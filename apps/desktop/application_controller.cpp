@@ -31,6 +31,26 @@ namespace {
 
 constexpr size_t kAutoWriteCandidateLimit = 4;
 
+enum class SmartSearchIntentKind {
+    Unknown,
+    ResetContext,
+    ExactScan,
+    GuidedScan,
+    RefineScan,
+    ActivateMemoryTargets,
+    WriteMemoryTargets,
+    RewriteLastTargets,
+    WriteProfileTargets,
+};
+
+struct SmartSearchIntent {
+    SmartSearchIntentKind kind{SmartSearchIntentKind::Unknown};
+    QStringList numbers;
+    QStringList addresses;
+    bool resetContext{false};
+    QString rationale;
+};
+
 QVariantMap moduleToVariantMap(const killcore::ProcessModuleInfo& module) {
     QVariantMap entry;
     entry["name"] = module.name;
@@ -220,6 +240,56 @@ bool looksLikeNewSearchRequest(const QString& query) {
         || q.contains("repart")
         || q.contains("recommence")
         || q.contains("reset");
+}
+
+SmartSearchIntent classifySmartSearchIntent(
+    const QString& query,
+    const QStringList& numbers,
+    const QStringList& addresses,
+    bool hasChatMemoryTargets,
+    bool hasLastAutoWriteTargets,
+    bool hasCandidates,
+    bool smartSearchActive) {
+    SmartSearchIntent intent;
+    intent.numbers = numbers;
+    intent.addresses = addresses;
+    intent.resetContext = looksLikeNewSearchRequest(query);
+
+    const bool hasOneNumber = numbers.size() == 1;
+    const bool wantsMemoryWrite = looksLikeMemoryTargetWriteRequest(query);
+    const bool wantsLastRewrite = looksLikeLastAutoWriteRewrite(query);
+
+    if (intent.resetContext && numbers.isEmpty()) {
+        intent.kind = SmartSearchIntentKind::ResetContext;
+        intent.rationale = "L'utilisateur demande un nouveau contexte sans donner encore de valeur.";
+    } else if (!addresses.isEmpty()) {
+        intent.kind = hasOneNumber && wantsMemoryWrite
+            ? SmartSearchIntentKind::WriteMemoryTargets
+            : SmartSearchIntentKind::ActivateMemoryTargets;
+        intent.rationale = "Le message contient une ou plusieurs adresses mémoire explicites.";
+    } else if (hasChatMemoryTargets && hasOneNumber && !intent.resetContext) {
+        intent.kind = SmartSearchIntentKind::WriteMemoryTargets;
+        intent.rationale = "Des adresses mémoire sont actives dans la conversation.";
+    } else if (hasLastAutoWriteTargets && hasOneNumber && !intent.resetContext && wantsLastRewrite) {
+        intent.kind = SmartSearchIntentKind::RewriteLastTargets;
+        intent.rationale = "L'utilisateur demande de modifier les dernières adresses écrites.";
+    } else if (hasOneNumber && !intent.resetContext && wantsMemoryWrite) {
+        intent.kind = SmartSearchIntentKind::WriteProfileTargets;
+        intent.rationale = "L'utilisateur formule une intention d'écriture sur une cible nommée.";
+    } else if (smartSearchActive && hasCandidates && hasOneNumber && !intent.resetContext) {
+        intent.kind = SmartSearchIntentKind::RefineScan;
+        intent.rationale = "Un scan guidé est actif et l'utilisateur donne une nouvelle valeur observée.";
+    } else if (numbers.size() >= 2) {
+        intent.kind = SmartSearchIntentKind::GuidedScan;
+        intent.rationale = "Le message contient une valeur actuelle et une valeur cible.";
+    } else if (hasOneNumber) {
+        intent.kind = SmartSearchIntentKind::ExactScan;
+        intent.rationale = intent.resetContext
+            ? "Nouvelle recherche demandée avec une valeur."
+            : "Recherche exacte depuis une valeur unique.";
+    }
+
+    return intent;
 }
 
 QVariantList suggestedWritesForCandidates(const killcore::CandidateStore& candidates, const QString& value, size_t limit) {
@@ -1266,9 +1336,21 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
 QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     KE_LOG_INFO() << "startSmartSearch(\"" << query.toStdString() << "\")";
     const QStringList numbers = numbersFromText(query);
+    const QStringList chatAddresses = hexAddressesFromText(query);
+    const SmartSearchIntent intent = classifySmartSearchIntent(
+        query,
+        numbers,
+        chatAddresses,
+        !m_chatMemoryTargets.isEmpty(),
+        !m_lastAutoWriteTargets.isEmpty(),
+        !m_candidates.isEmpty(),
+        m_smartSearchActive);
     appendSmartSearchDebug("smart_search_query", {
         {"query", query},
         {"numbers", numbers},
+        {"addresses", chatAddresses},
+        {"intent", static_cast<int>(intent.kind)},
+        {"intentRationale", intent.rationale},
         {"smartSearchActive", m_smartSearchActive},
         {"candidateCount", static_cast<qulonglong>(m_candidates.size())},
         {"initialValue", m_smartSearchInitialValue},
@@ -1276,8 +1358,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         {"valueType", m_smartSearchValueType},
     });
 
-    const bool forceNewSearch = looksLikeNewSearchRequest(query);
-    if (forceNewSearch) {
+    if (intent.resetContext) {
         m_smartSearchActive = false;
         m_smartSearchInitialValue.clear();
         m_smartSearchTargetValue.clear();
@@ -1291,88 +1372,70 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         });
     }
 
-    const QStringList chatAddresses = hexAddressesFromText(query);
-    if (!chatAddresses.isEmpty() && !forceNewSearch) {
+    if (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
+        || (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && !chatAddresses.isEmpty())) {
         auto activation = activateChatMemoryTargetsFromQuery(query);
-        if (activation.value("success").toBool()
-            && numbers.size() == 1
-            && looksLikeMemoryTargetWriteRequest(query)) {
+        if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets
+            && activation.value("success").toBool()
+            && numbers.size() == 1) {
             return writeChatMemoryTargetsFromQuery(query, numbers.first());
         }
         return activation;
     }
 
-    if (!m_chatMemoryTargets.isEmpty()
-        && numbers.size() == 1
-        && !forceNewSearch) {
+    if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
         return writeChatMemoryTargetsFromQuery(query, numbers.first());
     }
 
-    if (!m_lastAutoWriteTargets.isEmpty()
-        && numbers.size() == 1
-        && !forceNewSearch
-        && looksLikeLastAutoWriteRewrite(query)) {
+    if (intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
         return rewriteLastAutoWriteTargets(numbers.first(), query);
     }
 
-    if (numbers.size() == 1 && !forceNewSearch && looksLikeMemoryTargetWriteRequest(query)) {
+    if (intent.kind == SmartSearchIntentKind::WriteProfileTargets && numbers.size() == 1) {
         auto profileWrite = writeProfileTargetsFromQuery(query, numbers.first());
         if (profileWrite.value("tool").toString() == "profile_write") {
             return profileWrite;
         }
     }
 
-    const bool shouldRefineSmartSearch =
-        m_smartSearchActive && !m_candidates.isEmpty() && numbers.size() == 1;
-
     QVariantMap result;
-    if (forceNewSearch && numbers.isEmpty()) {
+    if (intent.kind == SmartSearchIntentKind::ResetContext) {
         result["status"] = "reset_only";
         result["message"] = "D'accord, j'ai oublié le contexte actif. Donne-moi la nouvelle valeur à chercher.";
         result["workflowStatus"] = "idle";
         result["error"] = "";
-    } else if (forceNewSearch && numbers.size() == 1) {
+    } else if (intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
         QVariantMap args;
         args["value"] = numbers.first();
         args["valueType"] = "Int32";
         result["status"] = "tool_call";
         result["tool"] = "exact_scan";
         result["args"] = args;
-        result["rationale"] = "Nouvelle recherche demandée explicitement par l'utilisateur.";
+        result["rationale"] = intent.rationale;
         result["state"] = "FirstScanRunning";
         result["error"] = "";
-    } else if (shouldRefineSmartSearch) {
+    } else if (intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
         QVariantMap args;
         args["mode"] = "exact";
         args["value"] = numbers.first();
         result["status"] = "tool_call";
         result["tool"] = "next_scan";
         result["args"] = args;
-        result["rationale"] = "Réduction guidée depuis la nouvelle valeur donnée par l'utilisateur.";
+        result["rationale"] = intent.rationale;
         result["state"] = "Refining";
         result["error"] = "";
-    } else if (numbers.size() >= 2) {
+    } else if (intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
         QVariantMap args;
         args["value"] = numbers.at(0);
         args["valueType"] = "Int32";
         result["status"] = "tool_call";
         result["tool"] = "exact_scan";
         result["args"] = args;
-        result["rationale"] = "Workflow guidé: première valeur = valeur actuelle, deuxième valeur = cible.";
+        result["rationale"] = intent.rationale;
         result["state"] = "FirstScanRunning";
         result["error"] = "";
         m_smartSearchTargetValue = numbers.at(1);
         m_smartSearchActive = true;
-    } else if (numbers.size() == 1) {
-        QVariantMap args;
-        args["value"] = numbers.first();
-        args["valueType"] = "Int32";
-        result["status"] = "tool_call";
-        result["tool"] = "exact_scan";
-        result["args"] = args;
-        result["rationale"] = "Recherche exacte déterministe depuis la valeur donnée par l'utilisateur.";
-        result["state"] = "FirstScanRunning";
-        result["error"] = "";
     } else {
         result = m_ai.processQuery(query);
     }
