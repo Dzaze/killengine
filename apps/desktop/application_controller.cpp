@@ -1083,6 +1083,36 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
     return result;
 }
 
+QVariantMap ApplicationController::getActiveChatMemoryTargets() const {
+    QVariantMap result;
+    QVariantList targets;
+
+    for (const auto& target : m_chatMemoryTargets) {
+        QVariantMap entry;
+        entry["address"] = QString::number(target.address, 16);
+        entry["type"] = killcore::valueTypeToString(target.type);
+        targets.append(entry);
+    }
+
+    result["success"] = true;
+    result["count"] = targets.size();
+    result["targets"] = targets;
+    return result;
+}
+
+QVariantMap ApplicationController::clearActiveChatMemoryTargets() {
+    const int cleared = m_chatMemoryTargets.size();
+    m_chatMemoryTargets.clear();
+    m_lastAutoWriteTargets.clear();
+
+    QVariantMap result;
+    result["success"] = true;
+    result["cleared"] = cleared;
+    result["targets"] = QVariantList{};
+    appendSmartSearchDebug("chat_memory_targets_cleared", result);
+    return result;
+}
+
 QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& query, const QString& value) {
     QVariantMap result;
     result["success"] = false;

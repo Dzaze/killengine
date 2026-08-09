@@ -150,6 +150,13 @@ export interface SmartSearchDebugEventsResult {
   error: string
 }
 
+export interface ChatMemoryTargetsResult {
+  success: boolean
+  count: number
+  targets: Array<Record<string, unknown>>
+  cleared?: number
+}
+
 export interface BackendController {
   getVersion(): Promise<string>
   getProcesses(): Promise<ProcessInfo[]>
@@ -173,6 +180,8 @@ export interface BackendController {
   getSmartSearchDebugFilePath(): Promise<string>
   getSmartSearchDebugEvents(maxEvents: number): Promise<SmartSearchDebugEventsResult>
   clearSmartSearchDebugEvents(): Promise<Record<string, unknown>>
+  getActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
+  clearActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
 
   // Phase 11 — Profils
   saveProfileTarget(
@@ -405,6 +414,12 @@ class BackendService {
       },
       async clearSmartSearchDebugEvents() {
         return { success: true, error: '' }
+      },
+      async getActiveChatMemoryTargets() {
+        return { success: true, count: 0, targets: [] }
+      },
+      async clearActiveChatMemoryTargets() {
+        return { success: true, count: 0, cleared: 0, targets: [] }
       },
       async saveProfileTarget() {
         return { success: false, error: 'Mock backend' }

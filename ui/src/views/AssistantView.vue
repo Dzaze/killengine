@@ -95,6 +95,18 @@ function suggestionsFor(message: typeof store.messages[number]): string {
       </div>
     </div>
 
+    <div v-if="store.activeChatMemoryTargets.length > 0" class="active-targets">
+      <div>
+        <strong>{{ store.activeChatMemoryTargets.length }} adresse(s) mémoire active(s)</strong>
+        <span>
+          {{ store.activeChatMemoryTargets.map((target) => `0x${target.address}`).join(' · ') }}
+        </span>
+      </div>
+      <button class="btn btn-secondary btn-small" @click="store.clearActiveChatMemoryTargets()">
+        Oublier
+      </button>
+    </div>
+
     <!-- Chat area -->
     <div ref="chatScroll" class="chat-area">
       <!-- Empty state -->
@@ -271,6 +283,36 @@ function suggestionsFor(message: typeof store.messages[number]): string {
 .wf-error .dot { background: var(--error); }
 .wf-idle { background: var(--bg-tertiary); color: var(--text-dim); }
 .wf-idle .dot { background: var(--text-dim); }
+
+.active-targets {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(122, 162, 247, 0.35);
+  border-radius: 8px;
+  background: rgba(122, 162, 247, 0.08);
+}
+
+.active-targets strong,
+.active-targets span {
+  display: block;
+}
+
+.active-targets strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.active-targets span {
+  overflow-wrap: anywhere;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+}
 
 /* Chat area */
 .chat-area {
@@ -619,6 +661,12 @@ function suggestionsFor(message: typeof store.messages[number]): string {
 .btn:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+.btn-small {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 .btn-rollback-batch {

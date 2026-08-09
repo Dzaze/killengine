@@ -117,6 +117,12 @@ public:
     /// Vide le fichier debug Smart Search.
     Q_INVOKABLE QVariantMap clearSmartSearchDebugEvents();
 
+    /// Liste les adresses mémoire actives dans l'Assistant.
+    Q_INVOKABLE QVariantMap getActiveChatMemoryTargets() const;
+
+    /// Oublie les adresses mémoire actives dans l'Assistant.
+    Q_INVOKABLE QVariantMap clearActiveChatMemoryTargets();
+
     // -----------------------------------------------------------------------
     // Phase 11 — Profils
     // -----------------------------------------------------------------------

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import {
   backend,
   type CandidatePage,
+  type ChatMemoryTargetsResult,
   type ExactScanResult,
   type MemoryMapResult,
   type NextScanResult,
@@ -46,6 +47,7 @@ export const useAppStore = defineStore('app', () => {
   const smartSearchDebugFilePath = ref('')
   const smartSearchDebugEvents = ref<Array<Record<string, unknown>>>([])
   const smartSearchDebugError = ref('')
+  const activeChatMemoryTargets = ref<Array<Record<string, unknown>>>([])
   const searchQuery = ref('')
   const searchResult = ref('')
   const exactScanValue = ref('')
@@ -128,6 +130,7 @@ export const useAppStore = defineStore('app', () => {
       await backend.connect()
       isConnected.value = backend.isConnected
       version.value = await backend.getController().getVersion()
+      await refreshActiveChatMemoryTargets()
       console.log('[KillEngine] Version:', version.value)
     } catch (e) {
       console.error('[KillEngine] Backend connection failed:', e)
@@ -223,6 +226,28 @@ export const useAppStore = defineStore('app', () => {
       smartSearchDebugEvents.value = []
       smartSearchDebugError.value = String(e)
       console.error('[KillEngine] Failed to refresh diagnostics:', e)
+    }
+  }
+
+  async function refreshActiveChatMemoryTargets() {
+    try {
+      const result: ChatMemoryTargetsResult = await backend.getController().getActiveChatMemoryTargets()
+      activeChatMemoryTargets.value = result.targets ?? []
+    } catch (e) {
+      activeChatMemoryTargets.value = []
+      console.error('[KillEngine] Failed to refresh active chat memory targets:', e)
+    }
+  }
+
+  async function clearActiveChatMemoryTargets() {
+    try {
+      const result = await backend.getController().clearActiveChatMemoryTargets()
+      activeChatMemoryTargets.value = []
+      pushMessage('assistant', `J'ai oublié ${String(result.cleared ?? 0)} adresse(s) mémoire active(s).`)
+      return result
+    } catch (e) {
+      pushMessage('assistant', "Impossible d'oublier les adresses mémoire : " + String(e), { isError: true })
+      return { success: false, error: String(e), count: 0, targets: [] }
     }
   }
 
@@ -327,6 +352,7 @@ export const useAppStore = defineStore('app', () => {
       if (result.error) extras.isError = true
 
       pushMessage('assistant', result.message ?? result.error ?? '…', extras)
+      await refreshActiveChatMemoryTargets()
     } catch (e) {
       pushMessage('assistant', 'Erreur de recherche : ' + String(e), { isError: true })
     } finally {
@@ -511,6 +537,7 @@ export const useAppStore = defineStore('app', () => {
     smartSearchDebugFilePath,
     smartSearchDebugEvents,
     smartSearchDebugError,
+    activeChatMemoryTargets,
     searchQuery,
     searchResult,
     exactScanValue,
@@ -547,6 +574,8 @@ export const useAppStore = defineStore('app', () => {
     detach,
     doPing,
     refreshDiagnostics,
+    refreshActiveChatMemoryTargets,
+    clearActiveChatMemoryTargets,
     clearSmartSearchDebug,
     doSearch,
     doExactScan,
