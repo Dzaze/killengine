@@ -86,6 +86,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - `KillEngineTestTarget.exe` est créé et expose des variables connues (health, money, stamina, position, hidden_score, Player heap) pour les validations manuelles et scénarios automatisés.
 - Les tests d'intégration automatisés (`tests/integration/`) lancent `KillEngineTestTarget.exe` et vérifient un scan exact réel sur processus externe.
 - Le scénario exact automatisé couvre scan exact sur valeur connue, réduction par relecture des candidats, écriture mémoire vérifiée et rollback vérifié.
+- Le scénario unknown automatisé couvre capture snapshot compressée, changement mémoire contrôlé, comparaison `Increased`, sélection de l'adresse connue et écriture finale vérifiée.
 - Les opérations de scan lourdes restent à améliorer côté asynchronisme/progression fine pour une UX V1 complète.
 
 ### Pré-requis avant Phase 12

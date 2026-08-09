@@ -5,14 +5,17 @@
 #include "memory/memory_writer.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
+#include "snapshot/snapshot_store.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QProcess>
 #include <QThread>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -159,4 +162,57 @@ TEST(IntegrationMemoryScanTest, ExactWorkflowWritesVerifiesAndRollsBackKnownValu
     ASSERT_TRUE(restored.success || restored.partial) << restored.errorMessage.toStdString();
     ASSERT_EQ(restored.bytesRead, sizeof(int32_t));
     EXPECT_EQ(restored.data, int32Bytes(41250));
+}
+
+TEST(IntegrationMemoryScanTest, UnknownWorkflowCapturesComparesAndWritesKnownValue) {
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadWrite);
+    ASSERT_TRUE(handle.isValid()) << "Could not open KillEngineTestTarget process.";
+
+    const killcore::ScanResult initialScan = scanInt32(handle, 41250);
+    ASSERT_TRUE(initialScan.success) << initialScan.errorMessage.toStdString();
+
+    killcore::MemoryReader reader(handle);
+    const auto playerMoneyAddress = findPlayerMoneyAddress(initialScan, reader);
+    ASSERT_TRUE(playerMoneyAddress.has_value()) << "Could not identify Player.money candidate.";
+
+    killcore::SnapshotStore snapshot;
+    const auto capture = snapshot.capture(handle);
+    ASSERT_TRUE(capture.success) << capture.errorMessage.toStdString();
+    ASSERT_FALSE(snapshot.isEmpty());
+    ASSERT_TRUE(snapshot.usesMappedStorage());
+
+    killcore::MemoryWriter writer(handle);
+    const auto changedWrite = writer.write(*playerMoneyAddress, int32Bytes(43000), true);
+    ASSERT_TRUE(changedWrite.success) << changedWrite.errorMessage.toStdString();
+    ASSERT_TRUE(changedWrite.verified) << changedWrite.errorMessage.toStdString();
+
+    const killcore::UnknownScanResult comparison =
+        snapshot.compare(handle, killcore::ValueType::Int32, killcore::NextScanMode::Increased);
+    ASSERT_TRUE(comparison.success) << comparison.errorMessage.toStdString();
+    ASSERT_GT(comparison.checkedBytes, 0U);
+    ASSERT_GT(comparison.matchesFound, 0U);
+
+    const auto foundChangedAddress = std::find_if(
+        comparison.matches.begin(),
+        comparison.matches.end(),
+        [&](const killcore::ScanMatch& match) {
+            return match.address == *playerMoneyAddress;
+        });
+    ASSERT_NE(foundChangedAddress, comparison.matches.end());
+
+    const auto finalWrite = writer.write(*playerMoneyAddress, int32Bytes(45000), true);
+    ASSERT_TRUE(finalWrite.success) << finalWrite.errorMessage.toStdString();
+    ASSERT_TRUE(finalWrite.verified) << finalWrite.errorMessage.toStdString();
+
+    const auto finalRead = reader.read(*playerMoneyAddress, sizeof(int32_t));
+    ASSERT_TRUE(finalRead.success || finalRead.partial) << finalRead.errorMessage.toStdString();
+    ASSERT_EQ(finalRead.bytesRead, sizeof(int32_t));
+    EXPECT_EQ(finalRead.data, int32Bytes(45000));
+
+    const auto rollback = writer.write(*playerMoneyAddress, changedWrite.previousValue, true);
+    ASSERT_TRUE(rollback.success) << rollback.errorMessage.toStdString();
+    ASSERT_TRUE(rollback.verified) << rollback.errorMessage.toStdString();
 }

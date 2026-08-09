@@ -152,6 +152,7 @@ RESTE À FAIRE ACTUEL :
   - Phase 13 UX : progression fine branchée sur les scans async, par bytes/chunks pour le scan exact et par candidats contrôlés pour le next scan.
   - Phase 13 Robustesse : tests d'intégration automatisés activés, lancement réel de `KillEngineTestTarget.exe` et scan exact sur valeur connue.
   - Phase 13 Robustesse : scénario exact automatisé ajouté avec réduction par relecture, écriture vérifiée et rollback vérifié.
+  - Phase 13 Robustesse : scénario unknown automatisé ajouté avec capture snapshot, comparaison `Increased`, adresse connue retrouvée et écriture finale vérifiée.
   - Prochaine étape : traiter les points Phase 13 un par un, puis passe de régression manuelle V1 / release candidate.
-  - Tests unitaires/intégration au dernier état : 32/32 OK.
+  - Tests unitaires/intégration au dernier état : 33/33 OK.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.

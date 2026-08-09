@@ -150,6 +150,6 @@ Prerequisites before Phase 12:
   - [ ] Robustesse et validations
     - [x] tests d'intégration automatisés avec `KillEngineTestTarget.exe`
     - [x] scénario exact complet : scan exact -> next scan -> écriture -> vérification -> rollback
-    - [ ] scénario unknown complet : capture -> changement -> comparaison -> écriture
+    - [x] scénario unknown complet : capture -> changement -> comparaison -> écriture
     - [ ] scénario profils complet : sauvegarde -> résolution -> activation -> écriture
     - [ ] passe de régression manuelle V1 sur Solitaire et KillEngineTestTarget
