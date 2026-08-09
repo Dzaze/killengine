@@ -168,6 +168,9 @@ public:
     /// Oublie les adresses mémoire actives dans l'Assistant.
     Q_INVOKABLE QVariantMap clearActiveChatMemoryTargets();
 
+    /// Retourne le contexte structuré courant de l'Assistant.
+    Q_INVOKABLE QVariantMap getSmartSearchContext() const;
+
     // -----------------------------------------------------------------------
     // Phase 11 — Profils
     // -----------------------------------------------------------------------

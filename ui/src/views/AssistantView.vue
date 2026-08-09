@@ -9,6 +9,30 @@ const chatScroll = ref<HTMLElement | null>(null)
 const isAwaitingChange = computed(() => store.workflowStatus === 'awaiting_value_change')
 const needsMoreRefinement = computed(() => store.workflowStatus === 'needs_more_refinement')
 const isWorkflowActive = computed(() => store.workflowStatus !== 'idle')
+const contextItems = computed(() => {
+  const context = store.smartSearchContext
+  if (!context) return []
+
+  const items: Array<{ label: string, value: string }> = []
+  if (context.initialValue) items.push({ label: 'Recherche', value: context.initialValue })
+  if (context.targetValue) items.push({ label: 'Cible', value: context.targetValue })
+  if (context.valueType) items.push({ label: 'Type', value: context.valueType })
+  if (context.candidateCount > 0) items.push({ label: 'Candidats', value: String(context.candidateCount) })
+  if (context.chatTargets.length > 0) {
+    items.push({
+      label: 'Adresses',
+      value: context.chatTargets.map((target) => `0x${target.address}`).join(' · '),
+    })
+  }
+  if (context.profileTargets.length > 0) {
+    items.push({
+      label: 'Profil',
+      value: context.profileTargets.map((target) => `${target.profile}:${target.target}`).join(' · '),
+    })
+  }
+  if (context.hasUndoReduction) items.push({ label: 'Réduction', value: 'restaurable' })
+  return items
+})
 
 async function scrollToBottom() {
   await nextTick()
@@ -134,6 +158,13 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
       <button class="btn btn-secondary btn-small" @click="store.clearActiveChatMemoryTargets()">
         Oublier
       </button>
+    </div>
+
+    <div v-if="contextItems.length > 0" class="context-strip">
+      <div v-for="item in contextItems" :key="item.label" class="context-chip">
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+      </div>
     </div>
 
     <!-- Chat area -->
@@ -352,6 +383,42 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   color: var(--text-secondary);
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
+}
+
+.context-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin-bottom: 10px;
+  padding-bottom: 2px;
+}
+
+.context-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 280px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  white-space: nowrap;
+}
+
+.context-chip span {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.context-chip strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
 }
 
 /* Chat area */

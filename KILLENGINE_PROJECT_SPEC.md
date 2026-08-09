@@ -62,6 +62,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les candidats survivants conservent un historique borné des valeurs observées pendant les `next_scan` guidés ; cet historique est rattaché aux suggestions et aux cartes d'auto-write.
 - Avant l'auto-write issu d'un scan guidé, les candidats sont filtrés par région mémoire : readable, writable, non guarded, et type de région `Private` ou `Mapped` ; les rejets restent visibles dans le chat.
 - Quand une comparaison élimine tous les candidats, le résultat inclut un diagnostic lisible : volume comparé, adresses illisibles si connues, exemples de valeurs observées, et rappel de restauration de réduction.
+- L'Assistant expose un contexte structuré visible : recherche initiale, cible, type, candidats courants, adresses actives, cibles de profil actives et réduction restaurable.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
 - La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.

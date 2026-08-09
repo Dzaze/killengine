@@ -2429,6 +2429,42 @@ QVariantMap ApplicationController::clearActiveChatMemoryTargets() {
     return result;
 }
 
+QVariantMap ApplicationController::getSmartSearchContext() const {
+    QVariantMap result;
+    QVariantList chatTargets;
+    QVariantList profileTargets;
+
+    for (const auto& target : m_chatMemoryTargets) {
+        QVariantMap entry;
+        entry["address"] = QString::number(target.address, 16);
+        entry["type"] = killcore::valueTypeToString(target.type);
+        chatTargets.append(entry);
+    }
+
+    for (const auto& target : m_activeProfileTargets) {
+        QVariantMap entry;
+        entry["profile"] = target.profileName;
+        entry["target"] = target.targetName;
+        entry["group"] = target.groupName;
+        entry["address"] = QString::number(target.address, 16);
+        entry["type"] = killcore::valueTypeToString(target.type);
+        profileTargets.append(entry);
+    }
+
+    result["success"] = true;
+    result["active"] = m_smartSearchActive;
+    result["workflow"] = m_smartSearchActive ? "guided_scan" : "idle";
+    result["initialValue"] = m_smartSearchInitialValue;
+    result["targetValue"] = m_smartSearchTargetValue;
+    result["valueType"] = m_smartSearchValueType;
+    result["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
+    result["hasUndoReduction"] = m_hasPreviousCandidates;
+    result["chatTargets"] = chatTargets;
+    result["profileTargets"] = profileTargets;
+    result["lastAutoWriteCount"] = m_lastAutoWriteTargets.size();
+    return result;
+}
+
 QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& query, const QString& value) {
     QVariantMap result;
     result["success"] = false;

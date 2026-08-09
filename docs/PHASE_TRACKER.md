@@ -133,7 +133,7 @@ Prerequisites before Phase 12:
     - [x] filtres anti-bruit pour régions très volatiles ou peu pertinentes
     - [x] diagnostic lisible quand une comparaison élimine tous les candidats
   - [ ] Assistant plus naturel
-    - [ ] mémoire de conversation structurée visible (`dernière recherche`, `valeur actuelle`, `valeur cible`, `adresses actives`, `profil actif`)
+    - [x] mémoire de conversation structurée visible (`dernière recherche`, `valeur actuelle`, `valeur cible`, `adresses actives`, `profil actif`)
     - [ ] intentions plus fines : nouvelle recherche, réutiliser adresses, changer valeur trouvée, oublier profils/adresses
     - [ ] réponses naturelles pour les transitions (`je cherche ailleurs`, `je garde ces adresses`, `j'attends la nouvelle valeur`)
     - [ ] éviter les messages techniques abrupts quand l'utilisateur démarre un nouveau contexte

@@ -138,6 +138,7 @@ RESTE À FAIRE ACTUEL :
   - Phase 13 faux positifs : historique borné des valeurs observées par adresse pendant les next scans guidés, rattaché aux suggestions et aux cartes d'auto-write.
   - Phase 13 faux positifs : filtre anti-bruit avant auto-write guidé, basé sur région readable/writable/non guarded et type Private/Mapped ; les candidats rejetés sont visibles dans l'Assistant.
   - Phase 13 faux positifs : diagnostic lisible quand une comparaison tombe à 0 candidat, avec volume comparé, illisibles, exemples et rappel de restauration.
+  - Phase 13 Assistant naturel : contexte structuré visible dans l'Assistant avec recherche, cible, type, candidats, adresses actives, profil actif et undo disponible.
   - Prochaine étape : traiter les points Phase 13 un par un, puis passe de régression manuelle V1 / release candidate.
   - Tests unitaires au dernier état : 30/30 OK.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.

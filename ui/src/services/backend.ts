@@ -224,6 +224,20 @@ export interface ChatMemoryTargetsResult {
   cleared?: number
 }
 
+export interface SmartSearchContextResult {
+  success: boolean
+  active: boolean
+  workflow: string
+  initialValue: string
+  targetValue: string
+  valueType: string
+  candidateCount: number
+  hasUndoReduction: boolean
+  chatTargets: Array<Record<string, unknown>>
+  profileTargets: Array<Record<string, unknown>>
+  lastAutoWriteCount: number
+}
+
 export interface AppSettings {
   success?: boolean
   language: 'fr' | 'en'
@@ -282,6 +296,7 @@ export interface BackendController {
   exportDiagnostics(): Promise<Record<string, unknown>>
   getActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
   clearActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
+  getSmartSearchContext(): Promise<SmartSearchContextResult>
 
   // Phase 11 — Profils
   saveProfileTarget(
@@ -774,6 +789,21 @@ class BackendService {
       },
       async clearActiveChatMemoryTargets() {
         return { success: true, count: 0, cleared: 0, targets: [] }
+      },
+      async getSmartSearchContext() {
+        return {
+          success: true,
+          active: false,
+          workflow: 'idle',
+          initialValue: '',
+          targetValue: '',
+          valueType: 'Int32',
+          candidateCount: 0,
+          hasUndoReduction: false,
+          chatTargets: [],
+          profileTargets: [],
+          lastAutoWriteCount: 0,
+        }
       },
       async saveProfileTarget() {
         return { success: false, error: 'Mock backend' }

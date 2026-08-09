@@ -13,6 +13,7 @@ import {
   type MemoryWriteResult,
   type ProcessInfo,
   type ProcessModuleInfo,
+  type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
   type UndoCandidateScanResult,
   type UnknownNextScanResult,
@@ -68,6 +69,7 @@ export const useAppStore = defineStore('app', () => {
   const settingModelPath = ref('')
   const settingModelThreads = ref(4)
   const activeChatMemoryTargets = ref<Array<Record<string, unknown>>>([])
+  const smartSearchContext = ref<SmartSearchContextResult | null>(null)
   const searchQuery = ref('')
   const searchResult = ref('')
   const exactScanValue = ref('')
@@ -165,6 +167,7 @@ export const useAppStore = defineStore('app', () => {
       version.value = await backend.getController().getVersion()
       await loadSettings()
       await refreshActiveChatMemoryTargets()
+      await refreshSmartSearchContext()
       console.log('[KillEngine] Version:', version.value)
     } catch (e) {
       console.error('[KillEngine] Backend connection failed:', e)
@@ -367,10 +370,20 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function refreshSmartSearchContext() {
+    try {
+      smartSearchContext.value = await backend.getController().getSmartSearchContext()
+    } catch (e) {
+      smartSearchContext.value = null
+      console.error('[KillEngine] Failed to refresh Smart Search context:', e)
+    }
+  }
+
   async function clearActiveChatMemoryTargets() {
     try {
       const result = await backend.getController().clearActiveChatMemoryTargets()
       activeChatMemoryTargets.value = []
+      await refreshSmartSearchContext()
       pushMessage('assistant', `J'ai oublié ${String(result.cleared ?? 0)} adresse(s) mémoire active(s).`)
       return result
     } catch (e) {
@@ -485,6 +498,7 @@ export const useAppStore = defineStore('app', () => {
 
       pushMessage('assistant', result.message ?? result.error ?? '…', extras)
       await refreshActiveChatMemoryTargets()
+      await refreshSmartSearchContext()
     } catch (e) {
       pushMessage('assistant', 'Erreur de recherche : ' + String(e), { isError: true })
     } finally {
@@ -784,6 +798,7 @@ export const useAppStore = defineStore('app', () => {
     settingModelPath,
     settingModelThreads,
     activeChatMemoryTargets,
+    smartSearchContext,
     searchQuery,
     searchResult,
     exactScanValue,
@@ -836,6 +851,7 @@ export const useAppStore = defineStore('app', () => {
     refreshLogTail,
     exportDiagnostics,
     refreshActiveChatMemoryTargets,
+    refreshSmartSearchContext,
     clearActiveChatMemoryTargets,
     clearSmartSearchDebug,
     doSearch,
