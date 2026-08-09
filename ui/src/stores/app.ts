@@ -104,6 +104,9 @@ export const useAppStore = defineStore('app', () => {
   const targetValueGuided = ref<string>('')
   const candidateHistory = ref<number[]>([])
   const isSearching = ref(false)
+  const scanBusy = ref(false)
+  const scanStatusText = ref('')
+  const scanProgressPercent = ref(0)
 
   // Getters
   const statusText = computed(() => {
@@ -494,7 +497,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function doExactScan() {
-    if (!exactScanValue.value.trim()) return
+    if (!exactScanValue.value.trim() || scanBusy.value) return
     // Si le Mode Expert est activé et qu'au moins un filtre est défini, on utilise l'API expert.
     const hasExpertFilter =
       expertModeEnabled.value
@@ -505,6 +508,9 @@ export const useAppStore = defineStore('app', () => {
         || expertExecutableOnly.value
         || expertCopyOnWriteOnly.value)
     try {
+      scanBusy.value = true
+      scanProgressPercent.value = 8
+      scanStatusText.value = 'Scan exact en cours...'
       if (hasExpertFilter) {
         exactScanResult.value = await backend.getController().startExactScanExpert(
           exactScanValue.value,
@@ -523,8 +529,12 @@ export const useAppStore = defineStore('app', () => {
           .getController()
           .startExactScan(exactScanValue.value, exactScanType.value)
       }
+      scanProgressPercent.value = 85
       candidatePageIndex.value = 0
+      scanStatusText.value = 'Chargement des candidats...'
       await refreshCandidates()
+      scanProgressPercent.value = 100
+      scanStatusText.value = 'Scan terminé.'
     } catch (e) {
       exactScanResult.value = {
         success: false,
@@ -538,6 +548,9 @@ export const useAppStore = defineStore('app', () => {
         matches: [],
         candidateStoreSize: 0,
       }
+      scanStatusText.value = 'Scan échoué.'
+    } finally {
+      scanBusy.value = false
     }
   }
 
@@ -553,10 +566,18 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function doNextScan() {
+    if (scanBusy.value) return
     try {
+      scanBusy.value = true
+      scanProgressPercent.value = 15
+      scanStatusText.value = 'Réduction des candidats...'
       nextScanResult.value = await backend.getController().nextScan(nextScanMode.value, nextScanValue.value)
+      scanProgressPercent.value = 85
       candidatePageIndex.value = 0
+      scanStatusText.value = 'Actualisation des candidats...'
       await refreshCandidates()
+      scanProgressPercent.value = 100
+      scanStatusText.value = 'Next scan terminé.'
     } catch (e) {
       nextScanResult.value = {
         success: false,
@@ -565,12 +586,21 @@ export const useAppStore = defineStore('app', () => {
         remaining: 0,
         error: String(e),
       }
+      scanStatusText.value = 'Next scan échoué.'
+    } finally {
+      scanBusy.value = false
     }
   }
 
   async function captureUnknownSnapshot() {
+    if (scanBusy.value) return
     try {
+      scanBusy.value = true
+      scanProgressPercent.value = 15
+      scanStatusText.value = 'Capture unknown en cours...'
       unknownSnapshotResult.value = await backend.getController().captureUnknownSnapshot()
+      scanProgressPercent.value = 100
+      scanStatusText.value = 'Snapshot capturé.'
     } catch (e) {
       unknownSnapshotResult.value = {
         success: false,
@@ -581,16 +611,27 @@ export const useAppStore = defineStore('app', () => {
         bytesCaptured: 0,
         error: String(e),
       }
+      scanStatusText.value = 'Capture unknown échouée.'
+    } finally {
+      scanBusy.value = false
     }
   }
 
   async function doUnknownNextScan() {
+    if (scanBusy.value) return
     try {
+      scanBusy.value = true
+      scanProgressPercent.value = 15
+      scanStatusText.value = 'Comparaison unknown en cours...'
       unknownNextScanResult.value = await backend
         .getController()
         .unknownNextScan(unknownScanMode.value, unknownScanType.value)
+      scanProgressPercent.value = 85
       candidatePageIndex.value = 0
+      scanStatusText.value = 'Actualisation des candidats...'
       await refreshCandidates()
+      scanProgressPercent.value = 100
+      scanStatusText.value = 'Comparaison unknown terminée.'
     } catch (e) {
       unknownNextScanResult.value = {
         success: false,
@@ -600,6 +641,9 @@ export const useAppStore = defineStore('app', () => {
         stored: 0,
         error: String(e),
       }
+      scanStatusText.value = 'Comparaison unknown échouée.'
+    } finally {
+      scanBusy.value = false
     }
   }
 
@@ -733,6 +777,9 @@ export const useAppStore = defineStore('app', () => {
     targetValueGuided,
     candidateHistory,
     isSearching,
+    scanBusy,
+    scanStatusText,
+    scanProgressPercent,
     statusText,
     init,
     refreshProcesses,

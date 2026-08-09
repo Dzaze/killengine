@@ -74,6 +74,16 @@ onMounted(() => {
     </div>
 
     <template v-else>
+      <div v-if="store.scanStatusText" class="scan-status" :class="{ active: store.scanBusy }">
+        <div class="scan-status-head">
+          <strong>{{ store.scanStatusText }}</strong>
+          <span>{{ store.scanProgressPercent }}%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" :style="{ width: `${store.scanProgressPercent}%` }"></div>
+        </div>
+      </div>
+
       <div class="summary-grid">
         <div class="stat">
           <span>{{ $t('scan.stored') }}</span>
@@ -103,16 +113,17 @@ onMounted(() => {
             v-model="store.exactScanValue"
             :placeholder="$t('scan.value')"
             class="input"
+            :disabled="store.scanBusy"
             @keyup.enter="store.doExactScan()"
           />
-          <select v-model="store.exactScanType" class="input select">
+          <select v-model="store.exactScanType" class="input select" :disabled="store.scanBusy">
             <option>Int32</option>
             <option>Int64</option>
             <option>Float32</option>
             <option>Float64</option>
           </select>
-          <button class="btn btn-primary" :disabled="!store.exactScanValue.trim()" @click="store.doExactScan()">
-            {{ $t('scan.button') }}
+          <button class="btn btn-primary" :disabled="!store.exactScanValue.trim() || store.scanBusy" @click="store.doExactScan()">
+            {{ store.scanBusy ? 'Scan...' : $t('scan.button') }}
           </button>
         </div>
 
@@ -176,7 +187,7 @@ onMounted(() => {
           <h2>{{ $t('scan.nextScan') }}</h2>
         </div>
         <div class="controls next-controls">
-          <select v-model="store.nextScanMode" class="input select">
+          <select v-model="store.nextScanMode" class="input select" :disabled="store.scanBusy">
             <option value="exact">{{ $t('scan.modeExact') }}</option>
             <option value="changed">{{ $t('scan.modeChanged') }}</option>
             <option value="unchanged">{{ $t('scan.modeUnchanged') }}</option>
@@ -186,13 +197,13 @@ onMounted(() => {
           </select>
           <input
             v-model="store.nextScanValue"
-            :disabled="store.nextScanMode !== 'exact' && store.nextScanMode !== 'delta'"
+            :disabled="store.scanBusy || (store.nextScanMode !== 'exact' && store.nextScanMode !== 'delta')"
             :placeholder="$t('scan.nextValue')"
             class="input"
             @keyup.enter="store.doNextScan()"
           />
-          <button class="btn btn-primary" @click="store.doNextScan()">
-            {{ $t('scan.nextScan') }}
+          <button class="btn btn-primary" :disabled="store.scanBusy" @click="store.doNextScan()">
+            {{ store.scanBusy ? 'Scan...' : $t('scan.nextScan') }}
           </button>
         </div>
         <div v-if="store.nextScanResult" class="metrics">
@@ -208,23 +219,23 @@ onMounted(() => {
           <h2>{{ $t('unknown.title') }}</h2>
         </div>
         <div class="controls unknown-controls">
-          <select v-model="store.unknownScanType" class="input select">
+          <select v-model="store.unknownScanType" class="input select" :disabled="store.scanBusy">
             <option>Int32</option>
             <option>Int64</option>
             <option>Float32</option>
             <option>Float64</option>
           </select>
-          <select v-model="store.unknownScanMode" class="input select">
+          <select v-model="store.unknownScanMode" class="input select" :disabled="store.scanBusy">
             <option value="changed">{{ $t('scan.modeChanged') }}</option>
             <option value="unchanged">{{ $t('scan.modeUnchanged') }}</option>
             <option value="increased">{{ $t('scan.modeIncreased') }}</option>
             <option value="decreased">{{ $t('scan.modeDecreased') }}</option>
           </select>
-          <button class="btn btn-secondary" @click="store.captureUnknownSnapshot()">
-            {{ $t('unknown.capture') }}
+          <button class="btn btn-secondary" :disabled="store.scanBusy" @click="store.captureUnknownSnapshot()">
+            {{ store.scanBusy ? 'Capture...' : $t('unknown.capture') }}
           </button>
-          <button class="btn btn-primary" @click="store.doUnknownNextScan()">
-            {{ $t('unknown.compare') }}
+          <button class="btn btn-primary" :disabled="store.scanBusy" @click="store.doUnknownNextScan()">
+            {{ store.scanBusy ? 'Compare...' : $t('unknown.compare') }}
           </button>
         </div>
         <div v-if="store.unknownSnapshotResult || store.unknownNextScanResult" class="metrics">
@@ -369,6 +380,52 @@ onMounted(() => {
   grid-template-columns: repeat(4, minmax(150px, 1fr));
   gap: 8px;
   margin-bottom: 14px;
+}
+
+.scan-status {
+  min-height: 54px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+}
+
+.scan-status.active {
+  border-color: rgba(122, 162, 247, 0.55);
+}
+
+.scan-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.scan-status-head strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.scan-status-head span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.progress-track {
+  overflow: hidden;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
 }
 
 .stat,

@@ -107,5 +107,5 @@ Prerequisites before Phase 12:
   - [x] settings UI (persistent language, scan limits, fast scan, AI path placeholder, debug controls)
   - [x] log viewer/export (tail viewer + compressed diagnostic export)
   - [x] crash handling (terminate/signal/SEH report files + diagnostic export inclusion)
-  - [ ] async scan UX/progress polish
+  - [x] async scan UX/progress polish (busy states, guarded actions, progress banner, scan signals)
   - [ ] documentation/user guide

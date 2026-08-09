@@ -578,8 +578,11 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
 
     killcore::ScanOptions options = scanOptionsFromSettings();
 
+    emit scanStarted();
+    emit scanProgress(0);
     killcore::ScanEngine scanner(m_handle);
     const auto scan = scanner.exactScan(scanValue, options);
+    emit scanProgress(90);
     m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
@@ -610,6 +613,8 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
         {"candidateStoreSize", result.value("candidateStoreSize")},
         {"error", result.value("error")},
     });
+    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanProgress(100);
     return result;
 }
 
@@ -690,8 +695,11 @@ QVariantMap ApplicationController::startExactScanExpert(
     options.executableOnly = expertOptions.value("executableOnly", false).toBool();
     options.copyOnWriteOnly = expertOptions.value("copyOnWriteOnly", false).toBool();
 
+    emit scanStarted();
+    emit scanProgress(0);
     killcore::ScanEngine scanner(m_handle);
     const auto scan = scanner.exactScan(scanValue, options);
+    emit scanProgress(90);
     m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
@@ -727,6 +735,8 @@ QVariantMap ApplicationController::startExactScanExpert(
         {"candidateStoreSize", result.value("candidateStoreSize")},
         {"error", result.value("error")},
     });
+    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanProgress(100);
     return result;
 }
 
@@ -765,6 +775,8 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         targetNumber = bytesToDouble(targetBytes, candidateType);
     }
 
+    emit scanStarted();
+    emit scanProgress(0);
     killcore::MemoryReader reader(m_handle);
     QList<killcore::Candidate> survivors;
     survivors.reserve(m_candidates.candidates().size());
@@ -861,6 +873,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         {"samples", debugSamples},
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanProgress(100);
     return result;
 }
 
@@ -895,7 +908,10 @@ QVariantMap ApplicationController::captureUnknownSnapshot() {
         return result;
     }
 
+    emit scanStarted();
+    emit scanProgress(0);
     const auto snapshot = m_snapshot.capture(m_handle);
+    emit scanProgress(100);
     result["success"] = snapshot.success;
     result["partial"] = snapshot.partial;
     result["cancelled"] = snapshot.cancelled;
@@ -929,7 +945,10 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         return result;
     }
 
+    emit scanStarted();
+    emit scanProgress(0);
     const auto scan = m_snapshot.compare(m_handle, type, scanMode);
+    emit scanProgress(90);
     killcore::ScanResult scanResult;
     scanResult.success = scan.success;
     scanResult.partial = scan.partial;
@@ -947,6 +966,7 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
     result["stored"] = static_cast<qulonglong>(m_candidates.size());
     result["error"] = scan.errorMessage;
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanProgress(100);
     return result;
 }
 
