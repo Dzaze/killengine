@@ -39,6 +39,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les profils peuvent contenir plusieurs cibles et les cibles résolues peuvent être utilisées par l'Assistant.
 - Une nouvelle recherche explicite remet de côté les adresses actives de conversation/profil avant de scanner ailleurs.
 - La page Paramètres sauvegarde des options persistantes : langue, type par défaut, limites de scan, fast scan, debug Smart Search et placeholders IA.
+- Le packaging Windows initial produit un zip portable et fournit un template Inno Setup pour l'installateur.
 - Crédit UI : `Pirolley Benoist` en bas à gauche.
 
 ### Limites connues de la baseline
@@ -49,8 +50,9 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
 - La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.
-- Le Mode Expert reste à finaliser côté UX.
+- Le Mode Expert est implémenté au niveau V1 polish initial avec filtres d'adresse, alignement et protections mémoire.
 - Les Paramètres sont implémentés au niveau V1 polish initial ; le Model Manager complet reste à brancher sur le chemin modèle sauvegardé.
+- Le packaging est implémenté au niveau V1 polish initial ; la signature Authenticode et l'installateur final signé restent hors de cette brique.
 - L'export lisible des logs/debug reste à ajouter.
 - `KillEngineTestTarget.exe` est créé et exposé des variables connues (health, money, stamina, position, hidden_score, Player heap) pour les validations manuelles et scénarios automatisés.
 - Les validations sont surtout manuelles sur Solitaire et via tests unitaires ; les tests d'intégration automatisés (`tests/integration/`) restent à écrire.

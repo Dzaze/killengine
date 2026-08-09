@@ -32,6 +32,21 @@ cd ..
 .\scripts\build.ps1
 ```
 
+## Package Windows
+
+```powershell
+.\scripts\package-windows.ps1
+```
+
+Sorties :
+
+```text
+dist\KillEngine-portable\
+dist\KillEngine-portable.zip
+```
+
+Un template Inno Setup est disponible dans `packaging/windows/KillEngine.iss`.
+
 ## Build détaillé
 
 ### UI (Vue 3 + TypeScript)
@@ -90,6 +105,6 @@ Prototype avancé :
 - IA locale optionnelle : tool-calls JSON, contrat d'intention structuré, fallback déterministe.
 - Tests unitaires : 24/24 au dernier état connu.
 
-Reste principalement : Mode Expert, Paramètres, export logs/debug, packaging, polish async/progression, documentation utilisateur.
+Reste principalement : export logs/debug, crash handling, polish async/progression, documentation utilisateur.
 
 Voir `KILLENGINE_PROJECT_SPEC.md` pour le cahier des charges complet.

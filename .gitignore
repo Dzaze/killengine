@@ -2,6 +2,7 @@
 
 # Build directories
 build/
+dist/
 out/
 cmake-build-*/
 [Bb]in/

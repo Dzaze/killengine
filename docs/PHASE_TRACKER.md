@@ -103,7 +103,7 @@ Prerequisites before Phase 12:
   - [x] visible active chat memory target state with clear action
   - [x] unit coverage for AI tools, intent extraction, and missing-value clarification
   - [x] Mode Expert complete UX (filtres start/stop address, alignment, writable/executable/COW + fast scan auto)
-  - [ ] installer/package
+  - [x] installer/package (portable zip script + Inno Setup template)
   - [x] settings UI (persistent language, scan limits, fast scan, AI path placeholder, debug controls)
   - [ ] log viewer/export
   - [ ] crash handling
