@@ -153,6 +153,8 @@ signals:
 private:
     void applyFreezeTick();
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
+    QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);
+    QVariantMap writeChatMemoryTargetsFromQuery(const QString& query, const QString& value);
     QVariantMap writeProfileTargetsFromQuery(const QString& query, const QString& value);
     QString smartSearchDebugFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;
@@ -187,6 +189,7 @@ private:
     QByteArray               m_lastWritePreviousValue;
     QList<WriteRecord>       m_writeHistory;
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
+    QList<AutoWriteTarget>   m_chatMemoryTargets;
     QList<ActiveProfileTarget> m_activeProfileTargets;
     int                      m_lastBatchStartIndex{-1};
     int                      m_lastBatchEndIndex{-1};

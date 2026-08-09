@@ -134,10 +134,25 @@ bool bytesEqual(const QByteArray& a, const QByteArray& b, killcore::ValueType ty
     return a == b;
 }
 
+QStringList hexAddressesFromText(const QString& text) {
+    QStringList addresses;
+    const QRegularExpression re(R"(\b0x[0-9a-fA-F]{5,16}\b)");
+    auto it = re.globalMatch(text);
+    while (it.hasNext()) {
+        addresses.append(it.next().captured(0));
+    }
+    return addresses;
+}
+
+QString textWithoutHexAddresses(QString text) {
+    const QRegularExpression re(R"(\b0x[0-9a-fA-F]{5,16}\b)");
+    return text.replace(re, " ");
+}
+
 QStringList numbersFromText(const QString& text) {
     QStringList values;
     const QRegularExpression re(R"([-+]?\d+(?:[\.,]\d+)?)");
-    auto it = re.globalMatch(text);
+    auto it = re.globalMatch(textWithoutHexAddresses(text));
     while (it.hasNext()) {
         values.append(it.next().captured(0).replace(',', '.'));
     }
@@ -176,6 +191,18 @@ bool looksLikeLastAutoWriteRewrite(const QString& query) {
         || q.contains("les adresse")
         || q.contains("les adresses")
         || q.contains("les mettre");
+}
+
+bool looksLikeMemoryTargetWriteRequest(const QString& query) {
+    const QString q = query.toLower();
+    return looksLikeLastAutoWriteRewrite(q)
+        || q.contains("passe")
+        || q.contains("passer")
+        || q.contains("mets")
+        || q.contains("met ")
+        || q.contains("valeur")
+        || q.contains("niveau")
+        || q.contains("score");
 }
 
 bool looksLikeNewSearchRequest(const QString& query) {
@@ -330,6 +357,7 @@ void ApplicationController::detachProcess() {
     m_lastWritePreviousValue.clear();
     m_writeHistory.clear();
     m_lastAutoWriteTargets.clear();
+    m_chatMemoryTargets.clear();
     m_activeProfileTargets.clear();
     m_lastBatchStartIndex = -1;
     m_lastBatchEndIndex = -1;
@@ -927,6 +955,134 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
     return result;
 }
 
+QVariantMap ApplicationController::activateChatMemoryTargetsFromQuery(const QString& query) {
+    QVariantMap result;
+    QVariantList suggestions;
+    const QStringList addressTexts = hexAddressesFromText(query);
+
+    result["query"] = query;
+    result["aiReady"] = m_ai.isReady();
+    result["status"] = "memory_targets_activated";
+    result["actionStatus"] = "not_executed";
+    result["workflowStatus"] = "memory_targets_ready";
+
+    m_chatMemoryTargets.clear();
+    m_lastAutoWriteTargets.clear();
+    m_smartSearchActive = false;
+    m_smartSearchInitialValue.clear();
+    m_smartSearchTargetValue.clear();
+
+    for (const auto& addressText : addressTexts) {
+        uint64_t address = 0;
+        if (!parseHexAddress(addressText, &address)) {
+            continue;
+        }
+
+        bool alreadyAdded = false;
+        for (const auto& target : m_chatMemoryTargets) {
+            if (target.address == address) {
+                alreadyAdded = true;
+                break;
+            }
+        }
+        if (alreadyAdded) {
+            continue;
+        }
+
+        const AutoWriteTarget target{address, killcore::ValueType::Int32};
+        m_chatMemoryTargets.append(target);
+        m_lastAutoWriteTargets.append(target);
+
+        QVariantMap suggestion;
+        suggestion["source"] = "chat_address";
+        suggestion["address"] = QString::number(address, 16);
+        suggestion["type"] = killcore::valueTypeToString(target.type);
+        suggestions.append(suggestion);
+    }
+
+    result["success"] = !m_chatMemoryTargets.isEmpty();
+    result["targetCount"] = m_chatMemoryTargets.size();
+    result["suggestedWrites"] = suggestions;
+    result["message"] = m_chatMemoryTargets.isEmpty()
+        ? QString("Je n'ai pas reconnu d'adresse mémoire valide dans ton message.")
+        : QString("J'ai sélectionné %1 adresse(s) mémoire depuis ton message. Donne-moi maintenant la valeur à écrire dessus.")
+              .arg(m_chatMemoryTargets.size());
+    appendSmartSearchDebug("chat_memory_targets_activated", result);
+    return result;
+}
+
+QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString& query, const QString& value) {
+    QVariantMap result;
+    QVariantList suggestions;
+    QVariantList writeResults;
+
+    result["query"] = query;
+    result["aiReady"] = m_ai.isReady();
+    result["status"] = "tool_call";
+    result["tool"] = "chat_memory_write";
+    result["actionStatus"] = "executed";
+    result["workflowStatus"] = "auto_write_done";
+    result["targetValue"] = value;
+
+    bool allWritesOk = true;
+    m_smartSearchTargetValue = value;
+    m_lastBatchStartIndex = m_writeHistory.size();
+    m_lastAutoWriteTargets.clear();
+
+    for (const auto& target : m_chatMemoryTargets) {
+        QVariantMap suggestion;
+        suggestion["source"] = "chat_address";
+        suggestion["address"] = QString::number(target.address, 16);
+        suggestion["type"] = killcore::valueTypeToString(target.type);
+        suggestion["value"] = value;
+        suggestions.append(suggestion);
+
+        auto writeResult = writeMemoryValue(
+            suggestion.value("address").toString(),
+            suggestion.value("type").toString(),
+            value);
+        writeResult.insert("source", suggestion.value("source"));
+        writeResult.insert("address", suggestion.value("address"));
+        writeResult.insert("value", value);
+        writeResult.insert("type", suggestion.value("type"));
+        allWritesOk = allWritesOk && writeResult.value("success").toBool();
+        writeResults.append(writeResult);
+
+        if (writeResult.value("success").toBool()) {
+            m_lastAutoWriteTargets.append(target);
+        }
+    }
+
+    m_lastBatchEndIndex = m_writeHistory.size();
+    if (m_lastBatchEndIndex == m_lastBatchStartIndex) {
+        m_lastBatchStartIndex = -1;
+        m_lastBatchEndIndex = -1;
+        m_lastAutoWriteTargets.clear();
+    }
+
+    QVariantMap actionResult;
+    actionResult["success"] = allWritesOk;
+    actionResult["remaining"] = static_cast<qulonglong>(m_chatMemoryTargets.size());
+    actionResult["error"] = allWritesOk ? QString() : QString("Au moins une écriture sur adresse donnée a échoué.");
+
+    result["success"] = allWritesOk;
+    result["actionResult"] = actionResult;
+    result["suggestedWrites"] = suggestions;
+    result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
+    result["autoWriteResults"] = writeResults;
+    result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
+    result["autoWriteCount"] = writeResults.size();
+    result["rollbackNote"] = "Tu peux annuler cette écriture via le bouton rollback batch dans l'assistant.";
+    result["message"] = allWritesOk
+        ? QString("J'ai écrit %1 sur %2 adresse(s) mémoire sélectionnée(s) dans la conversation.")
+              .arg(value)
+              .arg(m_chatMemoryTargets.size())
+        : QString("J'ai essayé d'écrire %1 sur les adresses mémoire sélectionnées, mais au moins une écriture a échoué.")
+              .arg(value);
+    appendSmartSearchDebug("chat_memory_write", result);
+    return result;
+}
+
 QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& query, const QString& value) {
     QVariantMap result;
     result["success"] = false;
@@ -1093,11 +1249,30 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         m_smartSearchTargetValue.clear();
         m_candidates.clear();
         m_lastAutoWriteTargets.clear();
+        m_chatMemoryTargets.clear();
         m_activeProfileTargets.clear();
         appendSmartSearchDebug("smart_search_reset", {
             {"query", query},
             {"reason", "new search request"},
         });
+    }
+
+    const QStringList chatAddresses = hexAddressesFromText(query);
+    if (!chatAddresses.isEmpty() && !forceNewSearch) {
+        auto activation = activateChatMemoryTargetsFromQuery(query);
+        if (activation.value("success").toBool()
+            && numbers.size() == 1
+            && looksLikeMemoryTargetWriteRequest(query)) {
+            return writeChatMemoryTargetsFromQuery(query, numbers.first());
+        }
+        return activation;
+    }
+
+    if (!m_chatMemoryTargets.isEmpty()
+        && numbers.size() == 1
+        && !forceNewSearch
+        && looksLikeMemoryTargetWriteRequest(query)) {
+        return writeChatMemoryTargetsFromQuery(query, numbers.first());
     }
 
     if (!m_lastAutoWriteTargets.isEmpty()
