@@ -54,6 +54,8 @@ public:
     bool isFileBacked() const;
     QString backingFilePath() const;
     size_t fileBackedThreshold() const;
+    size_t storageBytes() const;
+    size_t estimatedMemoryBytes() const;
     void setFileBackedThreshold(size_t threshold);
     bool firstCandidate(Candidate* candidate) const;
     CandidateStreamSnapshot streamSnapshot() const;

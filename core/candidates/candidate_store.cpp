@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 
 #include <algorithm>
 #include <cstring>
@@ -87,6 +88,25 @@ QString CandidateStore::backingFilePath() const {
 
 size_t CandidateStore::fileBackedThreshold() const {
     return m_fileBackedThreshold;
+}
+
+size_t CandidateStore::storageBytes() const {
+    if (m_backingFile) {
+        return static_cast<size_t>(std::max<qint64>(0, QFileInfo(*m_backingFile).size()));
+    }
+    return estimatedMemoryBytes();
+}
+
+size_t CandidateStore::estimatedMemoryBytes() const {
+    size_t total = sizeof(CandidateStore);
+    if (m_backingFile && m_candidates.isEmpty()) {
+        return total;
+    }
+    total += static_cast<size_t>(m_candidates.capacity()) * sizeof(Candidate);
+    for (const auto& candidate : m_candidates) {
+        total += static_cast<size_t>(candidate.lastValue.capacity());
+    }
+    return total;
 }
 
 void CandidateStore::setFileBackedThreshold(size_t threshold) {

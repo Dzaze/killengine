@@ -16,6 +16,18 @@ function formatNumber(value: number | undefined) {
   return new Intl.NumberFormat('fr-FR').format(value ?? 0)
 }
 
+function formatRate(value: number | undefined) {
+  return `${formatNumber(Math.round(value ?? 0))}/s`
+}
+
+function formatBytes(value: number | undefined) {
+  const bytes = value ?? 0
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} Go`
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} Ko`
+  return `${formatNumber(bytes)} o`
+}
+
 function useCandidateInAssistant(address: string, type: string) {
   store.selectCandidate(address, type)
   store.searchQuery = `j'utilise la mémoire 0x${address}`
@@ -189,6 +201,8 @@ onMounted(() => {
           <span>{{ $t('scan.matches') }}: {{ formatNumber(store.exactScanResult.matchesFound) }}</span>
           <span>{{ $t('scan.regions') }}: {{ formatNumber(store.exactScanResult.regionsScanned) }}</span>
           <span>{{ $t('scan.stored') }}: {{ formatNumber(store.exactScanResult.candidateStoreSize) }}</span>
+          <span v-if="store.exactScanResult.elapsedMs">Temps: {{ formatNumber(store.exactScanResult.elapsedMs) }} ms</span>
+          <span v-if="store.exactScanResult.bytesPerSecond">Débit: {{ formatRate(store.exactScanResult.bytesPerSecond) }}</span>
         </div>
         <p v-if="store.exactScanResult?.error" class="error">{{ store.exactScanResult.error }}</p>
       </section>
@@ -221,6 +235,8 @@ onMounted(() => {
           <span>{{ $t('scan.remaining') }}: {{ formatNumber(store.nextScanResult.remaining) }}</span>
           <span>{{ $t('scan.checked') }}: {{ formatNumber(store.nextScanResult.checked) }}</span>
           <span>{{ $t('scan.unreadable') }}: {{ formatNumber(store.nextScanResult.unreadable) }}</span>
+          <span v-if="store.nextScanResult.elapsedMs">Temps: {{ formatNumber(store.nextScanResult.elapsedMs) }} ms</span>
+          <span v-if="store.nextScanResult.candidatesPerSecond">Débit: {{ formatRate(store.nextScanResult.candidatesPerSecond) }}</span>
         </div>
         <p v-if="store.nextScanResult?.error" class="error">{{ store.nextScanResult.error }}</p>
       </section>
@@ -293,6 +309,11 @@ onMounted(() => {
         </div>
         <div class="page-info">
           {{ store.candidatePage ? store.candidatePage.pageIndex + 1 : 1 }} / {{ candidatePageTotal }}
+        </div>
+        <div v-if="store.candidatePage" class="metrics candidate-storage">
+          <span>{{ store.candidatePage.fileBacked ? 'Stockage fichier' : 'Stockage RAM' }}</span>
+          <span>Fichier: {{ formatBytes(store.candidatePage.candidateStoreBytes) }}</span>
+          <span>RAM estimée: {{ formatBytes(store.candidatePage.candidateStoreMemoryBytes) }}</span>
         </div>
         <div v-if="store.candidatePage?.displaySuppressed" class="candidate-suppressed">
           {{ formatNumber(store.candidatePage.totalCount) }} candidats trouvés. Réduis avec un next scan ou filtre une adresse pour afficher une page.
@@ -615,6 +636,11 @@ onMounted(() => {
   margin-top: 9px;
   color: var(--text-dim);
   font-size: 12px;
+}
+
+.candidate-storage {
+  margin-top: 0;
+  margin-bottom: 8px;
 }
 
 .error {

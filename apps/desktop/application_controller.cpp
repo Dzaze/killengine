@@ -15,6 +15,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -38,6 +39,13 @@ constexpr size_t kAutoWriteCandidateLimit = 4;
 constexpr int kDefaultScanMaxResults = 1000000;
 constexpr int kDefaultScanChunkSizeMb = 1;
 constexpr size_t kCandidateDisplayLimit = 250000;
+
+double ratePerSecond(size_t count, qint64 elapsedMs) {
+    if (elapsedMs <= 0) {
+        return 0.0;
+    }
+    return static_cast<double>(count) * 1000.0 / static_cast<double>(elapsedMs);
+}
 
 enum class SmartSearchIntentKind {
     Unknown,
@@ -843,6 +851,8 @@ QVariantMap ApplicationController::startExactScanAsync(
     emit scanProgress(0);
 
     std::thread([self, requestId, pid, value, valueType, expertOptions, scanValue, options, scannedBytes, cancellation]() {
+        QElapsedTimer timer;
+        timer.start();
         killcore::ScanResult scan;
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         if (!workerHandle.isValid()) {
@@ -852,11 +862,12 @@ QVariantMap ApplicationController::startExactScanAsync(
             killcore::ScanEngine scanner(workerHandle);
             scan = scanner.exactScan(scanValue, options, cancellation.get());
         }
+        const qint64 elapsedMs = timer.elapsed();
 
         if (!self) {
             return;
         }
-        QMetaObject::invokeMethod(self.data(), [self, requestId, value, valueType, expertOptions, scannedBytes, scan]() {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, value, valueType, expertOptions, scannedBytes, scan, elapsedMs]() {
             if (!self) {
                 return;
             }
@@ -887,6 +898,12 @@ QVariantMap ApplicationController::startExactScanAsync(
             finished["error"] = scan.errorMessage;
             finished["matches"] = finishedMatches;
             finished["candidateStoreSize"] = static_cast<qulonglong>(self->m_candidates.size());
+            finished["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
+            finished["bytesPerSecond"] = ratePerSecond(scan.bytesScanned, elapsedMs);
+            finished["matchesPerSecond"] = ratePerSecond(scan.matchesFound, elapsedMs);
+            finished["candidateStoreFileBacked"] = self->m_candidates.isFileBacked();
+            finished["candidateStoreBytes"] = static_cast<qulonglong>(self->m_candidates.storageBytes());
+            finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(self->m_candidates.estimatedMemoryBytes());
             self->appendSmartSearchDebug("exact_scan_async", {
                 {"requestId", requestId},
                 {"value", value},
@@ -897,6 +914,12 @@ QVariantMap ApplicationController::startExactScanAsync(
                 {"success", finished.value("success")},
                 {"matchesFound", finished.value("matchesFound")},
                 {"candidateStoreSize", finished.value("candidateStoreSize")},
+                {"elapsedMs", finished.value("elapsedMs")},
+                {"bytesPerSecond", finished.value("bytesPerSecond")},
+                {"matchesPerSecond", finished.value("matchesPerSecond")},
+                {"candidateStoreFileBacked", finished.value("candidateStoreFileBacked")},
+                {"candidateStoreBytes", finished.value("candidateStoreBytes")},
+                {"candidateStoreMemoryBytes", finished.value("candidateStoreMemoryBytes")},
                 {"cancelled", scan.cancelled},
                 {"error", finished.value("error")},
             });
@@ -985,6 +1008,8 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
     emit scanProgress(0);
 
     std::thread([self, requestId, pid, mode, value, scanMode, candidateType, candidateSnapshot, candidateThreshold, targetBytes, targetNumber, cancellation]() mutable {
+        QElapsedTimer timer;
+        timer.start();
         QVariantMap finished;
         QVariantList debugSamples;
         killcore::CandidateStore survivors;
@@ -1094,8 +1119,9 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         if (!self) {
             return;
         }
+        const qint64 elapsedMs = timer.elapsed();
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, candidateType, candidateSnapshot, survivors = std::move(survivors), checked, unreadable, cancelled, error, debugSamples, streamInput, streamOutput]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, candidateType, candidateSnapshot, survivors = std::move(survivors), checked, unreadable, cancelled, error, debugSamples, streamInput, streamOutput, elapsedMs]() mutable {
             if (!self) {
                 return;
             }
@@ -1120,6 +1146,10 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             finished["streamOutput"] = streamOutput;
             finished["fileBacked"] = self->m_candidates.isFileBacked();
             finished["candidateStorePath"] = self->m_candidates.backingFilePath();
+            finished["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
+            finished["candidatesPerSecond"] = ratePerSecond(checked, elapsedMs);
+            finished["candidateStoreBytes"] = static_cast<qulonglong>(self->m_candidates.storageBytes());
+            finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(self->m_candidates.estimatedMemoryBytes());
             finished["debugSamples"] = debugSamples;
 
             self->appendSmartSearchDebug("next_scan_async", {
@@ -1136,6 +1166,10 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 {"streamOutput", streamOutput},
                 {"fileBacked", finished.value("fileBacked")},
                 {"candidateStorePath", finished.value("candidateStorePath")},
+                {"elapsedMs", finished.value("elapsedMs")},
+                {"candidatesPerSecond", finished.value("candidatesPerSecond")},
+                {"candidateStoreBytes", finished.value("candidateStoreBytes")},
+                {"candidateStoreMemoryBytes", finished.value("candidateStoreMemoryBytes")},
                 {"error", error},
                 {"samples", debugSamples},
             });
@@ -1309,6 +1343,8 @@ QVariantMap ApplicationController::getCandidates(int pageIndex, int pageSize, co
         result["displayLimit"] = static_cast<qulonglong>(kCandidateDisplayLimit);
         result["fileBacked"] = m_candidates.isFileBacked();
         result["candidateStorePath"] = m_candidates.backingFilePath();
+        result["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
+        result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
         result["candidates"] = candidates;
         return result;
     }
@@ -1329,6 +1365,8 @@ QVariantMap ApplicationController::getCandidates(int pageIndex, int pageSize, co
     result["displayLimit"] = static_cast<qulonglong>(kCandidateDisplayLimit);
     result["fileBacked"] = m_candidates.isFileBacked();
     result["candidateStorePath"] = m_candidates.backingFilePath();
+    result["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
+    result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
     result["candidates"] = candidates;
     return result;
 }
@@ -2599,6 +2637,8 @@ QVariantMap ApplicationController::exportDiagnostics() {
     manifest["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
     manifest["candidateStoreFileBacked"] = m_candidates.isFileBacked();
     manifest["candidateStorePath"] = m_candidates.backingFilePath();
+    manifest["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
+    manifest["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
     manifest["logFilePath"] = getLogFilePath();
     manifest["smartSearchDebugFilePath"] = smartSearchDebugFilePath();
     manifest["crashDirectory"] = CrashHandler::crashDirectory();

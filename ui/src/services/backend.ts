@@ -82,6 +82,12 @@ export interface ExactScanResult {
   error: string
   matches: ExactScanMatch[]
   candidateStoreSize: number
+  elapsedMs?: number
+  bytesPerSecond?: number
+  matchesPerSecond?: number
+  candidateStoreFileBacked?: boolean
+  candidateStoreBytes?: number
+  candidateStoreMemoryBytes?: number
 }
 
 export interface CandidatePage {
@@ -92,6 +98,8 @@ export interface CandidatePage {
   displayLimit?: number
   fileBacked?: boolean
   candidateStorePath?: string
+  candidateStoreBytes?: number
+  candidateStoreMemoryBytes?: number
   candidates: ExactScanMatch[]
 }
 
@@ -111,6 +119,10 @@ export interface NextScanResult {
   streamOutput?: boolean
   fileBacked?: boolean
   candidateStorePath?: string
+  elapsedMs?: number
+  candidatesPerSecond?: number
+  candidateStoreBytes?: number
+  candidateStoreMemoryBytes?: number
   debugSamples?: Array<Record<string, unknown>>
 }
 
