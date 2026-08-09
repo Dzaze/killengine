@@ -7,6 +7,7 @@ const selectedCandidateAddresses = ref<string[]>([])
 
 const candidatePageTotal = computed(() => {
   if (!store.candidatePage) return 1
+  if (store.candidatePage.displaySuppressed) return 1
   return Math.max(1, Math.ceil(store.candidatePage.totalCount / store.candidatePage.pageSize))
 })
 const currentPageCandidates = computed(() => store.candidatePage?.candidates ?? [])
@@ -273,14 +274,14 @@ onMounted(() => {
           </button>
           <button
             class="btn btn-secondary"
-            :disabled="!store.candidatePage || (store.candidatePageIndex + 1) * store.candidatePageSize >= store.candidatePage.totalCount"
+            :disabled="!store.candidatePage || store.candidatePage.displaySuppressed || (store.candidatePageIndex + 1) * store.candidatePageSize >= store.candidatePage.totalCount"
             @click="store.nextCandidatePage()"
           >
             {{ $t('scan.next') }}
           </button>
         </div>
         <div class="selection-toolbar">
-          <button class="btn btn-secondary compact" :disabled="currentPageCandidates.length === 0" @click="toggleCurrentPageSelection()">
+          <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="toggleCurrentPageSelection()">
             Sélection page
           </button>
           <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="selectedCandidateAddresses = []">
@@ -292,6 +293,9 @@ onMounted(() => {
         </div>
         <div class="page-info">
           {{ store.candidatePage ? store.candidatePage.pageIndex + 1 : 1 }} / {{ candidatePageTotal }}
+        </div>
+        <div v-if="store.candidatePage?.displaySuppressed" class="candidate-suppressed">
+          {{ formatNumber(store.candidatePage.totalCount) }} candidats trouvés. Réduis avec un next scan ou filtre une adresse pour afficher une page.
         </div>
         <div class="candidate-list">
           <div v-for="match in currentPageCandidates" :key="match.address" class="candidate-row">
@@ -635,6 +639,16 @@ onMounted(() => {
 .page-info {
   margin-bottom: 6px;
   text-align: right;
+}
+
+.candidate-suppressed {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(122, 162, 247, 0.28);
+  border-radius: 6px;
+  background: rgba(122, 162, 247, 0.08);
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .candidate-list {

@@ -88,6 +88,8 @@ export interface CandidatePage {
   pageIndex: number
   pageSize: number
   totalCount: number
+  displaySuppressed?: boolean
+  displayLimit?: number
   fileBacked?: boolean
   candidateStorePath?: string
   candidates: ExactScanMatch[]
@@ -627,6 +629,8 @@ class BackendService {
           pageIndex,
           pageSize,
           totalCount: 0,
+          displaySuppressed: false,
+          displayLimit: 250000,
           fileBacked: false,
           candidateStorePath: '',
           candidates: [],

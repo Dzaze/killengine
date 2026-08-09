@@ -37,6 +37,7 @@ namespace {
 constexpr size_t kAutoWriteCandidateLimit = 4;
 constexpr int kDefaultScanMaxResults = 1000000;
 constexpr int kDefaultScanChunkSizeMb = 1;
+constexpr size_t kCandidateDisplayLimit = 250000;
 
 enum class SmartSearchIntentKind {
     Unknown,
@@ -1297,6 +1298,21 @@ QVariantMap ApplicationController::getCandidates(int pageIndex, int pageSize, co
 
     const int boundedPageIndex = std::max(0, pageIndex);
     const int boundedPageSize = std::clamp(pageSize, 1, 500);
+    const bool hasAddressFilter = !addressFilter.trimmed().isEmpty();
+    const bool displaySuppressed = !hasAddressFilter && m_candidates.size() > kCandidateDisplayLimit;
+
+    if (displaySuppressed) {
+        result["pageIndex"] = boundedPageIndex;
+        result["pageSize"] = boundedPageSize;
+        result["totalCount"] = static_cast<qulonglong>(m_candidates.size());
+        result["displaySuppressed"] = true;
+        result["displayLimit"] = static_cast<qulonglong>(kCandidateDisplayLimit);
+        result["fileBacked"] = m_candidates.isFileBacked();
+        result["candidateStorePath"] = m_candidates.backingFilePath();
+        result["candidates"] = candidates;
+        return result;
+    }
+
     const auto page = m_candidates.page(
         static_cast<size_t>(boundedPageIndex),
         static_cast<size_t>(boundedPageSize),
@@ -1309,6 +1325,8 @@ QVariantMap ApplicationController::getCandidates(int pageIndex, int pageSize, co
     result["pageIndex"] = static_cast<int>(page.pageIndex);
     result["pageSize"] = static_cast<int>(page.pageSize);
     result["totalCount"] = static_cast<qulonglong>(page.totalCount);
+    result["displaySuppressed"] = false;
+    result["displayLimit"] = static_cast<qulonglong>(kCandidateDisplayLimit);
     result["fileBacked"] = m_candidates.isFileBacked();
     result["candidateStorePath"] = m_candidates.backingFilePath();
     result["candidates"] = candidates;
