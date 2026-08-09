@@ -81,6 +81,15 @@ MIT — voir [LICENSE](LICENSE)
 
 ## Statut
 
-**Phase 0 — Fondation** : repo, CMake, Qt shell, Vue shell, QWebChannel, logging, tests.
+Prototype avancé :
+
+- Phases 0 à 11 validées au niveau prototype.
+- Phase 12 / Polissage V1 en cours.
+- Smart Search opérationnel : scan guidé, next scan, auto-write vérifié, rollback batch.
+- Profils opérationnels : plusieurs cibles, résolution d'adresses, réutilisation par l'Assistant.
+- IA locale optionnelle : tool-calls JSON, contrat d'intention structuré, fallback déterministe.
+- Tests unitaires : 24/24 au dernier état connu.
+
+Reste principalement : Mode Expert, Paramètres, export logs/debug, packaging, polish async/progression, documentation utilisateur.
 
 Voir `KILLENGINE_PROJECT_SPEC.md` pour le cahier des charges complet.

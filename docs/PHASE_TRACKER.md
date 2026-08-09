@@ -3,9 +3,9 @@
 Source of truth: `KILLENGINE_PROJECT_SPEC.md`
 
 Current status:
-- Phase 11 prototype is complete.
-- Phase 12 is not started.
-- V1 polishing is blocked until the remaining Phase 9 items below are done or explicitly descoped.
+- Phase 11 prototype is complete and revalidated through the Assistant/profile workflow.
+- Phase 12 has started as V1 polishing, but is not complete.
+- The current focus is polish and hardening: Mode Expert, Settings, logs/debug export, packaging, async UX, and user documentation.
 
 Prerequisites before Phase 12:
 - [x] finish or explicitly descope Phase 7 LZ4 compression
@@ -14,7 +14,7 @@ Prerequisites before Phase 12:
 - [x] finish or explicitly descope Phase 9 Qwen GGUF loading
 - [x] finish or explicitly descope Phase 9 validation with model-generated scan call
 - [x] confirm Phase 10 guided workflow still passes after the Phase 7/9 decision
-- [ ] confirm Phase 11 profile workflow still passes after the Phase 7/9 decision
+- [x] confirm Phase 11 profile workflow still passes after the Phase 7/9 decision
 
 - [x] PHASE 0 - Fondation
 - [x] PHASE 1 - Process Manager
@@ -61,7 +61,7 @@ Prerequisites before Phase 12:
   - [x] freeze
   - [x] UI write/freeze entry point
   - [x] validation with KillEngineTestTarget
-- [ ] PHASE 9 - IA locale
+- [x] PHASE 9 - IA locale
   - [x] llama.cpp integration via optional llama-cli runtime
   - [x] Qwen GGUF discovery/loading path
   - [x] AIEngine scaffold
@@ -70,6 +70,7 @@ Prerequisites before Phase 12:
   - [x] StateMachine
   - [x] strict JSON tool-call planning
   - [x] validation with model-generated scan call
+  - [x] structured intent contract and deterministic fallback
 - [x] PHASE 10 - Smart Search
   - [x] receive strict JSON tool-call from AIEngine
   - [x] execute exact_scan from Assistant
@@ -81,6 +82,10 @@ Prerequisites before Phase 12:
   - [x] refresh candidates after Assistant scans
   - [x] human-readable Assistant response
   - [x] full guided workflow UX (chat, quick actions, auto-write cards, batch rollback)
+  - [x] reset/new-search intent clears active memory targets before scanning elsewhere
+  - [x] direct memory addresses from chat can be selected and reused for writes
+  - [x] last auto-written addresses stay reusable for follow-up rewrites
+  - [x] debug labels expose smart-search intent decisions
 - [x] PHASE 11 - Profils
   - [x] Locator (module_offset + absolute)
   - [x] ProfileStore (sauvegarde/chargement JSON .keprofile)
@@ -89,9 +94,15 @@ Prerequisites before Phase 12:
   - [x] resolveProfileTarget (résout locator en adresse absolue)
   - [x] UI ProfileView (liste, créer, sauvegarder cible, résoudre, supprimer)
   - [x] Onglet Profils activé dans App.vue
+  - [x] multiple targets per profile
+  - [x] resolved profile targets can be used by Assistant write requests
 - [ ] PHASE 12 - Polissage V1
   - [x] Phase 7 LZ4/mapped storage completed for V1
   - [x] validate Phase 9 with a real Qwen GGUF model-generated scan call
+  - [x] Assistant conversation-state fixes for active addresses/profile targets
+  - [x] visible active chat memory target state with clear action
+  - [x] unit coverage for AI tools, intent extraction, and missing-value clarification
+  - [ ] Mode Expert complete UX
   - [ ] installer/package
   - [ ] settings UI
   - [ ] log viewer/export

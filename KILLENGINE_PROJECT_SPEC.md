@@ -9,7 +9,7 @@
 
 ## 0. Baseline actuelle du prototype
 
-Dernière mise à jour : phase 11 prototype fonctionnelle, avec Phase 7 terminée et Phase 9 intégrée côté runtime optionnel.
+Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phase 12 / Polissage V1 en cours.
 
 ### État validé
 
@@ -23,7 +23,9 @@ Dernière mise à jour : phase 11 prototype fonctionnelle, avec Phase 7 terminé
 - Next scan : `exact`, `changed`, `unchanged`, `increased`, `decreased`, `delta`.
 - Unknown initial value : capture snapshot compressé LZ4, stockage memory-mapped temporaire, puis comparaison.
 - Watch/read preview, écriture mémoire vérifiée, rollback simple, freeze simple.
-- Assistant Smart Search connecté aux outils déterministes.
+- Assistant Smart Search connecté aux outils déterministes et au runtime IA local optionnel.
+- Contrat d'intention IA structuré : le modèle peut produire une intention JSON validée avant exécution, avec fallback déterministe si le modèle est absent ou imprécis.
+- Debug Assistant : les décisions de Smart Search et les intents sont visibles pour diagnostiquer les cas où la conversation choisit la mauvaise action.
 - Workflow guidé validé sur Microsoft Solitaire :
   - l'utilisateur décrit une valeur actuelle et une valeur cible ;
   - KillEngine lance le scan exact ;
@@ -32,23 +34,30 @@ Dernière mise à jour : phase 11 prototype fonctionnelle, avec Phase 7 terminé
   - KillEngine réduit les candidats ;
   - si 1 à 4 candidats restent, KillEngine écrit automatiquement la valeur cible.
 - L'affichage Assistant montre un message humain plutôt que le JSON complet de debug.
+- Les adresses mémoire données dans la conversation peuvent être sélectionnées et réutilisées pour des écritures successives.
+- Les dernières adresses auto-écrites restent disponibles pour les demandes suivantes du type "passe-les à 2000".
+- Les profils peuvent contenir plusieurs cibles et les cibles résolues peuvent être utilisées par l'Assistant.
+- Une nouvelle recherche explicite remet de côté les adresses actives de conversation/profil avant de scanner ailleurs.
 - Crédit UI : `Pirolley Benoist` en bas à gauche.
 
 ### Limites connues de la baseline
 
-- Phase 12 / Polissage V1 n'est pas démarrée. Elle ne doit pas être considérée comme du polish final tant que les points fonctionnels ouverts ci-dessous ne sont pas arbitrés.
+- Phase 12 / Polissage V1 est démarrée mais incomplète.
 - Le moteur IA tente maintenant d'utiliser un runtime local `llama-cli` + GGUF Qwen si disponibles, puis retombe sur le planner déterministe si le modèle ou l'exécutable manque.
 - Le scan multi-type automatique complet n'est pas encore implémenté : le planner choisit surtout `Int32` par défaut sauf indication contraire.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
-- La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles par locator module_offset ou adresse absolue.
+- La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.
+- Le Mode Expert reste à finaliser côté UX.
+- Les Paramètres restent à finaliser côté UX.
+- L'export lisible des logs/debug reste à ajouter.
 - `KillEngineTestTarget.exe` est créé et exposé des variables connues (health, money, stamina, position, hidden_score, Player heap) pour les validations manuelles et scénarios automatisés.
 - Les validations sont surtout manuelles sur Solitaire et via tests unitaires ; les tests d'intégration automatisés (`tests/integration/`) restent à écrire.
 - Les opérations de scan lourdes restent à améliorer côté asynchronisme/progression fine pour une UX V1 complète.
 
 ### Pré-requis avant Phase 12
 
-La Phase 12 ne doit commencer que lorsque les points suivants sont terminés ou explicitement sortis du périmètre V1 :
+La Phase 12 est débloquée parce que les points suivants sont terminés ou explicitement sortis du périmètre V1 :
 
 - Phase 9 : validation avec appel de scan généré par le modèle.
 - Revalidation du workflow guidé Phase 10 après ces décisions.
@@ -69,7 +78,7 @@ Dernier état connu :
 ```text
 UI build OK
 C++ build OK
-Tests unitaires OK : 13/13
+Tests unitaires OK : 24/24
 KillEngineTestTarget.exe build OK
 ```
 
@@ -3107,11 +3116,13 @@ AIEngine
 ToolRegistry
 ToolValidator
 StateMachine
+IntentContract
+fallback déterministe
 ```
 
 ### Validation
 
-L’IA peut demander un scan exact via JSON sans accès Win32 direct.
+L’IA peut demander un scan exact via JSON sans accès Win32 direct, et peut produire une intention structurée validée avant exécution.
 
 ---
 
@@ -3134,7 +3145,7 @@ target confidence
 
 ### Validation
 
-Un utilisateur sans connaissance de Cheat Engine retrouve une variable du programme cible.
+Un utilisateur sans connaissance de Cheat Engine retrouve une variable du programme cible, peut réécrire les dernières adresses trouvées dans la conversation, et peut démarrer une nouvelle recherche sans rester bloqué sur les anciennes adresses actives.
 
 ---
 
@@ -3147,11 +3158,13 @@ labels
 module offsets
 hash exe
 session persistence
+multiple targets
+assistant target reuse
 ```
 
 ### Validation
 
-KillEngine retrouve une cible statique après redémarrage.
+KillEngine retrouve une ou plusieurs cibles statiques après redémarrage, puis l'Assistant peut les utiliser pour écrire une nouvelle valeur.
 
 ---
 
@@ -3173,6 +3186,7 @@ crash handling
 model manager
 updates
 documentation
+Mode Expert UX
 ```
 
 ---
