@@ -139,7 +139,7 @@ Prerequisites before Phase 12:
     - [x] éviter les messages techniques abrupts quand l'utilisateur démarre un nouveau contexte
   - [ ] Profils plus utiles
     - [x] libellés d'action plus clairs que `Résoudre` si nécessaire (`Activer`, `Utiliser dans l'Assistant`, `Écrire`)
-    - [ ] écriture directe d'une valeur sur une cible de profil
+    - [x] écriture directe d'une valeur sur une cible de profil
     - [ ] groupes de cibles par usage (`score`, `niveau`, `argent`, etc.)
     - [ ] état visible du profil/cible actuellement actifs dans l'Assistant
   - [ ] UX et efficacité

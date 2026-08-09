@@ -28,6 +28,7 @@ const newTargetName = ref('')
 const newTargetDescription = ref('')
 const resolveResult = ref<Record<string, unknown> | null>(null)
 const statusMessage = ref('')
+const targetWriteValues = ref<Record<string, string>>({})
 
 const profileSaveTargets = computed(() => {
   if (store.finalCandidateTargets.length > 0) {
@@ -163,6 +164,32 @@ async function activateAllTargets() {
   statusMessage.value = `✓ ${activated} cible(s) activée(s) pour l'Assistant.`
 }
 
+async function writeProfileTarget(target: ProfileTargetEntry) {
+  const value = (targetWriteValues.value[target.name] ?? '').trim()
+  if (!selectedProfile.value || !value) return
+
+  try {
+    const resolved = await backend.getController().resolveProfileTarget(selectedProfile.value, target.name)
+    resolveResult.value = resolved
+    if (!resolved.success) {
+      statusMessage.value = '✗ ' + (resolved.error ?? `Adresse introuvable pour ${target.name}.`)
+      return
+    }
+
+    const write = await backend
+      .getController()
+      .writeMemoryValue(String(resolved.address ?? ''), target.type, value)
+    if (write.success) {
+      statusMessage.value = `✓ "${target.name}" écrit à ${value} sur 0x${resolved.address}.`
+      await store.refreshSmartSearchContext()
+    } else {
+      statusMessage.value = '✗ ' + (write.error || `Écriture impossible pour ${target.name}.`)
+    }
+  } catch (e) {
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
+}
+
 async function deleteSelectedProfile() {
   if (!selectedProfile.value) return
   try {
@@ -280,6 +307,19 @@ onMounted(() => {
           </div>
           <div class="target-actions">
             <button class="btn btn-secondary btn-sm" @click="activateTarget(t.name)">Utiliser</button>
+            <input
+              v-model="targetWriteValues[t.name]"
+              class="target-write-input"
+              placeholder="Valeur"
+              @keyup.enter="writeProfileTarget(t)"
+            />
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="!targetWriteValues[t.name]?.trim()"
+              @click="writeProfileTarget(t)"
+            >
+              Écrire
+            </button>
           </div>
           <div v-if="t.description" class="target-desc">{{ t.description }}</div>
         </div>
@@ -480,6 +520,24 @@ onMounted(() => {
   font-size: 11px;
   color: var(--text-dim);
   font-style: italic;
+}
+
+.target-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.target-write-input {
+  width: 96px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
 }
 
 .btn-sm {

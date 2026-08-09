@@ -143,6 +143,7 @@ RESTE À FAIRE ACTUEL :
   - Phase 13 Assistant naturel : réponse dédiée au reset de contexte sans valeur, et préfixe naturel quand une nouvelle recherche démarre avec une valeur.
   - Phase 13 Assistant naturel : fallback frontend/backend ajouté pour éviter les bulles vides et les messages techniques abrupts.
   - Phase 13 Profils : libellés UI clarifiés, `Activer` devient `Utiliser` / `Utiliser tout`.
+  - Phase 13 Profils : écriture directe ajoutée dans la page Profil via champ valeur + bouton Écrire par cible.
   - Prochaine étape : traiter les points Phase 13 un par un, puis passe de régression manuelle V1 / release candidate.
   - Tests unitaires au dernier état : 30/30 OK.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.
