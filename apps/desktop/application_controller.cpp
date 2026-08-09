@@ -2668,6 +2668,9 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     });
 
     if (intent.resetContext) {
+        const bool hadCandidates = !m_candidates.isEmpty();
+        const int chatCount = m_chatMemoryTargets.size();
+        const int profileCount = m_activeProfileTargets.size();
         m_smartSearchActive = false;
         m_smartSearchInitialValue.clear();
         m_smartSearchTargetValue.clear();
@@ -2680,6 +2683,9 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         appendSmartSearchDebug("smart_search_reset", {
             {"query", query},
             {"reason", "new search request"},
+            {"hadCandidates", hadCandidates},
+            {"chatTargetsCleared", chatCount},
+            {"profileTargetsCleared", profileCount},
         });
     }
 
@@ -2706,6 +2712,19 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         cleared["message"] = QString("C'est fait, j'ai oublié les adresses et profils actifs de la conversation.");
         appendSmartSearchDebug("smart_search_clear_active_targets", cleared);
         return cleared;
+    }
+
+    if (intent.kind == SmartSearchIntentKind::ResetContext) {
+        QVariantMap reset;
+        reset["success"] = true;
+        reset["query"] = query;
+        reset["aiReady"] = m_ai.isReady();
+        reset["status"] = "context_reset";
+        reset["actionStatus"] = "executed";
+        reset["workflowStatus"] = "idle";
+        reset["message"] = "D'accord, je repars sur une recherche propre. Donne-moi la nouvelle valeur à chercher.";
+        appendSmartSearchDebug("smart_search_context_reset", reset);
+        return reset;
     }
 
     if (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
@@ -2826,7 +2845,10 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         const auto count = actionResult.value("candidateStoreSize").toULongLong();
         result["workflowStatus"] = "awaiting_value_change";
         result["targetValue"] = m_smartSearchTargetValue;
-        result["message"] = QString("J'ai trouvé %1 candidats pour %2. Fais bouger la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire la liste.")
+        const QString prefix = intent.resetContext
+            ? QString("Je repars sur une nouvelle recherche. ")
+            : QString();
+        result["message"] = prefix + QString("J'ai trouvé %1 candidats pour %2. Fais bouger la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire la liste.")
                                 .arg(count)
                                 .arg(m_smartSearchInitialValue);
     } else if ((tool == "next_scan" || tool == "unknown_compare") && actionResult.value("success").toBool()) {
