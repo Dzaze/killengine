@@ -83,8 +83,8 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - L'export diagnostic initial est disponible ; l'ouverture automatique du dossier exporté reste à ajouter si nécessaire.
 - Le crash handling initial écrit des rapports texte locaux ; les minidumps natifs restent une amélioration ultérieure.
 - La progression de scan V1 est volontairement grossière ; l'annulation est disponible mais ne fournit pas encore une progression fine par région.
-- `KillEngineTestTarget.exe` est créé et exposé des variables connues (health, money, stamina, position, hidden_score, Player heap) pour les validations manuelles et scénarios automatisés.
-- Les validations sont surtout manuelles sur Solitaire et via tests unitaires ; les tests d'intégration automatisés (`tests/integration/`) restent à écrire.
+- `KillEngineTestTarget.exe` est créé et expose des variables connues (health, money, stamina, position, hidden_score, Player heap) pour les validations manuelles et scénarios automatisés.
+- Les tests d'intégration automatisés (`tests/integration/`) lancent `KillEngineTestTarget.exe` et vérifient un scan exact réel sur processus externe.
 - Les opérations de scan lourdes restent à améliorer côté asynchronisme/progression fine pour une UX V1 complète.
 
 ### Pré-requis avant Phase 12

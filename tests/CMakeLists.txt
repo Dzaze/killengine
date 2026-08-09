@@ -42,14 +42,18 @@ set_target_properties(KillEngineTestTarget PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
-# Integration tests (Phase 1+)
-# add_executable(killengine_integration_tests
-#     integration/test_process.cpp
-#     integration/test_memory.cpp
-# )
-# target_link_libraries(killengine_integration_tests PRIVATE
-#     killcore
-#     GTest::gtest
-#     GTest::gtest_main
-# )
-# gtest_discover_tests(killengine_integration_tests)
+# Integration tests (Phase 13)
+add_executable(killengine_integration_tests
+    integration/test_main.cpp
+    integration/test_memory_scan.cpp
+)
+target_link_libraries(killengine_integration_tests PRIVATE
+    killcore
+    GTest::gtest
+    Qt6::Core
+)
+set_target_properties(killengine_integration_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+add_dependencies(killengine_integration_tests KillEngineTestTarget)
+gtest_discover_tests(killengine_integration_tests DISCOVERY_MODE PRE_TEST)
