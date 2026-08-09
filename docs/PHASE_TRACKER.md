@@ -127,11 +127,11 @@ Prerequisites before Phase 12:
     - [x] next scan streaming : lire les candidats précédents par blocs, écrire les survivants dans un nouveau fichier
     - [x] undo scan : conserver la génération précédente de résultats pour restaurer une réduction ratée
     - [x] métriques de performance : candidats/s, bytes/s, taille fichier, RAM estimée, temps par phase
-  - [ ] Réduction des faux positifs
+  - [x] Réduction des faux positifs
     - [x] mode de confirmation cible par écriture temporaire vérifiée puis restauration/écriture finale
     - [x] historique des valeurs observées par adresse pendant les scans guidés
     - [x] filtres anti-bruit pour régions très volatiles ou peu pertinentes
-    - [ ] diagnostic lisible quand une comparaison élimine tous les candidats
+    - [x] diagnostic lisible quand une comparaison élimine tous les candidats
   - [ ] Assistant plus naturel
     - [ ] mémoire de conversation structurée visible (`dernière recherche`, `valeur actuelle`, `valeur cible`, `adresses actives`, `profil actif`)
     - [ ] intentions plus fines : nouvelle recherche, réutiliser adresses, changer valeur trouvée, oublier profils/adresses

@@ -267,6 +267,47 @@ QVariantMap candidateObservationToVariantMap(
     return observation;
 }
 
+QString noCandidateDiagnosticMessage(const QVariantMap& actionResult, const QString& tool) {
+    const qulonglong checked = tool == "next_scan"
+        ? actionResult.value("checked").toULongLong()
+        : actionResult.value("checkedBytes").toULongLong();
+    const qulonglong unreadable = actionResult.value("unreadable").toULongLong();
+    const QVariantList samples = actionResult.value("debugSamples").toList();
+
+    QStringList parts;
+    if (tool == "next_scan") {
+        parts.append(QString("J'ai comparé %1 adresse(s).").arg(checked));
+        if (unreadable > 0) {
+            parts.append(QString("%1 adresse(s) étaient illisibles.").arg(unreadable));
+        }
+    } else {
+        parts.append(QString("La comparaison unknown a parcouru %1 octet(s).").arg(checked));
+    }
+
+    QStringList sampleTexts;
+    for (int i = 0; i < std::min<int>(static_cast<int>(samples.size()), 3); ++i) {
+        const auto sample = samples.at(i).toMap();
+        const QString address = sample.value("address").toString();
+        if (address.isEmpty()) {
+            continue;
+        }
+        if (sample.value("readable", true).toBool()) {
+            sampleTexts.append(QString("0x%1 : %2 -> %3")
+                                   .arg(address)
+                                   .arg(sample.value("previousNumber").toString())
+                                   .arg(sample.value("currentNumber").toString()));
+        } else {
+            sampleTexts.append(QString("0x%1 : illisible").arg(address));
+        }
+    }
+    if (!sampleTexts.isEmpty()) {
+        parts.append(QString("Exemples : %1.").arg(sampleTexts.join(", ")));
+    }
+
+    parts.append("Tu peux restaurer la réduction précédente dans le Mode Expert si cette étape a éliminé la bonne adresse.");
+    return parts.join(' ');
+}
+
 QString normalizedProfileText(QString value) {
     return value.toLower().trimmed();
 }
@@ -1316,6 +1357,9 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(self->m_candidates.estimatedMemoryBytes());
             finished["debugSamples"] = debugSamples;
             finished["valueHistoryUpdates"] = valueHistoryUpdates;
+            if (finished.value("remaining").toULongLong() == 0 && !cancelled) {
+                finished["diagnostic"] = noCandidateDiagnosticMessage(finished, "next_scan");
+            }
 
             self->appendSmartSearchDebug("next_scan_async", {
                 {"requestId", requestId},
@@ -1489,6 +1533,9 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
     result["debugValue"] = value;
     result["debugSamples"] = debugSamples;
     result["valueHistoryUpdates"] = valueHistoryUpdates;
+    if (m_candidates.size() == 0) {
+        result["diagnostic"] = noCandidateDiagnosticMessage(result, "next_scan");
+    }
     appendSmartSearchDebug("next_scan", {
         {"mode", mode},
         {"value", value},
@@ -1752,6 +1799,9 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
     result["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
     result["stored"] = static_cast<qulonglong>(m_candidates.size());
     result["error"] = scan.errorMessage;
+    if (m_candidates.size() == 0 && scan.success) {
+        result["diagnostic"] = noCandidateDiagnosticMessage(result, "unknown_compare");
+    }
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
     emit scanProgress(100);
     return result;
@@ -1849,6 +1899,9 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             finished["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
             finished["stored"] = static_cast<qulonglong>(self->m_candidates.size());
             finished["error"] = finishError;
+            if (self->m_candidates.size() == 0 && finishSuccess) {
+                finished["diagnostic"] = noCandidateDiagnosticMessage(finished, "unknown_compare");
+            }
 
             self->appendSmartSearchDebug("unknown_next_async", {
                 {"requestId", requestId},
@@ -2767,7 +2820,11 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                                     .arg(remaining);
         } else {
             result["workflowStatus"] = "no_candidate";
-            result["message"] = "Aucun candidat restant. Il faut repartir sur un nouveau scan exact.";
+            const QString diagnostic = actionResult.value("diagnostic").toString();
+            result["diagnostic"] = diagnostic;
+            result["message"] = diagnostic.isEmpty()
+                ? QString("Aucun candidat restant. Il faut repartir sur un nouveau scan exact.")
+                : QString("Aucun candidat restant. %1").arg(diagnostic);
         }
     }
 

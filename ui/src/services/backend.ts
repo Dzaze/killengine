@@ -125,6 +125,7 @@ export interface NextScanResult {
   candidateStoreMemoryBytes?: number
   debugSamples?: Array<Record<string, unknown>>
   valueHistoryUpdates?: Array<Record<string, unknown>>
+  diagnostic?: string
 }
 
 export interface UndoCandidateScanResult {
@@ -160,6 +161,7 @@ export interface UnknownNextScanResult {
   matchesFound: number
   stored: number
   error: string
+  diagnostic?: string
 }
 
 export interface MemoryWriteResult {
