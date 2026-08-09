@@ -69,6 +69,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les actions de profil utilisent des libellés orientés usage (`Utiliser`, `Utiliser tout`) plutôt qu'un vocabulaire technique de résolution.
 - La page Profil permet d'écrire directement une valeur sur une cible sauvegardée après résolution de son adresse courante.
 - Les cibles de profil sont regroupées par usage dérivé du nom (`score`, `niveau`, `argent`, etc.) et un groupe peut être envoyé d'un coup dans l'Assistant.
+- Le bandeau de contexte Assistant affiche les groupes et cibles de profil actuellement actifs.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
 - La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.

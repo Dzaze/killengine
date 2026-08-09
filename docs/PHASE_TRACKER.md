@@ -137,11 +137,11 @@ Prerequisites before Phase 12:
     - [x] intentions plus fines : nouvelle recherche, réutiliser adresses, changer valeur trouvée, oublier profils/adresses
     - [x] réponses naturelles pour les transitions (`je cherche ailleurs`, `je garde ces adresses`, `j'attends la nouvelle valeur`)
     - [x] éviter les messages techniques abrupts quand l'utilisateur démarre un nouveau contexte
-  - [ ] Profils plus utiles
+  - [x] Profils plus utiles
     - [x] libellés d'action plus clairs que `Résoudre` si nécessaire (`Activer`, `Utiliser dans l'Assistant`, `Écrire`)
     - [x] écriture directe d'une valeur sur une cible de profil
     - [x] groupes de cibles par usage (`score`, `niveau`, `argent`, etc.)
-    - [ ] état visible du profil/cible actuellement actifs dans l'Assistant
+    - [x] état visible du profil/cible actuellement actifs dans l'Assistant
   - [ ] UX et efficacité
     - [ ] bouton `Nouvelle recherche` visible dans l'Assistant
     - [ ] statut global clair : recherche active, adresses actives, profil actif, aucun contexte actif

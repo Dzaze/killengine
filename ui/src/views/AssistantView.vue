@@ -25,8 +25,16 @@ const contextItems = computed(() => {
     })
   }
   if (context.profileTargets.length > 0) {
+    const groups = Array.from(new Set(
+      context.profileTargets
+        .map((target) => String(target.group ?? '').trim())
+        .filter(Boolean),
+    ))
+    if (groups.length > 0) {
+      items.push({ label: 'Groupes profil', value: groups.join(' · ') })
+    }
     items.push({
-      label: 'Profil',
+      label: 'Cibles profil',
       value: context.profileTargets.map((target) => `${target.profile}:${target.target}`).join(' · '),
     })
   }
