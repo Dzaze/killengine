@@ -3,6 +3,7 @@
 #include "process/process_handle.h"
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
+#include "profiles/profile_store.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "snapshot/snapshot_store.h"
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -51,6 +53,29 @@ public:
 
 private:
     QProcess m_process;
+};
+
+class ProfileFileGuard {
+public:
+    explicit ProfileFileGuard(QString profileName)
+        : m_profileName(std::move(profileName)) {
+        killcore::ProfileStore::remove(m_profileName);
+    }
+
+    ~ProfileFileGuard() {
+        killcore::ProfileStore::remove(m_profileName);
+    }
+
+    const QString& name() const {
+        return m_profileName;
+    }
+
+    QString path() const {
+        return killcore::ProfileStore::profilePath(m_profileName);
+    }
+
+private:
+    QString m_profileName;
 };
 
 QByteArray int32Bytes(int32_t value) {
@@ -213,6 +238,60 @@ TEST(IntegrationMemoryScanTest, UnknownWorkflowCapturesComparesAndWritesKnownVal
     EXPECT_EQ(finalRead.data, int32Bytes(45000));
 
     const auto rollback = writer.write(*playerMoneyAddress, changedWrite.previousValue, true);
+    ASSERT_TRUE(rollback.success) << rollback.errorMessage.toStdString();
+    ASSERT_TRUE(rollback.verified) << rollback.errorMessage.toStdString();
+}
+
+TEST(IntegrationMemoryScanTest, ProfileWorkflowSavesResolvesActivatesAndWritesKnownValue) {
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadWrite);
+    ASSERT_TRUE(handle.isValid()) << "Could not open KillEngineTestTarget process.";
+
+    const killcore::ScanResult initialScan = scanInt32(handle, 41250);
+    ASSERT_TRUE(initialScan.success) << initialScan.errorMessage.toStdString();
+
+    killcore::MemoryReader reader(handle);
+    const auto playerMoneyAddress = findPlayerMoneyAddress(initialScan, reader);
+    ASSERT_TRUE(playerMoneyAddress.has_value()) << "Could not identify Player.money candidate.";
+
+    ProfileFileGuard profileFile(QString("integration_profile_%1").arg(target.pid()));
+
+    killcore::Profile profile;
+    profile.gameName = "KillEngine Integration Target";
+    profile.executableName = "KillEngineTestTarget.exe";
+
+    killcore::ProfileTarget moneyTarget;
+    moneyTarget.name = "score";
+    moneyTarget.type = killcore::ValueType::Int32;
+    moneyTarget.description = "Integration profile write target";
+    moneyTarget.locator.kind = killcore::LocatorKind::Absolute;
+    moneyTarget.locator.lastAddress = *playerMoneyAddress;
+    profile.targets.append(moneyTarget);
+
+    ASSERT_TRUE(killcore::ProfileStore::save(profile, profileFile.path()));
+
+    killcore::Profile loadedProfile;
+    ASSERT_TRUE(killcore::ProfileStore::load(profileFile.path(), &loadedProfile));
+    ASSERT_EQ(loadedProfile.targets.size(), 1);
+
+    const killcore::ProfileTarget activeTarget = loadedProfile.targets.first();
+    uint64_t resolvedAddress = 0;
+    ASSERT_TRUE(killcore::resolveLocatorAddress(handle, activeTarget.locator, &resolvedAddress));
+    ASSERT_EQ(resolvedAddress, *playerMoneyAddress);
+
+    killcore::MemoryWriter writer(handle);
+    const auto write = writer.write(resolvedAddress, int32Bytes(47000), true);
+    ASSERT_TRUE(write.success) << write.errorMessage.toStdString();
+    ASSERT_TRUE(write.verified) << write.errorMessage.toStdString();
+
+    const auto written = reader.read(resolvedAddress, sizeof(int32_t));
+    ASSERT_TRUE(written.success || written.partial) << written.errorMessage.toStdString();
+    ASSERT_EQ(written.bytesRead, sizeof(int32_t));
+    EXPECT_EQ(written.data, int32Bytes(47000));
+
+    const auto rollback = writer.write(resolvedAddress, write.previousValue, true);
     ASSERT_TRUE(rollback.success) << rollback.errorMessage.toStdString();
     ASSERT_TRUE(rollback.verified) << rollback.errorMessage.toStdString();
 }
