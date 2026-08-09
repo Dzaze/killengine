@@ -19,6 +19,11 @@ interface ProfileTargetEntry {
   description: string
 }
 
+interface ProfileTargetGroup {
+  name: string
+  targets: ProfileTargetEntry[]
+}
+
 const profiles = ref<ProfileEntry[]>([])
 const selectedProfile = ref<string>('')
 const profileTargets = ref<ProfileTargetEntry[]>([])
@@ -46,6 +51,20 @@ const profileSaveTargets = computed(() => {
 
   return []
 })
+
+const groupedProfileTargets = computed<ProfileTargetGroup[]>(() => {
+  const groups = new Map<string, ProfileTargetEntry[]>()
+  for (const target of profileTargets.value) {
+    const groupName = profileTargetGroupName(target.name)
+    groups.set(groupName, [...(groups.get(groupName) ?? []), target])
+  }
+  return Array.from(groups.entries()).map(([name, targets]) => ({ name, targets }))
+})
+
+function profileTargetGroupName(name: string): string {
+  const normalized = name.trim().toLowerCase().replace(/\s+\d+$/, '').trim()
+  return normalized || 'cibles'
+}
 
 async function refreshProfiles() {
   try {
@@ -162,6 +181,29 @@ async function activateAllTargets() {
   }
 
   statusMessage.value = `✓ ${activated} cible(s) activée(s) pour l'Assistant.`
+}
+
+async function activateTargetGroup(group: ProfileTargetGroup) {
+  if (!selectedProfile.value || group.targets.length === 0) return
+
+  let activated = 0
+  for (const target of group.targets) {
+    try {
+      const result = await backend.getController().activateProfileTarget(selectedProfile.value, target.name)
+      if (!result.success) {
+        statusMessage.value = '✗ ' + (result.error ?? `Activation impossible pour ${target.name}.`)
+        return
+      }
+      activated += 1
+      resolveResult.value = result
+    } catch (e) {
+      statusMessage.value = '✗ Erreur : ' + String(e)
+      return
+    }
+  }
+
+  await store.refreshSmartSearchContext()
+  statusMessage.value = `✓ Groupe "${group.name}" prêt dans l'Assistant (${activated} cible(s)).`
 }
 
 async function writeProfileTarget(target: ProfileTargetEntry) {
@@ -299,29 +341,36 @@ onMounted(() => {
           <h3>Cibles ({{ profileTargets.length }})</h3>
           <button class="btn btn-secondary btn-sm" @click="activateAllTargets()">Utiliser tout</button>
         </div>
-        <div v-for="t in profileTargets" :key="t.name" class="target-row">
-          <div class="target-info">
-            <span class="target-name">{{ t.name }}</span>
-            <span class="target-type">{{ t.type }}</span>
-            <span class="target-locator">{{ t.locator }}</span>
+        <div v-for="group in groupedProfileTargets" :key="group.name" class="target-group">
+          <div class="target-group-header">
+            <strong>{{ group.name }}</strong>
+            <span>{{ group.targets.length }} cible(s)</span>
+            <button class="btn btn-secondary btn-sm" @click="activateTargetGroup(group)">Utiliser le groupe</button>
           </div>
-          <div class="target-actions">
-            <button class="btn btn-secondary btn-sm" @click="activateTarget(t.name)">Utiliser</button>
-            <input
-              v-model="targetWriteValues[t.name]"
-              class="target-write-input"
-              placeholder="Valeur"
-              @keyup.enter="writeProfileTarget(t)"
-            />
-            <button
-              class="btn btn-primary btn-sm"
-              :disabled="!targetWriteValues[t.name]?.trim()"
-              @click="writeProfileTarget(t)"
-            >
-              Écrire
-            </button>
+          <div v-for="t in group.targets" :key="t.name" class="target-row">
+            <div class="target-info">
+              <span class="target-name">{{ t.name }}</span>
+              <span class="target-type">{{ t.type }}</span>
+              <span class="target-locator">{{ t.locator }}</span>
+            </div>
+            <div class="target-actions">
+              <button class="btn btn-secondary btn-sm" @click="activateTarget(t.name)">Utiliser</button>
+              <input
+                v-model="targetWriteValues[t.name]"
+                class="target-write-input"
+                placeholder="Valeur"
+                @keyup.enter="writeProfileTarget(t)"
+              />
+              <button
+                class="btn btn-primary btn-sm"
+                :disabled="!targetWriteValues[t.name]?.trim()"
+                @click="writeProfileTarget(t)"
+              >
+                Écrire
+              </button>
+            </div>
+            <div v-if="t.description" class="target-desc">{{ t.description }}</div>
           </div>
-          <div v-if="t.description" class="target-desc">{{ t.description }}</div>
         </div>
       </div>
 
@@ -479,6 +528,35 @@ onMounted(() => {
 
 .targets-header h3 {
   margin-bottom: 0;
+}
+
+.target-group {
+  margin-bottom: 10px;
+}
+
+.target-group-header {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(122, 162, 247, 0.08);
+}
+
+.target-group-header strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-group-header span {
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 .target-row {

@@ -140,7 +140,7 @@ Prerequisites before Phase 12:
   - [ ] Profils plus utiles
     - [x] libellés d'action plus clairs que `Résoudre` si nécessaire (`Activer`, `Utiliser dans l'Assistant`, `Écrire`)
     - [x] écriture directe d'une valeur sur une cible de profil
-    - [ ] groupes de cibles par usage (`score`, `niveau`, `argent`, etc.)
+    - [x] groupes de cibles par usage (`score`, `niveau`, `argent`, etc.)
     - [ ] état visible du profil/cible actuellement actifs dans l'Assistant
   - [ ] UX et efficacité
     - [ ] bouton `Nouvelle recherche` visible dans l'Assistant
