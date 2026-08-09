@@ -270,7 +270,7 @@ onMounted(() => {
       <div v-if="profileTargets.length > 0" class="targets-list">
         <div class="targets-header">
           <h3>Cibles ({{ profileTargets.length }})</h3>
-          <button class="btn btn-secondary btn-sm" @click="activateAllTargets()">Activer tout</button>
+          <button class="btn btn-secondary btn-sm" @click="activateAllTargets()">Utiliser tout</button>
         </div>
         <div v-for="t in profileTargets" :key="t.name" class="target-row">
           <div class="target-info">
@@ -279,7 +279,7 @@ onMounted(() => {
             <span class="target-locator">{{ t.locator }}</span>
           </div>
           <div class="target-actions">
-            <button class="btn btn-secondary btn-sm" @click="activateTarget(t.name)">Activer</button>
+            <button class="btn btn-secondary btn-sm" @click="activateTarget(t.name)">Utiliser</button>
           </div>
           <div v-if="t.description" class="target-desc">{{ t.description }}</div>
         </div>

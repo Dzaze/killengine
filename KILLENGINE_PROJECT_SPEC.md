@@ -66,6 +66,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - L'Assistant reconnaît explicitement les intentions `nouvelle recherche`, `réutiliser adresses`, `changer valeur trouvée` et `oublier adresses/profils actifs`.
 - Les transitions de conversation ont des réponses dédiées, notamment quand l'utilisateur repart sur une recherche propre sans encore donner de valeur.
 - Les réponses Assistant ont un fallback conversationnel quand aucune action exploitable n'est produite, afin d'éviter les bulles vides ou les messages techniques abrupts.
+- Les actions de profil utilisent des libellés orientés usage (`Utiliser`, `Utiliser tout`) plutôt qu'un vocabulaire technique de résolution.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
 - La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.
