@@ -131,6 +131,12 @@ public:
     /// Vide le fichier debug Smart Search.
     Q_INVOKABLE QVariantMap clearSmartSearchDebugEvents();
 
+    /// Retourne les dernières lignes du fichier de log principal.
+    Q_INVOKABLE QVariantMap getLogTail(int maxLines) const;
+
+    /// Exporte logs et diagnostics dans une archive zip locale.
+    Q_INVOKABLE QVariantMap exportDiagnostics();
+
     /// Liste les adresses mémoire actives dans l'Assistant.
     Q_INVOKABLE QVariantMap getActiveChatMemoryTargets() const;
 

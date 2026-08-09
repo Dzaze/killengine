@@ -153,6 +153,14 @@ async function saveAll() {
     <section class="panel">
       <div class="panel-title">
         <h2>Diagnostic</h2>
+        <div class="panel-actions">
+          <button class="btn btn-secondary compact" @click="store.refreshLogTail()">
+            Logs
+          </button>
+          <button class="btn btn-secondary compact" @click="store.exportDiagnostics()">
+            Exporter
+          </button>
+        </div>
       </div>
       <div class="path-row">
         <span>Log</span>
@@ -179,7 +187,23 @@ async function saveAll() {
         </div>
         <input v-model.number="store.settingSmartSearchDebugMaxEvents" class="input short-input" type="number" min="5" max="200" step="5" />
       </div>
+      <p v-if="store.diagnosticExportPath" class="status-line">
+        Diagnostic exporté : <code>{{ store.diagnosticExportPath }}</code>
+      </p>
+      <p v-if="store.diagnosticExportError" class="error">{{ store.diagnosticExportError }}</p>
+      <p v-if="store.logError" class="error">{{ store.logError }}</p>
       <p v-if="store.smartSearchDebugError" class="error">{{ store.smartSearchDebugError }}</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Log principal</h2>
+        <span>{{ store.logLines.length }}</span>
+      </div>
+      <div v-if="store.logLines.length === 0" class="empty-line">
+        Aucun log chargé.
+      </div>
+      <pre v-else class="log-viewer">{{ store.logLines.join('\n') }}</pre>
     </section>
 
     <section class="panel">
@@ -421,6 +445,20 @@ async function saveAll() {
   flex-direction: column;
   gap: 6px;
   overflow-y: auto;
+}
+
+.log-viewer {
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .debug-row {

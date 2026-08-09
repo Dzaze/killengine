@@ -105,7 +105,7 @@ Prerequisites before Phase 12:
   - [x] Mode Expert complete UX (filtres start/stop address, alignment, writable/executable/COW + fast scan auto)
   - [x] installer/package (portable zip script + Inno Setup template)
   - [x] settings UI (persistent language, scan limits, fast scan, AI path placeholder, debug controls)
-  - [ ] log viewer/export
+  - [x] log viewer/export (tail viewer + compressed diagnostic export)
   - [ ] crash handling
   - [ ] async scan UX/progress polish
   - [ ] documentation/user guide

@@ -6,6 +6,7 @@ import {
   type CandidatePage,
   type ChatMemoryTargetsResult,
   type ExactScanResult,
+  type LogTailResult,
   type MemoryMapResult,
   type NextScanResult,
   type MemoryReadPreview,
@@ -45,6 +46,10 @@ export const useAppStore = defineStore('app', () => {
   const memoryPreview = ref<MemoryReadPreview | null>(null)
   const pingResult = ref('')
   const logFilePath = ref('')
+  const logLines = ref<string[]>([])
+  const logError = ref('')
+  const diagnosticExportPath = ref('')
+  const diagnosticExportError = ref('')
   const smartSearchDebugFilePath = ref('')
   const smartSearchDebugEvents = ref<Array<Record<string, unknown>>>([])
   const smartSearchDebugError = ref('')
@@ -240,6 +245,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       logFilePath.value = await backend.getController().getLogFilePath()
       smartSearchDebugFilePath.value = await backend.getController().getSmartSearchDebugFilePath()
+      await refreshLogTail()
       const debugResult: SmartSearchDebugEventsResult = await backend
         .getController()
         .getSmartSearchDebugEvents(settingSmartSearchDebugMaxEvents.value)
@@ -247,10 +253,43 @@ export const useAppStore = defineStore('app', () => {
       smartSearchDebugError.value = debugResult.error ?? ''
     } catch (e) {
       logFilePath.value = ''
+      logLines.value = []
+      logError.value = String(e)
       smartSearchDebugFilePath.value = ''
       smartSearchDebugEvents.value = []
       smartSearchDebugError.value = String(e)
       console.error('[KillEngine] Failed to refresh diagnostics:', e)
+    }
+  }
+
+  async function refreshLogTail() {
+    try {
+      const result: LogTailResult = await backend.getController().getLogTail(80)
+      logFilePath.value = result.path || logFilePath.value
+      logLines.value = result.lines ?? []
+      logError.value = result.error ?? ''
+      return result
+    } catch (e) {
+      logLines.value = []
+      logError.value = String(e)
+      return { success: false, path: logFilePath.value, lines: [], error: String(e) }
+    }
+  }
+
+  async function exportDiagnostics() {
+    diagnosticExportPath.value = ''
+    diagnosticExportError.value = ''
+    try {
+      const result = await backend.getController().exportDiagnostics()
+      if (result.success === true) {
+        diagnosticExportPath.value = String(result.path ?? '')
+      } else {
+        diagnosticExportError.value = String(result.error ?? 'Export diagnostic impossible.')
+      }
+      return result
+    } catch (e) {
+      diagnosticExportError.value = String(e)
+      return { success: false, error: String(e) }
     }
   }
 
@@ -641,6 +680,10 @@ export const useAppStore = defineStore('app', () => {
     memoryPreview,
     pingResult,
     logFilePath,
+    logLines,
+    logError,
+    diagnosticExportPath,
+    diagnosticExportError,
     smartSearchDebugFilePath,
     smartSearchDebugEvents,
     smartSearchDebugError,
@@ -702,6 +745,8 @@ export const useAppStore = defineStore('app', () => {
     loadSettings,
     saveSettings,
     refreshDiagnostics,
+    refreshLogTail,
+    exportDiagnostics,
     refreshActiveChatMemoryTargets,
     clearActiveChatMemoryTargets,
     clearSmartSearchDebug,

@@ -159,6 +159,13 @@ export interface SmartSearchDebugEventsResult {
   error: string
 }
 
+export interface LogTailResult {
+  success: boolean
+  path: string
+  lines: string[]
+  error: string
+}
+
 export interface ChatMemoryTargetsResult {
   success: boolean
   count: number
@@ -209,6 +216,8 @@ export interface BackendController {
   getSmartSearchDebugFilePath(): Promise<string>
   getSmartSearchDebugEvents(maxEvents: number): Promise<SmartSearchDebugEventsResult>
   clearSmartSearchDebugEvents(): Promise<Record<string, unknown>>
+  getLogTail(maxLines: number): Promise<LogTailResult>
+  exportDiagnostics(): Promise<Record<string, unknown>>
   getActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
   clearActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
 
@@ -473,6 +482,12 @@ class BackendService {
       },
       async clearSmartSearchDebugEvents() {
         return { success: true, error: '' }
+      },
+      async getLogTail() {
+        return { success: true, path: 'mock://no-log-file', lines: [], error: '' }
+      },
+      async exportDiagnostics() {
+        return { success: false, path: '', error: 'Mock backend' }
       },
       async getActiveChatMemoryTargets() {
         return { success: true, count: 0, targets: [] }

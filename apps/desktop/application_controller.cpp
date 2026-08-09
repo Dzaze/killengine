@@ -15,6 +15,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
@@ -1871,6 +1872,114 @@ QVariantMap ApplicationController::clearSmartSearchDebugEvents() {
     }
 
     result["success"] = true;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::getLogTail(int maxLines) const {
+    QVariantMap result;
+    QVariantList lines;
+    result["success"] = false;
+    result["path"] = getLogFilePath();
+    result["lines"] = lines;
+
+    maxLines = std::clamp(maxLines, 1, 1000);
+
+    QFile file(getLogFilePath());
+    if (!file.exists()) {
+        result["success"] = true;
+        result["error"] = "";
+        return result;
+    }
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        result["error"] = "Impossible de lire le fichier log.";
+        return result;
+    }
+
+    constexpr qint64 kMaxTailBytes = 2 * 1024 * 1024;
+    if (file.size() > kMaxTailBytes) {
+        file.seek(file.size() - kMaxTailBytes);
+        file.readLine();
+    }
+
+    QList<QByteArray> tail;
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        tail.append(line);
+        if (tail.size() > maxLines) {
+            tail.removeFirst();
+        }
+    }
+
+    for (const auto& line : tail) {
+        lines.append(QString::fromUtf8(line));
+    }
+
+    result["success"] = true;
+    result["error"] = "";
+    result["lines"] = lines;
+    return result;
+}
+
+QVariantMap ApplicationController::exportDiagnostics() {
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString exportDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation).isEmpty()
+        ? QDir::currentPath()
+        : QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    const QString exportPath = QDir(exportDir).filePath("KillEngine-diagnostics-" + timestamp + ".kezdiag");
+
+    QVariantMap manifest;
+    manifest["createdAt"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    manifest["version"] = getVersion();
+    manifest["pid"] = m_pid;
+    manifest["processName"] = m_processName;
+    manifest["attached"] = m_attached;
+    manifest["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
+    manifest["logFilePath"] = getLogFilePath();
+    manifest["smartSearchDebugFilePath"] = smartSearchDebugFilePath();
+    manifest["settings"] = getSettings();
+
+    QByteArray payload;
+    auto appendSection = [&payload](const QString& name, const QByteArray& data) {
+        payload.append("\n===== ");
+        payload.append(name.toUtf8());
+        payload.append(" =====\n");
+        payload.append(data);
+        if (!payload.endsWith('\n')) {
+            payload.append('\n');
+        }
+    };
+
+    appendSection("manifest.json", QJsonDocument(QJsonObject::fromVariantMap(manifest)).toJson(QJsonDocument::Indented));
+
+    QFile logFile(getLogFilePath());
+    if (logFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        appendSection(QFileInfo(logFile).fileName(), logFile.readAll());
+    }
+
+    QFile debugFile(smartSearchDebugFilePath());
+    if (debugFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        appendSection(QFileInfo(debugFile).fileName(), debugFile.readAll());
+    }
+
+    QFile out(exportPath);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        result["error"] = "Impossible de créer le fichier diagnostic.";
+        result["path"] = exportPath;
+        return result;
+    }
+    out.write(qCompress(payload, 9));
+    out.close();
+
+    result["success"] = true;
+    result["path"] = exportPath;
+    result["bytesWritten"] = static_cast<qulonglong>(QFileInfo(exportPath).size());
     result["error"] = "";
     return result;
 }
