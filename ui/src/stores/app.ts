@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import {
   backend,
+  type AppSettings,
   type CandidatePage,
   type ChatMemoryTargetsResult,
   type ExactScanResult,
@@ -47,6 +48,18 @@ export const useAppStore = defineStore('app', () => {
   const smartSearchDebugFilePath = ref('')
   const smartSearchDebugEvents = ref<Array<Record<string, unknown>>>([])
   const smartSearchDebugError = ref('')
+  const settingsLoaded = ref(false)
+  const settingsSaving = ref(false)
+  const settingsStatus = ref('')
+  const appLanguage = ref<'fr' | 'en'>('fr')
+  const settingDefaultValueType = ref('Int32')
+  const settingScanMaxResults = ref(1000000)
+  const settingScanChunkSizeMb = ref(1)
+  const settingFastScan = ref(true)
+  const settingSmartSearchDebugEnabled = ref(true)
+  const settingSmartSearchDebugMaxEvents = ref(30)
+  const settingModelPath = ref('')
+  const settingModelThreads = ref(4)
   const activeChatMemoryTargets = ref<Array<Record<string, unknown>>>([])
   const searchQuery = ref('')
   const searchResult = ref('')
@@ -139,6 +152,7 @@ export const useAppStore = defineStore('app', () => {
       await backend.connect()
       isConnected.value = backend.isConnected
       version.value = await backend.getController().getVersion()
+      await loadSettings()
       await refreshActiveChatMemoryTargets()
       console.log('[KillEngine] Version:', version.value)
     } catch (e) {
@@ -226,7 +240,9 @@ export const useAppStore = defineStore('app', () => {
     try {
       logFilePath.value = await backend.getController().getLogFilePath()
       smartSearchDebugFilePath.value = await backend.getController().getSmartSearchDebugFilePath()
-      const debugResult: SmartSearchDebugEventsResult = await backend.getController().getSmartSearchDebugEvents(30)
+      const debugResult: SmartSearchDebugEventsResult = await backend
+        .getController()
+        .getSmartSearchDebugEvents(settingSmartSearchDebugMaxEvents.value)
       smartSearchDebugEvents.value = debugResult.events ?? []
       smartSearchDebugError.value = debugResult.error ?? ''
     } catch (e) {
@@ -235,6 +251,64 @@ export const useAppStore = defineStore('app', () => {
       smartSearchDebugEvents.value = []
       smartSearchDebugError.value = String(e)
       console.error('[KillEngine] Failed to refresh diagnostics:', e)
+    }
+  }
+
+  function applySettings(settings: AppSettings) {
+    appLanguage.value = settings.language === 'en' ? 'en' : 'fr'
+    settingDefaultValueType.value = settings.defaultValueType || 'Int32'
+    exactScanType.value = settingDefaultValueType.value
+    unknownScanType.value = settingDefaultValueType.value
+    settingScanMaxResults.value = Number(settings.scanMaxResults || 1000000)
+    settingScanChunkSizeMb.value = Number(settings.scanChunkSizeMb || 1)
+    settingFastScan.value = settings.fastScan !== false
+    settingSmartSearchDebugEnabled.value = settings.smartSearchDebugEnabled !== false
+    settingSmartSearchDebugMaxEvents.value = Number(settings.smartSearchDebugMaxEvents || 30)
+    settingModelPath.value = settings.modelPath || ''
+    settingModelThreads.value = Number(settings.modelThreads || 4)
+  }
+
+  function currentSettings(): AppSettings {
+    return {
+      language: appLanguage.value,
+      defaultValueType: settingDefaultValueType.value,
+      scanMaxResults: settingScanMaxResults.value,
+      scanChunkSizeMb: settingScanChunkSizeMb.value,
+      fastScan: settingFastScan.value,
+      smartSearchDebugEnabled: settingSmartSearchDebugEnabled.value,
+      smartSearchDebugMaxEvents: settingSmartSearchDebugMaxEvents.value,
+      modelPath: settingModelPath.value,
+      modelThreads: settingModelThreads.value,
+    }
+  }
+
+  async function loadSettings() {
+    try {
+      const settings = await backend.getController().getSettings()
+      applySettings(settings)
+      settingsLoaded.value = true
+      settingsStatus.value = ''
+      return settings
+    } catch (e) {
+      settingsStatus.value = 'Impossible de charger les paramètres : ' + String(e)
+      return null
+    }
+  }
+
+  async function saveSettings() {
+    settingsSaving.value = true
+    try {
+      const saved = await backend.getController().saveSettings(currentSettings())
+      applySettings(saved)
+      settingsLoaded.value = true
+      settingsStatus.value = 'Paramètres sauvegardés.'
+      await refreshDiagnostics()
+      return saved
+    } catch (e) {
+      settingsStatus.value = 'Sauvegarde impossible : ' + String(e)
+      return null
+    } finally {
+      settingsSaving.value = false
     }
   }
 
@@ -570,6 +644,18 @@ export const useAppStore = defineStore('app', () => {
     smartSearchDebugFilePath,
     smartSearchDebugEvents,
     smartSearchDebugError,
+    settingsLoaded,
+    settingsSaving,
+    settingsStatus,
+    appLanguage,
+    settingDefaultValueType,
+    settingScanMaxResults,
+    settingScanChunkSizeMb,
+    settingFastScan,
+    settingSmartSearchDebugEnabled,
+    settingSmartSearchDebugMaxEvents,
+    settingModelPath,
+    settingModelThreads,
     activeChatMemoryTargets,
     searchQuery,
     searchResult,
@@ -613,6 +699,8 @@ export const useAppStore = defineStore('app', () => {
     attach,
     detach,
     doPing,
+    loadSettings,
+    saveSettings,
     refreshDiagnostics,
     refreshActiveChatMemoryTargets,
     clearActiveChatMemoryTargets,

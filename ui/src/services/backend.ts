@@ -166,6 +166,19 @@ export interface ChatMemoryTargetsResult {
   cleared?: number
 }
 
+export interface AppSettings {
+  success?: boolean
+  language: 'fr' | 'en'
+  defaultValueType: string
+  scanMaxResults: number
+  scanChunkSizeMb: number
+  fastScan: boolean
+  smartSearchDebugEnabled: boolean
+  smartSearchDebugMaxEvents: number
+  modelPath: string
+  modelThreads: number
+}
+
 export interface BackendController {
   getVersion(): Promise<string>
   getProcesses(): Promise<ProcessInfo[]>
@@ -190,6 +203,8 @@ export interface BackendController {
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
   startSmartSearch(query: string): Promise<SmartSearchResult>
   ping(message: string): Promise<string>
+  getSettings(): Promise<AppSettings>
+  saveSettings(settings: AppSettings): Promise<AppSettings>
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
   getSmartSearchDebugEvents(maxEvents: number): Promise<SmartSearchDebugEventsResult>
@@ -430,6 +445,22 @@ class BackendService {
       },
       async ping(message: string) {
         return `pong (mock): ${message}`
+      },
+      async getSettings() {
+        return {
+          language: 'fr',
+          defaultValueType: 'Int32',
+          scanMaxResults: 1000000,
+          scanChunkSizeMb: 1,
+          fastScan: true,
+          smartSearchDebugEnabled: true,
+          smartSearchDebugMaxEvents: 30,
+          modelPath: '',
+          modelThreads: 4,
+        }
+      },
+      async saveSettings(settings: AppSettings) {
+        return { ...settings, success: true }
       },
       async getLogFilePath() {
         return 'mock://no-log-file'

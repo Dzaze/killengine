@@ -113,6 +113,12 @@ public:
     /// Ping — permet au frontend de vérifier que le backend est connecté.
     Q_INVOKABLE QString ping(const QString& message);
 
+    /// Retourne les paramètres persistants de l'application.
+    Q_INVOKABLE QVariantMap getSettings() const;
+
+    /// Sauvegarde les paramètres persistants de l'application.
+    Q_INVOKABLE QVariantMap saveSettings(const QVariantMap& settings);
+
     /// Retourne le chemin du fichier de log.
     Q_INVOKABLE QString getLogFilePath() const;
 

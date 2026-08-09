@@ -38,6 +38,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les dernières adresses auto-écrites restent disponibles pour les demandes suivantes du type "passe-les à 2000".
 - Les profils peuvent contenir plusieurs cibles et les cibles résolues peuvent être utilisées par l'Assistant.
 - Une nouvelle recherche explicite remet de côté les adresses actives de conversation/profil avant de scanner ailleurs.
+- La page Paramètres sauvegarde des options persistantes : langue, type par défaut, limites de scan, fast scan, debug Smart Search et placeholders IA.
 - Crédit UI : `Pirolley Benoist` en bas à gauche.
 
 ### Limites connues de la baseline
@@ -49,7 +50,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
 - La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.
 - Le Mode Expert reste à finaliser côté UX.
-- Les Paramètres restent à finaliser côté UX.
+- Les Paramètres sont implémentés au niveau V1 polish initial ; le Model Manager complet reste à brancher sur le chemin modèle sauvegardé.
 - L'export lisible des logs/debug reste à ajouter.
 - `KillEngineTestTarget.exe` est créé et exposé des variables connues (health, money, stamina, position, hidden_score, Player heap) pour les validations manuelles et scénarios automatisés.
 - Les validations sont surtout manuelles sur Solitaire et via tests unitaires ; les tests d'intégration automatisés (`tests/integration/`) restent à écrire.

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import AssistantView from '@/views/AssistantView.vue'
 import ExpertView from '@/views/ExpertView.vue'
@@ -9,6 +10,7 @@ import ProcessView from '@/views/ProcessView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 
 const store = useAppStore()
+const { locale } = useI18n()
 const activeView = ref<'assistant' | 'process' | 'memory' | 'profiles' | 'expert' | 'settings'>('assistant')
 
 const currentView = computed(() => {
@@ -23,6 +25,13 @@ const currentView = computed(() => {
 onMounted(() => {
   store.init()
 })
+
+watch(
+  () => store.appLanguage,
+  (language) => {
+    locale.value = language
+  },
+)
 </script>
 
 <template>

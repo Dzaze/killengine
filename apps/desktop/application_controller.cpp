@@ -30,6 +30,8 @@ namespace killengine {
 namespace {
 
 constexpr size_t kAutoWriteCandidateLimit = 4;
+constexpr int kDefaultScanMaxResults = 1000000;
+constexpr int kDefaultScanChunkSizeMb = 1;
 
 enum class SmartSearchIntentKind {
     Unknown,
@@ -139,6 +141,28 @@ bool parseHexAddress(const QString& addressHex, uint64_t* address) {
 
     *address = parsed;
     return true;
+}
+
+int boundedSettingInt(QSettings& settings, const QString& key, int fallback, int minimum, int maximum) {
+    bool ok = false;
+    const int value = settings.value(key, fallback).toInt(&ok);
+    if (!ok) {
+        return fallback;
+    }
+    return std::clamp(value, minimum, maximum);
+}
+
+killcore::ScanOptions scanOptionsFromSettings() {
+    QSettings settings;
+    killcore::ScanOptions options;
+    options.maxResults = static_cast<size_t>(
+        boundedSettingInt(settings, "scan/maxResults", kDefaultScanMaxResults, 1000, 10000000));
+    options.chunkSize = static_cast<size_t>(
+        boundedSettingInt(settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 1, 64))
+        * 1024
+        * 1024;
+    options.fastScan = settings.value("scan/fastScan", true).toBool();
+    return options;
 }
 
 double bytesToDouble(const QByteArray& bytes, killcore::ValueType type) {
@@ -550,9 +574,7 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
         return result;
     }
 
-    killcore::ScanOptions options;
-    options.maxResults = 1000000;
-    options.chunkSize = 1024 * 1024;
+    killcore::ScanOptions options = scanOptionsFromSettings();
 
     killcore::ScanEngine scanner(m_handle);
     const auto scan = scanner.exactScan(scanValue, options);
@@ -618,9 +640,7 @@ QVariantMap ApplicationController::startExactScanExpert(
         return result;
     }
 
-    killcore::ScanOptions options;
-    options.maxResults = 1000000;
-    options.chunkSize = 1024 * 1024;
+    killcore::ScanOptions options = scanOptionsFromSettings();
 
     // Filtres Mode Expert (tous optionnels)
     if (expertOptions.contains("startAddress")) {
@@ -1715,6 +1735,59 @@ QString ApplicationController::ping(const QString& message) {
     return response;
 }
 
+QVariantMap ApplicationController::getSettings() const {
+    QSettings settings;
+    QVariantMap result;
+    result["language"] = settings.value("ui/language", "fr").toString();
+    result["defaultValueType"] = settings.value("scan/defaultValueType", "Int32").toString();
+    result["scanMaxResults"] = boundedSettingInt(
+        settings, "scan/maxResults", kDefaultScanMaxResults, 1000, 10000000);
+    result["scanChunkSizeMb"] = boundedSettingInt(
+        settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 1, 64);
+    result["fastScan"] = settings.value("scan/fastScan", true).toBool();
+    result["smartSearchDebugEnabled"] = settings.value("diagnostics/smartSearchDebugEnabled", true).toBool();
+    result["smartSearchDebugMaxEvents"] = boundedSettingInt(
+        settings, "diagnostics/smartSearchDebugMaxEvents", 30, 5, 200);
+    result["modelPath"] = settings.value("ai/modelPath", "").toString();
+    result["modelThreads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
+    return result;
+}
+
+QVariantMap ApplicationController::saveSettings(const QVariantMap& incoming) {
+    QSettings settings;
+
+    const QString language = incoming.value("language", "fr").toString() == "en" ? "en" : "fr";
+    const QString valueType = incoming.value("defaultValueType", "Int32").toString();
+    killcore::ValueType parsedType;
+
+    settings.setValue("ui/language", language);
+    settings.setValue(
+        "scan/defaultValueType",
+        killcore::parseValueType(valueType, &parsedType) ? valueType : "Int32");
+    settings.setValue(
+        "scan/maxResults",
+        std::clamp(incoming.value("scanMaxResults", kDefaultScanMaxResults).toInt(), 1000, 10000000));
+    settings.setValue(
+        "scan/chunkSizeMb",
+        std::clamp(incoming.value("scanChunkSizeMb", kDefaultScanChunkSizeMb).toInt(), 1, 64));
+    settings.setValue("scan/fastScan", incoming.value("fastScan", true).toBool());
+    settings.setValue(
+        "diagnostics/smartSearchDebugEnabled",
+        incoming.value("smartSearchDebugEnabled", true).toBool());
+    settings.setValue(
+        "diagnostics/smartSearchDebugMaxEvents",
+        std::clamp(incoming.value("smartSearchDebugMaxEvents", 30).toInt(), 5, 200));
+    settings.setValue("ai/modelPath", incoming.value("modelPath", "").toString().trimmed());
+    settings.setValue(
+        "ai/modelThreads",
+        std::clamp(incoming.value("modelThreads", 4).toInt(), 1, 32));
+    settings.sync();
+
+    QVariantMap result = getSettings();
+    result["success"] = true;
+    return result;
+}
+
 QString ApplicationController::getLogFilePath() const {
     return killcore::Logger::instance().logFilePath();
 }
@@ -1730,6 +1803,10 @@ QVariantMap ApplicationController::getSmartSearchDebugEvents(int maxEvents) cons
     result["path"] = smartSearchDebugFilePath();
     result["events"] = events;
 
+    QSettings settings;
+    if (maxEvents <= 0) {
+        maxEvents = boundedSettingInt(settings, "diagnostics/smartSearchDebugMaxEvents", 30, 5, 200);
+    }
     maxEvents = std::clamp(maxEvents, 1, 200);
 
     QFile file(smartSearchDebugFilePath());
@@ -1809,6 +1886,11 @@ QString ApplicationController::smartSearchDebugFilePath() const {
 }
 
 void ApplicationController::appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const {
+    QSettings settings;
+    if (!settings.value("diagnostics/smartSearchDebugEnabled", true).toBool()) {
+        return;
+    }
+
     QVariantMap entry = payload;
     entry["event"] = event;
     entry["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
