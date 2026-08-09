@@ -167,6 +167,10 @@ export interface MemoryWriteResult {
   bytesWritten: number
   error: string
   enabled?: boolean
+  confirmationMode?: boolean
+  temporaryVerified?: boolean
+  restoredBeforeFinal?: boolean
+  finalVerified?: boolean
 }
 
 export interface ExpertScanOptions {

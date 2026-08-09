@@ -211,6 +211,7 @@ private:
     void applyFreezeTick();
     bool rememberCandidatesForUndo(QString* error = nullptr);
     void clearCandidateUndo();
+    QVariantMap writeMemoryValueConfirmed(const QString& addressHex, const QString& valueType, const QString& value);
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
     QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);
     QVariantMap writeChatMemoryTargetsFromQuery(const QString& query, const QString& value);

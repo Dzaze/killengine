@@ -108,7 +108,7 @@ Prototype avancé :
 
 - Phases 0 à 11 validées au niveau prototype.
 - Phase 12 / Polissage V1 complète au niveau checklist V1.
-- Smart Search opérationnel : scan guidé, next scan, auto-write vérifié, rollback batch.
+- Smart Search opérationnel : scan guidé, next scan, auto-write confirmé/restauré/vérifié, rollback batch.
 - Profils opérationnels : plusieurs cibles, résolution d'adresses, réutilisation par l'Assistant.
 - Gros volumes : candidats stockés en fichier temporaire compact, next scan streaming, métriques perf et restauration de réduction.
 - IA locale optionnelle : tool-calls JSON, contrat d'intention structuré, fallback déterministe.

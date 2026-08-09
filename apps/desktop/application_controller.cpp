@@ -1781,6 +1781,87 @@ QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, c
     return result;
 }
 
+QVariantMap ApplicationController::writeMemoryValueConfirmed(
+    const QString& addressHex,
+    const QString& valueType,
+    const QString& value) {
+    QVariantMap result;
+    result["success"] = false;
+    result["verified"] = false;
+    result["confirmationMode"] = true;
+    result["temporaryVerified"] = false;
+    result["restoredBeforeFinal"] = false;
+    result["finalVerified"] = false;
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(valueType, &type)) {
+        result["error"] = "Type invalide.";
+        return result;
+    }
+
+    killcore::ScanValue scanValue;
+    QString parseError;
+    if (!killcore::parseScanValue(value, type, &scanValue, &parseError)) {
+        result["error"] = parseError;
+        return result;
+    }
+
+    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
+    if (!writeHandle.isValid()) {
+        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        return result;
+    }
+
+    killcore::MemoryWriter writer(writeHandle);
+    const QByteArray targetBytes = killcore::scanValueToBytes(scanValue);
+    const auto temporaryWrite = writer.write(address, targetBytes, true);
+    result["temporaryVerified"] = temporaryWrite.success && temporaryWrite.verified;
+    result["bytesWritten"] = static_cast<int>(temporaryWrite.bytesWritten);
+
+    if (!temporaryWrite.success || !temporaryWrite.verified) {
+        result["error"] = temporaryWrite.errorMessage.isEmpty()
+            ? "La confirmation temporaire de l'adresse a échoué."
+            : temporaryWrite.errorMessage;
+        return result;
+    }
+
+    const QByteArray previousValue = temporaryWrite.previousValue;
+    if (previousValue.size() == targetBytes.size()) {
+        const auto restore = writer.write(address, previousValue, true);
+        result["restoredBeforeFinal"] = restore.success && restore.verified;
+        if (!restore.success || !restore.verified) {
+            result["error"] = restore.errorMessage.isEmpty()
+                ? "La restauration après confirmation temporaire a échoué."
+                : restore.errorMessage;
+            return result;
+        }
+    } else {
+        result["error"] = "Impossible de restaurer l'ancienne valeur après confirmation.";
+        return result;
+    }
+
+    const auto finalWrite = writer.write(address, targetBytes, true);
+    result["finalVerified"] = finalWrite.success && finalWrite.verified;
+    result["success"] = finalWrite.success && finalWrite.verified;
+    result["verified"] = finalWrite.verified;
+    result["bytesWritten"] = static_cast<int>(finalWrite.bytesWritten);
+    result["error"] = finalWrite.errorMessage;
+
+    if (result.value("success").toBool()) {
+        m_lastWriteAddress = address;
+        m_lastWritePreviousValue = previousValue;
+        m_writeHistory.append({address, previousValue});
+    }
+
+    return result;
+}
+
 QVariantMap ApplicationController::rollbackLastWriteBatch() {
     QVariantMap result;
     result["success"] = false;
@@ -1943,7 +2024,7 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
         suggestion["value"] = value;
         suggestions.append(suggestion);
 
-        auto writeResult = writeMemoryValue(
+        auto writeResult = writeMemoryValueConfirmed(
             suggestion.value("address").toString(),
             suggestion.value("type").toString(),
             value);
@@ -2063,7 +2144,7 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
         suggestion["value"] = value;
         suggestions.append(suggestion);
 
-        auto writeResult = writeMemoryValue(
+        auto writeResult = writeMemoryValueConfirmed(
             suggestion.value("address").toString(),
             suggestion.value("type").toString(),
             value);
@@ -2217,7 +2298,7 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
         suggestion["value"] = value;
         suggestions.append(suggestion);
 
-        auto writeResult = writeMemoryValue(
+        auto writeResult = writeMemoryValueConfirmed(
             suggestion.value("address").toString(),
             suggestion.value("type").toString(),
             value);
@@ -2464,7 +2545,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
 
             for (const auto& item : suggestions) {
                 const auto suggestion = item.toMap();
-                auto writeResult = writeMemoryValue(
+                auto writeResult = writeMemoryValueConfirmed(
                     suggestion.value("address").toString(),
                     suggestion.value("type").toString(),
                     suggestion.value("value").toString());

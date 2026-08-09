@@ -166,7 +166,12 @@ function suggestionsFor(message: typeof store.messages[number]): string {
               class="auto-write-row"
             >
               <span>0x{{ r.address }}</span>
-              <span>{{ r.verified ? '✓ vérifié' : '✗ non vérifié' }}</span>
+              <span>{{ r.verified ? '✓ final vérifié' : '✗ non vérifié' }}</span>
+              <span v-if="r.confirmationMode" class="confirm-steps">
+                {{ r.temporaryVerified ? 'test OK' : 'test KO' }}
+                ·
+                {{ r.restoredBeforeFinal ? 'restauré' : 'non restauré' }}
+              </span>
             </div>
             <p class="rollback-note">
               Tu peux annuler toutes les écritures automatiques ci-dessous.
@@ -505,9 +510,15 @@ function suggestionsFor(message: typeof store.messages[number]): string {
 
 .auto-write-row {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   justify-content: space-between;
   padding: 3px 0;
   font-family: 'Cascadia Code', monospace;
+}
+
+.confirm-steps {
+  color: var(--text-dim);
 }
 
 .rollback-note {

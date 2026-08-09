@@ -134,6 +134,7 @@ RESTE À FAIRE ACTUEL :
   - Phase 13 ouverte dans docs/PHASE_TRACKER.md comme baseline d'améliorations :
     précision de recherche, faux positifs, Assistant plus naturel, profils plus utiles, UX/efficacité, robustesse/tests.
   - Phase 13 scalabilité : CandidateStore file-backed ajouté avec fichier temporaire compact, pagination depuis fichier, next_scan async streaming, seuil d'affichage UI gros volume, métriques perf, undo de réduction, tests unitaires dédiés.
+  - Phase 13 faux positifs : auto-write Assistant confirmé par écriture temporaire vérifiée, restauration de l'ancienne valeur, puis écriture finale vérifiée ; l'UI affiche les étapes de confirmation.
   - Prochaine étape : traiter les points Phase 13 un par un, puis passe de régression manuelle V1 / release candidate.
   - Tests unitaires au dernier état : 30/30 OK.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.
