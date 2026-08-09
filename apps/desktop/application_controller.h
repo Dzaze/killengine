@@ -150,6 +150,7 @@ signals:
 private:
     void applyFreezeTick();
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
+    QVariantMap writeProfileTargetsFromQuery(const QString& query, const QString& value);
     QString smartSearchDebugFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;
 

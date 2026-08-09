@@ -148,6 +148,16 @@ QString bytesToHex(const QByteArray& bytes) {
     return QString::fromLatin1(bytes.toHex(' '));
 }
 
+QString normalizedProfileText(QString value) {
+    return value.toLower().trimmed();
+}
+
+QString profileTargetGroupName(QString name) {
+    name = normalizedProfileText(name);
+    static const QRegularExpression numberedSuffix(R"(\s+\d+$)");
+    return name.remove(numberedSuffix).trimmed();
+}
+
 bool looksLikeLastAutoWriteRewrite(const QString& query) {
     const QString q = query.toLower();
     return q.contains("plutot")
@@ -156,8 +166,6 @@ bool looksLikeLastAutoWriteRewrite(const QString& query) {
         || q.contains("changer")
         || q.contains("modifie")
         || q.contains("modifier")
-        || q.contains("score")
-        || q.contains("valeur")
         || q.contains("mettre")
         || q.contains("mets")
         || q.contains("met ")
@@ -905,6 +913,132 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
     return result;
 }
 
+QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& query, const QString& value) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    struct ResolvedProfileTarget {
+        QString profileName;
+        QString targetName;
+        killcore::ValueType type{killcore::ValueType::Int32};
+        uint64_t address{0};
+    };
+
+    const QString normalizedQuery = normalizedProfileText(query);
+    const auto profileNames = killcore::ProfileStore::listProfiles();
+    QList<ResolvedProfileTarget> resolvedTargets;
+    QString matchedGroupName;
+
+    for (const auto& profileName : profileNames) {
+        killcore::Profile profile;
+        if (!killcore::ProfileStore::load(killcore::ProfileStore::profilePath(profileName), &profile)) {
+            continue;
+        }
+
+        if (!profile.executableName.isEmpty()
+            && !m_processName.isEmpty()
+            && profile.executableName.compare(m_processName, Qt::CaseInsensitive) != 0) {
+            continue;
+        }
+
+        for (const auto& target : profile.targets) {
+            const QString groupName = profileTargetGroupName(target.name);
+            if (groupName.isEmpty() || !normalizedQuery.contains(groupName)) {
+                continue;
+            }
+
+            uint64_t address = 0;
+            if (!killcore::resolveLocatorAddress(m_handle, target.locator, &address)) {
+                continue;
+            }
+
+            matchedGroupName = groupName;
+            resolvedTargets.append({profileName, target.name, target.type, address});
+        }
+    }
+
+    if (resolvedTargets.isEmpty()) {
+        return result;
+    }
+
+    QVariantList suggestions;
+    QVariantList writeResults;
+    bool allWritesOk = true;
+    m_smartSearchTargetValue = value;
+    m_lastBatchStartIndex = m_writeHistory.size();
+    m_lastAutoWriteTargets.clear();
+
+    for (const auto& target : resolvedTargets) {
+        QVariantMap suggestion;
+        suggestion["profile"] = target.profileName;
+        suggestion["target"] = target.targetName;
+        suggestion["address"] = QString::number(target.address, 16);
+        suggestion["type"] = killcore::valueTypeToString(target.type);
+        suggestion["value"] = value;
+        suggestions.append(suggestion);
+
+        auto writeResult = writeMemoryValue(
+            suggestion.value("address").toString(),
+            suggestion.value("type").toString(),
+            value);
+        writeResult.insert("profile", suggestion.value("profile"));
+        writeResult.insert("target", suggestion.value("target"));
+        writeResult.insert("address", suggestion.value("address"));
+        writeResult.insert("value", value);
+        writeResult.insert("type", suggestion.value("type"));
+        allWritesOk = allWritesOk && writeResult.value("success").toBool();
+        writeResults.append(writeResult);
+
+        if (writeResult.value("success").toBool()) {
+            m_lastAutoWriteTargets.append({target.address, target.type});
+        }
+    }
+
+    m_lastBatchEndIndex = m_writeHistory.size();
+    if (m_lastBatchEndIndex == m_lastBatchStartIndex) {
+        m_lastBatchStartIndex = -1;
+        m_lastBatchEndIndex = -1;
+        m_lastAutoWriteTargets.clear();
+    }
+
+    QVariantMap actionResult;
+    actionResult["success"] = allWritesOk;
+    actionResult["remaining"] = static_cast<qulonglong>(resolvedTargets.size());
+    actionResult["error"] = allWritesOk ? QString() : QString("Au moins une écriture depuis le profil a échoué.");
+
+    result["success"] = allWritesOk;
+    result["query"] = query;
+    result["aiReady"] = m_ai.isReady();
+    result["status"] = "tool_call";
+    result["tool"] = "profile_write";
+    result["actionStatus"] = "executed";
+    result["workflowStatus"] = allWritesOk ? "auto_write_done" : "auto_write_partial_or_failed";
+    result["targetValue"] = value;
+    result["actionResult"] = actionResult;
+    result["suggestedWrites"] = suggestions;
+    result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
+    result["autoWriteResults"] = writeResults;
+    result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
+    result["autoWriteCount"] = writeResults.size();
+    result["rollbackNote"] = "Tu peux annuler cette écriture via le bouton rollback batch dans l'assistant.";
+    result["message"] = allWritesOk
+        ? QString("J'ai utilisé le profil et j'ai mis %1 sur %2 cible(s) \"%3\".")
+              .arg(value)
+              .arg(resolvedTargets.size())
+              .arg(matchedGroupName)
+        : QString("J'ai trouvé %1 cible(s) \"%2\" dans le profil, mais au moins une écriture vers %3 a échoué.")
+              .arg(resolvedTargets.size())
+              .arg(matchedGroupName)
+              .arg(value);
+    appendSmartSearchDebug("profile_write", result);
+    return result;
+}
+
 QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     KE_LOG_INFO() << "startSmartSearch(\"" << query.toStdString() << "\")";
     const QStringList numbers = numbersFromText(query);
@@ -922,6 +1056,13 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         && numbers.size() == 1
         && looksLikeLastAutoWriteRewrite(query)) {
         return rewriteLastAutoWriteTargets(numbers.first(), query);
+    }
+
+    if (numbers.size() == 1) {
+        auto profileWrite = writeProfileTargetsFromQuery(query, numbers.first());
+        if (profileWrite.value("tool").toString() == "profile_write") {
+            return profileWrite;
+        }
     }
 
     const bool shouldRefineSmartSearch =
