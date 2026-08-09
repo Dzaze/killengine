@@ -114,6 +114,21 @@ void CandidateStore::setFileBackedThreshold(size_t threshold) {
     persistIfNeeded();
 }
 
+CandidateStore CandidateStore::clone(QString* error) const {
+    CandidateStore copy;
+    copy.setFileBackedThreshold(m_fileBackedThreshold);
+
+    if (isFileBacked() && m_candidates.isEmpty()) {
+        if (!copy.copyFileBackedFromPath(backingFilePath(), m_totalCount, error)) {
+            copy.clear();
+        }
+        return copy;
+    }
+
+    copy.replaceCandidates(candidates());
+    return copy;
+}
+
 bool CandidateStore::firstCandidate(Candidate* candidate) const {
     if (!candidate || isEmpty()) {
         return false;
@@ -318,6 +333,46 @@ bool CandidateStore::writeCandidatesToFile(const QList<Candidate>& candidates) {
 
     m_backingFile = std::move(file);
     m_totalCount = static_cast<size_t>(candidates.size());
+    m_candidates.clear();
+    return true;
+}
+
+bool CandidateStore::copyFileBackedFromPath(const QString& path, size_t count, QString* error) {
+    clear();
+
+    QFile source(path);
+    if (!source.open(QIODevice::ReadOnly)) {
+        if (error) *error = "Unable to open candidate snapshot file.";
+        return false;
+    }
+
+    auto target = std::make_unique<QTemporaryFile>();
+    target->setFileTemplate(QDir::tempPath() + "/killengine_candidates_XXXXXX.kecand");
+    target->setAutoRemove(true);
+    if (!target->open()) {
+        if (error) *error = "Unable to create candidate snapshot copy.";
+        return false;
+    }
+
+    while (!source.atEnd()) {
+        const QByteArray chunk = source.read(1024 * 1024);
+        if (chunk.isEmpty() && source.error() != QFile::NoError) {
+            if (error) *error = "Unable to read candidate snapshot file.";
+            return false;
+        }
+        if (!chunk.isEmpty() && target->write(chunk) != chunk.size()) {
+            if (error) *error = "Unable to write candidate snapshot copy.";
+            return false;
+        }
+    }
+
+    if (!target->flush()) {
+        if (error) *error = "Unable to flush candidate snapshot copy.";
+        return false;
+    }
+
+    m_backingFile = std::move(target);
+    m_totalCount = count;
     m_candidates.clear();
     return true;
 }

@@ -165,3 +165,51 @@ TEST(CandidateStoreTest, WritesStreamingReplacementToTemporaryFile) {
     EXPECT_EQ(page.candidates[3].address, 0x500cu);
     EXPECT_EQ(page.candidates[3].lastValue, QByteArray::fromHex("2a000000"));
 }
+
+TEST(CandidateStoreTest, ClonesMemoryBackedCandidates) {
+    killcore::ScanResult scan;
+    scan.matches.append({0x6000, killcore::ValueType::Int32});
+    scan.matches.append({0x6004, killcore::ValueType::Int32});
+
+    killcore::CandidateStore store;
+    store.replaceFromScan(scan, QByteArray::fromHex("07000000"));
+
+    QString error;
+    auto copy = store.clone(&error);
+
+    ASSERT_TRUE(error.isEmpty()) << error.toStdString();
+    EXPECT_FALSE(copy.isFileBacked());
+    EXPECT_EQ(copy.size(), 2u);
+
+    store.clear();
+    auto page = copy.page(0, 10);
+    ASSERT_EQ(page.candidates.size(), 2);
+    EXPECT_EQ(page.candidates[0].address, 0x6000u);
+    EXPECT_EQ(page.candidates[0].lastValue, QByteArray::fromHex("07000000"));
+}
+
+TEST(CandidateStoreTest, ClonesFileBackedCandidatesWithoutHydratingSource) {
+    killcore::ScanResult scan;
+    for (int i = 0; i < 8; ++i) {
+        scan.matches.append({static_cast<uint64_t>(0x7000 + i * 4), killcore::ValueType::Int32});
+    }
+
+    killcore::CandidateStore store;
+    store.setFileBackedThreshold(3);
+    store.replaceFromScan(scan, QByteArray::fromHex("09000000"));
+    ASSERT_TRUE(store.isFileBacked());
+
+    QString error;
+    auto copy = store.clone(&error);
+
+    ASSERT_TRUE(error.isEmpty()) << error.toStdString();
+    EXPECT_TRUE(copy.isFileBacked());
+    EXPECT_EQ(copy.size(), 8u);
+
+    store.clear();
+    auto page = copy.page(1, 3);
+    ASSERT_EQ(page.totalCount, 8u);
+    ASSERT_EQ(page.candidates.size(), 3);
+    EXPECT_EQ(page.candidates[0].address, 0x700cu);
+    EXPECT_EQ(page.candidates[0].lastValue, QByteArray::fromHex("09000000"));
+}

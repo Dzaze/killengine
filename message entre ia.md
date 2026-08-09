@@ -127,13 +127,13 @@ Travaux récents validés et poussés :
 Dernières validations connues :
   - npm run build : OK
   - .\scripts\build.ps1 : OK
-  - ctest --test-dir build --output-on-failure : 24/24 OK
+  - ctest --test-dir build --output-on-failure : 30/30 OK
 
 RESTE À FAIRE ACTUEL :
   - Phase 12 checklist V1 : complète.
   - Phase 13 ouverte dans docs/PHASE_TRACKER.md comme baseline d'améliorations :
     précision de recherche, faux positifs, Assistant plus naturel, profils plus utiles, UX/efficacité, robustesse/tests.
-  - Phase 13 scalabilité : CandidateStore file-backed ajouté avec fichier temporaire compact, pagination depuis fichier, next_scan async streaming, seuil d'affichage UI gros volume, métriques perf, tests unitaires dédiés.
+  - Phase 13 scalabilité : CandidateStore file-backed ajouté avec fichier temporaire compact, pagination depuis fichier, next_scan async streaming, seuil d'affichage UI gros volume, métriques perf, undo de réduction, tests unitaires dédiés.
   - Prochaine étape : traiter les points Phase 13 un par un, puis passe de régression manuelle V1 / release candidate.
-  - Tests unitaires au dernier état : 28/28 OK.
+  - Tests unitaires au dernier état : 30/30 OK.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.

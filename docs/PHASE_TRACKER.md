@@ -119,13 +119,13 @@ Prerequisites before Phase 12:
     - [ ] variantes de représentation courantes (unsigned, valeur multipliée par 10/100/1000, score interne)
     - [ ] scoring de confiance des candidats (région writable, stabilité, cohérence de variation, module connu)
     - [ ] classement UI des candidats par confiance plutôt que seulement par adresse
-  - [ ] Scalabilité gros jeux / gros volumes de candidats
+  - [x] Scalabilité gros jeux / gros volumes de candidats
     - [x] CandidateStore file-backed pour éviter de garder des millions de candidats uniquement en RAM
     - [x] format compact adresses/valeurs précédentes en fichier temporaire (`*.kecand`)
     - [x] pagination virtuelle : ne charger/afficher que les candidats visibles ou la page demandée
     - [x] seuil d'affichage : montrer seulement le nombre total quand le résultat dépasse la limite UI
     - [x] next scan streaming : lire les candidats précédents par blocs, écrire les survivants dans un nouveau fichier
-    - [ ] undo scan : conserver la génération précédente de résultats pour restaurer une réduction ratée
+    - [x] undo scan : conserver la génération précédente de résultats pour restaurer une réduction ratée
     - [x] métriques de performance : candidats/s, bytes/s, taille fichier, RAM estimée, temps par phase
   - [ ] Réduction des faux positifs
     - [ ] mode de confirmation cible par écriture temporaire vérifiée puis restauration/écriture finale

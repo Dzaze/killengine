@@ -100,6 +100,9 @@ public:
     /// Réduit les candidats existants en relisant leurs adresses.
     Q_INVOKABLE QVariantMap nextScan(const QString& mode, const QString& value);
 
+    /// Restaure la génération de candidats présente avant la dernière réduction.
+    Q_INVOKABLE QVariantMap undoCandidateScan();
+
     /// Retourne une page de candidats issus du dernier scan.
     Q_INVOKABLE QVariantMap getCandidates(int pageIndex, int pageSize, const QString& addressFilter) const;
 
@@ -206,6 +209,8 @@ signals:
 
 private:
     void applyFreezeTick();
+    bool rememberCandidatesForUndo(QString* error = nullptr);
+    void clearCandidateUndo();
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
     QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);
     QVariantMap writeChatMemoryTargetsFromQuery(const QString& query, const QString& value);
@@ -236,6 +241,7 @@ private:
     int                     m_pid{0};
     killcore::ProcessHandle m_handle;
     killcore::CandidateStore m_candidates;
+    killcore::CandidateStore m_previousCandidates;
     killcore::SnapshotStore  m_snapshot;
     killcore::FreezeManager  m_freeze;
     QTimer                   m_freezeTimer;
@@ -248,6 +254,7 @@ private:
     int                      m_lastBatchStartIndex{-1};
     int                      m_lastBatchEndIndex{-1};
     bool                     m_scanInProgress{false};
+    bool                     m_hasPreviousCandidates{false};
     int                      m_nextScanRequestId{1};
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     killai::AIEngine         m_ai;

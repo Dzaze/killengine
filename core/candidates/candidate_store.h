@@ -57,6 +57,7 @@ public:
     size_t storageBytes() const;
     size_t estimatedMemoryBytes() const;
     void setFileBackedThreshold(size_t threshold);
+    CandidateStore clone(QString* error = nullptr) const;
     bool firstCandidate(Candidate* candidate) const;
     CandidateStreamSnapshot streamSnapshot() const;
     static bool forEachCandidate(
@@ -81,6 +82,7 @@ private:
 
     void persistIfNeeded();
     bool writeCandidatesToFile(const QList<Candidate>& candidates);
+    bool copyFileBackedFromPath(const QString& path, size_t count, QString* error);
     bool readCandidateAt(size_t index, Candidate* candidate) const;
     static Candidate storedToCandidate(const StoredCandidate& stored);
     static StoredCandidate candidateToStored(const Candidate& candidate);

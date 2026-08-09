@@ -471,6 +471,12 @@ bool ApplicationController::attachProcess(int pid) {
     m_pid = pid;
     m_attached = true;
     m_processName = m_handle.executableName();
+    m_candidates.clear();
+    clearCandidateUndo();
+    m_snapshot.clear();
+    m_lastAutoWriteTargets.clear();
+    m_chatMemoryTargets.clear();
+    m_activeProfileTargets.clear();
 
     KE_LOG_INFO() << "Attached to PID " << pid << " (" << m_processName.toStdString() << ")";
 
@@ -494,6 +500,7 @@ void ApplicationController::detachProcess() {
     m_attached = false;
     m_processName.clear();
     m_candidates.clear();
+    clearCandidateUndo();
     m_snapshot.clear();
     m_freeze.clear();
     m_freezeTimer.stop();
@@ -507,6 +514,22 @@ void ApplicationController::detachProcess() {
     m_lastBatchEndIndex = -1;
 
     emit attachmentChanged();
+}
+
+bool ApplicationController::rememberCandidatesForUndo(QString* error) {
+    if (m_candidates.isEmpty()) {
+        clearCandidateUndo();
+        return true;
+    }
+
+    m_previousCandidates = m_candidates.clone(error);
+    m_hasPreviousCandidates = m_previousCandidates.size() > 0;
+    return m_hasPreviousCandidates;
+}
+
+void ApplicationController::clearCandidateUndo() {
+    m_previousCandidates.clear();
+    m_hasPreviousCandidates = false;
 }
 
 QVariantMap ApplicationController::getMemoryMap() const {
@@ -603,6 +626,7 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
     killcore::ScanEngine scanner(m_handle);
     const auto scan = scanner.exactScan(scanValue, options);
     emit scanProgress(90);
+    clearCandidateUndo();
     m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
@@ -720,6 +744,7 @@ QVariantMap ApplicationController::startExactScanExpert(
     killcore::ScanEngine scanner(m_handle);
     const auto scan = scanner.exactScan(scanValue, options);
     emit scanProgress(90);
+    clearCandidateUndo();
     m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
@@ -875,6 +900,7 @@ QVariantMap ApplicationController::startExactScanAsync(
             QVariantMap finished;
             QVariantList finishedMatches;
             if (!scan.cancelled) {
+                self->clearCandidateUndo();
                 self->m_candidates.replaceFromScan(scan, scannedBytes);
             }
 
@@ -1126,19 +1152,25 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 return;
             }
 
-            if (!cancelled && error.isEmpty()) {
-                self->m_candidates = std::move(survivors);
+            QString finishError = error;
+            if (!cancelled && finishError.isEmpty()) {
+                QString undoError;
+                if (!self->rememberCandidatesForUndo(&undoError)) {
+                    finishError = undoError.isEmpty() ? "Impossible de préparer l'annulation du next scan." : undoError;
+                } else {
+                    self->m_candidates = std::move(survivors);
+                }
             }
 
             QVariantMap finished;
             finished["requestId"] = requestId;
             finished["kind"] = "next_scan";
-            finished["success"] = error.isEmpty();
+            finished["success"] = finishError.isEmpty();
             finished["cancelled"] = cancelled;
             finished["checked"] = static_cast<qulonglong>(checked);
             finished["unreadable"] = static_cast<qulonglong>(unreadable);
             finished["remaining"] = static_cast<qulonglong>(cancelled ? candidateSnapshot.totalCount : self->m_candidates.size());
-            finished["error"] = error;
+            finished["error"] = finishError;
             finished["debugBeforeCount"] = static_cast<qulonglong>(candidateSnapshot.totalCount);
             finished["debugMode"] = mode;
             finished["debugValue"] = value;
@@ -1170,7 +1202,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 {"candidatesPerSecond", finished.value("candidatesPerSecond")},
                 {"candidateStoreBytes", finished.value("candidateStoreBytes")},
                 {"candidateStoreMemoryBytes", finished.value("candidateStoreMemoryBytes")},
-                {"error", error},
+                {"error", finishError},
                 {"samples", debugSamples},
             });
 
@@ -1300,6 +1332,12 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         }
     }
 
+    QString undoError;
+    if (!rememberCandidatesForUndo(&undoError)) {
+        result["error"] = undoError.isEmpty() ? "Impossible de préparer l'annulation du next scan." : undoError;
+        emit scanProgress(100);
+        return result;
+    }
     m_candidates.replaceCandidates(survivors);
 
     result["success"] = true;
@@ -1320,6 +1358,46 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         {"unreadable", result.value("unreadable")},
         {"remaining", result.value("remaining")},
         {"samples", debugSamples},
+    });
+    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanProgress(100);
+    return result;
+}
+
+QVariantMap ApplicationController::undoCandidateScan() {
+    QVariantMap result;
+    result["success"] = false;
+    result["restored"] = false;
+    result["count"] = static_cast<qulonglong>(m_candidates.size());
+
+    if (m_scanInProgress) {
+        result["error"] = "Impossible de restaurer pendant un scan actif.";
+        return result;
+    }
+
+    if (!m_hasPreviousCandidates || m_previousCandidates.isEmpty()) {
+        result["error"] = "Aucune réduction précédente à restaurer.";
+        return result;
+    }
+
+    m_candidates = std::move(m_previousCandidates);
+    m_hasPreviousCandidates = false;
+
+    result["success"] = true;
+    result["restored"] = true;
+    result["count"] = static_cast<qulonglong>(m_candidates.size());
+    result["fileBacked"] = m_candidates.isFileBacked();
+    result["candidateStorePath"] = m_candidates.backingFilePath();
+    result["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
+    result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
+    result["error"] = "";
+
+    appendSmartSearchDebug("undo_candidate_scan", {
+        {"restored", true},
+        {"count", result.value("count")},
+        {"fileBacked", result.value("fileBacked")},
+        {"candidateStoreBytes", result.value("candidateStoreBytes")},
+        {"candidateStoreMemoryBytes", result.value("candidateStoreMemoryBytes")},
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
     emit scanProgress(100);
@@ -1517,6 +1595,12 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
     scanResult.errorMessage = scan.errorMessage;
     scanResult.matches = scan.matches;
 
+    QString undoError;
+    if (!m_candidates.isEmpty() && !rememberCandidatesForUndo(&undoError)) {
+        result["error"] = undoError.isEmpty() ? "Impossible de préparer l'annulation de la comparaison." : undoError;
+        emit scanProgress(100);
+        return result;
+    }
     m_candidates.replaceFromScan(scanResult, {});
 
     result["success"] = scan.success;
@@ -1592,6 +1676,8 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
                 return;
             }
 
+            bool finishSuccess = scan.success;
+            QString finishError = scan.errorMessage;
             if (!scan.cancelled) {
                 killcore::ScanResult scanResult;
                 scanResult.success = scan.success;
@@ -1600,19 +1686,27 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
                 scanResult.matchesFound = scan.matchesFound;
                 scanResult.errorMessage = scan.errorMessage;
                 scanResult.matches = scan.matches;
-                self->m_candidates.replaceFromScan(scanResult, {});
+                QString undoError;
+                if (!self->m_candidates.isEmpty() && !self->rememberCandidatesForUndo(&undoError)) {
+                    finishSuccess = false;
+                    finishError = undoError.isEmpty()
+                        ? "Impossible de préparer l'annulation de la comparaison."
+                        : undoError;
+                } else {
+                    self->m_candidates.replaceFromScan(scanResult, {});
+                }
             }
 
             QVariantMap finished;
             finished["requestId"] = requestId;
             finished["kind"] = "unknown_next";
-            finished["success"] = scan.success;
+            finished["success"] = finishSuccess;
             finished["partial"] = scan.partial;
             finished["cancelled"] = scan.cancelled;
             finished["checkedBytes"] = static_cast<qulonglong>(scan.checkedBytes);
             finished["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
             finished["stored"] = static_cast<qulonglong>(self->m_candidates.size());
-            finished["error"] = scan.errorMessage;
+            finished["error"] = finishError;
 
             self->appendSmartSearchDebug("unknown_next_async", {
                 {"requestId", requestId},
@@ -2221,6 +2315,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         m_smartSearchInitialValue.clear();
         m_smartSearchTargetValue.clear();
         m_candidates.clear();
+        clearCandidateUndo();
         m_lastAutoWriteTargets.clear();
         m_chatMemoryTargets.clear();
         m_activeProfileTargets.clear();

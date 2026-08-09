@@ -126,6 +126,17 @@ export interface NextScanResult {
   debugSamples?: Array<Record<string, unknown>>
 }
 
+export interface UndoCandidateScanResult {
+  success: boolean
+  restored: boolean
+  count: number
+  fileBacked?: boolean
+  candidateStorePath?: string
+  candidateStoreBytes?: number
+  candidateStoreMemoryBytes?: number
+  error: string
+}
+
 export interface UnknownSnapshotResult {
   requestId?: number
   kind?: string
@@ -241,6 +252,7 @@ export interface BackendController {
   scanFinished?: QWebChannelSignal<ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult>
   nextScan(mode: string, value: string): Promise<NextScanResult>
   nextScanAsync(mode: string, value: string): Promise<Record<string, unknown>>
+  undoCandidateScan(): Promise<UndoCandidateScanResult>
   cancelActiveScan(): Promise<Record<string, unknown>>
   getCandidates(pageIndex: number, pageSize: number, addressFilter: string): Promise<CandidatePage>
   captureUnknownSnapshot(): Promise<UnknownSnapshotResult>
@@ -659,6 +671,9 @@ class BackendService {
       },
       async nextScanAsync(_mode: string, _value: string) {
         return { success: false, started: false, error: 'Mock backend' }
+      },
+      async undoCandidateScan() {
+        return { success: false, restored: false, count: 0, error: 'Mock backend' }
       },
       async cancelActiveScan() {
         return { success: false, error: 'Mock backend' }

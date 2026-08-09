@@ -210,6 +210,14 @@ onMounted(() => {
       <section class="panel">
         <div class="panel-title">
           <h2>{{ $t('scan.nextScan') }}</h2>
+          <button
+            class="btn btn-secondary compact"
+            type="button"
+            :disabled="store.scanBusy || !store.candidatePage?.totalCount"
+            @click="store.undoCandidateScan()"
+          >
+            Restaurer réduction
+          </button>
         </div>
         <div class="controls next-controls">
           <select v-model="store.nextScanMode" class="input select" :disabled="store.scanBusy">

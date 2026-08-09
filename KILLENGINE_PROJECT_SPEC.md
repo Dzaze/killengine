@@ -56,6 +56,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Le moteur IA tente maintenant d'utiliser un runtime local `llama-cli` + GGUF Qwen si disponibles, puis retombe sur le planner déterministe si le modèle ou l'exécutable manque.
 - Le scan multi-type automatique complet n'est pas encore implémenté : le planner choisit surtout `Int32` par défaut sauf indication contraire.
 - Le CandidateStore bascule automatiquement sur fichier temporaire compact au-delà d'un seuil, sait paginer sans hydrater toute la liste, et le `next_scan` async peut lire/écrire les candidats en streaming.
+- Une réduction de candidats peut être restaurée depuis le Mode Expert via `Restaurer réduction`, y compris quand la génération précédente était stockée en fichier temporaire.
 - Les résultats de scan exposent des métriques de performance V1 : temps écoulé, débits, stockage fichier et RAM estimée.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
@@ -93,7 +94,7 @@ Dernier état connu :
 ```text
 UI build OK
 C++ build OK
-Tests unitaires OK : 24/24
+Tests unitaires OK : 30/30
 KillEngineTestTarget.exe build OK
 ```
 

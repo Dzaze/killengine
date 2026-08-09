@@ -14,6 +14,7 @@ import {
   type ProcessInfo,
   type ProcessModuleInfo,
   type SmartSearchDebugEventsResult,
+  type UndoCandidateScanResult,
   type UnknownNextScanResult,
   type UnknownSnapshotResult,
 } from '@/services/backend'
@@ -87,6 +88,7 @@ export const useAppStore = defineStore('app', () => {
   const nextScanMode = ref('exact')
   const nextScanValue = ref('')
   const nextScanResult = ref<NextScanResult | null>(null)
+  const undoCandidateScanResult = ref<UndoCandidateScanResult | null>(null)
   const unknownScanMode = ref('changed')
   const unknownScanType = ref('Int32')
   const unknownSnapshotResult = ref<UnknownSnapshotResult | null>(null)
@@ -589,6 +591,30 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function undoCandidateScan() {
+    if (scanBusy.value) return null
+    try {
+      undoCandidateScanResult.value = await backend.getController().undoCandidateScan()
+      if (undoCandidateScanResult.value.success) {
+        candidatePageIndex.value = 0
+        await refreshCandidates()
+        scanStatusText.value = `Réduction restaurée : ${undoCandidateScanResult.value.count} candidat(s).`
+      } else {
+        scanStatusText.value = undoCandidateScanResult.value.error || 'Aucune réduction à restaurer.'
+      }
+      return undoCandidateScanResult.value
+    } catch (e) {
+      undoCandidateScanResult.value = {
+        success: false,
+        restored: false,
+        count: candidatePage.value?.totalCount ?? 0,
+        error: String(e),
+      }
+      scanStatusText.value = 'Restauration impossible.'
+      return undoCandidateScanResult.value
+    }
+  }
+
   async function cancelActiveScan() {
     if (!scanBusy.value) return
     scanStatusText.value = 'Annulation demandée...'
@@ -772,6 +798,7 @@ export const useAppStore = defineStore('app', () => {
     nextScanMode,
     nextScanValue,
     nextScanResult,
+    undoCandidateScanResult,
     unknownScanMode,
     unknownScanType,
     unknownSnapshotResult,
@@ -813,6 +840,7 @@ export const useAppStore = defineStore('app', () => {
     nextCandidatePage,
     previousCandidatePage,
     doNextScan,
+    undoCandidateScan,
     captureUnknownSnapshot,
     doUnknownNextScan,
     selectCandidate,
