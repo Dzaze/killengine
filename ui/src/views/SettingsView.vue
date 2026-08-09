@@ -13,6 +13,19 @@ const runtimeRows = computed(() => [
   { label: 'Workflow', value: store.workflowStatus },
 ])
 
+const debugEvents = computed(() => [...store.smartSearchDebugEvents].reverse())
+
+function eventSummary(event: Record<string, unknown>) {
+  const parts = [
+    event.tool ? `tool=${String(event.tool)}` : '',
+    event.workflowStatus ? `workflow=${String(event.workflowStatus)}` : '',
+    event.actionStatus ? `action=${String(event.actionStatus)}` : '',
+    event.candidateCount !== undefined ? `candidats=${String(event.candidateCount)}` : '',
+    event.targetValue ? `cible=${String(event.targetValue)}` : '',
+  ].filter(Boolean)
+  return parts.join('  ')
+}
+
 async function refreshAll() {
   await store.doPing()
   await store.refreshDiagnostics()
@@ -81,6 +94,29 @@ onMounted(() => {
         <span>Smart Search JSON</span>
         <code>{{ store.smartSearchDebugFilePath || '-' }}</code>
       </div>
+      <p v-if="store.smartSearchDebugError" class="error">{{ store.smartSearchDebugError }}</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Événements Smart Search</h2>
+        <span>{{ debugEvents.length }}</span>
+      </div>
+      <div v-if="debugEvents.length === 0" class="empty-line">
+        Aucun événement debug enregistré.
+      </div>
+      <div v-else class="debug-list">
+        <div v-for="(event, index) in debugEvents" :key="index" class="debug-row">
+          <div class="debug-head">
+            <strong>{{ String(event.event ?? '-') }}</strong>
+            <span>{{ String(event.timestamp ?? '') }}</span>
+          </div>
+          <code v-if="event.query">{{ event.query }}</code>
+          <p v-if="eventSummary(event)">{{ eventSummary(event) }}</p>
+          <p v-if="event.message">{{ event.message }}</p>
+          <p v-if="event.error" class="error">{{ event.error }}</p>
+        </div>
+      </div>
     </section>
 
     <section class="panel">
@@ -114,6 +150,12 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.panel-title span,
+.empty-line {
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 .header {
@@ -222,6 +264,47 @@ onMounted(() => {
 
 .path-row:first-of-type {
   border-top: none;
+}
+
+.debug-list {
+  display: flex;
+  max-height: 360px;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.debug-row {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.debug-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.debug-head strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.debug-head span,
+.debug-row p {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.debug-row p {
+  margin-top: 5px;
+}
+
+.error {
+  color: var(--error) !important;
 }
 
 code {

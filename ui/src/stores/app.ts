@@ -10,6 +10,7 @@ import {
   type MemoryWriteResult,
   type ProcessInfo,
   type ProcessModuleInfo,
+  type SmartSearchDebugEventsResult,
   type UnknownNextScanResult,
   type UnknownSnapshotResult,
 } from '@/services/backend'
@@ -43,6 +44,8 @@ export const useAppStore = defineStore('app', () => {
   const pingResult = ref('')
   const logFilePath = ref('')
   const smartSearchDebugFilePath = ref('')
+  const smartSearchDebugEvents = ref<Array<Record<string, unknown>>>([])
+  const smartSearchDebugError = ref('')
   const searchQuery = ref('')
   const searchResult = ref('')
   const exactScanValue = ref('')
@@ -211,9 +214,14 @@ export const useAppStore = defineStore('app', () => {
     try {
       logFilePath.value = await backend.getController().getLogFilePath()
       smartSearchDebugFilePath.value = await backend.getController().getSmartSearchDebugFilePath()
+      const debugResult: SmartSearchDebugEventsResult = await backend.getController().getSmartSearchDebugEvents(30)
+      smartSearchDebugEvents.value = debugResult.events ?? []
+      smartSearchDebugError.value = debugResult.error ?? ''
     } catch (e) {
       logFilePath.value = ''
       smartSearchDebugFilePath.value = ''
+      smartSearchDebugEvents.value = []
+      smartSearchDebugError.value = String(e)
       console.error('[KillEngine] Failed to refresh diagnostics:', e)
     }
   }
@@ -484,6 +492,8 @@ export const useAppStore = defineStore('app', () => {
     pingResult,
     logFilePath,
     smartSearchDebugFilePath,
+    smartSearchDebugEvents,
+    smartSearchDebugError,
     searchQuery,
     searchResult,
     exactScanValue,

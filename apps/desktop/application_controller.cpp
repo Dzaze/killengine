@@ -1465,6 +1465,65 @@ QString ApplicationController::getSmartSearchDebugFilePath() const {
     return smartSearchDebugFilePath();
 }
 
+QVariantMap ApplicationController::getSmartSearchDebugEvents(int maxEvents) const {
+    QVariantMap result;
+    QVariantList events;
+    result["success"] = false;
+    result["path"] = smartSearchDebugFilePath();
+    result["events"] = events;
+
+    maxEvents = std::clamp(maxEvents, 1, 200);
+
+    QFile file(smartSearchDebugFilePath());
+    if (!file.exists()) {
+        result["success"] = true;
+        result["error"] = "";
+        return result;
+    }
+
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        result["error"] = "Impossible de lire le fichier debug Smart Search.";
+        return result;
+    }
+
+    constexpr qint64 kMaxTailBytes = 1024 * 1024;
+    if (file.size() > kMaxTailBytes) {
+        file.seek(file.size() - kMaxTailBytes);
+        file.readLine();
+    }
+
+    QList<QByteArray> lines;
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        lines.append(line);
+        if (lines.size() > maxEvents) {
+            lines.removeFirst();
+        }
+    }
+
+    for (const auto& line : lines) {
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            QVariantMap parseEntry;
+            parseEntry["event"] = "parse_error";
+            parseEntry["raw"] = QString::fromUtf8(line);
+            parseEntry["error"] = parseError.errorString();
+            events.append(parseEntry);
+            continue;
+        }
+        events.append(doc.object().toVariantMap());
+    }
+
+    result["success"] = true;
+    result["error"] = "";
+    result["events"] = events;
+    return result;
+}
+
 QString ApplicationController::smartSearchDebugFilePath() const {
     QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (dir.isEmpty()) {

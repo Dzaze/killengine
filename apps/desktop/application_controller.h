@@ -111,6 +111,9 @@ public:
     /// Retourne le chemin du fichier debug Smart Search.
     Q_INVOKABLE QString getSmartSearchDebugFilePath() const;
 
+    /// Retourne les derniers événements du debug Smart Search.
+    Q_INVOKABLE QVariantMap getSmartSearchDebugEvents(int maxEvents) const;
+
     // -----------------------------------------------------------------------
     // Phase 11 — Profils
     // -----------------------------------------------------------------------
