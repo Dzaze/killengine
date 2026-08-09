@@ -207,8 +207,13 @@ bool looksLikeMemoryTargetWriteRequest(const QString& query) {
 bool looksLikeNewSearchRequest(const QString& query) {
     const QString q = query.toLower();
     return q.contains("nouvelle recherche")
+        || q.contains("autre recherche")
         || q.contains("nouveau scan")
         || q.contains("nouvelle valeur")
+        || q.contains("autre valeur")
+        || q.contains("autre chose")
+        || q.contains("valeur a chercher")
+        || q.contains("valeur à chercher")
         || q.contains("autre que")
         || q.contains("pas ces adresse")
         || q.contains("pas ces adresses")
@@ -1378,6 +1383,10 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
 
     if (result.value("status").toString() != "tool_call") {
         result["actionStatus"] = "not_executed";
+        if (result.value("message").toString().trimmed().isEmpty()
+            && result.value("error").toString().trimmed().isEmpty()) {
+            result["message"] = "D'accord. Donne-moi la valeur à chercher, ou précise que tu veux écrire sur une adresse active.";
+        }
         return result;
     }
 
