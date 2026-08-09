@@ -124,6 +124,7 @@ export interface NextScanResult {
   candidateStoreBytes?: number
   candidateStoreMemoryBytes?: number
   debugSamples?: Array<Record<string, unknown>>
+  valueHistoryUpdates?: Array<Record<string, unknown>>
 }
 
 export interface UndoCandidateScanResult {

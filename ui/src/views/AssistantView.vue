@@ -76,8 +76,26 @@ function suggestionsFor(message: typeof store.messages[number]): string {
   if (!message.candidateCount && message.candidateCount !== 0) return ''
   if (!message.suggestions || message.suggestions.length === 0) return ''
   return message.suggestions
-    .map((s) => `0x${s.address} (${s.type}) → ${s.value}`)
+    .map((s) => {
+      const history = valueHistoryFor(s)
+      return `0x${s.address} (${s.type}) → ${s.value}${history ? ` · ${history}` : ''}`
+    })
     .join('\n')
+}
+
+function valueHistoryFor(record: Record<string, unknown>): string {
+  const history = Array.isArray(record.valueHistory) ? record.valueHistory : []
+  const values = history
+    .map((item) => {
+      const entry = item as Record<string, unknown>
+      const value = entry.currentNumber
+      return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
+    })
+    .filter(Boolean)
+
+  const uniqueValues = values.filter((value, index) => index === 0 || value !== values[index - 1])
+  if (uniqueValues.length === 0) return ''
+  return `observé : ${uniqueValues.slice(-4).join(' -> ')}`
 }
 </script>
 
@@ -172,6 +190,7 @@ function suggestionsFor(message: typeof store.messages[number]): string {
                 ·
                 {{ r.restoredBeforeFinal ? 'restauré' : 'non restauré' }}
               </span>
+              <span v-if="valueHistoryFor(r)" class="value-history">{{ valueHistoryFor(r) }}</span>
             </div>
             <p class="rollback-note">
               Tu peux annuler toutes les écritures automatiques ci-dessous.
@@ -519,6 +538,13 @@ function suggestionsFor(message: typeof store.messages[number]): string {
 
 .confirm-steps {
   color: var(--text-dim);
+}
+
+.value-history {
+  width: 100%;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
 }
 
 .rollback-note {

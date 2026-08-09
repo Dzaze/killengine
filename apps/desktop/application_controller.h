@@ -10,6 +10,7 @@
 
 #include <QObject>
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -211,6 +212,10 @@ private:
     void applyFreezeTick();
     bool rememberCandidatesForUndo(QString* error = nullptr);
     void clearCandidateUndo();
+    void clearCandidateValueHistory();
+    void recordCandidateObservations(const QVariantList& observations);
+    QVariantList candidateValueHistory(uint64_t address) const;
+    void enrichSuggestedWritesWithHistory(QVariantList* suggestions) const;
     QVariantMap writeMemoryValueConfirmed(const QString& addressHex, const QString& valueType, const QString& value);
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
     QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);
@@ -243,6 +248,7 @@ private:
     killcore::ProcessHandle m_handle;
     killcore::CandidateStore m_candidates;
     killcore::CandidateStore m_previousCandidates;
+    QHash<uint64_t, QVariantList> m_candidateValueHistory;
     killcore::SnapshotStore  m_snapshot;
     killcore::FreezeManager  m_freeze;
     QTimer                   m_freezeTimer;

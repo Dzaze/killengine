@@ -39,6 +39,8 @@ constexpr size_t kAutoWriteCandidateLimit = 4;
 constexpr int kDefaultScanMaxResults = 1000000;
 constexpr int kDefaultScanChunkSizeMb = 1;
 constexpr size_t kCandidateDisplayLimit = 250000;
+constexpr int kCandidateHistoryMaxAddresses = 10000;
+constexpr int kCandidateHistoryMaxEntriesPerAddress = 12;
 
 double ratePerSecond(size_t count, qint64 elapsedMs) {
     if (elapsedMs <= 0) {
@@ -243,6 +245,26 @@ QStringList numbersFromText(const QString& text) {
 
 QString bytesToHex(const QByteArray& bytes) {
     return QString::fromLatin1(bytes.toHex(' '));
+}
+
+QVariantMap candidateObservationToVariantMap(
+    const killcore::Candidate& candidate,
+    const QByteArray& current,
+    const QString& phase,
+    bool kept,
+    bool readable) {
+    QVariantMap observation;
+    observation["address"] = QString::number(candidate.address, 16);
+    observation["type"] = killcore::valueTypeToString(candidate.type);
+    observation["phase"] = phase;
+    observation["previousHex"] = bytesToHex(candidate.lastValue);
+    observation["currentHex"] = bytesToHex(current);
+    observation["previousNumber"] = bytesToDouble(candidate.lastValue, candidate.type);
+    observation["currentNumber"] = bytesToDouble(current, candidate.type);
+    observation["kept"] = kept;
+    observation["readable"] = readable;
+    observation["time"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    return observation;
 }
 
 QString normalizedProfileText(QString value) {
@@ -473,6 +495,7 @@ bool ApplicationController::attachProcess(int pid) {
     m_processName = m_handle.executableName();
     m_candidates.clear();
     clearCandidateUndo();
+    clearCandidateValueHistory();
     m_snapshot.clear();
     m_lastAutoWriteTargets.clear();
     m_chatMemoryTargets.clear();
@@ -501,6 +524,7 @@ void ApplicationController::detachProcess() {
     m_processName.clear();
     m_candidates.clear();
     clearCandidateUndo();
+    clearCandidateValueHistory();
     m_snapshot.clear();
     m_freeze.clear();
     m_freezeTimer.stop();
@@ -530,6 +554,54 @@ bool ApplicationController::rememberCandidatesForUndo(QString* error) {
 void ApplicationController::clearCandidateUndo() {
     m_previousCandidates.clear();
     m_hasPreviousCandidates = false;
+}
+
+void ApplicationController::clearCandidateValueHistory() {
+    m_candidateValueHistory.clear();
+}
+
+void ApplicationController::recordCandidateObservations(const QVariantList& observations) {
+    for (const auto& item : observations) {
+        const QVariantMap observation = item.toMap();
+        uint64_t address = 0;
+        if (!parseHexAddress(observation.value("address").toString(), &address)) {
+            continue;
+        }
+
+        if (!m_candidateValueHistory.contains(address)
+            && m_candidateValueHistory.size() >= kCandidateHistoryMaxAddresses) {
+            continue;
+        }
+
+        auto history = m_candidateValueHistory.value(address);
+        history.append(observation);
+        while (history.size() > kCandidateHistoryMaxEntriesPerAddress) {
+            history.removeFirst();
+        }
+        m_candidateValueHistory.insert(address, history);
+    }
+}
+
+QVariantList ApplicationController::candidateValueHistory(uint64_t address) const {
+    return m_candidateValueHistory.value(address);
+}
+
+void ApplicationController::enrichSuggestedWritesWithHistory(QVariantList* suggestions) const {
+    if (!suggestions) {
+        return;
+    }
+
+    for (int i = 0; i < suggestions->size(); ++i) {
+        QVariantMap suggestion = suggestions->at(i).toMap();
+        uint64_t address = 0;
+        if (parseHexAddress(suggestion.value("address").toString(), &address)) {
+            const auto history = candidateValueHistory(address);
+            if (!history.isEmpty()) {
+                suggestion["valueHistory"] = history;
+            }
+        }
+        (*suggestions)[i] = suggestion;
+    }
 }
 
 QVariantMap ApplicationController::getMemoryMap() const {
@@ -627,6 +699,7 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
     const auto scan = scanner.exactScan(scanValue, options);
     emit scanProgress(90);
     clearCandidateUndo();
+    clearCandidateValueHistory();
     m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
@@ -745,6 +818,7 @@ QVariantMap ApplicationController::startExactScanExpert(
     const auto scan = scanner.exactScan(scanValue, options);
     emit scanProgress(90);
     clearCandidateUndo();
+    clearCandidateValueHistory();
     m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
@@ -901,6 +975,7 @@ QVariantMap ApplicationController::startExactScanAsync(
             QVariantList finishedMatches;
             if (!scan.cancelled) {
                 self->clearCandidateUndo();
+                self->clearCandidateValueHistory();
                 self->m_candidates.replaceFromScan(scan, scannedBytes);
             }
 
@@ -1038,6 +1113,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         timer.start();
         QVariantMap finished;
         QVariantList debugSamples;
+        QVariantList valueHistoryUpdates;
         killcore::CandidateStore survivors;
         survivors.setFileBackedThreshold(candidateThreshold);
 
@@ -1125,6 +1201,9 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 }
 
                 if (keep) {
+                    if (valueHistoryUpdates.size() < kCandidateHistoryMaxAddresses) {
+                        valueHistoryUpdates.append(candidateObservationToVariantMap(candidate, current, "next_scan_async", true, true));
+                    }
                     auto updated = candidate;
                     updated.lastValue = current;
                     if (!survivors.appendFileBackedCandidate(updated, &error)) {
@@ -1147,7 +1226,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         }
         const qint64 elapsedMs = timer.elapsed();
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, candidateType, candidateSnapshot, survivors = std::move(survivors), checked, unreadable, cancelled, error, debugSamples, streamInput, streamOutput, elapsedMs]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, candidateType, candidateSnapshot, survivors = std::move(survivors), checked, unreadable, cancelled, error, debugSamples, valueHistoryUpdates, streamInput, streamOutput, elapsedMs]() mutable {
             if (!self) {
                 return;
             }
@@ -1159,6 +1238,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                     finishError = undoError.isEmpty() ? "Impossible de préparer l'annulation du next scan." : undoError;
                 } else {
                     self->m_candidates = std::move(survivors);
+                    self->recordCandidateObservations(valueHistoryUpdates);
                 }
             }
 
@@ -1183,6 +1263,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             finished["candidateStoreBytes"] = static_cast<qulonglong>(self->m_candidates.storageBytes());
             finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(self->m_candidates.estimatedMemoryBytes());
             finished["debugSamples"] = debugSamples;
+            finished["valueHistoryUpdates"] = valueHistoryUpdates;
 
             self->appendSmartSearchDebug("next_scan_async", {
                 {"requestId", requestId},
@@ -1202,6 +1283,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 {"candidatesPerSecond", finished.value("candidatesPerSecond")},
                 {"candidateStoreBytes", finished.value("candidateStoreBytes")},
                 {"candidateStoreMemoryBytes", finished.value("candidateStoreMemoryBytes")},
+                {"valueHistoryUpdates", valueHistoryUpdates},
                 {"error", finishError},
                 {"samples", debugSamples},
             });
@@ -1266,6 +1348,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
     size_t checked = 0;
     size_t unreadable = 0;
     QVariantList debugSamples;
+    QVariantList valueHistoryUpdates;
 
     for (const auto& candidate : m_candidates.candidates()) {
         const size_t bytesToRead = killcore::valueTypeSize(candidate.type);
@@ -1326,6 +1409,9 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         }
 
         if (keep) {
+            if (valueHistoryUpdates.size() < kCandidateHistoryMaxAddresses) {
+                valueHistoryUpdates.append(candidateObservationToVariantMap(candidate, current, "next_scan", true, true));
+            }
             auto updated = candidate;
             updated.lastValue = current;
             survivors.append(updated);
@@ -1339,6 +1425,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         return result;
     }
     m_candidates.replaceCandidates(survivors);
+    recordCandidateObservations(valueHistoryUpdates);
 
     result["success"] = true;
     result["checked"] = static_cast<qulonglong>(checked);
@@ -1349,6 +1436,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
     result["debugMode"] = mode;
     result["debugValue"] = value;
     result["debugSamples"] = debugSamples;
+    result["valueHistoryUpdates"] = valueHistoryUpdates;
     appendSmartSearchDebug("next_scan", {
         {"mode", mode},
         {"value", value},
@@ -1357,6 +1445,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         {"checked", result.value("checked")},
         {"unreadable", result.value("unreadable")},
         {"remaining", result.value("remaining")},
+        {"valueHistoryUpdates", valueHistoryUpdates},
         {"samples", debugSamples},
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
@@ -1386,6 +1475,7 @@ QVariantMap ApplicationController::undoCandidateScan() {
     result["success"] = true;
     result["restored"] = true;
     result["count"] = static_cast<qulonglong>(m_candidates.size());
+    clearCandidateValueHistory();
     result["fileBacked"] = m_candidates.isFileBacked();
     result["candidateStorePath"] = m_candidates.backingFilePath();
     result["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
@@ -2022,6 +2112,10 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
         suggestion["address"] = QString::number(target.address, 16);
         suggestion["type"] = killcore::valueTypeToString(target.type);
         suggestion["value"] = value;
+        const auto history = candidateValueHistory(target.address);
+        if (!history.isEmpty()) {
+            suggestion["valueHistory"] = history;
+        }
         suggestions.append(suggestion);
 
         auto writeResult = writeMemoryValueConfirmed(
@@ -2031,6 +2125,9 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
         writeResult.insert("address", suggestion.value("address"));
         writeResult.insert("value", value);
         writeResult.insert("type", suggestion.value("type"));
+        if (suggestion.contains("valueHistory")) {
+            writeResult.insert("valueHistory", suggestion.value("valueHistory"));
+        }
         allWritesOk = allWritesOk && writeResult.value("success").toBool();
         writeResults.append(writeResult);
     }
@@ -2142,6 +2239,10 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
         suggestion["address"] = QString::number(target.address, 16);
         suggestion["type"] = killcore::valueTypeToString(target.type);
         suggestion["value"] = value;
+        const auto history = candidateValueHistory(target.address);
+        if (!history.isEmpty()) {
+            suggestion["valueHistory"] = history;
+        }
         suggestions.append(suggestion);
 
         auto writeResult = writeMemoryValueConfirmed(
@@ -2152,6 +2253,9 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
         writeResult.insert("address", suggestion.value("address"));
         writeResult.insert("value", value);
         writeResult.insert("type", suggestion.value("type"));
+        if (suggestion.contains("valueHistory")) {
+            writeResult.insert("valueHistory", suggestion.value("valueHistory"));
+        }
         allWritesOk = allWritesOk && writeResult.value("success").toBool();
         writeResults.append(writeResult);
 
@@ -2296,6 +2400,10 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
         suggestion["address"] = QString::number(target.address, 16);
         suggestion["type"] = killcore::valueTypeToString(target.type);
         suggestion["value"] = value;
+        const auto history = candidateValueHistory(target.address);
+        if (!history.isEmpty()) {
+            suggestion["valueHistory"] = history;
+        }
         suggestions.append(suggestion);
 
         auto writeResult = writeMemoryValueConfirmed(
@@ -2307,6 +2415,9 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
         writeResult.insert("address", suggestion.value("address"));
         writeResult.insert("value", value);
         writeResult.insert("type", suggestion.value("type"));
+        if (suggestion.contains("valueHistory")) {
+            writeResult.insert("valueHistory", suggestion.value("valueHistory"));
+        }
         allWritesOk = allWritesOk && writeResult.value("success").toBool();
         writeResults.append(writeResult);
 
@@ -2397,6 +2508,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         m_smartSearchTargetValue.clear();
         m_candidates.clear();
         clearCandidateUndo();
+        clearCandidateValueHistory();
         m_lastAutoWriteTargets.clear();
         m_chatMemoryTargets.clear();
         m_activeProfileTargets.clear();
@@ -2534,10 +2646,11 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["targetValue"] = m_smartSearchTargetValue;
 
         if (remaining >= 1 && remaining <= kAutoWriteCandidateLimit && !m_smartSearchTargetValue.isEmpty()) {
-            const auto suggestions = suggestedWritesForCandidates(
+            auto suggestions = suggestedWritesForCandidates(
                 m_candidates,
                 m_smartSearchTargetValue,
                 kAutoWriteCandidateLimit);
+            enrichSuggestedWritesWithHistory(&suggestions);
             QVariantList writeResults;
             bool allWritesOk = true;
             m_lastBatchStartIndex = m_writeHistory.size();
@@ -2553,6 +2666,9 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                 writeResult.insert("address", suggestion.value("address"));
                 writeResult.insert("value", suggestion.value("value"));
                 writeResult.insert("type", suggestion.value("type"));
+                if (suggestion.contains("valueHistory")) {
+                    writeResult.insert("valueHistory", suggestion.value("valueHistory"));
+                }
                 allWritesOk = allWritesOk && writeResult.value("success").toBool();
                 writeResults.append(writeResult);
                 if (writeResult.value("success").toBool()) {
