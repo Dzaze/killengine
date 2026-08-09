@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 namespace killcore {
@@ -24,6 +25,13 @@ struct CandidatePage {
     size_t pageIndex{0};
     size_t pageSize{0};
     QList<Candidate> candidates;
+};
+
+struct CandidateStreamSnapshot {
+    bool fileBacked{false};
+    QString filePath;
+    size_t totalCount{0};
+    QList<Candidate> memoryCandidates;
 };
 
 class CandidateStore {
@@ -47,6 +55,16 @@ public:
     QString backingFilePath() const;
     size_t fileBackedThreshold() const;
     void setFileBackedThreshold(size_t threshold);
+    bool firstCandidate(Candidate* candidate) const;
+    CandidateStreamSnapshot streamSnapshot() const;
+    static bool forEachCandidate(
+        const CandidateStreamSnapshot& snapshot,
+        const std::function<bool(const Candidate&)>& visitor,
+        QString* error = nullptr);
+
+    bool beginFileBackedReplacement(QString* error = nullptr);
+    bool appendFileBackedCandidate(const Candidate& candidate, QString* error = nullptr);
+    bool finishFileBackedReplacement(QString* error = nullptr);
 
     void sortByAddress(bool ascending = true);
     CandidatePage page(size_t pageIndex, size_t pageSize, const QString& addressFilter = {}) const;
@@ -62,8 +80,8 @@ private:
     void persistIfNeeded();
     bool writeCandidatesToFile(const QList<Candidate>& candidates);
     bool readCandidateAt(size_t index, Candidate* candidate) const;
-    Candidate storedToCandidate(const StoredCandidate& stored) const;
-    StoredCandidate candidateToStored(const Candidate& candidate) const;
+    static Candidate storedToCandidate(const StoredCandidate& stored);
+    static StoredCandidate candidateToStored(const Candidate& candidate);
     void loadFileBackedCandidates() const;
 
     mutable QList<Candidate> m_candidates;

@@ -951,8 +951,15 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         return result;
     }
 
-    const auto candidates = m_candidates.candidates();
-    const auto candidateType = candidates.first().type;
+    killcore::Candidate firstCandidate;
+    if (!m_candidates.firstCandidate(&firstCandidate)) {
+        result["error"] = "Impossible de lire le premier candidat.";
+        return result;
+    }
+
+    const auto candidateSnapshot = m_candidates.streamSnapshot();
+    const auto candidateType = firstCandidate.type;
+    const auto candidateThreshold = m_candidates.fileBackedThreshold();
     killcore::ScanValue targetValue;
     QByteArray targetBytes;
     double targetNumber = 0.0;
@@ -976,27 +983,36 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, mode, value, scanMode, candidateType, candidates, targetBytes, targetNumber, cancellation]() {
+    std::thread([self, requestId, pid, mode, value, scanMode, candidateType, candidateSnapshot, candidateThreshold, targetBytes, targetNumber, cancellation]() mutable {
         QVariantMap finished;
         QVariantList debugSamples;
-        QList<killcore::Candidate> survivors;
-        survivors.reserve(candidates.size());
+        killcore::CandidateStore survivors;
+        survivors.setFileBackedThreshold(candidateThreshold);
 
         size_t checked = 0;
         size_t unreadable = 0;
         bool cancelled = false;
         QString error;
+        bool streamInput = candidateSnapshot.fileBacked;
+        bool streamOutput = true;
+
+        if (!survivors.beginFileBackedReplacement(&error)) {
+            streamOutput = false;
+        }
 
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
-        if (!workerHandle.isValid()) {
+        if (!error.isEmpty()) {
+            // error already set
+        } else if (!workerHandle.isValid()) {
             error = "Impossible d'ouvrir le processus dans le worker de next scan.";
         } else {
             killcore::MemoryReader reader(workerHandle);
-            for (const auto& candidate : candidates) {
+            QString streamError;
+            const bool completed = killcore::CandidateStore::forEachCandidate(candidateSnapshot, [&](const killcore::Candidate& candidate) {
                 if (cancellation->isCancelled()) {
                     cancelled = true;
                     error = "Next scan annulé.";
-                    break;
+                    return false;
                 }
 
                 const size_t bytesToRead = killcore::valueTypeSize(candidate.type);
@@ -1015,7 +1031,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                         sample["error"] = read.errorMessage;
                         debugSamples.append(sample);
                     }
-                    continue;
+                    return true;
                 }
 
                 const QByteArray current = read.data;
@@ -1059,8 +1075,18 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 if (keep) {
                     auto updated = candidate;
                     updated.lastValue = current;
-                    survivors.append(updated);
+                    if (!survivors.appendFileBackedCandidate(updated, &error)) {
+                        return false;
+                    }
                 }
+                return true;
+            }, &streamError);
+
+            if (!completed && error.isEmpty()) {
+                error = streamError.isEmpty() ? "Next scan interrompu." : streamError;
+            }
+            if (error.isEmpty() && !survivors.finishFileBackedReplacement(&error)) {
+                // error filled by finishFileBackedReplacement
             }
         }
 
@@ -1068,13 +1094,13 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             return;
         }
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, candidateType, candidates, survivors, checked, unreadable, cancelled, error, debugSamples]() {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, candidateType, candidateSnapshot, survivors = std::move(survivors), checked, unreadable, cancelled, error, debugSamples, streamInput, streamOutput]() mutable {
             if (!self) {
                 return;
             }
 
             if (!cancelled && error.isEmpty()) {
-                self->m_candidates.replaceCandidates(survivors);
+                self->m_candidates = std::move(survivors);
             }
 
             QVariantMap finished;
@@ -1084,11 +1110,15 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             finished["cancelled"] = cancelled;
             finished["checked"] = static_cast<qulonglong>(checked);
             finished["unreadable"] = static_cast<qulonglong>(unreadable);
-            finished["remaining"] = static_cast<qulonglong>(cancelled ? candidates.size() : self->m_candidates.size());
+            finished["remaining"] = static_cast<qulonglong>(cancelled ? candidateSnapshot.totalCount : self->m_candidates.size());
             finished["error"] = error;
-            finished["debugBeforeCount"] = static_cast<qulonglong>(candidates.size());
+            finished["debugBeforeCount"] = static_cast<qulonglong>(candidateSnapshot.totalCount);
             finished["debugMode"] = mode;
             finished["debugValue"] = value;
+            finished["streamInput"] = streamInput;
+            finished["streamOutput"] = streamOutput;
+            finished["fileBacked"] = self->m_candidates.isFileBacked();
+            finished["candidateStorePath"] = self->m_candidates.backingFilePath();
             finished["debugSamples"] = debugSamples;
 
             self->appendSmartSearchDebug("next_scan_async", {
@@ -1096,11 +1126,15 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 {"mode", mode},
                 {"value", value},
                 {"candidateType", killcore::valueTypeToString(candidateType)},
-                {"beforeCount", static_cast<qulonglong>(candidates.size())},
+                {"beforeCount", static_cast<qulonglong>(candidateSnapshot.totalCount)},
                 {"checked", finished.value("checked")},
                 {"unreadable", finished.value("unreadable")},
                 {"remaining", finished.value("remaining")},
                 {"cancelled", cancelled},
+                {"streamInput", streamInput},
+                {"streamOutput", streamOutput},
+                {"fileBacked", finished.value("fileBacked")},
+                {"candidateStorePath", finished.value("candidateStorePath")},
                 {"error", error},
                 {"samples", debugSamples},
             });

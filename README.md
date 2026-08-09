@@ -111,7 +111,7 @@ Prototype avancé :
 - Smart Search opérationnel : scan guidé, next scan, auto-write vérifié, rollback batch.
 - Profils opérationnels : plusieurs cibles, résolution d'adresses, réutilisation par l'Assistant.
 - IA locale optionnelle : tool-calls JSON, contrat d'intention structuré, fallback déterministe.
-- Tests unitaires : 26/26 au dernier état connu.
+- Tests unitaires : 28/28 au dernier état connu.
 - Guide utilisateur V1 disponible dans `docs/USER_GUIDE.md`.
 
 Voir `KILLENGINE_PROJECT_SPEC.md` pour le cahier des charges complet.

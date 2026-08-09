@@ -111,3 +111,57 @@ TEST(CandidateStoreTest, FiltersFileBackedCandidatesWithoutHydratingWholeStore) 
     ASSERT_EQ(hydrated.size(), 4);
     EXPECT_EQ(hydrated[0].address, 0x1000u);
 }
+
+TEST(CandidateStoreTest, IteratesFileBackedSnapshotAsStream) {
+    killcore::ScanResult scan;
+    for (int i = 0; i < 6; ++i) {
+        scan.matches.append({static_cast<uint64_t>(0x4000 + i * 8), killcore::ValueType::Int64});
+    }
+
+    killcore::CandidateStore store;
+    store.setFileBackedThreshold(3);
+    store.replaceFromScan(scan, QByteArray::fromHex("0102030405060708"));
+
+    const auto snapshot = store.streamSnapshot();
+    ASSERT_TRUE(snapshot.fileBacked);
+    ASSERT_EQ(snapshot.totalCount, 6u);
+
+    size_t seen = 0;
+    uint64_t lastAddress = 0;
+    QString error;
+    const bool ok = killcore::CandidateStore::forEachCandidate(snapshot, [&](const killcore::Candidate& candidate) {
+        ++seen;
+        lastAddress = candidate.address;
+        EXPECT_EQ(candidate.type, killcore::ValueType::Int64);
+        EXPECT_EQ(candidate.lastValue, QByteArray::fromHex("0102030405060708"));
+        return true;
+    }, &error);
+
+    EXPECT_TRUE(ok) << error.toStdString();
+    EXPECT_EQ(seen, 6u);
+    EXPECT_EQ(lastAddress, 0x4028u);
+}
+
+TEST(CandidateStoreTest, WritesStreamingReplacementToTemporaryFile) {
+    killcore::CandidateStore store;
+    QString error;
+    ASSERT_TRUE(store.beginFileBackedReplacement(&error)) << error.toStdString();
+
+    for (int i = 0; i < 4; ++i) {
+        killcore::Candidate candidate;
+        candidate.address = static_cast<uint64_t>(0x5000 + i * 4);
+        candidate.type = killcore::ValueType::Int32;
+        candidate.lastValue = QByteArray::fromHex("2a000000");
+        ASSERT_TRUE(store.appendFileBackedCandidate(candidate, &error)) << error.toStdString();
+    }
+    ASSERT_TRUE(store.finishFileBackedReplacement(&error)) << error.toStdString();
+
+    EXPECT_TRUE(store.isFileBacked());
+    EXPECT_EQ(store.size(), 4u);
+
+    auto page = store.page(0, 10);
+    ASSERT_EQ(page.totalCount, 4u);
+    ASSERT_EQ(page.candidates.size(), 4);
+    EXPECT_EQ(page.candidates[3].address, 0x500cu);
+    EXPECT_EQ(page.candidates[3].lastValue, QByteArray::fromHex("2a000000"));
+}

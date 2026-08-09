@@ -105,6 +105,10 @@ export interface NextScanResult {
   debugBeforeCount?: number
   debugMode?: string
   debugValue?: string
+  streamInput?: boolean
+  streamOutput?: boolean
+  fileBacked?: boolean
+  candidateStorePath?: string
   debugSamples?: Array<Record<string, unknown>>
 }
 
