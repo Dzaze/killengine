@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 
 namespace killcore {
 
@@ -36,6 +37,14 @@ struct ScanMatch {
     ValueType type{ValueType::Int32};
 };
 
+struct ScanProgress {
+    size_t regionsTotal{0};
+    size_t regionsScanned{0};
+    size_t bytesTotal{0};
+    size_t bytesScanned{0};
+    size_t matchesFound{0};
+};
+
 struct ScanOptions {
     size_t chunkSize{1024 * 1024};
     size_t maxResults{10000};
@@ -48,6 +57,7 @@ struct ScanOptions {
     bool     executableOnly{false};    ///< Ne scanner que les régions executables
     bool     copyOnWriteOnly{false};   ///< Ne scanner que les régions copy-on-write (mapped privé writable)
     bool     fastScan{true};           ///< Active l'alignement automatique par taille de type
+    std::function<void(const ScanProgress&)> progressCallback;
 };
 
 struct ScanResult {

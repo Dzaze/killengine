@@ -114,6 +114,7 @@ export const useAppStore = defineStore('app', () => {
   const scanBusy = ref(false)
   const scanStatusText = ref('')
   const scanProgressPercent = ref(0)
+  let backendScanSignalsConnected = false
 
   // Getters
   const statusText = computed(() => {
@@ -124,6 +125,11 @@ export const useAppStore = defineStore('app', () => {
 
   function nowTime(): string {
     return new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  function setScanProgress(percent: number) {
+    if (!Number.isFinite(percent)) return
+    scanProgressPercent.value = Math.max(0, Math.min(100, Math.round(percent)))
   }
 
   function pushMessage(
@@ -166,7 +172,17 @@ export const useAppStore = defineStore('app', () => {
     try {
       await backend.connect()
       isConnected.value = backend.isConnected
-      version.value = await backend.getController().getVersion()
+      const controller = backend.getController()
+      if (!backendScanSignalsConnected) {
+        controller.scanStarted?.connect(() => {
+          setScanProgress(0)
+        })
+        controller.scanProgress?.connect((percent) => {
+          setScanProgress(Number(percent))
+        })
+        backendScanSignalsConnected = true
+      }
+      version.value = await controller.getVersion()
       await loadSettings()
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
@@ -549,7 +565,7 @@ export const useAppStore = defineStore('app', () => {
         || expertCopyOnWriteOnly.value)
     try {
       scanBusy.value = true
-      scanProgressPercent.value = 8
+      setScanProgress(0)
       scanStatusText.value = 'Scan exact en cours...'
       exactScanResult.value = await backend.startExactScanAsync(
         exactScanValue.value,
@@ -565,11 +581,11 @@ export const useAppStore = defineStore('app', () => {
             }
           : {},
       )
-      scanProgressPercent.value = 85
+      setScanProgress(Math.max(scanProgressPercent.value, 95))
       candidatePageIndex.value = 0
       scanStatusText.value = 'Chargement des candidats...'
       await refreshCandidates()
-      scanProgressPercent.value = 100
+      setScanProgress(100)
       scanStatusText.value = exactScanResult.value.cancelled ? 'Scan annulé.' : 'Scan terminé.'
     } catch (e) {
       exactScanResult.value = {
@@ -605,14 +621,14 @@ export const useAppStore = defineStore('app', () => {
     if (scanBusy.value) return
     try {
       scanBusy.value = true
-      scanProgressPercent.value = 15
+      setScanProgress(0)
       scanStatusText.value = 'Réduction des candidats...'
       nextScanResult.value = await backend.startNextScanAsync(nextScanMode.value, nextScanValue.value)
-      scanProgressPercent.value = 85
+      setScanProgress(Math.max(scanProgressPercent.value, 95))
       candidatePageIndex.value = 0
       scanStatusText.value = 'Actualisation des candidats...'
       await refreshCandidates()
-      scanProgressPercent.value = 100
+      setScanProgress(100)
       scanStatusText.value = nextScanResult.value.cancelled ? 'Scan annulé.' : 'Next scan terminé.'
     } catch (e) {
       nextScanResult.value = {

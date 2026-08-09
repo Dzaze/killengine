@@ -49,6 +49,19 @@ double ratePerSecond(size_t count, qint64 elapsedMs) {
     return static_cast<double>(count) * 1000.0 / static_cast<double>(elapsedMs);
 }
 
+void emitQueuedScanProgress(const QPointer<ApplicationController>& self, int percent) {
+    const int clamped = std::clamp(percent, 0, 100);
+    if (!self) {
+        return;
+    }
+    QMetaObject::invokeMethod(self.data(), [self, clamped]() {
+        if (!self) {
+            return;
+        }
+        emit self->scanProgress(clamped);
+    }, Qt::QueuedConnection);
+}
+
 enum class SmartSearchIntentKind {
     Unknown,
     ResetContext,
@@ -1066,6 +1079,22 @@ QVariantMap ApplicationController::startExactScanAsync(
     emit scanStarted();
     emit scanProgress(0);
 
+    int lastWorkerProgress = 0;
+    options.progressCallback = [self, lastWorkerProgress](const killcore::ScanProgress& progress) mutable {
+        int percent = 1;
+        if (progress.bytesTotal > 0) {
+            percent = 1 + static_cast<int>((progress.bytesScanned * 94) / progress.bytesTotal);
+        } else if (progress.regionsTotal > 0) {
+            percent = 1 + static_cast<int>((progress.regionsScanned * 94) / progress.regionsTotal);
+        }
+        percent = std::clamp(percent, 1, 95);
+        if (percent <= lastWorkerProgress || (percent - lastWorkerProgress < 2 && percent < 95)) {
+            return;
+        }
+        lastWorkerProgress = percent;
+        emitQueuedScanProgress(self, percent);
+    };
+
     std::thread([self, requestId, pid, value, valueType, expertOptions, scanValue, options, scannedBytes, cancellation]() {
         QElapsedTimer timer;
         timer.start();
@@ -1240,6 +1269,17 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         QString error;
         bool streamInput = candidateSnapshot.fileBacked;
         bool streamOutput = true;
+        int lastWorkerProgress = 0;
+        const size_t progressTotal = std::max<size_t>(candidateSnapshot.totalCount, 1);
+        auto reportCandidateProgress = [&]() {
+            int percent = 1 + static_cast<int>((checked * 94) / progressTotal);
+            percent = std::clamp(percent, 1, 95);
+            if (percent <= lastWorkerProgress || (percent - lastWorkerProgress < 2 && percent < 95)) {
+                return;
+            }
+            lastWorkerProgress = percent;
+            emitQueuedScanProgress(self, percent);
+        };
 
         if (!survivors.beginFileBackedReplacement(&error)) {
             streamOutput = false;
@@ -1263,6 +1303,9 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 const size_t bytesToRead = killcore::valueTypeSize(candidate.type);
                 const auto read = reader.read(candidate.address, bytesToRead);
                 ++checked;
+                if (checked % 4096 == 0 || checked == candidateSnapshot.totalCount) {
+                    reportCandidateProgress();
+                }
 
                 if (!(read.success || read.partial) || read.bytesRead != bytesToRead) {
                     ++unreadable;

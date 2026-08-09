@@ -70,6 +70,35 @@ bool isCopyOnWriteProtection(uint32_t protection) {
     return flags.contains("WC") || flags.contains("XWC");
 }
 
+bool regionMatchesScanOptions(
+    const MemoryRegion& region,
+    const ScanOptions& options,
+    size_t needleSize,
+    uint64_t* scanStart = nullptr,
+    uint64_t* scanEnd = nullptr) {
+    if (!region.readable || region.guarded || region.size < static_cast<uint64_t>(needleSize)) {
+        return false;
+    }
+    if (options.writableOnly && !region.writable) return false;
+    if (options.executableOnly && !region.executable) return false;
+    if (options.copyOnWriteOnly && !isCopyOnWriteProtection(region.protection)) return false;
+
+    const uint64_t regionStart = region.baseAddress;
+    const uint64_t regionEnd = region.baseAddress + region.size;
+    if (options.stopAddress != 0 && regionStart >= options.stopAddress) return false;
+    if (options.startAddress != 0 && options.startAddress >= regionEnd) return false;
+
+    const uint64_t effectiveStart = std::max(regionStart, options.startAddress);
+    const uint64_t effectiveEnd = options.stopAddress == 0 ? regionEnd : std::min(regionEnd, options.stopAddress);
+    if (effectiveEnd <= effectiveStart || effectiveEnd - effectiveStart < static_cast<uint64_t>(needleSize)) {
+        return false;
+    }
+
+    if (scanStart) *scanStart = effectiveStart;
+    if (scanEnd) *scanEnd = effectiveEnd;
+    return true;
+}
+
 } // namespace
 
 ScanEngine::ScanEngine(const ProcessHandle& process)
@@ -96,6 +125,30 @@ ScanResult ScanEngine::exactScan(
     const auto regions = MemoryMap::snapshot(m_process);
     MemoryReader reader(m_process);
     const size_t chunkSize = std::max(options.chunkSize, static_cast<size_t>(needle.size()));
+    size_t progressRegionsTotal = 0;
+    size_t progressBytesTotal = 0;
+    for (const auto& region : regions) {
+        uint64_t scanStart = 0;
+        uint64_t scanEnd = 0;
+        if (regionMatchesScanOptions(region, options, static_cast<size_t>(needle.size()), &scanStart, &scanEnd)) {
+            ++progressRegionsTotal;
+            progressBytesTotal += static_cast<size_t>(scanEnd - scanStart);
+        }
+    }
+
+    auto reportProgress = [&]() {
+        if (!options.progressCallback) {
+            return;
+        }
+        options.progressCallback({
+            progressRegionsTotal,
+            result.regionsScanned,
+            progressBytesTotal,
+            result.bytesScanned,
+            result.matchesFound,
+        });
+    };
+    reportProgress();
 
     // Fast scan : aligne automatiquement sur la taille du type si l'utilisateur
     // n'a pas forcé un alignement explicite (alignment > 1).
@@ -112,19 +165,9 @@ ScanResult ScanEngine::exactScan(
             return result;
         }
 
-        if (!region.readable || region.guarded || region.size < static_cast<uint64_t>(needle.size())) {
+        if (!regionMatchesScanOptions(region, options, static_cast<size_t>(needle.size()))) {
             continue;
         }
-
-        // Filtres Mode Expert
-        if (options.writableOnly && !region.writable) continue;
-        if (options.executableOnly && !region.executable) continue;
-        if (options.copyOnWriteOnly && !isCopyOnWriteProtection(region.protection)) continue;
-
-        // Plage d'adresses : si stopAddress est avant la région ou startAddress après, on saute.
-        if (options.stopAddress != 0 && region.baseAddress >= options.stopAddress) continue;
-        if (options.startAddress != 0
-            && options.startAddress >= region.baseAddress + region.size) continue;
 
         uint64_t offset = 0;
         QByteArray overlap;
@@ -159,6 +202,7 @@ ScanResult ScanEngine::exactScan(
                 options.stopAddress);
 
             result.bytesScanned += read.bytesRead;
+            reportProgress();
             offset += static_cast<uint64_t>(read.bytesRead);
 
             const qsizetype overlapSize = std::min<qsizetype>(needle.size() - 1, buffer.size());
@@ -171,6 +215,7 @@ ScanResult ScanEngine::exactScan(
         }
 
         ++result.regionsScanned;
+        reportProgress();
     }
 
     result.success = true;

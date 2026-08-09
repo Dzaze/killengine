@@ -270,6 +270,9 @@ export interface BackendController {
     valueType: string,
     expertOptions: ExpertScanOptions,
   ): Promise<Record<string, unknown>>
+  scanStarted?: QWebChannelSignal<void>
+  scanProgress?: QWebChannelSignal<number>
+  scanStatsUpdated?: QWebChannelSignal<number>
   scanFinished?: QWebChannelSignal<ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult>
   nextScan(mode: string, value: string): Promise<NextScanResult>
   nextScanAsync(mode: string, value: string): Promise<Record<string, unknown>>

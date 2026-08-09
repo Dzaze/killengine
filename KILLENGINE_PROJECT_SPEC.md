@@ -23,6 +23,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Next scan : `exact`, `changed`, `unchanged`, `increased`, `decreased`, `delta`.
 - Unknown initial value : capture snapshot compressé LZ4, stockage memory-mapped temporaire, puis comparaison.
 - Watch/read preview, écriture mémoire vérifiée, rollback simple, freeze simple.
+- Les scans async exposent une progression fine : par bytes/chunks lus pour le scan exact, par candidats vérifiés pour le next scan.
 - Assistant Smart Search connecté aux outils déterministes et au runtime IA local optionnel.
 - Contrat d'intention IA structuré : le modèle peut produire une intention JSON validée avant exécution, avec fallback déterministe si le modèle est absent ou imprécis.
 - Debug Assistant : les décisions de Smart Search et les intents sont visibles pour diagnostiquer les cas où la conversation choisit la mauvaise action.
