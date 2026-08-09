@@ -5,7 +5,8 @@ Source of truth: `KILLENGINE_PROJECT_SPEC.md`
 Current status:
 - Phase 11 prototype is complete and revalidated through the Assistant/profile workflow.
 - Phase 12 / V1 polishing checklist is complete.
-- Next focus: manual V1 regression pass, integration tests, and any release-candidate fixes found during real gameplay.
+- Phase 13 has been opened as the improvement baseline for precision, efficiency, conversation quality, profiles, UX, and robustness.
+- Next focus: handle Phase 13 items one by one, then run a manual V1 regression pass before release candidate.
 
 Prerequisites before Phase 12:
 - [x] finish or explicitly descope Phase 7 LZ4 compression
@@ -112,3 +113,35 @@ Prerequisites before Phase 12:
   - [x] async threaded next scan + cancellation (worker thread, shared cancel token, no candidate-store replacement on cancel)
   - [x] async threaded unknown capture/compare (worker thread, movable mapped snapshot handoff, shared cancel token)
   - [x] documentation/user guide
+- [ ] PHASE 13 - Baseline améliorations précision / efficacité / qualité
+  - [ ] Précision de recherche
+    - [ ] Smart Search multi-type automatique (`Int32`, `Int64`, `Float32`, `Float64`) quand le type n'est pas explicite
+    - [ ] variantes de représentation courantes (unsigned, valeur multipliée par 10/100/1000, score interne)
+    - [ ] scoring de confiance des candidats (région writable, stabilité, cohérence de variation, module connu)
+    - [ ] classement UI des candidats par confiance plutôt que seulement par adresse
+  - [ ] Réduction des faux positifs
+    - [ ] mode de confirmation cible par écriture temporaire vérifiée puis restauration/écriture finale
+    - [ ] historique des valeurs observées par adresse pendant les scans guidés
+    - [ ] filtres anti-bruit pour régions très volatiles ou peu pertinentes
+    - [ ] diagnostic lisible quand une comparaison élimine tous les candidats
+  - [ ] Assistant plus naturel
+    - [ ] mémoire de conversation structurée visible (`dernière recherche`, `valeur actuelle`, `valeur cible`, `adresses actives`, `profil actif`)
+    - [ ] intentions plus fines : nouvelle recherche, réutiliser adresses, changer valeur trouvée, oublier profils/adresses
+    - [ ] réponses naturelles pour les transitions (`je cherche ailleurs`, `je garde ces adresses`, `j'attends la nouvelle valeur`)
+    - [ ] éviter les messages techniques abrupts quand l'utilisateur démarre un nouveau contexte
+  - [ ] Profils plus utiles
+    - [ ] libellés d'action plus clairs que `Résoudre` si nécessaire (`Activer`, `Utiliser dans l'Assistant`, `Écrire`)
+    - [ ] écriture directe d'une valeur sur une cible de profil
+    - [ ] groupes de cibles par usage (`score`, `niveau`, `argent`, etc.)
+    - [ ] état visible du profil/cible actuellement actifs dans l'Assistant
+  - [ ] UX et efficacité
+    - [ ] bouton `Nouvelle recherche` visible dans l'Assistant
+    - [ ] statut global clair : recherche active, adresses actives, profil actif, aucun contexte actif
+    - [ ] debug Assistant lisible expliquant pourquoi une action a été choisie
+    - [ ] progression plus fine par régions/chunks pendant les scans longs
+  - [ ] Robustesse et validations
+    - [ ] tests d'intégration automatisés avec `KillEngineTestTarget.exe`
+    - [ ] scénario exact complet : scan exact -> next scan -> écriture -> vérification -> rollback
+    - [ ] scénario unknown complet : capture -> changement -> comparaison -> écriture
+    - [ ] scénario profils complet : sauvegarde -> résolution -> activation -> écriture
+    - [ ] passe de régression manuelle V1 sur Solitaire et KillEngineTestTarget

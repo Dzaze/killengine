@@ -9,7 +9,7 @@
 
 ## 0. Baseline actuelle du prototype
 
-Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phase 12 / Polissage V1 complète au niveau checklist V1.
+Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phase 12 / Polissage V1 complète au niveau checklist V1 ; Phase 13 ouverte comme baseline d'améliorations.
 
 ### État validé
 
@@ -47,6 +47,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Le Mode Expert expose une annulation de scan actif ; une annulation ne remplace pas l'état candidat avec des résultats partiels.
 - La capture `unknown` transfère le snapshot memory-mapped au thread UI seulement si elle aboutit sans annulation.
 - Un guide utilisateur V1 existe dans `docs/USER_GUIDE.md`.
+- Une Phase 13 de suivi d'améliorations est ouverte dans `docs/PHASE_TRACKER.md` pour traiter précision, faux positifs, Assistant, profils, UX et robustesse.
 - Crédit UI : `Pirolley Benoist` en bas à gauche.
 
 ### Limites connues de la baseline

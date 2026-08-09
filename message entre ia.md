@@ -131,5 +131,7 @@ Dernières validations connues :
 
 RESTE À FAIRE ACTUEL :
   - Phase 12 checklist V1 : complète.
-  - Prochaine étape : passe de régression manuelle V1 / release candidate.
+  - Phase 13 ouverte dans docs/PHASE_TRACKER.md comme baseline d'améliorations :
+    précision de recherche, faux positifs, Assistant plus naturel, profils plus utiles, UX/efficacité, robustesse/tests.
+  - Prochaine étape : traiter les points Phase 13 un par un, puis passe de régression manuelle V1 / release candidate.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.
