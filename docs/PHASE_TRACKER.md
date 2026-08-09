@@ -4,8 +4,8 @@ Source of truth: `KILLENGINE_PROJECT_SPEC.md`
 
 Current status:
 - Phase 11 prototype is complete and revalidated through the Assistant/profile workflow.
-- Phase 12 has started as V1 polishing, but is not complete.
-- The current focus is polish and hardening: Mode Expert, Settings, logs/debug export, packaging, async UX, and user documentation.
+- Phase 12 / V1 polishing checklist is complete.
+- Next focus: manual V1 regression pass, integration tests, and any release-candidate fixes found during real gameplay.
 
 Prerequisites before Phase 12:
 - [x] finish or explicitly descope Phase 7 LZ4 compression
@@ -96,7 +96,7 @@ Prerequisites before Phase 12:
   - [x] Onglet Profils activé dans App.vue
   - [x] multiple targets per profile
   - [x] resolved profile targets can be used by Assistant write requests
-- [ ] PHASE 12 - Polissage V1
+- [x] PHASE 12 - Polissage V1
   - [x] Phase 7 LZ4/mapped storage completed for V1
   - [x] validate Phase 9 with a real Qwen GGUF model-generated scan call
   - [x] Assistant conversation-state fixes for active addresses/profile targets
@@ -111,4 +111,4 @@ Prerequisites before Phase 12:
   - [x] async threaded exact scan (worker thread, non-blocking start, scanFinished signal, safe candidate-store handoff)
   - [x] async threaded next scan + cancellation (worker thread, shared cancel token, no candidate-store replacement on cancel)
   - [x] async threaded unknown capture/compare (worker thread, movable mapped snapshot handoff, shared cancel token)
-  - [ ] documentation/user guide
+  - [x] documentation/user guide

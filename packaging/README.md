@@ -15,7 +15,7 @@ dist\KillEngine-portable\
 dist\KillEngine-portable.zip
 ```
 
-The package includes the deployed Qt runtime from `build\bin`, the application executable, license, README, project spec, phase tracker, and `models\README.md`.
+The package includes the deployed Qt runtime from `build\bin`, the application executable, license, README, project spec, phase tracker, user guide, and `models\README.md`.
 
 Models are not included by default because GGUF files are large and ignored by git. To include local GGUF files from `models\`, run:
 

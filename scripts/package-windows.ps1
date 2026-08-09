@@ -96,6 +96,7 @@ Copy-ItemIfExists -Path (Join-Path $repoRoot "README.md") -Destination $packageR
 Copy-ItemIfExists -Path (Join-Path $repoRoot "LICENSE") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "KILLENGINE_PROJECT_SPEC.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\PHASE_TRACKER.md") -Destination $packageRoot
+Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\USER_GUIDE.md") -Destination $packageRoot
 
 $modelsOut = Join-Path $packageRoot "models"
 New-Item -ItemType Directory -Force -Path $modelsOut | Out-Null
@@ -120,6 +121,7 @@ Notes:
   - GGUF models are not included unless package-windows.ps1 is run with -IncludeModel.
   - Place qwen.gguf in the models folder or set KILLENGINE_QWEN_GGUF.
   - Logs and profiles are stored under the Windows local app data folder.
+  - Read USER_GUIDE.md for the V1 user workflow.
 "@
 
 Set-Content -Path (Join-Path $packageRoot "PACKAGE_README.txt") -Value $packageReadme -Encoding ASCII

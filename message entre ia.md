@@ -130,5 +130,6 @@ Dernières validations connues :
   - ctest --test-dir build --output-on-failure : 24/24 OK
 
 RESTE À FAIRE ACTUEL :
-  - Phase 12 : documentation / guide utilisateur.
+  - Phase 12 checklist V1 : complète.
+  - Prochaine étape : passe de régression manuelle V1 / release candidate.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.

@@ -47,6 +47,14 @@ dist\KillEngine-portable.zip
 
 Un template Inno Setup est disponible dans `packaging/windows/KillEngine.iss`.
 
+## Guide utilisateur
+
+Le guide V1 est disponible ici :
+
+- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)
+
+Il couvre l'attachement au processus, l'Assistant, les profils, le Mode Expert, les paramètres, les diagnostics et les principaux cas de dépannage.
+
 ## Build détaillé
 
 ### UI (Vue 3 + TypeScript)
@@ -99,12 +107,11 @@ MIT — voir [LICENSE](LICENSE)
 Prototype avancé :
 
 - Phases 0 à 11 validées au niveau prototype.
-- Phase 12 / Polissage V1 en cours.
+- Phase 12 / Polissage V1 complète au niveau checklist V1.
 - Smart Search opérationnel : scan guidé, next scan, auto-write vérifié, rollback batch.
 - Profils opérationnels : plusieurs cibles, résolution d'adresses, réutilisation par l'Assistant.
 - IA locale optionnelle : tool-calls JSON, contrat d'intention structuré, fallback déterministe.
 - Tests unitaires : 24/24 au dernier état connu.
-
-Reste principalement : export logs/debug, crash handling, polish async/progression, documentation utilisateur.
+- Guide utilisateur V1 disponible dans `docs/USER_GUIDE.md`.
 
 Voir `KILLENGINE_PROJECT_SPEC.md` pour le cahier des charges complet.

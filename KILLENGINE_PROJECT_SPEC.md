@@ -9,7 +9,7 @@
 
 ## 0. Baseline actuelle du prototype
 
-Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phase 12 / Polissage V1 en cours.
+Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phase 12 / Polissage V1 complète au niveau checklist V1.
 
 ### État validé
 
@@ -46,11 +46,12 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les scans exacts, `next_scan` et `unknown` du Mode Expert peuvent partir dans un worker thread et rendre le contrôle au frontend immédiatement.
 - Le Mode Expert expose une annulation de scan actif ; une annulation ne remplace pas l'état candidat avec des résultats partiels.
 - La capture `unknown` transfère le snapshot memory-mapped au thread UI seulement si elle aboutit sans annulation.
+- Un guide utilisateur V1 existe dans `docs/USER_GUIDE.md`.
 - Crédit UI : `Pirolley Benoist` en bas à gauche.
 
 ### Limites connues de la baseline
 
-- Phase 12 / Polissage V1 est démarrée mais incomplète.
+- Phase 12 / Polissage V1 est complète au niveau checklist ; il reste à faire une passe de régression manuelle avant une release candidate.
 - Le moteur IA tente maintenant d'utiliser un runtime local `llama-cli` + GGUF Qwen si disponibles, puis retombe sur le planner déterministe si le modèle ou l'exécutable manque.
 - Le scan multi-type automatique complet n'est pas encore implémenté : le planner choisit surtout `Int32` par défaut sauf indication contraire.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
