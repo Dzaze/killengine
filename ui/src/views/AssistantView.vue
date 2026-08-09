@@ -14,6 +14,15 @@ const contextItems = computed(() => {
   if (!context) return []
 
   const items: Array<{ label: string, value: string }> = []
+  if (context.profileTargets.length > 0) {
+    items.push({ label: 'État', value: 'profil actif' })
+  } else if (context.chatTargets.length > 0) {
+    items.push({ label: 'État', value: 'adresses actives' })
+  } else if (context.active || context.candidateCount > 0) {
+    items.push({ label: 'État', value: 'recherche active' })
+  } else {
+    items.push({ label: 'État', value: 'aucun contexte actif' })
+  }
   if (context.initialValue) items.push({ label: 'Recherche', value: context.initialValue })
   if (context.targetValue) items.push({ label: 'Cible', value: context.targetValue })
   if (context.valueType) items.push({ label: 'Type', value: context.valueType })

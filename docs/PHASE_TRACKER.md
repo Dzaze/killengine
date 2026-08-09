@@ -144,7 +144,7 @@ Prerequisites before Phase 12:
     - [x] état visible du profil/cible actuellement actifs dans l'Assistant
   - [ ] UX et efficacité
     - [x] bouton `Nouvelle recherche` visible dans l'Assistant
-    - [ ] statut global clair : recherche active, adresses actives, profil actif, aucun contexte actif
+    - [x] statut global clair : recherche active, adresses actives, profil actif, aucun contexte actif
     - [ ] debug Assistant lisible expliquant pourquoi une action a été choisie
     - [ ] progression plus fine par régions/chunks pendant les scans longs
   - [ ] Robustesse et validations
