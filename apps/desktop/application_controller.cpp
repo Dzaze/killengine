@@ -59,6 +59,7 @@ enum class SmartSearchIntentKind {
     WriteMemoryTargets,
     RewriteLastTargets,
     WriteProfileTargets,
+    ClearActiveTargets,
 };
 
 struct SmartSearchIntent {
@@ -89,6 +90,8 @@ QString smartSearchIntentKindToString(SmartSearchIntentKind kind) {
             return "RewriteLastTargets";
         case SmartSearchIntentKind::WriteProfileTargets:
             return "WriteProfileTargets";
+        case SmartSearchIntentKind::ClearActiveTargets:
+            return "ClearActiveTargets";
     }
     return "Unknown";
 }
@@ -367,6 +370,23 @@ bool looksLikeNewSearchRequest(const QString& query) {
         || q.contains("reset");
 }
 
+bool looksLikeClearActiveTargetsRequest(const QString& query) {
+    const QString q = query.toLower();
+    const bool clearVerb = q.contains("oublie")
+        || q.contains("oublier")
+        || q.contains("efface")
+        || q.contains("supprime")
+        || q.contains("retire")
+        || q.contains("vide");
+    const bool targetWord = q.contains("adresse")
+        || q.contains("memoire")
+        || q.contains("mémoire")
+        || q.contains("cible")
+        || q.contains("profil")
+        || q.contains("contexte");
+    return clearVerb && targetWord;
+}
+
 SmartSearchIntent classifySmartSearchIntent(
     const QString& query,
     const QStringList& numbers,
@@ -383,8 +403,12 @@ SmartSearchIntent classifySmartSearchIntent(
     const bool hasOneNumber = numbers.size() == 1;
     const bool wantsMemoryWrite = looksLikeMemoryTargetWriteRequest(query);
     const bool wantsLastRewrite = looksLikeLastAutoWriteRewrite(query);
+    const bool wantsClearTargets = looksLikeClearActiveTargetsRequest(query);
 
-    if (intent.resetContext && numbers.isEmpty()) {
+    if (wantsClearTargets) {
+        intent.kind = SmartSearchIntentKind::ClearActiveTargets;
+        intent.rationale = "L'utilisateur demande d'oublier les adresses, profils ou cibles actives.";
+    } else if (intent.resetContext && numbers.isEmpty()) {
         intent.kind = SmartSearchIntentKind::ResetContext;
         intent.rationale = "L'utilisateur demande un nouveau contexte sans donner encore de valeur.";
     } else if (!addresses.isEmpty()) {
@@ -2657,6 +2681,31 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             {"query", query},
             {"reason", "new search request"},
         });
+    }
+
+    if (intent.kind == SmartSearchIntentKind::ClearActiveTargets) {
+        const int chatCount = m_chatMemoryTargets.size();
+        const int profileCount = m_activeProfileTargets.size();
+        const int lastCount = m_lastAutoWriteTargets.size();
+        m_chatMemoryTargets.clear();
+        m_activeProfileTargets.clear();
+        m_lastAutoWriteTargets.clear();
+        m_lastBatchStartIndex = -1;
+        m_lastBatchEndIndex = -1;
+
+        QVariantMap cleared;
+        cleared["success"] = true;
+        cleared["query"] = query;
+        cleared["aiReady"] = m_ai.isReady();
+        cleared["status"] = "active_targets_cleared";
+        cleared["actionStatus"] = "executed";
+        cleared["workflowStatus"] = "idle";
+        cleared["chatTargetsCleared"] = chatCount;
+        cleared["profileTargetsCleared"] = profileCount;
+        cleared["lastAutoWriteTargetsCleared"] = lastCount;
+        cleared["message"] = QString("C'est fait, j'ai oublié les adresses et profils actifs de la conversation.");
+        appendSmartSearchDebug("smart_search_clear_active_targets", cleared);
+        return cleared;
     }
 
     if (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
