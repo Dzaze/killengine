@@ -7,6 +7,7 @@
 
 add_library(killai STATIC
     ai_engine.cpp
+    intent_contract.cpp
     llama_runtime.cpp
     model_locator.cpp
     tool_registry.cpp

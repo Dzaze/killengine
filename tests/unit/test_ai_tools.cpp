@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "ai_engine.h"
+#include "intent_contract.h"
 #include "llama_runtime.h"
 #include "model_locator.h"
 #include "tool_validator.h"
@@ -43,6 +44,37 @@ TEST(AIEngineTest, PlansExactScanFromNumber) {
     if (qEnvironmentVariableIsSet("KILLENGINE_QWEN_GGUF") && qEnvironmentVariableIsSet("KILLENGINE_LLAMA_CLI")) {
         EXPECT_EQ(result.value("aiBackend").toString(), "llama.cpp");
     }
+}
+
+TEST(IntentContractTest, AcceptsGuidedScanIntent) {
+    QVariantMap intent;
+    intent["intent"] = "GuidedScan";
+    intent["value"] = "900";
+    intent["targetValue"] = "1000";
+
+    QString error;
+    EXPECT_TRUE(killai::IntentContract::validate(intent, &error));
+    EXPECT_TRUE(error.isEmpty());
+}
+
+TEST(IntentContractTest, RejectsMemoryTargetsWithoutAddress) {
+    QVariantMap intent;
+    intent["intent"] = "ActivateMemoryTargets";
+
+    QString error;
+    EXPECT_FALSE(killai::IntentContract::validate(intent, &error));
+    EXPECT_FALSE(error.isEmpty());
+}
+
+TEST(IntentContractTest, ValidatesMemoryTargetAddresses) {
+    QVariantMap intent;
+    intent["intent"] = "WriteMemoryTargets";
+    intent["value"] = "500";
+    intent["addresses"] = QVariantList{"0x2d3a80afb0c", "0x2d3f7e25594"};
+
+    QString error;
+    EXPECT_TRUE(killai::IntentContract::validate(intent, &error));
+    EXPECT_TRUE(error.isEmpty());
 }
 
 TEST(LlamaRuntimeTest, ExtractsToolCallJsonFromModelText) {
