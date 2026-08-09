@@ -13,7 +13,7 @@ Prerequisites before Phase 12:
 - [x] finish or explicitly descope Phase 9 llama.cpp integration
 - [x] finish or explicitly descope Phase 9 Qwen GGUF loading
 - [x] finish or explicitly descope Phase 9 validation with model-generated scan call
-- [ ] confirm Phase 10 guided workflow still passes after the Phase 7/9 decision
+- [x] confirm Phase 10 guided workflow still passes after the Phase 7/9 decision
 - [ ] confirm Phase 11 profile workflow still passes after the Phase 7/9 decision
 
 - [x] PHASE 0 - Fondation
