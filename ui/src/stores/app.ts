@@ -61,6 +61,7 @@ export const useAppStore = defineStore('app', () => {
   const writeValue = ref('')
   const writeResult = ref<MemoryWriteResult | null>(null)
   const freezeEnabled = ref(false)
+  const finalCandidateTargets = ref<Array<Record<string, unknown>>>([])
 
   // Chat / guided workflow state
   const messages = ref<ChatMessage[]>([])
@@ -275,7 +276,9 @@ export const useAppStore = defineStore('app', () => {
       }
 
       if (result.suggestedWrites) {
-        extras.suggestions = result.suggestedWrites as Array<Record<string, unknown>>
+        const suggestions = result.suggestedWrites as Array<Record<string, unknown>>
+        finalCandidateTargets.value = suggestions
+        extras.suggestions = suggestions
       }
 
       if (result.autoWriteResults) {
@@ -487,6 +490,7 @@ export const useAppStore = defineStore('app', () => {
     writeValue,
     writeResult,
     freezeEnabled,
+    finalCandidateTargets,
     messages,
     workflowStatus,
     targetValueGuided,

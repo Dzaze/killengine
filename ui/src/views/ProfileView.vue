@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
 
@@ -29,6 +29,23 @@ const newTargetDescription = ref('')
 const resolveResult = ref<Record<string, unknown> | null>(null)
 const statusMessage = ref('')
 
+const profileSaveTargets = computed(() => {
+  if (store.finalCandidateTargets.length > 0) {
+    return store.finalCandidateTargets
+      .filter((target) => target.address)
+      .map((target) => ({
+        address: String(target.address ?? ''),
+        type: String(target.type ?? store.exactScanType),
+      }))
+  }
+
+  if (store.selectedCandidateAddress) {
+    return [{ address: store.selectedCandidateAddress, type: store.exactScanType }]
+  }
+
+  return []
+})
+
 async function refreshProfiles() {
   try {
     profiles.value = (await backend.getController().listProfiles()) as unknown as ProfileEntry[]
@@ -54,8 +71,8 @@ async function saveCurrentTarget() {
     statusMessage.value = '⚠ Sélectionne ou crée d\'abord un profil.'
     return
   }
-  if (!store.selectedCandidateAddress) {
-    statusMessage.value = '⚠ Sélectionne d\'abord une adresse dans l\'Assistant.'
+  if (profileSaveTargets.value.length === 0) {
+    statusMessage.value = '⚠ Sélectionne d\'abord une adresse ou termine une recherche dans l\'Assistant.'
     return
   }
   if (!newTargetName.value.trim()) {
@@ -64,21 +81,35 @@ async function saveCurrentTarget() {
   }
 
   try {
-    const result = await backend.getController().saveProfileTarget(
-      selectedProfile.value,
-      newTargetName.value.trim(),
-      store.selectedCandidateAddress,
-      store.exactScanType,
-      newTargetDescription.value.trim(),
-    )
-    if (result.success) {
-      statusMessage.value = `✓ Cible "${newTargetName.value}" sauvegardée dans "${selectedProfile.value}" (${result.locator}).`
+    const baseName = newTargetName.value.trim()
+    const targets = profileSaveTargets.value
+    const results = []
+
+    for (let i = 0; i < targets.length; i += 1) {
+      const target = targets[i]
+      const targetName = targets.length === 1 ? baseName : `${baseName} ${i + 1}`
+      const result = await backend.getController().saveProfileTarget(
+        selectedProfile.value,
+        targetName,
+        target.address,
+        target.type,
+        newTargetDescription.value.trim(),
+      )
+      results.push(result)
+      if (!result.success) {
+        statusMessage.value = '✗ ' + (result.error ?? `Erreur de sauvegarde pour ${targetName}.`)
+        return
+      }
+    }
+
+    if (results.every((result) => result.success)) {
+      statusMessage.value = targets.length === 1
+        ? `✓ Cible "${baseName}" sauvegardée dans "${selectedProfile.value}" (${results[0].locator}).`
+        : `✓ ${targets.length} adresses sauvegardées dans "${selectedProfile.value}" sous "${baseName} 1", "${baseName} 2"...`
       newTargetName.value = ''
       newTargetDescription.value = ''
       await selectProfile(selectedProfile.value)
       await refreshProfiles()
-    } else {
-      statusMessage.value = '✗ ' + (result.error ?? 'Erreur de sauvegarde.')
     }
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
@@ -188,18 +219,27 @@ onMounted(() => {
       <div class="save-target-box">
         <h3>Sauvegarder la cible courante</h3>
         <p class="hint">
-          Adresse : <code>{{ store.selectedCandidateAddress || '(aucune)' }}</code>
-          · Type : <code>{{ store.exactScanType }}</code>
+          <template v-if="profileSaveTargets.length === 1">
+            Adresse : <code>{{ profileSaveTargets[0].address }}</code>
+            · Type : <code>{{ profileSaveTargets[0].type }}</code>
+          </template>
+          <template v-else-if="profileSaveTargets.length > 1">
+            Lot final : <code>{{ profileSaveTargets.length }} adresses</code>
+            · Type : <code>{{ profileSaveTargets[0].type }}</code>
+          </template>
+          <template v-else>
+            Adresse : <code>(aucune)</code>
+          </template>
         </p>
         <div class="save-row">
           <input v-model="newTargetName" placeholder="Nom cible (ex: Money)" class="scan-input" />
           <input v-model="newTargetDescription" placeholder="Description (optionnel)" class="scan-input" />
           <button
             class="btn btn-primary"
-            :disabled="!store.selectedCandidateAddress || !newTargetName.trim()"
+            :disabled="profileSaveTargets.length === 0 || !newTargetName.trim()"
             @click="saveCurrentTarget()"
           >
-            Sauvegarder
+            {{ profileSaveTargets.length > 1 ? 'Sauvegarder le lot' : 'Sauvegarder' }}
           </button>
         </div>
       </div>
