@@ -1,0 +1,95 @@
+{
+  "app": {
+    "title": "KillEngine",
+    "version": "Version",
+    "status": "Status",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "ready": "Ready",
+    "attached": "Attached"
+  },
+  "process": {
+    "select": "Select a process",
+    "refresh": "Refresh",
+    "attach": "Attach",
+    "detach": "Detach",
+    "name": "Name",
+    "pid": "PID",
+    "arch": "Architecture",
+    "modules": "Modules",
+    "windowOnly": "Windows only",
+    "hasWindow": "window",
+    "noModules": "No accessible modules",
+    "noProcesses": "No processes found"
+  },
+  "memory": {
+    "title": "Memory map",
+    "refresh": "Refresh",
+    "attachFirst": "Attach a process to show its memory map.",
+    "regions": "Regions",
+    "committed": "Committed",
+    "readable": "Readable",
+    "writable": "Writable",
+    "executable": "Executable",
+    "all": "All",
+    "preview": "Preview"
+  },
+  "search": {
+    "title": "What do you want to find?",
+    "placeholder": "e.g. Money: 41250",
+    "button": "Search",
+    "result": "Result"
+  },
+  "scan": {
+    "exact": "Exact scan",
+    "value": "Value",
+    "button": "Scan",
+    "matches": "Matches",
+    "regions": "Regions",
+    "stored": "Stored",
+    "partial": "partial",
+    "filterAddress": "Filter address...",
+    "previous": "Previous",
+    "next": "Next",
+    "nextScan": "Next Scan",
+    "nextValue": "New value / delta",
+    "remaining": "Remaining",
+    "checked": "Checked",
+    "unreadable": "Unreadable",
+    "modeExact": "Exact",
+    "modeChanged": "Changed",
+    "modeUnchanged": "Unchanged",
+    "modeIncreased": "Increased",
+    "modeDecreased": "Decreased",
+    "modeDelta": "Delta"
+  },
+  "unknown": {
+    "title": "Unknown initial value",
+    "capture": "Capture",
+    "compare": "Compare",
+    "regions": "Regions",
+    "bytes": "Bytes"
+  },
+  "write": {
+    "title": "Write / Freeze",
+    "address": "Address",
+    "value": "Value",
+    "write": "Write",
+    "rollback": "Rollback",
+    "freeze": "Freeze",
+    "stopFreeze": "Stop freeze",
+    "verified": "verified"
+  },
+  "actions": {
+    "ping": "Connection test",
+    "iHaveChanged": "I changed"
+  },
+  "nav": {
+    "assistant": "Assistant",
+    "process": "Process",
+    "memory": "Memory",
+    "profiles": "Profiles",
+    "expert": "Expert",
+    "settings": "Settings"
+  }
+}

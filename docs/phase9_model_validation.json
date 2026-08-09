@@ -1,0 +1,44 @@
+{
+  "phase": 9,
+  "validation": "model-generated scan call",
+  "validatedAt": "2026-08-09T12:20:00+02:00",
+  "runtime": {
+    "backend": "llama.cpp",
+    "executable": "third_party/llama.cpp/llama-cli.exe",
+    "build": "b10331-7ba604f1c"
+  },
+  "model": {
+    "path": "models/Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+    "family": "Qwen3.5-2B",
+    "format": "GGUF",
+    "quantization": "Q4_K_M"
+  },
+  "input": {
+    "query": "j'ai 41250 argent",
+    "expectedTool": "exact_scan",
+    "expectedArgs": {
+      "value": "41250",
+      "valueType": "Int32"
+    }
+  },
+  "modelToolCall": {
+    "tool": "exact_scan",
+    "args": {
+      "value": "41250",
+      "valueType": "Int32"
+    }
+  },
+  "checks": {
+    "toolCallJsonExtracted": true,
+    "toolCallValidated": true,
+    "aiEngineBackendAsserted": "llama.cpp",
+    "targetedUnitTest": "AIEngineTest.PlansExactScanFromNumber",
+    "targetedUnitTestPassed": true,
+    "fullUnitSuite": "ctest --test-dir build --output-on-failure",
+    "fullUnitSuitePassed": true
+  },
+  "notes": [
+    "LlamaRuntime now uses single-turn generation with reasoning disabled for planner calls.",
+    "JSON extraction scans for the last object containing both tool and args so llama-cli prompt echo does not break parsing."
+  ]
+}

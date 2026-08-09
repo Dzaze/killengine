@@ -1,0 +1,95 @@
+{
+  "app": {
+    "title": "KillEngine",
+    "version": "Version",
+    "status": "Statut",
+    "connected": "Connecté",
+    "disconnected": "Déconnecté",
+    "ready": "Prêt",
+    "attached": "Attaché"
+  },
+  "process": {
+    "select": "Sélectionner un processus",
+    "refresh": "Rafraîchir",
+    "attach": "Attacher",
+    "detach": "Détacher",
+    "name": "Nom",
+    "pid": "PID",
+    "arch": "Architecture",
+    "modules": "Modules",
+    "windowOnly": "Fenêtres seulement",
+    "hasWindow": "fenêtre",
+    "noModules": "Aucun module accessible",
+    "noProcesses": "Aucun processus trouvé"
+  },
+  "memory": {
+    "title": "Carte mémoire",
+    "refresh": "Rafraîchir",
+    "attachFirst": "Attache un processus pour afficher sa carte mémoire.",
+    "regions": "Régions",
+    "committed": "Committed",
+    "readable": "Readable",
+    "writable": "Writable",
+    "executable": "Executable",
+    "all": "Tout",
+    "preview": "Aperçu"
+  },
+  "search": {
+    "title": "Que veux-tu trouver ?",
+    "placeholder": "Ex: Argent : 41250",
+    "button": "Rechercher",
+    "result": "Résultat"
+  },
+  "scan": {
+    "exact": "Scan exact",
+    "value": "Valeur",
+    "button": "Scanner",
+    "matches": "Résultats",
+    "regions": "Régions",
+    "stored": "Stockés",
+    "partial": "partiel",
+    "filterAddress": "Filtrer adresse...",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "nextScan": "Next Scan",
+    "nextValue": "Nouvelle valeur / delta",
+    "remaining": "Restants",
+    "checked": "Vérifiés",
+    "unreadable": "Illisibles",
+    "modeExact": "Exact",
+    "modeChanged": "Changed",
+    "modeUnchanged": "Unchanged",
+    "modeIncreased": "Increased",
+    "modeDecreased": "Decreased",
+    "modeDelta": "Delta"
+  },
+  "unknown": {
+    "title": "Unknown initial value",
+    "capture": "Capturer",
+    "compare": "Comparer",
+    "regions": "Régions",
+    "bytes": "Bytes"
+  },
+  "write": {
+    "title": "Write / Freeze",
+    "address": "Adresse",
+    "value": "Valeur",
+    "write": "Écrire",
+    "rollback": "Rollback",
+    "freeze": "Freeze",
+    "stopFreeze": "Stop freeze",
+    "verified": "vérifié"
+  },
+  "actions": {
+    "ping": "Test de connexion",
+    "iHaveChanged": "J'ai changé"
+  },
+  "nav": {
+    "assistant": "Assistant",
+    "process": "Processus",
+    "memory": "Mémoire",
+    "profiles": "Profils",
+    "expert": "Expert",
+    "settings": "Paramètres"
+  }
+}

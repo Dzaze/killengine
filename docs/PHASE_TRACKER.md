@@ -1,0 +1,100 @@
+# KillEngine Phase Tracker
+
+Source of truth: `KILLENGINE_PROJECT_SPEC.md`
+
+Current status:
+- Phase 11 prototype is complete.
+- Phase 12 is not started.
+- V1 polishing is blocked until the remaining Phase 9 items below are done or explicitly descoped.
+
+Prerequisites before Phase 12:
+- [x] finish or explicitly descope Phase 7 LZ4 compression
+- [x] finish or explicitly descope Phase 7 mapped storage
+- [x] finish or explicitly descope Phase 9 llama.cpp integration
+- [x] finish or explicitly descope Phase 9 Qwen GGUF loading
+- [x] finish or explicitly descope Phase 9 validation with model-generated scan call
+- [ ] confirm Phase 10 guided workflow still passes after the Phase 7/9 decision
+- [ ] confirm Phase 11 profile workflow still passes after the Phase 7/9 decision
+
+- [x] PHASE 0 - Fondation
+- [x] PHASE 1 - Process Manager
+- [x] PHASE 2 - Memory Map
+- [x] PHASE 3 - Memory Reader
+  - [x] safe chunk reader
+  - [x] error handling
+  - [x] cancellation
+  - [x] validation with KillEngineTestTarget
+- [x] PHASE 4 - Exact Scan
+  - [x] Int32
+  - [x] Int64
+  - [x] Float32
+  - [x] Float64
+  - [x] UI exact scan entry point
+  - [x] validation with KillEngineTestTarget
+- [x] PHASE 5 - CandidateStore
+  - [x] compact address/type storage
+  - [x] sorting
+  - [x] filtering
+  - [x] pagination
+  - [x] validation with large candidate set
+- [x] PHASE 6 - Next Scan
+  - [x] exact
+  - [x] changed
+  - [x] unchanged
+  - [x] increased
+  - [x] decreased
+  - [x] delta
+  - [x] UI next scan entry point
+  - [x] validation with KillEngineTestTarget
+- [x] PHASE 7 - Unknown Initial Value
+  - [x] snapshot
+  - [x] comparison
+  - [x] LZ4 compression
+  - [x] mapped storage
+  - [x] UI unknown initial value entry point
+  - [x] validation with KillEngineTestTarget
+- [x] PHASE 8 - Watch / Write / Freeze
+  - [x] watch/read preview
+  - [x] safe write
+  - [x] verify
+  - [x] rollback
+  - [x] freeze
+  - [x] UI write/freeze entry point
+  - [x] validation with KillEngineTestTarget
+- [ ] PHASE 9 - IA locale
+  - [x] llama.cpp integration via optional llama-cli runtime
+  - [x] Qwen GGUF discovery/loading path
+  - [x] AIEngine scaffold
+  - [x] ToolRegistry
+  - [x] ToolValidator
+  - [x] StateMachine
+  - [x] strict JSON tool-call planning
+  - [x] validation with model-generated scan call
+- [x] PHASE 10 - Smart Search
+  - [x] receive strict JSON tool-call from AIEngine
+  - [x] execute exact_scan from Assistant
+  - [x] execute next_scan from Assistant
+  - [x] execute unknown capture/compare from Assistant
+  - [x] guided current-value/target-value workflow
+  - [x] auto-write target value when 1-4 final candidates remain
+  - [x] keep broad write/freeze requests behind manual UI flow
+  - [x] refresh candidates after Assistant scans
+  - [x] human-readable Assistant response
+  - [x] full guided workflow UX (chat, quick actions, auto-write cards, batch rollback)
+- [x] PHASE 11 - Profils
+  - [x] Locator (module_offset + absolute)
+  - [x] ProfileStore (sauvegarde/chargement JSON .keprofile)
+  - [x] saveProfileTarget (crée locator module_offset automatiquement)
+  - [x] loadProfile / listProfiles / deleteProfile
+  - [x] resolveProfileTarget (résout locator en adresse absolue)
+  - [x] UI ProfileView (liste, créer, sauvegarder cible, résoudre, supprimer)
+  - [x] Onglet Profils activé dans App.vue
+- [ ] PHASE 12 - Polissage V1
+  - [x] Phase 7 LZ4/mapped storage completed for V1
+  - [x] validate Phase 9 with a real Qwen GGUF model-generated scan call
+  - [ ] installer/package
+  - [ ] settings UI
+  - [ ] log viewer/export
+  - [ ] crash handling
+  - [ ] async scan UX/progress polish
+  - [ ] documentation/user guide

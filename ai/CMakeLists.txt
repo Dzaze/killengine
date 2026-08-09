@@ -1,0 +1,24 @@
+# =============================================================================
+# KillAI — Couche IA (llama.cpp + Qwen + tool calling)
+# =============================================================================
+
+# Phase 0: stubs uniquement
+# Phase 9: intégration réelle de llama.cpp
+
+add_library(killai STATIC
+    ai_engine.cpp
+    llama_runtime.cpp
+    model_locator.cpp
+    tool_registry.cpp
+    tool_validator.cpp
+    state_machine.cpp
+    evidence_summary.cpp
+)
+
+target_include_directories(killai PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(killai PUBLIC
+    killcore
+    Qt6::Core
+    nlohmann_json::nlohmann_json
+)
