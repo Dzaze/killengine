@@ -184,6 +184,9 @@ bool looksLikeLastAutoWriteRewrite(const QString& query) {
         || q.contains("mettre")
         || q.contains("mets")
         || q.contains("met ")
+        || q.contains("passe")
+        || q.contains("passé")
+        || q.contains("passer")
         || q.contains("remet")
         || q.contains("remets")
         || q.contains("ces adresse")
@@ -196,13 +199,9 @@ bool looksLikeLastAutoWriteRewrite(const QString& query) {
 bool looksLikeMemoryTargetWriteRequest(const QString& query) {
     const QString q = query.toLower();
     return looksLikeLastAutoWriteRewrite(q)
-        || q.contains("passe")
         || q.contains("passer")
         || q.contains("mets")
-        || q.contains("met ")
-        || q.contains("valeur")
-        || q.contains("niveau")
-        || q.contains("score");
+        || q.contains("met ");
 }
 
 bool looksLikeNewSearchRequest(const QString& query) {
@@ -1311,7 +1310,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return rewriteLastAutoWriteTargets(numbers.first(), query);
     }
 
-    if (numbers.size() == 1 && !forceNewSearch) {
+    if (numbers.size() == 1 && !forceNewSearch && looksLikeMemoryTargetWriteRequest(query)) {
         auto profileWrite = writeProfileTargetsFromQuery(query, numbers.first());
         if (profileWrite.value("tool").toString() == "profile_write") {
             return profileWrite;
@@ -1322,7 +1321,12 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         m_smartSearchActive && !m_candidates.isEmpty() && numbers.size() == 1;
 
     QVariantMap result;
-    if (forceNewSearch && numbers.size() == 1) {
+    if (forceNewSearch && numbers.isEmpty()) {
+        result["status"] = "reset_only";
+        result["message"] = "D'accord, j'ai oublié le contexte actif. Donne-moi la nouvelle valeur à chercher.";
+        result["workflowStatus"] = "idle";
+        result["error"] = "";
+    } else if (forceNewSearch && numbers.size() == 1) {
         QVariantMap args;
         args["value"] = numbers.first();
         args["valueType"] = "Int32";
@@ -1354,6 +1358,16 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["error"] = "";
         m_smartSearchTargetValue = numbers.at(1);
         m_smartSearchActive = true;
+    } else if (numbers.size() == 1) {
+        QVariantMap args;
+        args["value"] = numbers.first();
+        args["valueType"] = "Int32";
+        result["status"] = "tool_call";
+        result["tool"] = "exact_scan";
+        result["args"] = args;
+        result["rationale"] = "Recherche exacte déterministe depuis la valeur donnée par l'utilisateur.";
+        result["state"] = "FirstScanRunning";
+        result["error"] = "";
     } else {
         result = m_ai.processQuery(query);
     }
