@@ -176,6 +176,7 @@ export interface BackendController {
   loadProfile(profileName: string): Promise<Record<string, unknown>>
   deleteProfile(profileName: string): Promise<boolean>
   resolveProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
+  activateProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
 }
 
 class BackendService {
@@ -399,6 +400,9 @@ class BackendService {
         return false
       },
       async resolveProfileTarget() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async activateProfileTarget() {
         return { success: false, error: 'Mock backend' }
       },
     }

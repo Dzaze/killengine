@@ -126,19 +126,41 @@ async function createNewProfile() {
   newProfileName.value = ''
 }
 
-async function resolveTarget(targetName: string) {
+async function activateTarget(targetName: string) {
   if (!selectedProfile.value) return
   try {
-    const result = await backend.getController().resolveProfileTarget(selectedProfile.value, targetName)
+    const result = await backend.getController().activateProfileTarget(selectedProfile.value, targetName)
     resolveResult.value = result
     if (result.success) {
-      statusMessage.value = `✓ "${targetName}" résolu à l'adresse 0x${result.address}`
+      statusMessage.value = `✓ "${targetName}" activé pour l'Assistant à l'adresse 0x${result.address}`
     } else {
-      statusMessage.value = '✗ ' + (result.error ?? 'Résolution impossible.')
+      statusMessage.value = '✗ ' + (result.error ?? 'Activation impossible.')
     }
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
   }
+}
+
+async function activateAllTargets() {
+  if (!selectedProfile.value || profileTargets.value.length === 0) return
+
+  let activated = 0
+  for (const target of profileTargets.value) {
+    try {
+      const result = await backend.getController().activateProfileTarget(selectedProfile.value, target.name)
+      if (!result.success) {
+        statusMessage.value = '✗ ' + (result.error ?? `Activation impossible pour ${target.name}.`)
+        return
+      }
+      activated += 1
+      resolveResult.value = result
+    } catch (e) {
+      statusMessage.value = '✗ Erreur : ' + String(e)
+      return
+    }
+  }
+
+  statusMessage.value = `✓ ${activated} cible(s) activée(s) pour l'Assistant.`
 }
 
 async function deleteSelectedProfile() {
@@ -246,7 +268,10 @@ onMounted(() => {
 
       <!-- Cibles du profil -->
       <div v-if="profileTargets.length > 0" class="targets-list">
-        <h3>Cibles ({{ profileTargets.length }})</h3>
+        <div class="targets-header">
+          <h3>Cibles ({{ profileTargets.length }})</h3>
+          <button class="btn btn-secondary btn-sm" @click="activateAllTargets()">Activer tout</button>
+        </div>
         <div v-for="t in profileTargets" :key="t.name" class="target-row">
           <div class="target-info">
             <span class="target-name">{{ t.name }}</span>
@@ -254,7 +279,7 @@ onMounted(() => {
             <span class="target-locator">{{ t.locator }}</span>
           </div>
           <div class="target-actions">
-            <button class="btn btn-secondary btn-sm" @click="resolveTarget(t.name)">Résoudre</button>
+            <button class="btn btn-secondary btn-sm" @click="activateTarget(t.name)">Activer</button>
           </div>
           <div v-if="t.description" class="target-desc">{{ t.description }}</div>
         </div>
@@ -262,7 +287,7 @@ onMounted(() => {
 
       <!-- Résultat de résolution -->
       <div v-if="resolveResult" class="resolve-box" :class="resolveResult.success ? 'ok' : 'fail'">
-        <span v-if="resolveResult.success">✓ Adresse résolue : 0x{{ resolveResult.address }}</span>
+        <span v-if="resolveResult.success">✓ Prêt dans l'Assistant : 0x{{ resolveResult.address }}</span>
         <span v-else>✗ {{ resolveResult.error }}</span>
       </div>
 
@@ -402,6 +427,18 @@ onMounted(() => {
 
 .targets-list {
   margin-bottom: 16px;
+}
+
+.targets-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.targets-header h3 {
+  margin-bottom: 0;
 }
 
 .target-row {

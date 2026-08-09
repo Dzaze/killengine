@@ -317,6 +317,7 @@ void ApplicationController::detachProcess() {
     m_lastWritePreviousValue.clear();
     m_writeHistory.clear();
     m_lastAutoWriteTargets.clear();
+    m_activeProfileTargets.clear();
     m_lastBatchStartIndex = -1;
     m_lastBatchEndIndex = -1;
 
@@ -922,17 +923,17 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
         return result;
     }
 
-    struct ResolvedProfileTarget {
-        QString profileName;
-        QString targetName;
-        killcore::ValueType type{killcore::ValueType::Int32};
-        uint64_t address{0};
-    };
-
     const QString normalizedQuery = normalizedProfileText(query);
     const auto profileNames = killcore::ProfileStore::listProfiles();
-    QList<ResolvedProfileTarget> resolvedTargets;
+    QList<ActiveProfileTarget> resolvedTargets;
     QString matchedGroupName;
+
+    for (const auto& target : m_activeProfileTargets) {
+        if (!target.groupName.isEmpty() && normalizedQuery.contains(target.groupName)) {
+            matchedGroupName = target.groupName;
+            resolvedTargets.append(target);
+        }
+    }
 
     for (const auto& profileName : profileNames) {
         killcore::Profile profile;
@@ -958,7 +959,16 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
             }
 
             matchedGroupName = groupName;
-            resolvedTargets.append({profileName, target.name, target.type, address});
+            bool alreadyResolved = false;
+            for (const auto& existing : resolvedTargets) {
+                if (existing.profileName == profileName && existing.targetName == target.name) {
+                    alreadyResolved = true;
+                    break;
+                }
+            }
+            if (!alreadyResolved) {
+                resolvedTargets.append({profileName, target.name, groupName, address, target.type});
+            }
         }
     }
 
@@ -996,6 +1006,17 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
 
         if (writeResult.value("success").toBool()) {
             m_lastAutoWriteTargets.append({target.address, target.type});
+            bool updatedActiveTarget = false;
+            for (auto& activeTarget : m_activeProfileTargets) {
+                if (activeTarget.profileName == target.profileName && activeTarget.targetName == target.targetName) {
+                    activeTarget = target;
+                    updatedActiveTarget = true;
+                    break;
+                }
+            }
+            if (!updatedActiveTarget) {
+                m_activeProfileTargets.append(target);
+            }
         }
     }
 
@@ -1443,6 +1464,79 @@ QVariantMap ApplicationController::resolveProfileTarget(const QString& profileNa
                 result["error"] = "Impossible de résoudre le locator. Le module est peut-être absent.";
                 return result;
             }
+        }
+    }
+
+    result["error"] = "Cible introuvable dans le profil.";
+    return result;
+}
+
+QVariantMap ApplicationController::activateProfileTarget(const QString& profileName, const QString& targetName) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    for (const auto& target : profile.targets) {
+        if (target.name == targetName) {
+            uint64_t address = 0;
+            if (!killcore::resolveLocatorAddress(m_handle, target.locator, &address)) {
+                result["error"] = "Impossible d'activer cette cible. Le module est peut-être absent.";
+                return result;
+            }
+
+            const ActiveProfileTarget active{
+                profileName,
+                target.name,
+                profileTargetGroupName(target.name),
+                address,
+                target.type,
+            };
+
+            bool updated = false;
+            for (auto& existing : m_activeProfileTargets) {
+                if (existing.profileName == active.profileName && existing.targetName == active.targetName) {
+                    existing = active;
+                    updated = true;
+                    break;
+                }
+            }
+            if (!updated) {
+                m_activeProfileTargets.append(active);
+            }
+
+            bool autoWriteTargetUpdated = false;
+            for (auto& existing : m_lastAutoWriteTargets) {
+                if (existing.address == active.address) {
+                    existing.type = active.type;
+                    autoWriteTargetUpdated = true;
+                    break;
+                }
+            }
+            if (!autoWriteTargetUpdated) {
+                m_lastAutoWriteTargets.append({active.address, active.type});
+            }
+
+            result["success"] = true;
+            result["profileName"] = profileName;
+            result["targetName"] = target.name;
+            result["groupName"] = active.groupName;
+            result["address"] = QString::number(address, 16);
+            result["type"] = killcore::valueTypeToString(target.type);
+            result["activeTargetCount"] = m_activeProfileTargets.size();
+            result["message"] = QString("\"%1\" activé pour l'Assistant à l'adresse 0x%2.")
+                                    .arg(target.name, QString::number(address, 16));
+            return result;
         }
     }
 

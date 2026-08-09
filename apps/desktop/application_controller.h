@@ -136,6 +136,9 @@ public:
     /// Résout une cible de profil en adresse absolue pour le processus courant.
     Q_INVOKABLE QVariantMap resolveProfileTarget(const QString& profileName, const QString& targetName);
 
+    /// Active une cible de profil pour l'utiliser directement depuis l'Assistant.
+    Q_INVOKABLE QVariantMap activateProfileTarget(const QString& profileName, const QString& targetName);
+
 signals:
     void attachmentChanged();
     void scanStarted();
@@ -164,6 +167,14 @@ private:
         killcore::ValueType type{killcore::ValueType::Int32};
     };
 
+    struct ActiveProfileTarget {
+        QString profileName;
+        QString targetName;
+        QString groupName;
+        uint64_t address{0};
+        killcore::ValueType type{killcore::ValueType::Int32};
+    };
+
     bool                    m_attached{false};
     QString                 m_processName;
     int                     m_pid{0};
@@ -176,6 +187,7 @@ private:
     QByteArray               m_lastWritePreviousValue;
     QList<WriteRecord>       m_writeHistory;
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
+    QList<ActiveProfileTarget> m_activeProfileTargets;
     int                      m_lastBatchStartIndex{-1};
     int                      m_lastBatchEndIndex{-1};
     killai::AIEngine         m_ai;
