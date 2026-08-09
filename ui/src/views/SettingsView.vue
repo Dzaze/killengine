@@ -343,6 +343,43 @@ async function saveAll() {
   font-size: 12px;
 }
 
+.input {
+  min-width: 0;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.input::placeholder {
+  color: var(--text-dim);
+}
+
+.input:focus {
+  border-color: rgba(122, 162, 247, 0.8);
+  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.15);
+}
+
+.input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.select {
+  cursor: pointer;
+}
+
+.select option {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
 .settings-grid .wide {
   grid-column: span 2;
 }
@@ -352,7 +389,18 @@ async function saveAll() {
   justify-content: center;
 }
 
+.settings-grid .toggle-row,
+.inline-setting .toggle-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 34px;
+}
+
 .toggle-row input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
   accent-color: var(--accent);
 }
 
