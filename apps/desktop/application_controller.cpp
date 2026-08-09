@@ -589,6 +589,125 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
     return result;
 }
 
+QVariantMap ApplicationController::startExactScanExpert(
+    const QString& value,
+    const QString& valueType,
+    const QVariantMap& expertOptions) {
+    QVariantMap result;
+    QVariantList matches;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        result["matches"] = matches;
+        return result;
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(valueType, &type)) {
+        result["error"] = "Type de valeur invalide.";
+        result["matches"] = matches;
+        return result;
+    }
+
+    killcore::ScanValue scanValue;
+    QString parseError;
+    if (!killcore::parseScanValue(value, type, &scanValue, &parseError)) {
+        result["error"] = parseError;
+        result["matches"] = matches;
+        return result;
+    }
+
+    killcore::ScanOptions options;
+    options.maxResults = 1000000;
+    options.chunkSize = 1024 * 1024;
+
+    // Filtres Mode Expert (tous optionnels)
+    if (expertOptions.contains("startAddress")) {
+        const QString startText = expertOptions.value("startAddress").toString().trimmed();
+        if (!startText.isEmpty()) {
+            uint64_t startAddress = 0;
+            if (parseHexAddress(startText, &startAddress)) {
+                options.startAddress = startAddress;
+            } else {
+                result["error"] = "Adresse de début invalide.";
+                result["matches"] = matches;
+                return result;
+            }
+        }
+    }
+    if (expertOptions.contains("stopAddress")) {
+        const QString stopText = expertOptions.value("stopAddress").toString().trimmed();
+        if (!stopText.isEmpty()) {
+            uint64_t stopAddress = 0;
+            if (parseHexAddress(stopText, &stopAddress)) {
+                options.stopAddress = stopAddress;
+            } else {
+                result["error"] = "Adresse de fin invalide.";
+                result["matches"] = matches;
+                return result;
+            }
+        }
+    }
+    if (options.startAddress != 0
+        && options.stopAddress != 0
+        && options.stopAddress <= options.startAddress) {
+        result["error"] = "La fin de plage doit être supérieure au début.";
+        result["matches"] = matches;
+        return result;
+    }
+    if (expertOptions.contains("alignment")) {
+        bool alignOk = false;
+        const auto align = expertOptions.value("alignment").toULongLong(&alignOk);
+        if (alignOk && align > 0) {
+            options.alignment = static_cast<size_t>(align);
+            options.fastScan = false; // alignement explicite désactive le fast scan auto
+        }
+    }
+    options.writableOnly = expertOptions.value("writableOnly", false).toBool();
+    options.executableOnly = expertOptions.value("executableOnly", false).toBool();
+    options.copyOnWriteOnly = expertOptions.value("copyOnWriteOnly", false).toBool();
+
+    killcore::ScanEngine scanner(m_handle);
+    const auto scan = scanner.exactScan(scanValue, options);
+    m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
+
+    const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
+    for (qsizetype i = 0; i < previewCount; ++i) {
+        const auto& match = scan.matches.at(i);
+        QVariantMap entry;
+        entry["address"] = QString::number(match.address, 16);
+        entry["type"] = killcore::valueTypeToString(match.type);
+        matches.append(entry);
+    }
+
+    result["success"] = scan.success;
+    result["partial"] = scan.partial;
+    result["cancelled"] = scan.cancelled;
+    result["regionsScanned"] = static_cast<int>(scan.regionsScanned);
+    result["bytesScanned"] = static_cast<qulonglong>(scan.bytesScanned);
+    result["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
+    result["matchesReturned"] = matches.size();
+    result["error"] = scan.errorMessage;
+    result["matches"] = matches;
+    result["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+    appendSmartSearchDebug("exact_scan_expert", {
+        {"value", value},
+        {"valueType", valueType},
+        {"startAddress", expertOptions.value("startAddress")},
+        {"stopAddress", expertOptions.value("stopAddress")},
+        {"alignment", expertOptions.value("alignment")},
+        {"writableOnly", options.writableOnly},
+        {"executableOnly", options.executableOnly},
+        {"copyOnWriteOnly", options.copyOnWriteOnly},
+        {"success", result.value("success")},
+        {"matchesFound", result.value("matchesFound")},
+        {"candidateStoreSize", result.value("candidateStoreSize")},
+        {"error", result.value("error")},
+    });
+    return result;
+}
+
 QVariantMap ApplicationController::nextScan(const QString& mode, const QString& value) {
     QVariantMap result;
     result["success"] = false;

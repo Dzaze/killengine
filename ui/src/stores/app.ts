@@ -53,6 +53,15 @@ export const useAppStore = defineStore('app', () => {
   const exactScanValue = ref('')
   const exactScanType = ref('Int32')
   const exactScanResult = ref<ExactScanResult | null>(null)
+
+  // Mode Expert (Phase 12)
+  const expertModeEnabled = ref(false)
+  const expertStartAddress = ref('')
+  const expertStopAddress = ref('')
+  const expertAlignment = ref(0)
+  const expertWritableOnly = ref(false)
+  const expertExecutableOnly = ref(false)
+  const expertCopyOnWriteOnly = ref(false)
   const candidatePage = ref<CandidatePage | null>(null)
   const candidatePageIndex = ref(0)
   const candidatePageSize = ref(100)
@@ -373,10 +382,34 @@ export const useAppStore = defineStore('app', () => {
 
   async function doExactScan() {
     if (!exactScanValue.value.trim()) return
+    // Si le Mode Expert est activé et qu'au moins un filtre est défini, on utilise l'API expert.
+    const hasExpertFilter =
+      expertModeEnabled.value
+      && (expertStartAddress.value.trim()
+        || expertStopAddress.value.trim()
+        || expertAlignment.value > 0
+        || expertWritableOnly.value
+        || expertExecutableOnly.value
+        || expertCopyOnWriteOnly.value)
     try {
-      exactScanResult.value = await backend
-        .getController()
-        .startExactScan(exactScanValue.value, exactScanType.value)
+      if (hasExpertFilter) {
+        exactScanResult.value = await backend.getController().startExactScanExpert(
+          exactScanValue.value,
+          exactScanType.value,
+          {
+            startAddress: expertStartAddress.value.trim() || undefined,
+            stopAddress: expertStopAddress.value.trim() || undefined,
+            alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
+            writableOnly: expertWritableOnly.value,
+            executableOnly: expertExecutableOnly.value,
+            copyOnWriteOnly: expertCopyOnWriteOnly.value,
+          },
+        )
+      } else {
+        exactScanResult.value = await backend
+          .getController()
+          .startExactScan(exactScanValue.value, exactScanType.value)
+      }
       candidatePageIndex.value = 0
       await refreshCandidates()
     } catch (e) {
@@ -543,6 +576,13 @@ export const useAppStore = defineStore('app', () => {
     exactScanValue,
     exactScanType,
     exactScanResult,
+    expertModeEnabled,
+    expertStartAddress,
+    expertStopAddress,
+    expertAlignment,
+    expertWritableOnly,
+    expertExecutableOnly,
+    expertCopyOnWriteOnly,
     candidatePage,
     candidatePageIndex,
     candidatePageSize,

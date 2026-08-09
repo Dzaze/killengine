@@ -74,6 +74,14 @@ public:
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
 
+    /// Lance un scan exact avec filtres Mode Expert (Phase 12).
+    /// expertOptions keys: startAddress, stopAddress, alignment, writableOnly,
+    ///                     executableOnly, copyOnWriteOnly, fastScan (toutes optionnelles).
+    Q_INVOKABLE QVariantMap startExactScanExpert(
+        const QString& value,
+        const QString& valueType,
+        const QVariantMap& expertOptions);
+
     /// Réduit les candidats existants en relisant leurs adresses.
     Q_INVOKABLE QVariantMap nextScan(const QString& mode, const QString& value);
 

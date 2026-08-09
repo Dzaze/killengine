@@ -15,7 +15,10 @@ void scanBuffer(
     const QByteArray& needle,
     ValueType type,
     ScanResult* result,
-    size_t maxResults) {
+    size_t maxResults,
+    size_t alignment,
+    uint64_t rangeStart,
+    uint64_t rangeEnd) {
     if (!result || needle.isEmpty() || buffer.size() < needle.size()) {
         return;
     }
@@ -24,17 +27,47 @@ void scanBuffer(
     const auto needleSize = needle.size();
     const char* haystack = buffer.constData();
     const char* expected = needle.constData();
+    const uint64_t step = static_cast<uint64_t>(std::max<size_t>(alignment, 1));
 
-    for (qsizetype offset = 0; offset <= haystackSize - needleSize; ++offset) {
+    uint64_t firstAddress = std::max(baseAddress, rangeStart);
+    if (rangeEnd != 0 && firstAddress >= rangeEnd) {
+        return;
+    }
+
+    const uint64_t remainder = firstAddress % step;
+    if (remainder != 0) {
+        firstAddress += step - remainder;
+    }
+    if (firstAddress < baseAddress) {
+        return;
+    }
+
+    const uint64_t firstOffset = firstAddress - baseAddress;
+    if (firstOffset > static_cast<uint64_t>(haystackSize - needleSize)) {
+        return;
+    }
+
+    for (qsizetype offset = static_cast<qsizetype>(firstOffset);
+         offset <= haystackSize - needleSize;
+         offset += static_cast<qsizetype>(step)) {
+        const uint64_t candidateAddress = baseAddress + static_cast<uint64_t>(offset);
+        if (rangeEnd != 0 && candidateAddress >= rangeEnd) {
+            break;
+        }
         if (std::memcmp(haystack + offset, expected, static_cast<size_t>(needleSize)) == 0) {
             ++result->matchesFound;
             if (result->matches.size() < static_cast<qsizetype>(maxResults)) {
-                result->matches.append({baseAddress + static_cast<uint64_t>(offset), type});
+                result->matches.append({candidateAddress, type});
             } else {
                 result->partial = true;
             }
         }
     }
+}
+
+bool isCopyOnWriteProtection(uint32_t protection) {
+    const auto flags = protectionToString(protection).split('|');
+    return flags.contains("WC") || flags.contains("XWC");
 }
 
 } // namespace
@@ -64,6 +97,13 @@ ScanResult ScanEngine::exactScan(
     MemoryReader reader(m_process);
     const size_t chunkSize = std::max(options.chunkSize, static_cast<size_t>(needle.size()));
 
+    // Fast scan : aligne automatiquement sur la taille du type si l'utilisateur
+    // n'a pas forcé un alignement explicite (alignment > 1).
+    size_t effectiveAlignment = options.alignment;
+    if (effectiveAlignment <= 1 && options.fastScan) {
+        effectiveAlignment = valueTypeSize(value.type);
+    }
+
     for (const auto& region : regions) {
         if (cancellation && cancellation->isCancelled()) {
             result.cancelled = true;
@@ -75,6 +115,16 @@ ScanResult ScanEngine::exactScan(
         if (!region.readable || region.guarded || region.size < static_cast<uint64_t>(needle.size())) {
             continue;
         }
+
+        // Filtres Mode Expert
+        if (options.writableOnly && !region.writable) continue;
+        if (options.executableOnly && !region.executable) continue;
+        if (options.copyOnWriteOnly && !isCopyOnWriteProtection(region.protection)) continue;
+
+        // Plage d'adresses : si stopAddress est avant la région ou startAddress après, on saute.
+        if (options.stopAddress != 0 && region.baseAddress >= options.stopAddress) continue;
+        if (options.startAddress != 0
+            && options.startAddress >= region.baseAddress + region.size) continue;
 
         uint64_t offset = 0;
         QByteArray overlap;
@@ -97,7 +147,16 @@ ScanResult ScanEngine::exactScan(
 
             QByteArray buffer = overlap + read.data;
             const uint64_t bufferBase = region.baseAddress + offset - static_cast<uint64_t>(overlap.size());
-            scanBuffer(buffer, bufferBase, needle, value.type, &result, options.maxResults);
+            scanBuffer(
+                buffer,
+                bufferBase,
+                needle,
+                value.type,
+                &result,
+                options.maxResults,
+                effectiveAlignment,
+                options.startAddress,
+                options.stopAddress);
 
             result.bytesScanned += read.bytesRead;
             offset += static_cast<uint64_t>(read.bytesRead);

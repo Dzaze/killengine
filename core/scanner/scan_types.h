@@ -39,6 +39,15 @@ struct ScanMatch {
 struct ScanOptions {
     size_t chunkSize{1024 * 1024};
     size_t maxResults{10000};
+
+    // Filtres Mode Expert (Phase 12)
+    uint64_t startAddress{0};          ///< Adresse de début (0 = début de chaque région)
+    uint64_t stopAddress{0};           ///< Adresse de fin (0 = fin de chaque région)
+    size_t   alignment{1};             ///< Alignement des adresses candidates (1 = pas d'alignement)
+    bool     writableOnly{false};      ///< Ne scanner que les régions writables
+    bool     executableOnly{false};    ///< Ne scanner que les régions executables
+    bool     copyOnWriteOnly{false};   ///< Ne scanner que les régions copy-on-write (mapped privé writable)
+    bool     fastScan{true};           ///< Active l'alignement automatique par taille de type
 };
 
 struct ScanResult {

@@ -115,6 +115,54 @@ onMounted(() => {
             {{ $t('scan.button') }}
           </button>
         </div>
+
+        <!-- Mode Expert — Filtres avancés -->
+        <div class="expert-toggle">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="store.expertModeEnabled" />
+            Mode Expert (filtres avancés)
+          </label>
+        </div>
+        <div v-if="store.expertModeEnabled" class="expert-filters">
+          <div class="controls expert-address-controls">
+            <input
+              v-model="store.expertStartAddress"
+              class="input"
+              placeholder="Adresse début (0x...)"
+            />
+            <input
+              v-model="store.expertStopAddress"
+              class="input"
+              placeholder="Adresse fin (0x...)"
+            />
+            <input
+              v-model.number="store.expertAlignment"
+              type="number"
+              min="0"
+              step="1"
+              class="input"
+              placeholder="Alignement (0 = auto)"
+            />
+          </div>
+          <div class="expert-flags">
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="store.expertWritableOnly" />
+              Writable uniquement
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="store.expertExecutableOnly" />
+              Exécutable uniquement
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="store.expertCopyOnWriteOnly" />
+              Copy-on-write uniquement
+            </label>
+          </div>
+          <p class="hint">
+            Astuce : laisse les champs vides pour scanner tout. Alignement 0 active le fast scan automatique.
+          </p>
+        </div>
+
         <div v-if="store.exactScanResult" class="metrics">
           <span>{{ $t('scan.matches') }}: {{ formatNumber(store.exactScanResult.matchesFound) }}</span>
           <span>{{ $t('scan.regions') }}: {{ formatNumber(store.exactScanResult.regionsScanned) }}</span>
@@ -372,6 +420,51 @@ onMounted(() => {
 
 .exact-controls {
   grid-template-columns: 1fr 120px auto;
+}
+
+.expert-toggle {
+  margin-top: 10px;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.expert-filters {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.expert-address-controls {
+  grid-template-columns: 1fr 1fr 140px;
+  margin-bottom: 6px;
+}
+
+.expert-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.hint {
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .next-controls {

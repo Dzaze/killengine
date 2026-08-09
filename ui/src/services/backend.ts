@@ -125,6 +125,15 @@ export interface MemoryWriteResult {
   enabled?: boolean
 }
 
+export interface ExpertScanOptions {
+  startAddress?: string
+  stopAddress?: string
+  alignment?: number
+  writableOnly?: boolean
+  executableOnly?: boolean
+  copyOnWriteOnly?: boolean
+}
+
 export interface SmartSearchResult {
   status: string
   message?: string
@@ -166,6 +175,11 @@ export interface BackendController {
   getMemoryMap(): Promise<MemoryMapResult>
   readMemoryPreview(addressHex: string, size: number): Promise<MemoryReadPreview>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
+  startExactScanExpert(
+    value: string,
+    valueType: string,
+    expertOptions: ExpertScanOptions,
+  ): Promise<ExactScanResult>
   nextScan(mode: string, value: string): Promise<NextScanResult>
   getCandidates(pageIndex: number, pageSize: number, addressFilter: string): Promise<CandidatePage>
   captureUnknownSnapshot(): Promise<UnknownSnapshotResult>
@@ -330,6 +344,20 @@ class BackendService {
         }
       },
       async startExactScan(_value: string, _valueType: string) {
+        return {
+          success: false,
+          partial: false,
+          cancelled: false,
+          regionsScanned: 0,
+          bytesScanned: 0,
+          matchesFound: 0,
+          matchesReturned: 0,
+          error: 'Mock backend',
+          matches: [],
+          candidateStoreSize: 0,
+        }
+      },
+      async startExactScanExpert(_value: string, _valueType: string, _expertOptions: ExpertScanOptions) {
         return {
           success: false,
           partial: false,

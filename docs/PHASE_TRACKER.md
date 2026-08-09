@@ -102,7 +102,7 @@ Prerequisites before Phase 12:
   - [x] Assistant conversation-state fixes for active addresses/profile targets
   - [x] visible active chat memory target state with clear action
   - [x] unit coverage for AI tools, intent extraction, and missing-value clarification
-  - [ ] Mode Expert complete UX
+  - [x] Mode Expert complete UX (filtres start/stop address, alignment, writable/executable/COW + fast scan auto)
   - [ ] installer/package
   - [ ] settings UI
   - [ ] log viewer/export
