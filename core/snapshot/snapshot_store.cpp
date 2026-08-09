@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace killcore {
 
@@ -68,6 +69,43 @@ bool matchesMode(const char* previous, const char* current, ValueType type, Next
 }
 
 } // namespace
+
+SnapshotStore::~SnapshotStore() {
+    clear();
+}
+
+SnapshotStore::SnapshotStore(SnapshotStore&& other) noexcept
+    : m_regions(std::move(other.m_regions)),
+      m_bytesCaptured(other.m_bytesCaptured),
+      m_compressedBytesCaptured(other.m_compressedBytesCaptured),
+      m_backingFile(std::move(other.m_backingFile)),
+      m_mappedData(other.m_mappedData),
+      m_mappedSize(other.m_mappedSize) {
+    other.m_bytesCaptured = 0;
+    other.m_compressedBytesCaptured = 0;
+    other.m_mappedData = nullptr;
+    other.m_mappedSize = 0;
+}
+
+SnapshotStore& SnapshotStore::operator=(SnapshotStore&& other) noexcept {
+    if (this == &other) {
+        return *this;
+    }
+
+    clear();
+    m_regions = std::move(other.m_regions);
+    m_bytesCaptured = other.m_bytesCaptured;
+    m_compressedBytesCaptured = other.m_compressedBytesCaptured;
+    m_backingFile = std::move(other.m_backingFile);
+    m_mappedData = other.m_mappedData;
+    m_mappedSize = other.m_mappedSize;
+
+    other.m_bytesCaptured = 0;
+    other.m_compressedBytesCaptured = 0;
+    other.m_mappedData = nullptr;
+    other.m_mappedSize = 0;
+    return *this;
+}
 
 SnapshotResult SnapshotStore::capture(
     const ProcessHandle& process,
@@ -223,6 +261,7 @@ UnknownScanResult SnapshotStore::compare(
 
     for (const auto& region : m_regions) {
         if (cancellation && cancellation->isCancelled()) {
+            result.cancelled = true;
             result.partial = true;
             result.errorMessage = "Unknown scan cancelled.";
             return result;

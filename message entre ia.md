@@ -116,9 +116,13 @@ Travaux récents validés et poussés :
 ▸ Scans asynchrones
   - Scan exact en worker thread via startExactScanAsync + signal scanFinished.
   - Next scan en worker thread via nextScanAsync + signal scanFinished.
+  - Capture unknown en worker thread via captureUnknownSnapshotAsync + signal scanFinished.
+  - Comparaison unknown en worker thread via unknownNextScanAsync + signal scanFinished.
+  - SnapshotStore possède une sémantique de move explicite pour transférer proprement le fichier temporaire memory-mapped du worker vers le contrôleur UI.
   - Annulation du scan actif via cancelActiveScan.
   - Une annulation ne remplace pas le CandidateStore avec des résultats partiels.
   - Le Mode Expert affiche un bouton Annuler pendant un scan actif.
+  - detachProcess() ne nettoie plus l'état mémoire pendant qu'un scan est en cours ; il demande l'annulation et attend que le worker termine.
 
 Dernières validations connues :
   - npm run build : OK
@@ -126,6 +130,5 @@ Dernières validations connues :
   - ctest --test-dir build --output-on-failure : 24/24 OK
 
 RESTE À FAIRE ACTUEL :
-  - Phase 12 : async threaded unknown capture/compare.
   - Phase 12 : documentation / guide utilisateur.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.

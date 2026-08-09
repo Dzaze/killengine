@@ -472,6 +472,14 @@ bool ApplicationController::attachProcess(int pid) {
 void ApplicationController::detachProcess() {
     KE_LOG_INFO() << "detachProcess()";
 
+    if (m_scanInProgress) {
+        if (m_activeScanCancellation) {
+            m_activeScanCancellation->cancel();
+        }
+        KE_LOG_INFO() << "Detach deferred because a scan is still running.";
+        return;
+    }
+
     m_handle.close();
     m_pid = 0;
     m_attached = false;
@@ -1296,6 +1304,94 @@ QVariantMap ApplicationController::captureUnknownSnapshot() {
     return result;
 }
 
+QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
+    QVariantMap result;
+    result["success"] = false;
+    result["started"] = false;
+
+    if (m_scanInProgress) {
+        result["error"] = "Un scan est déjà en cours.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const int requestId = m_nextScanRequestId++;
+    const int pid = m_pid;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_scanInProgress = true;
+    m_activeScanCancellation = cancellation;
+    emit scanStarted();
+    emit scanProgress(0);
+
+    std::thread([self, requestId, pid, cancellation]() mutable {
+        killcore::SnapshotStore snapshotStore;
+        killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
+        killcore::SnapshotResult snapshot;
+        if (!workerHandle.isValid()) {
+            snapshot.success = false;
+            snapshot.errorMessage = "Impossible d'ouvrir le processus dans le worker unknown.";
+        } else {
+            snapshot = snapshotStore.capture(workerHandle, 512 * 1024 * 1024, cancellation.get());
+        }
+
+        if (!self) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(self.data(), [self, requestId, snapshot, snapshotStore = std::move(snapshotStore)]() mutable {
+            if (!self) {
+                return;
+            }
+
+            if (snapshot.success && !snapshot.cancelled) {
+                self->m_snapshot = std::move(snapshotStore);
+            }
+
+            QVariantMap finished;
+            finished["requestId"] = requestId;
+            finished["kind"] = "unknown_capture";
+            finished["success"] = snapshot.success;
+            finished["partial"] = snapshot.partial;
+            finished["cancelled"] = snapshot.cancelled;
+            finished["regionsCaptured"] = static_cast<qulonglong>(snapshot.regionsCaptured);
+            finished["regionsSkipped"] = static_cast<qulonglong>(snapshot.regionsSkipped);
+            finished["bytesCaptured"] = static_cast<qulonglong>(snapshot.bytesCaptured);
+            finished["compressedBytes"] = static_cast<qulonglong>(snapshot.compressedBytes);
+            finished["mappedStorage"] = snapshot.mappedStorage;
+            finished["error"] = snapshot.errorMessage;
+
+            self->appendSmartSearchDebug("unknown_capture_async", {
+                {"requestId", requestId},
+                {"success", finished.value("success")},
+                {"partial", finished.value("partial")},
+                {"cancelled", finished.value("cancelled")},
+                {"regionsCaptured", finished.value("regionsCaptured")},
+                {"regionsSkipped", finished.value("regionsSkipped")},
+                {"bytesCaptured", finished.value("bytesCaptured")},
+                {"compressedBytes", finished.value("compressedBytes")},
+                {"mappedStorage", finished.value("mappedStorage")},
+                {"error", finished.value("error")},
+            });
+
+            self->m_scanInProgress = false;
+            self->m_activeScanCancellation.reset();
+            emit self->scanProgress(100);
+            emit self->scanFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["error"] = "";
+    return result;
+}
+
 QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QString& valueType) {
     QVariantMap result;
     result["success"] = false;
@@ -1333,12 +1429,125 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
 
     result["success"] = scan.success;
     result["partial"] = scan.partial;
+    result["cancelled"] = scan.cancelled;
     result["checkedBytes"] = static_cast<qulonglong>(scan.checkedBytes);
     result["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
     result["stored"] = static_cast<qulonglong>(m_candidates.size());
     result["error"] = scan.errorMessage;
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
     emit scanProgress(100);
+    return result;
+}
+
+QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, const QString& valueType) {
+    QVariantMap result;
+    result["success"] = false;
+    result["started"] = false;
+
+    if (m_scanInProgress) {
+        result["error"] = "Un scan est déjà en cours.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (m_snapshot.isEmpty()) {
+        result["error"] = "Aucun snapshot unknown capturé.";
+        return result;
+    }
+
+    killcore::NextScanMode scanMode;
+    if (!killcore::parseNextScanMode(mode, &scanMode)) {
+        result["error"] = "Mode invalide.";
+        return result;
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(valueType, &type)) {
+        result["error"] = "Type invalide.";
+        return result;
+    }
+
+    const int requestId = m_nextScanRequestId++;
+    const int pid = m_pid;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_scanInProgress = true;
+    m_activeScanCancellation = cancellation;
+    emit scanStarted();
+    emit scanProgress(0);
+
+    std::thread([self, requestId, pid, mode, valueType, type, scanMode, cancellation]() {
+        killcore::UnknownScanResult scan;
+        killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
+        if (!workerHandle.isValid()) {
+            scan.success = false;
+            scan.errorMessage = "Impossible d'ouvrir le processus dans le worker unknown.";
+        } else if (self) {
+            scan = self->m_snapshot.compare(workerHandle, type, scanMode, cancellation.get());
+        } else {
+            return;
+        }
+
+        if (!self) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, valueType, type, scan]() {
+            if (!self) {
+                return;
+            }
+
+            if (!scan.cancelled) {
+                killcore::ScanResult scanResult;
+                scanResult.success = scan.success;
+                scanResult.partial = scan.partial;
+                scanResult.bytesScanned = scan.checkedBytes;
+                scanResult.matchesFound = scan.matchesFound;
+                scanResult.errorMessage = scan.errorMessage;
+                scanResult.matches = scan.matches;
+                self->m_candidates.replaceFromScan(scanResult, {});
+            }
+
+            QVariantMap finished;
+            finished["requestId"] = requestId;
+            finished["kind"] = "unknown_next";
+            finished["success"] = scan.success;
+            finished["partial"] = scan.partial;
+            finished["cancelled"] = scan.cancelled;
+            finished["checkedBytes"] = static_cast<qulonglong>(scan.checkedBytes);
+            finished["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
+            finished["stored"] = static_cast<qulonglong>(self->m_candidates.size());
+            finished["error"] = scan.errorMessage;
+
+            self->appendSmartSearchDebug("unknown_next_async", {
+                {"requestId", requestId},
+                {"mode", mode},
+                {"valueType", valueType},
+                {"parsedType", killcore::valueTypeToString(type)},
+                {"success", finished.value("success")},
+                {"partial", finished.value("partial")},
+                {"cancelled", finished.value("cancelled")},
+                {"checkedBytes", finished.value("checkedBytes")},
+                {"matchesFound", finished.value("matchesFound")},
+                {"stored", finished.value("stored")},
+                {"error", finished.value("error")},
+            });
+
+            self->m_scanInProgress = false;
+            self->m_activeScanCancellation.reset();
+            emit self->scanStatsUpdated(static_cast<int>(self->m_candidates.size()));
+            emit self->scanProgress(100);
+            emit self->scanFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["error"] = "";
     return result;
 }
 

@@ -107,6 +107,8 @@ export interface NextScanResult {
 }
 
 export interface UnknownSnapshotResult {
+  requestId?: number
+  kind?: string
   success: boolean
   partial: boolean
   cancelled: boolean
@@ -117,8 +119,11 @@ export interface UnknownSnapshotResult {
 }
 
 export interface UnknownNextScanResult {
+  requestId?: number
+  kind?: string
   success: boolean
   partial: boolean
+  cancelled?: boolean
   checkedBytes: number
   matchesFound: number
   stored: number
@@ -213,13 +218,15 @@ export interface BackendController {
     valueType: string,
     expertOptions: ExpertScanOptions,
   ): Promise<Record<string, unknown>>
-  scanFinished?: QWebChannelSignal<ExactScanResult | NextScanResult>
+  scanFinished?: QWebChannelSignal<ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult>
   nextScan(mode: string, value: string): Promise<NextScanResult>
   nextScanAsync(mode: string, value: string): Promise<Record<string, unknown>>
   cancelActiveScan(): Promise<Record<string, unknown>>
   getCandidates(pageIndex: number, pageSize: number, addressFilter: string): Promise<CandidatePage>
   captureUnknownSnapshot(): Promise<UnknownSnapshotResult>
+  captureUnknownSnapshotAsync(): Promise<Record<string, unknown>>
   unknownNextScan(mode: string, valueType: string): Promise<UnknownNextScanResult>
+  unknownNextScanAsync(mode: string, valueType: string): Promise<Record<string, unknown>>
   writeMemoryValue(addressHex: string, valueType: string, value: string): Promise<MemoryWriteResult>
   rollbackLastWrite(): Promise<MemoryWriteResult>
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
@@ -376,7 +383,7 @@ class BackendService {
         })
       }, 10 * 60 * 1000)
 
-      const handler = (payload: ExactScanResult | NextScanResult) => {
+      const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
         if (Number(payload.requestId) !== requestId) return
         if ('kind' in payload && payload.kind === 'next_scan') return
         window.clearTimeout(timeout)
@@ -420,7 +427,7 @@ class BackendService {
         })
       }, 10 * 60 * 1000)
 
-      const handler = (payload: ExactScanResult | NextScanResult) => {
+      const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
         if (Number(payload.requestId) !== requestId) return
         if ('kind' in payload && payload.kind && payload.kind !== 'next_scan') return
         window.clearTimeout(timeout)
@@ -433,6 +440,98 @@ class BackendService {
 
   async cancelActiveScan(): Promise<Record<string, unknown>> {
     return this.getController().cancelActiveScan()
+  }
+
+  async captureUnknownSnapshotAsync(): Promise<UnknownSnapshotResult> {
+    const controller = this.getController()
+    if (!controller.scanFinished || !controller.captureUnknownSnapshotAsync) {
+      return controller.captureUnknownSnapshot()
+    }
+
+    const start = await controller.captureUnknownSnapshotAsync()
+    if (start.success !== true || start.started !== true) {
+      return {
+        success: false,
+        partial: false,
+        cancelled: false,
+        regionsCaptured: 0,
+        regionsSkipped: 0,
+        bytesCaptured: 0,
+        error: String(start.error ?? 'Impossible de démarrer la capture unknown async.'),
+      }
+    }
+
+    const requestId = Number(start.requestId)
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        resolve({
+          requestId,
+          kind: 'unknown_capture',
+          success: false,
+          partial: false,
+          cancelled: false,
+          regionsCaptured: 0,
+          regionsSkipped: 0,
+          bytesCaptured: 0,
+          error: 'Timeout de la capture unknown async.',
+        })
+      }, 10 * 60 * 1000)
+
+      const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
+        if (Number(payload.requestId) !== requestId) return
+        if ('kind' in payload && payload.kind && payload.kind !== 'unknown_capture') return
+        window.clearTimeout(timeout)
+        controller.scanFinished?.disconnect?.(handler)
+        resolve(payload as UnknownSnapshotResult)
+      }
+      controller.scanFinished?.connect(handler)
+    })
+  }
+
+  async unknownNextScanAsync(mode: string, valueType: string): Promise<UnknownNextScanResult> {
+    const controller = this.getController()
+    if (!controller.scanFinished || !controller.unknownNextScanAsync) {
+      return controller.unknownNextScan(mode, valueType)
+    }
+
+    const start = await controller.unknownNextScanAsync(mode, valueType)
+    if (start.success !== true || start.started !== true) {
+      return {
+        success: false,
+        partial: false,
+        cancelled: false,
+        checkedBytes: 0,
+        matchesFound: 0,
+        stored: 0,
+        error: String(start.error ?? 'Impossible de démarrer la comparaison unknown async.'),
+      }
+    }
+
+    const requestId = Number(start.requestId)
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        resolve({
+          requestId,
+          kind: 'unknown_next',
+          success: false,
+          partial: false,
+          cancelled: false,
+          checkedBytes: 0,
+          matchesFound: 0,
+          stored: 0,
+          error: 'Timeout de la comparaison unknown async.',
+        })
+      }, 10 * 60 * 1000)
+
+      const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
+        if (Number(payload.requestId) !== requestId) return
+        if ('kind' in payload && payload.kind && payload.kind !== 'unknown_next') return
+        window.clearTimeout(timeout)
+        controller.scanFinished?.disconnect?.(handler)
+        resolve(payload as UnknownNextScanResult)
+      }
+      controller.scanFinished?.connect(handler)
+    })
   }
 
   private notifyListeners(): void {
@@ -551,15 +650,22 @@ class BackendService {
           error: 'Mock backend',
         }
       },
+      async captureUnknownSnapshotAsync() {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
       async unknownNextScan(_mode: string, _valueType: string) {
         return {
           success: false,
           partial: false,
+          cancelled: false,
           checkedBytes: 0,
           matchesFound: 0,
           stored: 0,
           error: 'Mock backend',
         }
+      },
+      async unknownNextScanAsync(_mode: string, _valueType: string) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
       async writeMemoryValue(_addressHex: string, _valueType: string, _value: string) {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend' }

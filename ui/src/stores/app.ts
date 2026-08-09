@@ -608,9 +608,9 @@ export const useAppStore = defineStore('app', () => {
       scanBusy.value = true
       scanProgressPercent.value = 15
       scanStatusText.value = 'Capture unknown en cours...'
-      unknownSnapshotResult.value = await backend.getController().captureUnknownSnapshot()
+      unknownSnapshotResult.value = await backend.captureUnknownSnapshotAsync()
       scanProgressPercent.value = 100
-      scanStatusText.value = 'Snapshot capturé.'
+      scanStatusText.value = unknownSnapshotResult.value.cancelled ? 'Scan annulé.' : 'Snapshot capturé.'
     } catch (e) {
       unknownSnapshotResult.value = {
         success: false,
@@ -633,19 +633,18 @@ export const useAppStore = defineStore('app', () => {
       scanBusy.value = true
       scanProgressPercent.value = 15
       scanStatusText.value = 'Comparaison unknown en cours...'
-      unknownNextScanResult.value = await backend
-        .getController()
-        .unknownNextScan(unknownScanMode.value, unknownScanType.value)
+      unknownNextScanResult.value = await backend.unknownNextScanAsync(unknownScanMode.value, unknownScanType.value)
       scanProgressPercent.value = 85
       candidatePageIndex.value = 0
       scanStatusText.value = 'Actualisation des candidats...'
       await refreshCandidates()
       scanProgressPercent.value = 100
-      scanStatusText.value = 'Comparaison unknown terminée.'
+      scanStatusText.value = unknownNextScanResult.value.cancelled ? 'Scan annulé.' : 'Comparaison unknown terminée.'
     } catch (e) {
       unknownNextScanResult.value = {
         success: false,
         partial: false,
+        cancelled: false,
         checkedBytes: 0,
         matchesFound: 0,
         stored: 0,

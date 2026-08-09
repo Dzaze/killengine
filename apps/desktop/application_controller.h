@@ -106,8 +106,14 @@ public:
     /// Capture un snapshot initial sans connaître la valeur cible.
     Q_INVOKABLE QVariantMap captureUnknownSnapshot();
 
+    /// Capture un snapshot unknown dans un worker thread.
+    Q_INVOKABLE QVariantMap captureUnknownSnapshotAsync();
+
     /// Compare le snapshot unknown initial avec l'état courant.
     Q_INVOKABLE QVariantMap unknownNextScan(const QString& mode, const QString& valueType);
+
+    /// Compare le snapshot unknown dans un worker thread.
+    Q_INVOKABLE QVariantMap unknownNextScanAsync(const QString& mode, const QString& valueType);
 
     /// Écrit une valeur typée à une adresse.
     Q_INVOKABLE QVariantMap writeMemoryValue(const QString& addressHex, const QString& valueType, const QString& value);

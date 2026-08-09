@@ -110,5 +110,5 @@ Prerequisites before Phase 12:
   - [x] scan UX/progress polish (busy states, guarded actions, progress banner, scan signals)
   - [x] async threaded exact scan (worker thread, non-blocking start, scanFinished signal, safe candidate-store handoff)
   - [x] async threaded next scan + cancellation (worker thread, shared cancel token, no candidate-store replacement on cancel)
-  - [ ] async threaded unknown capture/compare
+  - [x] async threaded unknown capture/compare (worker thread, movable mapped snapshot handoff, shared cancel token)
   - [ ] documentation/user guide

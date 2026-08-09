@@ -38,6 +38,7 @@ struct SnapshotResult {
 struct UnknownScanResult {
     bool success{false};
     bool partial{false};
+    bool cancelled{false};
     size_t checkedBytes{0};
     size_t matchesFound{0};
     QString errorMessage;
@@ -46,6 +47,14 @@ struct UnknownScanResult {
 
 class SnapshotStore {
 public:
+    SnapshotStore() = default;
+    ~SnapshotStore();
+
+    SnapshotStore(const SnapshotStore&) = delete;
+    SnapshotStore& operator=(const SnapshotStore&) = delete;
+    SnapshotStore(SnapshotStore&& other) noexcept;
+    SnapshotStore& operator=(SnapshotStore&& other) noexcept;
+
     SnapshotResult capture(
         const ProcessHandle& process,
         size_t maxBytes = 512 * 1024 * 1024,
