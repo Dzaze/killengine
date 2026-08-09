@@ -28,6 +28,8 @@ export interface ChatMessage {
   workflowStatus?: string
   candidateCount?: number
   targetValue?: string
+  intent?: string
+  intentRationale?: string
   suggestions?: Array<Record<string, unknown>>
   filteredWriteCandidates?: Array<Record<string, unknown>>
   autoWriteResults?: Array<Record<string, unknown>>
@@ -471,6 +473,8 @@ export const useAppStore = defineStore('app', () => {
         workflowStatus: wfStatus || undefined,
         candidateCount,
         targetValue: result.targetValue ? String(result.targetValue) : undefined,
+        intent: result.intent ? String(result.intent) : undefined,
+        intentRationale: result.intentRationale ? String(result.intentRationale) : undefined,
       }
 
       if (result.requiresConfirmation) {

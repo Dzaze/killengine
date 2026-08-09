@@ -2667,6 +2667,12 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         {"valueType", m_smartSearchValueType},
     });
 
+    auto stampIntent = [&](QVariantMap* payload) {
+        if (!payload) return;
+        (*payload)["intent"] = smartSearchIntentKindToString(intent.kind);
+        (*payload)["intentRationale"] = intent.rationale;
+    };
+
     if (intent.resetContext) {
         const bool hadCandidates = !m_candidates.isEmpty();
         const int chatCount = m_chatMemoryTargets.size();
@@ -2710,6 +2716,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         cleared["profileTargetsCleared"] = profileCount;
         cleared["lastAutoWriteTargetsCleared"] = lastCount;
         cleared["message"] = QString("C'est fait, j'ai oublié les adresses et profils actifs de la conversation.");
+        stampIntent(&cleared);
         appendSmartSearchDebug("smart_search_clear_active_targets", cleared);
         return cleared;
     }
@@ -2723,6 +2730,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         reset["actionStatus"] = "executed";
         reset["workflowStatus"] = "idle";
         reset["message"] = "D'accord, je repars sur une recherche propre. Donne-moi la nouvelle valeur à chercher.";
+        stampIntent(&reset);
         appendSmartSearchDebug("smart_search_context_reset", reset);
         return reset;
     }
@@ -2733,22 +2741,30 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets
             && activation.value("success").toBool()
             && numbers.size() == 1) {
-            return writeChatMemoryTargetsFromQuery(query, numbers.first());
+            auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
+            stampIntent(&writeTargets);
+            return writeTargets;
         }
+        stampIntent(&activation);
         return activation;
     }
 
     if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
-        return writeChatMemoryTargetsFromQuery(query, numbers.first());
+        auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
+        stampIntent(&writeTargets);
+        return writeTargets;
     }
 
     if (intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
-        return rewriteLastAutoWriteTargets(numbers.first(), query);
+        auto rewriteTargets = rewriteLastAutoWriteTargets(numbers.first(), query);
+        stampIntent(&rewriteTargets);
+        return rewriteTargets;
     }
 
     if (intent.kind == SmartSearchIntentKind::WriteProfileTargets && numbers.size() == 1) {
         auto profileWrite = writeProfileTargetsFromQuery(query, numbers.first());
         if (profileWrite.value("tool").toString() == "profile_write") {
+            stampIntent(&profileWrite);
             return profileWrite;
         }
     }
@@ -2805,6 +2821,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             && result.value("error").toString().trimmed().isEmpty()) {
             result["message"] = "D'accord. Donne-moi la valeur à chercher, ou précise que tu veux écrire sur une adresse active.";
         }
+        stampIntent(&result);
         return result;
     }
 
@@ -2824,10 +2841,12 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = "Cette action modifie la mémoire. Utilise l'onglet Mémoire pour confirmer manuellement.";
+        stampIntent(&result);
         return result;
     } else {
         result["actionStatus"] = "unsupported_tool";
         result["actionError"] = QString("Outil Smart Search non supporté: %1").arg(tool);
+        stampIntent(&result);
         return result;
     }
 
@@ -2935,6 +2954,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         }
     }
 
+    stampIntent(&result);
     if (result.value("message").toString().trimmed().isEmpty()
         && result.value("error").toString().trimmed().isEmpty()
         && result.value("actionStatus").toString().trimmed().isEmpty()) {

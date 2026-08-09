@@ -226,6 +226,9 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
             <span class="message-time">{{ msg.time }}</span>
           </div>
           <div class="message-text" :class="{ 'is-error': msg.isError }">{{ msg.text }}</div>
+          <div v-if="msg.intentRationale" class="decision-line">
+            Décision : {{ msg.intentRationale }}
+          </div>
 
           <!-- Candidate badge -->
           <div v-if="msg.candidateCount !== undefined && msg.role === 'assistant'" class="message-badges">
@@ -592,6 +595,13 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .message-text.is-error {
   color: var(--error);
+}
+
+.decision-line {
+  max-width: 720px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .message-badges {

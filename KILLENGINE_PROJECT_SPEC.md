@@ -26,6 +26,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Assistant Smart Search connecté aux outils déterministes et au runtime IA local optionnel.
 - Contrat d'intention IA structuré : le modèle peut produire une intention JSON validée avant exécution, avec fallback déterministe si le modèle est absent ou imprécis.
 - Debug Assistant : les décisions de Smart Search et les intents sont visibles pour diagnostiquer les cas où la conversation choisit la mauvaise action.
+- Les réponses Assistant affichent une ligne de décision lisible indiquant l'intention reconnue et la raison du choix d'action.
 - Workflow guidé validé sur Microsoft Solitaire :
   - l'utilisateur décrit une valeur actuelle et une valeur cible ;
   - KillEngine lance le scan exact ;

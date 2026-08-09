@@ -145,7 +145,7 @@ Prerequisites before Phase 12:
   - [ ] UX et efficacité
     - [x] bouton `Nouvelle recherche` visible dans l'Assistant
     - [x] statut global clair : recherche active, adresses actives, profil actif, aucun contexte actif
-    - [ ] debug Assistant lisible expliquant pourquoi une action a été choisie
+    - [x] debug Assistant lisible expliquant pourquoi une action a été choisie
     - [ ] progression plus fine par régions/chunks pendant les scans longs
   - [ ] Robustesse et validations
     - [ ] tests d'intégration automatisés avec `KillEngineTestTarget.exe`
