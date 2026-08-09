@@ -41,6 +41,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - La page Paramètres sauvegarde des options persistantes : langue, type par défaut, limites de scan, fast scan, debug Smart Search et placeholders IA.
 - Le packaging Windows initial produit un zip portable et fournit un template Inno Setup pour l'installateur.
 - La page Paramètres permet de lire les dernières lignes du log principal et d'exporter un bundle diagnostic compressé.
+- Les crashs non gérés produisent un rapport local et les rapports récents sont inclus dans l'export diagnostic.
 - Crédit UI : `Pirolley Benoist` en bas à gauche.
 
 ### Limites connues de la baseline
@@ -55,6 +56,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les Paramètres sont implémentés au niveau V1 polish initial ; le Model Manager complet reste à brancher sur le chemin modèle sauvegardé.
 - Le packaging est implémenté au niveau V1 polish initial ; la signature Authenticode et l'installateur final signé restent hors de cette brique.
 - L'export diagnostic initial est disponible ; l'ouverture automatique du dossier exporté reste à ajouter si nécessaire.
+- Le crash handling initial écrit des rapports texte locaux ; les minidumps natifs restent une amélioration ultérieure.
 - `KillEngineTestTarget.exe` est créé et exposé des variables connues (health, money, stamina, position, hidden_score, Player heap) pour les validations manuelles et scénarios automatisés.
 - Les validations sont surtout manuelles sur Solitaire et via tests unitaires ; les tests d'intégration automatisés (`tests/integration/`) restent à écrire.
 - Les opérations de scan lourdes restent à améliorer côté asynchronisme/progression fine pour une UX V1 complète.

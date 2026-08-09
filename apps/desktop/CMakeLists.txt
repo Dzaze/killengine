@@ -5,6 +5,7 @@
 qt_add_executable(KillEngine
     main.cpp
     application_controller.cpp
+    crash_handler.cpp
 )
 
 if(WIN32)

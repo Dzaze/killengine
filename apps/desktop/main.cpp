@@ -1,4 +1,5 @@
 #include "application_controller.h"
+#include "crash_handler.h"
 #include "logging/logger.h"
 
 #include <QApplication>
@@ -11,6 +12,8 @@
 #include <QIcon>
 #include <QDir>
 #include <QStandardPaths>
+
+#include <exception>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -32,7 +35,9 @@ static void attachConsole() {
 }
 #endif
 
-int main(int argc, char* argv[]) {
+namespace {
+
+int runApplication(int argc, char* argv[]) {
     // High-DPI support (Qt 6 handles this automatically, but be explicit)
     QApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
@@ -49,6 +54,7 @@ int main(int argc, char* argv[]) {
     // Initialize logging
     killcore::Logger::instance().init();
     killcore::Logger::instance().setLevel(killcore::LogLevel::Debug);
+    killengine::CrashHandler::install();
 
     KE_LOG_INFO() << "========================================";
     KE_LOG_INFO() << "  KillEngine " << KILLENGINE_VERSION << " starting...";
@@ -125,4 +131,21 @@ int main(int argc, char* argv[]) {
 
     KE_LOG_INFO() << "KillEngine shutting down (exit code " << result << ")";
     return result;
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    try {
+        return runApplication(argc, argv);
+    } catch (const std::exception& e) {
+        const QString detail = QString::fromUtf8(e.what());
+        killengine::CrashHandler::writeReport("main_exception", detail);
+        KE_LOG_FATAL() << "Unhandled exception in main: " << detail.toStdString();
+        return 1;
+    } catch (...) {
+        killengine::CrashHandler::writeReport("main_exception", "unknown exception");
+        KE_LOG_FATAL() << "Unknown unhandled exception in main.";
+        return 1;
+    }
 }

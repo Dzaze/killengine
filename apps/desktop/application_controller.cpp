@@ -1,6 +1,7 @@
 #include "application_controller.h"
 
 #include "candidates/candidate_store.h"
+#include "crash_handler.h"
 #include "logging/logger.h"
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
@@ -1943,6 +1944,7 @@ QVariantMap ApplicationController::exportDiagnostics() {
     manifest["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
     manifest["logFilePath"] = getLogFilePath();
     manifest["smartSearchDebugFilePath"] = smartSearchDebugFilePath();
+    manifest["crashDirectory"] = CrashHandler::crashDirectory();
     manifest["settings"] = getSettings();
 
     QByteArray payload;
@@ -1966,6 +1968,19 @@ QVariantMap ApplicationController::exportDiagnostics() {
     QFile debugFile(smartSearchDebugFilePath());
     if (debugFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
         appendSection(QFileInfo(debugFile).fileName(), debugFile.readAll());
+    }
+
+    QDir crashDir(CrashHandler::crashDirectory());
+    const auto crashFiles = crashDir.entryInfoList(
+        QStringList{"*.crash.txt"},
+        QDir::Files,
+        QDir::Time);
+    const qsizetype crashFileCount = std::min<qsizetype>(crashFiles.size(), 5);
+    for (qsizetype i = 0; i < crashFileCount; ++i) {
+        QFile crashFile(crashFiles.at(i).absoluteFilePath());
+        if (crashFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            appendSection("crashes/" + crashFiles.at(i).fileName(), crashFile.readAll());
+        }
     }
 
     QFile out(exportPath);

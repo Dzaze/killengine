@@ -106,6 +106,6 @@ Prerequisites before Phase 12:
   - [x] installer/package (portable zip script + Inno Setup template)
   - [x] settings UI (persistent language, scan limits, fast scan, AI path placeholder, debug controls)
   - [x] log viewer/export (tail viewer + compressed diagnostic export)
-  - [ ] crash handling
+  - [x] crash handling (terminate/signal/SEH report files + diagnostic export inclusion)
   - [ ] async scan UX/progress polish
   - [ ] documentation/user guide
