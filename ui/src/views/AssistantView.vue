@@ -97,6 +97,17 @@ function valueHistoryFor(record: Record<string, unknown>): string {
   if (uniqueValues.length === 0) return ''
   return `observé : ${uniqueValues.slice(-4).join(' -> ')}`
 }
+
+function filteredCandidatesFor(message: typeof store.messages[number]): string {
+  const filtered = message.filteredWriteCandidates ?? []
+  if (filtered.length === 0) return ''
+  return filtered
+    .map((candidate) => {
+      const reason = String(candidate.noiseFilterReason ?? 'rejeté')
+      return `0x${candidate.address} (${candidate.regionType ?? '?'}) · ${reason}`
+    })
+    .join('\n')
+}
 </script>
 
 <template>
@@ -204,6 +215,11 @@ function valueHistoryFor(record: Record<string, unknown>): string {
           <div v-if="suggestionsFor(msg)" class="suggestions-box">
             <div class="suggestions-title">Adresses suggérées</div>
             <pre class="suggestions-list">{{ suggestionsFor(msg) }}</pre>
+          </div>
+
+          <div v-if="filteredCandidatesFor(msg)" class="filtered-box">
+            <div class="suggestions-title">Filtre anti-bruit</div>
+            <pre class="suggestions-list">{{ filteredCandidatesFor(msg) }}</pre>
           </div>
 
           <!-- Requires confirmation -->
@@ -560,6 +576,14 @@ function valueHistoryFor(record: Record<string, unknown>): string {
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.filtered-box {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(247, 118, 142, 0.28);
+  border-radius: 8px;
+  background: rgba(247, 118, 142, 0.08);
 }
 
 .suggestions-title {

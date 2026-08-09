@@ -216,6 +216,7 @@ private:
     void recordCandidateObservations(const QVariantList& observations);
     QVariantList candidateValueHistory(uint64_t address) const;
     void enrichSuggestedWritesWithHistory(QVariantList* suggestions) const;
+    QVariantList filterAutoWriteSuggestionsByRegion(const QVariantList& suggestions, QVariantList* rejected) const;
     QVariantMap writeMemoryValueConfirmed(const QString& addressHex, const QString& valueType, const QString& value);
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
     QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);

@@ -60,6 +60,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les résultats de scan exposent des métriques de performance V1 : temps écoulé, débits, stockage fichier et RAM estimée.
 - L'auto-write Assistant passe par une confirmation temporaire vérifiée puis restauration avant l'écriture finale, afin de réduire les faux positifs d'adresses non fiables.
 - Les candidats survivants conservent un historique borné des valeurs observées pendant les `next_scan` guidés ; cet historique est rattaché aux suggestions et aux cartes d'auto-write.
+- Avant l'auto-write issu d'un scan guidé, les candidats sont filtrés par région mémoire : readable, writable, non guarded, et type de région `Private` ou `Mapped` ; les rejets restent visibles dans le chat.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
 - La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.

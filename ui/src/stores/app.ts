@@ -28,6 +28,7 @@ export interface ChatMessage {
   candidateCount?: number
   targetValue?: string
   suggestions?: Array<Record<string, unknown>>
+  filteredWriteCandidates?: Array<Record<string, unknown>>
   autoWriteResults?: Array<Record<string, unknown>>
   autoWriteOk?: boolean
   requiresConfirmation?: boolean
@@ -468,6 +469,10 @@ export const useAppStore = defineStore('app', () => {
         const suggestions = result.suggestedWrites as Array<Record<string, unknown>>
         finalCandidateTargets.value = suggestions
         extras.suggestions = suggestions
+      }
+
+      if (result.filteredWriteCandidates) {
+        extras.filteredWriteCandidates = result.filteredWriteCandidates as Array<Record<string, unknown>>
       }
 
       if (result.autoWriteResults) {

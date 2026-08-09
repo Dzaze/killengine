@@ -604,6 +604,58 @@ void ApplicationController::enrichSuggestedWritesWithHistory(QVariantList* sugge
     }
 }
 
+QVariantList ApplicationController::filterAutoWriteSuggestionsByRegion(
+    const QVariantList& suggestions,
+    QVariantList* rejected) const {
+    QVariantList accepted;
+    const auto regions = killcore::MemoryMap::snapshot(m_handle);
+
+    for (const auto& item : suggestions) {
+        QVariantMap suggestion = item.toMap();
+        uint64_t address = 0;
+        if (!parseHexAddress(suggestion.value("address").toString(), &address)) {
+            suggestion["noiseFilterReason"] = "Adresse invalide.";
+            if (rejected) rejected->append(suggestion);
+            continue;
+        }
+
+        bool foundRegion = false;
+        killcore::MemoryRegion matchedRegion;
+        for (const auto& region : regions) {
+            const uint64_t end = region.baseAddress + region.size;
+            if (address >= region.baseAddress && address < end) {
+                matchedRegion = region;
+                foundRegion = true;
+                break;
+            }
+        }
+
+        if (!foundRegion) {
+            suggestion["noiseFilterReason"] = "Région mémoire introuvable.";
+            if (rejected) rejected->append(suggestion);
+            continue;
+        }
+
+        suggestion["regionBase"] = QString::number(matchedRegion.baseAddress, 16);
+        suggestion["regionType"] = killcore::memoryTypeToString(matchedRegion.type);
+        suggestion["regionWritable"] = matchedRegion.writable;
+        suggestion["regionReadable"] = matchedRegion.readable;
+        suggestion["regionGuarded"] = matchedRegion.guarded;
+
+        const bool relevantType = matchedRegion.type == killcore::MemoryType::Private
+            || matchedRegion.type == killcore::MemoryType::Mapped;
+        if (!matchedRegion.readable || !matchedRegion.writable || matchedRegion.guarded || !relevantType) {
+            suggestion["noiseFilterReason"] = "Région peu pertinente pour une valeur de jeu.";
+            if (rejected) rejected->append(suggestion);
+            continue;
+        }
+
+        accepted.append(suggestion);
+    }
+
+    return accepted;
+}
+
 QVariantMap ApplicationController::getMemoryMap() const {
     QVariantMap result;
     QVariantList regionList;
@@ -2651,12 +2703,14 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                 m_smartSearchTargetValue,
                 kAutoWriteCandidateLimit);
             enrichSuggestedWritesWithHistory(&suggestions);
+            QVariantList rejectedSuggestions;
+            const auto writeSuggestions = filterAutoWriteSuggestionsByRegion(suggestions, &rejectedSuggestions);
             QVariantList writeResults;
             bool allWritesOk = true;
             m_lastBatchStartIndex = m_writeHistory.size();
             m_lastAutoWriteTargets.clear();
 
-            for (const auto& item : suggestions) {
+            for (const auto& item : writeSuggestions) {
                 const auto suggestion = item.toMap();
                 auto writeResult = writeMemoryValueConfirmed(
                     suggestion.value("address").toString(),
@@ -2690,16 +2744,23 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             result["workflowStatus"] = allWritesOk ? "auto_write_done" : "auto_write_partial_or_failed";
             result["suggestedWrites"] = suggestions;
             result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
+            result["filteredWriteCandidates"] = rejectedSuggestions;
             result["autoWriteResults"] = writeResults;
             result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
             result["autoWriteCount"] = writeResults.size();
             result["rollbackNote"] = "Tu peux annuler toutes les écritures via le bouton rollback batch dans l'assistant.";
-            result["message"] = allWritesOk
-                                    ? QString("Il reste %1 candidat(s). J'ai écrit automatiquement %2 sur toutes les adresses finales.")
+            if (writeSuggestions.isEmpty()) {
+                result["workflowStatus"] = "auto_write_partial_or_failed";
+                result["message"] = QString("Il reste %1 candidat(s), mais le filtre anti-bruit n'a gardé aucune adresse assez fiable pour une écriture automatique.")
+                                        .arg(remaining);
+            } else {
+                result["message"] = allWritesOk
+                                    ? QString("Il reste %1 candidat(s). J'ai écrit automatiquement %2 sur les adresses finales fiables.")
                                           .arg(remaining)
                                           .arg(m_smartSearchTargetValue)
                                     : QString("Il reste %1 candidat(s), mais au moins une écriture automatique a échoué.")
                                           .arg(remaining);
+            }
         } else if (remaining > 1) {
             result["workflowStatus"] = "needs_more_refinement";
             result["message"] = QString("Il reste %1 candidats. Refais varier le score, puis indique-moi la nouvelle valeur.")
