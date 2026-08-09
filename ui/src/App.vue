@@ -2,17 +2,21 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import AssistantView from '@/views/AssistantView.vue'
+import ExpertView from '@/views/ExpertView.vue'
 import MemoryView from '@/views/MemoryView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import ProcessView from '@/views/ProcessView.vue'
+import SettingsView from '@/views/SettingsView.vue'
 
 const store = useAppStore()
-const activeView = ref<'assistant' | 'process' | 'memory' | 'profiles'>('assistant')
+const activeView = ref<'assistant' | 'process' | 'memory' | 'profiles' | 'expert' | 'settings'>('assistant')
 
 const currentView = computed(() => {
   if (activeView.value === 'process') return ProcessView
   if (activeView.value === 'memory') return MemoryView
   if (activeView.value === 'profiles') return ProfileView
+  if (activeView.value === 'expert') return ExpertView
+  if (activeView.value === 'settings') return SettingsView
   return AssistantView
 })
 
@@ -59,8 +63,20 @@ onMounted(() => {
         >
           {{ $t('nav.profiles') }}
         </button>
-        <button class="nav-item" disabled>{{ $t('nav.expert') }}</button>
-        <button class="nav-item" disabled>{{ $t('nav.settings') }}</button>
+        <button
+          class="nav-item"
+          :class="{ active: activeView === 'expert' }"
+          @click="activeView = 'expert'"
+        >
+          {{ $t('nav.expert') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: activeView === 'settings' }"
+          @click="activeView = 'settings'"
+        >
+          {{ $t('nav.settings') }}
+        </button>
       </nav>
 
       <div class="sidebar-footer">

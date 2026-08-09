@@ -163,6 +163,7 @@ export interface BackendController {
   startSmartSearch(query: string): Promise<SmartSearchResult>
   ping(message: string): Promise<string>
   getLogFilePath(): Promise<string>
+  getSmartSearchDebugFilePath(): Promise<string>
 
   // Phase 11 — Profils
   saveProfileTarget(
@@ -386,6 +387,9 @@ class BackendService {
       },
       async getLogFilePath() {
         return 'mock://no-log-file'
+      },
+      async getSmartSearchDebugFilePath() {
+        return 'mock://no-smart-search-debug'
       },
       async saveProfileTarget() {
         return { success: false, error: 'Mock backend' }

@@ -41,6 +41,8 @@ export const useAppStore = defineStore('app', () => {
   const memoryMap = ref<MemoryMapResult | null>(null)
   const memoryPreview = ref<MemoryReadPreview | null>(null)
   const pingResult = ref('')
+  const logFilePath = ref('')
+  const smartSearchDebugFilePath = ref('')
   const searchQuery = ref('')
   const searchResult = ref('')
   const exactScanValue = ref('')
@@ -203,6 +205,17 @@ export const useAppStore = defineStore('app', () => {
       pingResult.value = await backend.getController().ping('hello from Vue')
     } catch (e) {
       pingResult.value = 'Ping failed: ' + String(e)
+    }
+  }
+
+  async function refreshDiagnostics() {
+    try {
+      logFilePath.value = await backend.getController().getLogFilePath()
+      smartSearchDebugFilePath.value = await backend.getController().getSmartSearchDebugFilePath()
+    } catch (e) {
+      logFilePath.value = ''
+      smartSearchDebugFilePath.value = ''
+      console.error('[KillEngine] Failed to refresh diagnostics:', e)
     }
   }
 
@@ -470,6 +483,8 @@ export const useAppStore = defineStore('app', () => {
     memoryMap,
     memoryPreview,
     pingResult,
+    logFilePath,
+    smartSearchDebugFilePath,
     searchQuery,
     searchResult,
     exactScanValue,
@@ -506,6 +521,7 @@ export const useAppStore = defineStore('app', () => {
     attach,
     detach,
     doPing,
+    refreshDiagnostics,
     doSearch,
     doExactScan,
     refreshCandidates,
