@@ -72,7 +72,6 @@ export const useAppStore = defineStore('app', () => {
   const targetValueGuided = ref<string>('')
   const candidateHistory = ref<number[]>([])
   const isSearching = ref(false)
-  const showExpertPanel = ref(false)
 
   // Getters
   const statusText = computed(() => {
@@ -511,7 +510,6 @@ export const useAppStore = defineStore('app', () => {
     targetValueGuided,
     candidateHistory,
     isSearching,
-    showExpertPanel,
     statusText,
     init,
     refreshProcesses,
