@@ -178,6 +178,19 @@ bool looksLikeLastAutoWriteRewrite(const QString& query) {
         || q.contains("les mettre");
 }
 
+bool looksLikeNewSearchRequest(const QString& query) {
+    const QString q = query.toLower();
+    return q.contains("nouvelle recherche")
+        || q.contains("nouveau scan")
+        || q.contains("nouvelle valeur")
+        || q.contains("autre que")
+        || q.contains("pas ces adresse")
+        || q.contains("pas ces adresses")
+        || q.contains("repart")
+        || q.contains("recommence")
+        || q.contains("reset");
+}
+
 QVariantList suggestedWritesForCandidates(const killcore::CandidateStore& candidates, const QString& value, size_t limit) {
     QVariantList suggestions;
     if (value.isEmpty() || candidates.isEmpty()) {
@@ -1073,13 +1086,28 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         {"valueType", m_smartSearchValueType},
     });
 
+    const bool forceNewSearch = looksLikeNewSearchRequest(query);
+    if (forceNewSearch) {
+        m_smartSearchActive = false;
+        m_smartSearchInitialValue.clear();
+        m_smartSearchTargetValue.clear();
+        m_candidates.clear();
+        m_lastAutoWriteTargets.clear();
+        m_activeProfileTargets.clear();
+        appendSmartSearchDebug("smart_search_reset", {
+            {"query", query},
+            {"reason", "new search request"},
+        });
+    }
+
     if (!m_lastAutoWriteTargets.isEmpty()
         && numbers.size() == 1
+        && !forceNewSearch
         && looksLikeLastAutoWriteRewrite(query)) {
         return rewriteLastAutoWriteTargets(numbers.first(), query);
     }
 
-    if (numbers.size() == 1) {
+    if (numbers.size() == 1 && !forceNewSearch) {
         auto profileWrite = writeProfileTargetsFromQuery(query, numbers.first());
         if (profileWrite.value("tool").toString() == "profile_write") {
             return profileWrite;
@@ -1090,7 +1118,17 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         m_smartSearchActive && !m_candidates.isEmpty() && numbers.size() == 1;
 
     QVariantMap result;
-    if (shouldRefineSmartSearch) {
+    if (forceNewSearch && numbers.size() == 1) {
+        QVariantMap args;
+        args["value"] = numbers.first();
+        args["valueType"] = "Int32";
+        result["status"] = "tool_call";
+        result["tool"] = "exact_scan";
+        result["args"] = args;
+        result["rationale"] = "Nouvelle recherche demandée explicitement par l'utilisateur.";
+        result["state"] = "FirstScanRunning";
+        result["error"] = "";
+    } else if (shouldRefineSmartSearch) {
         QVariantMap args;
         args["mode"] = "exact";
         args["value"] = numbers.first();
