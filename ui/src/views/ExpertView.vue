@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
+const selectedCandidateAddresses = ref<string[]>([])
 
 const candidatePageTotal = computed(() => {
   if (!store.candidatePage) return 1
   return Math.max(1, Math.ceil(store.candidatePage.totalCount / store.candidatePage.pageSize))
 })
+const currentPageCandidates = computed(() => store.candidatePage?.candidates ?? [])
 
 function formatNumber(value: number | undefined) {
   return new Intl.NumberFormat('fr-FR').format(value ?? 0)
@@ -16,6 +18,36 @@ function formatNumber(value: number | undefined) {
 function useCandidateInAssistant(address: string, type: string) {
   store.selectCandidate(address, type)
   store.searchQuery = `j'utilise la mémoire 0x${address}`
+  void store.doSearch()
+}
+
+function isCandidateSelected(address: string) {
+  return selectedCandidateAddresses.value.includes(address)
+}
+
+function toggleCandidateSelection(address: string) {
+  if (isCandidateSelected(address)) {
+    selectedCandidateAddresses.value = selectedCandidateAddresses.value.filter((item) => item !== address)
+    return
+  }
+  selectedCandidateAddresses.value = [...selectedCandidateAddresses.value, address]
+}
+
+function toggleCurrentPageSelection() {
+  const pageAddresses = currentPageCandidates.value.map((candidate) => candidate.address)
+  const allPageSelected = pageAddresses.length > 0
+    && pageAddresses.every((address) => selectedCandidateAddresses.value.includes(address))
+  if (allPageSelected) {
+    selectedCandidateAddresses.value = selectedCandidateAddresses.value.filter((address) => !pageAddresses.includes(address))
+    return
+  }
+  selectedCandidateAddresses.value = Array.from(new Set([...selectedCandidateAddresses.value, ...pageAddresses]))
+}
+
+function useSelectedCandidatesInAssistant() {
+  if (selectedCandidateAddresses.value.length === 0) return
+  const addresses = selectedCandidateAddresses.value.map((address) => `0x${address}`).join(' ')
+  store.searchQuery = `j'utilise ces mémoires ${addresses}`
   void store.doSearch()
 }
 
@@ -158,7 +190,7 @@ onMounted(() => {
       <section class="panel">
         <div class="panel-title">
           <h2>Candidats</h2>
-          <span>{{ formatNumber(store.candidatePage?.totalCount) }}</span>
+          <span>{{ formatNumber(store.candidatePage?.totalCount) }} · {{ selectedCandidateAddresses.length }} sélectionné(s)</span>
         </div>
         <div class="candidate-toolbar">
           <input
@@ -178,11 +210,29 @@ onMounted(() => {
             {{ $t('scan.next') }}
           </button>
         </div>
+        <div class="selection-toolbar">
+          <button class="btn btn-secondary compact" :disabled="currentPageCandidates.length === 0" @click="toggleCurrentPageSelection()">
+            Sélection page
+          </button>
+          <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="selectedCandidateAddresses = []">
+            Effacer
+          </button>
+          <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0" @click="useSelectedCandidatesInAssistant()">
+            Utiliser sélection
+          </button>
+        </div>
         <div class="page-info">
           {{ store.candidatePage ? store.candidatePage.pageIndex + 1 : 1 }} / {{ candidatePageTotal }}
         </div>
         <div class="candidate-list">
-          <div v-for="match in store.candidatePage?.candidates ?? []" :key="match.address" class="candidate-row">
+          <div v-for="match in currentPageCandidates" :key="match.address" class="candidate-row">
+            <label class="candidate-check">
+              <input
+                type="checkbox"
+                :checked="isCandidateSelected(match.address)"
+                @change="toggleCandidateSelection(match.address)"
+              />
+            </label>
             <button class="address-btn" @click="store.selectCandidate(match.address, match.type)">
               0x{{ match.address }}
             </button>
@@ -402,6 +452,13 @@ onMounted(() => {
   margin-bottom: 6px;
 }
 
+.selection-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
 .page-info {
   margin-bottom: 6px;
   text-align: right;
@@ -417,7 +474,7 @@ onMounted(() => {
 
 .candidate-row {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) 90px auto;
+  grid-template-columns: 28px minmax(170px, 1fr) 90px auto;
   gap: 10px;
   align-items: center;
   padding: 7px 8px;
@@ -426,6 +483,18 @@ onMounted(() => {
   color: var(--text-dim);
   font-family: 'Cascadia Code', monospace;
   font-size: 12px;
+}
+
+.candidate-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.candidate-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
 }
 
 .address-btn {
