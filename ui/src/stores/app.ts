@@ -511,24 +511,20 @@ export const useAppStore = defineStore('app', () => {
       scanBusy.value = true
       scanProgressPercent.value = 8
       scanStatusText.value = 'Scan exact en cours...'
-      if (hasExpertFilter) {
-        exactScanResult.value = await backend.getController().startExactScanExpert(
-          exactScanValue.value,
-          exactScanType.value,
-          {
-            startAddress: expertStartAddress.value.trim() || undefined,
-            stopAddress: expertStopAddress.value.trim() || undefined,
-            alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
-            writableOnly: expertWritableOnly.value,
-            executableOnly: expertExecutableOnly.value,
-            copyOnWriteOnly: expertCopyOnWriteOnly.value,
-          },
-        )
-      } else {
-        exactScanResult.value = await backend
-          .getController()
-          .startExactScan(exactScanValue.value, exactScanType.value)
-      }
+      exactScanResult.value = await backend.startExactScanAsync(
+        exactScanValue.value,
+        exactScanType.value,
+        hasExpertFilter
+          ? {
+              startAddress: expertStartAddress.value.trim() || undefined,
+              stopAddress: expertStopAddress.value.trim() || undefined,
+              alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
+              writableOnly: expertWritableOnly.value,
+              executableOnly: expertExecutableOnly.value,
+              copyOnWriteOnly: expertCopyOnWriteOnly.value,
+            }
+          : {},
+      )
       scanProgressPercent.value = 85
       candidatePageIndex.value = 0
       scanStatusText.value = 'Chargement des candidats...'

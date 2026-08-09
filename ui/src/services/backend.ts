@@ -71,6 +71,7 @@ export interface ExactScanMatch {
 }
 
 export interface ExactScanResult {
+  requestId?: number
   success: boolean
   partial: boolean
   cancelled: boolean
@@ -200,6 +201,12 @@ export interface BackendController {
     valueType: string,
     expertOptions: ExpertScanOptions,
   ): Promise<ExactScanResult>
+  startExactScanAsync(
+    value: string,
+    valueType: string,
+    expertOptions: ExpertScanOptions,
+  ): Promise<Record<string, unknown>>
+  scanFinished?: QWebChannelSignal<ExactScanResult>
   nextScan(mode: string, value: string): Promise<NextScanResult>
   getCandidates(pageIndex: number, pageSize: number, addressFilter: string): Promise<CandidatePage>
   captureUnknownSnapshot(): Promise<UnknownSnapshotResult>
@@ -316,6 +323,60 @@ class BackendService {
     }
   }
 
+  async startExactScanAsync(
+    value: string,
+    valueType: string,
+    expertOptions: ExpertScanOptions,
+  ): Promise<ExactScanResult> {
+    const controller = this.getController()
+    if (!controller.scanFinished) {
+      return controller.startExactScanExpert(value, valueType, expertOptions)
+    }
+
+    const start = await controller.startExactScanAsync(value, valueType, expertOptions)
+    if (start.success !== true || start.started !== true) {
+      return {
+        success: false,
+        partial: false,
+        cancelled: false,
+        regionsScanned: 0,
+        bytesScanned: 0,
+        matchesFound: 0,
+        matchesReturned: 0,
+        error: String(start.error ?? 'Impossible de démarrer le scan async.'),
+        matches: [],
+        candidateStoreSize: 0,
+      }
+    }
+
+    const requestId = Number(start.requestId)
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        resolve({
+          requestId,
+          success: false,
+          partial: false,
+          cancelled: false,
+          regionsScanned: 0,
+          bytesScanned: 0,
+          matchesFound: 0,
+          matchesReturned: 0,
+          error: 'Timeout du scan async.',
+          matches: [],
+          candidateStoreSize: 0,
+        })
+      }, 10 * 60 * 1000)
+
+      const handler = (payload: ExactScanResult) => {
+        if (Number(payload.requestId) !== requestId) return
+        window.clearTimeout(timeout)
+        controller.scanFinished?.disconnect?.(handler)
+        resolve(payload)
+      }
+      controller.scanFinished?.connect(handler)
+    })
+  }
+
   private notifyListeners(): void {
     this.listeners.forEach((l) => l())
   }
@@ -394,6 +455,9 @@ class BackendService {
           matches: [],
           candidateStoreSize: 0,
         }
+      },
+      async startExactScanAsync(_value: string, _valueType: string, _expertOptions: ExpertScanOptions) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
       async getCandidates(pageIndex: number, pageSize: number, _addressFilter: string) {
         return {

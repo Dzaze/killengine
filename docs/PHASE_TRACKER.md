@@ -108,5 +108,6 @@ Prerequisites before Phase 12:
   - [x] log viewer/export (tail viewer + compressed diagnostic export)
   - [x] crash handling (terminate/signal/SEH report files + diagnostic export inclusion)
   - [x] scan UX/progress polish (busy states, guarded actions, progress banner, scan signals)
-  - [ ] true async threaded scans (worker thread, non-blocking controller calls, cancellation, safe candidate-store handoff)
+  - [x] async threaded exact scan (worker thread, non-blocking start, scanFinished signal, safe candidate-store handoff)
+  - [ ] async threaded next/unknown scans and cancellation
   - [ ] documentation/user guide

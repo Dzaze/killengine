@@ -9,6 +9,11 @@ declare global {
     objects: Record<string, unknown>
   }
 
+  interface QWebChannelSignal<T = unknown> {
+    connect(callback: (payload: T) => void): void
+    disconnect?(callback: (payload: T) => void): void
+  }
+
   interface Window {
     QWebChannel: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

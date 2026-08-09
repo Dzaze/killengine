@@ -82,6 +82,12 @@ public:
         const QString& valueType,
         const QVariantMap& expertOptions);
 
+    /// Lance un scan exact dans un worker thread et retourne immédiatement un requestId.
+    Q_INVOKABLE QVariantMap startExactScanAsync(
+        const QString& value,
+        const QString& valueType,
+        const QVariantMap& expertOptions);
+
     /// Réduit les candidats existants en relisant leurs adresses.
     Q_INVOKABLE QVariantMap nextScan(const QString& mode, const QString& value);
 
@@ -176,6 +182,7 @@ signals:
     void scanStarted();
     void scanProgress(int percent);
     void scanStatsUpdated(int candidateCount);
+    void scanFinished(const QVariantMap& result);
     void aiMessage(const QString& message);
     void targetConfidenceChanged(int confidence);
     void targetFound(const QVariantMap& target);
@@ -225,6 +232,8 @@ private:
     QList<ActiveProfileTarget> m_activeProfileTargets;
     int                      m_lastBatchStartIndex{-1};
     int                      m_lastBatchEndIndex{-1};
+    bool                     m_scanInProgress{false};
+    int                      m_nextScanRequestId{1};
     killai::AIEngine         m_ai;
     bool                     m_smartSearchActive{false};
     QString                  m_smartSearchInitialValue;

@@ -19,6 +19,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaObject>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
@@ -26,6 +28,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <thread>
 
 namespace killengine {
 
@@ -737,6 +740,163 @@ QVariantMap ApplicationController::startExactScanExpert(
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
     emit scanProgress(100);
+    return result;
+}
+
+QVariantMap ApplicationController::startExactScanAsync(
+    const QString& value,
+    const QString& valueType,
+    const QVariantMap& expertOptions) {
+    QVariantMap result;
+    QVariantList matches;
+    result["success"] = false;
+    result["started"] = false;
+
+    if (m_scanInProgress) {
+        result["error"] = "Un scan est déjà en cours.";
+        return result;
+    }
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        result["matches"] = matches;
+        return result;
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(valueType, &type)) {
+        result["error"] = "Type de valeur invalide.";
+        result["matches"] = matches;
+        return result;
+    }
+
+    killcore::ScanValue scanValue;
+    QString parseError;
+    if (!killcore::parseScanValue(value, type, &scanValue, &parseError)) {
+        result["error"] = parseError;
+        result["matches"] = matches;
+        return result;
+    }
+
+    killcore::ScanOptions options = scanOptionsFromSettings();
+    if (expertOptions.contains("startAddress")) {
+        const QString startText = expertOptions.value("startAddress").toString().trimmed();
+        if (!startText.isEmpty()) {
+            uint64_t startAddress = 0;
+            if (!parseHexAddress(startText, &startAddress)) {
+                result["error"] = "Adresse de début invalide.";
+                result["matches"] = matches;
+                return result;
+            }
+            options.startAddress = startAddress;
+        }
+    }
+    if (expertOptions.contains("stopAddress")) {
+        const QString stopText = expertOptions.value("stopAddress").toString().trimmed();
+        if (!stopText.isEmpty()) {
+            uint64_t stopAddress = 0;
+            if (!parseHexAddress(stopText, &stopAddress)) {
+                result["error"] = "Adresse de fin invalide.";
+                result["matches"] = matches;
+                return result;
+            }
+            options.stopAddress = stopAddress;
+        }
+    }
+    if (options.startAddress != 0
+        && options.stopAddress != 0
+        && options.stopAddress <= options.startAddress) {
+        result["error"] = "La fin de plage doit être supérieure au début.";
+        result["matches"] = matches;
+        return result;
+    }
+    if (expertOptions.contains("alignment")) {
+        bool alignOk = false;
+        const auto align = expertOptions.value("alignment").toULongLong(&alignOk);
+        if (alignOk && align > 0) {
+            options.alignment = static_cast<size_t>(align);
+            options.fastScan = false;
+        }
+    }
+    options.writableOnly = expertOptions.value("writableOnly", false).toBool();
+    options.executableOnly = expertOptions.value("executableOnly", false).toBool();
+    options.copyOnWriteOnly = expertOptions.value("copyOnWriteOnly", false).toBool();
+
+    const int requestId = m_nextScanRequestId++;
+    const int pid = m_pid;
+    const QByteArray scannedBytes = killcore::scanValueToBytes(scanValue);
+    const QPointer<ApplicationController> self(this);
+
+    m_scanInProgress = true;
+    emit scanStarted();
+    emit scanProgress(0);
+
+    std::thread([self, requestId, pid, value, valueType, expertOptions, scanValue, options, scannedBytes]() {
+        killcore::ScanResult scan;
+        killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
+        if (!workerHandle.isValid()) {
+            scan.success = false;
+            scan.errorMessage = "Impossible d'ouvrir le processus dans le worker de scan.";
+        } else {
+            killcore::ScanEngine scanner(workerHandle);
+            scan = scanner.exactScan(scanValue, options);
+        }
+
+        if (!self) {
+            return;
+        }
+        QMetaObject::invokeMethod(self.data(), [self, requestId, value, valueType, expertOptions, scannedBytes, scan]() {
+            if (!self) {
+                return;
+            }
+
+            QVariantMap finished;
+            QVariantList finishedMatches;
+            self->m_candidates.replaceFromScan(scan, scannedBytes);
+
+            const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
+            for (qsizetype i = 0; i < previewCount; ++i) {
+                const auto& match = scan.matches.at(i);
+                QVariantMap entry;
+                entry["address"] = QString::number(match.address, 16);
+                entry["type"] = killcore::valueTypeToString(match.type);
+                finishedMatches.append(entry);
+            }
+
+            finished["requestId"] = requestId;
+            finished["success"] = scan.success;
+            finished["partial"] = scan.partial;
+            finished["cancelled"] = scan.cancelled;
+            finished["regionsScanned"] = static_cast<int>(scan.regionsScanned);
+            finished["bytesScanned"] = static_cast<qulonglong>(scan.bytesScanned);
+            finished["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
+            finished["matchesReturned"] = finishedMatches.size();
+            finished["error"] = scan.errorMessage;
+            finished["matches"] = finishedMatches;
+            finished["candidateStoreSize"] = static_cast<qulonglong>(self->m_candidates.size());
+            self->appendSmartSearchDebug("exact_scan_async", {
+                {"requestId", requestId},
+                {"value", value},
+                {"valueType", valueType},
+                {"startAddress", expertOptions.value("startAddress")},
+                {"stopAddress", expertOptions.value("stopAddress")},
+                {"alignment", expertOptions.value("alignment")},
+                {"success", finished.value("success")},
+                {"matchesFound", finished.value("matchesFound")},
+                {"candidateStoreSize", finished.value("candidateStoreSize")},
+                {"error", finished.value("error")},
+            });
+            self->m_scanInProgress = false;
+            emit self->scanStatsUpdated(static_cast<int>(self->m_candidates.size()));
+            emit self->scanProgress(100);
+            emit self->scanFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["error"] = "";
     return result;
 }
 
