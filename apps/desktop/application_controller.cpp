@@ -51,6 +51,30 @@ struct SmartSearchIntent {
     QString rationale;
 };
 
+QString smartSearchIntentKindToString(SmartSearchIntentKind kind) {
+    switch (kind) {
+        case SmartSearchIntentKind::Unknown:
+            return "Unknown";
+        case SmartSearchIntentKind::ResetContext:
+            return "ResetContext";
+        case SmartSearchIntentKind::ExactScan:
+            return "ExactScan";
+        case SmartSearchIntentKind::GuidedScan:
+            return "GuidedScan";
+        case SmartSearchIntentKind::RefineScan:
+            return "RefineScan";
+        case SmartSearchIntentKind::ActivateMemoryTargets:
+            return "ActivateMemoryTargets";
+        case SmartSearchIntentKind::WriteMemoryTargets:
+            return "WriteMemoryTargets";
+        case SmartSearchIntentKind::RewriteLastTargets:
+            return "RewriteLastTargets";
+        case SmartSearchIntentKind::WriteProfileTargets:
+            return "WriteProfileTargets";
+    }
+    return "Unknown";
+}
+
 QVariantMap moduleToVariantMap(const killcore::ProcessModuleInfo& module) {
     QVariantMap entry;
     entry["name"] = module.name;
@@ -1349,7 +1373,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         {"query", query},
         {"numbers", numbers},
         {"addresses", chatAddresses},
-        {"intent", static_cast<int>(intent.kind)},
+        {"intent", smartSearchIntentKindToString(intent.kind)},
         {"intentRationale", intent.rationale},
         {"smartSearchActive", m_smartSearchActive},
         {"candidateCount", static_cast<qulonglong>(m_candidates.size())},

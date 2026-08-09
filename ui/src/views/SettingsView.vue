@@ -17,6 +17,7 @@ const debugEvents = computed(() => [...store.smartSearchDebugEvents].reverse())
 
 function eventSummary(event: Record<string, unknown>) {
   const parts = [
+    event.intent ? `intent=${String(event.intent)}` : '',
     event.tool ? `tool=${String(event.tool)}` : '',
     event.workflowStatus ? `workflow=${String(event.workflowStatus)}` : '',
     event.actionStatus ? `action=${String(event.actionStatus)}` : '',
@@ -118,6 +119,7 @@ onMounted(() => {
           </div>
           <code v-if="event.query">{{ event.query }}</code>
           <p v-if="eventSummary(event)">{{ eventSummary(event) }}</p>
+          <p v-if="event.intentRationale">{{ event.intentRationale }}</p>
           <p v-if="event.message">{{ event.message }}</p>
           <p v-if="event.error" class="error">{{ event.error }}</p>
         </div>
