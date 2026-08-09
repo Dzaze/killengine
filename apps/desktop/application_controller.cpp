@@ -1270,8 +1270,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
 
     if (!m_chatMemoryTargets.isEmpty()
         && numbers.size() == 1
-        && !forceNewSearch
-        && looksLikeMemoryTargetWriteRequest(query)) {
+        && !forceNewSearch) {
         return writeChatMemoryTargetsFromQuery(query, numbers.first());
     }
 
