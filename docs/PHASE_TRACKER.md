@@ -132,11 +132,11 @@ Prerequisites before Phase 12:
     - [x] historique des valeurs observées par adresse pendant les scans guidés
     - [x] filtres anti-bruit pour régions très volatiles ou peu pertinentes
     - [x] diagnostic lisible quand une comparaison élimine tous les candidats
-  - [ ] Assistant plus naturel
+  - [x] Assistant plus naturel
     - [x] mémoire de conversation structurée visible (`dernière recherche`, `valeur actuelle`, `valeur cible`, `adresses actives`, `profil actif`)
     - [x] intentions plus fines : nouvelle recherche, réutiliser adresses, changer valeur trouvée, oublier profils/adresses
     - [x] réponses naturelles pour les transitions (`je cherche ailleurs`, `je garde ces adresses`, `j'attends la nouvelle valeur`)
-    - [ ] éviter les messages techniques abrupts quand l'utilisateur démarre un nouveau contexte
+    - [x] éviter les messages techniques abrupts quand l'utilisateur démarre un nouveau contexte
   - [ ] Profils plus utiles
     - [ ] libellés d'action plus clairs que `Résoudre` si nécessaire (`Activer`, `Utiliser dans l'Assistant`, `Écrire`)
     - [ ] écriture directe d'une valeur sur une cible de profil

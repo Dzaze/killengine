@@ -496,7 +496,16 @@ export const useAppStore = defineStore('app', () => {
 
       if (result.error) extras.isError = true
 
-      pushMessage('assistant', result.message ?? result.error ?? '…', extras)
+      const assistantText = String(
+        result.message
+        ?? result.error
+        ?? "Je n'ai pas assez d'informations pour agir. Donne-moi une valeur à chercher ou une adresse à utiliser.",
+      ).trim()
+      pushMessage(
+        'assistant',
+        assistantText || "Je n'ai pas assez d'informations pour agir. Donne-moi une valeur à chercher ou une adresse à utiliser.",
+        extras,
+      )
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
     } catch (e) {

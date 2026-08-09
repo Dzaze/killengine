@@ -2935,6 +2935,13 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         }
     }
 
+    if (result.value("message").toString().trimmed().isEmpty()
+        && result.value("error").toString().trimmed().isEmpty()
+        && result.value("actionStatus").toString().trimmed().isEmpty()) {
+        result["actionStatus"] = "needs_clarification";
+        result["message"] = "Je garde le contexte actuel. Donne-moi une valeur à chercher, une nouvelle valeur observée, ou une adresse mémoire à utiliser.";
+    }
+
     appendSmartSearchDebug("smart_search_result", result);
     return result;
 }
