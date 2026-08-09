@@ -77,7 +77,17 @@ onMounted(() => {
       <div v-if="store.scanStatusText" class="scan-status" :class="{ active: store.scanBusy }">
         <div class="scan-status-head">
           <strong>{{ store.scanStatusText }}</strong>
-          <span>{{ store.scanProgressPercent }}%</span>
+          <div class="scan-status-actions">
+            <span>{{ store.scanProgressPercent }}%</span>
+            <button
+              v-if="store.scanBusy"
+              class="btn btn-secondary btn-small"
+              type="button"
+              @click="store.cancelActiveScan()"
+            >
+              Annuler
+            </button>
+          </div>
         </div>
         <div class="progress-track">
           <div class="progress-fill" :style="{ width: `${store.scanProgressPercent}%` }"></div>
@@ -410,6 +420,19 @@ onMounted(() => {
 
 .scan-status-head span {
   color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.scan-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-small {
+  min-height: 26px;
+  padding: 4px 10px;
   font-size: 12px;
 }
 

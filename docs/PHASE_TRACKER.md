@@ -109,5 +109,6 @@ Prerequisites before Phase 12:
   - [x] crash handling (terminate/signal/SEH report files + diagnostic export inclusion)
   - [x] scan UX/progress polish (busy states, guarded actions, progress banner, scan signals)
   - [x] async threaded exact scan (worker thread, non-blocking start, scanFinished signal, safe candidate-store handoff)
-  - [ ] async threaded next/unknown scans and cancellation
+  - [x] async threaded next scan + cancellation (worker thread, shared cancel token, no candidate-store replacement on cancel)
+  - [ ] async threaded unknown capture/compare
   - [ ] documentation/user guide

@@ -3,6 +3,7 @@
 #include "ai_engine.h"
 #include "candidates/candidate_store.h"
 #include "freeze/freeze_manager.h"
+#include "memory/memory_reader.h"
 #include "process/process_handle.h"
 #include "profiles/profile_store.h"
 #include "snapshot/snapshot_store.h"
@@ -14,6 +15,8 @@
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
+
+#include <memory>
 
 namespace killengine {
 
@@ -87,6 +90,12 @@ public:
         const QString& value,
         const QString& valueType,
         const QVariantMap& expertOptions);
+
+    /// Réduit les candidats dans un worker thread et retourne immédiatement un requestId.
+    Q_INVOKABLE QVariantMap nextScanAsync(const QString& mode, const QString& value);
+
+    /// Demande l'annulation du scan actif.
+    Q_INVOKABLE QVariantMap cancelActiveScan();
 
     /// Réduit les candidats existants en relisant leurs adresses.
     Q_INVOKABLE QVariantMap nextScan(const QString& mode, const QString& value);
@@ -234,6 +243,7 @@ private:
     int                      m_lastBatchEndIndex{-1};
     bool                     m_scanInProgress{false};
     int                      m_nextScanRequestId{1};
+    std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     killai::AIEngine         m_ai;
     bool                     m_smartSearchActive{false};
     QString                  m_smartSearchInitialValue;

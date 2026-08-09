@@ -43,8 +43,9 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - La page Paramètres permet de lire les dernières lignes du log principal et d'exporter un bundle diagnostic compressé.
 - Les crashs non gérés produisent un rapport local et les rapports récents sont inclus dans l'export diagnostic.
 - Le Mode Expert affiche un état de scan en cours, bloque les actions concurrentes et expose une progression simple.
-- Le scan exact du Mode Expert peut maintenant partir dans un worker thread et rendre le contrôle au frontend immédiatement.
-- Les scans `next_scan` et `unknown` restent synchrones, et l'annulation fine reste à implémenter.
+- Les scans exacts et `next_scan` du Mode Expert peuvent partir dans un worker thread et rendre le contrôle au frontend immédiatement.
+- Le Mode Expert expose une annulation de scan actif ; une annulation ne remplace pas l'état candidat avec des résultats partiels.
+- Les scans `unknown` restent synchrones.
 - Crédit UI : `Pirolley Benoist` en bas à gauche.
 
 ### Limites connues de la baseline
@@ -60,7 +61,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Le packaging est implémenté au niveau V1 polish initial ; la signature Authenticode et l'installateur final signé restent hors de cette brique.
 - L'export diagnostic initial est disponible ; l'ouverture automatique du dossier exporté reste à ajouter si nécessaire.
 - Le crash handling initial écrit des rapports texte locaux ; les minidumps natifs restent une amélioration ultérieure.
-- La progression de scan V1 est volontairement grossière ; la parallélisation complète de tous les scans et l'annulation fine restent à implémenter.
+- La progression de scan V1 est volontairement grossière ; l'asynchronisme des scans `unknown` reste à implémenter.
 - `KillEngineTestTarget.exe` est créé et exposé des variables connues (health, money, stamina, position, hidden_score, Player heap) pour les validations manuelles et scénarios automatisés.
 - Les validations sont surtout manuelles sur Solitaire et via tests unitaires ; les tests d'intégration automatisés (`tests/integration/`) restent à écrire.
 - Les opérations de scan lourdes restent à améliorer côté asynchronisme/progression fine pour une UX V1 complète.

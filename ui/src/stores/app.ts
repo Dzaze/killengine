@@ -530,7 +530,7 @@ export const useAppStore = defineStore('app', () => {
       scanStatusText.value = 'Chargement des candidats...'
       await refreshCandidates()
       scanProgressPercent.value = 100
-      scanStatusText.value = 'Scan terminé.'
+      scanStatusText.value = exactScanResult.value.cancelled ? 'Scan annulé.' : 'Scan terminé.'
     } catch (e) {
       exactScanResult.value = {
         success: false,
@@ -567,16 +567,17 @@ export const useAppStore = defineStore('app', () => {
       scanBusy.value = true
       scanProgressPercent.value = 15
       scanStatusText.value = 'Réduction des candidats...'
-      nextScanResult.value = await backend.getController().nextScan(nextScanMode.value, nextScanValue.value)
+      nextScanResult.value = await backend.startNextScanAsync(nextScanMode.value, nextScanValue.value)
       scanProgressPercent.value = 85
       candidatePageIndex.value = 0
       scanStatusText.value = 'Actualisation des candidats...'
       await refreshCandidates()
       scanProgressPercent.value = 100
-      scanStatusText.value = 'Next scan terminé.'
+      scanStatusText.value = nextScanResult.value.cancelled ? 'Scan annulé.' : 'Next scan terminé.'
     } catch (e) {
       nextScanResult.value = {
         success: false,
+        cancelled: false,
         checked: 0,
         unreadable: 0,
         remaining: 0,
@@ -585,6 +586,19 @@ export const useAppStore = defineStore('app', () => {
       scanStatusText.value = 'Next scan échoué.'
     } finally {
       scanBusy.value = false
+    }
+  }
+
+  async function cancelActiveScan() {
+    if (!scanBusy.value) return
+    scanStatusText.value = 'Annulation demandée...'
+    try {
+      const result = await backend.cancelActiveScan()
+      if (result.success !== true && result.error) {
+        scanStatusText.value = String(result.error)
+      }
+    } catch (e) {
+      scanStatusText.value = 'Annulation impossible : ' + String(e)
     }
   }
 
@@ -795,6 +809,7 @@ export const useAppStore = defineStore('app', () => {
     clearSmartSearchDebug,
     doSearch,
     doExactScan,
+    cancelActiveScan,
     refreshCandidates,
     nextCandidatePage,
     previousCandidatePage,

@@ -826,12 +826,14 @@ QVariantMap ApplicationController::startExactScanAsync(
     const int pid = m_pid;
     const QByteArray scannedBytes = killcore::scanValueToBytes(scanValue);
     const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
 
     m_scanInProgress = true;
+    m_activeScanCancellation = cancellation;
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, value, valueType, expertOptions, scanValue, options, scannedBytes]() {
+    std::thread([self, requestId, pid, value, valueType, expertOptions, scanValue, options, scannedBytes, cancellation]() {
         killcore::ScanResult scan;
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         if (!workerHandle.isValid()) {
@@ -839,7 +841,7 @@ QVariantMap ApplicationController::startExactScanAsync(
             scan.errorMessage = "Impossible d'ouvrir le processus dans le worker de scan.";
         } else {
             killcore::ScanEngine scanner(workerHandle);
-            scan = scanner.exactScan(scanValue, options);
+            scan = scanner.exactScan(scanValue, options, cancellation.get());
         }
 
         if (!self) {
@@ -852,7 +854,9 @@ QVariantMap ApplicationController::startExactScanAsync(
 
             QVariantMap finished;
             QVariantList finishedMatches;
-            self->m_candidates.replaceFromScan(scan, scannedBytes);
+            if (!scan.cancelled) {
+                self->m_candidates.replaceFromScan(scan, scannedBytes);
+            }
 
             const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
             for (qsizetype i = 0; i < previewCount; ++i) {
@@ -884,9 +888,217 @@ QVariantMap ApplicationController::startExactScanAsync(
                 {"success", finished.value("success")},
                 {"matchesFound", finished.value("matchesFound")},
                 {"candidateStoreSize", finished.value("candidateStoreSize")},
+                {"cancelled", scan.cancelled},
                 {"error", finished.value("error")},
             });
             self->m_scanInProgress = false;
+            self->m_activeScanCancellation.reset();
+            emit self->scanStatsUpdated(static_cast<int>(self->m_candidates.size()));
+            emit self->scanProgress(100);
+            emit self->scanFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::cancelActiveScan() {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_scanInProgress || !m_activeScanCancellation) {
+        result["error"] = "Aucun scan actif à annuler.";
+        return result;
+    }
+    m_activeScanCancellation->cancel();
+    result["success"] = true;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QString& value) {
+    QVariantMap result;
+    result["success"] = false;
+    result["started"] = false;
+
+    if (m_scanInProgress) {
+        result["error"] = "Un scan est déjà en cours.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (m_candidates.isEmpty()) {
+        result["error"] = "Aucun candidat à filtrer. Lance d'abord un scan exact.";
+        return result;
+    }
+
+    killcore::NextScanMode scanMode;
+    if (!killcore::parseNextScanMode(mode, &scanMode)) {
+        result["error"] = "Mode de next scan invalide.";
+        return result;
+    }
+
+    const auto candidates = m_candidates.candidates();
+    const auto candidateType = candidates.first().type;
+    killcore::ScanValue targetValue;
+    QByteArray targetBytes;
+    double targetNumber = 0.0;
+    if (scanMode == killcore::NextScanMode::Exact || scanMode == killcore::NextScanMode::Delta) {
+        QString parseError;
+        if (!killcore::parseScanValue(value, candidateType, &targetValue, &parseError)) {
+            result["error"] = parseError;
+            return result;
+        }
+        targetBytes = killcore::scanValueToBytes(targetValue);
+        targetNumber = bytesToDouble(targetBytes, candidateType);
+    }
+
+    const int requestId = m_nextScanRequestId++;
+    const int pid = m_pid;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_scanInProgress = true;
+    m_activeScanCancellation = cancellation;
+    emit scanStarted();
+    emit scanProgress(0);
+
+    std::thread([self, requestId, pid, mode, value, scanMode, candidateType, candidates, targetBytes, targetNumber, cancellation]() {
+        QVariantMap finished;
+        QVariantList debugSamples;
+        QList<killcore::Candidate> survivors;
+        survivors.reserve(candidates.size());
+
+        size_t checked = 0;
+        size_t unreadable = 0;
+        bool cancelled = false;
+        QString error;
+
+        killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
+        if (!workerHandle.isValid()) {
+            error = "Impossible d'ouvrir le processus dans le worker de next scan.";
+        } else {
+            killcore::MemoryReader reader(workerHandle);
+            for (const auto& candidate : candidates) {
+                if (cancellation->isCancelled()) {
+                    cancelled = true;
+                    error = "Next scan annulé.";
+                    break;
+                }
+
+                const size_t bytesToRead = killcore::valueTypeSize(candidate.type);
+                const auto read = reader.read(candidate.address, bytesToRead);
+                ++checked;
+
+                if (!(read.success || read.partial) || read.bytesRead != bytesToRead) {
+                    ++unreadable;
+                    if (debugSamples.size() < 20) {
+                        QVariantMap sample;
+                        sample["address"] = QString::number(candidate.address, 16);
+                        sample["type"] = killcore::valueTypeToString(candidate.type);
+                        sample["previousHex"] = bytesToHex(candidate.lastValue);
+                        sample["readable"] = false;
+                        sample["readBytes"] = static_cast<qulonglong>(read.bytesRead);
+                        sample["error"] = read.errorMessage;
+                        debugSamples.append(sample);
+                    }
+                    continue;
+                }
+
+                const QByteArray current = read.data;
+                const double previousNumber = bytesToDouble(candidate.lastValue, candidate.type);
+                const double currentNumber = bytesToDouble(current, candidate.type);
+
+                bool keep = false;
+                switch (scanMode) {
+                    case killcore::NextScanMode::Exact:
+                        keep = bytesEqual(current, targetBytes, candidate.type);
+                        break;
+                    case killcore::NextScanMode::Changed:
+                        keep = !bytesEqual(current, candidate.lastValue, candidate.type);
+                        break;
+                    case killcore::NextScanMode::Unchanged:
+                        keep = bytesEqual(current, candidate.lastValue, candidate.type);
+                        break;
+                    case killcore::NextScanMode::Increased:
+                        keep = currentNumber > previousNumber;
+                        break;
+                    case killcore::NextScanMode::Decreased:
+                        keep = currentNumber < previousNumber;
+                        break;
+                    case killcore::NextScanMode::Delta:
+                        keep = std::abs((currentNumber - previousNumber) - targetNumber) < 0.000001;
+                        break;
+                }
+
+                if (debugSamples.size() < 20) {
+                    QVariantMap sample;
+                    sample["address"] = QString::number(candidate.address, 16);
+                    sample["type"] = killcore::valueTypeToString(candidate.type);
+                    sample["previousHex"] = bytesToHex(candidate.lastValue);
+                    sample["currentHex"] = bytesToHex(current);
+                    sample["previousNumber"] = previousNumber;
+                    sample["currentNumber"] = currentNumber;
+                    sample["keep"] = keep;
+                    debugSamples.append(sample);
+                }
+
+                if (keep) {
+                    auto updated = candidate;
+                    updated.lastValue = current;
+                    survivors.append(updated);
+                }
+            }
+        }
+
+        if (!self) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, candidateType, candidates, survivors, checked, unreadable, cancelled, error, debugSamples]() {
+            if (!self) {
+                return;
+            }
+
+            if (!cancelled && error.isEmpty()) {
+                self->m_candidates.replaceCandidates(survivors);
+            }
+
+            QVariantMap finished;
+            finished["requestId"] = requestId;
+            finished["kind"] = "next_scan";
+            finished["success"] = error.isEmpty();
+            finished["cancelled"] = cancelled;
+            finished["checked"] = static_cast<qulonglong>(checked);
+            finished["unreadable"] = static_cast<qulonglong>(unreadable);
+            finished["remaining"] = static_cast<qulonglong>(cancelled ? candidates.size() : self->m_candidates.size());
+            finished["error"] = error;
+            finished["debugBeforeCount"] = static_cast<qulonglong>(candidates.size());
+            finished["debugMode"] = mode;
+            finished["debugValue"] = value;
+            finished["debugSamples"] = debugSamples;
+
+            self->appendSmartSearchDebug("next_scan_async", {
+                {"requestId", requestId},
+                {"mode", mode},
+                {"value", value},
+                {"candidateType", killcore::valueTypeToString(candidateType)},
+                {"beforeCount", static_cast<qulonglong>(candidates.size())},
+                {"checked", finished.value("checked")},
+                {"unreadable", finished.value("unreadable")},
+                {"remaining", finished.value("remaining")},
+                {"cancelled", cancelled},
+                {"error", error},
+                {"samples", debugSamples},
+            });
+
+            self->m_scanInProgress = false;
+            self->m_activeScanCancellation.reset();
             emit self->scanStatsUpdated(static_cast<int>(self->m_candidates.size()));
             emit self->scanProgress(100);
             emit self->scanFinished(finished);

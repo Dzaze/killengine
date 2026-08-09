@@ -92,11 +92,18 @@ export interface CandidatePage {
 }
 
 export interface NextScanResult {
+  requestId?: number
+  kind?: string
   success: boolean
+  cancelled?: boolean
   checked: number
   unreadable: number
   remaining: number
   error: string
+  debugBeforeCount?: number
+  debugMode?: string
+  debugValue?: string
+  debugSamples?: Array<Record<string, unknown>>
 }
 
 export interface UnknownSnapshotResult {
@@ -206,8 +213,10 @@ export interface BackendController {
     valueType: string,
     expertOptions: ExpertScanOptions,
   ): Promise<Record<string, unknown>>
-  scanFinished?: QWebChannelSignal<ExactScanResult>
+  scanFinished?: QWebChannelSignal<ExactScanResult | NextScanResult>
   nextScan(mode: string, value: string): Promise<NextScanResult>
+  nextScanAsync(mode: string, value: string): Promise<Record<string, unknown>>
+  cancelActiveScan(): Promise<Record<string, unknown>>
   getCandidates(pageIndex: number, pageSize: number, addressFilter: string): Promise<CandidatePage>
   captureUnknownSnapshot(): Promise<UnknownSnapshotResult>
   unknownNextScan(mode: string, valueType: string): Promise<UnknownNextScanResult>
@@ -367,14 +376,63 @@ class BackendService {
         })
       }, 10 * 60 * 1000)
 
-      const handler = (payload: ExactScanResult) => {
+      const handler = (payload: ExactScanResult | NextScanResult) => {
         if (Number(payload.requestId) !== requestId) return
+        if ('kind' in payload && payload.kind === 'next_scan') return
         window.clearTimeout(timeout)
         controller.scanFinished?.disconnect?.(handler)
-        resolve(payload)
+        resolve(payload as ExactScanResult)
       }
       controller.scanFinished?.connect(handler)
     })
+  }
+
+  async startNextScanAsync(mode: string, value: string): Promise<NextScanResult> {
+    const controller = this.getController()
+    if (!controller.scanFinished || !controller.nextScanAsync) {
+      return controller.nextScan(mode, value)
+    }
+
+    const start = await controller.nextScanAsync(mode, value)
+    if (start.success !== true || start.started !== true) {
+      return {
+        success: false,
+        cancelled: false,
+        checked: 0,
+        unreadable: 0,
+        remaining: 0,
+        error: String(start.error ?? 'Impossible de démarrer le next scan async.'),
+      }
+    }
+
+    const requestId = Number(start.requestId)
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        resolve({
+          requestId,
+          kind: 'next_scan',
+          success: false,
+          cancelled: false,
+          checked: 0,
+          unreadable: 0,
+          remaining: 0,
+          error: 'Timeout du next scan async.',
+        })
+      }, 10 * 60 * 1000)
+
+      const handler = (payload: ExactScanResult | NextScanResult) => {
+        if (Number(payload.requestId) !== requestId) return
+        if ('kind' in payload && payload.kind && payload.kind !== 'next_scan') return
+        window.clearTimeout(timeout)
+        controller.scanFinished?.disconnect?.(handler)
+        resolve(payload as NextScanResult)
+      }
+      controller.scanFinished?.connect(handler)
+    })
+  }
+
+  async cancelActiveScan(): Promise<Record<string, unknown>> {
+    return this.getController().cancelActiveScan()
   }
 
   private notifyListeners(): void {
@@ -475,6 +533,12 @@ class BackendService {
           remaining: 0,
           error: 'Mock backend',
         }
+      },
+      async nextScanAsync(_mode: string, _value: string) {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
+      async cancelActiveScan() {
+        return { success: false, error: 'Mock backend' }
       },
       async captureUnknownSnapshot() {
         return {
