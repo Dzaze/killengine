@@ -371,6 +371,18 @@ async function saveAll() {
   opacity: 0.45;
 }
 
+.input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.input[type="number"]::-webkit-outer-spin-button,
+.input[type="number"]::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 .select {
   cursor: pointer;
 }
