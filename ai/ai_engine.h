@@ -31,7 +31,11 @@ public:
     /// Traite une requête utilisateur et retourne une décision JSON.
     QVariantMap processQuery(const QString& query);
 
+    /// Interprète une requête utilisateur en intention structurée validée.
+    QVariantMap processIntent(const QString& query);
+
 private:
+    QVariantMap deterministicIntent(const QString& query);
     QVariantMap makeToolCall(const QString& tool, const QVariantMap& args, const QString& rationale);
     QVariantMap deterministicPlan(const QString& query);
     static QString inferValueType(const QString& query);

@@ -1,7 +1,9 @@
 #include "ai_engine.h"
+#include "intent_contract.h"
 #include "logging/logger.h"
 
 #include <QRegularExpression>
+#include <QVariantList>
 
 namespace killai {
 
@@ -23,6 +25,64 @@ bool AIEngine::init() {
 }
 
 bool AIEngine::isReady() const { return m_ready; }
+
+QVariantMap AIEngine::processIntent(const QString& query) {
+    if (!m_ready) {
+        QVariantMap result;
+        result["status"] = "not_ready";
+        result["message"] = "AIEngine is not initialized.";
+        return result;
+    }
+
+    const QString q = query.toLower();
+    const bool looksLikeWriteWithoutValue =
+        (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")
+         || q.contains("write") || q.contains("écri") || q.contains("ecri"))
+        && firstNumber(query).isEmpty();
+    if (looksLikeWriteWithoutValue) {
+        QVariantMap result;
+        result["status"] = "needs_clarification";
+        result["intent"] = "Unknown";
+        result["value"] = "";
+        result["targetValue"] = "";
+        result["addresses"] = QVariantList{};
+        result["confidence"] = 0.9;
+        result["missing"] = "Tu veux le passer à quelle valeur ?";
+        result["message"] = result["missing"];
+        result["aiBackend"] = "deterministic_guard";
+        return result;
+    }
+
+    if (m_llama.isAvailable()) {
+        const auto generated = m_llama.planIntent(query);
+        if (generated.success) {
+            QString error;
+            QVariantMap intent = LlamaRuntime::extractIntentJson(generated.output, &error);
+            if (!intent.isEmpty()) {
+                const bool valid = IntentContract::validate(intent, &error);
+                intent["status"] = valid ? "intent" : "needs_clarification";
+                intent["aiBackend"] = "llama.cpp";
+                intent["error"] = error;
+                if (!valid && intent.value("message").toString().isEmpty()) {
+                    intent["message"] = intent.value("missing").toString().isEmpty()
+                        ? QString("Je dois préciser l'intention avant d'agir.")
+                        : intent.value("missing").toString();
+                }
+                return intent;
+            }
+            KE_LOG_INFO() << "AIEngine model intent rejected: " << error.toStdString();
+        } else {
+            KE_LOG_INFO() << "AIEngine model intent generation failed: " << generated.errorMessage.toStdString();
+        }
+    }
+
+    QVariantMap fallback = deterministicIntent(query);
+    fallback["aiBackend"] = "deterministic";
+    if (m_llama.info().available == false && !m_llama.info().errorMessage.isEmpty()) {
+        fallback["aiBackendNote"] = m_llama.info().errorMessage;
+    }
+    return fallback;
+}
 
 QVariantMap AIEngine::processQuery(const QString& query) {
     const QString q = query.toLower();
@@ -66,6 +126,74 @@ QVariantMap AIEngine::processQuery(const QString& query) {
         fallback["aiBackendNote"] = m_llama.info().errorMessage;
     }
     return fallback;
+}
+
+QVariantMap AIEngine::deterministicIntent(const QString& query) {
+    const QString q = query.toLower();
+    QVariantMap result;
+    result["status"] = "intent";
+    result["intent"] = "Unknown";
+    result["value"] = "";
+    result["targetValue"] = "";
+    result["addresses"] = QVariantList{};
+    result["confidence"] = 0.5;
+    result["missing"] = "";
+
+    QVariantList addresses;
+    const QRegularExpression addressRe(R"(0x[0-9a-fA-F]{5,16})");
+    auto addressIt = addressRe.globalMatch(query);
+    while (addressIt.hasNext()) {
+        addresses.append(addressIt.next().captured(0));
+    }
+
+    QStringList numbers;
+    const QRegularExpression numberRe(R"([-+]?\d+(?:[\.,]\d+)?)");
+    auto numberIt = numberRe.globalMatch(query);
+    while (numberIt.hasNext()) {
+        numbers.append(numberIt.next().captured(0).replace(',', '.'));
+    }
+
+    if (q.contains("autre") || q.contains("nouveau") || q.contains("reset") || q.contains("recommence")) {
+        result["intent"] = numbers.isEmpty() ? "ResetContext" : "ExactScan";
+        if (!numbers.isEmpty()) result["value"] = numbers.first();
+        result["confidence"] = 0.75;
+    } else if (!addresses.isEmpty()) {
+        result["intent"] = numbers.isEmpty() ? "ActivateMemoryTargets" : "WriteMemoryTargets";
+        result["addresses"] = addresses;
+        if (!numbers.isEmpty()) result["value"] = numbers.first();
+        result["confidence"] = 0.9;
+    } else if (numbers.size() >= 2) {
+        result["intent"] = "GuidedScan";
+        result["value"] = numbers.at(0);
+        result["targetValue"] = numbers.at(1);
+        result["confidence"] = 0.85;
+    } else if (numbers.size() == 1) {
+        if (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")) {
+            result["intent"] = "RewriteLastTargets";
+        } else {
+            result["intent"] = "ExactScan";
+        }
+        result["value"] = numbers.first();
+        result["confidence"] = 0.7;
+    } else if (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")) {
+        result["status"] = "needs_clarification";
+        result["missing"] = "Tu veux le passer à quelle valeur ?";
+        result["message"] = result["missing"];
+    } else {
+        result["status"] = "needs_clarification";
+        result["missing"] = "Quelle valeur veux-tu chercher ?";
+        result["message"] = result["missing"];
+    }
+
+    QString error;
+    if (result.value("status").toString() == "intent" && !IntentContract::validate(result, &error)) {
+        result["status"] = "needs_clarification";
+        result["error"] = error;
+        result["message"] = result.value("missing").toString().isEmpty()
+            ? QString("Il manque une information pour continuer.")
+            : result.value("missing").toString();
+    }
+    return result;
 }
 
 QVariantMap AIEngine::deterministicPlan(const QString& query) {

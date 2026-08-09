@@ -77,6 +77,26 @@ TEST(IntentContractTest, ValidatesMemoryTargetAddresses) {
     EXPECT_TRUE(error.isEmpty());
 }
 
+TEST(AIEngineTest, ProducesGuidedScanIntent) {
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+
+    const auto result = engine.processIntent("j'ai 900 en score je veux le passer a 1000");
+    EXPECT_EQ(result.value("status").toString(), "intent");
+    EXPECT_EQ(result.value("intent").toString(), "GuidedScan");
+    EXPECT_EQ(result.value("value").toString(), "900");
+    EXPECT_EQ(result.value("targetValue").toString(), "1000");
+}
+
+TEST(AIEngineTest, AsksClarificationForMissingWriteValue) {
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+
+    const auto result = engine.processIntent("passe le score");
+    EXPECT_EQ(result.value("status").toString(), "needs_clarification");
+    EXPECT_FALSE(result.value("message").toString().isEmpty());
+}
+
 TEST(LlamaRuntimeTest, ExtractsToolCallJsonFromModelText) {
     QString error;
     const auto call = killai::LlamaRuntime::extractToolCallJson(
@@ -86,6 +106,18 @@ TEST(LlamaRuntimeTest, ExtractsToolCallJsonFromModelText) {
     ASSERT_TRUE(error.isEmpty()) << error.toStdString();
     EXPECT_EQ(call.value("tool").toString(), "exact_scan");
     EXPECT_EQ(call.value("args").toMap().value("value").toString(), "42");
+}
+
+TEST(LlamaRuntimeTest, ExtractsIntentJsonFromModelText) {
+    QString error;
+    const auto intent = killai::LlamaRuntime::extractIntentJson(
+        R"(prefix {"intent":"GuidedScan","value":"900","targetValue":"1000","addresses":[],"confidence":0.95,"missing":""} suffix)",
+        &error);
+
+    ASSERT_TRUE(error.isEmpty()) << error.toStdString();
+    EXPECT_EQ(intent.value("intent").toString(), "GuidedScan");
+    EXPECT_EQ(intent.value("value").toString(), "900");
+    EXPECT_EQ(intent.value("targetValue").toString(), "1000");
 }
 
 TEST(LlamaRuntimeTest, ExtractsLastToolCallWhenPromptContainsJson) {
