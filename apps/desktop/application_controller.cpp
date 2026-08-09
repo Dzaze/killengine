@@ -1275,6 +1275,8 @@ QVariantMap ApplicationController::getCandidates(int pageIndex, int pageSize, co
     result["pageIndex"] = static_cast<int>(page.pageIndex);
     result["pageSize"] = static_cast<int>(page.pageSize);
     result["totalCount"] = static_cast<qulonglong>(page.totalCount);
+    result["fileBacked"] = m_candidates.isFileBacked();
+    result["candidateStorePath"] = m_candidates.backingFilePath();
     result["candidates"] = candidates;
     return result;
 }
@@ -2543,6 +2545,8 @@ QVariantMap ApplicationController::exportDiagnostics() {
     manifest["processName"] = m_processName;
     manifest["attached"] = m_attached;
     manifest["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
+    manifest["candidateStoreFileBacked"] = m_candidates.isFileBacked();
+    manifest["candidateStorePath"] = m_candidates.backingFilePath();
     manifest["logFilePath"] = getLogFilePath();
     manifest["smartSearchDebugFilePath"] = smartSearchDebugFilePath();
     manifest["crashDirectory"] = CrashHandler::crashDirectory();

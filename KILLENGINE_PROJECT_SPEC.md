@@ -55,7 +55,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Phase 12 / Polissage V1 est complète au niveau checklist ; il reste à faire une passe de régression manuelle avant une release candidate.
 - Le moteur IA tente maintenant d'utiliser un runtime local `llama-cli` + GGUF Qwen si disponibles, puis retombe sur le planner déterministe si le modèle ou l'exécutable manque.
 - Le scan multi-type automatique complet n'est pas encore implémenté : le planner choisit surtout `Int32` par défaut sauf indication contraire.
-- Le stockage des candidats reste majoritairement en mémoire ; la Phase 13 prévoit un CandidateStore file-backed avec pagination virtuelle pour mieux supporter les scans à très gros volumes.
+- Le CandidateStore bascule automatiquement sur fichier temporaire compact au-delà d'un seuil et sait paginer sans hydrater toute la liste ; le next scan streaming par blocs reste à implémenter.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
 - La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.

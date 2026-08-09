@@ -67,3 +67,47 @@ TEST(CandidateStoreTest, HandlesLargeCandidateSet) {
     EXPECT_GT(page.totalCount, 0u);
     EXPECT_LE(page.totalCount, static_cast<size_t>(kCandidateCount));
 }
+
+TEST(CandidateStoreTest, SpillsLargeCandidateSetToTemporaryFile) {
+    killcore::ScanResult scan;
+    for (int i = 0; i < 12; ++i) {
+        scan.matches.append({static_cast<uint64_t>(0x2000 + i * 4), killcore::ValueType::Int32});
+    }
+
+    killcore::CandidateStore store;
+    store.setFileBackedThreshold(5);
+    store.replaceFromScan(scan, QByteArray::fromHex("64000000"));
+
+    EXPECT_TRUE(store.isFileBacked());
+    EXPECT_FALSE(store.backingFilePath().isEmpty());
+    EXPECT_EQ(store.size(), 12u);
+
+    auto page = store.page(1, 4);
+    ASSERT_EQ(page.totalCount, 12u);
+    ASSERT_EQ(page.candidates.size(), 4);
+    EXPECT_EQ(page.candidates[0].address, 0x2010u);
+    EXPECT_EQ(page.candidates[0].lastValue, QByteArray::fromHex("64000000"));
+}
+
+TEST(CandidateStoreTest, FiltersFileBackedCandidatesWithoutHydratingWholeStore) {
+    killcore::ScanResult scan;
+    scan.matches.append({0x1000, killcore::ValueType::Int32});
+    scan.matches.append({0x1234, killcore::ValueType::Int32});
+    scan.matches.append({0x2234, killcore::ValueType::Int32});
+    scan.matches.append({0x3000, killcore::ValueType::Int32});
+
+    killcore::CandidateStore store;
+    store.setFileBackedThreshold(2);
+    store.replaceFromScan(scan, {});
+
+    ASSERT_TRUE(store.isFileBacked());
+    auto page = store.page(0, 10, "234");
+    ASSERT_EQ(page.totalCount, 2u);
+    ASSERT_EQ(page.candidates.size(), 2);
+    EXPECT_EQ(page.candidates[0].address, 0x1234u);
+    EXPECT_EQ(page.candidates[1].address, 0x2234u);
+
+    const auto& hydrated = store.candidates();
+    ASSERT_EQ(hydrated.size(), 4);
+    EXPECT_EQ(hydrated[0].address, 0x1000u);
+}
