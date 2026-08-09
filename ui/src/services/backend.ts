@@ -172,6 +172,7 @@ export interface BackendController {
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
   getSmartSearchDebugEvents(maxEvents: number): Promise<SmartSearchDebugEventsResult>
+  clearSmartSearchDebugEvents(): Promise<Record<string, unknown>>
 
   // Phase 11 — Profils
   saveProfileTarget(
@@ -401,6 +402,9 @@ class BackendService {
       },
       async getSmartSearchDebugEvents() {
         return { success: true, path: 'mock://no-smart-search-debug', events: [], error: '' }
+      },
+      async clearSmartSearchDebugEvents() {
+        return { success: true, error: '' }
       },
       async saveProfileTarget() {
         return { success: false, error: 'Mock backend' }

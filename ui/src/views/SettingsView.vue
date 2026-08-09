@@ -100,7 +100,12 @@ onMounted(() => {
     <section class="panel">
       <div class="panel-title">
         <h2>Événements Smart Search</h2>
-        <span>{{ debugEvents.length }}</span>
+        <div class="panel-actions">
+          <span>{{ debugEvents.length }}</span>
+          <button class="btn btn-secondary compact" :disabled="debugEvents.length === 0" @click="store.clearSmartSearchDebug()">
+            Vider
+          </button>
+        </div>
       </div>
       <div v-if="debugEvents.length === 0" class="empty-line">
         Aucun événement debug enregistré.
@@ -156,6 +161,12 @@ onMounted(() => {
 .empty-line {
   color: var(--text-dim);
   font-size: 12px;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .header {
@@ -321,6 +332,11 @@ code {
   cursor: pointer;
   font-size: 13px;
   transition: all 0.15s;
+}
+
+.compact {
+  padding: 5px 9px;
+  font-size: 12px;
 }
 
 .btn:disabled {

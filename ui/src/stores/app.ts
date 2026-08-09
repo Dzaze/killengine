@@ -226,6 +226,23 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function clearSmartSearchDebug() {
+    try {
+      const result = await backend.getController().clearSmartSearchDebugEvents()
+      if (result.success !== true) {
+        smartSearchDebugError.value = String(result.error ?? 'Impossible de vider le debug Smart Search.')
+        return result
+      }
+      smartSearchDebugEvents.value = []
+      smartSearchDebugError.value = ''
+      await refreshDiagnostics()
+      return result
+    } catch (e) {
+      smartSearchDebugError.value = String(e)
+      return { success: false, error: String(e) }
+    }
+  }
+
   async function doSearch() {
     const query = searchQuery.value.trim()
     if (!query || isSearching.value) return
@@ -530,6 +547,7 @@ export const useAppStore = defineStore('app', () => {
     detach,
     doPing,
     refreshDiagnostics,
+    clearSmartSearchDebug,
     doSearch,
     doExactScan,
     refreshCandidates,

@@ -114,6 +114,9 @@ public:
     /// Retourne les derniers événements du debug Smart Search.
     Q_INVOKABLE QVariantMap getSmartSearchDebugEvents(int maxEvents) const;
 
+    /// Vide le fichier debug Smart Search.
+    Q_INVOKABLE QVariantMap clearSmartSearchDebugEvents();
+
     // -----------------------------------------------------------------------
     // Phase 11 — Profils
     // -----------------------------------------------------------------------

@@ -1524,6 +1524,22 @@ QVariantMap ApplicationController::getSmartSearchDebugEvents(int maxEvents) cons
     return result;
 }
 
+QVariantMap ApplicationController::clearSmartSearchDebugEvents() {
+    QVariantMap result;
+    result["success"] = false;
+    result["path"] = smartSearchDebugFilePath();
+
+    QFile file(smartSearchDebugFilePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        result["error"] = "Impossible de vider le fichier debug Smart Search.";
+        return result;
+    }
+
+    result["success"] = true;
+    result["error"] = "";
+    return result;
+}
+
 QString ApplicationController::smartSearchDebugFilePath() const {
     QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (dir.isEmpty()) {
