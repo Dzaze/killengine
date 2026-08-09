@@ -150,9 +150,14 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         <h1>{{ $t('search.title') }}</h1>
         <p class="subtitle">Décris ce que tu cherches, KillEngine fait le reste.</p>
       </div>
-      <div v-if="isWorkflowActive" class="workflow-badge" :class="workflowClass(store.workflowStatus)">
-        <span class="dot"></span>
-        {{ workflowLabel(store.workflowStatus) }}
+      <div class="header-actions">
+        <div v-if="isWorkflowActive" class="workflow-badge" :class="workflowClass(store.workflowStatus)">
+          <span class="dot"></span>
+          {{ workflowLabel(store.workflowStatus) }}
+        </div>
+        <button class="btn btn-secondary btn-small" :disabled="store.isSearching" @click="store.startNewSearchContext()">
+          Nouvelle recherche
+        </button>
       </div>
     </div>
 
@@ -325,6 +330,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 16px;
+  gap: 12px;
 }
 
 .header h1 {
@@ -352,6 +358,13 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+}
+
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .wf-success { background: rgba(158, 206, 106, 0.15); color: var(--success); }

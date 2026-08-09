@@ -515,6 +515,12 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function startNewSearchContext() {
+    if (isSearching.value) return
+    searchQuery.value = 'nouvelle recherche'
+    await doSearch()
+  }
+
   function extractCandidateCount(result: Record<string, unknown>): number | undefined {
     if (typeof result.candidateStoreSize === 'number') return result.candidateStoreSize
     const ar = result.actionResult as Record<string, unknown> | undefined
@@ -864,6 +870,7 @@ export const useAppStore = defineStore('app', () => {
     clearActiveChatMemoryTargets,
     clearSmartSearchDebug,
     doSearch,
+    startNewSearchContext,
     doExactScan,
     cancelActiveScan,
     refreshCandidates,

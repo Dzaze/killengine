@@ -146,6 +146,7 @@ RESTE À FAIRE ACTUEL :
   - Phase 13 Profils : écriture directe ajoutée dans la page Profil via champ valeur + bouton Écrire par cible.
   - Phase 13 Profils : cibles regroupées par usage dérivé du nom, avec bouton `Utiliser le groupe`.
   - Phase 13 Profils : bandeau Assistant enrichi avec groupes et cibles de profil actifs.
+  - Phase 13 UX : bouton `Nouvelle recherche` ajouté dans l'Assistant, relié au reset de contexte existant.
   - Prochaine étape : traiter les points Phase 13 un par un, puis passe de régression manuelle V1 / release candidate.
   - Tests unitaires au dernier état : 30/30 OK.
   - Tests d'intégration automatisés à écrire si on veut couvrir les scénarios complets hors validation manuelle.
