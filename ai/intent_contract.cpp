@@ -30,6 +30,7 @@ QStringList IntentContract::supportedIntents() {
         "WriteMemoryTargets",
         "RewriteLastTargets",
         "WriteProfileTargets",
+        "ReportBadTargets",
     };
 }
 

@@ -35,10 +35,35 @@ QVariantMap AIEngine::processIntent(const QString& query) {
     }
 
     const QString q = query.toLower();
+    QStringList detectedNumbers;
+    const QRegularExpression guardedNumberRe(R"([-+]?\d+(?:[\.,]\d+)?)");
+    auto guardedNumberIt = guardedNumberRe.globalMatch(query);
+    while (guardedNumberIt.hasNext()) {
+        detectedNumbers.append(guardedNumberIt.next().captured(0).replace(',', '.'));
+    }
+    const bool looksLikeBadTargets =
+        q.contains("marche pas") || q.contains("marché pas") || q.contains("pas marché")
+        || q.contains("ne marche pas") || q.contains("mauvaise adresse")
+        || q.contains("pas bon") || q.contains("rien change");
+    if (looksLikeBadTargets) {
+        QVariantMap result;
+        result["status"] = "intent";
+        result["intent"] = "ReportBadTargets";
+        result["value"] = "";
+        result["targetValue"] = "";
+        result["addresses"] = QVariantList{};
+        result["confidence"] = 0.9;
+        result["missing"] = "";
+        result["aiBackend"] = "deterministic_guard";
+        return result;
+    }
+
+    const QString firstDetectedNumber = firstNumber(query);
     const bool looksLikeWriteWithoutValue =
         (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")
+         || q.contains("veux") || q.contains("voudrais") || q.contains("augmente") || q.contains("remplace")
          || q.contains("write") || q.contains("écri") || q.contains("ecri"))
-        && firstNumber(query).isEmpty();
+        && firstDetectedNumber.isEmpty();
     if (looksLikeWriteWithoutValue) {
         QVariantMap result;
         result["status"] = "needs_clarification";
@@ -49,6 +74,25 @@ QVariantMap AIEngine::processIntent(const QString& query) {
         result["confidence"] = 0.9;
         result["missing"] = "Tu veux le passer à quelle valeur ?";
         result["message"] = result["missing"];
+        result["aiBackend"] = "deterministic_guard";
+        return result;
+    }
+
+    const bool looksLikeRewriteWithValue =
+        !firstDetectedNumber.isEmpty()
+        && (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")
+            || q.contains("veux") || q.contains("voudrais") || q.contains("augmente") || q.contains("remplace"))
+        && (q.contains(" le ") || q.contains(" les ") || q.contains("ça") || q.contains("ca")
+            || q.contains("adresse") || q.contains("derni"));
+    if (looksLikeRewriteWithValue && detectedNumbers.size() == 1) {
+        QVariantMap result;
+        result["status"] = "intent";
+        result["intent"] = "RewriteLastTargets";
+        result["value"] = firstDetectedNumber;
+        result["targetValue"] = "";
+        result["addresses"] = QVariantList{};
+        result["confidence"] = 0.9;
+        result["missing"] = "";
         result["aiBackend"] = "deterministic_guard";
         return result;
     }
@@ -153,7 +197,12 @@ QVariantMap AIEngine::deterministicIntent(const QString& query) {
         numbers.append(numberIt.next().captured(0).replace(',', '.'));
     }
 
-    if (q.contains("autre") || q.contains("nouveau") || q.contains("reset") || q.contains("recommence")) {
+    if (q.contains("marche pas") || q.contains("marché pas") || q.contains("pas marché")
+        || q.contains("ne marche pas") || q.contains("mauvaise adresse")
+        || q.contains("pas bon") || q.contains("rien change")) {
+        result["intent"] = "ReportBadTargets";
+        result["confidence"] = 0.8;
+    } else if (q.contains("autre") || q.contains("nouveau") || q.contains("reset") || q.contains("recommence")) {
         result["intent"] = numbers.isEmpty() ? "ResetContext" : "ExactScan";
         if (!numbers.isEmpty()) result["value"] = numbers.first();
         result["confidence"] = 0.75;
@@ -168,14 +217,16 @@ QVariantMap AIEngine::deterministicIntent(const QString& query) {
         result["targetValue"] = numbers.at(1);
         result["confidence"] = 0.85;
     } else if (numbers.size() == 1) {
-        if (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")) {
+        if (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")
+            || q.contains("veux") || q.contains("voudrais") || q.contains("augmente") || q.contains("remplace")) {
             result["intent"] = "RewriteLastTargets";
         } else {
             result["intent"] = "ExactScan";
         }
         result["value"] = numbers.first();
         result["confidence"] = 0.7;
-    } else if (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")) {
+    } else if (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")
+               || q.contains("veux") || q.contains("voudrais") || q.contains("augmente") || q.contains("remplace")) {
         result["status"] = "needs_clarification";
         result["missing"] = "Tu veux le passer à quelle valeur ?";
         result["message"] = result["missing"];

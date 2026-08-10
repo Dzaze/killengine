@@ -114,11 +114,11 @@ Prerequisites before Phase 12:
   - [x] async threaded unknown capture/compare (worker thread, movable mapped snapshot handoff, shared cancel token)
   - [x] documentation/user guide
 - [ ] PHASE 13 - Baseline améliorations précision / efficacité / qualité
-  - [ ] Précision de recherche
-    - [ ] Smart Search multi-type automatique (`Int32`, `Int64`, `Float32`, `Float64`) quand le type n'est pas explicite
-    - [ ] variantes de représentation courantes (unsigned, valeur multipliée par 10/100/1000, score interne)
-    - [ ] scoring de confiance des candidats (région writable, stabilité, cohérence de variation, module connu)
-    - [ ] classement UI des candidats par confiance plutôt que seulement par adresse
+  - [x] Précision de recherche
+    - [x] Smart Search multi-type automatique (`Int32`, `Int64`, `Float32`, `Float64`) quand le type n'est pas explicite
+    - [x] variantes de représentation courantes (unsigned, valeur multipliée par 10/100/1000, score interne)
+    - [x] scoring de confiance des candidats (région writable, stabilité, cohérence de variation, module connu)
+    - [x] classement UI des candidats par confiance plutôt que seulement par adresse
   - [x] Scalabilité gros jeux / gros volumes de candidats
     - [x] CandidateStore file-backed pour éviter de garder des millions de candidats uniquement en RAM
     - [x] format compact adresses/valeurs précédentes en fichier temporaire (`*.kecand`)
@@ -137,19 +137,28 @@ Prerequisites before Phase 12:
     - [x] intentions plus fines : nouvelle recherche, réutiliser adresses, changer valeur trouvée, oublier profils/adresses
     - [x] réponses naturelles pour les transitions (`je cherche ailleurs`, `je garde ces adresses`, `j'attends la nouvelle valeur`)
     - [x] éviter les messages techniques abrupts quand l'utilisateur démarre un nouveau contexte
+    - [x] verrouillage des adresses finales apres auto-write, reecritures naturelles (`je les veux a 3000`) et historique d'ecritures visible
+    - [x] récupération conversationnelle quand l'utilisateur signale une mauvaise adresse (`ça n'a pas marché`)
+    - [x] test conversation guidée puis réécritures naturelles (`20 -> 1000 -> 2000 -> 3000`)
   - [x] Profils plus utiles
     - [x] libellés d'action plus clairs que `Résoudre` si nécessaire (`Activer`, `Utiliser dans l'Assistant`, `Écrire`)
     - [x] écriture directe d'une valeur sur une cible de profil
     - [x] groupes de cibles par usage (`score`, `niveau`, `argent`, etc.)
     - [x] état visible du profil/cible actuellement actifs dans l'Assistant
-  - [ ] UX et efficacité
+  - [x] UX et efficacité
     - [x] bouton `Nouvelle recherche` visible dans l'Assistant
+    - [x] actions de bulle : réutiliser adresses, tester une seule adresse, chercher la valeur ailleurs
+    - [x] confiance lisible par adresse et rollback batch détaillé
     - [x] statut global clair : recherche active, adresses actives, profil actif, aucun contexte actif
     - [x] debug Assistant lisible expliquant pourquoi une action a été choisie
+    - [x] bulle conversationnelle `Réflexion en cours...` pendant les traitements Assistant
+    - [x] aperçu mémoire visible avec état de lecture, adresse courante et erreurs lisibles
+    - [x] bascule directe d'une région mémoire vers le Mode Expert avec adresse préremplie
     - [x] progression plus fine par régions/chunks pendant les scans longs
   - [ ] Robustesse et validations
     - [x] tests d'intégration automatisés avec `KillEngineTestTarget.exe`
     - [x] scénario exact complet : scan exact -> next scan -> écriture -> vérification -> rollback
     - [x] scénario unknown complet : capture -> changement -> comparaison -> écriture
     - [x] scénario profils complet : sauvegarde -> résolution -> activation -> écriture
+    - [x] test logger `LevelFiltering` stabilisé après réinitialisation répétée
     - [ ] passe de régression manuelle V1 sur Solitaire et KillEngineTestTarget

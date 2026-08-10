@@ -49,7 +49,13 @@ void CandidateStore::replaceFromScan(const ScanResult& scan, const QByteArray& s
     m_candidates.reserve(scan.matches.size());
 
     for (const auto& match : scan.matches) {
-        m_candidates.append({match.address, match.type, scannedValue});
+        Candidate candidate;
+        candidate.address = match.address;
+        candidate.type = match.type;
+        candidate.lastValue = scannedValue;
+        candidate.confidence = match.confidence;
+        candidate.variantLabel = match.variantLabel;
+        m_candidates.append(candidate);
     }
 
     sortByAddress();
@@ -240,6 +246,18 @@ void CandidateStore::sortByAddress(bool ascending) {
     std::sort(m_candidates.begin(), m_candidates.end(),
               [ascending](const Candidate& a, const Candidate& b) {
                   return ascending ? a.address < b.address : a.address > b.address;
+              });
+    m_totalCount = static_cast<size_t>(m_candidates.size());
+}
+
+void CandidateStore::sortByConfidence() {
+    loadFileBackedCandidates();
+    std::sort(m_candidates.begin(), m_candidates.end(),
+              [](const Candidate& a, const Candidate& b) {
+                  if (a.confidence != b.confidence) {
+                      return a.confidence > b.confidence; // confiance décroissante
+                  }
+                  return a.address < b.address; // équirépartition par adresse
               });
     m_totalCount = static_cast<size_t>(m_candidates.size());
 }

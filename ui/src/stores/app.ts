@@ -34,13 +34,19 @@ export interface ChatMessage {
   filteredWriteCandidates?: Array<Record<string, unknown>>
   autoWriteResults?: Array<Record<string, unknown>>
   autoWriteOk?: boolean
+  previousTargetValue?: string
+  writeHistory?: string[]
+  activeTargetCount?: number
+  recoveryActions?: Array<Record<string, unknown>>
   requiresConfirmation?: boolean
   confirmationReason?: string
+  isThinking?: boolean
   isError?: boolean
 }
 
 export const useAppStore = defineStore('app', () => {
   // State
+  const activeView = ref<'assistant' | 'process' | 'memory' | 'profiles' | 'expert' | 'settings'>('assistant')
   const version = ref('...')
   const isConnected = ref(false)
   const isAttached = ref(false)
@@ -49,6 +55,8 @@ export const useAppStore = defineStore('app', () => {
   const processModules = ref<ProcessModuleInfo[]>([])
   const memoryMap = ref<MemoryMapResult | null>(null)
   const memoryPreview = ref<MemoryReadPreview | null>(null)
+  const memoryPreviewAddress = ref('')
+  const memoryPreviewLoading = ref(false)
   const pingResult = ref('')
   const logFilePath = ref('')
   const logLines = ref<string[]>([])
@@ -132,6 +140,16 @@ export const useAppStore = defineStore('app', () => {
     scanProgressPercent.value = Math.max(0, Math.min(100, Math.round(percent)))
   }
 
+  function repairMojibakeText(text: string): string {
+    if (!/[ÃÂâ]/.test(text)) return text
+    try {
+      const bytes = Uint8Array.from(Array.from(text, (char) => char.charCodeAt(0) & 0xff))
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    } catch {
+      return text
+    }
+  }
+
   function pushMessage(
     role: 'user' | 'assistant',
     text: string,
@@ -141,12 +159,23 @@ export const useAppStore = defineStore('app', () => {
     const msg: ChatMessage = {
       id: messageIdCounter.value,
       role,
-      text,
+      text: repairMojibakeText(text),
       time: nowTime(),
       ...extras,
     }
     messages.value.push(msg)
     return msg
+  }
+
+  function updateMessage(id: number, text: string, extras: Partial<ChatMessage> = {}) {
+    const index = messages.value.findIndex((message) => message.id === id)
+    if (index < 0) return
+    messages.value[index] = {
+      ...messages.value[index],
+      ...extras,
+      text: repairMojibakeText(text),
+      time: nowTime(),
+    }
   }
 
   function resetWorkflow() {
@@ -162,7 +191,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function doGuidedChange() {
-    // Bouton "J'ai changé" — invite l'utilisateur à donner la nouvelle valeur.
+    // Bouton "J'ai changé" - invite l'utilisateur à donner la nouvelle valeur.
     pushMessage('assistant', 'Parfait ! Donne-moi maintenant la nouvelle valeur affichée dans le jeu.')
     workflowStatus.value = 'awaiting_new_value'
   }
@@ -232,6 +261,18 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function readMemoryPreview(addressHex: string, size = 64) {
+    const normalizedAddress = addressHex.trim().replace(/^0x/i, '')
+    memoryPreviewAddress.value = normalizedAddress
+    memoryPreviewLoading.value = true
+    memoryPreview.value = {
+      success: false,
+      partial: false,
+      cancelled: false,
+      bytesRead: 0,
+      requestedBytes: size,
+      error: '',
+      hex: '',
+    }
     try {
       memoryPreview.value = await backend.getController().readMemoryPreview(addressHex, size)
     } catch (e) {
@@ -244,6 +285,8 @@ export const useAppStore = defineStore('app', () => {
         error: String(e),
         hex: '',
       }
+    } finally {
+      memoryPreviewLoading.value = false
     }
   }
 
@@ -255,6 +298,8 @@ export const useAppStore = defineStore('app', () => {
       processModules.value = []
       memoryMap.value = null
       memoryPreview.value = null
+      memoryPreviewAddress.value = ''
+      memoryPreviewLoading.value = false
     } catch (e) {
       console.error('[KillEngine] Detach failed:', e)
     }
@@ -433,12 +478,13 @@ export const useAppStore = defineStore('app', () => {
 
     // Message utilisateur
     pushMessage('user', query)
+    const thinkingMessage = pushMessage('assistant', 'Réflexion en cours...', { isThinking: true })
     searchQuery.value = ''
     isSearching.value = true
 
     try {
       const result = await backend.getController().startSmartSearch(query)
-      searchResult.value = result.message ?? JSON.stringify(result, null, 2)
+      searchResult.value = repairMojibakeText(result.message ?? JSON.stringify(result, null, 2))
 
       // Synchronise les résultats déterministes
       if (result.actionStatus === 'executed' && result.actionResult) {
@@ -508,10 +554,19 @@ export const useAppStore = defineStore('app', () => {
         extras.filteredWriteCandidates = result.filteredWriteCandidates as Array<Record<string, unknown>>
       }
 
+      if (result.recoveryActions) {
+        extras.recoveryActions = result.recoveryActions as Array<Record<string, unknown>>
+      }
+
       if (result.autoWriteResults) {
         const results = result.autoWriteResults as Array<Record<string, unknown>>
         extras.autoWriteResults = results
         extras.autoWriteOk = results.length > 0 && results.every((r) => r.success === true)
+        extras.previousTargetValue = result.previousTargetValue ? String(result.previousTargetValue) : undefined
+        extras.activeTargetCount = typeof result.activeTargetCount === 'number' ? result.activeTargetCount : undefined
+        extras.writeHistory = Array.isArray(result.writeHistory)
+          ? result.writeHistory.map((value) => String(value))
+          : undefined
       }
 
       if (result.error) extras.isError = true
@@ -521,15 +576,15 @@ export const useAppStore = defineStore('app', () => {
         ?? result.error
         ?? "Je n'ai pas assez d'informations pour agir. Donne-moi une valeur à chercher ou une adresse à utiliser.",
       ).trim()
-      pushMessage(
-        'assistant',
+      updateMessage(
+        thinkingMessage.id,
         assistantText || "Je n'ai pas assez d'informations pour agir. Donne-moi une valeur à chercher ou une adresse à utiliser.",
-        extras,
+        { ...extras, isThinking: false },
       )
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
     } catch (e) {
-      pushMessage('assistant', 'Erreur de recherche : ' + String(e), { isError: true })
+      updateMessage(thinkingMessage.id, 'Erreur de recherche : ' + String(e), { isThinking: false, isError: true })
     } finally {
       isSearching.value = false
     }
@@ -539,6 +594,44 @@ export const useAppStore = defineStore('app', () => {
     if (isSearching.value) return
     searchQuery.value = 'nouvelle recherche'
     await doSearch()
+  }
+
+  async function useSuggestedAddresses(suggestions: Array<Record<string, unknown>>) {
+    const addresses = suggestions
+      .map((suggestion) => String(suggestion.address ?? '').trim())
+      .filter(Boolean)
+      .map((address) => address.startsWith('0x') ? address : `0x${address}`)
+    if (addresses.length === 0 || isSearching.value) return
+    searchQuery.value = `j'utilise ces mémoires ${addresses.join(' ')}`
+    await doSearch()
+  }
+
+  async function searchValueElsewhere(value: string) {
+    const trimmed = value.trim()
+    if (!trimmed || isSearching.value) return
+    searchQuery.value = `nouvelle recherche ${trimmed}`
+    await doSearch()
+  }
+
+  async function testSingleSuggestedAddress(suggestion: Record<string, unknown>) {
+    const address = String(suggestion.address ?? '').trim()
+    const type = String(suggestion.type ?? exactScanType.value)
+    const value = String(suggestion.value ?? targetValueGuided.value ?? '').trim()
+    if (!address || !value || isSearching.value) return
+
+    const normalizedAddress = address.startsWith('0x') ? address.slice(2) : address
+    pushMessage('user', `tester uniquement 0x${normalizedAddress} avec ${value}`)
+    try {
+      const result = await backend.getController().writeMemoryValue(normalizedAddress, type, value)
+      writeResult.value = result
+      pushMessage('assistant',
+        result.success
+          ? `J'ai écrit ${value} uniquement sur 0x${normalizedAddress}. Vérifie dans le jeu si c'est la bonne adresse.`
+          : `L'écriture sur 0x${normalizedAddress} a échoué : ${result.error}`,
+        { isError: !result.success })
+    } catch (e) {
+      pushMessage('assistant', `L'écriture sur 0x${normalizedAddress} a échoué : ${String(e)}`, { isError: true })
+    }
   }
 
   function extractCandidateCount(result: Record<string, unknown>): number | undefined {
@@ -741,6 +834,31 @@ export const useAppStore = defineStore('app', () => {
     exactScanType.value = type
   }
 
+  function openExpertAtAddress(address: string, type = exactScanType.value) {
+    const normalizedAddress = address.trim().replace(/^0x/i, '')
+    if (!normalizedAddress) return
+    selectCandidate(normalizedAddress, type)
+    activeView.value = 'expert'
+  }
+
+  async function writeSelectedAddresses(addresses: string[], type: string, value: string) {
+    if (addresses.length === 0 || !value.trim()) return
+    try {
+      const results: MemoryWriteResult[] = []
+      for (const address of addresses) {
+        const result = await backend.getController().writeMemoryValue(address, type, value)
+        results.push(result)
+      }
+      writeResult.value = results[results.length - 1]
+      scanStatusText.value = results.every((r) => r.success)
+        ? `${results.length} adresse(s) écrite(s).`
+        : `Écriture partielle: ${results.filter((r) => r.success).length}/${results.length} réussie(s).`
+    } catch (e) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
+      scanStatusText.value = 'Écriture multiple échouée.'
+    }
+  }
+
   async function writeSelectedValue() {
     if (!selectedCandidateAddress.value || !writeValue.value.trim()) return
     try {
@@ -763,9 +881,20 @@ export const useAppStore = defineStore('app', () => {
   async function rollbackLastWriteBatch() {
     try {
       const result = await backend.getController().rollbackLastWriteBatch()
+      const restored = Array.isArray(result.restoredWrites)
+        ? result.restoredWrites
+          .map((item: unknown) => {
+            const record = item as Record<string, unknown>
+            const prefix = record.success === true ? '✓' : '✗'
+            return `${prefix} 0x${record.address}: ${String(record.from ?? '?')} -> ${String(record.to ?? '?')}`
+          })
+          .join('\n')
+        : ''
       pushMessage('assistant', result.success
-        ? `Rollback batch réussi : ${result.rolledBack}/${result.total} écritures restaurées.`
-        : `Rollback batch partiel : ${String(result.rolledBack ?? 0)}/${String(result.total ?? 0)} restaurées.`)
+        ? `Rollback batch réussi : ${result.rolledBack}/${result.total} écritures restaurées.${restored ? `\n${restored}` : ''}`
+        : `Rollback batch partiel : ${String(result.rolledBack ?? 0)}/${String(result.total ?? 0)} restaurées.${restored ? `\n${restored}` : ''}`)
+      await refreshActiveChatMemoryTargets()
+      await refreshSmartSearchContext()
       return result
     } catch (e) {
       pushMessage('assistant', 'Rollback batch échoué : ' + String(e), { isError: true })
@@ -804,6 +933,7 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     version,
+    activeView,
     isConnected,
     isAttached,
     processName,
@@ -811,6 +941,8 @@ export const useAppStore = defineStore('app', () => {
     processModules,
     memoryMap,
     memoryPreview,
+    memoryPreviewAddress,
+    memoryPreviewLoading,
     pingResult,
     logFilePath,
     logLines,
@@ -890,7 +1022,11 @@ export const useAppStore = defineStore('app', () => {
     clearActiveChatMemoryTargets,
     clearSmartSearchDebug,
     doSearch,
+    updateMessage,
     startNewSearchContext,
+    useSuggestedAddresses,
+    searchValueElsewhere,
+    testSingleSuggestedAddress,
     doExactScan,
     cancelActiveScan,
     refreshCandidates,
@@ -901,7 +1037,9 @@ export const useAppStore = defineStore('app', () => {
     captureUnknownSnapshot,
     doUnknownNextScan,
     selectCandidate,
+    openExpertAtAddress,
     writeSelectedValue,
+    writeSelectedAddresses,
     rollbackLastWrite,
     rollbackLastWriteBatch,
     toggleFreeze,

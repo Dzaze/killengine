@@ -78,6 +78,11 @@ public:
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
 
+    /// Phase 13 : Lance un scan multi-type + variantes de représentation.
+    /// Quand valueType est vide ou "Auto", cherche en Int32/Int64/Float32/Float64
+    /// + variantes (unsigned, ×10/100/1000) et applique un score de confiance.
+    Q_INVOKABLE QVariantMap startExactScanMultiType(const QString& value, const QString& valueType);
+
     /// Lance un scan exact avec filtres Mode Expert (Phase 12).
     /// expertOptions keys: startAddress, stopAddress, alignment, writableOnly,
     ///                     executableOnly, copyOnWriteOnly, fastScan (toutes optionnelles).
@@ -231,6 +236,9 @@ private:
     struct WriteRecord {
         uint64_t   address{0};
         QByteArray previousValue;
+        QByteArray writtenValue;
+        killcore::ValueType type{killcore::ValueType::Int32};
+        QString valueText;
     };
 
     struct AutoWriteTarget {
@@ -262,6 +270,7 @@ private:
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
     QList<AutoWriteTarget>   m_chatMemoryTargets;
     QList<ActiveProfileTarget> m_activeProfileTargets;
+    QStringList              m_autoWriteValueHistory;
     int                      m_lastBatchStartIndex{-1};
     int                      m_lastBatchEndIndex{-1};
     bool                     m_scanInProgress{false};

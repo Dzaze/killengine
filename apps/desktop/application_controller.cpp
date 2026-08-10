@@ -10,6 +10,7 @@
 #include "process/process_handle.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
+#include "scanner/value_variants.h"
 #include "snapshot/snapshot_store.h"
 
 #include <QCoreApplication>
@@ -73,6 +74,7 @@ enum class SmartSearchIntentKind {
     RewriteLastTargets,
     WriteProfileTargets,
     ClearActiveTargets,
+    ReportBadTargets,
 };
 
 struct SmartSearchIntent {
@@ -105,6 +107,8 @@ QString smartSearchIntentKindToString(SmartSearchIntentKind kind) {
             return "WriteProfileTargets";
         case SmartSearchIntentKind::ClearActiveTargets:
             return "ClearActiveTargets";
+        case SmartSearchIntentKind::ReportBadTargets:
+            return "ReportBadTargets";
     }
     return "Unknown";
 }
@@ -350,10 +354,27 @@ bool looksLikeLastAutoWriteRewrite(const QString& query) {
         || q.contains("passer")
         || q.contains("remet")
         || q.contains("remets")
+        || q.contains("veux")
+        || q.contains("veut")
+        || q.contains("voulais")
+        || q.contains("voudrais")
+        || q.contains("augmente")
+        || q.contains("augmenter")
+        || q.contains("remplace")
+        || q.contains("remplacer")
+        || q.contains("fixe")
+        || q.contains("définis")
+        || q.contains("definis")
+        || q.contains("définir")
+        || q.contains("definir")
         || q.contains("ces adresse")
         || q.contains("ces adresses")
         || q.contains("les adresse")
         || q.contains("les adresses")
+        || q.contains(" le ")
+        || q.contains(" les ")
+        || q.contains(" ça ")
+        || q.contains(" ca ")
         || q.contains("les mettre");
 }
 
@@ -400,6 +421,25 @@ bool looksLikeClearActiveTargetsRequest(const QString& query) {
     return clearVerb && targetWord;
 }
 
+bool looksLikeBadTargetReport(const QString& query) {
+    const QString q = query.toLower();
+    return q.contains("marche pas")
+        || q.contains("marché pas")
+        || q.contains("pas marche")
+        || q.contains("pas marché")
+        || q.contains("n'a pas marché")
+        || q.contains("n a pas marche")
+        || q.contains("ne marche pas")
+        || q.contains("pas bon")
+        || q.contains("pas la bonne")
+        || q.contains("mauvaise adresse")
+        || q.contains("mauvaises adresses")
+        || q.contains("ca change pas")
+        || q.contains("ça change pas")
+        || q.contains("rien change")
+        || q.contains("rien ne change");
+}
+
 SmartSearchIntent classifySmartSearchIntent(
     const QString& query,
     const QStringList& numbers,
@@ -417,10 +457,14 @@ SmartSearchIntent classifySmartSearchIntent(
     const bool wantsMemoryWrite = looksLikeMemoryTargetWriteRequest(query);
     const bool wantsLastRewrite = looksLikeLastAutoWriteRewrite(query);
     const bool wantsClearTargets = looksLikeClearActiveTargetsRequest(query);
+    const bool reportsBadTargets = looksLikeBadTargetReport(query);
 
     if (wantsClearTargets) {
         intent.kind = SmartSearchIntentKind::ClearActiveTargets;
         intent.rationale = "L'utilisateur demande d'oublier les adresses, profils ou cibles actives.";
+    } else if (reportsBadTargets && (hasLastAutoWriteTargets || hasChatMemoryTargets)) {
+        intent.kind = SmartSearchIntentKind::ReportBadTargets;
+        intent.rationale = "L'utilisateur indique que les dernières adresses écrites ne donnent pas le résultat attendu.";
     } else if (intent.resetContext && numbers.isEmpty()) {
         intent.kind = SmartSearchIntentKind::ResetContext;
         intent.rationale = "L'utilisateur demande un nouveau contexte sans donner encore de valeur.";
@@ -429,12 +473,12 @@ SmartSearchIntent classifySmartSearchIntent(
             ? SmartSearchIntentKind::WriteMemoryTargets
             : SmartSearchIntentKind::ActivateMemoryTargets;
         intent.rationale = "Le message contient une ou plusieurs adresses mémoire explicites.";
-    } else if (hasChatMemoryTargets && hasOneNumber && !intent.resetContext) {
-        intent.kind = SmartSearchIntentKind::WriteMemoryTargets;
-        intent.rationale = "Des adresses mémoire sont actives dans la conversation.";
     } else if (hasLastAutoWriteTargets && hasOneNumber && !intent.resetContext && wantsLastRewrite) {
         intent.kind = SmartSearchIntentKind::RewriteLastTargets;
         intent.rationale = "L'utilisateur demande de modifier les dernières adresses écrites.";
+    } else if (hasChatMemoryTargets && hasOneNumber && !intent.resetContext) {
+        intent.kind = SmartSearchIntentKind::WriteMemoryTargets;
+        intent.rationale = "Des adresses mémoire sont actives dans la conversation.";
     } else if (hasOneNumber && !intent.resetContext && wantsMemoryWrite) {
         intent.kind = SmartSearchIntentKind::WriteProfileTargets;
         intent.rationale = "L'utilisateur formule une intention d'écriture sur une cible nommée.";
@@ -454,6 +498,16 @@ SmartSearchIntent classifySmartSearchIntent(
     return intent;
 }
 
+QString confidenceLabel(double confidence) {
+    if (confidence >= 0.85) {
+        return "fiabilité élevée";
+    }
+    if (confidence >= 0.65) {
+        return "fiabilité moyenne";
+    }
+    return "fiabilité faible";
+}
+
 QVariantList suggestedWritesForCandidates(const killcore::CandidateStore& candidates, const QString& value, size_t limit) {
     QVariantList suggestions;
     if (value.isEmpty() || candidates.isEmpty()) {
@@ -468,9 +522,41 @@ QVariantList suggestedWritesForCandidates(const killcore::CandidateStore& candid
         suggestion["address"] = QString::number(candidate.address, 16);
         suggestion["type"] = killcore::valueTypeToString(candidate.type);
         suggestion["value"] = value;
+        suggestion["confidence"] = candidate.confidence;
+        suggestion["confidenceLabel"] = confidenceLabel(candidate.confidence);
+        suggestion["confidenceReason"] = candidate.variantLabel.isEmpty()
+            ? QString("adresse survivante des réductions")
+            : QString("%1 · %2").arg(confidenceLabel(candidate.confidence), candidate.variantLabel);
+        if (!candidate.variantLabel.isEmpty()) {
+            suggestion["variantLabel"] = candidate.variantLabel;
+        }
         suggestions.append(suggestion);
     }
     return suggestions;
+}
+
+void appendDistinctText(QStringList* values, const QString& value, int maxCount) {
+    if (!values) {
+        return;
+    }
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+    if (values->isEmpty() || values->last() != trimmed) {
+        values->append(trimmed);
+    }
+    while (values->size() > maxCount) {
+        values->removeFirst();
+    }
+}
+
+QVariantList writeHistoryToVariantList(const QStringList& values) {
+    QVariantList result;
+    for (const auto& value : values) {
+        result.append(value);
+    }
+    return result;
 }
 
 } // namespace
@@ -578,6 +664,7 @@ bool ApplicationController::attachProcess(int pid) {
     m_lastAutoWriteTargets.clear();
     m_chatMemoryTargets.clear();
     m_activeProfileTargets.clear();
+    m_autoWriteValueHistory.clear();
 
     KE_LOG_INFO() << "Attached to PID " << pid << " (" << m_processName.toStdString() << ")";
 
@@ -612,6 +699,7 @@ void ApplicationController::detachProcess() {
     m_lastAutoWriteTargets.clear();
     m_chatMemoryTargets.clear();
     m_activeProfileTargets.clear();
+    m_autoWriteValueHistory.clear();
     m_lastBatchStartIndex = -1;
     m_lastBatchEndIndex = -1;
 
@@ -854,6 +942,89 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
     appendSmartSearchDebug("exact_scan", {
         {"value", value},
         {"valueType", valueType},
+        {"success", result.value("success")},
+        {"partial", result.value("partial")},
+        {"matchesFound", result.value("matchesFound")},
+        {"candidateStoreSize", result.value("candidateStoreSize")},
+        {"error", result.value("error")},
+    });
+    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanProgress(100);
+    return result;
+}
+
+QVariantMap ApplicationController::startExactScanMultiType(const QString& value, const QString& valueType) {
+    QVariantMap result;
+    QVariantList matches;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        result["matches"] = matches;
+        return result;
+    }
+
+    killcore::ValueType explicitType = killcore::ValueType::Int32;
+    const QString normalizedType = valueType.trimmed();
+    const bool explicitTypeGiven = !normalizedType.isEmpty()
+        && normalizedType.compare("Auto", Qt::CaseInsensitive) != 0;
+    if (explicitTypeGiven && !killcore::parseValueType(normalizedType, &explicitType)) {
+        result["error"] = "Type de valeur invalide.";
+        result["matches"] = matches;
+        return result;
+    }
+
+    const auto valueVariants = killcore::generateScanVariants(value, explicitType, explicitTypeGiven);
+    if (valueVariants.isEmpty()) {
+        result["error"] = QString("Impossible de parser '%1' comme valeur numérique.").arg(value);
+        result["matches"] = matches;
+        return result;
+    }
+
+    QList<killcore::ScanEngine::MultiTypeMatch> variants;
+    variants.reserve(valueVariants.size());
+    for (const auto& valueVariant : valueVariants) {
+        variants.append({valueVariant.value, valueVariant.label, valueVariant.secondary});
+    }
+
+    killcore::ScanOptions options = scanOptionsFromSettings();
+
+    emit scanStarted();
+    emit scanProgress(0);
+    killcore::ScanEngine scanner(m_handle);
+    const auto scan = scanner.exactScanMultiType(variants, options);
+    emit scanProgress(90);
+    clearCandidateUndo();
+    clearCandidateValueHistory();
+    m_candidates.replaceFromScan(scan, {});
+
+    const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
+    for (qsizetype i = 0; i < previewCount; ++i) {
+        const auto& match = scan.matches.at(i);
+        QVariantMap entry;
+        entry["address"] = QString::number(match.address, 16);
+        entry["type"] = killcore::valueTypeToString(match.type);
+        entry["confidence"] = match.confidence;
+        entry["variantLabel"] = match.variantLabel;
+        matches.append(entry);
+    }
+
+    result["success"] = scan.success;
+    result["partial"] = scan.partial;
+    result["cancelled"] = scan.cancelled;
+    result["regionsScanned"] = static_cast<int>(scan.regionsScanned);
+    result["bytesScanned"] = static_cast<qulonglong>(scan.bytesScanned);
+    result["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
+    result["matchesReturned"] = matches.size();
+    result["error"] = scan.errorMessage;
+    result["matches"] = matches;
+    result["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+    result["variantCount"] = variants.size();
+    appendSmartSearchDebug("exact_scan_multi_type", {
+        {"value", value},
+        {"valueType", valueType},
+        {"explicitTypeGiven", explicitTypeGiven},
+        {"variantCount", variants.size()},
         {"success", result.value("success")},
         {"partial", result.value("partial")},
         {"matchesFound", result.value("matchesFound")},
@@ -2033,7 +2204,7 @@ QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, c
     if (write.success) {
         m_lastWriteAddress = address;
         m_lastWritePreviousValue = write.previousValue;
-        m_writeHistory.append({address, write.previousValue});
+        m_writeHistory.append({address, write.previousValue, killcore::scanValueToBytes(scanValue), type, value});
     }
 
     result["success"] = write.success;
@@ -2118,7 +2289,7 @@ QVariantMap ApplicationController::writeMemoryValueConfirmed(
     if (result.value("success").toBool()) {
         m_lastWriteAddress = address;
         m_lastWritePreviousValue = previousValue;
-        m_writeHistory.append({address, previousValue});
+        m_writeHistory.append({address, previousValue, targetBytes, type, value});
     }
 
     return result;
@@ -2143,6 +2314,7 @@ QVariantMap ApplicationController::rollbackLastWriteBatch() {
 
     killcore::MemoryWriter writer(writeHandle);
     int rolled = 0;
+    QVariantList restoredWrites;
     const int batchEnd = std::min(m_lastBatchEndIndex, static_cast<int>(m_writeHistory.size()));
     for (int i = batchEnd - 1; i >= m_lastBatchStartIndex; --i) {
         const auto& rec = m_writeHistory.at(i);
@@ -2150,6 +2322,14 @@ QVariantMap ApplicationController::rollbackLastWriteBatch() {
         if (write.success) {
             ++rolled;
         }
+        QVariantMap restored;
+        restored["address"] = QString::number(rec.address, 16);
+        restored["type"] = killcore::valueTypeToString(rec.type);
+        restored["from"] = rec.valueText;
+        restored["to"] = bytesToDouble(rec.previousValue, rec.type);
+        restored["success"] = write.success;
+        restored["verified"] = write.verified;
+        restoredWrites.append(restored);
     }
 
     const int total = batchEnd - m_lastBatchStartIndex;
@@ -2167,6 +2347,7 @@ QVariantMap ApplicationController::rollbackLastWriteBatch() {
     result["success"] = (rolled == total);
     result["rolledBack"] = rolled;
     result["total"] = total;
+    result["restoredWrites"] = restoredWrites;
     result["error"] = (rolled == total) ? QString() : QString("Seulement %1/%2 restaurées.").arg(rolled).arg(total);
     return result;
 }
@@ -2276,6 +2457,7 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
     result["targetValue"] = value;
 
     bool allWritesOk = true;
+    const QString previousTargetValue = m_smartSearchTargetValue;
     m_smartSearchTargetValue = value;
     m_lastBatchStartIndex = m_writeHistory.size();
 
@@ -2309,6 +2491,11 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
         m_lastBatchStartIndex = -1;
         m_lastBatchEndIndex = -1;
     }
+    if (allWritesOk && !m_lastAutoWriteTargets.isEmpty()) {
+        m_smartSearchActive = false;
+        m_chatMemoryTargets = m_lastAutoWriteTargets;
+        appendDistinctText(&m_autoWriteValueHistory, value, 12);
+    }
 
     QVariantMap actionResult;
     actionResult["success"] = allWritesOk;
@@ -2321,9 +2508,12 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
     result["autoWriteResults"] = writeResults;
     result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
     result["autoWriteCount"] = writeResults.size();
+    result["activeTargetCount"] = m_chatMemoryTargets.size();
+    result["previousTargetValue"] = previousTargetValue;
+    result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
     result["rollbackNote"] = "Tu peux annuler cette réécriture via le bouton rollback batch dans l'assistant.";
     result["message"] = allWritesOk
-        ? QString("J'ai repris les %1 dernière(s) adresse(s) auto-écrite(s) et j'ai mis %2 dessus.")
+        ? QString("J'ai repris les %1 dernière(s) adresse(s) auto-écrite(s) et j'ai mis %2 dessus. Je garde ces adresses actives pour les prochaines modifications.")
               .arg(m_lastAutoWriteTargets.size())
               .arg(value)
         : QString("J'ai repris les dernières adresses auto-écrites, mais au moins une réécriture vers %1 a échoué.")
@@ -2344,6 +2534,7 @@ QVariantMap ApplicationController::activateChatMemoryTargetsFromQuery(const QStr
 
     m_chatMemoryTargets.clear();
     m_lastAutoWriteTargets.clear();
+    m_autoWriteValueHistory.clear();
     m_smartSearchActive = false;
     m_smartSearchInitialValue.clear();
     m_smartSearchTargetValue.clear();
@@ -2401,6 +2592,7 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
     result["targetValue"] = value;
 
     bool allWritesOk = true;
+    const QString previousTargetValue = m_smartSearchTargetValue;
     m_smartSearchTargetValue = value;
     m_lastBatchStartIndex = m_writeHistory.size();
     m_lastAutoWriteTargets.clear();
@@ -2442,6 +2634,14 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
         m_lastBatchEndIndex = -1;
         m_lastAutoWriteTargets.clear();
     }
+    if (allWritesOk && !m_lastAutoWriteTargets.isEmpty()) {
+        m_smartSearchActive = false;
+        m_chatMemoryTargets = m_lastAutoWriteTargets;
+        if (m_autoWriteValueHistory.isEmpty() && !previousTargetValue.isEmpty()) {
+            appendDistinctText(&m_autoWriteValueHistory, previousTargetValue, 12);
+        }
+        appendDistinctText(&m_autoWriteValueHistory, value, 12);
+    }
 
     QVariantMap actionResult;
     actionResult["success"] = allWritesOk;
@@ -2455,9 +2655,12 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
     result["autoWriteResults"] = writeResults;
     result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
     result["autoWriteCount"] = writeResults.size();
+    result["activeTargetCount"] = m_chatMemoryTargets.size();
+    result["previousTargetValue"] = previousTargetValue;
+    result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
     result["rollbackNote"] = "Tu peux annuler cette écriture via le bouton rollback batch dans l'assistant.";
     result["message"] = allWritesOk
-        ? QString("J'ai écrit %1 sur %2 adresse(s) mémoire sélectionnée(s) dans la conversation.")
+        ? QString("J'ai écrit %1 sur %2 adresse(s) mémoire sélectionnée(s) dans la conversation. Je garde ces adresses actives pour les prochaines modifications.")
               .arg(value)
               .arg(m_chatMemoryTargets.size())
         : QString("J'ai essayé d'écrire %1 sur les adresses mémoire sélectionnées, mais au moins une écriture a échoué.")
@@ -2487,6 +2690,7 @@ QVariantMap ApplicationController::clearActiveChatMemoryTargets() {
     const int cleared = m_chatMemoryTargets.size();
     m_chatMemoryTargets.clear();
     m_lastAutoWriteTargets.clear();
+    m_autoWriteValueHistory.clear();
 
     QVariantMap result;
     result["success"] = true;
@@ -2519,8 +2723,10 @@ QVariantMap ApplicationController::getSmartSearchContext() const {
     }
 
     result["success"] = true;
-    result["active"] = m_smartSearchActive;
-    result["workflow"] = m_smartSearchActive ? "guided_scan" : "idle";
+    result["active"] = m_smartSearchActive || !m_chatMemoryTargets.isEmpty() || !m_activeProfileTargets.isEmpty();
+    result["workflow"] = m_smartSearchActive
+        ? "guided_scan"
+        : (!m_chatMemoryTargets.isEmpty() ? "active_addresses" : (!m_activeProfileTargets.isEmpty() ? "active_profile" : "idle"));
     result["initialValue"] = m_smartSearchInitialValue;
     result["targetValue"] = m_smartSearchTargetValue;
     result["valueType"] = m_smartSearchValueType;
@@ -2529,6 +2735,7 @@ QVariantMap ApplicationController::getSmartSearchContext() const {
     result["chatTargets"] = chatTargets;
     result["profileTargets"] = profileTargets;
     result["lastAutoWriteCount"] = m_lastAutoWriteTargets.size();
+    result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
     return result;
 }
 
@@ -2597,6 +2804,7 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
     QVariantList suggestions;
     QVariantList writeResults;
     bool allWritesOk = true;
+    const QString previousTargetValue = m_smartSearchTargetValue;
     m_smartSearchTargetValue = value;
     m_lastBatchStartIndex = m_writeHistory.size();
     m_lastAutoWriteTargets.clear();
@@ -2651,6 +2859,14 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
         m_lastBatchEndIndex = -1;
         m_lastAutoWriteTargets.clear();
     }
+    if (allWritesOk && !m_lastAutoWriteTargets.isEmpty()) {
+        m_smartSearchActive = false;
+        m_chatMemoryTargets = m_lastAutoWriteTargets;
+        if (m_autoWriteValueHistory.isEmpty() && !previousTargetValue.isEmpty()) {
+            appendDistinctText(&m_autoWriteValueHistory, previousTargetValue, 12);
+        }
+        appendDistinctText(&m_autoWriteValueHistory, value, 12);
+    }
 
     QVariantMap actionResult;
     actionResult["success"] = allWritesOk;
@@ -2671,9 +2887,12 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
     result["autoWriteResults"] = writeResults;
     result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
     result["autoWriteCount"] = writeResults.size();
+    result["activeTargetCount"] = m_chatMemoryTargets.size();
+    result["previousTargetValue"] = previousTargetValue;
+    result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
     result["rollbackNote"] = "Tu peux annuler cette écriture via le bouton rollback batch dans l'assistant.";
     result["message"] = allWritesOk
-        ? QString("J'ai utilisé le profil et j'ai mis %1 sur %2 cible(s) \"%3\".")
+        ? QString("J'ai utilisé le profil et j'ai mis %1 sur %2 cible(s) \"%3\". Je garde ces adresses actives pour les prochaines modifications.")
               .arg(value)
               .arg(resolvedTargets.size())
               .arg(matchedGroupName)
@@ -2727,6 +2946,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         clearCandidateUndo();
         clearCandidateValueHistory();
         m_lastAutoWriteTargets.clear();
+        m_autoWriteValueHistory.clear();
         m_chatMemoryTargets.clear();
         m_activeProfileTargets.clear();
         appendSmartSearchDebug("smart_search_reset", {
@@ -2745,6 +2965,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         m_chatMemoryTargets.clear();
         m_activeProfileTargets.clear();
         m_lastAutoWriteTargets.clear();
+        m_autoWriteValueHistory.clear();
         m_lastBatchStartIndex = -1;
         m_lastBatchEndIndex = -1;
 
@@ -2776,6 +2997,32 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         stampIntent(&reset);
         appendSmartSearchDebug("smart_search_context_reset", reset);
         return reset;
+    }
+
+    if (intent.kind == SmartSearchIntentKind::ReportBadTargets) {
+        QVariantMap recovery;
+        QVariantList actions;
+        actions.append(QVariantMap{{"id", "rollback_batch"}, {"label", "Rollback dernier lot"}});
+        actions.append(QVariantMap{{"id", "clear_targets"}, {"label", "Oublier ces adresses"}});
+        actions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+        if (!m_candidates.isEmpty()) {
+            actions.append(QVariantMap{{"id", "continue_candidates"}, {"label", "Continuer avec les autres candidats"}});
+        }
+
+        recovery["success"] = true;
+        recovery["query"] = query;
+        recovery["aiReady"] = m_ai.isReady();
+        recovery["status"] = "bad_targets_reported";
+        recovery["actionStatus"] = "needs_recovery_choice";
+        recovery["workflowStatus"] = "auto_write_problem";
+        recovery["targetValue"] = m_smartSearchTargetValue;
+        recovery["activeTargetCount"] = m_chatMemoryTargets.size();
+        recovery["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+        recovery["recoveryActions"] = actions;
+        recovery["message"] = "D'accord, on ne valide pas ces adresses. Tu peux annuler le dernier lot, oublier ces adresses, repartir sur une nouvelle recherche, ou continuer avec les candidats restants.";
+        stampIntent(&recovery);
+        appendSmartSearchDebug("smart_search_bad_targets_reported", recovery);
+        return recovery;
     }
 
     if (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
@@ -2962,6 +3209,13 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                 m_lastBatchEndIndex = -1;
                 m_lastAutoWriteTargets.clear();
             }
+            if (allWritesOk && !m_lastAutoWriteTargets.isEmpty()) {
+                m_smartSearchActive = false;
+                m_chatMemoryTargets = m_lastAutoWriteTargets;
+                m_autoWriteValueHistory.clear();
+                appendDistinctText(&m_autoWriteValueHistory, m_smartSearchInitialValue, 12);
+                appendDistinctText(&m_autoWriteValueHistory, m_smartSearchTargetValue, 12);
+            }
 
             result["workflowStatus"] = allWritesOk ? "auto_write_done" : "auto_write_partial_or_failed";
             result["suggestedWrites"] = suggestions;
@@ -2970,6 +3224,9 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             result["autoWriteResults"] = writeResults;
             result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
             result["autoWriteCount"] = writeResults.size();
+            result["activeTargetCount"] = m_chatMemoryTargets.size();
+            result["previousTargetValue"] = m_smartSearchInitialValue;
+            result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
             result["rollbackNote"] = "Tu peux annuler toutes les écritures via le bouton rollback batch dans l'assistant.";
             if (writeSuggestions.isEmpty()) {
                 result["workflowStatus"] = "auto_write_partial_or_failed";
@@ -2977,7 +3234,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                                         .arg(remaining);
             } else {
                 result["message"] = allWritesOk
-                                    ? QString("Il reste %1 candidat(s). J'ai écrit automatiquement %2 sur les adresses finales fiables.")
+                                    ? QString("Il reste %1 candidat(s). J'ai écrit automatiquement %2 sur les adresses finales fiables. Je garde ces adresses actives pour les prochaines modifications.")
                                           .arg(remaining)
                                           .arg(m_smartSearchTargetValue)
                                     : QString("Il reste %1 candidat(s), mais au moins une écriture automatique a échoué.")

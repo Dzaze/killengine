@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import AssistantView from '@/views/AssistantView.vue'
@@ -11,14 +11,13 @@ import SettingsView from '@/views/SettingsView.vue'
 
 const store = useAppStore()
 const { locale } = useI18n()
-const activeView = ref<'assistant' | 'process' | 'memory' | 'profiles' | 'expert' | 'settings'>('assistant')
 
 const currentView = computed(() => {
-  if (activeView.value === 'process') return ProcessView
-  if (activeView.value === 'memory') return MemoryView
-  if (activeView.value === 'profiles') return ProfileView
-  if (activeView.value === 'expert') return ExpertView
-  if (activeView.value === 'settings') return SettingsView
+  if (store.activeView === 'process') return ProcessView
+  if (store.activeView === 'memory') return MemoryView
+  if (store.activeView === 'profiles') return ProfileView
+  if (store.activeView === 'expert') return ExpertView
+  if (store.activeView === 'settings') return SettingsView
   return AssistantView
 })
 
@@ -46,43 +45,43 @@ watch(
       <nav class="nav">
         <button
           class="nav-item"
-          :class="{ active: activeView === 'assistant' }"
-          @click="activeView = 'assistant'"
+          :class="{ active: store.activeView === 'assistant' }"
+          @click="store.activeView = 'assistant'"
         >
           {{ $t('nav.assistant') }}
         </button>
         <button
           class="nav-item"
-          :class="{ active: activeView === 'process' }"
-          @click="activeView = 'process'"
+          :class="{ active: store.activeView === 'process' }"
+          @click="store.activeView = 'process'"
         >
           {{ $t('nav.process') }}
         </button>
         <button
           class="nav-item"
-          :class="{ active: activeView === 'memory' }"
-          @click="activeView = 'memory'"
+          :class="{ active: store.activeView === 'memory' }"
+          @click="store.activeView = 'memory'"
         >
           {{ $t('nav.memory') }}
         </button>
         <button
           class="nav-item"
-          :class="{ active: activeView === 'profiles' }"
-          @click="activeView = 'profiles'"
+          :class="{ active: store.activeView === 'profiles' }"
+          @click="store.activeView = 'profiles'"
         >
           {{ $t('nav.profiles') }}
         </button>
         <button
           class="nav-item"
-          :class="{ active: activeView === 'expert' }"
-          @click="activeView = 'expert'"
+          :class="{ active: store.activeView === 'expert' }"
+          @click="store.activeView = 'expert'"
         >
           {{ $t('nav.expert') }}
         </button>
         <button
           class="nav-item"
-          :class="{ active: activeView === 'settings' }"
-          @click="activeView = 'settings'"
+          :class="{ active: store.activeView === 'settings' }"
+          @click="store.activeView = 'settings'"
         >
           {{ $t('nav.settings') }}
         </button>

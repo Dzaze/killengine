@@ -18,6 +18,14 @@ const filteredRegions = computed(() => {
   })
 })
 
+function previewRegion(address: string) {
+  void store.readMemoryPreview(address, 64)
+}
+
+function openRegionInExpert(address: string) {
+  store.openExpertAtAddress(address)
+}
+
 function formatBytes(bytes: number | undefined) {
   if (!bytes) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -99,6 +107,38 @@ onMounted(() => {
         </button>
       </div>
 
+      <div
+        v-if="store.memoryPreview || store.memoryPreviewLoading"
+        class="preview-panel"
+        :class="{ loading: store.memoryPreviewLoading, error: store.memoryPreview && !store.memoryPreview.success }"
+      >
+        <div class="preview-title">
+          <div>
+            <strong>{{ $t('memory.preview') }}</strong>
+            <code v-if="store.memoryPreviewAddress">0x{{ store.memoryPreviewAddress }}</code>
+          </div>
+          <div class="preview-actions">
+            <span v-if="store.memoryPreview">
+              {{ store.memoryPreview.bytesRead }}/{{ store.memoryPreview.requestedBytes }} B
+            </span>
+            <button
+              v-if="store.memoryPreviewAddress"
+              class="preview-action-btn"
+              type="button"
+              @click="openRegionInExpert(store.memoryPreviewAddress)"
+            >
+              Basculer en expert
+            </button>
+          </div>
+        </div>
+        <div v-if="store.memoryPreviewLoading" class="preview-loading">
+          Lecture de la mémoire...
+        </div>
+        <pre v-else-if="store.memoryPreview?.hex">{{ store.memoryPreview.hex }}</pre>
+        <p v-else-if="store.memoryPreview?.error">{{ store.memoryPreview.error }}</p>
+        <p v-else>Aucune donnée lisible à cette adresse.</p>
+      </div>
+
       <div class="region-list">
         <div v-for="region in filteredRegions.slice(0, 250)" :key="`${region.baseAddress}-${region.size}`" class="region-row">
           <div class="address">0x{{ region.baseAddress }}</div>
@@ -106,19 +146,24 @@ onMounted(() => {
           <div class="protection">{{ region.protection }}</div>
           <div class="state">{{ region.state }}</div>
           <div class="type">{{ region.type }}</div>
-          <button class="preview-btn" :disabled="!region.readable" @click="store.readMemoryPreview(region.baseAddress, 64)">
-            {{ $t('memory.preview') }}
-          </button>
+          <div class="region-actions">
+            <button
+              class="preview-btn"
+              :class="{ active: store.memoryPreviewAddress === region.baseAddress }"
+              :disabled="!region.readable || (store.memoryPreviewLoading && store.memoryPreviewAddress === region.baseAddress)"
+              @click="previewRegion(region.baseAddress)"
+            >
+              {{ store.memoryPreviewLoading && store.memoryPreviewAddress === region.baseAddress ? 'Lecture...' : $t('memory.preview') }}
+            </button>
+            <button
+              class="preview-btn expert-btn"
+              :disabled="!region.readable"
+              @click="openRegionInExpert(region.baseAddress)"
+            >
+              Expert
+            </button>
+          </div>
         </div>
-      </div>
-
-      <div v-if="store.memoryPreview" class="preview-panel">
-        <div class="preview-title">
-          <strong>{{ $t('memory.preview') }}</strong>
-          <span>{{ store.memoryPreview.bytesRead }}/{{ store.memoryPreview.requestedBytes }} B</span>
-        </div>
-        <pre v-if="store.memoryPreview.hex">{{ store.memoryPreview.hex }}</pre>
-        <p v-if="store.memoryPreview.error">{{ store.memoryPreview.error }}</p>
       </div>
     </template>
   </div>
@@ -234,7 +279,7 @@ onMounted(() => {
 
 .region-row {
   display: grid;
-  grid-template-columns: 150px 90px 120px 90px 90px 80px;
+  grid-template-columns: 150px 90px 120px 90px 90px 150px;
   gap: 12px;
   align-items: center;
   padding: 8px 10px;
@@ -261,27 +306,79 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.region-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.expert-btn {
+  color: var(--accent);
+}
+
 .preview-btn:disabled {
   cursor: not-allowed;
   opacity: 0.35;
 }
 
+.preview-btn.active {
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
 .preview-panel {
-  margin-top: 14px;
+  margin: 0 0 12px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-tertiary);
 }
 
+.preview-panel.loading {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.preview-panel.error {
+  border-color: color-mix(in srgb, #ef4444 35%, var(--border));
+}
+
 .preview-title {
   display: flex;
+  gap: 12px;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
 }
 
+.preview-title div,
+.preview-actions {
+  display: flex;
+  min-width: 0;
+  gap: 10px;
+  align-items: center;
+}
+
+.preview-actions {
+  flex-shrink: 0;
+}
+
+.preview-action-btn {
+  padding: 5px 9px;
+  border: none;
+  border-radius: 6px;
+  background: var(--bg-accent);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+}
+
 .preview-title strong {
   color: var(--text-primary);
+}
+
+.preview-title code {
+  color: var(--accent);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 12px;
 }
 
 .preview-title span,
@@ -290,7 +387,14 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.preview-loading {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .preview-panel pre {
+  max-height: 160px;
+  overflow: auto;
   overflow-wrap: anywhere;
   color: var(--text-primary);
   font-family: 'Cascadia Code', monospace;

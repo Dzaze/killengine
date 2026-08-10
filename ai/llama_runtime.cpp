@@ -270,7 +270,7 @@ QString LlamaRuntime::buildIntentPrompt(const QString& query) {
     return QString(
         "Tu es l'interpreteur d'intention de KillEngine.\n"
         "Reponds uniquement avec un objet JSON compact et rien d'autre.\n"
-        "Schema: {\"intent\":\"Unknown|ResetContext|ExactScan|GuidedScan|RefineScan|ActivateMemoryTargets|WriteMemoryTargets|RewriteLastTargets|WriteProfileTargets\",\"value\":\"\",\"targetValue\":\"\",\"addresses\":[],\"confidence\":0.0,\"missing\":\"\"}\n"
+        "Schema: {\"intent\":\"Unknown|ResetContext|ExactScan|GuidedScan|RefineScan|ActivateMemoryTargets|WriteMemoryTargets|RewriteLastTargets|WriteProfileTargets|ReportBadTargets\",\"value\":\"\",\"targetValue\":\"\",\"addresses\":[],\"confidence\":0.0,\"missing\":\"\"}\n"
         "Regles:\n"
         "- ExactScan: l'utilisateur donne une valeur actuelle a chercher.\n"
         "- GuidedScan: l'utilisateur donne une valeur actuelle et une valeur cible.\n"
@@ -279,6 +279,7 @@ QString LlamaRuntime::buildIntentPrompt(const QString& query) {
         "- WriteMemoryTargets: l'utilisateur donne adresse(s) 0x et valeur a ecrire, ou demande d'ecrire sur adresses actives.\n"
         "- RewriteLastTargets: l'utilisateur demande de repasser/modifier les dernieres adresses trouvees.\n"
         "- WriteProfileTargets: l'utilisateur demande explicitement d'ecrire sur une cible nommee/profil.\n"
+        "- ReportBadTargets: l'utilisateur signale que les dernieres adresses/ecritures ne marchent pas.\n"
         "- ResetContext: l'utilisateur veut une autre recherche ou repartir de zero.\n"
         "- Si une valeur requise manque, mets intent Unknown et missing avec la question courte a poser.\n"
         "Exemples:\n"

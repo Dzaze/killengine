@@ -97,6 +97,36 @@ TEST(AIEngineTest, AsksClarificationForMissingWriteValue) {
     EXPECT_FALSE(result.value("message").toString().isEmpty());
 }
 
+TEST(AIEngineTest, RecognizesNaturalRewritePhrasesInConversationSequence) {
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+
+    const auto guided = engine.processIntent("j'ai un score de 20 je le veux a 1000");
+    EXPECT_EQ(guided.value("status").toString(), "intent");
+    EXPECT_EQ(guided.value("intent").toString(), "GuidedScan");
+    EXPECT_EQ(guided.value("value").toString(), "20");
+    EXPECT_EQ(guided.value("targetValue").toString(), "1000");
+
+    const auto rewritePass = engine.processIntent("ok passe le a 2000");
+    EXPECT_EQ(rewritePass.value("status").toString(), "intent");
+    EXPECT_EQ(rewritePass.value("intent").toString(), "RewriteLastTargets");
+    EXPECT_EQ(rewritePass.value("value").toString(), "2000");
+
+    const auto rewriteWant = engine.processIntent("je les veux a 3000");
+    EXPECT_EQ(rewriteWant.value("status").toString(), "intent");
+    EXPECT_EQ(rewriteWant.value("intent").toString(), "RewriteLastTargets");
+    EXPECT_EQ(rewriteWant.value("value").toString(), "3000");
+}
+
+TEST(AIEngineTest, RecognizesBadTargetRecoveryRequest) {
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+
+    const auto result = engine.processIntent("ça n'a pas marché mauvaise adresse");
+    EXPECT_EQ(result.value("status").toString(), "intent");
+    EXPECT_EQ(result.value("intent").toString(), "ReportBadTargets");
+}
+
 TEST(LlamaRuntimeTest, ExtractsToolCallJsonFromModelText) {
     QString error;
     const auto call = killai::LlamaRuntime::extractToolCallJson(

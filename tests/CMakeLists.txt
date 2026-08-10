@@ -6,6 +6,7 @@
 add_executable(killengine_unit_tests
     unit/test_main.cpp
     unit/test_value_parser.cpp
+    unit/test_value_variants.cpp
     unit/test_logger.cpp
     unit/test_candidate_store.cpp
     unit/test_ai_tools.cpp

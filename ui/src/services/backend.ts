@@ -68,6 +68,8 @@ export interface MemoryReadPreview {
 export interface ExactScanMatch {
   address: string
   type: string
+  confidence?: number
+  variantLabel?: string
 }
 
 export interface ExactScanResult {
@@ -236,6 +238,7 @@ export interface SmartSearchContextResult {
   chatTargets: Array<Record<string, unknown>>
   profileTargets: Array<Record<string, unknown>>
   lastAutoWriteCount: number
+  writeHistory?: string[]
 }
 
 export interface AppSettings {
@@ -270,6 +273,8 @@ export interface BackendController {
     valueType: string,
     expertOptions: ExpertScanOptions,
   ): Promise<Record<string, unknown>>
+  /** Phase 13 : scan multi-type + variantes de representation (precision de recherche). */
+  startExactScanMultiType?(value: string, valueType: string): Promise<ExactScanResult>
   scanStarted?: QWebChannelSignal<void>
   scanProgress?: QWebChannelSignal<number>
   scanStatsUpdated?: QWebChannelSignal<number>

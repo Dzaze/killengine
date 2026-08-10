@@ -35,6 +35,8 @@ enum class NextScanMode {
 struct ScanMatch {
     uint64_t address{0};
     ValueType type{ValueType::Int32};
+    double confidence{1.0}; ///< Phase 13 : score de confiance [0.0, 1.0].
+    QString  variantLabel;  ///< Phase 13 : libellé de variante (ex. "Float32 x100").
 };
 
 struct ScanProgress {

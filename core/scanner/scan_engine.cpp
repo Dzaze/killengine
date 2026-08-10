@@ -18,7 +18,9 @@ void scanBuffer(
     size_t maxResults,
     size_t alignment,
     uint64_t rangeStart,
-    uint64_t rangeEnd) {
+    uint64_t rangeEnd,
+    double confidence = 1.0,
+    const QString& variantLabel = {}) {
     if (!result || needle.isEmpty() || buffer.size() < needle.size()) {
         return;
     }
@@ -57,7 +59,12 @@ void scanBuffer(
         if (std::memcmp(haystack + offset, expected, static_cast<size_t>(needleSize)) == 0) {
             ++result->matchesFound;
             if (result->matches.size() < static_cast<qsizetype>(maxResults)) {
-                result->matches.append({candidateAddress, type});
+                ScanMatch match;
+                match.address = candidateAddress;
+                match.type = type;
+                match.confidence = confidence;
+                match.variantLabel = variantLabel;
+                result->matches.append(match);
             } else {
                 result->partial = true;
             }
@@ -220,6 +227,157 @@ ScanResult ScanEngine::exactScan(
 
     result.success = true;
     KE_LOG_INFO() << "Exact scan completed: type=" << valueTypeToString(value.type).toStdString()
+                  << " matches=" << result.matchesFound
+                  << " bytes=" << result.bytesScanned;
+    return result;
+}
+
+ScanResult ScanEngine::exactScanMultiType(
+    const QList<MultiTypeMatch>& variants,
+    const ScanOptions& options,
+    const CancellationToken* cancellation) const {
+    ScanResult result;
+
+    if (!m_process.isValid()) {
+        result.errorMessage = "Process handle is not valid.";
+        return result;
+    }
+
+    if (variants.isEmpty()) {
+        result.errorMessage = "No scan variant provided.";
+        return result;
+    }
+
+    // Déterminer la plus grande taille d'aiguille pour découper les chunks correctement.
+    size_t maxNeedleSize = 1;
+    for (const auto& variant : variants) {
+        const QByteArray needle = scanValueToBytes(variant.value);
+        maxNeedleSize = std::max(maxNeedleSize, static_cast<size_t>(needle.size()));
+    }
+
+    const auto regions = MemoryMap::snapshot(m_process);
+    MemoryReader reader(m_process);
+    const size_t chunkSize = std::max(options.chunkSize, maxNeedleSize);
+
+    size_t progressRegionsTotal = 0;
+    size_t progressBytesTotal = 0;
+    for (const auto& region : regions) {
+        uint64_t scanStart = 0;
+        uint64_t scanEnd = 0;
+        if (regionMatchesScanOptions(region, options, maxNeedleSize, &scanStart, &scanEnd)) {
+            ++progressRegionsTotal;
+            progressBytesTotal += static_cast<size_t>(scanEnd - scanStart);
+        }
+    }
+
+    auto reportProgress = [&]() {
+        if (!options.progressCallback) {
+            return;
+        }
+        options.progressCallback({
+            progressRegionsTotal,
+            result.regionsScanned,
+            progressBytesTotal,
+            result.bytesScanned,
+            result.matchesFound,
+        });
+    };
+    reportProgress();
+
+    for (const auto& region : regions) {
+        if (cancellation && cancellation->isCancelled()) {
+            result.cancelled = true;
+            result.partial = true;
+            result.errorMessage = "Scan cancelled.";
+            return result;
+        }
+
+        if (!regionMatchesScanOptions(region, options, maxNeedleSize)) {
+            continue;
+        }
+
+        uint64_t offset = 0;
+        QByteArray overlap;
+        while (offset < region.size) {
+            const size_t remaining = static_cast<size_t>(std::min<uint64_t>(
+                region.size - offset,
+                static_cast<uint64_t>(chunkSize)));
+            const auto read = reader.readChunked(region.baseAddress + offset, remaining, chunkSize, cancellation);
+
+            if (read.cancelled) {
+                result.cancelled = true;
+                result.partial = true;
+                result.errorMessage = read.errorMessage;
+                return result;
+            }
+
+            if (read.bytesRead == 0) {
+                break;
+            }
+
+            QByteArray buffer = overlap + read.data;
+            const uint64_t bufferBase = region.baseAddress + offset - static_cast<uint64_t>(overlap.size());
+
+            for (const auto& variant : variants) {
+                const QByteArray needle = scanValueToBytes(variant.value);
+                if (needle.isEmpty()) {
+                    continue;
+                }
+
+                size_t effectiveAlignment = options.alignment;
+                if (effectiveAlignment <= 1 && options.fastScan) {
+                    effectiveAlignment = valueTypeSize(variant.value.type);
+                }
+
+                // Les variantes secondaires (×100, unsigned...) reçoivent un malus de confiance,
+                // appliqué seulement si l'adresse n'a pas déjà été matchée par une variante primaire.
+                const double confidence = variant.secondary ? 0.85 : 1.0;
+
+                scanBuffer(
+                    buffer,
+                    bufferBase,
+                    needle,
+                    variant.value.type,
+                    &result,
+                    options.maxResults,
+                    effectiveAlignment,
+                    options.startAddress,
+                    options.stopAddress,
+                    confidence,
+                    variant.label);
+            }
+
+            result.bytesScanned += read.bytesRead;
+            reportProgress();
+            offset += static_cast<uint64_t>(read.bytesRead);
+
+            const qsizetype overlapSize = std::min<qsizetype>(static_cast<qsizetype>(maxNeedleSize) - 1, buffer.size());
+            overlap = buffer.right(overlapSize);
+
+            if (read.partial) {
+                result.partial = true;
+                break;
+            }
+        }
+
+        ++result.regionsScanned;
+        reportProgress();
+    }
+
+    // Dédoublonner : si une adresse est matchée par plusieurs variantes,
+    // on conserve celle avec la plus haute confiance (et son label).
+    std::sort(result.matches.begin(), result.matches.end(),
+              [](const ScanMatch& a, const ScanMatch& b) {
+                  if (a.address != b.address) return a.address < b.address;
+                  return a.confidence > b.confidence;
+              });
+    auto eqAddress = [](const ScanMatch& a, const ScanMatch& b) { return a.address == b.address; };
+    auto last = std::unique(result.matches.begin(), result.matches.end(), eqAddress);
+    result.matches.erase(last, result.matches.end());
+    result.matchesFound = static_cast<size_t>(result.matches.size());
+
+    result.success = true;
+    KE_LOG_INFO() << "Multi-type scan completed: variants=" << variants.size()
                   << " matches=" << result.matchesFound
                   << " bytes=" << result.bytesScanned;
     return result;

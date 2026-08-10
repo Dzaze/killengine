@@ -29,6 +29,11 @@ const char* Logger::levelToString(LogLevel level) {
 void Logger::init(const QString& logDir) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
+    if (m_file.is_open()) {
+        m_file.close();
+    }
+    m_initialized = false;
+
     QString dir = logDir;
     if (dir.isEmpty()) {
         dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);

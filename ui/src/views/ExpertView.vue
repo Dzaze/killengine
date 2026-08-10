@@ -28,6 +28,18 @@ function formatBytes(value: number | undefined) {
   return `${formatNumber(bytes)} o`
 }
 
+function confidencePercent(confidence: number | undefined): number {
+  if (confidence === undefined || confidence === null) return 100
+  return Math.round(confidence * 100)
+}
+
+function confidenceClass(confidence: number | undefined): string {
+  const pct = confidencePercent(confidence)
+  if (pct >= 80) return 'conf-high'
+  if (pct >= 50) return 'conf-medium'
+  return 'conf-low'
+}
+
 function useCandidateInAssistant(address: string, type: string) {
   store.selectCandidate(address, type)
   store.searchQuery = `j'utilise la mémoire 0x${address}`
@@ -62,6 +74,15 @@ function useSelectedCandidatesInAssistant() {
   const addresses = selectedCandidateAddresses.value.map((address) => `0x${address}`).join(' ')
   store.searchQuery = `j'utilise ces mémoires ${addresses}`
   void store.doSearch()
+}
+
+function writeSelectedCandidates() {
+  if (selectedCandidateAddresses.value.length === 0 || !store.writeValue.trim()) return
+  void store.writeSelectedAddresses(
+    selectedCandidateAddresses.value,
+    store.exactScanType,
+    store.writeValue,
+  )
 }
 
 onMounted(() => {
@@ -314,6 +335,9 @@ onMounted(() => {
           <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0" @click="useSelectedCandidatesInAssistant()">
             Utiliser sélection
           </button>
+          <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0 || !store.writeValue.trim()" @click="writeSelectedCandidates()">
+            Écrire sur sélection
+          </button>
         </div>
         <div class="page-info">
           {{ store.candidatePage ? store.candidatePage.pageIndex + 1 : 1 }} / {{ candidatePageTotal }}
@@ -338,7 +362,16 @@ onMounted(() => {
             <button class="address-btn" @click="store.selectCandidate(match.address, match.type)">
               0x{{ match.address }}
             </button>
-            <span>{{ match.type }}</span>
+            <span class="candidate-type">{{ match.type }}</span>
+            <span
+              v-if="match.confidence !== undefined && match.confidence < 1"
+              class="confidence-badge"
+              :class="confidenceClass(match.confidence)"
+              :title="match.variantLabel"
+            >
+              {{ confidencePercent(match.confidence) }}%
+            </span>
+            <span v-if="match.variantLabel" class="variant-label">{{ match.variantLabel }}</span>
             <button class="btn btn-secondary compact" @click="useCandidateInAssistant(match.address, match.type)">
               Utiliser
             </button>
@@ -695,8 +728,8 @@ onMounted(() => {
 
 .candidate-row {
   display: grid;
-  grid-template-columns: 28px minmax(170px, 1fr) 90px auto;
-  gap: 10px;
+  grid-template-columns: 28px minmax(170px, 1fr) 80px auto auto auto;
+  gap: 8px;
   align-items: center;
   padding: 7px 8px;
   border-radius: 4px;
@@ -733,6 +766,44 @@ onMounted(() => {
 
 .address-btn:hover {
   color: var(--accent);
+}
+
+.candidate-type {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.confidence-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'Segoe UI', sans-serif;
+  white-space: nowrap;
+}
+
+.confidence-badge.conf-high {
+  background: rgba(76, 175, 80, 0.18);
+  color: #66bb6a;
+}
+
+.confidence-badge.conf-medium {
+  background: rgba(255, 193, 7, 0.18);
+  color: #ffa726;
+}
+
+.confidence-badge.conf-low {
+  background: rgba(244, 67, 54, 0.18);
+  color: #ef5350;
+}
+
+.variant-label {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-style: italic;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 980px) {

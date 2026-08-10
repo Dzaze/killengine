@@ -31,6 +31,8 @@ add_library(killcore STATIC
     # Scanner (stubs Phase 0)
     scanner/scan_engine.cpp
     scanner/scan_types.cpp
+    scanner/value_variants.cpp
+    scanner/candidate_confidence.cpp
     scanner/worker_pool.cpp
 
     # Candidates (stubs Phase 0)

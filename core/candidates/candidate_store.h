@@ -18,6 +18,8 @@ struct Candidate {
     uint64_t  address{0};
     ValueType type{ValueType::Int32};
     QByteArray lastValue;
+    double confidence{1.0}; ///< Phase 13 : score de confiance [0.0, 1.0].
+    QString variantLabel;   ///< Phase 13 : libellé de variante (ex. "Float32 x100").
 };
 
 struct CandidatePage {
@@ -70,6 +72,8 @@ public:
     bool finishFileBackedReplacement(QString* error = nullptr);
 
     void sortByAddress(bool ascending = true);
+    /// Phase 13 : trie les candidats par confiance décroissante (adresse en cas d'égalité).
+    void sortByConfidence();
     CandidatePage page(size_t pageIndex, size_t pageSize, const QString& addressFilter = {}) const;
 
 private:

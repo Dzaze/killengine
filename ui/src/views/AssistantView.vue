@@ -1,14 +1,50 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 const chatInput = ref('')
 const chatScroll = ref<HTMLElement | null>(null)
 
+// Indicateur de réflexion dynamique — messages qui changent pendant le traitement
+const thinkingMessages = [
+  'Réflexion en cours...',
+  'Analyse de ta requête...',
+  'Recherche en mémoire...',
+  'Comparaison des candidats...',
+  'Filtrage des faux positifs...',
+  'Optimisation des résultats...',
+]
+const thinkingIndex = ref(0)
+const thinkingText = ref(thinkingMessages[0])
+let thinkingTimer: ReturnType<typeof setInterval> | null = null
+
+watch(() => store.isSearching, (searching) => {
+  if (searching) {
+    thinkingIndex.value = 0
+    thinkingText.value = thinkingMessages[0]
+    thinkingTimer = setInterval(() => {
+      thinkingIndex.value = (thinkingIndex.value + 1) % thinkingMessages.length
+      thinkingText.value = thinkingMessages[thinkingIndex.value]
+    }, 1500)
+  } else if (thinkingTimer) {
+    clearInterval(thinkingTimer)
+    thinkingTimer = null
+  }
+})
+
+watch(() => store.messages.length, () => {
+  void scrollToBottom()
+})
+
+onUnmounted(() => {
+  if (thinkingTimer) clearInterval(thinkingTimer)
+})
+
 const isAwaitingChange = computed(() => store.workflowStatus === 'awaiting_value_change')
 const needsMoreRefinement = computed(() => store.workflowStatus === 'needs_more_refinement')
 const isWorkflowActive = computed(() => store.workflowStatus !== 'idle')
+const hasActiveAddresses = computed(() => store.activeChatMemoryTargets.length > 0)
 const contextItems = computed(() => {
   const context = store.smartSearchContext
   if (!context) return []
@@ -48,6 +84,9 @@ const contextItems = computed(() => {
     })
   }
   if (context.hasUndoReduction) items.push({ label: 'Réduction', value: 'restaurable' })
+  if (context.writeHistory && context.writeHistory.length > 0) {
+    items.push({ label: 'Écritures', value: context.writeHistory.join(' -> ') })
+  }
   return items
 })
 
@@ -78,6 +117,41 @@ async function quickChanged() {
   await scrollToBottom()
 }
 
+async function useMessageSuggestions(message: typeof store.messages[number]) {
+  if (!message.suggestions || message.suggestions.length === 0) return
+  await store.useSuggestedAddresses(message.suggestions)
+  await scrollToBottom()
+}
+
+async function startNewSearchFromMessage() {
+  await store.startNewSearchContext()
+  await scrollToBottom()
+}
+
+async function searchTargetElsewhere(message: typeof store.messages[number]) {
+  const value = message.targetValue || String(message.suggestions?.[0]?.value ?? '')
+  await store.searchValueElsewhere(value)
+  await scrollToBottom()
+}
+
+async function testSingleAddress(suggestion: Record<string, unknown>) {
+  await store.testSingleSuggestedAddress(suggestion)
+  await scrollToBottom()
+}
+
+async function runRecoveryAction(actionId: string) {
+  if (actionId === 'rollback_batch') {
+    await store.rollbackLastWriteBatch()
+  } else if (actionId === 'clear_targets') {
+    await store.clearActiveChatMemoryTargets()
+  } else if (actionId === 'new_search') {
+    await store.startNewSearchContext()
+  } else if (actionId === 'continue_candidates') {
+    store.pushMessage('assistant', 'Garde le jeu ouvert, fais varier la valeur et donne-moi la nouvelle valeur observée pour continuer la réduction.')
+  }
+  await scrollToBottom()
+}
+
 function workflowLabel(status: string | undefined): string {
   switch (status) {
     case 'awaiting_value_change':
@@ -87,9 +161,11 @@ function workflowLabel(status: string | undefined): string {
     case 'needs_more_refinement':
       return 'Encore trop de candidats — raffine davantage'
     case 'auto_write_done':
-      return 'Valeur cible écrite automatiquement'
+      return 'Adresses actives pour modification'
     case 'auto_write_partial_or_failed':
       return 'Écriture partielle — vérifie manuellement'
+    case 'auto_write_problem':
+      return 'Adresses à vérifier'
     case 'no_candidate':
       return 'Aucun candidat restant'
     default:
@@ -106,6 +182,7 @@ function workflowClass(status: string | undefined): string {
     case 'needs_more_refinement':
       return 'wf-warning'
     case 'auto_write_partial_or_failed':
+    case 'auto_write_problem':
     case 'no_candidate':
       return 'wf-error'
     default:
@@ -113,15 +190,20 @@ function workflowClass(status: string | undefined): string {
   }
 }
 
-function suggestionsFor(message: typeof store.messages[number]): string {
-  if (!message.candidateCount && message.candidateCount !== 0) return ''
-  if (!message.suggestions || message.suggestions.length === 0) return ''
-  return message.suggestions
-    .map((s) => {
-      const history = valueHistoryFor(s)
-      return `0x${s.address} (${s.type}) → ${s.value}${history ? ` · ${history}` : ''}`
-    })
-    .join('\n')
+function suggestionRowsFor(message: typeof store.messages[number]): Array<Record<string, unknown>> {
+  return message.suggestions ?? []
+}
+
+function confidenceFor(record: Record<string, unknown>): string {
+  const label = String(record.confidenceLabel ?? '').trim()
+  const reason = String(record.confidenceReason ?? '').trim()
+  if (reason) return reason
+  if (label) return label
+  const confidence = Number(record.confidence ?? Number.NaN)
+  if (!Number.isFinite(confidence)) return ''
+  if (confidence >= 0.85) return 'fiabilité élevée'
+  if (confidence >= 0.65) return 'fiabilité moyenne'
+  return 'fiabilité faible'
 }
 
 function valueHistoryFor(record: Record<string, unknown>): string {
@@ -136,7 +218,20 @@ function valueHistoryFor(record: Record<string, unknown>): string {
 
   const uniqueValues = values.filter((value, index) => index === 0 || value !== values[index - 1])
   if (uniqueValues.length === 0) return ''
-  return `observé : ${uniqueValues.slice(-4).join(' -> ')}`
+  return `ancienne valeur observée : ${uniqueValues.slice(-4).join(' -> ')}`
+}
+
+function writeHistoryFor(message: typeof store.messages[number]): string {
+  const history = message.writeHistory ?? []
+  return history.length > 0 ? history.join(' -> ') : ''
+}
+
+function writeSummaryFor(message: typeof store.messages[number], record: Record<string, unknown>): string {
+  const previous = message.previousTargetValue
+  const current = String(record.value ?? message.targetValue ?? '').trim()
+  if (previous && current && previous !== current) return `dernière écriture : ${previous} · nouvelle écriture : ${current}`
+  if (current) return `nouvelle écriture : ${current}`
+  return ''
 }
 
 function filteredCandidatesFor(message: typeof store.messages[number]): string {
@@ -217,15 +312,25 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         v-for="msg in store.messages"
         :key="msg.id"
         class="message"
-        :class="msg.role === 'user' ? 'message-user' : 'message-assistant'"
+        :class="[msg.role === 'user' ? 'message-user' : 'message-assistant', { 'thinking-indicator': msg.isThinking }]"
       >
-        <div class="message-avatar">{{ msg.role === 'user' ? '🧑' : '🤖' }}</div>
+        <div class="message-avatar" :class="{ 'thinking-avatar': msg.isThinking }">
+          {{ msg.role === 'user' ? '🧑' : '🤖' }}
+        </div>
         <div class="message-body">
           <div class="message-meta">
-            <span class="message-role">{{ msg.role === 'user' ? 'Toi' : 'KillEngine' }}</span>
+            <span class="message-role">{{ msg.isThinking ? 'KillEngine réfléchit' : msg.role === 'user' ? 'Toi' : 'KillEngine' }}</span>
             <span class="message-time">{{ msg.time }}</span>
           </div>
-          <div class="message-text" :class="{ 'is-error': msg.isError }">{{ msg.text }}</div>
+          <div v-if="msg.isThinking" class="thinking-card">
+            <div class="thinking-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <Transition name="thinking-fade" mode="out-in">
+              <span :key="thinkingText" class="thinking-text">{{ thinkingText }}</span>
+            </Transition>
+          </div>
+          <div v-else class="message-text" :class="{ 'is-error': msg.isError }">{{ msg.text }}</div>
           <div v-if="msg.intentRationale" class="decision-line">
             Décision : {{ msg.intentRationale }}
           </div>
@@ -245,6 +350,12 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
             <div class="auto-write-title">
               {{ msg.autoWriteOk ? '✓ Écriture auto réussie' : '⚠ Écriture auto partielle' }}
             </div>
+            <div v-if="writeHistoryFor(msg)" class="write-history-line">
+              Historique : {{ writeHistoryFor(msg) }}
+            </div>
+            <div v-if="msg.activeTargetCount" class="active-write-line">
+              {{ msg.activeTargetCount }} adresse(s) gardée(s) actives pour les prochaines modifications.
+            </div>
             <div
               v-for="(r, i) in msg.autoWriteResults"
               :key="i"
@@ -252,6 +363,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
             >
               <span>0x{{ r.address }}</span>
               <span>{{ r.verified ? '✓ final vérifié' : '✗ non vérifié' }}</span>
+              <span v-if="writeSummaryFor(msg, r)" class="write-summary">{{ writeSummaryFor(msg, r) }}</span>
               <span v-if="r.confirmationMode" class="confirm-steps">
                 {{ r.temporaryVerified ? 'test OK' : 'test KO' }}
                 ·
@@ -265,12 +377,56 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
             <button class="btn btn-secondary btn-rollback-batch" @click="store.rollbackLastWriteBatch()">
               ↩ Rollback toutes les écritures
             </button>
+            <div class="message-actions">
+              <button class="btn btn-secondary btn-small" @click="useMessageSuggestions(msg)">
+                Réutiliser ces adresses
+              </button>
+              <button class="btn btn-secondary btn-small" @click="startNewSearchFromMessage()">
+                Nouvelle recherche
+              </button>
+            </div>
           </div>
 
           <!-- Suggestions -->
-          <div v-if="suggestionsFor(msg)" class="suggestions-box">
+          <div v-if="suggestionRowsFor(msg).length > 0" class="suggestions-box">
             <div class="suggestions-title">Adresses suggérées</div>
-            <pre class="suggestions-list">{{ suggestionsFor(msg) }}</pre>
+            <div
+              v-for="(suggestion, index) in suggestionRowsFor(msg)"
+              :key="`${suggestion.address}-${index}`"
+              class="suggestion-row"
+            >
+              <div class="suggestion-main">
+                <code>0x{{ suggestion.address }}</code>
+                <span>{{ suggestion.type }} → {{ suggestion.value }}</span>
+              </div>
+              <div v-if="confidenceFor(suggestion) || valueHistoryFor(suggestion)" class="suggestion-confidence">
+                {{ [confidenceFor(suggestion), valueHistoryFor(suggestion)].filter(Boolean).join(' · ') }}
+              </div>
+              <div class="suggestion-actions">
+                <button class="btn btn-secondary btn-small" @click="testSingleAddress(suggestion)">
+                  Tester cette adresse
+                </button>
+              </div>
+            </div>
+            <div class="message-actions">
+              <button class="btn btn-secondary btn-small" @click="searchTargetElsewhere(msg)">
+                Chercher cette valeur ailleurs
+              </button>
+            </div>
+          </div>
+
+          <div v-if="msg.recoveryActions && msg.recoveryActions.length > 0" class="recovery-box">
+            <div class="suggestions-title">Que faire maintenant ?</div>
+            <div class="message-actions">
+              <button
+                v-for="action in msg.recoveryActions"
+                :key="String(action.id)"
+                class="btn btn-secondary btn-small"
+                @click="runRecoveryAction(String(action.id))"
+              >
+                {{ action.label }}
+              </button>
+            </div>
           </div>
 
           <div v-if="filteredCandidatesFor(msg)" class="filtered-box">
@@ -286,15 +442,6 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         </div>
       </div>
 
-      <!-- Thinking -->
-      <div v-if="store.isSearching" class="message message-assistant">
-        <div class="message-avatar">🤖</div>
-        <div class="message-body">
-          <div class="thinking-dots">
-            <span></span><span></span><span></span>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Quick actions -->
@@ -314,6 +461,8 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         :placeholder="
           isAwaitingChange || needsMoreRefinement
             ? 'Donne la nouvelle valeur observée dans le jeu...'
+            : hasActiveAddresses
+              ? 'Ex: mets les à 3000, ou lance une nouvelle recherche...'
             : $t('search.placeholder')
         "
         class="chat-input"
@@ -650,6 +799,17 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   margin-bottom: 6px;
 }
 
+.write-history-line,
+.active-write-line {
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.write-history-line {
+  font-family: 'Cascadia Code', monospace;
+}
+
 .auto-write-row {
   display: flex;
   flex-wrap: wrap;
@@ -663,11 +823,25 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   color: var(--text-dim);
 }
 
+.write-summary {
+  width: 100%;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+}
+
 .value-history {
   width: 100%;
   color: var(--text-dim);
   font-family: inherit;
   font-size: 11px;
+}
+
+.message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .rollback-note {
@@ -683,6 +857,48 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.recovery-box {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(224, 175, 104, 0.35);
+  border-radius: 8px;
+  background: rgba(224, 175, 104, 0.08);
+}
+
+.suggestion-row {
+  padding: 7px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.suggestion-row:first-of-type {
+  border-top: 0;
+}
+
+.suggestion-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.suggestion-main code {
+  color: var(--accent);
+  font-family: 'Cascadia Code', monospace;
+}
+
+.suggestion-confidence {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.suggestion-actions {
+  display: flex;
+  margin-top: 6px;
 }
 
 .filtered-box {
@@ -719,21 +935,52 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   align-items: center;
 }
 
-/* Thinking dots */
-.thinking-dots {
+/* Thinking indicator */
+.thinking-indicator {
+  align-self: flex-start;
+}
+
+.thinking-avatar {
+  animation: thinking-pulse 2s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.08); filter: brightness(1.15); }
+}
+
+.thinking-card {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
   padding: 12px 16px;
-  background: var(--bg-tertiary);
+  background: rgba(122, 162, 247, 0.08);
+  border: 1px solid rgba(122, 162, 247, 0.2);
   border-radius: 12px;
   border-bottom-left-radius: 4px;
 }
 
+.thinking-text {
+  color: var(--accent);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Thinking dots (inside thinking-card) */
+.thinking-dots {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
 .thinking-dots span {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--text-dim);
+  background: var(--accent);
   animation: bounce 1.4s infinite ease-in-out both;
 }
 
@@ -743,6 +990,22 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 @keyframes bounce {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
+}
+
+/* Transition for thinking text */
+.thinking-fade-enter-active,
+.thinking-fade-leave-active {
+  transition: all 0.3s ease;
+}
+
+.thinking-fade-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.thinking-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 /* Quick actions */
