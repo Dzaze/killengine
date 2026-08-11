@@ -22,8 +22,17 @@ function previewRegion(address: string) {
   void store.readMemoryPreview(address, 64)
 }
 
-function openRegionInExpert(address: string) {
-  store.openExpertAtAddress(address)
+function openRegionInExpert(region: Record<string, unknown>) {
+  store.openExpertForRegion(region)
+}
+
+async function copyPreviewAddress() {
+  if (!store.memoryPreviewAddress) return
+  await navigator.clipboard?.writeText(`0x${store.memoryPreviewAddress}`)
+}
+
+function scanAroundPreview(type = store.exactScanType) {
+  void store.scanAroundPreview(store.exactScanValue, type)
 }
 
 function formatBytes(bytes: number | undefined) {
@@ -125,7 +134,24 @@ onMounted(() => {
               v-if="store.memoryPreviewAddress"
               class="preview-action-btn"
               type="button"
-              @click="openRegionInExpert(store.memoryPreviewAddress)"
+              @click="copyPreviewAddress()"
+            >
+              Copier
+            </button>
+            <button
+              v-if="store.memoryPreviewAddress"
+              class="preview-action-btn"
+              type="button"
+              :disabled="!store.exactScanValue.trim()"
+              @click="scanAroundPreview()"
+            >
+              Scanner autour
+            </button>
+            <button
+              v-if="store.selectedMemoryRegion"
+              class="preview-action-btn"
+              type="button"
+              @click="openRegionInExpert(store.selectedMemoryRegion)"
             >
               Basculer en expert
             </button>
@@ -134,7 +160,22 @@ onMounted(() => {
         <div v-if="store.memoryPreviewLoading" class="preview-loading">
           Lecture de la mémoire...
         </div>
-        <pre v-else-if="store.memoryPreview?.hex">{{ store.memoryPreview.hex }}</pre>
+        <div v-else-if="store.memoryPreview?.hex" class="preview-grid">
+          <pre>{{ store.memoryPreview.hex }}</pre>
+          <pre class="ascii">{{ store.memoryPreviewAscii }}</pre>
+          <div class="decoded-values">
+            <button
+              v-for="decoded in store.memoryPreviewDecoded"
+              :key="decoded.label"
+              class="decoded-pill"
+              type="button"
+              @click="scanAroundPreview(decoded.label)"
+            >
+              <span>{{ decoded.label }}</span>
+              <strong>{{ decoded.value }}</strong>
+            </button>
+          </div>
+        </div>
         <p v-else-if="store.memoryPreview?.error">{{ store.memoryPreview.error }}</p>
         <p v-else>Aucune donnée lisible à cette adresse.</p>
       </div>
@@ -151,14 +192,14 @@ onMounted(() => {
               class="preview-btn"
               :class="{ active: store.memoryPreviewAddress === region.baseAddress }"
               :disabled="!region.readable || (store.memoryPreviewLoading && store.memoryPreviewAddress === region.baseAddress)"
-              @click="previewRegion(region.baseAddress)"
+              @click="store.selectedMemoryRegion = region; previewRegion(region.baseAddress)"
             >
               {{ store.memoryPreviewLoading && store.memoryPreviewAddress === region.baseAddress ? 'Lecture...' : $t('memory.preview') }}
             </button>
             <button
               class="preview-btn expert-btn"
               :disabled="!region.readable"
-              @click="openRegionInExpert(region.baseAddress)"
+              @click="openRegionInExpert(region)"
             >
               Expert
             </button>
@@ -371,6 +412,11 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.preview-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .preview-title strong {
   color: var(--text-primary);
 }
@@ -392,6 +438,12 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.preview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(180px, 0.7fr);
+  gap: 10px;
+}
+
 .preview-panel pre {
   max-height: 160px;
   overflow: auto;
@@ -400,6 +452,39 @@ onMounted(() => {
   font-family: 'Cascadia Code', monospace;
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+.preview-panel pre.ascii {
+  color: var(--text-secondary);
+}
+
+.decoded-values {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+}
+
+.decoded-pill {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-accent);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.decoded-pill strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

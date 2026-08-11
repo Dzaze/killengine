@@ -16,6 +16,14 @@ const runtimeRows = computed(() => [
 const debugEvents = computed(() => [...store.smartSearchDebugEvents].reverse())
 const valueTypes = ['Int32', 'Int64', 'Float32', 'Float64']
 
+function formatBytes(value: number | undefined) {
+  const bytes = value ?? 0
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} Go`
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} Ko`
+  return `${bytes} o`
+}
+
 function eventSummary(event: Record<string, unknown>) {
   const parts = [
     event.intent ? `intent=${String(event.intent)}` : '',
@@ -106,11 +114,73 @@ async function saveAll() {
           <span>Chunk mémoire</span>
           <input v-model.number="store.settingScanChunkSizeMb" class="input" type="number" min="1" max="64" step="1" />
         </label>
+        <label>
+          <span>Seuil fichier candidats</span>
+          <input v-model.number="store.settingCandidateFileBackedThreshold" class="input" type="number" min="1" max="5000000" step="1000" />
+        </label>
+        <label>
+          <span>Snapshot unknown max (Mo)</span>
+          <input v-model.number="store.settingUnknownSnapshotMaxMb" class="input" type="number" min="128" max="32768" step="128" />
+        </label>
         <label class="toggle-row">
           <input v-model="store.settingFastScan" type="checkbox" />
           <span>Fast scan par défaut</span>
         </label>
       </div>
+      <p class="hint">
+        Gros process : mets le seuil fichier à 1 pour purger la RAM plus tôt. Les fichiers temporaires sont supprimés au nouveau scan ou à la fermeture.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Stockage temporaire</h2>
+        <div class="panel-actions">
+          <button class="btn btn-secondary compact" :disabled="store.scanBusy" @click="store.refreshTemporaryStorageStatus()">
+            Actualiser
+          </button>
+          <button class="btn btn-primary compact" :disabled="store.scanBusy" @click="store.clearTemporaryStorage()">
+            Nettoyer maintenant
+          </button>
+        </div>
+      </div>
+      <div class="runtime-grid">
+        <div class="runtime-cell">
+          <span>Total</span>
+          <strong>{{ formatBytes(store.temporaryStorageStatus?.totalBytes) }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Actif</span>
+          <strong>{{ formatBytes(store.temporaryStorageStatus?.activeBytes) }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Orphelins</span>
+          <strong>{{ store.temporaryStorageStatus?.orphanFileCount ?? 0 }} · {{ formatBytes(store.temporaryStorageStatus?.orphanBytes) }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Fichiers actifs</span>
+          <strong>{{ store.temporaryStorageStatus?.activeFileCount ?? 0 }}</strong>
+        </div>
+      </div>
+      <div class="path-row">
+        <span>Dossier temp</span>
+        <code>{{ store.temporaryStorageStatus?.tempPath || '-' }}</code>
+      </div>
+      <div class="path-row">
+        <span>Candidats</span>
+        <code>{{ formatBytes(store.temporaryStorageStatus?.candidateBytes) }} · {{ store.temporaryStorageStatus?.candidateFileBacked ? 'fichier' : 'RAM' }}</code>
+      </div>
+      <div class="path-row">
+        <span>Undo / snapshot</span>
+        <code>{{ formatBytes(store.temporaryStorageStatus?.undoBytes) }} / {{ formatBytes(store.temporaryStorageStatus?.snapshotBytes) }}</code>
+      </div>
+      <p v-if="store.temporaryStorageCleanupResult" class="status-line">
+        {{ store.temporaryStorageCleanupResult.message || (store.temporaryStorageCleanupResult.success ? 'Nettoyage terminé.' : store.temporaryStorageCleanupResult.error) }}
+      </p>
+      <p v-if="store.temporaryStorageError" class="error">{{ store.temporaryStorageError }}</p>
+      <p class="hint">
+        Le nettoyage ferme le contexte de scan courant, vide l'undo et le snapshot unknown, puis supprime les fichiers `killengine_candidates_*.kecand` et `killengine_snapshot_*.kesnap` restants.
+      </p>
     </section>
 
     <section class="panel">

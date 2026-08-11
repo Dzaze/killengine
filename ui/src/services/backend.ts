@@ -150,6 +150,8 @@ export interface UnknownSnapshotResult {
   regionsCaptured: number
   regionsSkipped: number
   bytesCaptured: number
+  compressedBytes?: number
+  mappedStorage?: boolean
   error: string
 }
 
@@ -219,6 +221,24 @@ export interface LogTailResult {
   error: string
 }
 
+export interface TemporaryStorageStatus {
+  success: boolean
+  tempPath: string
+  activeBytes: number
+  activeFileCount: number
+  candidateBytes: number
+  candidateFileBacked: boolean
+  undoBytes: number
+  undoFileBacked: boolean
+  snapshotBytes: number
+  snapshotFileBacked: boolean
+  orphanBytes: number
+  orphanFileCount: number
+  totalBytes: number
+  orphanFiles?: Array<Record<string, unknown>>
+  error?: string
+}
+
 export interface ChatMemoryTargetsResult {
   success: boolean
   count: number
@@ -247,6 +267,8 @@ export interface AppSettings {
   defaultValueType: string
   scanMaxResults: number
   scanChunkSizeMb: number
+  candidateFileBackedThreshold: number
+  unknownSnapshotMaxMb: number
   fastScan: boolean
   smartSearchDebugEnabled: boolean
   smartSearchDebugMaxEvents: number
@@ -282,6 +304,7 @@ export interface BackendController {
   nextScan(mode: string, value: string): Promise<NextScanResult>
   nextScanAsync(mode: string, value: string): Promise<Record<string, unknown>>
   undoCandidateScan(): Promise<UndoCandidateScanResult>
+  clearScanContext(): Promise<Record<string, unknown>>
   cancelActiveScan(): Promise<Record<string, unknown>>
   getCandidates(pageIndex: number, pageSize: number, addressFilter: string): Promise<CandidatePage>
   captureUnknownSnapshot(): Promise<UnknownSnapshotResult>
@@ -302,6 +325,8 @@ export interface BackendController {
   clearSmartSearchDebugEvents(): Promise<Record<string, unknown>>
   getLogTail(maxLines: number): Promise<LogTailResult>
   exportDiagnostics(): Promise<Record<string, unknown>>
+  getTemporaryStorageStatus(): Promise<TemporaryStorageStatus>
+  clearTemporaryStorage(): Promise<Record<string, unknown>>
   getActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
   clearActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
   getSmartSearchContext(): Promise<SmartSearchContextResult>
@@ -705,6 +730,9 @@ class BackendService {
       async undoCandidateScan() {
         return { success: false, restored: false, count: 0, error: 'Mock backend' }
       },
+      async clearScanContext() {
+        return { success: true, clearedCandidates: 0, message: 'Contexte de scan vidé.' }
+      },
       async cancelActiveScan() {
         return { success: false, error: 'Mock backend' }
       },
@@ -764,6 +792,8 @@ class BackendService {
           defaultValueType: 'Int32',
           scanMaxResults: 1000000,
           scanChunkSizeMb: 1,
+          candidateFileBackedThreshold: 250000,
+          unknownSnapshotMaxMb: 512,
           fastScan: true,
           smartSearchDebugEnabled: true,
           smartSearchDebugMaxEvents: 30,
@@ -791,6 +821,27 @@ class BackendService {
       },
       async exportDiagnostics() {
         return { success: false, path: '', error: 'Mock backend' }
+      },
+      async getTemporaryStorageStatus() {
+        return {
+          success: true,
+          tempPath: 'mock://temp',
+          activeBytes: 0,
+          activeFileCount: 0,
+          candidateBytes: 0,
+          candidateFileBacked: false,
+          undoBytes: 0,
+          undoFileBacked: false,
+          snapshotBytes: 0,
+          snapshotFileBacked: false,
+          orphanBytes: 0,
+          orphanFileCount: 0,
+          totalBytes: 0,
+          orphanFiles: [],
+        }
+      },
+      async clearTemporaryStorage() {
+        return { success: true, removedBytes: 0, removedFileCount: 0, message: 'Stockage temporaire nettoyé.' }
       },
       async getActiveChatMemoryTargets() {
         return { success: true, count: 0, targets: [] }

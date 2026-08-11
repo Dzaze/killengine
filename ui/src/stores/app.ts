@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import {
   backend,
   type AppSettings,
@@ -15,6 +15,7 @@ import {
   type ProcessModuleInfo,
   type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
+  type TemporaryStorageStatus,
   type UndoCandidateScanResult,
   type UnknownNextScanResult,
   type UnknownSnapshotResult,
@@ -44,9 +45,45 @@ export interface ChatMessage {
   isError?: boolean
 }
 
+export interface UserActionLogEntry {
+  id: number
+  time: string
+  kind: string
+  title: string
+  detail: string
+  status: 'info' | 'success' | 'warning' | 'error'
+}
+
+export interface MemoryPreviewDecodedValue {
+  label: string
+  value: string
+}
+
+export interface WatchedAddress {
+  address: string
+  type: string
+  value: string
+  previousValue: string
+  changed: boolean
+  error: string
+  updatedAt: string
+}
+
+export interface UnknownGuideStep {
+  id: number
+  time: string
+  mode: string
+  label: string
+  beforeCount: number
+  afterCount: number
+  status: 'capture' | 'compare' | 'refine' | 'error'
+  detail: string
+}
+
 export const useAppStore = defineStore('app', () => {
   // State
   const activeView = ref<'assistant' | 'process' | 'memory' | 'profiles' | 'expert' | 'settings'>('assistant')
+  const uiMode = ref<'beginner' | 'expert'>('beginner')
   const version = ref('...')
   const isConnected = ref(false)
   const isAttached = ref(false)
@@ -57,12 +94,18 @@ export const useAppStore = defineStore('app', () => {
   const memoryPreview = ref<MemoryReadPreview | null>(null)
   const memoryPreviewAddress = ref('')
   const memoryPreviewLoading = ref(false)
+  const memoryPreviewAscii = computed(() => bytesToAscii(hexToBytes(memoryPreview.value?.hex ?? '')))
+  const memoryPreviewDecoded = computed(() => decodePreviewValues(hexToBytes(memoryPreview.value?.hex ?? '')))
+  const selectedMemoryRegion = ref<Record<string, unknown> | null>(null)
   const pingResult = ref('')
   const logFilePath = ref('')
   const logLines = ref<string[]>([])
   const logError = ref('')
   const diagnosticExportPath = ref('')
   const diagnosticExportError = ref('')
+  const temporaryStorageStatus = ref<TemporaryStorageStatus | null>(null)
+  const temporaryStorageCleanupResult = ref<Record<string, unknown> | null>(null)
+  const temporaryStorageError = ref('')
   const smartSearchDebugFilePath = ref('')
   const smartSearchDebugEvents = ref<Array<Record<string, unknown>>>([])
   const smartSearchDebugError = ref('')
@@ -73,6 +116,8 @@ export const useAppStore = defineStore('app', () => {
   const settingDefaultValueType = ref('Int32')
   const settingScanMaxResults = ref(1000000)
   const settingScanChunkSizeMb = ref(1)
+  const settingCandidateFileBackedThreshold = ref(250000)
+  const settingUnknownSnapshotMaxMb = ref(512)
   const settingFastScan = ref(true)
   const settingSmartSearchDebugEnabled = ref(true)
   const settingSmartSearchDebugMaxEvents = ref(30)
@@ -94,6 +139,10 @@ export const useAppStore = defineStore('app', () => {
   const expertWritableOnly = ref(false)
   const expertExecutableOnly = ref(false)
   const expertCopyOnWriteOnly = ref(false)
+  const expertRegionSize = ref(0)
+  const expertRegionProtection = ref('')
+  const expertRegionState = ref('')
+  const expertRegionType = ref('')
   const candidatePage = ref<CandidatePage | null>(null)
   const candidatePageIndex = ref(0)
   const candidatePageSize = ref(100)
@@ -106,15 +155,26 @@ export const useAppStore = defineStore('app', () => {
   const unknownScanType = ref('Int32')
   const unknownSnapshotResult = ref<UnknownSnapshotResult | null>(null)
   const unknownNextScanResult = ref<UnknownNextScanResult | null>(null)
+  const unknownGuideSteps = ref<UnknownGuideStep[]>([])
+  const unknownGuideStepIdCounter = ref(0)
   const selectedCandidateAddress = ref('')
   const writeValue = ref('')
   const writeResult = ref<MemoryWriteResult | null>(null)
+  const writeSafetyWarning = ref('')
+  const writeSafetyAcknowledged = ref(false)
   const freezeEnabled = ref(false)
   const finalCandidateTargets = ref<Array<Record<string, unknown>>>([])
+  const ignoredCandidateAddresses = ref<string[]>([])
+  const keptCandidateAddresses = ref<string[]>([])
+  const watchLiveEnabled = ref(false)
+  const watchedAddresses = ref<WatchedAddress[]>([])
+  let watchLiveTimer: ReturnType<typeof setInterval> | null = null
 
   // Chat / guided workflow state
   const messages = ref<ChatMessage[]>([])
   const messageIdCounter = ref(0)
+  const actionLog = ref<UserActionLogEntry[]>([])
+  const actionLogIdCounter = ref(0)
   const workflowStatus = ref<string>('idle')
   const targetValueGuided = ref<string>('')
   const candidateHistory = ref<number[]>([])
@@ -133,6 +193,95 @@ export const useAppStore = defineStore('app', () => {
 
   function nowTime(): string {
     return new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  function formatCount(value: number | undefined): string {
+    return new Intl.NumberFormat('fr-FR').format(value ?? 0)
+  }
+
+  function unknownModeLabel(mode: string): string {
+    if (mode === 'increased') return 'ça augmente'
+    if (mode === 'decreased') return 'ça diminue'
+    if (mode === 'unchanged') return 'stable'
+    if (mode === 'changed') return 'ça change'
+    return mode
+  }
+
+  function pushUnknownGuideStep(step: Omit<UnknownGuideStep, 'id' | 'time'>) {
+    unknownGuideStepIdCounter.value += 1
+    unknownGuideSteps.value.unshift({
+      id: unknownGuideStepIdCounter.value,
+      time: nowTime(),
+      ...step,
+    })
+    unknownGuideSteps.value = unknownGuideSteps.value.slice(0, 12)
+  }
+
+  function addActionLog(
+    kind: string,
+    title: string,
+    detail = '',
+    status: UserActionLogEntry['status'] = 'info',
+  ) {
+    actionLogIdCounter.value += 1
+    actionLog.value.unshift({
+      id: actionLogIdCounter.value,
+      time: nowTime(),
+      kind,
+      title,
+      detail,
+      status,
+    })
+    actionLog.value = actionLog.value.slice(0, 80)
+  }
+
+  function hexToBytes(hex: string): number[] {
+    return hex
+      .trim()
+      .split(/\s+/)
+      .map((chunk) => Number.parseInt(chunk, 16))
+      .filter((byte) => Number.isFinite(byte) && byte >= 0 && byte <= 255)
+  }
+
+  function bytesToAscii(bytes: number[]): string {
+    if (bytes.length === 0) return ''
+    return bytes
+      .map((byte) => (byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'))
+      .join('')
+  }
+
+  function readInt(bytes: number[], offset: number, size: number, signed: boolean): string {
+    if (bytes.length < offset + size) return '-'
+    let value = 0n
+    for (let i = 0; i < size; i += 1) {
+      value |= BigInt(bytes[offset + i]) << BigInt(8 * i)
+    }
+    if (signed) {
+      const signBit = 1n << BigInt(size * 8 - 1)
+      if ((value & signBit) !== 0n) value -= 1n << BigInt(size * 8)
+    }
+    return value.toString()
+  }
+
+  function decodeFloat(bytes: number[], size: 4 | 8): string {
+    if (bytes.length < size) return '-'
+    const buffer = new ArrayBuffer(size)
+    const view = new DataView(buffer)
+    bytes.slice(0, size).forEach((byte, index) => view.setUint8(index, byte))
+    const value = size === 4 ? view.getFloat32(0, true) : view.getFloat64(0, true)
+    return Number.isFinite(value) ? String(Number(value.toPrecision(8))) : String(value)
+  }
+
+  function decodePreviewValues(bytes: number[]): MemoryPreviewDecodedValue[] {
+    return [
+      { label: 'Int16', value: readInt(bytes, 0, 2, true) },
+      { label: 'UInt16', value: readInt(bytes, 0, 2, false) },
+      { label: 'Int32', value: readInt(bytes, 0, 4, true) },
+      { label: 'UInt32', value: readInt(bytes, 0, 4, false) },
+      { label: 'Int64', value: readInt(bytes, 0, 8, true) },
+      { label: 'Float32', value: decodeFloat(bytes, 4) },
+      { label: 'Float64', value: decodeFloat(bytes, 8) },
+    ]
   }
 
   function setScanProgress(percent: number) {
@@ -178,10 +327,28 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  function resetWorkflow() {
+  async function resetWorkflow() {
+    try {
+      const result = await backend.getController().clearScanContext()
+      addActionLog('scan', 'Nouveau scan', String(result.message ?? 'Contexte de scan vidé.'), 'success')
+    } catch (e) {
+      addActionLog('scan', 'Nouveau scan local', `Backend non purgé : ${String(e)}`, 'warning')
+    }
     workflowStatus.value = 'idle'
     targetValueGuided.value = ''
     candidateHistory.value = []
+    unknownGuideSteps.value = []
+    candidatePage.value = null
+    candidatePageIndex.value = 0
+    candidateFilter.value = ''
+    exactScanResult.value = null
+    nextScanResult.value = null
+    unknownSnapshotResult.value = null
+    unknownNextScanResult.value = null
+    nextScanValue.value = ''
+    scanStatusText.value = 'Nouveau scan prêt.'
+    setScanProgress(0)
+    await refreshSmartSearchContext()
   }
 
   async function tellNewValue(value: string) {
@@ -275,6 +442,14 @@ export const useAppStore = defineStore('app', () => {
     }
     try {
       memoryPreview.value = await backend.getController().readMemoryPreview(addressHex, size)
+      addActionLog(
+        'memory_preview',
+        `Aperçu mémoire 0x${normalizedAddress}`,
+        memoryPreview.value.success
+          ? `${memoryPreview.value.bytesRead}/${memoryPreview.value.requestedBytes} octets lus.`
+          : memoryPreview.value.error || 'Lecture sans donnée.',
+        memoryPreview.value.success ? 'success' : 'warning',
+      )
     } catch (e) {
       memoryPreview.value = {
         success: false,
@@ -285,6 +460,7 @@ export const useAppStore = defineStore('app', () => {
         error: String(e),
         hex: '',
       }
+      addActionLog('memory_preview', `Aperçu mémoire 0x${normalizedAddress}`, String(e), 'error')
     } finally {
       memoryPreviewLoading.value = false
     }
@@ -318,6 +494,7 @@ export const useAppStore = defineStore('app', () => {
       logFilePath.value = await backend.getController().getLogFilePath()
       smartSearchDebugFilePath.value = await backend.getController().getSmartSearchDebugFilePath()
       await refreshLogTail()
+      await refreshTemporaryStorageStatus()
       const debugResult: SmartSearchDebugEventsResult = await backend
         .getController()
         .getSmartSearchDebugEvents(settingSmartSearchDebugMaxEvents.value)
@@ -327,6 +504,8 @@ export const useAppStore = defineStore('app', () => {
       logFilePath.value = ''
       logLines.value = []
       logError.value = String(e)
+      temporaryStorageStatus.value = null
+      temporaryStorageError.value = String(e)
       smartSearchDebugFilePath.value = ''
       smartSearchDebugEvents.value = []
       smartSearchDebugError.value = String(e)
@@ -365,6 +544,46 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function refreshTemporaryStorageStatus() {
+    try {
+      temporaryStorageStatus.value = await backend.getController().getTemporaryStorageStatus()
+      temporaryStorageError.value = temporaryStorageStatus.value.error ?? ''
+      return temporaryStorageStatus.value
+    } catch (e) {
+      temporaryStorageStatus.value = null
+      temporaryStorageError.value = String(e)
+      return null
+    }
+  }
+
+  async function clearTemporaryStorage() {
+    if (scanBusy.value) return { success: false, error: 'Un scan est actif.' }
+    try {
+      temporaryStorageCleanupResult.value = await backend.getController().clearTemporaryStorage()
+      await refreshTemporaryStorageStatus()
+      candidatePage.value = null
+      candidatePageIndex.value = 0
+      exactScanResult.value = null
+      nextScanResult.value = null
+      unknownSnapshotResult.value = null
+      unknownNextScanResult.value = null
+      unknownGuideSteps.value = []
+      scanStatusText.value = String(temporaryStorageCleanupResult.value.message ?? 'Stockage temporaire nettoyé.')
+      addActionLog(
+        'cleanup',
+        'Temporaire nettoyé',
+        `${String(temporaryStorageCleanupResult.value.removedFileCount ?? 0)} fichier(s), ${String(temporaryStorageCleanupResult.value.removedBytes ?? 0)} octet(s).`,
+        temporaryStorageCleanupResult.value.success === true ? 'success' : 'warning',
+      )
+      return temporaryStorageCleanupResult.value
+    } catch (e) {
+      temporaryStorageCleanupResult.value = { success: false, error: String(e) }
+      temporaryStorageError.value = String(e)
+      addActionLog('cleanup', 'Nettoyage temporaire échoué', String(e), 'error')
+      return temporaryStorageCleanupResult.value
+    }
+  }
+
   function applySettings(settings: AppSettings) {
     appLanguage.value = settings.language === 'en' ? 'en' : 'fr'
     settingDefaultValueType.value = settings.defaultValueType || 'Int32'
@@ -372,6 +591,8 @@ export const useAppStore = defineStore('app', () => {
     unknownScanType.value = settingDefaultValueType.value
     settingScanMaxResults.value = Number(settings.scanMaxResults || 1000000)
     settingScanChunkSizeMb.value = Number(settings.scanChunkSizeMb || 1)
+    settingCandidateFileBackedThreshold.value = Number(settings.candidateFileBackedThreshold || 250000)
+    settingUnknownSnapshotMaxMb.value = Number(settings.unknownSnapshotMaxMb || 512)
     settingFastScan.value = settings.fastScan !== false
     settingSmartSearchDebugEnabled.value = settings.smartSearchDebugEnabled !== false
     settingSmartSearchDebugMaxEvents.value = Number(settings.smartSearchDebugMaxEvents || 30)
@@ -385,6 +606,8 @@ export const useAppStore = defineStore('app', () => {
       defaultValueType: settingDefaultValueType.value,
       scanMaxResults: settingScanMaxResults.value,
       scanChunkSizeMb: settingScanChunkSizeMb.value,
+      candidateFileBackedThreshold: settingCandidateFileBackedThreshold.value,
+      unknownSnapshotMaxMb: settingUnknownSnapshotMaxMb.value,
       fastScan: settingFastScan.value,
       smartSearchDebugEnabled: settingSmartSearchDebugEnabled.value,
       smartSearchDebugMaxEvents: settingSmartSearchDebugMaxEvents.value,
@@ -488,7 +711,7 @@ export const useAppStore = defineStore('app', () => {
 
       // Synchronise les résultats déterministes
       if (result.actionStatus === 'executed' && result.actionResult) {
-        if (result.tool === 'exact_scan') {
+        if (result.tool === 'exact_scan' || result.tool === 'exact_scan_multi_type') {
           exactScanResult.value = result.actionResult as unknown as ExactScanResult
           candidatePageIndex.value = 0
           await refreshCandidates()
@@ -571,9 +794,14 @@ export const useAppStore = defineStore('app', () => {
 
       if (result.error) extras.isError = true
 
+      const actionResultError = typeof result.actionResult === 'object' && result.actionResult !== null
+        ? String((result.actionResult as Record<string, unknown>).error ?? '').trim()
+        : ''
       const assistantText = String(
         result.message
         ?? result.error
+        ?? result.actionError
+        ?? actionResultError
         ?? "Je n'ai pas assez d'informations pour agir. Donne-moi une valeur à chercher ou une adresse à utiliser.",
       ).trim()
       updateMessage(
@@ -611,6 +839,19 @@ export const useAppStore = defineStore('app', () => {
     if (!trimmed || isSearching.value) return
     searchQuery.value = `nouvelle recherche ${trimmed}`
     await doSearch()
+  }
+
+  async function searchValueAsType(value: string, type: string, target?: string) {
+    const trimmed = value.trim()
+    if (!trimmed || isSearching.value) return
+    const targetText = target?.trim() ?? ''
+    exactScanValue.value = trimmed
+    exactScanType.value = type
+    searchQuery.value = targetText
+      ? `nouvelle recherche ${trimmed} en ${type} cible ${targetText}`
+      : `nouvelle recherche ${trimmed} en ${type}`
+    await doSearch()
+    addActionLog('assistant', `Recherche Assistant en ${type}`, targetText ? `${trimmed} -> ${targetText}` : trimmed, 'info')
   }
 
   async function testSingleSuggestedAddress(suggestion: Record<string, unknown>) {
@@ -660,6 +901,7 @@ export const useAppStore = defineStore('app', () => {
       scanBusy.value = true
       setScanProgress(0)
       scanStatusText.value = 'Scan exact en cours...'
+      addActionLog('scan', `Scan exact ${exactScanValue.value}`, `${exactScanType.value}${hasExpertFilter ? ' · filtres expert actifs' : ''}.`, 'info')
       exactScanResult.value = await backend.startExactScanAsync(
         exactScanValue.value,
         exactScanType.value,
@@ -680,6 +922,12 @@ export const useAppStore = defineStore('app', () => {
       await refreshCandidates()
       setScanProgress(100)
       scanStatusText.value = exactScanResult.value.cancelled ? 'Scan annulé.' : 'Scan terminé.'
+      addActionLog(
+        'scan',
+        exactScanResult.value.cancelled ? 'Scan exact annulé' : 'Scan exact terminé',
+        `${exactScanResult.value.candidateStoreSize} candidat(s), ${exactScanResult.value.regionsScanned} région(s).`,
+        exactScanResult.value.success ? 'success' : 'warning',
+      )
     } catch (e) {
       exactScanResult.value = {
         success: false,
@@ -694,6 +942,7 @@ export const useAppStore = defineStore('app', () => {
         candidateStoreSize: 0,
       }
       scanStatusText.value = 'Scan échoué.'
+      addActionLog('scan', 'Scan exact échoué', String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -712,10 +961,23 @@ export const useAppStore = defineStore('app', () => {
 
   async function doNextScan() {
     if (scanBusy.value) return
+    if ((candidatePage.value?.totalCount ?? 0) <= 0) {
+      scanStatusText.value = 'Aucun candidat à réduire. Lance d’abord un premier scan.'
+      nextScanResult.value = {
+        success: false,
+        checked: 0,
+        unreadable: 0,
+        remaining: 0,
+        error: scanStatusText.value,
+      }
+      addActionLog('scan', 'Next scan refusé', scanStatusText.value, 'warning')
+      return
+    }
     try {
       scanBusy.value = true
       setScanProgress(0)
       scanStatusText.value = 'Réduction des candidats...'
+      addActionLog('scan', `Next scan ${nextScanMode.value}`, nextScanValue.value ? `Valeur ${nextScanValue.value}.` : 'Sans valeur explicite.', 'info')
       nextScanResult.value = await backend.startNextScanAsync(nextScanMode.value, nextScanValue.value)
       setScanProgress(Math.max(scanProgressPercent.value, 95))
       candidatePageIndex.value = 0
@@ -723,6 +985,12 @@ export const useAppStore = defineStore('app', () => {
       await refreshCandidates()
       setScanProgress(100)
       scanStatusText.value = nextScanResult.value.cancelled ? 'Scan annulé.' : 'Next scan terminé.'
+      addActionLog(
+        'scan',
+        nextScanResult.value.cancelled ? 'Next scan annulé' : 'Next scan terminé',
+        `${nextScanResult.value.remaining} candidat(s) restant(s).`,
+        nextScanResult.value.success ? 'success' : 'warning',
+      )
     } catch (e) {
       nextScanResult.value = {
         success: false,
@@ -733,6 +1001,7 @@ export const useAppStore = defineStore('app', () => {
         error: String(e),
       }
       scanStatusText.value = 'Next scan échoué.'
+      addActionLog('scan', 'Next scan échoué', String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -746,8 +1015,10 @@ export const useAppStore = defineStore('app', () => {
         candidatePageIndex.value = 0
         await refreshCandidates()
         scanStatusText.value = `Réduction restaurée : ${undoCandidateScanResult.value.count} candidat(s).`
+        addActionLog('rollback', 'Réduction restaurée', `${undoCandidateScanResult.value.count} candidat(s).`, 'success')
       } else {
         scanStatusText.value = undoCandidateScanResult.value.error || 'Aucune réduction à restaurer.'
+        addActionLog('rollback', 'Réduction non restaurée', scanStatusText.value, 'warning')
       }
       return undoCandidateScanResult.value
     } catch (e) {
@@ -758,6 +1029,7 @@ export const useAppStore = defineStore('app', () => {
         error: String(e),
       }
       scanStatusText.value = 'Restauration impossible.'
+      addActionLog('rollback', 'Restauration impossible', String(e), 'error')
       return undoCandidateScanResult.value
     }
   }
@@ -781,9 +1053,26 @@ export const useAppStore = defineStore('app', () => {
       scanBusy.value = true
       scanProgressPercent.value = 15
       scanStatusText.value = 'Capture unknown en cours...'
+      addActionLog('scan', 'Capture unknown', `${unknownScanType.value}.`, 'info')
       unknownSnapshotResult.value = await backend.captureUnknownSnapshotAsync()
       scanProgressPercent.value = 100
       scanStatusText.value = unknownSnapshotResult.value.cancelled ? 'Scan annulé.' : 'Snapshot capturé.'
+      candidatePage.value = null
+      candidatePageIndex.value = 0
+      nextScanResult.value = null
+      unknownNextScanResult.value = null
+      unknownGuideSteps.value = []
+      pushUnknownGuideStep({
+        mode: 'capture',
+        label: 'capture',
+        beforeCount: 0,
+        afterCount: 0,
+        status: unknownSnapshotResult.value.success ? 'capture' : 'error',
+        detail: unknownSnapshotResult.value.success
+          ? `${unknownSnapshotResult.value.regionsCaptured} région(s), ${unknownSnapshotResult.value.bytesCaptured} octet(s).`
+          : unknownSnapshotResult.value.error || 'Capture refusée.',
+      })
+      addActionLog('scan', 'Snapshot unknown capturé', `${unknownSnapshotResult.value.regionsCaptured} région(s).`, 'success')
     } catch (e) {
       unknownSnapshotResult.value = {
         success: false,
@@ -795,6 +1084,15 @@ export const useAppStore = defineStore('app', () => {
         error: String(e),
       }
       scanStatusText.value = 'Capture unknown échouée.'
+      pushUnknownGuideStep({
+        mode: 'capture',
+        label: 'capture',
+        beforeCount: 0,
+        afterCount: 0,
+        status: 'error',
+        detail: String(e),
+      })
+      addActionLog('scan', 'Capture unknown échouée', String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -802,10 +1100,19 @@ export const useAppStore = defineStore('app', () => {
 
   async function doUnknownNextScan() {
     if (scanBusy.value) return
+    if ((candidatePage.value?.totalCount ?? 0) > 0) {
+      nextScanMode.value = unknownScanMode.value
+      nextScanValue.value = ''
+      scanStatusText.value = `Raffinage unknown ${unknownScanMode.value}...`
+      addActionLog('scan', `Raffinage unknown ${unknownScanMode.value}`, `${candidatePage.value?.totalCount ?? 0} candidat(s).`, 'info')
+      await doNextScan()
+      return
+    }
     try {
       scanBusy.value = true
       scanProgressPercent.value = 15
       scanStatusText.value = 'Comparaison unknown en cours...'
+      addActionLog('scan', `Comparaison unknown ${unknownScanMode.value}`, unknownScanType.value, 'info')
       unknownNextScanResult.value = await backend.unknownNextScanAsync(unknownScanMode.value, unknownScanType.value)
       scanProgressPercent.value = 85
       candidatePageIndex.value = 0
@@ -813,6 +1120,7 @@ export const useAppStore = defineStore('app', () => {
       await refreshCandidates()
       scanProgressPercent.value = 100
       scanStatusText.value = unknownNextScanResult.value.cancelled ? 'Scan annulé.' : 'Comparaison unknown terminée.'
+      addActionLog('scan', 'Comparaison unknown terminée', `${unknownNextScanResult.value.stored} candidat(s).`, 'success')
     } catch (e) {
       unknownNextScanResult.value = {
         success: false,
@@ -824,6 +1132,7 @@ export const useAppStore = defineStore('app', () => {
         error: String(e),
       }
       scanStatusText.value = 'Comparaison unknown échouée.'
+      addActionLog('scan', 'Comparaison unknown échouée', String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -832,6 +1141,54 @@ export const useAppStore = defineStore('app', () => {
   function selectCandidate(address: string, type: string) {
     selectedCandidateAddress.value = address
     exactScanType.value = type
+    addAddressToWatch(address, type)
+    addActionLog('select', `Adresse sélectionnée 0x${address}`, `Type ${type}.`, 'info')
+  }
+
+  async function runUnknownGuideStep(mode: 'increased' | 'decreased' | 'unchanged' | 'changed') {
+    if (scanBusy.value) return
+    if (!unknownSnapshotResult.value?.success && (candidatePage.value?.totalCount ?? 0) <= 0) {
+      scanStatusText.value = 'Capture d’abord une valeur unknown.'
+      addActionLog('scan', 'Unknown guidé refusé', scanStatusText.value, 'warning')
+      pushUnknownGuideStep({
+        mode,
+        label: unknownModeLabel(mode),
+        beforeCount: 0,
+        afterCount: 0,
+        status: 'error',
+        detail: scanStatusText.value,
+      })
+      return
+    }
+
+    const beforeCount = candidatePage.value?.totalCount ?? 0
+    unknownScanMode.value = mode
+    await doUnknownNextScan()
+
+    const afterCount = candidatePage.value?.totalCount
+      ?? nextScanResult.value?.remaining
+      ?? unknownNextScanResult.value?.stored
+      ?? 0
+    const usedRefine = beforeCount > 0
+    const error = usedRefine ? nextScanResult.value?.error : unknownNextScanResult.value?.error
+    const cancelled = usedRefine ? nextScanResult.value?.cancelled : unknownNextScanResult.value?.cancelled
+    const status: UnknownGuideStep['status'] = error || cancelled ? 'error' : usedRefine ? 'refine' : 'compare'
+    const detail = error
+      ? String(error)
+      : cancelled
+        ? 'Opération annulée.'
+        : usedRefine
+          ? `${beforeCount} -> ${afterCount} candidat(s).`
+          : `${formatCount(unknownNextScanResult.value?.matchesFound)} trouvé(s), ${afterCount} stocké(s).`
+
+    pushUnknownGuideStep({
+      mode,
+      label: unknownModeLabel(mode),
+      beforeCount,
+      afterCount,
+      status,
+      detail,
+    })
   }
 
   function openExpertAtAddress(address: string, type = exactScanType.value) {
@@ -839,6 +1196,204 @@ export const useAppStore = defineStore('app', () => {
     if (!normalizedAddress) return
     selectCandidate(normalizedAddress, type)
     activeView.value = 'expert'
+    addActionLog('navigation', `Mode Expert ouvert sur 0x${normalizedAddress}`, `Type ${type}.`, 'info')
+  }
+
+  function openExpertForRegion(region: Record<string, unknown>, type = exactScanType.value) {
+    const address = String(region.baseAddress ?? '').trim().replace(/^0x/i, '')
+    const size = Number(region.size ?? 0)
+    if (!address) return
+
+    selectedMemoryRegion.value = region
+    selectedCandidateAddress.value = address
+    exactScanType.value = type
+    expertModeEnabled.value = true
+    expertStartAddress.value = `0x${address}`
+    expertStopAddress.value = size > 0 ? `0x${(Number.parseInt(address, 16) + size).toString(16)}` : ''
+    expertWritableOnly.value = region.writable === true
+    expertExecutableOnly.value = region.executable === true
+    expertCopyOnWriteOnly.value = String(region.type ?? '').toLowerCase().includes('copy')
+    expertRegionSize.value = size
+    expertRegionProtection.value = String(region.protection ?? '')
+    expertRegionState.value = String(region.state ?? '')
+    expertRegionType.value = String(region.type ?? '')
+    addAddressToWatch(address, type)
+    activeView.value = 'expert'
+    addActionLog(
+      'navigation',
+      `Région ouverte en Expert 0x${address}`,
+      `${expertRegionProtection.value || '?'} · ${expertRegionState.value || '?'} · ${expertRegionType.value || '?'}.`,
+      'info',
+    )
+  }
+
+  async function scanAroundPreview(value?: string, type = exactScanType.value) {
+    const scanValue = (value ?? exactScanValue.value).trim()
+    if (!scanValue || !memoryPreviewAddress.value) return
+    expertModeEnabled.value = true
+    expertStartAddress.value = `0x${memoryPreviewAddress.value}`
+    if (selectedMemoryRegion.value && Number(selectedMemoryRegion.value.size ?? 0) > 0) {
+      const size = Number(selectedMemoryRegion.value.size)
+      expertStopAddress.value = `0x${(Number.parseInt(memoryPreviewAddress.value, 16) + size).toString(16)}`
+    }
+    exactScanValue.value = scanValue
+    exactScanType.value = type
+    activeView.value = 'expert'
+    addActionLog('scan', `Scan autour de 0x${memoryPreviewAddress.value}`, `${type} = ${scanValue}.`, 'info')
+    await doExactScan()
+  }
+
+  function regionForAddress(address: string): Record<string, unknown> | undefined {
+    const normalized = address.trim().replace(/^0x/i, '')
+    const numericAddress = Number.parseInt(normalized, 16)
+    if (!Number.isFinite(numericAddress)) return undefined
+    return memoryMap.value?.regions.find((region) => {
+      const base = Number.parseInt(String(region.baseAddress ?? '').replace(/^0x/i, ''), 16)
+      const size = Number(region.size ?? 0)
+      return Number.isFinite(base) && size > 0 && numericAddress >= base && numericAddress < base + size
+    }) as Record<string, unknown> | undefined
+  }
+
+  function updateWriteSafetyWarning() {
+    writeSafetyWarning.value = ''
+    const address = selectedCandidateAddress.value.trim()
+    if (!address) return
+    const region = regionForAddress(address)
+    if (!region) {
+      writeSafetyWarning.value = 'Région inconnue : actualise la carte mémoire avant écriture.'
+      return
+    }
+    if (region.writable !== true) {
+      writeSafetyWarning.value = `Attention : la région 0x${region.baseAddress} n'est pas marquée writable (${region.protection ?? '?'}).`
+      return
+    }
+    if (String(region.state ?? '').toLowerCase() !== 'committed') {
+      writeSafetyWarning.value = `Attention : état mémoire ${String(region.state ?? '?')}, écriture risquée.`
+    }
+  }
+
+  function inferredTypesForValue(value: string): Array<Record<string, unknown>> {
+    const normalized = value.trim().replace(',', '.')
+    const numberValue = Number(normalized)
+    if (!Number.isFinite(numberValue)) return []
+    const integer = Number.isInteger(numberValue)
+    const results: Array<Record<string, unknown>> = []
+    if (integer && numberValue >= -2147483648 && numberValue <= 2147483647) {
+      results.push({ type: 'Int32', confidence: 'élevée', reason: 'entier courant dans les jeux' })
+    }
+    if (integer) results.push({ type: 'Int64', confidence: 'moyenne', reason: 'entier large possible' })
+    results.push({ type: 'Float32', confidence: integer ? 'moyenne' : 'élevée', reason: 'valeur affichée parfois stockée en float' })
+    results.push({ type: 'Float64', confidence: 'faible', reason: 'moins fréquent, utile pour jeux/outils spécifiques' })
+    if (integer && Math.abs(numberValue * 100) <= 2147483647) {
+      results.push({ type: 'Int32 x100', confidence: 'moyenne', reason: `valeur affichée ${value}, stock possible ${numberValue * 100}` })
+    }
+    return results
+  }
+
+  const inferredExactTypes = computed(() => inferredTypesForValue(exactScanValue.value))
+  const canWriteSelectedValue = computed(() => {
+    if (!selectedCandidateAddress.value || !writeValue.value.trim()) return false
+    return !writeSafetyWarning.value || writeSafetyAcknowledged.value
+  })
+
+  watch([selectedCandidateAddress, writeValue, writeSafetyWarning], () => {
+    writeSafetyAcknowledged.value = false
+  })
+
+  function useInferredType(typeLabel: string) {
+    const type = typeLabel.replace(/\s+x100$/i, '')
+    if (typeLabel.endsWith('x100')) {
+      const numeric = Number(exactScanValue.value.trim().replace(',', '.'))
+      if (Number.isFinite(numeric)) exactScanValue.value = String(numeric * 100)
+    }
+    exactScanType.value = type
+    addActionLog('scan_type', `Type de scan choisi : ${typeLabel}`, `Valeur ${exactScanValue.value}.`, 'info')
+  }
+
+  function addAddressToWatch(address: string, type = exactScanType.value) {
+    const normalized = address.trim().replace(/^0x/i, '')
+    if (!normalized || watchedAddresses.value.some((item) => item.address === normalized)) return
+    watchedAddresses.value.push({
+      address: normalized,
+      type,
+      value: '',
+      previousValue: '',
+      changed: false,
+      error: '',
+      updatedAt: '',
+    })
+  }
+
+  function removeAddressFromWatch(address: string) {
+    const normalized = address.trim().replace(/^0x/i, '')
+    watchedAddresses.value = watchedAddresses.value.filter((item) => item.address !== normalized)
+  }
+
+  async function refreshWatchedAddresses() {
+    const next: WatchedAddress[] = []
+    for (const watched of watchedAddresses.value.slice(0, 20)) {
+      try {
+        const preview = await backend.getController().readMemoryPreview(watched.address, 8)
+        const decoded = decodePreviewValues(hexToBytes(preview.hex))
+        const value = decoded.find((item) => item.label === watched.type)?.value ?? decoded[2]?.value ?? ''
+        next.push({
+          ...watched,
+          previousValue: watched.value,
+          value,
+          changed: watched.value !== '' && value !== watched.value,
+          error: preview.success ? '' : preview.error,
+          updatedAt: nowTime(),
+        })
+      } catch (e) {
+        next.push({ ...watched, previousValue: watched.value, changed: false, error: String(e), updatedAt: nowTime() })
+      }
+    }
+    watchedAddresses.value = next
+  }
+
+  function setWatchLiveEnabled(enabled: boolean) {
+    watchLiveEnabled.value = enabled
+    if (watchLiveTimer) {
+      clearInterval(watchLiveTimer)
+      watchLiveTimer = null
+    }
+    if (enabled) {
+      void refreshWatchedAddresses()
+      watchLiveTimer = setInterval(() => {
+        void refreshWatchedAddresses()
+      }, 1000)
+    }
+    addActionLog('watch', enabled ? 'Watch live activé' : 'Watch live arrêté', `${watchedAddresses.value.length} adresse(s).`, enabled ? 'success' : 'info')
+  }
+
+  function keepCandidate(address: string) {
+    const normalized = address.trim().replace(/^0x/i, '')
+    keptCandidateAddresses.value = Array.from(new Set([...keptCandidateAddresses.value, normalized]))
+    ignoredCandidateAddresses.value = ignoredCandidateAddresses.value.filter((item) => item !== normalized)
+    candidateFilter.value = normalized
+    candidatePageIndex.value = 0
+    void refreshCandidates()
+    addActionLog('candidate', `Candidat gardé 0x${normalized}`, 'Filtre appliqué sur cette adresse.', 'success')
+  }
+
+  function ignoreCandidate(address: string) {
+    const normalized = address.trim().replace(/^0x/i, '')
+    ignoredCandidateAddresses.value = Array.from(new Set([...ignoredCandidateAddresses.value, normalized]))
+    keptCandidateAddresses.value = keptCandidateAddresses.value.filter((item) => item !== normalized)
+    addActionLog('candidate', `Candidat ignoré 0x${normalized}`, 'Masqué dans la comparaison visuelle locale.', 'warning')
+  }
+
+  function candidateVisualState(candidate: Record<string, unknown>): string {
+    const address = String(candidate.address ?? '').replace(/^0x/i, '')
+    if (keptCandidateAddresses.value.includes(address)) return 'gardé'
+    if (ignoredCandidateAddresses.value.includes(address)) return 'ignoré'
+    const confidence = Number(candidate.confidence ?? Number.NaN)
+    if (Number.isFinite(confidence)) {
+      if (confidence >= 0.8) return 'très probable'
+      if (confidence >= 0.5) return 'à vérifier'
+      return 'faible'
+    }
+    return 'standard'
   }
 
   async function writeSelectedAddresses(addresses: string[], type: string, value: string) {
@@ -853,28 +1408,45 @@ export const useAppStore = defineStore('app', () => {
       scanStatusText.value = results.every((r) => r.success)
         ? `${results.length} adresse(s) écrite(s).`
         : `Écriture partielle: ${results.filter((r) => r.success).length}/${results.length} réussie(s).`
+      addActionLog('write', `Écriture multiple ${value}`, `${results.filter((r) => r.success).length}/${results.length} réussie(s).`, results.every((r) => r.success) ? 'success' : 'warning')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
       scanStatusText.value = 'Écriture multiple échouée.'
+      addActionLog('write', 'Écriture multiple échouée', String(e), 'error')
     }
   }
 
   async function writeSelectedValue() {
     if (!selectedCandidateAddress.value || !writeValue.value.trim()) return
+    updateWriteSafetyWarning()
+    if (writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
+      addActionLog('write_guard', 'Écriture bloquée', writeSafetyWarning.value, 'warning')
+      return
+    }
     try {
       writeResult.value = await backend
         .getController()
         .writeMemoryValue(selectedCandidateAddress.value, exactScanType.value, writeValue.value)
+      addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
+      addActionLog(
+        'write',
+        `Écriture 0x${selectedCandidateAddress.value}`,
+        `${exactScanType.value} = ${writeValue.value}${writeSafetyWarning.value ? ` · ${writeSafetyWarning.value}` : ''}.`,
+        writeResult.value.success ? 'success' : 'error',
+      )
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
+      addActionLog('write', `Écriture échouée 0x${selectedCandidateAddress.value}`, String(e), 'error')
     }
   }
 
   async function rollbackLastWrite() {
     try {
       writeResult.value = await backend.getController().rollbackLastWrite()
+      addActionLog('rollback', 'Rollback dernière écriture', writeResult.value.success ? 'Adresse restaurée.' : writeResult.value.error, writeResult.value.success ? 'success' : 'warning')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
+      addActionLog('rollback', 'Rollback échoué', String(e), 'error')
     }
   }
 
@@ -893,6 +1465,7 @@ export const useAppStore = defineStore('app', () => {
       pushMessage('assistant', result.success
         ? `Rollback batch réussi : ${result.rolledBack}/${result.total} écritures restaurées.${restored ? `\n${restored}` : ''}`
         : `Rollback batch partiel : ${String(result.rolledBack ?? 0)}/${String(result.total ?? 0)} restaurées.${restored ? `\n${restored}` : ''}`)
+      addActionLog('rollback', 'Rollback batch', `${String(result.rolledBack ?? 0)}/${String(result.total ?? 0)} restaurée(s).`, result.success ? 'success' : 'warning')
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
       return result
@@ -905,15 +1478,23 @@ export const useAppStore = defineStore('app', () => {
   async function toggleFreeze() {
     if (!selectedCandidateAddress.value || !writeValue.value.trim()) return
     const nextState = !freezeEnabled.value
+    updateWriteSafetyWarning()
+    if (nextState && writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
+      addActionLog('write_guard', 'Freeze bloqué', writeSafetyWarning.value, 'warning')
+      return
+    }
     try {
       writeResult.value = await backend
         .getController()
         .setFreezeValue(selectedCandidateAddress.value, exactScanType.value, writeValue.value, nextState)
       if (writeResult.value.success) {
         freezeEnabled.value = nextState
+        addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
       }
+      addActionLog('freeze', nextState ? 'Freeze activé' : 'Freeze arrêté', `0x${selectedCandidateAddress.value} = ${writeValue.value}.`, writeResult.value.success ? 'success' : 'error')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: freezeEnabled.value }
+      addActionLog('freeze', 'Freeze échoué', String(e), 'error')
     }
   }
 
@@ -934,6 +1515,7 @@ export const useAppStore = defineStore('app', () => {
   return {
     version,
     activeView,
+    uiMode,
     isConnected,
     isAttached,
     processName,
@@ -943,12 +1525,18 @@ export const useAppStore = defineStore('app', () => {
     memoryPreview,
     memoryPreviewAddress,
     memoryPreviewLoading,
+    memoryPreviewAscii,
+    memoryPreviewDecoded,
+    selectedMemoryRegion,
     pingResult,
     logFilePath,
     logLines,
     logError,
     diagnosticExportPath,
     diagnosticExportError,
+    temporaryStorageStatus,
+    temporaryStorageCleanupResult,
+    temporaryStorageError,
     smartSearchDebugFilePath,
     smartSearchDebugEvents,
     smartSearchDebugError,
@@ -959,6 +1547,8 @@ export const useAppStore = defineStore('app', () => {
     settingDefaultValueType,
     settingScanMaxResults,
     settingScanChunkSizeMb,
+    settingCandidateFileBackedThreshold,
+    settingUnknownSnapshotMaxMb,
     settingFastScan,
     settingSmartSearchDebugEnabled,
     settingSmartSearchDebugMaxEvents,
@@ -978,6 +1568,10 @@ export const useAppStore = defineStore('app', () => {
     expertWritableOnly,
     expertExecutableOnly,
     expertCopyOnWriteOnly,
+    expertRegionSize,
+    expertRegionProtection,
+    expertRegionState,
+    expertRegionType,
     candidatePage,
     candidatePageIndex,
     candidatePageSize,
@@ -990,12 +1584,21 @@ export const useAppStore = defineStore('app', () => {
     unknownScanType,
     unknownSnapshotResult,
     unknownNextScanResult,
+    unknownGuideSteps,
     selectedCandidateAddress,
     writeValue,
     writeResult,
+    writeSafetyWarning,
+    writeSafetyAcknowledged,
+    canWriteSelectedValue,
     freezeEnabled,
     finalCandidateTargets,
+    ignoredCandidateAddresses,
+    keptCandidateAddresses,
+    watchLiveEnabled,
+    watchedAddresses,
     messages,
+    actionLog,
     workflowStatus,
     targetValueGuided,
     candidateHistory,
@@ -1017,6 +1620,8 @@ export const useAppStore = defineStore('app', () => {
     refreshDiagnostics,
     refreshLogTail,
     exportDiagnostics,
+    refreshTemporaryStorageStatus,
+    clearTemporaryStorage,
     refreshActiveChatMemoryTargets,
     refreshSmartSearchContext,
     clearActiveChatMemoryTargets,
@@ -1026,6 +1631,7 @@ export const useAppStore = defineStore('app', () => {
     startNewSearchContext,
     useSuggestedAddresses,
     searchValueElsewhere,
+    searchValueAsType,
     testSingleSuggestedAddress,
     doExactScan,
     cancelActiveScan,
@@ -1036,8 +1642,21 @@ export const useAppStore = defineStore('app', () => {
     undoCandidateScan,
     captureUnknownSnapshot,
     doUnknownNextScan,
+    runUnknownGuideStep,
     selectCandidate,
     openExpertAtAddress,
+    openExpertForRegion,
+    scanAroundPreview,
+    inferredExactTypes,
+    useInferredType,
+    updateWriteSafetyWarning,
+    addAddressToWatch,
+    removeAddressFromWatch,
+    refreshWatchedAddresses,
+    setWatchLiveEnabled,
+    keepCandidate,
+    ignoreCandidate,
+    candidateVisualState,
     writeSelectedValue,
     writeSelectedAddresses,
     rollbackLastWrite,

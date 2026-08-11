@@ -97,6 +97,7 @@ Copy-ItemIfExists -Path (Join-Path $repoRoot "LICENSE") -Destination $packageRoo
 Copy-ItemIfExists -Path (Join-Path $repoRoot "KILLENGINE_PROJECT_SPEC.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\PHASE_TRACKER.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\USER_GUIDE.md") -Destination $packageRoot
+Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\V1_REGRESSION_CHECKLIST.md") -Destination $packageRoot
 
 $modelsOut = Join-Path $packageRoot "models"
 New-Item -ItemType Directory -Force -Path $modelsOut | Out-Null

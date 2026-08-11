@@ -34,6 +34,7 @@ const newTargetDescription = ref('')
 const resolveResult = ref<Record<string, unknown> | null>(null)
 const statusMessage = ref('')
 const targetWriteValues = ref<Record<string, string>>({})
+const targetResolveStates = ref<Record<string, Record<string, unknown>>>({})
 
 const profileSaveTargets = computed(() => {
   if (store.finalCandidateTargets.length > 0) {
@@ -155,6 +156,59 @@ async function activateTarget(targetName: string) {
       statusMessage.value = `✓ "${targetName}" activé pour l'Assistant à l'adresse 0x${result.address}`
     } else {
       statusMessage.value = '✗ ' + (result.error ?? 'Activation impossible.')
+    }
+  } catch (e) {
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
+}
+
+async function verifyTarget(target: ProfileTargetEntry) {
+  if (!selectedProfile.value) return
+  try {
+    const result = await backend.getController().resolveProfileTarget(selectedProfile.value, target.name)
+    targetResolveStates.value = { ...targetResolveStates.value, [target.name]: result }
+    resolveResult.value = result
+    statusMessage.value = result.success
+      ? `✓ "${target.name}" résolu à 0x${result.address}.`
+      : `✗ "${target.name}" introuvable : ${result.error ?? 'résolution impossible.'}`
+  } catch (e) {
+    const result = { success: false, error: String(e) }
+    targetResolveStates.value = { ...targetResolveStates.value, [target.name]: result }
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
+}
+
+function targetResolutionLabel(target: ProfileTargetEntry): string {
+  const state = targetResolveStates.value[target.name]
+  if (!state) return 'à vérifier'
+  return state.success ? `résolu 0x${state.address}` : 'introuvable'
+}
+
+function targetResolutionClass(target: ProfileTargetEntry): string {
+  const state = targetResolveStates.value[target.name]
+  if (!state) return 'pending'
+  return state.success ? 'ok' : 'fail'
+}
+
+async function repairTargetWithCurrentAddress(target: ProfileTargetEntry) {
+  if (!selectedProfile.value || !store.selectedCandidateAddress) {
+    statusMessage.value = '⚠ Sélectionne une adresse dans Expert avant de réparer cette cible.'
+    return
+  }
+  try {
+    const result = await backend.getController().saveProfileTarget(
+      selectedProfile.value,
+      target.name,
+      store.selectedCandidateAddress,
+      target.type,
+      target.description || 'Réparé depuis l’adresse courante.',
+    )
+    if (result.success) {
+      statusMessage.value = `✓ "${target.name}" réparé avec 0x${store.selectedCandidateAddress}.`
+      await selectProfile(selectedProfile.value)
+      await verifyTarget(target)
+    } else {
+      statusMessage.value = '✗ ' + (result.error ?? 'Réparation impossible.')
     }
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
@@ -354,6 +408,17 @@ onMounted(() => {
               <span class="target-locator">{{ t.locator }}</span>
             </div>
             <div class="target-actions">
+              <span class="target-resolution" :class="targetResolutionClass(t)">
+                {{ targetResolutionLabel(t) }}
+              </span>
+              <button class="btn btn-secondary btn-sm" @click="verifyTarget(t)">Vérifier</button>
+              <button
+                class="btn btn-secondary btn-sm"
+                :disabled="!store.selectedCandidateAddress"
+                @click="repairTargetWithCurrentAddress(t)"
+              >
+                Réparer
+              </button>
               <button class="btn btn-secondary btn-sm" @click="activateTarget(t.name)">Utiliser</button>
               <input
                 v-model="targetWriteValues[t.name]"
@@ -602,8 +667,37 @@ onMounted(() => {
 
 .target-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+}
+
+.target-resolution {
+  max-width: 150px;
+  overflow: hidden;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-resolution.ok {
+  border-color: rgba(158, 206, 106, 0.35);
+  color: var(--success);
+}
+
+.target-resolution.fail {
+  border-color: rgba(247, 118, 142, 0.35);
+  color: var(--error);
+}
+
+.target-resolution.pending {
+  border-color: rgba(224, 175, 104, 0.35);
+  color: var(--warning);
 }
 
 .target-write-input {

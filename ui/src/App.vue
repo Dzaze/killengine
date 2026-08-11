@@ -88,6 +88,22 @@ watch(
       </nav>
 
       <div class="sidebar-footer">
+        <div class="mode-switch" role="group" aria-label="Mode interface">
+          <button
+            type="button"
+            :class="{ active: store.uiMode === 'beginner' }"
+            @click="store.uiMode = 'beginner'"
+          >
+            Débutant
+          </button>
+          <button
+            type="button"
+            :class="{ active: store.uiMode === 'expert' }"
+            @click="store.uiMode = 'expert'"
+          >
+            Expert
+          </button>
+        </div>
         <div class="credits">Pirolley Benoist</div>
         <div class="version">v{{ store.version }}</div>
         <div class="status" :class="{ connected: store.isConnected }">
@@ -208,6 +224,33 @@ body {
 .sidebar-footer {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
+}
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.mode-switch button {
+  min-width: 0;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.mode-switch button.active {
+  background: var(--bg-accent);
+  color: var(--accent);
 }
 
 .version {

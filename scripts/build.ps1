@@ -29,6 +29,7 @@ Write-Host "Building KillEngine..." -ForegroundColor Cyan
 $batchContent = @"
 @echo off
 call "$vcvars" >nul 2>&1
+set "VSLANG=1033"
 set "PATH=$ninjaPath;%PATH%"
 cmake --build build --config Release
 "@

@@ -48,6 +48,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Les scans exacts, `next_scan` et `unknown` du Mode Expert peuvent partir dans un worker thread et rendre le contrôle au frontend immédiatement.
 - Le Mode Expert expose une annulation de scan actif ; une annulation ne remplace pas l'état candidat avec des résultats partiels.
 - La capture `unknown` transfère le snapshot memory-mapped au thread UI seulement si elle aboutit sans annulation.
+- Le Mode Expert propose un flux `Unknown` guidé : boutons `ça augmente`, `ça diminue`, `stable`, `ça change`, avec historique visible des comparaisons et raffinages.
 - Un guide utilisateur V1 existe dans `docs/USER_GUIDE.md`.
 - Une Phase 13 de suivi d'améliorations est ouverte dans `docs/PHASE_TRACKER.md` pour traiter précision, faux positifs, Assistant, profils, UX et robustesse.
 - Crédit UI : `Pirolley Benoist` en bas à gauche.
@@ -58,6 +59,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Le moteur IA tente maintenant d'utiliser un runtime local `llama-cli` + GGUF Qwen si disponibles, puis retombe sur le planner déterministe si le modèle ou l'exécutable manque.
 - Le scan multi-type automatique complet n'est pas encore implémenté : le planner choisit surtout `Int32` par défaut sauf indication contraire.
 - Le CandidateStore bascule automatiquement sur fichier temporaire compact au-delà d'un seuil, sait paginer sans hydrater toute la liste, et le `next_scan` async peut lire/écrire les candidats en streaming.
+- La page Paramètres expose l'état du stockage temporaire de scan et un nettoyage manuel qui ferme candidats/undo/snapshot puis supprime les fichiers `killengine_candidates_*.kecand` et `killengine_snapshot_*.kesnap` restants.
 - Une réduction de candidats peut être restaurée depuis le Mode Expert via `Restaurer réduction`, y compris quand la génération précédente était stockée en fichier temporaire.
 - Les résultats de scan exposent des métriques de performance V1 : temps écoulé, débits, stockage fichier et RAM estimée.
 - L'auto-write Assistant passe par une confirmation temporaire vérifiée puis restauration avant l'écriture finale, afin de réduire les faux positifs d'adresses non fiables.
@@ -76,6 +78,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Le bandeau Assistant affiche un statut global explicite : profil actif, adresses actives, recherche active ou aucun contexte actif.
 - Le rollback batch restaure maintenant toutes les écritures du dernier auto-write (jusqu'à 4 adresses) ; le rollback simple restaure la dernière uniquement.
 - Les snapshots unknown sont maintenant compressés LZ4 par région et stockés dans un fichier temporaire memory-mapped ; la comparaison décompresse les régions à la volée.
+- Le flux unknown expert peut être piloté sans changer manuellement de mode : après capture, l'utilisateur clique sur l'événement observé et KillEngine choisit comparaison initiale ou raffinage de candidats existants.
 - La Phase 11 Profils est implémentée au niveau prototype : sauvegarde/chargement/résolution de cibles multiples par locator module_offset ou adresse absolue.
 - Le Mode Expert est implémenté au niveau V1 polish initial avec filtres d'adresse, alignement et protections mémoire.
 - Les Paramètres sont implémentés au niveau V1 polish initial ; le Model Manager complet reste à brancher sur le chemin modèle sauvegardé.

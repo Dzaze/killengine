@@ -47,6 +47,17 @@ dist\KillEngine-portable.zip
 
 Un template Inno Setup est disponible dans `packaging/windows/KillEngine.iss`.
 
+## Validation release
+
+```powershell
+.\scripts\release-check.ps1
+.\scripts\release-check.ps1 -Package
+```
+
+La checklist manuelle V1 est disponible ici :
+
+- [`docs/V1_REGRESSION_CHECKLIST.md`](docs/V1_REGRESSION_CHECKLIST.md)
+
 ## Guide utilisateur
 
 Le guide V1 est disponible ici :
@@ -112,7 +123,8 @@ Prototype avancé :
 - Profils opérationnels : plusieurs cibles, résolution d'adresses, réutilisation par l'Assistant.
 - Gros volumes : candidats stockés en fichier temporaire compact, next scan streaming, métriques perf et restauration de réduction.
 - IA locale optionnelle : tool-calls JSON, contrat d'intention structuré, fallback déterministe.
-- Tests unitaires : 30/30 au dernier état connu.
+- Tests unitaires : 38/38 au dernier état connu.
+- Tests d'intégration : 4/4 au dernier état connu.
 - Guide utilisateur V1 disponible dans `docs/USER_GUIDE.md`.
 
 Voir `KILLENGINE_PROJECT_SPEC.md` pour le cahier des charges complet.

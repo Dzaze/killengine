@@ -1,0 +1,44 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows MSVC Release",
+      "description": "Ninja + MSVC x64 + Qt 6.8.1, matching the project scripts.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_PREFIX_PATH": "C:/Qt/6.8.1/msvc2022_64",
+        "CMAKE_MAKE_PROGRAM": "C:/Python313/Scripts/ninja.exe",
+        "KILLENGINE_BUILD_TESTS": "ON"
+      },
+      "environment": {
+        "VSLANG": "1033"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Build Windows MSVC Release",
+      "configurePreset": "windows-msvc-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Test Windows MSVC Release",
+      "configurePreset": "windows-msvc-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

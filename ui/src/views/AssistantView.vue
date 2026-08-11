@@ -45,6 +45,16 @@ const isAwaitingChange = computed(() => store.workflowStatus === 'awaiting_value
 const needsMoreRefinement = computed(() => store.workflowStatus === 'needs_more_refinement')
 const isWorkflowActive = computed(() => store.workflowStatus !== 'idle')
 const hasActiveAddresses = computed(() => store.activeChatMemoryTargets.length > 0)
+const searchPlaceholder = computed(() => {
+  if (isAwaitingChange.value || needsMoreRefinement.value) return 'Donne la nouvelle valeur observée dans le jeu...'
+  if (hasActiveAddresses.value) return 'Ex: mets les à 3000, freeze à 500, ou lance une nouvelle recherche...'
+  return 'Ex: j’ai une valeur à 905 je la veux à 10000'
+})
+const searchStatusText = computed(() => {
+  if (store.isSearching) return thinkingText.value
+  if (isWorkflowActive.value) return workflowLabel(store.workflowStatus)
+  return store.isAttached ? 'Prêt à chercher' : 'Attache un processus avant de scanner'
+})
 const contextItems = computed(() => {
   const context = store.smartSearchContext
   if (!context) return []
@@ -139,7 +149,28 @@ async function testSingleAddress(suggestion: Record<string, unknown>) {
   await scrollToBottom()
 }
 
-async function runRecoveryAction(actionId: string) {
+function watchSuggestion(suggestion: Record<string, unknown>) {
+  store.addAddressToWatch(String(suggestion.address ?? ''), String(suggestion.type ?? store.exactScanType))
+  store.setWatchLiveEnabled(true)
+}
+
+function keepSuggestion(suggestion: Record<string, unknown>) {
+  store.keepCandidate(String(suggestion.address ?? ''))
+}
+
+function ignoreSuggestion(suggestion: Record<string, unknown>) {
+  store.ignoreCandidate(String(suggestion.address ?? ''))
+}
+
+async function searchSuggestionAsType(suggestion: Record<string, unknown>, type: string) {
+  await store.searchValueAsType(String(suggestion.value ?? ''), type)
+  await scrollToBottom()
+}
+
+async function runRecoveryAction(action: Record<string, unknown> | string) {
+  const actionId = typeof action === 'string' ? action : String(action.id ?? '')
+  const actionValue = typeof action === 'string' ? '' : String(action.value ?? store.targetValueGuided ?? '')
+  const actionTarget = typeof action === 'string' ? '' : String(action.target ?? store.targetValueGuided ?? '')
   if (actionId === 'rollback_batch') {
     await store.rollbackLastWriteBatch()
   } else if (actionId === 'clear_targets') {
@@ -148,6 +179,34 @@ async function runRecoveryAction(actionId: string) {
     await store.startNewSearchContext()
   } else if (actionId === 'continue_candidates') {
     store.pushMessage('assistant', 'Garde le jeu ouvert, fais varier la valeur et donne-moi la nouvelle valeur observée pour continuer la réduction.')
+  } else if (actionId === 'undo_reduction') {
+    await store.undoCandidateScan()
+    store.pushMessage('assistant', 'J’ai restauré les candidats précédents. Tu peux maintenant essayer changed, increased, ou une autre représentation.')
+  } else if (actionId === 'try_changed') {
+    await store.undoCandidateScan()
+    store.nextScanMode = 'changed'
+    store.nextScanValue = ''
+    await store.doNextScan()
+  } else if (actionId === 'try_increased') {
+    await store.undoCandidateScan()
+    store.nextScanMode = 'increased'
+    store.nextScanValue = ''
+    await store.doNextScan()
+  } else if (actionId === 'retry_float32') {
+    await store.searchValueAsType(actionValue, 'Float32', actionTarget)
+  } else if (actionId === 'retry_int64') {
+    await store.searchValueAsType(actionValue, 'Int64', actionTarget)
+  } else if (actionId === 'retry_int32_x100') {
+    const numeric = Number(actionValue.trim().replace(',', '.'))
+    const numericTarget = Number(actionTarget.trim().replace(',', '.'))
+    const nextValue = Number.isFinite(numeric) ? String(numeric * 100) : actionValue
+    const nextTarget = Number.isFinite(numericTarget) ? String(numericTarget * 100) : actionTarget
+    await store.searchValueAsType(nextValue, 'Int32', nextTarget)
+  } else if (actionId === 'try_unknown_increased') {
+    await store.startNewSearchContext()
+    store.activeView = 'expert'
+    store.unknownScanMode = 'increased'
+    store.pushMessage('assistant', 'Passe en Unknown initial value : capture une première image, fais augmenter la valeur dans le jeu, puis lance increased.')
   }
   await scrollToBottom()
 }
@@ -162,6 +221,10 @@ function workflowLabel(status: string | undefined): string {
       return 'Encore trop de candidats — raffine davantage'
     case 'auto_write_done':
       return 'Adresses actives pour modification'
+    case 'freeze_done':
+      return 'Freeze actif'
+    case 'requires_manual_write':
+      return 'Écriture prête à confirmer'
     case 'auto_write_partial_or_failed':
       return 'Écriture partielle — vérifie manuellement'
     case 'auto_write_problem':
@@ -176,10 +239,12 @@ function workflowLabel(status: string | undefined): string {
 function workflowClass(status: string | undefined): string {
   switch (status) {
     case 'auto_write_done':
+    case 'freeze_done':
       return 'wf-success'
     case 'awaiting_value_change':
     case 'awaiting_new_value':
     case 'needs_more_refinement':
+    case 'requires_manual_write':
       return 'wf-warning'
     case 'auto_write_partial_or_failed':
     case 'auto_write_problem':
@@ -263,6 +328,14 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           Nouvelle recherche
         </button>
       </div>
+    </div>
+
+    <div class="assistant-status-strip" :class="{ 'is-working': store.isSearching }">
+      <div class="top-search-status">
+        <span class="status-dot"></span>
+        <span>{{ searchStatusText }}</span>
+      </div>
+      <div v-if="store.isSearching" class="top-search-progress"></div>
     </div>
 
     <div v-if="store.activeChatMemoryTargets.length > 0" class="active-targets">
@@ -406,11 +479,26 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
                 <button class="btn btn-secondary btn-small" @click="testSingleAddress(suggestion)">
                   Tester cette adresse
                 </button>
+                <button class="btn btn-secondary btn-small" @click="watchSuggestion(suggestion)">
+                  Watch
+                </button>
+                <button class="btn btn-secondary btn-small" @click="keepSuggestion(suggestion)">
+                  Garder
+                </button>
+                <button class="btn btn-secondary btn-small" @click="ignoreSuggestion(suggestion)">
+                  Ignorer
+                </button>
               </div>
             </div>
             <div class="message-actions">
               <button class="btn btn-secondary btn-small" @click="searchTargetElsewhere(msg)">
                 Chercher cette valeur ailleurs
+              </button>
+              <button class="btn btn-secondary btn-small" @click="searchSuggestionAsType(suggestionRowsFor(msg)[0], 'Int32')">
+                Chercher en Int32
+              </button>
+              <button class="btn btn-secondary btn-small" @click="searchSuggestionAsType(suggestionRowsFor(msg)[0], 'Float32')">
+                Chercher en Float32
               </button>
             </div>
           </div>
@@ -422,7 +510,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
                 v-for="action in msg.recoveryActions"
                 :key="String(action.id)"
                 class="btn btn-secondary btn-small"
-                @click="runRecoveryAction(String(action.id))"
+                @click="runRecoveryAction(action)"
               >
                 {{ action.label }}
               </button>
@@ -459,18 +547,14 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
       <input
         v-model="chatInput"
         :placeholder="
-          isAwaitingChange || needsMoreRefinement
-            ? 'Donne la nouvelle valeur observée dans le jeu...'
-            : hasActiveAddresses
-              ? 'Ex: mets les à 3000, ou lance une nouvelle recherche...'
-            : $t('search.placeholder')
+          searchPlaceholder
         "
         class="chat-input"
         :disabled="store.isSearching"
         @keyup.enter="sendMessage()"
       />
       <button class="btn btn-primary" :disabled="!chatInput.trim() || store.isSearching" @click="sendMessage()">
-        <span v-if="store.isSearching">…</span>
+        <span v-if="store.isSearching" class="btn-spinner" aria-hidden="true"></span>
         <span v-else>{{ $t('search.button') }}</span>
       </button>
     </div>
@@ -526,6 +610,67 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.assistant-status-strip {
+  position: relative;
+  margin-bottom: 12px;
+  padding: 7px 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(36, 40, 59, 0.58);
+}
+
+.top-search-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 16px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--text-dim);
+}
+
+.assistant-status-strip.is-working {
+  border-color: rgba(122, 162, 247, 0.55);
+}
+
+.assistant-status-strip.is-working .status-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(122, 162, 247, 0.12);
+}
+
+.top-search-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(122, 162, 247, 0.15);
+}
+
+.top-search-progress::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -35%;
+  width: 35%;
+  background: var(--accent);
+  animation: search-progress 1.15s ease-in-out infinite;
+}
+
+@keyframes search-progress {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(390%); }
 }
 
 .wf-success { background: rgba(158, 206, 106, 0.15); color: var(--success); }
@@ -990,6 +1135,21 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 @keyframes bounce {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Transition for thinking text */

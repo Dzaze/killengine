@@ -140,6 +140,8 @@ Utilise ce mode quand tu ne connais pas la valeur initiale.
 4. Clique sur `Comparer`.
 5. Répète jusqu'à obtenir peu de candidats.
 
+Le Mode Expert propose aussi des boutons guidés : `ça augmente`, `ça diminue`, `stable`, `ça change`. Après une capture, clique simplement sur ce que tu observes ; KillEngine lance la comparaison initiale, puis raffine les candidats existants aux étapes suivantes. L'historique affiche chaque étape et le nombre de candidats avant/après.
+
 ### Annulation
 
 Les scans exacts, next scan et unknown tournent en worker thread. Pendant un scan actif, le bouton `Annuler` demande l'arrêt propre de l'opération. Une annulation ne remplace pas la liste de candidats par des résultats partiels.
@@ -158,6 +160,8 @@ La liste des candidats permet :
 ## Paramètres
 
 La page `Paramètres` permet de régler :
+
+- le stockage temporaire : taille active, fichiers orphelins et bouton `Nettoyer maintenant` ;
 
 - la langue ;
 - le type de scan par défaut ;

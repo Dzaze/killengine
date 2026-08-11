@@ -19,6 +19,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
@@ -39,6 +40,8 @@ namespace {
 constexpr size_t kAutoWriteCandidateLimit = 4;
 constexpr int kDefaultScanMaxResults = 1000000;
 constexpr int kDefaultScanChunkSizeMb = 1;
+constexpr int kDefaultCandidateFileThreshold = 250000;
+constexpr int kDefaultUnknownSnapshotMaxMb = 512;
 constexpr size_t kCandidateDisplayLimit = 250000;
 constexpr int kCandidateHistoryMaxAddresses = 10000;
 constexpr int kCandidateHistoryMaxEntriesPerAddress = 12;
@@ -71,6 +74,7 @@ enum class SmartSearchIntentKind {
     RefineScan,
     ActivateMemoryTargets,
     WriteMemoryTargets,
+    FreezeMemoryTargets,
     RewriteLastTargets,
     WriteProfileTargets,
     ClearActiveTargets,
@@ -101,6 +105,8 @@ QString smartSearchIntentKindToString(SmartSearchIntentKind kind) {
             return "ActivateMemoryTargets";
         case SmartSearchIntentKind::WriteMemoryTargets:
             return "WriteMemoryTargets";
+        case SmartSearchIntentKind::FreezeMemoryTargets:
+            return "FreezeMemoryTargets";
         case SmartSearchIntentKind::RewriteLastTargets:
             return "RewriteLastTargets";
         case SmartSearchIntentKind::WriteProfileTargets:
@@ -201,6 +207,27 @@ killcore::ScanOptions scanOptionsFromSettings() {
     return options;
 }
 
+size_t candidateFileBackedThresholdFromSettings() {
+    QSettings settings;
+    return static_cast<size_t>(boundedSettingInt(
+        settings,
+        "scan/candidateFileBackedThreshold",
+        kDefaultCandidateFileThreshold,
+        1,
+        5000000));
+}
+
+size_t unknownSnapshotMaxBytesFromSettings() {
+    QSettings settings;
+    const int mb = boundedSettingInt(
+        settings,
+        "scan/unknownSnapshotMaxMb",
+        kDefaultUnknownSnapshotMaxMb,
+        128,
+        32768);
+    return static_cast<size_t>(mb) * 1024 * 1024;
+}
+
 double bytesToDouble(const QByteArray& bytes, killcore::ValueType type) {
     if (bytes.size() < static_cast<qsizetype>(killcore::valueTypeSize(type))) {
         return 0.0;
@@ -238,6 +265,88 @@ bool bytesEqual(const QByteArray& a, const QByteArray& b, killcore::ValueType ty
     return a == b;
 }
 
+QString variantKey(killcore::ValueType type, const QString& label) {
+    return killcore::valueTypeToString(type) + "|" + label;
+}
+
+QHash<QString, QByteArray> variantBytesByKey(const QList<killcore::ValueVariant>& variants) {
+    QHash<QString, QByteArray> bytes;
+    for (const auto& variant : variants) {
+        bytes.insert(variantKey(variant.value.type, variant.label), killcore::scanValueToBytes(variant.value));
+    }
+    return bytes;
+}
+
+QList<killcore::ValueVariant> smartAutoScanVariants(const QString& rawValue) {
+    QList<killcore::ValueVariant> variants;
+    const QList<killcore::ValueType> fastTypes = {
+        killcore::ValueType::Int32,
+        killcore::ValueType::Int64,
+        killcore::ValueType::Float32,
+    };
+
+    for (const auto type : fastTypes) {
+        killcore::ScanValue value;
+        if (!killcore::parseScanValue(rawValue, type, &value)) {
+            continue;
+        }
+        killcore::ValueVariant variant;
+        variant.value = value;
+        variant.label = killcore::valueTypeToString(type);
+        variant.secondary = false;
+        variants.append(variant);
+    }
+    return variants;
+}
+
+QByteArray targetBytesForCandidate(
+    const QString& rawValue,
+    const killcore::Candidate& candidate,
+    QString* error = nullptr) {
+    if (!candidate.variantLabel.trimmed().isEmpty()) {
+        const auto variants = killcore::generateScanVariants(rawValue, candidate.type, true);
+        const auto bytes = variantBytesByKey(variants);
+        const QString key = variantKey(candidate.type, candidate.variantLabel);
+        if (bytes.contains(key)) {
+            return bytes.value(key);
+        }
+    }
+
+    killcore::ScanValue parsed;
+    QString parseError;
+    if (!killcore::parseScanValue(rawValue, candidate.type, &parsed, &parseError)) {
+        if (error) *error = parseError;
+        return {};
+    }
+    return killcore::scanValueToBytes(parsed);
+}
+
+QList<killcore::Candidate> candidatesFromUnknownScan(
+    const killcore::ProcessHandle& process,
+    const killcore::UnknownScanResult& scan) {
+    QList<killcore::Candidate> candidates;
+    candidates.reserve(scan.matches.size());
+    killcore::MemoryReader reader(process);
+
+    for (const auto& match : scan.matches) {
+        const size_t valueSize = killcore::valueTypeSize(match.type);
+        const auto read = reader.read(match.address, valueSize);
+        if (!(read.success || read.partial) || read.bytesRead != valueSize) {
+            continue;
+        }
+
+        killcore::Candidate candidate;
+        candidate.address = match.address;
+        candidate.type = match.type;
+        candidate.lastValue = read.data;
+        candidate.confidence = match.confidence;
+        candidate.variantLabel = match.variantLabel.isEmpty() ? QString("Unknown current") : match.variantLabel;
+        candidates.append(candidate);
+    }
+
+    return candidates;
+}
+
 QStringList hexAddressesFromText(const QString& text) {
     QStringList addresses;
     const QRegularExpression re(R"(\b0x[0-9a-fA-F]{5,16}\b)");
@@ -253,18 +362,72 @@ QString textWithoutHexAddresses(QString text) {
     return text.replace(re, " ");
 }
 
+QString textWithoutTypeTokens(QString text) {
+    static const QRegularExpression typeRe(
+        R"(\b(?:u?int(?:8|16|32|64)?|float(?:32|64)?|double|long)\b)",
+        QRegularExpression::CaseInsensitiveOption);
+    return text.replace(typeRe, " ");
+}
+
 QStringList numbersFromText(const QString& text) {
     QStringList values;
     const QRegularExpression re(R"([-+]?\d+(?:[\.,]\d+)?)");
-    auto it = re.globalMatch(textWithoutHexAddresses(text));
+    auto it = re.globalMatch(textWithoutTypeTokens(textWithoutHexAddresses(text)));
     while (it.hasNext()) {
         values.append(it.next().captured(0).replace(',', '.'));
     }
     return values;
 }
 
+QString explicitValueTypeFromText(const QString& text) {
+    const QString q = text.toLower();
+    if (q.contains("float64") || q.contains("double")) return "Float64";
+    if (q.contains("float32") || q.contains("float")) return "Float32";
+    if (q.contains("int64") || q.contains("long")) return "Int64";
+    if (q.contains("int32") || q.contains("int")) return "Int32";
+    return {};
+}
+
 QString bytesToHex(const QByteArray& bytes) {
     return QString::fromLatin1(bytes.toHex(' '));
+}
+
+QStringList killengineTemporaryFileNames() {
+    QDir dir(QDir::tempPath());
+    return dir.entryList(
+        QStringList{
+            "killengine_candidates_*.kecand",
+            "killengine_snapshot_*.kesnap",
+        },
+        QDir::Files);
+}
+
+QVariantMap scanKillengineTemporaryFiles() {
+    QDir dir(QDir::tempPath());
+    QVariantList files;
+    qulonglong bytes = 0;
+
+    for (const auto& name : killengineTemporaryFileNames()) {
+        const QFileInfo info(dir.absoluteFilePath(name));
+        if (!info.exists() || !info.isFile()) {
+            continue;
+        }
+
+        QVariantMap file;
+        file["name"] = info.fileName();
+        file["path"] = info.absoluteFilePath();
+        file["bytes"] = static_cast<qulonglong>(std::max<qint64>(0, info.size()));
+        file["lastModified"] = info.lastModified().toString(Qt::ISODate);
+        files.append(file);
+        bytes += file.value("bytes").toULongLong();
+    }
+
+    QVariantMap result;
+    result["count"] = files.size();
+    result["bytes"] = bytes;
+    result["files"] = files;
+    result["tempPath"] = dir.absolutePath();
+    return result;
 }
 
 QVariantMap candidateObservationToVariantMap(
@@ -305,6 +468,8 @@ QString noCandidateDiagnosticMessage(const QVariantMap& actionResult, const QStr
     }
 
     QStringList sampleTexts;
+    int unchangedSamples = 0;
+    int readableSamples = 0;
     for (int i = 0; i < std::min<int>(static_cast<int>(samples.size()), 3); ++i) {
         const auto sample = samples.at(i).toMap();
         const QString address = sample.value("address").toString();
@@ -312,6 +477,10 @@ QString noCandidateDiagnosticMessage(const QVariantMap& actionResult, const QStr
             continue;
         }
         if (sample.value("readable", true).toBool()) {
+            ++readableSamples;
+            if (sample.value("previousNumber").toString() == sample.value("currentNumber").toString()) {
+                ++unchangedSamples;
+            }
             sampleTexts.append(QString("0x%1 : %2 -> %3")
                                    .arg(address)
                                    .arg(sample.value("previousNumber").toString())
@@ -323,8 +492,11 @@ QString noCandidateDiagnosticMessage(const QVariantMap& actionResult, const QStr
     if (!sampleTexts.isEmpty()) {
         parts.append(QString("Exemples : %1.").arg(sampleTexts.join(", ")));
     }
+    if (readableSamples > 0 && unchangedSamples == readableSamples) {
+        parts.append("Les exemples n'ont pas bougé : la première recherche a probablement capturé des copies, une valeur miroir, ou une représentation qui ne suit pas la valeur affichée.");
+    }
 
-    parts.append("Tu peux restaurer la réduction précédente dans le Mode Expert si cette étape a éliminé la bonne adresse.");
+    parts.append("Restaure la réduction précédente, puis essaie une réduction changed/increased ou une nouvelle recherche en Float32 / valeur x100.");
     return parts.join(' ');
 }
 
@@ -437,7 +609,30 @@ bool looksLikeBadTargetReport(const QString& query) {
         || q.contains("ca change pas")
         || q.contains("ça change pas")
         || q.contains("rien change")
-        || q.contains("rien ne change");
+        || q.contains("rien ne change")
+        || q.contains("crash")
+        || q.contains("crashé")
+        || q.contains("crashe")
+        || q.contains("planté")
+        || q.contains("plante")
+        || q.contains("jeu s'est fermé")
+        || q.contains("jeu s est ferme");
+}
+
+bool looksLikeFreezeRequest(const QString& query) {
+    const QString q = query.toLower();
+    return q.contains("freeze")
+        || q.contains("freezer")
+        || q.contains("fige")
+        || q.contains("figer")
+        || q.contains("bloque")
+        || q.contains("bloquer")
+        || q.contains("verrouille")
+        || q.contains("verrouiller")
+        || q.contains("garde a")
+        || q.contains("garde à")
+        || q.contains("maintien")
+        || q.contains("maintenir");
 }
 
 SmartSearchIntent classifySmartSearchIntent(
@@ -458,6 +653,7 @@ SmartSearchIntent classifySmartSearchIntent(
     const bool wantsLastRewrite = looksLikeLastAutoWriteRewrite(query);
     const bool wantsClearTargets = looksLikeClearActiveTargetsRequest(query);
     const bool reportsBadTargets = looksLikeBadTargetReport(query);
+    const bool wantsFreeze = looksLikeFreezeRequest(query);
 
     if (wantsClearTargets) {
         intent.kind = SmartSearchIntentKind::ClearActiveTargets;
@@ -465,14 +661,22 @@ SmartSearchIntent classifySmartSearchIntent(
     } else if (reportsBadTargets && (hasLastAutoWriteTargets || hasChatMemoryTargets)) {
         intent.kind = SmartSearchIntentKind::ReportBadTargets;
         intent.rationale = "L'utilisateur indique que les dernières adresses écrites ne donnent pas le résultat attendu.";
+    } else if (smartSearchActive && hasCandidates && hasOneNumber) {
+        intent.kind = SmartSearchIntentKind::RefineScan;
+        intent.rationale = "Un scan guidé est actif et l'utilisateur donne une nouvelle valeur observée.";
     } else if (intent.resetContext && numbers.isEmpty()) {
         intent.kind = SmartSearchIntentKind::ResetContext;
         intent.rationale = "L'utilisateur demande un nouveau contexte sans donner encore de valeur.";
     } else if (!addresses.isEmpty()) {
-        intent.kind = hasOneNumber && wantsMemoryWrite
-            ? SmartSearchIntentKind::WriteMemoryTargets
-            : SmartSearchIntentKind::ActivateMemoryTargets;
+        intent.kind = hasOneNumber && wantsFreeze
+            ? SmartSearchIntentKind::FreezeMemoryTargets
+            : (hasOneNumber && wantsMemoryWrite
+                ? SmartSearchIntentKind::WriteMemoryTargets
+                : SmartSearchIntentKind::ActivateMemoryTargets);
         intent.rationale = "Le message contient une ou plusieurs adresses mémoire explicites.";
+    } else if (hasChatMemoryTargets && hasOneNumber && !intent.resetContext && wantsFreeze) {
+        intent.kind = SmartSearchIntentKind::FreezeMemoryTargets;
+        intent.rationale = "Des adresses mémoire sont actives et l'utilisateur demande de freezer la valeur.";
     } else if (hasLastAutoWriteTargets && hasOneNumber && !intent.resetContext && wantsLastRewrite) {
         intent.kind = SmartSearchIntentKind::RewriteLastTargets;
         intent.rationale = "L'utilisateur demande de modifier les dernières adresses écrites.";
@@ -482,9 +686,6 @@ SmartSearchIntent classifySmartSearchIntent(
     } else if (hasOneNumber && !intent.resetContext && wantsMemoryWrite) {
         intent.kind = SmartSearchIntentKind::WriteProfileTargets;
         intent.rationale = "L'utilisateur formule une intention d'écriture sur une cible nommée.";
-    } else if (smartSearchActive && hasCandidates && hasOneNumber && !intent.resetContext) {
-        intent.kind = SmartSearchIntentKind::RefineScan;
-        intent.rationale = "Un scan guidé est actif et l'utilisateur donne une nouvelle valeur observée.";
     } else if (numbers.size() >= 2) {
         intent.kind = SmartSearchIntentKind::GuidedScan;
         intent.rationale = "Le message contient une valeur actuelle et une valeur cible.";
@@ -563,6 +764,9 @@ QVariantList writeHistoryToVariantList(const QStringList& values) {
 
 ApplicationController::ApplicationController(QObject* parent)
     : QObject(parent) {
+    const size_t candidateThreshold = candidateFileBackedThresholdFromSettings();
+    m_candidates.setFileBackedThreshold(candidateThreshold);
+    m_previousCandidates.setFileBackedThreshold(candidateThreshold);
     m_freezeTimer.setInterval(100);
     connect(&m_freezeTimer, &QTimer::timeout, this, &ApplicationController::applyFreezeTick);
     m_ai.init();
@@ -966,7 +1170,9 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
 
     killcore::ValueType explicitType = killcore::ValueType::Int32;
     const QString normalizedType = valueType.trimmed();
+    const bool smartAuto = normalizedType.compare("SmartAuto", Qt::CaseInsensitive) == 0;
     const bool explicitTypeGiven = !normalizedType.isEmpty()
+        && !smartAuto
         && normalizedType.compare("Auto", Qt::CaseInsensitive) != 0;
     if (explicitTypeGiven && !killcore::parseValueType(normalizedType, &explicitType)) {
         result["error"] = "Type de valeur invalide.";
@@ -974,7 +1180,9 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
         return result;
     }
 
-    const auto valueVariants = killcore::generateScanVariants(value, explicitType, explicitTypeGiven);
+    const auto valueVariants = smartAuto
+        ? smartAutoScanVariants(value)
+        : killcore::generateScanVariants(value, explicitType, explicitTypeGiven);
     if (valueVariants.isEmpty()) {
         result["error"] = QString("Impossible de parser '%1' comme valeur numérique.").arg(value);
         result["matches"] = matches;
@@ -996,7 +1204,25 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
     emit scanProgress(90);
     clearCandidateUndo();
     clearCandidateValueHistory();
-    m_candidates.replaceFromScan(scan, {});
+    const auto variantBytes = variantBytesByKey(valueVariants);
+    QList<killcore::Candidate> candidates;
+    candidates.reserve(scan.matches.size());
+    for (const auto& match : scan.matches) {
+        killcore::Candidate candidate;
+        candidate.address = match.address;
+        candidate.type = match.type;
+        candidate.lastValue = variantBytes.value(variantKey(match.type, match.variantLabel));
+        if (candidate.lastValue.isEmpty()) {
+            killcore::ScanValue fallbackValue;
+            if (killcore::parseScanValue(value, match.type, &fallbackValue)) {
+                candidate.lastValue = killcore::scanValueToBytes(fallbackValue);
+            }
+        }
+        candidate.confidence = match.confidence;
+        candidate.variantLabel = match.variantLabel;
+        candidates.append(candidate);
+    }
+    m_candidates.replaceCandidates(candidates);
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
     for (qsizetype i = 0; i < previewCount; ++i) {
@@ -1023,6 +1249,7 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
     appendSmartSearchDebug("exact_scan_multi_type", {
         {"value", value},
         {"valueType", valueType},
+        {"smartAuto", smartAuto},
         {"explicitTypeGiven", explicitTypeGiven},
         {"variantCount", variants.size()},
         {"success", result.value("success")},
@@ -1400,19 +1627,20 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
     }
 
     const auto candidateSnapshot = m_candidates.streamSnapshot();
-    const auto candidateType = firstCandidate.type;
+    const auto firstCandidateType = firstCandidate.type;
     const auto candidateThreshold = m_candidates.fileBackedThreshold();
-    killcore::ScanValue targetValue;
-    QByteArray targetBytes;
     double targetNumber = 0.0;
-    if (scanMode == killcore::NextScanMode::Exact || scanMode == killcore::NextScanMode::Delta) {
-        QString parseError;
-        if (!killcore::parseScanValue(value, candidateType, &targetValue, &parseError)) {
-            result["error"] = parseError;
+    if (scanMode == killcore::NextScanMode::Exact && value.trimmed().isEmpty()) {
+        result["error"] = "Valeur requise pour un next scan exact.";
+        return result;
+    }
+    if (scanMode == killcore::NextScanMode::Delta) {
+        bool ok = false;
+        targetNumber = value.trimmed().replace(',', '.').toDouble(&ok);
+        if (!ok) {
+            result["error"] = "Valeur delta invalide.";
             return result;
         }
-        targetBytes = killcore::scanValueToBytes(targetValue);
-        targetNumber = bytesToDouble(targetBytes, candidateType);
     }
 
     const int requestId = m_nextScanRequestId++;
@@ -1425,7 +1653,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, mode, value, scanMode, candidateType, candidateSnapshot, candidateThreshold, targetBytes, targetNumber, cancellation]() mutable {
+    std::thread([self, requestId, pid, mode, value, scanMode, firstCandidateType, candidateSnapshot, candidateThreshold, targetNumber, cancellation]() mutable {
         QElapsedTimer timer;
         timer.start();
         QVariantMap finished;
@@ -1499,9 +1727,18 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
 
                 bool keep = false;
                 switch (scanMode) {
-                    case killcore::NextScanMode::Exact:
-                        keep = bytesEqual(current, targetBytes, candidate.type);
+                    case killcore::NextScanMode::Exact: {
+                        QString targetError;
+                        const QByteArray candidateTargetBytes = targetBytesForCandidate(value, candidate, &targetError);
+                        if (candidateTargetBytes.isEmpty()) {
+                            error = targetError.isEmpty()
+                                ? "Impossible de construire la valeur cible pour un candidat."
+                                : targetError;
+                            return false;
+                        }
+                        keep = bytesEqual(current, candidateTargetBytes, candidate.type);
                         break;
+                    }
                     case killcore::NextScanMode::Changed:
                         keep = !bytesEqual(current, candidate.lastValue, candidate.type);
                         break;
@@ -1557,7 +1794,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         }
         const qint64 elapsedMs = timer.elapsed();
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, candidateType, candidateSnapshot, survivors = std::move(survivors), checked, unreadable, cancelled, error, debugSamples, valueHistoryUpdates, streamInput, streamOutput, elapsedMs]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, firstCandidateType, candidateSnapshot, survivors = std::move(survivors), checked, unreadable, cancelled, error, debugSamples, valueHistoryUpdates, streamInput, streamOutput, elapsedMs]() mutable {
             if (!self) {
                 return;
             }
@@ -1603,7 +1840,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 {"requestId", requestId},
                 {"mode", mode},
                 {"value", value},
-                {"candidateType", killcore::valueTypeToString(candidateType)},
+                {"candidateType", killcore::valueTypeToString(firstCandidateType)},
                 {"beforeCount", static_cast<qulonglong>(candidateSnapshot.totalCount)},
                 {"checked", finished.value("checked")},
                 {"unreadable", finished.value("unreadable")},
@@ -1657,19 +1894,20 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         return result;
     }
 
-    killcore::ScanValue targetValue;
-    QByteArray targetBytes;
     double targetNumber = 0.0;
-    const auto candidateType = m_candidates.candidates().first().type;
+    const auto firstCandidateType = m_candidates.candidates().first().type;
 
-    if (scanMode == killcore::NextScanMode::Exact || scanMode == killcore::NextScanMode::Delta) {
-        QString parseError;
-        if (!killcore::parseScanValue(value, candidateType, &targetValue, &parseError)) {
-            result["error"] = parseError;
+    if (scanMode == killcore::NextScanMode::Exact && value.trimmed().isEmpty()) {
+        result["error"] = "Valeur requise pour un next scan exact.";
+        return result;
+    }
+    if (scanMode == killcore::NextScanMode::Delta) {
+        bool ok = false;
+        targetNumber = value.trimmed().replace(',', '.').toDouble(&ok);
+        if (!ok) {
+            result["error"] = "Valeur delta invalide.";
             return result;
         }
-        targetBytes = killcore::scanValueToBytes(targetValue);
-        targetNumber = bytesToDouble(targetBytes, candidateType);
     }
 
     emit scanStarted();
@@ -1710,9 +1948,19 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
 
         bool keep = false;
         switch (scanMode) {
-            case killcore::NextScanMode::Exact:
-                keep = bytesEqual(current, targetBytes, candidate.type);
+            case killcore::NextScanMode::Exact: {
+                QString targetError;
+                const QByteArray candidateTargetBytes = targetBytesForCandidate(value, candidate, &targetError);
+                if (candidateTargetBytes.isEmpty()) {
+                    result["error"] = targetError.isEmpty()
+                        ? "Impossible de construire la valeur cible pour un candidat."
+                        : targetError;
+                    emit scanProgress(100);
+                    return result;
+                }
+                keep = bytesEqual(current, candidateTargetBytes, candidate.type);
                 break;
+            }
             case killcore::NextScanMode::Changed:
                 keep = !bytesEqual(current, candidate.lastValue, candidate.type);
                 break;
@@ -1777,7 +2025,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
     appendSmartSearchDebug("next_scan", {
         {"mode", mode},
         {"value", value},
-        {"candidateType", killcore::valueTypeToString(candidateType)},
+        {"candidateType", killcore::valueTypeToString(firstCandidateType)},
         {"beforeCount", static_cast<qulonglong>(beforeCount)},
         {"checked", result.value("checked")},
         {"unreadable", result.value("unreadable")},
@@ -1885,9 +2133,16 @@ QVariantMap ApplicationController::captureUnknownSnapshot() {
         return result;
     }
 
+    m_candidates.clear();
+    clearCandidateUndo();
+    clearCandidateValueHistory();
+    m_smartSearchActive = false;
+    m_smartSearchInitialValue.clear();
+    m_smartSearchTargetValue.clear();
+
     emit scanStarted();
     emit scanProgress(0);
-    const auto snapshot = m_snapshot.capture(m_handle);
+    const auto snapshot = m_snapshot.capture(m_handle, unknownSnapshotMaxBytesFromSettings());
     emit scanProgress(100);
     result["success"] = snapshot.success;
     result["partial"] = snapshot.partial;
@@ -1915,8 +2170,16 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
         return result;
     }
 
+    m_candidates.clear();
+    clearCandidateUndo();
+    clearCandidateValueHistory();
+    m_smartSearchActive = false;
+    m_smartSearchInitialValue.clear();
+    m_smartSearchTargetValue.clear();
+
     const int requestId = m_nextScanRequestId++;
     const int pid = m_pid;
+    const size_t maxSnapshotBytes = unknownSnapshotMaxBytesFromSettings();
     const QPointer<ApplicationController> self(this);
     auto cancellation = std::make_shared<killcore::CancellationToken>();
 
@@ -1925,7 +2188,7 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, cancellation]() mutable {
+    std::thread([self, requestId, pid, maxSnapshotBytes, cancellation]() mutable {
         killcore::SnapshotStore snapshotStore;
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         killcore::SnapshotResult snapshot;
@@ -1933,7 +2196,7 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
             snapshot.success = false;
             snapshot.errorMessage = "Impossible d'ouvrir le processus dans le worker unknown.";
         } else {
-            snapshot = snapshotStore.capture(workerHandle, 512 * 1024 * 1024, cancellation.get());
+            snapshot = snapshotStore.capture(workerHandle, maxSnapshotBytes, cancellation.get());
         }
 
         if (!self) {
@@ -2028,7 +2291,7 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         emit scanProgress(100);
         return result;
     }
-    m_candidates.replaceFromScan(scanResult, {});
+    m_candidates.replaceCandidates(candidatesFromUnknownScan(m_handle, scan));
 
     result["success"] = scan.success;
     result["partial"] = scan.partial;
@@ -2087,12 +2350,16 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
 
     std::thread([self, requestId, pid, mode, valueType, type, scanMode, cancellation]() {
         killcore::UnknownScanResult scan;
+        QList<killcore::Candidate> unknownCandidates;
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         if (!workerHandle.isValid()) {
             scan.success = false;
             scan.errorMessage = "Impossible d'ouvrir le processus dans le worker unknown.";
         } else if (self) {
             scan = self->m_snapshot.compare(workerHandle, type, scanMode, cancellation.get());
+            if (scan.success && !scan.cancelled) {
+                unknownCandidates = candidatesFromUnknownScan(workerHandle, scan);
+            }
         } else {
             return;
         }
@@ -2101,7 +2368,7 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             return;
         }
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, valueType, type, scan]() {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, valueType, type, scan, unknownCandidates = std::move(unknownCandidates)]() mutable {
             if (!self) {
                 return;
             }
@@ -2109,13 +2376,6 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             bool finishSuccess = scan.success;
             QString finishError = scan.errorMessage;
             if (!scan.cancelled) {
-                killcore::ScanResult scanResult;
-                scanResult.success = scan.success;
-                scanResult.partial = scan.partial;
-                scanResult.bytesScanned = scan.checkedBytes;
-                scanResult.matchesFound = scan.matchesFound;
-                scanResult.errorMessage = scan.errorMessage;
-                scanResult.matches = scan.matches;
                 QString undoError;
                 if (!self->m_candidates.isEmpty() && !self->rememberCandidatesForUndo(&undoError)) {
                     finishSuccess = false;
@@ -2123,7 +2383,7 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
                         ? "Impossible de préparer l'annulation de la comparaison."
                         : undoError;
                 } else {
-                    self->m_candidates.replaceFromScan(scanResult, {});
+                    self->m_candidates.replaceCandidates(unknownCandidates);
                 }
             }
 
@@ -2669,6 +2929,66 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
     return result;
 }
 
+QVariantMap ApplicationController::freezeChatMemoryTargetsFromQuery(const QString& query, const QString& value) {
+    QVariantMap result;
+    QVariantList suggestions;
+    QVariantList freezeResults;
+
+    result["query"] = query;
+    result["aiReady"] = m_ai.isReady();
+    result["status"] = "tool_call";
+    result["tool"] = "chat_memory_freeze";
+    result["actionStatus"] = "executed";
+    result["workflowStatus"] = "freeze_done";
+    result["targetValue"] = value;
+
+    bool allFreezeOk = true;
+    int frozenCount = 0;
+
+    for (const auto& target : m_chatMemoryTargets) {
+        QVariantMap suggestion;
+        suggestion["source"] = "chat_address";
+        suggestion["address"] = QString::number(target.address, 16);
+        suggestion["type"] = killcore::valueTypeToString(target.type);
+        suggestion["value"] = value;
+        suggestions.append(suggestion);
+
+        auto freezeResult = setFreezeValue(
+            suggestion.value("address").toString(),
+            suggestion.value("type").toString(),
+            value,
+            true);
+        freezeResult.insert("source", suggestion.value("source"));
+        freezeResult.insert("address", suggestion.value("address"));
+        freezeResult.insert("value", value);
+        freezeResult.insert("type", suggestion.value("type"));
+        freezeResults.append(freezeResult);
+
+        allFreezeOk = allFreezeOk && freezeResult.value("success").toBool();
+        if (freezeResult.value("success").toBool()) {
+            ++frozenCount;
+        }
+    }
+
+    result["success"] = allFreezeOk && frozenCount > 0;
+    result["suggestedWrites"] = suggestions;
+    result["freezeResults"] = freezeResults;
+    result["activeTargetCount"] = m_chatMemoryTargets.size();
+    result["message"] = frozenCount > 0
+        ? QString("Freeze activé sur %1/%2 adresse(s) active(s) à %3. Je garde ces adresses actives pour pouvoir modifier ensuite.")
+              .arg(frozenCount)
+              .arg(m_chatMemoryTargets.size())
+              .arg(value)
+        : QString("Je n'ai pas pu activer le freeze sur les adresses actives.");
+    if (!allFreezeOk) {
+        result["workflowStatus"] = "freeze_partial_or_failed";
+        result["error"] = "Au moins un freeze a échoué.";
+    }
+
+    appendSmartSearchDebug("chat_memory_freeze", result);
+    return result;
+}
+
 QVariantMap ApplicationController::getActiveChatMemoryTargets() const {
     QVariantMap result;
     QVariantList targets;
@@ -2697,6 +3017,126 @@ QVariantMap ApplicationController::clearActiveChatMemoryTargets() {
     result["cleared"] = cleared;
     result["targets"] = QVariantList{};
     appendSmartSearchDebug("chat_memory_targets_cleared", result);
+    return result;
+}
+
+QVariantMap ApplicationController::clearScanContext() {
+    QVariantMap result;
+    const auto candidateCount = static_cast<qulonglong>(m_candidates.size());
+    const bool hadUndo = m_hasPreviousCandidates;
+    const bool hadSnapshot = !m_snapshot.isEmpty();
+    const bool wasSmartSearchActive = m_smartSearchActive;
+
+    m_candidates.clear();
+    clearCandidateUndo();
+    clearCandidateValueHistory();
+    m_snapshot.clear();
+    m_smartSearchActive = false;
+    m_smartSearchInitialValue.clear();
+    m_smartSearchTargetValue.clear();
+    m_smartSearchValueType = "Int32";
+    m_lastBatchStartIndex = -1;
+    m_lastBatchEndIndex = -1;
+
+    result["success"] = true;
+    result["clearedCandidates"] = candidateCount;
+    result["hadUndoReduction"] = hadUndo;
+    result["hadUnknownSnapshot"] = hadSnapshot;
+    result["wasSmartSearchActive"] = wasSmartSearchActive;
+    result["message"] = QString("Contexte de scan vidé : %1 candidat(s) supprimé(s).").arg(candidateCount);
+    appendSmartSearchDebug("scan_context_cleared", result);
+    return result;
+}
+
+QVariantMap ApplicationController::getTemporaryStorageStatus() const {
+    const auto orphan = scanKillengineTemporaryFiles();
+    const qulonglong candidateBytes = static_cast<qulonglong>(m_candidates.storageBytes());
+    const qulonglong undoBytes = m_hasPreviousCandidates
+        ? static_cast<qulonglong>(m_previousCandidates.storageBytes())
+        : 0;
+    const qulonglong snapshotBytes = static_cast<qulonglong>(m_snapshot.compressedBytesCaptured());
+    const bool hasCandidateFile = m_candidates.isFileBacked();
+    const bool hasUndoFile = m_hasPreviousCandidates && m_previousCandidates.isFileBacked();
+    const bool hasSnapshotFile = m_snapshot.usesMappedStorage();
+    const qulonglong activeBytes = candidateBytes + undoBytes + snapshotBytes;
+
+    QVariantMap result;
+    result["success"] = true;
+    result["tempPath"] = orphan.value("tempPath");
+    result["activeBytes"] = activeBytes;
+    result["activeFileCount"] = static_cast<int>(hasCandidateFile) + static_cast<int>(hasUndoFile) + static_cast<int>(hasSnapshotFile);
+    result["candidateBytes"] = candidateBytes;
+    result["candidateFileBacked"] = hasCandidateFile;
+    result["undoBytes"] = undoBytes;
+    result["undoFileBacked"] = hasUndoFile;
+    result["snapshotBytes"] = snapshotBytes;
+    result["snapshotFileBacked"] = hasSnapshotFile;
+    result["orphanBytes"] = orphan.value("bytes").toULongLong();
+    result["orphanFileCount"] = orphan.value("count").toInt();
+    result["orphanFiles"] = orphan.value("files").toList();
+    result["totalBytes"] = activeBytes + result.value("orphanBytes").toULongLong();
+    return result;
+}
+
+QVariantMap ApplicationController::clearTemporaryStorage() {
+    QVariantMap result;
+    if (m_activeScanCancellation) {
+        result["success"] = false;
+        result["error"] = "Un scan est actif : annule ou attends la fin avant de nettoyer le temporaire.";
+        return result;
+    }
+
+    const auto before = getTemporaryStorageStatus();
+    const qulonglong clearedCandidates = static_cast<qulonglong>(m_candidates.size());
+    const bool hadUndo = m_hasPreviousCandidates;
+    const bool hadSnapshot = !m_snapshot.isEmpty();
+
+    m_candidates.clear();
+    clearCandidateUndo();
+    clearCandidateValueHistory();
+    m_snapshot.clear();
+    m_smartSearchActive = false;
+    m_smartSearchInitialValue.clear();
+    m_smartSearchTargetValue.clear();
+
+    QDir dir(QDir::tempPath());
+    QVariantList removedFiles;
+    QVariantList failedFiles;
+    qulonglong removedBytes = 0;
+    for (const auto& name : killengineTemporaryFileNames()) {
+        const QString path = dir.absoluteFilePath(name);
+        const QFileInfo info(path);
+        const qulonglong bytes = static_cast<qulonglong>(std::max<qint64>(0, info.size()));
+        if (QFile::remove(path)) {
+            QVariantMap file;
+            file["path"] = path;
+            file["bytes"] = bytes;
+            removedFiles.append(file);
+            removedBytes += bytes;
+        } else if (info.exists()) {
+            failedFiles.append(path);
+        }
+    }
+
+    result["success"] = failedFiles.isEmpty();
+    result["tempPath"] = dir.absolutePath();
+    result["beforeBytes"] = before.value("totalBytes").toULongLong();
+    result["closedActiveBytes"] = before.value("activeBytes").toULongLong();
+    result["removedBytes"] = removedBytes;
+    result["removedFileCount"] = removedFiles.size();
+    result["removedFiles"] = removedFiles;
+    result["failedFiles"] = failedFiles;
+    result["clearedCandidates"] = clearedCandidates;
+    result["hadUndoReduction"] = hadUndo;
+    result["hadUnknownSnapshot"] = hadSnapshot;
+    result["message"] = failedFiles.isEmpty()
+        ? QString("Stockage temporaire nettoyé : %1 fichier(s), %2 octet(s) supprimé(s).")
+              .arg(removedFiles.size())
+              .arg(removedBytes)
+        : QString("Nettoyage partiel : %1 fichier(s) supprimé(s), %2 fichier(s) verrouillé(s).")
+              .arg(removedFiles.size())
+              .arg(failedFiles.size());
+    appendSmartSearchDebug("temporary_storage_cleared", result);
     return result;
 }
 
@@ -2908,6 +3348,8 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     KE_LOG_INFO() << "startSmartSearch(\"" << query.toStdString() << "\")";
     const QStringList numbers = numbersFromText(query);
     const QStringList chatAddresses = hexAddressesFromText(query);
+    const QString explicitValueType = explicitValueTypeFromText(query);
+    const QString defaultValueType = explicitValueType.isEmpty() ? QString("Int32") : explicitValueType;
     const SmartSearchIntent intent = classifySmartSearchIntent(
         query,
         numbers,
@@ -2927,6 +3369,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         {"initialValue", m_smartSearchInitialValue},
         {"targetValue", m_smartSearchTargetValue},
         {"valueType", m_smartSearchValueType},
+        {"explicitValueType", explicitValueType},
     });
 
     auto stampIntent = [&](QVariantMap* payload) {
@@ -2935,7 +3378,11 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         (*payload)["intentRationale"] = intent.rationale;
     };
 
-    if (intent.resetContext) {
+    const bool shouldClearSearchContext = intent.resetContext
+        && (intent.kind == SmartSearchIntentKind::ResetContext
+            || intent.kind == SmartSearchIntentKind::ExactScan
+            || intent.kind == SmartSearchIntentKind::GuidedScan);
+    if (shouldClearSearchContext) {
         const bool hadCandidates = !m_candidates.isEmpty();
         const int chatCount = m_chatMemoryTargets.size();
         const int profileCount = m_activeProfileTargets.size();
@@ -3026,7 +3473,8 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     }
 
     if (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
-        || (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && !chatAddresses.isEmpty())) {
+        || (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && !chatAddresses.isEmpty())
+        || (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && !chatAddresses.isEmpty())) {
         auto activation = activateChatMemoryTargetsFromQuery(query);
         if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets
             && activation.value("success").toBool()
@@ -3034,6 +3482,13 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
             stampIntent(&writeTargets);
             return writeTargets;
+        }
+        if (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets
+            && activation.value("success").toBool()
+            && numbers.size() == 1) {
+            auto freezeTargets = freezeChatMemoryTargetsFromQuery(query, numbers.first());
+            stampIntent(&freezeTargets);
+            return freezeTargets;
         }
         stampIntent(&activation);
         return activation;
@@ -3043,6 +3498,12 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
         stampIntent(&writeTargets);
         return writeTargets;
+    }
+
+    if (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
+        auto freezeTargets = freezeChatMemoryTargetsFromQuery(query, numbers.first());
+        stampIntent(&freezeTargets);
+        return freezeTargets;
     }
 
     if (intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
@@ -3068,9 +3529,9 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     } else if (intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
         QVariantMap args;
         args["value"] = numbers.first();
-        args["valueType"] = "Int32";
+        args["valueType"] = explicitValueType.isEmpty() ? QString("SmartAuto") : defaultValueType;
         result["status"] = "tool_call";
-        result["tool"] = "exact_scan";
+        result["tool"] = explicitValueType.isEmpty() ? QString("exact_scan_multi_type") : QString("exact_scan");
         result["args"] = args;
         result["rationale"] = intent.rationale;
         result["state"] = "FirstScanRunning";
@@ -3088,9 +3549,9 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     } else if (intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
         QVariantMap args;
         args["value"] = numbers.at(0);
-        args["valueType"] = "Int32";
+        args["valueType"] = explicitValueType.isEmpty() ? QString("SmartAuto") : defaultValueType;
         result["status"] = "tool_call";
-        result["tool"] = "exact_scan";
+        result["tool"] = explicitValueType.isEmpty() ? QString("exact_scan_multi_type") : QString("exact_scan");
         result["args"] = args;
         result["rationale"] = intent.rationale;
         result["state"] = "FirstScanRunning";
@@ -3121,6 +3582,8 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
 
     if (tool == "exact_scan") {
         actionResult = startExactScan(args.value("value").toString(), args.value("valueType").toString());
+    } else if (tool == "exact_scan_multi_type") {
+        actionResult = startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
     } else if (tool == "next_scan") {
         actionResult = nextScan(args.value("mode").toString(), args.value("value").toString());
     } else if (tool == "unknown_capture") {
@@ -3143,24 +3606,36 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     result["actionStatus"] = actionResult.value("success").toBool() ? "executed" : "failed";
     result["actionResult"] = actionResult;
 
-    if (tool == "exact_scan" && actionResult.value("success").toBool()) {
+    if (!actionResult.value("success").toBool()) {
+        const QString actionError = actionResult.value("error").toString().trimmed();
+        result["workflowStatus"] = "action_failed";
+        result["error"] = actionError;
+        result["message"] = actionError.isEmpty()
+            ? QString("L'action %1 a échoué sans détail. Vérifie le processus attaché et le type de valeur.")
+                  .arg(tool)
+            : QString("Je voulais agir, mais l'action a échoué : %1").arg(actionError);
+    } else if (tool == "exact_scan" || tool == "exact_scan_multi_type") {
         m_smartSearchInitialValue = args.value("value").toString();
         m_smartSearchValueType = args.value("valueType", "Int32").toString();
         if (numbers.size() >= 2) {
             m_smartSearchTargetValue = numbers.at(1);
-            m_smartSearchActive = true;
         }
 
         const auto count = actionResult.value("candidateStoreSize").toULongLong();
+        m_smartSearchActive = count > 0;
         result["workflowStatus"] = "awaiting_value_change";
         result["targetValue"] = m_smartSearchTargetValue;
         const QString prefix = intent.resetContext
             ? QString("Je repars sur une nouvelle recherche. ")
             : QString();
-        result["message"] = prefix + QString("J'ai trouvé %1 candidats pour %2. Fais bouger la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire la liste.")
+        const QString typeNote = tool == "exact_scan_multi_type"
+            ? QString(" en Auto rapide")
+            : QString();
+        result["message"] = prefix + QString("J'ai trouvé %1 candidats pour %2%3. Fais bouger la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire la liste.")
                                 .arg(count)
-                                .arg(m_smartSearchInitialValue);
-    } else if ((tool == "next_scan" || tool == "unknown_compare") && actionResult.value("success").toBool()) {
+                                .arg(m_smartSearchInitialValue)
+                                .arg(typeNote);
+    } else if (tool == "next_scan" || tool == "unknown_compare") {
         const auto remaining = tool == "next_scan"
                                    ? actionResult.value("remaining").toULongLong()
                                    : actionResult.value("stored").toULongLong();
@@ -3247,9 +3722,22 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         } else {
             result["workflowStatus"] = "no_candidate";
             const QString diagnostic = actionResult.value("diagnostic").toString();
+            const QString observedValue = args.value("value").toString().trimmed();
+            const QString retryValue = observedValue.isEmpty() ? m_smartSearchInitialValue : observedValue;
+            QVariantList recoveryActions;
+            recoveryActions.append(QVariantMap{{"id", "undo_reduction"}, {"label", "Restaurer les candidats"}});
+            recoveryActions.append(QVariantMap{{"id", "try_changed"}, {"label", "Essayer changed"}});
+            recoveryActions.append(QVariantMap{{"id", "try_increased"}, {"label", "Essayer increased"}});
+            recoveryActions.append(QVariantMap{{"id", "retry_float32"}, {"label", "Rechercher en Float32"}, {"value", retryValue}, {"target", m_smartSearchTargetValue}});
+            recoveryActions.append(QVariantMap{{"id", "retry_int64"}, {"label", "Rechercher en Int64"}, {"value", retryValue}, {"target", m_smartSearchTargetValue}});
+            recoveryActions.append(QVariantMap{{"id", "retry_int32_x100"}, {"label", "Rechercher valeur x100"}, {"value", retryValue}, {"target", m_smartSearchTargetValue}});
+            recoveryActions.append(QVariantMap{{"id", "try_unknown_increased"}, {"label", "Unknown + increased"}});
+            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
             result["diagnostic"] = diagnostic;
+            result["observedValue"] = retryValue;
+            result["recoveryActions"] = recoveryActions;
             result["message"] = diagnostic.isEmpty()
-                ? QString("Aucun candidat restant. Il faut repartir sur un nouveau scan exact.")
+                ? QString("Aucun candidat restant. Restaure les candidats précédents, puis essaie changed/increased ou une autre représentation.")
                 : QString("Aucun candidat restant. %1").arg(diagnostic);
         }
     }
@@ -3283,6 +3771,10 @@ QVariantMap ApplicationController::getSettings() const {
         settings, "scan/maxResults", kDefaultScanMaxResults, 1000, 10000000);
     result["scanChunkSizeMb"] = boundedSettingInt(
         settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 1, 64);
+    result["candidateFileBackedThreshold"] = boundedSettingInt(
+        settings, "scan/candidateFileBackedThreshold", kDefaultCandidateFileThreshold, 1, 5000000);
+    result["unknownSnapshotMaxMb"] = boundedSettingInt(
+        settings, "scan/unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb, 128, 32768);
     result["fastScan"] = settings.value("scan/fastScan", true).toBool();
     result["smartSearchDebugEnabled"] = settings.value("diagnostics/smartSearchDebugEnabled", true).toBool();
     result["smartSearchDebugMaxEvents"] = boundedSettingInt(
@@ -3309,6 +3801,12 @@ QVariantMap ApplicationController::saveSettings(const QVariantMap& incoming) {
     settings.setValue(
         "scan/chunkSizeMb",
         std::clamp(incoming.value("scanChunkSizeMb", kDefaultScanChunkSizeMb).toInt(), 1, 64));
+    settings.setValue(
+        "scan/candidateFileBackedThreshold",
+        std::clamp(incoming.value("candidateFileBackedThreshold", kDefaultCandidateFileThreshold).toInt(), 1, 5000000));
+    settings.setValue(
+        "scan/unknownSnapshotMaxMb",
+        std::clamp(incoming.value("unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb).toInt(), 128, 32768));
     settings.setValue("scan/fastScan", incoming.value("fastScan", true).toBool());
     settings.setValue(
         "diagnostics/smartSearchDebugEnabled",
@@ -3321,6 +3819,9 @@ QVariantMap ApplicationController::saveSettings(const QVariantMap& incoming) {
         "ai/modelThreads",
         std::clamp(incoming.value("modelThreads", 4).toInt(), 1, 32));
     settings.sync();
+    const size_t candidateThreshold = candidateFileBackedThresholdFromSettings();
+    m_candidates.setFileBackedThreshold(candidateThreshold);
+    m_previousCandidates.setFileBackedThreshold(candidateThreshold);
 
     QVariantMap result = getSettings();
     result["success"] = true;

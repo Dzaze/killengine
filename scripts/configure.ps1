@@ -40,19 +40,39 @@ if (-not $ninjaPath) {
     pip install ninja 2>$null
     $ninjaPath = (python -c "import ninja; print(ninja.BIN_DIR)")
 }
+$ninjaExe = Join-Path $ninjaPath "ninja.exe"
+
+$depsRoot = Join-Path (Resolve-Path ".") "build\_deps"
+if (Test-Path $depsRoot) {
+    $repoRoot = (Resolve-Path ".").Path
+    $resolvedDepsRoot = (Resolve-Path $depsRoot).Path
+    if (-not $resolvedDepsRoot.StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean Ninja state outside workspace: $resolvedDepsRoot"
+    }
+
+    Get-ChildItem -LiteralPath $resolvedDepsRoot -Recurse -Force -File -Include ".ninja_deps", ".ninja_log" -ErrorAction SilentlyContinue |
+        Remove-Item -Force
+}
 
 # Configure with CMake using vcvars environment
 $batchContent = @"
 @echo off
 call "$vcvars" >nul 2>&1
+set "VSLANG=1033"
 set "PATH=$ninjaPath;%PATH%"
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$QT_PATH" -DKILLENGINE_BUILD_TESTS=ON
+cmake -B build -G Ninja -DCMAKE_MAKE_PROGRAM="$ninjaExe" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$QT_PATH" -DKILLENGINE_BUILD_TESTS=ON
 "@
 
 $tempBat = Join-Path $env:TEMP "killengine_configure.bat"
 Set-Content -Path $tempBat -Value $batchContent -Encoding ASCII
 & cmd /c $tempBat
+$configureExitCode = $LASTEXITCODE
 Remove-Item $tempBat -ErrorAction SilentlyContinue
+
+if ($configureExitCode -ne 0) {
+    Write-Host "`nConfiguration FAILED!" -ForegroundColor Red
+    exit $configureExitCode
+}
 
 Write-Host "`nConfiguration complete!" -ForegroundColor Green
 Write-Host "Run .\scripts\build.ps1 to build." -ForegroundColor Cyan

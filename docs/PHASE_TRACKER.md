@@ -6,7 +6,7 @@ Current status:
 - Phase 11 prototype is complete and revalidated through the Assistant/profile workflow.
 - Phase 12 / V1 polishing checklist is complete.
 - Phase 13 has been opened as the improvement baseline for precision, efficiency, conversation quality, profiles, UX, and robustness.
-- Next focus: handle Phase 13 items one by one, then run a manual V1 regression pass before release candidate.
+- Next focus: run the manual V1 regression pass before release candidate.
 
 Prerequisites before Phase 12:
 - [x] finish or explicitly descope Phase 7 LZ4 compression
@@ -122,6 +122,7 @@ Prerequisites before Phase 12:
   - [x] Scalabilité gros jeux / gros volumes de candidats
     - [x] CandidateStore file-backed pour éviter de garder des millions de candidats uniquement en RAM
     - [x] format compact adresses/valeurs précédentes en fichier temporaire (`*.kecand`)
+    - [x] état et nettoyage manuel du stockage temporaire depuis Paramètres (`*.kecand`, `*.kesnap`)
     - [x] pagination virtuelle : ne charger/afficher que les candidats visibles ou la page demandée
     - [x] seuil d'affichage : montrer seulement le nombre total quand le résultat dépasse la limite UI
     - [x] next scan streaming : lire les candidats précédents par blocs, écrire les survivants dans un nouveau fichier
@@ -155,10 +156,26 @@ Prerequisites before Phase 12:
     - [x] aperçu mémoire visible avec état de lecture, adresse courante et erreurs lisibles
     - [x] bascule directe d'une région mémoire vers le Mode Expert avec adresse préremplie
     - [x] progression plus fine par régions/chunks pendant les scans longs
+  - [ ] Passe expert gameplay
+    - [x] inspecteur mémoire enrichi : ASCII, décodages rapides, copie et scan autour
+    - [x] Mode Expert prérempli depuis une région mémoire avec plage et filtres
+    - [x] journal utilisateur des scans, écritures, freeze, rollback et navigation utile
+    - [x] détection de type automatique visible et exploitable côté UI
+    - [x] comparaison visuelle enrichie des candidats restants
+    - [x] watch live des adresses candidates et sélectionnées
+    - [x] Unknown guidé en Mode Expert : boutons augmenté/diminué/stable/changé avec historique compare/raffinage
+    - [x] profils plus intelligents avec état de résolution/réparation visible
+    - [x] sécurité anti-mauvaise écriture avant modification mémoire
+    - [x] Assistant enrichi pour garder/ignorer/tester/chercher en type précis
+    - [x] mode débutant / mode expert pour adapter la densité de l'interface
   - [ ] Robustesse et validations
     - [x] tests d'intégration automatisés avec `KillEngineTestTarget.exe`
     - [x] scénario exact complet : scan exact -> next scan -> écriture -> vérification -> rollback
     - [x] scénario unknown complet : capture -> changement -> comparaison -> écriture
     - [x] scénario profils complet : sauvegarde -> résolution -> activation -> écriture
     - [x] test logger `LevelFiltering` stabilisé après réinitialisation répétée
+    - [x] validation passe expert gameplay : UI build, build global, unitaires 38/38, intégration 4/4
+    - [x] gate release automatisé `scripts/release-check.ps1` : UI type-check, UI build, configure, build, unitaires, intégration
+    - [x] package portable validé via `scripts/release-check.ps1 -Package`
+    - [x] checklist manuelle V1 documentée dans `docs/V1_REGRESSION_CHECKLIST.md`
     - [ ] passe de régression manuelle V1 sur Solitaire et KillEngineTestTarget

@@ -173,6 +173,15 @@ public:
     /// Oublie les adresses mémoire actives dans l'Assistant.
     Q_INVOKABLE QVariantMap clearActiveChatMemoryTargets();
 
+    /// Vide le contexte de scan (candidats, undo, snapshot unknown) pour repartir proprement.
+    Q_INVOKABLE QVariantMap clearScanContext();
+
+    /// Retourne l'état du stockage temporaire des scans.
+    Q_INVOKABLE QVariantMap getTemporaryStorageStatus() const;
+
+    /// Ferme les stores temporaires actifs et supprime les fichiers temporaires KillEngine restants.
+    Q_INVOKABLE QVariantMap clearTemporaryStorage();
+
     /// Retourne le contexte structuré courant de l'Assistant.
     Q_INVOKABLE QVariantMap getSmartSearchContext() const;
 
@@ -229,6 +238,7 @@ private:
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
     QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);
     QVariantMap writeChatMemoryTargetsFromQuery(const QString& query, const QString& value);
+    QVariantMap freezeChatMemoryTargetsFromQuery(const QString& query, const QString& value);
     QVariantMap writeProfileTargetsFromQuery(const QString& query, const QString& value);
     QString smartSearchDebugFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;

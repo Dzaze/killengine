@@ -11,6 +11,20 @@ const candidatePageTotal = computed(() => {
   return Math.max(1, Math.ceil(store.candidatePage.totalCount / store.candidatePage.pageSize))
 })
 const currentPageCandidates = computed(() => store.candidatePage?.candidates ?? [])
+const displayedCandidates = computed(() => currentPageCandidates.value.filter(
+  (candidate) => !store.ignoredCandidateAddresses.includes(candidate.address),
+))
+const expertDense = computed(() => store.uiMode === 'expert')
+const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0) > 0)
+const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau scan' : 'Premier scan')
+const unknownCompareLabel = computed(() => hasCandidateContext.value ? 'Raffiner' : 'Comparer')
+const unknownGuideReady = computed(() => Boolean(store.unknownSnapshotResult?.success) || hasCandidateContext.value)
+const unknownGuideActions = [
+  { mode: 'increased', label: 'ça augmente' },
+  { mode: 'decreased', label: 'ça diminue' },
+  { mode: 'unchanged', label: 'stable' },
+  { mode: 'changed', label: 'ça change' },
+] as const
 
 function formatNumber(value: number | undefined) {
   return new Intl.NumberFormat('fr-FR').format(value ?? 0)
@@ -85,6 +99,11 @@ function writeSelectedCandidates() {
   )
 }
 
+function watchCandidate(address: string, type: string) {
+  store.addAddressToWatch(address, type)
+  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
+}
+
 onMounted(() => {
   if (store.candidatePage) return
   void store.refreshCandidates()
@@ -98,9 +117,14 @@ onMounted(() => {
         <h1>{{ $t('nav.expert') }}</h1>
         <p>{{ store.isAttached ? store.processName : store.statusText }}</p>
       </div>
-      <button class="btn btn-secondary" @click="store.doPing()">
-        {{ $t('actions.ping') }}
-      </button>
+      <div class="header-actions">
+        <button class="btn btn-secondary" :disabled="store.scanBusy" @click="store.resetWorkflow()">
+          Nouveau scan
+        </button>
+        <button class="btn btn-secondary" @click="store.doPing()">
+          {{ $t('actions.ping') }}
+        </button>
+      </div>
     </div>
 
     <div v-if="!store.isAttached" class="empty-state">
@@ -147,10 +171,29 @@ onMounted(() => {
         </div>
       </div>
 
+      <section v-if="store.expertRegionSize || store.expertRegionProtection" class="panel region-context">
+        <div class="panel-title">
+          <h2>Région active</h2>
+          <span>{{ formatBytes(store.expertRegionSize) }}</span>
+        </div>
+        <div class="metrics">
+          <span>Début: {{ store.expertStartAddress || '-' }}</span>
+          <span>Fin: {{ store.expertStopAddress || '-' }}</span>
+          <span>Protection: {{ store.expertRegionProtection || '-' }}</span>
+          <span>État: {{ store.expertRegionState || '-' }}</span>
+          <span>Type: {{ store.expertRegionType || '-' }}</span>
+        </div>
+      </section>
+
       <section class="panel">
         <div class="panel-title">
           <h2>{{ $t('scan.exact') }}</h2>
-          <span v-if="store.exactScanResult?.partial">{{ $t('scan.partial') }}</span>
+          <div class="panel-actions">
+            <span v-if="store.exactScanResult?.partial">{{ $t('scan.partial') }}</span>
+            <button class="btn btn-secondary compact" type="button" :disabled="store.scanBusy" @click="store.resetWorkflow()">
+              Nouveau scan
+            </button>
+          </div>
         </div>
         <div class="controls exact-controls">
           <input
@@ -167,7 +210,22 @@ onMounted(() => {
             <option>Float64</option>
           </select>
           <button class="btn btn-primary" :disabled="!store.exactScanValue.trim() || store.scanBusy" @click="store.doExactScan()">
-            {{ store.scanBusy ? 'Scan...' : $t('scan.button') }}
+            <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
+            <span>{{ store.scanBusy ? 'Scan...' : exactScanButtonLabel }}</span>
+          </button>
+        </div>
+        <div v-if="store.inferredExactTypes.length > 0" class="type-suggestions">
+          <button
+            v-for="item in store.inferredExactTypes"
+            :key="String(item.type)"
+            class="type-chip"
+            type="button"
+            :class="{ active: store.exactScanType === String(item.type).replace(/\\s+x100$/i, '') }"
+            :title="`${item.confidence} · ${item.reason}`"
+            @click="store.useInferredType(String(item.type))"
+          >
+            <strong>{{ item.type }}</strong>
+            <span>{{ item.confidence }}</span>
           </button>
         </div>
 
@@ -241,7 +299,7 @@ onMounted(() => {
           </button>
         </div>
         <div class="controls next-controls">
-          <select v-model="store.nextScanMode" class="input select" :disabled="store.scanBusy">
+          <select v-model="store.nextScanMode" class="input select" :disabled="store.scanBusy || !hasCandidateContext">
             <option value="exact">{{ $t('scan.modeExact') }}</option>
             <option value="changed">{{ $t('scan.modeChanged') }}</option>
             <option value="unchanged">{{ $t('scan.modeUnchanged') }}</option>
@@ -251,13 +309,14 @@ onMounted(() => {
           </select>
           <input
             v-model="store.nextScanValue"
-            :disabled="store.scanBusy || (store.nextScanMode !== 'exact' && store.nextScanMode !== 'delta')"
+            :disabled="store.scanBusy || !hasCandidateContext || (store.nextScanMode !== 'exact' && store.nextScanMode !== 'delta')"
             :placeholder="$t('scan.nextValue')"
             class="input"
             @keyup.enter="store.doNextScan()"
           />
-          <button class="btn btn-primary" :disabled="store.scanBusy" @click="store.doNextScan()">
-            {{ store.scanBusy ? 'Scan...' : $t('scan.nextScan') }}
+          <button class="btn btn-primary" :disabled="store.scanBusy || !hasCandidateContext" @click="store.doNextScan()">
+            <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
+            <span>{{ store.scanBusy ? 'Scan...' : $t('scan.nextScan') }}</span>
           </button>
         </div>
         <div v-if="store.nextScanResult" class="metrics">
@@ -288,18 +347,50 @@ onMounted(() => {
             <option value="decreased">{{ $t('scan.modeDecreased') }}</option>
           </select>
           <button class="btn btn-secondary" :disabled="store.scanBusy" @click="store.captureUnknownSnapshot()">
-            {{ store.scanBusy ? 'Capture...' : $t('unknown.capture') }}
+            <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
+            <span>{{ store.scanBusy ? 'Capture...' : $t('unknown.capture') }}</span>
           </button>
           <button class="btn btn-primary" :disabled="store.scanBusy" @click="store.doUnknownNextScan()">
-            {{ store.scanBusy ? 'Compare...' : $t('unknown.compare') }}
+            <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
+            <span>{{ store.scanBusy ? 'Compare...' : unknownCompareLabel }}</span>
+          </button>
+        </div>
+        <div class="unknown-guide">
+          <button
+            v-for="action in unknownGuideActions"
+            :key="action.mode"
+            class="btn btn-secondary compact guide-btn"
+            type="button"
+            :class="{ active: store.unknownScanMode === action.mode }"
+            :disabled="store.scanBusy || !unknownGuideReady"
+            @click="store.runUnknownGuideStep(action.mode)"
+          >
+            {{ action.label }}
           </button>
         </div>
         <div v-if="store.unknownSnapshotResult || store.unknownNextScanResult" class="metrics">
           <span v-if="store.unknownSnapshotResult">{{ $t('unknown.regions') }}: {{ formatNumber(store.unknownSnapshotResult.regionsCaptured) }}</span>
           <span v-if="store.unknownSnapshotResult">{{ $t('unknown.bytes') }}: {{ formatNumber(store.unknownSnapshotResult.bytesCaptured) }}</span>
+          <span v-if="store.unknownSnapshotResult?.compressedBytes !== undefined">Compressé: {{ formatBytes(store.unknownSnapshotResult.compressedBytes) }}</span>
+          <span v-if="store.unknownSnapshotResult?.mappedStorage">Stockage fichier temporaire</span>
           <span v-if="store.unknownNextScanResult">{{ $t('scan.matches') }}: {{ formatNumber(store.unknownNextScanResult.matchesFound) }}</span>
           <span v-if="store.unknownNextScanResult">{{ $t('scan.stored') }}: {{ formatNumber(store.unknownNextScanResult.stored) }}</span>
         </div>
+        <div v-if="store.unknownGuideSteps.length > 0" class="unknown-timeline">
+          <div
+            v-for="step in store.unknownGuideSteps"
+            :key="step.id"
+            class="unknown-step"
+            :class="step.status"
+          >
+            <span>{{ step.time }}</span>
+            <strong>{{ step.label }}</strong>
+            <em>{{ step.detail }}</em>
+          </div>
+        </div>
+        <p class="hint">
+          Capture, fais varier la ressource, compare. Ensuite change le mode selon ce qui s'est passé et raffine la liste.
+        </p>
       </section>
 
       <section class="panel">
@@ -351,7 +442,12 @@ onMounted(() => {
           {{ formatNumber(store.candidatePage.totalCount) }} candidats trouvés. Réduis avec un next scan ou filtre une adresse pour afficher une page.
         </div>
         <div class="candidate-list">
-          <div v-for="match in currentPageCandidates" :key="match.address" class="candidate-row">
+          <div
+            v-for="match in displayedCandidates"
+            :key="match.address"
+            class="candidate-row"
+            :class="[`candidate-${store.candidateVisualState(match).replace(' ', '-')}`]"
+          >
             <label class="candidate-check">
               <input
                 type="checkbox"
@@ -362,19 +458,34 @@ onMounted(() => {
             <button class="address-btn" @click="store.selectCandidate(match.address, match.type)">
               0x{{ match.address }}
             </button>
-            <span class="candidate-type">{{ match.type }}</span>
-            <span
-              v-if="match.confidence !== undefined && match.confidence < 1"
-              class="confidence-badge"
-              :class="confidenceClass(match.confidence)"
-              :title="match.variantLabel"
-            >
-              {{ confidencePercent(match.confidence) }}%
-            </span>
-            <span v-if="match.variantLabel" class="variant-label">{{ match.variantLabel }}</span>
-            <button class="btn btn-secondary compact" @click="useCandidateInAssistant(match.address, match.type)">
-              Utiliser
-            </button>
+            <div class="candidate-meta">
+              <span class="candidate-type">{{ match.type }}</span>
+              <span
+                v-if="match.confidence !== undefined && match.confidence < 1"
+                class="confidence-badge"
+                :class="confidenceClass(match.confidence)"
+                :title="match.variantLabel"
+              >
+                {{ confidencePercent(match.confidence) }}%
+              </span>
+              <span v-if="match.variantLabel" class="variant-label">{{ match.variantLabel }}</span>
+              <span class="visual-state">{{ store.candidateVisualState(match) }}</span>
+              <span v-if="store.watchedAddresses.some((item) => item.address === match.address)" class="live-dot">watch</span>
+            </div>
+            <div class="candidate-actions">
+              <button class="btn btn-secondary compact" @click="useCandidateInAssistant(match.address, match.type)">
+                Utiliser
+              </button>
+              <button class="btn btn-secondary compact" @click="watchCandidate(match.address, match.type)">
+                Watch
+              </button>
+              <button class="btn btn-secondary compact" @click="store.keepCandidate(match.address)">
+                Garder
+              </button>
+              <button class="btn btn-secondary compact" @click="store.ignoreCandidate(match.address)">
+                Ignorer
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -385,7 +496,13 @@ onMounted(() => {
           <span v-if="store.writeResult">{{ store.writeResult.success ? 'OK' : 'FAIL' }}</span>
         </div>
         <div class="controls write-controls">
-          <input v-model="store.selectedCandidateAddress" class="input" :placeholder="$t('write.address')" />
+          <input
+            v-model="store.selectedCandidateAddress"
+            class="input"
+            :placeholder="$t('write.address')"
+            @input="store.updateWriteSafetyWarning()"
+            @blur="store.updateWriteSafetyWarning()"
+          />
           <select v-model="store.exactScanType" class="input select">
             <option>Int32</option>
             <option>Int64</option>
@@ -393,15 +510,22 @@ onMounted(() => {
             <option>Float64</option>
           </select>
           <input v-model="store.writeValue" class="input" :placeholder="$t('write.value')" @keyup.enter="store.writeSelectedValue()" />
-          <button class="btn btn-primary" :disabled="!store.selectedCandidateAddress || !store.writeValue.trim()" @click="store.writeSelectedValue()">
+          <button class="btn btn-primary" :disabled="!store.canWriteSelectedValue" @click="store.writeSelectedValue()">
             {{ $t('write.write') }}
           </button>
           <button class="btn btn-secondary" @click="store.rollbackLastWrite()">
             {{ $t('write.rollback') }}
           </button>
-          <button class="btn btn-secondary" :disabled="!store.selectedCandidateAddress || !store.writeValue.trim()" @click="store.toggleFreeze()">
+          <button class="btn btn-secondary" :disabled="store.freezeEnabled ? !store.selectedCandidateAddress : !store.canWriteSelectedValue" @click="store.toggleFreeze()">
             {{ store.freezeEnabled ? $t('write.stopFreeze') : $t('write.freeze') }}
           </button>
+        </div>
+        <div v-if="store.writeSafetyWarning" class="write-safety">
+          <p class="warning">{{ store.writeSafetyWarning }}</p>
+          <label class="safety-ack">
+            <input v-model="store.writeSafetyAcknowledged" type="checkbox" />
+            Je confirme cette écriture mémoire
+          </label>
         </div>
         <div v-if="store.writeResult" class="metrics">
           <span>{{ store.writeResult.bytesWritten }} B</span>
@@ -409,6 +533,45 @@ onMounted(() => {
           <span v-if="store.writeResult.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
         </div>
         <p v-if="store.writeResult?.error" class="error">{{ store.writeResult.error }}</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Watch live</h2>
+          <button
+            class="btn btn-secondary compact"
+            type="button"
+            :disabled="store.watchedAddresses.length === 0"
+            @click="store.setWatchLiveEnabled(!store.watchLiveEnabled)"
+          >
+            {{ store.watchLiveEnabled ? 'Arrêter' : 'Démarrer' }}
+          </button>
+        </div>
+        <div v-if="store.watchedAddresses.length === 0" class="hint">Sélectionne un candidat ou clique Watch pour surveiller une adresse.</div>
+        <div v-else class="watch-list">
+          <div v-for="item in store.watchedAddresses" :key="item.address" class="watch-row" :class="{ changed: item.changed }">
+            <code>0x{{ item.address }}</code>
+            <span>{{ item.type }}</span>
+            <strong>{{ item.value || '-' }}</strong>
+            <span v-if="item.previousValue">avant: {{ item.previousValue }}</span>
+            <span>{{ item.updatedAt }}</span>
+            <button class="btn btn-secondary compact" @click="store.removeAddressFromWatch(item.address)">Retirer</button>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="expertDense" class="panel">
+        <div class="panel-title">
+          <h2>Journal utilisateur</h2>
+          <span>{{ store.actionLog.length }} entrée(s)</span>
+        </div>
+        <div class="action-log">
+          <div v-for="entry in store.actionLog.slice(0, 18)" :key="entry.id" class="action-entry" :class="entry.status">
+            <span>{{ entry.time }}</span>
+            <strong>{{ entry.title }}</strong>
+            <em>{{ entry.detail }}</em>
+          </div>
+        </div>
       </section>
     </template>
   </div>
@@ -431,6 +594,14 @@ onMounted(() => {
 
 .header {
   margin-bottom: 18px;
+}
+
+.header-actions,
+.panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .header h1 {
@@ -500,6 +671,21 @@ onMounted(() => {
   min-height: 26px;
   padding: 4px 10px;
   font-size: 12px;
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .progress-track {
@@ -613,12 +799,116 @@ onMounted(() => {
   line-height: 1.4;
 }
 
+.type-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.type-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(36, 40, 59, 0.72);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.type-chip strong {
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.type-chip span {
+  overflow: hidden;
+  max-width: 58px;
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.type-chip:hover,
+.type-chip.active {
+  border-color: rgba(122, 162, 247, 0.55);
+  background: rgba(122, 162, 247, 0.12);
+  color: var(--accent);
+}
+
+.type-chip.active strong {
+  color: var(--accent);
+}
+
 .next-controls {
   grid-template-columns: 150px 1fr auto;
 }
 
 .unknown-controls {
   grid-template-columns: 120px 150px auto auto;
+}
+
+.unknown-guide {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.guide-btn.active {
+  background: rgba(122, 162, 247, 0.18);
+  color: var(--accent);
+}
+
+.unknown-timeline {
+  display: grid;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.unknown-step {
+  display: grid;
+  grid-template-columns: 70px 96px 1fr;
+  gap: 8px;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.unknown-step strong {
+  color: var(--text-primary);
+}
+
+.unknown-step em {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unknown-step.capture {
+  border-color: rgba(122, 162, 247, 0.42);
+}
+
+.unknown-step.compare,
+.unknown-step.refine {
+  border-color: rgba(158, 206, 106, 0.38);
+}
+
+.unknown-step.error {
+  border-color: rgba(247, 118, 142, 0.45);
 }
 
 .write-controls {
@@ -679,6 +969,33 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.warning {
+  margin-top: 8px;
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.write-safety {
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warning) 8%, var(--bg-secondary));
+}
+
+.write-safety .warning {
+  margin-top: 0;
+}
+
+.safety-ack {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .candidate-storage {
   margin-top: 0;
   margin-bottom: 8px;
@@ -728,15 +1045,54 @@ onMounted(() => {
 
 .candidate-row {
   display: grid;
-  grid-template-columns: 28px minmax(170px, 1fr) 80px auto auto auto;
+  grid-template-columns: 28px minmax(170px, 1fr) minmax(240px, 1.1fr) minmax(270px, auto);
   gap: 8px;
   align-items: center;
   padding: 7px 8px;
+  border: 1px solid transparent;
   border-radius: 4px;
   background: var(--bg-primary);
   color: var(--text-dim);
   font-family: 'Cascadia Code', monospace;
   font-size: 12px;
+}
+
+.candidate-meta,
+.candidate-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.candidate-meta {
+  overflow: hidden;
+}
+
+.candidate-actions {
+  justify-content: flex-end;
+}
+
+.candidate-actions .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.candidate-très-probable {
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+}
+
+.candidate-à-vérifier {
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+
+.candidate-faible,
+.candidate-ignoré {
+  opacity: 0.65;
+}
+
+.candidate-gardé {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
 .candidate-check {
@@ -804,6 +1160,75 @@ onMounted(() => {
   font-style: italic;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.visual-state,
+.live-dot {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.live-dot {
+  color: var(--success);
+}
+
+.watch-list,
+.action-log {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.watch-row,
+.action-entry {
+  display: grid;
+  grid-template-columns: 150px 80px minmax(90px, 1fr) minmax(90px, 1fr) 70px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.watch-row.changed {
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+}
+
+.watch-row code,
+.watch-row strong {
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+}
+
+.action-entry {
+  grid-template-columns: 70px minmax(160px, 0.9fr) minmax(200px, 1.5fr);
+}
+
+.action-entry strong {
+  color: var(--text-primary);
+}
+
+.action-entry em {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-entry.success {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
+
+.action-entry.warning {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
+}
+
+.action-entry.error {
+  border-color: color-mix(in srgb, var(--error) 30%, var(--border));
 }
 
 @media (max-width: 980px) {
