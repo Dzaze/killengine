@@ -11,6 +11,8 @@ QString Locator::toString() const {
                 .arg(offset, 0, 16);
         case LocatorKind::Absolute:
             return QString("0x%1").arg(lastAddress, 0, 16);
+        case LocatorKind::PointerChain:
+            return pointerChain.toString();
     }
     return {};
 }
@@ -21,6 +23,8 @@ bool Locator::isValid() const {
             return !module.isEmpty() && offset > 0;
         case LocatorKind::Absolute:
             return lastAddress > 0;
+        case LocatorKind::PointerChain:
+            return pointerChain.isValid();
     }
     return false;
 }
@@ -44,6 +48,14 @@ bool resolveLocatorAddress(const ProcessHandle& handle, const Locator& locator, 
                 }
             }
             return false;
+        }
+        case LocatorKind::PointerChain: {
+            const auto result = resolvePointerChain(handle, locator.pointerChain);
+            if (!result.success) {
+                return false;
+            }
+            *address = result.finalAddress;
+            return true;
         }
     }
     return false;

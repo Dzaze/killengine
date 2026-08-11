@@ -1,9 +1,90 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { backend, type PointerChainInfo, type PointerChainResolveResult, type PointerScanResult } from '@/services/backend'
 
 const store = useAppStore()
 const selectedCandidateAddresses = ref<string[]>([])
+
+// Phase 14 — Pointer Chains
+const pointerScanAddress = ref('')
+const pointerScanValueType = ref('Int32')
+const pointerScanMaxDepth = ref(3)
+const pointerScanMaxOffset = ref(0x1000)
+const pointerScanResult = ref<PointerScanResult | null>(null)
+const pointerScanBusy = ref(false)
+const pointerResolveResult = ref<PointerChainResolveResult | null>(null)
+const selectedPointerChainIndex = ref<number>(-1)
+
+async function runPointerScan() {
+  if (!pointerScanAddress.value.trim()) return
+  pointerScanBusy.value = true
+  pointerScanResult.value = null
+  pointerResolveResult.value = null
+  try {
+    const controller = backend.getController()
+    if (controller.scanPointerChains) {
+      const result = await controller.scanPointerChains(pointerScanAddress.value, {
+        maxDepth: pointerScanMaxDepth.value,
+        maxOffset: pointerScanMaxOffset.value,
+        maxResults: 100,
+        onlyModuleBase: true,
+      })
+      pointerScanResult.value = result
+    } else {
+      pointerScanResult.value = { success: false, error: 'Methode backend indisponible (mock mode).' }
+    }
+  } catch (e) {
+    pointerScanResult.value = { success: false, error: String(e) }
+  } finally {
+    pointerScanBusy.value = false
+  }
+}
+
+async function testPointerChain(chain: PointerChainInfo) {
+  try {
+    const controller = backend.getController()
+    if (controller.resolvePointerChain) {
+      pointerResolveResult.value = await controller.resolvePointerChain(chain)
+    }
+  } catch (e) {
+    pointerResolveResult.value = { success: false, error: String(e) }
+  }
+}
+
+function usePointerChainAsCandidate(chain: PointerChainInfo) {
+  // Place la chaîne comme adresse candidate pour écriture (test immédiat).
+  void testPointerChain(chain).then(() => {
+    if (pointerResolveResult.value?.success && pointerResolveResult.value.finalAddress) {
+      store.selectedCandidateAddress = pointerResolveResult.value.finalAddress
+      store.exactScanType = pointerScanValueType.value
+    }
+  })
+}
+
+async function savePointerChain(chain: PointerChainInfo) {
+  const profileName = window.prompt('Nom du profil :', 'StarCraft2')
+  if (!profileName) return
+  const targetName = window.prompt('Nom de la cible :', 'Minerals')
+  if (!targetName) return
+  try {
+    const controller = backend.getController()
+    if (controller.savePointerChainProfileTarget) {
+      const result = await controller.savePointerChainProfileTarget(
+        profileName,
+        targetName,
+        chain,
+        pointerScanValueType.value,
+        'Chaine de pointeurs auto-detectee',
+      )
+      if (!result.success) {
+        window.alert('Erreur sauvegarde profil : ' + (result.error ?? 'inconnue'))
+      }
+    }
+  } catch (e) {
+    window.alert('Erreur : ' + String(e))
+  }
+}
 
 const candidatePageTotal = computed(() => {
   if (!store.candidatePage) return 1
@@ -17,7 +98,6 @@ const displayedCandidates = computed(() => currentPageCandidates.value.filter(
 const expertDense = computed(() => store.uiMode === 'expert')
 const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0) > 0)
 const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau scan' : 'Premier scan')
-const unknownCompareLabel = computed(() => hasCandidateContext.value ? 'Raffiner' : 'Comparer')
 const unknownGuideReady = computed(() => Boolean(store.unknownSnapshotResult?.success) || hasCandidateContext.value)
 const unknownGuideActions = [
   { mode: 'increased', label: 'ça augmente' },
@@ -204,6 +284,7 @@ onMounted(() => {
             @keyup.enter="store.doExactScan()"
           />
           <select v-model="store.exactScanType" class="input select" :disabled="store.scanBusy">
+            <option value="Auto">Auto (multi-type)</option>
             <option>Int32</option>
             <option>Int64</option>
             <option>Float32</option>
@@ -340,19 +421,9 @@ onMounted(() => {
             <option>Float32</option>
             <option>Float64</option>
           </select>
-          <select v-model="store.unknownScanMode" class="input select" :disabled="store.scanBusy">
-            <option value="changed">{{ $t('scan.modeChanged') }}</option>
-            <option value="unchanged">{{ $t('scan.modeUnchanged') }}</option>
-            <option value="increased">{{ $t('scan.modeIncreased') }}</option>
-            <option value="decreased">{{ $t('scan.modeDecreased') }}</option>
-          </select>
           <button class="btn btn-secondary" :disabled="store.scanBusy" @click="store.captureUnknownSnapshot()">
             <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
             <span>{{ store.scanBusy ? 'Capture...' : $t('unknown.capture') }}</span>
-          </button>
-          <button class="btn btn-primary" :disabled="store.scanBusy" @click="store.doUnknownNextScan()">
-            <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
-            <span>{{ store.scanBusy ? 'Compare...' : unknownCompareLabel }}</span>
           </button>
         </div>
         <div class="unknown-guide">
@@ -362,7 +433,7 @@ onMounted(() => {
             class="btn btn-secondary compact guide-btn"
             type="button"
             :class="{ active: store.unknownScanMode === action.mode }"
-            :disabled="store.scanBusy || !unknownGuideReady"
+            :disabled="store.scanBusy || !unknownGuideReady || (action.mode === 'unchanged' && !hasCandidateContext)"
             @click="store.runUnknownGuideStep(action.mode)"
           >
             {{ action.label }}
@@ -389,7 +460,7 @@ onMounted(() => {
           </div>
         </div>
         <p class="hint">
-          Capture, fais varier la ressource, compare. Ensuite change le mode selon ce qui s'est passé et raffine la liste.
+          Capture d'abord, fais varier la ressource, puis indique comment elle a bougé. Stable sert surtout après une première réduction.
         </p>
       </section>
 
@@ -558,6 +629,106 @@ onMounted(() => {
             <button class="btn btn-secondary compact" @click="store.removeAddressFromWatch(item.address)">Retirer</button>
           </div>
         </div>
+      </section>
+
+      <section class="panel pointer-chain-panel">
+        <div class="panel-title">
+          <h2>Pointer Chains <span class="hint-inline">(StarCraft 2 / jeux modernes)</span></h2>
+          <span v-if="pointerScanResult">{{ formatNumber(pointerScanResult.chainCount) }} chaine(s)</span>
+        </div>
+        <p class="hint">
+          Pour les jeux modernes (StarCraft 2, etc.), les ressources sont allouees dynamiquement.
+          Trouve d'abord l'adresse avec un scan normal, puis utilise le scanner de pointeurs pour
+          decouvrir une chaine stable qui survivra aux redemarrages.
+        </p>
+        <div class="controls pointer-chain-controls">
+          <input
+            v-model="pointerScanAddress"
+            class="input"
+            placeholder="Adresse cible (0x...)"
+            :disabled="store.scanBusy || !store.isAttached"
+          />
+          <select v-model="pointerScanValueType" class="input select">
+            <option>Int32</option>
+            <option>Int64</option>
+            <option>Float32</option>
+            <option>Float64</option>
+          </select>
+          <input
+            v-model.number="pointerScanMaxDepth"
+            type="number"
+            min="1"
+            max="5"
+            class="input"
+            placeholder="Profondeur"
+            title="Nombre de niveaux de dereferencement"
+          />
+          <input
+            v-model.number="pointerScanMaxOffset"
+            type="number"
+            min="0"
+            step="16"
+            class="input"
+            placeholder="Offset max"
+            title="Offset maximum entre pointeur et cible"
+          />
+          <button
+            class="btn btn-primary"
+            :disabled="!pointerScanAddress.trim() || store.scanBusy || !store.isAttached"
+            @click="runPointerScan()"
+          >
+            <span v-if="pointerScanBusy" class="btn-spinner" aria-hidden="true"></span>
+            <span>{{ pointerScanBusy ? 'Scan...' : 'Scanner les pointeurs' }}</span>
+          </button>
+        </div>
+        <div v-if="pointerScanResult" class="metrics">
+          <span>Chaines: {{ formatNumber(pointerScanResult.chainCount) }}</span>
+          <span>Pointeurs scannes: {{ formatNumber(pointerScanResult.pointersScanned) }}</span>
+          <span>Bytes: {{ formatBytes(pointerScanResult.bytesScanned) }}</span>
+          <span v-if="pointerScanResult.elapsedMs">Temps: {{ formatNumber(pointerScanResult.elapsedMs) }} ms</span>
+          <span v-if="pointerScanResult.partial">Resultat partiel</span>
+        </div>
+        <div v-if="pointerScanResult?.chains?.length" class="pointer-chain-list">
+          <div
+            v-for="(chain, index) in pointerScanResult.chains.slice(0, 20)"
+            :key="index"
+            class="pointer-chain-row"
+            :class="{ selected: selectedPointerChainIndex === index }"
+          >
+            <label class="candidate-check">
+              <input
+                type="radio"
+                :value="index"
+                v-model.number="selectedPointerChainIndex"
+              />
+            </label>
+            <div class="pointer-chain-info">
+              <strong>{{ chain.label }}</strong>
+              <span class="chain-depth">profondeur {{ chain.depth }}</span>
+            </div>
+            <div class="pointer-chain-actions">
+              <button class="btn btn-secondary compact" @click="testPointerChain(chain)">
+                Tester
+              </button>
+              <button
+                class="btn btn-secondary compact"
+                @click="usePointerChainAsCandidate(chain)"
+              >
+                Utiliser
+              </button>
+              <button
+                class="btn btn-primary compact"
+                @click="savePointerChain(chain)"
+              >
+                Sauver profil
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-if="pointerScanResult?.error" class="error">{{ pointerScanResult.error }}</p>
+        <p v-if="pointerResolveResult" class="hint">
+          Resolution : {{ pointerResolveResult.success ? 'OK 0x' + pointerResolveResult.finalAddress : 'ECHEC ' + pointerResolveResult.error }}
+        </p>
       </section>
 
       <section v-if="expertDense" class="panel">
@@ -851,7 +1022,7 @@ onMounted(() => {
 }
 
 .unknown-controls {
-  grid-template-columns: 120px 150px auto auto;
+  grid-template-columns: 120px minmax(220px, 1fr);
 }
 
 .unknown-guide {
@@ -1231,6 +1402,65 @@ onMounted(() => {
   border-color: color-mix(in srgb, var(--error) 30%, var(--border));
 }
 
+.hint-inline {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: normal;
+}
+
+.pointer-chain-controls {
+  grid-template-columns: minmax(170px, 1fr) 110px 100px 110px auto;
+}
+
+.pointer-chain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.pointer-chain-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.pointer-chain-row.selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.pointer-chain-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pointer-chain-info strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chain-depth {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.pointer-chain-actions {
+  display: flex;
+  gap: 4px;
+}
+
 @media (max-width: 980px) {
   .summary-grid,
   .exact-controls,
@@ -1238,7 +1468,8 @@ onMounted(() => {
   .unknown-controls,
   .write-controls,
   .candidate-toolbar,
-  .candidate-row {
+  .candidate-row,
+  .pointer-chain-controls {
     grid-template-columns: 1fr;
   }
 }

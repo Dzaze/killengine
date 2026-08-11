@@ -8,6 +8,8 @@
 #include "memory/memory_writer.h"
 #include "process/process_enumerator.h"
 #include "process/process_handle.h"
+#include "pointer/pointer_chain.h"
+#include "pointer/pointer_scanner.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "scanner/value_variants.h"
@@ -2260,10 +2262,18 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         result["error"] = "Aucun processus attaché.";
         return result;
     }
+    if (m_snapshot.isEmpty()) {
+        result["error"] = "Aucun snapshot unknown capturé.";
+        return result;
+    }
 
     killcore::NextScanMode scanMode;
     if (!killcore::parseNextScanMode(mode, &scanMode)) {
         result["error"] = "Mode invalide.";
+        return result;
+    }
+    if (scanMode == killcore::NextScanMode::Unchanged && m_candidates.isEmpty()) {
+        result["error"] = "Le mode stable/ne change pas n'est pas autorisé en première comparaison unknown : il garde trop de mémoire et peut saturer. Fais d'abord changed, increased ou decreased.";
         return result;
     }
 
@@ -2329,6 +2339,10 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
     killcore::NextScanMode scanMode;
     if (!killcore::parseNextScanMode(mode, &scanMode)) {
         result["error"] = "Mode invalide.";
+        return result;
+    }
+    if (scanMode == killcore::NextScanMode::Unchanged && m_candidates.isEmpty()) {
+        result["error"] = "Le mode stable/ne change pas n'est pas autorisé en première comparaison unknown : il garde trop de mémoire et peut saturer. Fais d'abord changed, increased ou decreased.";
         return result;
     }
 
@@ -4335,6 +4349,242 @@ QVariantMap ApplicationController::activateProfileTarget(const QString& profileN
     }
 
     result["error"] = "Cible introuvable dans le profil.";
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+killcore::PointerChain variantMapToPointerChain(const QVariantMap& chainMap, QString* error = nullptr) {
+    killcore::PointerChain chain;
+    chain.module = chainMap.value("module").toString();
+    if (chain.module.isEmpty()) {
+        if (error) *error = "Chaine invalide : module manquant.";
+        return chain;
+    }
+
+    const QString baseOffsetHex = chainMap.value("baseOffset").toString();
+    bool ok = false;
+    chain.baseOffset = baseOffsetHex.toULongLong(&ok, 16);
+    if (!ok) {
+        if (error) *error = "Chaine invalide : baseOffset hex invalide.";
+        return chain;
+    }
+
+    const QVariantList offsets = chainMap.value("offsets").toList();
+    for (const auto& offsetVar : offsets) {
+        const uint64_t off = offsetVar.toString().toULongLong(&ok, 16);
+        if (!ok) {
+            if (error) *error = "Chaine invalide : offset hex invalide.";
+            return chain;
+        }
+        chain.offsets.append(off);
+    }
+
+    return chain;
+}
+
+QVariantMap pointerChainToVariantMap(const killcore::PointerChain& chain) {
+    QVariantMap result;
+    result["module"] = chain.module;
+    result["baseOffset"] = QString::number(chain.baseOffset, 16);
+    QVariantList offsets;
+    for (uint64_t offset : chain.offsets) {
+        offsets.append(QString::number(offset, 16));
+    }
+    result["offsets"] = offsets;
+    result["depth"] = chain.depth();
+    result["label"] = chain.toString();
+    return result;
+}
+
+} // namespace
+
+QVariantMap ApplicationController::scanPointerChains(
+    const QString& addressHex,
+    const QVariantMap& scanOptions) {
+
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+
+    uint64_t targetAddress = 0;
+    if (!parseHexAddress(addressHex, &targetAddress)) {
+        result["error"] = "Adresse cible invalide.";
+        return result;
+    }
+
+    killcore::PointerScanOptions options;
+    options.maxDepth = scanOptions.value("maxDepth", 3).toInt();
+    options.maxOffset = scanOptions.value("maxOffset", 0x1000).toULongLong();
+    options.maxResults = static_cast<size_t>(scanOptions.value("maxResults", 100).toULongLong());
+    options.onlyModuleBase = scanOptions.value("onlyModuleBase", true).toBool();
+    options.alignment = static_cast<size_t>(scanOptions.value("alignment", 8).toULongLong());
+
+    const QVariant baseModulesVar = scanOptions.value("baseModules");
+    if (baseModulesVar.isValid() && baseModulesVar.canConvert<QVariantList>()) {
+        for (const auto& mod : baseModulesVar.toList()) {
+            options.baseModules.append(mod.toString());
+        }
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+
+    auto scanResult = killcore::scanForPointerChains(m_handle, targetAddress, options);
+
+    result["success"] = scanResult.success;
+    result["partial"] = scanResult.partial;
+    result["cancelled"] = scanResult.cancelled;
+    result["pointersScanned"] = static_cast<qulonglong>(scanResult.pointersScanned);
+    result["bytesScanned"] = static_cast<qulonglong>(scanResult.bytesScanned);
+    result["elapsedMs"] = static_cast<qulonglong>(timer.elapsed());
+    result["chainCount"] = static_cast<int>(scanResult.chains.size());
+
+    if (!scanResult.errorMessage.isEmpty()) {
+        result["error"] = scanResult.errorMessage;
+    }
+
+    QVariantList chainsList;
+    for (const auto& chain : scanResult.chains) {
+        chainsList.append(pointerChainToVariantMap(chain));
+    }
+    result["chains"] = chainsList;
+
+    KE_LOG_INFO() << "scanPointerChains: target=0x" << QString::number(targetAddress, 16).toStdString()
+                  << " chains=" << scanResult.chains.size()
+                  << " elapsed=" << timer.elapsed() << "ms";
+
+    return result;
+}
+
+QVariantMap ApplicationController::resolvePointerChain(const QVariantMap& chainMap) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+
+    QString parseError;
+    const auto chain = variantMapToPointerChain(chainMap, &parseError);
+    if (!parseError.isEmpty()) {
+        result["error"] = parseError;
+        return result;
+    }
+
+    const auto resolveResult = killcore::resolvePointerChain(m_handle, chain);
+    if (!resolveResult.success) {
+        result["error"] = resolveResult.errorMessage.isEmpty()
+            ? QString("Resolution de chaine echouee.")
+            : resolveResult.errorMessage;
+        return result;
+    }
+
+    result["success"] = true;
+    result["finalAddress"] = QString::number(resolveResult.finalAddress, 16);
+
+    QVariantList steps;
+    for (uint64_t addr : resolveResult.intermediateAddresses) {
+        steps.append(QString::number(addr, 16));
+    }
+    result["steps"] = steps;
+
+    return result;
+}
+
+QVariantMap ApplicationController::savePointerChainProfileTarget(
+    const QString& profileName,
+    const QString& targetName,
+    const QVariantMap& chainMap,
+    const QString& valueType,
+    const QString& description) {
+
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+
+    QString parseError;
+    const auto chain = variantMapToPointerChain(chainMap, &parseError);
+    if (!parseError.isEmpty()) {
+        result["error"] = parseError;
+        return result;
+    }
+
+    // Valider la chaîne avant de la sauvegarder.
+    const auto resolveCheck = killcore::resolvePointerChain(m_handle, chain);
+    if (!resolveCheck.success) {
+        result["error"] = "La chaine ne se resout pas : " + resolveCheck.errorMessage;
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    bool isNewProfile = true;
+    if (killcore::ProfileStore::load(path, &profile)) {
+        isNewProfile = false;
+    } else {
+        profile.gameName = profileName;
+        profile.executableName = m_processName;
+    }
+
+    killcore::ValueType type = killcore::ValueType::Int32;
+    killcore::parseValueType(valueType, &type);
+
+    // Cherche une cible existante avec le même nom pour la remplacer.
+    bool replaced = false;
+    for (auto& existing : profile.targets) {
+        if (existing.name == targetName) {
+            existing.type = type;
+            existing.locator.kind = killcore::LocatorKind::PointerChain;
+            existing.locator.pointerChain = chain;
+            existing.locator.lastAddress = resolveCheck.finalAddress;
+            existing.description = description;
+            replaced = true;
+            break;
+        }
+    }
+    if (!replaced) {
+        killcore::ProfileTarget target;
+        target.name = targetName;
+        target.type = type;
+        target.locator.kind = killcore::LocatorKind::PointerChain;
+        target.locator.pointerChain = chain;
+        target.locator.lastAddress = resolveCheck.finalAddress;
+        target.description = description;
+        profile.targets.append(target);
+    }
+
+    if (!killcore::ProfileStore::save(profile, path)) {
+        result["error"] = "Impossible de sauvegarder le profil.";
+        return result;
+    }
+
+    result["success"] = true;
+    result["profileName"] = profileName;
+    result["targetName"] = targetName;
+    result["resolvedAddress"] = QString::number(resolveCheck.finalAddress, 16);
+    result["isNewProfile"] = isNewProfile;
+    result["chainLabel"] = chain.toString();
+    result["message"] = QString("Cible \"%1\" sauvegardee avec chaine de pointeurs (resout a 0x%2).")
+                            .arg(targetName, QString::number(resolveCheck.finalAddress, 16));
+
+    KE_LOG_INFO() << "savePointerChainProfileTarget: profile=" << profileName.toStdString()
+                  << " target=" << targetName.toStdString()
+                  << " addr=0x" << QString::number(resolveCheck.finalAddress, 16).toStdString();
+
     return result;
 }
 

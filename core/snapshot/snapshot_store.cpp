@@ -14,6 +14,8 @@ namespace killcore {
 
 namespace {
 
+constexpr size_t kUnknownMaxReturnedMatches = 250000;
+
 double bytesToDouble(const char* data, ValueType type) {
     switch (type) {
         case ValueType::Int32: {
@@ -292,13 +294,18 @@ UnknownScanResult SnapshotStore::compare(
         }
 
         const qsizetype comparable = std::min(previous.block.data.size(), read.data.size());
-        for (qsizetype offset = 0; offset <= comparable - static_cast<qsizetype>(valueSize); ++offset) {
+        const qsizetype step = static_cast<qsizetype>(std::max<size_t>(valueSize, 1));
+        for (qsizetype offset = 0; offset <= comparable - static_cast<qsizetype>(valueSize); offset += step) {
             if (matchesMode(previous.block.data.constData() + offset, read.data.constData() + offset, type, mode)) {
                 ++result.matchesFound;
-                if (result.matches.size() < 1000000) {
+                if (result.matches.size() < static_cast<qsizetype>(kUnknownMaxReturnedMatches)) {
                     result.matches.append({region.baseAddress + static_cast<uint64_t>(offset), type});
                 } else {
                     result.partial = true;
+                    result.success = true;
+                    result.errorMessage = QString("Trop de candidats unknown (%1+). Raffine avec changed/increased/decreased ou reduis la plage.")
+                                              .arg(kUnknownMaxReturnedMatches);
+                    return result;
                 }
             }
         }

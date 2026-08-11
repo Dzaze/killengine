@@ -42,8 +42,9 @@ killengine/
 │   ├── candidates/     # CandidateStore (file-backed, pagination, undo)
 │   ├── memory/         # MemoryMap, MemoryReader, MemoryWriter
 │   ├── snapshot/       # SnapshotStore + LZ4 codec (unknown initial value)
+│   ├── pointer/        # PointerChain + PointerScanner (chaines de pointeurs multi-niveau)
 │   ├── freeze/         # FreezeManager (écriture périodique)
-│   ├── profiles/       # ProfileStore + Locator (module_offset)
+│   ├── profiles/       # ProfileStore + Locator (module_offset, absolute, pointer_chain)
 │   ├── process/        # ProcessEnumerator, ProcessHandle
 │   └── logging/        # Logger (fichier rotatif)
 ├── ai/             # killai.lib — moteur IA (tool-calling, intent contract)
@@ -86,6 +87,16 @@ killengine/
 - Toujours utiliser Google Test (`TEST(SuiteName, TestName) { ... }`)
 - Les tests doivent être indépendants du processus cible ( KillEngineTestTarget)
 - Les tests d'intégration (`tests/integration/`) lancent `KillEngineTestTarget.exe`
+
+### Unknown Initial Value
+- Après une capture unknown, l'utilisateur choisit le type de comparaison via les boutons guidés (`ça augmente`, `ça diminue`, `ça change`, `stable`).
+- `stable` / `unchanged` ne doit pas être proposé ni accepté en première comparaison unknown : il garde trop de mémoire et peut saturer les gros scans. Il sert surtout après une première réduction.
+- Les comparaisons unknown doivent rester bornées côté moteur pour éviter les retours massifs et les blocages UI.
+
+### Pointer Chains
+- Les chaines de pointeurs sont représentées par `core/pointer/PointerChain` et peuvent être stockées dans les profils via `LocatorKind::PointerChain`.
+- Convention de résolution : chaque offset suit un déréférencement (`read pointer`, puis `+ offset`), y compris le dernier offset.
+- Les nouvelles méthodes C++ exposées à l'UI doivent aussi être ajoutées dans `ui/src/services/backend.ts`.
 
 ### Gros fichiers à connaître
 - `apps/desktop/application_controller.cpp` : **~3700 lignes** — c'est LE fichier central

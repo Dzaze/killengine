@@ -20,13 +20,38 @@ QString locatorKindToString(LocatorKind kind) {
     switch (kind) {
         case LocatorKind::ModuleOffset: return "module_offset";
         case LocatorKind::Absolute:     return "absolute";
+        case LocatorKind::PointerChain: return "pointer_chain";
     }
     return "module_offset";
 }
 
 LocatorKind stringToLocatorKind(const QString& str) {
     if (str == "absolute") return LocatorKind::Absolute;
+    if (str == "pointer_chain") return LocatorKind::PointerChain;
     return LocatorKind::ModuleOffset;
+}
+
+QJsonObject pointerChainToJson(const PointerChain& chain) {
+    QJsonObject json;
+    json["module"] = chain.module;
+    json["baseOffset"] = QString::number(chain.baseOffset, 16);
+    QJsonArray offsetsArray;
+    for (uint64_t off : chain.offsets) {
+        offsetsArray.append(QString::number(off, 16));
+    }
+    json["offsets"] = offsetsArray;
+    return json;
+}
+
+PointerChain pointerChainFromJson(const QJsonObject& json) {
+    PointerChain chain;
+    chain.module = json.value("module").toString();
+    chain.baseOffset = json.value("baseOffset").toString().toULongLong(nullptr, 16);
+    const QJsonArray offsetsArray = json.value("offsets").toArray();
+    for (const auto& item : offsetsArray) {
+        chain.offsets.append(item.toString().toULongLong(nullptr, 16));
+    }
+    return chain;
 }
 
 QJsonObject locatorToJson(const Locator& loc) {
@@ -35,6 +60,9 @@ QJsonObject locatorToJson(const Locator& loc) {
     json["module"] = loc.module;
     json["offset"] = QString::number(loc.offset, 16);
     json["lastAddress"] = QString::number(loc.lastAddress, 16);
+    if (loc.kind == LocatorKind::PointerChain) {
+        json["pointerChain"] = pointerChainToJson(loc.pointerChain);
+    }
     return json;
 }
 
@@ -44,6 +72,9 @@ Locator locatorFromJson(const QJsonObject& json) {
     loc.module = json.value("module").toString();
     loc.offset = json.value("offset").toString().toULongLong(nullptr, 16);
     loc.lastAddress = json.value("lastAddress").toString().toULongLong(nullptr, 16);
+    if (loc.kind == LocatorKind::PointerChain) {
+        loc.pointerChain = pointerChainFromJson(json.value("pointerChain").toObject());
+    }
     return loc;
 }
 

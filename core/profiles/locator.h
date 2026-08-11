@@ -1,6 +1,7 @@
 #pragma once
 
 #include "process/process_handle.h"
+#include "pointer/pointer_chain.h"
 
 #include <QString>
 #include <cstdint>
@@ -13,6 +14,7 @@ namespace killcore {
 enum class LocatorKind {
     Absolute,      // Adresse absolue (non stable, debug uniquement)
     ModuleOffset,  // Module + offset (stable via ASLR)
+    PointerChain,  // Chaîne de pointeurs multi-niveau (stable, requis pour les jeux modernes)
 };
 
 /**
@@ -25,6 +27,10 @@ struct Locator {
     QString     module;     // ex: "KillEngineTestTarget.exe"
     uint64_t    offset{0};  // ex: 0x3F2A0
     uint64_t    lastAddress{0}; // dernière adresse absolue connue (debug)
+
+    /// Chaîne de pointeurs (utilisé quand kind == PointerChain).
+    /// Pour StarCraft 2 et les jeux modernes où la cible est allouée sur le tas.
+    PointerChain pointerChain;
 
     /// Sérialise le locator en chaîne lisible.
     QString toString() const;

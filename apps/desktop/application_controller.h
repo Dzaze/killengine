@@ -213,6 +213,30 @@ public:
     /// Active une cible de profil pour l'utiliser directement depuis l'Assistant.
     Q_INVOKABLE QVariantMap activateProfileTarget(const QString& profileName, const QString& targetName);
 
+    // -----------------------------------------------------------------------
+    // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
+    // -----------------------------------------------------------------------
+
+    /// Scanne la mémoire pour trouver des chaînes de pointeurs menant à une adresse cible.
+    /// addressHex = adresse trouvée par scan (ex: minéraux).
+    /// options keys (optionnelles): maxDepth, maxOffset, maxResults, onlyModuleBase,
+    ///                              baseModules (QStringList), alignment.
+    Q_INVOKABLE QVariantMap scanPointerChains(
+        const QString& addressHex,
+        const QVariantMap& scanOptions);
+
+    /// Résout une chaîne de pointeurs et retourne l'adresse finale + étapes intermédiaires.
+    /// chain keys: module, baseOffset (hex string), offsets (liste de hex strings).
+    Q_INVOKABLE QVariantMap resolvePointerChain(const QVariantMap& chain);
+
+    /// Sauvegarde une cible de profil avec une chaîne de pointeurs comme locator.
+    Q_INVOKABLE QVariantMap savePointerChainProfileTarget(
+        const QString& profileName,
+        const QString& targetName,
+        const QVariantMap& chain,
+        const QString& valueType,
+        const QString& description);
+
 signals:
     void attachmentChanged();
     void scanStarted();

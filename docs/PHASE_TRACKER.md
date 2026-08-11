@@ -47,12 +47,13 @@ Prerequisites before Phase 12:
   - [x] delta
   - [x] UI next scan entry point
   - [x] validation with KillEngineTestTarget
-- [x] PHASE 7 - Unknown Initial Value
+  - [x] PHASE 7 - Unknown Initial Value
   - [x] snapshot
   - [x] comparison
   - [x] LZ4 compression
   - [x] mapped storage
   - [x] UI unknown initial value entry point
+  - [x] garde-fous stabilite : `unchanged` interdit en premiere comparaison unknown et plafonnement des retours massifs
   - [x] validation with KillEngineTestTarget
 - [x] PHASE 8 - Watch / Write / Freeze
   - [x] watch/read preview
@@ -172,6 +173,7 @@ Prerequisites before Phase 12:
     - [x] tests d'intégration automatisés avec `KillEngineTestTarget.exe`
     - [x] scénario exact complet : scan exact -> next scan -> écriture -> vérification -> rollback
     - [x] scénario unknown complet : capture -> changement -> comparaison -> écriture
+    - [x] garde-fous unknown : capture obligatoire avant compare, `stable/ne change pas` reserve au raffinage, limite de retours trop volumineux
     - [x] scénario profils complet : sauvegarde -> résolution -> activation -> écriture
     - [x] test logger `LevelFiltering` stabilisé après réinitialisation répétée
     - [x] validation passe expert gameplay : UI build, build global, unitaires 38/38, intégration 4/4
@@ -179,3 +181,13 @@ Prerequisites before Phase 12:
     - [x] package portable validé via `scripts/release-check.ps1 -Package`
     - [x] checklist manuelle V1 documentée dans `docs/V1_REGRESSION_CHECKLIST.md`
     - [ ] passe de régression manuelle V1 sur Solitaire et KillEngineTestTarget
+- [x] PHASE 14 - Pointer Chains (StarCraft 2 / jeux modernes)
+    - [x] PointerChain : structure + resolution multi-niveau
+    - [x] PointerScanner : algorithme BFS pour trouver les chaines depuis une adresse cible
+    - [x] Extension Locator : LocatorKind::PointerChain (retrocompatible)
+    - [x] ProfileStore : serialisation JSON des chaines de pointeurs
+    - [x] ApplicationController : scanPointerChains, resolvePointerChain, savePointerChainProfileTarget
+    - [x] Frontend : types TypeScript + UI ExpertView (scan, test, sauvegarde profil)
+    - [x] Tests unitaires : 6 tests PointerChain, dont round-trip profil pointer_chain (44/44 au total)
+    - [x] Convention de resolution corrigee : chaque offset suit un dereferencement, compatible avec les chaines trouvees par le scanner
+    - [ ] Validation manuelle sur StarCraft 2

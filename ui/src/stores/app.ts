@@ -888,6 +888,11 @@ export const useAppStore = defineStore('app', () => {
 
   async function doExactScan() {
     if (!exactScanValue.value.trim() || scanBusy.value) return
+
+    // Le mode Auto (multi-type) est crucial pour StarCraft 2 : il cherche
+    // Int32/Int64/Float32/Float64 + variantes (×100, unsigned...) en une fois.
+    const isAutoType = exactScanType.value.toLowerCase() === 'auto'
+
     // Si le Mode Expert est activé et qu'au moins un filtre est défini, on utilise l'API expert.
     const hasExpertFilter =
       expertModeEnabled.value
@@ -900,22 +905,40 @@ export const useAppStore = defineStore('app', () => {
     try {
       scanBusy.value = true
       setScanProgress(0)
-      scanStatusText.value = 'Scan exact en cours...'
-      addActionLog('scan', `Scan exact ${exactScanValue.value}`, `${exactScanType.value}${hasExpertFilter ? ' · filtres expert actifs' : ''}.`, 'info')
-      exactScanResult.value = await backend.startExactScanAsync(
-        exactScanValue.value,
-        exactScanType.value,
-        hasExpertFilter
-          ? {
-              startAddress: expertStartAddress.value.trim() || undefined,
-              stopAddress: expertStopAddress.value.trim() || undefined,
-              alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
-              writableOnly: expertWritableOnly.value,
-              executableOnly: expertExecutableOnly.value,
-              copyOnWriteOnly: expertCopyOnWriteOnly.value,
-            }
-          : {},
-      )
+      scanStatusText.value = isAutoType ? 'Scan multi-type en cours...' : 'Scan exact en cours...'
+      addActionLog('scan', `Scan ${isAutoType ? 'multi-type' : 'exact'} ${exactScanValue.value}`, `${exactScanType.value}${hasExpertFilter ? ' · filtres expert actifs' : ''}.`, 'info')
+
+      if (isAutoType) {
+        const controller = backend.getController()
+        if (controller.startExactScanMultiType) {
+          exactScanResult.value = await controller.startExactScanMultiType(
+            exactScanValue.value,
+            exactScanType.value,
+          )
+        } else {
+          // Fallback : si le backend n'expose pas le scan multi-type, on utilise le scan simple.
+          exactScanResult.value = await backend.startExactScanAsync(
+            exactScanValue.value,
+            'Int32',
+            {},
+          )
+        }
+      } else {
+        exactScanResult.value = await backend.startExactScanAsync(
+          exactScanValue.value,
+          exactScanType.value,
+          hasExpertFilter
+            ? {
+                startAddress: expertStartAddress.value.trim() || undefined,
+                stopAddress: expertStopAddress.value.trim() || undefined,
+                alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
+                writableOnly: expertWritableOnly.value,
+                executableOnly: expertExecutableOnly.value,
+                copyOnWriteOnly: expertCopyOnWriteOnly.value,
+              }
+            : {},
+        )
+      }
       setScanProgress(Math.max(scanProgressPercent.value, 95))
       candidatePageIndex.value = 0
       scanStatusText.value = 'Chargement des candidats...'
@@ -1061,6 +1084,7 @@ export const useAppStore = defineStore('app', () => {
       candidatePageIndex.value = 0
       nextScanResult.value = null
       unknownNextScanResult.value = null
+      unknownScanMode.value = 'changed'
       unknownGuideSteps.value = []
       pushUnknownGuideStep({
         mode: 'capture',
@@ -1106,6 +1130,34 @@ export const useAppStore = defineStore('app', () => {
       scanStatusText.value = `Raffinage unknown ${unknownScanMode.value}...`
       addActionLog('scan', `Raffinage unknown ${unknownScanMode.value}`, `${candidatePage.value?.totalCount ?? 0} candidat(s).`, 'info')
       await doNextScan()
+      return
+    }
+    if (!unknownSnapshotResult.value?.success) {
+      scanStatusText.value = 'Capture d’abord une image unknown avant de comparer.'
+      unknownNextScanResult.value = {
+        success: false,
+        partial: false,
+        cancelled: false,
+        checkedBytes: 0,
+        matchesFound: 0,
+        stored: 0,
+        error: scanStatusText.value,
+      }
+      addActionLog('scan', 'Comparaison unknown refusée', scanStatusText.value, 'warning')
+      return
+    }
+    if (unknownScanMode.value === 'unchanged') {
+      scanStatusText.value = 'Le mode stable est réservé au raffinage après une première réduction. Utilise d’abord ça change, ça augmente ou ça diminue.'
+      unknownNextScanResult.value = {
+        success: false,
+        partial: false,
+        cancelled: false,
+        checkedBytes: 0,
+        matchesFound: 0,
+        stored: 0,
+        error: scanStatusText.value,
+      }
+      addActionLog('scan', 'Unknown stable refusé', scanStatusText.value, 'warning')
       return
     }
     try {

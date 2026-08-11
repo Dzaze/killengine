@@ -48,6 +48,10 @@ add_library(killcore STATIC
     # Profiles (stubs Phase 0)
     profiles/profile_store.cpp
     profiles/locator.cpp
+
+    # Pointer chains (Phase 14 — StarCraft 2 / jeux modernes)
+    pointer/pointer_chain.cpp
+    pointer/pointer_scanner.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

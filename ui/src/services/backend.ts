@@ -276,7 +276,43 @@ export interface AppSettings {
   modelThreads: number
 }
 
-export interface BackendController {
+  export interface PointerChainInfo {
+    module: string
+    baseOffset: string
+    offsets: string[]
+    depth?: number
+    label?: string
+  }
+
+  export interface PointerScanResult {
+    success: boolean
+    partial?: boolean
+    cancelled?: boolean
+    pointersScanned?: number
+    bytesScanned?: number
+    elapsedMs?: number
+    chainCount?: number
+    chains?: PointerChainInfo[]
+    error?: string
+  }
+
+  export interface PointerChainResolveResult {
+    success: boolean
+    finalAddress?: string
+    steps?: string[]
+    error?: string
+  }
+
+  export interface PointerScanOptions {
+    maxDepth?: number
+    maxOffset?: number
+    maxResults?: number
+    onlyModuleBase?: boolean
+    baseModules?: string[]
+    alignment?: number
+  }
+
+  export interface BackendController {
   getVersion(): Promise<string>
   getProcesses(): Promise<ProcessInfo[]>
   getProcessModules(pid: number): Promise<ProcessModuleInfo[]>
@@ -344,6 +380,17 @@ export interface BackendController {
   deleteProfile(profileName: string): Promise<boolean>
   resolveProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   activateProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
+
+  // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
+  scanPointerChains?(addressHex: string, scanOptions: PointerScanOptions): Promise<PointerScanResult>
+  resolvePointerChain?(chain: PointerChainInfo): Promise<PointerChainResolveResult>
+  savePointerChainProfileTarget?(
+    profileName: string,
+    targetName: string,
+    chain: PointerChainInfo,
+    valueType: string,
+    description: string,
+  ): Promise<Record<string, unknown>>
 }
 
 class BackendService {
