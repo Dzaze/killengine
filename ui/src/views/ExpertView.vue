@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
+  type MemoryWriteTarget,
   type PointerChainInfo,
   type PointerChainResolveResult,
   type PointerScanResult,
@@ -17,6 +18,7 @@ import {
 
 const store = useAppStore()
 const selectedCandidateAddresses = ref<string[]>([])
+const selectedWriteTargetOverrides = ref<Record<string, MemoryWriteTarget>>({})
 
 // Phase 14 — Pointer Chains
 const pointerScanAddress = ref('')
@@ -427,6 +429,13 @@ function useUiSourceCandidate(candidate: UiStringSourceCandidate) {
   store.selectCandidate(candidate.address, candidate.type)
   store.writeValue = uiStringValue.value || store.exactScanValue
   selectedCandidateAddresses.value = [candidate.address]
+  selectedWriteTargetOverrides.value = {
+    [candidate.address]: {
+      address: candidate.address,
+      type: candidate.type,
+      variantLabel: candidate.variantLabel,
+    },
+  }
   syncSelectedWriteType()
 }
 
@@ -440,6 +449,14 @@ function useSelectedUiSourcesForWrite() {
   const chosen = uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate)))
   if (chosen.length === 0) return
   selectedCandidateAddresses.value = chosen.map((candidate) => candidate.address)
+  selectedWriteTargetOverrides.value = Object.fromEntries(chosen.map((candidate) => [
+    candidate.address,
+    {
+      address: candidate.address,
+      type: candidate.type,
+      variantLabel: candidate.variantLabel,
+    },
+  ]))
   const types = Array.from(new Set(chosen.map((candidate) => candidate.type)))
   if (types.length === 1) {
     store.exactScanType = types[0]
@@ -460,11 +477,21 @@ const displayedCandidates = computed(() => currentPageCandidates.value.filter(
 const selectedCandidateRecords = computed(() => selectedCandidateAddresses.value
   .map((address) => currentPageCandidates.value.find((candidate) => candidate.address === address))
   .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate)))
+const selectedWriteTargets = computed<MemoryWriteTarget[]>(() => selectedCandidateAddresses.value.map((address) => {
+  const override = selectedWriteTargetOverrides.value[address]
+  if (override) return override
+  const record = currentPageCandidates.value.find((candidate) => candidate.address === address)
+  return {
+    address,
+    type: String(record?.type ?? store.exactScanType),
+  }
+}))
+const selectedWriteHasVariants = computed(() => selectedWriteTargets.value.some((target) => Boolean(target.variantLabel)))
 const selectedCandidateTypes = computed(() => Array.from(new Set(
-  selectedCandidateRecords.value.map((candidate) => String(candidate.type)),
+  selectedWriteTargets.value.map((target) => String(target.variantLabel || target.type)),
 )))
 const selectedWriteType = computed(() => selectedCandidateTypes.value.length === 1
-  ? selectedCandidateTypes.value[0]
+  ? selectedWriteTargets.value[0]?.type ?? store.exactScanType
   : store.exactScanType)
 const hasSelectedWriteTargets = computed(() => selectedCandidateAddresses.value.length > 0)
 const writeTargetLabel = computed(() => {
@@ -472,7 +499,7 @@ const writeTargetLabel = computed(() => {
   const knownCount = selectedCandidateRecords.value.length
   const typeNote = selectedCandidateTypes.value.length === 1
     ? selectedCandidateTypes.value[0]
-    : 'type choisi'
+    : (selectedWriteHasVariants.value ? 'auto source' : 'type choisi')
   return `${selectedCandidateAddresses.value.length} adresse(s) sélectionnée(s) · ${typeNote}${knownCount < selectedCandidateAddresses.value.length ? ' · certaines hors page' : ''}`
 })
 const canWriteFromPanel = computed(() => hasSelectedWriteTargets.value
@@ -537,10 +564,14 @@ function isCandidateSelected(address: string) {
 function toggleCandidateSelection(address: string) {
   if (isCandidateSelected(address)) {
     selectedCandidateAddresses.value = selectedCandidateAddresses.value.filter((item) => item !== address)
+    const { [address]: _removed, ...rest } = selectedWriteTargetOverrides.value
+    selectedWriteTargetOverrides.value = rest
     syncSelectedWriteType()
     return
   }
   selectedCandidateAddresses.value = [...selectedCandidateAddresses.value, address]
+  const { [address]: _removed, ...rest } = selectedWriteTargetOverrides.value
+  selectedWriteTargetOverrides.value = rest
   syncSelectedWriteType()
 }
 
@@ -550,15 +581,22 @@ function toggleCurrentPageSelection() {
     && pageAddresses.every((address) => selectedCandidateAddresses.value.includes(address))
   if (allPageSelected) {
     selectedCandidateAddresses.value = selectedCandidateAddresses.value.filter((address) => !pageAddresses.includes(address))
+    selectedWriteTargetOverrides.value = Object.fromEntries(
+      Object.entries(selectedWriteTargetOverrides.value).filter(([address]) => !pageAddresses.includes(address)),
+    )
     syncSelectedWriteType()
     return
   }
   selectedCandidateAddresses.value = Array.from(new Set([...selectedCandidateAddresses.value, ...pageAddresses]))
+  selectedWriteTargetOverrides.value = Object.fromEntries(
+    Object.entries(selectedWriteTargetOverrides.value).filter(([address]) => !pageAddresses.includes(address)),
+  )
   syncSelectedWriteType()
 }
 
 function clearCandidateSelection() {
   selectedCandidateAddresses.value = []
+  selectedWriteTargetOverrides.value = {}
 }
 
 function syncSelectedWriteType() {
@@ -581,11 +619,11 @@ function useSelectedCandidatesInAssistant() {
 
 function writeSelectedCandidates() {
   if (selectedCandidateAddresses.value.length === 0 || !store.writeValue.trim()) return
-  void store.writeSelectedAddresses(
-    selectedCandidateAddresses.value,
-    selectedWriteType.value,
-    store.writeValue,
-  )
+  if (selectedWriteHasVariants.value) {
+    void store.writeSelectedTargets(selectedWriteTargets.value, store.writeValue)
+    return
+  }
+  void store.writeSelectedAddresses(selectedCandidateAddresses.value, selectedWriteType.value, store.writeValue)
 }
 
 function writeFromPanel() {

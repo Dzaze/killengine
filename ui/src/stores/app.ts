@@ -10,7 +10,9 @@ import {
   type MemoryMapResult,
   type NextScanResult,
   type MemoryReadPreview,
+  type MemoryWriteBatchResult,
   type MemoryWriteResult,
+  type MemoryWriteTarget,
   type ProcessInfo,
   type ProcessModuleInfo,
   type SmartSearchContextResult,
@@ -1553,6 +1555,31 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function writeSelectedTargets(targets: MemoryWriteTarget[], value: string) {
+    if (targets.length === 0 || !value.trim()) return
+    try {
+      const controller = backend.getController()
+      if (controller.writeMemoryValuesWithVariants) {
+        const result: MemoryWriteBatchResult = await controller.writeMemoryValuesWithVariants(targets, value)
+        writeResult.value = result
+        const written = result.written ?? result.results?.filter((r) => r.success).length ?? 0
+        scanStatusText.value = result.success
+          ? `${written} adresse(s) écrite(s) avec encodage auto.`
+          : `Écriture auto partielle: ${written}/${targets.length} réussie(s).`
+        for (const target of targets) {
+          addAddressToWatch(target.address, target.type)
+        }
+        addActionLog('write', `Écriture auto ${value}`, `${written}/${targets.length} réussie(s).`, result.success ? 'success' : 'warning')
+        return
+      }
+      await writeSelectedAddresses(targets.map((target) => target.address), targets[0]?.type ?? exactScanType.value, value)
+    } catch (e) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
+      scanStatusText.value = 'Écriture auto échouée.'
+      addActionLog('write', 'Écriture auto échouée', String(e), 'error')
+    }
+  }
+
   async function writeSelectedValue() {
     if (!selectedCandidateAddress.value || !writeValue.value.trim()) return
     updateWriteSafetyWarning()
@@ -1852,6 +1879,7 @@ export const useAppStore = defineStore('app', () => {
     candidateVisualState,
     writeSelectedValue,
     writeSelectedAddresses,
+    writeSelectedTargets,
     rollbackLastWrite,
     rollbackLastWriteBatch,
     freezeCandidateCurrent,

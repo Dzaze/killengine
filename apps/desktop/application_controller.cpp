@@ -3553,6 +3553,106 @@ QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, c
     return result;
 }
 
+QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantList& targets, const QString& value) {
+    QVariantMap result;
+    QVariantList writeResults;
+    result["success"] = false;
+    result["results"] = writeResults;
+    result["written"] = 0;
+    result["total"] = targets.size();
+
+    const QString rawValue = value.trimmed();
+    if (targets.isEmpty()) {
+        result["error"] = "Aucune cible à écrire.";
+        return result;
+    }
+    if (rawValue.isEmpty()) {
+        result["error"] = "Valeur vide.";
+        return result;
+    }
+
+    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
+    if (!writeHandle.isValid()) {
+        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        return result;
+    }
+
+    killcore::MemoryWriter writer(writeHandle);
+    bool allWritesOk = true;
+    int written = 0;
+    m_lastBatchStartIndex = m_writeHistory.size();
+
+    for (const auto& item : targets) {
+        const QVariantMap target = item.toMap();
+        QVariantMap writeResult;
+        writeResult["success"] = false;
+        writeResult["verified"] = false;
+        writeResult["bytesWritten"] = 0;
+
+        const QString addressHex = target.value("address").toString();
+        const QString typeName = target.value("type").toString();
+        const QString variantLabel = target.value("variantLabel").toString();
+        writeResult["address"] = addressHex;
+        writeResult["type"] = typeName;
+        writeResult["variantLabel"] = variantLabel;
+        writeResult["displayValue"] = rawValue;
+
+        uint64_t address = 0;
+        if (!parseHexAddress(addressHex, &address)) {
+            writeResult["error"] = "Adresse invalide.";
+            allWritesOk = false;
+            writeResults.append(writeResult);
+            continue;
+        }
+
+        killcore::ValueType type;
+        if (!killcore::parseValueType(typeName, &type)) {
+            writeResult["error"] = "Type invalide.";
+            allWritesOk = false;
+            writeResults.append(writeResult);
+            continue;
+        }
+
+        QString parseError;
+        const QByteArray targetBytes = killcore::targetBytesForTypeAndVariant(rawValue, type, variantLabel, &parseError);
+        if (targetBytes.isEmpty()) {
+            writeResult["error"] = parseError.isEmpty() ? QString("Valeur incompatible avec cette variante.") : parseError;
+            allWritesOk = false;
+            writeResults.append(writeResult);
+            continue;
+        }
+
+        const auto write = writer.write(address, targetBytes, true);
+        writeResult["success"] = write.success;
+        writeResult["verified"] = write.verified;
+        writeResult["bytesWritten"] = static_cast<int>(write.bytesWritten);
+        writeResult["error"] = write.errorMessage;
+        writeResult["encodedHex"] = QString::fromLatin1(targetBytes.toHex(' ').toUpper());
+
+        if (write.success) {
+            ++written;
+            m_lastWriteAddress = address;
+            m_lastWritePreviousValue = write.previousValue;
+            m_writeHistory.append({address, write.previousValue, targetBytes, type, rawValue});
+        } else {
+            allWritesOk = false;
+        }
+        writeResults.append(writeResult);
+    }
+
+    m_lastBatchEndIndex = m_writeHistory.size();
+    result["success"] = allWritesOk && written > 0;
+    result["verified"] = result.value("success").toBool();
+    result["bytesWritten"] = 0;
+    result["written"] = written;
+    result["total"] = targets.size();
+    result["results"] = writeResults;
+    result["error"] = allWritesOk
+        ? QString()
+        : QString("Écriture partielle: %1/%2 réussie(s).").arg(written).arg(targets.size());
+    return result;
+}
+
 QVariantMap ApplicationController::writeMemoryValueConfirmed(
     const QString& addressHex,
     const QString& valueType,

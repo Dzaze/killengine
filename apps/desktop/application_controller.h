@@ -153,6 +153,9 @@ public:
     /// Écrit une valeur typée à une adresse.
     Q_INVOKABLE QVariantMap writeMemoryValue(const QString& addressHex, const QString& valueType, const QString& value);
 
+    /// Écrit une valeur affichée sur plusieurs cibles, en appliquant les variantes x100/x65536/etc.
+    Q_INVOKABLE QVariantMap writeMemoryValuesWithVariants(const QVariantList& targets, const QString& value);
+
     /// Restaure la dernière valeur écrasée par writeMemoryValue.
     Q_INVOKABLE QVariantMap rollbackLastWrite();
 

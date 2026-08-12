@@ -305,6 +305,18 @@ export interface MemoryWriteResult {
   finalVerified?: boolean
 }
 
+export interface MemoryWriteTarget {
+  address: string
+  type: string
+  variantLabel?: string
+}
+
+export interface MemoryWriteBatchResult extends MemoryWriteResult {
+  written?: number
+  total?: number
+  results?: MemoryWriteResult[]
+}
+
 export interface ExpertScanOptions {
   startAddress?: string
   stopAddress?: string
@@ -488,6 +500,7 @@ export interface AppSettings {
   unknownNextScan(mode: string, valueType: string): Promise<UnknownNextScanResult>
   unknownNextScanAsync(mode: string, valueType: string): Promise<Record<string, unknown>>
   writeMemoryValue(addressHex: string, valueType: string, value: string): Promise<MemoryWriteResult>
+  writeMemoryValuesWithVariants?(targets: MemoryWriteTarget[], value: string): Promise<MemoryWriteBatchResult>
   rollbackLastWrite(): Promise<MemoryWriteResult>
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
@@ -1075,6 +1088,9 @@ class BackendService {
       },
       async writeMemoryValue(_addressHex: string, _valueType: string, _value: string) {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend' }
+      },
+      async writeMemoryValuesWithVariants(_targets: MemoryWriteTarget[], _value: string) {
+        return { success: false, verified: false, bytesWritten: 0, written: 0, total: 0, results: [], error: 'Mock backend' }
       },
       async rollbackLastWrite() {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend' }
