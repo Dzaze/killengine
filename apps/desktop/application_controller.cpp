@@ -28,6 +28,7 @@
 #include <QPointer>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QSet>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -345,6 +346,17 @@ bool hasNumericBoundary(const QByteArray& haystack, qsizetype index, qsizetype l
 
 QString uiStringAddress(uint64_t address) {
     return QString::number(address, 16).toUpper();
+}
+
+const killcore::MemoryRegion* findRegionContaining(
+    const QList<killcore::MemoryRegion>& regions,
+    uint64_t address) {
+    for (const auto& region : regions) {
+        if (address >= region.baseAddress && address < region.baseAddress + region.size) {
+            return &region;
+        }
+    }
+    return nullptr;
 }
 
 uint64_t relevantBytesForUnknownSnapshotOptions(
@@ -1533,6 +1545,161 @@ QVariantMap ApplicationController::trackUiStringCandidates(const QVariantList& c
     result["unreadable"] = unreadable;
     result["remaining"] = survivors.size();
     result["survivors"] = survivors;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::analyzeUiStringSources(
+    const QVariantMap& stringCandidate,
+    const QString& value,
+    const QVariantMap& optionsMap) const {
+    QVariantMap result;
+    QVariantList candidates;
+    result["success"] = false;
+    result["candidates"] = candidates;
+
+    const QString rawValue = value.trimmed();
+    if (rawValue.isEmpty()) {
+        result["error"] = "Valeur source vide.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t stringAddress = 0;
+    if (!parseHexAddress(stringCandidate.value("address").toString(), &stringAddress)) {
+        result["error"] = "Adresse string invalide.";
+        return result;
+    }
+
+    const int stringLength = std::clamp(stringCandidate.value("byteLength", 0).toInt(), 0, 256);
+    const int radius = std::clamp(optionsMap.value("radiusBytes", 65536).toInt(), 256, 1024 * 1024);
+    const int maxResults = std::clamp(optionsMap.value("maxResults", 200).toInt(), 1, 5000);
+    const int alignment = std::clamp(optionsMap.value("alignment", 1).toInt(), 1, 16);
+
+    const auto variants = killcore::generateScanVariants(rawValue, killcore::ValueType::Int32, false);
+    if (variants.isEmpty()) {
+        result["error"] = "Valeur impossible à convertir en variantes numériques.";
+        return result;
+    }
+
+    const auto regions = killcore::MemoryMap::snapshot(m_handle);
+    const killcore::MemoryRegion* region = findRegionContaining(regions, stringAddress);
+    if (!region || !region->readable || region->guarded || region->size == 0) {
+        result["error"] = "Région de la string illisible.";
+        return result;
+    }
+
+    const uint64_t regionStart = region->baseAddress;
+    const uint64_t regionEnd = region->baseAddress + region->size;
+    const uint64_t windowStart = stringAddress > static_cast<uint64_t>(radius)
+        ? std::max(regionStart, stringAddress - static_cast<uint64_t>(radius))
+        : regionStart;
+    const uint64_t requestedEnd = stringAddress + static_cast<uint64_t>(stringLength) + static_cast<uint64_t>(radius);
+    const uint64_t windowEnd = std::min(regionEnd, requestedEnd);
+    if (windowEnd <= windowStart) {
+        result["error"] = "Fenêtre d'analyse vide.";
+        return result;
+    }
+
+    const size_t readSize = static_cast<size_t>(std::min<uint64_t>(windowEnd - windowStart, 2ull * 1024ull * 1024ull));
+    killcore::MemoryReader reader(m_handle);
+    const auto read = reader.readChunked(windowStart, readSize, 64 * 1024);
+    if (!read.success && !read.partial) {
+        result["error"] = read.errorMessage;
+        return result;
+    }
+
+    struct SourceHit {
+        QVariantMap map;
+        double score{0.0};
+        uint64_t distance{0};
+    };
+
+    QList<SourceHit> hits;
+    QSet<QString> seen;
+    const uint64_t stringEnd = stringAddress + static_cast<uint64_t>(std::max(0, stringLength));
+
+    for (const auto& variant : variants) {
+        const QByteArray needle = killcore::scanValueToBytes(variant.value);
+        if (needle.isEmpty() || needle.size() > read.data.size()) {
+            continue;
+        }
+
+        qsizetype from = 0;
+        while (hits.size() < maxResults * 4) {
+            const qsizetype found = read.data.indexOf(needle, from);
+            if (found < 0) {
+                break;
+            }
+            from = found + 1;
+            const uint64_t address = windowStart + static_cast<uint64_t>(found);
+            if (alignment > 1 && (address % static_cast<uint64_t>(alignment)) != 0) {
+                continue;
+            }
+            if (address >= stringAddress && address < stringEnd) {
+                continue;
+            }
+
+            const QString key = uiStringAddress(address) + "|" + killcore::valueTypeToString(variant.value.type);
+            if (seen.contains(key)) {
+                continue;
+            }
+            seen.insert(key);
+
+            const uint64_t distance = address > stringAddress ? address - stringAddress : stringAddress - address;
+            double score = 1.0;
+            score -= std::min<double>(0.55, static_cast<double>(distance) / static_cast<double>(std::max(1, radius)) * 0.55);
+            if (variant.secondary) {
+                score -= 0.18;
+            }
+            const auto type = variant.value.type;
+            if (type == killcore::ValueType::Int32 || type == killcore::ValueType::UInt32) {
+                score += 0.08;
+            }
+            if (type == killcore::ValueType::Int8 || type == killcore::ValueType::UInt8) {
+                score -= 0.2;
+            }
+            score = std::clamp(score, 0.05, 1.0);
+
+            QVariantMap entry;
+            entry["address"] = uiStringAddress(address);
+            entry["type"] = killcore::valueTypeToString(type);
+            entry["confidence"] = score;
+            entry["variantLabel"] = variant.label;
+            entry["lastValueHex"] = QString::fromLatin1(needle.toHex(' ').toUpper());
+            entry["lastValueNumber"] = bytesToDouble(needle, type);
+            entry["distanceBytes"] = static_cast<qulonglong>(distance);
+            entry["offsetFromString"] = static_cast<qlonglong>(address) - static_cast<qlonglong>(stringAddress);
+            entry["regionBase"] = uiStringAddress(region->baseAddress);
+            entry["protection"] = killcore::protectionToString(region->protection);
+            entry["memoryType"] = killcore::memoryTypeToString(region->type);
+            hits.append({entry, score, distance});
+        }
+    }
+
+    std::sort(hits.begin(), hits.end(), [](const SourceHit& a, const SourceHit& b) {
+        if (std::abs(a.score - b.score) > 0.000001) {
+            return a.score > b.score;
+        }
+        return a.distance < b.distance;
+    });
+
+    for (int i = 0; i < hits.size() && i < maxResults; ++i) {
+        candidates.append(hits.at(i).map);
+    }
+
+    result["success"] = true;
+    result["partial"] = hits.size() > maxResults;
+    result["candidates"] = candidates;
+    result["matchesFound"] = hits.size();
+    result["matchesReturned"] = candidates.size();
+    result["bytesScanned"] = static_cast<qulonglong>(read.bytesRead);
+    result["windowStart"] = uiStringAddress(windowStart);
+    result["windowEnd"] = uiStringAddress(windowStart + static_cast<uint64_t>(read.bytesRead));
+    result["radiusBytes"] = radius;
     result["error"] = "";
     return result;
 }

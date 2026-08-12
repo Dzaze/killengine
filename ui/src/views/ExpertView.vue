@@ -8,6 +8,8 @@ import {
   type PointerScanResult,
   type UiStringCandidate,
   type UiStringScanResult,
+  type UiStringSourceCandidate,
+  type UiStringSourceResult,
   type UiStringTrackResult,
 } from '@/services/backend'
 
@@ -34,8 +36,11 @@ const uiStringBoundary = ref(true)
 const uiStringBusy = ref(false)
 const uiStringResult = ref<UiStringScanResult | null>(null)
 const uiStringTrackResult = ref<UiStringTrackResult | null>(null)
+const uiStringSourceResult = ref<UiStringSourceResult | null>(null)
 const uiStringCandidates = ref<UiStringCandidate[]>([])
+const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
+const selectedUiSourceAddresses = ref<string[]>([])
 
 async function runPointerScan() {
   if (!pointerScanAddress.value.trim()) return
@@ -143,7 +148,10 @@ async function scanUiStrings() {
   uiStringBusy.value = true
   uiStringResult.value = null
   uiStringTrackResult.value = null
+  uiStringSourceResult.value = null
+  uiStringSourceCandidates.value = []
   selectedUiStringAddresses.value = []
+  selectedUiSourceAddresses.value = []
   try {
     const controller = backend.getController()
     if (!controller.scanUiStrings) {
@@ -217,6 +225,90 @@ function watchUiStringCandidate(candidate: UiStringCandidate) {
 function useUiStringCandidate(candidate: UiStringCandidate) {
   store.searchQuery = `je trace le texte affiche a 0x${candidate.address} (${candidate.encoding})`
   void store.doSearch()
+}
+
+function sourceKey(candidate: UiStringSourceCandidate) {
+  return `${candidate.type}:${candidate.address}`
+}
+
+function isUiSourceSelected(candidate: UiStringSourceCandidate) {
+  return selectedUiSourceAddresses.value.includes(sourceKey(candidate))
+}
+
+function toggleUiSourceSelection(candidate: UiStringSourceCandidate) {
+  const key = sourceKey(candidate)
+  if (selectedUiSourceAddresses.value.includes(key)) {
+    selectedUiSourceAddresses.value = selectedUiSourceAddresses.value.filter((item) => item !== key)
+    return
+  }
+  selectedUiSourceAddresses.value = [...selectedUiSourceAddresses.value, key]
+}
+
+async function analyzeUiStringSources(candidate?: UiStringCandidate) {
+  const target = candidate ?? selectedUiStringCandidates()[0]
+  const value = (uiStringValue.value || store.exactScanValue).trim()
+  if (!target || !value) return
+  uiStringBusy.value = true
+  uiStringSourceResult.value = null
+  uiStringSourceCandidates.value = []
+  selectedUiSourceAddresses.value = []
+  try {
+    const controller = backend.getController()
+    if (!controller.analyzeUiStringSources) {
+      uiStringSourceResult.value = {
+        success: false,
+        matchesFound: 0,
+        matchesReturned: 0,
+        bytesScanned: 0,
+        candidates: [],
+        error: 'Methode backend indisponible (mock mode).',
+      }
+      return
+    }
+    const result = await controller.analyzeUiStringSources(target, value, {
+      radiusBytes: 65536,
+      maxResults: 200,
+      alignment: 1,
+    })
+    uiStringSourceResult.value = result
+    uiStringSourceCandidates.value = result.candidates ?? []
+  } catch (e) {
+    uiStringSourceResult.value = {
+      success: false,
+      matchesFound: 0,
+      matchesReturned: 0,
+      bytesScanned: 0,
+      candidates: [],
+      error: String(e),
+    }
+  } finally {
+    uiStringBusy.value = false
+  }
+}
+
+function useUiSourceCandidate(candidate: UiStringSourceCandidate) {
+  store.selectCandidate(candidate.address, candidate.type)
+  store.writeValue = uiStringValue.value || store.exactScanValue
+  selectedCandidateAddresses.value = [candidate.address]
+  syncSelectedWriteType()
+}
+
+function watchUiSourceCandidate(candidate: UiStringSourceCandidate) {
+  store.addAddressToWatch(candidate.address, candidate.type)
+  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
+}
+
+function useSelectedUiSourcesForWrite() {
+  const selected = new Set(selectedUiSourceAddresses.value)
+  const chosen = uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate)))
+  if (chosen.length === 0) return
+  selectedCandidateAddresses.value = chosen.map((candidate) => candidate.address)
+  const types = Array.from(new Set(chosen.map((candidate) => candidate.type)))
+  if (types.length === 1) {
+    store.exactScanType = types[0]
+  }
+  store.selectedCandidateAddress = chosen[0].address
+  store.writeValue = uiStringValue.value || store.exactScanValue
 }
 
 const candidatePageTotal = computed(() => {
@@ -757,11 +849,20 @@ onMounted(() => {
           <span>Restants: {{ formatNumber(uiStringTrackResult.remaining) }}</span>
           <span>Illisibles: {{ formatNumber(uiStringTrackResult.unreadable) }}</span>
         </div>
+        <div v-if="uiStringSourceResult" class="metrics">
+          <span>Sources: {{ formatNumber(uiStringSourceResult.matchesReturned) }}</span>
+          <span>Fenêtre: {{ formatBytes(uiStringSourceResult.bytesScanned) }}</span>
+          <span v-if="uiStringSourceResult.partial" class="warning-text">résultats limités</span>
+        </div>
         <p v-if="uiStringResult?.error" class="error">{{ uiStringResult.error }}</p>
         <p v-if="uiStringTrackResult?.error" class="error">{{ uiStringTrackResult.error }}</p>
+        <p v-if="uiStringSourceResult?.error" class="error">{{ uiStringSourceResult.error }}</p>
         <div v-if="uiStringCandidates.length > 0" class="selection-toolbar">
           <button class="btn btn-secondary compact" type="button" @click="toggleAllUiStringSelection()">
             {{ selectedUiStringAddresses.length === uiStringCandidates.length ? 'Tout décocher' : 'Tout cocher' }}
+          </button>
+          <button class="btn btn-primary compact" type="button" :disabled="uiStringBusy" @click="analyzeUiStringSources()">
+            Analyser sources
           </button>
           <span>{{ selectedUiStringAddresses.length || uiStringCandidates.length }} suivi(s) au prochain filtre</span>
         </div>
@@ -779,8 +880,42 @@ onMounted(() => {
             <strong>{{ candidate.text }}</strong>
             <span>{{ candidate.protection || '-' }}</span>
             <span>{{ candidate.memoryType || '-' }}</span>
+            <button class="btn btn-primary compact" type="button" @click="analyzeUiStringSources(candidate)">Sources</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">Watch</button>
             <button class="btn btn-secondary compact" type="button" @click="useUiStringCandidate(candidate)">Assistant</button>
+          </div>
+        </div>
+        <div v-if="uiStringSourceCandidates.length > 0" class="source-list">
+          <div class="source-list-title">
+            <strong>Sources numériques proches</strong>
+            <button
+              class="btn btn-primary compact"
+              type="button"
+              :disabled="selectedUiSourceAddresses.length === 0"
+              @click="useSelectedUiSourcesForWrite()"
+            >
+              Envoyer vers Write
+            </button>
+          </div>
+          <div
+            v-for="candidate in uiStringSourceCandidates"
+            :key="sourceKey(candidate)"
+            class="source-row"
+          >
+            <label class="candidate-check">
+              <input
+                type="checkbox"
+                :checked="isUiSourceSelected(candidate)"
+                @change="toggleUiSourceSelection(candidate)"
+              />
+            </label>
+            <code>0x{{ candidate.address }}</code>
+            <span>{{ candidate.type }}</span>
+            <span>{{ candidate.variantLabel || '-' }}</span>
+            <strong>{{ candidate.lastValueNumber }}</strong>
+            <span>{{ formatNumber(candidate.distanceBytes) }} o</span>
+            <button class="btn btn-primary compact" type="button" @click="useUiSourceCandidate(candidate)">Utiliser</button>
+            <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate)">Watch</button>
           </div>
         </div>
       </section>
@@ -1449,7 +1584,7 @@ onMounted(() => {
 
 .ui-string-row {
   display: grid;
-  grid-template-columns: 28px minmax(140px, 1fr) 58px 70px 92px 78px auto auto;
+  grid-template-columns: 28px minmax(140px, 1fr) 58px 70px 92px 78px auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 38px;
@@ -1470,6 +1605,47 @@ onMounted(() => {
 
 .ui-string-row strong {
   color: var(--accent);
+}
+
+.source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.source-list-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.source-row {
+  display: grid;
+  grid-template-columns: 28px minmax(140px, 1fr) 74px minmax(120px, 1fr) 70px 80px auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 7px 8px;
+  border: 1px solid rgba(158, 206, 106, 0.18);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.source-row code {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-row strong {
+  color: var(--success);
 }
 
 .write-controls {
@@ -1902,6 +2078,7 @@ onMounted(() => {
   .unknown-controls,
   .ui-string-controls,
   .ui-string-row,
+  .source-row,
   .write-controls,
   .candidate-toolbar,
   .candidate-row,

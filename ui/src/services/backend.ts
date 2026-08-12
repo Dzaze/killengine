@@ -101,6 +101,33 @@ export interface UiStringTrackResult {
   survivors: UiStringCandidate[]
 }
 
+export interface UiStringSourceCandidate {
+  address: string
+  type: string
+  confidence?: number
+  variantLabel?: string
+  lastValueHex?: string
+  lastValueNumber?: number
+  distanceBytes?: number
+  offsetFromString?: number
+  regionBase?: string
+  protection?: string
+  memoryType?: string
+}
+
+export interface UiStringSourceResult {
+  success: boolean
+  partial?: boolean
+  matchesFound: number
+  matchesReturned: number
+  bytesScanned: number
+  windowStart?: string
+  windowEnd?: string
+  radiusBytes?: number
+  error: string
+  candidates: UiStringSourceCandidate[]
+}
+
 export interface ExactScanMatch {
   address: string
   type: string
@@ -373,6 +400,11 @@ export interface AppSettings {
   readMemoryPreview(addressHex: string, size: number): Promise<MemoryReadPreview>
   scanUiStrings?(value: string, options: ExpertScanOptions & Record<string, unknown>): Promise<UiStringScanResult>
   trackUiStringCandidates?(candidates: UiStringCandidate[], value: string): Promise<UiStringTrackResult>
+  analyzeUiStringSources?(
+    stringCandidate: UiStringCandidate,
+    value: string,
+    options: Record<string, unknown>,
+  ): Promise<UiStringSourceResult>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
   startExactScanExpert(
     value: string,

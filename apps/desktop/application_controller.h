@@ -81,6 +81,12 @@ public:
     /// Relit des candidats texte et garde ceux qui correspondent à la nouvelle valeur affichée.
     Q_INVOKABLE QVariantMap trackUiStringCandidates(const QVariantList& candidates, const QString& value) const;
 
+    /// Cherche des valeurs numériques plausibles autour d'une string UI déjà localisée.
+    Q_INVOKABLE QVariantMap analyzeUiStringSources(
+        const QVariantMap& stringCandidate,
+        const QString& value,
+        const QVariantMap& options) const;
+
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
 
