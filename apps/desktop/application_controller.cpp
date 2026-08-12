@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <thread>
 
 namespace killengine {
@@ -41,9 +42,11 @@ namespace {
 
 constexpr size_t kAutoWriteCandidateLimit = 4;
 constexpr int kDefaultScanMaxResults = 1000000;
-constexpr int kDefaultScanChunkSizeMb = 1;
+constexpr int kDefaultScanChunkSizeMb = 0;
+constexpr int kDefaultScanMaxWorkerThreads = 0;
+constexpr int kDefaultScanMaxInFlightMb = 0;
 constexpr int kDefaultCandidateFileThreshold = 250000;
-constexpr int kDefaultUnknownSnapshotMaxMb = 512;
+constexpr int kDefaultUnknownSnapshotMaxMb = 128;
 constexpr size_t kCandidateDisplayLimit = 250000;
 constexpr int kCandidateHistoryMaxAddresses = 10000;
 constexpr int kCandidateHistoryMaxEntriesPerAddress = 12;
@@ -160,10 +163,19 @@ QVariantMap memoryStatsToVariantMap(const killcore::MemoryMapStats& stats) {
     return entry;
 }
 
+double bytesToDouble(const QByteArray& bytes, killcore::ValueType type);
+QString bytesToHex(const QByteArray& bytes);
+
 QVariantMap candidateToVariantMap(const killcore::Candidate& candidate) {
     QVariantMap entry;
     entry["address"] = QString::number(candidate.address, 16);
     entry["type"] = killcore::valueTypeToString(candidate.type);
+    entry["lastValueHex"] = bytesToHex(candidate.lastValue);
+    entry["lastValueNumber"] = bytesToDouble(candidate.lastValue, candidate.type);
+    entry["confidence"] = candidate.confidence;
+    if (!candidate.variantLabel.isEmpty()) {
+        entry["variantLabel"] = candidate.variantLabel;
+    }
     return entry;
 }
 
@@ -201,11 +213,31 @@ killcore::ScanOptions scanOptionsFromSettings() {
     killcore::ScanOptions options;
     options.maxResults = static_cast<size_t>(
         boundedSettingInt(settings, "scan/maxResults", kDefaultScanMaxResults, 1000, 10000000));
-    options.chunkSize = static_cast<size_t>(
-        boundedSettingInt(settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 1, 64))
-        * 1024
-        * 1024;
+    const QByteArray modeName = settings.value("scan/performanceMode", "Auto").toString().toLatin1();
+    options.performanceMode = killcore::parsePerformanceMode(modeName.constData(), killcore::PerformanceMode::Auto);
+    const int chunkSizeMb = boundedSettingInt(settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 0, 64);
+    options.chunkSize = chunkSizeMb > 0
+        ? static_cast<size_t>(chunkSizeMb) * 1024 * 1024
+        : 0;
+    options.maxWorkerThreads = static_cast<size_t>(
+        boundedSettingInt(settings, "scan/maxWorkerThreads", kDefaultScanMaxWorkerThreads, 0, 128));
+    const int maxInFlightMb = boundedSettingInt(settings, "scan/maxInFlightMb", kDefaultScanMaxInFlightMb, 0, 32768);
+    options.maxInFlightBytes = maxInFlightMb > 0
+        ? static_cast<uint64_t>(maxInFlightMb) * 1024ull * 1024ull
+        : 0;
     options.fastScan = settings.value("scan/fastScan", true).toBool();
+    return options;
+}
+
+killcore::ScanOptions scanOptionsFromSettingsAndExpertOptions(const QVariantMap& expertOptions) {
+    killcore::ScanOptions options = scanOptionsFromSettings();
+    options.startAddress = expertOptions.value("startAddress", 0).toULongLong();
+    options.stopAddress = expertOptions.value("stopAddress", 0).toULongLong();
+    options.alignment = static_cast<size_t>(std::max(0, expertOptions.value("alignment", 0).toInt()));
+    options.writableOnly = expertOptions.value("writableOnly", false).toBool();
+    options.executableOnly = expertOptions.value("executableOnly", false).toBool();
+    options.copyOnWriteOnly = expertOptions.value("copyOnWriteOnly", false).toBool();
+    options.fastScan = expertOptions.value("fastScan", options.fastScan).toBool();
     return options;
 }
 
@@ -219,15 +251,170 @@ size_t candidateFileBackedThresholdFromSettings() {
         5000000));
 }
 
-size_t unknownSnapshotMaxBytesFromSettings() {
+int unknownSnapshotMaxMbFromSettings() {
     QSettings settings;
-    const int mb = boundedSettingInt(
-        settings,
-        "scan/unknownSnapshotMaxMb",
-        kDefaultUnknownSnapshotMaxMb,
-        128,
-        32768);
+    const int raw = settings.value("scan/unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb).toInt();
+    if (raw == -1) {
+        return -1;
+    }
+    return std::clamp(raw, 128, 32768);
+}
+
+size_t unknownSnapshotMaxBytesFromSettings() {
+    const int mb = unknownSnapshotMaxMbFromSettings();
+    if (mb == -1) {
+        return static_cast<size_t>(kDefaultUnknownSnapshotMaxMb) * 1024 * 1024;
+    }
     return static_cast<size_t>(mb) * 1024 * 1024;
+}
+
+int requestedUnknownSnapshotMaxMb(const QVariantMap& options) {
+    if (options.contains("unknownSnapshotMaxMb")) {
+        const int fromOptions = options.value("unknownSnapshotMaxMb", 0).toInt();
+        return fromOptions == -1 ? -1 : std::clamp(fromOptions, 128, 32768);
+    }
+    return unknownSnapshotMaxMbFromSettings();
+}
+
+bool isCopyOnWriteProtection(uint32_t protection) {
+    const auto flags = killcore::protectionToString(protection).split('|');
+    return flags.contains("WC") || flags.contains("XWC");
+}
+
+bool regionMatchesScanOptions(const killcore::MemoryRegion& region, const killcore::ScanOptions& options) {
+    if (!region.readable || region.guarded || region.size == 0) {
+        return false;
+    }
+    if (options.writableOnly && !region.writable) return false;
+    if (options.executableOnly && !region.executable) return false;
+    if (options.copyOnWriteOnly && !isCopyOnWriteProtection(region.protection)) return false;
+
+    const uint64_t regionStart = region.baseAddress;
+    const uint64_t regionEnd = region.baseAddress + region.size;
+    if (options.stopAddress != 0 && regionStart >= options.stopAddress) return false;
+    if (options.startAddress != 0 && options.startAddress >= regionEnd) return false;
+    return true;
+}
+
+QByteArray encodeUiStringValue(const QString& value, const QString& encoding) {
+    if (encoding.compare("utf16", Qt::CaseInsensitive) == 0 ||
+        encoding.compare("utf16le", Qt::CaseInsensitive) == 0) {
+        QByteArray bytes;
+        bytes.reserve(value.size() * 2);
+        for (const QChar ch : value) {
+            const ushort code = ch.unicode();
+            bytes.append(static_cast<char>(code & 0xff));
+            bytes.append(static_cast<char>((code >> 8) & 0xff));
+        }
+        return bytes;
+    }
+    return value.toLatin1();
+}
+
+bool asciiDigitByte(char byte) {
+    return byte >= '0' && byte <= '9';
+}
+
+bool hasNumericBoundary(const QByteArray& haystack, qsizetype index, qsizetype length, const QString& encoding) {
+    if (encoding.compare("utf16", Qt::CaseInsensitive) == 0 ||
+        encoding.compare("utf16le", Qt::CaseInsensitive) == 0) {
+        const qsizetype before = index - 2;
+        if (before >= 0 &&
+            haystack.at(before + 1) == '\0' &&
+            asciiDigitByte(haystack.at(before))) {
+            return false;
+        }
+        const qsizetype after = index + length;
+        if (after + 1 < haystack.size() &&
+            haystack.at(after + 1) == '\0' &&
+            asciiDigitByte(haystack.at(after))) {
+            return false;
+        }
+        return true;
+    }
+
+    if (index > 0 && asciiDigitByte(haystack.at(index - 1))) {
+        return false;
+    }
+    const qsizetype after = index + length;
+    if (after < haystack.size() && asciiDigitByte(haystack.at(after))) {
+        return false;
+    }
+    return true;
+}
+
+QString uiStringAddress(uint64_t address) {
+    return QString::number(address, 16).toUpper();
+}
+
+uint64_t relevantBytesForUnknownSnapshotOptions(
+    const QList<killcore::MemoryRegion>& regions,
+    const killcore::ScanOptions& options) {
+    uint64_t relevantBytes = 0;
+    for (const auto& region : regions) {
+        if (!region.readable || region.guarded || region.size == 0) {
+            continue;
+        }
+        if (options.writableOnly && !region.writable) continue;
+        if (options.executableOnly && !region.executable) continue;
+        if (options.copyOnWriteOnly && !isCopyOnWriteProtection(region.protection)) continue;
+
+        const uint64_t regionStart = region.baseAddress;
+        const uint64_t regionEnd = region.baseAddress + region.size;
+        if (options.stopAddress != 0 && regionStart >= options.stopAddress) continue;
+        if (options.startAddress != 0 && options.startAddress >= regionEnd) continue;
+
+        const uint64_t effectiveStart = std::max(regionStart, options.startAddress);
+        const uint64_t effectiveEnd = options.stopAddress == 0 ? regionEnd : std::min(regionEnd, options.stopAddress);
+        if (effectiveEnd > effectiveStart) {
+            relevantBytes += effectiveEnd - effectiveStart;
+        }
+    }
+    return relevantBytes;
+}
+
+// Suggere une profondeur de snapshot (en Mo) adaptee aux filtres de capture.
+// Heuristique : couvrir toute la memoire pertinente, arrondie au 128 Mo
+// superieur, plafonnee a 4096 Mo pour limiter l'usage disque du snapshot.
+int suggestUnknownSnapshotDepthMb(const killcore::ProcessHandle& handle, const killcore::ScanOptions& options, uint64_t* outRelevantBytes = nullptr) {
+    if (!handle.isValid()) {
+        return 0;
+    }
+    const auto regions = killcore::MemoryMap::snapshot(handle);
+    const uint64_t relevantBytes = relevantBytesForUnknownSnapshotOptions(regions, options);
+    if (outRelevantBytes) {
+        *outRelevantBytes = relevantBytes;
+    }
+    if (relevantBytes == 0) {
+        return 0;
+    }
+    constexpr uint64_t kMb = 1024 * 1024;
+    const uint64_t mb = (relevantBytes + kMb - 1) / kMb;
+    const uint64_t rounded = ((mb + 127) / 128) * 128;
+    return static_cast<int>(std::min<uint64_t>(rounded, 4096));
+}
+
+// Mode Auto : unknownSnapshotMaxMb == -1 dans les options expert.
+// Utilise la suggestion basee sur les filtres actifs de la capture.
+size_t resolveUnknownSnapshotMaxBytes(
+    const QVariantMap& options,
+    const killcore::ProcessHandle& handle,
+    const killcore::ScanOptions& scanOptions,
+    int* outSuggestedMb = nullptr,
+    uint64_t* outRelevantBytes = nullptr) {
+    uint64_t relevantBytes = 0;
+    const int suggested = suggestUnknownSnapshotDepthMb(handle, scanOptions, &relevantBytes);
+    if (outSuggestedMb) *outSuggestedMb = suggested;
+    if (outRelevantBytes) *outRelevantBytes = relevantBytes;
+
+    const int requestedMb = requestedUnknownSnapshotMaxMb(options);
+    if (requestedMb == -1 && suggested > 0) {
+        return static_cast<size_t>(suggested) * 1024 * 1024;
+    }
+    if (requestedMb > 0) {
+        return static_cast<size_t>(requestedMb) * 1024 * 1024;
+    }
+    return unknownSnapshotMaxBytesFromSettings();
 }
 
 double bytesToDouble(const QByteArray& bytes, killcore::ValueType type) {
@@ -236,13 +423,43 @@ double bytesToDouble(const QByteArray& bytes, killcore::ValueType type) {
     }
 
     switch (type) {
+        case killcore::ValueType::Int8: {
+            int8_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return static_cast<double>(value);
+        }
+        case killcore::ValueType::UInt8: {
+            uint8_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return static_cast<double>(value);
+        }
+        case killcore::ValueType::Int16: {
+            int16_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return static_cast<double>(value);
+        }
+        case killcore::ValueType::UInt16: {
+            uint16_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return static_cast<double>(value);
+        }
         case killcore::ValueType::Int32: {
             int32_t value = 0;
             std::memcpy(&value, bytes.constData(), sizeof(value));
             return static_cast<double>(value);
         }
+        case killcore::ValueType::UInt32: {
+            uint32_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return static_cast<double>(value);
+        }
         case killcore::ValueType::Int64: {
             int64_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return static_cast<double>(value);
+        }
+        case killcore::ValueType::UInt64: {
+            uint64_t value = 0;
             std::memcpy(&value, bytes.constData(), sizeof(value));
             return static_cast<double>(value);
         }
@@ -282,9 +499,12 @@ QHash<QString, QByteArray> variantBytesByKey(const QList<killcore::ValueVariant>
 QList<killcore::ValueVariant> smartAutoScanVariants(const QString& rawValue) {
     QList<killcore::ValueVariant> variants;
     const QList<killcore::ValueType> fastTypes = {
+        killcore::ValueType::UInt16,
         killcore::ValueType::Int32,
+        killcore::ValueType::UInt32,
         killcore::ValueType::Int64,
         killcore::ValueType::Float32,
+        killcore::ValueType::Float64,
     };
 
     for (const auto type : fastTypes) {
@@ -383,6 +603,12 @@ QStringList numbersFromText(const QString& text) {
 
 QString explicitValueTypeFromText(const QString& text) {
     const QString q = text.toLower();
+    if (q.contains("uint8") || q.contains("u8") || q.contains("byte")) return "UInt8";
+    if (q.contains("int8") || q.contains("i8")) return "Int8";
+    if (q.contains("uint16") || q.contains("u16")) return "UInt16";
+    if (q.contains("int16") || q.contains("i16") || q.contains("short")) return "Int16";
+    if (q.contains("uint32") || q.contains("u32")) return "UInt32";
+    if (q.contains("uint64") || q.contains("u64")) return "UInt64";
     if (q.contains("float64") || q.contains("double")) return "Float64";
     if (q.contains("float32") || q.contains("float")) return "Float32";
     if (q.contains("int64") || q.contains("long")) return "Int64";
@@ -1089,6 +1315,228 @@ QVariantMap ApplicationController::readMemoryPreview(const QString& addressHex, 
     return result;
 }
 
+QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVariantMap& optionsMap) const {
+    QVariantMap result;
+    QVariantList matches;
+    result["success"] = false;
+    result["matches"] = matches;
+
+    const QString needleText = value.trimmed();
+    if (needleText.isEmpty()) {
+        result["error"] = "Valeur texte vide.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::ScanOptions options = scanOptionsFromSettingsAndExpertOptions(optionsMap);
+    options.writableOnly = optionsMap.value("writableOnly", true).toBool();
+    options.executableOnly = optionsMap.value("executableOnly", false).toBool();
+    options.copyOnWriteOnly = optionsMap.value("copyOnWriteOnly", false).toBool();
+
+    const bool scanAscii = optionsMap.value("ascii", true).toBool();
+    const bool scanUtf16 = optionsMap.value("utf16", true).toBool();
+    const bool numericBoundary = optionsMap.value("numericBoundary", true).toBool();
+    const int maxResults = std::clamp(optionsMap.value("maxResults", 5000).toInt(), 1, 50000);
+    constexpr size_t kChunkSize = 1024 * 1024;
+
+    QList<QPair<QString, QByteArray>> patterns;
+    if (scanAscii) {
+        const QByteArray ascii = encodeUiStringValue(needleText, "ascii");
+        if (!ascii.isEmpty()) {
+            patterns.append({"ascii", ascii});
+        }
+    }
+    if (scanUtf16) {
+        const QByteArray utf16 = encodeUiStringValue(needleText, "utf16");
+        if (!utf16.isEmpty()) {
+            patterns.append({"utf16", utf16});
+        }
+    }
+    if (patterns.isEmpty()) {
+        result["error"] = "Aucun encodage texte sélectionné.";
+        return result;
+    }
+
+    emit const_cast<ApplicationController*>(this)->scanStarted();
+    emit const_cast<ApplicationController*>(this)->scanProgress(0);
+
+    QElapsedTimer timer;
+    timer.start();
+    killcore::MemoryReader reader(m_handle);
+    const auto regions = killcore::MemoryMap::snapshot(m_handle);
+    uint64_t bytesScanned = 0;
+    int regionsScanned = 0;
+    bool partial = false;
+
+    for (const auto& region : regions) {
+        if (matches.size() >= maxResults) {
+            partial = true;
+            break;
+        }
+        if (!regionMatchesScanOptions(region, options)) {
+            continue;
+        }
+
+        const uint64_t regionStart = region.baseAddress;
+        const uint64_t regionEnd = region.baseAddress + region.size;
+        const uint64_t effectiveStart = std::max(regionStart, options.startAddress);
+        const uint64_t effectiveEnd = options.stopAddress == 0 ? regionEnd : std::min(regionEnd, options.stopAddress);
+        if (effectiveEnd <= effectiveStart) {
+            continue;
+        }
+
+        ++regionsScanned;
+        const uint64_t regionSize = effectiveEnd - effectiveStart;
+        size_t maxPatternSize = 1;
+        for (const auto& pattern : patterns) {
+            maxPatternSize = std::max(maxPatternSize, static_cast<size_t>(pattern.second.size()));
+        }
+        const size_t overlap = std::min<size_t>(maxPatternSize > 0 ? maxPatternSize - 1 : 0, 64);
+
+        uint64_t offset = 0;
+        QByteArray previousTail;
+        while (offset < regionSize && matches.size() < maxResults) {
+            const uint64_t remaining = regionSize - offset;
+            const size_t toRead = static_cast<size_t>(std::min<uint64_t>(remaining, kChunkSize));
+            const uint64_t readAddress = effectiveStart + offset;
+            const auto read = reader.readChunked(readAddress, toRead, kChunkSize);
+            if (!read.success && !read.partial) {
+                break;
+            }
+
+            QByteArray buffer = previousTail + read.data;
+            const uint64_t bufferBase = readAddress - static_cast<uint64_t>(previousTail.size());
+            bytesScanned += read.bytesRead;
+
+            for (const auto& pattern : patterns) {
+                qsizetype from = 0;
+                while (matches.size() < maxResults) {
+                    const qsizetype found = buffer.indexOf(pattern.second, from);
+                    if (found < 0) {
+                        break;
+                    }
+                    from = found + 1;
+                    if (numericBoundary && !hasNumericBoundary(buffer, found, pattern.second.size(), pattern.first)) {
+                        continue;
+                    }
+
+                    QVariantMap match;
+                    const uint64_t matchAddress = bufferBase + static_cast<uint64_t>(found);
+                    match["address"] = uiStringAddress(matchAddress);
+                    match["encoding"] = pattern.first;
+                    match["text"] = needleText;
+                    match["byteLength"] = pattern.second.size();
+                    match["bytesHex"] = QString::fromLatin1(pattern.second.toHex(' ').toUpper());
+                    match["regionBase"] = uiStringAddress(region.baseAddress);
+                    match["regionSize"] = static_cast<qulonglong>(region.size);
+                    match["protection"] = killcore::protectionToString(region.protection);
+                    match["memoryType"] = killcore::memoryTypeToString(region.type);
+                    match["writable"] = region.writable;
+                    matches.append(match);
+                }
+            }
+
+            if (read.data.size() > static_cast<qsizetype>(overlap)) {
+                previousTail = read.data.right(static_cast<qsizetype>(overlap));
+            } else {
+                previousTail = read.data;
+            }
+            offset += read.bytesRead;
+            if (read.bytesRead == 0 || read.partial) {
+                break;
+            }
+        }
+
+        const int percent = regions.isEmpty()
+            ? 100
+            : std::clamp((regionsScanned * 100) / std::max(1, static_cast<int>(regions.size())), 0, 99);
+        emit const_cast<ApplicationController*>(this)->scanProgress(percent);
+    }
+
+    if (matches.size() >= maxResults) {
+        partial = true;
+    }
+
+    emit const_cast<ApplicationController*>(this)->scanProgress(100);
+
+    result["success"] = true;
+    result["partial"] = partial;
+    result["matches"] = matches;
+    result["matchesFound"] = matches.size();
+    result["matchesReturned"] = matches.size();
+    result["maxResults"] = maxResults;
+    result["regionsScanned"] = regionsScanned;
+    result["bytesScanned"] = static_cast<qulonglong>(bytesScanned);
+    result["elapsedMs"] = static_cast<int>(timer.elapsed());
+    result["writableOnly"] = options.writableOnly;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::trackUiStringCandidates(const QVariantList& candidates, const QString& value) const {
+    QVariantMap result;
+    QVariantList survivors;
+    result["success"] = false;
+    result["survivors"] = survivors;
+
+    const QString needleText = value.trimmed();
+    if (needleText.isEmpty()) {
+        result["error"] = "Nouvelle valeur texte vide.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::MemoryReader reader(m_handle);
+    int checked = 0;
+    int unreadable = 0;
+
+    for (const auto& item : candidates) {
+        const QVariantMap candidate = item.toMap();
+        uint64_t address = 0;
+        if (!parseHexAddress(candidate.value("address").toString(), &address)) {
+            continue;
+        }
+
+        const QString encoding = candidate.value("encoding", "ascii").toString();
+        const QByteArray expected = encodeUiStringValue(needleText, encoding);
+        const int oldLength = std::max(0, candidate.value("byteLength", expected.size()).toInt());
+        const int expectedSize = static_cast<int>(expected.size());
+        const size_t readSize = static_cast<size_t>(std::clamp(
+            std::max(oldLength, expectedSize),
+            1,
+            128));
+
+        ++checked;
+        const auto read = reader.read(address, readSize);
+        if (!read.success && !read.partial) {
+            ++unreadable;
+            continue;
+        }
+
+        if (read.data.startsWith(expected)) {
+            QVariantMap survivor = candidate;
+            survivor["text"] = needleText;
+            survivor["byteLength"] = expected.size();
+            survivor["bytesHex"] = QString::fromLatin1(expected.toHex(' ').toUpper());
+            survivors.append(survivor);
+        }
+    }
+
+    result["success"] = true;
+    result["checked"] = checked;
+    result["unreadable"] = unreadable;
+    result["remaining"] = survivors.size();
+    result["survivors"] = survivors;
+    result["error"] = "";
+    return result;
+}
+
 QVariantMap ApplicationController::startExactScan(const QString& value, const QString& valueType) {
     QVariantMap result;
     QVariantList matches;
@@ -1119,8 +1567,11 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
 
     emit scanStarted();
     emit scanProgress(0);
+    QElapsedTimer timer;
+    timer.start();
     killcore::ScanEngine scanner(m_handle);
     const auto scan = scanner.exactScan(scanValue, options);
+    const qint64 elapsedMs = timer.elapsed();
     emit scanProgress(90);
     clearCandidateUndo();
     clearCandidateValueHistory();
@@ -1145,6 +1596,9 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
     result["error"] = scan.errorMessage;
     result["matches"] = matches;
     result["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+    result["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
+    result["bytesPerSecond"] = ratePerSecond(scan.bytesScanned, elapsedMs);
+    result["matchesPerSecond"] = ratePerSecond(scan.matchesFound, elapsedMs);
     appendSmartSearchDebug("exact_scan", {
         {"value", value},
         {"valueType", valueType},
@@ -1152,6 +1606,21 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
         {"partial", result.value("partial")},
         {"matchesFound", result.value("matchesFound")},
         {"candidateStoreSize", result.value("candidateStoreSize")},
+        {"error", result.value("error")},
+    });
+    appendScanTelemetry("exact_scan", {
+        {"value", value},
+        {"valueType", valueType},
+        {"success", result.value("success")},
+        {"partial", result.value("partial")},
+        {"cancelled", result.value("cancelled")},
+        {"regionsScanned", result.value("regionsScanned")},
+        {"bytesScanned", result.value("bytesScanned")},
+        {"matchesFound", result.value("matchesFound")},
+        {"candidateStoreSize", result.value("candidateStoreSize")},
+        {"elapsedMs", result.value("elapsedMs")},
+        {"bytesPerSecond", result.value("bytesPerSecond")},
+        {"matchesPerSecond", result.value("matchesPerSecond")},
         {"error", result.value("error")},
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
@@ -1201,8 +1670,11 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
 
     emit scanStarted();
     emit scanProgress(0);
+    QElapsedTimer timer;
+    timer.start();
     killcore::ScanEngine scanner(m_handle);
     const auto scan = scanner.exactScanMultiType(variants, options);
+    const qint64 elapsedMs = timer.elapsed();
     emit scanProgress(90);
     clearCandidateUndo();
     clearCandidateValueHistory();
@@ -1248,6 +1720,9 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
     result["matches"] = matches;
     result["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
     result["variantCount"] = variants.size();
+    result["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
+    result["bytesPerSecond"] = ratePerSecond(scan.bytesScanned, elapsedMs);
+    result["matchesPerSecond"] = ratePerSecond(scan.matchesFound, elapsedMs);
     appendSmartSearchDebug("exact_scan_multi_type", {
         {"value", value},
         {"valueType", valueType},
@@ -1258,6 +1733,24 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
         {"partial", result.value("partial")},
         {"matchesFound", result.value("matchesFound")},
         {"candidateStoreSize", result.value("candidateStoreSize")},
+        {"error", result.value("error")},
+    });
+    appendScanTelemetry("exact_scan_multi_type", {
+        {"value", value},
+        {"valueType", valueType},
+        {"smartAuto", smartAuto},
+        {"explicitTypeGiven", explicitTypeGiven},
+        {"variantCount", variants.size()},
+        {"success", result.value("success")},
+        {"partial", result.value("partial")},
+        {"cancelled", result.value("cancelled")},
+        {"regionsScanned", result.value("regionsScanned")},
+        {"bytesScanned", result.value("bytesScanned")},
+        {"matchesFound", result.value("matchesFound")},
+        {"candidateStoreSize", result.value("candidateStoreSize")},
+        {"elapsedMs", result.value("elapsedMs")},
+        {"bytesPerSecond", result.value("bytesPerSecond")},
+        {"matchesPerSecond", result.value("matchesPerSecond")},
         {"error", result.value("error")},
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
@@ -1344,8 +1837,11 @@ QVariantMap ApplicationController::startExactScanExpert(
 
     emit scanStarted();
     emit scanProgress(0);
+    QElapsedTimer timer;
+    timer.start();
     killcore::ScanEngine scanner(m_handle);
     const auto scan = scanner.exactScan(scanValue, options);
+    const qint64 elapsedMs = timer.elapsed();
     emit scanProgress(90);
     clearCandidateUndo();
     clearCandidateValueHistory();
@@ -1370,6 +1866,9 @@ QVariantMap ApplicationController::startExactScanExpert(
     result["error"] = scan.errorMessage;
     result["matches"] = matches;
     result["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+    result["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
+    result["bytesPerSecond"] = ratePerSecond(scan.bytesScanned, elapsedMs);
+    result["matchesPerSecond"] = ratePerSecond(scan.matchesFound, elapsedMs);
     appendSmartSearchDebug("exact_scan_expert", {
         {"value", value},
         {"valueType", valueType},
@@ -1382,6 +1881,27 @@ QVariantMap ApplicationController::startExactScanExpert(
         {"success", result.value("success")},
         {"matchesFound", result.value("matchesFound")},
         {"candidateStoreSize", result.value("candidateStoreSize")},
+        {"error", result.value("error")},
+    });
+    appendScanTelemetry("exact_scan_expert", {
+        {"value", value},
+        {"valueType", valueType},
+        {"startAddress", expertOptions.value("startAddress")},
+        {"stopAddress", expertOptions.value("stopAddress")},
+        {"alignment", expertOptions.value("alignment")},
+        {"writableOnly", options.writableOnly},
+        {"executableOnly", options.executableOnly},
+        {"copyOnWriteOnly", options.copyOnWriteOnly},
+        {"success", result.value("success")},
+        {"partial", result.value("partial")},
+        {"cancelled", result.value("cancelled")},
+        {"regionsScanned", result.value("regionsScanned")},
+        {"bytesScanned", result.value("bytesScanned")},
+        {"matchesFound", result.value("matchesFound")},
+        {"candidateStoreSize", result.value("candidateStoreSize")},
+        {"elapsedMs", result.value("elapsedMs")},
+        {"bytesPerSecond", result.value("bytesPerSecond")},
+        {"matchesPerSecond", result.value("matchesPerSecond")},
         {"error", result.value("error")},
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
@@ -1570,6 +2090,31 @@ QVariantMap ApplicationController::startExactScanAsync(
                 {"cancelled", scan.cancelled},
                 {"error", finished.value("error")},
             });
+            self->appendScanTelemetry("exact_scan_async", {
+                {"requestId", requestId},
+                {"value", value},
+                {"valueType", valueType},
+                {"startAddress", expertOptions.value("startAddress")},
+                {"stopAddress", expertOptions.value("stopAddress")},
+                {"alignment", expertOptions.value("alignment")},
+                {"writableOnly", expertOptions.value("writableOnly")},
+                {"executableOnly", expertOptions.value("executableOnly")},
+                {"copyOnWriteOnly", expertOptions.value("copyOnWriteOnly")},
+                {"success", finished.value("success")},
+                {"partial", finished.value("partial")},
+                {"cancelled", finished.value("cancelled")},
+                {"regionsScanned", finished.value("regionsScanned")},
+                {"bytesScanned", finished.value("bytesScanned")},
+                {"matchesFound", finished.value("matchesFound")},
+                {"candidateStoreSize", finished.value("candidateStoreSize")},
+                {"candidateStoreFileBacked", finished.value("candidateStoreFileBacked")},
+                {"candidateStoreBytes", finished.value("candidateStoreBytes")},
+                {"candidateStoreMemoryBytes", finished.value("candidateStoreMemoryBytes")},
+                {"elapsedMs", finished.value("elapsedMs")},
+                {"bytesPerSecond", finished.value("bytesPerSecond")},
+                {"matchesPerSecond", finished.value("matchesPerSecond")},
+                {"error", finished.value("error")},
+            });
             self->m_scanInProgress = false;
             self->m_activeScanCancellation.reset();
             emit self->scanStatsUpdated(static_cast<int>(self->m_candidates.size()));
@@ -1663,13 +2208,17 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         QVariantList valueHistoryUpdates;
         killcore::CandidateStore survivors;
         survivors.setFileBackedThreshold(candidateThreshold);
+        QList<killcore::Candidate> memorySurvivors;
+        if (candidateSnapshot.totalCount <= candidateThreshold) {
+            memorySurvivors.reserve(static_cast<qsizetype>(candidateSnapshot.totalCount));
+        }
 
         size_t checked = 0;
         size_t unreadable = 0;
         bool cancelled = false;
         QString error;
         bool streamInput = candidateSnapshot.fileBacked;
-        bool streamOutput = true;
+        bool streamOutput = candidateSnapshot.totalCount > candidateThreshold;
         int lastWorkerProgress = 0;
         const size_t progressTotal = std::max<size_t>(candidateSnapshot.totalCount, 1);
         auto reportCandidateProgress = [&]() {
@@ -1682,7 +2231,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             emitQueuedScanProgress(self, percent);
         };
 
-        if (!survivors.beginFileBackedReplacement(&error)) {
+        if (streamOutput && !survivors.beginFileBackedReplacement(&error)) {
             streamOutput = false;
         }
 
@@ -1776,8 +2325,12 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                     }
                     auto updated = candidate;
                     updated.lastValue = current;
-                    if (!survivors.appendFileBackedCandidate(updated, &error)) {
-                        return false;
+                    if (streamOutput) {
+                        if (!survivors.appendFileBackedCandidate(updated, &error)) {
+                            return false;
+                        }
+                    } else {
+                        memorySurvivors.append(updated);
                     }
                 }
                 return true;
@@ -1786,7 +2339,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             if (!completed && error.isEmpty()) {
                 error = streamError.isEmpty() ? "Next scan interrompu." : streamError;
             }
-            if (error.isEmpty() && !survivors.finishFileBackedReplacement(&error)) {
+            if (error.isEmpty() && streamOutput && !survivors.finishFileBackedReplacement(&error)) {
                 // error filled by finishFileBackedReplacement
             }
         }
@@ -1796,7 +2349,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         }
         const qint64 elapsedMs = timer.elapsed();
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, firstCandidateType, candidateSnapshot, survivors = std::move(survivors), checked, unreadable, cancelled, error, debugSamples, valueHistoryUpdates, streamInput, streamOutput, elapsedMs]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, firstCandidateType, candidateSnapshot, survivors = std::move(survivors), memorySurvivors = std::move(memorySurvivors), checked, unreadable, cancelled, error, debugSamples, valueHistoryUpdates, streamInput, streamOutput, elapsedMs]() mutable {
             if (!self) {
                 return;
             }
@@ -1807,7 +2360,11 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 if (!self->rememberCandidatesForUndo(&undoError)) {
                     finishError = undoError.isEmpty() ? "Impossible de préparer l'annulation du next scan." : undoError;
                 } else {
-                    self->m_candidates = std::move(survivors);
+                    if (streamOutput) {
+                        self->m_candidates = std::move(survivors);
+                    } else {
+                        self->m_candidates.replaceCandidates(memorySurvivors);
+                    }
                     self->recordCandidateObservations(valueHistoryUpdates);
                 }
             }
@@ -1832,8 +2389,6 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             finished["candidatesPerSecond"] = ratePerSecond(checked, elapsedMs);
             finished["candidateStoreBytes"] = static_cast<qulonglong>(self->m_candidates.storageBytes());
             finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(self->m_candidates.estimatedMemoryBytes());
-            finished["debugSamples"] = debugSamples;
-            finished["valueHistoryUpdates"] = valueHistoryUpdates;
             if (finished.value("remaining").toULongLong() == 0 && !cancelled) {
                 finished["diagnostic"] = noCandidateDiagnosticMessage(finished, "next_scan");
             }
@@ -1856,9 +2411,29 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 {"candidatesPerSecond", finished.value("candidatesPerSecond")},
                 {"candidateStoreBytes", finished.value("candidateStoreBytes")},
                 {"candidateStoreMemoryBytes", finished.value("candidateStoreMemoryBytes")},
-                {"valueHistoryUpdates", valueHistoryUpdates},
+                {"valueHistoryUpdateCount", valueHistoryUpdates.size()},
                 {"error", finishError},
                 {"samples", debugSamples},
+            });
+            self->appendScanTelemetry("next_scan_async", {
+                {"requestId", requestId},
+                {"mode", mode},
+                {"value", value},
+                {"candidateType", killcore::valueTypeToString(firstCandidateType)},
+                {"beforeCount", static_cast<qulonglong>(candidateSnapshot.totalCount)},
+                {"checked", finished.value("checked")},
+                {"unreadable", finished.value("unreadable")},
+                {"remaining", finished.value("remaining")},
+                {"cancelled", cancelled},
+                {"streamInput", streamInput},
+                {"streamOutput", streamOutput},
+                {"fileBacked", finished.value("fileBacked")},
+                {"candidateStorePath", finished.value("candidateStorePath")},
+                {"elapsedMs", finished.value("elapsedMs")},
+                {"candidatesPerSecond", finished.value("candidatesPerSecond")},
+                {"candidateStoreBytes", finished.value("candidateStoreBytes")},
+                {"candidateStoreMemoryBytes", finished.value("candidateStoreMemoryBytes")},
+                {"error", finishError},
             });
 
             self->m_scanInProgress = false;
@@ -2019,8 +2594,6 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
     result["debugBeforeCount"] = static_cast<qulonglong>(beforeCount);
     result["debugMode"] = mode;
     result["debugValue"] = value;
-    result["debugSamples"] = debugSamples;
-    result["valueHistoryUpdates"] = valueHistoryUpdates;
     if (m_candidates.size() == 0) {
         result["diagnostic"] = noCandidateDiagnosticMessage(result, "next_scan");
     }
@@ -2032,7 +2605,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         {"checked", result.value("checked")},
         {"unreadable", result.value("unreadable")},
         {"remaining", result.value("remaining")},
-        {"valueHistoryUpdates", valueHistoryUpdates},
+        {"valueHistoryUpdateCount", valueHistoryUpdates.size()},
         {"samples", debugSamples},
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
@@ -2127,6 +2700,10 @@ QVariantMap ApplicationController::getCandidates(int pageIndex, int pageSize, co
 }
 
 QVariantMap ApplicationController::captureUnknownSnapshot() {
+    return captureUnknownSnapshotWithOptions({});
+}
+
+QVariantMap ApplicationController::captureUnknownSnapshotWithOptions(const QVariantMap& expertOptions) {
     QVariantMap result;
     result["success"] = false;
 
@@ -2144,7 +2721,12 @@ QVariantMap ApplicationController::captureUnknownSnapshot() {
 
     emit scanStarted();
     emit scanProgress(0);
-    const auto snapshot = m_snapshot.capture(m_handle, unknownSnapshotMaxBytesFromSettings());
+    const auto options = scanOptionsFromSettingsAndExpertOptions(expertOptions);
+    int suggestedDepthMb = 0;
+    uint64_t relevantBytes = 0;
+    const size_t maxSnapshotBytes = resolveUnknownSnapshotMaxBytes(
+        expertOptions, m_handle, options, &suggestedDepthMb, &relevantBytes);
+    const auto snapshot = m_snapshot.capture(m_handle, maxSnapshotBytes, nullptr, options);
     emit scanProgress(100);
     result["success"] = snapshot.success;
     result["partial"] = snapshot.partial;
@@ -2152,13 +2734,25 @@ QVariantMap ApplicationController::captureUnknownSnapshot() {
     result["regionsCaptured"] = static_cast<qulonglong>(snapshot.regionsCaptured);
     result["regionsSkipped"] = static_cast<qulonglong>(snapshot.regionsSkipped);
     result["bytesCaptured"] = static_cast<qulonglong>(snapshot.bytesCaptured);
+    result["captureLimitBytes"] = static_cast<qulonglong>(maxSnapshotBytes);
+    result["captureLimitReached"] = snapshot.partial || snapshot.bytesCaptured >= maxSnapshotBytes;
     result["compressedBytes"] = static_cast<qulonglong>(snapshot.compressedBytes);
     result["mappedStorage"] = snapshot.mappedStorage;
+    result["writableOnly"] = options.writableOnly;
+    result["executableOnly"] = options.executableOnly;
+    result["copyOnWriteOnly"] = options.copyOnWriteOnly;
+    result["suggestedDepthMb"] = suggestedDepthMb;
+    result["relevantBytes"] = static_cast<qulonglong>(relevantBytes);
+    result["autoDepthApplied"] = requestedUnknownSnapshotMaxMb(expertOptions) == -1;
     result["error"] = snapshot.errorMessage;
     return result;
 }
 
 QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
+    return captureUnknownSnapshotAsyncWithOptions({});
+}
+
+QVariantMap ApplicationController::captureUnknownSnapshotAsyncWithOptions(const QVariantMap& expertOptions) {
     QVariantMap result;
     result["success"] = false;
     result["started"] = false;
@@ -2181,7 +2775,11 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
 
     const int requestId = m_nextScanRequestId++;
     const int pid = m_pid;
-    const size_t maxSnapshotBytes = unknownSnapshotMaxBytesFromSettings();
+    int suggestedDepthMb = 0;
+    uint64_t relevantBytes = 0;
+    const auto options = scanOptionsFromSettingsAndExpertOptions(expertOptions);
+    const size_t maxSnapshotBytes = resolveUnknownSnapshotMaxBytes(
+        expertOptions, m_handle, options, &suggestedDepthMb, &relevantBytes);
     const QPointer<ApplicationController> self(this);
     auto cancellation = std::make_shared<killcore::CancellationToken>();
 
@@ -2190,7 +2788,8 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, maxSnapshotBytes, cancellation]() mutable {
+    const bool autoDepthApplied = requestedUnknownSnapshotMaxMb(expertOptions) == -1;
+    std::thread([self, requestId, pid, maxSnapshotBytes, suggestedDepthMb, relevantBytes, autoDepthApplied, options, cancellation]() mutable {
         killcore::SnapshotStore snapshotStore;
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         killcore::SnapshotResult snapshot;
@@ -2198,14 +2797,14 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
             snapshot.success = false;
             snapshot.errorMessage = "Impossible d'ouvrir le processus dans le worker unknown.";
         } else {
-            snapshot = snapshotStore.capture(workerHandle, maxSnapshotBytes, cancellation.get());
+            snapshot = snapshotStore.capture(workerHandle, maxSnapshotBytes, cancellation.get(), options);
         }
 
         if (!self) {
             return;
         }
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, snapshot, snapshotStore = std::move(snapshotStore)]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, maxSnapshotBytes, suggestedDepthMb, relevantBytes, autoDepthApplied, snapshot, options, snapshotStore = std::move(snapshotStore)]() mutable {
             if (!self) {
                 return;
             }
@@ -2223,8 +2822,16 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
             finished["regionsCaptured"] = static_cast<qulonglong>(snapshot.regionsCaptured);
             finished["regionsSkipped"] = static_cast<qulonglong>(snapshot.regionsSkipped);
             finished["bytesCaptured"] = static_cast<qulonglong>(snapshot.bytesCaptured);
+            finished["captureLimitBytes"] = static_cast<qulonglong>(maxSnapshotBytes);
+            finished["captureLimitReached"] = snapshot.partial || snapshot.bytesCaptured >= maxSnapshotBytes;
             finished["compressedBytes"] = static_cast<qulonglong>(snapshot.compressedBytes);
             finished["mappedStorage"] = snapshot.mappedStorage;
+            finished["writableOnly"] = options.writableOnly;
+            finished["executableOnly"] = options.executableOnly;
+            finished["copyOnWriteOnly"] = options.copyOnWriteOnly;
+            finished["suggestedDepthMb"] = suggestedDepthMb;
+            finished["relevantBytes"] = static_cast<qulonglong>(relevantBytes);
+            finished["autoDepthApplied"] = autoDepthApplied;
             finished["error"] = snapshot.errorMessage;
 
             self->appendSmartSearchDebug("unknown_capture_async", {
@@ -2237,6 +2844,28 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsync() {
                 {"bytesCaptured", finished.value("bytesCaptured")},
                 {"compressedBytes", finished.value("compressedBytes")},
                 {"mappedStorage", finished.value("mappedStorage")},
+                {"writableOnly", finished.value("writableOnly")},
+                {"executableOnly", finished.value("executableOnly")},
+                {"copyOnWriteOnly", finished.value("copyOnWriteOnly")},
+                {"error", finished.value("error")},
+            });
+            self->appendScanTelemetry("unknown_capture_async", {
+                {"requestId", requestId},
+                {"success", finished.value("success")},
+                {"partial", finished.value("partial")},
+                {"cancelled", finished.value("cancelled")},
+                {"regionsCaptured", finished.value("regionsCaptured")},
+                {"regionsSkipped", finished.value("regionsSkipped")},
+                {"bytesCaptured", finished.value("bytesCaptured")},
+                {"captureLimitBytes", finished.value("captureLimitBytes")},
+                {"captureLimitReached", finished.value("captureLimitReached")},
+                {"captureLimitBytes", finished.value("captureLimitBytes")},
+                {"captureLimitReached", finished.value("captureLimitReached")},
+                {"compressedBytes", finished.value("compressedBytes")},
+                {"mappedStorage", finished.value("mappedStorage")},
+                {"writableOnly", finished.value("writableOnly")},
+                {"executableOnly", finished.value("executableOnly")},
+                {"copyOnWriteOnly", finished.value("copyOnWriteOnly")},
                 {"error", finished.value("error")},
             });
 
@@ -2262,17 +2891,27 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         result["error"] = "Aucun processus attaché.";
         return result;
     }
-    if (m_snapshot.isEmpty()) {
-        result["error"] = "Aucun snapshot unknown capturé.";
-        return result;
-    }
 
     killcore::NextScanMode scanMode;
     if (!killcore::parseNextScanMode(mode, &scanMode)) {
         result["error"] = "Mode invalide.";
         return result;
     }
-    if (scanMode == killcore::NextScanMode::Unchanged && m_candidates.isEmpty()) {
+    if (!m_candidates.isEmpty()) {
+        QVariantMap refined = nextScan(mode, "");
+        refined["kind"] = "unknown_refine";
+        refined["refinedFromCandidates"] = true;
+        refined["checkedBytes"] = refined.value("checked");
+        refined["matchesFound"] = refined.value("remaining");
+        refined["stored"] = refined.value("remaining");
+        return refined;
+    }
+
+    if (m_snapshot.isEmpty()) {
+        result["error"] = "Aucun snapshot unknown capturé.";
+        return result;
+    }
+    if (scanMode == killcore::NextScanMode::Unchanged) {
         result["error"] = "Le mode stable/ne change pas n'est pas autorisé en première comparaison unknown : il garde trop de mémoire et peut saturer. Fais d'abord changed, increased ou decreased.";
         return result;
     }
@@ -2331,17 +2970,57 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
         result["error"] = "Aucun processus attaché.";
         return result;
     }
-    if (m_snapshot.isEmpty()) {
-        result["error"] = "Aucun snapshot unknown capturé.";
-        return result;
-    }
 
     killcore::NextScanMode scanMode;
     if (!killcore::parseNextScanMode(mode, &scanMode)) {
         result["error"] = "Mode invalide.";
         return result;
     }
-    if (scanMode == killcore::NextScanMode::Unchanged && m_candidates.isEmpty()) {
+    if (!m_candidates.isEmpty()) {
+        const size_t refineCandidateCount = m_candidates.size();
+        appendScanTelemetry("unknown_refine_async_start", {
+            {"mode", mode},
+            {"valueType", valueType},
+            {"candidateCount", static_cast<qulonglong>(refineCandidateCount)},
+            {"fileBacked", m_candidates.isFileBacked()},
+            {"candidateStoreBytes", static_cast<qulonglong>(m_candidates.storageBytes())},
+            {"candidateStoreMemoryBytes", static_cast<qulonglong>(m_candidates.estimatedMemoryBytes())},
+        });
+        if (refineCandidateCount <= 20000) {
+            QElapsedTimer timer;
+            timer.start();
+            QVariantMap refined = nextScan(mode, "");
+            refined["requestId"] = m_nextScanRequestId++;
+            refined["kind"] = "unknown_refine";
+            refined["refinedFromCandidates"] = true;
+            refined["checkedBytes"] = refined.value("checked");
+            refined["matchesFound"] = refined.value("remaining");
+            refined["stored"] = refined.value("remaining");
+            refined["elapsedMs"] = static_cast<qulonglong>(timer.elapsed());
+            appendScanTelemetry("unknown_refine_direct", {
+                {"requestId", refined.value("requestId")},
+                {"mode", mode},
+                {"valueType", valueType},
+                {"beforeCount", static_cast<qulonglong>(refineCandidateCount)},
+                {"checked", refined.value("checked")},
+                {"unreadable", refined.value("unreadable")},
+                {"remaining", refined.value("remaining")},
+                {"elapsedMs", refined.value("elapsedMs")},
+                {"success", refined.value("success")},
+                {"error", refined.value("error")},
+            });
+            return refined;
+        }
+        QVariantMap refined = nextScanAsync(mode, "");
+        refined["refinedFromCandidates"] = true;
+        return refined;
+    }
+
+    if (m_snapshot.isEmpty()) {
+        result["error"] = "Aucun snapshot unknown capturé.";
+        return result;
+    }
+    if (scanMode == killcore::NextScanMode::Unchanged) {
         result["error"] = "Le mode stable/ne change pas n'est pas autorisé en première comparaison unknown : il garde trop de mémoire et peut saturer. Fais d'abord changed, increased ou decreased.";
         return result;
     }
@@ -2416,6 +3095,19 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             }
 
             self->appendSmartSearchDebug("unknown_next_async", {
+                {"requestId", requestId},
+                {"mode", mode},
+                {"valueType", valueType},
+                {"parsedType", killcore::valueTypeToString(type)},
+                {"success", finished.value("success")},
+                {"partial", finished.value("partial")},
+                {"cancelled", finished.value("cancelled")},
+                {"checkedBytes", finished.value("checkedBytes")},
+                {"matchesFound", finished.value("matchesFound")},
+                {"stored", finished.value("stored")},
+                {"error", finished.value("error")},
+            });
+            self->appendScanTelemetry("unknown_next_async", {
                 {"requestId", requestId},
                 {"mode", mode},
                 {"valueType", valueType},
@@ -3784,11 +4476,15 @@ QVariantMap ApplicationController::getSettings() const {
     result["scanMaxResults"] = boundedSettingInt(
         settings, "scan/maxResults", kDefaultScanMaxResults, 1000, 10000000);
     result["scanChunkSizeMb"] = boundedSettingInt(
-        settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 1, 64);
+        settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 0, 64);
+    result["performanceMode"] = settings.value("scan/performanceMode", "Auto").toString();
+    result["scanMaxWorkerThreads"] = boundedSettingInt(
+        settings, "scan/maxWorkerThreads", kDefaultScanMaxWorkerThreads, 0, 128);
+    result["scanMaxInFlightMb"] = boundedSettingInt(
+        settings, "scan/maxInFlightMb", kDefaultScanMaxInFlightMb, 0, 32768);
     result["candidateFileBackedThreshold"] = boundedSettingInt(
         settings, "scan/candidateFileBackedThreshold", kDefaultCandidateFileThreshold, 1, 5000000);
-    result["unknownSnapshotMaxMb"] = boundedSettingInt(
-        settings, "scan/unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb, 128, 32768);
+    result["unknownSnapshotMaxMb"] = unknownSnapshotMaxMbFromSettings();
     result["fastScan"] = settings.value("scan/fastScan", true).toBool();
     result["smartSearchDebugEnabled"] = settings.value("diagnostics/smartSearchDebugEnabled", true).toBool();
     result["smartSearchDebugMaxEvents"] = boundedSettingInt(
@@ -3814,13 +4510,26 @@ QVariantMap ApplicationController::saveSettings(const QVariantMap& incoming) {
         std::clamp(incoming.value("scanMaxResults", kDefaultScanMaxResults).toInt(), 1000, 10000000));
     settings.setValue(
         "scan/chunkSizeMb",
-        std::clamp(incoming.value("scanChunkSizeMb", kDefaultScanChunkSizeMb).toInt(), 1, 64));
+        std::clamp(incoming.value("scanChunkSizeMb", kDefaultScanChunkSizeMb).toInt(), 0, 64));
+    const QByteArray performanceModeName = incoming.value("performanceMode", "Auto").toString().toLatin1();
+    settings.setValue(
+        "scan/performanceMode",
+        killcore::performanceModeToString(killcore::parsePerformanceMode(
+            performanceModeName.constData(),
+            killcore::PerformanceMode::Auto)));
+    settings.setValue(
+        "scan/maxWorkerThreads",
+        std::clamp(incoming.value("scanMaxWorkerThreads", kDefaultScanMaxWorkerThreads).toInt(), 0, 128));
+    settings.setValue(
+        "scan/maxInFlightMb",
+        std::clamp(incoming.value("scanMaxInFlightMb", kDefaultScanMaxInFlightMb).toInt(), 0, 32768));
     settings.setValue(
         "scan/candidateFileBackedThreshold",
         std::clamp(incoming.value("candidateFileBackedThreshold", kDefaultCandidateFileThreshold).toInt(), 1, 5000000));
+    const int unknownSnapshotMaxMb = incoming.value("unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb).toInt();
     settings.setValue(
         "scan/unknownSnapshotMaxMb",
-        std::clamp(incoming.value("unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb).toInt(), 128, 32768));
+        unknownSnapshotMaxMb == -1 ? -1 : std::clamp(unknownSnapshotMaxMb, 128, 32768));
     settings.setValue("scan/fastScan", incoming.value("fastScan", true).toBool());
     settings.setValue(
         "diagnostics/smartSearchDebugEnabled",
@@ -3848,6 +4557,10 @@ QString ApplicationController::getLogFilePath() const {
 
 QString ApplicationController::getSmartSearchDebugFilePath() const {
     return smartSearchDebugFilePath();
+}
+
+QString ApplicationController::getScanTelemetryFilePath() const {
+    return scanTelemetryFilePath();
 }
 
 QVariantMap ApplicationController::getSmartSearchDebugEvents(int maxEvents) const {
@@ -4000,6 +4713,7 @@ QVariantMap ApplicationController::exportDiagnostics() {
     manifest["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
     manifest["logFilePath"] = getLogFilePath();
     manifest["smartSearchDebugFilePath"] = smartSearchDebugFilePath();
+    manifest["scanTelemetryFilePath"] = scanTelemetryFilePath();
     manifest["crashDirectory"] = CrashHandler::crashDirectory();
     manifest["settings"] = getSettings();
 
@@ -4024,6 +4738,11 @@ QVariantMap ApplicationController::exportDiagnostics() {
     QFile debugFile(smartSearchDebugFilePath());
     if (debugFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
         appendSection(QFileInfo(debugFile).fileName(), debugFile.readAll());
+    }
+
+    QFile scanTelemetryFile(scanTelemetryFilePath());
+    if (scanTelemetryFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        appendSection(QFileInfo(scanTelemetryFile).fileName(), scanTelemetryFile.readAll());
     }
 
     QDir crashDir(CrashHandler::crashDirectory());
@@ -4065,6 +4784,16 @@ QString ApplicationController::smartSearchDebugFilePath() const {
     return dir + "/smart_search_debug.jsonl";
 }
 
+QString ApplicationController::scanTelemetryFilePath() const {
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty()) {
+        dir = QDir::currentPath();
+    }
+    dir += "/logs";
+    QDir().mkpath(dir);
+    return dir + "/scan_telemetry.jsonl";
+}
+
 void ApplicationController::appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const {
     QSettings settings;
     if (!settings.value("diagnostics/smartSearchDebugEnabled", true).toBool()) {
@@ -4077,10 +4806,50 @@ void ApplicationController::appendSmartSearchDebug(const QString& event, const Q
     entry["pid"] = m_pid;
     entry["processName"] = m_processName;
 
-    QFile file(smartSearchDebugFilePath());
+    const QString path = smartSearchDebugFilePath();
+    QFileInfo debugInfo(path);
+    if (debugInfo.exists() && debugInfo.size() > 8 * 1024 * 1024) {
+        QFile::remove(path + ".old");
+        QFile::rename(path, path + ".old");
+    }
+
+    QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
         KE_LOG_WARN() << "Unable to open Smart Search debug file: "
-                      << smartSearchDebugFilePath().toStdString();
+                      << path.toStdString();
+        return;
+    }
+
+    file.write(QJsonDocument(QJsonObject::fromVariantMap(entry)).toJson(QJsonDocument::Compact));
+    file.write("\n");
+}
+
+void ApplicationController::appendScanTelemetry(const QString& event, const QVariantMap& payload) const {
+    QSettings settings;
+
+    QVariantMap entry = payload;
+    entry["event"] = event;
+    entry["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    entry["pid"] = m_pid;
+    entry["processName"] = m_processName;
+    entry["performanceMode"] = settings.value("scan/performanceMode", "Auto").toString();
+    entry["scanChunkSizeMb"] = boundedSettingInt(settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 0, 64);
+    entry["scanMaxWorkerThreads"] = boundedSettingInt(settings, "scan/maxWorkerThreads", kDefaultScanMaxWorkerThreads, 0, 128);
+    entry["scanMaxInFlightMb"] = boundedSettingInt(settings, "scan/maxInFlightMb", kDefaultScanMaxInFlightMb, 0, 32768);
+    entry["scanMaxResults"] = boundedSettingInt(settings, "scan/maxResults", kDefaultScanMaxResults, 1000, 10000000);
+    entry["fastScan"] = settings.value("scan/fastScan", true).toBool();
+
+    const QString path = scanTelemetryFilePath();
+    QFileInfo telemetryInfo(path);
+    if (telemetryInfo.exists() && telemetryInfo.size() > 16 * 1024 * 1024) {
+        QFile::remove(path + ".old");
+        QFile::rename(path, path + ".old");
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        KE_LOG_WARN() << "Unable to open scan telemetry file: "
+                      << path.toStdString();
         return;
     }
 
@@ -4461,6 +5230,25 @@ QVariantMap ApplicationController::scanPointerChains(
     KE_LOG_INFO() << "scanPointerChains: target=0x" << QString::number(targetAddress, 16).toStdString()
                   << " chains=" << scanResult.chains.size()
                   << " elapsed=" << timer.elapsed() << "ms";
+    appendScanTelemetry("pointer_scan", {
+        {"targetAddress", QString::number(targetAddress, 16)},
+        {"maxDepth", options.maxDepth},
+        {"maxOffset", static_cast<qulonglong>(options.maxOffset)},
+        {"maxResults", static_cast<qulonglong>(options.maxResults)},
+        {"onlyModuleBase", options.onlyModuleBase},
+        {"alignment", static_cast<qulonglong>(options.alignment)},
+        {"baseModules", options.baseModules},
+        {"success", result.value("success")},
+        {"partial", result.value("partial")},
+        {"cancelled", result.value("cancelled")},
+        {"pointersScanned", result.value("pointersScanned")},
+        {"bytesScanned", result.value("bytesScanned")},
+        {"chainCount", result.value("chainCount")},
+        {"elapsedMs", result.value("elapsedMs")},
+        {"pointersPerSecond", ratePerSecond(scanResult.pointersScanned, timer.elapsed())},
+        {"bytesPerSecond", ratePerSecond(scanResult.bytesScanned, timer.elapsed())},
+        {"error", result.value("error")},
+    });
 
     return result;
 }

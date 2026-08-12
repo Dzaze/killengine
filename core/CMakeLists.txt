@@ -33,6 +33,7 @@ add_library(killcore STATIC
     scanner/scan_types.cpp
     scanner/value_variants.cpp
     scanner/candidate_confidence.cpp
+    scanner/performance_profile.cpp
     scanner/worker_pool.cpp
 
     # Candidates (stubs Phase 0)

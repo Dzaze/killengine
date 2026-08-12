@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { backend, type PointerChainInfo, type PointerChainResolveResult, type PointerScanResult } from '@/services/backend'
+import {
+  backend,
+  type PointerChainInfo,
+  type PointerChainResolveResult,
+  type PointerScanResult,
+  type UiStringCandidate,
+  type UiStringScanResult,
+  type UiStringTrackResult,
+} from '@/services/backend'
 
 const store = useAppStore()
 const selectedCandidateAddresses = ref<string[]>([])
@@ -15,6 +23,19 @@ const pointerScanResult = ref<PointerScanResult | null>(null)
 const pointerScanBusy = ref(false)
 const pointerResolveResult = ref<PointerChainResolveResult | null>(null)
 const selectedPointerChainIndex = ref<number>(-1)
+
+// Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
+const uiStringValue = ref('')
+const uiStringNextValue = ref('')
+const uiStringAscii = ref(true)
+const uiStringUtf16 = ref(true)
+const uiStringWritableOnly = ref(true)
+const uiStringBoundary = ref(true)
+const uiStringBusy = ref(false)
+const uiStringResult = ref<UiStringScanResult | null>(null)
+const uiStringTrackResult = ref<UiStringTrackResult | null>(null)
+const uiStringCandidates = ref<UiStringCandidate[]>([])
+const selectedUiStringAddresses = ref<string[]>([])
 
 async function runPointerScan() {
   if (!pointerScanAddress.value.trim()) return
@@ -86,6 +107,118 @@ async function savePointerChain(chain: PointerChainInfo) {
   }
 }
 
+function uiStringKey(candidate: UiStringCandidate) {
+  return `${candidate.encoding}:${candidate.address}`
+}
+
+function isUiStringSelected(candidate: UiStringCandidate) {
+  return selectedUiStringAddresses.value.includes(uiStringKey(candidate))
+}
+
+function toggleUiStringSelection(candidate: UiStringCandidate) {
+  const key = uiStringKey(candidate)
+  if (selectedUiStringAddresses.value.includes(key)) {
+    selectedUiStringAddresses.value = selectedUiStringAddresses.value.filter((item) => item !== key)
+    return
+  }
+  selectedUiStringAddresses.value = [...selectedUiStringAddresses.value, key]
+}
+
+function toggleAllUiStringSelection() {
+  const keys = uiStringCandidates.value.map(uiStringKey)
+  const allSelected = keys.length > 0 && keys.every((key) => selectedUiStringAddresses.value.includes(key))
+  selectedUiStringAddresses.value = allSelected ? [] : keys
+}
+
+function selectedUiStringCandidates() {
+  if (selectedUiStringAddresses.value.length === 0) return uiStringCandidates.value
+  const selected = new Set(selectedUiStringAddresses.value)
+  return uiStringCandidates.value.filter((candidate) => selected.has(uiStringKey(candidate)))
+}
+
+async function scanUiStrings() {
+  const value = (uiStringValue.value || store.exactScanValue).trim()
+  if (!value) return
+  uiStringValue.value = value
+  uiStringBusy.value = true
+  uiStringResult.value = null
+  uiStringTrackResult.value = null
+  selectedUiStringAddresses.value = []
+  try {
+    const controller = backend.getController()
+    if (!controller.scanUiStrings) {
+      uiStringResult.value = {
+        success: false,
+        matchesFound: 0,
+        matchesReturned: 0,
+        regionsScanned: 0,
+        bytesScanned: 0,
+        matches: [],
+        error: 'Methode backend indisponible (mock mode).',
+      }
+      uiStringCandidates.value = []
+      return
+    }
+    const result = await controller.scanUiStrings(value, {
+      startAddress: store.expertStartAddress || undefined,
+      stopAddress: store.expertStopAddress || undefined,
+      writableOnly: uiStringWritableOnly.value,
+      copyOnWriteOnly: store.expertCopyOnWriteOnly,
+      ascii: uiStringAscii.value,
+      utf16: uiStringUtf16.value,
+      numericBoundary: uiStringBoundary.value,
+      maxResults: 5000,
+    })
+    uiStringResult.value = result
+    uiStringCandidates.value = result.matches ?? []
+  } catch (e) {
+    uiStringResult.value = {
+      success: false,
+      matchesFound: 0,
+      matchesReturned: 0,
+      regionsScanned: 0,
+      bytesScanned: 0,
+      matches: [],
+      error: String(e),
+    }
+    uiStringCandidates.value = []
+  } finally {
+    uiStringBusy.value = false
+  }
+}
+
+async function trackUiStrings() {
+  const value = uiStringNextValue.value.trim()
+  if (!value || uiStringCandidates.value.length === 0) return
+  uiStringBusy.value = true
+  try {
+    const controller = backend.getController()
+    if (!controller.trackUiStringCandidates) {
+      uiStringTrackResult.value = { success: false, checked: 0, unreadable: 0, remaining: 0, survivors: [], error: 'Methode backend indisponible (mock mode).' }
+      return
+    }
+    const result = await controller.trackUiStringCandidates(selectedUiStringCandidates(), value)
+    uiStringTrackResult.value = result
+    uiStringCandidates.value = result.survivors ?? []
+    selectedUiStringAddresses.value = uiStringCandidates.value.map(uiStringKey)
+    uiStringValue.value = value
+  } catch (e) {
+    uiStringTrackResult.value = { success: false, checked: 0, unreadable: 0, remaining: 0, survivors: [], error: String(e) }
+  } finally {
+    uiStringBusy.value = false
+  }
+}
+
+function watchUiStringCandidate(candidate: UiStringCandidate) {
+  store.addAddressToWatch(candidate.address, candidate.encoding === 'utf16' ? 'UInt16' : 'UInt8')
+  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
+}
+
+function useUiStringCandidate(candidate: UiStringCandidate) {
+  store.searchQuery = `je trace le texte affiche a 0x${candidate.address} (${candidate.encoding})`
+  void store.doSearch()
+}
+
 const candidatePageTotal = computed(() => {
   if (!store.candidatePage) return 1
   if (store.candidatePage.displaySuppressed) return 1
@@ -95,16 +228,44 @@ const currentPageCandidates = computed(() => store.candidatePage?.candidates ?? 
 const displayedCandidates = computed(() => currentPageCandidates.value.filter(
   (candidate) => !store.ignoredCandidateAddresses.includes(candidate.address),
 ))
+const selectedCandidateRecords = computed(() => selectedCandidateAddresses.value
+  .map((address) => currentPageCandidates.value.find((candidate) => candidate.address === address))
+  .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate)))
+const selectedCandidateTypes = computed(() => Array.from(new Set(
+  selectedCandidateRecords.value.map((candidate) => String(candidate.type)),
+)))
+const selectedWriteType = computed(() => selectedCandidateTypes.value.length === 1
+  ? selectedCandidateTypes.value[0]
+  : store.exactScanType)
+const hasSelectedWriteTargets = computed(() => selectedCandidateAddresses.value.length > 0)
+const writeTargetLabel = computed(() => {
+  if (!hasSelectedWriteTargets.value) return ''
+  const knownCount = selectedCandidateRecords.value.length
+  const typeNote = selectedCandidateTypes.value.length === 1
+    ? selectedCandidateTypes.value[0]
+    : 'type choisi'
+  return `${selectedCandidateAddresses.value.length} adresse(s) sélectionnée(s) · ${typeNote}${knownCount < selectedCandidateAddresses.value.length ? ' · certaines hors page' : ''}`
+})
+const canWriteFromPanel = computed(() => hasSelectedWriteTargets.value
+  ? Boolean(store.writeValue.trim())
+  : store.canWriteSelectedValue)
+const writeButtonLabel = computed(() => hasSelectedWriteTargets.value
+  ? `Écrire ${selectedCandidateAddresses.value.length}`
+  : 'Écrire')
 const expertDense = computed(() => store.uiMode === 'expert')
 const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0) > 0)
 const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau scan' : 'Premier scan')
 const unknownGuideReady = computed(() => Boolean(store.unknownSnapshotResult?.success) || hasCandidateContext.value)
+const valueTypeOptions = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Float32', 'Float64']
+
 const unknownGuideActions = [
   { mode: 'increased', label: 'ça augmente' },
   { mode: 'decreased', label: 'ça diminue' },
   { mode: 'unchanged', label: 'stable' },
   { mode: 'changed', label: 'ça change' },
 ] as const
+const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096] // -1 = Auto
+const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
 
 function formatNumber(value: number | undefined) {
   return new Intl.NumberFormat('fr-FR').format(value ?? 0)
@@ -147,9 +308,11 @@ function isCandidateSelected(address: string) {
 function toggleCandidateSelection(address: string) {
   if (isCandidateSelected(address)) {
     selectedCandidateAddresses.value = selectedCandidateAddresses.value.filter((item) => item !== address)
+    syncSelectedWriteType()
     return
   }
   selectedCandidateAddresses.value = [...selectedCandidateAddresses.value, address]
+  syncSelectedWriteType()
 }
 
 function toggleCurrentPageSelection() {
@@ -158,9 +321,26 @@ function toggleCurrentPageSelection() {
     && pageAddresses.every((address) => selectedCandidateAddresses.value.includes(address))
   if (allPageSelected) {
     selectedCandidateAddresses.value = selectedCandidateAddresses.value.filter((address) => !pageAddresses.includes(address))
+    syncSelectedWriteType()
     return
   }
   selectedCandidateAddresses.value = Array.from(new Set([...selectedCandidateAddresses.value, ...pageAddresses]))
+  syncSelectedWriteType()
+}
+
+function clearCandidateSelection() {
+  selectedCandidateAddresses.value = []
+}
+
+function syncSelectedWriteType() {
+  const selected = currentPageCandidates.value.filter((candidate) => selectedCandidateAddresses.value.includes(candidate.address))
+  const types = Array.from(new Set(selected.map((candidate) => String(candidate.type))))
+  if (types.length === 1) {
+    store.exactScanType = types[0]
+  }
+  if (selected.length > 0) {
+    store.selectedCandidateAddress = selected[0].address
+  }
 }
 
 function useSelectedCandidatesInAssistant() {
@@ -174,14 +354,43 @@ function writeSelectedCandidates() {
   if (selectedCandidateAddresses.value.length === 0 || !store.writeValue.trim()) return
   void store.writeSelectedAddresses(
     selectedCandidateAddresses.value,
-    store.exactScanType,
+    selectedWriteType.value,
     store.writeValue,
   )
+}
+
+function writeFromPanel() {
+  if (hasSelectedWriteTargets.value) {
+    writeSelectedCandidates()
+    return
+  }
+  void store.writeSelectedValue()
 }
 
 function watchCandidate(address: string, type: string) {
   store.addAddressToWatch(address, type)
   if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
+}
+
+function watchedCandidate(address: string) {
+  return store.watchedAddresses.find((item) => item.address === address)
+}
+
+function candidateCurrentValue(address: string): string {
+  return watchedCandidate(address)?.value || '-'
+}
+
+function candidateReadError(address: string): string {
+  return watchedCandidate(address)?.error || ''
+}
+
+function readCandidateValue(address: string, type: string) {
+  store.addAddressToWatch(address, type)
+  void store.refreshWatchedAddress(address)
+}
+
+function freezeCandidateCurrent(address: string, type: string) {
+  void store.freezeCandidateCurrent(address, type)
 }
 
 onMounted(() => {
@@ -285,10 +494,7 @@ onMounted(() => {
           />
           <select v-model="store.exactScanType" class="input select" :disabled="store.scanBusy">
             <option value="Auto">Auto (multi-type)</option>
-            <option>Int32</option>
-            <option>Int64</option>
-            <option>Float32</option>
-            <option>Float64</option>
+            <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
           </select>
           <button class="btn btn-primary" :disabled="!store.exactScanValue.trim() || store.scanBusy" @click="store.doExactScan()">
             <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
@@ -416,11 +622,22 @@ onMounted(() => {
         </div>
         <div class="controls unknown-controls">
           <select v-model="store.unknownScanType" class="input select" :disabled="store.scanBusy">
-            <option>Int32</option>
-            <option>Int64</option>
-            <option>Float32</option>
-            <option>Float64</option>
+            <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
           </select>
+          <label class="checkbox-label compact-toggle">
+            <input v-model="store.unknownWritableOnly" type="checkbox" :disabled="store.scanBusy" />
+            <span>Writable only</span>
+          </label>
+          <label class="checkbox-label compact-toggle">
+            <input v-model="store.unknownCopyOnWriteOnly" type="checkbox" :disabled="store.scanBusy || !store.unknownWritableOnly" />
+            <span>Copy-on-write</span>
+          </label>
+          <label class="compact-select">
+            <span>Profondeur</span>
+            <select v-model.number="store.settingUnknownSnapshotMaxMb" class="input select" :disabled="store.scanBusy">
+              <option v-for="mb in unknownSnapshotPresets" :key="mb" :value="mb">{{ unknownDepthLabel(mb) }}</option>
+            </select>
+          </label>
           <button class="btn btn-secondary" :disabled="store.scanBusy" @click="store.captureUnknownSnapshot()">
             <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
             <span>{{ store.scanBusy ? 'Capture...' : $t('unknown.capture') }}</span>
@@ -442,10 +659,29 @@ onMounted(() => {
         <div v-if="store.unknownSnapshotResult || store.unknownNextScanResult" class="metrics">
           <span v-if="store.unknownSnapshotResult">{{ $t('unknown.regions') }}: {{ formatNumber(store.unknownSnapshotResult.regionsCaptured) }}</span>
           <span v-if="store.unknownSnapshotResult">{{ $t('unknown.bytes') }}: {{ formatNumber(store.unknownSnapshotResult.bytesCaptured) }}</span>
+          <span v-if="store.unknownSnapshotResult?.captureLimitBytes">Limite: {{ formatBytes(store.unknownSnapshotResult.captureLimitBytes) }}</span>
+          <span v-if="store.unknownSnapshotResult?.captureLimitReached" class="warning-text">limite atteinte</span>
           <span v-if="store.unknownSnapshotResult?.compressedBytes !== undefined">Compressé: {{ formatBytes(store.unknownSnapshotResult.compressedBytes) }}</span>
           <span v-if="store.unknownSnapshotResult?.mappedStorage">Stockage fichier temporaire</span>
+          <span v-if="store.unknownSnapshotResult?.writableOnly">Writable only</span>
+          <span v-if="store.unknownSnapshotResult?.copyOnWriteOnly">Copy-on-write</span>
           <span v-if="store.unknownNextScanResult">{{ $t('scan.matches') }}: {{ formatNumber(store.unknownNextScanResult.matchesFound) }}</span>
           <span v-if="store.unknownNextScanResult">{{ $t('scan.stored') }}: {{ formatNumber(store.unknownNextScanResult.stored) }}</span>
+        </div>
+        <div v-if="store.unknownSnapshotResult?.captureLimitReached" class="warning depth-warning">
+          <p>
+            <strong>Capture limitée</strong> : seulement {{ formatBytes(store.unknownSnapshotResult.bytesCaptured) }} capturés sur une limite de {{ formatBytes(store.unknownSnapshotResult.captureLimitBytes) }}.
+          </p>
+          <p v-if="(store.unknownSnapshotResult.relevantBytes ?? 0) > (store.unknownSnapshotResult.bytesCaptured ?? 0)">
+            Mémoire pertinente totale : {{ formatBytes(store.unknownSnapshotResult.relevantBytes) }}.
+            Tu ne couvres que {{ (((store.unknownSnapshotResult.bytesCaptured ?? 0) / (store.unknownSnapshotResult.relevantBytes ?? 1)) * 100).toFixed(1) }}% — la ressource est probablement dans les {{ (100 - (((store.unknownSnapshotResult.bytesCaptured ?? 0) / (store.unknownSnapshotResult.relevantBytes ?? 1)) * 100)).toFixed(0) }}% manquants.
+          </p>
+          <p v-if="(store.unknownSnapshotResult.suggestedDepthMb ?? 0) > 0">
+            <strong>Recommandation</strong> : passe la profondeur à <strong>{{ store.unknownSnapshotResult.suggestedDepthMb }} Mo</strong> (ou <strong>Auto</strong>) puis refais la capture.
+          </p>
+        </div>
+        <div v-else-if="store.unknownSnapshotResult?.autoDepthApplied && (store.unknownSnapshotResult.suggestedDepthMb ?? 0) > 0" class="hint depth-info">
+          Mode Auto : profondeur calculée à {{ store.unknownSnapshotResult.suggestedDepthMb }} Mo pour {{ formatBytes(store.unknownSnapshotResult.relevantBytes) }} de mémoire pertinente.
         </div>
         <div v-if="store.unknownGuideSteps.length > 0" class="unknown-timeline">
           <div
@@ -462,6 +698,91 @@ onMounted(() => {
         <p class="hint">
           Capture d'abord, fais varier la ressource, puis indique comment elle a bougé. Stable sert surtout après une première réduction.
         </p>
+      </section>
+
+      <section class="panel ui-string-panel">
+        <div class="panel-title">
+          <h2>Trace UI string</h2>
+          <span v-if="uiStringResult">{{ formatNumber(uiStringCandidates.length) }} candidat(s)</span>
+        </div>
+        <div class="controls ui-string-controls">
+          <input
+            v-model="uiStringValue"
+            class="input"
+            placeholder="Texte affiché (ex: 50)"
+            :disabled="uiStringBusy || store.scanBusy"
+            @keyup.enter="scanUiStrings()"
+          />
+          <button class="btn btn-primary" :disabled="uiStringBusy || store.scanBusy || !(uiStringValue || store.exactScanValue).trim()" @click="scanUiStrings()">
+            <span v-if="uiStringBusy" class="btn-spinner" aria-hidden="true"></span>
+            Scanner texte
+          </button>
+          <input
+            v-model="uiStringNextValue"
+            class="input"
+            placeholder="Nouvelle valeur affichée"
+            :disabled="uiStringBusy || uiStringCandidates.length === 0"
+            @keyup.enter="trackUiStrings()"
+          />
+          <button class="btn btn-secondary" :disabled="uiStringBusy || uiStringCandidates.length === 0 || !uiStringNextValue.trim()" @click="trackUiStrings()">
+            Filtrer
+          </button>
+        </div>
+        <div class="expert-flags ui-string-flags">
+          <label class="checkbox-label">
+            <input v-model="uiStringAscii" type="checkbox" :disabled="uiStringBusy" />
+            ASCII
+          </label>
+          <label class="checkbox-label">
+            <input v-model="uiStringUtf16" type="checkbox" :disabled="uiStringBusy" />
+            UTF-16
+          </label>
+          <label class="checkbox-label">
+            <input v-model="uiStringWritableOnly" type="checkbox" :disabled="uiStringBusy" />
+            Writable only
+          </label>
+          <label class="checkbox-label">
+            <input v-model="uiStringBoundary" type="checkbox" :disabled="uiStringBusy" />
+            Nombre isolé
+          </label>
+        </div>
+        <div v-if="uiStringResult" class="metrics">
+          <span>Matches: {{ formatNumber(uiStringResult.matchesFound) }}</span>
+          <span>Régions: {{ formatNumber(uiStringResult.regionsScanned) }}</span>
+          <span>Lu: {{ formatBytes(uiStringResult.bytesScanned) }}</span>
+          <span v-if="uiStringResult.partial" class="warning-text">limite atteinte</span>
+        </div>
+        <div v-if="uiStringTrackResult" class="metrics">
+          <span>Testés: {{ formatNumber(uiStringTrackResult.checked) }}</span>
+          <span>Restants: {{ formatNumber(uiStringTrackResult.remaining) }}</span>
+          <span>Illisibles: {{ formatNumber(uiStringTrackResult.unreadable) }}</span>
+        </div>
+        <p v-if="uiStringResult?.error" class="error">{{ uiStringResult.error }}</p>
+        <p v-if="uiStringTrackResult?.error" class="error">{{ uiStringTrackResult.error }}</p>
+        <div v-if="uiStringCandidates.length > 0" class="selection-toolbar">
+          <button class="btn btn-secondary compact" type="button" @click="toggleAllUiStringSelection()">
+            {{ selectedUiStringAddresses.length === uiStringCandidates.length ? 'Tout décocher' : 'Tout cocher' }}
+          </button>
+          <span>{{ selectedUiStringAddresses.length || uiStringCandidates.length }} suivi(s) au prochain filtre</span>
+        </div>
+        <div v-if="uiStringCandidates.length > 0" class="ui-string-list">
+          <div v-for="candidate in uiStringCandidates" :key="uiStringKey(candidate)" class="ui-string-row">
+            <label class="candidate-check">
+              <input
+                type="checkbox"
+                :checked="isUiStringSelected(candidate)"
+                @change="toggleUiStringSelection(candidate)"
+              />
+            </label>
+            <code>0x{{ candidate.address }}</code>
+            <span>{{ candidate.encoding }}</span>
+            <strong>{{ candidate.text }}</strong>
+            <span>{{ candidate.protection || '-' }}</span>
+            <span>{{ candidate.memoryType || '-' }}</span>
+            <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">Watch</button>
+            <button class="btn btn-secondary compact" type="button" @click="useUiStringCandidate(candidate)">Assistant</button>
+          </div>
+        </div>
       </section>
 
       <section class="panel">
@@ -491,7 +812,7 @@ onMounted(() => {
           <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="toggleCurrentPageSelection()">
             Sélection page
           </button>
-          <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="selectedCandidateAddresses = []">
+          <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="clearCandidateSelection()">
             Effacer
           </button>
           <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0" @click="useSelectedCandidatesInAssistant()">
@@ -543,12 +864,22 @@ onMounted(() => {
               <span class="visual-state">{{ store.candidateVisualState(match) }}</span>
               <span v-if="store.watchedAddresses.some((item) => item.address === match.address)" class="live-dot">watch</span>
             </div>
+            <div class="candidate-value" :class="{ error: candidateReadError(match.address) }" :title="candidateReadError(match.address) || match.lastValueHex">
+              <span>Valeur</span>
+              <strong>{{ candidateCurrentValue(match.address) }}</strong>
+            </div>
             <div class="candidate-actions">
               <button class="btn btn-secondary compact" @click="useCandidateInAssistant(match.address, match.type)">
                 Utiliser
               </button>
+              <button class="btn btn-secondary compact" @click="readCandidateValue(match.address, match.type)">
+                Lire
+              </button>
               <button class="btn btn-secondary compact" @click="watchCandidate(match.address, match.type)">
                 Watch
+              </button>
+              <button class="btn btn-secondary compact" @click="freezeCandidateCurrent(match.address, match.type)">
+                Freeze actuel
               </button>
               <button class="btn btn-secondary compact" @click="store.keepCandidate(match.address)">
                 Garder
@@ -567,7 +898,12 @@ onMounted(() => {
           <span v-if="store.writeResult">{{ store.writeResult.success ? 'OK' : 'FAIL' }}</span>
         </div>
         <div class="controls write-controls">
+          <div v-if="hasSelectedWriteTargets" class="input multi-target-summary" :title="selectedCandidateAddresses.map((address) => `0x${address}`).join(', ')">
+            <strong>{{ writeTargetLabel }}</strong>
+            <button class="inline-clear" type="button" @click="clearCandidateSelection()">manuel</button>
+          </div>
           <input
+            v-else
             v-model="store.selectedCandidateAddress"
             class="input"
             :placeholder="$t('write.address')"
@@ -575,19 +911,16 @@ onMounted(() => {
             @blur="store.updateWriteSafetyWarning()"
           />
           <select v-model="store.exactScanType" class="input select">
-            <option>Int32</option>
-            <option>Int64</option>
-            <option>Float32</option>
-            <option>Float64</option>
+            <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
           </select>
-          <input v-model="store.writeValue" class="input" :placeholder="$t('write.value')" @keyup.enter="store.writeSelectedValue()" />
-          <button class="btn btn-primary" :disabled="!store.canWriteSelectedValue" @click="store.writeSelectedValue()">
-            {{ $t('write.write') }}
+          <input v-model="store.writeValue" class="input" :placeholder="$t('write.value')" @keyup.enter="writeFromPanel()" />
+          <button class="btn btn-primary" :disabled="!canWriteFromPanel" @click="writeFromPanel()">
+            {{ writeButtonLabel }}
           </button>
           <button class="btn btn-secondary" @click="store.rollbackLastWrite()">
             {{ $t('write.rollback') }}
           </button>
-          <button class="btn btn-secondary" :disabled="store.freezeEnabled ? !store.selectedCandidateAddress : !store.canWriteSelectedValue" @click="store.toggleFreeze()">
+          <button class="btn btn-secondary" :disabled="hasSelectedWriteTargets || (store.freezeEnabled ? !store.selectedCandidateAddress : !store.canWriteSelectedValue)" @click="store.toggleFreeze()">
             {{ store.freezeEnabled ? $t('write.stopFreeze') : $t('write.freeze') }}
           </button>
         </div>
@@ -649,10 +982,7 @@ onMounted(() => {
             :disabled="store.scanBusy || !store.isAttached"
           />
           <select v-model="pointerScanValueType" class="input select">
-            <option>Int32</option>
-            <option>Int64</option>
-            <option>Float32</option>
-            <option>Float64</option>
+            <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
           </select>
           <input
             v-model.number="pointerScanMaxDepth"
@@ -1022,7 +1352,25 @@ onMounted(() => {
 }
 
 .unknown-controls {
-  grid-template-columns: 120px minmax(220px, 1fr);
+  grid-template-columns: 120px minmax(110px, auto) minmax(120px, auto) minmax(150px, auto) auto;
+  align-items: center;
+}
+
+.compact-toggle {
+  min-height: 32px;
+}
+
+.compact-select {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr);
+  gap: 6px;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.warning-text {
+  color: var(--warning);
 }
 
 .unknown-guide {
@@ -1082,8 +1430,74 @@ onMounted(() => {
   border-color: rgba(247, 118, 142, 0.45);
 }
 
+.ui-string-controls {
+  grid-template-columns: minmax(130px, 1fr) auto minmax(150px, 1fr) auto;
+  align-items: center;
+}
+
+.ui-string-flags {
+  margin-top: 8px;
+}
+
+.ui-string-list {
+  display: flex;
+  max-height: 220px;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.ui-string-row {
+  display: grid;
+  grid-template-columns: 28px minmax(140px, 1fr) 58px 70px 92px 78px auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 7px 8px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.ui-string-row code {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-string-row strong {
+  color: var(--accent);
+}
+
 .write-controls {
   grid-template-columns: minmax(170px, 1fr) 110px minmax(140px, 1fr) auto auto auto;
+}
+
+.multi-target-summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.multi-target-summary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-clear {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
 }
 
 .input {
@@ -1216,7 +1630,7 @@ onMounted(() => {
 
 .candidate-row {
   display: grid;
-  grid-template-columns: 28px minmax(170px, 1fr) minmax(240px, 1.1fr) minmax(270px, auto);
+  grid-template-columns: 28px minmax(160px, 1fr) minmax(210px, 1fr) minmax(120px, 0.6fr) minmax(390px, auto);
   gap: 8px;
   align-items: center;
   padding: 7px 8px;
@@ -1229,6 +1643,7 @@ onMounted(() => {
 }
 
 .candidate-meta,
+.candidate-value,
 .candidate-actions {
   display: flex;
   min-width: 0;
@@ -1242,6 +1657,25 @@ onMounted(() => {
 
 .candidate-actions {
   justify-content: flex-end;
+}
+
+.candidate-value {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.candidate-value strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-value.error strong {
+  color: var(--error);
 }
 
 .candidate-actions .btn {
@@ -1466,6 +1900,8 @@ onMounted(() => {
   .exact-controls,
   .next-controls,
   .unknown-controls,
+  .ui-string-controls,
+  .ui-string-row,
   .write-controls,
   .candidate-toolbar,
   .candidate-row,

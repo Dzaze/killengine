@@ -14,7 +14,10 @@ const runtimeRows = computed(() => [
 ])
 
 const debugEvents = computed(() => [...store.smartSearchDebugEvents].reverse())
-const valueTypes = ['Int32', 'Int64', 'Float32', 'Float64']
+const valueTypes = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Float32', 'Float64']
+const performanceModes = ['Auto', 'Eco', 'Normal', 'Performance', 'Max']
+const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096, 8192]
+const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
 
 function formatBytes(value: number | undefined) {
   const bytes = value ?? 0
@@ -111,16 +114,32 @@ async function saveAll() {
           <input v-model.number="store.settingScanMaxResults" class="input" type="number" min="1000" max="10000000" step="1000" />
         </label>
         <label>
-          <span>Chunk mémoire</span>
-          <input v-model.number="store.settingScanChunkSizeMb" class="input" type="number" min="1" max="64" step="1" />
+          <span>Mode performance</span>
+          <select v-model="store.settingPerformanceMode" class="input select">
+            <option v-for="mode in performanceModes" :key="mode">{{ mode }}</option>
+          </select>
+        </label>
+        <label>
+          <span>Chunk mémoire (Mo, 0 = Auto)</span>
+          <input v-model.number="store.settingScanChunkSizeMb" class="input" type="number" min="0" max="64" step="1" />
+        </label>
+        <label>
+          <span>Threads max (0 = Auto)</span>
+          <input v-model.number="store.settingScanMaxWorkerThreads" class="input" type="number" min="0" max="128" step="1" />
+        </label>
+        <label>
+          <span>Mémoire scan en vol (Mo, 0 = Auto)</span>
+          <input v-model.number="store.settingScanMaxInFlightMb" class="input" type="number" min="0" max="32768" step="64" />
         </label>
         <label>
           <span>Seuil fichier candidats</span>
           <input v-model.number="store.settingCandidateFileBackedThreshold" class="input" type="number" min="1" max="5000000" step="1000" />
         </label>
         <label>
-          <span>Snapshot unknown max (Mo)</span>
-          <input v-model.number="store.settingUnknownSnapshotMaxMb" class="input" type="number" min="128" max="32768" step="128" />
+          <span>Snapshot unknown max</span>
+          <select v-model.number="store.settingUnknownSnapshotMaxMb" class="input select">
+            <option v-for="mb in unknownSnapshotPresets" :key="mb" :value="mb">{{ unknownDepthLabel(mb) }}</option>
+          </select>
         </label>
         <label class="toggle-row">
           <input v-model="store.settingFastScan" type="checkbox" />
@@ -239,6 +258,10 @@ async function saveAll() {
       <div class="path-row">
         <span>Smart Search JSON</span>
         <code>{{ store.smartSearchDebugFilePath || '-' }}</code>
+      </div>
+      <div class="path-row">
+        <span>Scan telemetry JSON</span>
+        <code>{{ store.scanTelemetryFilePath || '-' }}</code>
       </div>
       <div class="setting-row inline-setting">
         <div>

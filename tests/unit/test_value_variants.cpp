@@ -17,8 +17,14 @@ bool variantHasValue(const QList<killcore::ValueVariant>& variants, ValueType ty
         killcore::ScanValue expectedSv;
         expectedSv.type = type;
         switch (type) {
+            case ValueType::Int8:    expectedSv.value = static_cast<int8_t>(expected); break;
+            case ValueType::UInt8:   expectedSv.value = static_cast<uint>(expected); break;
+            case ValueType::Int16:   expectedSv.value = static_cast<int16_t>(expected); break;
+            case ValueType::UInt16:  expectedSv.value = static_cast<uint>(expected); break;
             case ValueType::Int32:   expectedSv.value = static_cast<int32_t>(expected); break;
+            case ValueType::UInt32:  expectedSv.value = static_cast<uint>(expected); break;
             case ValueType::Int64:   expectedSv.value = static_cast<int64_t>(expected); break;
+            case ValueType::UInt64:  expectedSv.value = static_cast<qulonglong>(expected); break;
             case ValueType::Float32: expectedSv.value = static_cast<float>(expected); break;
             case ValueType::Float64: expectedSv.value = expected; break;
         }
@@ -41,6 +47,7 @@ TEST(ValueVariants, EmptyForNonNumeric) {
 TEST(ValueVariants, MultiTypeWhenNotExplicit) {
     const auto variants = generateScanVariants("100");
     EXPECT_TRUE(variantHasValue(variants, ValueType::Int32, 100.0));
+    EXPECT_TRUE(variantHasValue(variants, ValueType::Int16, 100.0));
     EXPECT_TRUE(variantHasValue(variants, ValueType::Float32, 100.0));
     EXPECT_TRUE(variantHasValue(variants, ValueType::Float64, 100.0));
 }
@@ -75,4 +82,13 @@ TEST(ValueVariants, LargeValueSkipsInt32) {
     const auto variants = generateScanVariants("5000000000");
     EXPECT_FALSE(variantHasValue(variants, ValueType::Int32, 5000000000.0));
     EXPECT_TRUE(variantHasValue(variants, ValueType::Int64, 5000000000.0));
+}
+
+TEST(ValueVariants, IncludesCompactUnsignedAndFixedPointScales) {
+    const auto variants = generateScanVariants("35");
+    EXPECT_LE(variants.size(), 20);
+    EXPECT_TRUE(variantHasValue(variants, ValueType::Int16, 35.0));
+    EXPECT_TRUE(variantHasValue(variants, ValueType::Int32, 35.0 * 4096.0));
+    EXPECT_TRUE(variantHasValue(variants, ValueType::Int32, 35.0 * 65536.0));
+    EXPECT_FALSE(variantHasValue(variants, ValueType::UInt8, 35.0));
 }

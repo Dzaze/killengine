@@ -75,12 +75,18 @@ public:
     /// Lit un petit aperçu mémoire en hexadécimal depuis le processus attaché.
     Q_INVOKABLE QVariantMap readMemoryPreview(const QString& addressHex, int size) const;
 
+    /// Cherche une valeur affichée sous forme de texte (ASCII / UTF-16LE) dans la mémoire.
+    Q_INVOKABLE QVariantMap scanUiStrings(const QString& value, const QVariantMap& options) const;
+
+    /// Relit des candidats texte et garde ceux qui correspondent à la nouvelle valeur affichée.
+    Q_INVOKABLE QVariantMap trackUiStringCandidates(const QVariantList& candidates, const QString& value) const;
+
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
 
     /// Phase 13 : Lance un scan multi-type + variantes de représentation.
-    /// Quand valueType est vide ou "Auto", cherche en Int32/Int64/Float32/Float64
-    /// + variantes (unsigned, ×10/100/1000) et applique un score de confiance.
+    /// Quand valueType est vide ou "Auto", cherche plusieurs représentations
+    /// numériques (Int/UInt, Float, fixed-point) et applique un score de confiance.
     Q_INVOKABLE QVariantMap startExactScanMultiType(const QString& value, const QString& valueType);
 
     /// Lance un scan exact avec filtres Mode Expert (Phase 12).
@@ -115,8 +121,14 @@ public:
     /// Capture un snapshot initial sans connaître la valeur cible.
     Q_INVOKABLE QVariantMap captureUnknownSnapshot();
 
+    /// Capture un snapshot initial avec filtres Mode Expert.
+    Q_INVOKABLE QVariantMap captureUnknownSnapshotWithOptions(const QVariantMap& expertOptions);
+
     /// Capture un snapshot unknown dans un worker thread.
     Q_INVOKABLE QVariantMap captureUnknownSnapshotAsync();
+
+    /// Capture un snapshot unknown dans un worker thread avec filtres Mode Expert.
+    Q_INVOKABLE QVariantMap captureUnknownSnapshotAsyncWithOptions(const QVariantMap& expertOptions);
 
     /// Compare le snapshot unknown initial avec l'état courant.
     Q_INVOKABLE QVariantMap unknownNextScan(const QString& mode, const QString& valueType);
@@ -154,6 +166,9 @@ public:
 
     /// Retourne le chemin du fichier debug Smart Search.
     Q_INVOKABLE QString getSmartSearchDebugFilePath() const;
+
+    /// Retourne le chemin du fichier telemetry des scans.
+    Q_INVOKABLE QString getScanTelemetryFilePath() const;
 
     /// Retourne les derniers événements du debug Smart Search.
     Q_INVOKABLE QVariantMap getSmartSearchDebugEvents(int maxEvents) const;
@@ -265,7 +280,9 @@ private:
     QVariantMap freezeChatMemoryTargetsFromQuery(const QString& query, const QString& value);
     QVariantMap writeProfileTargetsFromQuery(const QString& query, const QString& value);
     QString smartSearchDebugFilePath() const;
+    QString scanTelemetryFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;
+    void appendScanTelemetry(const QString& event, const QVariantMap& payload) const;
 
     struct WriteRecord {
         uint64_t   address{0};

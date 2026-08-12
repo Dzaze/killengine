@@ -65,11 +65,49 @@ export interface MemoryReadPreview {
   hex: string
 }
 
+export interface UiStringCandidate {
+  address: string
+  encoding: 'ascii' | 'utf16' | string
+  text: string
+  byteLength: number
+  bytesHex?: string
+  regionBase?: string
+  regionSize?: number
+  protection?: string
+  memoryType?: string
+  writable?: boolean
+}
+
+export interface UiStringScanResult {
+  success: boolean
+  partial?: boolean
+  matchesFound: number
+  matchesReturned: number
+  maxResults?: number
+  regionsScanned: number
+  bytesScanned: number
+  elapsedMs?: number
+  writableOnly?: boolean
+  error: string
+  matches: UiStringCandidate[]
+}
+
+export interface UiStringTrackResult {
+  success: boolean
+  checked: number
+  unreadable: number
+  remaining: number
+  error: string
+  survivors: UiStringCandidate[]
+}
+
 export interface ExactScanMatch {
   address: string
   type: string
   confidence?: number
   variantLabel?: string
+  lastValueHex?: string
+  lastValueNumber?: number
 }
 
 export interface ExactScanResult {
@@ -150,8 +188,16 @@ export interface UnknownSnapshotResult {
   regionsCaptured: number
   regionsSkipped: number
   bytesCaptured: number
+  captureLimitBytes?: number
+  captureLimitReached?: boolean
   compressedBytes?: number
   mappedStorage?: boolean
+  writableOnly?: boolean
+  executableOnly?: boolean
+  copyOnWriteOnly?: boolean
+  suggestedDepthMb?: number
+  relevantBytes?: number
+  autoDepthApplied?: boolean
   error: string
 }
 
@@ -166,6 +212,7 @@ export interface UnknownNextScanResult {
   stored: number
   error: string
   diagnostic?: string
+  refinedFromCandidates?: boolean
 }
 
 export interface MemoryWriteResult {
@@ -187,6 +234,7 @@ export interface ExpertScanOptions {
   writableOnly?: boolean
   executableOnly?: boolean
   copyOnWriteOnly?: boolean
+  unknownSnapshotMaxMb?: number
 }
 
 export interface SmartSearchResult {
@@ -267,6 +315,9 @@ export interface AppSettings {
   defaultValueType: string
   scanMaxResults: number
   scanChunkSizeMb: number
+  performanceMode: 'Auto' | 'Eco' | 'Normal' | 'Performance' | 'Max'
+  scanMaxWorkerThreads: number
+  scanMaxInFlightMb: number
   candidateFileBackedThreshold: number
   unknownSnapshotMaxMb: number
   fastScan: boolean
@@ -320,6 +371,8 @@ export interface AppSettings {
   detachProcess(): Promise<void>
   getMemoryMap(): Promise<MemoryMapResult>
   readMemoryPreview(addressHex: string, size: number): Promise<MemoryReadPreview>
+  scanUiStrings?(value: string, options: ExpertScanOptions & Record<string, unknown>): Promise<UiStringScanResult>
+  trackUiStringCandidates?(candidates: UiStringCandidate[], value: string): Promise<UiStringTrackResult>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
   startExactScanExpert(
     value: string,
@@ -344,7 +397,9 @@ export interface AppSettings {
   cancelActiveScan(): Promise<Record<string, unknown>>
   getCandidates(pageIndex: number, pageSize: number, addressFilter: string): Promise<CandidatePage>
   captureUnknownSnapshot(): Promise<UnknownSnapshotResult>
+  captureUnknownSnapshotWithOptions?(expertOptions: ExpertScanOptions): Promise<UnknownSnapshotResult>
   captureUnknownSnapshotAsync(): Promise<Record<string, unknown>>
+  captureUnknownSnapshotAsyncWithOptions?(expertOptions: ExpertScanOptions): Promise<Record<string, unknown>>
   unknownNextScan(mode: string, valueType: string): Promise<UnknownNextScanResult>
   unknownNextScanAsync(mode: string, valueType: string): Promise<Record<string, unknown>>
   writeMemoryValue(addressHex: string, valueType: string, value: string): Promise<MemoryWriteResult>
@@ -357,6 +412,7 @@ export interface AppSettings {
   saveSettings(settings: AppSettings): Promise<AppSettings>
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
+  getScanTelemetryFilePath?(): Promise<string>
   getSmartSearchDebugEvents(maxEvents: number): Promise<SmartSearchDebugEventsResult>
   clearSmartSearchDebugEvents(): Promise<Record<string, unknown>>
   getLogTail(maxLines: number): Promise<LogTailResult>
@@ -483,27 +539,15 @@ class BackendService {
       return controller.startExactScanExpert(value, valueType, expertOptions)
     }
 
-    const start = await controller.startExactScanAsync(value, valueType, expertOptions)
-    if (start.success !== true || start.started !== true) {
-      return {
-        success: false,
-        partial: false,
-        cancelled: false,
-        regionsScanned: 0,
-        bytesScanned: 0,
-        matchesFound: 0,
-        matchesReturned: 0,
-        error: String(start.error ?? 'Impossible de démarrer le scan async.'),
-        matches: [],
-        candidateStoreSize: 0,
-      }
-    }
-
-    const requestId = Number(start.requestId)
     return new Promise((resolve) => {
+      let requestId: number | null = null
+      let settled = false
+      const earlyPayloads: Array<ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult> = []
       const timeout = window.setTimeout(() => {
+        settled = true
+        controller.scanFinished?.disconnect?.(handler)
         resolve({
-          requestId,
+          requestId: requestId ?? undefined,
           success: false,
           partial: false,
           cancelled: false,
@@ -518,13 +562,62 @@ class BackendService {
       }, 10 * 60 * 1000)
 
       const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
+        if (requestId === null) {
+          earlyPayloads.push(payload)
+          return
+        }
         if (Number(payload.requestId) !== requestId) return
         if ('kind' in payload && payload.kind === 'next_scan') return
+        settled = true
         window.clearTimeout(timeout)
         controller.scanFinished?.disconnect?.(handler)
         resolve(payload as ExactScanResult)
       }
       controller.scanFinished?.connect(handler)
+
+      void controller.startExactScanAsync(value, valueType, expertOptions).then((start) => {
+        if (settled) return
+        if (start.success !== true || start.started !== true) {
+          settled = true
+          window.clearTimeout(timeout)
+          controller.scanFinished?.disconnect?.(handler)
+          resolve({
+            success: false,
+            partial: false,
+            cancelled: false,
+            regionsScanned: 0,
+            bytesScanned: 0,
+            matchesFound: 0,
+            matchesReturned: 0,
+            error: String(start.error ?? 'Impossible de démarrer le scan async.'),
+            matches: [],
+            candidateStoreSize: 0,
+          })
+          return
+        }
+        requestId = Number(start.requestId)
+        for (const payload of earlyPayloads.splice(0)) {
+          handler(payload)
+          if (settled) break
+        }
+      }).catch((error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        controller.scanFinished?.disconnect?.(handler)
+        resolve({
+          success: false,
+          partial: false,
+          cancelled: false,
+          regionsScanned: 0,
+          bytesScanned: 0,
+          matchesFound: 0,
+          matchesReturned: 0,
+          error: String(error),
+          matches: [],
+          candidateStoreSize: 0,
+        })
+      })
     })
   }
 
@@ -534,23 +627,15 @@ class BackendService {
       return controller.nextScan(mode, value)
     }
 
-    const start = await controller.nextScanAsync(mode, value)
-    if (start.success !== true || start.started !== true) {
-      return {
-        success: false,
-        cancelled: false,
-        checked: 0,
-        unreadable: 0,
-        remaining: 0,
-        error: String(start.error ?? 'Impossible de démarrer le next scan async.'),
-      }
-    }
-
-    const requestId = Number(start.requestId)
     return new Promise((resolve) => {
+      let requestId: number | null = null
+      let settled = false
+      const earlyPayloads: Array<ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult> = []
       const timeout = window.setTimeout(() => {
+        settled = true
+        controller.scanFinished?.disconnect?.(handler)
         resolve({
-          requestId,
+          requestId: requestId ?? undefined,
           kind: 'next_scan',
           success: false,
           cancelled: false,
@@ -562,13 +647,54 @@ class BackendService {
       }, 10 * 60 * 1000)
 
       const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
+        if (requestId === null) {
+          earlyPayloads.push(payload)
+          return
+        }
         if (Number(payload.requestId) !== requestId) return
         if ('kind' in payload && payload.kind && payload.kind !== 'next_scan') return
+        settled = true
         window.clearTimeout(timeout)
         controller.scanFinished?.disconnect?.(handler)
         resolve(payload as NextScanResult)
       }
       controller.scanFinished?.connect(handler)
+
+      void controller.nextScanAsync(mode, value).then((start) => {
+        if (settled) return
+        if (start.success !== true || start.started !== true) {
+          settled = true
+          window.clearTimeout(timeout)
+          controller.scanFinished?.disconnect?.(handler)
+          resolve({
+            success: false,
+            cancelled: false,
+            checked: 0,
+            unreadable: 0,
+            remaining: 0,
+            error: String(start.error ?? 'Impossible de démarrer le next scan async.'),
+          })
+          return
+        }
+        requestId = Number(start.requestId)
+        for (const payload of earlyPayloads.splice(0)) {
+          handler(payload)
+          if (settled) break
+        }
+      }).catch((error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        controller.scanFinished?.disconnect?.(handler)
+        resolve({
+          success: false,
+          cancelled: false,
+          checked: 0,
+          unreadable: 0,
+          remaining: 0,
+          error: String(error),
+        })
+      })
     })
   }
 
@@ -576,13 +702,17 @@ class BackendService {
     return this.getController().cancelActiveScan()
   }
 
-  async captureUnknownSnapshotAsync(): Promise<UnknownSnapshotResult> {
+  async captureUnknownSnapshotAsync(expertOptions: ExpertScanOptions = {}): Promise<UnknownSnapshotResult> {
     const controller = this.getController()
     if (!controller.scanFinished || !controller.captureUnknownSnapshotAsync) {
-      return controller.captureUnknownSnapshot()
+      return controller.captureUnknownSnapshotWithOptions
+        ? controller.captureUnknownSnapshotWithOptions(expertOptions)
+        : controller.captureUnknownSnapshot()
     }
 
-    const start = await controller.captureUnknownSnapshotAsync()
+    const start = controller.captureUnknownSnapshotAsyncWithOptions
+      ? await controller.captureUnknownSnapshotAsyncWithOptions(expertOptions)
+      : await controller.captureUnknownSnapshotAsync()
     if (start.success !== true || start.started !== true) {
       return {
         success: false,
@@ -629,6 +759,22 @@ class BackendService {
     }
 
     const start = await controller.unknownNextScanAsync(mode, valueType)
+    if (start.success === true && start.started !== true) {
+      const direct = start as UnknownNextScanResult & NextScanResult & Record<string, unknown>
+      return {
+        requestId: Number(direct.requestId ?? 0),
+        kind: 'unknown_refine',
+        success: direct.success,
+        partial: Boolean(direct.partial ?? false),
+        cancelled: Boolean(direct.cancelled ?? false),
+        checkedBytes: Number(direct.checkedBytes ?? direct.checked ?? 0),
+        matchesFound: Number(direct.matchesFound ?? direct.remaining ?? 0),
+        stored: Number(direct.stored ?? direct.remaining ?? 0),
+        error: String(direct.error ?? ''),
+        diagnostic: direct.diagnostic ? String(direct.diagnostic) : undefined,
+        refinedFromCandidates: true,
+      }
+    }
     if (start.success !== true || start.started !== true) {
       return {
         success: false,
@@ -659,9 +805,26 @@ class BackendService {
 
       const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
         if (Number(payload.requestId) !== requestId) return
-        if ('kind' in payload && payload.kind && payload.kind !== 'unknown_next') return
+        if ('kind' in payload && payload.kind && payload.kind !== 'unknown_next' && payload.kind !== 'next_scan') return
         window.clearTimeout(timeout)
         controller.scanFinished?.disconnect?.(handler)
+        if ('kind' in payload && payload.kind === 'next_scan') {
+          const nextPayload = payload as NextScanResult
+          resolve({
+            requestId,
+            kind: 'unknown_refine',
+            success: nextPayload.success,
+            partial: false,
+            cancelled: nextPayload.cancelled,
+            checkedBytes: nextPayload.checked,
+            matchesFound: nextPayload.remaining,
+            stored: nextPayload.remaining,
+            error: nextPayload.error,
+            diagnostic: nextPayload.diagnostic,
+            refinedFromCandidates: true,
+          })
+          return
+        }
         resolve(payload as UnknownNextScanResult)
       }
       controller.scanFinished?.connect(handler)
@@ -794,7 +957,21 @@ class BackendService {
           error: 'Mock backend',
         }
       },
+      async captureUnknownSnapshotWithOptions(_expertOptions: ExpertScanOptions) {
+        return {
+          success: false,
+          partial: false,
+          cancelled: false,
+          regionsCaptured: 0,
+          regionsSkipped: 0,
+          bytesCaptured: 0,
+          error: 'Mock backend',
+        }
+      },
       async captureUnknownSnapshotAsync() {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
+      async captureUnknownSnapshotAsyncWithOptions(_expertOptions: ExpertScanOptions) {
         return { success: false, started: false, error: 'Mock backend' }
       },
       async unknownNextScan(_mode: string, _valueType: string) {
@@ -838,9 +1015,12 @@ class BackendService {
           language: 'fr',
           defaultValueType: 'Int32',
           scanMaxResults: 1000000,
-          scanChunkSizeMb: 1,
+          scanChunkSizeMb: 0,
+          performanceMode: 'Auto',
+          scanMaxWorkerThreads: 0,
+          scanMaxInFlightMb: 0,
           candidateFileBackedThreshold: 250000,
-          unknownSnapshotMaxMb: 512,
+          unknownSnapshotMaxMb: 128,
           fastScan: true,
           smartSearchDebugEnabled: true,
           smartSearchDebugMaxEvents: 30,
@@ -856,6 +1036,9 @@ class BackendService {
       },
       async getSmartSearchDebugFilePath() {
         return 'mock://no-smart-search-debug'
+      },
+      async getScanTelemetryFilePath() {
+        return 'mock://no-scan-telemetry'
       },
       async getSmartSearchDebugEvents() {
         return { success: true, path: 'mock://no-smart-search-debug', events: [], error: '' }

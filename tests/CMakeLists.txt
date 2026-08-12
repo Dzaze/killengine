@@ -12,6 +12,8 @@ add_executable(killengine_unit_tests
     unit/test_ai_tools.cpp
     unit/test_snapshot_codec.cpp
     unit/test_pointer_chain.cpp
+    unit/test_performance_profile.cpp
+    unit/test_worker_pool.cpp
 )
 
 target_link_libraries(killengine_unit_tests PRIVATE

@@ -58,7 +58,13 @@ public:
     SnapshotResult capture(
         const ProcessHandle& process,
         size_t maxBytes = 512 * 1024 * 1024,
-        const CancellationToken* cancellation = nullptr);
+        const CancellationToken* cancellation = nullptr,
+        const ScanOptions& options = {});
+
+    SnapshotResult capture(
+        const ProcessHandle& process,
+        size_t maxBytes,
+        const CancellationToken* cancellation);
 
     UnknownScanResult compare(
         const ProcessHandle& process,

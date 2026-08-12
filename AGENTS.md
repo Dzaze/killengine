@@ -98,6 +98,13 @@ killengine/
 - Convention de résolution : chaque offset suit un déréférencement (`read pointer`, puis `+ offset`), y compris le dernier offset.
 - Les nouvelles méthodes C++ exposées à l'UI doivent aussi être ajoutées dans `ui/src/services/backend.ts`.
 
+### Performance adaptive
+- Préférer plus de threads contrôlés à plus de processus : le moteur doit rester déterministe et l'UI Qt/Vue doit rester fluide.
+- Centraliser les décisions machine dans `core/scanner/performance_profile.*` plutôt que disperser des heuristiques dans `ScanEngine` ou `ApplicationController`.
+- Le mode `Auto` doit garder au moins un thread logique disponible pour Windows/l'UI, plafonner la mémoire en vol, et rester borné sur les gros scans unknown.
+- Les modes exposables à l'UI sont `Eco`, `Normal`, `Performance`, `Max` ; `Auto` choisit un profil à partir des coeurs logiques et de la mémoire disponible.
+- Toute parallélisation de scan doit découper par régions/chunks, accepter `CancellationToken`, reporter la progression, et ne jamais envoyer une masse non paginée de candidats au frontend.
+
 ### Gros fichiers à connaître
 - `apps/desktop/application_controller.cpp` : **~3700 lignes** — c'est LE fichier central
   - Contient : Smart Search, scan dispatch, write/freeze, profils, undo, debugging
@@ -145,6 +152,7 @@ killengine/
 Voir `docs/PHASE_TRACKER.md` section "PHASE 13". Les éléments restants :
 - Passe de régression manuelle V1 (Solitaire + KillEngineTestTarget)
 - Optimisations futures potentielles :
+  - Profil de performance adaptatif (`Auto`, `Eco`, `Normal`, `Performance`, `Max`)
   - Propagation de la confiance à travers `nextScan`
   - Bonus module connu dans `candidate_confidence`
   - Scan multi-type asynchrone (worker thread)

@@ -154,6 +154,7 @@ Prerequisites before Phase 12:
     - [x] statut global clair : recherche active, adresses actives, profil actif, aucun contexte actif
     - [x] debug Assistant lisible expliquant pourquoi une action a été choisie
     - [x] bulle conversationnelle `Réflexion en cours...` pendant les traitements Assistant
+    - [x] rendu immédiat de la bulle Assistant avant les recherches longues (`Je vais rechercher ça en mémoire...`)
     - [x] aperçu mémoire visible avec état de lecture, adresse courante et erreurs lisibles
     - [x] bascule directe d'une région mémoire vers le Mode Expert avec adresse préremplie
     - [x] progression plus fine par régions/chunks pendant les scans longs
@@ -164,7 +165,11 @@ Prerequisites before Phase 12:
     - [x] détection de type automatique visible et exploitable côté UI
     - [x] comparaison visuelle enrichie des candidats restants
     - [x] watch live des adresses candidates et sélectionnées
+    - [x] candidats finaux exploitables : lecture live immédiate et freeze de la valeur actuelle depuis la liste
     - [x] Unknown guidé en Mode Expert : boutons augmenté/diminué/stable/changé avec historique compare/raffinage
+    - [x] Unknown SC2 plus sobre : capture filtrable writable/copy-on-write et raffinage backend sur candidats existants
+    - [x] Unknown SC2 profond : plafond de capture visible/modifiable dans Expert et alerte quand la limite mémoire est atteinte
+    - [x] Anti-boucle UI : abonnements `scanFinished` installés avant démarrage exact/next scan async pour éviter les fins ratées
     - [x] profils plus intelligents avec état de résolution/réparation visible
     - [x] sécurité anti-mauvaise écriture avant modification mémoire
     - [x] Assistant enrichi pour garder/ignorer/tester/chercher en type précis
@@ -191,3 +196,19 @@ Prerequisites before Phase 12:
     - [x] Tests unitaires : 6 tests PointerChain, dont round-trip profil pointer_chain (44/44 au total)
     - [x] Convention de resolution corrigee : chaque offset suit un dereferencement, compatible avec les chaines trouvees par le scanner
     - [ ] Validation manuelle sur StarCraft 2
+- [ ] PHASE 15 - Performance adaptive selon la machine
+    - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
+    - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM
+    - [x] Tests unitaires du choix de profil et des plafonds de threads
+    - [x] Brancher `ScanEngine` sur le profil adaptive pour chunk/logs de scan
+    - [x] Reglage UI/backend du mode performance et chunk `0 = Auto`
+    - [x] Worker pool scanner pour scan exact par regions/chunks avec cancellation/progression
+    - [x] Scan multi-type parallele par regions/chunks avec dedoublonnage final
+    - [x] Reglages UI Parametres : threads max et memoire max
+    - [x] Robustesse `MemoryReader` : fallback en blocs plus petits quand une grosse lecture echoue
+    - [x] Robustesse `SnapshotStore` : fallback de capture directe pour plage explicite start/stop
+    - [x] Telemetry scan JSONL dediee (`scan_telemetry.jsonl`) pour tests SC2 et analyse performance
+    - [x] Revue corrective : encodage C++ restaure, Auto unknown persistant, scans paralleles bornes aux plages expert
+    - [x] Scan multi-representation etendu : Int/UInt 8/16/32/64, Float, fixed-point x10/x100/x1000/x4096/x65536
+    - [x] Trace UI string : scan ASCII/UTF-16 des nombres affiches et filtrage des candidats quand l'affichage varie
+    - [ ] Validation benchmarks sur KillEngineTestTarget et gros volumes de candidats

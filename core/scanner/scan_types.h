@@ -1,5 +1,7 @@
 #pragma once
 
+#include "scanner/performance_profile.h"
+
 #include <QList>
 #include <QByteArray>
 #include <QString>
@@ -12,8 +14,14 @@
 namespace killcore {
 
 enum class ValueType {
+    Int8,
+    UInt8,
+    Int16,
+    UInt16,
     Int32,
+    UInt32,
     Int64,
+    UInt64,
     Float32,
     Float64,
 };
@@ -48,8 +56,11 @@ struct ScanProgress {
 };
 
 struct ScanOptions {
-    size_t chunkSize{1024 * 1024};
+    size_t chunkSize{0};              ///< 0 = choisi par PerformanceProfile.
     size_t maxResults{10000};
+    PerformanceMode performanceMode{PerformanceMode::Auto};
+    size_t maxWorkerThreads{0};       ///< 0 = choisi par PerformanceProfile.
+    uint64_t maxInFlightBytes{0};     ///< 0 = choisi par PerformanceProfile.
 
     // Filtres Mode Expert (Phase 12)
     uint64_t startAddress{0};          ///< Adresse de début (0 = début de chaque région)

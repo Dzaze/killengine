@@ -8,7 +8,7 @@ const chatScroll = ref<HTMLElement | null>(null)
 
 // Indicateur de réflexion dynamique — messages qui changent pendant le traitement
 const thinkingMessages = [
-  'Réflexion en cours...',
+  'Je vais rechercher ça en mémoire...',
   'Analyse de ta requête...',
   'Recherche en mémoire...',
   'Comparaison des candidats...',

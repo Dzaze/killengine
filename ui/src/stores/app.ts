@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import {
   backend,
   type AppSettings,
@@ -107,6 +107,7 @@ export const useAppStore = defineStore('app', () => {
   const temporaryStorageCleanupResult = ref<Record<string, unknown> | null>(null)
   const temporaryStorageError = ref('')
   const smartSearchDebugFilePath = ref('')
+  const scanTelemetryFilePath = ref('')
   const smartSearchDebugEvents = ref<Array<Record<string, unknown>>>([])
   const smartSearchDebugError = ref('')
   const settingsLoaded = ref(false)
@@ -115,9 +116,12 @@ export const useAppStore = defineStore('app', () => {
   const appLanguage = ref<'fr' | 'en'>('fr')
   const settingDefaultValueType = ref('Int32')
   const settingScanMaxResults = ref(1000000)
-  const settingScanChunkSizeMb = ref(1)
+  const settingScanChunkSizeMb = ref(0)
+  const settingPerformanceMode = ref<AppSettings['performanceMode']>('Auto')
+  const settingScanMaxWorkerThreads = ref(0)
+  const settingScanMaxInFlightMb = ref(0)
   const settingCandidateFileBackedThreshold = ref(250000)
-  const settingUnknownSnapshotMaxMb = ref(512)
+  const settingUnknownSnapshotMaxMb = ref(128)
   const settingFastScan = ref(true)
   const settingSmartSearchDebugEnabled = ref(true)
   const settingSmartSearchDebugMaxEvents = ref(30)
@@ -153,6 +157,8 @@ export const useAppStore = defineStore('app', () => {
   const undoCandidateScanResult = ref<UndoCandidateScanResult | null>(null)
   const unknownScanMode = ref('changed')
   const unknownScanType = ref('Int32')
+  const unknownWritableOnly = ref(true)
+  const unknownCopyOnWriteOnly = ref(false)
   const unknownSnapshotResult = ref<UnknownSnapshotResult | null>(null)
   const unknownNextScanResult = ref<UnknownNextScanResult | null>(null)
   const unknownGuideSteps = ref<UnknownGuideStep[]>([])
@@ -274,29 +280,36 @@ export const useAppStore = defineStore('app', () => {
 
   function decodePreviewValues(bytes: number[]): MemoryPreviewDecodedValue[] {
     return [
+      { label: 'Int8', value: readInt(bytes, 0, 1, true) },
+      { label: 'UInt8', value: readInt(bytes, 0, 1, false) },
       { label: 'Int16', value: readInt(bytes, 0, 2, true) },
       { label: 'UInt16', value: readInt(bytes, 0, 2, false) },
       { label: 'Int32', value: readInt(bytes, 0, 4, true) },
       { label: 'UInt32', value: readInt(bytes, 0, 4, false) },
       { label: 'Int64', value: readInt(bytes, 0, 8, true) },
+      { label: 'UInt64', value: readInt(bytes, 0, 8, false) },
       { label: 'Float32', value: decodeFloat(bytes, 4) },
       { label: 'Float64', value: decodeFloat(bytes, 8) },
     ]
   }
 
+  function valueTypeReadSize(type: string): number {
+    if (/8/.test(type)) return 1
+    if (/16/.test(type)) return 2
+    if (/64/.test(type)) return 8
+    return 4
+  }
+
+  function decodeTypedPreviewValue(preview: MemoryReadPreview, type: string): string {
+    const decoded = decodePreviewValues(hexToBytes(preview.hex))
+    return decoded.find((item) => item.label === type)?.value
+      ?? decoded.find((item) => item.label === 'Int32')?.value
+      ?? ''
+  }
+
   function setScanProgress(percent: number) {
     if (!Number.isFinite(percent)) return
     scanProgressPercent.value = Math.max(0, Math.min(100, Math.round(percent)))
-  }
-
-  function repairMojibakeText(text: string): string {
-    if (!/[ÃÂâ]/.test(text)) return text
-    try {
-      const bytes = Uint8Array.from(Array.from(text, (char) => char.charCodeAt(0) & 0xff))
-      return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    } catch {
-      return text
-    }
   }
 
   function pushMessage(
@@ -308,7 +321,7 @@ export const useAppStore = defineStore('app', () => {
     const msg: ChatMessage = {
       id: messageIdCounter.value,
       role,
-      text: repairMojibakeText(text),
+      text,
       time: nowTime(),
       ...extras,
     }
@@ -322,9 +335,14 @@ export const useAppStore = defineStore('app', () => {
     messages.value[index] = {
       ...messages.value[index],
       ...extras,
-      text: repairMojibakeText(text),
+      text,
       time: nowTime(),
     }
+  }
+
+  async function letChatRenderBeforeBackendWork() {
+    await nextTick()
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50))
   }
 
   async function resetWorkflow() {
@@ -491,8 +509,12 @@ export const useAppStore = defineStore('app', () => {
 
   async function refreshDiagnostics() {
     try {
-      logFilePath.value = await backend.getController().getLogFilePath()
-      smartSearchDebugFilePath.value = await backend.getController().getSmartSearchDebugFilePath()
+      const controller = backend.getController()
+      logFilePath.value = await controller.getLogFilePath()
+      smartSearchDebugFilePath.value = await controller.getSmartSearchDebugFilePath()
+      scanTelemetryFilePath.value = controller.getScanTelemetryFilePath
+        ? await controller.getScanTelemetryFilePath()
+        : ''
       await refreshLogTail()
       await refreshTemporaryStorageStatus()
       const debugResult: SmartSearchDebugEventsResult = await backend
@@ -507,6 +529,7 @@ export const useAppStore = defineStore('app', () => {
       temporaryStorageStatus.value = null
       temporaryStorageError.value = String(e)
       smartSearchDebugFilePath.value = ''
+      scanTelemetryFilePath.value = ''
       smartSearchDebugEvents.value = []
       smartSearchDebugError.value = String(e)
       console.error('[KillEngine] Failed to refresh diagnostics:', e)
@@ -590,9 +613,12 @@ export const useAppStore = defineStore('app', () => {
     exactScanType.value = settingDefaultValueType.value
     unknownScanType.value = settingDefaultValueType.value
     settingScanMaxResults.value = Number(settings.scanMaxResults || 1000000)
-    settingScanChunkSizeMb.value = Number(settings.scanChunkSizeMb || 1)
+    settingScanChunkSizeMb.value = Number(settings.scanChunkSizeMb ?? 0)
+    settingPerformanceMode.value = settings.performanceMode || 'Auto'
+    settingScanMaxWorkerThreads.value = Number(settings.scanMaxWorkerThreads ?? 0)
+    settingScanMaxInFlightMb.value = Number(settings.scanMaxInFlightMb ?? 0)
     settingCandidateFileBackedThreshold.value = Number(settings.candidateFileBackedThreshold || 250000)
-    settingUnknownSnapshotMaxMb.value = Number(settings.unknownSnapshotMaxMb || 512)
+    settingUnknownSnapshotMaxMb.value = Number(settings.unknownSnapshotMaxMb || 128)
     settingFastScan.value = settings.fastScan !== false
     settingSmartSearchDebugEnabled.value = settings.smartSearchDebugEnabled !== false
     settingSmartSearchDebugMaxEvents.value = Number(settings.smartSearchDebugMaxEvents || 30)
@@ -606,6 +632,9 @@ export const useAppStore = defineStore('app', () => {
       defaultValueType: settingDefaultValueType.value,
       scanMaxResults: settingScanMaxResults.value,
       scanChunkSizeMb: settingScanChunkSizeMb.value,
+      performanceMode: settingPerformanceMode.value,
+      scanMaxWorkerThreads: settingScanMaxWorkerThreads.value,
+      scanMaxInFlightMb: settingScanMaxInFlightMb.value,
       candidateFileBackedThreshold: settingCandidateFileBackedThreshold.value,
       unknownSnapshotMaxMb: settingUnknownSnapshotMaxMb.value,
       fastScan: settingFastScan.value,
@@ -701,13 +730,14 @@ export const useAppStore = defineStore('app', () => {
 
     // Message utilisateur
     pushMessage('user', query)
-    const thinkingMessage = pushMessage('assistant', 'Réflexion en cours...', { isThinking: true })
+    const thinkingMessage = pushMessage('assistant', 'Je vais rechercher ça en mémoire...', { isThinking: true })
     searchQuery.value = ''
     isSearching.value = true
+    await letChatRenderBeforeBackendWork()
 
     try {
       const result = await backend.getController().startSmartSearch(query)
-      searchResult.value = repairMojibakeText(result.message ?? JSON.stringify(result, null, 2))
+      searchResult.value = result.message ?? JSON.stringify(result, null, 2)
 
       // Synchronise les résultats déterministes
       if (result.actionStatus === 'executed' && result.actionResult) {
@@ -890,7 +920,7 @@ export const useAppStore = defineStore('app', () => {
     if (!exactScanValue.value.trim() || scanBusy.value) return
 
     // Le mode Auto (multi-type) est crucial pour StarCraft 2 : il cherche
-    // Int32/Int64/Float32/Float64 + variantes (×100, unsigned...) en une fois.
+    // Int/UInt, Float et variantes fixed-point en une fois.
     const isAutoType = exactScanType.value.toLowerCase() === 'auto'
 
     // Si le Mode Expert est activé et qu'au moins un filtre est défini, on utilise l'API expert.
@@ -976,6 +1006,16 @@ export const useAppStore = defineStore('app', () => {
       candidatePage.value = await backend
         .getController()
         .getCandidates(candidatePageIndex.value, candidatePageSize.value, candidateFilter.value)
+      if (
+        candidatePage.value
+        && !candidatePage.value.displaySuppressed
+        && candidatePage.value.totalCount > 0
+        && candidatePage.value.totalCount <= 20
+      ) {
+        for (const candidate of candidatePage.value.candidates) {
+          addAddressToWatch(candidate.address, candidate.type)
+        }
+      }
     } catch (e) {
       console.error('[KillEngine] Failed to get candidates:', e)
       candidatePage.value = null
@@ -1077,7 +1117,11 @@ export const useAppStore = defineStore('app', () => {
       scanProgressPercent.value = 15
       scanStatusText.value = 'Capture unknown en cours...'
       addActionLog('scan', 'Capture unknown', `${unknownScanType.value}.`, 'info')
-      unknownSnapshotResult.value = await backend.captureUnknownSnapshotAsync()
+      unknownSnapshotResult.value = await backend.captureUnknownSnapshotAsync({
+        writableOnly: unknownWritableOnly.value,
+        copyOnWriteOnly: unknownWritableOnly.value && unknownCopyOnWriteOnly.value,
+        unknownSnapshotMaxMb: settingUnknownSnapshotMaxMb.value,
+      })
       scanProgressPercent.value = 100
       scanStatusText.value = unknownSnapshotResult.value.cancelled ? 'Scan annulé.' : 'Snapshot capturé.'
       candidatePage.value = null
@@ -1093,7 +1137,7 @@ export const useAppStore = defineStore('app', () => {
         afterCount: 0,
         status: unknownSnapshotResult.value.success ? 'capture' : 'error',
         detail: unknownSnapshotResult.value.success
-          ? `${unknownSnapshotResult.value.regionsCaptured} région(s), ${unknownSnapshotResult.value.bytesCaptured} octet(s).`
+          ? `${unknownSnapshotResult.value.regionsCaptured} région(s), ${unknownSnapshotResult.value.bytesCaptured} octet(s) / limite ${unknownSnapshotResult.value.captureLimitBytes ?? 0}.${unknownSnapshotResult.value.captureLimitReached ? ' Limite atteinte.' : ''}${unknownSnapshotResult.value.writableOnly ? ' Writable only.' : ''}`
           : unknownSnapshotResult.value.error || 'Capture refusée.',
       })
       addActionLog('scan', 'Snapshot unknown capturé', `${unknownSnapshotResult.value.regionsCaptured} région(s).`, 'success')
@@ -1124,14 +1168,6 @@ export const useAppStore = defineStore('app', () => {
 
   async function doUnknownNextScan() {
     if (scanBusy.value) return
-    if ((candidatePage.value?.totalCount ?? 0) > 0) {
-      nextScanMode.value = unknownScanMode.value
-      nextScanValue.value = ''
-      scanStatusText.value = `Raffinage unknown ${unknownScanMode.value}...`
-      addActionLog('scan', `Raffinage unknown ${unknownScanMode.value}`, `${candidatePage.value?.totalCount ?? 0} candidat(s).`, 'info')
-      await doNextScan()
-      return
-    }
     if (!unknownSnapshotResult.value?.success) {
       scanStatusText.value = 'Capture d’abord une image unknown avant de comparer.'
       unknownNextScanResult.value = {
@@ -1163,8 +1199,17 @@ export const useAppStore = defineStore('app', () => {
     try {
       scanBusy.value = true
       scanProgressPercent.value = 15
-      scanStatusText.value = 'Comparaison unknown en cours...'
-      addActionLog('scan', `Comparaison unknown ${unknownScanMode.value}`, unknownScanType.value, 'info')
+      const candidateCount = candidatePage.value?.totalCount ?? 0
+      const isRefine = candidateCount > 0
+      scanStatusText.value = isRefine
+        ? `Raffinage unknown ${unknownScanMode.value}...`
+        : 'Comparaison unknown en cours...'
+      addActionLog(
+        'scan',
+        isRefine ? `Raffinage unknown ${unknownScanMode.value}` : `Comparaison unknown ${unknownScanMode.value}`,
+        isRefine ? `${candidateCount} candidat(s).` : unknownScanType.value,
+        'info',
+      )
       unknownNextScanResult.value = await backend.unknownNextScanAsync(unknownScanMode.value, unknownScanType.value)
       scanProgressPercent.value = 85
       candidatePageIndex.value = 0
@@ -1218,12 +1263,12 @@ export const useAppStore = defineStore('app', () => {
     await doUnknownNextScan()
 
     const afterCount = candidatePage.value?.totalCount
-      ?? nextScanResult.value?.remaining
       ?? unknownNextScanResult.value?.stored
+      ?? nextScanResult.value?.remaining
       ?? 0
     const usedRefine = beforeCount > 0
-    const error = usedRefine ? nextScanResult.value?.error : unknownNextScanResult.value?.error
-    const cancelled = usedRefine ? nextScanResult.value?.cancelled : unknownNextScanResult.value?.cancelled
+    const error = unknownNextScanResult.value?.error
+    const cancelled = unknownNextScanResult.value?.cancelled
     const status: UnknownGuideStep['status'] = error || cancelled ? 'error' : usedRefine ? 'refine' : 'compare'
     const detail = error
       ? String(error)
@@ -1330,14 +1375,33 @@ export const useAppStore = defineStore('app', () => {
     if (!Number.isFinite(numberValue)) return []
     const integer = Number.isInteger(numberValue)
     const results: Array<Record<string, unknown>> = []
+    if (integer && numberValue >= 0 && numberValue <= 255) {
+      results.push({ type: 'UInt8', confidence: 'faible', reason: 'petite valeur compacte possible' })
+    }
+    if (integer && numberValue >= -128 && numberValue <= 127) {
+      results.push({ type: 'Int8', confidence: 'faible', reason: 'petite valeur signée compacte possible' })
+    }
+    if (integer && numberValue >= 0 && numberValue <= 65535) {
+      results.push({ type: 'UInt16', confidence: 'moyenne', reason: 'ressource compacte possible' })
+    }
+    if (integer && numberValue >= -32768 && numberValue <= 32767) {
+      results.push({ type: 'Int16', confidence: 'moyenne', reason: 'entier court possible' })
+    }
     if (integer && numberValue >= -2147483648 && numberValue <= 2147483647) {
       results.push({ type: 'Int32', confidence: 'élevée', reason: 'entier courant dans les jeux' })
     }
+    if (integer && numberValue >= 0 && numberValue <= 4294967295) {
+      results.push({ type: 'UInt32', confidence: 'élevée', reason: 'entier non signé courant pour ressources' })
+    }
     if (integer) results.push({ type: 'Int64', confidence: 'moyenne', reason: 'entier large possible' })
+    if (integer && numberValue >= 0) results.push({ type: 'UInt64', confidence: 'faible', reason: 'entier non signé large possible' })
     results.push({ type: 'Float32', confidence: integer ? 'moyenne' : 'élevée', reason: 'valeur affichée parfois stockée en float' })
     results.push({ type: 'Float64', confidence: 'faible', reason: 'moins fréquent, utile pour jeux/outils spécifiques' })
-    if (integer && Math.abs(numberValue * 100) <= 2147483647) {
-      results.push({ type: 'Int32 x100', confidence: 'moyenne', reason: `valeur affichée ${value}, stock possible ${numberValue * 100}` })
+    for (const scale of [10, 100, 1000, 4096, 65536]) {
+      const scaled = numberValue * scale
+      if (integer && Math.abs(scaled) <= 2147483647) {
+        results.push({ type: `Int32 x${scale}`, confidence: scale >= 4096 ? 'moyenne' : 'moyenne', reason: `valeur affichée ${value}, stock possible ${scaled}` })
+      }
     }
     return results
   }
@@ -1364,7 +1428,13 @@ export const useAppStore = defineStore('app', () => {
 
   function addAddressToWatch(address: string, type = exactScanType.value) {
     const normalized = address.trim().replace(/^0x/i, '')
-    if (!normalized || watchedAddresses.value.some((item) => item.address === normalized)) return
+    if (!normalized) return
+    const existing = watchedAddresses.value.find((item) => item.address === normalized)
+    if (existing) {
+      existing.type = type
+      void refreshWatchedAddress(normalized)
+      return
+    }
     watchedAddresses.value.push({
       address: normalized,
       type,
@@ -1374,6 +1444,7 @@ export const useAppStore = defineStore('app', () => {
       error: '',
       updatedAt: '',
     })
+    void refreshWatchedAddress(normalized)
   }
 
   function removeAddressFromWatch(address: string) {
@@ -1381,26 +1452,40 @@ export const useAppStore = defineStore('app', () => {
     watchedAddresses.value = watchedAddresses.value.filter((item) => item.address !== normalized)
   }
 
-  async function refreshWatchedAddresses() {
-    const next: WatchedAddress[] = []
-    for (const watched of watchedAddresses.value.slice(0, 20)) {
-      try {
-        const preview = await backend.getController().readMemoryPreview(watched.address, 8)
-        const decoded = decodePreviewValues(hexToBytes(preview.hex))
-        const value = decoded.find((item) => item.label === watched.type)?.value ?? decoded[2]?.value ?? ''
-        next.push({
-          ...watched,
-          previousValue: watched.value,
-          value,
-          changed: watched.value !== '' && value !== watched.value,
-          error: preview.success ? '' : preview.error,
-          updatedAt: nowTime(),
-        })
-      } catch (e) {
-        next.push({ ...watched, previousValue: watched.value, changed: false, error: String(e), updatedAt: nowTime() })
+  async function refreshWatchedAddress(address: string): Promise<WatchedAddress | null> {
+    const normalized = address.trim().replace(/^0x/i, '')
+    const watched = watchedAddresses.value.find((item) => item.address === normalized)
+    if (!watched) return null
+
+    let updated: WatchedAddress
+    try {
+      const preview = await backend.getController().readMemoryPreview(
+        watched.address,
+        valueTypeReadSize(watched.type),
+      )
+      const value = decodeTypedPreviewValue(preview, watched.type)
+      updated = {
+        ...watched,
+        previousValue: watched.value,
+        value,
+        changed: watched.value !== '' && value !== watched.value,
+        error: preview.success ? '' : preview.error,
+        updatedAt: nowTime(),
       }
+    } catch (e) {
+      updated = { ...watched, previousValue: watched.value, changed: false, error: String(e), updatedAt: nowTime() }
     }
-    watchedAddresses.value = next
+
+    watchedAddresses.value = watchedAddresses.value.map((item) => (
+      item.address === normalized ? updated : item
+    ))
+    return updated
+  }
+
+  async function refreshWatchedAddresses() {
+    for (const watched of watchedAddresses.value.slice(0, 20)) {
+      await refreshWatchedAddress(watched.address)
+    }
   }
 
   function setWatchLiveEnabled(enabled: boolean) {
@@ -1527,6 +1612,55 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function freezeCandidateCurrent(address: string, type: string) {
+    const normalized = address.trim().replace(/^0x/i, '')
+    if (!normalized) return
+
+    selectedCandidateAddress.value = normalized
+    exactScanType.value = type
+    addAddressToWatch(normalized, type)
+
+    const watched = await refreshWatchedAddress(normalized)
+    const currentValue = watched?.value.trim() ?? ''
+    if (!currentValue || currentValue === '-') {
+      writeResult.value = {
+        success: false,
+        verified: false,
+        bytesWritten: 0,
+        error: watched?.error || 'Valeur actuelle illisible.',
+        enabled: freezeEnabled.value,
+      }
+      addActionLog('freeze', `Freeze impossible 0x${normalized}`, writeResult.value.error, 'error')
+      return
+    }
+
+    writeValue.value = currentValue
+    updateWriteSafetyWarning()
+    if (writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
+      addActionLog('write_guard', 'Freeze bloqué', writeSafetyWarning.value, 'warning')
+      return
+    }
+
+    try {
+      writeResult.value = await backend
+        .getController()
+        .setFreezeValue(normalized, type, currentValue, true)
+      if (writeResult.value.success) {
+        freezeEnabled.value = true
+        await refreshWatchedAddress(normalized)
+      }
+      addActionLog(
+        'freeze',
+        writeResult.value.success ? 'Freeze actuel activé' : 'Freeze actuel échoué',
+        `0x${normalized} ${type} = ${currentValue}.`,
+        writeResult.value.success ? 'success' : 'error',
+      )
+    } catch (e) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: freezeEnabled.value }
+      addActionLog('freeze', `Freeze échoué 0x${normalized}`, String(e), 'error')
+    }
+  }
+
   async function toggleFreeze() {
     if (!selectedCandidateAddress.value || !writeValue.value.trim()) return
     const nextState = !freezeEnabled.value
@@ -1590,6 +1724,7 @@ export const useAppStore = defineStore('app', () => {
     temporaryStorageCleanupResult,
     temporaryStorageError,
     smartSearchDebugFilePath,
+    scanTelemetryFilePath,
     smartSearchDebugEvents,
     smartSearchDebugError,
     settingsLoaded,
@@ -1599,6 +1734,9 @@ export const useAppStore = defineStore('app', () => {
     settingDefaultValueType,
     settingScanMaxResults,
     settingScanChunkSizeMb,
+    settingPerformanceMode,
+    settingScanMaxWorkerThreads,
+    settingScanMaxInFlightMb,
     settingCandidateFileBackedThreshold,
     settingUnknownSnapshotMaxMb,
     settingFastScan,
@@ -1634,6 +1772,8 @@ export const useAppStore = defineStore('app', () => {
     undoCandidateScanResult,
     unknownScanMode,
     unknownScanType,
+    unknownWritableOnly,
+    unknownCopyOnWriteOnly,
     unknownSnapshotResult,
     unknownNextScanResult,
     unknownGuideSteps,
@@ -1704,6 +1844,7 @@ export const useAppStore = defineStore('app', () => {
     updateWriteSafetyWarning,
     addAddressToWatch,
     removeAddressFromWatch,
+    refreshWatchedAddress,
     refreshWatchedAddresses,
     setWatchLiveEnabled,
     keepCandidate,
@@ -1713,6 +1854,7 @@ export const useAppStore = defineStore('app', () => {
     writeSelectedAddresses,
     rollbackLastWrite,
     rollbackLastWriteBatch,
+    freezeCandidateCurrent,
     toggleFreeze,
     pushMessage,
     tellNewValue,

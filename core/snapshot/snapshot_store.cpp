@@ -18,13 +18,43 @@ constexpr size_t kUnknownMaxReturnedMatches = 250000;
 
 double bytesToDouble(const char* data, ValueType type) {
     switch (type) {
+        case ValueType::Int8: {
+            int8_t value = 0;
+            std::memcpy(&value, data, sizeof(value));
+            return static_cast<double>(value);
+        }
+        case ValueType::UInt8: {
+            uint8_t value = 0;
+            std::memcpy(&value, data, sizeof(value));
+            return static_cast<double>(value);
+        }
+        case ValueType::Int16: {
+            int16_t value = 0;
+            std::memcpy(&value, data, sizeof(value));
+            return static_cast<double>(value);
+        }
+        case ValueType::UInt16: {
+            uint16_t value = 0;
+            std::memcpy(&value, data, sizeof(value));
+            return static_cast<double>(value);
+        }
         case ValueType::Int32: {
             int32_t value = 0;
             std::memcpy(&value, data, sizeof(value));
             return static_cast<double>(value);
         }
+        case ValueType::UInt32: {
+            uint32_t value = 0;
+            std::memcpy(&value, data, sizeof(value));
+            return static_cast<double>(value);
+        }
         case ValueType::Int64: {
             int64_t value = 0;
+            std::memcpy(&value, data, sizeof(value));
+            return static_cast<double>(value);
+        }
+        case ValueType::UInt64: {
+            uint64_t value = 0;
             std::memcpy(&value, data, sizeof(value));
             return static_cast<double>(value);
         }
@@ -70,6 +100,39 @@ bool matchesMode(const char* previous, const char* current, ValueType type, Next
     return false;
 }
 
+bool isCopyOnWriteProtection(uint32_t protection) {
+    const auto flags = protectionToString(protection).split('|');
+    return flags.contains("WC") || flags.contains("XWC");
+}
+
+bool regionMatchesSnapshotOptions(
+    const MemoryRegion& region,
+    const ScanOptions& options,
+    uint64_t* readStart,
+    uint64_t* readEnd) {
+    if (!region.readable || region.guarded || region.size == 0) {
+        return false;
+    }
+    if (options.writableOnly && !region.writable) return false;
+    if (options.executableOnly && !region.executable) return false;
+    if (options.copyOnWriteOnly && !isCopyOnWriteProtection(region.protection)) return false;
+
+    const uint64_t regionStart = region.baseAddress;
+    const uint64_t regionEnd = region.baseAddress + region.size;
+    if (options.stopAddress != 0 && regionStart >= options.stopAddress) return false;
+    if (options.startAddress != 0 && options.startAddress >= regionEnd) return false;
+
+    const uint64_t effectiveStart = std::max(regionStart, options.startAddress);
+    const uint64_t effectiveEnd = options.stopAddress == 0 ? regionEnd : std::min(regionEnd, options.stopAddress);
+    if (effectiveEnd <= effectiveStart) {
+        return false;
+    }
+
+    if (readStart) *readStart = effectiveStart;
+    if (readEnd) *readEnd = effectiveEnd;
+    return true;
+}
+
 } // namespace
 
 SnapshotStore::~SnapshotStore() {
@@ -113,6 +176,14 @@ SnapshotResult SnapshotStore::capture(
     const ProcessHandle& process,
     size_t maxBytes,
     const CancellationToken* cancellation) {
+    return capture(process, maxBytes, cancellation, {});
+}
+
+SnapshotResult SnapshotStore::capture(
+    const ProcessHandle& process,
+    size_t maxBytes,
+    const CancellationToken* cancellation,
+    const ScanOptions& options) {
     clear();
 
     SnapshotResult result;
@@ -140,18 +211,22 @@ SnapshotResult SnapshotStore::capture(
             return result;
         }
 
-        if (!region.readable || region.guarded || region.size == 0) {
+        uint64_t readStart = 0;
+        uint64_t readEnd = 0;
+        if (!regionMatchesSnapshotOptions(region, options, &readStart, &readEnd)) {
             ++result.regionsSkipped;
             continue;
         }
 
-        if (m_bytesCaptured + static_cast<size_t>(region.size) > maxBytes) {
+        const uint64_t readSize64 = readEnd - readStart;
+        const size_t readSize = static_cast<size_t>(readSize64);
+        if (m_bytesCaptured + readSize > maxBytes) {
             ++result.regionsSkipped;
             result.partial = true;
             continue;
         }
 
-        const auto read = reader.readChunked(region.baseAddress, static_cast<size_t>(region.size), 1024 * 1024, cancellation);
+        const auto read = reader.readChunked(readStart, readSize, 1024 * 1024, cancellation);
         if (!(read.success || read.partial) || read.bytesRead == 0) {
             ++result.regionsSkipped;
             continue;
@@ -174,7 +249,7 @@ SnapshotResult SnapshotStore::capture(
         }
 
         SnapshotRegion snapshotRegion;
-        snapshotRegion.baseAddress = region.baseAddress;
+        snapshotRegion.baseAddress = readStart;
         snapshotRegion.size = static_cast<uint64_t>(read.bytesRead);
         snapshotRegion.mappedOffset = mappedOffset;
         snapshotRegion.storedSize = compressed.block.data.size();
@@ -190,6 +265,48 @@ SnapshotResult SnapshotStore::capture(
 
         if (read.partial) {
             result.partial = true;
+        }
+    }
+
+    if (m_regions.isEmpty() && options.startAddress != 0 && options.stopAddress > options.startAddress) {
+        const uint64_t readSize64 = options.stopAddress - options.startAddress;
+        if (readSize64 <= static_cast<uint64_t>(maxBytes)) {
+            const auto read = reader.readChunked(
+                options.startAddress,
+                static_cast<size_t>(readSize64),
+                1024 * 1024,
+                cancellation);
+
+            if ((read.success || read.partial) && read.bytesRead > 0) {
+                auto compressed = SnapshotCodec::compressLz4(read.data);
+                if (compressed.success) {
+                    const qint64 mappedOffset = m_backingFile->pos();
+                    const qint64 written = m_backingFile->write(compressed.block.data);
+                    if (written != compressed.block.data.size()) {
+                        result.errorMessage = "Unable to write compressed snapshot block.";
+                        clear();
+                        return result;
+                    }
+
+                    SnapshotRegion snapshotRegion;
+                    snapshotRegion.baseAddress = options.startAddress;
+                    snapshotRegion.size = static_cast<uint64_t>(read.bytesRead);
+                    snapshotRegion.mappedOffset = mappedOffset;
+                    snapshotRegion.storedSize = compressed.block.data.size();
+                    snapshotRegion.originalSize = compressed.block.originalSize;
+                    snapshotRegion.compressed = compressed.block.compressed;
+                    m_regions.append(std::move(snapshotRegion));
+                    m_bytesCaptured += read.bytesRead;
+                    m_compressedBytesCaptured += static_cast<size_t>(compressed.block.data.size());
+
+                    ++result.regionsCaptured;
+                    result.bytesCaptured = m_bytesCaptured;
+                    result.compressedBytes = m_compressedBytesCaptured;
+                    result.partial = result.partial || read.partial;
+                } else {
+                    result.errorMessage = compressed.errorMessage;
+                }
+            }
         }
     }
 

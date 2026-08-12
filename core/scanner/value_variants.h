@@ -24,12 +24,12 @@ struct ValueVariant {
  * @brief Génère les variantes de représentation courantes pour une valeur numérique donnée.
  *
  * Si `explicitType` est faux (l'utilisateur n'a pas précisé de type), la fonction
- * produit les 4 types natifs (Int32, Int64, Float32, Float64).
+ * produit les types natifs courants (Int/UInt 8/16/32/64, Float32, Float64).
  *
  * Pour chaque type, des variantes de scaling sont produites quand c'est pertinent :
  *   - valeur exacte
- *   - valeur ×10, ×100, ×1000 (score/argent interne)
- *   - représentation unsigned (Int32/Int64 uniquement)
+ *   - valeur ×10, ×100, ×1000, ×4096, ×65536 (fixed-point / scores internes)
+ *   - représentations compactes et unsigned
  *
  * @param rawValue  Texte source (ex. "100", "12.5").
  * @param explicitType Type imposé (ValueType::Int32 par défaut si non précisé).

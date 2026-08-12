@@ -145,6 +145,39 @@ TEST(IntegrationMemoryScanTest, ExactScanFindsKnownTestTargetValue) {
     EXPECT_FALSE(scan.matches.isEmpty());
 }
 
+TEST(IntegrationMemoryScanTest, MultiTypeScanFindsKnownTestTargetValue) {
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadOnly);
+    ASSERT_TRUE(handle.isValid()) << "Could not open KillEngineTestTarget process.";
+
+    QList<killcore::ScanEngine::MultiTypeMatch> variants;
+    killcore::ScanValue value;
+    QString parseError;
+    ASSERT_TRUE(killcore::parseScanValue("41250", killcore::ValueType::Int32, &value, &parseError))
+        << parseError.toStdString();
+    variants.append({value, "Int32", false});
+
+    killcore::ScanValue floatValue;
+    ASSERT_TRUE(killcore::parseScanValue("41250", killcore::ValueType::Float32, &floatValue, &parseError))
+        << parseError.toStdString();
+    variants.append({floatValue, "Float32", false});
+
+    killcore::ScanOptions options;
+    options.maxResults = 1000000;
+    killcore::ScanEngine scanner(handle);
+    const auto scan = scanner.exactScanMultiType(variants, options);
+
+    ASSERT_TRUE(scan.success) << scan.errorMessage.toStdString();
+    EXPECT_GT(scan.bytesScanned, 0U);
+    EXPECT_GT(scan.matchesFound, 0U);
+
+    killcore::MemoryReader reader(handle);
+    const auto playerMoneyAddress = findPlayerMoneyAddress(scan, reader);
+    EXPECT_TRUE(playerMoneyAddress.has_value()) << "Could not identify Player.money candidate from multi-type scan.";
+}
+
 TEST(IntegrationMemoryScanTest, ExactWorkflowWritesVerifiesAndRollsBackKnownValue) {
     TestTargetProcess target;
     ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
@@ -203,8 +236,15 @@ TEST(IntegrationMemoryScanTest, UnknownWorkflowCapturesComparesAndWritesKnownVal
     const auto playerMoneyAddress = findPlayerMoneyAddress(initialScan, reader);
     ASSERT_TRUE(playerMoneyAddress.has_value()) << "Could not identify Player.money candidate.";
 
+    const auto beforeSnapshotRead = reader.read(*playerMoneyAddress, sizeof(int32_t));
+    ASSERT_TRUE(beforeSnapshotRead.success || beforeSnapshotRead.partial) << beforeSnapshotRead.errorMessage.toStdString();
+    ASSERT_EQ(beforeSnapshotRead.bytesRead, sizeof(int32_t));
+
     killcore::SnapshotStore snapshot;
-    const auto capture = snapshot.capture(handle);
+    killcore::ScanOptions snapshotOptions;
+    snapshotOptions.startAddress = *playerMoneyAddress;
+    snapshotOptions.stopAddress = *playerMoneyAddress + sizeof(int32_t);
+    const auto capture = snapshot.capture(handle, 1024 * 1024, nullptr, snapshotOptions);
     ASSERT_TRUE(capture.success) << capture.errorMessage.toStdString();
     ASSERT_FALSE(snapshot.isEmpty());
     ASSERT_TRUE(snapshot.usesMappedStorage());

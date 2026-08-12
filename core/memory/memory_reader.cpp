@@ -69,18 +69,36 @@ MemoryReadResult MemoryReader::readChunked(
             return result;
         }
 
-        const size_t bytesToRead = std::min(chunkSize, size - offset);
+        const size_t plannedBytesToRead = std::min(chunkSize, size - offset);
+        const size_t minimumAttemptSize = std::max<size_t>(
+            1,
+            std::min<size_t>(64 * 1024, plannedBytesToRead));
+        size_t bytesToRead = plannedBytesToRead;
         QByteArray buffer;
-        buffer.resize(static_cast<qsizetype>(bytesToRead));
-
         SIZE_T bytesRead = 0;
         const auto currentAddress = address + static_cast<uint64_t>(offset);
-        const BOOL ok = ReadProcessMemory(
-            m_process.rawHandle(),
-            reinterpret_cast<LPCVOID>(currentAddress),
-            buffer.data(),
-            bytesToRead,
-            &bytesRead);
+        BOOL ok = FALSE;
+
+        while (true) {
+            buffer.resize(static_cast<qsizetype>(bytesToRead));
+            bytesRead = 0;
+            ok = ReadProcessMemory(
+                m_process.rawHandle(),
+                reinterpret_cast<LPCVOID>(currentAddress),
+                buffer.data(),
+                bytesToRead,
+                &bytesRead);
+
+            if (ok && bytesRead > 0) {
+                break;
+            }
+
+            if (bytesToRead <= minimumAttemptSize) {
+                break;
+            }
+
+            bytesToRead = std::max(minimumAttemptSize, bytesToRead / 2);
+        }
 
         if (!ok || bytesRead == 0) {
             result.errorCode = GetLastError();
