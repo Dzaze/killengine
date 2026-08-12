@@ -212,4 +212,5 @@ Prerequisites before Phase 12:
     - [x] Scan multi-representation etendu : Int/UInt 8/16/32/64, Float, fixed-point x10/x100/x1000/x4096/x65536
     - [x] Trace UI string : scan ASCII/UTF-16 des nombres affiches et filtrage des candidats quand l'affichage varie
     - [x] Source probe UI string : analyse locale autour d'une string suivie pour proposer les valeurs numeriques proches a tester/write/freeze
+    - [x] Tracker sources UI string : reduction des sources numeriques candidates selon les changements successifs de l'affichage
     - [ ] Validation benchmarks sur KillEngineTestTarget et gros volumes de candidats

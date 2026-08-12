@@ -555,6 +555,29 @@ QByteArray targetBytesForCandidate(
     return killcore::scanValueToBytes(parsed);
 }
 
+QByteArray targetBytesForTypeAndVariant(
+    const QString& rawValue,
+    killcore::ValueType type,
+    const QString& variantLabel,
+    QString* error = nullptr) {
+    if (!variantLabel.trimmed().isEmpty()) {
+        const auto variants = killcore::generateScanVariants(rawValue, type, true);
+        const auto bytes = variantBytesByKey(variants);
+        const QString key = variantKey(type, variantLabel);
+        if (bytes.contains(key)) {
+            return bytes.value(key);
+        }
+    }
+
+    killcore::ScanValue parsed;
+    QString parseError;
+    if (!killcore::parseScanValue(rawValue, type, &parsed, &parseError)) {
+        if (error) *error = parseError;
+        return {};
+    }
+    return killcore::scanValueToBytes(parsed);
+}
+
 QList<killcore::Candidate> candidatesFromUnknownScan(
     const killcore::ProcessHandle& process,
     const killcore::UnknownScanResult& scan) {
@@ -1700,6 +1723,79 @@ QVariantMap ApplicationController::analyzeUiStringSources(
     result["windowStart"] = uiStringAddress(windowStart);
     result["windowEnd"] = uiStringAddress(windowStart + static_cast<uint64_t>(read.bytesRead));
     result["radiusBytes"] = radius;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::trackUiStringSources(const QVariantList& sourceCandidates, const QString& value) const {
+    QVariantMap result;
+    QVariantList survivors;
+    result["success"] = false;
+    result["survivors"] = survivors;
+
+    const QString rawValue = value.trimmed();
+    if (rawValue.isEmpty()) {
+        result["error"] = "Nouvelle valeur source vide.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::MemoryReader reader(m_handle);
+    int checked = 0;
+    int unreadable = 0;
+    int incompatible = 0;
+
+    for (const auto& item : sourceCandidates) {
+        QVariantMap candidate = item.toMap();
+        uint64_t address = 0;
+        if (!parseHexAddress(candidate.value("address").toString(), &address)) {
+            ++incompatible;
+            continue;
+        }
+
+        killcore::ValueType type;
+        if (!killcore::parseValueType(candidate.value("type").toString(), &type)) {
+            ++incompatible;
+            continue;
+        }
+
+        QString targetError;
+        const QString variantLabel = candidate.value("variantLabel").toString();
+        const QByteArray expected = targetBytesForTypeAndVariant(rawValue, type, variantLabel, &targetError);
+        if (expected.isEmpty()) {
+            ++incompatible;
+            continue;
+        }
+
+        ++checked;
+        const auto read = reader.read(address, killcore::valueTypeSize(type));
+        if (!(read.success || read.partial) || read.bytesRead < killcore::valueTypeSize(type)) {
+            ++unreadable;
+            continue;
+        }
+
+        if (bytesEqual(read.data, expected, type)) {
+            const double previousConfidence = candidate.value("confidence", 0.5).toDouble();
+            const int previousHits = candidate.value("trackHits", 0).toInt();
+            candidate["previousValueNumber"] = candidate.value("lastValueNumber");
+            candidate["lastValueNumber"] = bytesToDouble(read.data, type);
+            candidate["lastValueHex"] = QString::fromLatin1(read.data.left(static_cast<qsizetype>(expected.size())).toHex(' ').toUpper());
+            candidate["expectedHex"] = QString::fromLatin1(expected.toHex(' ').toUpper());
+            candidate["trackHits"] = previousHits + 1;
+            candidate["confidence"] = std::clamp(previousConfidence + 0.12, 0.0, 1.0);
+            survivors.append(candidate);
+        }
+    }
+
+    result["success"] = true;
+    result["checked"] = checked;
+    result["unreadable"] = unreadable;
+    result["incompatible"] = incompatible;
+    result["remaining"] = survivors.size();
+    result["survivors"] = survivors;
     result["error"] = "";
     return result;
 }

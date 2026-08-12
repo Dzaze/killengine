@@ -108,6 +108,9 @@ export interface UiStringSourceCandidate {
   variantLabel?: string
   lastValueHex?: string
   lastValueNumber?: number
+  previousValueNumber?: number
+  expectedHex?: string
+  trackHits?: number
   distanceBytes?: number
   offsetFromString?: number
   regionBase?: string
@@ -126,6 +129,16 @@ export interface UiStringSourceResult {
   radiusBytes?: number
   error: string
   candidates: UiStringSourceCandidate[]
+}
+
+export interface UiStringSourceTrackResult {
+  success: boolean
+  checked: number
+  unreadable: number
+  incompatible?: number
+  remaining: number
+  error: string
+  survivors: UiStringSourceCandidate[]
 }
 
 export interface ExactScanMatch {
@@ -405,6 +418,7 @@ export interface AppSettings {
     value: string,
     options: Record<string, unknown>,
   ): Promise<UiStringSourceResult>
+  trackUiStringSources?(sourceCandidates: UiStringSourceCandidate[], value: string): Promise<UiStringSourceTrackResult>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
   startExactScanExpert(
     value: string,

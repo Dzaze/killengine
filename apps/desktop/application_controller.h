@@ -87,6 +87,9 @@ public:
         const QString& value,
         const QVariantMap& options) const;
 
+    /// Relit des sources numériques candidates et garde celles qui suivent la nouvelle valeur affichée.
+    Q_INVOKABLE QVariantMap trackUiStringSources(const QVariantList& sourceCandidates, const QString& value) const;
+
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
 

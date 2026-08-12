@@ -10,6 +10,7 @@ import {
   type UiStringScanResult,
   type UiStringSourceCandidate,
   type UiStringSourceResult,
+  type UiStringSourceTrackResult,
   type UiStringTrackResult,
 } from '@/services/backend'
 
@@ -37,6 +38,7 @@ const uiStringBusy = ref(false)
 const uiStringResult = ref<UiStringScanResult | null>(null)
 const uiStringTrackResult = ref<UiStringTrackResult | null>(null)
 const uiStringSourceResult = ref<UiStringSourceResult | null>(null)
+const uiStringSourceTrackResult = ref<UiStringSourceTrackResult | null>(null)
 const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
@@ -149,6 +151,7 @@ async function scanUiStrings() {
   uiStringResult.value = null
   uiStringTrackResult.value = null
   uiStringSourceResult.value = null
+  uiStringSourceTrackResult.value = null
   uiStringSourceCandidates.value = []
   selectedUiStringAddresses.value = []
   selectedUiSourceAddresses.value = []
@@ -210,6 +213,10 @@ async function trackUiStrings() {
     uiStringCandidates.value = result.survivors ?? []
     selectedUiStringAddresses.value = uiStringCandidates.value.map(uiStringKey)
     uiStringValue.value = value
+    uiStringSourceResult.value = null
+    uiStringSourceTrackResult.value = null
+    uiStringSourceCandidates.value = []
+    selectedUiSourceAddresses.value = []
   } catch (e) {
     uiStringTrackResult.value = { success: false, checked: 0, unreadable: 0, remaining: 0, survivors: [], error: String(e) }
   } finally {
@@ -250,6 +257,7 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate) {
   if (!target || !value) return
   uiStringBusy.value = true
   uiStringSourceResult.value = null
+  uiStringSourceTrackResult.value = null
   uiStringSourceCandidates.value = []
   selectedUiSourceAddresses.value = []
   try {
@@ -279,6 +287,48 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate) {
       matchesReturned: 0,
       bytesScanned: 0,
       candidates: [],
+      error: String(e),
+    }
+  } finally {
+    uiStringBusy.value = false
+  }
+}
+
+function selectedUiSourceCandidates() {
+  if (selectedUiSourceAddresses.value.length === 0) return uiStringSourceCandidates.value
+  const selected = new Set(selectedUiSourceAddresses.value)
+  return uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate)))
+}
+
+async function trackUiStringSources() {
+  const value = uiStringNextValue.value.trim()
+  if (!value || uiStringSourceCandidates.value.length === 0) return
+  uiStringBusy.value = true
+  try {
+    const controller = backend.getController()
+    if (!controller.trackUiStringSources) {
+      uiStringSourceTrackResult.value = {
+        success: false,
+        checked: 0,
+        unreadable: 0,
+        remaining: 0,
+        survivors: [],
+        error: 'Methode backend indisponible (mock mode).',
+      }
+      return
+    }
+    const result = await controller.trackUiStringSources(selectedUiSourceCandidates(), value)
+    uiStringSourceTrackResult.value = result
+    uiStringSourceCandidates.value = result.survivors ?? []
+    selectedUiSourceAddresses.value = uiStringSourceCandidates.value.map(sourceKey)
+    uiStringValue.value = value
+  } catch (e) {
+    uiStringSourceTrackResult.value = {
+      success: false,
+      checked: 0,
+      unreadable: 0,
+      remaining: 0,
+      survivors: [],
       error: String(e),
     }
   } finally {
@@ -817,7 +867,10 @@ onMounted(() => {
             @keyup.enter="trackUiStrings()"
           />
           <button class="btn btn-secondary" :disabled="uiStringBusy || uiStringCandidates.length === 0 || !uiStringNextValue.trim()" @click="trackUiStrings()">
-            Filtrer
+            Filtrer strings
+          </button>
+          <button class="btn btn-primary" :disabled="uiStringBusy || uiStringSourceCandidates.length === 0 || !uiStringNextValue.trim()" @click="trackUiStringSources()">
+            Tracker sources
           </button>
         </div>
         <div class="expert-flags ui-string-flags">
@@ -854,9 +907,16 @@ onMounted(() => {
           <span>Fenêtre: {{ formatBytes(uiStringSourceResult.bytesScanned) }}</span>
           <span v-if="uiStringSourceResult.partial" class="warning-text">résultats limités</span>
         </div>
+        <div v-if="uiStringSourceTrackResult" class="metrics">
+          <span>Sources testées: {{ formatNumber(uiStringSourceTrackResult.checked) }}</span>
+          <span>Sources restantes: {{ formatNumber(uiStringSourceTrackResult.remaining) }}</span>
+          <span>Illisibles: {{ formatNumber(uiStringSourceTrackResult.unreadable) }}</span>
+          <span v-if="uiStringSourceTrackResult.incompatible">Incompatibles: {{ formatNumber(uiStringSourceTrackResult.incompatible) }}</span>
+        </div>
         <p v-if="uiStringResult?.error" class="error">{{ uiStringResult.error }}</p>
         <p v-if="uiStringTrackResult?.error" class="error">{{ uiStringTrackResult.error }}</p>
         <p v-if="uiStringSourceResult?.error" class="error">{{ uiStringSourceResult.error }}</p>
+        <p v-if="uiStringSourceTrackResult?.error" class="error">{{ uiStringSourceTrackResult.error }}</p>
         <div v-if="uiStringCandidates.length > 0" class="selection-toolbar">
           <button class="btn btn-secondary compact" type="button" @click="toggleAllUiStringSelection()">
             {{ selectedUiStringAddresses.length === uiStringCandidates.length ? 'Tout décocher' : 'Tout cocher' }}
@@ -913,7 +973,7 @@ onMounted(() => {
             <span>{{ candidate.type }}</span>
             <span>{{ candidate.variantLabel || '-' }}</span>
             <strong>{{ candidate.lastValueNumber }}</strong>
-            <span>{{ formatNumber(candidate.distanceBytes) }} o</span>
+            <span>{{ candidate.trackHits ? `${candidate.trackHits} hit(s)` : `${formatNumber(candidate.distanceBytes)} o` }}</span>
             <button class="btn btn-primary compact" type="button" @click="useUiSourceCandidate(candidate)">Utiliser</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate)">Watch</button>
           </div>
@@ -1566,7 +1626,7 @@ onMounted(() => {
 }
 
 .ui-string-controls {
-  grid-template-columns: minmax(130px, 1fr) auto minmax(150px, 1fr) auto;
+  grid-template-columns: minmax(130px, 1fr) auto minmax(150px, 1fr) auto auto;
   align-items: center;
 }
 
