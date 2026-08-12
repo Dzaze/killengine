@@ -52,6 +52,8 @@ const uiStringSourceRadiusOptions = [
   { value: 64 * 1024, label: '64 Ko' },
   { value: 256 * 1024, label: '256 Ko' },
   { value: 1024 * 1024, label: '1 Mo' },
+  { value: 4 * 1024 * 1024, label: '4 Mo' },
+  { value: 16 * 1024 * 1024, label: '16 Mo' },
 ]
 
 async function runPointerScan() {
@@ -263,7 +265,7 @@ function toggleUiSourceSelection(candidate: UiStringSourceCandidate) {
   selectedUiSourceAddresses.value = [...selectedUiSourceAddresses.value, key]
 }
 
-async function analyzeUiStringSources(candidate?: UiStringCandidate) {
+async function analyzeUiStringSources(candidate?: UiStringCandidate, radiusOverrideBytes = uiStringSourceRadiusBytes.value) {
   const targets = candidate ? [candidate] : selectedUiStringCandidates()
   const value = (uiStringValue.value || store.exactScanValue).trim()
   if (targets.length === 0 || !value) return
@@ -293,7 +295,7 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate) {
     let firstError = ''
     for (const target of targets) {
       const result = await controller.analyzeUiStringSources(target, value, {
-        radiusBytes: uiStringSourceRadiusBytes.value,
+        radiusBytes: radiusOverrideBytes,
         maxResults: 300,
         alignment: 1,
       })
@@ -317,11 +319,12 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate) {
       matchesFound,
       matchesReturned: candidates.length,
       bytesScanned,
-      radiusBytes: uiStringSourceRadiusBytes.value,
+      radiusBytes: radiusOverrideBytes,
       candidates,
       error: firstError,
     }
     uiStringSourceCandidates.value = candidates
+    selectedUiSourceAddresses.value = candidates.map(sourceKey)
   } catch (e) {
     uiStringSourceResult.value = {
       success: false,
@@ -378,8 +381,22 @@ async function inspectUiStringOrigins(candidate?: UiStringCandidate) {
 }
 
 async function autoInspectUiStrings() {
-  if (selectedUiStringCandidates().length === 0) return
-  await analyzeUiStringSources()
+  const targets = selectedUiStringCandidates()
+  if (targets.length === 0) return
+  const radii = Array.from(new Set([
+    uiStringSourceRadiusBytes.value,
+    1024 * 1024,
+    4 * 1024 * 1024,
+    16 * 1024 * 1024,
+  ])).sort((a, b) => a - b)
+  for (const radius of radii) {
+    uiStringSourceRadiusBytes.value = radius
+    await analyzeUiStringSources(undefined, radius)
+    if (uiStringSourceCandidates.value.length > 0) {
+      useSelectedUiSourcesForWrite()
+      break
+    }
+  }
   await inspectUiStringOrigins()
 }
 

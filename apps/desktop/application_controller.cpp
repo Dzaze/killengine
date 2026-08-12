@@ -1603,7 +1603,7 @@ QVariantMap ApplicationController::analyzeUiStringSources(
     }
 
     const int stringLength = std::clamp(stringCandidate.value("byteLength", 0).toInt(), 0, 256);
-    const int radius = std::clamp(optionsMap.value("radiusBytes", 65536).toInt(), 256, 1024 * 1024);
+    const int radius = std::clamp(optionsMap.value("radiusBytes", 65536).toInt(), 256, 16 * 1024 * 1024);
     const int maxResults = std::clamp(optionsMap.value("maxResults", 200).toInt(), 1, 5000);
     const int alignment = std::clamp(optionsMap.value("alignment", 1).toInt(), 1, 16);
 
@@ -1626,7 +1626,7 @@ QVariantMap ApplicationController::analyzeUiStringSources(
         return result;
     }
 
-    const size_t readSize = static_cast<size_t>(std::min<uint64_t>(windowEnd - windowStart, 2ull * 1024ull * 1024ull));
+    const size_t readSize = static_cast<size_t>(std::min<uint64_t>(windowEnd - windowStart, 32ull * 1024ull * 1024ull));
     killcore::MemoryReader reader(m_handle);
     const auto read = reader.readChunked(windowStart, readSize, 64 * 1024);
     if (!read.success && !read.partial) {
@@ -1823,11 +1823,6 @@ QVariantMap ApplicationController::inspectUiStringOrigins(
     uint64_t bytesScanned = 0;
     int regionsScanned = 0;
     bool partial = false;
-    const uint64_t refMin = clusterStart > kPointerSlack ? clusterStart - kPointerSlack : clusterStart;
-    const uint64_t refMax = clusterEnd > std::numeric_limits<uint64_t>::max() - kPointerSlack
-        ? std::numeric_limits<uint64_t>::max()
-        : clusterEnd + kPointerSlack;
-
     for (const auto& region : regions) {
         if (pointerRefs.size() >= maxRefs || bytesScanned >= maxScanBytes) {
             partial = true;
@@ -1858,13 +1853,15 @@ QVariantMap ApplicationController::inspectUiStringOrigins(
             for (qsizetype i = 0; i <= limit && pointerRefs.size() < maxRefs; i += 8) {
                 uint64_t pointed = 0;
                 std::memcpy(&pointed, read.data.constData() + i, sizeof(pointed));
-                if (pointed < refMin || pointed > refMax) {
-                    continue;
-                }
-
+                auto nearestIt = std::lower_bound(addresses.begin(), addresses.end(), pointed);
                 uint64_t nearest = addresses.first();
-                uint64_t nearestDistance = pointed > nearest ? pointed - nearest : nearest - pointed;
-                for (const uint64_t candidateAddress : addresses) {
+                uint64_t nearestDistance = std::numeric_limits<uint64_t>::max();
+                if (nearestIt != addresses.end()) {
+                    nearest = *nearestIt;
+                    nearestDistance = pointed > nearest ? pointed - nearest : nearest - pointed;
+                }
+                if (nearestIt != addresses.begin()) {
+                    const uint64_t candidateAddress = *(nearestIt - 1);
                     const uint64_t distance = pointed > candidateAddress
                         ? pointed - candidateAddress
                         : candidateAddress - pointed;
@@ -1872,6 +1869,9 @@ QVariantMap ApplicationController::inspectUiStringOrigins(
                         nearest = candidateAddress;
                         nearestDistance = distance;
                     }
+                }
+                if (nearestDistance > kPointerSlack) {
+                    continue;
                 }
 
                 QVariantMap ref;
