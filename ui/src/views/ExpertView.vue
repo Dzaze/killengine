@@ -484,9 +484,20 @@ const selectedWriteTargets = computed<MemoryWriteTarget[]>(() => selectedCandida
   return {
     address,
     type: String(record?.type ?? store.exactScanType),
+    variantLabel: record?.variantLabel,
   }
 }))
 const selectedWriteHasVariants = computed(() => selectedWriteTargets.value.some((target) => Boolean(target.variantLabel)))
+const writePlan = computed(() => selectedWriteTargets.value.map((target) => {
+  const displayValue = store.writeValue.trim()
+  const encodedValue = encodedDisplayWriteValue(displayValue, target.variantLabel)
+  return {
+    ...target,
+    displayValue,
+    encodedValue,
+    mode: target.variantLabel || target.type,
+  }
+}))
 const selectedCandidateTypes = computed(() => Array.from(new Set(
   selectedWriteTargets.value.map((target) => String(target.variantLabel || target.type)),
 )))
@@ -537,6 +548,18 @@ function formatBytes(value: number | undefined) {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} Ko`
   return `${formatNumber(bytes)} o`
+}
+
+function encodedDisplayWriteValue(value: string, variantLabel?: string): string {
+  const cleanValue = value.trim().replace(',', '.')
+  if (!cleanValue) return '-'
+  const multiplier = variantLabel?.match(/\bx\s*(\d+(?:\.\d+)?)\b/i)
+  if (!multiplier) return cleanValue
+  const numeric = Number(cleanValue)
+  const scale = Number(multiplier[1])
+  if (!Number.isFinite(numeric) || !Number.isFinite(scale)) return cleanValue
+  const encoded = numeric * scale
+  return Number.isInteger(encoded) ? String(encoded) : String(encoded)
 }
 
 function confidencePercent(confidence: number | undefined): number {
@@ -1283,6 +1306,20 @@ onMounted(() => {
             {{ store.freezeEnabled ? $t('write.stopFreeze') : $t('write.freeze') }}
           </button>
         </div>
+        <div v-if="hasSelectedWriteTargets" class="write-plan">
+          <div class="write-plan-title">
+            <strong>Plan d'écriture</strong>
+            <span>{{ writePlan.length }} cible(s) · valeur affichée {{ store.writeValue.trim() || '-' }}</span>
+          </div>
+          <div class="write-plan-list">
+            <div v-for="target in writePlan.slice(0, 12)" :key="`${target.address}:${target.mode}`" class="write-plan-row">
+              <code>0x{{ target.address }}</code>
+              <span>{{ target.mode }}</span>
+              <strong>{{ target.encodedValue }}</strong>
+            </div>
+          </div>
+          <span v-if="writePlan.length > 12" class="muted">+ {{ writePlan.length - 12 }} autre(s) cible(s) avec le même calcul automatique.</span>
+        </div>
         <div v-if="store.writeSafetyWarning" class="write-safety">
           <p class="warning">{{ store.writeSafetyWarning }}</p>
           <label class="safety-ack">
@@ -1930,6 +1967,59 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.write-plan {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 4px;
+  background: rgba(13, 17, 32, 0.42);
+}
+
+.write-plan-title,
+.write-plan-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(90px, 140px) minmax(90px, 140px);
+  gap: 10px;
+  align-items: center;
+}
+
+.write-plan-title {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.write-plan-title strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.write-plan-list {
+  display: grid;
+  gap: 4px;
+}
+
+.write-plan-row {
+  min-height: 28px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.write-plan-row code {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.write-plan-row strong {
+  color: var(--success);
+}
+
 .input {
   min-width: 0;
   padding: 8px 10px;
@@ -2334,6 +2424,8 @@ onMounted(() => {
   .ui-string-row,
   .origin-row,
   .source-row,
+  .write-plan-title,
+  .write-plan-row,
   .write-controls,
   .candidate-toolbar,
   .candidate-row,
