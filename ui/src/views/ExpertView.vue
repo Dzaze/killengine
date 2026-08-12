@@ -7,6 +7,7 @@ import {
   type PointerChainResolveResult,
   type PointerScanResult,
   type UiStringCandidate,
+  type UiStringOriginResult,
   type UiStringScanResult,
   type UiStringSourceCandidate,
   type UiStringSourceResult,
@@ -40,6 +41,7 @@ const uiStringResult = ref<UiStringScanResult | null>(null)
 const uiStringTrackResult = ref<UiStringTrackResult | null>(null)
 const uiStringSourceResult = ref<UiStringSourceResult | null>(null)
 const uiStringSourceTrackResult = ref<UiStringSourceTrackResult | null>(null)
+const uiStringOriginResult = ref<UiStringOriginResult | null>(null)
 const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
@@ -158,6 +160,7 @@ async function scanUiStrings() {
   uiStringTrackResult.value = null
   uiStringSourceResult.value = null
   uiStringSourceTrackResult.value = null
+  uiStringOriginResult.value = null
   uiStringSourceCandidates.value = []
   selectedUiStringAddresses.value = []
   selectedUiSourceAddresses.value = []
@@ -221,6 +224,7 @@ async function trackUiStrings() {
     uiStringValue.value = value
     uiStringSourceResult.value = null
     uiStringSourceTrackResult.value = null
+    uiStringOriginResult.value = null
     uiStringSourceCandidates.value = []
     selectedUiSourceAddresses.value = []
   } catch (e) {
@@ -264,6 +268,7 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate) {
   uiStringBusy.value = true
   uiStringSourceResult.value = null
   uiStringSourceTrackResult.value = null
+  uiStringOriginResult.value = null
   uiStringSourceCandidates.value = []
   selectedUiSourceAddresses.value = []
   try {
@@ -327,6 +332,53 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate) {
   } finally {
     uiStringBusy.value = false
   }
+}
+
+async function inspectUiStringOrigins(candidate?: UiStringCandidate) {
+  const targets = candidate ? [candidate] : selectedUiStringCandidates()
+  if (targets.length === 0) return
+  uiStringBusy.value = true
+  uiStringOriginResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.inspectUiStringOrigins) {
+      uiStringOriginResult.value = {
+        success: false,
+        targetCount: 0,
+        pointerRefsFound: 0,
+        bytesScanned: 0,
+        regionsScanned: 0,
+        targets: [],
+        pointerRefs: [],
+        error: 'Methode backend indisponible (mock mode).',
+      }
+      return
+    }
+    uiStringOriginResult.value = await controller.inspectUiStringOrigins(targets, {
+      maxRefs: 500,
+      maxScanMb: 512,
+      writableOnly: true,
+    })
+  } catch (e) {
+    uiStringOriginResult.value = {
+      success: false,
+      targetCount: 0,
+      pointerRefsFound: 0,
+      bytesScanned: 0,
+      regionsScanned: 0,
+      targets: [],
+      pointerRefs: [],
+      error: String(e),
+    }
+  } finally {
+    uiStringBusy.value = false
+  }
+}
+
+async function autoInspectUiStrings() {
+  if (selectedUiStringCandidates().length === 0) return
+  await analyzeUiStringSources()
+  await inspectUiStringOrigins()
 }
 
 function selectedUiSourceCandidates() {
@@ -969,6 +1021,12 @@ onMounted(() => {
           <button class="btn btn-primary compact" type="button" :disabled="uiStringBusy" @click="analyzeUiStringSources()">
             Analyser sources
           </button>
+          <button class="btn btn-primary compact" type="button" :disabled="uiStringBusy" @click="autoInspectUiStrings()">
+            Auto origine
+          </button>
+          <button class="btn btn-secondary compact" type="button" :disabled="uiStringBusy" @click="inspectUiStringOrigins()">
+            Backrefs
+          </button>
           <span>{{ selectedUiStringAddresses.length || uiStringCandidates.length }} suivi(s) au prochain filtre</span>
         </div>
         <div v-if="uiStringCandidates.length > 0" class="ui-string-list">
@@ -986,8 +1044,31 @@ onMounted(() => {
             <span>{{ candidate.movedFrom ? `+${formatNumber(candidate.movedDistanceBytes)} o` : (candidate.protection || '-') }}</span>
             <span>{{ candidate.memoryType || '-' }}</span>
             <button class="btn btn-primary compact" type="button" @click="analyzeUiStringSources(candidate)">Sources</button>
+            <button class="btn btn-secondary compact" type="button" @click="inspectUiStringOrigins(candidate)">Origine</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">Watch</button>
             <button class="btn btn-secondary compact" type="button" @click="useUiStringCandidate(candidate)">Assistant</button>
+          </div>
+        </div>
+        <div v-if="uiStringOriginResult" class="metrics">
+          <span>Cluster: {{ uiStringOriginResult.clusterStart ? `0x${uiStringOriginResult.clusterStart}` : '-' }}</span>
+          <span>Cibles: {{ formatNumber(uiStringOriginResult.targetCount) }}</span>
+          <span>Span: {{ formatBytes(uiStringOriginResult.clusterSpanBytes) }}</span>
+          <span v-if="uiStringOriginResult.commonStrideBytes">Stride: {{ formatBytes(uiStringOriginResult.commonStrideBytes) }}</span>
+          <span>Backrefs: {{ formatNumber(uiStringOriginResult.pointerRefsFound) }}</span>
+          <span>Lu: {{ formatBytes(uiStringOriginResult.bytesScanned) }}</span>
+        </div>
+        <p v-if="uiStringOriginResult?.error" class="error">{{ uiStringOriginResult.error }}</p>
+        <div v-if="uiStringOriginResult?.pointerRefs.length" class="origin-list">
+          <div class="source-list-title">
+            <strong>Pointeurs vers les strings</strong>
+            <span>{{ formatNumber(uiStringOriginResult.pointerRefs.length) }} ref(s)</span>
+          </div>
+          <div v-for="ref in uiStringOriginResult.pointerRefs.slice(0, 80)" :key="`${ref.address}:${ref.pointsTo}`" class="origin-row">
+            <code>0x{{ ref.address }}</code>
+            <span>→ 0x{{ ref.pointsTo }}</span>
+            <span>{{ ref.distanceToString ? `${formatNumber(ref.distanceToString)} o` : 'exact' }}</span>
+            <span>{{ ref.memoryType || '-' }}</span>
+            <span>{{ ref.protection || '-' }}</span>
           </div>
         </div>
         <div v-if="uiStringSourceCandidates.length > 0" class="source-list">
@@ -1689,7 +1770,7 @@ onMounted(() => {
 
 .ui-string-row {
   display: grid;
-  grid-template-columns: 28px minmax(140px, 1fr) 58px 70px 92px 78px auto auto auto;
+  grid-template-columns: 28px minmax(140px, 1fr) 58px 70px 92px 78px auto auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 38px;
@@ -1717,6 +1798,15 @@ onMounted(() => {
   flex-direction: column;
   gap: 4px;
   margin-top: 10px;
+}
+
+.origin-list {
+  display: flex;
+  max-height: 190px;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  overflow-y: auto;
 }
 
 .source-list-title {
@@ -1751,6 +1841,27 @@ onMounted(() => {
 
 .source-row strong {
   color: var(--success);
+}
+
+.origin-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) 72px 78px 92px;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.origin-row code {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .write-controls {
@@ -2183,6 +2294,7 @@ onMounted(() => {
   .unknown-controls,
   .ui-string-controls,
   .ui-string-row,
+  .origin-row,
   .source-row,
   .write-controls,
   .candidate-toolbar,

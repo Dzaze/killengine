@@ -144,6 +144,41 @@ export interface UiStringSourceTrackResult {
   survivors: UiStringSourceCandidate[]
 }
 
+export interface UiStringPointerRef {
+  address: string
+  pointsTo: string
+  nearestString: string
+  distanceToString?: number
+  regionBase?: string
+  protection?: string
+  memoryType?: string
+  writable?: boolean
+}
+
+export interface UiStringOriginTarget {
+  address: string
+  offsetFromCluster?: number
+  regionBase?: string
+  protection?: string
+  memoryType?: string
+}
+
+export interface UiStringOriginResult {
+  success: boolean
+  partial?: boolean
+  targetCount: number
+  clusterStart?: string
+  clusterEnd?: string
+  clusterSpanBytes?: number
+  commonStrideBytes?: number
+  pointerRefsFound: number
+  bytesScanned: number
+  regionsScanned: number
+  error: string
+  targets: UiStringOriginTarget[]
+  pointerRefs: UiStringPointerRef[]
+}
+
 export interface ExactScanMatch {
   address: string
   type: string
@@ -422,6 +457,7 @@ export interface AppSettings {
     options: Record<string, unknown>,
   ): Promise<UiStringSourceResult>
   trackUiStringSources?(sourceCandidates: UiStringSourceCandidate[], value: string): Promise<UiStringSourceTrackResult>
+  inspectUiStringOrigins?(stringCandidates: UiStringCandidate[], options: Record<string, unknown>): Promise<UiStringOriginResult>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
   startExactScanExpert(
     value: string,

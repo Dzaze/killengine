@@ -1749,6 +1749,167 @@ QVariantMap ApplicationController::trackUiStringSources(const QVariantList& sour
     return result;
 }
 
+QVariantMap ApplicationController::inspectUiStringOrigins(
+    const QVariantList& stringCandidates,
+    const QVariantMap& optionsMap) const {
+    QVariantMap result;
+    QVariantList targets;
+    QVariantList pointerRefs;
+    result["success"] = false;
+    result["targets"] = targets;
+    result["pointerRefs"] = pointerRefs;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (stringCandidates.isEmpty()) {
+        result["error"] = "Aucune string à inspecter.";
+        return result;
+    }
+
+    QList<uint64_t> addresses;
+    addresses.reserve(stringCandidates.size());
+    for (const auto& item : stringCandidates) {
+        const QVariantMap candidate = item.toMap();
+        uint64_t address = 0;
+        if (parseHexAddress(candidate.value("address").toString(), &address)) {
+            addresses.append(address);
+        }
+    }
+    if (addresses.isEmpty()) {
+        result["error"] = "Aucune adresse string valide.";
+        return result;
+    }
+    std::sort(addresses.begin(), addresses.end());
+
+    const uint64_t clusterStart = addresses.first();
+    const uint64_t clusterEnd = addresses.last();
+    const uint64_t clusterSpan = clusterEnd >= clusterStart ? clusterEnd - clusterStart : 0;
+    const int maxRefs = std::clamp(optionsMap.value("maxRefs", 500).toInt(), 1, 5000);
+    const uint64_t maxScanBytes = static_cast<uint64_t>(
+        std::clamp(optionsMap.value("maxScanMb", 512).toInt(), 16, 4096)) * 1024ull * 1024ull;
+    const bool writableOnly = optionsMap.value("writableOnly", true).toBool();
+    constexpr size_t kChunkSize = 1024 * 1024;
+    constexpr uint64_t kPointerSlack = 32;
+
+    uint64_t commonStride = 0;
+    if (addresses.size() >= 2) {
+        commonStride = addresses.at(1) - addresses.at(0);
+        for (qsizetype i = 2; i < addresses.size(); ++i) {
+            const uint64_t delta = addresses.at(i) - addresses.at(i - 1);
+            if (delta != commonStride) {
+                commonStride = 0;
+                break;
+            }
+        }
+    }
+
+    const auto regions = killcore::MemoryMap::snapshot(m_handle);
+    const killcore::MemoryRegion* clusterRegion = findRegionContaining(regions, clusterStart);
+    for (const uint64_t address : addresses) {
+        QVariantMap target;
+        target["address"] = uiStringAddress(address);
+        target["offsetFromCluster"] = static_cast<qlonglong>(address - clusterStart);
+        if (clusterRegion) {
+            target["regionBase"] = uiStringAddress(clusterRegion->baseAddress);
+            target["protection"] = killcore::protectionToString(clusterRegion->protection);
+            target["memoryType"] = killcore::memoryTypeToString(clusterRegion->type);
+        }
+        targets.append(target);
+    }
+
+    killcore::MemoryReader reader(m_handle);
+    uint64_t bytesScanned = 0;
+    int regionsScanned = 0;
+    bool partial = false;
+    const uint64_t refMin = clusterStart > kPointerSlack ? clusterStart - kPointerSlack : clusterStart;
+    const uint64_t refMax = clusterEnd > std::numeric_limits<uint64_t>::max() - kPointerSlack
+        ? std::numeric_limits<uint64_t>::max()
+        : clusterEnd + kPointerSlack;
+
+    for (const auto& region : regions) {
+        if (pointerRefs.size() >= maxRefs || bytesScanned >= maxScanBytes) {
+            partial = true;
+            break;
+        }
+        if (!region.readable || region.guarded || region.size < sizeof(uint64_t)) {
+            continue;
+        }
+        if (writableOnly && !region.writable) {
+            continue;
+        }
+
+        ++regionsScanned;
+        uint64_t offset = 0;
+        while (offset < region.size && pointerRefs.size() < maxRefs && bytesScanned < maxScanBytes) {
+            const uint64_t remaining = region.size - offset;
+            const size_t toRead = static_cast<size_t>(std::min<uint64_t>(
+                remaining,
+                std::min<uint64_t>(kChunkSize, maxScanBytes - bytesScanned)));
+            const uint64_t readAddress = region.baseAddress + offset;
+            const auto read = reader.readChunked(readAddress, toRead, kChunkSize);
+            if (!read.success && !read.partial) {
+                break;
+            }
+            bytesScanned += read.bytesRead;
+
+            const qsizetype limit = read.data.size() - static_cast<qsizetype>(sizeof(uint64_t));
+            for (qsizetype i = 0; i <= limit && pointerRefs.size() < maxRefs; i += 8) {
+                uint64_t pointed = 0;
+                std::memcpy(&pointed, read.data.constData() + i, sizeof(pointed));
+                if (pointed < refMin || pointed > refMax) {
+                    continue;
+                }
+
+                uint64_t nearest = addresses.first();
+                uint64_t nearestDistance = pointed > nearest ? pointed - nearest : nearest - pointed;
+                for (const uint64_t candidateAddress : addresses) {
+                    const uint64_t distance = pointed > candidateAddress
+                        ? pointed - candidateAddress
+                        : candidateAddress - pointed;
+                    if (distance < nearestDistance) {
+                        nearest = candidateAddress;
+                        nearestDistance = distance;
+                    }
+                }
+
+                QVariantMap ref;
+                const uint64_t pointerAddress = readAddress + static_cast<uint64_t>(i);
+                ref["address"] = uiStringAddress(pointerAddress);
+                ref["pointsTo"] = uiStringAddress(pointed);
+                ref["nearestString"] = uiStringAddress(nearest);
+                ref["distanceToString"] = static_cast<qulonglong>(nearestDistance);
+                ref["regionBase"] = uiStringAddress(region.baseAddress);
+                ref["protection"] = killcore::protectionToString(region.protection);
+                ref["memoryType"] = killcore::memoryTypeToString(region.type);
+                ref["writable"] = region.writable;
+                pointerRefs.append(ref);
+            }
+
+            offset += read.bytesRead;
+            if (read.bytesRead == 0 || read.partial) {
+                break;
+            }
+        }
+    }
+
+    result["success"] = true;
+    result["targetCount"] = addresses.size();
+    result["targets"] = targets;
+    result["clusterStart"] = uiStringAddress(clusterStart);
+    result["clusterEnd"] = uiStringAddress(clusterEnd);
+    result["clusterSpanBytes"] = static_cast<qulonglong>(clusterSpan);
+    result["commonStrideBytes"] = static_cast<qulonglong>(commonStride);
+    result["pointerRefs"] = pointerRefs;
+    result["pointerRefsFound"] = pointerRefs.size();
+    result["bytesScanned"] = static_cast<qulonglong>(bytesScanned);
+    result["regionsScanned"] = regionsScanned;
+    result["partial"] = partial || pointerRefs.size() >= maxRefs;
+    result["error"] = "";
+    return result;
+}
+
 QVariantMap ApplicationController::startExactScan(const QString& value, const QString& valueType) {
     QVariantMap result;
     QVariantList matches;

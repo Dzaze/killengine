@@ -90,6 +90,11 @@ public:
     /// Relit des sources numériques candidates et garde celles qui suivent la nouvelle valeur affichée.
     Q_INVOKABLE QVariantMap trackUiStringSources(const QVariantList& sourceCandidates, const QString& value) const;
 
+    /// Inspecte les strings UI suivies : cluster, slots proches et pointeurs qui les référencent.
+    Q_INVOKABLE QVariantMap inspectUiStringOrigins(
+        const QVariantList& stringCandidates,
+        const QVariantMap& options) const;
+
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
 
