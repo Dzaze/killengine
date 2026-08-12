@@ -34,6 +34,7 @@ const uiStringAscii = ref(true)
 const uiStringUtf16 = ref(true)
 const uiStringWritableOnly = ref(true)
 const uiStringBoundary = ref(true)
+const uiStringSourceRadiusBytes = ref(1024 * 1024)
 const uiStringBusy = ref(false)
 const uiStringResult = ref<UiStringScanResult | null>(null)
 const uiStringTrackResult = ref<UiStringTrackResult | null>(null)
@@ -43,6 +44,11 @@ const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
 const selectedUiSourceAddresses = ref<string[]>([])
+const uiStringSourceRadiusOptions = [
+  { value: 64 * 1024, label: '64 Ko' },
+  { value: 256 * 1024, label: '256 Ko' },
+  { value: 1024 * 1024, label: '1 Mo' },
+]
 
 async function runPointerScan() {
   if (!pointerScanAddress.value.trim()) return
@@ -235,7 +241,7 @@ function useUiStringCandidate(candidate: UiStringCandidate) {
 }
 
 function sourceKey(candidate: UiStringSourceCandidate) {
-  return `${candidate.type}:${candidate.address}`
+  return `${candidate.type}:${candidate.variantLabel ?? ''}:${candidate.address}`
 }
 
 function isUiSourceSelected(candidate: UiStringSourceCandidate) {
@@ -252,9 +258,9 @@ function toggleUiSourceSelection(candidate: UiStringSourceCandidate) {
 }
 
 async function analyzeUiStringSources(candidate?: UiStringCandidate) {
-  const target = candidate ?? selectedUiStringCandidates()[0]
+  const targets = candidate ? [candidate] : selectedUiStringCandidates()
   const value = (uiStringValue.value || store.exactScanValue).trim()
-  if (!target || !value) return
+  if (targets.length === 0 || !value) return
   uiStringBusy.value = true
   uiStringSourceResult.value = null
   uiStringSourceTrackResult.value = null
@@ -273,13 +279,42 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate) {
       }
       return
     }
-    const result = await controller.analyzeUiStringSources(target, value, {
-      radiusBytes: 65536,
-      maxResults: 200,
-      alignment: 1,
-    })
-    uiStringSourceResult.value = result
-    uiStringSourceCandidates.value = result.candidates ?? []
+    const merged = new Map<string, UiStringSourceCandidate>()
+    let matchesFound = 0
+    let bytesScanned = 0
+    let partial = false
+    let firstError = ''
+    for (const target of targets) {
+      const result = await controller.analyzeUiStringSources(target, value, {
+        radiusBytes: uiStringSourceRadiusBytes.value,
+        maxResults: 300,
+        alignment: 1,
+      })
+      if (!result.success && !firstError) firstError = result.error
+      matchesFound += Number(result.matchesFound ?? 0)
+      bytesScanned += Number(result.bytesScanned ?? 0)
+      partial = partial || Boolean(result.partial)
+      for (const source of result.candidates ?? []) {
+        const existing = merged.get(sourceKey(source))
+        if (!existing || Number(source.confidence ?? 0) > Number(existing.confidence ?? 0)) {
+          merged.set(sourceKey(source), source)
+        }
+      }
+    }
+    const candidates = Array.from(merged.values())
+      .sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))
+      .slice(0, 500)
+    uiStringSourceResult.value = {
+      success: firstError === '',
+      partial: partial || merged.size > candidates.length,
+      matchesFound,
+      matchesReturned: candidates.length,
+      bytesScanned,
+      radiusBytes: uiStringSourceRadiusBytes.value,
+      candidates,
+      error: firstError,
+    }
+    uiStringSourceCandidates.value = candidates
   } catch (e) {
     uiStringSourceResult.value = {
       success: false,
@@ -890,6 +925,14 @@ onMounted(() => {
             <input v-model="uiStringBoundary" type="checkbox" :disabled="uiStringBusy" />
             Nombre isolé
           </label>
+          <label class="compact-select">
+            <span>Rayon sources</span>
+            <select v-model.number="uiStringSourceRadiusBytes" class="input select" :disabled="uiStringBusy">
+              <option v-for="option in uiStringSourceRadiusOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
         </div>
         <div v-if="uiStringResult" class="metrics">
           <span>Matches: {{ formatNumber(uiStringResult.matchesFound) }}</span>
@@ -905,7 +948,8 @@ onMounted(() => {
         </div>
         <div v-if="uiStringSourceResult" class="metrics">
           <span>Sources: {{ formatNumber(uiStringSourceResult.matchesReturned) }}</span>
-          <span>Fenêtre: {{ formatBytes(uiStringSourceResult.bytesScanned) }}</span>
+          <span>Fenêtres lues: {{ formatBytes(uiStringSourceResult.bytesScanned) }}</span>
+          <span v-if="uiStringSourceResult.radiusBytes">Rayon: {{ formatBytes(uiStringSourceResult.radiusBytes) }}</span>
           <span v-if="uiStringSourceResult.partial" class="warning-text">résultats limités</span>
         </div>
         <div v-if="uiStringSourceTrackResult" class="metrics">
