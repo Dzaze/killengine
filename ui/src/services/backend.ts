@@ -71,6 +71,8 @@ export interface UiStringCandidate {
   text: string
   byteLength: number
   bytesHex?: string
+  movedFrom?: string
+  movedDistanceBytes?: number
   regionBase?: string
   regionSize?: number
   protection?: string
@@ -96,6 +98,7 @@ export interface UiStringTrackResult {
   success: boolean
   checked: number
   unreadable: number
+  moved?: number
   remaining: number
   error: string
   survivors: UiStringCandidate[]

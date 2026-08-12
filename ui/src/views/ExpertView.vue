@@ -901,6 +901,7 @@ onMounted(() => {
           <span>Testés: {{ formatNumber(uiStringTrackResult.checked) }}</span>
           <span>Restants: {{ formatNumber(uiStringTrackResult.remaining) }}</span>
           <span>Illisibles: {{ formatNumber(uiStringTrackResult.unreadable) }}</span>
+          <span v-if="uiStringTrackResult.moved">Déplacés: {{ formatNumber(uiStringTrackResult.moved) }}</span>
         </div>
         <div v-if="uiStringSourceResult" class="metrics">
           <span>Sources: {{ formatNumber(uiStringSourceResult.matchesReturned) }}</span>
@@ -938,7 +939,7 @@ onMounted(() => {
             <code>0x{{ candidate.address }}</code>
             <span>{{ candidate.encoding }}</span>
             <strong>{{ candidate.text }}</strong>
-            <span>{{ candidate.protection || '-' }}</span>
+            <span>{{ candidate.movedFrom ? `+${formatNumber(candidate.movedDistanceBytes)} o` : (candidate.protection || '-') }}</span>
             <span>{{ candidate.memoryType || '-' }}</span>
             <button class="btn btn-primary compact" type="button" @click="analyzeUiStringSources(candidate)">Sources</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">Watch</button>

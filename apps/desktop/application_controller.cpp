@@ -29,6 +29,7 @@
 #include <QPointer>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QSet>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -1454,8 +1455,12 @@ QVariantMap ApplicationController::trackUiStringCandidates(const QVariantList& c
     }
 
     killcore::MemoryReader reader(m_handle);
+    const auto regions = killcore::MemoryMap::snapshot(m_handle);
     int checked = 0;
     int unreadable = 0;
+    int moved = 0;
+    QSet<QString> seenSurvivors;
+    constexpr uint64_t kRescanRadius = 512;
 
     for (const auto& item : candidates) {
         const QVariantMap candidate = item.toMap();
@@ -1482,16 +1487,90 @@ QVariantMap ApplicationController::trackUiStringCandidates(const QVariantList& c
 
         if (read.data.startsWith(expected)) {
             QVariantMap survivor = candidate;
+            const QString survivorKey = encoding + "|" + uiStringAddress(address);
+            if (seenSurvivors.contains(survivorKey)) {
+                continue;
+            }
+            seenSurvivors.insert(survivorKey);
             survivor["text"] = needleText;
             survivor["byteLength"] = expected.size();
             survivor["bytesHex"] = QString::fromLatin1(expected.toHex(' ').toUpper());
             survivors.append(survivor);
+            continue;
         }
+
+        const killcore::MemoryRegion* region = findRegionContaining(regions, address);
+        if (!region || !region->readable || region->guarded || region->size == 0) {
+            continue;
+        }
+
+        const uint64_t regionStart = region->baseAddress;
+        const uint64_t regionEnd = region->baseAddress + region->size;
+        const uint64_t windowStart = address > kRescanRadius
+            ? std::max(regionStart, address - kRescanRadius)
+            : regionStart;
+        const uint64_t windowEnd = std::min(regionEnd, address + static_cast<uint64_t>(readSize) + kRescanRadius);
+        if (windowEnd <= windowStart) {
+            continue;
+        }
+
+        const auto windowRead = reader.readChunked(
+            windowStart,
+            static_cast<size_t>(windowEnd - windowStart),
+            4096);
+        if (!windowRead.success && !windowRead.partial) {
+            continue;
+        }
+
+        const bool scanAscii = encoding.compare("ascii", Qt::CaseInsensitive) == 0;
+        const bool scanUtf16 = encoding.compare("utf16", Qt::CaseInsensitive) == 0
+            || encoding.compare("utf16le", Qt::CaseInsensitive) == 0;
+        const auto relocatedMatches = killcore::findUiStringMatchesInBuffer(
+            windowRead.data,
+            needleText,
+            scanAscii,
+            scanUtf16,
+            /*numericBoundary=*/true,
+            16);
+        if (relocatedMatches.isEmpty()) {
+            continue;
+        }
+
+        auto best = relocatedMatches.first();
+        uint64_t bestAddress = windowStart + static_cast<uint64_t>(best.offset);
+        uint64_t bestDistance = bestAddress > address ? bestAddress - address : address - bestAddress;
+        for (const auto& match : relocatedMatches) {
+            const uint64_t relocatedAddress = windowStart + static_cast<uint64_t>(match.offset);
+            const uint64_t distance = relocatedAddress > address ? relocatedAddress - address : address - relocatedAddress;
+            if (distance < bestDistance) {
+                best = match;
+                bestAddress = relocatedAddress;
+                bestDistance = distance;
+            }
+        }
+
+        const QString survivorKey = best.encoding + "|" + uiStringAddress(bestAddress);
+        if (seenSurvivors.contains(survivorKey)) {
+            continue;
+        }
+        seenSurvivors.insert(survivorKey);
+
+        QVariantMap survivor = candidate;
+        survivor["address"] = uiStringAddress(bestAddress);
+        survivor["movedFrom"] = uiStringAddress(address);
+        survivor["movedDistanceBytes"] = static_cast<qulonglong>(bestDistance);
+        survivor["encoding"] = best.encoding;
+        survivor["text"] = needleText;
+        survivor["byteLength"] = best.byteLength;
+        survivor["bytesHex"] = QString::fromLatin1(expected.toHex(' ').toUpper());
+        survivors.append(survivor);
+        ++moved;
     }
 
     result["success"] = true;
     result["checked"] = checked;
     result["unreadable"] = unreadable;
+    result["moved"] = moved;
     result["remaining"] = survivors.size();
     result["survivors"] = survivors;
     result["error"] = "";
