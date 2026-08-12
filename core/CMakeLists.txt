@@ -32,6 +32,7 @@ add_library(killcore STATIC
     scanner/scan_engine.cpp
     scanner/scan_types.cpp
     scanner/value_variants.cpp
+    scanner/display_value_tracker.cpp
     scanner/candidate_confidence.cpp
     scanner/performance_profile.cpp
     scanner/worker_pool.cpp

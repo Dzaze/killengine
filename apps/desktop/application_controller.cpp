@@ -12,6 +12,7 @@
 #include "pointer/pointer_scanner.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
+#include "scanner/display_value_tracker.h"
 #include "scanner/value_variants.h"
 #include "snapshot/snapshot_store.h"
 
@@ -28,7 +29,6 @@
 #include <QPointer>
 #include <QRegularExpression>
 #include <QSettings>
-#include <QSet>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -297,53 +297,6 @@ bool regionMatchesScanOptions(const killcore::MemoryRegion& region, const killco
     return true;
 }
 
-QByteArray encodeUiStringValue(const QString& value, const QString& encoding) {
-    if (encoding.compare("utf16", Qt::CaseInsensitive) == 0 ||
-        encoding.compare("utf16le", Qt::CaseInsensitive) == 0) {
-        QByteArray bytes;
-        bytes.reserve(value.size() * 2);
-        for (const QChar ch : value) {
-            const ushort code = ch.unicode();
-            bytes.append(static_cast<char>(code & 0xff));
-            bytes.append(static_cast<char>((code >> 8) & 0xff));
-        }
-        return bytes;
-    }
-    return value.toLatin1();
-}
-
-bool asciiDigitByte(char byte) {
-    return byte >= '0' && byte <= '9';
-}
-
-bool hasNumericBoundary(const QByteArray& haystack, qsizetype index, qsizetype length, const QString& encoding) {
-    if (encoding.compare("utf16", Qt::CaseInsensitive) == 0 ||
-        encoding.compare("utf16le", Qt::CaseInsensitive) == 0) {
-        const qsizetype before = index - 2;
-        if (before >= 0 &&
-            haystack.at(before + 1) == '\0' &&
-            asciiDigitByte(haystack.at(before))) {
-            return false;
-        }
-        const qsizetype after = index + length;
-        if (after + 1 < haystack.size() &&
-            haystack.at(after + 1) == '\0' &&
-            asciiDigitByte(haystack.at(after))) {
-            return false;
-        }
-        return true;
-    }
-
-    if (index > 0 && asciiDigitByte(haystack.at(index - 1))) {
-        return false;
-    }
-    const qsizetype after = index + length;
-    if (after < haystack.size() && asciiDigitByte(haystack.at(after))) {
-        return false;
-    }
-    return true;
-}
-
 QString uiStringAddress(uint64_t address) {
     return QString::number(address, 16).toUpper();
 }
@@ -549,29 +502,6 @@ QByteArray targetBytesForCandidate(
     killcore::ScanValue parsed;
     QString parseError;
     if (!killcore::parseScanValue(rawValue, candidate.type, &parsed, &parseError)) {
-        if (error) *error = parseError;
-        return {};
-    }
-    return killcore::scanValueToBytes(parsed);
-}
-
-QByteArray targetBytesForTypeAndVariant(
-    const QString& rawValue,
-    killcore::ValueType type,
-    const QString& variantLabel,
-    QString* error = nullptr) {
-    if (!variantLabel.trimmed().isEmpty()) {
-        const auto variants = killcore::generateScanVariants(rawValue, type, true);
-        const auto bytes = variantBytesByKey(variants);
-        const QString key = variantKey(type, variantLabel);
-        if (bytes.contains(key)) {
-            return bytes.value(key);
-        }
-    }
-
-    killcore::ScanValue parsed;
-    QString parseError;
-    if (!killcore::parseScanValue(rawValue, type, &parsed, &parseError)) {
         if (error) *error = parseError;
         return {};
     }
@@ -1379,13 +1309,13 @@ QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVa
 
     QList<QPair<QString, QByteArray>> patterns;
     if (scanAscii) {
-        const QByteArray ascii = encodeUiStringValue(needleText, "ascii");
+        const QByteArray ascii = killcore::encodeUiStringValue(needleText, "ascii");
         if (!ascii.isEmpty()) {
             patterns.append({"ascii", ascii});
         }
     }
     if (scanUtf16) {
-        const QByteArray utf16 = encodeUiStringValue(needleText, "utf16");
+        const QByteArray utf16 = killcore::encodeUiStringValue(needleText, "utf16");
         if (!utf16.isEmpty()) {
             patterns.append({"utf16", utf16});
         }
@@ -1446,32 +1376,28 @@ QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVa
             const uint64_t bufferBase = readAddress - static_cast<uint64_t>(previousTail.size());
             bytesScanned += read.bytesRead;
 
-            for (const auto& pattern : patterns) {
-                qsizetype from = 0;
-                while (matches.size() < maxResults) {
-                    const qsizetype found = buffer.indexOf(pattern.second, from);
-                    if (found < 0) {
-                        break;
-                    }
-                    from = found + 1;
-                    if (numericBoundary && !hasNumericBoundary(buffer, found, pattern.second.size(), pattern.first)) {
-                        continue;
-                    }
-
-                    QVariantMap match;
-                    const uint64_t matchAddress = bufferBase + static_cast<uint64_t>(found);
-                    match["address"] = uiStringAddress(matchAddress);
-                    match["encoding"] = pattern.first;
-                    match["text"] = needleText;
-                    match["byteLength"] = pattern.second.size();
-                    match["bytesHex"] = QString::fromLatin1(pattern.second.toHex(' ').toUpper());
-                    match["regionBase"] = uiStringAddress(region.baseAddress);
-                    match["regionSize"] = static_cast<qulonglong>(region.size);
-                    match["protection"] = killcore::protectionToString(region.protection);
-                    match["memoryType"] = killcore::memoryTypeToString(region.type);
-                    match["writable"] = region.writable;
-                    matches.append(match);
-                }
+            const auto bufferMatches = killcore::findUiStringMatchesInBuffer(
+                buffer,
+                needleText,
+                scanAscii,
+                scanUtf16,
+                numericBoundary,
+                maxResults - matches.size());
+            for (const auto& bufferMatch : bufferMatches) {
+                QVariantMap match;
+                const uint64_t matchAddress = bufferBase + static_cast<uint64_t>(bufferMatch.offset);
+                const QByteArray bytes = killcore::encodeUiStringValue(needleText, bufferMatch.encoding);
+                match["address"] = uiStringAddress(matchAddress);
+                match["encoding"] = bufferMatch.encoding;
+                match["text"] = needleText;
+                match["byteLength"] = bufferMatch.byteLength;
+                match["bytesHex"] = QString::fromLatin1(bytes.toHex(' ').toUpper());
+                match["regionBase"] = uiStringAddress(region.baseAddress);
+                match["regionSize"] = static_cast<qulonglong>(region.size);
+                match["protection"] = killcore::protectionToString(region.protection);
+                match["memoryType"] = killcore::memoryTypeToString(region.type);
+                match["writable"] = region.writable;
+                matches.append(match);
             }
 
             if (read.data.size() > static_cast<qsizetype>(overlap)) {
@@ -1539,7 +1465,7 @@ QVariantMap ApplicationController::trackUiStringCandidates(const QVariantList& c
         }
 
         const QString encoding = candidate.value("encoding", "ascii").toString();
-        const QByteArray expected = encodeUiStringValue(needleText, encoding);
+        const QByteArray expected = killcore::encodeUiStringValue(needleText, encoding);
         const int oldLength = std::max(0, candidate.value("byteLength", expected.size()).toInt());
         const int expectedSize = static_cast<int>(expected.size());
         const size_t readSize = static_cast<size_t>(std::clamp(
@@ -1602,12 +1528,6 @@ QVariantMap ApplicationController::analyzeUiStringSources(
     const int maxResults = std::clamp(optionsMap.value("maxResults", 200).toInt(), 1, 5000);
     const int alignment = std::clamp(optionsMap.value("alignment", 1).toInt(), 1, 16);
 
-    const auto variants = killcore::generateScanVariants(rawValue, killcore::ValueType::Int32, false);
-    if (variants.isEmpty()) {
-        result["error"] = "Valeur impossible à convertir en variantes numériques.";
-        return result;
-    }
-
     const auto regions = killcore::MemoryMap::snapshot(m_handle);
     const killcore::MemoryRegion* region = findRegionContaining(regions, stringAddress);
     if (!region || !region->readable || region->guarded || region->size == 0) {
@@ -1635,87 +1555,37 @@ QVariantMap ApplicationController::analyzeUiStringSources(
         return result;
     }
 
-    struct SourceHit {
-        QVariantMap map;
-        double score{0.0};
-        uint64_t distance{0};
-    };
+    const size_t stringOffset = stringAddress > windowStart
+        ? static_cast<size_t>(stringAddress - windowStart)
+        : 0;
+    const auto hits = killcore::findUiStringSourcesInBuffer(
+        read.data,
+        stringOffset,
+        stringLength,
+        rawValue,
+        maxResults,
+        alignment,
+        radius);
 
-    QList<SourceHit> hits;
-    QSet<QString> seen;
-    const uint64_t stringEnd = stringAddress + static_cast<uint64_t>(std::max(0, stringLength));
-
-    for (const auto& variant : variants) {
-        const QByteArray needle = killcore::scanValueToBytes(variant.value);
-        if (needle.isEmpty() || needle.size() > read.data.size()) {
-            continue;
-        }
-
-        qsizetype from = 0;
-        while (hits.size() < maxResults * 4) {
-            const qsizetype found = read.data.indexOf(needle, from);
-            if (found < 0) {
-                break;
-            }
-            from = found + 1;
-            const uint64_t address = windowStart + static_cast<uint64_t>(found);
-            if (alignment > 1 && (address % static_cast<uint64_t>(alignment)) != 0) {
-                continue;
-            }
-            if (address >= stringAddress && address < stringEnd) {
-                continue;
-            }
-
-            const QString key = uiStringAddress(address) + "|" + killcore::valueTypeToString(variant.value.type);
-            if (seen.contains(key)) {
-                continue;
-            }
-            seen.insert(key);
-
-            const uint64_t distance = address > stringAddress ? address - stringAddress : stringAddress - address;
-            double score = 1.0;
-            score -= std::min<double>(0.55, static_cast<double>(distance) / static_cast<double>(std::max(1, radius)) * 0.55);
-            if (variant.secondary) {
-                score -= 0.18;
-            }
-            const auto type = variant.value.type;
-            if (type == killcore::ValueType::Int32 || type == killcore::ValueType::UInt32) {
-                score += 0.08;
-            }
-            if (type == killcore::ValueType::Int8 || type == killcore::ValueType::UInt8) {
-                score -= 0.2;
-            }
-            score = std::clamp(score, 0.05, 1.0);
-
-            QVariantMap entry;
-            entry["address"] = uiStringAddress(address);
-            entry["type"] = killcore::valueTypeToString(type);
-            entry["confidence"] = score;
-            entry["variantLabel"] = variant.label;
-            entry["lastValueHex"] = QString::fromLatin1(needle.toHex(' ').toUpper());
-            entry["lastValueNumber"] = bytesToDouble(needle, type);
-            entry["distanceBytes"] = static_cast<qulonglong>(distance);
-            entry["offsetFromString"] = static_cast<qlonglong>(address) - static_cast<qlonglong>(stringAddress);
-            entry["regionBase"] = uiStringAddress(region->baseAddress);
-            entry["protection"] = killcore::protectionToString(region->protection);
-            entry["memoryType"] = killcore::memoryTypeToString(region->type);
-            hits.append({entry, score, distance});
-        }
-    }
-
-    std::sort(hits.begin(), hits.end(), [](const SourceHit& a, const SourceHit& b) {
-        if (std::abs(a.score - b.score) > 0.000001) {
-            return a.score > b.score;
-        }
-        return a.distance < b.distance;
-    });
-
-    for (int i = 0; i < hits.size() && i < maxResults; ++i) {
-        candidates.append(hits.at(i).map);
+    for (const auto& hit : hits) {
+        const uint64_t address = windowStart + static_cast<uint64_t>(hit.offset);
+        QVariantMap entry;
+        entry["address"] = uiStringAddress(address);
+        entry["type"] = killcore::valueTypeToString(hit.type);
+        entry["confidence"] = hit.confidence;
+        entry["variantLabel"] = hit.variantLabel;
+        entry["lastValueHex"] = QString::fromLatin1(hit.bytes.toHex(' ').toUpper());
+        entry["lastValueNumber"] = hit.valueNumber;
+        entry["distanceBytes"] = static_cast<qulonglong>(hit.distanceBytes);
+        entry["offsetFromString"] = static_cast<qlonglong>(address) - static_cast<qlonglong>(stringAddress);
+        entry["regionBase"] = uiStringAddress(region->baseAddress);
+        entry["protection"] = killcore::protectionToString(region->protection);
+        entry["memoryType"] = killcore::memoryTypeToString(region->type);
+        candidates.append(entry);
     }
 
     result["success"] = true;
-    result["partial"] = hits.size() > maxResults;
+    result["partial"] = false;
     result["candidates"] = candidates;
     result["matchesFound"] = hits.size();
     result["matchesReturned"] = candidates.size();
@@ -1764,7 +1634,7 @@ QVariantMap ApplicationController::trackUiStringSources(const QVariantList& sour
 
         QString targetError;
         const QString variantLabel = candidate.value("variantLabel").toString();
-        const QByteArray expected = targetBytesForTypeAndVariant(rawValue, type, variantLabel, &targetError);
+        const QByteArray expected = killcore::targetBytesForTypeAndVariant(rawValue, type, variantLabel, &targetError);
         if (expected.isEmpty()) {
             ++incompatible;
             continue;
