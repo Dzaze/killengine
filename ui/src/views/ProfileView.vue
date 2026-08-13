@@ -361,6 +361,12 @@ async function restoreProfilePatch(patch: ProfilePatchEntry) {
 function patchStateLabel(patch: ProfilePatchEntry): string {
   const state = patchStates.value[patch.name]
   if (!state) return 'prêt'
+  const status = String(state.status ?? '')
+  if (status === 'original') return 'original'
+  if (status === 'active') return 'actif'
+  if (status === 'ambiguous') return 'ambigu'
+  if (status === 'missing') return 'introuvable'
+  if (status === 'invalid') return 'invalide'
   if (state.active === true) return 'actif'
   if (state.active === false && state.success) return 'restauré'
   return state.success ? 'ok' : 'fail'
@@ -369,9 +375,37 @@ function patchStateLabel(patch: ProfilePatchEntry): string {
 function patchStateClass(patch: ProfilePatchEntry): string {
   const state = patchStates.value[patch.name]
   if (!state) return 'pending'
+  const status = String(state.status ?? '')
+  if (status === 'active') return 'ok'
+  if (status === 'original') return 'pending'
+  if (status === 'ambiguous') return 'warn'
+  if (status === 'missing' || status === 'invalid') return 'fail'
   if (state.active === true) return 'ok'
   if (state.active === false && state.success) return 'pending'
   return state.success ? 'ok' : 'fail'
+}
+
+async function inspectProfilePatches() {
+  if (!selectedProfile.value || profilePatches.value.length === 0) return
+  try {
+    const controller = backend.getController()
+    if (!controller.inspectProfileCodePatches) {
+      statusMessage.value = '✗ Inspection trainer indisponible.'
+      return
+    }
+    const result = await controller.inspectProfileCodePatches(selectedProfile.value)
+    const nextStates = { ...patchStates.value }
+    for (const item of ((result.states as Record<string, unknown>[]) ?? [])) {
+      const patchName = String(item.patchName ?? '')
+      if (patchName) nextStates[patchName] = { ...item, active: Boolean(item.active) }
+    }
+    patchStates.value = nextStates
+    statusMessage.value = result.success
+      ? `✓ État trainer: ${result.active} actif(s), ${result.original} original(aux), ${result.ambiguous} ambigu(s).`
+      : '✗ ' + (String(result.error ?? 'Inspection trainer incomplète.'))
+  } catch (e) {
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
 }
 
 async function applyAllProfilePatches() {
@@ -560,6 +594,7 @@ onMounted(() => {
         <div class="targets-header">
           <h3>Patchs trainer ({{ profilePatches.length }})</h3>
           <div class="trainer-actions">
+            <button class="btn btn-secondary btn-sm" @click="inspectProfilePatches()">Vérifier état</button>
             <button class="btn btn-primary btn-sm" @click="applyAllProfilePatches()">Tout appliquer</button>
             <button class="btn btn-secondary btn-sm" @click="restoreAllProfilePatches()">Tout restaurer</button>
           </div>
@@ -878,6 +913,11 @@ onMounted(() => {
 
 .target-resolution.pending {
   border-color: rgba(224, 175, 104, 0.35);
+  color: var(--warning);
+}
+
+.target-resolution.warn {
+  border-color: rgba(255, 199, 119, 0.5);
   color: var(--warning);
 }
 

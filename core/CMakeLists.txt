@@ -66,6 +66,8 @@ add_library(killcore STATIC
     patch/code_patch.cpp
     patch/instruction_patch_suggester.h
     patch/instruction_patch_suggester.cpp
+    patch/profile_patch_state.h
+    patch/profile_patch_state.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

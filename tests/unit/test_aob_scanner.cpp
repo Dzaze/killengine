@@ -1,6 +1,7 @@
 #include "patch/aob_scanner.h"
 #include "patch/code_patch.h"
 #include "patch/instruction_patch_suggester.h"
+#include "patch/profile_patch_state.h"
 
 #include <gtest/gtest.h>
 
@@ -110,4 +111,52 @@ TEST(InstructionPatchSuggester, SuggestsBranchDirectionPatches) {
     EXPECT_EQ(suggestions[0].bytesText, "90 90");
     EXPECT_EQ(suggestions[1].label, "Forcer pris");
     EXPECT_EQ(suggestions[1].bytesText, "EB 05");
+}
+
+TEST(ProfilePatchState, ClassifiesOriginalCode) {
+    const auto state = classifyProfilePatchMemoryState(1, 0, false, true);
+
+    EXPECT_EQ(state.status, "original");
+    EXPECT_TRUE(state.success);
+    EXPECT_FALSE(state.active);
+}
+
+TEST(ProfilePatchState, ClassifiesActivePatchedCode) {
+    const auto state = classifyProfilePatchMemoryState(0, 1, false, true);
+
+    EXPECT_EQ(state.status, "active");
+    EXPECT_TRUE(state.success);
+    EXPECT_TRUE(state.active);
+}
+
+TEST(ProfilePatchState, KeepsSessionActiveAsActive) {
+    const auto state = classifyProfilePatchMemoryState(1, 1, true, true);
+
+    EXPECT_EQ(state.status, "active");
+    EXPECT_TRUE(state.success);
+    EXPECT_TRUE(state.active);
+}
+
+TEST(ProfilePatchState, ClassifiesMissingSignaturesAsFailure) {
+    const auto state = classifyProfilePatchMemoryState(0, 0, false, true);
+
+    EXPECT_EQ(state.status, "missing");
+    EXPECT_FALSE(state.success);
+    EXPECT_FALSE(state.active);
+}
+
+TEST(ProfilePatchState, ClassifiesMultipleMatchesAsAmbiguous) {
+    const auto state = classifyProfilePatchMemoryState(2, 0, false, true);
+
+    EXPECT_EQ(state.status, "ambiguous");
+    EXPECT_TRUE(state.success);
+    EXPECT_FALSE(state.active);
+}
+
+TEST(ProfilePatchState, ClassifiesInvalidPatternsAsFailure) {
+    const auto state = classifyProfilePatchMemoryState(0, 0, false, false);
+
+    EXPECT_EQ(state.status, "invalid");
+    EXPECT_FALSE(state.success);
+    EXPECT_FALSE(state.active);
 }

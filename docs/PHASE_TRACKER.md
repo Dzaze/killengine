@@ -222,7 +222,8 @@ Prerequisites before Phase 12:
     - [x] Patch assisté v3 : classement de risque par type d'instruction et templates conditionnels plus précis
     - [x] Patch assisté v4 : persistance trainer dans les profils (AOB stable + patch + module + restore)
     - [x] Trainer UX : activer/désactiver plusieurs patchs d'un profil en un clic avec état actif visible
-    - [ ] Trainer UX avancée : vue dédiée avec toggles persistants, warnings anti-multi-match et refresh d'état mémoire
+    - [x] Trainer UX avancée v1 : refresh d'état mémoire des patchs de profil (original / actif / ambigu / introuvable)
+    - [ ] Trainer UX avancée v2 : vue dédiée avec toggles persistants et warnings anti-multi-match bloquants avant application
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM

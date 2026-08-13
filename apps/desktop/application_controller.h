@@ -306,6 +306,9 @@ public:
     /// Restaure tous les patchs code actifs d'un profil.
     Q_INVOKABLE QVariantMap restoreAllProfileCodePatches(const QString& profileName);
 
+    /// Inspecte les patchs code d'un profil sans écrire, pour afficher leur état actuel.
+    Q_INVOKABLE QVariantMap inspectProfileCodePatches(const QString& profileName);
+
     // -----------------------------------------------------------------------
     // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
     // -----------------------------------------------------------------------

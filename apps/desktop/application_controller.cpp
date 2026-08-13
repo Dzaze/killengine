@@ -14,6 +14,7 @@
 #include "patch/aob_scanner.h"
 #include "patch/code_patch.h"
 #include "patch/instruction_patch_suggester.h"
+#include "patch/profile_patch_state.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "scanner/display_value_tracker.h"
@@ -7211,6 +7212,126 @@ QVariantMap ApplicationController::restoreAllProfileCodePatches(const QString& p
                               .arg(restored)
                               .arg(alreadyInactive)
                               .arg(profile.patches.size());
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::inspectProfileCodePatches(const QString& profileName) {
+    QVariantMap result;
+    result["success"] = false;
+    result["profileName"] = profileName;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    killcore::AobScanOptions options;
+    options.executableOnly = true;
+    options.imageOnly = true;
+    options.maxResults = 100;
+
+    QVariantList states;
+    int originalCount = 0;
+    int activeCount = 0;
+    int ambiguousCount = 0;
+    int missingCount = 0;
+    int invalidCount = 0;
+
+    for (const auto& patch : profile.patches) {
+        QVariantMap state;
+        state["profileName"] = profileName;
+        state["patchName"] = patch.name;
+        state["module"] = patch.module;
+        state["moduleOffset"] = QString::number(patch.moduleOffset, 16).toUpper();
+        state["success"] = true;
+        state["active"] = false;
+
+        const auto originalPattern = killcore::parseAobPattern(patch.aobPattern);
+        const auto patchedPattern = killcore::parseAobPattern(patch.patchBytes);
+        if (!originalPattern.isValid() && !patchedPattern.isValid()) {
+            state["success"] = false;
+            state["status"] = "invalid";
+            state["error"] = originalPattern.error.isEmpty() ? patchedPattern.error : originalPattern.error;
+            ++invalidCount;
+            states.append(state);
+            continue;
+        }
+
+        int originalMatches = 0;
+        int patchedMatches = 0;
+        QString originalAddress;
+        QString patchedAddress;
+
+        if (originalPattern.isValid()) {
+            const auto scan = killcore::scanAobPattern(m_handle, originalPattern, options);
+            originalMatches = scan.matches.size();
+            if (!scan.matches.isEmpty()) {
+                originalAddress = QString::number(scan.matches.first().address, 16).toUpper();
+            }
+        }
+
+        if (patchedPattern.isValid()) {
+            const auto scan = killcore::scanAobPattern(m_handle, patchedPattern, options);
+            patchedMatches = scan.matches.size();
+            if (!scan.matches.isEmpty()) {
+                patchedAddress = QString::number(scan.matches.first().address, 16).toUpper();
+            }
+        }
+
+        state["originalMatches"] = originalMatches;
+        state["patchedMatches"] = patchedMatches;
+        state["matchedAddress"] = patchedAddress.isEmpty() ? originalAddress : patchedAddress;
+
+        const bool sessionActive = !patchedAddress.isEmpty() && m_activeCodePatches.contains(patchedAddress.toULongLong(nullptr, 16));
+        const auto memoryState = killcore::classifyProfilePatchMemoryState(
+            originalMatches,
+            patchedMatches,
+            sessionActive,
+            originalPattern.isValid() || patchedPattern.isValid());
+        state["status"] = memoryState.status;
+        state["success"] = memoryState.success;
+        state["active"] = memoryState.active;
+
+        if (memoryState.status == "active") {
+            ++activeCount;
+        } else if (memoryState.status == "original") {
+            ++originalCount;
+        } else if (memoryState.status == "missing") {
+            state["error"] = "Signature originale et patchée introuvables.";
+            ++missingCount;
+        } else {
+            state["warning"] = "Signature non unique ou état mixte.";
+            ++ambiguousCount;
+        }
+
+        states.append(state);
+    }
+
+    result["success"] = invalidCount == 0 && missingCount == 0;
+    result["states"] = states;
+    result["total"] = profile.patches.size();
+    result["original"] = originalCount;
+    result["active"] = activeCount;
+    result["ambiguous"] = ambiguousCount;
+    result["missing"] = missingCount;
+    result["invalid"] = invalidCount;
+    if (profile.patches.isEmpty()) {
+        result["error"] = "Aucun patch trainer dans ce profil.";
+    } else if (!result.value("success").toBool()) {
+        result["error"] = QString("Inspection: %1 actif(s), %2 original(aux), %3 ambigu(s), %4 introuvable(s), %5 invalide(s).")
+                              .arg(activeCount)
+                              .arg(originalCount)
+                              .arg(ambiguousCount)
+                              .arg(missingCount)
+                              .arg(invalidCount);
     }
     return result;
 }

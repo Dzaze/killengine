@@ -708,6 +708,7 @@ export interface AppSettings {
   restoreProfileCodePatch?(profileName: string, patchName: string): Promise<CodePatchResult>
   applyAllProfileCodePatches?(profileName: string): Promise<Record<string, unknown>>
   restoreAllProfileCodePatches?(profileName: string): Promise<Record<string, unknown>>
+  inspectProfileCodePatches?(profileName: string): Promise<Record<string, unknown>>
 
   // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
   scanPointerChains?(addressHex: string, scanOptions: PointerScanOptions): Promise<PointerScanResult>
@@ -1436,6 +1437,9 @@ class BackendService {
       },
       async restoreAllProfileCodePatches() {
         return { success: false, results: [], error: 'Mock backend' }
+      },
+      async inspectProfileCodePatches() {
+        return { success: false, states: [], error: 'Mock backend' }
       },
     }
   }
