@@ -156,7 +156,7 @@ async function toggleUiStringLiveInvestigation() {
       uiStringSourceCandidates.value = Array.from(merged.values())
         .sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))
         .slice(0, 500)
-      selectedUiSourceAddresses.value = globalHits.slice(0, uiStringSourceSafeSelectionLimit).map(sourceKey)
+      selectedUiSourceAddresses.value = chooseNonOverlappingSources(globalHits).slice(0, uiStringSourceSafeSelectionLimit).map(sourceKey)
     }
   } catch (e) {
     uiStringInvestigationFinishResult.value = {
@@ -370,6 +370,45 @@ function sourceKey(candidate: UiStringSourceCandidate) {
   return `${candidate.type}:${candidate.variantLabel ?? ''}:${candidate.address}`
 }
 
+function uiSourceTypeSize(type: string) {
+  if (type.endsWith('8')) return 1
+  if (type.endsWith('16')) return 2
+  if (type.endsWith('32') || type === 'Float32') return 4
+  if (type.endsWith('64') || type === 'Float64') return 8
+  return 4
+}
+
+function addressNumber(address: string) {
+  return Number.parseInt(address.replace(/^0x/i, ''), 16)
+}
+
+function chooseNonOverlappingSources(sources: UiStringSourceCandidate[]) {
+  const sorted = [...sources].sort((a, b) => {
+    const confidenceDelta = Number(b.confidence ?? 0) - Number(a.confidence ?? 0)
+    if (Math.abs(confidenceDelta) > 0.000001) return confidenceDelta
+    const distanceDelta = Number(a.distanceBytes ?? Number.MAX_SAFE_INTEGER) - Number(b.distanceBytes ?? Number.MAX_SAFE_INTEGER)
+    if (distanceDelta !== 0) return distanceDelta
+    return uiSourceTypeSize(a.type) - uiSourceTypeSize(b.type)
+  })
+  const chosen: UiStringSourceCandidate[] = []
+  const ranges: Array<{ start: number, end: number }> = []
+  const seenKeys = new Set<string>()
+  for (const source of sorted) {
+    const key = sourceKey(source)
+    if (seenKeys.has(key)) continue
+    seenKeys.add(key)
+    const start = addressNumber(source.address)
+    const size = uiSourceTypeSize(source.type)
+    const end = start + size
+    if (!Number.isFinite(start) || ranges.some((range) => start < range.end && end > range.start)) {
+      continue
+    }
+    ranges.push({ start, end })
+    chosen.push(source)
+  }
+  return chosen
+}
+
 function isUiSourceSelected(candidate: UiStringSourceCandidate) {
   return selectedUiSourceAddresses.value.includes(sourceKey(candidate))
 }
@@ -384,7 +423,7 @@ function toggleUiSourceSelection(candidate: UiStringSourceCandidate) {
 }
 
 function selectAllUiSources() {
-  selectedUiSourceAddresses.value = uiStringSourceCandidates.value.map(sourceKey)
+  selectedUiSourceAddresses.value = chooseNonOverlappingSources(uiStringSourceCandidates.value).map(sourceKey)
 }
 
 function clearUiSourceSelection() {
@@ -392,7 +431,7 @@ function clearUiSourceSelection() {
 }
 
 function selectTopUiSources(limit = uiStringSourceSafeSelectionLimit) {
-  selectedUiSourceAddresses.value = uiStringSourceCandidates.value.slice(0, limit).map(sourceKey)
+  selectedUiSourceAddresses.value = chooseNonOverlappingSources(uiStringSourceCandidates.value).slice(0, limit).map(sourceKey)
 }
 
 async function analyzeUiStringSources(candidate?: UiStringCandidate, radiusOverrideBytes = uiStringSourceRadiusBytes.value) {
@@ -593,7 +632,7 @@ function watchUiSourceCandidate(candidate: UiStringSourceCandidate) {
 
 function useSelectedUiSourcesForWrite() {
   const selected = new Set(selectedUiSourceAddresses.value)
-  const chosen = uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate)))
+  const chosen = chooseNonOverlappingSources(uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate))))
   if (chosen.length === 0) return
   selectedCandidateAddresses.value = chosen.map((candidate) => candidate.address)
   selectedWriteTargetOverrides.value = Object.fromEntries(chosen.map((candidate) => [
@@ -645,6 +684,7 @@ const writePlan = computed(() => selectedWriteTargets.value.map((target) => {
     mode: target.variantLabel || target.type,
   }
 }))
+const writeFailures = computed(() => (store.writeResult?.results ?? []).filter((result) => !result.success))
 const selectedCandidateTypes = computed(() => Array.from(new Set(
   selectedWriteTargets.value.map((target) => String(target.variantLabel || target.type)),
 )))
@@ -1360,7 +1400,7 @@ onMounted(() => {
                 Top {{ uiStringSourceSafeSelectionLimit }}
               </button>
               <button class="btn btn-secondary compact" type="button" @click="selectAllUiSources()">
-                Tout cocher
+                Tout cocher sûr
               </button>
               <button class="btn btn-secondary compact" type="button" @click="clearUiSourceSelection()">
                 Tout décocher
@@ -1563,10 +1603,23 @@ onMounted(() => {
         </div>
         <div v-if="store.writeResult" class="metrics">
           <span>{{ store.writeResult.bytesWritten }} B</span>
+          <span v-if="store.writeResult.written !== undefined">Écrites: {{ formatNumber(store.writeResult.written) }}/{{ formatNumber(store.writeResult.total) }}</span>
           <span v-if="store.writeResult.verified">{{ $t('write.verified') }}</span>
           <span v-if="store.writeResult.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
         </div>
         <p v-if="store.writeResult?.error" class="error">{{ store.writeResult.error }}</p>
+        <div v-if="writeFailures.length" class="write-fail-list">
+          <div class="source-list-title">
+            <strong>Échecs d'écriture</strong>
+            <span>{{ formatNumber(writeFailures.length) }} fail(s)</span>
+          </div>
+          <div v-for="failure in writeFailures.slice(0, 16)" :key="`${failure.address}:${failure.type}:${failure.variantLabel}`" class="write-fail-row">
+            <code>0x{{ failure.address || '-' }}</code>
+            <span>{{ failure.variantLabel || failure.type || '-' }}</span>
+            <strong>{{ failure.encodedHex || '-' }}</strong>
+            <span>{{ failure.error || '-' }}</span>
+          </div>
+        </div>
       </section>
 
       <section class="panel">
@@ -2435,6 +2488,42 @@ onMounted(() => {
 
 .write-plan-row strong {
   color: var(--success);
+}
+
+.write-fail-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.write-fail-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(110px, 150px) minmax(110px, 160px) minmax(180px, 2fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 117, 127, 0.22);
+  border-radius: 4px;
+  background: rgba(255, 117, 127, 0.05);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.write-fail-row code,
+.write-fail-row span,
+.write-fail-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.write-fail-row code {
+  color: var(--text-primary);
+}
+
+.write-fail-row strong {
+  color: var(--warning);
 }
 
 .input {

@@ -344,6 +344,14 @@ export interface MemoryWriteResult {
   verified: boolean
   bytesWritten: number
   error: string
+  address?: string
+  type?: string
+  variantLabel?: string
+  encodedHex?: string
+  displayValue?: string
+  written?: number
+  total?: number
+  results?: MemoryWriteResult[]
   enabled?: boolean
   confirmationMode?: boolean
   temporaryVerified?: boolean
