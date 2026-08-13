@@ -221,7 +221,8 @@ Prerequisites before Phase 12:
     - [x] Patch assisté v2 : Zydis v4.1.1 pour mnemonics/opérandes et wildcards sur immediates/displacements
     - [x] Patch assisté v3 : classement de risque par type d'instruction et templates conditionnels plus précis
     - [x] Patch assisté v4 : persistance trainer dans les profils (AOB stable + patch + module + restore)
-    - [ ] Trainer UX : activer/désactiver plusieurs patchs d'un profil en un clic avec état actif visible
+    - [x] Trainer UX : activer/désactiver plusieurs patchs d'un profil en un clic avec état actif visible
+    - [ ] Trainer UX avancée : vue dédiée avec toggles persistants, warnings anti-multi-match et refresh d'état mémoire
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM

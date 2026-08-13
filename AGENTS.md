@@ -143,10 +143,10 @@ killengine/
 - Module : `core/patch/aob_scanner.*`.
 - Objectif : passer du scan de valeurs RAM à une approche trainer type WeMod/Wand : retrouver une signature d'instruction stable dans les régions code, puis plus tard patcher/hooker cette instruction.
 - Backend : `ApplicationController::scanAobPattern(pattern, options)` expose le scan de pattern (`48 8B ?? 89`) avec filtres `executableOnly`, `imageOnly`, `maxResults`; `generateAobSignature(address, options)` lit les bytes autour d'un RIP capturé pour produire une signature brute; `suggestCodePatches(address, options)` utilise Zydis v4.1.1 pour décoder l'instruction, générer une signature stable avec wildcards sur immediates/displacements, classer le type d'instruction et proposer des templates; `applyCodePatch` / `restoreCodePatch` écrivent des bytes exacts et restaurent les bytes originaux gardés en mémoire.
-- Profils : `ProfileStore` persiste aussi `patches` dans les `.keprofile` (nom, module, offset, AOB stable, bytes patchés, bytes originaux, désassemblage, risque). `saveProfileCodePatch`, `applyProfileCodePatch`, `restoreProfileCodePatch` permettent de construire un mini trainer réutilisable.
+- Profils : `ProfileStore` persiste aussi `patches` dans les `.keprofile` (nom, module, offset, AOB stable, bytes patchés, bytes originaux, désassemblage, risque). `saveProfileCodePatch`, `applyProfileCodePatch`, `restoreProfileCodePatch`, `applyAllProfileCodePatches`, `restoreAllProfileCodePatches` permettent de construire et piloter un mini trainer réutilisable.
 - UI : section **AOB signatures** dans Expert. Les hits `Écrit par` peuvent remplir automatiquement le pattern AOB via le bouton `Signature`; les matches AOB peuvent être analysés pour afficher le désassemblage, remplir une AOB stable, proposer des patchs classés (`low`/`medium`/`high`) comme `NOP écriture`, `Forcer non pris`, `Forcer pris`, `INT3 debug`, `RET + NOP`, puis patcher/restaurer ou sauvegarder dans un profil trainer.
 - Tests ciblés : `.\build\bin\killengine_unit_tests.exe --gtest_filter=AobScanner.*`.
-- Prochaine étape logique : ajouter une UX trainer dédiée pour appliquer/restaurer plusieurs patchs de profil en un clic et afficher clairement l'état actif.
+- Prochaine étape logique : ajouter une vue trainer dédiée avec toggles persistants, warnings anti-multi-match et refresh d'état mémoire.
 
 ### Performance adaptive
 - Préférer plus de threads contrôlés à plus de processus : le moteur doit rester déterministe et l'UI Qt/Vue doit rester fluide.

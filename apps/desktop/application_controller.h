@@ -300,6 +300,12 @@ public:
     /// Restaure un patch de profil déjà appliqué dans la session courante.
     Q_INVOKABLE QVariantMap restoreProfileCodePatch(const QString& profileName, const QString& patchName);
 
+    /// Applique tous les patchs code d'un profil.
+    Q_INVOKABLE QVariantMap applyAllProfileCodePatches(const QString& profileName);
+
+    /// Restaure tous les patchs code actifs d'un profil.
+    Q_INVOKABLE QVariantMap restoreAllProfileCodePatches(const QString& profileName);
+
     // -----------------------------------------------------------------------
     // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
     // -----------------------------------------------------------------------

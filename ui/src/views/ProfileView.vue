@@ -48,6 +48,7 @@ const resolveResult = ref<Record<string, unknown> | null>(null)
 const statusMessage = ref('')
 const targetWriteValues = ref<Record<string, string>>({})
 const targetResolveStates = ref<Record<string, Record<string, unknown>>>({})
+const patchStates = ref<Record<string, Record<string, unknown>>>({})
 
 const profileSaveTargets = computed(() => {
   if (store.finalCandidateTargets.length > 0) {
@@ -96,9 +97,11 @@ async function selectProfile(name: string) {
     profileInfo.value = result
     profileTargets.value = (result.targets as ProfileTargetEntry[]) ?? []
     profilePatches.value = (result.patches as ProfilePatchEntry[]) ?? []
+    patchStates.value = {}
   } catch {
     profileTargets.value = []
     profilePatches.value = []
+    patchStates.value = {}
   }
 }
 
@@ -328,6 +331,7 @@ async function applyProfilePatch(patch: ProfilePatchEntry) {
       return
     }
     const result = await controller.applyProfileCodePatch(selectedProfile.value, patch.name)
+    patchStates.value = { ...patchStates.value, [patch.name]: { ...result, active: Boolean(result.success || result.active) } }
     statusMessage.value = result.success
       ? `✓ Patch "${patch.name}" appliqué à 0x${result.matchedAddress ?? result.address ?? ''}.`
       : '✗ ' + (result.error ?? `Patch "${patch.name}" impossible.`)
@@ -345,9 +349,72 @@ async function restoreProfilePatch(patch: ProfilePatchEntry) {
       return
     }
     const result = await controller.restoreProfileCodePatch(selectedProfile.value, patch.name)
+    patchStates.value = { ...patchStates.value, [patch.name]: { ...result, active: result.success ? false : Boolean(result.active) } }
     statusMessage.value = result.success
       ? `✓ Patch "${patch.name}" restauré.`
       : '✗ ' + (result.error ?? `Restauration "${patch.name}" impossible.`)
+  } catch (e) {
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
+}
+
+function patchStateLabel(patch: ProfilePatchEntry): string {
+  const state = patchStates.value[patch.name]
+  if (!state) return 'prêt'
+  if (state.active === true) return 'actif'
+  if (state.active === false && state.success) return 'restauré'
+  return state.success ? 'ok' : 'fail'
+}
+
+function patchStateClass(patch: ProfilePatchEntry): string {
+  const state = patchStates.value[patch.name]
+  if (!state) return 'pending'
+  if (state.active === true) return 'ok'
+  if (state.active === false && state.success) return 'pending'
+  return state.success ? 'ok' : 'fail'
+}
+
+async function applyAllProfilePatches() {
+  if (!selectedProfile.value || profilePatches.value.length === 0) return
+  try {
+    const controller = backend.getController()
+    if (!controller.applyAllProfileCodePatches) {
+      statusMessage.value = '✗ Fonction trainer profil indisponible.'
+      return
+    }
+    const result = await controller.applyAllProfileCodePatches(selectedProfile.value)
+    const nextStates = { ...patchStates.value }
+    for (const item of ((result.results as Record<string, unknown>[]) ?? [])) {
+      const patchName = String(item.patchName ?? '')
+      if (patchName) nextStates[patchName] = { ...item, active: Boolean(item.success || item.active || item.alreadyActive) }
+    }
+    patchStates.value = nextStates
+    statusMessage.value = result.success
+      ? `✓ ${result.applied}/${result.total} patch(s) appliqué(s), ${result.alreadyActive ?? 0} déjà actif(s).`
+      : '✗ ' + (String(result.error ?? 'Application trainer partielle.'))
+  } catch (e) {
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
+}
+
+async function restoreAllProfilePatches() {
+  if (!selectedProfile.value || profilePatches.value.length === 0) return
+  try {
+    const controller = backend.getController()
+    if (!controller.restoreAllProfileCodePatches) {
+      statusMessage.value = '✗ Fonction restauration trainer indisponible.'
+      return
+    }
+    const result = await controller.restoreAllProfileCodePatches(selectedProfile.value)
+    const nextStates = { ...patchStates.value }
+    for (const item of ((result.results as Record<string, unknown>[]) ?? [])) {
+      const patchName = String(item.patchName ?? '')
+      if (patchName) nextStates[patchName] = { ...item, active: item.success ? false : Boolean(item.active ?? nextStates[patchName]?.active) }
+    }
+    patchStates.value = nextStates
+    statusMessage.value = result.success
+      ? `✓ ${result.restored} patch(s) restauré(s), ${result.alreadyInactive} déjà inactif(s).`
+      : '✗ ' + (String(result.error ?? 'Restauration trainer partielle.'))
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
   }
@@ -492,11 +559,16 @@ onMounted(() => {
       <div v-if="profilePatches.length > 0" class="patches-list">
         <div class="targets-header">
           <h3>Patchs trainer ({{ profilePatches.length }})</h3>
+          <div class="trainer-actions">
+            <button class="btn btn-primary btn-sm" @click="applyAllProfilePatches()">Tout appliquer</button>
+            <button class="btn btn-secondary btn-sm" @click="restoreAllProfilePatches()">Tout restaurer</button>
+          </div>
         </div>
         <div v-for="patch in profilePatches" :key="patch.name" class="patch-row">
           <div class="patch-info">
             <span class="target-name">{{ patch.name }}</span>
             <span v-if="patch.riskLevel" class="patch-risk">{{ patch.riskLevel }}</span>
+            <span class="target-resolution" :class="patchStateClass(patch)">{{ patchStateLabel(patch) }}</span>
             <span v-if="patch.module" class="target-locator">{{ patch.module }} +0x{{ patch.moduleOffset }}</span>
           </div>
           <div class="target-actions">
@@ -656,6 +728,13 @@ onMounted(() => {
 
 .patches-list {
   margin-bottom: 16px;
+}
+
+.trainer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 .targets-header {

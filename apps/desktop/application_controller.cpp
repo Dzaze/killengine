@@ -7122,6 +7122,99 @@ QVariantMap ApplicationController::restoreProfileCodePatch(const QString& profil
     return result;
 }
 
+QVariantMap ApplicationController::applyAllProfileCodePatches(const QString& profileName) {
+    QVariantMap result;
+    result["success"] = false;
+    result["profileName"] = profileName;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    QVariantList patchResults;
+    int applied = 0;
+    int alreadyActive = 0;
+    for (const auto& patch : profile.patches) {
+        QVariantMap patchResult = applyProfileCodePatch(profileName, patch.name);
+        if (patchResult.value("success").toBool()) {
+            ++applied;
+        } else if (patchResult.value("active").toBool()) {
+            ++alreadyActive;
+            patchResult["alreadyActive"] = true;
+        }
+        patchResults.append(patchResult);
+    }
+
+    result["success"] = applied + alreadyActive == profile.patches.size();
+    result["applied"] = applied;
+    result["alreadyActive"] = alreadyActive;
+    result["total"] = profile.patches.size();
+    result["results"] = patchResults;
+    if (profile.patches.isEmpty()) {
+        result["error"] = "Aucun patch trainer dans ce profil.";
+    } else if (!result.value("success").toBool()) {
+        result["error"] = QString("Application partielle: %1 appliqué(s), %2 déjà actif(s), %3 total.")
+                              .arg(applied)
+                              .arg(alreadyActive)
+                              .arg(profile.patches.size());
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::restoreAllProfileCodePatches(const QString& profileName) {
+    QVariantMap result;
+    result["success"] = false;
+    result["profileName"] = profileName;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    QVariantList patchResults;
+    int restored = 0;
+    int alreadyInactive = 0;
+    for (const auto& patch : profile.patches) {
+        QVariantMap patchResult = restoreProfileCodePatch(profileName, patch.name);
+        patchResults.append(patchResult);
+        if (patchResult.value("success").toBool()) {
+            ++restored;
+        } else if (patchResult.value("error").toString().contains("non actif", Qt::CaseInsensitive)) {
+            ++alreadyInactive;
+        }
+    }
+
+    result["success"] = restored + alreadyInactive == profile.patches.size();
+    result["restored"] = restored;
+    result["alreadyInactive"] = alreadyInactive;
+    result["total"] = profile.patches.size();
+    result["results"] = patchResults;
+    if (profile.patches.isEmpty()) {
+        result["error"] = "Aucun patch trainer dans ce profil.";
+    } else if (!result.value("success").toBool()) {
+        result["error"] = QString("Restauration partielle: %1 restauré(s), %2 déjà inactif(s), %3 total.")
+                              .arg(restored)
+                              .arg(alreadyInactive)
+                              .arg(profile.patches.size());
+    }
+    return result;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
 // ---------------------------------------------------------------------------
