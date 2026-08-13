@@ -954,6 +954,18 @@ QVariantList writeHistoryToVariantList(const QStringList& values) {
     return result;
 }
 
+struct UiInvestigationWindowState {
+    uint64_t base{0};
+    QByteArray before;
+    QString label;
+    QString reason;
+};
+
+QList<UiInvestigationWindowState>& uiInvestigationWindows() {
+    static QList<UiInvestigationWindowState> windows;
+    return windows;
+}
+
 } // namespace
 
 ApplicationController::ApplicationController(QObject* parent)
@@ -2212,12 +2224,13 @@ QVariantMap ApplicationController::startUiStringInvestigation(
     }
 
     killcore::MemoryReader reader(m_handle);
-    m_uiInvestigationWindows.clear();
+    auto& investigationWindows = uiInvestigationWindows();
+    investigationWindows.clear();
     uint64_t bytesCaptured = 0;
     int unreadable = 0;
 
     for (const auto& window : merged) {
-        if (m_uiInvestigationWindows.size() >= maxWindows || bytesCaptured >= maxBytes) {
+        if (investigationWindows.size() >= maxWindows || bytesCaptured >= maxBytes) {
             break;
         }
         const uint64_t size64 = std::min<uint64_t>(window.end - window.start, maxBytes - bytesCaptured);
@@ -2231,7 +2244,7 @@ QVariantMap ApplicationController::startUiStringInvestigation(
             ++unreadable;
             continue;
         }
-        m_uiInvestigationWindows.append({
+        investigationWindows.append({
             window.start,
             read.data.left(static_cast<qsizetype>(read.bytesRead)),
             window.label.left(240),
@@ -2240,9 +2253,9 @@ QVariantMap ApplicationController::startUiStringInvestigation(
         bytesCaptured += read.bytesRead;
     }
 
-    m_uiInvestigationStartedAt = QDateTime::currentDateTime();
-    result["success"] = !m_uiInvestigationWindows.isEmpty();
-    result["windows"] = m_uiInvestigationWindows.size();
+    m_uiInvestigationStartedMs = QDateTime::currentMSecsSinceEpoch();
+    result["success"] = !investigationWindows.isEmpty();
+    result["windows"] = investigationWindows.size();
     result["bytesCaptured"] = static_cast<qulonglong>(bytesCaptured);
     result["unreadable"] = unreadable;
     result["radiusBytes"] = radius;
@@ -2272,7 +2285,8 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
         result["error"] = "Aucun processus attaché.";
         return result;
     }
-    if (m_uiInvestigationWindows.isEmpty()) {
+    auto& investigationWindows = uiInvestigationWindows();
+    if (investigationWindows.isEmpty()) {
         result["error"] = "Aucune enquête live active.";
         return result;
     }
@@ -2284,7 +2298,7 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
     int changedBytes = 0;
     bool partial = false;
 
-    for (const auto& window : m_uiInvestigationWindows) {
+    for (const auto& window : investigationWindows) {
         if (changes.size() >= maxChanges) {
             partial = true;
             break;
@@ -2325,12 +2339,12 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
         }
     }
 
-    const qint64 elapsedMs = m_uiInvestigationStartedAt.isValid()
-        ? m_uiInvestigationStartedAt.msecsTo(QDateTime::currentDateTime())
+    const qint64 elapsedMs = m_uiInvestigationStartedMs > 0
+        ? QDateTime::currentMSecsSinceEpoch() - m_uiInvestigationStartedMs
         : 0;
-    const int capturedWindows = m_uiInvestigationWindows.size();
-    m_uiInvestigationWindows.clear();
-    m_uiInvestigationStartedAt = {};
+    const int capturedWindows = investigationWindows.size();
+    investigationWindows.clear();
+    m_uiInvestigationStartedMs = 0;
 
     result["success"] = true;
     result["windowsChecked"] = windowsChecked;

@@ -10,7 +10,6 @@
 
 #include <QObject>
 #include <QByteArray>
-#include <QDateTime>
 #include <QHash>
 #include <QString>
 #include <QStringList>
@@ -324,13 +323,6 @@ private:
         killcore::ValueType type{killcore::ValueType::Int32};
     };
 
-    struct UiInvestigationWindow {
-        uint64_t base{0};
-        QByteArray before;
-        QString label;
-        QString reason;
-    };
-
     struct ActiveProfileTarget {
         QString profileName;
         QString targetName;
@@ -354,8 +346,7 @@ private:
     QList<WriteRecord>       m_writeHistory;
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
     QList<AutoWriteTarget>   m_chatMemoryTargets;
-    QList<UiInvestigationWindow> m_uiInvestigationWindows;
-    QDateTime                m_uiInvestigationStartedAt;
+    qint64                   m_uiInvestigationStartedMs{0};
     QList<ActiveProfileTarget> m_activeProfileTargets;
     QStringList              m_autoWriteValueHistory;
     int                      m_lastBatchStartIndex{-1};
