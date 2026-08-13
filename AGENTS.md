@@ -98,6 +98,34 @@ killengine/
 - Convention de résolution : chaque offset suit un déréférencement (`read pointer`, puis `+ offset`), y compris le dernier offset.
 - Les nouvelles méthodes C++ exposées à l'UI doivent aussi être ajoutées dans `ui/src/services/backend.ts`.
 
+### Trace UI string / SC2
+- Objectif : retrouver les ressources affichées quand les scans numériques classiques ne trouvent rien, en partant des strings UI (`"45"`, `"50"`, etc.) puis en remontant vers les sources numériques ou les pointeurs qui les alimentent.
+- UI principale : `ui/src/views/ExpertView.vue`, section **Trace UI string**.
+  - `Scanner texte` cherche la valeur affichée en ASCII/UTF-16 dans les régions filtrées.
+  - `Filtrer strings` est le next scan des strings : il garde les mêmes slots si la valeur change, et peut suivre une string déplacée dans une petite fenêtre proche.
+  - `Analyser sources` cherche des formes numériques autour des strings suivies : `Int32`, `Int32 x100`, `Int32 x65536`, etc.
+  - `Tracker sources` garde les sources numériques qui suivent la nouvelle valeur affichée.
+  - `Auto origine` lance l'analyse source, essaie plusieurs rayons (`1 Mo`, `4 Mo`, `16 Mo`), sélectionne automatiquement les sources trouvées, prépare le panneau Write, puis inspecte les backrefs.
+  - `Backrefs` / `Origine` cherchent les pointeurs 64-bit qui pointent près des strings exactes ; ne pas matcher tout l'intervalle entre strings éloignées.
+- Backend exposé dans `ApplicationController` :
+  - `scanUiStrings`
+  - `trackUiStringCandidates`
+  - `analyzeUiStringSources`
+  - `trackUiStringSources`
+  - `inspectUiStringOrigins`
+  - `writeMemoryValuesWithVariants`
+- Logique pure testée dans `core/scanner/display_value_tracker.*`.
+  - Tests ciblés : `.\build\bin\killengine_unit_tests.exe --gtest_filter=UiStringTracker.*`
+- Écriture : le panneau **Write / Freeze** peut recevoir une sélection mixte issue des sources UI. L'utilisateur entre la valeur affichée (`60`) ; KillEngine calcule automatiquement la valeur réellement écrite selon le variant (`Int32` -> `60`, `Int32 x100` -> `6000`, `Int32 x65536` -> `3932160`) et affiche un **Plan d'écriture** avant le clic.
+- Télémétrie : les actions Trace UI string écrivent dans `%LOCALAPPDATA%\KillEngine\KillEngine\logs\scan_telemetry.jsonl`.
+  - Événements : `ui_string_scan`, `ui_string_track`, `ui_string_sources_analyze`, `ui_string_sources_track`, `ui_string_origins_inspect`, `ui_string_sources_write`.
+  - Lecture rapide après un test :
+    `Get-Content "$env:LOCALAPPDATA\KillEngine\KillEngine\logs\scan_telemetry.jsonl" -Tail 80`
+- Interprétation SC2 :
+  - Beaucoup de strings UI peuvent être de simples copies d'affichage, pas la source gameplay.
+  - Des adresses basses de type `0x590A... -> 0x289...` ressemblent souvent à des tables de pointeurs UI ; ne pas les écrire comme des ressources.
+  - Si `Sources = 0` et `Backrefs = 0` après les rayons larges, l'étape suivante probable est un vrai mode debugger/hardware breakpoint pour capturer l'instruction qui écrit la string.
+
 ### Performance adaptive
 - Préférer plus de threads contrôlés à plus de processus : le moteur doit rester déterministe et l'UI Qt/Vue doit rester fluide.
 - Centraliser les décisions machine dans `core/scanner/performance_profile.*` plutôt que disperser des heuristiques dans `ScanEngine` ou `ApplicationController`.
@@ -106,7 +134,7 @@ killengine/
 - Toute parallélisation de scan doit découper par régions/chunks, accepter `CancellationToken`, reporter la progression, et ne jamais envoyer une masse non paginée de candidats au frontend.
 
 ### Gros fichiers à connaître
-- `apps/desktop/application_controller.cpp` : **~3700 lignes** — c'est LE fichier central
+- `apps/desktop/application_controller.cpp` : **5000+ lignes** — c'est LE fichier central
   - Contient : Smart Search, scan dispatch, write/freeze, profils, undo, debugging
   - ⚠️ Les éditions `replace_in_file` peuvent échouer sur ce fichier (utiliser PowerShell pour les remplacements complexes)
 - `core/candidates/candidate_store.cpp` : gestion file-backed des candidats
