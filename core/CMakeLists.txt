@@ -64,6 +64,8 @@ add_library(killcore STATIC
     patch/aob_scanner.cpp
     patch/code_patch.h
     patch/code_patch.cpp
+    patch/instruction_patch_suggester.h
+    patch/instruction_patch_suggester.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

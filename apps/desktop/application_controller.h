@@ -196,6 +196,9 @@ public:
     /// bytesText: "90 90 CC", options keys: verify.
     Q_INVOKABLE QVariantMap applyCodePatch(const QString& addressHex, const QString& bytesText, const QVariantMap& options);
 
+    /// Analyse les bytes à une adresse et propose des patchs de même longueur.
+    Q_INVOKABLE QVariantMap suggestCodePatches(const QString& addressHex, const QVariantMap& options);
+
     /// Restaure les bytes originaux d'un patch actif.
     Q_INVOKABLE QVariantMap restoreCodePatch(const QString& addressHex);
 

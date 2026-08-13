@@ -1,5 +1,6 @@
 #include "patch/aob_scanner.h"
 #include "patch/code_patch.h"
+#include "patch/instruction_patch_suggester.h"
 
 #include <gtest/gtest.h>
 
@@ -64,4 +65,28 @@ TEST(CodePatch, RejectsWildcardPatchBytes) {
 
     EXPECT_FALSE(bytes.isValid());
     EXPECT_TRUE(bytes.bytes.isEmpty());
+}
+
+TEST(InstructionPatchSuggester, DecodesCommonRipRelativeWriteLength) {
+    const QByteArray bytes = QByteArray::fromHex("488905DEADBEEF488B05");
+
+    const auto instruction = decodeX64InstructionLength(bytes);
+
+    ASSERT_TRUE(instruction.success) << instruction.error.toStdString();
+    EXPECT_EQ(instruction.length, 7);
+    EXPECT_EQ(instruction.mnemonicHint, "write-like");
+}
+
+TEST(InstructionPatchSuggester, SuggestsSameLengthNopPatch) {
+    InstructionInfo instruction;
+    instruction.success = true;
+    instruction.length = 7;
+    instruction.mnemonicHint = "write-like";
+
+    const auto suggestions = suggestInstructionPatches(instruction);
+
+    ASSERT_FALSE(suggestions.isEmpty());
+    EXPECT_EQ(suggestions.first().label, "NOP x7");
+    EXPECT_EQ(suggestions.first().bytesText, "90 90 90 90 90 90 90");
+    EXPECT_FALSE(suggestions.first().risky);
 }

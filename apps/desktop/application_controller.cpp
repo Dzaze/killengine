@@ -13,6 +13,7 @@
 #include "pointer/pointer_scanner.h"
 #include "patch/aob_scanner.h"
 #include "patch/code_patch.h"
+#include "patch/instruction_patch_suggester.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "scanner/display_value_tracker.h"
@@ -4963,6 +4964,59 @@ QVariantMap ApplicationController::applyCodePatch(const QString& addressHex, con
                       << " protectionChanged=" << applied.protectionChanged;
     }
 
+    return result;
+}
+
+QVariantMap ApplicationController::suggestCodePatches(const QString& addressHex, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = addressHex;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int maxBytes = std::clamp(options.value("maxBytes", 16).toInt(), 8, 64);
+    killcore::MemoryReader reader(m_handle);
+    const auto read = reader.readChunked(address, static_cast<size_t>(maxBytes), 4096);
+    if (!read.success && read.bytesRead == 0) {
+        result["error"] = read.errorMessage.isEmpty() ? QString("Lecture instruction impossible.") : read.errorMessage;
+        return result;
+    }
+
+    const auto instruction = killcore::decodeX64InstructionLength(read.data);
+    result["instructionSuccess"] = instruction.success;
+    result["instructionLength"] = instruction.length;
+    result["mnemonicHint"] = instruction.mnemonicHint;
+    result["bytesRead"] = static_cast<int>(read.bytesRead);
+    result["bytes"] = QString::fromLatin1(read.data.left(instruction.length > 0 ? instruction.length : read.data.size()).toHex(' ').toUpper());
+
+    if (!instruction.success) {
+        result["error"] = instruction.error;
+        return result;
+    }
+
+    QVariantList suggestions;
+    const auto patchSuggestions = killcore::suggestInstructionPatches(instruction);
+    for (const auto& suggestion : patchSuggestions) {
+        QVariantMap item;
+        item["label"] = suggestion.label;
+        item["bytesText"] = suggestion.bytesText;
+        item["description"] = suggestion.description;
+        item["risky"] = suggestion.risky;
+        suggestions.append(item);
+    }
+
+    result["success"] = true;
+    result["suggestions"] = suggestions;
+    result["warning"] = "Décodage x64 ciblé et expérimental. Vérifie toujours les bytes avant d'appliquer.";
     return result;
 }
 

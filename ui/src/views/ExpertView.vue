@@ -6,6 +6,8 @@ import {
   type AobScanResult,
   type AobSignatureResult,
   type CodePatchResult,
+  type CodePatchSuggestion,
+  type CodePatchSuggestionResult,
   type MemoryWriteTarget,
   type PointerChainInfo,
   type PointerChainResolveResult,
@@ -50,6 +52,8 @@ const codePatchAddress = ref('')
 const codePatchBytes = ref('90 90')
 const codePatchBusy = ref(false)
 const codePatchResult = ref<CodePatchResult | null>(null)
+const codePatchSuggestBusy = ref(false)
+const codePatchSuggestionResult = ref<CodePatchSuggestionResult | null>(null)
 
 // Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
 const uiStringValue = ref('')
@@ -330,9 +334,38 @@ function useAobMatchAddress(address: string) {
   void store.readMemoryPreview(address, 128)
 }
 
-function selectAobPatchAddress(address: string) {
+async function selectAobPatchAddress(address: string) {
   codePatchAddress.value = address
   store.memoryPreviewAddress = address
+  await suggestSelectedCodePatches()
+}
+
+function useCodePatchSuggestion(suggestion: CodePatchSuggestion) {
+  codePatchBytes.value = suggestion.bytesText
+}
+
+async function suggestSelectedCodePatches() {
+  const address = codePatchAddress.value.trim()
+  if (!address) return
+  codePatchSuggestBusy.value = true
+  codePatchSuggestionResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.suggestCodePatches) {
+      codePatchSuggestionResult.value = { success: false, suggestions: [], error: 'Methode backend indisponible.' }
+      return
+    }
+    const result = await controller.suggestCodePatches(address, { maxBytes: 16 })
+    codePatchSuggestionResult.value = result
+    const firstSafe = result.suggestions?.find((suggestion) => !suggestion.risky)
+    if (result.success && firstSafe) {
+      codePatchBytes.value = firstSafe.bytesText
+    }
+  } catch (e) {
+    codePatchSuggestionResult.value = { success: false, suggestions: [], error: String(e) }
+  } finally {
+    codePatchSuggestBusy.value = false
+  }
 }
 
 async function applySelectedCodePatch() {
@@ -2000,10 +2033,35 @@ onMounted(() => {
             <span v-if="codePatchBusy" class="btn-spinner" aria-hidden="true"></span>
             Appliquer
           </button>
+          <button class="btn btn-secondary" :disabled="codePatchSuggestBusy || !codePatchAddress.trim()" @click="suggestSelectedCodePatches()">
+            <span v-if="codePatchSuggestBusy" class="btn-spinner" aria-hidden="true"></span>
+            Analyser
+          </button>
           <button class="btn btn-secondary" :disabled="codePatchBusy || !codePatchAddress.trim()" @click="restoreSelectedCodePatch()">
             Restaurer
           </button>
         </div>
+        <div v-if="codePatchSuggestionResult" class="metrics">
+          <span>Instruction: {{ codePatchSuggestionResult.success ? 'OK' : 'FAIL' }}</span>
+          <span v-if="codePatchSuggestionResult.instructionLength">{{ formatNumber(codePatchSuggestionResult.instructionLength) }} o</span>
+          <span v-if="codePatchSuggestionResult.mnemonicHint">{{ codePatchSuggestionResult.mnemonicHint }}</span>
+        </div>
+        <p v-if="codePatchSuggestionResult?.bytes" class="hint">Instruction: {{ codePatchSuggestionResult.bytes }}</p>
+        <p v-if="codePatchSuggestionResult?.warning" class="hint">{{ codePatchSuggestionResult.warning }}</p>
+        <div v-if="codePatchSuggestionResult?.suggestions?.length" class="patch-suggestion-list">
+          <button
+            v-for="suggestion in codePatchSuggestionResult.suggestions"
+            :key="suggestion.label"
+            class="btn compact"
+            :class="suggestion.risky ? 'btn-secondary' : 'btn-primary'"
+            type="button"
+            :title="suggestion.description"
+            @click="useCodePatchSuggestion(suggestion)"
+          >
+            {{ suggestion.label }}
+          </button>
+        </div>
+        <p v-if="codePatchSuggestionResult?.error" class="error">{{ codePatchSuggestionResult.error }}</p>
         <div v-if="codePatchResult" class="metrics">
           <span>Patch: {{ codePatchResult.success ? 'OK' : 'FAIL' }}</span>
           <span v-if="codePatchResult.bytesWritten">{{ formatNumber(codePatchResult.bytesWritten) }} o</span>
@@ -3323,9 +3381,16 @@ onMounted(() => {
 }
 
 .code-patch-controls {
-  grid-template-columns: minmax(170px, 1fr) minmax(180px, 1fr) auto auto;
+  grid-template-columns: minmax(170px, 1fr) minmax(180px, 1fr) auto auto auto;
   align-items: center;
   margin-top: 10px;
+}
+
+.patch-suggestion-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .aob-flags {

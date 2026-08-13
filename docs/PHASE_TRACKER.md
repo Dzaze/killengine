@@ -217,7 +217,8 @@ Prerequisites before Phase 12:
     - [x] Tests unitaires `AobScanner.*` pour parser, wildcards et matches multiples
     - [x] Génération de signature à partir des hits `Find What Writes`
     - [x] Patch manuel de bytes exacts avec sauvegarde/restauration des bytes originaux
-    - [ ] Patch assisté : templates NOP/RET/JMP selon instruction désassemblée
+    - [x] Patch assisté v1 : décodage ciblé de longueur x64 + templates NOP/INT3/RET de même taille
+    - [ ] Patch assisté v2 : vrai désassembleur pour mnemonics/opérandes et wildcards intelligents
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM

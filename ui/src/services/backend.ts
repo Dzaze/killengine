@@ -436,6 +436,26 @@ export interface CodePatchResult {
   protectionChanged?: boolean
 }
 
+export interface CodePatchSuggestion {
+  label: string
+  bytesText: string
+  description?: string
+  risky?: boolean
+}
+
+export interface CodePatchSuggestionResult {
+  success: boolean
+  error?: string
+  warning?: string
+  address?: string
+  instructionSuccess?: boolean
+  instructionLength?: number
+  mnemonicHint?: string
+  bytesRead?: number
+  bytes?: string
+  suggestions?: CodePatchSuggestion[]
+}
+
 export interface ExpertScanOptions {
   startAddress?: string
   stopAddress?: string
@@ -633,6 +653,7 @@ export interface AppSettings {
   scanAobPattern?(pattern: string, options: Record<string, unknown>): Promise<AobScanResult>
   generateAobSignature?(addressHex: string, options: Record<string, unknown>): Promise<AobSignatureResult>
   applyCodePatch?(addressHex: string, bytesText: string, options: Record<string, unknown>): Promise<CodePatchResult>
+  suggestCodePatches?(addressHex: string, options: Record<string, unknown>): Promise<CodePatchSuggestionResult>
   restoreCodePatch?(addressHex: string): Promise<CodePatchResult>
   setFreezeInterval(intervalMs: number): Promise<Record<string, unknown>>
   startSmartSearch(query: string): Promise<SmartSearchResult>
@@ -1257,6 +1278,9 @@ class BackendService {
       },
       async applyCodePatch(_addressHex: string, _bytesText: string, _options: Record<string, unknown>) {
         return { success: false, error: 'Mock backend' }
+      },
+      async suggestCodePatches(_addressHex: string, _options: Record<string, unknown>) {
+        return { success: false, suggestions: [], error: 'Mock backend' }
       },
       async restoreCodePatch(_addressHex: string) {
         return { success: false, error: 'Mock backend' }
