@@ -8,6 +8,8 @@ import {
   type PointerChainResolveResult,
   type PointerScanResult,
   type UiStringCandidate,
+  type UiStringInvestigationFinishResult,
+  type UiStringInvestigationStartResult,
   type UiStringOriginResult,
   type UiStringScanResult,
   type UiStringSourceCandidate,
@@ -50,6 +52,8 @@ const selectedUiStringAddresses = ref<string[]>([])
 const selectedUiSourceAddresses = ref<string[]>([])
 const uiStringLiveInvestigation = ref(false)
 const uiStringLiveStartedAt = ref<number | null>(null)
+const uiStringInvestigationStartResult = ref<UiStringInvestigationStartResult | null>(null)
+const uiStringInvestigationFinishResult = ref<UiStringInvestigationFinishResult | null>(null)
 const uiStringSourceRadiusOptions = [
   { value: 64 * 1024, label: '64 Ko' },
   { value: 256 * 1024, label: '256 Ko' },
@@ -63,9 +67,69 @@ const uiStringInvestigationElapsed = computed(() => {
   return Math.max(0, Math.floor((Date.now() - uiStringLiveStartedAt.value) / 1000))
 })
 
-function toggleUiStringLiveInvestigation() {
-  uiStringLiveInvestigation.value = !uiStringLiveInvestigation.value
-  uiStringLiveStartedAt.value = uiStringLiveInvestigation.value ? Date.now() : null
+async function toggleUiStringLiveInvestigation() {
+  const controller = backend.getController()
+  if (!uiStringLiveInvestigation.value) {
+    const strings = selectedUiStringCandidates()
+    const sources = selectedUiSourceCandidates()
+    if (strings.length === 0 && sources.length === 0) return
+    uiStringBusy.value = true
+    uiStringInvestigationFinishResult.value = null
+    try {
+      if (!controller.startUiStringInvestigation) {
+        uiStringInvestigationStartResult.value = { success: false, windows: 0, error: 'Methode backend indisponible (mock mode).' }
+        return
+      }
+      const result = await controller.startUiStringInvestigation(strings, sources, {
+        radiusBytes: 4096,
+        maxWindows: 96,
+        maxBytesMb: 24,
+      })
+      uiStringInvestigationStartResult.value = result
+      if (result.success) {
+        uiStringLiveInvestigation.value = true
+        uiStringLiveStartedAt.value = Date.now()
+      }
+    } catch (e) {
+      uiStringInvestigationStartResult.value = { success: false, windows: 0, error: String(e) }
+    } finally {
+      uiStringBusy.value = false
+    }
+    return
+  }
+
+  uiStringBusy.value = true
+  try {
+    if (!controller.finishUiStringInvestigation) {
+      uiStringInvestigationFinishResult.value = {
+        success: false,
+        windowsChecked: 0,
+        unreadable: 0,
+        changedBytes: 0,
+        changesFound: 0,
+        changes: [],
+        error: 'Methode backend indisponible (mock mode).',
+      }
+      return
+    }
+    uiStringInvestigationFinishResult.value = await controller.finishUiStringInvestigation({
+      maxChanges: 500,
+    })
+  } catch (e) {
+    uiStringInvestigationFinishResult.value = {
+      success: false,
+      windowsChecked: 0,
+      unreadable: 0,
+      changedBytes: 0,
+      changesFound: 0,
+      changes: [],
+      error: String(e),
+    }
+  } finally {
+    uiStringLiveInvestigation.value = false
+    uiStringLiveStartedAt.value = null
+    uiStringBusy.value = false
+  }
 }
 
 async function runPointerScan() {
@@ -1073,6 +1137,38 @@ onMounted(() => {
             {{ uiStringLiveInvestigation ? 'Arrêter enquête' : 'Démarrer enquête' }}
           </button>
         </div>
+        <div v-if="uiStringInvestigationStartResult" class="metrics">
+          <span>Fenêtres enquête: {{ formatNumber(uiStringInvestigationStartResult.windows) }}</span>
+          <span>Capturé: {{ formatBytes(uiStringInvestigationStartResult.bytesCaptured) }}</span>
+          <span v-if="uiStringInvestigationStartResult.radiusBytes">Rayon: {{ formatBytes(uiStringInvestigationStartResult.radiusBytes) }}</span>
+          <span v-if="uiStringInvestigationStartResult.unreadable">Illisibles: {{ formatNumber(uiStringInvestigationStartResult.unreadable) }}</span>
+        </div>
+        <p v-if="uiStringInvestigationStartResult?.error" class="error">{{ uiStringInvestigationStartResult.error }}</p>
+        <div v-if="uiStringInvestigationFinishResult" class="metrics">
+          <span>Changements: {{ formatNumber(uiStringInvestigationFinishResult.changesFound) }}</span>
+          <span>Octets modifiés: {{ formatNumber(uiStringInvestigationFinishResult.changedBytes) }}</span>
+          <span>Fenêtres lues: {{ formatNumber(uiStringInvestigationFinishResult.windowsChecked) }}</span>
+          <span v-if="uiStringInvestigationFinishResult.partial" class="warning-text">résultats limités</span>
+        </div>
+        <p v-if="uiStringInvestigationFinishResult?.error" class="error">{{ uiStringInvestigationFinishResult.error }}</p>
+        <div v-if="uiStringInvestigationFinishResult?.changes.length" class="investigation-change-list">
+          <div class="source-list-title">
+            <strong>Changements pendant l'enquête</strong>
+            <span>{{ formatNumber(uiStringInvestigationFinishResult.changes.length) }} piste(s)</span>
+          </div>
+          <div
+            v-for="change in uiStringInvestigationFinishResult.changes.slice(0, 80)"
+            :key="`${change.address}:${change.offset}:${change.length}`"
+            class="investigation-change-row"
+          >
+            <code>0x{{ change.address }}</code>
+            <span>{{ change.reason || '-' }}</span>
+            <span>{{ change.beforeHex || '-' }}</span>
+            <strong>{{ change.afterHex || '-' }}</strong>
+            <span>{{ change.afterInt32 !== undefined ? `i32 ${formatNumber(change.afterInt32)}` : '-' }}</span>
+            <span>{{ change.afterFloat32 !== undefined ? `f32 ${change.afterFloat32.toFixed(3)}` : '-' }}</span>
+          </div>
+        </div>
         <div class="expert-flags ui-string-flags">
           <label class="checkbox-label">
             <input v-model="uiStringAscii" type="checkbox" :disabled="uiStringBusy" />
@@ -1988,6 +2084,42 @@ onMounted(() => {
   }
 }
 
+.investigation-change-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.investigation-change-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(90px, 120px) minmax(110px, 1fr) minmax(110px, 1fr) 86px 86px;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid rgba(158, 206, 106, 0.18);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.investigation-change-row code,
+.investigation-change-row span,
+.investigation-change-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.investigation-change-row code {
+  color: var(--text-primary);
+}
+
+.investigation-change-row strong {
+  color: var(--success);
+}
+
 .ui-string-list {
   display: flex;
   max-height: 220px;
@@ -2575,6 +2707,7 @@ onMounted(() => {
   .unknown-controls,
   .ui-string-controls,
   .ui-investigation,
+  .investigation-change-row,
   .ui-string-row,
   .origin-row,
   .source-row,

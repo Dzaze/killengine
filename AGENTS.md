@@ -107,18 +107,21 @@ killengine/
   - `Tracker sources` garde les sources numériques qui suivent la nouvelle valeur affichée.
   - `Auto origine` lance l'analyse source, essaie plusieurs rayons (`1 Mo`, `4 Mo`, `16 Mo`), sélectionne automatiquement les sources trouvées, prépare le panneau Write, puis inspecte les backrefs.
   - `Backrefs` / `Origine` cherchent les pointeurs 64-bit qui pointent près des strings exactes ; ne pas matcher tout l'intervalle entre strings éloignées.
+  - `Démarrer enquête` / `Arrêter enquête` capture des snapshots rapides autour des strings/sources sélectionnées pendant que l'utilisateur fait varier la valeur en jeu, puis affiche les offsets qui ont changé.
 - Backend exposé dans `ApplicationController` :
   - `scanUiStrings`
   - `trackUiStringCandidates`
   - `analyzeUiStringSources`
   - `trackUiStringSources`
   - `inspectUiStringOrigins`
+  - `startUiStringInvestigation`
+  - `finishUiStringInvestigation`
   - `writeMemoryValuesWithVariants`
 - Logique pure testée dans `core/scanner/display_value_tracker.*`.
   - Tests ciblés : `.\build\bin\killengine_unit_tests.exe --gtest_filter=UiStringTracker.*`
 - Écriture : le panneau **Write / Freeze** peut recevoir une sélection mixte issue des sources UI. L'utilisateur entre la valeur affichée (`60`) ; KillEngine calcule automatiquement la valeur réellement écrite selon le variant (`Int32` -> `60`, `Int32 x100` -> `6000`, `Int32 x65536` -> `3932160`) et affiche un **Plan d'écriture** avant le clic.
 - Télémétrie : les actions Trace UI string écrivent dans `%LOCALAPPDATA%\KillEngine\KillEngine\logs\scan_telemetry.jsonl`.
-  - Événements : `ui_string_scan`, `ui_string_track`, `ui_string_sources_analyze`, `ui_string_sources_track`, `ui_string_origins_inspect`, `ui_string_sources_write`.
+  - Événements : `ui_string_scan`, `ui_string_track`, `ui_string_sources_analyze`, `ui_string_sources_track`, `ui_string_origins_inspect`, `ui_string_investigation_start`, `ui_string_investigation_finish`, `ui_string_sources_write`.
   - Lecture rapide après un test :
     `Get-Content "$env:LOCALAPPDATA\KillEngine\KillEngine\logs\scan_telemetry.jsonl" -Tail 80`
 - Interprétation SC2 :

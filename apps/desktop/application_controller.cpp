@@ -2129,6 +2129,238 @@ QVariantMap ApplicationController::inspectUiStringOrigins(
     return result;
 }
 
+QVariantMap ApplicationController::startUiStringInvestigation(
+    const QVariantList& stringCandidates,
+    const QVariantList& sourceCandidates,
+    const QVariantMap& optionsMap) {
+    QVariantMap result;
+    result["success"] = false;
+    result["windows"] = 0;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const int radius = std::clamp(optionsMap.value("radiusBytes", 4096).toInt(), 256, 1024 * 1024);
+    const int maxWindows = std::clamp(optionsMap.value("maxWindows", 64).toInt(), 1, 512);
+    const uint64_t maxBytes = static_cast<uint64_t>(
+        std::clamp(optionsMap.value("maxBytesMb", 16).toInt(), 1, 256)) * 1024ull * 1024ull;
+
+    struct RequestWindow {
+        uint64_t start{0};
+        uint64_t end{0};
+        QString label;
+        QString reason;
+    };
+    QList<RequestWindow> requests;
+    auto addRequest = [&](uint64_t address, int byteLength, const QString& label, const QString& reason) {
+        const uint64_t extra = static_cast<uint64_t>(radius);
+        const uint64_t start = address > extra ? address - extra : 0;
+        const uint64_t valueEnd = address + static_cast<uint64_t>(std::max(1, byteLength));
+        const uint64_t end = valueEnd > std::numeric_limits<uint64_t>::max() - extra
+            ? std::numeric_limits<uint64_t>::max()
+            : valueEnd + extra;
+        requests.append({start, end, label, reason});
+    };
+
+    for (const auto& item : stringCandidates) {
+        const QVariantMap candidate = item.toMap();
+        uint64_t address = 0;
+        if (parseHexAddress(candidate.value("address").toString(), &address)) {
+            addRequest(
+                address,
+                candidate.value("byteLength", 8).toInt(),
+                QString("string 0x%1").arg(uiStringAddress(address)),
+                candidate.value("encoding", "string").toString());
+        }
+    }
+    for (const auto& item : sourceCandidates) {
+        const QVariantMap candidate = item.toMap();
+        uint64_t address = 0;
+        killcore::ValueType type = killcore::ValueType::Int32;
+        if (parseHexAddress(candidate.value("address").toString(), &address)
+            && killcore::parseValueType(candidate.value("type", "Int32").toString(), &type)) {
+            const QString variant = candidate.value("variantLabel").toString();
+            addRequest(
+                address,
+                static_cast<int>(killcore::valueTypeSize(type)),
+                QString("source 0x%1").arg(uiStringAddress(address)),
+                variant.isEmpty() ? killcore::valueTypeToString(type) : variant);
+        }
+    }
+
+    if (requests.isEmpty()) {
+        result["error"] = "Aucune string/source à observer.";
+        return result;
+    }
+
+    std::sort(requests.begin(), requests.end(), [](const RequestWindow& a, const RequestWindow& b) {
+        return a.start < b.start;
+    });
+
+    QList<RequestWindow> merged;
+    for (const auto& req : requests) {
+        if (merged.isEmpty() || req.start > merged.last().end + 4096) {
+            merged.append(req);
+            continue;
+        }
+        auto& last = merged.last();
+        last.end = std::max(last.end, req.end);
+        last.label += QString(", %1").arg(req.label);
+        last.reason += QString(", %1").arg(req.reason);
+    }
+
+    killcore::MemoryReader reader(m_handle);
+    m_uiInvestigationWindows.clear();
+    uint64_t bytesCaptured = 0;
+    int unreadable = 0;
+
+    for (const auto& window : merged) {
+        if (m_uiInvestigationWindows.size() >= maxWindows || bytesCaptured >= maxBytes) {
+            break;
+        }
+        const uint64_t size64 = std::min<uint64_t>(window.end - window.start, maxBytes - bytesCaptured);
+        if (size64 == 0) continue;
+        const auto read = reader.readChunked(window.start, static_cast<size_t>(size64), 64 * 1024);
+        if (!read.success && !read.partial) {
+            ++unreadable;
+            continue;
+        }
+        if (read.bytesRead == 0) {
+            ++unreadable;
+            continue;
+        }
+        m_uiInvestigationWindows.append({
+            window.start,
+            read.data.left(static_cast<qsizetype>(read.bytesRead)),
+            window.label.left(240),
+            window.reason.left(240),
+        });
+        bytesCaptured += read.bytesRead;
+    }
+
+    m_uiInvestigationStartedAt = QDateTime::currentDateTime();
+    result["success"] = !m_uiInvestigationWindows.isEmpty();
+    result["windows"] = m_uiInvestigationWindows.size();
+    result["bytesCaptured"] = static_cast<qulonglong>(bytesCaptured);
+    result["unreadable"] = unreadable;
+    result["radiusBytes"] = radius;
+    result["error"] = result.value("success").toBool() ? QString() : QString("Aucune fenêtre lisible capturée.");
+    appendScanTelemetry("ui_string_investigation_start", {
+        {"success", result.value("success")},
+        {"stringCandidates", stringCandidates.size()},
+        {"sourceCandidates", sourceCandidates.size()},
+        {"requestWindows", requests.size()},
+        {"mergedWindows", merged.size()},
+        {"windows", result.value("windows")},
+        {"bytesCaptured", result.value("bytesCaptured")},
+        {"unreadable", unreadable},
+        {"radiusBytes", radius},
+        {"error", result.value("error")},
+    });
+    return result;
+}
+
+QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap& optionsMap) {
+    QVariantMap result;
+    QVariantList changes;
+    result["success"] = false;
+    result["changes"] = changes;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (m_uiInvestigationWindows.isEmpty()) {
+        result["error"] = "Aucune enquête live active.";
+        return result;
+    }
+
+    const int maxChanges = std::clamp(optionsMap.value("maxChanges", 500).toInt(), 1, 5000);
+    killcore::MemoryReader reader(m_handle);
+    int windowsChecked = 0;
+    int unreadable = 0;
+    int changedBytes = 0;
+    bool partial = false;
+
+    for (const auto& window : m_uiInvestigationWindows) {
+        if (changes.size() >= maxChanges) {
+            partial = true;
+            break;
+        }
+        ++windowsChecked;
+        const auto read = reader.readChunked(window.base, static_cast<size_t>(window.before.size()), 64 * 1024);
+        if (!read.success && !read.partial) {
+            ++unreadable;
+            continue;
+        }
+        const qsizetype comparable = std::min(window.before.size(), read.data.size());
+        qsizetype i = 0;
+        while (i < comparable && changes.size() < maxChanges) {
+            if (window.before.at(i) == read.data.at(i)) {
+                ++i;
+                continue;
+            }
+            const qsizetype start = i;
+            while (i < comparable && window.before.at(i) != read.data.at(i)) {
+                ++i;
+            }
+            const qsizetype length = i - start;
+            changedBytes += static_cast<int>(length);
+            const uint64_t address = window.base + static_cast<uint64_t>(start);
+            QVariantMap change;
+            change["address"] = uiStringAddress(address);
+            change["offset"] = static_cast<qulonglong>(start);
+            change["length"] = static_cast<int>(length);
+            change["label"] = window.label;
+            change["reason"] = window.reason;
+            change["beforeHex"] = QString::fromLatin1(window.before.mid(start, std::min<qsizetype>(length, 16)).toHex(' ').toUpper());
+            change["afterHex"] = QString::fromLatin1(read.data.mid(start, std::min<qsizetype>(length, 16)).toHex(' ').toUpper());
+            if (start + 4 <= read.data.size()) {
+                change["afterInt32"] = bytesToDouble(read.data.mid(start, 4), killcore::ValueType::Int32);
+                change["afterFloat32"] = bytesToDouble(read.data.mid(start, 4), killcore::ValueType::Float32);
+            }
+            changes.append(change);
+        }
+    }
+
+    const qint64 elapsedMs = m_uiInvestigationStartedAt.isValid()
+        ? m_uiInvestigationStartedAt.msecsTo(QDateTime::currentDateTime())
+        : 0;
+    const int capturedWindows = m_uiInvestigationWindows.size();
+    m_uiInvestigationWindows.clear();
+    m_uiInvestigationStartedAt = {};
+
+    result["success"] = true;
+    result["windowsChecked"] = windowsChecked;
+    result["capturedWindows"] = capturedWindows;
+    result["unreadable"] = unreadable;
+    result["changedBytes"] = changedBytes;
+    result["changesFound"] = changes.size();
+    result["partial"] = partial || changes.size() >= maxChanges;
+    result["elapsedMs"] = static_cast<int>(elapsedMs);
+    result["changes"] = changes;
+    result["error"] = "";
+    QVariantList samples;
+    for (int idx = 0; idx < std::min<int>(changes.size(), 20); ++idx) {
+        samples.append(changes.at(idx));
+    }
+    appendScanTelemetry("ui_string_investigation_finish", {
+        {"success", true},
+        {"capturedWindows", capturedWindows},
+        {"windowsChecked", windowsChecked},
+        {"unreadable", unreadable},
+        {"changedBytes", changedBytes},
+        {"changesFound", changes.size()},
+        {"partial", result.value("partial")},
+        {"elapsedMs", result.value("elapsedMs")},
+        {"sampleCount", samples.size()},
+        {"samples", samples},
+    });
+    return result;
+}
+
 QVariantMap ApplicationController::startExactScan(const QString& value, const QString& valueType) {
     QVariantMap result;
     QVariantList matches;

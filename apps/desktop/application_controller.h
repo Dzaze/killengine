@@ -10,6 +10,7 @@
 
 #include <QObject>
 #include <QByteArray>
+#include <QDateTime>
 #include <QHash>
 #include <QString>
 #include <QStringList>
@@ -94,6 +95,15 @@ public:
     Q_INVOKABLE QVariantMap inspectUiStringOrigins(
         const QVariantList& stringCandidates,
         const QVariantMap& options) const;
+
+    /// Démarre une enquête live : snapshot des zones autour des strings/sources UI suivies.
+    Q_INVOKABLE QVariantMap startUiStringInvestigation(
+        const QVariantList& stringCandidates,
+        const QVariantList& sourceCandidates,
+        const QVariantMap& options);
+
+    /// Termine l'enquête live : relit les zones capturées et retourne les changements observés.
+    Q_INVOKABLE QVariantMap finishUiStringInvestigation(const QVariantMap& options);
 
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
@@ -314,6 +324,13 @@ private:
         killcore::ValueType type{killcore::ValueType::Int32};
     };
 
+    struct UiInvestigationWindow {
+        uint64_t base{0};
+        QByteArray before;
+        QString label;
+        QString reason;
+    };
+
     struct ActiveProfileTarget {
         QString profileName;
         QString targetName;
@@ -337,6 +354,8 @@ private:
     QList<WriteRecord>       m_writeHistory;
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
     QList<AutoWriteTarget>   m_chatMemoryTargets;
+    QList<UiInvestigationWindow> m_uiInvestigationWindows;
+    QDateTime                m_uiInvestigationStartedAt;
     QList<ActiveProfileTarget> m_activeProfileTargets;
     QStringList              m_autoWriteValueHistory;
     int                      m_lastBatchStartIndex{-1};

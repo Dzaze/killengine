@@ -179,6 +179,40 @@ export interface UiStringOriginResult {
   pointerRefs: UiStringPointerRef[]
 }
 
+export interface UiStringInvestigationChange {
+  address: string
+  offset?: number
+  length?: number
+  label?: string
+  reason?: string
+  beforeHex?: string
+  afterHex?: string
+  afterInt32?: number
+  afterFloat32?: number
+}
+
+export interface UiStringInvestigationStartResult {
+  success: boolean
+  windows: number
+  bytesCaptured?: number
+  unreadable?: number
+  radiusBytes?: number
+  error: string
+}
+
+export interface UiStringInvestigationFinishResult {
+  success: boolean
+  windowsChecked: number
+  capturedWindows?: number
+  unreadable: number
+  changedBytes: number
+  changesFound: number
+  partial?: boolean
+  elapsedMs?: number
+  error: string
+  changes: UiStringInvestigationChange[]
+}
+
 export interface ExactScanMatch {
   address: string
   type: string
@@ -470,6 +504,12 @@ export interface AppSettings {
   ): Promise<UiStringSourceResult>
   trackUiStringSources?(sourceCandidates: UiStringSourceCandidate[], value: string): Promise<UiStringSourceTrackResult>
   inspectUiStringOrigins?(stringCandidates: UiStringCandidate[], options: Record<string, unknown>): Promise<UiStringOriginResult>
+  startUiStringInvestigation?(
+    stringCandidates: UiStringCandidate[],
+    sourceCandidates: UiStringSourceCandidate[],
+    options: Record<string, unknown>,
+  ): Promise<UiStringInvestigationStartResult>
+  finishUiStringInvestigation?(options: Record<string, unknown>): Promise<UiStringInvestigationFinishResult>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
   startExactScanExpert(
     value: string,
@@ -1091,6 +1131,20 @@ class BackendService {
       },
       async writeMemoryValuesWithVariants(_targets: MemoryWriteTarget[], _value: string) {
         return { success: false, verified: false, bytesWritten: 0, written: 0, total: 0, results: [], error: 'Mock backend' }
+      },
+      async startUiStringInvestigation() {
+        return { success: false, windows: 0, bytesCaptured: 0, unreadable: 0, radiusBytes: 0, error: 'Mock backend' }
+      },
+      async finishUiStringInvestigation() {
+        return {
+          success: false,
+          windowsChecked: 0,
+          unreadable: 0,
+          changedBytes: 0,
+          changesFound: 0,
+          changes: [],
+          error: 'Mock backend',
+        }
       },
       async rollbackLastWrite() {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend' }
