@@ -10,6 +10,9 @@ struct InstructionInfo {
     bool success{false};
     int length{0};
     QString mnemonicHint;
+    QString disassembly;
+    QString decoder{"builtin"};
+    QString stableAobPattern;
     QString error;
 };
 

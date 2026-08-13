@@ -94,6 +94,22 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(lz4)
 
 # ---------------------------------------------------------------------------
+# Zydis — désassembleur x86/x64 pour signatures et patchs assistés
+# ---------------------------------------------------------------------------
+set(ZYDIS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ZYDIS_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(ZYDIS_BUILD_DOXYGEN OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    zydis
+    GIT_REPOSITORY https://github.com/zyantific/zydis.git
+    GIT_TAG v4.1.1
+    GIT_SHALLOW TRUE
+    GIT_SUBMODULES_RECURSE TRUE
+)
+FetchContent_MakeAvailable(zydis)
+
+# ---------------------------------------------------------------------------
 # Définitions globales du projet
 # ---------------------------------------------------------------------------
 add_compile_definitions(

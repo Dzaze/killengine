@@ -361,6 +361,9 @@ async function suggestSelectedCodePatches() {
     if (result.success && firstSafe) {
       codePatchBytes.value = firstSafe.bytesText
     }
+    if (result.success && result.stableAobPattern) {
+      aobPattern.value = result.stableAobPattern
+    }
   } catch (e) {
     codePatchSuggestionResult.value = { success: false, suggestions: [], error: String(e) }
   } finally {
@@ -2045,7 +2048,10 @@ onMounted(() => {
           <span>Instruction: {{ codePatchSuggestionResult.success ? 'OK' : 'FAIL' }}</span>
           <span v-if="codePatchSuggestionResult.instructionLength">{{ formatNumber(codePatchSuggestionResult.instructionLength) }} o</span>
           <span v-if="codePatchSuggestionResult.mnemonicHint">{{ codePatchSuggestionResult.mnemonicHint }}</span>
+          <span v-if="codePatchSuggestionResult.decoder">{{ codePatchSuggestionResult.decoder }}</span>
         </div>
+        <p v-if="codePatchSuggestionResult?.disassembly" class="hint">{{ codePatchSuggestionResult.disassembly }}</p>
+        <p v-if="codePatchSuggestionResult?.stableAobPattern" class="hint">AOB stable: {{ codePatchSuggestionResult.stableAobPattern }}</p>
         <p v-if="codePatchSuggestionResult?.bytes" class="hint">Instruction: {{ codePatchSuggestionResult.bytes }}</p>
         <p v-if="codePatchSuggestionResult?.warning" class="hint">{{ codePatchSuggestionResult.warning }}</p>
         <div v-if="codePatchSuggestionResult?.suggestions?.length" class="patch-suggestion-list">

@@ -74,7 +74,9 @@ TEST(InstructionPatchSuggester, DecodesCommonRipRelativeWriteLength) {
 
     ASSERT_TRUE(instruction.success) << instruction.error.toStdString();
     EXPECT_EQ(instruction.length, 7);
-    EXPECT_EQ(instruction.mnemonicHint, "write-like");
+    EXPECT_FALSE(instruction.mnemonicHint.isEmpty());
+    EXPECT_FALSE(instruction.decoder.isEmpty());
+    EXPECT_EQ(instruction.stableAobPattern, "48 89 05 ?? ?? ?? ??");
 }
 
 TEST(InstructionPatchSuggester, SuggestsSameLengthNopPatch) {

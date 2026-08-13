@@ -451,6 +451,9 @@ export interface CodePatchSuggestionResult {
   instructionSuccess?: boolean
   instructionLength?: number
   mnemonicHint?: string
+  disassembly?: string
+  decoder?: string
+  stableAobPattern?: string
   bytesRead?: number
   bytes?: string
   suggestions?: CodePatchSuggestion[]

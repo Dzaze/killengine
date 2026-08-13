@@ -218,7 +218,8 @@ Prerequisites before Phase 12:
     - [x] Génération de signature à partir des hits `Find What Writes`
     - [x] Patch manuel de bytes exacts avec sauvegarde/restauration des bytes originaux
     - [x] Patch assisté v1 : décodage ciblé de longueur x64 + templates NOP/INT3/RET de même taille
-    - [ ] Patch assisté v2 : vrai désassembleur pour mnemonics/opérandes et wildcards intelligents
+    - [x] Patch assisté v2 : Zydis v4.1.1 pour mnemonics/opérandes et wildcards sur immediates/displacements
+    - [ ] Patch assisté v3 : classement de risque par type d'instruction et templates conditionnels plus précis
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM

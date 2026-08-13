@@ -79,3 +79,11 @@ target_link_libraries(killcore PUBLIC
     psapi
     dbghelp
 )
+
+if(TARGET Zydis::Zydis)
+    target_link_libraries(killcore PUBLIC Zydis::Zydis)
+    target_compile_definitions(killcore PUBLIC KILLENGINE_HAS_ZYDIS=1)
+elseif(TARGET Zydis)
+    target_link_libraries(killcore PUBLIC Zydis)
+    target_compile_definitions(killcore PUBLIC KILLENGINE_HAS_ZYDIS=1)
+endif()

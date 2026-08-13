@@ -5,6 +5,13 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <QPair>
+#include <QStringList>
+
+#if defined(KILLENGINE_HAS_ZYDIS)
+#include <Zydis/Zydis.h>
+#endif
+
 namespace killcore {
 
 namespace {
@@ -151,6 +158,26 @@ QString repeatedNopBytes(int length) {
     return bytesToAobPattern(bytes);
 }
 
+QString bytesToWildcardPattern(const QByteArray& bytes, const QList<QPair<int, int>>& wildcardRanges) {
+    QStringList tokens;
+    tokens.reserve(bytes.size());
+    for (int i = 0; i < bytes.size(); ++i) {
+        bool wildcard = false;
+        for (const auto& range : wildcardRanges) {
+            if (i >= range.first && i < range.first + range.second) {
+                wildcard = true;
+                break;
+            }
+        }
+        if (wildcard) {
+            tokens.append("??");
+        } else {
+            tokens.append(QString("%1").arg(static_cast<uint8_t>(bytes.at(i)), 2, 16, QLatin1Char('0')).toUpper());
+        }
+    }
+    return tokens.join(' ');
+}
+
 } // namespace
 
 InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
@@ -159,6 +186,39 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
         info.error = "Aucun byte à décoder.";
         return info;
     }
+
+#if defined(KILLENGINE_HAS_ZYDIS)
+    ZydisDisassembledInstruction instruction;
+    if (ZYAN_SUCCESS(ZydisDisassembleIntel(
+            ZYDIS_MACHINE_MODE_LONG_64,
+            0,
+            reinterpret_cast<const ZyanU8*>(bytes.constData()),
+            static_cast<ZyanUSize>(bytes.size()),
+            &instruction))) {
+        info.success = true;
+        info.length = static_cast<int>(instruction.info.length);
+        info.mnemonicHint = QString::fromLatin1(ZydisMnemonicGetString(instruction.info.mnemonic));
+        info.disassembly = QString::fromLatin1(instruction.text);
+        info.decoder = "zydis";
+        QList<QPair<int, int>> wildcardRanges;
+        if (instruction.info.raw.disp.size > 0) {
+            wildcardRanges.append({
+                static_cast<int>(instruction.info.raw.disp.offset),
+                static_cast<int>(instruction.info.raw.disp.size / 8)
+            });
+        }
+        for (const auto& imm : instruction.info.raw.imm) {
+            if (imm.size > 0) {
+                wildcardRanges.append({
+                    static_cast<int>(imm.offset),
+                    static_cast<int>(imm.size / 8)
+                });
+            }
+        }
+        info.stableAobPattern = bytesToWildcardPattern(bytes.left(info.length), wildcardRanges);
+        return info;
+    }
+#endif
 
     int index = 0;
     while (hasBytes(bytes, index, 1) && isLegacyPrefix(byteAt(bytes, index))) {
@@ -218,6 +278,7 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
     info.success = true;
     info.length = length;
     info.mnemonicHint = hintForOpcode(op, twoByte);
+    info.stableAobPattern = bytesToAobPattern(bytes.left(length));
     return info;
 }
 

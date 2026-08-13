@@ -142,10 +142,10 @@ killengine/
 ### AOB signatures / Trainer engine
 - Module : `core/patch/aob_scanner.*`.
 - Objectif : passer du scan de valeurs RAM à une approche trainer type WeMod/Wand : retrouver une signature d'instruction stable dans les régions code, puis plus tard patcher/hooker cette instruction.
-- Backend : `ApplicationController::scanAobPattern(pattern, options)` expose le scan de pattern (`48 8B ?? 89`) avec filtres `executableOnly`, `imageOnly`, `maxResults`; `generateAobSignature(address, options)` lit les bytes autour d'un RIP capturé pour produire une signature brute; `suggestCodePatches(address, options)` estime la longueur de l'instruction x64 et propose des templates; `applyCodePatch` / `restoreCodePatch` écrivent des bytes exacts et restaurent les bytes originaux gardés en mémoire.
-- UI : section **AOB signatures** dans Expert. Les hits `Écrit par` peuvent remplir automatiquement le pattern AOB via le bouton `Signature`; les matches AOB peuvent être analysés pour proposer `NOP xN`, `INT3 debug`, `RET + NOP`, puis patchés/restaurés.
+- Backend : `ApplicationController::scanAobPattern(pattern, options)` expose le scan de pattern (`48 8B ?? 89`) avec filtres `executableOnly`, `imageOnly`, `maxResults`; `generateAobSignature(address, options)` lit les bytes autour d'un RIP capturé pour produire une signature brute; `suggestCodePatches(address, options)` utilise Zydis v4.1.1 pour décoder l'instruction, générer une signature stable avec wildcards sur immediates/displacements, et proposer des templates; `applyCodePatch` / `restoreCodePatch` écrivent des bytes exacts et restaurent les bytes originaux gardés en mémoire.
+- UI : section **AOB signatures** dans Expert. Les hits `Écrit par` peuvent remplir automatiquement le pattern AOB via le bouton `Signature`; les matches AOB peuvent être analysés pour afficher le désassemblage, remplir une AOB stable, proposer `NOP xN`, `INT3 debug`, `RET + NOP`, puis patcher/restaurer.
 - Tests ciblés : `.\build\bin\killengine_unit_tests.exe --gtest_filter=AobScanner.*`.
-- Prochaine étape logique : brancher un vrai désassembleur (Zydis/Capstone) pour afficher mnemonics/opérandes, poser des wildcards sur offsets relatifs, et éviter les faux décodages du mini-décodeur.
+- Prochaine étape logique : affiner le risque par instruction (`mov` mémoire, `cmp`, `jcc`, `call`) et proposer des templates adaptés au lieu d'une liste générique.
 
 ### Performance adaptive
 - Préférer plus de threads contrôlés à plus de processus : le moteur doit rester déterministe et l'UI Qt/Vue doit rester fluide.

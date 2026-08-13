@@ -4995,6 +4995,9 @@ QVariantMap ApplicationController::suggestCodePatches(const QString& addressHex,
     result["instructionSuccess"] = instruction.success;
     result["instructionLength"] = instruction.length;
     result["mnemonicHint"] = instruction.mnemonicHint;
+    result["disassembly"] = instruction.disassembly;
+    result["decoder"] = instruction.decoder;
+    result["stableAobPattern"] = instruction.stableAobPattern;
     result["bytesRead"] = static_cast<int>(read.bytesRead);
     result["bytes"] = QString::fromLatin1(read.data.left(instruction.length > 0 ? instruction.length : read.data.size()).toHex(' ').toUpper());
 
