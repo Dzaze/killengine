@@ -107,7 +107,7 @@ killengine/
   - `Tracker sources` garde les sources numériques qui suivent la nouvelle valeur affichée.
   - `Auto origine` lance l'analyse source, essaie plusieurs rayons (`1 Mo`, `4 Mo`, `16 Mo`), sélectionne automatiquement les sources trouvées, prépare le panneau Write, puis inspecte les backrefs.
   - `Backrefs` / `Origine` cherchent les pointeurs 64-bit qui pointent près des strings exactes ; ne pas matcher tout l'intervalle entre strings éloignées.
-  - `Démarrer enquête` / `Arrêter enquête` capture des snapshots rapides autour des strings/sources sélectionnées pendant que l'utilisateur fait varier la valeur en jeu, puis affiche les offsets qui ont changé.
+  - `Démarrer enquête` / `Arrêter enquête` capture des snapshots rapides autour des strings/sources sélectionnées, plus des empreintes globales de blocs writable. À l'arrêt, l'app relit les blocs modifiés et cherche les variantes numériques de la nouvelle valeur affichée (`globalValueHits`), puis ajoute automatiquement ces pistes aux sources numériques sélectionnées.
 - Backend exposé dans `ApplicationController` :
   - `scanUiStrings`
   - `trackUiStringCandidates`
@@ -127,7 +127,7 @@ killengine/
 - Interprétation SC2 :
   - Beaucoup de strings UI peuvent être de simples copies d'affichage, pas la source gameplay.
   - Des adresses basses de type `0x590A... -> 0x289...` ressemblent souvent à des tables de pointeurs UI ; ne pas les écrire comme des ressources.
-  - Si `Sources = 0` et `Backrefs = 0` après les rayons larges, l'étape suivante probable est un vrai mode debugger/hardware breakpoint pour capturer l'instruction qui écrit la string.
+  - Si `Valeurs radar = 0` malgré des `Blocs modifiés > 0`, la valeur nouvelle n'est probablement pas représentée directement dans les pages modifiées observées ; retenter en renseignant bien la nouvelle valeur affichée avant `Arrêter et comparer`, ou passer ensuite à un vrai mode debugger/hardware breakpoint pour capturer l'instruction qui écrit la string.
 
 ### Performance adaptive
 - Préférer plus de threads contrôlés à plus de processus : le moteur doit rester déterministe et l'UI Qt/Vue doit rester fluide.

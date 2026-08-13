@@ -195,6 +195,10 @@ export interface UiStringInvestigationStartResult {
   success: boolean
   windows: number
   bytesCaptured?: number
+  probeBlocks?: number
+  probeBytesCaptured?: number
+  probeRegions?: number
+  probeUnreadable?: number
   unreadable?: number
   radiusBytes?: number
   error: string
@@ -207,6 +211,14 @@ export interface UiStringInvestigationFinishResult {
   unreadable: number
   changedBytes: number
   changesFound: number
+  globalValueHits?: UiStringSourceCandidate[]
+  globalValueHitsFound?: number
+  probeBlocksCaptured?: number
+  probeBlocksChecked?: number
+  probeBlocksChanged?: number
+  probeBytesChecked?: number
+  probeChangedBytes?: number
+  probeUnreadable?: number
   partial?: boolean
   elapsedMs?: number
   error: string

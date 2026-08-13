@@ -106,6 +106,9 @@ async function toggleUiStringLiveInvestigation() {
         radiusBytes: 4096,
         maxWindows: 96,
         maxBytesMb: 24,
+        globalProbe: true,
+        maxProbeMb: 1024,
+        probeBlockSize: 64 * 1024,
       })
       const capturedWindows = Number(result.windows ?? 0)
       uiStringInvestigationStartResult.value = capturedWindows > 0 ? { ...result, success: true } : result
@@ -134,9 +137,26 @@ async function toggleUiStringLiveInvestigation() {
       }
       return
     }
-    uiStringInvestigationFinishResult.value = await controller.finishUiStringInvestigation({
+    const result = await controller.finishUiStringInvestigation({
       maxChanges: 500,
+      maxGlobalValueHits: 500,
+      value: (uiStringNextValue.value || uiStringValue.value || store.exactScanValue).trim(),
     })
+    uiStringInvestigationFinishResult.value = result
+    const globalHits = result.globalValueHits ?? []
+    if (globalHits.length > 0) {
+      const merged = new Map<string, UiStringSourceCandidate>()
+      for (const source of uiStringSourceCandidates.value) {
+        merged.set(sourceKey(source), source)
+      }
+      for (const source of globalHits) {
+        merged.set(sourceKey(source), source)
+      }
+      uiStringSourceCandidates.value = Array.from(merged.values())
+        .sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))
+        .slice(0, 500)
+      selectedUiSourceAddresses.value = globalHits.map(sourceKey)
+    }
   } catch (e) {
     uiStringInvestigationFinishResult.value = {
       success: false,
@@ -1161,6 +1181,8 @@ onMounted(() => {
         <div v-if="uiStringInvestigationStartResult" class="metrics">
           <span>Fenêtres enquête: {{ formatNumber(uiStringInvestigationStartResult.windows) }}</span>
           <span>Capturé: {{ formatBytes(uiStringInvestigationStartResult.bytesCaptured) }}</span>
+          <span v-if="uiStringInvestigationStartResult.probeBlocks">Blocs radar: {{ formatNumber(uiStringInvestigationStartResult.probeBlocks) }}</span>
+          <span v-if="uiStringInvestigationStartResult.probeBytesCaptured">Radar: {{ formatBytes(uiStringInvestigationStartResult.probeBytesCaptured) }}</span>
           <span v-if="uiStringInvestigationStartResult.radiusBytes">Rayon: {{ formatBytes(uiStringInvestigationStartResult.radiusBytes) }}</span>
           <span v-if="uiStringInvestigationStartResult.unreadable">Illisibles: {{ formatNumber(uiStringInvestigationStartResult.unreadable) }}</span>
         </div>
@@ -1169,14 +1191,22 @@ onMounted(() => {
           <span>Changements: {{ formatNumber(uiStringInvestigationFinishResult.changesFound) }}</span>
           <span>Octets modifiés: {{ formatNumber(uiStringInvestigationFinishResult.changedBytes) }}</span>
           <span>Fenêtres lues: {{ formatNumber(uiStringInvestigationFinishResult.windowsChecked) }}</span>
+          <span v-if="uiStringInvestigationFinishResult.probeBlocksChanged !== undefined">Blocs modifiés: {{ formatNumber(uiStringInvestigationFinishResult.probeBlocksChanged) }}</span>
+          <span v-if="uiStringInvestigationFinishResult.globalValueHitsFound !== undefined">Valeurs radar: {{ formatNumber(uiStringInvestigationFinishResult.globalValueHitsFound) }}</span>
           <span v-if="uiStringInvestigationFinishResult.partial" class="warning-text">résultats limités</span>
         </div>
         <p v-if="uiStringInvestigationFinishResult?.error" class="error">{{ uiStringInvestigationFinishResult.error }}</p>
-        <div v-if="uiStringInvestigationFinishResult && !uiStringInvestigationFinishResult.error && uiStringInvestigationFinishResult.changesFound === 0" class="investigation-empty">
+        <div v-if="uiStringInvestigationFinishResult && !uiStringInvestigationFinishResult.error && uiStringInvestigationFinishResult.changesFound === 0 && !(uiStringInvestigationFinishResult.globalValueHits?.length)" class="investigation-empty">
           <strong>Aucun changement capturé dans les fenêtres suivies.</strong>
           <span>
-            Ça veut dire que les strings suivies ont été relues, mais que la vraie valeur modifiée n'était pas dans le petit voisinage capturé.
-            Relance l'enquête, change la ressource pendant que l'état est armé, ou augmente le rayon sources avant de recommencer.
+            Ça veut dire que les strings suivies ont été relues, mais que la vraie valeur modifiée n'a pas été retrouvée dans les blocs modifiés.
+            Relance l'enquête en indiquant la nouvelle valeur affichée, puis modifie la ressource pendant que l'état est armé.
+          </span>
+        </div>
+        <div v-if="uiStringInvestigationFinishResult?.globalValueHits?.length" class="investigation-hit-summary">
+          <strong>Valeurs trouvées dans des blocs modifiés</strong>
+          <span>
+            Ces adresses sont automatiquement ajoutées et cochées dans Sources numériques. Tu peux les envoyer vers Write, puis tester une écriture/freeze.
           </span>
         </div>
         <div v-if="uiStringInvestigationFinishResult?.changes.length" class="investigation-change-list">
@@ -2132,6 +2162,22 @@ onMounted(() => {
 
 .investigation-empty strong {
   color: var(--warning);
+}
+
+.investigation-hit-summary {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(158, 206, 106, 0.24);
+  border-radius: 4px;
+  background: rgba(158, 206, 106, 0.06);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.investigation-hit-summary strong {
+  color: var(--success);
 }
 
 .investigation-change-row {

@@ -961,9 +961,31 @@ struct UiInvestigationWindowState {
     QString reason;
 };
 
+struct UiInvestigationProbeBlockState {
+    uint64_t base{0};
+    int size{0};
+    uint64_t hash{0};
+    QString protection;
+    QString memoryType;
+};
+
 QList<UiInvestigationWindowState>& uiInvestigationWindows() {
     static QList<UiInvestigationWindowState> windows;
     return windows;
+}
+
+QList<UiInvestigationProbeBlockState>& uiInvestigationProbeBlocks() {
+    static QList<UiInvestigationProbeBlockState> blocks;
+    return blocks;
+}
+
+uint64_t uiInvestigationHash(const QByteArray& bytes) {
+    uint64_t hash = 1469598103934665603ull;
+    for (const unsigned char byte : bytes) {
+        hash ^= static_cast<uint64_t>(byte);
+        hash *= 1099511628211ull;
+    }
+    return hash;
 }
 
 } // namespace
@@ -2158,6 +2180,10 @@ QVariantMap ApplicationController::startUiStringInvestigation(
     const int maxWindows = std::clamp(optionsMap.value("maxWindows", 64).toInt(), 1, 512);
     const uint64_t maxBytes = static_cast<uint64_t>(
         std::clamp(optionsMap.value("maxBytesMb", 16).toInt(), 1, 256)) * 1024ull * 1024ull;
+    const bool globalProbe = optionsMap.value("globalProbe", true).toBool();
+    const int probeBlockSize = std::clamp(optionsMap.value("probeBlockSize", 64 * 1024).toInt(), 4096, 1024 * 1024);
+    const uint64_t maxProbeBytes = static_cast<uint64_t>(
+        std::clamp(optionsMap.value("maxProbeMb", 512).toInt(), 16, 2048)) * 1024ull * 1024ull;
 
     struct RequestWindow {
         uint64_t start{0};
@@ -2225,9 +2251,14 @@ QVariantMap ApplicationController::startUiStringInvestigation(
 
     killcore::MemoryReader reader(m_handle);
     auto& investigationWindows = uiInvestigationWindows();
+    auto& investigationProbeBlocks = uiInvestigationProbeBlocks();
     investigationWindows.clear();
+    investigationProbeBlocks.clear();
     uint64_t bytesCaptured = 0;
+    uint64_t probeBytesCaptured = 0;
     int unreadable = 0;
+    int probeUnreadable = 0;
+    int probeRegions = 0;
 
     for (const auto& window : merged) {
         if (investigationWindows.size() >= maxWindows || bytesCaptured >= maxBytes) {
@@ -2253,10 +2284,58 @@ QVariantMap ApplicationController::startUiStringInvestigation(
         bytesCaptured += read.bytesRead;
     }
 
+    if (globalProbe) {
+        const auto regions = killcore::MemoryMap::snapshot(m_handle);
+        for (const auto& region : regions) {
+            if (probeBytesCaptured >= maxProbeBytes) {
+                break;
+            }
+            if (!region.readable || !region.writable || region.guarded || region.size == 0) {
+                continue;
+            }
+            ++probeRegions;
+            uint64_t offset = 0;
+            while (offset < region.size && probeBytesCaptured < maxProbeBytes) {
+                const uint64_t address = region.baseAddress + offset;
+                const uint64_t remainingRegion = region.size - offset;
+                const size_t toRead = static_cast<size_t>(std::min<uint64_t>({
+                    static_cast<uint64_t>(probeBlockSize),
+                    remainingRegion,
+                    maxProbeBytes - probeBytesCaptured,
+                }));
+                if (toRead == 0) {
+                    break;
+                }
+                const auto read = reader.read(address, toRead);
+                if (!read.success && !read.partial) {
+                    ++probeUnreadable;
+                    offset += static_cast<uint64_t>(toRead);
+                    continue;
+                }
+                if (read.bytesRead > 0) {
+                    const QByteArray data = read.data.left(static_cast<qsizetype>(read.bytesRead));
+                    investigationProbeBlocks.append({
+                        address,
+                        static_cast<int>(read.bytesRead),
+                        uiInvestigationHash(data),
+                        killcore::protectionToString(region.protection),
+                        killcore::memoryTypeToString(region.type),
+                    });
+                    probeBytesCaptured += read.bytesRead;
+                }
+                offset += static_cast<uint64_t>(toRead);
+            }
+        }
+    }
+
     m_uiInvestigationStartedMs = QDateTime::currentMSecsSinceEpoch();
     result["success"] = !investigationWindows.isEmpty();
     result["windows"] = investigationWindows.size();
     result["bytesCaptured"] = static_cast<qulonglong>(bytesCaptured);
+    result["probeBlocks"] = investigationProbeBlocks.size();
+    result["probeBytesCaptured"] = static_cast<qulonglong>(probeBytesCaptured);
+    result["probeRegions"] = probeRegions;
+    result["probeUnreadable"] = probeUnreadable;
     result["unreadable"] = unreadable;
     result["radiusBytes"] = radius;
     result["error"] = result.value("success").toBool() ? QString() : QString("Aucune fenêtre lisible capturée.");
@@ -2268,6 +2347,11 @@ QVariantMap ApplicationController::startUiStringInvestigation(
         {"mergedWindows", merged.size()},
         {"windows", result.value("windows")},
         {"bytesCaptured", result.value("bytesCaptured")},
+        {"probeBlocks", result.value("probeBlocks")},
+        {"probeBytesCaptured", result.value("probeBytesCaptured")},
+        {"probeRegions", probeRegions},
+        {"probeUnreadable", probeUnreadable},
+        {"globalProbe", globalProbe},
         {"unreadable", unreadable},
         {"radiusBytes", radius},
         {"error", result.value("error")},
@@ -2292,6 +2376,8 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
     }
 
     const int maxChanges = std::clamp(optionsMap.value("maxChanges", 500).toInt(), 1, 5000);
+    const int maxGlobalValueHits = std::clamp(optionsMap.value("maxGlobalValueHits", 250).toInt(), 0, 2000);
+    const QString globalValue = optionsMap.value("value").toString().trimmed();
     killcore::MemoryReader reader(m_handle);
     int windowsChecked = 0;
     int unreadable = 0;
@@ -2339,11 +2425,89 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
         }
     }
 
+    QVariantList globalValueHits;
+    int probeBlocksChecked = 0;
+    int probeBlocksChanged = 0;
+    uint64_t probeBytesChecked = 0;
+    uint64_t probeChangedBytes = 0;
+    int probeUnreadable = 0;
+    QSet<QString> globalSeen;
+    const auto variants = globalValue.isEmpty()
+        ? QList<killcore::ValueVariant>{}
+        : killcore::generateScanVariants(globalValue, killcore::ValueType::Int32, false);
+    auto& investigationProbeBlocks = uiInvestigationProbeBlocks();
+    for (const auto& block : investigationProbeBlocks) {
+        if (globalValueHits.size() >= maxGlobalValueHits) {
+            partial = true;
+            break;
+        }
+        ++probeBlocksChecked;
+        const auto read = reader.read(block.base, static_cast<size_t>(block.size));
+        if (!read.success && !read.partial) {
+            ++probeUnreadable;
+            continue;
+        }
+        if (read.bytesRead == 0) {
+            ++probeUnreadable;
+            continue;
+        }
+        probeBytesChecked += read.bytesRead;
+        const QByteArray data = read.data.left(static_cast<qsizetype>(read.bytesRead));
+        const uint64_t currentHash = uiInvestigationHash(data);
+        if (currentHash == block.hash) {
+            continue;
+        }
+        ++probeBlocksChanged;
+        probeChangedBytes += read.bytesRead;
+
+        for (const auto& variant : variants) {
+            if (globalValueHits.size() >= maxGlobalValueHits) {
+                partial = true;
+                break;
+            }
+            const QByteArray needle = killcore::scanValueToBytes(variant.value);
+            if (needle.isEmpty() || needle.size() > data.size()) {
+                continue;
+            }
+            qsizetype from = 0;
+            while (globalValueHits.size() < maxGlobalValueHits) {
+                const qsizetype found = data.indexOf(needle, from);
+                if (found < 0) {
+                    break;
+                }
+                from = found + 1;
+                const uint64_t address = block.base + static_cast<uint64_t>(found);
+                const QString key = uiStringAddress(address) + "|" + killcore::valueTypeToString(variant.value.type) + "|" + variant.label;
+                if (globalSeen.contains(key)) {
+                    continue;
+                }
+                globalSeen.insert(key);
+
+                QVariantMap hit;
+                hit["address"] = uiStringAddress(address);
+                hit["type"] = killcore::valueTypeToString(variant.value.type);
+                hit["variantLabel"] = variant.label;
+                hit["confidence"] = variant.secondary ? 0.62 : 0.74;
+                hit["lastValueHex"] = QString::fromLatin1(needle.toHex(' ').toUpper());
+                hit["lastValueNumber"] = bytesToDouble(needle, variant.value.type);
+                hit["distanceBytes"] = static_cast<qulonglong>(0);
+                hit["offsetFromString"] = static_cast<qlonglong>(0);
+                hit["regionBase"] = uiStringAddress(block.base);
+                hit["protection"] = block.protection;
+                hit["memoryType"] = block.memoryType;
+                hit["origin"] = "global_diff";
+                globalValueHits.append(hit);
+            }
+        }
+    }
+
     const qint64 elapsedMs = m_uiInvestigationStartedMs > 0
         ? QDateTime::currentMSecsSinceEpoch() - m_uiInvestigationStartedMs
         : 0;
     const int capturedWindows = investigationWindows.size();
     investigationWindows.clear();
+    const int capturedProbeBlocks = investigationProbeBlocks.size();
+    investigationProbeBlocks.clear();
     m_uiInvestigationStartedMs = 0;
 
     result["success"] = true;
@@ -2352,6 +2516,14 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
     result["unreadable"] = unreadable;
     result["changedBytes"] = changedBytes;
     result["changesFound"] = changes.size();
+    result["globalValueHits"] = globalValueHits;
+    result["globalValueHitsFound"] = globalValueHits.size();
+    result["probeBlocksCaptured"] = capturedProbeBlocks;
+    result["probeBlocksChecked"] = probeBlocksChecked;
+    result["probeBlocksChanged"] = probeBlocksChanged;
+    result["probeBytesChecked"] = static_cast<qulonglong>(probeBytesChecked);
+    result["probeChangedBytes"] = static_cast<qulonglong>(probeChangedBytes);
+    result["probeUnreadable"] = probeUnreadable;
     result["partial"] = partial || changes.size() >= maxChanges;
     result["elapsedMs"] = static_cast<int>(elapsedMs);
     result["changes"] = changes;
@@ -2367,6 +2539,14 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
         {"unreadable", unreadable},
         {"changedBytes", changedBytes},
         {"changesFound", changes.size()},
+        {"globalValue", globalValue},
+        {"globalValueHitsFound", globalValueHits.size()},
+        {"probeBlocksCaptured", capturedProbeBlocks},
+        {"probeBlocksChecked", probeBlocksChecked},
+        {"probeBlocksChanged", probeBlocksChanged},
+        {"probeBytesChecked", static_cast<qulonglong>(probeBytesChecked)},
+        {"probeChangedBytes", static_cast<qulonglong>(probeChangedBytes)},
+        {"probeUnreadable", probeUnreadable},
         {"partial", result.value("partial")},
         {"elapsedMs", result.value("elapsedMs")},
         {"sampleCount", samples.size()},

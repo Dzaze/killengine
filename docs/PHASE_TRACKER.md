@@ -213,5 +213,6 @@ Prerequisites before Phase 12:
     - [x] Trace UI string : scan ASCII/UTF-16 des nombres affiches et filtrage des candidats quand l'affichage varie
     - [x] Source probe UI string : analyse locale autour d'une string suivie pour proposer les valeurs numeriques proches a tester/write/freeze
     - [x] Tracker sources UI string : reduction des sources numeriques candidates selon les changements successifs de l'affichage
+    - [x] Enquete UI string radar : empreintes globales de blocs writable, detection des blocs modifies et extraction automatique des valeurs numeriques candidates (`globalValueHits`)
     - [x] Tests tracker UI string : buffer simulant source numerique + texte affiche ASCII/UTF-16 + variante fixed-point
     - [ ] Validation benchmarks sur KillEngineTestTarget et gros volumes de candidats
