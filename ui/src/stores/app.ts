@@ -47,6 +47,26 @@ export interface ChatMessage {
   isError?: boolean
 }
 
+export interface InvestigationReport {
+  kind?: string
+  createdAt?: string
+  processName?: string
+  displayedValue?: string
+  nextDisplayedValue?: string
+  numericSources?: {
+    count?: number
+    selected?: number
+    top?: Array<Record<string, unknown>>
+  }
+  liveInvestigation?: Record<string, unknown> | null
+  debugger?: {
+    hitCount?: number
+    cancelled?: boolean
+    hits?: Array<Record<string, unknown>>
+  }
+  aob?: Record<string, unknown>
+}
+
 export interface UserActionLogEntry {
   id: number
   time: string
@@ -105,6 +125,8 @@ export const useAppStore = defineStore('app', () => {
   const logError = ref('')
   const diagnosticExportPath = ref('')
   const diagnosticExportError = ref('')
+  const diagnosticFolderOpened = ref(false)
+  const diagnosticOpenFolderError = ref('')
   const temporaryStorageStatus = ref<TemporaryStorageStatus | null>(null)
   const temporaryStorageCleanupResult = ref<Record<string, unknown> | null>(null)
   const temporaryStorageError = ref('')
@@ -131,6 +153,7 @@ export const useAppStore = defineStore('app', () => {
   const settingModelThreads = ref(4)
   const activeChatMemoryTargets = ref<Array<Record<string, unknown>>>([])
   const smartSearchContext = ref<SmartSearchContextResult | null>(null)
+  const investigationReport = ref<InvestigationReport | null>(null)
   const searchQuery = ref('')
   const searchResult = ref('')
   const exactScanValue = ref('')
@@ -558,10 +581,14 @@ export const useAppStore = defineStore('app', () => {
   async function exportDiagnostics() {
     diagnosticExportPath.value = ''
     diagnosticExportError.value = ''
+    diagnosticFolderOpened.value = false
+    diagnosticOpenFolderError.value = ''
     try {
       const result = await backend.getController().exportDiagnostics()
       if (result.success === true) {
         diagnosticExportPath.value = String(result.path ?? '')
+        diagnosticFolderOpened.value = Boolean(result.folderOpened ?? false)
+        diagnosticOpenFolderError.value = String(result.openFolderError ?? '')
       } else {
         diagnosticExportError.value = String(result.error ?? 'Export diagnostic impossible.')
       }
@@ -729,12 +756,71 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  function setInvestigationReport(report: InvestigationReport | null) {
+    investigationReport.value = report
+  }
+
+  function topInvestigationCandidates() {
+    const top = investigationReport.value?.numericSources?.top
+    return Array.isArray(top) ? top : []
+  }
+
+  function investigationAssistantReply(query: string): string {
+    const report = investigationReport.value
+    if (!report) return ''
+    const lower = query.toLowerCase()
+    const asksInvestigation = /(meilleur|piste|tester|quoi|suivant|enqu[eê]te|rapport|debugger|aob|trainer|bloqu)/i.test(lower)
+    if (!asksInvestigation) return ''
+
+    const top = topInvestigationCandidates()
+    const best = top[0]
+    const lines: string[] = []
+    if (best) {
+      const address = String(best.address ?? '')
+      const type = String(best.variantLabel ?? best.type ?? '')
+      const score = Math.round(Number(best.score ?? 0) * 100)
+      const reasons = Array.isArray(best.reasons) ? best.reasons.map(String).join(' · ') : ''
+      lines.push(`Meilleure piste actuelle : 0x${address} (${type}) · score ${score}%.`)
+      if (reasons) lines.push(`Pourquoi : ${reasons}.`)
+      lines.push('Prochaine action recommandée : Watch cette piste, puis lance Écrit par si elle suit bien la valeur affichée.')
+    } else {
+      lines.push("Je n'ai pas encore de piste scorée. Lance Trace UI string, puis Analyser sources ou Démarrer enquête.")
+    }
+
+    const hitCount = Number(report.debugger?.hitCount ?? 0)
+    if (hitCount > 0) {
+      lines.push(`${hitCount} hit(s) debugger capturé(s) : tu peux analyser le RIP puis stabiliser l'AOB avant de sauver le trainer.`)
+    } else if (report.debugger?.cancelled) {
+      lines.push('La dernière capture debugger a été annulée.')
+    }
+
+    const matchesFound = Number(report.aob?.matchesFound ?? Number.NaN)
+    if (Number.isFinite(matchesFound)) {
+      if (matchesFound === 1) lines.push('AOB : signature unique, bonne candidate pour un patch trainer.')
+      else if (matchesFound > 1) lines.push(`AOB : ${matchesFound} matches, il faut stabiliser avant de patcher.`)
+      else lines.push('AOB : aucune signature exploitable pour le moment.')
+    }
+
+    return lines.join('\n')
+  }
+
   async function doSearch() {
     const query = searchQuery.value.trim()
     if (!query || isSearching.value) return
 
     // Message utilisateur
     pushMessage('user', query)
+
+    const localInvestigationReply = investigationAssistantReply(query)
+    if (localInvestigationReply) {
+      pushMessage('assistant', localInvestigationReply, {
+        intent: 'InvestigationReport',
+        intentRationale: "L'utilisateur demande une décision sur l'enquête mémoire courante.",
+      })
+      searchQuery.value = ''
+      return
+    }
+
     const thinkingMessage = pushMessage('assistant', 'Je vais rechercher ça en mémoire...', { isThinking: true })
     searchQuery.value = ''
     isSearching.value = true
@@ -1772,6 +1858,8 @@ export const useAppStore = defineStore('app', () => {
     logError,
     diagnosticExportPath,
     diagnosticExportError,
+    diagnosticFolderOpened,
+    diagnosticOpenFolderError,
     temporaryStorageStatus,
     temporaryStorageCleanupResult,
     temporaryStorageError,
@@ -1798,6 +1886,7 @@ export const useAppStore = defineStore('app', () => {
     settingModelThreads,
     activeChatMemoryTargets,
     smartSearchContext,
+    investigationReport,
     searchQuery,
     searchResult,
     exactScanValue,
@@ -1871,6 +1960,7 @@ export const useAppStore = defineStore('app', () => {
     clearTemporaryStorage,
     refreshActiveChatMemoryTargets,
     refreshSmartSearchContext,
+    setInvestigationReport,
     clearActiveChatMemoryTargets,
     clearSmartSearchDebug,
     doSearch,

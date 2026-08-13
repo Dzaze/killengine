@@ -208,8 +208,14 @@ Prerequisites before Phase 12:
     - [x] Module `core/debug/hardware_breakpoint.*` : session hardware breakpoint DR0-DR3 avec attachement debugger Windows
     - [x] Backend `findWhatWrites(address, options)` exposé via `ApplicationController` et `backend.ts`
     - [x] UI Expert / Trace UI string : bouton `Écrit par` sur les sources numériques proches
+    - [x] Investigation UI string : live précédent/actuel des strings suivies et `Écrit par` directement sur les strings affichées
+    - [x] UX hits debugger : cible surveillée visible, sélection du RIP, aperçu mémoire et copie rapide avant analyse AOB
+    - [x] Mode async/non-bloquant v1 : `findWhatWritesAsync` worker dédié + signal `findWhatWritesFinished`, fallback synchrone côté UI
+    - [x] Garde-fous UX v1 : avertissement anti-debug, consentement explicite et durée de capture configurable
+    - [x] Tunnel trainer v1 : bouton `Trainer` depuis un hit debugger, génération AOB + patch, sauvegarde bloquée si signature non unique
+    - [x] Annulation explicite v1 : `cancelFindWhatWrites` stoppe la session async via token et bouton `Annuler capture`
     - [ ] Validation manuelle SC2 : vérifier que l'attachement debugger capture une instruction sans bloquer le jeu
-    - [ ] Mode async/non-bloquant et garde-fous UX avant généralisation
+    - [ ] Garde-fous UX avant généralisation : validation manuelle prolongée
 - [ ] PHASE 18 - AOB signatures / trainer engine
     - [x] Module `core/patch/aob_scanner.*` : parsing de signatures `48 8B ??` et recherche buffer/process
     - [x] Backend `scanAobPattern(pattern, options)` : scan borné des régions exécutables/image
@@ -223,6 +229,10 @@ Prerequisites before Phase 12:
     - [x] Patch assisté v4 : persistance trainer dans les profils (AOB stable + patch + module + restore)
     - [x] Trainer UX : activer/désactiver plusieurs patchs d'un profil en un clic avec état actif visible
     - [x] Trainer UX avancée v1 : refresh d'état mémoire des patchs de profil (original / actif / ambigu / introuvable)
+    - [x] Hit debugger vers AOB : analyse directe du RIP capturé, AOB stable, scan de signature et suggestions de patch
+    - [x] AOB auto-stabilise v1 : test de plusieurs signatures autour du RIP, sélection du premier match unique et blocage trainer si ambigu
+    - [x] Trainer UX avancée v2a : inspection obligatoire avant application globale, résumé original/actif/ambigu/introuvable/invalide et désactivation des patchs risqués
+    - [x] Trainer UX avancée v2b : dernier profil restauré automatiquement, inspection auto si attaché et toggles ON/OFF par patch
     - [ ] Trainer UX avancée v2 : vue dédiée avec toggles persistants et warnings anti-multi-match bloquants avant application
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
@@ -244,5 +254,13 @@ Prerequisites before Phase 12:
     - [x] Enquete UI string radar : empreintes globales de blocs writable, detection des blocs modifies et extraction automatique des valeurs numeriques candidates (`globalValueHits`)
     - [x] Finition radar UI string : filtres type/variant et selection par lots pour tester les sources numeriques sans ecrire 500 adresses d'un coup
     - [x] Watch live de lot : envoyer sources/candidats en surveillance live par paquet ou selection, jusqu'a 200 lectures par cycle
+    - [x] Scoring intelligent UI : panneau `Pistes intelligentes` fusionnant sources proches, radar, tracking, watch live et hits debugger avec raisons lisibles
+    - [x] Rapport d'enquete structure : export presse-papiers JSON avec valeurs, strings, sources, top pistes, debugger et AOB
+    - [x] Assistant enquête v1 : le rapport Expert est partagé au store et l'assistant répond aux questions "quelle piste tester / pourquoi bloqué" avec le top scoré
+    - [x] Analyse de structure v1 : lecture autour d'une source sérieuse, voisins Int32/Float32 et marqueurs valeur affichée/fixed-point
     - [x] Tests tracker UI string : buffer simulant source numerique + texte affiche ASCII/UTF-16 + variante fixed-point
-    - [ ] Validation benchmarks sur KillEngineTestTarget et gros volumes de candidats
+    - [x] Validation benchmarks sur KillEngineTestTarget et gros volumes de candidats
+      - [x] Executable `KillEngineBenchmark` (`tests/benchmarks/benchmark_main.cpp`) : scan exact, scan multi-type, unknown capture/compare, 500k candidats synthetiques (replace/paginate/tri/filtrage)
+      - [x] Script `scripts/benchmark-performance.ps1` orchestrant build + run + export CSV/JSON dans `docs/benchmark-results/`
+      - [x] Doc `docs/PERFORMANCE_BENCHMARKS.md` : prerequis, lancement, metriques, interpretation, limites
+      - [x] Run valide : 73/73 unitaires OK, benchmark 3.49s (exact 204ms/~767MB/s, multi-type 257ms/~611MB/s, unknown mapped 525ms, 500k candidats replace 175ms/paginate 0.23ms/tri 33-144ms/filtrage 249905 survivants)

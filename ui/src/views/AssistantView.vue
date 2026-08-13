@@ -97,6 +97,13 @@ const contextItems = computed(() => {
   if (context.writeHistory && context.writeHistory.length > 0) {
     items.push({ label: 'Écritures', value: context.writeHistory.join(' -> ') })
   }
+  if (store.investigationReport?.numericSources?.top?.length) {
+    const best = store.investigationReport.numericSources.top[0]
+    items.push({
+      label: 'Enquête',
+      value: `top 0x${best.address ?? '?'} · ${Math.round(Number(best.score ?? 0) * 100)}%`,
+    })
+  }
   return items
 })
 
@@ -373,6 +380,12 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           </button>
           <button class="example-chip" @click="sendExample('41250 99999')">
             41250 99999
+          </button>
+          <button class="example-chip" @click="sendExample('quelle piste tester maintenant ?')">
+            Quelle piste tester ?
+          </button>
+          <button class="example-chip" @click="sendExample('pourquoi le trainer est bloqué ?')">
+            Pourquoi bloqué ?
           </button>
         </div>
         <p v-if="!store.isAttached" class="warn-text">

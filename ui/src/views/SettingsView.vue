@@ -284,6 +284,7 @@ async function saveAll() {
         Diagnostic exporté : <code>{{ store.diagnosticExportPath }}</code>
       </p>
       <p v-if="store.diagnosticExportError" class="error">{{ store.diagnosticExportError }}</p>
+      <p v-if="store.diagnosticOpenFolderError" class="warning">{{ store.diagnosticOpenFolderError }}</p>
       <p v-if="store.logError" class="error">{{ store.logError }}</p>
       <p v-if="store.smartSearchDebugError" class="error">{{ store.smartSearchDebugError }}</p>
     </section>

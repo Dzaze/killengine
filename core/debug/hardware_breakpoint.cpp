@@ -1,6 +1,7 @@
 #include "hardware_breakpoint.h"
 
 #include "logging/logger.h"
+#include "memory/memory_reader.h"
 #include "process/process_enumerator.h"
 
 #ifdef Q_OS_WIN
@@ -10,7 +11,9 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 namespace killcore {
 
@@ -519,6 +522,16 @@ QList<BreakpointHit> findWhatWrites(
     BreakpointSize size,
     int timeoutMs,
     size_t maxHits) {
+    return findWhatWrites(pid, address, size, timeoutMs, maxHits, nullptr);
+}
+
+QList<BreakpointHit> findWhatWrites(
+    uint32_t pid,
+    uint64_t address,
+    BreakpointSize size,
+    int timeoutMs,
+    size_t maxHits,
+    const CancellationToken* cancellation) {
 
     QList<BreakpointHit> hits;
 
@@ -541,7 +554,25 @@ QList<BreakpointHit> findWhatWrites(
     }
 
     // Monitoring bloquant dans le même thread que DebugActiveProcess.
+    std::atomic_bool watcherDone{false};
+    std::thread cancellationWatcher;
+    if (cancellation) {
+        cancellationWatcher = std::thread([&session, cancellation, &watcherDone]() {
+            while (!watcherDone.load()) {
+                if (cancellation->isCancelled()) {
+                    session.stopMonitoring();
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        });
+    }
+
     session.monitorBlocking(maxHits, timeoutMs);
+    watcherDone.store(true);
+    if (cancellationWatcher.joinable()) {
+        cancellationWatcher.join();
+    }
     hits = session.takeHits();
     session.detach();
 #endif

@@ -187,7 +187,9 @@ export interface UiStringInvestigationChange {
   reason?: string
   beforeHex?: string
   afterHex?: string
+  beforeInt32?: number
   afterInt32?: number
+  beforeFloat32?: number
   afterFloat32?: number
 }
 
@@ -660,6 +662,9 @@ export interface AppSettings {
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
   findWhatWrites?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  findWhatWritesAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  cancelFindWhatWrites?(): Promise<Record<string, unknown>>
+  findWhatWritesFinished?: QWebChannelSignal<Record<string, unknown>>
   scanAobPattern?(pattern: string, options: Record<string, unknown>): Promise<AobScanResult>
   generateAobSignature?(addressHex: string, options: Record<string, unknown>): Promise<AobSignatureResult>
   applyCodePatch?(addressHex: string, bytesText: string, options: Record<string, unknown>): Promise<CodePatchResult>
@@ -1292,6 +1297,12 @@ class BackendService {
       },
       async findWhatWrites(_addressHex: string, _options: Record<string, unknown>) {
         return { success: false, hitCount: 0, hits: [], error: 'Mock backend' }
+      },
+      async findWhatWritesAsync(_addressHex: string, _options: Record<string, unknown>) {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
+      async cancelFindWhatWrites() {
+        return { success: false, error: 'Mock backend' }
       },
       async scanAobPattern(_pattern: string, _options: Record<string, unknown>) {
         return { success: false, matches: [], matchesFound: 0, regionsScanned: 0, bytesScanned: 0, error: 'Mock backend' }

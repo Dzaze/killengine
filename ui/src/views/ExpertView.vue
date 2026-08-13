@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
@@ -46,6 +46,8 @@ const aobImageOnly = ref(true)
 const aobMaxResults = ref(200)
 const aobBusy = ref(false)
 const aobResult = ref<AobScanResult | null>(null)
+const aobStabilizeBusy = ref(false)
+const aobStabilizeResult = ref<Record<string, unknown> | null>(null)
 const aobSignatureBusy = ref(false)
 const aobSignatureResult = ref<AobSignatureResult | null>(null)
 const codePatchAddress = ref('')
@@ -59,6 +61,7 @@ const codePatchProfilePatchName = ref('')
 const codePatchProfileDescription = ref('')
 const codePatchProfileBusy = ref(false)
 const codePatchProfileResult = ref<Record<string, unknown> | null>(null)
+const codePatchTrainerFlowBusy = ref(false)
 
 // Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
 const uiStringValue = ref('')
@@ -76,16 +79,30 @@ const uiStringSourceTrackResult = ref<UiStringSourceTrackResult | null>(null)
 const uiStringOriginResult = ref<UiStringOriginResult | null>(null)
 const findWhatWritesResult = ref<Record<string, unknown> | null>(null)
 const findWhatWritesBusy = ref(false)
+const findWhatWritesAcknowledged = ref(false)
+const findWhatWritesTimeoutMs = ref(7000)
+const structureProbeResult = ref<Record<string, unknown> | null>(null)
+const selectedFindWhatWritesRip = ref('')
 const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
 const selectedUiSourceAddresses = ref<string[]>([])
+const uiStringLiveTexts = ref<Record<string, {
+  current: string
+  previous: string
+  changed: boolean
+  error: string
+  updatedAt: string
+}>>({})
+const uiStringTextLiveEnabled = ref(false)
+const uiStringTextLiveRefreshing = ref(false)
 const uiStringLiveInvestigation = ref(false)
 const uiStringLiveStartedAt = ref<number | null>(null)
 const uiStringInvestigationElapsed = ref(0)
 const uiStringInvestigationStartResult = ref<UiStringInvestigationStartResult | null>(null)
 const uiStringInvestigationFinishResult = ref<UiStringInvestigationFinishResult | null>(null)
 let uiStringInvestigationTimer: ReturnType<typeof setInterval> | null = null
+let uiStringTextLiveTimer: ReturnType<typeof setInterval> | null = null
 const uiStringSourceRadiusOptions = [
   { value: 64 * 1024, label: '64 Ko' },
   { value: 256 * 1024, label: '256 Ko' },
@@ -100,6 +117,27 @@ const uiStringSourceBatchSize = ref(10)
 const uiStringSourceBatchIndex = ref(0)
 const uiStringSourceBatchSizeOptions = [5, 10, 25, 50]
 const freezeIntervalPresets = [16, 33, 50, 100, 250, 500]
+const findWhatWritesTimeoutOptions = [3000, 5000, 7000, 10000, 15000]
+
+interface IntelligentCandidate {
+  key: string
+  address: string
+  type: string
+  variantLabel?: string
+  score: number
+  scorePercent: number
+  currentValue: string
+  reasons: string[]
+  source: UiStringSourceCandidate
+}
+
+interface StructureProbeRow {
+  offset: number
+  address: string
+  int32: number
+  float32: number
+  marker: string
+}
 
 function setUiStringInvestigationActive(active: boolean) {
   uiStringLiveInvestigation.value = active
@@ -123,6 +161,10 @@ onBeforeUnmount(() => {
   if (uiStringInvestigationTimer) {
     clearInterval(uiStringInvestigationTimer)
     uiStringInvestigationTimer = null
+  }
+  if (uiStringTextLiveTimer) {
+    clearInterval(uiStringTextLiveTimer)
+    uiStringTextLiveTimer = null
   }
 })
 
@@ -303,11 +345,96 @@ async function scanAobSignature() {
   }
 }
 
+async function scanAobPatternCandidate(pattern: string, maxResults = 1000): Promise<AobScanResult> {
+  const controller = backend.getController()
+  if (!controller.scanAobPattern) {
+    return { success: false, matches: [], error: 'Methode backend indisponible.' }
+  }
+  return controller.scanAobPattern(pattern, {
+    executableOnly: aobExecutableOnly.value,
+    imageOnly: aobImageOnly.value,
+    maxResults,
+  })
+}
+
+async function stabilizeSelectedAobSignature() {
+  const address = codePatchAddress.value.trim() || selectedFindWhatWritesRip.value.trim()
+  if (!address) return
+  aobStabilizeBusy.value = true
+  aobStabilizeResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.generateAobSignature) {
+      aobStabilizeResult.value = { success: false, error: 'Methode backend indisponible.' }
+      return
+    }
+
+    const tested: Array<Record<string, unknown>> = []
+    const patterns: string[] = []
+    const stablePattern = codePatchSuggestionResult.value?.stableAobPattern?.trim()
+    if (stablePattern) patterns.push(stablePattern)
+
+    for (const beforeBytes of [0, 4, 8, 12]) {
+      for (const length of [16, 24, 32, 48, 64]) {
+        const signature = await controller.generateAobSignature(address, { beforeBytes, length })
+        if (signature.success && signature.pattern && !patterns.includes(signature.pattern)) {
+          patterns.push(signature.pattern)
+        }
+      }
+    }
+
+    let best: { pattern: string, scan: AobScanResult } | null = null
+    for (const pattern of patterns) {
+      const scan = await scanAobPatternCandidate(pattern, 1000)
+      const matchesFound = Number(scan.matchesFound ?? scan.matches?.length ?? 0)
+      tested.push({
+        pattern,
+        matchesFound,
+        patternBytes: scan.patternBytes,
+        success: scan.success,
+        partial: scan.partial,
+        error: scan.error,
+      })
+      if (scan.success && matchesFound === 1) {
+        best = { pattern, scan }
+        break
+      }
+      if (scan.success && matchesFound > 0 && (!best || matchesFound < Number(best.scan.matchesFound ?? Number.MAX_SAFE_INTEGER))) {
+        best = { pattern, scan }
+      }
+    }
+
+    if (best) {
+      aobPattern.value = best.pattern
+      aobResult.value = best.scan
+    }
+    const matchesFound = Number(best?.scan.matchesFound ?? best?.scan.matches?.length ?? 0)
+    aobStabilizeResult.value = {
+      success: Boolean(best && matchesFound === 1),
+      pattern: best?.pattern ?? '',
+      matchesFound,
+      tested,
+      error: best && matchesFound !== 1
+        ? `Aucune signature unique. Meilleure piste: ${formatNumber(matchesFound)} match(es).`
+        : (!best ? 'Aucune signature exploitable générée.' : ''),
+    }
+  } catch (e) {
+    aobStabilizeResult.value = { success: false, error: String(e) }
+  } finally {
+    aobStabilizeBusy.value = false
+  }
+}
+
 async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
   const rip = String(hit.instructionPointer ?? '').trim()
   if (!rip) return
+  selectedFindWhatWritesRip.value = rip
   aobSignatureBusy.value = true
   aobSignatureResult.value = null
+  codePatchSuggestBusy.value = true
+  codePatchSuggestionResult.value = null
+  codePatchAddress.value = rip
+  store.memoryPreviewAddress = rip
   try {
     const controller = backend.getController()
     if (!controller.generateAobSignature) {
@@ -319,8 +446,23 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
       length: 24,
     })
     aobSignatureResult.value = result
-    if (result.success && result.pattern) {
+    if (controller.suggestCodePatches) {
+      const suggestionResult = await controller.suggestCodePatches(rip, { maxBytes: 16 })
+      codePatchSuggestionResult.value = suggestionResult
+      const firstSafe = suggestionResult.suggestions?.find((suggestion) => !suggestion.risky)
+      if (suggestionResult.success && firstSafe) {
+        codePatchBytes.value = firstSafe.bytesText
+      }
+      if (suggestionResult.success && suggestionResult.stableAobPattern) {
+        aobPattern.value = suggestionResult.stableAobPattern
+      }
+    } else {
+      codePatchSuggestionResult.value = { success: false, suggestions: [], error: 'Methode backend indisponible.' }
+    }
+    if (!aobPattern.value.trim() && result.success && result.pattern) {
       aobPattern.value = result.pattern
+    }
+    if (aobPattern.value.trim()) {
       await scanAobSignature()
       void nextTick(() => {
         document.querySelector('.aob-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -328,9 +470,38 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
     }
   } catch (e) {
     aobSignatureResult.value = { success: false, error: String(e) }
+    codePatchSuggestionResult.value = { success: false, suggestions: [], error: String(e) }
   } finally {
     aobSignatureBusy.value = false
+    codePatchSuggestBusy.value = false
   }
+}
+
+function findWhatWritesHitKey(hit: Record<string, unknown>) {
+  return `${hit.instructionPointer}:${hit.threadId}:${hit.address}`
+}
+
+function isSelectedFindWhatWritesHit(hit: Record<string, unknown>) {
+  return selectedFindWhatWritesRip.value !== '' && selectedFindWhatWritesRip.value === String(hit.instructionPointer ?? '').trim()
+}
+
+function previewFindWhatWritesHit(hit: Record<string, unknown>) {
+  const rip = String(hit.instructionPointer ?? '').trim()
+  if (!rip) return
+  selectedFindWhatWritesRip.value = rip
+  codePatchAddress.value = rip
+  store.memoryPreviewAddress = rip
+  void store.readMemoryPreview(rip, 128)
+  void nextTick(() => {
+    document.querySelector('.aob-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
+
+async function copyFindWhatWritesRip(hit: Record<string, unknown>) {
+  const rip = String(hit.instructionPointer ?? '').trim()
+  if (!rip) return
+  selectedFindWhatWritesRip.value = rip
+  await navigator.clipboard?.writeText(`0x${rip}`)
 }
 
 function useAobMatchAddress(address: string) {
@@ -347,6 +518,29 @@ async function selectAobPatchAddress(address: string) {
 
 function useCodePatchSuggestion(suggestion: CodePatchSuggestion) {
   codePatchBytes.value = suggestion.bytesText
+}
+
+function cleanTrainerName(value: string, fallback: string) {
+  const cleaned = value
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+  return cleaned || fallback
+}
+
+function defaultTrainerProfileName() {
+  return cleanTrainerName(store.processName || 'StarCraft2', 'StarCraft2')
+}
+
+function defaultPatchNameFromHit(hit: Record<string, unknown>) {
+  const moduleName = cleanTrainerName(String(hit.module || aobSignatureResult.value?.module || 'Patch'), 'Patch')
+  const offset = String(hit.moduleOffset || aobSignatureResult.value?.moduleOffset || selectedFindWhatWritesRip.value || '0').toUpperCase()
+  return `${moduleName}_${offset}`
+}
+
+function selectedPatchSuggestion() {
+  const patchBytes = codePatchBytes.value.trim()
+  return codePatchSuggestionResult.value?.suggestions?.find((suggestion) => suggestion.bytesText === patchBytes)
 }
 
 async function suggestSelectedCodePatches() {
@@ -440,7 +634,7 @@ async function saveSelectedCodePatchProfile() {
       {
         originalBytes: codePatchResult.value?.originalBytes || codePatchSuggestionResult.value?.bytes || '',
         disassembly: codePatchSuggestionResult.value?.disassembly || '',
-        riskLevel: codePatchSuggestionResult.value?.suggestions?.find((s) => s.bytesText === patchBytes)?.riskLevel || '',
+        riskLevel: selectedPatchSuggestion()?.riskLevel || '',
         description: codePatchProfileDescription.value.trim(),
       },
     )
@@ -448,6 +642,60 @@ async function saveSelectedCodePatchProfile() {
     codePatchProfileResult.value = { success: false, error: String(e) }
   } finally {
     codePatchProfileBusy.value = false
+  }
+}
+
+async function saveTrainerPatchFromHit(hit: Record<string, unknown>) {
+  if (codePatchTrainerFlowBusy.value) return
+  codePatchTrainerFlowBusy.value = true
+  codePatchProfileResult.value = null
+  try {
+    await generateAobSignatureFromHit(hit)
+    if (Number(aobResult.value?.matchesFound ?? 0) !== 1) {
+      await stabilizeSelectedAobSignature()
+    }
+
+    const patchBytes = codePatchBytes.value.trim()
+    const pattern = (codePatchSuggestionResult.value?.stableAobPattern || aobPattern.value).trim()
+    if (!patchBytes || !pattern || !codePatchAddress.value.trim()) {
+      codePatchProfileResult.value = {
+        success: false,
+        error: 'Analyse incomplète : patch, adresse ou AOB stable manquant.',
+      }
+      return
+    }
+
+    if (!codePatchProfileName.value.trim()) {
+      codePatchProfileName.value = defaultTrainerProfileName()
+    }
+    if (!codePatchProfilePatchName.value.trim()) {
+      codePatchProfilePatchName.value = defaultPatchNameFromHit(hit)
+    }
+    if (!codePatchProfileDescription.value.trim()) {
+      const suggestion = selectedPatchSuggestion()
+      codePatchProfileDescription.value = [
+        codePatchSuggestionResult.value?.disassembly || 'Patch issu Find What Writes',
+        suggestion?.label ? `Suggestion: ${suggestion.label}` : '',
+        hit.address ? `Cible observée: 0x${hit.address}` : '',
+      ].filter(Boolean).join(' | ')
+    }
+
+    const matchesFound = Number(aobResult.value?.matchesFound ?? 0)
+    if (!aobResult.value?.success || matchesFound !== 1) {
+      codePatchProfileResult.value = {
+        success: false,
+        profileName: codePatchProfileName.value.trim(),
+        patchName: codePatchProfilePatchName.value.trim(),
+        error: matchesFound === 0
+          ? 'Signature AOB introuvable : ajuste le pattern avant de sauver le trainer.'
+          : `Signature AOB non unique (${formatNumber(matchesFound)} matches) : sauvegarde bloquée pour éviter un patch dangereux.`,
+      }
+      return
+    }
+
+    await saveSelectedCodePatchProfile()
+  } finally {
+    codePatchTrainerFlowBusy.value = false
   }
 }
 
@@ -573,6 +821,181 @@ function useUiStringCandidate(candidate: UiStringCandidate) {
   void store.doSearch()
 }
 
+function localNowTime(): string {
+  return new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function previewHexToBytes(hex: string): number[] {
+  return hex
+    .trim()
+    .split(/\s+/)
+    .map((chunk) => Number.parseInt(chunk, 16))
+    .filter((byte) => Number.isFinite(byte) && byte >= 0 && byte <= 255)
+}
+
+function readInt32Le(bytes: number[], offset: number) {
+  const value = (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) | 0
+  return value
+}
+
+function readFloat32Le(bytes: number[], offset: number) {
+  const buffer = new ArrayBuffer(4)
+  const view = new DataView(buffer)
+  for (let i = 0; i < 4; i += 1) view.setUint8(i, bytes[offset + i] ?? 0)
+  return view.getFloat32(0, true)
+}
+
+function displayedNumericValue() {
+  const raw = (uiStringNextValue.value || uiStringValue.value || store.exactScanValue).trim().replace(',', '.')
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : null
+}
+
+async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) {
+  const address = addressNumber(candidate.address)
+  if (!Number.isFinite(address)) return
+  const base = Math.max(0, address - 128)
+  const targetValue = displayedNumericValue()
+  structureProbeResult.value = null
+  try {
+    const preview = await backend.getController().readMemoryPreview(base.toString(16).toUpperCase(), 256)
+    if (!preview.success && !preview.partial) {
+      structureProbeResult.value = { success: false, error: preview.error || 'Lecture structure impossible.' }
+      return
+    }
+    const bytes = previewHexToBytes(preview.hex)
+    const rows: StructureProbeRow[] = []
+    for (let offset = 0; offset + 4 <= bytes.length; offset += 4) {
+      const rowAddress = base + offset
+      const int32 = readInt32Le(bytes, offset)
+      const float32 = readFloat32Le(bytes, offset)
+      const markers: string[] = []
+      if (rowAddress === address) markers.push('source')
+      if (targetValue !== null && int32 === Math.trunc(targetValue)) markers.push('i32 affiché')
+      if (targetValue !== null && Math.abs(float32 - targetValue) < 0.001) markers.push('f32 affiché')
+      if (targetValue !== null && [10, 100, 1000, 4096, 65536].some((scale) => int32 === Math.trunc(targetValue * scale))) {
+        markers.push('fixed-point')
+      }
+      if (markers.length > 0 || (Math.abs(rowAddress - address) <= 32 && int32 !== 0)) {
+        rows.push({
+          offset: rowAddress - address,
+          address: rowAddress.toString(16).toUpperCase(),
+          int32,
+          float32,
+          marker: markers.join(' · '),
+        })
+      }
+    }
+    structureProbeResult.value = {
+      success: true,
+      base: base.toString(16).toUpperCase(),
+      address: candidate.address,
+      rows,
+      rowCount: rows.length,
+    }
+  } catch (e) {
+    structureProbeResult.value = { success: false, error: String(e) }
+  }
+}
+
+function decodeUiStringBytes(candidate: UiStringCandidate, bytes: number[]): string {
+  const chars: string[] = []
+  const maxChars = 32
+  if (candidate.encoding === 'utf16') {
+    for (let i = 0; i + 1 < bytes.length && chars.length < maxChars; i += 2) {
+      const code = bytes[i] | (bytes[i + 1] << 8)
+      if (code === 0) break
+      if (code < 32 || code > 126) break
+      chars.push(String.fromCharCode(code))
+    }
+  } else {
+    for (const byte of bytes) {
+      if (chars.length >= maxChars) break
+      if (byte === 0) break
+      if (byte < 32 || byte > 126) break
+      chars.push(String.fromCharCode(byte))
+    }
+  }
+  return chars.join('')
+}
+
+function uiStringLiveState(candidate: UiStringCandidate) {
+  return uiStringLiveTexts.value[uiStringKey(candidate)]
+}
+
+async function refreshUiStringLiveCandidate(candidate: UiStringCandidate) {
+  const controller = backend.getController()
+  const key = uiStringKey(candidate)
+  const previousState = uiStringLiveTexts.value[key]
+  try {
+    const minBytes = Math.max(1, Number(candidate.byteLength ?? 0))
+    const readSize = Math.min(96, Math.max(minBytes + 8, candidate.encoding === 'utf16' ? 64 : 32))
+    const preview = await controller.readMemoryPreview(candidate.address, readSize)
+    if (!preview.success && !preview.partial) {
+      uiStringLiveTexts.value = {
+        ...uiStringLiveTexts.value,
+        [key]: {
+          current: previousState?.current ?? '',
+          previous: previousState?.previous ?? '',
+          changed: false,
+          error: preview.error || 'Lecture impossible.',
+          updatedAt: localNowTime(),
+        },
+      }
+      return
+    }
+    const current = decodeUiStringBytes(candidate, previewHexToBytes(preview.hex))
+    uiStringLiveTexts.value = {
+      ...uiStringLiveTexts.value,
+      [key]: {
+        current,
+        previous: previousState?.current ?? '',
+        changed: Boolean(previousState?.current) && previousState.current !== current,
+        error: '',
+        updatedAt: localNowTime(),
+      },
+    }
+  } catch (e) {
+    uiStringLiveTexts.value = {
+      ...uiStringLiveTexts.value,
+      [key]: {
+        current: previousState?.current ?? '',
+        previous: previousState?.previous ?? '',
+        changed: false,
+        error: String(e),
+        updatedAt: localNowTime(),
+      },
+    }
+  }
+}
+
+async function refreshSelectedUiStringTexts() {
+  const targets = selectedUiStringCandidates().slice(0, 80)
+  if (targets.length === 0 || uiStringTextLiveRefreshing.value) return
+  uiStringTextLiveRefreshing.value = true
+  try {
+    for (const target of targets) {
+      await refreshUiStringLiveCandidate(target)
+    }
+  } finally {
+    uiStringTextLiveRefreshing.value = false
+  }
+}
+
+function setUiStringTextLiveEnabled(enabled: boolean) {
+  uiStringTextLiveEnabled.value = enabled
+  if (uiStringTextLiveTimer) {
+    clearInterval(uiStringTextLiveTimer)
+    uiStringTextLiveTimer = null
+  }
+  if (enabled) {
+    void refreshSelectedUiStringTexts()
+    uiStringTextLiveTimer = setInterval(() => {
+      void refreshSelectedUiStringTexts()
+    }, 1000)
+  }
+}
+
 function sourceKey(candidate: UiStringSourceCandidate) {
   return `${candidate.type}:${candidate.variantLabel ?? ''}:${candidate.address}`
 }
@@ -590,6 +1013,11 @@ function findWhatWritesSizeForType(type: string) {
   if (type.endsWith('16')) return 2
   if (type.endsWith('64') || type === 'Float64') return 8
   return 4
+}
+
+function findWhatWritesSizeForUiString(candidate: UiStringCandidate) {
+  if (candidate.encoding === 'utf16') return 2
+  return 1
 }
 
 function addressNumber(address: string) {
@@ -652,6 +1080,159 @@ const currentUiStringSourceBatch = computed(() => {
   const start = boundedUiStringSourceBatchIndex.value * uiStringSourceBatchSize.value
   return safeFilteredUiStringSources.value.slice(start, start + uiStringSourceBatchSize.value)
 })
+
+function normalizeAddress(address: string) {
+  return address.replace(/^0x/i, '').toUpperCase()
+}
+
+function addIntelligenceCandidate(
+  map: Map<string, UiStringSourceCandidate>,
+  candidate: UiStringSourceCandidate,
+) {
+  const existing = map.get(sourceKey(candidate))
+  if (!existing || Number(candidate.confidence ?? 0) > Number(existing.confidence ?? 0)) {
+    map.set(sourceKey(candidate), candidate)
+  }
+}
+
+const intelligentUiCandidates = computed<IntelligentCandidate[]>(() => {
+  const merged = new Map<string, UiStringSourceCandidate>()
+  for (const source of uiStringSourceCandidates.value) addIntelligenceCandidate(merged, source)
+  for (const source of uiStringInvestigationFinishResult.value?.globalValueHits ?? []) addIntelligenceCandidate(merged, source)
+
+  const debuggerTargets = new Set(findWhatWritesHits.value.map((hit) => normalizeAddress(String(hit.address ?? ''))))
+  return Array.from(merged.values()).map((source) => {
+    const reasons: string[] = []
+    let score = Number(source.confidence ?? 0.45)
+    reasons.push(`base ${confidencePercent(score)}%`)
+
+    const distance = Number(source.distanceBytes ?? Number.MAX_SAFE_INTEGER)
+    if (Number.isFinite(distance) && distance <= 4096) {
+      score += 0.12
+      reasons.push('proche string')
+    } else if (Number.isFinite(distance) && distance <= 1024 * 1024) {
+      score += 0.04
+      reasons.push('même fenêtre')
+    }
+
+    const trackHits = Number(source.trackHits ?? 0)
+    if (trackHits > 0) {
+      score += Math.min(0.18, 0.06 * trackHits)
+      reasons.push(`${trackHits} suivi(s) OK`)
+    }
+
+    if ((uiStringInvestigationFinishResult.value?.globalValueHits ?? []).some((hit) => sourceKey(hit) === sourceKey(source))) {
+      score += 0.16
+      reasons.push('radar modifié')
+    }
+
+    const watched = watchedCandidate(source.address)
+    if (watched?.changed) {
+      score += 0.1
+      reasons.push('watch bouge')
+    }
+    if (isUiSourceSelected(source)) {
+      score += 0.04
+      reasons.push('sélectionné')
+    }
+    if (debuggerTargets.has(normalizeAddress(source.address))) {
+      score += 0.22
+      reasons.push('writer capturé')
+    }
+    if ((source.variantLabel || '').includes('x')) {
+      score -= 0.03
+      reasons.push('encodage')
+    }
+    if (source.type.endsWith('8')) {
+      score -= 0.08
+      reasons.push('compact bruyant')
+    }
+
+    score = Math.max(0.01, Math.min(1, score))
+    return {
+      key: sourceKey(source),
+      address: source.address,
+      type: source.type,
+      variantLabel: source.variantLabel,
+      score,
+      scorePercent: Math.round(score * 100),
+      currentValue: candidateCurrentValue(source.address),
+      reasons,
+      source,
+    }
+  }).sort((a, b) => {
+    if (Math.abs(b.score - a.score) > 0.000001) return b.score - a.score
+    return addressNumber(a.address) - addressNumber(b.address)
+  }).slice(0, 80)
+})
+
+const investigationReport = computed(() => ({
+  kind: 'killengine_investigation_report',
+  createdAt: new Date().toISOString(),
+  processName: store.processName,
+  displayedValue: uiStringValue.value.trim(),
+  nextDisplayedValue: uiStringNextValue.value.trim(),
+  uiStrings: {
+    count: uiStringCandidates.value.length,
+    selected: selectedUiStringAddresses.value.length,
+    matchesFound: uiStringResult.value?.matchesFound,
+    trackedRemaining: uiStringTrackResult.value?.remaining,
+  },
+  numericSources: {
+    count: uiStringSourceCandidates.value.length,
+    selected: selectedUiSourceAddresses.value.length,
+    trackedRemaining: uiStringSourceTrackResult.value?.remaining,
+    top: intelligentUiCandidates.value.slice(0, 12).map((candidate) => ({
+      address: candidate.address,
+      type: candidate.type,
+      variantLabel: candidate.variantLabel,
+      score: candidate.score,
+      currentValue: candidate.currentValue,
+      reasons: candidate.reasons,
+    })),
+  },
+  liveInvestigation: uiStringInvestigationFinishResult.value ? {
+    changesFound: uiStringInvestigationFinishResult.value.changesFound,
+    changedBytes: uiStringInvestigationFinishResult.value.changedBytes,
+    globalValueHitsFound: uiStringInvestigationFinishResult.value.globalValueHitsFound,
+    probeBlocksChanged: uiStringInvestigationFinishResult.value.probeBlocksChanged,
+    partial: uiStringInvestigationFinishResult.value.partial,
+  } : null,
+  debugger: {
+    hitCount: Number(findWhatWritesResult.value?.hitCount ?? 0),
+    cancelled: Boolean(findWhatWritesResult.value?.cancelled),
+    hits: findWhatWritesHits.value.slice(0, 8).map((hit) => ({
+      address: hit.address,
+      instructionPointer: hit.instructionPointer,
+      module: hit.module,
+      moduleOffset: hit.moduleOffset,
+      valueBefore: hit.valueBefore,
+      valueAfter: hit.valueAfter,
+    })),
+  },
+  aob: {
+    pattern: aobPattern.value.trim(),
+    matchesFound: aobResult.value?.matchesFound,
+    stablePattern: codePatchSuggestionResult.value?.stableAobPattern,
+    disassembly: codePatchSuggestionResult.value?.disassembly,
+  },
+}))
+
+async function copyInvestigationReport() {
+  await navigator.clipboard?.writeText(JSON.stringify(investigationReport.value, null, 2))
+}
+
+watch(investigationReport, (report) => {
+  store.setInvestigationReport(report)
+}, { deep: true })
+
+function selectIntelligentUiCandidate(candidate: IntelligentCandidate) {
+  selectedUiSourceAddresses.value = [candidate.key]
+}
+
+function selectTopIntelligentUiCandidates(limit = uiStringSourceSafeSelectionLimit) {
+  selectedUiSourceAddresses.value = intelligentUiCandidates.value.slice(0, limit).map((candidate) => candidate.key)
+}
 
 function isUiSourceSelected(candidate: UiStringSourceCandidate) {
   return selectedUiSourceAddresses.value.includes(sourceKey(candidate))
@@ -909,18 +1490,136 @@ function watchCurrentUiSourceBatch() {
 }
 
 async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
+  if (!findWhatWritesAcknowledged.value) {
+    findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: 'Active "Debugger autorisé" avant de lancer Écrit par.' }
+    return
+  }
   findWhatWritesBusy.value = true
   findWhatWritesResult.value = null
   try {
-    const controller = backend.getController()
-    if (!controller.findWhatWrites) {
-      findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: 'Methode backend indisponible.' }
-      return
-    }
-    findWhatWritesResult.value = await controller.findWhatWrites(candidate.address, {
+    findWhatWritesResult.value = await runFindWhatWrites(candidate.address, {
       size: findWhatWritesSizeForType(candidate.type),
-      timeoutMs: 5000,
+      timeoutMs: findWhatWritesTimeoutMs.value,
       maxHits: 12,
+    })
+  } catch (e) {
+    findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: String(e) }
+  } finally {
+    findWhatWritesBusy.value = false
+  }
+}
+
+async function runFindWhatWrites(address: string, options: Record<string, unknown>) {
+  const controller = backend.getController()
+  const findWhatWritesAsync = controller.findWhatWritesAsync
+  const findWhatWritesFinished = controller.findWhatWritesFinished
+  if (findWhatWritesAsync && findWhatWritesFinished) {
+    return new Promise<Record<string, unknown>>((resolve) => {
+      let requestId: number | null = null
+      let settled = false
+      const earlyPayloads: Array<Record<string, unknown>> = []
+      const timeout = window.setTimeout(() => {
+        settled = true
+        findWhatWritesFinished.disconnect?.(handler)
+        resolve({
+          requestId: requestId ?? undefined,
+          success: false,
+          hitCount: 0,
+          hits: [],
+          error: 'Timeout de la capture Find What Writes.',
+        })
+      }, 20000)
+
+      const handler = (payload: Record<string, unknown>) => {
+        if (requestId === null) {
+          earlyPayloads.push(payload)
+          return
+        }
+        if (Number(payload.requestId) !== requestId) return
+        settled = true
+        window.clearTimeout(timeout)
+        findWhatWritesFinished.disconnect?.(handler)
+        resolve(payload)
+      }
+      findWhatWritesFinished.connect(handler)
+
+      void findWhatWritesAsync(address, options).then((start) => {
+        if (settled) return
+        if (start.success !== true || start.started !== true) {
+          settled = true
+          window.clearTimeout(timeout)
+          findWhatWritesFinished.disconnect?.(handler)
+          resolve({
+            success: false,
+            hitCount: 0,
+            hits: [],
+            error: String(start.error ?? 'Impossible de démarrer Find What Writes async.'),
+          })
+          return
+        }
+        requestId = Number(start.requestId)
+        for (const payload of earlyPayloads.splice(0)) {
+          handler(payload)
+          if (settled) break
+        }
+      }).catch((error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        findWhatWritesFinished.disconnect?.(handler)
+        resolve({
+          success: false,
+          hitCount: 0,
+          hits: [],
+          error: String(error),
+        })
+      })
+    })
+  }
+  if (!controller.findWhatWrites) {
+    return { success: false, hitCount: 0, hits: [], error: 'Methode backend indisponible.' }
+  }
+  return controller.findWhatWrites(address, options)
+}
+
+async function cancelFindWhatWritesCapture() {
+  const controller = backend.getController()
+  if (!controller.cancelFindWhatWrites) {
+    findWhatWritesResult.value = {
+      success: false,
+      hitCount: 0,
+      hits: [],
+      error: 'Annulation Find What Writes indisponible côté backend.',
+    }
+    return
+  }
+  const result = await controller.cancelFindWhatWrites()
+  if (result.success !== true) {
+    findWhatWritesResult.value = {
+      success: false,
+      hitCount: 0,
+      hits: [],
+      error: String(result.error ?? 'Annulation Find What Writes impossible.'),
+    }
+  }
+}
+
+async function findWhatWritesForUiString(candidate: UiStringCandidate) {
+  if (!findWhatWritesAcknowledged.value) {
+    findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: 'Active "Debugger autorisé" avant de lancer Écrit par.' }
+    return
+  }
+  findWhatWritesBusy.value = true
+  findWhatWritesResult.value = null
+  try {
+    await refreshUiStringLiveCandidate(candidate)
+    findWhatWritesResult.value = await runFindWhatWrites(candidate.address, {
+      size: findWhatWritesSizeForUiString(candidate),
+      timeoutMs: findWhatWritesTimeoutMs.value,
+      maxHits: 16,
+      origin: 'ui_string',
+      encoding: candidate.encoding,
+      text: candidate.text,
     })
   } catch (e) {
     findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: String(e) }
@@ -998,6 +1697,7 @@ const writePlan = computed(() => selectedWriteTargets.value.map((target) => {
 }))
 const writeFailures = computed(() => (store.writeResult?.results ?? []).filter((result) => !result.success))
 const findWhatWritesHits = computed(() => (findWhatWritesResult.value?.hits as Array<Record<string, unknown>> | undefined) ?? [])
+const structureProbeRows = computed(() => (structureProbeResult.value?.rows as StructureProbeRow[] | undefined) ?? [])
 const selectedCandidateTypes = computed(() => Array.from(new Set(
   selectedWriteTargets.value.map((target) => String(target.variantLabel || target.type)),
 )))
@@ -1157,7 +1857,12 @@ function writeFromPanel() {
   void store.writeSelectedValue()
 }
 
-function watchCandidate(address: string, type: string) {
+function watchOrRefreshCandidate(address: string, type: string) {
+  const watched = watchedCandidate(address)
+  if (watched) {
+    void store.refreshWatchedAddress(address)
+    return
+  }
   store.addAddressToWatch(address, type)
   if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
 }
@@ -1190,11 +1895,6 @@ function candidateCurrentValue(address: string): string {
 
 function candidateReadError(address: string): string {
   return watchedCandidate(address)?.error || ''
-}
-
-function readCandidateValue(address: string, type: string) {
-  store.addAddressToWatch(address, type)
-  void store.refreshWatchedAddress(address)
 }
 
 function freezeCandidateCurrent(address: string, type: string) {
@@ -1613,8 +2313,8 @@ onMounted(() => {
             <span>{{ change.reason || '-' }}</span>
             <span>{{ change.beforeHex || '-' }}</span>
             <strong>{{ change.afterHex || '-' }}</strong>
-            <span>{{ change.afterInt32 !== undefined ? `i32 ${formatNumber(change.afterInt32)}` : '-' }}</span>
-            <span>{{ change.afterFloat32 !== undefined ? `f32 ${change.afterFloat32.toFixed(3)}` : '-' }}</span>
+            <span>{{ change.afterInt32 !== undefined ? `i32 ${formatNumber(change.beforeInt32)} -> ${formatNumber(change.afterInt32)}` : '-' }}</span>
+            <span>{{ change.afterFloat32 !== undefined ? `f32 ${change.beforeFloat32?.toFixed(3)} -> ${change.afterFloat32.toFixed(3)}` : '-' }}</span>
           </div>
         </div>
         <div class="expert-flags ui-string-flags">
@@ -1642,7 +2342,22 @@ onMounted(() => {
               </option>
             </select>
           </label>
+          <label class="checkbox-label debugger-check">
+            <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />
+            Debugger autorisé
+          </label>
+          <label class="compact-select">
+            <span>Écrit par</span>
+            <select v-model.number="findWhatWritesTimeoutMs" class="input select" :disabled="findWhatWritesBusy">
+              <option v-for="timeout in findWhatWritesTimeoutOptions" :key="timeout" :value="timeout">
+                {{ timeout / 1000 }} s
+              </option>
+            </select>
+          </label>
         </div>
+        <p class="debugger-guard">
+          <strong>Écrit par</strong> attache le debugger Windows au processus pendant la capture. À utiliser sur une cible de test ou solo, puis fais varier la valeur pendant la fenêtre choisie.
+        </p>
         <div v-if="uiStringResult" class="metrics">
           <span>Matches: {{ formatNumber(uiStringResult.matchesFound) }}</span>
           <span>Régions: {{ formatNumber(uiStringResult.regionsScanned) }}</span>
@@ -1684,10 +2399,31 @@ onMounted(() => {
           <button class="btn btn-secondary compact" type="button" :disabled="uiStringBusy" @click="inspectUiStringOrigins()">
             Backrefs
           </button>
+          <button
+            class="btn btn-secondary compact"
+            type="button"
+            :disabled="uiStringBusy || uiStringCandidates.length === 0"
+            @click="setUiStringTextLiveEnabled(!uiStringTextLiveEnabled)"
+          >
+            {{ uiStringTextLiveEnabled ? 'Live strings stop' : 'Live strings' }}
+          </button>
+          <button
+            class="btn btn-secondary compact"
+            type="button"
+            :disabled="uiStringBusy || uiStringTextLiveRefreshing || uiStringCandidates.length === 0"
+            @click="refreshSelectedUiStringTexts()"
+          >
+            Rafraîchir strings
+          </button>
           <span>{{ selectedUiStringAddresses.length || uiStringCandidates.length }} suivi(s) au prochain filtre</span>
         </div>
         <div v-if="uiStringCandidates.length > 0" class="ui-string-list">
-          <div v-for="candidate in uiStringCandidates" :key="uiStringKey(candidate)" class="ui-string-row">
+          <div
+            v-for="candidate in uiStringCandidates"
+            :key="uiStringKey(candidate)"
+            class="ui-string-row"
+            :class="{ changed: uiStringLiveState(candidate)?.changed }"
+          >
             <label class="candidate-check">
               <input
                 type="checkbox"
@@ -1698,12 +2434,69 @@ onMounted(() => {
             <code>0x{{ candidate.address }}</code>
             <span>{{ candidate.encoding }}</span>
             <strong>{{ candidate.text }}</strong>
+            <span class="ui-string-live-current">
+              actuel: {{ uiStringLiveState(candidate)?.current || '-' }}
+            </span>
+            <span class="ui-string-live-previous">
+              avant: {{ uiStringLiveState(candidate)?.previous || '-' }}
+            </span>
             <span>{{ candidate.movedFrom ? `+${formatNumber(candidate.movedDistanceBytes)} o` : (candidate.protection || '-') }}</span>
             <span>{{ candidate.memoryType || '-' }}</span>
             <button class="btn btn-primary compact" type="button" @click="analyzeUiStringSources(candidate)">Sources</button>
             <button class="btn btn-secondary compact" type="button" @click="inspectUiStringOrigins(candidate)">Origine</button>
-            <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">Watch</button>
+            <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">Watch octets</button>
+            <button class="btn btn-secondary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForUiString(candidate)">
+              Écrit par
+            </button>
             <button class="btn btn-secondary compact" type="button" @click="useUiStringCandidate(candidate)">Assistant</button>
+            <span v-if="uiStringLiveState(candidate)?.error" class="error-inline">{{ uiStringLiveState(candidate)?.error }}</span>
+          </div>
+        </div>
+        <div v-if="findWhatWritesResult || findWhatWritesBusy" class="find-writes-panel">
+          <div class="source-list-title">
+            <strong>Find what writes</strong>
+            <span>{{ formatNumber(Number(findWhatWritesResult?.hitCount ?? 0)) }} hit(s)</span>
+            <button
+              v-if="findWhatWritesBusy"
+              class="btn btn-secondary compact"
+              type="button"
+              @click="cancelFindWhatWritesCapture()"
+            >
+              Annuler capture
+            </button>
+          </div>
+          <p v-if="findWhatWritesBusy" class="hint">Capture en cours : modifie la valeur dans SC2 pendant {{ findWhatWritesTimeoutMs / 1000 }} seconde(s).</p>
+          <p v-if="findWhatWritesResult?.error" class="error">{{ findWhatWritesResult.error }}</p>
+          <div
+            v-for="hit in findWhatWritesHits.slice(0, 12)"
+            :key="findWhatWritesHitKey(hit)"
+            class="find-writes-row"
+            :class="{ selected: isSelectedFindWhatWritesHit(hit) }"
+          >
+            <code>RIP 0x{{ hit.instructionPointer }}</code>
+            <span>cible 0x{{ hit.address }}</span>
+            <span>{{ hit.module || '-' }}</span>
+            <span>+0x{{ hit.moduleOffset || '0' }}</span>
+            <span>T{{ hit.threadId }}</span>
+            <span>avant {{ formatNumber(Number(hit.valueBefore ?? 0)) }}</span>
+            <strong>actuel {{ formatNumber(Number(hit.valueAfter ?? 0)) }}</strong>
+            <button class="btn btn-secondary compact" type="button" @click="previewFindWhatWritesHit(hit)">
+              Aperçu
+            </button>
+            <button class="btn btn-secondary compact" type="button" @click="copyFindWhatWritesRip(hit)">
+              Copier
+            </button>
+            <button class="btn btn-primary compact" type="button" :disabled="aobSignatureBusy" @click="generateAobSignatureFromHit(hit)">
+              Analyser
+            </button>
+            <button
+              class="btn btn-primary compact"
+              type="button"
+              :disabled="codePatchTrainerFlowBusy || aobSignatureBusy || codePatchProfileBusy"
+              @click="saveTrainerPatchFromHit(hit)"
+            >
+              Trainer
+            </button>
           </div>
         </div>
         <div v-if="uiStringOriginResult" class="metrics">
@@ -1726,6 +2519,61 @@ onMounted(() => {
             <span>{{ ref.distanceToString ? `${formatNumber(ref.distanceToString)} o` : 'exact' }}</span>
             <span>{{ ref.memoryType || '-' }}</span>
             <span>{{ ref.protection || '-' }}</span>
+          </div>
+        </div>
+        <div v-if="intelligentUiCandidates.length > 0" class="intelligence-panel">
+          <div class="source-list-title">
+            <strong>Pistes intelligentes</strong>
+            <span>top {{ formatNumber(Math.min(12, intelligentUiCandidates.length)) }}/{{ formatNumber(intelligentUiCandidates.length) }}</span>
+            <div class="source-actions">
+              <button class="btn btn-secondary compact" type="button" @click="selectTopIntelligentUiCandidates()">
+                Cocher Top IA
+              </button>
+              <button class="btn btn-secondary compact" type="button" :disabled="selectedUiSourceAddresses.length === 0" @click="watchSelectedUiSources()">
+                Watch cochés
+              </button>
+              <button class="btn btn-primary compact" type="button" :disabled="selectedUiSourceAddresses.length === 0" @click="useSelectedUiSourcesForWrite()">
+                Write cochés
+              </button>
+              <button class="btn btn-secondary compact" type="button" @click="copyInvestigationReport()">
+                Copier rapport
+              </button>
+            </div>
+          </div>
+          <div
+            v-for="candidate in intelligentUiCandidates.slice(0, 12)"
+            :key="candidate.key"
+            class="intelligence-row"
+            :class="confidenceClass(candidate.score)"
+          >
+            <strong>{{ candidate.scorePercent }}%</strong>
+            <code>0x{{ candidate.address }}</code>
+            <span>{{ candidate.variantLabel || candidate.type }}</span>
+            <span>{{ candidate.currentValue }}</span>
+            <span class="intelligence-reasons">{{ candidate.reasons.join(' · ') }}</span>
+            <button class="btn btn-secondary compact" type="button" @click="selectIntelligentUiCandidate(candidate)">Cocher</button>
+            <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate.source)">Watch</button>
+            <button class="btn btn-secondary compact" type="button" @click="analyzeStructureAroundSource(candidate.source)">Struct</button>
+            <button class="btn btn-secondary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate.source)">Écrit par</button>
+          </div>
+        </div>
+        <div v-if="structureProbeResult" class="structure-panel">
+          <div class="source-list-title">
+            <strong>Structure autour source</strong>
+            <span v-if="structureProbeResult.address">0x{{ structureProbeResult.address }} · {{ formatNumber(Number(structureProbeResult.rowCount ?? 0)) }} ligne(s)</span>
+          </div>
+          <p v-if="structureProbeResult.error" class="error">{{ structureProbeResult.error }}</p>
+          <div
+            v-for="row in structureProbeRows"
+            :key="row.address"
+            class="structure-row"
+            :class="{ marked: row.marker }"
+          >
+            <code>0x{{ row.address }}</code>
+            <span>{{ row.offset >= 0 ? '+' : '' }}{{ row.offset }}</span>
+            <strong>i32 {{ formatNumber(row.int32) }}</strong>
+            <span>f32 {{ Number.isFinite(row.float32) ? row.float32.toFixed(3) : '-' }}</span>
+            <span>{{ row.marker || '-' }}</span>
           </div>
         </div>
         <div v-if="uiStringSourceCandidates.length > 0" ref="uiStringSourcesPanelRef" class="source-list">
@@ -1805,31 +2653,10 @@ onMounted(() => {
             <span>{{ candidate.trackHits ? `${candidate.trackHits} hit(s)` : `${formatNumber(candidate.distanceBytes)} o` }}</span>
             <button class="btn btn-primary compact" type="button" @click="useUiSourceCandidate(candidate)">Utiliser</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate)">Watch</button>
-            <button class="btn btn-secondary compact" type="button" :disabled="findWhatWritesBusy" @click="findWhatWritesForSource(candidate)">
+            <button class="btn btn-secondary compact" type="button" @click="analyzeStructureAroundSource(candidate)">Struct</button>
+            <button class="btn btn-secondary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate)">
               Écrit par
             </button>
-          </div>
-          <div v-if="findWhatWritesResult" class="find-writes-panel">
-            <div class="source-list-title">
-              <strong>Find what writes</strong>
-              <span>{{ formatNumber(Number(findWhatWritesResult.hitCount ?? 0)) }} hit(s)</span>
-            </div>
-            <p v-if="findWhatWritesBusy" class="hint">Capture en cours : modifie la valeur dans SC2 pendant quelques secondes.</p>
-            <p v-if="findWhatWritesResult.error" class="error">{{ findWhatWritesResult.error }}</p>
-            <div
-              v-for="hit in findWhatWritesHits.slice(0, 12)"
-              :key="`${hit.instructionPointer}:${hit.threadId}`"
-              class="find-writes-row"
-            >
-              <code>RIP 0x{{ hit.instructionPointer }}</code>
-              <span>{{ hit.module || '-' }}</span>
-              <span>+0x{{ hit.moduleOffset || '0' }}</span>
-              <span>T{{ hit.threadId }}</span>
-              <strong>{{ formatNumber(Number(hit.valueAfter ?? 0)) }}</strong>
-              <button class="btn btn-primary compact" type="button" :disabled="aobSignatureBusy" @click="generateAobSignatureFromHit(hit)">
-                Signature
-              </button>
-            </div>
           </div>
         </div>
       </section>
@@ -1927,11 +2754,8 @@ onMounted(() => {
               <button class="btn btn-secondary compact" @click="useCandidateInAssistant(match.address, match.type)">
                 Utiliser
               </button>
-              <button class="btn btn-secondary compact" @click="readCandidateValue(match.address, match.type)">
-                Lire
-              </button>
-              <button class="btn btn-secondary compact" @click="watchCandidate(match.address, match.type)">
-                Watch
+              <button class="btn btn-secondary compact" @click="watchOrRefreshCandidate(match.address, match.type)">
+                {{ watchedCandidate(match.address) ? 'Rafraîchir' : 'Watch' }}
               </button>
               <button class="btn btn-secondary compact" @click="freezeCandidateCurrent(match.address, match.type)">
                 Freeze actuel
@@ -2150,10 +2974,20 @@ onMounted(() => {
             <span v-if="codePatchSuggestBusy" class="btn-spinner" aria-hidden="true"></span>
             Analyser
           </button>
+          <button class="btn btn-secondary" :disabled="aobStabilizeBusy || !codePatchAddress.trim()" @click="stabilizeSelectedAobSignature()">
+            <span v-if="aobStabilizeBusy" class="btn-spinner" aria-hidden="true"></span>
+            Stabiliser AOB
+          </button>
           <button class="btn btn-secondary" :disabled="codePatchBusy || !codePatchAddress.trim()" @click="restoreSelectedCodePatch()">
             Restaurer
           </button>
         </div>
+        <div v-if="aobStabilizeResult" class="metrics">
+          <span>Auto AOB: {{ aobStabilizeResult.success ? 'unique' : 'à ajuster' }}</span>
+          <span v-if="aobStabilizeResult.matchesFound !== undefined">{{ formatNumber(Number(aobStabilizeResult.matchesFound)) }} match(es)</span>
+          <span v-if="Array.isArray(aobStabilizeResult.tested)">{{ formatNumber(aobStabilizeResult.tested.length) }} pattern(s)</span>
+        </div>
+        <p v-if="aobStabilizeResult?.error" class="error">{{ aobStabilizeResult.error }}</p>
         <div v-if="codePatchSuggestionResult" class="metrics">
           <span>Instruction: {{ codePatchSuggestionResult.success ? 'OK' : 'FAIL' }}</span>
           <span v-if="codePatchSuggestionResult.instructionLength">{{ formatNumber(codePatchSuggestionResult.instructionLength) }} o</span>
@@ -2721,6 +3555,23 @@ onMounted(() => {
   margin-top: 8px;
 }
 
+.debugger-check {
+  border-color: rgba(247, 118, 142, 0.28);
+}
+
+.debugger-guard {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(247, 118, 142, 0.26);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(247, 118, 142, 0.08);
+}
+
+.debugger-guard strong {
+  color: #ffb7c3;
+}
+
 .ui-investigation {
   display: grid;
   grid-template-columns: 54px minmax(180px, 1fr) auto auto;
@@ -2900,7 +3751,7 @@ onMounted(() => {
 
 .ui-string-row {
   display: grid;
-  grid-template-columns: 28px minmax(140px, 1fr) 58px 70px 92px 78px auto auto auto auto;
+  grid-template-columns: 28px minmax(120px, 1fr) 54px 54px minmax(76px, 0.7fr) minmax(76px, 0.7fr) 86px 74px auto auto auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 38px;
@@ -2923,6 +3774,32 @@ onMounted(() => {
   color: var(--accent);
 }
 
+.ui-string-row.changed {
+  border-color: rgba(224, 175, 104, 0.55);
+}
+
+.ui-string-live-current,
+.ui-string-live-previous,
+.error-inline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-string-live-current {
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+}
+
+.ui-string-live-previous {
+  color: var(--text-dim);
+}
+
+.error-inline {
+  color: var(--error);
+  font-size: 11px;
+}
+
 .source-list {
   display: flex;
   flex-direction: column;
@@ -2937,6 +3814,93 @@ onMounted(() => {
   gap: 4px;
   margin-top: 10px;
   overflow-y: auto;
+}
+
+.intelligence-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid rgba(122, 162, 247, 0.2);
+  border-radius: 6px;
+  background: rgba(122, 162, 247, 0.06);
+}
+
+.intelligence-row {
+  display: grid;
+  grid-template-columns: 54px minmax(130px, 1fr) minmax(84px, 130px) 74px minmax(180px, 1.2fr) auto auto auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.intelligence-row.conf-high {
+  border-color: rgba(158, 206, 106, 0.35);
+}
+
+.intelligence-row.conf-medium {
+  border-color: rgba(224, 175, 104, 0.3);
+}
+
+.intelligence-row.conf-low {
+  border-color: rgba(247, 118, 142, 0.28);
+}
+
+.intelligence-row strong {
+  color: var(--accent);
+}
+
+.intelligence-row code,
+.intelligence-reasons {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.structure-panel {
+  display: flex;
+  max-height: 240px;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid rgba(158, 206, 106, 0.18);
+  border-radius: 6px;
+  background: rgba(13, 17, 32, 0.46);
+  overflow-y: auto;
+}
+
+.structure-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) 58px minmax(90px, 1fr) minmax(90px, 1fr) minmax(110px, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 7px;
+  border: 1px solid rgba(122, 162, 247, 0.12);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.structure-row.marked {
+  border-color: rgba(158, 206, 106, 0.32);
+  background: rgba(158, 206, 106, 0.07);
+}
+
+.structure-row code,
+.structure-row span,
+.structure-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .source-list-title {
@@ -2978,7 +3942,7 @@ onMounted(() => {
 
 .source-row {
   display: grid;
-  grid-template-columns: 28px minmax(140px, 1fr) 74px minmax(120px, 1fr) 70px 74px 80px auto auto auto;
+  grid-template-columns: 28px minmax(140px, 1fr) 74px minmax(120px, 1fr) 70px 74px 80px auto auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 38px;
@@ -3027,7 +3991,7 @@ onMounted(() => {
 
 .find-writes-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(100px, 160px) 82px 56px 90px auto;
+  grid-template-columns: minmax(150px, 1fr) minmax(140px, 1fr) minmax(90px, 150px) 78px 48px 88px 96px auto auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 30px;
@@ -3037,6 +4001,11 @@ onMounted(() => {
   background: var(--bg-primary);
   color: var(--text-dim);
   font-size: 12px;
+}
+
+.find-writes-row.selected {
+  border-color: rgba(122, 162, 247, 0.48);
+  background: rgba(122, 162, 247, 0.08);
 }
 
 .find-writes-row code,

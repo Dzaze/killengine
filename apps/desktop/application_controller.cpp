@@ -23,6 +23,8 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -1203,6 +1205,13 @@ void ApplicationController::detachProcess() {
             m_activeScanCancellation->cancel();
         }
         KE_LOG_INFO() << "Detach deferred because a scan is still running.";
+        return;
+    }
+    if (m_findWhatWritesInProgress) {
+        if (m_activeDebugCancellation) {
+            m_activeDebugCancellation->cancel();
+        }
+        KE_LOG_INFO() << "Detach deferred because Find What Writes is still running.";
         return;
     }
 
@@ -2508,8 +2517,10 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
             change["reason"] = window.reason;
             change["beforeHex"] = QString::fromLatin1(window.before.mid(start, std::min<qsizetype>(length, 16)).toHex(' ').toUpper());
             change["afterHex"] = QString::fromLatin1(read.data.mid(start, std::min<qsizetype>(length, 16)).toHex(' ').toUpper());
-            if (start + 4 <= read.data.size()) {
+            if (start + 4 <= read.data.size() && start + 4 <= window.before.size()) {
+                change["beforeInt32"] = bytesToDouble(window.before.mid(start, 4), killcore::ValueType::Int32);
                 change["afterInt32"] = bytesToDouble(read.data.mid(start, 4), killcore::ValueType::Int32);
+                change["beforeFloat32"] = bytesToDouble(window.before.mid(start, 4), killcore::ValueType::Float32);
                 change["afterFloat32"] = bytesToDouble(read.data.mid(start, 4), killcore::ValueType::Float32);
             }
             changes.append(change);
@@ -4782,6 +4793,137 @@ QVariantMap ApplicationController::findWhatWrites(const QString& addressHex, con
     return result;
 }
 
+QVariantMap ApplicationController::findWhatWritesAsync(const QString& addressHex, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["started"] = false;
+    result["address"] = addressHex;
+
+    if (m_findWhatWritesInProgress) {
+        result["error"] = "Une capture Find What Writes est déjà en cours.";
+        return result;
+    }
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int sizeBytes = std::clamp(options.value("size", 4).toInt(), 1, 8);
+    killcore::BreakpointSize breakpointSize = killcore::BreakpointSize::DWord;
+    if (sizeBytes <= 1) {
+        breakpointSize = killcore::BreakpointSize::Byte;
+    } else if (sizeBytes <= 2) {
+        breakpointSize = killcore::BreakpointSize::Word;
+    } else if (sizeBytes <= 4) {
+        breakpointSize = killcore::BreakpointSize::DWord;
+    } else {
+        breakpointSize = killcore::BreakpointSize::QWord;
+    }
+
+    const int timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 15000);
+    const int maxHitsInt = std::clamp(options.value("maxHits", 10).toInt(), 1, 100);
+    const int requestId = m_nextDebugRequestId++;
+    const int pid = m_pid;
+    const QString requestedAddress = addressHex;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_findWhatWritesInProgress = true;
+    m_activeDebugCancellation = cancellation;
+
+    KE_LOG_INFO() << "findWhatWritesAsync(address=0x" << std::hex << address
+                  << ", pid=" << std::dec << pid
+                  << ", size=" << sizeBytes
+                  << ", timeoutMs=" << timeoutMs
+                  << ", maxHits=" << maxHitsInt
+                  << ", requestId=" << requestId << ")";
+
+    std::thread([self, requestId, pid, address, requestedAddress, breakpointSize, sizeBytes, timeoutMs, maxHitsInt, cancellation]() {
+        const auto hits = killcore::findWhatWrites(
+            static_cast<uint32_t>(pid),
+            address,
+            breakpointSize,
+            timeoutMs,
+            static_cast<size_t>(maxHitsInt),
+            cancellation.get());
+        const bool cancelled = cancellation->isCancelled();
+
+        if (!self) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(self.data(), [self, requestId, requestedAddress, sizeBytes, timeoutMs, maxHitsInt, hits, cancelled]() {
+            if (!self) {
+                return;
+            }
+
+            QVariantList hitList;
+            for (const auto& hit : hits) {
+                QVariantMap item;
+                item["address"] = QString::number(hit.address, 16).toUpper();
+                item["instructionPointer"] = QString::number(hit.instructionPointer, 16).toUpper();
+                item["threadId"] = static_cast<qulonglong>(hit.threadId);
+                item["valueBefore"] = static_cast<qulonglong>(hit.valueBefore);
+                item["valueAfter"] = static_cast<qulonglong>(hit.valueAfter);
+                item["module"] = hit.module;
+                item["moduleOffset"] = QString::number(hit.moduleOffset, 16).toUpper();
+                hitList.append(item);
+            }
+
+            QVariantMap finished;
+            finished["requestId"] = requestId;
+            finished["kind"] = "find_what_writes";
+            finished["success"] = true;
+            finished["address"] = requestedAddress;
+            finished["hits"] = hitList;
+            finished["hitCount"] = hitList.size();
+            finished["size"] = sizeBytes;
+            finished["timeoutMs"] = timeoutMs;
+            finished["maxHits"] = maxHitsInt;
+            finished["cancelled"] = cancelled;
+            finished["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.";
+            finished["error"] = cancelled
+                ? "Capture Find What Writes annulée."
+                : hits.isEmpty()
+                ? "Aucune écriture capturée pendant la fenêtre d'observation."
+                : QString();
+
+            self->m_findWhatWritesInProgress = false;
+            self->m_activeDebugCancellation.reset();
+            emit self->findWhatWritesFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["size"] = sizeBytes;
+    result["timeoutMs"] = timeoutMs;
+    result["maxHits"] = maxHitsInt;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::cancelFindWhatWrites() {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_findWhatWritesInProgress || !m_activeDebugCancellation) {
+        result["error"] = "Aucune capture Find What Writes active à annuler.";
+        return result;
+    }
+
+    m_activeDebugCancellation->cancel();
+    result["success"] = true;
+    result["error"] = "";
+    return result;
+}
+
 QVariantMap ApplicationController::scanAobPattern(const QString& patternText, const QVariantMap& optionsMap) {
     QVariantMap result;
     result["success"] = false;
@@ -6516,6 +6658,18 @@ QVariantMap ApplicationController::exportDiagnostics() {
     result["path"] = exportPath;
     result["bytesWritten"] = static_cast<qulonglong>(QFileInfo(exportPath).size());
     result["error"] = "";
+
+    // Ouvre l'explorateur Windows sur le dossier contenant l'export.
+    // L'échec de l'ouverture ne doit pas invalider l'export.
+    const QString folderPath = QFileInfo(exportPath).absolutePath();
+    const bool folderOpened = QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
+    result["folderOpened"] = folderOpened;
+    if (!folderOpened) {
+        result["openFolderError"] = "Le dossier de l'export n'a pas pu être ouvert automatiquement. Chemin : " + folderPath;
+    } else {
+        result["openFolderError"] = "";
+    }
+
     return result;
 }
 

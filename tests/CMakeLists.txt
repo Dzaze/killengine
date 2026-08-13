@@ -63,3 +63,20 @@ set_target_properties(killengine_integration_tests PROPERTIES
 )
 add_dependencies(killengine_integration_tests KillEngineTestTarget)
 gtest_discover_tests(killengine_integration_tests DISCOVERY_MODE PRE_TEST)
+
+# =============================================================================
+# KillEngineBenchmark — Benchmark de performance (Phase 15)
+# =============================================================================
+# Exécutable autonome qui mesure scan exact, scan multi-type, unknown snapshot
+# et gros volumes de candidats. Voir docs/PERFORMANCE_BENCHMARKS.md.
+add_executable(KillEngineBenchmark
+    benchmarks/benchmark_main.cpp
+)
+target_link_libraries(KillEngineBenchmark PRIVATE
+    killcore
+    Qt6::Core
+)
+set_target_properties(KillEngineBenchmark PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+add_dependencies(KillEngineBenchmark KillEngineTestTarget)

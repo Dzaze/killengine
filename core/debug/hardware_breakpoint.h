@@ -13,6 +13,8 @@
 
 namespace killcore {
 
+class CancellationToken;
+
 /// Type de breakpoint matériel.
 enum class BreakpointType : uint32_t {
     Execute    = 0, ///< Break sur exécution d'instruction (DR7 bits 16-17 = 00)
@@ -178,6 +180,14 @@ QList<BreakpointHit> findWhatWrites(
     BreakpointSize size = BreakpointSize::DWord,
     int timeoutMs = 5000,
     size_t maxHits = 10);
+
+QList<BreakpointHit> findWhatWrites(
+    uint32_t pid,
+    uint64_t address,
+    BreakpointSize size,
+    int timeoutMs,
+    size_t maxHits,
+    const CancellationToken* cancellation);
 
 } // namespace killcore
 

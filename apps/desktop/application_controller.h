@@ -184,6 +184,12 @@ public:
     /// options keys: size (1/2/4/8), timeoutMs (défaut 5000), maxHits (défaut 10)
     Q_INVOKABLE QVariantMap findWhatWrites(const QString& addressHex, const QVariantMap& options);
 
+    /// Version non bloquante de findWhatWrites. Le résultat arrive via findWhatWritesFinished.
+    Q_INVOKABLE QVariantMap findWhatWritesAsync(const QString& addressHex, const QVariantMap& options);
+
+    /// Demande l'arrêt de la capture Find What Writes en cours.
+    Q_INVOKABLE QVariantMap cancelFindWhatWrites();
+
     /// Cherche une signature AOB dans les régions mémoire du processus.
     /// Pattern: "48 8B ?? ?? 89", options: executableOnly, imageOnly, startAddress, stopAddress, maxResults.
     Q_INVOKABLE QVariantMap scanAobPattern(const QString& pattern, const QVariantMap& options);
@@ -339,6 +345,7 @@ signals:
     void scanProgress(int percent);
     void scanStatsUpdated(int candidateCount);
     void scanFinished(const QVariantMap& result);
+    void findWhatWritesFinished(const QVariantMap& result);
     void aiMessage(const QString& message);
     void targetConfidenceChanged(int confidence);
     void targetFound(const QVariantMap& target);
@@ -416,6 +423,9 @@ private:
     bool                     m_scanInProgress{false};
     bool                     m_hasPreviousCandidates{false};
     int                      m_nextScanRequestId{1};
+    int                      m_nextDebugRequestId{1};
+    bool                     m_findWhatWritesInProgress{false};
+    std::shared_ptr<killcore::CancellationToken> m_activeDebugCancellation;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     killai::AIEngine         m_ai;
     bool                     m_smartSearchActive{false};

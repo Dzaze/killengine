@@ -10,6 +10,7 @@ interface ProfileEntry {
   gameName?: string
   executableName?: string
   targetCount?: number
+  patchCount?: number
 }
 
 interface ProfileTargetEntry {
@@ -49,6 +50,8 @@ const statusMessage = ref('')
 const targetWriteValues = ref<Record<string, string>>({})
 const targetResolveStates = ref<Record<string, Record<string, unknown>>>({})
 const patchStates = ref<Record<string, Record<string, unknown>>>({})
+const trainerBusy = ref(false)
+const lastProfileStorageKey = 'killengine.lastProfile'
 
 const profileSaveTargets = computed(() => {
   if (store.finalCandidateTargets.length > 0) {
@@ -76,6 +79,23 @@ const groupedProfileTargets = computed<ProfileTargetGroup[]>(() => {
   return Array.from(groups.entries()).map(([name, targets]) => ({ name, targets }))
 })
 
+const trainerPatchSummary = computed(() => {
+  const states = profilePatches.value.map((patch) => patchStates.value[patch.name]).filter(Boolean)
+  const count = (status: string) => states.filter((state) => String(state.status ?? '') === status).length
+  const inspected = profilePatches.value.length > 0 && states.length === profilePatches.value.length
+  const risky = count('ambiguous') + count('missing') + count('invalid')
+  return {
+    inspected,
+    original: count('original'),
+    active: count('active'),
+    ambiguous: count('ambiguous'),
+    missing: count('missing'),
+    invalid: count('invalid'),
+    risky,
+    canApplyAll: inspected && risky === 0,
+  }
+})
+
 function profileTargetGroupName(name: string): string {
   const normalized = name.trim().toLowerCase().replace(/\s+\d+$/, '').trim()
   return normalized || 'cibles'
@@ -84,6 +104,11 @@ function profileTargetGroupName(name: string): string {
 async function refreshProfiles() {
   try {
     profiles.value = (await backend.getController().listProfiles()) as unknown as ProfileEntry[]
+    const preferred = selectedProfile.value || localStorage.getItem(lastProfileStorageKey) || ''
+    const match = profiles.value.find((profile) => profile.name === preferred)
+    if (!selectedProfile.value && match) {
+      await selectProfile(match.name)
+    }
   } catch {
     profiles.value = []
   }
@@ -91,6 +116,7 @@ async function refreshProfiles() {
 
 async function selectProfile(name: string) {
   selectedProfile.value = name
+  localStorage.setItem(lastProfileStorageKey, name)
   resolveResult.value = null
   try {
     const result = await backend.getController().loadProfile(name)
@@ -98,6 +124,9 @@ async function selectProfile(name: string) {
     profileTargets.value = (result.targets as ProfileTargetEntry[]) ?? []
     profilePatches.value = (result.patches as ProfilePatchEntry[]) ?? []
     patchStates.value = {}
+    if (store.isAttached && profilePatches.value.length > 0) {
+      await inspectProfilePatches()
+    }
   } catch {
     profileTargets.value = []
     profilePatches.value = []
@@ -311,6 +340,7 @@ async function deleteSelectedProfile() {
     if (ok) {
       statusMessage.value = `Profil "${selectedProfile.value}" supprimé.`
       selectedProfile.value = ''
+      localStorage.removeItem(lastProfileStorageKey)
       profileTargets.value = []
       profilePatches.value = []
       await refreshProfiles()
@@ -324,6 +354,13 @@ async function deleteSelectedProfile() {
 
 async function applyProfilePatch(patch: ProfilePatchEntry) {
   if (!selectedProfile.value || !patch.name) return
+  if (!patchCanApply(patch)) {
+    statusMessage.value = patchStates.value[patch.name]
+      ? `⚠ Patch "${patch.name}" non applicable dans son état actuel (${patchStateLabel(patch)}).`
+      : `⚠ Vérifie l'état de "${patch.name}" avant application.`
+    return
+  }
+  trainerBusy.value = true
   try {
     const controller = backend.getController()
     if (!controller.applyProfileCodePatch) {
@@ -337,11 +374,20 @@ async function applyProfilePatch(patch: ProfilePatchEntry) {
       : '✗ ' + (result.error ?? `Patch "${patch.name}" impossible.`)
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
+  } finally {
+    trainerBusy.value = false
   }
 }
 
 async function restoreProfilePatch(patch: ProfilePatchEntry) {
   if (!selectedProfile.value || !patch.name) return
+  if (!patchCanRestore(patch)) {
+    statusMessage.value = patchStates.value[patch.name]
+      ? `⚠ Patch "${patch.name}" non actif, restauration inutile.`
+      : `⚠ Vérifie l'état de "${patch.name}" avant restauration.`
+    return
+  }
+  trainerBusy.value = true
   try {
     const controller = backend.getController()
     if (!controller.restoreProfileCodePatch) {
@@ -355,6 +401,8 @@ async function restoreProfilePatch(patch: ProfilePatchEntry) {
       : '✗ ' + (result.error ?? `Restauration "${patch.name}" impossible.`)
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
+  } finally {
+    trainerBusy.value = false
   }
 }
 
@@ -385,8 +433,43 @@ function patchStateClass(patch: ProfilePatchEntry): string {
   return state.success ? 'ok' : 'fail'
 }
 
+function patchStateDetail(patch: ProfilePatchEntry): string {
+  const state = patchStates.value[patch.name]
+  if (!state) return 'Vérification requise avant application.'
+  const parts = [
+    state.matchedAddress ? `0x${state.matchedAddress}` : '',
+    state.originalMatches !== undefined ? `original ${state.originalMatches}` : '',
+    state.patchedMatches !== undefined ? `patché ${state.patchedMatches}` : '',
+    state.error ? String(state.error) : '',
+  ].filter(Boolean)
+  return parts.join(' · ')
+}
+
+function patchCanApply(patch: ProfilePatchEntry): boolean {
+  const state = patchStates.value[patch.name]
+  if (!state) return false
+  const status = String(state.status ?? '')
+  return status === 'original' || (state.success === true && state.active !== true && status === '')
+}
+
+function patchCanRestore(patch: ProfilePatchEntry): boolean {
+  const state = patchStates.value[patch.name]
+  if (!state) return false
+  return String(state.status ?? '') === 'active' || state.active === true
+}
+
+async function toggleProfilePatch(patch: ProfilePatchEntry, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  if (checked) {
+    await applyProfilePatch(patch)
+  } else {
+    await restoreProfilePatch(patch)
+  }
+}
+
 async function inspectProfilePatches() {
   if (!selectedProfile.value || profilePatches.value.length === 0) return
+  trainerBusy.value = true
   try {
     const controller = backend.getController()
     if (!controller.inspectProfileCodePatches) {
@@ -405,11 +488,20 @@ async function inspectProfilePatches() {
       : '✗ ' + (String(result.error ?? 'Inspection trainer incomplète.'))
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
+  } finally {
+    trainerBusy.value = false
   }
 }
 
 async function applyAllProfilePatches() {
   if (!selectedProfile.value || profilePatches.value.length === 0) return
+  if (!trainerPatchSummary.value.canApplyAll) {
+    statusMessage.value = trainerPatchSummary.value.inspected
+      ? '⚠ Application globale bloquée : au moins un patch est ambigu, introuvable ou invalide.'
+      : '⚠ Vérifie d’abord l’état trainer avant d’appliquer le lot.'
+    return
+  }
+  trainerBusy.value = true
   try {
     const controller = backend.getController()
     if (!controller.applyAllProfileCodePatches) {
@@ -428,11 +520,14 @@ async function applyAllProfilePatches() {
       : '✗ ' + (String(result.error ?? 'Application trainer partielle.'))
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
+  } finally {
+    trainerBusy.value = false
   }
 }
 
 async function restoreAllProfilePatches() {
   if (!selectedProfile.value || profilePatches.value.length === 0) return
+  trainerBusy.value = true
   try {
     const controller = backend.getController()
     if (!controller.restoreAllProfileCodePatches) {
@@ -451,6 +546,8 @@ async function restoreAllProfilePatches() {
       : '✗ ' + (String(result.error ?? 'Restauration trainer partielle.'))
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
+  } finally {
+    trainerBusy.value = false
   }
 }
 
@@ -486,6 +583,7 @@ onMounted(() => {
           <div class="profile-meta">
             <span v-if="p.executableName">{{ p.executableName }}</span>
             <span v-if="p.targetCount !== undefined">{{ p.targetCount }} cible(s)</span>
+            <span v-if="p.patchCount !== undefined">{{ p.patchCount }} patch(s)</span>
           </div>
         </div>
       </div>
@@ -594,10 +692,18 @@ onMounted(() => {
         <div class="targets-header">
           <h3>Patchs trainer ({{ profilePatches.length }})</h3>
           <div class="trainer-actions">
-            <button class="btn btn-secondary btn-sm" @click="inspectProfilePatches()">Vérifier état</button>
-            <button class="btn btn-primary btn-sm" @click="applyAllProfilePatches()">Tout appliquer</button>
-            <button class="btn btn-secondary btn-sm" @click="restoreAllProfilePatches()">Tout restaurer</button>
+            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy" @click="inspectProfilePatches()">Vérifier état</button>
+            <button class="btn btn-primary btn-sm" :disabled="trainerBusy || !trainerPatchSummary.canApplyAll" @click="applyAllProfilePatches()">Tout appliquer</button>
+            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy || !trainerPatchSummary.inspected" @click="restoreAllProfilePatches()">Tout restaurer</button>
           </div>
+        </div>
+        <div class="trainer-summary" :class="{ armed: trainerPatchSummary.canApplyAll, blocked: trainerPatchSummary.inspected && trainerPatchSummary.risky > 0 }">
+          <strong>{{ trainerPatchSummary.inspected ? 'Trainer vérifié' : 'Inspection requise' }}</strong>
+          <span>original {{ trainerPatchSummary.original }}</span>
+          <span>actif {{ trainerPatchSummary.active }}</span>
+          <span>ambigu {{ trainerPatchSummary.ambiguous }}</span>
+          <span>introuvable {{ trainerPatchSummary.missing }}</span>
+          <span>invalide {{ trainerPatchSummary.invalid }}</span>
         </div>
         <div v-for="patch in profilePatches" :key="patch.name" class="patch-row">
           <div class="patch-info">
@@ -607,9 +713,18 @@ onMounted(() => {
             <span v-if="patch.module" class="target-locator">{{ patch.module }} +0x{{ patch.moduleOffset }}</span>
           </div>
           <div class="target-actions">
-            <button class="btn btn-primary btn-sm" @click="applyProfilePatch(patch)">Appliquer</button>
-            <button class="btn btn-secondary btn-sm" @click="restoreProfilePatch(patch)">Restaurer</button>
+            <label class="patch-toggle" :class="{ active: patchCanRestore(patch), disabled: trainerBusy || (!patchCanApply(patch) && !patchCanRestore(patch)) }">
+              <input
+                type="checkbox"
+                :checked="patchCanRestore(patch)"
+                :disabled="trainerBusy || (!patchCanApply(patch) && !patchCanRestore(patch))"
+                @change="toggleProfilePatch(patch, $event)"
+              />
+              <span>{{ patchCanRestore(patch) ? 'ON' : 'OFF' }}</span>
+            </label>
+            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy || !patchCanRestore(patch)" @click="restoreProfilePatch(patch)">Restaurer</button>
           </div>
+          <div class="patch-state-detail">{{ patchStateDetail(patch) }}</div>
           <div v-if="patch.disassembly" class="target-desc">{{ patch.disassembly }}</div>
           <div v-if="patch.aobPattern" class="target-desc">AOB: {{ patch.aobPattern }}</div>
           <div v-if="patch.patchBytes" class="target-desc">Patch: {{ patch.patchBytes }}</div>
@@ -772,6 +887,42 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
+.trainer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(224, 175, 104, 0.32);
+  border-radius: 6px;
+  background: rgba(224, 175, 104, 0.08);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.trainer-summary strong {
+  color: var(--warning);
+}
+
+.trainer-summary.armed {
+  border-color: rgba(158, 206, 106, 0.34);
+  background: rgba(158, 206, 106, 0.08);
+}
+
+.trainer-summary.armed strong {
+  color: var(--success);
+}
+
+.trainer-summary.blocked {
+  border-color: rgba(247, 118, 142, 0.34);
+  background: rgba(247, 118, 142, 0.08);
+}
+
+.trainer-summary.blocked strong {
+  color: var(--error);
+}
+
 .targets-header {
   display: flex;
   justify-content: space-between;
@@ -873,12 +1024,55 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.patch-state-detail {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .patch-risk {
   padding: 2px 6px;
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text-dim);
   font-size: 11px;
+}
+
+.patch-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(224, 175, 104, 0.4);
+  border-radius: 999px;
+  background: rgba(224, 175, 104, 0.08);
+  color: var(--warning);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.patch-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.patch-toggle.active {
+  border-color: rgba(158, 206, 106, 0.4);
+  background: rgba(158, 206, 106, 0.12);
+  color: var(--success);
+}
+
+.patch-toggle.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .target-actions {
