@@ -203,6 +203,7 @@ Prerequisites before Phase 12:
     - [x] `MemoryWriteResult::protectionChanged` pour signaler quand la protection a dû être changée
     - [x] `setFreezeInterval` : intervalle de polling configurable (10–2000 ms) pour jeux type SC2
     - [x] Interface `backend.ts` : `setFreezeInterval` exposée au frontend
+    - [x] UI Write / Freeze : preset d'intervalle visible (16–500 ms) relié à `setFreezeInterval`
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM
@@ -221,5 +222,6 @@ Prerequisites before Phase 12:
     - [x] Source probe UI string : analyse locale autour d'une string suivie pour proposer les valeurs numeriques proches a tester/write/freeze
     - [x] Tracker sources UI string : reduction des sources numeriques candidates selon les changements successifs de l'affichage
     - [x] Enquete UI string radar : empreintes globales de blocs writable, detection des blocs modifies et extraction automatique des valeurs numeriques candidates (`globalValueHits`)
+    - [x] Finition radar UI string : filtres type/variant et selection par lots pour tester les sources numeriques sans ecrire 500 adresses d'un coup
     - [x] Tests tracker UI string : buffer simulant source numerique + texte affiche ASCII/UTF-16 + variante fixed-point
     - [ ] Validation benchmarks sur KillEngineTestTarget et gros volumes de candidats

@@ -171,6 +171,8 @@ export const useAppStore = defineStore('app', () => {
   const writeSafetyWarning = ref('')
   const writeSafetyAcknowledged = ref(false)
   const freezeEnabled = ref(false)
+  const freezeIntervalMs = ref(100)
+  const freezeIntervalResult = ref<Record<string, unknown> | null>(null)
   const finalCandidateTargets = ref<Array<Record<string, unknown>>>([])
   const ignoredCandidateAddresses = ref<string[]>([])
   const keptCandidateAddresses = ref<string[]>([])
@@ -1697,6 +1699,26 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function setFreezeInterval(intervalMs: number) {
+    const requested = Math.round(Number(intervalMs))
+    const clamped = Math.min(2000, Math.max(10, Number.isFinite(requested) ? requested : 100))
+    freezeIntervalMs.value = clamped
+    try {
+      const result = await backend.getController().setFreezeInterval(clamped)
+      freezeIntervalResult.value = result
+      if (result.success === false) {
+        addActionLog('freeze', 'Intervalle freeze refusé', String(result.error ?? 'Erreur inconnue.'), 'warning')
+        return
+      }
+      const applied = Math.round(Number(result.intervalMs ?? clamped))
+      if (Number.isFinite(applied)) freezeIntervalMs.value = applied
+      addActionLog('freeze', 'Intervalle freeze', `${freezeIntervalMs.value} ms.`, 'success')
+    } catch (e) {
+      freezeIntervalResult.value = { success: false, error: String(e) }
+      addActionLog('freeze', 'Intervalle freeze échoué', String(e), 'error')
+    }
+  }
+
   async function nextCandidatePage() {
     if (!candidatePage.value) return
     const nextStart = (candidatePageIndex.value + 1) * candidatePageSize.value
@@ -1797,6 +1819,8 @@ export const useAppStore = defineStore('app', () => {
     writeSafetyAcknowledged,
     canWriteSelectedValue,
     freezeEnabled,
+    freezeIntervalMs,
+    freezeIntervalResult,
     finalCandidateTargets,
     ignoredCandidateAddresses,
     keptCandidateAddresses,
@@ -1870,6 +1894,7 @@ export const useAppStore = defineStore('app', () => {
     rollbackLastWriteBatch,
     freezeCandidateCurrent,
     toggleFreeze,
+    setFreezeInterval,
     pushMessage,
     tellNewValue,
     doGuidedChange,

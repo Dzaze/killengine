@@ -64,6 +64,12 @@ const uiStringSourceRadiusOptions = [
   { value: 16 * 1024 * 1024, label: '16 Mo' },
 ]
 const uiStringSourceSafeSelectionLimit = 25
+const uiStringSourceTypeFilter = ref('all')
+const uiStringSourceVariantFilter = ref('all')
+const uiStringSourceBatchSize = ref(10)
+const uiStringSourceBatchIndex = ref(0)
+const uiStringSourceBatchSizeOptions = [5, 10, 25, 50]
+const freezeIntervalPresets = [16, 33, 50, 100, 250, 500]
 
 function setUiStringInvestigationActive(active: boolean) {
   uiStringLiveInvestigation.value = active
@@ -409,6 +415,36 @@ function chooseNonOverlappingSources(sources: UiStringSourceCandidate[]) {
   return chosen
 }
 
+const filteredUiStringSourceCandidates = computed(() => uiStringSourceCandidates.value.filter((candidate) => {
+  const variant = candidate.variantLabel || '-'
+  return (uiStringSourceTypeFilter.value === 'all' || candidate.type === uiStringSourceTypeFilter.value)
+    && (uiStringSourceVariantFilter.value === 'all' || variant === uiStringSourceVariantFilter.value)
+}))
+
+const uiStringSourceTypeOptions = computed(() => Array.from(new Set(
+  uiStringSourceCandidates.value.map((candidate) => candidate.type),
+)).sort())
+
+const uiStringSourceVariantOptions = computed(() => Array.from(new Set(
+  uiStringSourceCandidates.value.map((candidate) => candidate.variantLabel || '-'),
+)).sort())
+
+const safeFilteredUiStringSources = computed(() => chooseNonOverlappingSources(filteredUiStringSourceCandidates.value))
+
+const uiStringSourceBatchCount = computed(() => Math.max(1, Math.ceil(
+  safeFilteredUiStringSources.value.length / uiStringSourceBatchSize.value,
+)))
+
+const boundedUiStringSourceBatchIndex = computed(() => Math.min(
+  uiStringSourceBatchIndex.value,
+  uiStringSourceBatchCount.value - 1,
+))
+
+const currentUiStringSourceBatch = computed(() => {
+  const start = boundedUiStringSourceBatchIndex.value * uiStringSourceBatchSize.value
+  return safeFilteredUiStringSources.value.slice(start, start + uiStringSourceBatchSize.value)
+})
+
 function isUiSourceSelected(candidate: UiStringSourceCandidate) {
   return selectedUiSourceAddresses.value.includes(sourceKey(candidate))
 }
@@ -423,7 +459,7 @@ function toggleUiSourceSelection(candidate: UiStringSourceCandidate) {
 }
 
 function selectAllUiSources() {
-  selectedUiSourceAddresses.value = chooseNonOverlappingSources(uiStringSourceCandidates.value).map(sourceKey)
+  selectedUiSourceAddresses.value = safeFilteredUiStringSources.value.map(sourceKey)
 }
 
 function clearUiSourceSelection() {
@@ -431,7 +467,19 @@ function clearUiSourceSelection() {
 }
 
 function selectTopUiSources(limit = uiStringSourceSafeSelectionLimit) {
-  selectedUiSourceAddresses.value = chooseNonOverlappingSources(uiStringSourceCandidates.value).slice(0, limit).map(sourceKey)
+  selectedUiSourceAddresses.value = safeFilteredUiStringSources.value.slice(0, limit).map(sourceKey)
+}
+
+function selectUiSourceBatch() {
+  selectedUiSourceAddresses.value = currentUiStringSourceBatch.value.map(sourceKey)
+}
+
+function previousUiSourceBatch() {
+  uiStringSourceBatchIndex.value = Math.max(0, boundedUiStringSourceBatchIndex.value - 1)
+}
+
+function nextUiSourceBatch() {
+  uiStringSourceBatchIndex.value = Math.min(uiStringSourceBatchCount.value - 1, boundedUiStringSourceBatchIndex.value + 1)
 }
 
 async function analyzeUiStringSources(candidate?: UiStringCandidate, radiusOverrideBytes = uiStringSourceRadiusBytes.value) {
@@ -493,7 +541,7 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate, radiusOverr
       error: firstError,
     }
     uiStringSourceCandidates.value = candidates
-    selectedUiSourceAddresses.value = candidates.map(sourceKey)
+    selectedUiSourceAddresses.value = chooseNonOverlappingSources(candidates).slice(0, uiStringSourceSafeSelectionLimit).map(sourceKey)
   } catch (e) {
     uiStringSourceResult.value = {
       success: false,
@@ -570,7 +618,7 @@ async function autoInspectUiStrings() {
 }
 
 function selectedUiSourceCandidates() {
-  if (selectedUiSourceAddresses.value.length === 0) return uiStringSourceCandidates.value
+  if (selectedUiSourceAddresses.value.length === 0) return filteredUiStringSourceCandidates.value
   const selected = new Set(selectedUiSourceAddresses.value)
   return uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate)))
 }
@@ -595,7 +643,7 @@ async function trackUiStringSources() {
     const result = await controller.trackUiStringSources(selectedUiSourceCandidates(), value)
     uiStringSourceTrackResult.value = result
     uiStringSourceCandidates.value = result.survivors ?? []
-    selectedUiSourceAddresses.value = uiStringSourceCandidates.value.map(sourceKey)
+    selectedUiSourceAddresses.value = chooseNonOverlappingSources(uiStringSourceCandidates.value).slice(0, uiStringSourceSafeSelectionLimit).map(sourceKey)
     uiStringValue.value = value
   } catch (e) {
     uiStringSourceTrackResult.value = {
@@ -1400,12 +1448,34 @@ onMounted(() => {
         <div v-if="uiStringSourceCandidates.length > 0" class="source-list">
           <div class="source-list-title">
             <strong>Sources numériques proches</strong>
-            <span>{{ formatNumber(uiStringSourceCandidates.length) }} source(s) · {{ formatNumber(selectedUiSourceAddresses.length) }} cochée(s)</span>
+            <span>{{ formatNumber(filteredUiStringSourceCandidates.length) }}/{{ formatNumber(uiStringSourceCandidates.length) }} source(s) · {{ formatNumber(selectedUiSourceAddresses.length) }} cochée(s)</span>
+            <div class="source-filter-bar">
+              <select v-model="uiStringSourceTypeFilter" class="input select compact-input" @change="uiStringSourceBatchIndex = 0">
+                <option value="all">Tous types</option>
+                <option v-for="type in uiStringSourceTypeOptions" :key="type" :value="type">{{ type }}</option>
+              </select>
+              <select v-model="uiStringSourceVariantFilter" class="input select compact-input" @change="uiStringSourceBatchIndex = 0">
+                <option value="all">Tous encodages</option>
+                <option v-for="variant in uiStringSourceVariantOptions" :key="variant" :value="variant">{{ variant }}</option>
+              </select>
+              <select v-model.number="uiStringSourceBatchSize" class="input select compact-input" @change="uiStringSourceBatchIndex = 0">
+                <option v-for="size in uiStringSourceBatchSizeOptions" :key="size" :value="size">{{ size }}/lot</option>
+              </select>
+            </div>
             <div class="source-actions">
-              <button class="btn btn-secondary compact" type="button" @click="selectTopUiSources()">
+              <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="previousUiSourceBatch()">
+                Prec
+              </button>
+              <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="selectUiSourceBatch()">
+                Lot {{ boundedUiStringSourceBatchIndex + 1 }}/{{ uiStringSourceBatchCount }}
+              </button>
+              <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="nextUiSourceBatch()">
+                Suiv
+              </button>
+              <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="selectTopUiSources()">
                 Top {{ uiStringSourceSafeSelectionLimit }}
               </button>
-              <button class="btn btn-secondary compact" type="button" @click="selectAllUiSources()">
+              <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="selectAllUiSources()">
                 Tout cocher sûr
               </button>
               <button class="btn btn-secondary compact" type="button" @click="clearUiSourceSelection()">
@@ -1425,7 +1495,7 @@ onMounted(() => {
             Sélection massive : écrire beaucoup d'adresses peut rendre SC2 instable. Teste plutôt par petits paquets.
           </p>
           <div
-            v-for="candidate in uiStringSourceCandidates"
+            v-for="candidate in filteredUiStringSourceCandidates"
             :key="sourceKey(candidate)"
             class="source-row"
           >
@@ -1582,6 +1652,16 @@ onMounted(() => {
           <button class="btn btn-secondary" @click="store.rollbackLastWrite()">
             {{ $t('write.rollback') }}
           </button>
+          <label class="freeze-interval-control">
+            <span>Freeze</span>
+            <select
+              v-model.number="store.freezeIntervalMs"
+              class="input select"
+              @change="store.setFreezeInterval(store.freezeIntervalMs)"
+            >
+              <option v-for="ms in freezeIntervalPresets" :key="ms" :value="ms">{{ ms }} ms</option>
+            </select>
+          </label>
           <button class="btn btn-secondary" :disabled="hasSelectedWriteTargets || (store.freezeEnabled ? !store.selectedCandidateAddress : !store.canWriteSelectedValue)" @click="store.toggleFreeze()">
             {{ store.freezeEnabled ? $t('write.stopFreeze') : $t('write.freeze') }}
           </button>
@@ -1607,12 +1687,13 @@ onMounted(() => {
             Je confirme cette écriture mémoire
           </label>
         </div>
-        <div v-if="store.writeResult" class="metrics">
-          <span>{{ store.writeResult.bytesWritten }} B</span>
-          <span v-if="store.writeResult.written !== undefined">Écrites: {{ formatNumber(store.writeResult.written) }}/{{ formatNumber(store.writeResult.total) }}</span>
-          <span v-if="store.writeResult.protectionChanged">VirtualProtectEx{{ store.writeResult.protectionChangedCount ? `: ${formatNumber(store.writeResult.protectionChangedCount)}` : '' }}</span>
-          <span v-if="store.writeResult.verified">{{ $t('write.verified') }}</span>
-          <span v-if="store.writeResult.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
+        <div v-if="store.writeResult || store.freezeIntervalResult" class="metrics">
+          <span v-if="store.writeResult">{{ store.writeResult.bytesWritten }} B</span>
+          <span v-if="store.writeResult?.written !== undefined">Écrites: {{ formatNumber(store.writeResult.written) }}/{{ formatNumber(store.writeResult.total) }}</span>
+          <span v-if="store.writeResult?.protectionChanged">VirtualProtectEx{{ store.writeResult.protectionChangedCount ? `: ${formatNumber(store.writeResult.protectionChangedCount)}` : '' }}</span>
+          <span v-if="store.writeResult?.verified">{{ $t('write.verified') }}</span>
+          <span v-if="store.writeResult?.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
+          <span v-if="store.freezeIntervalResult">intervalle: {{ store.freezeIntervalMs }} ms</span>
         </div>
         <p v-if="store.writeResult?.error" class="error">{{ store.writeResult.error }}</p>
         <div v-if="writeFailures.length" class="write-fail-list">
@@ -2364,6 +2445,20 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
+.source-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.compact-input {
+  min-height: 28px;
+  max-width: 150px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .source-warning {
   margin: 2px 0 6px;
   color: var(--warning);
@@ -2417,7 +2512,16 @@ onMounted(() => {
 }
 
 .write-controls {
-  grid-template-columns: minmax(170px, 1fr) 110px minmax(140px, 1fr) auto auto auto;
+  grid-template-columns: minmax(170px, 1fr) 110px minmax(140px, 1fr) auto auto minmax(118px, auto) auto;
+}
+
+.freeze-interval-control {
+  display: grid;
+  grid-template-columns: auto 76px;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 .multi-target-summary {

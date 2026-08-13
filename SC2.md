@@ -67,7 +67,7 @@ StarCraft 2 est un jeu AAA qui pose des défis spécifiques au scan mémoire cla
 ### Cause 1 : Le jeu réécrit plus vite que KillEngine
 SC2 met à jour ses valeurs ~60 fois par seconde (toutes les ~16 ms). Le freeze par défaut de KillEngine tourne à **100 ms** → le jeu réécrit 6 fois entre deux écritures.
 
-**Solution** : Réduis l'intervalle de freeze via l'API `setFreezeInterval(16)` (16 ms = une frame).
+**Solution** : Dans **Expert → Write / Freeze**, règle l'intervalle de freeze sur **16 ms** (une frame). Le bouton appelle `setFreezeInterval(16)` côté backend.
 - Bornes : 10 ms (très agressif) à 2000 ms (économique)
 - Valeur recommandée pour SC2 : **16 ms**
 
@@ -91,7 +91,7 @@ Voir la section en haut de ce document : SC2 consomme 2–3 Go de RAM, le snapsh
 ```yaml
 1. Profondeur scan  : Auto ou 2048 Mo minimum
 2. Type             : Int32 (pas Float pour les ressources)
-3. Intervalle freeze : 16 ms (setFreezeInterval) si la valeur clignote
+3. Intervalle freeze : 16 ms dans Write / Freeze si la valeur clignote
 4. VirtualProtectEx : automatique (Phase 16), vérifie les logs
 5. Double stockage  : freeze les deux candidats si tu en trouves plusieurs
 6. Find what writes : (Phase 17 future) pour remonter à la vraie source
