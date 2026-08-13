@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
@@ -52,8 +52,10 @@ const selectedUiStringAddresses = ref<string[]>([])
 const selectedUiSourceAddresses = ref<string[]>([])
 const uiStringLiveInvestigation = ref(false)
 const uiStringLiveStartedAt = ref<number | null>(null)
+const uiStringInvestigationElapsed = ref(0)
 const uiStringInvestigationStartResult = ref<UiStringInvestigationStartResult | null>(null)
 const uiStringInvestigationFinishResult = ref<UiStringInvestigationFinishResult | null>(null)
+let uiStringInvestigationTimer: ReturnType<typeof setInterval> | null = null
 const uiStringSourceRadiusOptions = [
   { value: 64 * 1024, label: '64 Ko' },
   { value: 256 * 1024, label: '256 Ko' },
@@ -62,9 +64,29 @@ const uiStringSourceRadiusOptions = [
   { value: 16 * 1024 * 1024, label: '16 Mo' },
 ]
 
-const uiStringInvestigationElapsed = computed(() => {
-  if (!uiStringLiveStartedAt.value) return 0
-  return Math.max(0, Math.floor((Date.now() - uiStringLiveStartedAt.value) / 1000))
+function setUiStringInvestigationActive(active: boolean) {
+  uiStringLiveInvestigation.value = active
+  uiStringLiveStartedAt.value = active ? Date.now() : null
+  uiStringInvestigationElapsed.value = 0
+
+  if (uiStringInvestigationTimer) {
+    clearInterval(uiStringInvestigationTimer)
+    uiStringInvestigationTimer = null
+  }
+
+  if (active) {
+    uiStringInvestigationTimer = setInterval(() => {
+      if (!uiStringLiveStartedAt.value) return
+      uiStringInvestigationElapsed.value = Math.max(0, Math.floor((Date.now() - uiStringLiveStartedAt.value) / 1000))
+    }, 1000)
+  }
+}
+
+onBeforeUnmount(() => {
+  if (uiStringInvestigationTimer) {
+    clearInterval(uiStringInvestigationTimer)
+    uiStringInvestigationTimer = null
+  }
 })
 
 async function toggleUiStringLiveInvestigation() {
@@ -85,10 +107,10 @@ async function toggleUiStringLiveInvestigation() {
         maxWindows: 96,
         maxBytesMb: 24,
       })
-      uiStringInvestigationStartResult.value = result
-      if (result.success) {
-        uiStringLiveInvestigation.value = true
-        uiStringLiveStartedAt.value = Date.now()
+      const capturedWindows = Number(result.windows ?? 0)
+      uiStringInvestigationStartResult.value = capturedWindows > 0 ? { ...result, success: true } : result
+      if (result.success || capturedWindows > 0) {
+        setUiStringInvestigationActive(true)
       }
     } catch (e) {
       uiStringInvestigationStartResult.value = { success: false, windows: 0, error: String(e) }
@@ -126,8 +148,7 @@ async function toggleUiStringLiveInvestigation() {
       error: String(e),
     }
   } finally {
-    uiStringLiveInvestigation.value = false
-    uiStringLiveStartedAt.value = null
+    setUiStringInvestigationActive(false)
     uiStringBusy.value = false
   }
 }
@@ -1121,10 +1142,10 @@ onMounted(() => {
             <div class="scanner-core"></div>
           </div>
           <div class="investigation-copy">
-            <strong>{{ uiStringLiveInvestigation ? 'Enquête live active' : 'Enquête live prête' }}</strong>
+            <strong>{{ uiStringLiveInvestigation ? 'Enquête armée' : 'Enquête live prête' }}</strong>
             <span>
               {{ uiStringLiveInvestigation
-                ? `Fais varier la valeur en jeu maintenant · ${formatNumber(uiStringInvestigationElapsed)} s`
+                ? `Snapshot capturé. Modifie la valeur dans SC2, puis clique Arrêter et comparer · ${formatNumber(uiStringInvestigationElapsed)} s`
                 : 'Démarre avant de modifier la ressource pour chercher au-delà de la simple string UI.' }}
             </span>
           </div>
@@ -1133,8 +1154,8 @@ onMounted(() => {
             <span>sources</span>
             <span>backrefs</span>
           </div>
-          <button class="btn compact" :class="uiStringLiveInvestigation ? 'btn-secondary' : 'btn-primary'" type="button" @click="toggleUiStringLiveInvestigation()">
-            {{ uiStringLiveInvestigation ? 'Arrêter enquête' : 'Démarrer enquête' }}
+          <button class="btn compact" :class="uiStringLiveInvestigation ? 'btn-secondary' : 'btn-primary'" type="button" :disabled="uiStringBusy" @click="toggleUiStringLiveInvestigation()">
+            {{ uiStringLiveInvestigation ? 'Arrêter et comparer' : 'Démarrer enquête' }}
           </button>
         </div>
         <div v-if="uiStringInvestigationStartResult" class="metrics">
