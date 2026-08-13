@@ -48,6 +48,8 @@ const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
 const selectedUiSourceAddresses = ref<string[]>([])
+const uiStringLiveInvestigation = ref(false)
+const uiStringLiveStartedAt = ref<number | null>(null)
 const uiStringSourceRadiusOptions = [
   { value: 64 * 1024, label: '64 Ko' },
   { value: 256 * 1024, label: '256 Ko' },
@@ -55,6 +57,16 @@ const uiStringSourceRadiusOptions = [
   { value: 4 * 1024 * 1024, label: '4 Mo' },
   { value: 16 * 1024 * 1024, label: '16 Mo' },
 ]
+
+const uiStringInvestigationElapsed = computed(() => {
+  if (!uiStringLiveStartedAt.value) return 0
+  return Math.max(0, Math.floor((Date.now() - uiStringLiveStartedAt.value) / 1000))
+})
+
+function toggleUiStringLiveInvestigation() {
+  uiStringLiveInvestigation.value = !uiStringLiveInvestigation.value
+  uiStringLiveStartedAt.value = uiStringLiveInvestigation.value ? Date.now() : null
+}
 
 async function runPointerScan() {
   if (!pointerScanAddress.value.trim()) return
@@ -1038,6 +1050,29 @@ onMounted(() => {
             Tracker sources
           </button>
         </div>
+        <div class="ui-investigation" :class="{ active: uiStringLiveInvestigation }">
+          <div class="scanner-visual" aria-hidden="true">
+            <div class="scanner-ring"></div>
+            <div class="scanner-sweep"></div>
+            <div class="scanner-core"></div>
+          </div>
+          <div class="investigation-copy">
+            <strong>{{ uiStringLiveInvestigation ? 'Enquête live active' : 'Enquête live prête' }}</strong>
+            <span>
+              {{ uiStringLiveInvestigation
+                ? `Fais varier la valeur en jeu maintenant · ${formatNumber(uiStringInvestigationElapsed)} s`
+                : 'Démarre avant de modifier la ressource pour chercher au-delà de la simple string UI.' }}
+            </span>
+          </div>
+          <div class="investigation-steps">
+            <span>strings</span>
+            <span>sources</span>
+            <span>backrefs</span>
+          </div>
+          <button class="btn compact" :class="uiStringLiveInvestigation ? 'btn-secondary' : 'btn-primary'" type="button" @click="toggleUiStringLiveInvestigation()">
+            {{ uiStringLiveInvestigation ? 'Arrêter enquête' : 'Démarrer enquête' }}
+          </button>
+        </div>
         <div class="expert-flags ui-string-flags">
           <label class="checkbox-label">
             <input v-model="uiStringAscii" type="checkbox" :disabled="uiStringBusy" />
@@ -1852,6 +1887,107 @@ onMounted(() => {
   margin-top: 8px;
 }
 
+.ui-investigation {
+  display: grid;
+  grid-template-columns: 54px minmax(180px, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 64px;
+  margin-top: 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(122, 162, 247, 0.18);
+  border-radius: 6px;
+  background: rgba(13, 17, 32, 0.46);
+}
+
+.ui-investigation.active {
+  border-color: rgba(158, 206, 106, 0.46);
+  box-shadow: inset 0 0 0 1px rgba(158, 206, 106, 0.08);
+}
+
+.scanner-visual {
+  position: relative;
+  width: 44px;
+  height: 44px;
+}
+
+.scanner-ring,
+.scanner-sweep,
+.scanner-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.scanner-ring {
+  border: 1px solid rgba(122, 162, 247, 0.44);
+  background:
+    linear-gradient(90deg, rgba(122, 162, 247, 0.22) 1px, transparent 1px),
+    linear-gradient(rgba(122, 162, 247, 0.22) 1px, transparent 1px);
+  background-size: 11px 11px;
+}
+
+.scanner-sweep {
+  background: conic-gradient(from 0deg, rgba(158, 206, 106, 0.74), rgba(158, 206, 106, 0.08) 42deg, transparent 80deg);
+  opacity: 0.28;
+}
+
+.ui-investigation.active .scanner-sweep {
+  animation: scanner-spin 1.1s linear infinite;
+  opacity: 0.72;
+}
+
+.scanner-core {
+  inset: 17px;
+  background: var(--accent);
+  box-shadow: 0 0 12px rgba(122, 162, 247, 0.62);
+}
+
+.ui-investigation.active .scanner-core {
+  background: var(--success);
+  box-shadow: 0 0 14px rgba(158, 206, 106, 0.78);
+}
+
+.investigation-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.investigation-copy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.investigation-copy span,
+.investigation-steps span {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.investigation-steps {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.investigation-steps span {
+  padding: 4px 7px;
+  border: 1px solid rgba(122, 162, 247, 0.18);
+  border-radius: 4px;
+  background: var(--bg-primary);
+}
+
+.ui-investigation.active .investigation-steps span {
+  border-color: rgba(158, 206, 106, 0.28);
+  color: var(--success);
+}
+
+@keyframes scanner-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .ui-string-list {
   display: flex;
   max-height: 220px;
@@ -2438,6 +2574,7 @@ onMounted(() => {
   .next-controls,
   .unknown-controls,
   .ui-string-controls,
+  .ui-investigation,
   .ui-string-row,
   .origin-row,
   .source-row,
