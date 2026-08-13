@@ -12,6 +12,7 @@
 #include "pointer/pointer_chain.h"
 #include "pointer/pointer_scanner.h"
 #include "patch/aob_scanner.h"
+#include "patch/code_patch.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "scanner/display_value_tracker.h"
@@ -1181,6 +1182,7 @@ bool ApplicationController::attachProcess(int pid) {
     m_snapshot.clear();
     m_lastAutoWriteTargets.clear();
     m_chatMemoryTargets.clear();
+    m_activeCodePatches.clear();
     m_activeProfileTargets.clear();
     m_autoWriteValueHistory.clear();
 
@@ -4904,6 +4906,105 @@ QVariantMap ApplicationController::generateAobSignature(const QString& addressHe
     result["moduleOffset"] = moduleInfo.value("moduleOffset");
     result["error"] = read.errorMessage;
     result["warning"] = "Signature exacte brute. Elle peut nécessiter des wildcards si l'instruction contient offsets/relocations.";
+    return result;
+}
+
+QVariantMap ApplicationController::applyCodePatch(const QString& addressHex, const QString& bytesText, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = addressHex;
+    result["patchBytes"] = bytesText;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+    if (m_activeCodePatches.contains(address)) {
+        result["error"] = "Un patch actif existe déjà à cette adresse. Restaure-le avant d'en appliquer un autre.";
+        result["active"] = true;
+        return result;
+    }
+
+    const auto patch = killcore::parsePatchBytes(bytesText);
+    if (!patch.isValid()) {
+        result["error"] = patch.error;
+        return result;
+    }
+    if (patch.bytes.size() > 64) {
+        result["error"] = "Patch trop long pour cette version expérimentale (64 bytes maximum).";
+        return result;
+    }
+
+    const bool verify = options.value("verify", true).toBool();
+    const auto applied = killcore::applyCodePatch(m_handle, address, patch.bytes, verify);
+    result["success"] = applied.success;
+    result["verified"] = applied.verified;
+    result["protectionChanged"] = applied.protectionChanged;
+    result["bytesWritten"] = static_cast<int>(applied.bytesWritten);
+    result["originalBytes"] = QString::fromLatin1(applied.previousBytes.toHex(' ').toUpper());
+    result["writtenBytes"] = QString::fromLatin1(patch.bytes.toHex(' ').toUpper());
+    result["error"] = applied.error;
+
+    if (applied.success) {
+        ActiveCodePatch active;
+        active.address = address;
+        active.originalBytes = applied.previousBytes;
+        active.patchBytes = patch.bytes;
+        m_activeCodePatches.insert(address, active);
+        result["active"] = true;
+        KE_LOG_WARN() << "Code patch applied at 0x" << std::hex << address
+                      << " bytes=" << std::dec << patch.bytes.size()
+                      << " protectionChanged=" << applied.protectionChanged;
+    }
+
+    return result;
+}
+
+QVariantMap ApplicationController::restoreCodePatch(const QString& addressHex) {
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = addressHex;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const auto it = m_activeCodePatches.constFind(address);
+    if (it == m_activeCodePatches.constEnd()) {
+        result["error"] = "Aucun patch actif connu à cette adresse.";
+        result["active"] = false;
+        return result;
+    }
+
+    const auto restored = killcore::restoreCodePatch(m_handle, address, it->originalBytes, true);
+    result["success"] = restored.success;
+    result["verified"] = restored.verified;
+    result["protectionChanged"] = restored.protectionChanged;
+    result["bytesWritten"] = static_cast<int>(restored.bytesWritten);
+    result["restoredBytes"] = QString::fromLatin1(it->originalBytes.toHex(' ').toUpper());
+    result["error"] = restored.error;
+
+    if (restored.success) {
+        m_activeCodePatches.remove(address);
+        result["active"] = false;
+        KE_LOG_WARN() << "Code patch restored at 0x" << std::hex << address;
+    } else {
+        result["active"] = true;
+    }
+
     return result;
 }
 

@@ -62,6 +62,8 @@ add_library(killcore STATIC
     # Patch / AOB signatures (Phase 18 — trainer engine)
     patch/aob_scanner.h
     patch/aob_scanner.cpp
+    patch/code_patch.h
+    patch/code_patch.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

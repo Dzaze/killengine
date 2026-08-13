@@ -5,6 +5,7 @@ import {
   backend,
   type AobScanResult,
   type AobSignatureResult,
+  type CodePatchResult,
   type MemoryWriteTarget,
   type PointerChainInfo,
   type PointerChainResolveResult,
@@ -45,6 +46,10 @@ const aobBusy = ref(false)
 const aobResult = ref<AobScanResult | null>(null)
 const aobSignatureBusy = ref(false)
 const aobSignatureResult = ref<AobSignatureResult | null>(null)
+const codePatchAddress = ref('')
+const codePatchBytes = ref('90 90')
+const codePatchBusy = ref(false)
+const codePatchResult = ref<CodePatchResult | null>(null)
 
 // Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
 const uiStringValue = ref('')
@@ -321,7 +326,52 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
 
 function useAobMatchAddress(address: string) {
   store.memoryPreviewAddress = address
+  codePatchAddress.value = address
   void store.readMemoryPreview(address, 128)
+}
+
+function selectAobPatchAddress(address: string) {
+  codePatchAddress.value = address
+  store.memoryPreviewAddress = address
+}
+
+async function applySelectedCodePatch() {
+  const address = codePatchAddress.value.trim()
+  const bytes = codePatchBytes.value.trim()
+  if (!address || !bytes) return
+  codePatchBusy.value = true
+  codePatchResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.applyCodePatch) {
+      codePatchResult.value = { success: false, error: 'Methode backend indisponible.' }
+      return
+    }
+    codePatchResult.value = await controller.applyCodePatch(address, bytes, { verify: true })
+  } catch (e) {
+    codePatchResult.value = { success: false, error: String(e) }
+  } finally {
+    codePatchBusy.value = false
+  }
+}
+
+async function restoreSelectedCodePatch() {
+  const address = codePatchAddress.value.trim()
+  if (!address) return
+  codePatchBusy.value = true
+  codePatchResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.restoreCodePatch) {
+      codePatchResult.value = { success: false, error: 'Methode backend indisponible.' }
+      return
+    }
+    codePatchResult.value = await controller.restoreCodePatch(address)
+  } catch (e) {
+    codePatchResult.value = { success: false, error: String(e) }
+  } finally {
+    codePatchBusy.value = false
+  }
 }
 
 function uiStringKey(candidate: UiStringCandidate) {
@@ -1932,12 +1982,45 @@ onMounted(() => {
         <p v-if="aobSignatureResult?.warning" class="hint">{{ aobSignatureResult.warning }}</p>
         <p v-if="aobSignatureResult?.error" class="error">{{ aobSignatureResult.error }}</p>
         <p v-if="aobResult?.error" class="error">{{ aobResult.error }}</p>
+        <div class="controls code-patch-controls">
+          <input
+            v-model="codePatchAddress"
+            class="input"
+            placeholder="Adresse patch (0x...)"
+            :disabled="codePatchBusy"
+          />
+          <input
+            v-model="codePatchBytes"
+            class="input"
+            placeholder="Bytes exacts: 90 90"
+            :disabled="codePatchBusy"
+            @keyup.enter="applySelectedCodePatch()"
+          />
+          <button class="btn btn-primary" :disabled="codePatchBusy || !codePatchAddress.trim() || !codePatchBytes.trim()" @click="applySelectedCodePatch()">
+            <span v-if="codePatchBusy" class="btn-spinner" aria-hidden="true"></span>
+            Appliquer
+          </button>
+          <button class="btn btn-secondary" :disabled="codePatchBusy || !codePatchAddress.trim()" @click="restoreSelectedCodePatch()">
+            Restaurer
+          </button>
+        </div>
+        <div v-if="codePatchResult" class="metrics">
+          <span>Patch: {{ codePatchResult.success ? 'OK' : 'FAIL' }}</span>
+          <span v-if="codePatchResult.bytesWritten">{{ formatNumber(codePatchResult.bytesWritten) }} o</span>
+          <span v-if="codePatchResult.verified">vérifié</span>
+          <span v-if="codePatchResult.protectionChanged">VirtualProtectEx</span>
+          <span v-if="codePatchResult.active">actif</span>
+        </div>
+        <p v-if="codePatchResult?.originalBytes" class="hint">Originaux: {{ codePatchResult.originalBytes }}</p>
+        <p v-if="codePatchResult?.restoredBytes" class="hint">Restaurés: {{ codePatchResult.restoredBytes }}</p>
+        <p v-if="codePatchResult?.error" class="error">{{ codePatchResult.error }}</p>
         <div v-if="aobResult?.matches?.length" class="aob-list">
           <div v-for="match in aobResult.matches.slice(0, 80)" :key="match.address" class="aob-row">
             <code>0x{{ match.address }}</code>
             <span>{{ match.module || match.memoryType || '-' }}</span>
             <span>{{ match.moduleOffset ? `+0x${match.moduleOffset}` : match.protection || '-' }}</span>
             <button class="btn btn-secondary compact" type="button" @click="useAobMatchAddress(match.address)">Lire</button>
+            <button class="btn btn-primary compact" type="button" @click="selectAobPatchAddress(match.address)">Patch</button>
           </div>
         </div>
       </section>
@@ -3239,6 +3322,12 @@ onMounted(() => {
   align-items: center;
 }
 
+.code-patch-controls {
+  grid-template-columns: minmax(170px, 1fr) minmax(180px, 1fr) auto auto;
+  align-items: center;
+  margin-top: 10px;
+}
+
 .aob-flags {
   margin-top: 8px;
 }
@@ -3251,7 +3340,7 @@ onMounted(() => {
 
 .aob-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(120px, 180px) minmax(90px, 140px) auto;
+  grid-template-columns: minmax(150px, 1fr) minmax(120px, 180px) minmax(90px, 140px) auto auto;
   gap: 8px;
   align-items: center;
   min-height: 34px;
@@ -3344,6 +3433,7 @@ onMounted(() => {
   .candidate-toolbar,
   .candidate-row,
   .aob-controls,
+  .code-patch-controls,
   .aob-row,
   .pointer-chain-controls {
     grid-template-columns: 1fr;

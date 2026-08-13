@@ -1,4 +1,5 @@
 #include "patch/aob_scanner.h"
+#include "patch/code_patch.h"
 
 #include <gtest/gtest.h>
 
@@ -49,4 +50,18 @@ TEST(AobScanner, FormatsBytesAsAobPattern) {
     const QByteArray bytes = QByteArray::fromHex("488B05DEADBEEF");
 
     EXPECT_EQ(bytesToAobPattern(bytes), "48 8B 05 DE AD BE EF");
+}
+
+TEST(CodePatch, ParsesExactPatchBytes) {
+    const auto bytes = parsePatchBytes("90 90 0xCC");
+
+    ASSERT_TRUE(bytes.isValid()) << bytes.error.toStdString();
+    EXPECT_EQ(bytes.bytes, QByteArray::fromHex("9090CC"));
+}
+
+TEST(CodePatch, RejectsWildcardPatchBytes) {
+    const auto bytes = parsePatchBytes("90 ?? CC");
+
+    EXPECT_FALSE(bytes.isValid());
+    EXPECT_TRUE(bytes.bytes.isEmpty());
 }

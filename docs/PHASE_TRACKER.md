@@ -216,7 +216,8 @@ Prerequisites before Phase 12:
     - [x] UI Expert : panneau `AOB signatures` avec filtres code exécutable/module image et liste module+offset
     - [x] Tests unitaires `AobScanner.*` pour parser, wildcards et matches multiples
     - [x] Génération de signature à partir des hits `Find What Writes`
-    - [ ] Patch enable/disable avec sauvegarde/restauration des bytes originaux
+    - [x] Patch manuel de bytes exacts avec sauvegarde/restauration des bytes originaux
+    - [ ] Patch assisté : templates NOP/RET/JMP selon instruction désassemblée
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM

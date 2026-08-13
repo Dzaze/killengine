@@ -192,6 +192,13 @@ public:
     /// options keys: beforeBytes, length.
     Q_INVOKABLE QVariantMap generateAobSignature(const QString& addressHex, const QVariantMap& options);
 
+    /// Applique un patch de bytes exacts à une adresse code, en gardant les bytes originaux pour restauration.
+    /// bytesText: "90 90 CC", options keys: verify.
+    Q_INVOKABLE QVariantMap applyCodePatch(const QString& addressHex, const QString& bytesText, const QVariantMap& options);
+
+    /// Restaure les bytes originaux d'un patch actif.
+    Q_INVOKABLE QVariantMap restoreCodePatch(const QString& addressHex);
+
     /// Configure l'intervalle du freeze polling (10-2000 ms, 100 ms par défaut).
     Q_INVOKABLE QVariantMap setFreezeInterval(int intervalMs);
 
@@ -352,6 +359,12 @@ private:
         killcore::ValueType type{killcore::ValueType::Int32};
     };
 
+    struct ActiveCodePatch {
+        uint64_t address{0};
+        QByteArray originalBytes;
+        QByteArray patchBytes;
+    };
+
     bool                    m_attached{false};
     QString                 m_processName;
     int                     m_pid{0};
@@ -367,6 +380,7 @@ private:
     QList<WriteRecord>       m_writeHistory;
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
     QList<AutoWriteTarget>   m_chatMemoryTargets;
+    QHash<uint64_t, ActiveCodePatch> m_activeCodePatches;
     qint64                   m_uiInvestigationStartedMs{0};
     QList<ActiveProfileTarget> m_activeProfileTargets;
     QStringList              m_autoWriteValueHistory;
