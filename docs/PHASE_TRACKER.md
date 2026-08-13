@@ -169,6 +169,7 @@ Prerequisites before Phase 12:
     - [x] Unknown guidé en Mode Expert : boutons augmenté/diminué/stable/changé avec historique compare/raffinage
     - [x] Unknown SC2 plus sobre : capture filtrable writable/copy-on-write et raffinage backend sur candidats existants
     - [x] Unknown SC2 profond : plafond de capture visible/modifiable dans Expert et alerte quand la limite mémoire est atteinte
+    - [x] Unknown Auto multi-type : première comparaison sans type imposé (`Auto`) et bouton `stable` autorisé en première passe avec bornes moteur
     - [x] Anti-boucle UI : abonnements `scanFinished` installés avant démarrage exact/next scan async pour éviter les fins ratées
     - [x] profils plus intelligents avec état de résolution/réparation visible
     - [x] sécurité anti-mauvaise écriture avant modification mémoire

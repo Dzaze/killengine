@@ -1099,6 +1099,7 @@ onMounted(() => {
         </div>
         <div class="controls unknown-controls">
           <select v-model="store.unknownScanType" class="input select" :disabled="store.scanBusy">
+            <option value="Auto">Auto (multi-type)</option>
             <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
           </select>
           <label class="checkbox-label compact-toggle">
@@ -1127,7 +1128,7 @@ onMounted(() => {
             class="btn btn-secondary compact guide-btn"
             type="button"
             :class="{ active: store.unknownScanMode === action.mode }"
-            :disabled="store.scanBusy || !unknownGuideReady || (action.mode === 'unchanged' && !hasCandidateContext)"
+            :disabled="store.scanBusy || !unknownGuideReady"
             @click="store.runUnknownGuideStep(action.mode)"
           >
             {{ action.label }}
@@ -1144,6 +1145,11 @@ onMounted(() => {
           <span v-if="store.unknownSnapshotResult?.copyOnWriteOnly">Copy-on-write</span>
           <span v-if="store.unknownNextScanResult">{{ $t('scan.matches') }}: {{ formatNumber(store.unknownNextScanResult.matchesFound) }}</span>
           <span v-if="store.unknownNextScanResult">{{ $t('scan.stored') }}: {{ formatNumber(store.unknownNextScanResult.stored) }}</span>
+        </div>
+        <div v-if="store.unknownNextScanResult?.typePasses?.length" class="metrics">
+          <span v-for="pass in store.unknownNextScanResult.typePasses" :key="pass.type">
+            {{ pass.type }}: {{ formatNumber(pass.stored ?? pass.matchesFound ?? 0) }}
+          </span>
         </div>
         <div v-if="store.unknownSnapshotResult?.captureLimitReached" class="warning depth-warning">
           <p>

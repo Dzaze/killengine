@@ -334,6 +334,16 @@ export interface UnknownNextScanResult {
   checkedBytes: number
   matchesFound: number
   stored: number
+  valueType?: string
+  typePasses?: Array<{
+    type: string
+    success: boolean
+    partial?: boolean
+    checkedBytes?: number
+    matchesFound?: number
+    stored?: number
+    error?: string
+  }>
   error: string
   diagnostic?: string
   refinedFromCandidates?: boolean

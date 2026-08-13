@@ -50,6 +50,7 @@ constexpr int kDefaultScanMaxInFlightMb = 0;
 constexpr int kDefaultCandidateFileThreshold = 250000;
 constexpr int kDefaultUnknownSnapshotMaxMb = 128;
 constexpr size_t kCandidateDisplayLimit = 250000;
+constexpr qsizetype kUnknownAutoMaxReturnedMatches = 250000;
 constexpr int kCandidateHistoryMaxAddresses = 10000;
 constexpr int kCandidateHistoryMaxEntriesPerAddress = 12;
 
@@ -485,6 +486,18 @@ QList<killcore::ValueVariant> smartAutoScanVariants(const QString& rawValue) {
         variants.append(variant);
     }
     return variants;
+}
+
+QList<killcore::ValueType> unknownAutoValueTypes() {
+    return {
+        killcore::ValueType::Int32,
+        killcore::ValueType::UInt32,
+        killcore::ValueType::Float32,
+        killcore::ValueType::Int16,
+        killcore::ValueType::UInt16,
+        killcore::ValueType::Int64,
+        killcore::ValueType::Float64,
+    };
 }
 
 QByteArray targetBytesForCandidate(
@@ -3929,28 +3942,73 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         result["error"] = "Aucun snapshot unknown capturé.";
         return result;
     }
-    if (scanMode == killcore::NextScanMode::Unchanged) {
-        result["error"] = "Le mode stable/ne change pas n'est pas autorisé en première comparaison unknown : il garde trop de mémoire et peut saturer. Fais d'abord changed, increased ou decreased.";
-        return result;
-    }
-
-    killcore::ValueType type;
-    if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
-        return result;
-    }
-
     emit scanStarted();
     emit scanProgress(0);
-    const auto scan = m_snapshot.compare(m_handle, type, scanMode);
+    const QString normalizedValueType = valueType.trimmed();
+    const bool autoType = normalizedValueType.compare("Auto", Qt::CaseInsensitive) == 0
+        || normalizedValueType.compare("SmartAuto", Qt::CaseInsensitive) == 0
+        || normalizedValueType.isEmpty();
+
+    QList<killcore::Candidate> unknownCandidates;
+    size_t checkedBytes = 0;
+    size_t matchesFound = 0;
+    bool partial = false;
+    bool cancelled = false;
+    bool compareSuccess = true;
+    QString compareError;
+    QVariantList typeSummaries;
+    QSet<QString> seenCandidates;
+
+    const auto compareTypes = autoType ? unknownAutoValueTypes() : QList<killcore::ValueType>{};
+    killcore::ValueType singleType;
+    if (!autoType && !killcore::parseValueType(valueType, &singleType)) {
+        result["error"] = "Type invalide.";
+        emit scanProgress(100);
+        return result;
+    }
+
+    const auto typesToRun = autoType ? compareTypes : QList<killcore::ValueType>{singleType};
+    for (const auto type : typesToRun) {
+        const auto scan = m_snapshot.compare(m_handle, type, scanMode);
+        checkedBytes += scan.checkedBytes;
+        matchesFound += scan.matchesFound;
+        partial = partial || scan.partial;
+        cancelled = cancelled || scan.cancelled;
+        compareSuccess = compareSuccess && scan.success;
+        if (!scan.errorMessage.isEmpty() && compareError.isEmpty()) {
+            compareError = scan.errorMessage;
+        }
+
+        const auto typeCandidates = candidatesFromUnknownScan(m_handle, scan);
+        for (const auto& candidate : typeCandidates) {
+            const QString key = QString::number(candidate.address, 16) + "|" + killcore::valueTypeToString(candidate.type);
+            if (seenCandidates.contains(key)) {
+                continue;
+            }
+            seenCandidates.insert(key);
+            unknownCandidates.append(candidate);
+            if (unknownCandidates.size() >= kUnknownAutoMaxReturnedMatches) {
+                partial = true;
+                compareError = QString("Trop de candidats unknown Auto (%1+). Raffine avec changed/increased/decreased ou reduis la plage.")
+                                   .arg(kUnknownAutoMaxReturnedMatches);
+                break;
+            }
+        }
+
+        typeSummaries.append(QVariantMap{
+            {"type", killcore::valueTypeToString(type)},
+            {"success", scan.success},
+            {"partial", scan.partial},
+            {"checkedBytes", static_cast<qulonglong>(scan.checkedBytes)},
+            {"matchesFound", static_cast<qulonglong>(scan.matchesFound)},
+            {"stored", typeCandidates.size()},
+            {"error", scan.errorMessage},
+        });
+        if (cancelled || unknownCandidates.size() >= kUnknownAutoMaxReturnedMatches) {
+            break;
+        }
+    }
     emit scanProgress(90);
-    killcore::ScanResult scanResult;
-    scanResult.success = scan.success;
-    scanResult.partial = scan.partial;
-    scanResult.bytesScanned = scan.checkedBytes;
-    scanResult.matchesFound = scan.matchesFound;
-    scanResult.errorMessage = scan.errorMessage;
-    scanResult.matches = scan.matches;
 
     QString undoError;
     if (!m_candidates.isEmpty() && !rememberCandidatesForUndo(&undoError)) {
@@ -3958,16 +4016,18 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         emit scanProgress(100);
         return result;
     }
-    m_candidates.replaceCandidates(candidatesFromUnknownScan(m_handle, scan));
+    m_candidates.replaceCandidates(unknownCandidates);
 
-    result["success"] = scan.success;
-    result["partial"] = scan.partial;
-    result["cancelled"] = scan.cancelled;
-    result["checkedBytes"] = static_cast<qulonglong>(scan.checkedBytes);
-    result["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
+    result["success"] = compareSuccess;
+    result["partial"] = partial;
+    result["cancelled"] = cancelled;
+    result["checkedBytes"] = static_cast<qulonglong>(checkedBytes);
+    result["matchesFound"] = static_cast<qulonglong>(matchesFound);
     result["stored"] = static_cast<qulonglong>(m_candidates.size());
-    result["error"] = scan.errorMessage;
-    if (m_candidates.size() == 0 && scan.success) {
+    result["valueType"] = autoType ? QString("Auto") : valueType;
+    result["typePasses"] = typeSummaries;
+    result["error"] = compareError;
+    if (m_candidates.size() == 0 && compareSuccess) {
         result["diagnostic"] = noCandidateDiagnosticMessage(result, "unknown_compare");
     }
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
@@ -4038,16 +4098,16 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
         result["error"] = "Aucun snapshot unknown capturé.";
         return result;
     }
-    if (scanMode == killcore::NextScanMode::Unchanged) {
-        result["error"] = "Le mode stable/ne change pas n'est pas autorisé en première comparaison unknown : il garde trop de mémoire et peut saturer. Fais d'abord changed, increased ou decreased.";
-        return result;
-    }
-
-    killcore::ValueType type;
-    if (!killcore::parseValueType(valueType, &type)) {
+    const QString normalizedValueType = valueType.trimmed();
+    const bool autoType = normalizedValueType.compare("Auto", Qt::CaseInsensitive) == 0
+        || normalizedValueType.compare("SmartAuto", Qt::CaseInsensitive) == 0
+        || normalizedValueType.isEmpty();
+    killcore::ValueType singleType = killcore::ValueType::Int32;
+    if (!autoType && !killcore::parseValueType(valueType, &singleType)) {
         result["error"] = "Type invalide.";
         return result;
     }
+    const auto typesToRun = autoType ? unknownAutoValueTypes() : QList<killcore::ValueType>{singleType};
 
     const int requestId = m_nextScanRequestId++;
     const int pid = m_pid;
@@ -4059,17 +4119,62 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, mode, valueType, type, scanMode, cancellation]() {
-        killcore::UnknownScanResult scan;
+    std::thread([self, requestId, pid, mode, valueType, autoType, typesToRun, scanMode, cancellation]() {
         QList<killcore::Candidate> unknownCandidates;
+        QVariantList typeSummaries;
+        size_t checkedBytes = 0;
+        size_t matchesFound = 0;
+        bool partial = false;
+        bool cancelled = false;
+        bool compareSuccess = true;
+        QString compareError;
+        QSet<QString> seenCandidates;
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         if (!workerHandle.isValid()) {
-            scan.success = false;
-            scan.errorMessage = "Impossible d'ouvrir le processus dans le worker unknown.";
+            compareSuccess = false;
+            compareError = "Impossible d'ouvrir le processus dans le worker unknown.";
         } else if (self) {
-            scan = self->m_snapshot.compare(workerHandle, type, scanMode, cancellation.get());
-            if (scan.success && !scan.cancelled) {
-                unknownCandidates = candidatesFromUnknownScan(workerHandle, scan);
+            for (const auto type : typesToRun) {
+                const auto scan = self->m_snapshot.compare(workerHandle, type, scanMode, cancellation.get());
+                checkedBytes += scan.checkedBytes;
+                matchesFound += scan.matchesFound;
+                partial = partial || scan.partial;
+                cancelled = cancelled || scan.cancelled;
+                compareSuccess = compareSuccess && scan.success;
+                if (!scan.errorMessage.isEmpty() && compareError.isEmpty()) {
+                    compareError = scan.errorMessage;
+                }
+
+                const auto typeCandidates = scan.success && !scan.cancelled
+                    ? candidatesFromUnknownScan(workerHandle, scan)
+                    : QList<killcore::Candidate>{};
+                for (const auto& candidate : typeCandidates) {
+                    const QString key = QString::number(candidate.address, 16) + "|" + killcore::valueTypeToString(candidate.type);
+                    if (seenCandidates.contains(key)) {
+                        continue;
+                    }
+                    seenCandidates.insert(key);
+                    unknownCandidates.append(candidate);
+                    if (unknownCandidates.size() >= kUnknownAutoMaxReturnedMatches) {
+                        partial = true;
+                        compareError = QString("Trop de candidats unknown Auto (%1+). Raffine avec changed/increased/decreased ou reduis la plage.")
+                                           .arg(kUnknownAutoMaxReturnedMatches);
+                        break;
+                    }
+                }
+
+                typeSummaries.append(QVariantMap{
+                    {"type", killcore::valueTypeToString(type)},
+                    {"success", scan.success},
+                    {"partial", scan.partial},
+                    {"checkedBytes", static_cast<qulonglong>(scan.checkedBytes)},
+                    {"matchesFound", static_cast<qulonglong>(scan.matchesFound)},
+                    {"stored", typeCandidates.size()},
+                    {"error", scan.errorMessage},
+                });
+                if (cancelled || unknownCandidates.size() >= kUnknownAutoMaxReturnedMatches) {
+                    break;
+                }
             }
         } else {
             return;
@@ -4079,14 +4184,14 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             return;
         }
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, valueType, type, scan, unknownCandidates = std::move(unknownCandidates)]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, valueType, autoType, compareSuccess, partial, cancelled, checkedBytes, matchesFound, compareError, typeSummaries, unknownCandidates = std::move(unknownCandidates)]() mutable {
             if (!self) {
                 return;
             }
 
-            bool finishSuccess = scan.success;
-            QString finishError = scan.errorMessage;
-            if (!scan.cancelled) {
+            bool finishSuccess = compareSuccess;
+            QString finishError = compareError;
+            if (!cancelled) {
                 QString undoError;
                 if (!self->m_candidates.isEmpty() && !self->rememberCandidatesForUndo(&undoError)) {
                     finishSuccess = false;
@@ -4102,11 +4207,13 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             finished["requestId"] = requestId;
             finished["kind"] = "unknown_next";
             finished["success"] = finishSuccess;
-            finished["partial"] = scan.partial;
-            finished["cancelled"] = scan.cancelled;
-            finished["checkedBytes"] = static_cast<qulonglong>(scan.checkedBytes);
-            finished["matchesFound"] = static_cast<qulonglong>(scan.matchesFound);
+            finished["partial"] = partial;
+            finished["cancelled"] = cancelled;
+            finished["checkedBytes"] = static_cast<qulonglong>(checkedBytes);
+            finished["matchesFound"] = static_cast<qulonglong>(matchesFound);
             finished["stored"] = static_cast<qulonglong>(self->m_candidates.size());
+            finished["valueType"] = autoType ? QString("Auto") : valueType;
+            finished["typePasses"] = typeSummaries;
             finished["error"] = finishError;
             if (self->m_candidates.size() == 0 && finishSuccess) {
                 finished["diagnostic"] = noCandidateDiagnosticMessage(finished, "unknown_compare");
@@ -4116,7 +4223,8 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
                 {"requestId", requestId},
                 {"mode", mode},
                 {"valueType", valueType},
-                {"parsedType", killcore::valueTypeToString(type)},
+                {"parsedType", autoType ? QString("Auto") : valueType},
+                {"typePasses", typeSummaries},
                 {"success", finished.value("success")},
                 {"partial", finished.value("partial")},
                 {"cancelled", finished.value("cancelled")},
@@ -4129,7 +4237,8 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
                 {"requestId", requestId},
                 {"mode", mode},
                 {"valueType", valueType},
-                {"parsedType", killcore::valueTypeToString(type)},
+                {"parsedType", autoType ? QString("Auto") : valueType},
+                {"typePasses", typeSummaries},
                 {"success", finished.value("success")},
                 {"partial", finished.value("partial")},
                 {"cancelled", finished.value("cancelled")},

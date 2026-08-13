@@ -158,7 +158,7 @@ export const useAppStore = defineStore('app', () => {
   const nextScanResult = ref<NextScanResult | null>(null)
   const undoCandidateScanResult = ref<UndoCandidateScanResult | null>(null)
   const unknownScanMode = ref('changed')
-  const unknownScanType = ref('Int32')
+  const unknownScanType = ref('Auto')
   const unknownWritableOnly = ref(true)
   const unknownCopyOnWriteOnly = ref(false)
   const unknownSnapshotResult = ref<UnknownSnapshotResult | null>(null)
@@ -613,7 +613,7 @@ export const useAppStore = defineStore('app', () => {
     appLanguage.value = settings.language === 'en' ? 'en' : 'fr'
     settingDefaultValueType.value = settings.defaultValueType || 'Int32'
     exactScanType.value = settingDefaultValueType.value
-    unknownScanType.value = settingDefaultValueType.value
+    unknownScanType.value = 'Auto'
     settingScanMaxResults.value = Number(settings.scanMaxResults || 1000000)
     settingScanChunkSizeMb.value = Number(settings.scanChunkSizeMb ?? 0)
     settingPerformanceMode.value = settings.performanceMode || 'Auto'
@@ -1182,20 +1182,6 @@ export const useAppStore = defineStore('app', () => {
         error: scanStatusText.value,
       }
       addActionLog('scan', 'Comparaison unknown refusée', scanStatusText.value, 'warning')
-      return
-    }
-    if (unknownScanMode.value === 'unchanged') {
-      scanStatusText.value = 'Le mode stable est réservé au raffinage après une première réduction. Utilise d’abord ça change, ça augmente ou ça diminue.'
-      unknownNextScanResult.value = {
-        success: false,
-        partial: false,
-        cancelled: false,
-        checkedBytes: 0,
-        matchesFound: 0,
-        stored: 0,
-        error: scanStatusText.value,
-      }
-      addActionLog('scan', 'Unknown stable refusé', scanStatusText.value, 'warning')
       return
     }
     try {

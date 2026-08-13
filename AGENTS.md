@@ -89,8 +89,9 @@ killengine/
 - Les tests d'intégration (`tests/integration/`) lancent `KillEngineTestTarget.exe`
 
 ### Unknown Initial Value
-- Après une capture unknown, l'utilisateur choisit le type de comparaison via les boutons guidés (`ça augmente`, `ça diminue`, `ça change`, `stable`).
-- `stable` / `unchanged` ne doit pas être proposé ni accepté en première comparaison unknown : il garde trop de mémoire et peut saturer les gros scans. Il sert surtout après une première réduction.
+- Après une capture unknown, l'utilisateur choisit la comparaison via les boutons guidés (`ça augmente`, `ça diminue`, `ça change`, `stable`).
+- Le type Unknown peut être `Auto` : la première comparaison teste plusieurs représentations (`Int16`, `UInt16`, `Int32`, `UInt32`, `Int64`, `Float32`, `Float64`) et stocke des candidats typés mélangés.
+- `stable` / `unchanged` est autorisé même en première comparaison, mais il est potentiellement très bruyant ; les comparaisons unknown restent bornées côté moteur pour éviter les retours massifs et les blocages UI.
 - Les comparaisons unknown doivent rester bornées côté moteur pour éviter les retours massifs et les blocages UI.
 
 ### Pointer Chains
