@@ -48,6 +48,8 @@ const uiStringTrackResult = ref<UiStringTrackResult | null>(null)
 const uiStringSourceResult = ref<UiStringSourceResult | null>(null)
 const uiStringSourceTrackResult = ref<UiStringSourceTrackResult | null>(null)
 const uiStringOriginResult = ref<UiStringOriginResult | null>(null)
+const findWhatWritesResult = ref<Record<string, unknown> | null>(null)
+const findWhatWritesBusy = ref(false)
 const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
@@ -386,6 +388,13 @@ function uiSourceTypeSize(type: string) {
   return 4
 }
 
+function findWhatWritesSizeForType(type: string) {
+  if (type.endsWith('8')) return 1
+  if (type.endsWith('16')) return 2
+  if (type.endsWith('64') || type === 'Float64') return 8
+  return 4
+}
+
 function addressNumber(address: string) {
   return Number.parseInt(address.replace(/^0x/i, ''), 16)
 }
@@ -683,6 +692,27 @@ function watchUiSourceCandidate(candidate: UiStringSourceCandidate) {
   if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
 }
 
+async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
+  findWhatWritesBusy.value = true
+  findWhatWritesResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.findWhatWrites) {
+      findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: 'Methode backend indisponible.' }
+      return
+    }
+    findWhatWritesResult.value = await controller.findWhatWrites(candidate.address, {
+      size: findWhatWritesSizeForType(candidate.type),
+      timeoutMs: 5000,
+      maxHits: 12,
+    })
+  } catch (e) {
+    findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: String(e) }
+  } finally {
+    findWhatWritesBusy.value = false
+  }
+}
+
 function useSelectedUiSourcesForWrite() {
   const selected = new Set(selectedUiSourceAddresses.value)
   const chosen = chooseNonOverlappingSources(uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate))))
@@ -751,6 +781,7 @@ const writePlan = computed(() => selectedWriteTargets.value.map((target) => {
   }
 }))
 const writeFailures = computed(() => (store.writeResult?.results ?? []).filter((result) => !result.success))
+const findWhatWritesHits = computed(() => (findWhatWritesResult.value?.hits as Array<Record<string, unknown>> | undefined) ?? [])
 const selectedCandidateTypes = computed(() => Array.from(new Set(
   selectedWriteTargets.value.map((target) => String(target.variantLabel || target.type)),
 )))
@@ -1531,6 +1562,28 @@ onMounted(() => {
             <span>{{ candidate.trackHits ? `${candidate.trackHits} hit(s)` : `${formatNumber(candidate.distanceBytes)} o` }}</span>
             <button class="btn btn-primary compact" type="button" @click="useUiSourceCandidate(candidate)">Utiliser</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate)">Watch</button>
+            <button class="btn btn-secondary compact" type="button" :disabled="findWhatWritesBusy" @click="findWhatWritesForSource(candidate)">
+              Écrit par
+            </button>
+          </div>
+          <div v-if="findWhatWritesResult" class="find-writes-panel">
+            <div class="source-list-title">
+              <strong>Find what writes</strong>
+              <span>{{ formatNumber(Number(findWhatWritesResult.hitCount ?? 0)) }} hit(s)</span>
+            </div>
+            <p v-if="findWhatWritesBusy" class="hint">Capture en cours : modifie la valeur dans SC2 pendant quelques secondes.</p>
+            <p v-if="findWhatWritesResult.error" class="error">{{ findWhatWritesResult.error }}</p>
+            <div
+              v-for="hit in findWhatWritesHits.slice(0, 12)"
+              :key="`${hit.instructionPointer}:${hit.threadId}`"
+              class="find-writes-row"
+            >
+              <code>RIP 0x{{ hit.instructionPointer }}</code>
+              <span>{{ hit.module || '-' }}</span>
+              <span>+0x{{ hit.moduleOffset || '0' }}</span>
+              <span>T{{ hit.threadId }}</span>
+              <strong>{{ formatNumber(Number(hit.valueAfter ?? 0)) }}</strong>
+            </div>
           </div>
         </div>
       </section>
@@ -2507,7 +2560,7 @@ onMounted(() => {
 
 .source-row {
   display: grid;
-  grid-template-columns: 28px minmax(140px, 1fr) 74px minmax(120px, 1fr) 70px 80px auto auto;
+  grid-template-columns: 28px minmax(140px, 1fr) 74px minmax(120px, 1fr) 70px 80px auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 38px;
@@ -2528,6 +2581,42 @@ onMounted(() => {
 
 .source-row strong {
   color: var(--success);
+}
+
+.find-writes-panel {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid rgba(122, 162, 247, 0.18);
+  border-radius: 6px;
+  background: rgba(13, 17, 32, 0.46);
+}
+
+.find-writes-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(100px, 160px) 82px 56px 90px;
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid rgba(122, 162, 247, 0.14);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.find-writes-row code,
+.find-writes-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.find-writes-row code,
+.find-writes-row strong {
+  color: var(--text-primary);
 }
 
 .origin-row {

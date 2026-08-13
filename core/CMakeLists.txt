@@ -54,6 +54,10 @@ add_library(killcore STATIC
     # Pointer chains (Phase 14 — StarCraft 2 / jeux modernes)
     pointer/pointer_chain.cpp
     pointer/pointer_scanner.cpp
+
+    # Debug / Hardware breakpoints (Phase 17 — Find What Writes)
+    debug/hardware_breakpoint.h
+    debug/hardware_breakpoint.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

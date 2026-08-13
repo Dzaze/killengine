@@ -2,6 +2,7 @@
 
 #include "candidates/candidate_store.h"
 #include "crash_handler.h"
+#include "debug/hardware_breakpoint.h"
 #include "logging/logger.h"
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
@@ -4702,6 +4703,76 @@ QVariantMap ApplicationController::rollbackLastWrite() {
         m_lastWriteAddress = 0;
         m_lastWritePreviousValue.clear();
     }
+    return result;
+}
+
+QVariantMap ApplicationController::findWhatWrites(const QString& addressHex, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = addressHex;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int sizeBytes = std::clamp(options.value("size", 4).toInt(), 1, 8);
+    killcore::BreakpointSize breakpointSize = killcore::BreakpointSize::DWord;
+    if (sizeBytes <= 1) {
+        breakpointSize = killcore::BreakpointSize::Byte;
+    } else if (sizeBytes <= 2) {
+        breakpointSize = killcore::BreakpointSize::Word;
+    } else if (sizeBytes <= 4) {
+        breakpointSize = killcore::BreakpointSize::DWord;
+    } else {
+        breakpointSize = killcore::BreakpointSize::QWord;
+    }
+
+    const int timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 15000);
+    const int maxHitsInt = std::clamp(options.value("maxHits", 10).toInt(), 1, 100);
+
+    KE_LOG_INFO() << "findWhatWrites(address=0x" << std::hex << address
+                  << ", pid=" << std::dec << m_pid
+                  << ", size=" << sizeBytes
+                  << ", timeoutMs=" << timeoutMs
+                  << ", maxHits=" << maxHitsInt << ")";
+
+    const auto hits = killcore::findWhatWrites(
+        static_cast<uint32_t>(m_pid),
+        address,
+        breakpointSize,
+        timeoutMs,
+        static_cast<size_t>(maxHitsInt));
+
+    QVariantList hitList;
+    for (const auto& hit : hits) {
+        QVariantMap item;
+        item["address"] = QString::number(hit.address, 16).toUpper();
+        item["instructionPointer"] = QString::number(hit.instructionPointer, 16).toUpper();
+        item["threadId"] = static_cast<qulonglong>(hit.threadId);
+        item["valueBefore"] = static_cast<qulonglong>(hit.valueBefore);
+        item["valueAfter"] = static_cast<qulonglong>(hit.valueAfter);
+        item["module"] = hit.module;
+        item["moduleOffset"] = QString::number(hit.moduleOffset, 16).toUpper();
+        hitList.append(item);
+    }
+
+    result["success"] = true;
+    result["hits"] = hitList;
+    result["hitCount"] = hitList.size();
+    result["size"] = sizeBytes;
+    result["timeoutMs"] = timeoutMs;
+    result["maxHits"] = maxHitsInt;
+    result["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.";
+    result["error"] = hits.isEmpty()
+        ? "Aucune écriture capturée pendant la fenêtre d'observation."
+        : QString();
     return result;
 }
 

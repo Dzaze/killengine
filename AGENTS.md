@@ -132,6 +132,13 @@ killengine/
   - Des adresses basses de type `0x590A... -> 0x289...` ressemblent souvent à des tables de pointeurs UI ; ne pas les écrire comme des ressources.
   - Si `Valeurs radar = 0` malgré des `Blocs modifiés > 0`, la valeur nouvelle n'est probablement pas représentée directement dans les pages modifiées observées ; retenter en renseignant bien la nouvelle valeur affichée avant `Arrêter et comparer`, ou passer ensuite à un vrai mode debugger/hardware breakpoint pour capturer l'instruction qui écrit la string.
 
+### Find What Writes / Debugger expérimental
+- Module : `core/debug/hardware_breakpoint.*`.
+- Backend : `ApplicationController::findWhatWrites(addressHex, options)` expose un premier utilitaire synchrone borné (`size`, `timeoutMs`, `maxHits`) via `ui/src/services/backend.ts`.
+- UI : section **Trace UI string**, bouton `Écrit par` sur une source numérique proche. L'utilisateur doit cliquer, puis faire varier la valeur dans le jeu pendant la fenêtre de capture.
+- Contraintes Windows : `DebugActiveProcess` / `WaitForDebugEvent` doivent rester dans le même thread logique pour l'utilitaire bloquant. Avant d'en faire un vrai workflow async, créer un worker dédié qui attache, attend et détache dans le même thread.
+- Prudence SC2 : l'attachement debugger peut échouer, être détecté, ou perturber le jeu. Garder cette fonctionnalité en mode Expert/expérimental tant qu'elle n'est pas validée manuellement.
+
 ### Performance adaptive
 - Préférer plus de threads contrôlés à plus de processus : le moteur doit rester déterministe et l'UI Qt/Vue doit rester fluide.
 - Centraliser les décisions machine dans `core/scanner/performance_profile.*` plutôt que disperser des heuristiques dans `ScanEngine` ou `ApplicationController`.

@@ -174,6 +174,16 @@ public:
     /// Active/désactive un freeze simple sur une adresse.
     Q_INVOKABLE QVariantMap setFreezeValue(const QString& addressHex, const QString& valueType, const QString& value, bool enabled);
 
+    // -----------------------------------------------------------------------
+    // Phase 17 — Hardware Breakpoints / Find What Writes
+    // -----------------------------------------------------------------------
+
+    /// Trouve l'instruction qui écrit à une adresse (hardware breakpoint).
+    /// C'est LA fonction qui permet de remonter à la vraie source gameplay
+    /// quand on a trouvé une valeur "displayed" qui est réécrite par le jeu.
+    /// options keys: size (1/2/4/8), timeoutMs (défaut 5000), maxHits (défaut 10)
+    Q_INVOKABLE QVariantMap findWhatWrites(const QString& addressHex, const QVariantMap& options);
+
     /// Configure l'intervalle du freeze polling (10-2000 ms, 100 ms par défaut).
     Q_INVOKABLE QVariantMap setFreezeInterval(int intervalMs);
 

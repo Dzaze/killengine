@@ -576,6 +576,7 @@ export interface AppSettings {
   rollbackLastWrite(): Promise<MemoryWriteResult>
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
+  findWhatWrites?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   setFreezeInterval(intervalMs: number): Promise<Record<string, unknown>>
   startSmartSearch(query: string): Promise<SmartSearchResult>
   ping(message: string): Promise<string>
@@ -1187,6 +1188,9 @@ class BackendService {
       },
       async setFreezeValue(_addressHex: string, _valueType: string, _value: string, enabled: boolean) {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend', enabled }
+      },
+      async findWhatWrites(_addressHex: string, _options: Record<string, unknown>) {
+        return { success: false, hitCount: 0, hits: [], error: 'Mock backend' }
       },
       async setFreezeInterval(_intervalMs: number) {
         return { success: false, error: 'Mock backend' }

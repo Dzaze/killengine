@@ -204,6 +204,12 @@ Prerequisites before Phase 12:
     - [x] `setFreezeInterval` : intervalle de polling configurable (10–2000 ms) pour jeux type SC2
     - [x] Interface `backend.ts` : `setFreezeInterval` exposée au frontend
     - [x] UI Write / Freeze : preset d'intervalle visible (16–500 ms) relié à `setFreezeInterval`
+- [ ] PHASE 17 - Find What Writes / debugger expérimental
+    - [x] Module `core/debug/hardware_breakpoint.*` : session hardware breakpoint DR0-DR3 avec attachement debugger Windows
+    - [x] Backend `findWhatWrites(address, options)` exposé via `ApplicationController` et `backend.ts`
+    - [x] UI Expert / Trace UI string : bouton `Écrit par` sur les sources numériques proches
+    - [ ] Validation manuelle SC2 : vérifier que l'attachement debugger capture une instruction sans bloquer le jeu
+    - [ ] Mode async/non-bloquant et garde-fous UX avant généralisation
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM
