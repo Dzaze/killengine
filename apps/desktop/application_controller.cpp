@@ -1290,10 +1290,20 @@ QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVa
     const QString needleText = value.trimmed();
     if (needleText.isEmpty()) {
         result["error"] = "Valeur texte vide.";
+        appendScanTelemetry("ui_string_scan", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", value},
+        });
         return result;
     }
     if (!m_handle.isValid()) {
         result["error"] = "Aucun processus attaché.";
+        appendScanTelemetry("ui_string_scan", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", needleText},
+        });
         return result;
     }
 
@@ -1323,6 +1333,13 @@ QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVa
     }
     if (patterns.isEmpty()) {
         result["error"] = "Aucun encodage texte sélectionné.";
+        appendScanTelemetry("ui_string_scan", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", needleText},
+            {"ascii", scanAscii},
+            {"utf16", scanUtf16},
+        });
         return result;
     }
 
@@ -1435,6 +1452,23 @@ QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVa
     result["elapsedMs"] = static_cast<int>(timer.elapsed());
     result["writableOnly"] = options.writableOnly;
     result["error"] = "";
+    appendScanTelemetry("ui_string_scan", {
+        {"success", true},
+        {"partial", partial},
+        {"value", needleText},
+        {"ascii", scanAscii},
+        {"utf16", scanUtf16},
+        {"numericBoundary", numericBoundary},
+        {"writableOnly", options.writableOnly},
+        {"copyOnWriteOnly", options.copyOnWriteOnly},
+        {"executableOnly", options.executableOnly},
+        {"maxResults", maxResults},
+        {"matchesFound", matches.size()},
+        {"matchesReturned", matches.size()},
+        {"regionsScanned", regionsScanned},
+        {"bytesScanned", static_cast<qulonglong>(bytesScanned)},
+        {"elapsedMs", static_cast<int>(timer.elapsed())},
+    });
     return result;
 }
 
@@ -1443,14 +1477,28 @@ QVariantMap ApplicationController::trackUiStringCandidates(const QVariantList& c
     QVariantList survivors;
     result["success"] = false;
     result["survivors"] = survivors;
+    QElapsedTimer timer;
+    timer.start();
 
     const QString needleText = value.trimmed();
     if (needleText.isEmpty()) {
         result["error"] = "Nouvelle valeur texte vide.";
+        appendScanTelemetry("ui_string_track", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"inputCandidates", candidates.size()},
+            {"value", value},
+        });
         return result;
     }
     if (!m_handle.isValid()) {
         result["error"] = "Aucun processus attaché.";
+        appendScanTelemetry("ui_string_track", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"inputCandidates", candidates.size()},
+            {"value", needleText},
+        });
         return result;
     }
 
@@ -1574,6 +1622,16 @@ QVariantMap ApplicationController::trackUiStringCandidates(const QVariantList& c
     result["remaining"] = survivors.size();
     result["survivors"] = survivors;
     result["error"] = "";
+    appendScanTelemetry("ui_string_track", {
+        {"success", true},
+        {"value", needleText},
+        {"inputCandidates", candidates.size()},
+        {"checked", checked},
+        {"unreadable", unreadable},
+        {"moved", moved},
+        {"remaining", survivors.size()},
+        {"elapsedMs", static_cast<int>(timer.elapsed())},
+    });
     return result;
 }
 
@@ -1585,20 +1643,38 @@ QVariantMap ApplicationController::analyzeUiStringSources(
     QVariantList candidates;
     result["success"] = false;
     result["candidates"] = candidates;
+    QElapsedTimer timer;
+    timer.start();
 
     const QString rawValue = value.trimmed();
     if (rawValue.isEmpty()) {
         result["error"] = "Valeur source vide.";
+        appendScanTelemetry("ui_string_sources_analyze", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", value},
+        });
         return result;
     }
     if (!m_handle.isValid()) {
         result["error"] = "Aucun processus attaché.";
+        appendScanTelemetry("ui_string_sources_analyze", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", rawValue},
+        });
         return result;
     }
 
     uint64_t stringAddress = 0;
     if (!parseHexAddress(stringCandidate.value("address").toString(), &stringAddress)) {
         result["error"] = "Adresse string invalide.";
+        appendScanTelemetry("ui_string_sources_analyze", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", rawValue},
+            {"stringAddress", stringCandidate.value("address").toString()},
+        });
         return result;
     }
 
@@ -1611,6 +1687,13 @@ QVariantMap ApplicationController::analyzeUiStringSources(
     const killcore::MemoryRegion* region = findRegionContaining(regions, stringAddress);
     if (!region || !region->readable || region->guarded || region->size == 0) {
         result["error"] = "Région de la string illisible.";
+        appendScanTelemetry("ui_string_sources_analyze", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", rawValue},
+            {"stringAddress", uiStringAddress(stringAddress)},
+            {"radiusBytes", radius},
+        });
         return result;
     }
 
@@ -1623,6 +1706,15 @@ QVariantMap ApplicationController::analyzeUiStringSources(
     const uint64_t windowEnd = std::min(regionEnd, requestedEnd);
     if (windowEnd <= windowStart) {
         result["error"] = "Fenêtre d'analyse vide.";
+        appendScanTelemetry("ui_string_sources_analyze", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", rawValue},
+            {"stringAddress", uiStringAddress(stringAddress)},
+            {"radiusBytes", radius},
+            {"windowStart", uiStringAddress(windowStart)},
+            {"windowEnd", uiStringAddress(windowEnd)},
+        });
         return result;
     }
 
@@ -1631,6 +1723,16 @@ QVariantMap ApplicationController::analyzeUiStringSources(
     const auto read = reader.readChunked(windowStart, readSize, 64 * 1024);
     if (!read.success && !read.partial) {
         result["error"] = read.errorMessage;
+        appendScanTelemetry("ui_string_sources_analyze", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"value", rawValue},
+            {"stringAddress", uiStringAddress(stringAddress)},
+            {"radiusBytes", radius},
+            {"windowStart", uiStringAddress(windowStart)},
+            {"windowEnd", uiStringAddress(windowEnd)},
+            {"requestedBytes", static_cast<qulonglong>(readSize)},
+        });
         return result;
     }
 
@@ -1673,6 +1775,35 @@ QVariantMap ApplicationController::analyzeUiStringSources(
     result["windowEnd"] = uiStringAddress(windowStart + static_cast<uint64_t>(read.bytesRead));
     result["radiusBytes"] = radius;
     result["error"] = "";
+    QVariantList samples;
+    for (int i = 0; i < std::min<int>(candidates.size(), 10); ++i) {
+        const QVariantMap candidate = candidates.at(i).toMap();
+        samples.append(QVariantMap{
+            {"address", candidate.value("address")},
+            {"type", candidate.value("type")},
+            {"variantLabel", candidate.value("variantLabel")},
+            {"confidence", candidate.value("confidence")},
+            {"distanceBytes", candidate.value("distanceBytes")},
+            {"lastValueNumber", candidate.value("lastValueNumber")},
+        });
+    }
+    appendScanTelemetry("ui_string_sources_analyze", {
+        {"success", true},
+        {"value", rawValue},
+        {"stringAddress", uiStringAddress(stringAddress)},
+        {"stringLength", stringLength},
+        {"radiusBytes", radius},
+        {"alignment", alignment},
+        {"maxResults", maxResults},
+        {"windowStart", uiStringAddress(windowStart)},
+        {"windowEnd", result.value("windowEnd")},
+        {"bytesScanned", static_cast<qulonglong>(read.bytesRead)},
+        {"matchesFound", hits.size()},
+        {"matchesReturned", candidates.size()},
+        {"sampleCount", samples.size()},
+        {"samples", samples},
+        {"elapsedMs", static_cast<int>(timer.elapsed())},
+    });
     return result;
 }
 
@@ -1681,14 +1812,28 @@ QVariantMap ApplicationController::trackUiStringSources(const QVariantList& sour
     QVariantList survivors;
     result["success"] = false;
     result["survivors"] = survivors;
+    QElapsedTimer timer;
+    timer.start();
 
     const QString rawValue = value.trimmed();
     if (rawValue.isEmpty()) {
         result["error"] = "Nouvelle valeur source vide.";
+        appendScanTelemetry("ui_string_sources_track", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"inputCandidates", sourceCandidates.size()},
+            {"value", value},
+        });
         return result;
     }
     if (!m_handle.isValid()) {
         result["error"] = "Aucun processus attaché.";
+        appendScanTelemetry("ui_string_sources_track", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"inputCandidates", sourceCandidates.size()},
+            {"value", rawValue},
+        });
         return result;
     }
 
@@ -1746,6 +1891,30 @@ QVariantMap ApplicationController::trackUiStringSources(const QVariantList& sour
     result["remaining"] = survivors.size();
     result["survivors"] = survivors;
     result["error"] = "";
+    QVariantList samples;
+    for (int i = 0; i < std::min<int>(survivors.size(), 10); ++i) {
+        const QVariantMap survivor = survivors.at(i).toMap();
+        samples.append(QVariantMap{
+            {"address", survivor.value("address")},
+            {"type", survivor.value("type")},
+            {"variantLabel", survivor.value("variantLabel")},
+            {"confidence", survivor.value("confidence")},
+            {"trackHits", survivor.value("trackHits")},
+            {"lastValueNumber", survivor.value("lastValueNumber")},
+        });
+    }
+    appendScanTelemetry("ui_string_sources_track", {
+        {"success", true},
+        {"value", rawValue},
+        {"inputCandidates", sourceCandidates.size()},
+        {"checked", checked},
+        {"unreadable", unreadable},
+        {"incompatible", incompatible},
+        {"remaining", survivors.size()},
+        {"sampleCount", samples.size()},
+        {"samples", samples},
+        {"elapsedMs", static_cast<int>(timer.elapsed())},
+    });
     return result;
 }
 
@@ -1758,13 +1927,25 @@ QVariantMap ApplicationController::inspectUiStringOrigins(
     result["success"] = false;
     result["targets"] = targets;
     result["pointerRefs"] = pointerRefs;
+    QElapsedTimer timer;
+    timer.start();
 
     if (!m_handle.isValid()) {
         result["error"] = "Aucun processus attaché.";
+        appendScanTelemetry("ui_string_origins_inspect", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"inputCandidates", stringCandidates.size()},
+        });
         return result;
     }
     if (stringCandidates.isEmpty()) {
         result["error"] = "Aucune string à inspecter.";
+        appendScanTelemetry("ui_string_origins_inspect", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"inputCandidates", stringCandidates.size()},
+        });
         return result;
     }
 
@@ -1779,6 +1960,11 @@ QVariantMap ApplicationController::inspectUiStringOrigins(
     }
     if (addresses.isEmpty()) {
         result["error"] = "Aucune adresse string valide.";
+        appendScanTelemetry("ui_string_origins_inspect", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"inputCandidates", stringCandidates.size()},
+        });
         return result;
     }
     std::sort(addresses.begin(), addresses.end());
@@ -1907,6 +2093,39 @@ QVariantMap ApplicationController::inspectUiStringOrigins(
     result["regionsScanned"] = regionsScanned;
     result["partial"] = partial || pointerRefs.size() >= maxRefs;
     result["error"] = "";
+    QVariantList refSamples;
+    for (int i = 0; i < std::min<int>(pointerRefs.size(), 12); ++i) {
+        const QVariantMap ref = pointerRefs.at(i).toMap();
+        refSamples.append(QVariantMap{
+            {"address", ref.value("address")},
+            {"pointsTo", ref.value("pointsTo")},
+            {"nearestString", ref.value("nearestString")},
+            {"distanceToString", ref.value("distanceToString")},
+            {"memoryType", ref.value("memoryType")},
+            {"protection", ref.value("protection")},
+            {"writable", ref.value("writable")},
+        });
+    }
+    appendScanTelemetry("ui_string_origins_inspect", {
+        {"success", true},
+        {"inputCandidates", stringCandidates.size()},
+        {"targetCount", addresses.size()},
+        {"clusterStart", result.value("clusterStart")},
+        {"clusterEnd", result.value("clusterEnd")},
+        {"clusterSpanBytes", static_cast<qulonglong>(clusterSpan)},
+        {"commonStrideBytes", static_cast<qulonglong>(commonStride)},
+        {"maxRefs", maxRefs},
+        {"maxScanBytes", static_cast<qulonglong>(maxScanBytes)},
+        {"writableOnly", writableOnly},
+        {"pointerSlackBytes", static_cast<qulonglong>(kPointerSlack)},
+        {"pointerRefsFound", pointerRefs.size()},
+        {"bytesScanned", static_cast<qulonglong>(bytesScanned)},
+        {"regionsScanned", regionsScanned},
+        {"partial", result.value("partial")},
+        {"sampleCount", refSamples.size()},
+        {"samples", refSamples},
+        {"elapsedMs", static_cast<int>(timer.elapsed())},
+    });
     return result;
 }
 
@@ -3560,20 +3779,40 @@ QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantL
     result["results"] = writeResults;
     result["written"] = 0;
     result["total"] = targets.size();
+    QElapsedTimer timer;
+    timer.start();
 
     const QString rawValue = value.trimmed();
     if (targets.isEmpty()) {
         result["error"] = "Aucune cible à écrire.";
+        appendScanTelemetry("ui_string_sources_write", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"displayValue", value},
+            {"targetCount", targets.size()},
+        });
         return result;
     }
     if (rawValue.isEmpty()) {
         result["error"] = "Valeur vide.";
+        appendScanTelemetry("ui_string_sources_write", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"displayValue", value},
+            {"targetCount", targets.size()},
+        });
         return result;
     }
 
     killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
     if (!writeHandle.isValid()) {
         result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        appendScanTelemetry("ui_string_sources_write", {
+            {"success", false},
+            {"error", result.value("error")},
+            {"displayValue", rawValue},
+            {"targetCount", targets.size()},
+        });
         return result;
     }
 
@@ -3650,6 +3889,32 @@ QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantL
     result["error"] = allWritesOk
         ? QString()
         : QString("Écriture partielle: %1/%2 réussie(s).").arg(written).arg(targets.size());
+    QVariantList samples;
+    for (int i = 0; i < std::min<int>(writeResults.size(), 16); ++i) {
+        const QVariantMap write = writeResults.at(i).toMap();
+        samples.append(QVariantMap{
+            {"address", write.value("address")},
+            {"type", write.value("type")},
+            {"variantLabel", write.value("variantLabel")},
+            {"success", write.value("success")},
+            {"verified", write.value("verified")},
+            {"bytesWritten", write.value("bytesWritten")},
+            {"encodedHex", write.value("encodedHex")},
+            {"error", write.value("error")},
+        });
+    }
+    appendScanTelemetry("ui_string_sources_write", {
+        {"success", result.value("success")},
+        {"verified", result.value("verified")},
+        {"displayValue", rawValue},
+        {"targetCount", targets.size()},
+        {"written", written},
+        {"failed", targets.size() - written},
+        {"error", result.value("error")},
+        {"sampleCount", samples.size()},
+        {"samples", samples},
+        {"elapsedMs", static_cast<int>(timer.elapsed())},
+    });
     return result;
 }
 
