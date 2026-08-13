@@ -1172,6 +1172,13 @@ onMounted(() => {
           <span v-if="uiStringInvestigationFinishResult.partial" class="warning-text">résultats limités</span>
         </div>
         <p v-if="uiStringInvestigationFinishResult?.error" class="error">{{ uiStringInvestigationFinishResult.error }}</p>
+        <div v-if="uiStringInvestigationFinishResult && !uiStringInvestigationFinishResult.error && uiStringInvestigationFinishResult.changesFound === 0" class="investigation-empty">
+          <strong>Aucun changement capturé dans les fenêtres suivies.</strong>
+          <span>
+            Ça veut dire que les strings suivies ont été relues, mais que la vraie valeur modifiée n'était pas dans le petit voisinage capturé.
+            Relance l'enquête, change la ressource pendant que l'état est armé, ou augmente le rayon sources avant de recommencer.
+          </span>
+        </div>
         <div v-if="uiStringInvestigationFinishResult?.changes.length" class="investigation-change-list">
           <div class="source-list-title">
             <strong>Changements pendant l'enquête</strong>
@@ -2109,6 +2116,22 @@ onMounted(() => {
   display: grid;
   gap: 4px;
   margin-top: 10px;
+}
+
+.investigation-empty {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 199, 119, 0.28);
+  border-radius: 4px;
+  background: rgba(255, 199, 119, 0.06);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.investigation-empty strong {
+  color: var(--warning);
 }
 
 .investigation-change-row {
