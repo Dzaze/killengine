@@ -243,5 +243,6 @@ Prerequisites before Phase 12:
     - [x] Tracker sources UI string : reduction des sources numeriques candidates selon les changements successifs de l'affichage
     - [x] Enquete UI string radar : empreintes globales de blocs writable, detection des blocs modifies et extraction automatique des valeurs numeriques candidates (`globalValueHits`)
     - [x] Finition radar UI string : filtres type/variant et selection par lots pour tester les sources numeriques sans ecrire 500 adresses d'un coup
+    - [x] Watch live de lot : envoyer sources/candidats en surveillance live par paquet ou selection, jusqu'a 200 lectures par cycle
     - [x] Tests tracker UI string : buffer simulant source numerique + texte affiche ASCII/UTF-16 + variante fixed-point
     - [ ] Validation benchmarks sur KillEngineTestTarget et gros volumes de candidats

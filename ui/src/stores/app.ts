@@ -178,6 +178,7 @@ export const useAppStore = defineStore('app', () => {
   const keptCandidateAddresses = ref<string[]>([])
   const watchLiveEnabled = ref(false)
   const watchedAddresses = ref<WatchedAddress[]>([])
+  const watchLiveReadLimit = 200
   let watchLiveTimer: ReturnType<typeof setInterval> | null = null
 
   // Chat / guided workflow state
@@ -1437,9 +1438,25 @@ export const useAppStore = defineStore('app', () => {
     void refreshWatchedAddress(normalized)
   }
 
+  function addAddressesToWatch(targets: Array<{ address: string, type?: string }>, limit = watchLiveReadLimit) {
+    let added = 0
+    const boundedTargets = targets.slice(0, limit)
+    for (const target of boundedTargets) {
+      const before = watchedAddresses.value.length
+      addAddressToWatch(target.address, target.type ?? exactScanType.value)
+      if (watchedAddresses.value.length > before) added += 1
+    }
+    addActionLog('watch', `${boundedTargets.length} adresse(s) envoyée(s) au live`, `${added} nouvelle(s), limite ${limit}.`, 'info')
+  }
+
   function removeAddressFromWatch(address: string) {
     const normalized = address.trim().replace(/^0x/i, '')
     watchedAddresses.value = watchedAddresses.value.filter((item) => item.address !== normalized)
+  }
+
+  function clearWatchedAddresses() {
+    watchedAddresses.value = []
+    addActionLog('watch', 'Watch live vidé', 'Toutes les adresses surveillées ont été retirées.', 'info')
   }
 
   async function refreshWatchedAddress(address: string): Promise<WatchedAddress | null> {
@@ -1473,7 +1490,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function refreshWatchedAddresses() {
-    for (const watched of watchedAddresses.value.slice(0, 20)) {
+    for (const watched of watchedAddresses.value.slice(0, watchLiveReadLimit)) {
       await refreshWatchedAddress(watched.address)
     }
   }
@@ -1826,6 +1843,7 @@ export const useAppStore = defineStore('app', () => {
     keptCandidateAddresses,
     watchLiveEnabled,
     watchedAddresses,
+    watchLiveReadLimit,
     messages,
     actionLog,
     workflowStatus,
@@ -1880,7 +1898,9 @@ export const useAppStore = defineStore('app', () => {
     useInferredType,
     updateWriteSafetyWarning,
     addAddressToWatch,
+    addAddressesToWatch,
     removeAddressFromWatch,
+    clearWatchedAddresses,
     refreshWatchedAddress,
     refreshWatchedAddresses,
     setWatchLiveEnabled,

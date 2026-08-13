@@ -889,6 +889,25 @@ function watchUiSourceCandidate(candidate: UiStringSourceCandidate) {
   if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
 }
 
+function watchSelectedUiSources() {
+  const selected = selectedUiSourceCandidates()
+  if (selected.length === 0) return
+  store.addAddressesToWatch(selected.map((candidate) => ({
+    address: candidate.address,
+    type: candidate.type,
+  })))
+  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
+}
+
+function watchCurrentUiSourceBatch() {
+  if (currentUiStringSourceBatch.value.length === 0) return
+  store.addAddressesToWatch(currentUiStringSourceBatch.value.map((candidate) => ({
+    address: candidate.address,
+    type: candidate.type,
+  })))
+  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
+}
+
 async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
   findWhatWritesBusy.value = true
   findWhatWritesResult.value = null
@@ -1140,6 +1159,24 @@ function writeFromPanel() {
 
 function watchCandidate(address: string, type: string) {
   store.addAddressToWatch(address, type)
+  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
+}
+
+function watchSelectedCandidates() {
+  if (selectedCandidateAddresses.value.length === 0) return
+  store.addAddressesToWatch(selectedWriteTargets.value.map((target) => ({
+    address: target.address,
+    type: target.type,
+  })))
+  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
+}
+
+function watchCurrentCandidatePage() {
+  if (currentPageCandidates.value.length === 0) return
+  store.addAddressesToWatch(currentPageCandidates.value.map((candidate) => ({
+    address: candidate.address,
+    type: String(candidate.type),
+  })))
   if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
 }
 
@@ -1721,6 +1758,12 @@ onMounted(() => {
               <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="selectTopUiSources()">
                 Top {{ uiStringSourceSafeSelectionLimit }}
               </button>
+              <button class="btn btn-secondary compact" type="button" :disabled="currentUiStringSourceBatch.length === 0" @click="watchCurrentUiSourceBatch()">
+                Watch lot
+              </button>
+              <button class="btn btn-secondary compact" type="button" :disabled="selectedUiSourceAddresses.length === 0" @click="watchSelectedUiSources()">
+                Watch cochés
+              </button>
               <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="selectAllUiSources()">
                 Tout cocher sûr
               </button>
@@ -1756,6 +1799,9 @@ onMounted(() => {
             <span>{{ candidate.type }}</span>
             <span>{{ candidate.variantLabel || '-' }}</span>
             <strong>{{ candidate.lastValueNumber }}</strong>
+            <strong class="live-value" :class="{ changed: watchedCandidate(candidate.address)?.changed }">
+              {{ candidateCurrentValue(candidate.address) }}
+            </strong>
             <span>{{ candidate.trackHits ? `${candidate.trackHits} hit(s)` : `${formatNumber(candidate.distanceBytes)} o` }}</span>
             <button class="btn btn-primary compact" type="button" @click="useUiSourceCandidate(candidate)">Utiliser</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate)">Watch</button>
@@ -1823,6 +1869,12 @@ onMounted(() => {
           </button>
           <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0 || !store.writeValue.trim()" @click="writeSelectedCandidates()">
             Écrire sur sélection
+          </button>
+          <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="watchCurrentCandidatePage()">
+            Watch page
+          </button>
+          <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="watchSelectedCandidates()">
+            Watch sélection
           </button>
         </div>
         <div class="page-info">
@@ -1994,6 +2046,15 @@ onMounted(() => {
       <section class="panel">
         <div class="panel-title">
           <h2>Watch live</h2>
+          <span>{{ store.watchedAddresses.length }} adresse(s) · {{ store.watchLiveReadLimit }}/cycle</span>
+          <button
+            class="btn btn-secondary compact"
+            type="button"
+            :disabled="store.watchedAddresses.length === 0"
+            @click="store.refreshWatchedAddresses()"
+          >
+            Rafraîchir
+          </button>
           <button
             class="btn btn-secondary compact"
             type="button"
@@ -2001,6 +2062,14 @@ onMounted(() => {
             @click="store.setWatchLiveEnabled(!store.watchLiveEnabled)"
           >
             {{ store.watchLiveEnabled ? 'Arrêter' : 'Démarrer' }}
+          </button>
+          <button
+            class="btn btn-secondary compact"
+            type="button"
+            :disabled="store.watchedAddresses.length === 0"
+            @click="store.clearWatchedAddresses()"
+          >
+            Vider
           </button>
         </div>
         <div v-if="store.watchedAddresses.length === 0" class="hint">Sélectionne un candidat ou clique Watch pour surveiller une adresse.</div>
@@ -2909,7 +2978,7 @@ onMounted(() => {
 
 .source-row {
   display: grid;
-  grid-template-columns: 28px minmax(140px, 1fr) 74px minmax(120px, 1fr) 70px 80px auto auto auto;
+  grid-template-columns: 28px minmax(140px, 1fr) 74px minmax(120px, 1fr) 70px 74px 80px auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 38px;
@@ -2930,6 +2999,20 @@ onMounted(() => {
 
 .source-row strong {
   color: var(--success);
+}
+
+.live-value {
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid rgba(122, 162, 247, 0.25);
+  border-radius: 999px;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.live-value.changed {
+  border-color: rgba(224, 175, 104, 0.55);
+  color: var(--warning);
 }
 
 .find-writes-panel {
