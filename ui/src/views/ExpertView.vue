@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
@@ -21,6 +21,8 @@ import {
 const store = useAppStore()
 const selectedCandidateAddresses = ref<string[]>([])
 const selectedWriteTargetOverrides = ref<Record<string, MemoryWriteTarget>>({})
+const uiStringSourcesPanelRef = ref<HTMLElement | null>(null)
+const writePanelRef = ref<HTMLElement | null>(null)
 
 // Phase 14 — Pointer Chains
 const pointerScanAddress = ref('')
@@ -673,6 +675,7 @@ function useUiSourceCandidate(candidate: UiStringSourceCandidate) {
     },
   }
   syncSelectedWriteType()
+  scrollToWritePanel()
 }
 
 function watchUiSourceCandidate(candidate: UiStringSourceCandidate) {
@@ -699,6 +702,19 @@ function useSelectedUiSourcesForWrite() {
   }
   store.selectedCandidateAddress = chosen[0].address
   store.writeValue = uiStringValue.value || store.exactScanValue
+  scrollToWritePanel()
+}
+
+function scrollToWritePanel() {
+  void nextTick(() => {
+    writePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
+
+function scrollToUiSources() {
+  void nextTick(() => {
+    uiStringSourcesPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 const candidatePageTotal = computed(() => {
@@ -1447,7 +1463,7 @@ onMounted(() => {
             <span>{{ ref.protection || '-' }}</span>
           </div>
         </div>
-        <div v-if="uiStringSourceCandidates.length > 0" class="source-list">
+        <div v-if="uiStringSourceCandidates.length > 0" ref="uiStringSourcesPanelRef" class="source-list">
           <div class="source-list-title">
             <strong>Sources numériques proches</strong>
             <span>{{ formatNumber(filteredUiStringSourceCandidates.length) }}/{{ formatNumber(uiStringSourceCandidates.length) }} source(s) · {{ formatNumber(selectedUiSourceAddresses.length) }} cochée(s)</span>
@@ -1626,10 +1642,20 @@ onMounted(() => {
         </div>
       </section>
 
-      <section class="panel">
+      <section ref="writePanelRef" class="panel">
         <div class="panel-title">
           <h2>{{ $t('write.title') }}</h2>
-          <span v-if="store.writeResult">{{ store.writeResult.success ? 'OK' : 'FAIL' }}</span>
+          <div class="panel-title-actions">
+            <button
+              v-if="uiStringSourceCandidates.length > 0"
+              class="btn btn-secondary compact"
+              type="button"
+              @click="scrollToUiSources()"
+            >
+              Retour sources
+            </button>
+            <span v-if="store.writeResult">{{ store.writeResult.success ? 'OK' : 'FAIL' }}</span>
+          </div>
         </div>
         <div class="controls write-controls">
           <div v-if="hasSelectedWriteTargets" class="input multi-target-summary" :title="selectedCandidateAddresses.map((address) => `0x${address}`).join(', ')">
@@ -2011,12 +2037,24 @@ onMounted(() => {
 }
 
 .panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
 .panel-title h2 {
   color: var(--text-primary);
   font-size: 15px;
+}
+
+.panel-title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 .controls {
