@@ -4373,6 +4373,7 @@ QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, c
 
     result["success"] = write.success;
     result["verified"] = write.verified;
+    result["protectionChanged"] = write.protectionChanged;
     result["bytesWritten"] = static_cast<int>(write.bytesWritten);
     result["error"] = write.errorMessage;
     return result;
@@ -4470,6 +4471,7 @@ QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantL
         const auto write = writer.write(address, targetBytes, true);
         writeResult["success"] = write.success;
         writeResult["verified"] = write.verified;
+        writeResult["protectionChanged"] = write.protectionChanged;
         writeResult["bytesWritten"] = static_cast<int>(write.bytesWritten);
         writeResult["error"] = write.errorMessage;
         writeResult["encodedHex"] = QString::fromLatin1(targetBytes.toHex(' ').toUpper());
@@ -4486,8 +4488,13 @@ QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantL
     }
 
     m_lastBatchEndIndex = m_writeHistory.size();
+    const int protectionChangedCount = static_cast<int>(std::count_if(writeResults.begin(), writeResults.end(), [](const QVariant& item) {
+        return item.toMap().value("protectionChanged").toBool();
+    }));
     result["success"] = allWritesOk && written > 0;
     result["verified"] = result.value("success").toBool();
+    result["protectionChanged"] = protectionChangedCount > 0;
+    result["protectionChangedCount"] = protectionChangedCount;
     result["bytesWritten"] = 0;
     result["written"] = written;
     result["total"] = targets.size();
@@ -4504,6 +4511,7 @@ QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantL
             {"variantLabel", write.value("variantLabel")},
             {"success", write.value("success")},
             {"verified", write.value("verified")},
+            {"protectionChanged", write.value("protectionChanged")},
             {"bytesWritten", write.value("bytesWritten")},
             {"encodedHex", write.value("encodedHex")},
             {"error", write.value("error")},
@@ -4512,6 +4520,7 @@ QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantL
     appendScanTelemetry("ui_string_sources_write", {
         {"success", result.value("success")},
         {"verified", result.value("verified")},
+        {"protectionChangedCount", protectionChangedCount},
         {"displayValue", rawValue},
         {"targetCount", targets.size()},
         {"written", written},
@@ -4565,6 +4574,7 @@ QVariantMap ApplicationController::writeMemoryValueConfirmed(
     const QByteArray targetBytes = killcore::scanValueToBytes(scanValue);
     const auto temporaryWrite = writer.write(address, targetBytes, true);
     result["temporaryVerified"] = temporaryWrite.success && temporaryWrite.verified;
+    result["temporaryProtectionChanged"] = temporaryWrite.protectionChanged;
     result["bytesWritten"] = static_cast<int>(temporaryWrite.bytesWritten);
 
     if (!temporaryWrite.success || !temporaryWrite.verified) {
@@ -4578,6 +4588,7 @@ QVariantMap ApplicationController::writeMemoryValueConfirmed(
     if (previousValue.size() == targetBytes.size()) {
         const auto restore = writer.write(address, previousValue, true);
         result["restoredBeforeFinal"] = restore.success && restore.verified;
+        result["restoreProtectionChanged"] = restore.protectionChanged;
         if (!restore.success || !restore.verified) {
             result["error"] = restore.errorMessage.isEmpty()
                 ? "La restauration après confirmation temporaire a échoué."
@@ -4593,6 +4604,7 @@ QVariantMap ApplicationController::writeMemoryValueConfirmed(
     result["finalVerified"] = finalWrite.success && finalWrite.verified;
     result["success"] = finalWrite.success && finalWrite.verified;
     result["verified"] = finalWrite.verified;
+    result["protectionChanged"] = finalWrite.protectionChanged;
     result["bytesWritten"] = static_cast<int>(finalWrite.bytesWritten);
     result["error"] = finalWrite.errorMessage;
 
@@ -4639,6 +4651,7 @@ QVariantMap ApplicationController::rollbackLastWriteBatch() {
         restored["to"] = bytesToDouble(rec.previousValue, rec.type);
         restored["success"] = write.success;
         restored["verified"] = write.verified;
+        restored["protectionChanged"] = write.protectionChanged;
         restoredWrites.append(restored);
     }
 
@@ -4682,6 +4695,7 @@ QVariantMap ApplicationController::rollbackLastWrite() {
 
     result["success"] = write.success;
     result["verified"] = write.verified;
+    result["protectionChanged"] = write.protectionChanged;
     result["bytesWritten"] = static_cast<int>(write.bytesWritten);
     result["error"] = write.errorMessage;
     if (write.success) {
@@ -4731,6 +4745,28 @@ QVariantMap ApplicationController::setFreezeValue(const QString& addressHex, con
 
     result["success"] = true;
     result["enabled"] = true;
+    return result;
+}
+
+QVariantMap ApplicationController::setFreezeInterval(int intervalMs) {
+    QVariantMap result;
+
+    // Bornes raisonnables : 10 ms (très agressif, pour jeux type SC2)
+    // à 2000 ms (économique). En dehors de ces bornes, on remet le défaut (100 ms).
+    const int clamped = (intervalMs <= 0) ? 100 : std::clamp(intervalMs, 10, 2000);
+
+    m_freezeTimer.setInterval(clamped);
+
+    // Si le timer est déjà actif (freeze en cours), on le redémarre avec le nouvel intervalle.
+    const bool wasActive = m_freezeTimer.isActive();
+    if (wasActive) {
+        m_freezeTimer.stop();
+        m_freezeTimer.start();
+    }
+
+    result["success"] = true;
+    result["intervalMs"] = clamped;
+    result["wasActive"] = wasActive;
     return result;
 }
 

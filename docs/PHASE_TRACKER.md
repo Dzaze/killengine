@@ -197,6 +197,12 @@ Prerequisites before Phase 12:
     - [x] Tests unitaires : 6 tests PointerChain, dont round-trip profil pointer_chain (44/44 au total)
     - [x] Convention de resolution corrigee : chaque offset suit un dereferencement, compatible avec les chaines trouvees par le scanner
     - [ ] Validation manuelle sur StarCraft 2
+- [x] PHASE 16 - Écriture robuste et freeze SC2
+    - [x] Diagnostic des limites de l'approche "lecture RAM pure" (`docs/SC2_IMPROVEMENT_ANALYSIS.md`)
+    - [x] `MemoryWriter` : retry automatique avec `VirtualProtectEx` sur pages protégées
+    - [x] `MemoryWriteResult::protectionChanged` pour signaler quand la protection a dû être changée
+    - [x] `setFreezeInterval` : intervalle de polling configurable (10–2000 ms) pour jeux type SC2
+    - [x] Interface `backend.ts` : `setFreezeInterval` exposée au frontend
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM

@@ -1610,6 +1610,7 @@ onMounted(() => {
         <div v-if="store.writeResult" class="metrics">
           <span>{{ store.writeResult.bytesWritten }} B</span>
           <span v-if="store.writeResult.written !== undefined">Écrites: {{ formatNumber(store.writeResult.written) }}/{{ formatNumber(store.writeResult.total) }}</span>
+          <span v-if="store.writeResult.protectionChanged">VirtualProtectEx{{ store.writeResult.protectionChangedCount ? `: ${formatNumber(store.writeResult.protectionChangedCount)}` : '' }}</span>
           <span v-if="store.writeResult.verified">{{ $t('write.verified') }}</span>
           <span v-if="store.writeResult.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
         </div>

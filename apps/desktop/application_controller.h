@@ -174,6 +174,9 @@ public:
     /// Active/désactive un freeze simple sur une adresse.
     Q_INVOKABLE QVariantMap setFreezeValue(const QString& addressHex, const QString& valueType, const QString& value, bool enabled);
 
+    /// Configure l'intervalle du freeze polling (10-2000 ms, 100 ms par défaut).
+    Q_INVOKABLE QVariantMap setFreezeInterval(int intervalMs);
+
     /// Lance une recherche intelligente (Smart Search).
     /// Phase 0: stub qui logge la requête.
     Q_INVOKABLE QVariantMap startSmartSearch(const QString& query);

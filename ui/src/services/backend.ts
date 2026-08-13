@@ -352,6 +352,7 @@ export interface UnknownNextScanResult {
 export interface MemoryWriteResult {
   success: boolean
   verified: boolean
+  protectionChanged?: boolean
   bytesWritten: number
   error: string
   address?: string
@@ -361,6 +362,7 @@ export interface MemoryWriteResult {
   displayValue?: string
   written?: number
   total?: number
+  protectionChangedCount?: number
   results?: MemoryWriteResult[]
   enabled?: boolean
   confirmationMode?: boolean
@@ -574,6 +576,7 @@ export interface AppSettings {
   rollbackLastWrite(): Promise<MemoryWriteResult>
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
+  setFreezeInterval(intervalMs: number): Promise<Record<string, unknown>>
   startSmartSearch(query: string): Promise<SmartSearchResult>
   ping(message: string): Promise<string>
   getSettings(): Promise<AppSettings>
@@ -1184,6 +1187,9 @@ class BackendService {
       },
       async setFreezeValue(_addressHex: string, _valueType: string, _value: string, enabled: boolean) {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend', enabled }
+      },
+      async setFreezeInterval(_intervalMs: number) {
+        return { success: false, error: 'Mock backend' }
       },
       async startSmartSearch(query: string) {
         return {

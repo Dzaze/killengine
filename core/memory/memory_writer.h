@@ -11,13 +11,14 @@
 namespace killcore {
 
 struct MemoryWriteResult {
-    bool success{false};
-    bool verified{false};
-    uint64_t address{0};
-    size_t requestedBytes{0};
-    size_t bytesWritten{0};
-    uint32_t errorCode{0};
-    QString errorMessage;
+    bool       success{false};
+    bool       verified{false};
+    bool       protectionChanged{false}; ///< True si VirtualProtectEx a été nécessaire
+    uint64_t   address{0};
+    size_t     requestedBytes{0};
+    size_t     bytesWritten{0};
+    uint32_t   errorCode{0};
+    QString    errorMessage;
     QByteArray previousValue;
 };
 
