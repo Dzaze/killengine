@@ -476,10 +476,12 @@ function selectUiSourceBatch() {
 
 function previousUiSourceBatch() {
   uiStringSourceBatchIndex.value = Math.max(0, boundedUiStringSourceBatchIndex.value - 1)
+  selectUiSourceBatch()
 }
 
 function nextUiSourceBatch() {
   uiStringSourceBatchIndex.value = Math.min(uiStringSourceBatchCount.value - 1, boundedUiStringSourceBatchIndex.value + 1)
+  selectUiSourceBatch()
 }
 
 async function analyzeUiStringSources(candidate?: UiStringCandidate, radiusOverrideBytes = uiStringSourceRadiusBytes.value) {
