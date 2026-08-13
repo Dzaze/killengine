@@ -63,6 +63,7 @@ const uiStringSourceRadiusOptions = [
   { value: 4 * 1024 * 1024, label: '4 Mo' },
   { value: 16 * 1024 * 1024, label: '16 Mo' },
 ]
+const uiStringSourceSafeSelectionLimit = 25
 
 function setUiStringInvestigationActive(active: boolean) {
   uiStringLiveInvestigation.value = active
@@ -155,7 +156,7 @@ async function toggleUiStringLiveInvestigation() {
       uiStringSourceCandidates.value = Array.from(merged.values())
         .sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))
         .slice(0, 500)
-      selectedUiSourceAddresses.value = globalHits.map(sourceKey)
+      selectedUiSourceAddresses.value = globalHits.slice(0, uiStringSourceSafeSelectionLimit).map(sourceKey)
     }
   } catch (e) {
     uiStringInvestigationFinishResult.value = {
@@ -380,6 +381,18 @@ function toggleUiSourceSelection(candidate: UiStringSourceCandidate) {
     return
   }
   selectedUiSourceAddresses.value = [...selectedUiSourceAddresses.value, key]
+}
+
+function selectAllUiSources() {
+  selectedUiSourceAddresses.value = uiStringSourceCandidates.value.map(sourceKey)
+}
+
+function clearUiSourceSelection() {
+  selectedUiSourceAddresses.value = []
+}
+
+function selectTopUiSources(limit = uiStringSourceSafeSelectionLimit) {
+  selectedUiSourceAddresses.value = uiStringSourceCandidates.value.slice(0, limit).map(sourceKey)
 }
 
 async function analyzeUiStringSources(candidate?: UiStringCandidate, radiusOverrideBytes = uiStringSourceRadiusBytes.value) {
@@ -1341,15 +1354,30 @@ onMounted(() => {
         <div v-if="uiStringSourceCandidates.length > 0" class="source-list">
           <div class="source-list-title">
             <strong>Sources numériques proches</strong>
-            <button
-              class="btn btn-primary compact"
-              type="button"
-              :disabled="selectedUiSourceAddresses.length === 0"
-              @click="useSelectedUiSourcesForWrite()"
-            >
-              Envoyer vers Write
-            </button>
+            <span>{{ formatNumber(uiStringSourceCandidates.length) }} source(s) · {{ formatNumber(selectedUiSourceAddresses.length) }} cochée(s)</span>
+            <div class="source-actions">
+              <button class="btn btn-secondary compact" type="button" @click="selectTopUiSources()">
+                Top {{ uiStringSourceSafeSelectionLimit }}
+              </button>
+              <button class="btn btn-secondary compact" type="button" @click="selectAllUiSources()">
+                Tout cocher
+              </button>
+              <button class="btn btn-secondary compact" type="button" @click="clearUiSourceSelection()">
+                Tout décocher
+              </button>
+              <button
+                class="btn btn-primary compact"
+                type="button"
+                :disabled="selectedUiSourceAddresses.length === 0"
+                @click="useSelectedUiSourcesForWrite()"
+              >
+                Envoyer {{ formatNumber(selectedUiSourceAddresses.length) }} vers Write
+              </button>
+            </div>
           </div>
+          <p v-if="selectedUiSourceAddresses.length > 50" class="source-warning">
+            Sélection massive : écrire beaucoup d'adresses peut rendre SC2 instable. Teste plutôt par petits paquets.
+          </p>
           <div
             v-for="candidate in uiStringSourceCandidates"
             :key="sourceKey(candidate)"
@@ -2264,7 +2292,21 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
   color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.source-warning {
+  margin: 2px 0 6px;
+  color: var(--warning);
   font-size: 12px;
 }
 
