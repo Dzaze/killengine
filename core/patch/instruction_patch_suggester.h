@@ -12,6 +12,8 @@ struct InstructionInfo {
     QString mnemonicHint;
     QString disassembly;
     QString decoder{"builtin"};
+    QString category{"unknown"};
+    QString rawBytesText;
     QString stableAobPattern;
     QString error;
 };
@@ -20,6 +22,8 @@ struct PatchSuggestion {
     QString label;
     QString bytesText;
     QString description;
+    QString category;
+    QString riskLevel{"medium"};
     bool risky{false};
 };
 

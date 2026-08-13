@@ -76,6 +76,8 @@ TEST(InstructionPatchSuggester, DecodesCommonRipRelativeWriteLength) {
     EXPECT_EQ(instruction.length, 7);
     EXPECT_FALSE(instruction.mnemonicHint.isEmpty());
     EXPECT_FALSE(instruction.decoder.isEmpty());
+    EXPECT_EQ(instruction.category, "memory-write");
+    EXPECT_FALSE(instruction.rawBytesText.isEmpty());
     EXPECT_EQ(instruction.stableAobPattern, "48 89 05 ?? ?? ?? ??");
 }
 
@@ -84,11 +86,28 @@ TEST(InstructionPatchSuggester, SuggestsSameLengthNopPatch) {
     instruction.success = true;
     instruction.length = 7;
     instruction.mnemonicHint = "write-like";
+    instruction.category = "memory-write";
 
     const auto suggestions = suggestInstructionPatches(instruction);
 
     ASSERT_FALSE(suggestions.isEmpty());
-    EXPECT_EQ(suggestions.first().label, "NOP x7");
+    EXPECT_EQ(suggestions.first().label, "NOP écriture x7");
     EXPECT_EQ(suggestions.first().bytesText, "90 90 90 90 90 90 90");
+    EXPECT_EQ(suggestions.first().riskLevel, "low");
     EXPECT_FALSE(suggestions.first().risky);
+}
+
+TEST(InstructionPatchSuggester, SuggestsBranchDirectionPatches) {
+    const QByteArray bytes = QByteArray::fromHex("7505");
+    auto instruction = decodeX64InstructionLength(bytes);
+    ASSERT_TRUE(instruction.success) << instruction.error.toStdString();
+    ASSERT_EQ(instruction.category, "conditional-jump");
+
+    const auto suggestions = suggestInstructionPatches(instruction);
+
+    ASSERT_GE(suggestions.size(), 2);
+    EXPECT_EQ(suggestions[0].label, "Forcer non pris");
+    EXPECT_EQ(suggestions[0].bytesText, "90 90");
+    EXPECT_EQ(suggestions[1].label, "Forcer pris");
+    EXPECT_EQ(suggestions[1].bytesText, "EB 05");
 }

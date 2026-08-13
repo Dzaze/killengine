@@ -2048,6 +2048,7 @@ onMounted(() => {
           <span>Instruction: {{ codePatchSuggestionResult.success ? 'OK' : 'FAIL' }}</span>
           <span v-if="codePatchSuggestionResult.instructionLength">{{ formatNumber(codePatchSuggestionResult.instructionLength) }} o</span>
           <span v-if="codePatchSuggestionResult.mnemonicHint">{{ codePatchSuggestionResult.mnemonicHint }}</span>
+          <span v-if="codePatchSuggestionResult.category">{{ codePatchSuggestionResult.category }}</span>
           <span v-if="codePatchSuggestionResult.decoder">{{ codePatchSuggestionResult.decoder }}</span>
         </div>
         <p v-if="codePatchSuggestionResult?.disassembly" class="hint">{{ codePatchSuggestionResult.disassembly }}</p>
@@ -2059,12 +2060,12 @@ onMounted(() => {
             v-for="suggestion in codePatchSuggestionResult.suggestions"
             :key="suggestion.label"
             class="btn compact"
-            :class="suggestion.risky ? 'btn-secondary' : 'btn-primary'"
+            :class="suggestion.riskLevel === 'low' ? 'btn-primary' : 'btn-secondary'"
             type="button"
             :title="suggestion.description"
             @click="useCodePatchSuggestion(suggestion)"
           >
-            {{ suggestion.label }}
+            {{ suggestion.label }}{{ suggestion.riskLevel ? ` · ${suggestion.riskLevel}` : '' }}
           </button>
         </div>
         <p v-if="codePatchSuggestionResult?.error" class="error">{{ codePatchSuggestionResult.error }}</p>

@@ -158,6 +158,14 @@ QString repeatedNopBytes(int length) {
     return bytesToAobPattern(bytes);
 }
 
+QString bytesToText(const QByteArray& bytes) {
+    return bytesToAobPattern(bytes);
+}
+
+QString patchBytesToText(const QByteArray& bytes) {
+    return bytesToAobPattern(bytes);
+}
+
 QString bytesToWildcardPattern(const QByteArray& bytes, const QList<QPair<int, int>>& wildcardRanges) {
     QStringList tokens;
     tokens.reserve(bytes.size());
@@ -176,6 +184,62 @@ QString bytesToWildcardPattern(const QByteArray& bytes, const QList<QPair<int, i
         }
     }
     return tokens.join(' ');
+}
+
+QString categoryForInstruction(const QString& mnemonicHint, const QString& disassembly) {
+    const QString mnemonic = mnemonicHint.toLower();
+    const QString text = disassembly.toLower();
+    if (mnemonic == "call") return "call";
+    if (mnemonic == "ret") return "ret";
+    if (mnemonic.startsWith('j')) return mnemonic == "jmp" ? "jump" : "conditional-jump";
+    if (mnemonic == "cmp" || mnemonic == "test") return "compare";
+    if (mnemonic == "mov" || mnemonic == "movups" || mnemonic == "movss" || mnemonic == "movsd" ||
+        mnemonic == "add" || mnemonic == "sub" || mnemonic == "inc" || mnemonic == "dec") {
+        if (text.contains('[') && text.indexOf('[') < text.indexOf(',')) {
+            return "memory-write";
+        }
+        return "data";
+    }
+    if (mnemonic == "write-like") return "memory-write";
+    if (mnemonic == "jcc") return "conditional-jump";
+    if (mnemonic == "jump") return "jump";
+    return "generic";
+}
+
+PatchSuggestion makeSuggestion(
+    const QString& label,
+    const QString& bytesText,
+    const QString& description,
+    const QString& category,
+    const QString& riskLevel) {
+    PatchSuggestion suggestion;
+    suggestion.label = label;
+    suggestion.bytesText = bytesText;
+    suggestion.description = description;
+    suggestion.category = category;
+    suggestion.riskLevel = riskLevel;
+    suggestion.risky = riskLevel != "low";
+    return suggestion;
+}
+
+QByteArray forceNearConditionalJumpBytes(const QByteArray& rawBytes) {
+    if (rawBytes.size() != 6 || static_cast<uint8_t>(rawBytes.at(0)) != 0x0F) return {};
+
+    const int32_t originalDisp =
+        static_cast<uint8_t>(rawBytes.at(2)) |
+        (static_cast<uint8_t>(rawBytes.at(3)) << 8) |
+        (static_cast<uint8_t>(rawBytes.at(4)) << 16) |
+        (static_cast<uint8_t>(rawBytes.at(5)) << 24);
+    const int32_t adjustedDisp = originalDisp + 1; // E9 rel32 ends one byte earlier than 0F 8x rel32.
+
+    QByteArray patch;
+    patch.append(static_cast<char>(0xE9));
+    patch.append(static_cast<char>(adjustedDisp & 0xFF));
+    patch.append(static_cast<char>((adjustedDisp >> 8) & 0xFF));
+    patch.append(static_cast<char>((adjustedDisp >> 16) & 0xFF));
+    patch.append(static_cast<char>((adjustedDisp >> 24) & 0xFF));
+    patch.append(static_cast<char>(0x90));
+    return patch;
 }
 
 } // namespace
@@ -200,6 +264,8 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
         info.mnemonicHint = QString::fromLatin1(ZydisMnemonicGetString(instruction.info.mnemonic));
         info.disassembly = QString::fromLatin1(instruction.text);
         info.decoder = "zydis";
+        info.category = categoryForInstruction(info.mnemonicHint, info.disassembly);
+        info.rawBytesText = bytesToText(bytes.left(info.length));
         QList<QPair<int, int>> wildcardRanges;
         if (instruction.info.raw.disp.size > 0) {
             wildcardRanges.append({
@@ -278,6 +344,8 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
     info.success = true;
     info.length = length;
     info.mnemonicHint = hintForOpcode(op, twoByte);
+    info.category = categoryForInstruction(info.mnemonicHint, info.disassembly);
+    info.rawBytesText = bytesToText(bytes.left(length));
     info.stableAobPattern = bytesToAobPattern(bytes.left(length));
     return info;
 }
@@ -286,30 +354,88 @@ QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruct
     QList<PatchSuggestion> suggestions;
     if (!instruction.success || instruction.length <= 0) return suggestions;
 
-    PatchSuggestion nop;
-    nop.label = QString("NOP x%1").arg(instruction.length);
-    nop.bytesText = repeatedNopBytes(instruction.length);
-    nop.description = "Neutralise l'instruction en gardant exactement la même longueur.";
-    nop.risky = false;
-    suggestions.append(nop);
+    const QString nopBytes = repeatedNopBytes(instruction.length);
+    const QByteArray rawBytes = QByteArray::fromHex(instruction.rawBytesText.toLatin1());
+    const QString category = instruction.category == "unknown" || instruction.category.isEmpty()
+        ? categoryForInstruction(instruction.mnemonicHint, instruction.disassembly)
+        : instruction.category;
 
-    PatchSuggestion int3;
-    int3.label = "INT3 debug";
-    int3.bytesText = repeatedNopBytes(instruction.length);
+    if (category == "memory-write") {
+        suggestions.append(makeSuggestion(
+            QString("NOP écriture x%1").arg(instruction.length),
+            nopBytes,
+            "Empêche cette instruction d'écrire en mémoire. C'est généralement le premier test pour une ressource réécrite.",
+            "memory-write",
+            "low"));
+    } else if (category == "conditional-jump") {
+        suggestions.append(makeSuggestion(
+            "Forcer non pris",
+            nopBytes,
+            "Neutralise le saut conditionnel: le flux continue comme si la condition était fausse.",
+            "branch",
+            "medium"));
+        if (rawBytes.size() == 2) {
+            QByteArray patch = rawBytes;
+            patch[0] = static_cast<char>(0xEB);
+            suggestions.append(makeSuggestion(
+                "Forcer pris",
+                patchBytesToText(patch),
+                "Convertit le saut conditionnel court en saut inconditionnel vers la même cible.",
+                "branch",
+                "medium"));
+        } else if (rawBytes.size() == 6) {
+            const QByteArray patch = forceNearConditionalJumpBytes(rawBytes);
+            if (!patch.isEmpty()) {
+                suggestions.append(makeSuggestion(
+                    "Forcer pris",
+                    patchBytesToText(patch),
+                    "Convertit le saut conditionnel proche en saut inconditionnel et garde la même taille.",
+                    "branch",
+                    "medium"));
+            }
+        }
+    } else if (category == "compare") {
+        suggestions.append(makeSuggestion(
+            QString("NOP compare x%1").arg(instruction.length),
+            nopBytes,
+            "Neutralise un compare/test; utile seulement si l'instruction suivante dépend des flags.",
+            "compare",
+            "high"));
+    } else if (category == "call") {
+        suggestions.append(makeSuggestion(
+            QString("NOP call x%1").arg(instruction.length),
+            nopBytes,
+            "Saute l'appel de fonction. Risqué si la fonction prépare un état requis après l'appel.",
+            "call",
+            "high"));
+    } else {
+        suggestions.append(makeSuggestion(
+            QString("NOP x%1").arg(instruction.length),
+            nopBytes,
+            "Neutralise l'instruction en gardant exactement la même longueur.",
+            "generic",
+            "medium"));
+    }
+
+    PatchSuggestion int3 = makeSuggestion(
+        "INT3 debug",
+        nopBytes,
+        "Breakpoint logiciel pour valider que le code passe ici; expérimental.",
+        "debug",
+        "high");
     if (instruction.length > 0) {
         int3.bytesText.replace(0, 2, "CC");
     }
-    int3.description = "Breakpoint logiciel pour valider que le code passe ici; expérimental.";
-    int3.risky = true;
     suggestions.append(int3);
 
     if (instruction.length >= 1) {
-        PatchSuggestion ret;
-        ret.label = "RET + NOP";
-        ret.bytesText = repeatedNopBytes(instruction.length);
+        PatchSuggestion ret = makeSuggestion(
+            "RET + NOP",
+            nopBytes,
+            "Force un retour immédiat; très risqué hors début de fonction.",
+            "return",
+            "high");
         ret.bytesText.replace(0, 2, "C3");
-        ret.description = "Force un retour immédiat; très risqué hors début de fonction.";
-        ret.risky = true;
         suggestions.append(ret);
     }
 

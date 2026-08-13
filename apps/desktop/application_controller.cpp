@@ -4997,6 +4997,7 @@ QVariantMap ApplicationController::suggestCodePatches(const QString& addressHex,
     result["mnemonicHint"] = instruction.mnemonicHint;
     result["disassembly"] = instruction.disassembly;
     result["decoder"] = instruction.decoder;
+    result["category"] = instruction.category;
     result["stableAobPattern"] = instruction.stableAobPattern;
     result["bytesRead"] = static_cast<int>(read.bytesRead);
     result["bytes"] = QString::fromLatin1(read.data.left(instruction.length > 0 ? instruction.length : read.data.size()).toHex(' ').toUpper());
@@ -5013,6 +5014,8 @@ QVariantMap ApplicationController::suggestCodePatches(const QString& addressHex,
         item["label"] = suggestion.label;
         item["bytesText"] = suggestion.bytesText;
         item["description"] = suggestion.description;
+        item["category"] = suggestion.category;
+        item["riskLevel"] = suggestion.riskLevel;
         item["risky"] = suggestion.risky;
         suggestions.append(item);
     }

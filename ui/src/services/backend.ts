@@ -440,6 +440,8 @@ export interface CodePatchSuggestion {
   label: string
   bytesText: string
   description?: string
+  category?: string
+  riskLevel?: 'low' | 'medium' | 'high' | string
   risky?: boolean
 }
 
@@ -453,6 +455,7 @@ export interface CodePatchSuggestionResult {
   mnemonicHint?: string
   disassembly?: string
   decoder?: string
+  category?: string
   stableAobPattern?: string
   bytesRead?: number
   bytes?: string
