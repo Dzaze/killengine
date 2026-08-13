@@ -184,6 +184,10 @@ public:
     /// options keys: size (1/2/4/8), timeoutMs (défaut 5000), maxHits (défaut 10)
     Q_INVOKABLE QVariantMap findWhatWrites(const QString& addressHex, const QVariantMap& options);
 
+    /// Cherche une signature AOB dans les régions mémoire du processus.
+    /// Pattern: "48 8B ?? ?? 89", options: executableOnly, imageOnly, startAddress, stopAddress, maxResults.
+    Q_INVOKABLE QVariantMap scanAobPattern(const QString& pattern, const QVariantMap& options);
+
     /// Configure l'intervalle du freeze polling (10-2000 ms, 100 ms par défaut).
     Q_INVOKABLE QVariantMap setFreezeInterval(int intervalMs);
 

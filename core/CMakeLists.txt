@@ -58,6 +58,10 @@ add_library(killcore STATIC
     # Debug / Hardware breakpoints (Phase 17 — Find What Writes)
     debug/hardware_breakpoint.h
     debug/hardware_breakpoint.cpp
+
+    # Patch / AOB signatures (Phase 18 — trainer engine)
+    patch/aob_scanner.h
+    patch/aob_scanner.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

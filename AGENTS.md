@@ -139,6 +139,14 @@ killengine/
 - Contraintes Windows : `DebugActiveProcess` / `WaitForDebugEvent` doivent rester dans le même thread logique pour l'utilitaire bloquant. Avant d'en faire un vrai workflow async, créer un worker dédié qui attache, attend et détache dans le même thread.
 - Prudence SC2 : l'attachement debugger peut échouer, être détecté, ou perturber le jeu. Garder cette fonctionnalité en mode Expert/expérimental tant qu'elle n'est pas validée manuellement.
 
+### AOB signatures / Trainer engine
+- Module : `core/patch/aob_scanner.*`.
+- Objectif : passer du scan de valeurs RAM à une approche trainer type WeMod/Wand : retrouver une signature d'instruction stable dans les régions code, puis plus tard patcher/hooker cette instruction.
+- Backend : `ApplicationController::scanAobPattern(pattern, options)` expose le scan de pattern (`48 8B ?? 89`) avec filtres `executableOnly`, `imageOnly`, `maxResults`.
+- UI : section **AOB signatures** dans Expert. Pour l'instant, elle scanne et affiche `module + offset`; elle ne patch pas encore.
+- Tests ciblés : `.\build\bin\killengine_unit_tests.exe --gtest_filter=AobScanner.*`.
+- Prochaine étape logique : générer une signature autour d'un RIP capturé par `Écrit par`, puis ajouter un patch enable/disable qui sauvegarde les bytes originaux.
+
 ### Performance adaptive
 - Préférer plus de threads contrôlés à plus de processus : le moteur doit rester déterministe et l'UI Qt/Vue doit rester fluide.
 - Centraliser les décisions machine dans `core/scanner/performance_profile.*` plutôt que disperser des heuristiques dans `ScanEngine` ou `ApplicationController`.

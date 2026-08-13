@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
+  type AobScanResult,
   type MemoryWriteTarget,
   type PointerChainInfo,
   type PointerChainResolveResult,
@@ -33,6 +34,14 @@ const pointerScanResult = ref<PointerScanResult | null>(null)
 const pointerScanBusy = ref(false)
 const pointerResolveResult = ref<PointerChainResolveResult | null>(null)
 const selectedPointerChainIndex = ref<number>(-1)
+
+// AOB signatures — base du futur trainer engine.
+const aobPattern = ref('')
+const aobExecutableOnly = ref(true)
+const aobImageOnly = ref(true)
+const aobMaxResults = ref(200)
+const aobBusy = ref(false)
+const aobResult = ref<AobScanResult | null>(null)
 
 // Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
 const uiStringValue = ref('')
@@ -252,6 +261,34 @@ async function savePointerChain(chain: PointerChainInfo) {
   } catch (e) {
     window.alert('Erreur : ' + String(e))
   }
+}
+
+async function scanAobSignature() {
+  const pattern = aobPattern.value.trim()
+  if (!pattern) return
+  aobBusy.value = true
+  aobResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.scanAobPattern) {
+      aobResult.value = { success: false, matches: [], error: 'Methode backend indisponible.' }
+      return
+    }
+    aobResult.value = await controller.scanAobPattern(pattern, {
+      executableOnly: aobExecutableOnly.value,
+      imageOnly: aobImageOnly.value,
+      maxResults: aobMaxResults.value,
+    })
+  } catch (e) {
+    aobResult.value = { success: false, matches: [], error: String(e) }
+  } finally {
+    aobBusy.value = false
+  }
+}
+
+function useAobMatchAddress(address: string) {
+  store.memoryPreviewAddress = address
+  void store.readMemoryPreview(address, 128)
 }
 
 function uiStringKey(candidate: UiStringCandidate) {
@@ -1816,6 +1853,52 @@ onMounted(() => {
         </div>
       </section>
 
+      <section class="panel">
+        <div class="panel-title">
+          <h2>AOB signatures</h2>
+          <span v-if="aobResult">{{ formatNumber(aobResult.matchesFound) }} match(es)</span>
+        </div>
+        <div class="controls aob-controls">
+          <input
+            v-model="aobPattern"
+            class="input"
+            placeholder="Pattern: 48 8B ?? ?? 89"
+            :disabled="aobBusy"
+            @keyup.enter="scanAobSignature()"
+          />
+          <input v-model.number="aobMaxResults" class="input" type="number" min="1" max="10000" />
+          <button class="btn btn-primary" :disabled="aobBusy || !aobPattern.trim()" @click="scanAobSignature()">
+            <span v-if="aobBusy" class="btn-spinner" aria-hidden="true"></span>
+            Scanner AOB
+          </button>
+        </div>
+        <div class="expert-flags aob-flags">
+          <label class="checkbox-label">
+            <input v-model="aobExecutableOnly" type="checkbox" :disabled="aobBusy" />
+            Code exécutable
+          </label>
+          <label class="checkbox-label">
+            <input v-model="aobImageOnly" type="checkbox" :disabled="aobBusy" />
+            Module image
+          </label>
+        </div>
+        <div v-if="aobResult" class="metrics">
+          <span>Régions: {{ formatNumber(aobResult.regionsScanned) }}</span>
+          <span>Lu: {{ formatBytes(aobResult.bytesScanned) }}</span>
+          <span v-if="aobResult.patternBytes">Pattern: {{ formatNumber(aobResult.patternBytes) }} o</span>
+          <span v-if="aobResult.partial" class="warning-text">résultats limités</span>
+        </div>
+        <p v-if="aobResult?.error" class="error">{{ aobResult.error }}</p>
+        <div v-if="aobResult?.matches?.length" class="aob-list">
+          <div v-for="match in aobResult.matches.slice(0, 80)" :key="match.address" class="aob-row">
+            <code>0x{{ match.address }}</code>
+            <span>{{ match.module || match.memoryType || '-' }}</span>
+            <span>{{ match.moduleOffset ? `+0x${match.moduleOffset}` : match.protection || '-' }}</span>
+            <button class="btn btn-secondary compact" type="button" @click="useAobMatchAddress(match.address)">Lire</button>
+          </div>
+        </div>
+      </section>
+
       <section class="panel pointer-chain-panel">
         <div class="panel-title">
           <h2>Pointer Chains <span class="hint-inline">(StarCraft 2 / jeux modernes)</span></h2>
@@ -3108,6 +3191,46 @@ onMounted(() => {
   font-weight: normal;
 }
 
+.aob-controls {
+  grid-template-columns: minmax(220px, 1fr) 120px auto;
+  align-items: center;
+}
+
+.aob-flags {
+  margin-top: 8px;
+}
+
+.aob-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.aob-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(120px, 180px) minmax(90px, 140px) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.aob-row code,
+.aob-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aob-row code {
+  color: var(--text-primary);
+}
+
 .pointer-chain-controls {
   grid-template-columns: minmax(170px, 1fr) 110px 100px 110px auto;
 }
@@ -3177,6 +3300,8 @@ onMounted(() => {
   .write-controls,
   .candidate-toolbar,
   .candidate-row,
+  .aob-controls,
+  .aob-row,
   .pointer-chain-controls {
     grid-template-columns: 1fr;
   }

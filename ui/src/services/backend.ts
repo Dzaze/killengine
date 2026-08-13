@@ -383,6 +383,29 @@ export interface MemoryWriteBatchResult extends MemoryWriteResult {
   results?: MemoryWriteResult[]
 }
 
+export interface AobScanMatch {
+  address: string
+  regionBase?: string
+  regionSize?: number
+  protection?: string
+  memoryType?: string
+  module?: string
+  moduleOffset?: string
+}
+
+export interface AobScanResult {
+  success: boolean
+  partial?: boolean
+  error?: string
+  bytesScanned?: number
+  regionsScanned?: number
+  matchesFound?: number
+  matches?: AobScanMatch[]
+  patternBytes?: number
+  executableOnly?: boolean
+  imageOnly?: boolean
+}
+
 export interface ExpertScanOptions {
   startAddress?: string
   stopAddress?: string
@@ -577,6 +600,7 @@ export interface AppSettings {
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
   findWhatWrites?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  scanAobPattern?(pattern: string, options: Record<string, unknown>): Promise<AobScanResult>
   setFreezeInterval(intervalMs: number): Promise<Record<string, unknown>>
   startSmartSearch(query: string): Promise<SmartSearchResult>
   ping(message: string): Promise<string>
@@ -1191,6 +1215,9 @@ class BackendService {
       },
       async findWhatWrites(_addressHex: string, _options: Record<string, unknown>) {
         return { success: false, hitCount: 0, hits: [], error: 'Mock backend' }
+      },
+      async scanAobPattern(_pattern: string, _options: Record<string, unknown>) {
+        return { success: false, matches: [], matchesFound: 0, regionsScanned: 0, bytesScanned: 0, error: 'Mock backend' }
       },
       async setFreezeInterval(_intervalMs: number) {
         return { success: false, error: 'Mock backend' }

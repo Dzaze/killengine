@@ -210,6 +210,13 @@ Prerequisites before Phase 12:
     - [x] UI Expert / Trace UI string : bouton `Écrit par` sur les sources numériques proches
     - [ ] Validation manuelle SC2 : vérifier que l'attachement debugger capture une instruction sans bloquer le jeu
     - [ ] Mode async/non-bloquant et garde-fous UX avant généralisation
+- [ ] PHASE 18 - AOB signatures / trainer engine
+    - [x] Module `core/patch/aob_scanner.*` : parsing de signatures `48 8B ??` et recherche buffer/process
+    - [x] Backend `scanAobPattern(pattern, options)` : scan borné des régions exécutables/image
+    - [x] UI Expert : panneau `AOB signatures` avec filtres code exécutable/module image et liste module+offset
+    - [x] Tests unitaires `AobScanner.*` pour parser, wildcards et matches multiples
+    - [ ] Génération de signature à partir des hits `Find What Writes`
+    - [ ] Patch enable/disable avec sauvegarde/restauration des bytes originaux
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM

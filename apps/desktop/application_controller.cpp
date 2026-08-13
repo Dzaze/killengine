@@ -11,6 +11,7 @@
 #include "process/process_handle.h"
 #include "pointer/pointer_chain.h"
 #include "pointer/pointer_scanner.h"
+#include "patch/aob_scanner.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "scanner/display_value_tracker.h"
@@ -4773,6 +4774,81 @@ QVariantMap ApplicationController::findWhatWrites(const QString& addressHex, con
     result["error"] = hits.isEmpty()
         ? "Aucune écriture capturée pendant la fenêtre d'observation."
         : QString();
+    return result;
+}
+
+QVariantMap ApplicationController::scanAobPattern(const QString& patternText, const QVariantMap& optionsMap) {
+    QVariantMap result;
+    result["success"] = false;
+    result["pattern"] = patternText;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const auto pattern = killcore::parseAobPattern(patternText);
+    if (!pattern.isValid()) {
+        result["error"] = pattern.error;
+        return result;
+    }
+
+    killcore::AobScanOptions options;
+    options.executableOnly = optionsMap.value("executableOnly", true).toBool();
+    options.writableOnly = optionsMap.value("writableOnly", false).toBool();
+    options.imageOnly = optionsMap.value("imageOnly", true).toBool();
+    options.maxResults = std::clamp(optionsMap.value("maxResults", 200).toInt(), 1, 10000);
+
+    const QString startText = optionsMap.value("startAddress").toString().trimmed();
+    const QString stopText = optionsMap.value("stopAddress").toString().trimmed();
+    if (!startText.isEmpty() && !parseHexAddress(startText, &options.startAddress)) {
+        result["error"] = "Adresse de début invalide.";
+        return result;
+    }
+    if (!stopText.isEmpty() && !parseHexAddress(stopText, &options.stopAddress)) {
+        result["error"] = "Adresse de fin invalide.";
+        return result;
+    }
+    if (options.startAddress > 0 && options.stopAddress > 0 && options.startAddress >= options.stopAddress) {
+        result["error"] = "La plage AOB est invalide.";
+        return result;
+    }
+
+    KE_LOG_INFO() << "scanAobPattern(patternBytes=" << pattern.bytes.size()
+                  << ", executableOnly=" << options.executableOnly
+                  << ", imageOnly=" << options.imageOnly
+                  << ", maxResults=" << options.maxResults << ")";
+
+    const auto scan = killcore::scanAobPattern(m_handle, pattern, options);
+    QVariantList matches;
+    const auto modules = killcore::ProcessEnumerator::enumerateModules(static_cast<uint32_t>(m_pid));
+    for (const auto& match : scan.matches) {
+        QVariantMap item;
+        item["address"] = QString::number(match.address, 16).toUpper();
+        item["regionBase"] = QString::number(match.regionBase, 16).toUpper();
+        item["regionSize"] = static_cast<qulonglong>(match.regionSize);
+        item["protection"] = killcore::protectionToString(match.protection);
+        item["memoryType"] = killcore::memoryTypeToString(match.memoryType);
+        for (const auto& module : modules) {
+            if (match.address >= module.baseAddress && match.address < module.baseAddress + module.size) {
+                item["module"] = module.name;
+                item["moduleOffset"] = QString::number(match.address - module.baseAddress, 16).toUpper();
+                break;
+            }
+        }
+        matches.append(item);
+    }
+
+    result["success"] = scan.success;
+    result["partial"] = scan.partial;
+    result["error"] = scan.error;
+    result["bytesScanned"] = static_cast<qulonglong>(scan.bytesScanned);
+    result["regionsScanned"] = scan.regionsScanned;
+    result["matchesFound"] = scan.matchesFound;
+    result["matches"] = matches;
+    result["patternBytes"] = static_cast<int>(pattern.bytes.size());
+    result["executableOnly"] = options.executableOnly;
+    result["imageOnly"] = options.imageOnly;
     return result;
 }
 
