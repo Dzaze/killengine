@@ -451,6 +451,17 @@ bool bytesEqual(const QByteArray& a, const QByteArray& b, killcore::ValueType ty
     return a == b;
 }
 
+QString unknownVariantLabel() {
+    return "Unknown current";
+}
+
+bool candidateNeedsAutoVariantMatch(const killcore::Candidate& candidate) {
+    const QString label = candidate.variantLabel.trimmed();
+    return label.isEmpty()
+        || label.compare(unknownVariantLabel(), Qt::CaseInsensitive) == 0
+        || label.compare("Unknown Auto", Qt::CaseInsensitive) == 0;
+}
+
 QString variantKey(killcore::ValueType type, const QString& label) {
     return killcore::valueTypeToString(type) + "|" + label;
 }
@@ -522,6 +533,66 @@ QByteArray targetBytesForCandidate(
     return killcore::scanValueToBytes(parsed);
 }
 
+bool matchCandidateExactVariant(
+    const QString& rawValue,
+    const killcore::Candidate& candidate,
+    const QByteArray& current,
+    killcore::Candidate* updatedCandidate,
+    QString* error) {
+    if (!candidateNeedsAutoVariantMatch(candidate)) {
+        QString targetError;
+        const QByteArray candidateTargetBytes = targetBytesForCandidate(rawValue, candidate, &targetError);
+        if (candidateTargetBytes.isEmpty()) {
+            if (error) {
+                *error = targetError.isEmpty()
+                    ? QString("Impossible de construire la valeur cible pour un candidat.")
+                    : targetError;
+            }
+            return false;
+        }
+        if (!bytesEqual(current, candidateTargetBytes, candidate.type)) {
+            return false;
+        }
+        if (updatedCandidate) {
+            *updatedCandidate = candidate;
+        }
+        return true;
+    }
+
+    const auto variants = killcore::generateScanVariants(rawValue, candidate.type, true);
+    for (const auto& variant : variants) {
+        if (variant.value.type != candidate.type) {
+            continue;
+        }
+        const QByteArray targetBytes = killcore::scanValueToBytes(variant.value);
+        if (!targetBytes.isEmpty() && bytesEqual(current, targetBytes, candidate.type)) {
+            if (updatedCandidate) {
+                *updatedCandidate = candidate;
+                updatedCandidate->variantLabel = variant.label;
+            }
+            return true;
+        }
+    }
+
+    QString parseError;
+    const QByteArray fallbackBytes = targetBytesForCandidate(rawValue, candidate, &parseError);
+    if (fallbackBytes.isEmpty()) {
+        if (error) {
+            *error = parseError.isEmpty()
+                ? QString("Impossible de construire la valeur cible pour un candidat.")
+                : parseError;
+        }
+        return false;
+    }
+    if (!bytesEqual(current, fallbackBytes, candidate.type)) {
+        return false;
+    }
+    if (updatedCandidate) {
+        *updatedCandidate = candidate;
+    }
+    return true;
+}
+
 QList<killcore::Candidate> candidatesFromUnknownScan(
     const killcore::ProcessHandle& process,
     const killcore::UnknownScanResult& scan) {
@@ -541,7 +612,7 @@ QList<killcore::Candidate> candidatesFromUnknownScan(
         candidate.type = match.type;
         candidate.lastValue = read.data;
         candidate.confidence = match.confidence;
-        candidate.variantLabel = match.variantLabel.isEmpty() ? QString("Unknown current") : match.variantLabel;
+        candidate.variantLabel = match.variantLabel.isEmpty() ? unknownVariantLabel() : match.variantLabel;
         candidates.append(candidate);
     }
 
@@ -3308,17 +3379,17 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                 const double currentNumber = bytesToDouble(current, candidate.type);
 
                 bool keep = false;
+                killcore::Candidate updatedCandidate = candidate;
                 switch (scanMode) {
                     case killcore::NextScanMode::Exact: {
                         QString targetError;
-                        const QByteArray candidateTargetBytes = targetBytesForCandidate(value, candidate, &targetError);
-                        if (candidateTargetBytes.isEmpty()) {
+                        keep = matchCandidateExactVariant(value, candidate, current, &updatedCandidate, &targetError);
+                        if (!targetError.isEmpty()) {
                             error = targetError.isEmpty()
                                 ? "Impossible de construire la valeur cible pour un candidat."
                                 : targetError;
                             return false;
                         }
-                        keep = bytesEqual(current, candidateTargetBytes, candidate.type);
                         break;
                     }
                     case killcore::NextScanMode::Changed:
@@ -3352,9 +3423,9 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
 
                 if (keep) {
                     if (valueHistoryUpdates.size() < kCandidateHistoryMaxAddresses) {
-                        valueHistoryUpdates.append(candidateObservationToVariantMap(candidate, current, "next_scan_async", true, true));
+                        valueHistoryUpdates.append(candidateObservationToVariantMap(updatedCandidate, current, "next_scan_async", true, true));
                     }
-                    auto updated = candidate;
+                    auto updated = updatedCandidate;
                     updated.lastValue = current;
                     if (streamOutput) {
                         if (!survivors.appendFileBackedCandidate(updated, &error)) {
@@ -3555,18 +3626,18 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         const double currentNumber = bytesToDouble(current, candidate.type);
 
         bool keep = false;
+        killcore::Candidate updatedCandidate = candidate;
         switch (scanMode) {
             case killcore::NextScanMode::Exact: {
                 QString targetError;
-                const QByteArray candidateTargetBytes = targetBytesForCandidate(value, candidate, &targetError);
-                if (candidateTargetBytes.isEmpty()) {
+                keep = matchCandidateExactVariant(value, candidate, current, &updatedCandidate, &targetError);
+                if (!targetError.isEmpty()) {
                     result["error"] = targetError.isEmpty()
                         ? "Impossible de construire la valeur cible pour un candidat."
                         : targetError;
                     emit scanProgress(100);
                     return result;
                 }
-                keep = bytesEqual(current, candidateTargetBytes, candidate.type);
                 break;
             }
             case killcore::NextScanMode::Changed:
@@ -3600,9 +3671,9 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
 
         if (keep) {
             if (valueHistoryUpdates.size() < kCandidateHistoryMaxAddresses) {
-                valueHistoryUpdates.append(candidateObservationToVariantMap(candidate, current, "next_scan", true, true));
+                valueHistoryUpdates.append(candidateObservationToVariantMap(updatedCandidate, current, "next_scan", true, true));
             }
-            auto updated = candidate;
+            auto updated = updatedCandidate;
             updated.lastValue = current;
             survivors.append(updated);
         }
