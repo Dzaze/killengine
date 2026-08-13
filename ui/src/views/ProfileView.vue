@@ -19,6 +19,18 @@ interface ProfileTargetEntry {
   description: string
 }
 
+interface ProfilePatchEntry {
+  name: string
+  module?: string
+  moduleOffset?: string
+  aobPattern?: string
+  patchBytes?: string
+  originalBytes?: string
+  disassembly?: string
+  riskLevel?: string
+  description?: string
+}
+
 interface ProfileTargetGroup {
   name: string
   targets: ProfileTargetEntry[]
@@ -27,6 +39,7 @@ interface ProfileTargetGroup {
 const profiles = ref<ProfileEntry[]>([])
 const selectedProfile = ref<string>('')
 const profileTargets = ref<ProfileTargetEntry[]>([])
+const profilePatches = ref<ProfilePatchEntry[]>([])
 const profileInfo = ref<Record<string, unknown>>({})
 const newProfileName = ref('')
 const newTargetName = ref('')
@@ -82,8 +95,10 @@ async function selectProfile(name: string) {
     const result = await backend.getController().loadProfile(name)
     profileInfo.value = result
     profileTargets.value = (result.targets as ProfileTargetEntry[]) ?? []
+    profilePatches.value = (result.patches as ProfilePatchEntry[]) ?? []
   } catch {
     profileTargets.value = []
+    profilePatches.value = []
   }
 }
 
@@ -294,10 +309,45 @@ async function deleteSelectedProfile() {
       statusMessage.value = `Profil "${selectedProfile.value}" supprimé.`
       selectedProfile.value = ''
       profileTargets.value = []
+      profilePatches.value = []
       await refreshProfiles()
     } else {
       statusMessage.value = '✗ Échec de la suppression.'
     }
+  } catch (e) {
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
+}
+
+async function applyProfilePatch(patch: ProfilePatchEntry) {
+  if (!selectedProfile.value || !patch.name) return
+  try {
+    const controller = backend.getController()
+    if (!controller.applyProfileCodePatch) {
+      statusMessage.value = '✗ Fonction patch profil indisponible.'
+      return
+    }
+    const result = await controller.applyProfileCodePatch(selectedProfile.value, patch.name)
+    statusMessage.value = result.success
+      ? `✓ Patch "${patch.name}" appliqué à 0x${result.matchedAddress ?? result.address ?? ''}.`
+      : '✗ ' + (result.error ?? `Patch "${patch.name}" impossible.`)
+  } catch (e) {
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
+}
+
+async function restoreProfilePatch(patch: ProfilePatchEntry) {
+  if (!selectedProfile.value || !patch.name) return
+  try {
+    const controller = backend.getController()
+    if (!controller.restoreProfileCodePatch) {
+      statusMessage.value = '✗ Fonction restauration patch indisponible.'
+      return
+    }
+    const result = await controller.restoreProfileCodePatch(selectedProfile.value, patch.name)
+    statusMessage.value = result.success
+      ? `✓ Patch "${patch.name}" restauré.`
+      : '✗ ' + (result.error ?? `Restauration "${patch.name}" impossible.`)
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
   }
@@ -436,6 +486,27 @@ onMounted(() => {
             </div>
             <div v-if="t.description" class="target-desc">{{ t.description }}</div>
           </div>
+        </div>
+      </div>
+
+      <div v-if="profilePatches.length > 0" class="patches-list">
+        <div class="targets-header">
+          <h3>Patchs trainer ({{ profilePatches.length }})</h3>
+        </div>
+        <div v-for="patch in profilePatches" :key="patch.name" class="patch-row">
+          <div class="patch-info">
+            <span class="target-name">{{ patch.name }}</span>
+            <span v-if="patch.riskLevel" class="patch-risk">{{ patch.riskLevel }}</span>
+            <span v-if="patch.module" class="target-locator">{{ patch.module }} +0x{{ patch.moduleOffset }}</span>
+          </div>
+          <div class="target-actions">
+            <button class="btn btn-primary btn-sm" @click="applyProfilePatch(patch)">Appliquer</button>
+            <button class="btn btn-secondary btn-sm" @click="restoreProfilePatch(patch)">Restaurer</button>
+          </div>
+          <div v-if="patch.disassembly" class="target-desc">{{ patch.disassembly }}</div>
+          <div v-if="patch.aobPattern" class="target-desc">AOB: {{ patch.aobPattern }}</div>
+          <div v-if="patch.patchBytes" class="target-desc">Patch: {{ patch.patchBytes }}</div>
+          <div v-if="patch.description" class="target-desc">{{ patch.description }}</div>
         </div>
       </div>
 
@@ -583,6 +654,10 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
+.patches-list {
+  margin-bottom: 16px;
+}
+
 .targets-header {
   display: flex;
   justify-content: space-between;
@@ -663,6 +738,33 @@ onMounted(() => {
   font-size: 11px;
   color: var(--text-dim);
   font-style: italic;
+}
+
+.patch-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.patch-info {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.patch-risk {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
 }
 
 .target-actions {

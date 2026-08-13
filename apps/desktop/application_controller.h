@@ -285,6 +285,21 @@ public:
     /// Active une cible de profil pour l'utiliser directement depuis l'Assistant.
     Q_INVOKABLE QVariantMap activateProfileTarget(const QString& profileName, const QString& targetName);
 
+    /// Sauvegarde un patch code trainer dans un profil.
+    Q_INVOKABLE QVariantMap saveProfileCodePatch(
+        const QString& profileName,
+        const QString& patchName,
+        const QString& addressHex,
+        const QString& aobPattern,
+        const QString& patchBytes,
+        const QVariantMap& metadata);
+
+    /// Retrouve un patch par AOB stable puis applique ses bytes.
+    Q_INVOKABLE QVariantMap applyProfileCodePatch(const QString& profileName, const QString& patchName);
+
+    /// Restaure un patch de profil déjà appliqué dans la session courante.
+    Q_INVOKABLE QVariantMap restoreProfileCodePatch(const QString& profileName, const QString& patchName);
+
     // -----------------------------------------------------------------------
     // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
     // -----------------------------------------------------------------------

@@ -40,6 +40,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <thread>
 
 namespace killengine {
@@ -6714,6 +6715,7 @@ QVariantList ApplicationController::listProfiles() {
             entry["gameName"] = profile.gameName;
             entry["executableName"] = profile.executableName;
             entry["targetCount"] = profile.targets.size();
+            entry["patchCount"] = profile.patches.size();
         }
         result.append(entry);
     }
@@ -6747,6 +6749,23 @@ QVariantMap ApplicationController::loadProfile(const QString& profileName) {
     }
     result["targets"] = targetsList;
     result["targetCount"] = targetsList.size();
+
+    QVariantList patchesList;
+    for (const auto& patch : profile.patches) {
+        QVariantMap patchEntry;
+        patchEntry["name"] = patch.name;
+        patchEntry["module"] = patch.module;
+        patchEntry["moduleOffset"] = QString::number(patch.moduleOffset, 16).toUpper();
+        patchEntry["aobPattern"] = patch.aobPattern;
+        patchEntry["patchBytes"] = patch.patchBytes;
+        patchEntry["originalBytes"] = patch.originalBytes;
+        patchEntry["disassembly"] = patch.disassembly;
+        patchEntry["riskLevel"] = patch.riskLevel;
+        patchEntry["description"] = patch.description;
+        patchesList.append(patchEntry);
+    }
+    result["patches"] = patchesList;
+    result["patchCount"] = patchesList.size();
 
     return result;
 }
@@ -6861,6 +6880,245 @@ QVariantMap ApplicationController::activateProfileTarget(const QString& profileN
     }
 
     result["error"] = "Cible introuvable dans le profil.";
+    return result;
+}
+
+QVariantMap ApplicationController::saveProfileCodePatch(
+    const QString& profileName,
+    const QString& patchName,
+    const QString& addressHex,
+    const QString& aobPattern,
+    const QString& patchBytes,
+    const QVariantMap& metadata) {
+
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const QString cleanProfileName = profileName.trimmed();
+    const QString cleanPatchName = patchName.trimmed();
+    if (cleanProfileName.isEmpty() || cleanPatchName.isEmpty()) {
+        result["error"] = "Nom de profil ou de patch vide.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse patch invalide.";
+        return result;
+    }
+
+    const auto parsedPattern = killcore::parseAobPattern(aobPattern);
+    if (!parsedPattern.isValid()) {
+        result["error"] = parsedPattern.error;
+        return result;
+    }
+    const auto parsedPatch = killcore::parsePatchBytes(patchBytes);
+    if (!parsedPatch.isValid()) {
+        result["error"] = parsedPatch.error;
+        return result;
+    }
+
+    const auto modules = killcore::ProcessEnumerator::enumerateModules(m_pid);
+    QString moduleName;
+    uint64_t moduleOffset = 0;
+    uint64_t bestSize = 0;
+    for (const auto& module : modules) {
+        if (address >= module.baseAddress && address < module.baseAddress + module.size) {
+            if (moduleName.isEmpty() || module.size < bestSize) {
+                moduleName = module.name;
+                moduleOffset = address - module.baseAddress;
+                bestSize = module.size;
+            }
+        }
+    }
+
+    QString originalBytes = metadata.value("originalBytes").toString().trimmed();
+    if (originalBytes.isEmpty()) {
+        killcore::MemoryReader reader(m_handle);
+        const auto read = reader.readChunked(address, static_cast<size_t>(parsedPatch.bytes.size()), 4096);
+        if (read.success || read.partial) {
+            originalBytes = QString::fromLatin1(read.data.toHex(' ').toUpper());
+        }
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        profile.gameName = cleanProfileName;
+        profile.executableName = m_processName;
+    }
+
+    killcore::ProfileCodePatch patch;
+    patch.name = cleanPatchName;
+    patch.module = moduleName;
+    patch.moduleOffset = moduleOffset;
+    patch.aobPattern = aobPattern.trimmed();
+    patch.patchBytes = patchBytes.trimmed();
+    patch.originalBytes = originalBytes;
+    patch.disassembly = metadata.value("disassembly").toString();
+    patch.riskLevel = metadata.value("riskLevel").toString();
+    patch.description = metadata.value("description").toString();
+
+    bool replaced = false;
+    for (auto& existing : profile.patches) {
+        if (existing.name == patch.name) {
+            existing = patch;
+            replaced = true;
+            break;
+        }
+    }
+    if (!replaced) {
+        profile.patches.append(patch);
+    }
+
+    if (!killcore::ProfileStore::save(profile, path)) {
+        result["error"] = "Impossible de sauvegarder le profil.";
+        return result;
+    }
+
+    result["success"] = true;
+    result["profileName"] = cleanProfileName;
+    result["patchName"] = cleanPatchName;
+    result["module"] = moduleName;
+    result["moduleOffset"] = QString::number(moduleOffset, 16).toUpper();
+    result["patchCount"] = profile.patches.size();
+    result["replaced"] = replaced;
+    return result;
+}
+
+QVariantMap ApplicationController::applyProfileCodePatch(const QString& profileName, const QString& patchName) {
+    QVariantMap result;
+    result["success"] = false;
+    result["profileName"] = profileName;
+    result["patchName"] = patchName;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    std::optional<killcore::ProfileCodePatch> patch;
+    for (const auto& item : profile.patches) {
+        if (item.name == patchName) {
+            patch = item;
+            break;
+        }
+    }
+    if (!patch) {
+        result["error"] = "Patch introuvable dans le profil.";
+        return result;
+    }
+
+    const auto pattern = killcore::parseAobPattern(patch->aobPattern);
+    if (!pattern.isValid()) {
+        result["error"] = pattern.error;
+        return result;
+    }
+
+    killcore::AobScanOptions options;
+    options.executableOnly = true;
+    options.imageOnly = true;
+    options.maxResults = 100;
+    const auto scan = killcore::scanAobPattern(m_handle, pattern, options);
+    if (!scan.success || scan.matches.isEmpty()) {
+        result["error"] = scan.error.isEmpty() ? QString("Signature AOB introuvable.") : scan.error;
+        return result;
+    }
+
+    const auto modules = killcore::ProcessEnumerator::enumerateModules(m_pid);
+    uint64_t selectedAddress = scan.matches.first().address;
+    bool selectedModuleMatch = false;
+    for (const auto& match : scan.matches) {
+        for (const auto& module : modules) {
+            if (match.address >= module.baseAddress && match.address < module.baseAddress + module.size
+                && module.name.compare(patch->module, Qt::CaseInsensitive) == 0) {
+                selectedAddress = match.address;
+                selectedModuleMatch = true;
+                break;
+            }
+        }
+        if (selectedModuleMatch) {
+            break;
+        }
+    }
+
+    result = applyCodePatch(QString::number(selectedAddress, 16), patch->patchBytes, {{"verify", true}});
+    result["profileName"] = profileName;
+    result["patchName"] = patchName;
+    result["matchedAddress"] = QString::number(selectedAddress, 16).toUpper();
+    result["matchCount"] = scan.matches.size();
+    result["aobPattern"] = patch->aobPattern;
+    return result;
+}
+
+QVariantMap ApplicationController::restoreProfileCodePatch(const QString& profileName, const QString& patchName) {
+    QVariantMap result;
+    result["success"] = false;
+    result["profileName"] = profileName;
+    result["patchName"] = patchName;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    for (const auto& patch : profile.patches) {
+        if (patch.name != patchName) {
+            continue;
+        }
+        QList<killcore::AobPattern> restorePatterns;
+        const auto originalPattern = killcore::parseAobPattern(patch.aobPattern);
+        if (originalPattern.isValid()) {
+            restorePatterns.append(originalPattern);
+        }
+        const auto activePattern = killcore::parseAobPattern(patch.patchBytes);
+        if (activePattern.isValid()) {
+            restorePatterns.append(activePattern);
+        }
+        if (restorePatterns.isEmpty()) {
+            result["error"] = originalPattern.error.isEmpty() ? activePattern.error : originalPattern.error;
+            return result;
+        }
+        killcore::AobScanOptions options;
+        options.executableOnly = true;
+        options.imageOnly = true;
+        options.maxResults = 100;
+        for (const auto& restorePattern : restorePatterns) {
+            const auto scan = killcore::scanAobPattern(m_handle, restorePattern, options);
+            for (const auto& match : scan.matches) {
+                if (m_activeCodePatches.contains(match.address)) {
+                    result = restoreCodePatch(QString::number(match.address, 16));
+                    result["profileName"] = profileName;
+                    result["patchName"] = patchName;
+                    result["matchedAddress"] = QString::number(match.address, 16).toUpper();
+                    return result;
+                }
+            }
+        }
+        result["error"] = "Patch non actif dans la session courante.";
+        return result;
+    }
+
+    result["error"] = "Patch introuvable dans le profil.";
     return result;
 }
 

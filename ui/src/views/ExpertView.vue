@@ -54,6 +54,11 @@ const codePatchBusy = ref(false)
 const codePatchResult = ref<CodePatchResult | null>(null)
 const codePatchSuggestBusy = ref(false)
 const codePatchSuggestionResult = ref<CodePatchSuggestionResult | null>(null)
+const codePatchProfileName = ref('')
+const codePatchProfilePatchName = ref('')
+const codePatchProfileDescription = ref('')
+const codePatchProfileBusy = ref(false)
+const codePatchProfileResult = ref<Record<string, unknown> | null>(null)
 
 // Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
 const uiStringValue = ref('')
@@ -407,6 +412,42 @@ async function restoreSelectedCodePatch() {
     codePatchResult.value = { success: false, error: String(e) }
   } finally {
     codePatchBusy.value = false
+  }
+}
+
+async function saveSelectedCodePatchProfile() {
+  const profileName = codePatchProfileName.value.trim()
+  const patchName = codePatchProfilePatchName.value.trim()
+  const address = codePatchAddress.value.trim()
+  const pattern = (codePatchSuggestionResult.value?.stableAobPattern || aobPattern.value).trim()
+  const patchBytes = codePatchBytes.value.trim()
+  if (!profileName || !patchName || !address || !pattern || !patchBytes) return
+
+  codePatchProfileBusy.value = true
+  codePatchProfileResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.saveProfileCodePatch) {
+      codePatchProfileResult.value = { success: false, error: 'Methode backend indisponible.' }
+      return
+    }
+    codePatchProfileResult.value = await controller.saveProfileCodePatch(
+      profileName,
+      patchName,
+      address,
+      pattern,
+      patchBytes,
+      {
+        originalBytes: codePatchResult.value?.originalBytes || codePatchSuggestionResult.value?.bytes || '',
+        disassembly: codePatchSuggestionResult.value?.disassembly || '',
+        riskLevel: codePatchSuggestionResult.value?.suggestions?.find((s) => s.bytesText === patchBytes)?.riskLevel || '',
+        description: codePatchProfileDescription.value.trim(),
+      },
+    )
+  } catch (e) {
+    codePatchProfileResult.value = { success: false, error: String(e) }
+  } finally {
+    codePatchProfileBusy.value = false
   }
 }
 
@@ -2079,6 +2120,40 @@ onMounted(() => {
         <p v-if="codePatchResult?.originalBytes" class="hint">Originaux: {{ codePatchResult.originalBytes }}</p>
         <p v-if="codePatchResult?.restoredBytes" class="hint">Restaurés: {{ codePatchResult.restoredBytes }}</p>
         <p v-if="codePatchResult?.error" class="error">{{ codePatchResult.error }}</p>
+        <div class="controls code-patch-profile-controls">
+          <input
+            v-model="codePatchProfileName"
+            class="input"
+            placeholder="Profil trainer"
+            :disabled="codePatchProfileBusy"
+          />
+          <input
+            v-model="codePatchProfilePatchName"
+            class="input"
+            placeholder="Nom patch"
+            :disabled="codePatchProfileBusy"
+          />
+          <input
+            v-model="codePatchProfileDescription"
+            class="input"
+            placeholder="Description"
+            :disabled="codePatchProfileBusy"
+          />
+          <button
+            class="btn btn-primary"
+            :disabled="codePatchProfileBusy || !codePatchProfileName.trim() || !codePatchProfilePatchName.trim() || !codePatchAddress.trim() || !codePatchBytes.trim()"
+            @click="saveSelectedCodePatchProfile()"
+          >
+            <span v-if="codePatchProfileBusy" class="btn-spinner" aria-hidden="true"></span>
+            Sauver trainer
+          </button>
+        </div>
+        <div v-if="codePatchProfileResult" class="metrics">
+          <span>Profil: {{ codePatchProfileResult.success ? 'OK' : 'FAIL' }}</span>
+          <span v-if="codePatchProfileResult.profileName">{{ codePatchProfileResult.profileName }}</span>
+          <span v-if="codePatchProfileResult.patchName">{{ codePatchProfileResult.patchName }}</span>
+        </div>
+        <p v-if="codePatchProfileResult?.error" class="error">{{ codePatchProfileResult.error }}</p>
         <div v-if="aobResult?.matches?.length" class="aob-list">
           <div v-for="match in aobResult.matches.slice(0, 80)" :key="match.address" class="aob-row">
             <code>0x{{ match.address }}</code>
@@ -3393,6 +3468,12 @@ onMounted(() => {
   margin-top: 10px;
 }
 
+.code-patch-profile-controls {
+  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) minmax(160px, 1fr) auto;
+  align-items: center;
+  margin-top: 10px;
+}
+
 .patch-suggestion-list {
   display: flex;
   flex-wrap: wrap;
@@ -3506,6 +3587,7 @@ onMounted(() => {
   .candidate-row,
   .aob-controls,
   .code-patch-controls,
+  .code-patch-profile-controls,
   .aob-row,
   .pointer-chain-controls {
     grid-template-columns: 1fr;

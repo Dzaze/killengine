@@ -428,6 +428,10 @@ export interface CodePatchResult {
   active?: boolean
   error?: string
   address?: string
+  matchedAddress?: string
+  profileName?: string
+  patchName?: string
+  matchCount?: number
   patchBytes?: string
   originalBytes?: string
   writtenBytes?: string
@@ -692,6 +696,16 @@ export interface AppSettings {
   deleteProfile(profileName: string): Promise<boolean>
   resolveProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   activateProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
+  saveProfileCodePatch?(
+    profileName: string,
+    patchName: string,
+    addressHex: string,
+    aobPattern: string,
+    patchBytes: string,
+    metadata: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>
+  applyProfileCodePatch?(profileName: string, patchName: string): Promise<CodePatchResult>
+  restoreProfileCodePatch?(profileName: string, patchName: string): Promise<CodePatchResult>
 
   // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
   scanPointerChains?(addressHex: string, scanOptions: PointerScanOptions): Promise<PointerScanResult>
@@ -1404,6 +1418,15 @@ class BackendService {
         return { success: false, error: 'Mock backend' }
       },
       async activateProfileTarget() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async saveProfileCodePatch() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async applyProfileCodePatch() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async restoreProfileCodePatch() {
         return { success: false, error: 'Mock backend' }
       },
     }

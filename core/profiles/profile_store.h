@@ -19,6 +19,18 @@ struct ProfileTarget {
     QString   description;    // optionnel
 };
 
+struct ProfileCodePatch {
+    QString name;
+    QString module;
+    uint64_t moduleOffset{0};
+    QString aobPattern;
+    QString patchBytes;
+    QString originalBytes;
+    QString disassembly;
+    QString riskLevel;
+    QString description;
+};
+
 /**
  * @brief Profil réutilisable pour un jeu/exécutable.
  *
@@ -29,6 +41,7 @@ struct Profile {
     QString              executableName; // ex: "KillEngineTestTarget.exe"
     QString              executableHash; // SHA-256 de l'exécutable (vide si non calculé)
     QList<ProfileTarget> targets;
+    QList<ProfileCodePatch> patches;
 
     /// Version du format de profil (pour migrations futures).
     static constexpr int FORMAT_VERSION = 1;

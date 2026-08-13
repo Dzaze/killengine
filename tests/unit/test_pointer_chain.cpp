@@ -7,6 +7,7 @@
 using killcore::LocatorKind;
 using killcore::PointerChain;
 using killcore::Profile;
+using killcore::ProfileCodePatch;
 using killcore::ProfileStore;
 using killcore::ProfileTarget;
 using killcore::ValueType;
@@ -50,6 +51,44 @@ TEST(PointerChain, OffsetsRequired) {
     chain.baseOffset = 0x1000;
     chain.offsets = {};  // no offsets
     EXPECT_FALSE(chain.isValid());
+}
+
+TEST(PointerChain, ProfileStoreRoundTripsCodePatches) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+
+    Profile profile;
+    profile.gameName = "StarCraft2";
+    profile.executableName = "SC2_x64.exe";
+
+    ProfileCodePatch patch;
+    patch.name = "Unlimited resources";
+    patch.module = "SC2_x64.exe";
+    patch.moduleOffset = 0x123456;
+    patch.aobPattern = "48 89 05 ?? ?? ?? ??";
+    patch.patchBytes = "90 90 90 90 90 90 90";
+    patch.originalBytes = "48 89 05 AA BB CC DD";
+    patch.disassembly = "mov [rip+0x1234], rax";
+    patch.riskLevel = "low";
+    patch.description = "Trainer patch test";
+    profile.patches.append(patch);
+
+    const QString path = dir.filePath("starcraft2.keprofile");
+    ASSERT_TRUE(ProfileStore::save(profile, path));
+
+    Profile loaded;
+    ASSERT_TRUE(ProfileStore::load(path, &loaded));
+    ASSERT_EQ(loaded.patches.size(), 1);
+    const auto& loadedPatch = loaded.patches.first();
+    EXPECT_EQ(loadedPatch.name, patch.name);
+    EXPECT_EQ(loadedPatch.module, patch.module);
+    EXPECT_EQ(loadedPatch.moduleOffset, patch.moduleOffset);
+    EXPECT_EQ(loadedPatch.aobPattern, patch.aobPattern);
+    EXPECT_EQ(loadedPatch.patchBytes, patch.patchBytes);
+    EXPECT_EQ(loadedPatch.originalBytes, patch.originalBytes);
+    EXPECT_EQ(loadedPatch.disassembly, patch.disassembly);
+    EXPECT_EQ(loadedPatch.riskLevel, patch.riskLevel);
+    EXPECT_EQ(loadedPatch.description, patch.description);
 }
 
 TEST(PointerChain, ProfileStoreRoundTripsPointerChainLocator) {

@@ -89,6 +89,28 @@ QJsonObject targetToJson(const ProfileTarget& target) {
     return json;
 }
 
+QJsonObject patchToJson(const ProfileCodePatch& patch) {
+    QJsonObject json;
+    json["name"] = patch.name;
+    json["module"] = patch.module;
+    json["moduleOffset"] = QString::number(patch.moduleOffset, 16);
+    json["aobPattern"] = patch.aobPattern;
+    json["patchBytes"] = patch.patchBytes;
+    if (!patch.originalBytes.isEmpty()) {
+        json["originalBytes"] = patch.originalBytes;
+    }
+    if (!patch.disassembly.isEmpty()) {
+        json["disassembly"] = patch.disassembly;
+    }
+    if (!patch.riskLevel.isEmpty()) {
+        json["riskLevel"] = patch.riskLevel;
+    }
+    if (!patch.description.isEmpty()) {
+        json["description"] = patch.description;
+    }
+    return json;
+}
+
 ProfileTarget targetFromJson(const QJsonObject& json) {
     ProfileTarget target;
     target.name = json.value("name").toString();
@@ -96,6 +118,20 @@ ProfileTarget targetFromJson(const QJsonObject& json) {
     target.locator = locatorFromJson(json.value("locator").toObject());
     target.description = json.value("description").toString();
     return target;
+}
+
+ProfileCodePatch patchFromJson(const QJsonObject& json) {
+    ProfileCodePatch patch;
+    patch.name = json.value("name").toString();
+    patch.module = json.value("module").toString();
+    patch.moduleOffset = json.value("moduleOffset").toString().toULongLong(nullptr, 16);
+    patch.aobPattern = json.value("aobPattern").toString();
+    patch.patchBytes = json.value("patchBytes").toString();
+    patch.originalBytes = json.value("originalBytes").toString();
+    patch.disassembly = json.value("disassembly").toString();
+    patch.riskLevel = json.value("riskLevel").toString();
+    patch.description = json.value("description").toString();
+    return patch;
 }
 
 } // namespace
@@ -133,6 +169,12 @@ bool ProfileStore::save(const Profile& profile, const QString& filename) {
         targetsArray.append(targetToJson(target));
     }
     root["targets"] = targetsArray;
+
+    QJsonArray patchesArray;
+    for (const auto& patch : profile.patches) {
+        patchesArray.append(patchToJson(patch));
+    }
+    root["patches"] = patchesArray;
 
     QJsonDocument doc(root);
 
@@ -180,8 +222,15 @@ bool ProfileStore::load(const QString& filename, Profile* profile) {
         profile->targets.append(targetFromJson(item.toObject()));
     }
 
+    profile->patches.clear();
+    const QJsonArray patchesArray = root.value("patches").toArray();
+    for (const auto& item : patchesArray) {
+        profile->patches.append(patchFromJson(item.toObject()));
+    }
+
     KE_LOG_INFO() << "Profile loaded: " << filename.toStdString()
-                  << " (" << profile->targets.size() << " targets)";
+                  << " (" << profile->targets.size() << " targets, "
+                  << profile->patches.size() << " patches)";
     return true;
 }
 
