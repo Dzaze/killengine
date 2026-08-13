@@ -142,10 +142,10 @@ killengine/
 ### AOB signatures / Trainer engine
 - Module : `core/patch/aob_scanner.*`.
 - Objectif : passer du scan de valeurs RAM à une approche trainer type WeMod/Wand : retrouver une signature d'instruction stable dans les régions code, puis plus tard patcher/hooker cette instruction.
-- Backend : `ApplicationController::scanAobPattern(pattern, options)` expose le scan de pattern (`48 8B ?? 89`) avec filtres `executableOnly`, `imageOnly`, `maxResults`.
-- UI : section **AOB signatures** dans Expert. Pour l'instant, elle scanne et affiche `module + offset`; elle ne patch pas encore.
+- Backend : `ApplicationController::scanAobPattern(pattern, options)` expose le scan de pattern (`48 8B ?? 89`) avec filtres `executableOnly`, `imageOnly`, `maxResults`; `generateAobSignature(address, options)` lit les bytes autour d'un RIP capturé pour produire une signature brute.
+- UI : section **AOB signatures** dans Expert. Les hits `Écrit par` peuvent remplir automatiquement le pattern AOB via le bouton `Signature`; elle ne patch pas encore.
 - Tests ciblés : `.\build\bin\killengine_unit_tests.exe --gtest_filter=AobScanner.*`.
-- Prochaine étape logique : générer une signature autour d'un RIP capturé par `Écrit par`, puis ajouter un patch enable/disable qui sauvegarde les bytes originaux.
+- Prochaine étape logique : ajouter un patch enable/disable qui sauvegarde les bytes originaux.
 
 ### Performance adaptive
 - Préférer plus de threads contrôlés à plus de processus : le moteur doit rester déterministe et l'UI Qt/Vue doit rester fluide.

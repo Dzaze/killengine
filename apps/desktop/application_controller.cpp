@@ -4852,6 +4852,61 @@ QVariantMap ApplicationController::scanAobPattern(const QString& patternText, co
     return result;
 }
 
+QVariantMap ApplicationController::generateAobSignature(const QString& addressHex, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = addressHex;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int beforeBytes = std::clamp(options.value("beforeBytes", 0).toInt(), 0, 32);
+    const int length = std::clamp(options.value("length", 24).toInt(), 4, 64);
+    const uint64_t startAddress = address > static_cast<uint64_t>(beforeBytes)
+        ? address - static_cast<uint64_t>(beforeBytes)
+        : address;
+
+    killcore::MemoryReader reader(m_handle);
+    const auto read = reader.readChunked(startAddress, static_cast<size_t>(length), 4096);
+    if (!read.success && read.bytesRead == 0) {
+        result["error"] = read.errorMessage.isEmpty() ? QString("Lecture des octets d'instruction impossible.") : read.errorMessage;
+        return result;
+    }
+
+    QVariantMap moduleInfo;
+    const auto modules = killcore::ProcessEnumerator::enumerateModules(static_cast<uint32_t>(m_pid));
+    for (const auto& module : modules) {
+        if (startAddress >= module.baseAddress && startAddress < module.baseAddress + module.size) {
+            moduleInfo["module"] = module.name;
+            moduleInfo["moduleOffset"] = QString::number(startAddress - module.baseAddress, 16).toUpper();
+            break;
+        }
+    }
+
+    result["success"] = true;
+    result["partial"] = read.partial;
+    result["startAddress"] = QString::number(startAddress, 16).toUpper();
+    result["instructionAddress"] = QString::number(address, 16).toUpper();
+    result["bytesRead"] = static_cast<int>(read.bytesRead);
+    result["requestedBytes"] = static_cast<int>(read.requestedBytes);
+    result["hex"] = QString::fromLatin1(read.data.toHex(' ').toUpper());
+    result["pattern"] = killcore::bytesToAobPattern(read.data);
+    result["patternBytes"] = static_cast<int>(read.data.size());
+    result["module"] = moduleInfo.value("module");
+    result["moduleOffset"] = moduleInfo.value("moduleOffset");
+    result["error"] = read.errorMessage;
+    result["warning"] = "Signature exacte brute. Elle peut nécessiter des wildcards si l'instruction contient offsets/relocations.";
+    return result;
+}
+
 QVariantMap ApplicationController::setFreezeValue(const QString& addressHex, const QString& valueType, const QString& value, bool enabled) {
     QVariantMap result;
     result["success"] = false;

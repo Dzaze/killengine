@@ -51,6 +51,7 @@ struct AobScanResult {
 };
 
 AobPattern parseAobPattern(const QString& patternText);
+QString bytesToAobPattern(const QByteArray& bytes);
 QList<uint64_t> searchAobBuffer(const QByteArray& haystack, const AobPattern& pattern, uint64_t baseAddress = 0);
 AobScanResult scanAobPattern(const ProcessHandle& process, const AobPattern& pattern, const AobScanOptions& options = {});
 

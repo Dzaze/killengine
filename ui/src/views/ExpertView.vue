@@ -4,6 +4,7 @@ import { useAppStore } from '@/stores/app'
 import {
   backend,
   type AobScanResult,
+  type AobSignatureResult,
   type MemoryWriteTarget,
   type PointerChainInfo,
   type PointerChainResolveResult,
@@ -42,6 +43,8 @@ const aobImageOnly = ref(true)
 const aobMaxResults = ref(200)
 const aobBusy = ref(false)
 const aobResult = ref<AobScanResult | null>(null)
+const aobSignatureBusy = ref(false)
+const aobSignatureResult = ref<AobSignatureResult | null>(null)
 
 // Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
 const uiStringValue = ref('')
@@ -283,6 +286,36 @@ async function scanAobSignature() {
     aobResult.value = { success: false, matches: [], error: String(e) }
   } finally {
     aobBusy.value = false
+  }
+}
+
+async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
+  const rip = String(hit.instructionPointer ?? '').trim()
+  if (!rip) return
+  aobSignatureBusy.value = true
+  aobSignatureResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.generateAobSignature) {
+      aobSignatureResult.value = { success: false, error: 'Methode backend indisponible.' }
+      return
+    }
+    const result = await controller.generateAobSignature(rip, {
+      beforeBytes: 0,
+      length: 24,
+    })
+    aobSignatureResult.value = result
+    if (result.success && result.pattern) {
+      aobPattern.value = result.pattern
+      await scanAobSignature()
+      void nextTick(() => {
+        document.querySelector('.aob-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
+  } catch (e) {
+    aobSignatureResult.value = { success: false, error: String(e) }
+  } finally {
+    aobSignatureBusy.value = false
   }
 }
 
@@ -1620,6 +1653,9 @@ onMounted(() => {
               <span>+0x{{ hit.moduleOffset || '0' }}</span>
               <span>T{{ hit.threadId }}</span>
               <strong>{{ formatNumber(Number(hit.valueAfter ?? 0)) }}</strong>
+              <button class="btn btn-primary compact" type="button" :disabled="aobSignatureBusy" @click="generateAobSignatureFromHit(hit)">
+                Signature
+              </button>
             </div>
           </div>
         </div>
@@ -1853,7 +1889,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel aob-panel">
         <div class="panel-title">
           <h2>AOB signatures</h2>
           <span v-if="aobResult">{{ formatNumber(aobResult.matchesFound) }} match(es)</span>
@@ -1888,6 +1924,13 @@ onMounted(() => {
           <span v-if="aobResult.patternBytes">Pattern: {{ formatNumber(aobResult.patternBytes) }} o</span>
           <span v-if="aobResult.partial" class="warning-text">résultats limités</span>
         </div>
+        <div v-if="aobSignatureResult" class="metrics">
+          <span>Signature: {{ aobSignatureResult.success ? 'OK' : 'FAIL' }}</span>
+          <span v-if="aobSignatureResult.module">{{ aobSignatureResult.module }} +0x{{ aobSignatureResult.moduleOffset }}</span>
+          <span v-if="aobSignatureResult.patternBytes">{{ formatNumber(aobSignatureResult.patternBytes) }} o</span>
+        </div>
+        <p v-if="aobSignatureResult?.warning" class="hint">{{ aobSignatureResult.warning }}</p>
+        <p v-if="aobSignatureResult?.error" class="error">{{ aobSignatureResult.error }}</p>
         <p v-if="aobResult?.error" class="error">{{ aobResult.error }}</p>
         <div v-if="aobResult?.matches?.length" class="aob-list">
           <div v-for="match in aobResult.matches.slice(0, 80)" :key="match.address" class="aob-row">
@@ -2678,7 +2721,7 @@ onMounted(() => {
 
 .find-writes-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(100px, 160px) 82px 56px 90px;
+  grid-template-columns: minmax(150px, 1fr) minmax(100px, 160px) 82px 56px 90px auto;
   gap: 8px;
   align-items: center;
   min-height: 30px;

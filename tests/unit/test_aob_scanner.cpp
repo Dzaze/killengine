@@ -44,3 +44,9 @@ TEST(AobScanner, FindsMultipleWildcardMatches) {
     EXPECT_EQ(matches[0], 0u);
     EXPECT_EQ(matches[1], 3u);
 }
+
+TEST(AobScanner, FormatsBytesAsAobPattern) {
+    const QByteArray bytes = QByteArray::fromHex("488B05DEADBEEF");
+
+    EXPECT_EQ(bytesToAobPattern(bytes), "48 8B 05 DE AD BE EF");
+}

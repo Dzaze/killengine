@@ -215,7 +215,7 @@ Prerequisites before Phase 12:
     - [x] Backend `scanAobPattern(pattern, options)` : scan borné des régions exécutables/image
     - [x] UI Expert : panneau `AOB signatures` avec filtres code exécutable/module image et liste module+offset
     - [x] Tests unitaires `AobScanner.*` pour parser, wildcards et matches multiples
-    - [ ] Génération de signature à partir des hits `Find What Writes`
+    - [x] Génération de signature à partir des hits `Find What Writes`
     - [ ] Patch enable/disable avec sauvegarde/restauration des bytes originaux
 - [ ] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire

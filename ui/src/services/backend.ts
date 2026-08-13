@@ -406,6 +406,22 @@ export interface AobScanResult {
   imageOnly?: boolean
 }
 
+export interface AobSignatureResult {
+  success: boolean
+  partial?: boolean
+  error?: string
+  warning?: string
+  startAddress?: string
+  instructionAddress?: string
+  bytesRead?: number
+  requestedBytes?: number
+  hex?: string
+  pattern?: string
+  patternBytes?: number
+  module?: string
+  moduleOffset?: string
+}
+
 export interface ExpertScanOptions {
   startAddress?: string
   stopAddress?: string
@@ -601,6 +617,7 @@ export interface AppSettings {
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
   findWhatWrites?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   scanAobPattern?(pattern: string, options: Record<string, unknown>): Promise<AobScanResult>
+  generateAobSignature?(addressHex: string, options: Record<string, unknown>): Promise<AobSignatureResult>
   setFreezeInterval(intervalMs: number): Promise<Record<string, unknown>>
   startSmartSearch(query: string): Promise<SmartSearchResult>
   ping(message: string): Promise<string>
@@ -1218,6 +1235,9 @@ class BackendService {
       },
       async scanAobPattern(_pattern: string, _options: Record<string, unknown>) {
         return { success: false, matches: [], matchesFound: 0, regionsScanned: 0, bytesScanned: 0, error: 'Mock backend' }
+      },
+      async generateAobSignature(_addressHex: string, _options: Record<string, unknown>) {
+        return { success: false, pattern: '', error: 'Mock backend' }
       },
       async setFreezeInterval(_intervalMs: number) {
         return { success: false, error: 'Mock backend' }

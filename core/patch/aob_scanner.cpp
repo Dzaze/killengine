@@ -68,6 +68,10 @@ AobPattern parseAobPattern(const QString& patternText) {
     return pattern;
 }
 
+QString bytesToAobPattern(const QByteArray& bytes) {
+    return QString::fromLatin1(bytes.toHex(' ').toUpper());
+}
+
 QList<uint64_t> searchAobBuffer(const QByteArray& haystack, const AobPattern& pattern, uint64_t baseAddress) {
     QList<uint64_t> matches;
     if (!pattern.isValid() || haystack.size() < pattern.size()) return matches;

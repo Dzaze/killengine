@@ -188,6 +188,10 @@ public:
     /// Pattern: "48 8B ?? ?? 89", options: executableOnly, imageOnly, startAddress, stopAddress, maxResults.
     Q_INVOKABLE QVariantMap scanAobPattern(const QString& pattern, const QVariantMap& options);
 
+    /// Génère une signature AOB exacte à partir des octets autour d'une adresse d'instruction.
+    /// options keys: beforeBytes, length.
+    Q_INVOKABLE QVariantMap generateAobSignature(const QString& addressHex, const QVariantMap& options);
+
     /// Configure l'intervalle du freeze polling (10-2000 ms, 100 ms par défaut).
     Q_INVOKABLE QVariantMap setFreezeInterval(int intervalMs);
 
