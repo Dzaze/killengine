@@ -5,6 +5,7 @@
 #include "memory/memory_reader.h"
 
 #include <algorithm>
+#include <array>
 
 namespace killcore {
 
@@ -72,6 +73,58 @@ QString bytesToAobPattern(const QByteArray& bytes) {
     return QString::fromLatin1(bytes.toHex(' ').toUpper());
 }
 
+AobPatternQuality evaluateAobPatternQuality(const AobPattern& pattern) {
+    AobPatternQuality quality;
+    quality.patternBytes = static_cast<int>(pattern.bytes.size());
+    if (!pattern.isValid()) {
+        quality.level = "invalid";
+        quality.warning = pattern.error.isEmpty() ? "Pattern AOB invalide." : pattern.error;
+        return quality;
+    }
+
+    std::array<bool, 256> seen{};
+    for (const auto& byte : pattern.bytes) {
+        if (byte) {
+            ++quality.fixedBytes;
+            if (!seen[*byte]) {
+                seen[*byte] = true;
+                ++quality.uniqueFixedBytes;
+            }
+        } else {
+            ++quality.wildcardBytes;
+        }
+    }
+
+    quality.fixedRatio = quality.patternBytes > 0
+        ? static_cast<double>(quality.fixedBytes) / static_cast<double>(quality.patternBytes)
+        : 0.0;
+
+    int score = 0;
+    score += std::min(40, quality.fixedBytes * 4);
+    score += std::min(25, quality.uniqueFixedBytes * 3);
+    score += std::min(20, quality.patternBytes);
+    score += static_cast<int>(quality.fixedRatio * 15.0);
+    if (quality.patternBytes < 6) score -= 25;
+    if (quality.fixedBytes < 4) score -= 35;
+    if (quality.uniqueFixedBytes < 3) score -= 15;
+    if (quality.fixedRatio < 0.45) score -= 20;
+    if (quality.wildcardBytes == quality.patternBytes) score = 0;
+
+    quality.score = std::clamp(score, 0, 100);
+    if (quality.score >= 75) {
+        quality.level = "strong";
+        quality.warning = "Signature AOB robuste; verifier quand meme l'unicite avant Trainer.";
+    } else if (quality.score >= 50) {
+        quality.level = "medium";
+        quality.warning = "Signature AOB moyenne; preferer une fenetre plus longue ou plus d'octets fixes.";
+    } else {
+        quality.level = "weak";
+        quality.warning = "Signature AOB faible; risque eleve de multi-match ou de casse apres update.";
+    }
+    quality.trainerSafe = quality.score >= 75 && quality.fixedBytes >= 8 && quality.fixedRatio >= 0.55;
+    return quality;
+}
+
 QList<uint64_t> searchAobBuffer(const QByteArray& haystack, const AobPattern& pattern, uint64_t baseAddress) {
     QList<uint64_t> matches;
     if (!pattern.isValid() || haystack.size() < pattern.size()) return matches;
@@ -80,9 +133,44 @@ QList<uint64_t> searchAobBuffer(const QByteArray& haystack, const AobPattern& pa
     const qsizetype limit = haystack.size() - patternSize;
     const auto* data = reinterpret_cast<const uint8_t*>(haystack.constData());
 
-    for (qsizetype i = 0; i <= limit; ++i) {
+    qsizetype anchorIndex = -1;
+    for (qsizetype j = patternSize - 1; j >= 0; --j) {
+        if (pattern.bytes[static_cast<size_t>(j)].has_value()) {
+            anchorIndex = j;
+            break;
+        }
+    }
+
+    if (anchorIndex < 0) {
+        for (qsizetype i = 0; i <= limit; ++i) {
+            matches.append(baseAddress + static_cast<uint64_t>(i));
+        }
+        return matches;
+    }
+
+    std::array<qsizetype, 256> anchorMismatchShift;
+    anchorMismatchShift.fill(anchorIndex + 1);
+    for (qsizetype j = 0; j < anchorIndex; ++j) {
+        const auto expected = pattern.bytes[static_cast<size_t>(j)];
+        if (expected) {
+            anchorMismatchShift[*expected] = anchorIndex - j;
+        }
+    }
+
+    const uint8_t anchorByte = *pattern.bytes[static_cast<size_t>(anchorIndex)];
+    qsizetype i = 0;
+    while (i <= limit) {
+        const uint8_t currentAnchor = data[i + anchorIndex];
+        if (currentAnchor != anchorByte) {
+            i += std::max<qsizetype>(1, anchorMismatchShift[currentAnchor]);
+            continue;
+        }
+
         bool ok = true;
         for (qsizetype j = 0; j < patternSize; ++j) {
+            if (j == anchorIndex) {
+                continue;
+            }
             const auto expected = pattern.bytes[static_cast<size_t>(j)];
             if (expected && data[i + j] != *expected) {
                 ok = false;
@@ -92,6 +180,7 @@ QList<uint64_t> searchAobBuffer(const QByteArray& haystack, const AobPattern& pa
         if (ok) {
             matches.append(baseAddress + static_cast<uint64_t>(i));
         }
+        ++i;
     }
 
     return matches;

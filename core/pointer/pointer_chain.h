@@ -14,13 +14,13 @@ namespace killcore {
  * Une chaîne part d'une base de module stable (module + offset de base),
  * puis suit une série de déréférencements + offsets jusqu'à l'adresse finale.
  *
- * Exemple pour StarCraft 2 :
- *   module = "SC2.exe"
+ * Exemple :
+ *   module = "game.exe"
  *   baseOffset = 0x0123ABC
  *   offsets = [0x50, 0x10, 0x20]
  *
  * Résolution :
- *   addr = base(SC2.exe) + 0x0123ABC
+ *   addr = base(game.exe) + 0x0123ABC
  *   addr = read<uint64_t>(addr) + 0x50
  *   addr = read<uint64_t>(addr) + 0x10
  *   finalAddr = read<uint64_t>(addr) + 0x20
@@ -29,7 +29,7 @@ namespace killcore {
  * tant que la structure interne du jeu ne change pas (patch/mise à jour).
  */
 struct PointerChain {
-    QString       module;         ///< Nom du module de base (ex: "SC2.exe").
+    QString       module;         ///< Nom du module de base (ex: "game.exe").
     uint64_t      baseOffset{0};  ///< Offset depuis la base du module.
     QList<uint64_t> offsets;      ///< Offsets de chaque niveau (le dernier est appliqué sans déréférencement).
 
@@ -37,7 +37,7 @@ struct PointerChain {
     int depth() const { return offsets.size(); }
 
     /// Sérialise la chaîne en notation lisible.
-    /// Ex: "SC2.exe+0x0123ABC->0x50->0x10->0x20"
+    /// Ex: "game.exe+0x0123ABC->0x50->0x10->0x20"
     QString toString() const;
 
     /// Retourne true si la chaîne est suffisamment définie pour être résolue.

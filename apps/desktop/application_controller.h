@@ -2,10 +2,15 @@
 
 #include "ai_engine.h"
 #include "candidates/candidate_store.h"
+#include "debug/breakpoint_freeze.h"
 #include "freeze/freeze_manager.h"
+#include "inject/dll_injector.h"
+#include "inject/function_hook.h"
+#include "input/global_hotkey.h"
 #include "memory/memory_reader.h"
 #include "process/process_handle.h"
 #include "profiles/profile_store.h"
+#include "scripting/auto_assembler.h"
 #include "snapshot/snapshot_store.h"
 
 #include <QObject>
@@ -16,8 +21,13 @@
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QPointer>
 
 #include <memory>
+#include <optional>
+
+class QLabel;
+class QWidget;
 
 namespace killengine {
 
@@ -75,6 +85,9 @@ public:
     /// Lit un petit aperçu mémoire en hexadécimal depuis le processus attaché.
     Q_INVOKABLE QVariantMap readMemoryPreview(const QString& addressHex, int size) const;
 
+    /// Analyse une fenêtre mémoire en champs typés exploitables par la vue Structure.
+    Q_INVOKABLE QVariantMap analyzeStructureMemory(const QString& addressHex, int size) const;
+
     /// Cherche une valeur affichée sous forme de texte (ASCII / UTF-16LE) dans la mémoire.
     Q_INVOKABLE QVariantMap scanUiStrings(const QString& value, const QVariantMap& options) const;
 
@@ -119,6 +132,9 @@ public:
         const QString& value,
         const QString& valueType,
         const QVariantMap& expertOptions);
+
+    /// Scan Expert de valeurs obfusquées simples (XOR/Add/Sub/NOT) sur les régions filtrées.
+    Q_INVOKABLE QVariantMap scanEncryptedValue(const QString& value, const QString& valueType, const QVariantMap& options);
 
     /// Lance un scan exact dans un worker thread et retourne immédiatement un requestId.
     Q_INVOKABLE QVariantMap startExactScanAsync(
@@ -174,6 +190,25 @@ public:
     /// Active/désactive un freeze simple sur une adresse.
     Q_INVOKABLE QVariantMap setFreezeValue(const QString& addressHex, const QString& valueType, const QString& value, bool enabled);
 
+    /// Active un freeze par hardware breakpoint sur une adresse (mode Expert).
+    Q_INVOKABLE QVariantMap freezeWithBreakpoint(const QString& addressHex, const QString& valueType, const QString& value, const QVariantMap& options);
+
+    /// Fait passer une adresse déjà en freeze polling vers le mode hardware
+    /// breakpoint, sans que l'appelant ait besoin de reconnaître type/valeur :
+    /// réutilise l'entrée FreezeEntry existante. Pensé pour le bouton "Passer
+    /// en Freeze BP" proposé par l'Assistant après une détection d'instabilité
+    /// (freezeInstabilityDetected) — l'utilisateur n'a que l'adresse en main.
+    Q_INVOKABLE QVariantMap escalatePollingFreezeToBreakpoint(const QString& addressHex);
+
+    /// Arrête le freeze par hardware breakpoint actif.
+    Q_INVOKABLE QVariantMap stopBreakpointFreeze();
+
+    /// Statistiques live du freeze par hardware breakpoint actif (hits,
+    /// réécritures, erreurs). Jusqu'ici collectées par BreakpointFreezeManager
+    /// mais jamais exposées à l'UI en dehors de l'arrêt — l'utiliser pour
+    /// afficher une tenue en direct plutôt que d'attendre stopBreakpointFreeze.
+    Q_INVOKABLE QVariantMap getBreakpointFreezeStats() const;
+
     // -----------------------------------------------------------------------
     // Phase 17 — Hardware Breakpoints / Find What Writes
     // -----------------------------------------------------------------------
@@ -189,6 +224,20 @@ public:
 
     /// Demande l'arrêt de la capture Find What Writes en cours.
     Q_INVOKABLE QVariantMap cancelFindWhatWrites();
+
+    /// Find What Accesses (breakpoint lecture/ecriture) : capture les instructions qui LISSENT l'adresse.
+    /// Version non bloquante. Le resultat arrive via findWhatAccessesFinished.
+    Q_INVOKABLE QVariantMap findWhatAccessesAsync(const QString& addressHex, const QVariantMap& options);
+
+    /// Scan groupe : cherche N valeurs avec offsets fixes connus (ex: HP/Mana/Stamina voisins).
+    /// Entrees : liste {offset, type, value} + options standards Mode Expert.
+    Q_INVOKABLE QVariantMap scanGroupScan(const QVariantList& entries, const QVariantMap& options);
+
+    /// Ecriture hexadecimale brute : "48 8B 00" -> bytes exacts a l'adresse. Sauvegarde previous pour rollback.
+    Q_INVOKABLE QVariantMap writeMemoryHex(const QString& addressHex, const QString& hexString);
+
+    /// Dump d'une region memoire vers fichier binaire (.bin) sous QStandardPaths::DocumentsLocation/KillEngine/dumps.
+    Q_INVOKABLE QVariantMap dumpMemoryRegion(const QString& addressHex, int size, const QString& fileName);
 
     /// Cherche une signature AOB dans les régions mémoire du processus.
     /// Pattern: "48 8B ?? ?? 89", options: executableOnly, imageOnly, startAddress, stopAddress, maxResults.
@@ -208,18 +257,89 @@ public:
     /// Restaure les bytes originaux d'un patch actif.
     Q_INVOKABLE QVariantMap restoreCodePatch(const QString& addressHex);
 
+    // -----------------------------------------------------------------------
+    // Phase 20 — Injection / hooking / auto-assembler (outils Expert manuels
+    // gardés par confirmation explicite côté frontend, cf. confirmRiskAction
+    // risk='injection'). Pas encore de feature Trainer persistante (action
+    // 'hook') : ces méthodes sont pour l'instant du one-shot Expert, comme les
+    // patchs AOB avant d'avoir leur propre étage Trainer.
+
+    /// Injecte une DLL dans le processus attaché (CreateRemoteThread + LoadLibraryW).
+    Q_INVOKABLE QVariantMap injectDllIntoProcess(const QString& dllPath);
+
+    /// Installe un inline hook (detour) sur une fonction du processus attaché.
+    /// Garde les bytes originaux pour restauration via removeFunctionHook.
+    Q_INVOKABLE QVariantMap installFunctionHook(const QString& targetAddressHex, const QString& hookAddressHex);
+
+    /// Retire un hook actif et restaure les bytes originaux.
+    Q_INVOKABLE QVariantMap removeFunctionHook(const QString& targetAddressHex);
+
+    /// Parse et compile un script auto-assembler sans l'exécuter (aperçu : instructions reconnues, erreurs de syntaxe/ligne).
+    Q_INVOKABLE QVariantMap parseAutoAssemblerScript(const QString& scriptText) const;
+
+    /// Exécute un script auto-assembler dans le processus attaché ; garde le résultat pour restoreAutoAssemblerScript.
+    Q_INVOKABLE QVariantMap executeAutoAssemblerScript(const QString& scriptText);
+
+    /// Restaure les bytes originaux du dernier script auto-assembler exécuté.
+    Q_INVOKABLE QVariantMap restoreAutoAssemblerScript();
+
     /// Configure l'intervalle du freeze polling (10-2000 ms, 100 ms par défaut).
     Q_INVOKABLE QVariantMap setFreezeInterval(int intervalMs);
+
+    /// Enregistre une hotkey globale et renvoie son ID.
+    Q_INVOKABLE QVariantMap registerGlobalHotkey(const QString& combo, const QVariantMap& action);
+
+    /// Supprime une hotkey globale.
+    Q_INVOKABLE QVariantMap unregisterGlobalHotkey(int id);
+
+    /// Liste les hotkeys globales enregistrées.
+    Q_INVOKABLE QVariantMap getGlobalHotkeys() const;
+
+    /// Supprime toutes les hotkeys globales.
+    Q_INVOKABLE QVariantMap clearGlobalHotkeys();
+
+    /// Affiche/masque l'overlay Trainer externe always-on-top.
+    Q_INVOKABLE QVariantMap setTrainerOverlayVisible(bool visible, const QVariantMap& options);
+
+    /// Met à jour le contenu de l'overlay Trainer.
+    Q_INVOKABLE QVariantMap updateTrainerOverlay(const QVariantMap& state);
 
     /// Lance une recherche intelligente (Smart Search).
     /// Phase 0: stub qui logge la requête.
     Q_INVOKABLE QVariantMap startSmartSearch(const QString& query);
+
+    /// Lance une auto-résolution prudente : plan IA + premières actions sûres seulement.
+    Q_INVOKABLE QVariantMap startAutoResolve(const QString& query, const QVariantMap& options);
+
+    /// Résume le contexte d'enquête et la télémétrie récente pour guider l'IA proactive.
+    Q_INVOKABLE QVariantMap getAutoResolveReport(int maxEvents) const;
+
+    /// Vide la mémoire locale d'auto-résolution (QSettings) pour le processus courant ou tous les processus.
+    Q_INVOKABLE QVariantMap clearAutoResolveMemory(bool allProcesses);
+
+    /// Ajoute un événement d'audit IA dans la télémétrie locale.
+    Q_INVOKABLE QVariantMap logAiAudit(const QString& event, const QVariantMap& payload);
 
     /// Ping — permet au frontend de vérifier que le backend est connecté.
     Q_INVOKABLE QString ping(const QString& message);
 
     /// Retourne les paramètres persistants de l'application.
     Q_INVOKABLE QVariantMap getSettings() const;
+
+    /// Vrai si la modale de bienvenue première ouverture a déjà été vue/fermée (QSettings, survit à un profil Windows différent).
+    Q_INVOKABLE bool hasSeenOnboarding() const;
+
+    /// Marque la modale de bienvenue comme vue (case "Ne plus afficher").
+    Q_INVOKABLE void setOnboardingSeen(bool seen);
+
+    /// Ouvre USER_GUIDE.md dans l'application par défaut du système (package: à côté de l'exe ; dev: docs/USER_GUIDE.md).
+    Q_INVOKABLE bool openUserGuide() const;
+
+    /// Retourne un diagnostic lisible du runtime IA local (modèle GGUF + llama-cli).
+    Q_INVOKABLE QVariantMap getAiModelStatus() const;
+
+    /// Ouvre un sélecteur de fichier natif pour choisir un modèle GGUF (remplace la saisie manuelle du chemin).
+    Q_INVOKABLE QVariantMap browseForModelFile();
 
     /// Sauvegarde les paramètres persistants de l'application.
     Q_INVOKABLE QVariantMap saveSettings(const QVariantMap& settings);
@@ -316,7 +436,7 @@ public:
     Q_INVOKABLE QVariantMap inspectProfileCodePatches(const QString& profileName);
 
     // -----------------------------------------------------------------------
-    // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
+    // Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
     // -----------------------------------------------------------------------
 
     /// Scanne la mémoire pour trouver des chaînes de pointeurs menant à une adresse cible.
@@ -339,6 +459,17 @@ public:
         const QString& valueType,
         const QString& description);
 
+    /// Après une écriture confirmée, cherche une chaîne de pointeurs stable vers
+    /// cette adresse pour qu'elle survive à un redémarrage du processus cible.
+    /// Lecture seule, bornée par défaut (depth=3, offset=0x1000, results=5) pour
+    /// rester rapide : à appeler explicitement, jamais automatiquement après
+    /// chaque écriture (le scan de pointeurs reste l'opération la plus longue).
+    /// Le meilleur candidat (`bestChain`) est directement réutilisable tel quel
+    /// par `savePointerChainProfileTarget`.
+    Q_INVOKABLE QVariantMap suggestStableLocatorForAddress(
+        const QString& addressHex,
+        const QVariantMap& options);
+
 signals:
     void attachmentChanged();
     void scanStarted();
@@ -346,6 +477,16 @@ signals:
     void scanStatsUpdated(int candidateCount);
     void scanFinished(const QVariantMap& result);
     void findWhatWritesFinished(const QVariantMap& result);
+
+    /// Émis quand un freeze par polling est détecté instable (la valeur repart
+    /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le
+    /// classique "freeze qui clignote". Détecté automatiquement, sans que
+    /// l'utilisateur ait besoin de le signaler — voir applyFreezeTick().
+    void freezeInstabilityDetected(const QVariantMap& info);
+
+    /// Resultat d'une capture Find What Accesses async (kind = find_what_accesses).
+    void findWhatAccessesFinished(const QVariantMap& result);
+    void globalHotkeyTriggered(const QVariantMap& event);
     void aiMessage(const QString& message);
     void targetConfidenceChanged(int confidence);
     void targetFound(const QVariantMap& target);
@@ -354,6 +495,13 @@ signals:
 
 private:
     void applyFreezeTick();
+    bool restartBreakpointFreezeFromRegistry(killcore::BreakpointFreezeMode mode, QString* error = nullptr);
+    QVariantMap activateBreakpointFreezeFor(
+        uint64_t address,
+        killcore::ValueType type,
+        const QByteArray& frozenBytes,
+        killcore::BreakpointFreezeMode mode,
+        const QString& modeText);
     bool rememberCandidatesForUndo(QString* error = nullptr);
     void clearCandidateUndo();
     void clearCandidateValueHistory();
@@ -399,6 +547,13 @@ private:
         QByteArray patchBytes;
     };
 
+    struct ActiveFunctionHook {
+        uint64_t targetAddress{0};
+        uint64_t hookFunctionAddress{0};
+        uint64_t trampolineAddress{0};
+        QByteArray originalBytes;
+    };
+
     bool                    m_attached{false};
     QString                 m_processName;
     int                     m_pid{0};
@@ -408,13 +563,19 @@ private:
     QHash<uint64_t, QVariantList> m_candidateValueHistory;
     killcore::SnapshotStore  m_snapshot;
     killcore::FreezeManager  m_freeze;
+    std::unique_ptr<killcore::BreakpointFreezeManager> m_breakpointFreeze;
+    std::unique_ptr<killcore::GlobalHotkeyManager> m_hotkeys;
     QTimer                   m_freezeTimer;
+    QPointer<QWidget>        m_trainerOverlay;
+    QPointer<QLabel>         m_trainerOverlayLabel;
     uint64_t                 m_lastWriteAddress{0};
     QByteArray               m_lastWritePreviousValue;
     QList<WriteRecord>       m_writeHistory;
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
     QList<AutoWriteTarget>   m_chatMemoryTargets;
     QHash<uint64_t, ActiveCodePatch> m_activeCodePatches;
+    QHash<uint64_t, ActiveFunctionHook> m_activeFunctionHooks;
+    std::optional<killcore::AutoAsmResult> m_lastAutoAsmResult;
     qint64                   m_uiInvestigationStartedMs{0};
     QList<ActiveProfileTarget> m_activeProfileTargets;
     QStringList              m_autoWriteValueHistory;
@@ -425,6 +586,7 @@ private:
     int                      m_nextScanRequestId{1};
     int                      m_nextDebugRequestId{1};
     bool                     m_findWhatWritesInProgress{false};
+    bool                     m_findWhatAccessesInProgress{false};
     std::shared_ptr<killcore::CancellationToken> m_activeDebugCancellation;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     killai::AIEngine         m_ai;

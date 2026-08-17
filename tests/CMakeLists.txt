@@ -12,10 +12,13 @@ add_executable(killengine_unit_tests
     unit/test_logger.cpp
     unit/test_candidate_store.cpp
     unit/test_ai_tools.cpp
+    unit/test_ai_adaptive.cpp
+    unit/test_auto_resolver.cpp
     unit/test_snapshot_codec.cpp
     unit/test_pointer_chain.cpp
     unit/test_performance_profile.cpp
     unit/test_worker_pool.cpp
+    unit/test_power_up_modules.cpp
 )
 
 target_link_libraries(killengine_unit_tests PRIVATE
@@ -48,10 +51,11 @@ set_target_properties(KillEngineTestTarget PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
-# Integration tests (Phase 13)
+# Integration tests (Phase 13 + power-up runtime)
 add_executable(killengine_integration_tests
     integration/test_main.cpp
     integration/test_memory_scan.cpp
+    integration/test_power_up_runtime.cpp
 )
 target_link_libraries(killengine_integration_tests PRIVATE
     killcore

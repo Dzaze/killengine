@@ -1,0 +1,10 @@
+{
+  "id": "auto_resolver",
+  "displayName": "Auto Resolver IA",
+  "role": "resolver",
+  "provider": "llama.cpp",
+  "modelPath": "../qwen/Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+  "runtimePath": "../../llama-cli.exe",
+  "required": true,
+  "description": "Agent autonome embarque pour planifier scan, narrowing, verification, signature AOB et proposition de patch."
+}

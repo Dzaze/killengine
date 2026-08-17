@@ -9,11 +9,14 @@
 // =============================================================================
 
 #include <QApplication>
+#include <QDir>
+#include <QFile>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMainWindow>
+#include <QProcessEnvironment>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTextEdit>
@@ -21,10 +24,12 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <thread>
 
 // ---------------------------------------------------------------------------
 // Variables mémoire connues (variables globales pour adresses stables)
@@ -285,12 +290,93 @@ private:
 
 #include "test_target_main.moc"
 
+// ---------------------------------------------------------------------------
+// Stress rewriter — simule une cible qui réécrit sa propre mémoire via ses
+// PROPRES instructions CPU, pas via WriteProcessMemory externe.
+//
+// C'est une distinction fondamentale pour tester un hardware breakpoint :
+// DR0-DR3 ne piègent que les instructions exécutées sur un thread du
+// processus cible qui les porte. Un WriteProcessMemory externe (ce que fait
+// KillEngine lui-même pour écrire une valeur, et ce qu'un premier jet de test
+// utilisait par erreur) ne déclenche jamais le breakpoint : le copy se fait
+// en mode noyau, sans exécuter d'instruction sur un thread du debuggee.
+// Un vrai jeu, lui, réécrit sa mémoire via son propre code — c'est ce que ce
+// thread reproduit fidèlement, activé uniquement via la variable
+// d'environnement KILLENGINE_TEST_TARGET_STRESS_REWRITE pour ne jamais
+// perturber le fonctionnement normal de la cible de test.
+// ---------------------------------------------------------------------------
+static std::atomic_bool g_stressRewriteActive{false};
+
+static void runStressRewriteLoop() {
+    // Delai avant de commencer a marteler g_health : laisse au harness de
+    // test le temps de scanner la valeur initiale connue (100) et d'attacher
+    // le freeze breakpoint avant que la valeur ne s'eloigne. Sans ce delai,
+    // un scan par valeur lance apres le demarrage du thread tombe sur une
+    // correspondance fortuite (g_health a deja largement depasse la valeur
+    // recherchee), pas sur la vraie adresse.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+
+    // Cadence a ~1000 ecritures/seconde : c'est le pire cas cite par
+    // docs/POWER_UP_ROADMAP.md section A ("tient meme si le jeu reecrit
+    // 1000x/seconde"), et deja bien plus rapide qu'un vrai jeu (qui mute
+    // rarement une valeur plus d'une fois par frame, 60-240Hz). Une boucle
+    // sans aucune pause reecrit des centaines de milliers de fois par
+    // seconde — plus vite que le temps de reaction physique d'un debugger
+    // (WaitForDebugEvent + 2 syscalls a chaque hit) ne peut jamais suivre,
+    // ce qui ne prouve rien sur la fiabilite reelle du freeze face a une
+    // cible plausible. sleep_for() a la microseconde n'est pas fiable sous
+    // Windows (granularite timer par defaut ~15ms) ; on cadence donc par
+    // spin-wait sur steady_clock pour une precision sub-milliseconde.
+    constexpr auto kInterval = std::chrono::microseconds(1000);
+    auto nextWrite = std::chrono::steady_clock::now();
+
+    int32_t counter = 500;
+    while (g_stressRewriteActive.load(std::memory_order_relaxed)) {
+        while (std::chrono::steady_clock::now() < nextWrite) {
+            // spin-wait volontaire : precision > ce que Sleep()/sleep_for() offre
+        }
+        g_health = counter++;
+        if (counter > 1'000'000) counter = 500;
+        nextWrite += kInterval;
+    }
+}
+
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("KillEngineTestTarget");
 
+    // Expose l'adresse reelle des globales de test dans un fichier marqueur :
+    // un scan par VALEUR (ex: Int32==100) peut tomber sur n'importe quelle
+    // autre variable Qt/CRT qui vaut coincidemment 100 dans ce process, pas
+    // forcement g_health. Les tests d'integration qui ont besoin d'une
+    // adresse fiable (pas juste "une adresse plausible") lisent ce fichier
+    // plutot que de deviner par valeur.
+    {
+        QFile marker(QDir::temp().filePath("killengine_test_target_addresses.txt"));
+        if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            const QString line = QString("pid=%1\ng_health=0x%2\n")
+                .arg(QApplication::applicationPid())
+                .arg(reinterpret_cast<quintptr>(&g_health), 0, 16);
+            marker.write(line.toUtf8());
+            marker.close();
+        }
+    }
+
+    std::thread stressThread;
+    if (QProcessEnvironment::systemEnvironment().contains("KILLENGINE_TEST_TARGET_STRESS_REWRITE")) {
+        g_stressRewriteActive.store(true);
+        stressThread = std::thread(runStressRewriteLoop);
+    }
+
     TestTargetWindow window;
     window.show();
 
-    return app.exec();
+    const int exitCode = app.exec();
+
+    if (stressThread.joinable()) {
+        g_stressRewriteActive.store(false);
+        stressThread.join();
+    }
+
+    return exitCode;
 }

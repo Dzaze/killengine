@@ -4,18 +4,22 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import AssistantView from '@/views/AssistantView.vue'
 import ExpertView from '@/views/ExpertView.vue'
+import InvestigationView from '@/views/InvestigationView.vue'
 import MemoryView from '@/views/MemoryView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import ProcessView from '@/views/ProcessView.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import TrainerView from '@/views/TrainerView.vue'
 
 const store = useAppStore()
 const { locale } = useI18n()
 
 const currentView = computed(() => {
   if (store.activeView === 'process') return ProcessView
+  if (store.activeView === 'investigation') return InvestigationView
   if (store.activeView === 'memory') return MemoryView
   if (store.activeView === 'profiles') return ProfileView
+  if (store.activeView === 'trainer') return TrainerView
   if (store.activeView === 'expert') return ExpertView
   if (store.activeView === 'settings') return SettingsView
   return AssistantView
@@ -59,6 +63,13 @@ watch(
         </button>
         <button
           class="nav-item"
+          :class="{ active: store.activeView === 'investigation' }"
+          @click="store.activeView = 'investigation'"
+        >
+          {{ $t('nav.investigation') }}
+        </button>
+        <button
+          class="nav-item"
           :class="{ active: store.activeView === 'memory' }"
           @click="store.activeView = 'memory'"
         >
@@ -70,6 +81,13 @@ watch(
           @click="store.activeView = 'profiles'"
         >
           {{ $t('nav.profiles') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'trainer' }"
+          @click="store.activeView = 'trainer'"
+        >
+          {{ $t('nav.trainer') }}
         </button>
         <button
           class="nav-item"
@@ -116,6 +134,57 @@ watch(
     <main class="main">
       <component :is="currentView" />
     </main>
+
+    <div v-if="store.showOnboarding" class="risk-backdrop" role="presentation">
+      <section class="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+        <h2 id="onboarding-title">Bienvenue dans KillEngine</h2>
+        <p class="onboarding-intro">Trois choses à savoir pour démarrer :</p>
+        <ol class="onboarding-steps">
+          <li>
+            <strong>Attache un processus.</strong>
+            Onglet Processus, choisis l'application que tu veux analyser.
+          </li>
+          <li>
+            <strong>Décris ce que tu cherches à l'Assistant.</strong>
+            Une valeur affichée à l'écran suffit — pas besoin de connaître les types de données ou les scans.
+          </li>
+          <li>
+            <strong>Transforme une trouvaille en Trainer.</strong>
+            Une fois une valeur confirmée, sauvegarde-la comme feature réutilisable avec un raccourci clavier.
+          </li>
+        </ol>
+        <div class="onboarding-actions">
+          <button type="button" class="risk-btn secondary" @click="store.openUserGuide()">
+            Guide complet
+          </button>
+          <button type="button" class="risk-btn primary" @click="store.dismissOnboarding()">
+            Commencer
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="store.riskDialog?.open" class="risk-backdrop" role="presentation">
+      <section class="risk-modal" role="dialog" aria-modal="true" aria-labelledby="risk-title">
+        <div class="risk-head">
+          <span class="risk-pill">{{ store.riskDialog.risk }}</span>
+          <span>Mode {{ store.riskDialog.mode }}</span>
+        </div>
+        <h2 id="risk-title">{{ store.riskDialog.title }}</h2>
+        <p class="risk-detail">{{ store.riskDialog.detail }}</p>
+        <p class="risk-warning">
+          Cette action modifie ou observe activement un processus local. Confirme uniquement si tu contrôles ce processus et acceptes le risque.
+        </p>
+        <div class="risk-actions">
+          <button type="button" class="risk-btn secondary" @click="store.resolveRiskDialog(false)">
+            Annuler
+          </button>
+          <button type="button" class="risk-btn primary" @click="store.resolveRiskDialog(true)">
+            Confirmer
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -277,5 +346,124 @@ body {
 .main {
   flex: 1;
   overflow-y: auto;
+}
+
+.risk-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 9, 14, 0.72);
+}
+
+.risk-modal {
+  width: min(520px, 100%);
+  border: 1px solid rgba(224, 175, 104, 0.36);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
+  padding: 18px;
+}
+
+.risk-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.risk-pill {
+  border: 1px solid rgba(224, 175, 104, 0.45);
+  border-radius: 999px;
+  color: var(--warning);
+  padding: 3px 8px;
+}
+
+.risk-modal h2 {
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.risk-detail {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.risk-warning {
+  margin-top: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.onboarding-modal {
+  width: min(520px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
+  padding: 20px;
+}
+
+.onboarding-modal h2 {
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.onboarding-intro {
+  margin-top: 8px;
+  color: var(--text-dim);
+}
+
+.onboarding-steps {
+  margin: 14px 0 4px;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.onboarding-steps li + li {
+  margin-top: 10px;
+}
+
+.onboarding-steps strong {
+  display: block;
+  color: var(--text-primary);
+}
+
+.onboarding-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.risk-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.risk-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.risk-btn.secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.risk-btn.primary {
+  border-color: rgba(224, 175, 104, 0.55);
+  background: var(--warning);
+  color: #101219;
 }
 </style>

@@ -1,0 +1,10 @@
+{
+  "id": "assistant",
+  "displayName": "Assistant IA",
+  "role": "assistant",
+  "provider": "llama.cpp",
+  "modelPath": "../qwen/Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+  "runtimePath": "../../llama-cli.exe",
+  "required": true,
+  "description": "Agent conversationnel embarque pour guider les scans, expliquer les resultats et piloter les workflows utilisateur."
+}

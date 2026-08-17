@@ -61,7 +61,8 @@
     "modeUnchanged": "Unchanged",
     "modeIncreased": "Increased",
     "modeDecreased": "Decreased",
-    "modeDelta": "Delta"
+    "modeDelta": "Delta",
+    "nextScanHint": "Change the value in the game, pick what happened from the list, then click Next Scan."
   },
   "unknown": {
     "title": "Unknown initial value",
@@ -90,6 +91,161 @@
     "memory": "Memory",
     "profiles": "Profiles",
     "expert": "Expert",
-    "settings": "Settings"
+    "settings": "Settings",
+    "investigation": "Investigation",
+    "trainer": "Trainer"
+  },
+  "help": {
+    "label": {
+      "about": "Help:",
+      "what": "What it does",
+      "when": "When to use it",
+      "cost": "What it costs",
+      "example": "Example"
+    },
+    "risk": {
+      "read": {
+        "label": "Read only",
+        "detail": "These tools read the target process memory without ever modifying it."
+      },
+      "write": {
+        "label": "Writes memory",
+        "detail": "These tools modify the target process data. Reversible through Rollback, but a wrong address can crash it."
+      },
+      "code": {
+        "label": "Modifies code",
+        "detail": "These tools attach a debugger or rewrite the target process instructions. Crash and detection risk. Keep it to software you control."
+      }
+    },
+    "step": {
+      "find": {
+        "title": "1. Find",
+        "what": "Narrow the whole process memory down to a handful of candidate addresses."
+      },
+      "inspect": {
+        "title": "2. Inspect",
+        "what": "Work out which candidate is the real value, and which stable path leads to it."
+      },
+      "act": {
+        "title": "3. Act",
+        "what": "Write or freeze the value. From here on the target process is modified."
+      },
+      "persist": {
+        "title": "4. Persist",
+        "what": "Turn what works into a code signature, then a patch, then a reusable Trainer feature."
+      }
+    },
+    "regionContext": {
+      "title": "Active region",
+      "what": "Details the memory region of the selected address: bounds, protection, state and type.",
+      "when": "To understand why a write fails, or to check whether the address sits in Private data rather than Mapped or Image memory.",
+      "cost": "Read only.",
+      "example": "A candidate address sits at 0x1A2B..., type Private, RW protection. That is real program data (not a read-only mapped file) — a good sign for writing to it without an access error."
+    },
+    "scanExact": {
+      "title": "Exact scan",
+      "what": "Finds every memory address holding exactly the value you typed.",
+      "when": "When the value is visible on screen and stays stable. Fastest starting point.",
+      "cost": "Read only. The first scan can return thousands of results: that is expected, Next Scan narrows them down.",
+      "example": "You see 41250 as gold on screen. Type 41250, pick Int32, click Scan. Hundreds of addresses come back — that is expected, it is the starting point, not the final answer."
+    },
+    "nextScan": {
+      "title": "Next scan",
+      "what": "Re-reads only the existing candidates and keeps those matching the chosen comparison.",
+      "when": "After a first scan, as soon as the value changed in the program. Repeat until only a few addresses remain.",
+      "cost": "Read only. Unchanged is the noisiest comparison: it keeps almost everything.",
+      "example": "After scanning for 41250, you spend 500 in-game (new displayed gold: 40750). Type 40750, click Next Scan Exact: the list drops to a few dozen addresses."
+    },
+    "unknown": {
+      "title": "Unknown initial value",
+      "what": "Snapshots memory without knowing the value, then compares successive snapshots through it went up, it went down, it changed, it is stable.",
+      "when": "When the value is not displayed as a number: health bar, gauge, percentage, or encrypted value.",
+      "cost": "Read only, but the snapshot uses temporary disk space. Expect 3 to 5 comparisons before the list is usable.",
+      "example": "The health bar shows no exact number. Click Capture, take a hit in-game, then click it went down. Repeat 2-3 times until only 1-5 candidates remain."
+    },
+    "uiString": {
+      "title": "UI string trace",
+      "what": "Starts from the text shown on screen rather than the number, then walks back to the numeric source or pointer feeding it.",
+      "when": "When numeric scans find nothing: modern engines, decoupled UI, value recomputed at display time.",
+      "cost": "Read only. Many matches are display copies rather than the real source: use Auto origin to tell them apart.",
+      "example": "A plain Int32 scan finds nothing for the on-screen \"45\". Run Scan text on \"45\": it surfaces every memory location holding that text, then Analyze sources looks for the number feeding it right next to it."
+    },
+    "candidates": {
+      "title": "Candidates",
+      "what": "Paginated list of addresses kept by the current scan, with their re-read value and a confidence score.",
+      "when": "Throughout: this is the working set. Select addresses to write, watch, or send to the Assistant.",
+      "cost": "Read only. Re-reading queries the target process on every refresh.",
+      "example": "3 addresses remain after narrowing. Check them, then click Send to Assistant to keep the conversation going with these active leads without retyping addresses."
+    },
+    "write": {
+      "title": "Write / Freeze",
+      "what": "Writes a value to the selected addresses, and can rewrite it in a loop (freeze) so it does not drop back.",
+      "when": "Once only a few candidates remain. Test in small batches before freezing.",
+      "cost": "Modifies the target process memory. A wrong address can crash it. Every write stays reversible through Rollback.",
+      "example": "2 candidates remain after narrowing. Type 999999 as the value, click Write: KillEngine computes and shows the Write plan before the final click that actually changes memory."
+    },
+    "freezeBp": {
+      "title": "Breakpoint freeze",
+      "what": "Sets a hardware breakpoint on the address and rewrites the value at the exact moment the program tries to change it.",
+      "when": "When polling freeze flickers because the target rewrites the value faster than the polling interval.",
+      "cost": "Attaches the Windows debugger to the process. Can be detected or disturb the target.",
+      "example": "Regular freeze at 16 ms flickers because the game rewrites the value faster than one tick. Switch to Freeze BP: the value is corrected the instant the game tries to write it."
+    },
+    "watchLive": {
+      "title": "Live watch",
+      "what": "Watches up to 200 addresses and shows their values in real time, without clicking address by address.",
+      "when": "To tell candidates apart: the right address follows what you do in the program.",
+      "cost": "Read only. A large watch batch increases read load.",
+      "example": "You have 4 suspect candidates. Click Watch on each, then play: the one that moves exactly as expected (drops by 10 after a hit, say) is the right one."
+    },
+    "findWhatWrites": {
+      "title": "Find what writes",
+      "what": "Attaches the debugger and captures the instruction writing to this address: its RIP, module and disassembly.",
+      "when": "To go from knowing the address to knowing the code that computes it, and turn that into a stable patch.",
+      "cost": "Attaches the Windows debugger. Change the value in the program during the capture window, otherwise nothing is caught.",
+      "example": "The address you found refuses to stay frozen. Click Find what writes, then land a hit in-game during the capture window: KillEngine shows the exact instruction writing that value, with its module and offset."
+    },
+    "aob": {
+      "title": "AOB signatures",
+      "what": "Searches a byte signature inside the program code, then offers to patch the matched instruction.",
+      "when": "To build a feature that survives a restart: an address changes every session, a code signature does not.",
+      "cost": "Modifies the executable code. A signature matching several places is blocked, because patching the wrong one crashes the target.",
+      "example": "Find what writes located the instruction at SC2.exe+0x4A1B2. Click Signature to generate a stable AOB, then Analyze to see the suggested patches (NOP the write, force a value, etc.) ranked by risk."
+    },
+    "pointerChains": {
+      "title": "Pointer chains",
+      "what": "Finds a stable module + offsets path to the address, instead of the absolute address that changes on every launch.",
+      "when": "When an address stops working after the program restarts.",
+      "cost": "Read only, but this is the slowest scan. Start with a depth of 3 before raising it.",
+      "example": "Address 0x7FF6... worked yesterday but not today after relaunching the game. Run a pointer scan on it: you get a path like module+0x1A4 -> +0x20 -> +0x8, stable across sessions."
+    },
+    "groupScan": {
+      "title": "Group scan",
+      "what": "Searches several known values separated by fixed offsets, for example HP at +0 and Mana at +4.",
+      "when": "When you know two or three neighbouring values: it locates the structure base in one pass.",
+      "cost": "Read only.",
+      "example": "You know HP=100 and Mana=50 sit next to each other in memory. Enter both values with their relative offsets (0 and +4): KillEngine locates the player structure's base directly."
+    },
+    "watchPointerChains": {
+      "title": "Watch pointer chains",
+      "what": "Follows the value at the end of a pointer chain live, resolving it again on every tick.",
+      "when": "To check a chain stays valid while the program reallocates its objects.",
+      "cost": "Read only.",
+      "example": "After validating a pointer chain, click Watch on it to confirm it keeps resolving to the right value even when the game recreates the object (level change, respawn...)."
+    },
+    "journal": {
+      "title": "Session journal",
+      "what": "Free-form note attached to the current analysis session.",
+      "when": "To record what worked before turning it into a profile or a Trainer feature.",
+      "cost": "No effect on the target process.",
+      "example": "Note \"minerals AOB stable on patch 5.0.14\" to remember later what worked, before turning it into a profile or a Trainer feature."
+    },
+    "injection": {
+      "title": "Injection / hooking / auto-assembler",
+      "what": "Injects a DLL, installs an inline hook on a function, or runs an auto-assembler script inside the attached process.",
+      "when": "For an invincible freeze that intercepts the write at the source, or a cheat that needs to run inside the target process rather than read/write it from the outside.",
+      "cost": "Actively modifies the target process (injected code, rewritten instructions). Requires explicit confirmation for every action, no persistent Trainer feature yet.",
+      "example": "After capturing the instruction that writes a value (Written by), install a hook on it to force the value on every call instead of rewriting it in a loop from the outside."
+    }
   }
 }

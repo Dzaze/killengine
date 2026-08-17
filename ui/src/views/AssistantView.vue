@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
-import { useAppStore } from '@/stores/app'
+import { useAppStore, type WorkflowPreset } from '@/stores/app'
 
 const store = useAppStore()
 const chatInput = ref('')
@@ -123,9 +123,27 @@ async function sendMessage() {
   await scrollToBottom()
 }
 
+async function sendAutoResolve() {
+  const value = chatInput.value.trim()
+  if (!value) return
+  chatInput.value = ''
+  store.searchQuery = value
+  await store.doAutoResolve()
+  await scrollToBottom()
+}
+
 async function sendExample(text: string) {
   store.searchQuery = text
   await store.doSearch()
+  await scrollToBottom()
+}
+
+async function useWorkflowPreset(preset: WorkflowPreset) {
+  const applied = store.applyWorkflowPreset(preset.id)
+  if (!applied) return
+  if (applied.mode === 'auto' && store.isAttached) {
+    await store.doAutoResolve()
+  }
   await scrollToBottom()
 }
 
@@ -210,12 +228,101 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     const nextTarget = Number.isFinite(numericTarget) ? String(numericTarget * 100) : actionTarget
     await store.searchValueAsType(nextValue, 'Int32', nextTarget)
   } else if (actionId === 'try_unknown_increased') {
-    await store.startNewSearchContext()
     store.activeView = 'expert'
     store.unknownScanMode = 'increased'
-    store.pushMessage('assistant', 'Passe en Unknown initial value : capture une première image, fais augmenter la valeur dans le jeu, puis lance increased.')
+    await store.runAutoUnknownObservation(actionValue || store.targetValueGuided || 'capture')
+  } else if (actionId === 'try_unknown_changed' || actionId === 'unknown_capture') {
+    store.activeView = 'expert'
+    store.unknownScanMode = 'changed'
+    await store.runAutoUnknownObservation(actionValue || store.targetValueGuided || 'capture')
+  } else if (actionId === 'continue_unknown_observation') {
+    store.pushMessage('assistant', 'Fais varier la valeur dans le processus, puis tape la nouvelle observation ici. Je reprendrai Unknown automatiquement.')
+  } else if (actionId === 'try_encrypted_scan' || actionId === 'encrypted_scan') {
+    const value = actionValue || store.targetValueGuided || store.smartSearchContext?.initialValue || ''
+    if (value.trim()) {
+      await store.runAutoEncryptedScan(value)
+    } else {
+      store.activeView = 'expert'
+      store.pushMessage('assistant', 'Donne-moi une valeur affichée, puis je lancerai le scan chiffré borné.')
+    }
+  } else if (actionId === 'trace_ui_string' || actionId === 'trace_ui_sources') {
+    const value = actionValue || store.targetValueGuided || store.smartSearchContext?.initialValue || ''
+    if (value.trim()) {
+      await store.runAutoTraceUiString(value)
+    } else {
+      store.activeView = 'expert'
+      store.pushMessage('assistant', 'Donne-moi la valeur affichée à l’écran, puis je lancerai Trace UI string.')
+    }
+  } else if (actionId === 'review_encrypted_hits') {
+    store.activeView = 'expert'
+    store.pushMessage('assistant', 'J’ai ouvert Expert : inspecte les hits chiffrés, Watch les meilleurs, puis transforme seulement une piste confirmée en write/freeze.')
+  } else if (actionId === 'reduce_again' || actionId === 'reduce_with_new_value') {
+    store.pushMessage('assistant', 'Fais varier la valeur dans le jeu, tape la nouvelle valeur observée, puis appuie sur Auto pour réduire les candidats.')
+  } else if (actionId === 'run_exact' || actionId === 'exact_or_multitype') {
+    store.searchQuery = actionValue || store.targetValueGuided || ''
+    if (store.searchQuery.trim()) await store.doAutoResolve()
+  } else if (actionId === 'attach_process') {
+    store.activeView = 'process'
+    store.pushMessage('assistant', 'Va dans Process, attache une application autorisée, puis reviens ici : je reprendrai le plan.')
+  } else if (actionId === 'open_expert') {
+    store.activeView = 'expert'
+    store.pushMessage('assistant', 'Expert ouvert. Je garde le contexte Assistant pour continuer la chaîne dès que tu valides une piste.')
+  } else if (actionId === 'confirm_test_write' || actionId === 'guarded_write' || actionId === 'review_top_candidates') {
+    store.pushMessage('assistant', 'Checkpoint écriture : je peux préparer le test, mais confirme explicitement la valeur à écrire et les candidats à utiliser.')
+  } else if (actionId === 'escalate_freeze_bp') {
+    const address = typeof action === 'string' ? '' : String(action.address ?? '')
+    await store.escalateFreezeToBreakpoint(address)
+  } else if (actionId === 'confirm_breakpoint_freeze' || actionId === 'guarded_freeze') {
+    store.pushMessage('assistant', 'Checkpoint freeze BP : confirme l’adresse, le type et la valeur figée avant que je lance un breakpoint hardware.')
+  } else if (actionId === 'trainer_checkpoint') {
+    store.activeView = 'expert'
+    store.pushMessage('assistant', 'Checkpoint trainer : vérifie la signature AOB et les matches avant tout patch ou hook.')
   }
   await scrollToBottom()
+}
+
+function recoveryActionClass(action: Record<string, unknown>): string {
+  const requiresConfirmation = action.requiresConfirmation === true || action.safe === false
+  return requiresConfirmation ? 'btn-risk' : 'btn-safe'
+}
+
+function recoveryActionLabel(action: Record<string, unknown>): string {
+  const label = String(action.label ?? action.id ?? 'Action')
+  const requiresConfirmation = action.requiresConfirmation === true || action.safe === false
+  return requiresConfirmation ? `Confirmer: ${label}` : label
+}
+
+function recoveryActionTitle(action: Record<string, unknown>): string {
+  const reason = String(action.reason ?? '').trim()
+  const requiresConfirmation = action.requiresConfirmation === true || action.safe === false
+  if (requiresConfirmation) return reason || 'Action risquée : confirmation explicite requise avant exécution.'
+  return reason || 'Action sûre : lecture, scan ou navigation.'
+}
+
+function safeStepClass(step: Record<string, unknown>): string {
+  const status = String(step.status ?? '').toLowerCase()
+  if (status === 'error' || status === 'failed') return 'safe-step-error'
+  if (status === 'warning' || status === 'partial') return 'safe-step-warning'
+  return 'safe-step-success'
+}
+
+function safeStepLabel(step: Record<string, unknown>): string {
+  const tool = String(step.tool ?? 'outil')
+  if (tool === 'exact_scan_multi_type') return 'Scan multi-type'
+  if (tool === 'next_scan') return 'Réduction'
+  if (tool === 'scan_encrypted_value') return 'Scan chiffré'
+  if (tool === 'scan_ui_strings') return 'Trace UI string'
+  return tool
+}
+
+function safeStepMetric(step: Record<string, unknown>): string {
+  const payload = typeof step.payload === 'object' && step.payload !== null
+    ? step.payload as Record<string, unknown>
+    : {}
+  const count = payload.matchesFound ?? payload.matchesReturned ?? payload.candidateStoreSize ?? payload.remaining
+  const partial = payload.partial === true ? ' · partiel' : ''
+  if (count === undefined || count === null || count === '') return partial.trim()
+  return `${Number(count).toLocaleString('fr-FR')} résultat(s)${partial}`
 }
 
 function workflowLabel(status: string | undefined): string {
@@ -232,6 +339,14 @@ function workflowLabel(status: string | undefined): string {
       return 'Freeze actif'
     case 'requires_manual_write':
       return 'Écriture prête à confirmer'
+    case 'awaiting_write_confirmation':
+      return 'Auto : écriture à confirmer'
+    case 'auto_resolve_no_candidate':
+      return 'Auto : aucune piste restante'
+    case 'awaiting_unknown_observation':
+      return 'Auto : snapshot Unknown prêt'
+    case 'auto_resolve_planned':
+      return 'Auto : plan prêt'
     case 'auto_write_partial_or_failed':
       return 'Écriture partielle — vérifie manuellement'
     case 'auto_write_problem':
@@ -252,10 +367,13 @@ function workflowClass(status: string | undefined): string {
     case 'awaiting_new_value':
     case 'needs_more_refinement':
     case 'requires_manual_write':
+    case 'awaiting_write_confirmation':
+    case 'auto_resolve_planned':
       return 'wf-warning'
     case 'auto_write_partial_or_failed':
     case 'auto_write_problem':
     case 'no_candidate':
+    case 'auto_resolve_no_candidate':
       return 'wf-error'
     default:
       return 'wf-idle'
@@ -371,6 +489,20 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         <div class="empty-icon">⚡</div>
         <h2>Bienvenue dans l'Assistant</h2>
         <p>Écris par exemple :</p>
+        <div class="workflow-presets">
+          <button
+            v-for="preset in store.workflowPresets"
+            :key="preset.id"
+            class="workflow-preset"
+            :class="{ selected: store.lastWorkflowPresetId === preset.id }"
+            type="button"
+            @click="useWorkflowPreset(preset)"
+          >
+            <strong>{{ preset.title }}</strong>
+            <span>{{ preset.description }}</span>
+            <em>{{ preset.mode === 'auto' ? 'Auto' : 'Guide' }} · {{ preset.risk }}</em>
+          </button>
+        </div>
         <div class="examples">
           <button class="example-chip" @click="sendExample('Argent : 41250')">
             Argent : 41250
@@ -425,6 +557,23 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           <div v-if="msg.candidateCount !== undefined && msg.role === 'assistant'" class="message-badges">
             <span class="badge badge-info">{{ msg.candidateCount }} candidat(s)</span>
             <span v-if="msg.targetValue" class="badge badge-target">cible : {{ msg.targetValue }}</span>
+          </div>
+
+          <div v-if="msg.executedSafeSteps && msg.executedSafeSteps.length > 0" class="safe-steps-box">
+            <div class="suggestions-title">Actions sûres exécutées</div>
+            <div
+              v-for="(step, index) in msg.executedSafeSteps"
+              :key="`${step.tool}-${index}`"
+              class="safe-step-row"
+              :class="safeStepClass(step)"
+            >
+              <div class="safe-step-main">
+                <span class="safe-step-index">{{ index + 1 }}</span>
+                <strong>{{ safeStepLabel(step) }}</strong>
+                <span v-if="safeStepMetric(step)" class="safe-step-metric">{{ safeStepMetric(step) }}</span>
+              </div>
+              <div v-if="step.detail" class="safe-step-detail">{{ step.detail }}</div>
+            </div>
           </div>
 
           <!-- Auto-write result -->
@@ -523,9 +672,11 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
                 v-for="action in msg.recoveryActions"
                 :key="String(action.id)"
                 class="btn btn-secondary btn-small"
+                :class="recoveryActionClass(action)"
+                :title="recoveryActionTitle(action)"
                 @click="runRecoveryAction(action)"
               >
-                {{ action.label }}
+                {{ recoveryActionLabel(action) }}
               </button>
             </div>
           </div>
@@ -569,6 +720,9 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
       <button class="btn btn-primary" :disabled="!chatInput.trim() || store.isSearching" @click="sendMessage()">
         <span v-if="store.isSearching" class="btn-spinner" aria-hidden="true"></span>
         <span v-else>{{ $t('search.button') }}</span>
+      </button>
+      <button class="btn btn-secondary" :disabled="!chatInput.trim() || store.isSearching" title="Planifie et lance seulement les actions sûres." @click="sendAutoResolve()">
+        Auto
       </button>
     </div>
 
@@ -804,6 +958,56 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   justify-content: center;
 }
 
+.workflow-presets {
+  display: grid;
+  width: min(760px, 100%);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.workflow-preset {
+  min-height: 92px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.workflow-preset:hover,
+.workflow-preset.selected {
+  border-color: var(--accent);
+  background: var(--bg-accent);
+}
+
+.workflow-preset strong,
+.workflow-preset span,
+.workflow-preset em {
+  display: block;
+}
+
+.workflow-preset strong {
+  font-size: 13px;
+}
+
+.workflow-preset span {
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.workflow-preset em {
+  margin-top: 8px;
+  color: var(--accent);
+  font-size: 11px;
+  font-style: normal;
+}
+
 .example-chip {
   padding: 8px 16px;
   background: var(--bg-tertiary);
@@ -819,6 +1023,12 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 .example-chip:hover {
   background: var(--bg-accent);
   border-color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .workflow-presets {
+    grid-template-columns: 1fr;
+  }
 }
 
 .warn-text {
@@ -934,6 +1144,70 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   color: var(--success);
 }
 
+.safe-steps-box {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(122, 162, 247, 0.28);
+  border-radius: 8px;
+  background: rgba(122, 162, 247, 0.07);
+}
+
+.safe-step-row {
+  padding: 7px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.safe-step-row:first-of-type {
+  border-top: 0;
+}
+
+.safe-step-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.safe-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(122, 162, 247, 0.16);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.safe-step-success strong {
+  color: var(--success);
+}
+
+.safe-step-warning strong {
+  color: var(--warning);
+}
+
+.safe-step-error strong {
+  color: var(--error);
+}
+
+.safe-step-metric {
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+}
+
+.safe-step-detail {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .auto-write-box {
   margin-top: 6px;
   padding: 10px;
@@ -1023,6 +1297,20 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   border: 1px solid rgba(224, 175, 104, 0.35);
   border-radius: 8px;
   background: rgba(224, 175, 104, 0.08);
+}
+
+.recovery-box .btn-safe {
+  border-color: rgba(122, 162, 247, 0.35);
+}
+
+.recovery-box .btn-risk {
+  border-color: rgba(224, 175, 104, 0.55);
+  background: rgba(224, 175, 104, 0.12);
+  color: var(--warning);
+}
+
+.recovery-box .btn-risk:hover:not(:disabled) {
+  background: rgba(224, 175, 104, 0.2);
 }
 
 .suggestion-row {

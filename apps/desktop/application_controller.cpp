@@ -1,5 +1,7 @@
 #include "application_controller.h"
 
+#include "auto_resolver.h"
+#include "model_locator.h"
 #include "candidates/candidate_store.h"
 #include "crash_handler.h"
 #include "debug/hardware_breakpoint.h"
@@ -18,12 +20,15 @@
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "scanner/display_value_tracker.h"
+#include "scanner/encrypted_scan.h"
+#include "scanner/structure_analyzer.h"
 #include "scanner/value_variants.h"
 #include "snapshot/snapshot_store.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QFileDialog>
 #include <QUrl>
 #include <QDir>
 #include <QElapsedTimer>
@@ -32,9 +37,14 @@
 #include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
+#include <QLabel>
 #include <QMetaObject>
 #include <QPointer>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QVBoxLayout>
+#include <QWidget>
 #include <QSettings>
 #include <QSet>
 #include <QStandardPaths>
@@ -188,6 +198,49 @@ QVariantMap candidateToVariantMap(const killcore::Candidate& candidate) {
         entry["variantLabel"] = candidate.variantLabel;
     }
     return entry;
+}
+
+QVariantMap autoResolveStepToVariantMap(const killai::AutoResolveStep& step, int index) {
+    QVariantMap entry;
+    entry["index"] = index;
+    entry["type"] = killai::stepTypeToString(step.type);
+    entry["description"] = step.description;
+    entry["params"] = step.params;
+    entry["completed"] = step.completed;
+    entry["success"] = step.success;
+    entry["result"] = step.result;
+    return entry;
+}
+
+QVariantList autoResolveStepsToVariantList(const QList<killai::AutoResolveStep>& steps) {
+    QVariantList list;
+    for (int i = 0; i < steps.size(); ++i) {
+        list.append(autoResolveStepToVariantMap(steps[i], i + 1));
+    }
+    return list;
+}
+
+QVariantMap aobPatternQualityToVariantMap(const killcore::AobPatternQuality& quality) {
+    QVariantMap item;
+    item["score"] = quality.score;
+    item["level"] = quality.level;
+    item["warning"] = quality.warning;
+    item["patternBytes"] = quality.patternBytes;
+    item["fixedBytes"] = quality.fixedBytes;
+    item["wildcardBytes"] = quality.wildcardBytes;
+    item["uniqueFixedBytes"] = quality.uniqueFixedBytes;
+    item["fixedRatio"] = quality.fixedRatio;
+    item["trainerSafe"] = quality.trainerSafe;
+    return item;
+}
+
+QString autoResolverGameKey(QString processName) {
+    processName = processName.trimmed().toLower();
+    if (processName.isEmpty()) {
+        return "unknown";
+    }
+    processName.replace(QRegularExpression("[^a-z0-9_.-]+"), "_");
+    return processName.left(80);
 }
 
 bool parseHexAddress(const QString& addressHex, uint64_t* address) {
@@ -1002,9 +1055,20 @@ QVariantList suggestedWritesForCandidates(const killcore::CandidateStore& candid
     }
 
     const auto& all = candidates.candidates();
-    const size_t count = std::min(limit, static_cast<size_t>(all.size()));
-    for (size_t i = 0; i < count; ++i) {
-        const auto& candidate = all.at(static_cast<qsizetype>(i));
+    for (qsizetype i = 0; i < all.size() && static_cast<size_t>(suggestions.size()) < limit; ++i) {
+        const auto& candidate = all.at(i);
+
+        // Une valeur cible qui ne rentre pas dans le type detecte du candidat
+        // (ex: 100000 sur un candidat UInt16, max 65535) echoue a coup sur a
+        // l'ecriture. Sans ce filtre, le candidat etait quand meme presente
+        // comme suggestion "fiabilite elevee" et l'echec n'apparaissait qu'au
+        // moment d'ecrire (auto_write_partial_or_failed) — trop tard pour
+        // etre utile a l'utilisateur ou a l'IA.
+        killcore::ScanValue parsedValue;
+        if (!killcore::parseScanValue(value, candidate.type, &parsedValue)) {
+            continue;
+        }
+
         QVariantMap suggestion;
         suggestion["address"] = QString::number(candidate.address, 16);
         suggestion["type"] = killcore::valueTypeToString(candidate.type);
@@ -1089,11 +1153,31 @@ ApplicationController::ApplicationController(QObject* parent)
     m_previousCandidates.setFileBackedThreshold(candidateThreshold);
     m_freezeTimer.setInterval(100);
     connect(&m_freezeTimer, &QTimer::timeout, this, &ApplicationController::applyFreezeTick);
+    m_hotkeys = std::make_unique<killcore::GlobalHotkeyManager>();
+    connect(m_hotkeys.get(), &killcore::GlobalHotkeyManager::hotkeyTriggered, this, [this](int id, const killcore::HotkeyAction& action) {
+        QVariantMap event;
+        event["id"] = id;
+        event["targetId"] = action.targetId;
+        event["label"] = action.label;
+        event["payload"] = action.payload;
+        switch (action.type) {
+            case killcore::HotkeyActionType::ToggleFreeze: event["type"] = "toggle_freeze"; break;
+            case killcore::HotkeyActionType::TogglePatch: event["type"] = "toggle_patch"; break;
+            case killcore::HotkeyActionType::WriteValue: event["type"] = "write_value"; break;
+            case killcore::HotkeyActionType::ToggleOverlay: event["type"] = "toggle_overlay"; break;
+            case killcore::HotkeyActionType::Custom: event["type"] = "custom"; break;
+        }
+        appendScanTelemetry("global_hotkey_triggered", event);
+        emit globalHotkeyTriggered(event);
+    });
     m_ai.init();
     KE_LOG_INFO() << "ApplicationController initialized";
 }
 
 ApplicationController::~ApplicationController() {
+    if (m_breakpointFreeze) {
+        m_breakpointFreeze->stop();
+    }
     KE_LOG_INFO() << "ApplicationController destroyed";
 }
 
@@ -1169,6 +1253,10 @@ QVariantList ApplicationController::getProcessModules(int pid) const {
 bool ApplicationController::attachProcess(int pid) {
     KE_LOG_INFO() << "attachProcess(pid=" << pid << ")";
 
+    if (m_breakpointFreeze) {
+        m_breakpointFreeze->stop();
+    }
+
     // Close any existing handle
     m_handle.close();
 
@@ -1188,6 +1276,8 @@ bool ApplicationController::attachProcess(int pid) {
     m_lastAutoWriteTargets.clear();
     m_chatMemoryTargets.clear();
     m_activeCodePatches.clear();
+    m_activeFunctionHooks.clear();
+    m_lastAutoAsmResult.reset();
     m_activeProfileTargets.clear();
     m_autoWriteValueHistory.clear();
 
@@ -1213,6 +1303,10 @@ void ApplicationController::detachProcess() {
         }
         KE_LOG_INFO() << "Detach deferred because Find What Writes is still running.";
         return;
+    }
+
+    if (m_breakpointFreeze) {
+        m_breakpointFreeze->stop();
     }
 
     m_handle.close();
@@ -1412,6 +1506,83 @@ QVariantMap ApplicationController::readMemoryPreview(const QString& addressHex, 
     result["requestedBytes"] = static_cast<int>(read.requestedBytes);
     result["error"] = read.errorMessage;
     result["hex"] = QString::fromLatin1(read.data.toHex(' ').toUpper());
+    return result;
+}
+
+QVariantMap ApplicationController::analyzeStructureMemory(const QString& addressHex, int size) const {
+    QVariantMap result;
+    QVariantList fields;
+    result["success"] = false;
+    result["fields"] = fields;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    bool ok = false;
+    QString normalized = addressHex.trimmed();
+    if (normalized.startsWith("0x", Qt::CaseInsensitive)) {
+        normalized = normalized.mid(2);
+    }
+    const uint64_t address = normalized.toULongLong(&ok, 16);
+    if (!ok || address == 0) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int boundedSize = std::clamp(size, 16, 1024);
+    killcore::MemoryReader reader(m_handle);
+    const auto read = reader.readChunked(address, static_cast<size_t>(boundedSize), 4096);
+    if (!read.success && !read.partial) {
+        result["error"] = read.errorMessage.isEmpty() ? QStringLiteral("Lecture structure impossible.") : read.errorMessage;
+        result["bytesRead"] = static_cast<int>(read.bytesRead);
+        result["requestedBytes"] = static_cast<int>(read.requestedBytes);
+        appendScanTelemetry("structure_analyze", result);
+        return result;
+    }
+
+    killcore::StructureAnalysisOptions options;
+    options.windowSize = static_cast<int>(read.bytesRead);
+    const auto analysis = killcore::analyzeStructure(read.data, address, options);
+    if (!analysis.success) {
+        result["error"] = analysis.error;
+        appendScanTelemetry("structure_analyze", result);
+        return result;
+    }
+
+    for (const auto& field : analysis.fields) {
+        QVariantMap item;
+        item["offset"] = field.offset;
+        item["address"] = QStringLiteral("%1").arg(address + static_cast<uint64_t>(field.offset), 0, 16).toUpper();
+        item["type"] = killcore::fieldTypeToString(field.type);
+        item["value"] = field.interpretedValue;
+        item["valueText"] = killcore::fieldToReadable(field);
+        item["rawHex"] = field.rawHex;
+        item["changed"] = field.changed;
+        if (!field.label.isEmpty()) {
+            item["label"] = field.label;
+        }
+        fields.append(item);
+    }
+
+    result["success"] = true;
+    result["partial"] = read.partial;
+    result["cancelled"] = read.cancelled;
+    result["baseAddress"] = QStringLiteral("%1").arg(address, 0, 16).toUpper();
+    result["bytesRead"] = static_cast<int>(read.bytesRead);
+    result["requestedBytes"] = static_cast<int>(read.requestedBytes);
+    result["fieldCount"] = fields.size();
+    result["fields"] = fields;
+    result["error"] = read.errorMessage;
+
+    appendScanTelemetry("structure_analyze", {
+        {"success", true},
+        {"address", result.value("baseAddress")},
+        {"bytesRead", result.value("bytesRead")},
+        {"fieldCount", result.value("fieldCount")},
+        {"partial", result.value("partial")},
+    });
     return result;
 }
 
@@ -3026,6 +3197,188 @@ QVariantMap ApplicationController::startExactScanExpert(
     });
     emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
     emit scanProgress(100);
+    return result;
+}
+
+QVariantMap ApplicationController::scanEncryptedValue(const QString& value, const QString& valueType, const QVariantMap& optionsMap) {
+    QVariantMap result;
+    QVariantList matches;
+    result["success"] = false;
+    result["matches"] = matches;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(valueType, &type)) {
+        result["error"] = "Type invalide pour scan chiffré.";
+        return result;
+    }
+
+    killcore::ScanValue displayScanValue;
+    QString parseError;
+    if (!killcore::parseScanValue(value, type, &displayScanValue, &parseError)) {
+        result["error"] = parseError;
+        return result;
+    }
+
+    uint64_t displayValue = 0;
+    if (type == killcore::ValueType::Float32 || type == killcore::ValueType::Float64) {
+        result["error"] = "Le scan chiffré v1 supporte seulement les types entiers.";
+        return result;
+    }
+    const QByteArray displayBytes = killcore::scanValueToBytes(displayScanValue);
+    std::memcpy(&displayValue, displayBytes.constData(), std::min<size_t>(displayBytes.size(), sizeof(displayValue)));
+
+    const QString modeText = optionsMap.value("mode", "xor").toString().toLower();
+    killcore::EncryptedScanMode encryptedMode = killcore::EncryptedScanMode::XorKey;
+    if (modeText == "add") {
+        encryptedMode = killcore::EncryptedScanMode::AddKey;
+    } else if (modeText == "sub") {
+        encryptedMode = killcore::EncryptedScanMode::SubKey;
+    } else if (modeText == "not") {
+        encryptedMode = killcore::EncryptedScanMode::NotBits;
+    } else if (modeText != "xor") {
+        result["error"] = "Mode chiffré invalide. Utilise xor, add, sub ou not.";
+        return result;
+    }
+
+    bool keyOk = false;
+    QString keyText = optionsMap.value("key", "0").toString().trimmed();
+    if (keyText.startsWith("0x", Qt::CaseInsensitive)) {
+        keyText = keyText.mid(2);
+        keyOk = true;
+    }
+    const uint64_t key = keyOk
+        ? keyText.toULongLong(&keyOk, 16)
+        : optionsMap.value("key", 0).toULongLong(&keyOk);
+    const int keySearchBits = std::clamp(optionsMap.value("keySearchBits", 0).toInt(), 0, 32);
+    if (!keyOk && keySearchBits == 0 && encryptedMode != killcore::EncryptedScanMode::NotBits) {
+        result["error"] = "Clé invalide.";
+        return result;
+    }
+
+    killcore::EncryptedScanOptions encryptedOptions;
+    encryptedOptions.mode = encryptedMode;
+    encryptedOptions.key = key;
+    encryptedOptions.keySearchBits = keySearchBits;
+    encryptedOptions.valueType = type;
+
+    killcore::ScanOptions scanOptions = scanOptionsFromSettingsAndExpertOptions(optionsMap);
+    scanOptions.writableOnly = optionsMap.value("writableOnly", true).toBool();
+    scanOptions.executableOnly = optionsMap.value("executableOnly", false).toBool();
+    scanOptions.copyOnWriteOnly = optionsMap.value("copyOnWriteOnly", false).toBool();
+    const int maxResults = std::clamp(optionsMap.value("maxResults", 1000).toInt(), 1, 10000);
+    const size_t typeSize = killcore::valueTypeSize(type);
+    const size_t chunkSize = std::max<size_t>(1024 * 1024, typeSize);
+
+    emit scanStarted();
+    emit scanProgress(0);
+
+    QElapsedTimer timer;
+    timer.start();
+    killcore::MemoryReader reader(m_handle);
+    const auto regions = killcore::MemoryMap::snapshot(m_handle);
+    int regionsScanned = 0;
+    uint64_t bytesScanned = 0;
+    bool partial = false;
+    QString error;
+
+    for (const auto& region : regions) {
+        if (matches.size() >= maxResults) {
+            partial = true;
+            break;
+        }
+        if (!regionMatchesScanOptions(region, scanOptions) || region.size < static_cast<uint64_t>(typeSize)) {
+            continue;
+        }
+
+        const uint64_t regionStart = region.baseAddress;
+        const uint64_t regionEnd = region.baseAddress + region.size;
+        const uint64_t effectiveStart = std::max(regionStart, scanOptions.startAddress);
+        const uint64_t effectiveEnd = scanOptions.stopAddress == 0 ? regionEnd : std::min(regionEnd, scanOptions.stopAddress);
+        if (effectiveEnd <= effectiveStart || effectiveEnd - effectiveStart < typeSize) {
+            continue;
+        }
+
+        ++regionsScanned;
+        const uint64_t regionSize = effectiveEnd - effectiveStart;
+        const size_t overlap = typeSize > 0 ? typeSize - 1 : 0;
+        QByteArray previousTail;
+        uint64_t offset = 0;
+        while (offset < regionSize && matches.size() < maxResults) {
+            const uint64_t remaining = regionSize - offset;
+            const size_t toRead = static_cast<size_t>(std::min<uint64_t>(remaining, chunkSize));
+            const uint64_t readAddress = effectiveStart + offset;
+            const auto read = reader.readChunked(readAddress, toRead, chunkSize);
+            if (!read.success && !read.partial) {
+                break;
+            }
+
+            QByteArray buffer = previousTail + read.data;
+            const uint64_t bufferBase = readAddress - static_cast<uint64_t>(previousTail.size());
+            bytesScanned += read.bytesRead;
+            auto scan = killcore::scanEncryptedInBuffer(buffer, bufferBase, displayValue, encryptedOptions);
+            if (!scan.success && !scan.error.isEmpty()) {
+                error = scan.error;
+                partial = true;
+                break;
+            }
+            if (scan.partial) {
+                partial = true;
+            }
+            for (const auto& matchInfo : scan.matches) {
+                if (matches.size() >= maxResults) {
+                    partial = true;
+                    break;
+                }
+                QVariantMap match;
+                match["address"] = QString::number(matchInfo.address, 16).toUpper();
+                match["type"] = killcore::valueTypeToString(matchInfo.type);
+                match["confidence"] = matchInfo.confidence;
+                match["variantLabel"] = matchInfo.variantLabel;
+                match["regionBase"] = QString::number(region.baseAddress, 16).toUpper();
+                match["protection"] = killcore::protectionToString(region.protection);
+                match["memoryType"] = killcore::memoryTypeToString(region.type);
+                match["writable"] = region.writable;
+                matches.append(match);
+            }
+
+            previousTail = read.data.size() > static_cast<qsizetype>(overlap)
+                ? read.data.right(static_cast<qsizetype>(overlap))
+                : read.data;
+            offset += read.bytesRead;
+            if (read.bytesRead == 0 || read.partial) {
+                break;
+            }
+        }
+
+        const int percent = regions.isEmpty()
+            ? 100
+            : std::clamp((regionsScanned * 100) / std::max(1, static_cast<int>(regions.size())), 0, 99);
+        emit scanProgress(percent);
+        if (!error.isEmpty()) {
+            break;
+        }
+    }
+
+    emit scanProgress(100);
+
+    result["success"] = error.isEmpty();
+    result["partial"] = partial || matches.size() >= maxResults;
+    result["matches"] = matches;
+    result["matchesFound"] = matches.size();
+    result["matchesReturned"] = matches.size();
+    result["maxResults"] = maxResults;
+    result["regionsScanned"] = regionsScanned;
+    result["bytesScanned"] = static_cast<qulonglong>(bytesScanned);
+    result["elapsedMs"] = static_cast<int>(timer.elapsed());
+    result["mode"] = modeText;
+    result["key"] = QString::number(key, 16).toUpper();
+    result["keySearchBits"] = keySearchBits;
+    result["error"] = error;
     return result;
 }
 
@@ -4924,6 +5277,404 @@ QVariantMap ApplicationController::cancelFindWhatWrites() {
     return result;
 }
 
+QVariantMap ApplicationController::findWhatAccessesAsync(const QString& addressHex, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["started"] = false;
+    result["address"] = addressHex;
+
+    if (m_findWhatAccessesInProgress || m_findWhatWritesInProgress) {
+        result["error"] = "Une capture debugger est deja en cours.";
+        return result;
+    }
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int sizeBytes = std::clamp(options.value("size", 4).toInt(), 1, 8);
+    killcore::BreakpointSize breakpointSize = killcore::BreakpointSize::DWord;
+    if (sizeBytes <= 1) {
+        breakpointSize = killcore::BreakpointSize::Byte;
+    } else if (sizeBytes <= 2) {
+        breakpointSize = killcore::BreakpointSize::Word;
+    } else if (sizeBytes <= 4) {
+        breakpointSize = killcore::BreakpointSize::DWord;
+    } else {
+        breakpointSize = killcore::BreakpointSize::QWord;
+    }
+
+    const int timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 15000);
+    const int maxHitsInt = std::clamp(options.value("maxHits", 10).toInt(), 1, 100);
+    const int requestId = m_nextDebugRequestId++;
+    const int pid = m_pid;
+    const QString requestedAddress = addressHex;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_findWhatAccessesInProgress = true;
+    m_activeDebugCancellation = cancellation;
+
+    KE_LOG_INFO() << "findWhatAccessesAsync(address=0x" << std::hex << address
+                  << ", pid=" << std::dec << pid
+                  << ", size=" << sizeBytes
+                  << ", timeoutMs=" << timeoutMs
+                  << ", maxHits=" << maxHitsInt
+                  << ", requestId=" << requestId << ")";
+
+    std::thread([self, requestId, pid, address, requestedAddress, breakpointSize, sizeBytes, timeoutMs, maxHitsInt, cancellation]() {
+        const auto hits = killcore::findWhatAccesses(
+            static_cast<uint32_t>(pid),
+            address,
+            breakpointSize,
+            timeoutMs,
+            static_cast<size_t>(maxHitsInt),
+            cancellation.get());
+        const bool cancelled = cancellation->isCancelled();
+
+        if (!self) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(self.data(), [self, requestId, requestedAddress, sizeBytes, timeoutMs, maxHitsInt, hits, cancelled]() {
+            if (!self) {
+                return;
+            }
+
+            QVariantList hitList;
+            for (const auto& hit : hits) {
+                QVariantMap item;
+                item["address"] = QString::number(hit.address, 16).toUpper();
+                item["instructionPointer"] = QString::number(hit.instructionPointer, 16).toUpper();
+                item["threadId"] = static_cast<qulonglong>(hit.threadId);
+                item["valueBefore"] = static_cast<qulonglong>(hit.valueBefore);
+                item["valueAfter"] = static_cast<qulonglong>(hit.valueAfter);
+                item["module"] = hit.module;
+                item["moduleOffset"] = QString::number(hit.moduleOffset, 16).toUpper();
+                hitList.append(item);
+            }
+
+            QVariantMap finished;
+            finished["requestId"] = requestId;
+            finished["kind"] = "find_what_accesses";
+            finished["success"] = true;
+            finished["address"] = requestedAddress;
+            finished["hits"] = hitList;
+            finished["hitCount"] = hitList.size();
+            finished["size"] = sizeBytes;
+            finished["timeoutMs"] = timeoutMs;
+            finished["maxHits"] = maxHitsInt;
+            finished["cancelled"] = cancelled;
+            finished["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.";
+            finished["error"] = cancelled
+                ? "Capture Find What Accesses annulee."
+                : hits.isEmpty()
+                ? "Aucun acces capture pendant la fenetre d'observation."
+                : QString();
+
+            self->m_findWhatAccessesInProgress = false;
+            self->m_activeDebugCancellation.reset();
+            emit self->findWhatAccessesFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["size"] = sizeBytes;
+    result["timeoutMs"] = timeoutMs;
+    result["maxHits"] = maxHitsInt;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::scanGroupScan(const QVariantList& entriesList, const QVariantMap& optionsMap) {
+    QVariantMap result;
+    QVariantList matches;
+    result["success"] = false;
+    result["matches"] = matches;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+
+    killcore::GroupScanOptions groupOptions;
+    const int maxResults = std::clamp(optionsMap.value("maxResults", 1000).toInt(), 1, 10000);
+    groupOptions.maxResults = static_cast<size_t>(maxResults);
+    groupOptions.maxDistance = std::clamp(optionsMap.value("maxDistance", 256).toInt(), 4, 4096);
+
+    if (entriesList.isEmpty()) {
+        result["error"] = "Aucune entree pour le scan groupe.";
+        return result;
+    }
+
+    for (const auto& entryVariant : entriesList) {
+        const QVariantMap entryMap = entryVariant.toMap();
+        killcore::GroupScanEntry entry;
+
+        const QString typeText = entryMap.value("type", "Int32").toString();
+        if (!killcore::parseValueType(typeText, &entry.type)) {
+            result["error"] = QString("Type invalide pour une entree du scan groupe : %1").arg(typeText);
+            return result;
+        }
+
+        bool offsetOk = false;
+        entry.offset = entryMap.value("offset").toLongLong(&offsetOk);
+        if (!offsetOk) {
+            result["error"] = "Offset invalide pour une entree du scan groupe.";
+            return result;
+        }
+
+        killcore::ScanValue scanValue;
+        QString parseError;
+        const QString valueText = entryMap.value("value").toString();
+        if (!killcore::parseScanValue(valueText, entry.type, &scanValue, &parseError)) {
+            result["error"] = parseError;
+            return result;
+        }
+        entry.value = scanValue.value;
+
+        groupOptions.entries.append(entry);
+    }
+
+    killcore::ScanOptions scanOptions = scanOptionsFromSettingsAndExpertOptions(optionsMap);
+    scanOptions.writableOnly = optionsMap.value("writableOnly", true).toBool();
+
+    size_t maxEntrySize = 1;
+    for (const auto& entry : groupOptions.entries) {
+        maxEntrySize = std::max(maxEntrySize, killcore::valueTypeSize(entry.type));
+    }
+
+    emit scanStarted();
+    emit scanProgress(0);
+
+    QElapsedTimer timer;
+    timer.start();
+    killcore::MemoryReader reader(m_handle);
+    const auto regions = killcore::MemoryMap::snapshot(m_handle);
+    int regionsScanned = 0;
+    uint64_t bytesScanned = 0;
+    bool partial = false;
+    QString error;
+
+    const size_t chunkSize = 1024 * 1024;
+
+    for (const auto& region : regions) {
+        if (matches.size() >= maxResults) {
+            partial = true;
+            break;
+        }
+        if (!regionMatchesScanOptions(region, scanOptions)) {
+            continue;
+        }
+
+        const uint64_t regionStart = region.baseAddress;
+        const uint64_t regionEnd = region.baseAddress + region.size;
+        const uint64_t effectiveStart = std::max(regionStart, scanOptions.startAddress);
+        const uint64_t effectiveEnd = scanOptions.stopAddress == 0 ? regionEnd : std::min(regionEnd, scanOptions.stopAddress);
+        if (effectiveEnd <= effectiveStart) {
+            continue;
+        }
+
+        ++regionsScanned;
+        const uint64_t regionSize = effectiveEnd - effectiveStart;
+        const size_t overlap = static_cast<size_t>(groupOptions.maxDistance) + maxEntrySize;
+        QByteArray previousTail;
+        uint64_t offset = 0;
+        while (offset < regionSize && matches.size() < maxResults) {
+            const uint64_t remaining = regionSize - offset;
+            const size_t toRead = static_cast<size_t>(std::min<uint64_t>(remaining, chunkSize));
+            const uint64_t readAddress = effectiveStart + offset;
+            const auto read = reader.readChunked(readAddress, toRead, chunkSize);
+            if (!read.success && !read.partial) {
+                break;
+            }
+
+            QByteArray buffer = previousTail + read.data;
+            const uint64_t bufferBase = readAddress - static_cast<uint64_t>(previousTail.size());
+            bytesScanned += read.bytesRead;
+            auto scan = killcore::scanGroupInBuffer(buffer, bufferBase, groupOptions);
+            if (!scan.success && !scan.error.isEmpty()) {
+                error = scan.error;
+                partial = true;
+                break;
+            }
+            if (scan.partial) {
+                partial = true;
+            }
+            for (const auto& matchInfo : scan.matches) {
+                if (matches.size() >= maxResults) {
+                    partial = true;
+                    break;
+                }
+                QVariantMap match;
+                match["address"] = QString::number(matchInfo.address, 16).toUpper();
+                match["type"] = killcore::valueTypeToString(matchInfo.type);
+                match["confidence"] = matchInfo.confidence;
+                match["variantLabel"] = matchInfo.variantLabel;
+                match["regionBase"] = QString::number(region.baseAddress, 16).toUpper();
+                match["protection"] = killcore::protectionToString(region.protection);
+                match["memoryType"] = killcore::memoryTypeToString(region.type);
+                match["writable"] = region.writable;
+                matches.append(match);
+            }
+
+            previousTail = read.data.size() > static_cast<qsizetype>(overlap)
+                ? read.data.right(static_cast<qsizetype>(overlap))
+                : read.data;
+            offset += read.bytesRead;
+            if (read.bytesRead == 0 || read.partial) {
+                break;
+            }
+        }
+
+        const int percent = regions.isEmpty()
+            ? 100
+            : std::clamp((regionsScanned * 100) / std::max(1, static_cast<int>(regions.size())), 0, 99);
+        emit scanProgress(percent);
+        if (!error.isEmpty()) {
+            break;
+        }
+    }
+
+    emit scanProgress(100);
+
+    result["success"] = error.isEmpty();
+    result["partial"] = partial || matches.size() >= maxResults;
+    result["matches"] = matches;
+    result["matchesFound"] = matches.size();
+    result["maxResults"] = maxResults;
+    result["regionsScanned"] = regionsScanned;
+    result["bytesScanned"] = static_cast<qulonglong>(bytesScanned);
+    result["elapsedMs"] = static_cast<int>(timer.elapsed());
+    result["entriesCount"] = groupOptions.entries.size();
+    result["error"] = error;
+    return result;
+}
+
+QVariantMap ApplicationController::writeMemoryHex(const QString& addressHex, const QString& hexString) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    // Parser la chaine hex : accepte "48 8B 00", "488B00", "48 8b 00"
+    QString cleaned = hexString.simplified().remove(' ').remove('\t').remove('\n').remove('\r').remove(',');
+    if (cleaned.size() % 2 != 0) {
+        result["error"] = "Chaine hexadecimale invalide : nombre impair de caracteres.";
+        return result;
+    }
+    if (cleaned.isEmpty()) {
+        result["error"] = "Chaine hexadecimale vide.";
+        return result;
+    }
+    if (cleaned.size() > 4096) {
+        result["error"] = "Chaine hexadecimale trop longue (max 2048 octets).";
+        return result;
+    }
+    const QByteArray bytes = QByteArray::fromHex(cleaned.toLatin1());
+    if (bytes.isEmpty()) {
+        result["error"] = "Chaine hexadecimale invalide.";
+        return result;
+    }
+
+    killcore::MemoryWriter writer(m_handle);
+    const auto writeResult = writer.write(address, bytes, true);
+
+    result["success"] = writeResult.success;
+    result["verified"] = writeResult.verified;
+    result["address"] = QString::number(address, 16).toUpper();
+    result["bytesWritten"] = static_cast<int>(writeResult.bytesWritten);
+    result["requestedBytes"] = bytes.size();
+    result["protectionChanged"] = writeResult.protectionChanged;
+    result["previousHex"] = QString::fromLatin1(writeResult.previousValue.toHex(' ').toUpper());
+    result["newHex"] = QString::fromLatin1(bytes.toHex(' ').toUpper());
+    result["error"] = writeResult.errorMessage;
+
+    if (writeResult.success) {
+        KE_LOG_INFO() << "writeMemoryHex: " << writeResult.bytesWritten << " octets ecrits a 0x" << std::hex << address;
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::dumpMemoryRegion(const QString& addressHex, int size, const QString& fileName) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int boundedSize = std::clamp(size, 1, 16 * 1024 * 1024);
+
+    QString safeName = fileName.simplified();
+    if (safeName.isEmpty()) {
+        safeName = QString("dump_%1_%2.bin")
+            .arg(QString::number(address, 16).toUpper())
+            .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+    }
+    safeName.remove('<').remove('>').remove(':').remove('"').remove('/').remove('\\').remove('|').remove('?').remove('*');
+    if (!safeName.endsWith(".bin", Qt::CaseInsensitive)) {
+        safeName += ".bin";
+    }
+
+    const QString dumpDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+        + "/KillEngine/dumps";
+    QDir().mkpath(dumpDir);
+    const QString filePath = dumpDir + "/" + safeName;
+
+    killcore::MemoryReader reader(m_handle);
+    const auto read = reader.readChunked(address, static_cast<size_t>(boundedSize), 1024 * 1024);
+    if (!read.success && !read.partial) {
+        result["error"] = read.errorMessage.isEmpty() ? QString("Lecture memoire echouee.") : read.errorMessage;
+        return result;
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        result["error"] = QString("Impossible de creer le fichier : %1").arg(filePath);
+        return result;
+    }
+    const qint64 written = file.write(read.data);
+    file.close();
+    if (written != read.data.size()) {
+        result["error"] = QString("Ecriture fichier incomplete : %1/%2 octets").arg(written).arg(read.data.size());
+        return result;
+    }
+
+    result["success"] = true;
+    result["address"] = QString::number(address, 16).toUpper();
+    result["size"] = static_cast<int>(read.bytesRead);
+    result["partial"] = read.partial;
+    result["filePath"] = filePath;
+    result["fileName"] = safeName;
+    result["error"] = "";
+    KE_LOG_INFO() << "dumpMemoryRegion: " << read.bytesRead << " octets dumps depuis 0x" << std::hex << address;
+    return result;
+}
 QVariantMap ApplicationController::scanAobPattern(const QString& patternText, const QVariantMap& optionsMap) {
     QVariantMap result;
     result["success"] = false;
@@ -4996,6 +5747,11 @@ QVariantMap ApplicationController::scanAobPattern(const QString& patternText, co
     result["patternBytes"] = static_cast<int>(pattern.bytes.size());
     result["executableOnly"] = options.executableOnly;
     result["imageOnly"] = options.imageOnly;
+    const auto quality = killcore::evaluateAobPatternQuality(pattern);
+    result["signatureQuality"] = aobPatternQualityToVariantMap(quality);
+    result["signatureRisk"] = quality.level;
+    result["signatureWarning"] = quality.warning;
+    appendScanTelemetry("aob_scan", result);
     return result;
 }
 
@@ -5047,10 +5803,15 @@ QVariantMap ApplicationController::generateAobSignature(const QString& addressHe
     result["hex"] = QString::fromLatin1(read.data.toHex(' ').toUpper());
     result["pattern"] = killcore::bytesToAobPattern(read.data);
     result["patternBytes"] = static_cast<int>(read.data.size());
+    const auto rawPattern = killcore::parseAobPattern(result.value("pattern").toString());
+    const auto quality = killcore::evaluateAobPatternQuality(rawPattern);
+    result["signatureQuality"] = aobPatternQualityToVariantMap(quality);
+    result["signatureRisk"] = quality.level;
     result["module"] = moduleInfo.value("module");
     result["moduleOffset"] = moduleInfo.value("moduleOffset");
     result["error"] = read.errorMessage;
-    result["warning"] = "Signature exacte brute. Elle peut nécessiter des wildcards si l'instruction contient offsets/relocations.";
+    result["warning"] = QString("Signature exacte brute. %1 Elle peut nécessiter des wildcards si l'instruction contient offsets/relocations.").arg(quality.warning);
+    appendScanTelemetry("aob_signature", result);
     return result;
 }
 
@@ -5143,6 +5904,10 @@ QVariantMap ApplicationController::suggestCodePatches(const QString& addressHex,
     result["decoder"] = instruction.decoder;
     result["category"] = instruction.category;
     result["stableAobPattern"] = instruction.stableAobPattern;
+    const auto stablePattern = killcore::parseAobPattern(instruction.stableAobPattern);
+    const auto stableQuality = killcore::evaluateAobPatternQuality(stablePattern);
+    result["signatureQuality"] = aobPatternQualityToVariantMap(stableQuality);
+    result["signatureRisk"] = stableQuality.level;
     result["bytesRead"] = static_cast<int>(read.bytesRead);
     result["bytes"] = QString::fromLatin1(read.data.left(instruction.length > 0 ? instruction.length : read.data.size()).toHex(' ').toUpper());
 
@@ -5167,6 +5932,7 @@ QVariantMap ApplicationController::suggestCodePatches(const QString& addressHex,
     result["success"] = true;
     result["suggestions"] = suggestions;
     result["warning"] = "Décodage x64 ciblé et expérimental. Vérifie toujours les bytes avant d'appliquer.";
+    appendScanTelemetry("aob_patch_suggest", result);
     return result;
 }
 
@@ -5212,6 +5978,241 @@ QVariantMap ApplicationController::restoreCodePatch(const QString& addressHex) {
     return result;
 }
 
+QVariantMap ApplicationController::injectDllIntoProcess(const QString& dllPath) {
+    QVariantMap result;
+    result["success"] = false;
+    result["dllPath"] = dllPath;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (dllPath.trimmed().isEmpty()) {
+        result["error"] = "Chemin DLL vide.";
+        return result;
+    }
+
+    const auto injected = killcore::injectDll(m_handle, dllPath);
+    result["success"] = injected.success;
+    result["error"] = injected.error;
+    result["moduleBase"] = QString::number(injected.moduleBase, 16).toUpper();
+
+    if (injected.remoteThreadHandle) {
+        CloseHandle(reinterpret_cast<HANDLE>(injected.remoteThreadHandle));
+    }
+
+    appendScanTelemetry("dll_injection", result);
+    if (injected.success) {
+        KE_LOG_WARN() << "DLL injected: " << dllPath.toStdString() << " moduleBase=0x" << std::hex << injected.moduleBase;
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::installFunctionHook(const QString& targetAddressHex, const QString& hookAddressHex) {
+    QVariantMap result;
+    result["success"] = false;
+    result["targetAddress"] = targetAddressHex;
+    result["hookAddress"] = hookAddressHex;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t targetAddress = 0;
+    uint64_t hookAddress = 0;
+    if (!parseHexAddress(targetAddressHex, &targetAddress) || !parseHexAddress(hookAddressHex, &hookAddress)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+    if (m_activeFunctionHooks.contains(targetAddress)) {
+        result["error"] = "Un hook actif existe déjà sur cette adresse. Retire-le avant d'en installer un autre.";
+        result["active"] = true;
+        return result;
+    }
+
+    const auto installed = killcore::installInlineHook(m_handle, targetAddress, hookAddress);
+    result["success"] = installed.success;
+    result["error"] = installed.error;
+    result["trampolineAddress"] = QString::number(installed.trampolineAddress, 16).toUpper();
+    result["originalBytes"] = QString::fromLatin1(installed.originalBytes.toHex(' ').toUpper());
+
+    if (installed.success) {
+        ActiveFunctionHook active;
+        active.targetAddress = targetAddress;
+        active.hookFunctionAddress = hookAddress;
+        active.trampolineAddress = installed.trampolineAddress;
+        active.originalBytes = installed.originalBytes;
+        m_activeFunctionHooks.insert(targetAddress, active);
+        result["active"] = true;
+        KE_LOG_WARN() << "Function hook installed at 0x" << std::hex << targetAddress
+                      << " -> 0x" << hookAddress;
+    }
+
+    appendScanTelemetry("function_hook_install", result);
+    return result;
+}
+
+QVariantMap ApplicationController::removeFunctionHook(const QString& targetAddressHex) {
+    QVariantMap result;
+    result["success"] = false;
+    result["targetAddress"] = targetAddressHex;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t targetAddress = 0;
+    if (!parseHexAddress(targetAddressHex, &targetAddress)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const auto it = m_activeFunctionHooks.constFind(targetAddress);
+    if (it == m_activeFunctionHooks.constEnd()) {
+        result["error"] = "Aucun hook actif connu à cette adresse.";
+        result["active"] = false;
+        return result;
+    }
+
+    const auto removed = killcore::removeInlineHook(m_handle, targetAddress, it->originalBytes);
+    result["success"] = removed.success;
+    result["error"] = removed.error;
+    result["restoredBytes"] = QString::fromLatin1(it->originalBytes.toHex(' ').toUpper());
+
+    if (removed.success) {
+        m_activeFunctionHooks.remove(targetAddress);
+        result["active"] = false;
+        KE_LOG_WARN() << "Function hook removed at 0x" << std::hex << targetAddress;
+    } else {
+        result["active"] = true;
+    }
+
+    appendScanTelemetry("function_hook_remove", result);
+    return result;
+}
+
+namespace {
+
+QVariantMap autoAsmScriptToPreviewVariant(const killcore::AutoAsmScript& script) {
+    QVariantMap preview;
+    preview["parseSuccess"] = script.success;
+    preview["parseError"] = script.error;
+    preview["parseErrorLine"] = script.errorLine;
+
+    QVariantList instructions;
+    for (const auto& instruction : script.instructions) {
+        instructions.append(QVariantMap{
+            {"line", instruction.line},
+            {"target", instruction.target},
+        });
+    }
+    preview["instructionCount"] = script.instructions.size();
+    preview["instructions"] = instructions;
+
+    QVariantList allocations;
+    for (const auto& allocation : script.allocations) {
+        allocations.append(QVariantMap{{"name", allocation.name}, {"size", static_cast<qulonglong>(allocation.size)}});
+    }
+    preview["allocations"] = allocations;
+
+    QVariantList labels;
+    for (const auto& label : script.labels) {
+        labels.append(label.name);
+    }
+    preview["labels"] = labels;
+
+    return preview;
+}
+
+} // namespace
+
+QVariantMap ApplicationController::parseAutoAssemblerScript(const QString& scriptText) const {
+    QVariantMap result;
+    const auto script = killcore::parseAutoAsmScript(scriptText);
+    result = autoAsmScriptToPreviewVariant(script);
+    result["success"] = script.success;
+
+    if (script.success) {
+        const auto compiled = killcore::compileAutoAsmScript(script);
+        result["compileSuccess"] = compiled.success;
+        result["compileError"] = compiled.error;
+        result["compileErrorLine"] = compiled.errorLine;
+        result["compiledBytes"] = QString::fromLatin1(compiled.code.toHex(' ').toUpper());
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::executeAutoAssemblerScript(const QString& scriptText) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const auto script = killcore::parseAutoAsmScript(scriptText);
+    if (!script.success) {
+        result["error"] = script.error;
+        result["errorLine"] = script.errorLine;
+        return result;
+    }
+    if (m_lastAutoAsmResult.has_value()) {
+        result["error"] = "Un script auto-assembler est déjà actif. Restaure-le avant d'en exécuter un autre.";
+        result["active"] = true;
+        return result;
+    }
+
+    const auto executed = killcore::executeAutoAsmScript(m_handle, script);
+    result["success"] = executed.success;
+    result["error"] = executed.error;
+    result["patchAddress"] = QString::number(executed.patchAddress, 16).toUpper();
+    result["patchSize"] = executed.patchSize;
+
+    if (executed.success) {
+        m_lastAutoAsmResult = executed;
+        result["active"] = true;
+        KE_LOG_WARN() << "Auto-assembler script executed, patch at 0x" << std::hex << executed.patchAddress
+                      << " size=" << std::dec << executed.patchSize;
+    }
+
+    appendScanTelemetry("auto_assembler_execute", result);
+    return result;
+}
+
+QVariantMap ApplicationController::restoreAutoAssemblerScript() {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (!m_lastAutoAsmResult.has_value()) {
+        result["error"] = "Aucun script auto-assembler actif à restaurer.";
+        result["active"] = false;
+        return result;
+    }
+
+    const bool restored = killcore::restoreAutoAsmScript(m_handle, *m_lastAutoAsmResult);
+    result["success"] = restored;
+
+    if (restored) {
+        result["patchAddress"] = QString::number(m_lastAutoAsmResult->patchAddress, 16).toUpper();
+        m_lastAutoAsmResult.reset();
+        result["active"] = false;
+        KE_LOG_WARN() << "Auto-assembler script restored.";
+    } else {
+        result["error"] = "Échec de la restauration du script auto-assembler.";
+        result["active"] = true;
+    }
+
+    appendScanTelemetry("auto_assembler_restore", result);
+    return result;
+}
+
 QVariantMap ApplicationController::setFreezeValue(const QString& addressHex, const QString& valueType, const QString& value, bool enabled) {
     QVariantMap result;
     result["success"] = false;
@@ -5224,7 +6225,7 @@ QVariantMap ApplicationController::setFreezeValue(const QString& addressHex, con
 
     if (!enabled) {
         m_freeze.remove(address);
-        if (m_freeze.isEmpty()) {
+        if (!m_freeze.hasMode(killcore::FreezeMode::Polling)) {
             m_freezeTimer.stop();
         }
         result["success"] = true;
@@ -5245,7 +6246,7 @@ QVariantMap ApplicationController::setFreezeValue(const QString& addressHex, con
         return result;
     }
 
-    m_freeze.setEntry(address, type, killcore::scanValueToBytes(scanValue));
+    m_freeze.setEntry(address, type, killcore::scanValueToBytes(scanValue), killcore::FreezeMode::Polling);
     if (!m_freezeTimer.isActive()) {
         m_freezeTimer.start();
     }
@@ -5255,10 +6256,176 @@ QVariantMap ApplicationController::setFreezeValue(const QString& addressHex, con
     return result;
 }
 
+QVariantMap ApplicationController::freezeWithBreakpoint(const QString& addressHex, const QString& valueType, const QString& value, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["enabled"] = false;
+    result["mode"] = "breakpoint";
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(valueType, &type)) {
+        result["error"] = "Type invalide.";
+        return result;
+    }
+
+    killcore::ScanValue scanValue;
+    QString parseError;
+    if (!killcore::parseScanValue(value, type, &scanValue, &parseError)) {
+        result["error"] = parseError;
+        return result;
+    }
+
+    const QByteArray frozenBytes = killcore::scanValueToBytes(scanValue);
+    switch (frozenBytes.size()) {
+        case 1:
+        case 2:
+        case 4:
+        case 8:
+            break;
+        default:
+            result["error"] = "Taille de valeur incompatible avec un hardware breakpoint.";
+            return result;
+    }
+
+    killcore::BreakpointFreezeMode mode = killcore::BreakpointFreezeMode::RewriteValue;
+    const QString modeText = options.value("mode", "rewrite").toString().toLower();
+    if (modeText == "capture") {
+        mode = killcore::BreakpointFreezeMode::Capture;
+    } else if (modeText == "block" || modeText == "blockwrite") {
+        mode = killcore::BreakpointFreezeMode::BlockWrite;
+    }
+
+    return activateBreakpointFreezeFor(address, type, frozenBytes, mode, modeText);
+}
+
+QVariantMap ApplicationController::activateBreakpointFreezeFor(
+    uint64_t address,
+    killcore::ValueType type,
+    const QByteArray& frozenBytes,
+    killcore::BreakpointFreezeMode mode,
+    const QString& modeText) {
+    QVariantMap result;
+    m_freeze.setEntry(address, type, frozenBytes, killcore::FreezeMode::HardwareBreakpoint);
+    QString restartError;
+    const bool ok = restartBreakpointFreezeFromRegistry(mode, &restartError);
+    result["success"] = ok;
+    result["enabled"] = ok;
+    result["address"] = QString::number(address, 16).toUpper();
+    result["type"] = killcore::valueTypeToString(type);
+    result["bytesWritten"] = 0;
+    result["verified"] = false;
+    result["breakpointSize"] = frozenBytes.size();
+    result["freezeMode"] = modeText;
+    result["mode"] = "breakpoint";
+    if (!ok) {
+        m_freeze.remove(address);
+        restartBreakpointFreezeFromRegistry(mode);
+        result["error"] = restartError.isEmpty()
+            ? "Impossible d'activer le freeze par hardware breakpoint. Vérifie les privilèges debug et la cible."
+            : restartError;
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::escalatePollingFreezeToBreakpoint(const QString& addressHex) {
+    QVariantMap result;
+    result["success"] = false;
+    result["enabled"] = false;
+    result["mode"] = "breakpoint";
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const killcore::FreezeEntry* pollingEntry = nullptr;
+    for (const auto& entry : m_freeze.entries()) {
+        if (entry.address == address && entry.mode == killcore::FreezeMode::Polling) {
+            pollingEntry = &entry;
+            break;
+        }
+    }
+    if (!pollingEntry) {
+        result["error"] = "Aucun freeze polling actif sur cette adresse (déjà arrêté ou déjà en Freeze BP ?).";
+        return result;
+    }
+
+    // Reutilise directement les bytes/type deja connus de l'entree polling :
+    // aucun decodage/re-encodage depuis une chaine, contrairement a
+    // freezeWithBreakpoint() qui part d'une saisie utilisateur.
+    return activateBreakpointFreezeFor(
+        pollingEntry->address,
+        pollingEntry->type,
+        pollingEntry->value,
+        killcore::BreakpointFreezeMode::RewriteValue,
+        "rewrite");
+}
+
+QVariantMap ApplicationController::stopBreakpointFreeze() {
+    QVariantMap result;
+    result["success"] = true;
+    result["enabled"] = false;
+    result["mode"] = "breakpoint";
+
+    if (m_breakpointFreeze) {
+        const auto stats = m_breakpointFreeze->stats();
+        m_breakpointFreeze->stop();
+        m_freeze.removeByMode(killcore::FreezeMode::HardwareBreakpoint);
+        result["hits"] = static_cast<qulonglong>(stats.totalHits);
+        result["rewrites"] = static_cast<qulonglong>(stats.rewrites);
+        result["blocks"] = static_cast<qulonglong>(stats.blocks);
+        result["errors"] = static_cast<qulonglong>(stats.errors);
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::getBreakpointFreezeStats() const {
+    QVariantMap result;
+    result["active"] = m_breakpointFreeze && m_breakpointFreeze->isActive();
+    result["mode"] = "breakpoint";
+    if (!m_breakpointFreeze) {
+        result["hits"] = 0ULL;
+        result["rewrites"] = 0ULL;
+        result["blocks"] = 0ULL;
+        result["errors"] = 0ULL;
+        return result;
+    }
+
+    const auto stats = m_breakpointFreeze->stats();
+    result["hits"] = static_cast<qulonglong>(stats.totalHits);
+    result["rewrites"] = static_cast<qulonglong>(stats.rewrites);
+    result["blocks"] = static_cast<qulonglong>(stats.blocks);
+    result["errors"] = static_cast<qulonglong>(stats.errors);
+
+    // Signal simple, sans nouveau minuteur dédié : si des erreurs de
+    // réécriture s'accumulent, le freeze BP n'est probablement pas en train
+    // de tenir correctement malgré des hits. L'UI peut afficher ceci sans
+    // attendre l'arrêt du freeze.
+    result["healthy"] = stats.errors == 0;
+    return result;
+}
+
 QVariantMap ApplicationController::setFreezeInterval(int intervalMs) {
     QVariantMap result;
 
-    // Bornes raisonnables : 10 ms (très agressif, pour jeux type SC2)
+    // Bornes raisonnables : 10 ms (très agressif, pour cibles qui réécrivent vite)
     // à 2000 ms (économique). En dehors de ces bornes, on remet le défaut (100 ms).
     const int clamped = (intervalMs <= 0) ? 100 : std::clamp(intervalMs, 10, 2000);
 
@@ -5277,6 +6444,159 @@ QVariantMap ApplicationController::setFreezeInterval(int intervalMs) {
     return result;
 }
 
+QVariantMap ApplicationController::registerGlobalHotkey(const QString& comboText, const QVariantMap& actionMap) {
+    QVariantMap result;
+    result["success"] = false;
+    result["combo"] = comboText;
+
+    if (!m_hotkeys) {
+        result["error"] = "Gestionnaire de hotkeys indisponible.";
+        return result;
+    }
+
+    const killcore::HotkeyCombo combo = killcore::HotkeyCombo::fromString(comboText);
+    if (combo.keyCode == 0) {
+        result["error"] = "Combinaison invalide. Exemple: Ctrl+Alt+F1.";
+        return result;
+    }
+
+    const QString typeText = actionMap.value("type", "custom").toString().toLower();
+    killcore::HotkeyAction action;
+    action.type = killcore::HotkeyActionType::Custom;
+    if (typeText == "toggle_freeze") {
+        action.type = killcore::HotkeyActionType::ToggleFreeze;
+    } else if (typeText == "toggle_patch") {
+        action.type = killcore::HotkeyActionType::TogglePatch;
+    } else if (typeText == "write_value") {
+        action.type = killcore::HotkeyActionType::WriteValue;
+    } else if (typeText == "toggle_overlay") {
+        action.type = killcore::HotkeyActionType::ToggleOverlay;
+    }
+    action.targetId = actionMap.value("targetId").toString();
+    action.label = actionMap.value("label", combo.toString()).toString();
+    action.payload = actionMap.value("payload");
+
+    const int id = m_hotkeys->registerHotkey(combo, action);
+    if (id < 0) {
+        result["error"] = "RegisterHotKey a échoué. La combinaison est peut-être déjà utilisée.";
+        return result;
+    }
+
+    result["success"] = true;
+    result["id"] = id;
+    result["combo"] = combo.toString();
+    result["type"] = typeText;
+    result["targetId"] = action.targetId;
+    appendScanTelemetry("global_hotkey_registered", result);
+    return result;
+}
+
+QVariantMap ApplicationController::unregisterGlobalHotkey(int id) {
+    QVariantMap result;
+    result["success"] = m_hotkeys && m_hotkeys->unregisterHotkey(id);
+    result["id"] = id;
+    if (!result.value("success").toBool()) {
+        result["error"] = "Hotkey introuvable.";
+    }
+    appendScanTelemetry("global_hotkey_unregistered", result);
+    return result;
+}
+
+QVariantMap ApplicationController::getGlobalHotkeys() const {
+    QVariantMap result;
+    QVariantList hotkeys;
+    if (m_hotkeys) {
+        const auto entries = m_hotkeys->registeredHotkeys();
+        for (int i = 0; i < entries.size(); ++i) {
+            const auto& entry = entries[i];
+            QVariantMap item;
+            item["index"] = i;
+            item["combo"] = entry.first.toString();
+            item["targetId"] = entry.second.targetId;
+            item["label"] = entry.second.label;
+            item["payload"] = entry.second.payload;
+            hotkeys.append(item);
+        }
+    }
+    result["success"] = true;
+    result["hotkeys"] = hotkeys;
+    return result;
+}
+
+QVariantMap ApplicationController::clearGlobalHotkeys() {
+    QVariantMap result;
+    if (m_hotkeys) {
+        m_hotkeys->unregisterAll();
+    }
+    result["success"] = true;
+    appendScanTelemetry("global_hotkeys_cleared", result);
+    return result;
+}
+
+QVariantMap ApplicationController::setTrainerOverlayVisible(bool visible, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = true;
+    result["visible"] = visible;
+
+    if (visible) {
+        if (!m_trainerOverlay) {
+            auto* overlay = new QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+            overlay->setAttribute(Qt::WA_DeleteOnClose, false);
+            overlay->setWindowTitle("KillEngine Trainer Overlay");
+            overlay->setStyleSheet(
+                "QWidget { background: rgba(22, 23, 31, 222); border: 1px solid rgba(122,162,247,110); border-radius: 8px; }"
+                "QLabel { color: #c0caf5; font-family: 'Segoe UI'; font-size: 12px; }");
+            auto* layout = new QVBoxLayout(overlay);
+            layout->setContentsMargins(12, 10, 12, 10);
+            auto* label = new QLabel("KillEngine Trainer\nAucune feature active.", overlay);
+            label->setTextFormat(Qt::PlainText);
+            label->setWordWrap(true);
+            layout->addWidget(label);
+            m_trainerOverlay = overlay;
+            m_trainerOverlayLabel = label;
+        }
+        const int x = options.value("x", 24).toInt();
+        const int y = options.value("y", 24).toInt();
+        const int width = std::clamp(options.value("width", 320).toInt(), 180, 640);
+        const int height = std::clamp(options.value("height", 140).toInt(), 80, 480);
+        m_trainerOverlay->setGeometry(x, y, width, height);
+        m_trainerOverlay->show();
+        m_trainerOverlay->raise();
+    } else if (m_trainerOverlay) {
+        m_trainerOverlay->hide();
+    }
+
+    appendScanTelemetry("trainer_overlay_visible", result);
+    return result;
+}
+
+QVariantMap ApplicationController::updateTrainerOverlay(const QVariantMap& state) {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_trainerOverlay || !m_trainerOverlayLabel) {
+        result["error"] = "Overlay Trainer non initialisé.";
+        return result;
+    }
+
+    const QString title = state.value("title", "KillEngine Trainer").toString();
+    const QVariantList features = state.value("features").toList();
+    QStringList lines;
+    lines << title;
+    for (const QVariant& item : features.mid(0, 10)) {
+        const QVariantMap feature = item.toMap();
+        const QString enabled = feature.value("enabled").toBool() ? "ON " : "OFF";
+        lines << QString("%1  %2  %3")
+            .arg(enabled, feature.value("name").toString(), feature.value("status").toString());
+    }
+    if (features.isEmpty()) {
+        lines << "Aucune feature Trainer.";
+    }
+    m_trainerOverlayLabel->setText(lines.join('\n'));
+    result["success"] = true;
+    result["lineCount"] = lines.size();
+    return result;
+}
+
 void ApplicationController::applyFreezeTick() {
     if (m_freeze.isEmpty() || m_pid <= 0) {
         m_freezeTimer.stop();
@@ -5289,11 +6609,100 @@ void ApplicationController::applyFreezeTick() {
     }
 
     killcore::MemoryWriter writer(writeHandle);
+    killcore::MemoryReader reader(writeHandle);
     for (const auto& entry : m_freeze.entries()) {
-        if (entry.enabled) {
-            writer.write(entry.address, entry.value, false);
+        if (!entry.enabled || entry.mode != killcore::FreezeMode::Polling) {
+            continue;
+        }
+
+        // Fiabilite (Phase 18) : lire AVANT de reecrire detecte, sans que
+        // l'utilisateur ait besoin de le signaler, qu'une cible reecrit plus
+        // vite que ce freeze ne peut suivre (le classique "freeze qui
+        // clignote"). La reecriture a lieu dans tous les cas juste apres.
+        const auto read = reader.read(entry.address, static_cast<size_t>(entry.value.size()));
+        const bool matched = (read.success || read.partial)
+            && read.bytesRead == static_cast<size_t>(entry.value.size())
+            && read.data == entry.value;
+
+        const bool crossedThreshold = m_freeze.recordPollTick(entry.address, matched);
+
+        writer.write(entry.address, entry.value, false);
+
+        if (crossedThreshold) {
+            const QString addressHex = QString::number(entry.address, 16).toUpper();
+            const double holdRatePercent = entry.totalTicks > 0
+                ? 100.0 * static_cast<double>(entry.totalTicks - entry.totalDriftTicks) / static_cast<double>(entry.totalTicks)
+                : 0.0;
+
+            QVariantMap info;
+            info["address"] = addressHex;
+            info["type"] = killcore::valueTypeToString(entry.type);
+            info["mode"] = "polling";
+            info["consecutiveDriftTicks"] = entry.consecutiveDriftTicks;
+            info["totalDriftTicks"] = entry.totalDriftTicks;
+            info["totalTicks"] = entry.totalTicks;
+            info["holdRatePercent"] = holdRatePercent;
+            info["message"] = QString(
+                "Le freeze sur 0x%1 ne tient pas : la valeur repart avant chaque réécriture depuis %2 ticks d'affilée "
+                "(tenue mesurée %3%). La cible réécrit probablement plus vite que l'intervalle de polling actuel.")
+                .arg(addressHex)
+                .arg(entry.consecutiveDriftTicks)
+                .arg(QString::number(holdRatePercent, 'f', 0));
+            info["suggestion"] = "Passe en Freeze BP (bloque l'écriture à la source) ou lance Écrit par pour trouver l'instruction qui réécrit.";
+
+            appendScanTelemetry("freeze_poll_instability", info);
+            emit freezeInstabilityDetected(info);
         }
     }
+}
+
+bool ApplicationController::restartBreakpointFreezeFromRegistry(killcore::BreakpointFreezeMode mode, QString* error) {
+    if (!m_attached || m_pid <= 0) {
+        if (error) *error = "Aucun processus attaché.";
+        return false;
+    }
+
+    const auto entries = m_freeze.entriesForMode(killcore::FreezeMode::HardwareBreakpoint);
+    if (entries.isEmpty()) {
+        if (m_breakpointFreeze) {
+            m_breakpointFreeze->stop();
+        }
+        return true;
+    }
+
+    if (entries.size() > 4) {
+        if (error) *error = "Un hardware breakpoint ne peut surveiller que 4 adresses simultanées (DR0-DR3).";
+        return false;
+    }
+
+    QList<killcore::BreakpointFreezeConfig> configs;
+    for (const auto& entry : entries) {
+        killcore::BreakpointFreezeConfig config;
+        config.address = entry.address;
+        config.frozenValue = entry.value;
+        config.mode = mode;
+        switch (entry.value.size()) {
+            case 1: config.size = killcore::BreakpointSize::Byte; break;
+            case 2: config.size = killcore::BreakpointSize::Word; break;
+            case 4: config.size = killcore::BreakpointSize::DWord; break;
+            case 8: config.size = killcore::BreakpointSize::QWord; break;
+            default:
+                if (error) *error = "Taille de valeur incompatible avec un hardware breakpoint.";
+                return false;
+        }
+        configs.append(config);
+    }
+
+    if (!m_breakpointFreeze) {
+        m_breakpointFreeze = std::make_unique<killcore::BreakpointFreezeManager>();
+    }
+
+    if (!m_breakpointFreeze->startMulti(static_cast<uint32_t>(m_pid), configs)) {
+        if (error) *error = "Impossible d'activer la session hardware breakpoint.";
+        return false;
+    }
+
+    return true;
 }
 
 QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& value, const QString& query) {
@@ -5772,6 +7181,393 @@ QVariantMap ApplicationController::getSmartSearchContext() const {
     return result;
 }
 
+QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
+    QVariantMap result;
+    result["success"] = true;
+    result["attached"] = m_handle.isValid();
+    result["processName"] = processName();
+    result["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
+    result["workflow"] = m_smartSearchActive ? QString("guided_scan") : QString("idle");
+    result["initialValue"] = m_smartSearchInitialValue;
+    result["targetValue"] = m_smartSearchTargetValue;
+    result["valueType"] = m_smartSearchValueType;
+    result["activeChatTargetCount"] = m_chatMemoryTargets.size();
+    result["activeProfileTargetCount"] = m_activeProfileTargets.size();
+
+    QSettings settings;
+    const QString gameKey = autoResolverGameKey(processName());
+    settings.beginGroup(QString("autoResolver/process/%1").arg(gameKey));
+    QVariantMap learnedProfile;
+    learnedProfile["gameKey"] = gameKey;
+    learnedProfile["starts"] = settings.value("starts", 0).toInt();
+    learnedProfile["reductions"] = settings.value("reductions", 0).toInt();
+    learnedProfile["noCandidateCount"] = settings.value("noCandidateCount", 0).toInt();
+    learnedProfile["lowCandidateCheckpoints"] = settings.value("lowCandidateCheckpoints", 0).toInt();
+    learnedProfile["lastWorkflow"] = settings.value("lastWorkflow").toString();
+    learnedProfile["lastCandidateCount"] = settings.value("lastCandidateCount", 0).toULongLong();
+    learnedProfile["lastUpdated"] = settings.value("lastUpdated").toString();
+    learnedProfile["lastSuccessfulAuditEvent"] = settings.value("lastSuccessfulAuditEvent").toString();
+    learnedProfile["lastSuccessfulAuditAt"] = settings.value("lastSuccessfulAuditAt").toString();
+    learnedProfile["lastSuccessfulAddress"] = settings.value("lastSuccessfulAddress").toString();
+    learnedProfile["lastSuccessfulValueType"] = settings.value("lastSuccessfulValueType").toString();
+    learnedProfile["lastSuccessfulAobPattern"] = settings.value("lastSuccessfulAobPattern").toString();
+    QVariantMap strategyWins;
+    settings.beginGroup("strategyWins");
+    const QStringList strategyKeys = settings.childKeys();
+    for (const QString& key : strategyKeys) {
+        strategyWins[key] = settings.value(key, 0).toInt();
+    }
+    settings.endGroup();
+    learnedProfile["strategyWins"] = strategyWins;
+    settings.endGroup();
+    result["learnedProfile"] = learnedProfile;
+
+    const int boundedMaxEvents = std::clamp(maxEvents, 5, 200);
+    auto readEvents = [](const QString& path, int limit) {
+        QVariantList events;
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            return events;
+        }
+
+        QList<QByteArray> lines;
+        while (!file.atEnd()) {
+            const QByteArray line = file.readLine().trimmed();
+            if (!line.isEmpty()) {
+                lines.append(line);
+                if (lines.size() > limit) {
+                    lines.removeFirst();
+                }
+            }
+        }
+
+        for (const QByteArray& line : lines) {
+            QJsonParseError parseError;
+            const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
+            if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+                continue;
+            }
+            events.append(doc.object().toVariantMap());
+        }
+        return events;
+    };
+
+    QVariantList recentEvents = readEvents(scanTelemetryFilePath(), boundedMaxEvents);
+    const QVariantList debugEvents = readEvents(smartSearchDebugFilePath(), boundedMaxEvents);
+    for (const QVariant& event : debugEvents) {
+        recentEvents.append(event);
+    }
+
+    QVariantMap eventCounts;
+    QVariantList lastSignals;
+    for (const QVariant& item : recentEvents) {
+        const QVariantMap event = item.toMap();
+        const QString name = event.value("event").toString();
+        if (!name.isEmpty()) {
+            eventCounts[name] = eventCounts.value(name).toInt() + 1;
+        }
+
+        if (lastSignals.size() >= 12) {
+            lastSignals.removeFirst();
+        }
+
+        QVariantMap signal;
+        signal["event"] = name;
+        signal["timestamp"] = event.value("timestamp").toString();
+        signal["candidateStoreSize"] = event.value("candidateStoreSize", event.value("candidateCount"));
+        signal["matchesFound"] = event.value("matchesFound", event.value("matchCount"));
+        signal["remaining"] = event.value("remaining", event.value("stored"));
+        signal["globalValueHits"] = event.value("globalValueHits");
+        signal["error"] = event.value("error").toString();
+        lastSignals.append(signal);
+    }
+
+    // Analyse pure de la telemetry (insights + rapport valeur affichee),
+    // testee independamment dans tests/unit/test_auto_resolver.cpp. Seule
+    // implementation de cette logique — voir la note d'architecture dans
+    // ai/auto_resolver.h.
+    QList<QVariantMap> eventMaps;
+    eventMaps.reserve(recentEvents.size());
+    for (const QVariant& item : recentEvents) {
+        eventMaps.append(item.toMap());
+    }
+    const auto telemetryReport = killai::computeAutoResolveTelemetryReport(eventMaps);
+
+    QVariantList telemetryInsights;
+    for (const auto& insight : telemetryReport.insights) {
+        telemetryInsights.append(QVariantMap{
+            {"id", insight.id},
+            {"label", insight.label},
+            {"reason", insight.reason},
+            {"nextAction", insight.nextAction},
+            {"safe", insight.safe},
+            {"requiresConfirmation", !insight.safe},
+        });
+    }
+
+    QVariantMap displayValueReport;
+    displayValueReport["enabled"] = telemetryReport.displayValueSignals;
+    displayValueReport["pattern"] = telemetryReport.displayValuePattern;
+    displayValueReport["traceUiSourceCount"] = telemetryReport.traceUiSourceCount;
+    displayValueReport["globalValueHits"] = telemetryReport.traceUiGlobalHits;
+    displayValueReport["exactZeroCount"] = telemetryReport.exactZeroCount;
+    displayValueReport["recommendation"] = telemetryReport.displayValueRecommendation;
+    displayValueReport["warnings"] = QVariantList{
+        "Les strings UI peuvent etre des copies d'affichage, pas la source gameplay.",
+        "Ne pas ecrire globalValueHits en masse; tester Top 5/Top 25 seulement.",
+        "Si exact=0 et Trace UI donne des strings, privilegier source analysis avant patch/debug."
+    };
+
+    QVariantList recommendations;
+    QVariantList guardrails;
+    guardrails.append(QVariantMap{{"id", "no_auto_write"}, {"label", "Aucune écriture automatique sans confirmation"}, {"risk", "write"}});
+    guardrails.append(QVariantMap{{"id", "no_auto_debug"}, {"label", "Aucun debugger/hardware breakpoint sans confirmation"}, {"risk", "debug"}});
+    guardrails.append(QVariantMap{{"id", "no_auto_patch"}, {"label", "Aucun patch/injection sans confirmation"}, {"risk", "patch"}});
+
+    if (!m_handle.isValid()) {
+        recommendations.append(QVariantMap{{"id", "attach_process"}, {"label", "Attacher un processus"}, {"safe", true}, {"reason", "Aucun processus actif."}});
+    } else if (!m_chatMemoryTargets.isEmpty() || !m_activeProfileTargets.isEmpty()) {
+        recommendations.append(QVariantMap{{"id", "guarded_write"}, {"label", "Proposer une écriture confirmée"}, {"safe", false}, {"reason", "Des cibles mémoire sont déjà actives."}});
+        recommendations.append(QVariantMap{{"id", "guarded_freeze"}, {"label", "Proposer un freeze confirmé"}, {"safe", false}, {"reason", "Des cibles mémoire sont déjà actives."}});
+    } else if (m_smartSearchActive && !m_candidates.isEmpty()) {
+        recommendations.append(QVariantMap{{"id", "reduce_with_new_value"}, {"label", "Réduire avec la nouvelle valeur observée"}, {"safe", true}, {"reason", "Une recherche guidée contient encore des candidats."}});
+        if (m_candidates.size() <= kAutoWriteCandidateLimit) {
+            recommendations.append(QVariantMap{{"id", "review_top_candidates"}, {"label", "Préparer un test d'écriture confirmé"}, {"safe", false}, {"reason", "Le nombre de candidats est assez bas."}});
+        }
+    } else {
+        recommendations.append(QVariantMap{{"id", "exact_or_multitype"}, {"label", "Lancer un scan exact multi-type"}, {"safe", true}, {"reason", "Aucun contexte actif exploitable."}});
+        recommendations.append(QVariantMap{{"id", "encrypted_scan"}, {"label", "Essayer un scan chiffré borné"}, {"safe", true}, {"reason", "Utile si le scan exact ne trouve rien."}});
+        recommendations.append(QVariantMap{{"id", "unknown_capture"}, {"label", "Capturer unknown initial value"}, {"safe", true}, {"reason", "Utile quand la valeur réelle n'est pas connue ou transformée."}});
+    }
+
+    if (eventCounts.value("ui_string_investigation_finish").toInt() > 0 || eventCounts.value("ui_string_sources_analyze").toInt() > 0) {
+        recommendations.append(QVariantMap{{"id", "trace_ui_sources"}, {"label", "Exploiter les sources Trace UI string"}, {"safe", true}, {"reason", "La télémétrie récente contient des pistes UI/string."}});
+    }
+    if (eventCounts.value("find_what_writes").toInt() > 0 || eventCounts.value("aob_signature").toInt() > 0) {
+        recommendations.append(QVariantMap{{"id", "trainer_checkpoint"}, {"label", "Préparer checkpoint AOB/patch"}, {"safe", false}, {"reason", "Des signaux debugger/AOB existent déjà."}});
+    }
+    if (learnedProfile.value("noCandidateCount").toInt() >= 2) {
+        recommendations.prepend(QVariantMap{{"id", "trace_ui_string"}, {"label", "Privilégier Trace UI string"}, {"safe", true}, {"reason", "Les scans exacts récents de ce processus ont souvent fini sans candidat."}});
+        recommendations.prepend(QVariantMap{{"id", "encrypted_scan"}, {"label", "Privilégier scan chiffré"}, {"safe", true}, {"reason", "Mémoire locale : plusieurs scans sans candidat sur ce processus."}});
+    }
+    const QString lastSuccessfulAudit = learnedProfile.value("lastSuccessfulAuditEvent").toString();
+    if (!lastSuccessfulAudit.isEmpty()) {
+        recommendations.prepend(QVariantMap{
+            {"id", "reuse_successful_strategy"},
+            {"label", "Réutiliser la dernière stratégie gagnante"},
+            {"safe", lastSuccessfulAudit.contains("write") || lastSuccessfulAudit.contains("freeze") ? false : true},
+            {"requiresConfirmation", lastSuccessfulAudit.contains("write") || lastSuccessfulAudit.contains("freeze")},
+            {"reason", QString("Dernière action validée pour ce processus : %1.").arg(lastSuccessfulAudit)}
+        });
+    }
+
+    QVariantList strategyScores;
+    auto addStrategyScore = [&strategyScores](const QString& id, const QString& label, int score, const QString& reason) {
+        strategyScores.append(QVariantMap{{"id", id}, {"label", label}, {"score", score}, {"reason", reason}});
+    };
+
+    int exactScore = m_handle.isValid() ? 55 : 0;
+    int reduceScore = (m_smartSearchActive && !m_candidates.isEmpty()) ? 95 : 0;
+    int unknownScore = m_handle.isValid() ? 45 : 0;
+    int encryptedScore = m_handle.isValid() ? 35 : 0;
+    int traceUiScore = m_handle.isValid() ? 30 : 0;
+
+    const QString processLower = processName().toLower();
+    if (processLower.contains("sc2") || processLower.contains("starcraft")) {
+        traceUiScore += 25;
+        encryptedScore += 10;
+    }
+    if (learnedProfile.value("noCandidateCount").toInt() >= 2) {
+        encryptedScore += 35;
+        traceUiScore += 30;
+        exactScore -= 20;
+    }
+    if (lastSuccessfulAudit.contains("aob")) {
+        traceUiScore += 10;
+    }
+    if (lastSuccessfulAudit.contains("write") || lastSuccessfulAudit.contains("freeze")) {
+        reduceScore += 10;
+    }
+    if (eventCounts.value("ui_string_scan").toInt() > 0 || eventCounts.value("ui_string_sources_analyze").toInt() > 0) {
+        traceUiScore += 25;
+    }
+    if (m_candidates.size() > 50000) {
+        unknownScore += 10;
+        traceUiScore += 10;
+    }
+
+    addStrategyScore("reduce_with_new_value", "Réduire candidats existants", reduceScore, "Meilleur choix quand une recherche guidée est active.");
+    addStrategyScore("exact_or_multitype", "Scan exact multi-type", exactScore, "Point d'entrée le plus rapide quand la valeur réelle est connue.");
+    addStrategyScore("unknown_capture", "Unknown initial value", unknownScore, "Bon choix si la valeur bouge mais la représentation mémoire est inconnue.");
+    addStrategyScore("encrypted_scan", "Scan chiffré borné", encryptedScore, "Bon choix si le scan exact échoue souvent.");
+    addStrategyScore("trace_ui_string", "Trace UI string", traceUiScore, "Bon choix si le jeu affiche une copie UI plutôt que la source gameplay.");
+
+    std::sort(strategyScores.begin(), strategyScores.end(), [](const QVariant& a, const QVariant& b) {
+        return a.toMap().value("score").toInt() > b.toMap().value("score").toInt();
+    });
+
+    const QVariantMap preferredStrategy = strategyScores.isEmpty() ? QVariantMap{} : strategyScores.first().toMap();
+    auto proactiveAction = [](const QString& id,
+                              const QString& label,
+                              const QString& tool,
+                              int confidence,
+                              bool safe,
+                              const QString& risk,
+                              const QString& reason) {
+        QVariantMap action;
+        action["id"] = id;
+        action["label"] = label;
+        action["tool"] = tool;
+        action["confidence"] = std::clamp(confidence, 0, 100);
+        action["safe"] = safe;
+        action["requiresConfirmation"] = !safe;
+        action["risk"] = risk;
+        action["reason"] = reason;
+        action["proactive"] = true;
+        return action;
+    };
+
+    QVariantMap nextBestAction;
+    if (!m_handle.isValid()) {
+        nextBestAction = proactiveAction(
+            "attach_process",
+            "Attacher un processus",
+            "attach_process",
+            100,
+            true,
+            "safe",
+            "Aucun processus actif : l'assistant ne peut pas scanner tant qu'une cible autorisée n'est pas attachée.");
+    } else if (!m_chatMemoryTargets.isEmpty() || !m_activeProfileTargets.isEmpty()) {
+        nextBestAction = proactiveAction(
+            "guarded_write",
+            "Préparer une écriture confirmée",
+            "chat_memory_write",
+            88,
+            false,
+            "write",
+            "Des cibles mémoire sont déjà actives; la prochaine action utile est un test confirmé, pas une nouvelle recherche.");
+    } else if (m_smartSearchActive && !m_candidates.isEmpty()) {
+        const int confidence = m_candidates.size() <= kAutoWriteCandidateLimit ? 90 : 82;
+        nextBestAction = proactiveAction(
+            m_candidates.size() <= kAutoWriteCandidateLimit ? "review_top_candidates" : "reduce_with_new_value",
+            m_candidates.size() <= kAutoWriteCandidateLimit ? "Préparer test d'écriture confirmé" : "Réduire avec nouvelle valeur",
+            m_candidates.size() <= kAutoWriteCandidateLimit ? "prepare_guarded_write" : "next_scan",
+            confidence,
+            m_candidates.size() > kAutoWriteCandidateLimit,
+            m_candidates.size() <= kAutoWriteCandidateLimit ? "write" : "safe",
+            m_candidates.size() <= kAutoWriteCandidateLimit
+                ? "Le nombre de candidats est assez bas; il faut passer par une confirmation avant écriture/freeze."
+                : "Une recherche est déjà active; refaire varier la valeur donnera la réduction la plus rentable.");
+    } else {
+        const QString strategyId = preferredStrategy.value("id").toString();
+        const int confidence = preferredStrategy.value("score", 50).toInt();
+        if (strategyId == "trace_ui_string") {
+            nextBestAction = proactiveAction("trace_ui_string", "Lancer Trace UI string", "scan_ui_strings", confidence, true, "safe", preferredStrategy.value("reason").toString());
+        } else if (strategyId == "encrypted_scan") {
+            nextBestAction = proactiveAction("encrypted_scan", "Lancer scan chiffré borné", "scan_encrypted_value", confidence, true, "safe", preferredStrategy.value("reason").toString());
+        } else if (strategyId == "unknown_capture") {
+            nextBestAction = proactiveAction("unknown_capture", "Capturer Unknown initial value", "unknown_capture", confidence, true, "safe", preferredStrategy.value("reason").toString());
+        } else {
+            nextBestAction = proactiveAction("exact_or_multitype", "Lancer scan exact multi-type", "exact_scan_multi_type", confidence, true, "safe", preferredStrategy.value("reason").toString());
+        }
+    }
+
+    if (!lastSuccessfulAudit.isEmpty()) {
+        nextBestAction["learnedFrom"] = lastSuccessfulAudit;
+    }
+    if (telemetryReport.displayValueSignals) {
+        nextBestAction["displayValueAware"] = true;
+    }
+
+    result["strategyScores"] = strategyScores;
+    result["preferredStrategy"] = preferredStrategy;
+    result["nextBestAction"] = nextBestAction;
+
+    result["eventCounts"] = eventCounts;
+    result["recentSignals"] = lastSignals;
+    result["telemetryInsights"] = telemetryInsights;
+    result["displayValueReport"] = displayValueReport;
+    QVariantMap aobReport;
+    aobReport["multiMatchCount"] = telemetryReport.aobMultiMatchCount;
+    aobReport["weakQualityCount"] = telemetryReport.aobWeakQualityCount;
+    aobReport["trainerBlockedCount"] = telemetryReport.trainerBlockedCount;
+    if (telemetryReport.aobMultiMatchCount > 0) {
+        aobReport["matchesFound"] = 2;
+    } else if (eventCounts.value("aob_scan").toInt() > 0 || eventCounts.value("aob_signature").toInt() > 0) {
+        aobReport["matchesFound"] = 1;
+    }
+    aobReport["qualityReady"] = telemetryReport.aobWeakQualityCount == 0 && telemetryReport.trainerBlockedCount == 0 && telemetryReport.aobMultiMatchCount == 0;
+    result["aob"] = aobReport;
+    result["recommendations"] = recommendations;
+    result["guardrails"] = guardrails;
+    result["summary"] = QString("%1 candidat(s), %2 cible(s) active(s), %3 événement(s) récent(s).")
+        .arg(m_candidates.size())
+        .arg(m_chatMemoryTargets.size() + m_activeProfileTargets.size())
+        .arg(recentEvents.size());
+    return result;
+}
+
+QVariantMap ApplicationController::clearAutoResolveMemory(bool allProcesses) {
+    QSettings settings;
+    QVariantMap result;
+    result["success"] = true;
+    result["allProcesses"] = allProcesses;
+    if (allProcesses) {
+        settings.remove("autoResolver");
+        result["message"] = "Mémoire Auto vidée pour tous les processus.";
+    } else {
+        const QString gameKey = autoResolverGameKey(processName());
+        settings.remove(QString("autoResolver/process/%1").arg(gameKey));
+        result["gameKey"] = gameKey;
+        result["message"] = QString("Mémoire Auto vidée pour %1.").arg(gameKey);
+    }
+    appendSmartSearchDebug("auto_resolve_memory_cleared", result);
+    return result;
+}
+
+QVariantMap ApplicationController::logAiAudit(const QString& event, const QVariantMap& payload) {
+    const QString cleanEvent = event.trimmed().isEmpty()
+        ? QString("ai_audit")
+        : event.trimmed().left(80);
+    QVariantMap entry = payload;
+    entry["processName"] = processName();
+    entry["pid"] = m_pid;
+    entry["auditEvent"] = cleanEvent;
+    appendScanTelemetry("ai_audit", entry);
+
+    const bool successfulAction = payload.value("success").toBool()
+        || cleanEvent == "risk_confirmed"
+        || cleanEvent.endsWith("_prepared");
+    if (successfulAction) {
+        QSettings settings;
+        const QString gameKey = autoResolverGameKey(processName());
+        settings.beginGroup(QString("autoResolver/process/%1").arg(gameKey));
+        settings.setValue("lastSuccessfulAuditEvent", cleanEvent);
+        settings.setValue("lastSuccessfulAuditAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+        settings.setValue(
+            QString("strategyWins/%1").arg(cleanEvent),
+            settings.value(QString("strategyWins/%1").arg(cleanEvent), 0).toInt() + 1);
+        const QString address = payload.value("address").toString();
+        if (!address.isEmpty()) {
+            settings.setValue("lastSuccessfulAddress", address);
+        }
+        const QString type = payload.value("type").toString();
+        if (!type.isEmpty()) {
+            settings.setValue("lastSuccessfulValueType", type);
+        }
+        const QString aobPattern = payload.value("aobPattern").toString();
+        if (!aobPattern.isEmpty()) {
+            settings.setValue("lastSuccessfulAobPattern", aobPattern.left(512));
+        }
+        settings.endGroup();
+    }
+
+    QVariantMap result;
+    result["success"] = true;
+    result["event"] = cleanEvent;
+    return result;
+}
+
 QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& query, const QString& value) {
     QVariantMap result;
     result["success"] = false;
@@ -5934,6 +7730,351 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
               .arg(matchedGroupName)
               .arg(value);
     appendSmartSearchDebug("profile_write", result);
+    return result;
+}
+
+QVariantMap ApplicationController::startAutoResolve(const QString& query, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["query"] = query;
+    result["status"] = "auto_resolve";
+    result["workflowStatus"] = "auto_resolve_planned";
+    result["aiReady"] = m_ai.isReady();
+
+    const QString trimmed = query.trimmed();
+    if (trimmed.isEmpty()) {
+        result["error"] = "Objectif vide.";
+        result["message"] = "Donne-moi un objectif avec une valeur, par exemple : minéraux 41250 vers 99999.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        result["message"] = "Attache d'abord un processus, puis relance l'auto-résolution.";
+        return result;
+    }
+
+    const QStringList numbers = numbersFromText(trimmed);
+    if (numbers.isEmpty()) {
+        result["error"] = "Aucune valeur numérique détectée.";
+        result["message"] = "J'ai besoin au minimum d'une valeur actuelle pour démarrer le plan.";
+        return result;
+    }
+
+    const QString explicitType = explicitValueTypeFromText(trimmed);
+    const QString valueType = options.value("valueType", explicitType.isEmpty() ? QString("Int32") : explicitType).toString();
+    const bool executeSafe = options.value("executeSafe", true).toBool();
+
+    bool targetOk = false;
+    const qlonglong targetValue = numbers.first().toLongLong(&targetOk);
+    if (!targetOk) {
+        result["error"] = "Valeur numérique invalide.";
+        return result;
+    }
+
+    killai::AutoResolveGoal goal;
+    goal.description = trimmed;
+    goal.targetValue = targetValue;
+    goal.valueType = valueType;
+    goal.gameContext = processName();
+
+    killai::AutoResolver resolver;
+    const auto plan = resolver.planForGoal(goal);
+    result["plan"] = autoResolveStepsToVariantList(plan);
+    result["planStepCount"] = plan.size();
+    result["targetValue"] = numbers.size() > 1 ? numbers.at(1) : numbers.first();
+    result["initialValue"] = numbers.first();
+    result["valueType"] = valueType;
+
+    auto rememberAutoResolverProgress = [this](const QString& workflow, qulonglong candidateCount) {
+        QSettings settings;
+        const QString gameKey = autoResolverGameKey(processName());
+        settings.beginGroup(QString("autoResolver/process/%1").arg(gameKey));
+        settings.setValue("starts", settings.value("starts", 0).toInt() + 1);
+        if (workflow.contains("reduce", Qt::CaseInsensitive) || workflow.contains("refinement", Qt::CaseInsensitive)) {
+            settings.setValue("reductions", settings.value("reductions", 0).toInt() + 1);
+        }
+        if (candidateCount == 0) {
+            settings.setValue("noCandidateCount", settings.value("noCandidateCount", 0).toInt() + 1);
+        }
+        if (candidateCount > 0 && candidateCount <= kAutoWriteCandidateLimit) {
+            settings.setValue("lowCandidateCheckpoints", settings.value("lowCandidateCheckpoints", 0).toInt() + 1);
+        }
+        settings.setValue("lastWorkflow", workflow);
+        settings.setValue("lastCandidateCount", candidateCount);
+        settings.setValue("lastUpdated", QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
+        settings.endGroup();
+    };
+
+    QVariantList actions;
+    actions.append(QVariantMap{{"id", "run_exact"}, {"label", "Scan Auto multi-type"}, {"safe", true}});
+    actions.append(QVariantMap{{"id", "try_unknown_increased"}, {"label", "Passer en Unknown"}, {"safe", true}});
+    actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert"}, {"safe", true}});
+    QVariantList executedSafeSteps;
+    const int maxSafeSteps = std::clamp(options.value("maxSafeSteps", 2).toInt(), 1, 5);
+    auto appendSafeStep = [&executedSafeSteps](const QString& tool, const QString& status, const QString& detail, const QVariantMap& payload = {}) {
+        QVariantMap step;
+        step["tool"] = tool;
+        step["status"] = status;
+        step["detail"] = detail;
+        step["safe"] = true;
+        if (!payload.isEmpty()) {
+            step["payload"] = payload;
+        }
+        executedSafeSteps.append(step);
+    };
+    result["contextReport"] = getAutoResolveReport(80);
+
+    if (!executeSafe) {
+        result["success"] = true;
+        result["actionStatus"] = "planned_only";
+        result["nextActions"] = actions;
+        result["message"] = QString("Plan auto prêt : %1 étapes. Je n'ai rien exécuté parce que le mode exécution sûre est désactivé.")
+                                .arg(plan.size());
+        appendSmartSearchDebug("auto_resolve_plan", result);
+        return result;
+    }
+
+    if (m_smartSearchActive && !m_candidates.isEmpty()) {
+        QVariantMap reduction = nextScan("exact", numbers.first());
+        appendSafeStep(
+            "next_scan",
+            reduction.value("success").toBool() ? "success" : "error",
+            QString("Réduction exacte avec la nouvelle valeur %1.").arg(numbers.first()),
+            reduction);
+        result["firstAction"] = reduction;
+        result["safeAction"] = "next_scan";
+        result["success"] = reduction.value("success").toBool();
+        result["actionStatus"] = result.value("success").toBool() ? "safe_reduction_executed" : "safe_reduction_failed";
+        const qulonglong remaining = reduction.value("remaining", reduction.value("candidateStoreSize")).toULongLong();
+        result["candidateCount"] = remaining;
+        result["workflowStatus"] = remaining == 0
+            ? "auto_resolve_no_candidate"
+            : (remaining <= kAutoWriteCandidateLimit ? "awaiting_write_confirmation" : "needs_more_refinement");
+        rememberAutoResolverProgress(result.value("workflowStatus").toString(), remaining);
+        result["contextReport"] = getAutoResolveReport(80);
+
+        actions.clear();
+        if (remaining == 0) {
+            if (executedSafeSteps.size() < maxSafeSteps) {
+                QVariantMap encryptedOptions{
+                    {"mode", "xor"},
+                    {"keySearchBits", 16},
+                    {"maxResults", 200},
+                    {"writableOnly", true},
+                };
+                QVariantMap encrypted = scanEncryptedValue(numbers.first(), explicitType.isEmpty() ? QString("Int32") : valueType, encryptedOptions);
+                appendSafeStep(
+                    "scan_encrypted_value",
+                    encrypted.value("success").toBool() ? "success" : "error",
+                    QString("Fallback scan chiffré XOR borné après réduction vide."),
+                    encrypted);
+                result["fallbackAction"] = encrypted;
+                result["encryptedMatches"] = encrypted.value("matches");
+                const int encryptedCount = encrypted.value("matchesFound", encrypted.value("matchesReturned")).toInt();
+                if (encrypted.value("success").toBool() && encryptedCount > 0) {
+                    result["workflowStatus"] = "awaiting_encrypted_review";
+                    result["candidateCount"] = encryptedCount;
+                    actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Comparer avec Trace UI string"}, {"safe", true}});
+                    actions.append(QVariantMap{{"id", "review_encrypted_hits"}, {"label", "Inspecter hits chiffrés"}, {"safe", true}});
+                    result["message"] = QString("La réduction a vidé les candidats, donc j'ai enchaîné un scan chiffré XOR borné : %1 hit(s). On inspecte ces pistes avant tout write.")
+                                            .arg(encryptedCount);
+                } else {
+                    int uiStringCount = 0;
+                    if (executedSafeSteps.size() < maxSafeSteps) {
+                        QVariantMap traceOptions{
+                            {"ascii", true},
+                            {"utf16", true},
+                            {"numericBoundary", true},
+                            {"writableOnly", true},
+                            {"maxResults", 200},
+                        };
+                        QVariantMap trace = scanUiStrings(numbers.first(), traceOptions);
+                        appendSafeStep(
+                            "scan_ui_strings",
+                            trace.value("success").toBool() ? "success" : "error",
+                            "Fallback Trace UI string borné après scan chiffré vide.",
+                            trace);
+                        result["fallbackTraceUiAction"] = trace;
+                        result["uiStringMatches"] = trace.value("matches");
+                        uiStringCount = trace.value("matchesFound", trace.value("matchesReturned")).toInt();
+                    }
+                    if (uiStringCount > 0) {
+                        result["workflowStatus"] = "awaiting_trace_ui_review";
+                        result["candidateCount"] = uiStringCount;
+                        actions.append(QVariantMap{{"id", "trace_ui_sources"}, {"label", "Analyser sources UI"}, {"safe", true}});
+                        actions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Basculer en Unknown"}, {"safe", true}});
+                        result["message"] = QString("La réduction et le scan chiffré sont vides, mais Trace UI string a trouvé %1 string(s). Prochaine étape : analyser les sources UI.")
+                                                .arg(uiStringCount);
+                    } else {
+                        QVariantMap unknownOptions{
+                            {"unknownSnapshotMaxMb", 128},
+                            {"writableOnly", true},
+                            {"executableOnly", false},
+                            {"copyOnWriteOnly", false},
+                        };
+                        QVariantMap unknown = captureUnknownSnapshotWithOptions(unknownOptions);
+                        appendSafeStep(
+                            "unknown_capture",
+                            unknown.value("success").toBool() ? "success" : "error",
+                            "Capture Unknown bornée après fallbacks vides; attente d'une variation utilisateur.",
+                            unknown);
+                        result["unknownCaptureAction"] = unknown;
+                        result["workflowStatus"] = unknown.value("success").toBool() ? "awaiting_unknown_observation" : "auto_resolve_no_candidate";
+                        actions.append(QVariantMap{{"id", "continue_unknown_observation"}, {"label", "Continuer après variation"}, {"safe", true}});
+                        actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Relancer Trace UI string"}, {"safe", true}});
+                        result["message"] = unknown.value("success").toBool()
+                            ? QString("La réduction, le scan chiffré et Trace UI string sont vides. J'ai capturé un snapshot Unknown borné : fais varier la valeur, puis donne-moi la nouvelle observation.")
+                            : QString("Les fallbacks safe sont vides et la capture Unknown a échoué : %1").arg(unknown.value("error").toString());
+                    }
+                }
+            } else {
+                actions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Basculer en Unknown"}, {"safe", true}});
+                actions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Essayer scan chiffré"}, {"safe", true}});
+                result["message"] = "J'ai réduit avec la nouvelle valeur, mais il ne reste aucun candidat. Je propose de passer en Unknown ou en scan chiffré borné.";
+            }
+        } else if (remaining <= kAutoWriteCandidateLimit) {
+            const QString writeValue = !m_smartSearchTargetValue.isEmpty()
+                ? m_smartSearchTargetValue
+                : (numbers.size() > 1 ? numbers.at(1) : numbers.first());
+            const QVariantList suggestions = suggestedWritesForCandidates(m_candidates, writeValue, kAutoWriteCandidateLimit);
+            actions.append(QVariantMap{{"id", "confirm_test_write"}, {"label", "Tester l'écriture sur les candidats"}, {"safe", false}, {"requiresConfirmation", true}});
+            actions.append(QVariantMap{{"id", "confirm_breakpoint_freeze"}, {"label", "Préparer freeze BP confirmé"}, {"safe", false}, {"requiresConfirmation", true}});
+            result["requiresConfirmation"] = true;
+            result["confirmationReason"] = "Écriture/freeze sur mémoire de processus : je prépare, tu confirmes avant action.";
+            result["suggestedWrites"] = suggestions;
+            result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
+            result["message"] = QString("J'ai réduit à %1 candidat(s). On est dans la zone intéressante : prochaine étape, test d'écriture confirmé ou freeze BP confirmé.")
+                                    .arg(remaining);
+        } else {
+            actions.append(QVariantMap{{"id", "reduce_again"}, {"label", "Réduire encore avec une nouvelle valeur"}, {"safe", true}});
+            actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Chercher via Trace UI string"}, {"safe", true}});
+            result["message"] = QString("J'ai réduit à %1 candidat(s). Fais encore varier la valeur et donne-moi la nouvelle valeur pour continuer automatiquement.")
+                                    .arg(remaining);
+        }
+
+        result["nextActions"] = actions;
+        result["executedSafeSteps"] = executedSafeSteps;
+        appendSmartSearchDebug("auto_resolve_reduce", result);
+        return result;
+    }
+
+    QVariantMap firstScan = startExactScanMultiType(numbers.first(), "Auto");
+    appendSafeStep(
+        "exact_scan_multi_type",
+        firstScan.value("success").toBool() ? "success" : "error",
+        QString("Scan initial multi-type pour %1.").arg(numbers.first()),
+        firstScan);
+    result["firstAction"] = firstScan;
+    result["success"] = firstScan.value("success").toBool();
+    result["actionStatus"] = result.value("success").toBool() ? "safe_step_executed" : "safe_step_failed";
+    const qulonglong candidateCount = firstScan.value("candidateStoreSize", firstScan.value("matchesFound")).toULongLong();
+    result["candidateCount"] = candidateCount;
+
+    if (result.value("success").toBool()) {
+        m_smartSearchActive = candidateCount > 0;
+        m_smartSearchInitialValue = numbers.first();
+        m_smartSearchTargetValue = numbers.size() > 1 ? numbers.at(1) : QString();
+        m_smartSearchValueType = "Auto";
+        result["workflowStatus"] = candidateCount > 0 ? "awaiting_value_change" : "auto_resolve_no_candidate";
+        if (candidateCount == 0) {
+            if (executedSafeSteps.size() < maxSafeSteps) {
+                QVariantMap encryptedOptions{
+                    {"mode", "xor"},
+                    {"keySearchBits", 16},
+                    {"maxResults", 200},
+                    {"writableOnly", true},
+                };
+                QVariantMap encrypted = scanEncryptedValue(numbers.first(), explicitType.isEmpty() ? QString("Int32") : valueType, encryptedOptions);
+                appendSafeStep(
+                    "scan_encrypted_value",
+                    encrypted.value("success").toBool() ? "success" : "error",
+                    "Fallback scan chiffré XOR borné après scan exact vide.",
+                    encrypted);
+                result["fallbackAction"] = encrypted;
+                result["encryptedMatches"] = encrypted.value("matches");
+                const int encryptedCount = encrypted.value("matchesFound", encrypted.value("matchesReturned")).toInt();
+                if (encrypted.value("success").toBool() && encryptedCount > 0) {
+                    result["workflowStatus"] = "awaiting_encrypted_review";
+                    result["candidateCount"] = encryptedCount;
+                    actions.prepend(QVariantMap{{"id", "review_encrypted_hits"}, {"label", "Inspecter hits chiffrés"}, {"safe", true}});
+                    actions.prepend(QVariantMap{{"id", "trace_ui_string"}, {"label", "Comparer Trace UI string"}, {"safe", true}});
+                    result["message"] = QString("Le scan exact n'a rien trouvé. J'ai enchaîné automatiquement un scan chiffré XOR borné : %1 hit(s). On valide ces pistes avant toute action risquée.")
+                                            .arg(encryptedCount);
+                } else {
+                    int uiStringCount = 0;
+                    if (executedSafeSteps.size() < maxSafeSteps) {
+                        QVariantMap traceOptions{
+                            {"ascii", true},
+                            {"utf16", true},
+                            {"numericBoundary", true},
+                            {"writableOnly", true},
+                            {"maxResults", 200},
+                        };
+                        QVariantMap trace = scanUiStrings(numbers.first(), traceOptions);
+                        appendSafeStep(
+                            "scan_ui_strings",
+                            trace.value("success").toBool() ? "success" : "error",
+                            "Fallback Trace UI string borné après scan chiffré vide.",
+                            trace);
+                        result["fallbackTraceUiAction"] = trace;
+                        result["uiStringMatches"] = trace.value("matches");
+                        uiStringCount = trace.value("matchesFound", trace.value("matchesReturned")).toInt();
+                    }
+                    if (uiStringCount > 0) {
+                        result["workflowStatus"] = "awaiting_trace_ui_review";
+                        result["candidateCount"] = uiStringCount;
+                        actions.prepend(QVariantMap{{"id", "trace_ui_sources"}, {"label", "Analyser sources UI"}, {"safe", true}});
+                        result["message"] = QString("Le scan exact et le scan chiffré sont vides, mais Trace UI string a trouvé %1 string(s). Prochaine étape : analyser les sources UI.")
+                                            .arg(uiStringCount);
+                    } else {
+                        QVariantMap unknownOptions{
+                            {"unknownSnapshotMaxMb", 128},
+                            {"writableOnly", true},
+                            {"executableOnly", false},
+                            {"copyOnWriteOnly", false},
+                        };
+                        QVariantMap unknown = captureUnknownSnapshotWithOptions(unknownOptions);
+                        appendSafeStep(
+                            "unknown_capture",
+                            unknown.value("success").toBool() ? "success" : "error",
+                            "Capture Unknown bornée après fallbacks vides; attente d'une variation utilisateur.",
+                            unknown);
+                        result["unknownCaptureAction"] = unknown;
+                        result["workflowStatus"] = unknown.value("success").toBool() ? "awaiting_unknown_observation" : "auto_resolve_no_candidate";
+                        actions.prepend(QVariantMap{{"id", "continue_unknown_observation"}, {"label", "Continuer après variation"}, {"safe", true}});
+                        result["message"] = unknown.value("success").toBool()
+                            ? QString("Le scan exact, le scan chiffré et Trace UI string sont vides. J'ai capturé un snapshot Unknown borné : fais varier la valeur, puis donne-moi la nouvelle observation.")
+                            : QString("Les fallbacks safe sont vides et la capture Unknown a échoué : %1").arg(unknown.value("error").toString());
+                    }
+                }
+            } else {
+                actions.prepend(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Essayer scan chiffré"}, {"safe", true}});
+                result["message"] = "J'ai lancé le scan initial, mais il n'a rien trouvé. Prochaine piste : Unknown ou scan chiffré.";
+            }
+        } else {
+            const QString writeValue = numbers.size() > 1 ? numbers.at(1) : numbers.first();
+            const QVariantList suggestions = suggestedWritesForCandidates(m_candidates, writeValue, kAutoWriteCandidateLimit);
+            if (candidateCount <= kAutoWriteCandidateLimit) {
+                result["requiresConfirmation"] = true;
+                result["confirmationReason"] = "Petit nombre de candidats : confirme avant tout test d'écriture ou freeze.";
+                result["suggestedWrites"] = suggestions;
+                result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
+                actions.prepend(QVariantMap{{"id", "confirm_test_write"}, {"label", "Tester l'écriture sur les candidats"}, {"safe", false}, {"requiresConfirmation", true}});
+            }
+            result["message"] = QString("J'ai lancé le plan auto et trouvé %1 candidat(s). Fais varier la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire.")
+                                    .arg(candidateCount);
+        }
+    } else {
+        result["workflowStatus"] = "action_failed";
+        result["error"] = firstScan.value("error").toString();
+        result["message"] = QString("Le plan est prêt, mais le premier scan a échoué : %1").arg(result.value("error").toString());
+    }
+
+    result["nextActions"] = actions;
+    result["executedSafeSteps"] = executedSafeSteps;
+    rememberAutoResolverProgress(result.value("workflowStatus").toString(), candidateCount);
+    result["contextReport"] = getAutoResolveReport(80);
+    appendSmartSearchDebug("auto_resolve_start", result);
     return result;
 }
 
@@ -6152,7 +8293,18 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         m_smartSearchTargetValue = numbers.at(1);
         m_smartSearchActive = true;
     } else {
-        result = m_ai.processQuery(query);
+        QVariantMap aiContext;
+        aiContext["processAttached"] = m_handle.isValid();
+        aiContext["processName"] = processName();
+        aiContext["scanActive"] = m_smartSearchActive;
+        aiContext["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
+        aiContext["initialValue"] = m_smartSearchInitialValue;
+        aiContext["targetValue"] = m_smartSearchTargetValue;
+        aiContext["activeTargetCount"] = static_cast<qulonglong>(m_chatMemoryTargets.size());
+        aiContext["unknownSnapshotActive"] = !m_snapshot.isEmpty();
+        aiContext["freezeCount"] = static_cast<qulonglong>(m_freeze.entries().size());
+        aiContext["valueType"] = m_smartSearchValueType;
+        result = m_ai.processQuery(query, aiContext);
     }
 
     result["query"] = query;
@@ -6173,6 +8325,13 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     const QVariantMap args = result.value("args").toMap();
     QVariantMap actionResult;
 
+    // Le modele connait l'issue des actions precedentes: apres un echec il
+    // proposera une alternative (multi_type, encrypted, trace UI, unknown).
+    const auto noteAiOutcome = [this, &query, &tool](bool success, const QString& detail) {
+        m_ai.noteOutcome(query, tool, success ? QStringLiteral("success") : QStringLiteral("failed"));
+        Q_UNUSED(detail);
+    };
+
     if (tool == "exact_scan") {
         actionResult = startExactScan(args.value("value").toString(), args.value("valueType").toString());
     } else if (tool == "exact_scan_multi_type") {
@@ -6183,6 +8342,84 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         actionResult = captureUnknownSnapshot();
     } else if (tool == "unknown_compare") {
         actionResult = unknownNextScan(args.value("mode").toString(), args.value("valueType").toString());
+    } else if (tool == "auto_resolve") {
+        QVariantMap autoOptions;
+        autoOptions["executeSafe"] = true;
+        if (!explicitValueType.isEmpty()) autoOptions["valueType"] = defaultValueType;
+        actionResult = startAutoResolve(args.value("query").toString(), autoOptions);
+        if (!actionResult.value("message").toString().isEmpty()) {
+            result["message"] = actionResult.value("message");
+        }
+        if (!actionResult.value("executedSafeSteps").isNull()) {
+            result["executedSafeSteps"] = actionResult.value("executedSafeSteps");
+        }
+    } else if (tool == "encrypted_scan") {
+        QVariantMap encryptedOptions;
+        encryptedOptions["mode"] = args.value("mode", "xor");
+        encryptedOptions["key"] = args.value("key", "0");
+        encryptedOptions["keySearchBits"] = args.value("keySearchBits", 16);
+        actionResult = scanEncryptedValue(
+            args.value("value").toString(),
+            args.value("valueType", explicitValueType.isEmpty() ? QString("Int32") : defaultValueType).toString(),
+            encryptedOptions);
+        if (actionResult.value("success").toBool()) {
+            const auto encryptedMatches = actionResult.value("matchesFound").toULongLong();
+            result["workflowStatus"] = encryptedMatches > 0 ? "awaiting_value_change" : "no_candidate";
+            result["message"] = encryptedMatches > 0
+                ? QString("Scan chiffré : %1 adresse(s) correspondent à %2 sous une forme chiffrée (XOR/Add/Sub). Fais varier la valeur puis redonne-la moi pour affiner.")
+                      .arg(encryptedMatches)
+                      .arg(args.value("value").toString())
+                : QString("Scan chiffré : aucune adresse ne correspond à %1 sous forme chiffrée. On peut tenter la Trace UI string ou Unknown.")
+                      .arg(args.value("value").toString());
+            if (encryptedMatches == 0) {
+                QVariantList recoveryActions;
+                recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Chercher le texte affiché"}, {"value", args.value("value")}});
+                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Unknown (valeur inconnue)"}});
+                recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+                result["recoveryActions"] = recoveryActions;
+            }
+        }
+    } else if (tool == "prepare_write_checkpoint") {
+        // Checkpoint safe: prepare les suggestions d'ecriture sans ecrire.
+        const QString checkpointValue = args.value("value", m_smartSearchTargetValue).toString();
+        auto suggestions = suggestedWritesForCandidates(m_candidates, checkpointValue, kAutoWriteCandidateLimit);
+        enrichSuggestedWritesWithHistory(&suggestions);
+        actionResult["success"] = !suggestions.isEmpty();
+        actionResult["suggestedWrites"] = suggestions;
+        result["suggestedWrites"] = suggestions;
+        result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
+        result["workflowStatus"] = suggestions.isEmpty() ? "no_candidate" : "awaiting_write_confirmation";
+        result["message"] = suggestions.isEmpty()
+            ? QString("Aucun candidat fiable a preparer. Continue a reduire la liste avec de nouvelles valeurs observees.")
+            : QString("Checkpoint pret: %1 adresse(s) candidate(s) pour ecrire %2. Confirme l'ecriture pour appliquer.")
+                  .arg(suggestions.size())
+                  .arg(checkpointValue);
+    } else if (tool == "trace_ui_string") {
+        QVariantMap traceOptions;
+        traceOptions["ascii"] = true;
+        traceOptions["utf16"] = true;
+        traceOptions["writableOnly"] = true;
+        actionResult = scanUiStrings(args.value("value").toString(), traceOptions);
+        if (actionResult.value("success").toBool()) {
+            const auto stringsFound = actionResult.value("matchesFound").toULongLong();
+            result["workflowStatus"] = stringsFound > 0 ? "awaiting_value_change" : "no_candidate";
+            result["message"] = stringsFound > 0
+                ? QString("Trace UI string : %1 occurrence(s) du texte \"%2\" trouvées en mémoire. J'ai chargé les pistes dans Expert > Trace UI string. Utilise Filtrer strings après avoir changé la valeur, puis Analyser sources.")
+                      .arg(stringsFound)
+                      .arg(args.value("value").toString())
+                : QString("Trace UI string : le texte \"%1\" n'a pas été trouvé en mémoire. Vérifie la valeur affichée exacte, ou passe en Unknown.")
+                      .arg(args.value("value").toString());
+            if (!actionResult.value("candidates").isNull()) {
+                result["uiStringCandidates"] = actionResult.value("candidates");
+            }
+            if (stringsFound == 0) {
+                QVariantList recoveryActions;
+                recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Scan chiffré (XOR)"}, {"value", args.value("value")}});
+                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Unknown (valeur inconnue)"}});
+                recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+                result["recoveryActions"] = recoveryActions;
+            }
+        }
     } else if (tool == "write_value" || tool == "freeze_value") {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
@@ -6198,6 +8435,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
 
     result["actionStatus"] = actionResult.value("success").toBool() ? "executed" : "failed";
     result["actionResult"] = actionResult;
+    noteAiOutcome(actionResult.value("success").toBool(), QString());
 
     if (!actionResult.value("success").toBool()) {
         const QString actionError = actionResult.value("error").toString().trimmed();
@@ -6216,7 +8454,6 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
 
         const auto count = actionResult.value("candidateStoreSize").toULongLong();
         m_smartSearchActive = count > 0;
-        result["workflowStatus"] = "awaiting_value_change";
         result["targetValue"] = m_smartSearchTargetValue;
         const QString prefix = intent.resetContext
             ? QString("Je repars sur une nouvelle recherche. ")
@@ -6224,10 +8461,27 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         const QString typeNote = tool == "exact_scan_multi_type"
             ? QString(" en Auto rapide")
             : QString();
-        result["message"] = prefix + QString("J'ai trouvé %1 candidats pour %2%3. Fais bouger la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire la liste.")
-                                .arg(count)
-                                .arg(m_smartSearchInitialValue)
-                                .arg(typeNote);
+        if (count > 0) {
+            result["workflowStatus"] = "awaiting_value_change";
+            result["message"] = prefix + QString("J'ai trouvé %1 candidats pour %2%3. Fais bouger la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire la liste.")
+                                    .arg(count)
+                                    .arg(m_smartSearchInitialValue)
+                                    .arg(typeNote);
+        } else {
+            // Scan direct a vide : proposer tout de suite les strategies de
+            // repli plutot que redemander une variation sur une recherche
+            // qui n'a encore trouve aucun candidat.
+            result["workflowStatus"] = "no_candidate";
+            result["message"] = prefix + QString("Aucun candidat pour %1%2 en scan direct. Ce n'est pas forcement une impasse : ça peut être une valeur chiffrée/obfusquée, une valeur affichée en texte plutôt qu'en mémoire brute, ou une valeur qui varie déjà.")
+                                    .arg(m_smartSearchInitialValue)
+                                    .arg(typeNote);
+            QVariantList recoveryActions;
+            recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Scan chiffré (XOR)"}, {"value", m_smartSearchInitialValue}});
+            recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Chercher le texte affiché"}, {"value", m_smartSearchInitialValue}});
+            recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Unknown (valeur inconnue)"}});
+            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+            result["recoveryActions"] = recoveryActions;
+        }
     } else if (tool == "next_scan" || tool == "unknown_compare") {
         const auto remaining = tool == "next_scan"
                                    ? actionResult.value("remaining").toULongLong()
@@ -6376,8 +8630,233 @@ QVariantMap ApplicationController::getSettings() const {
     result["smartSearchDebugEnabled"] = settings.value("diagnostics/smartSearchDebugEnabled", true).toBool();
     result["smartSearchDebugMaxEvents"] = boundedSettingInt(
         settings, "diagnostics/smartSearchDebugMaxEvents", 30, 5, 200);
+    const QString autoRiskMode = settings.value("ai/autoRiskMode", "Safe").toString();
+    result["autoRiskMode"] =
+        (autoRiskMode == "Expert" || autoRiskMode == "Trainer") ? autoRiskMode : QString("Safe");
     result["modelPath"] = settings.value("ai/modelPath", "").toString();
+    result["modelEnabled"] = settings.value("ai/modelEnabled", true).toBool();
     result["modelThreads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
+    return result;
+}
+
+bool ApplicationController::hasSeenOnboarding() const {
+    return QSettings().value("ui/hasSeenOnboarding", false).toBool();
+}
+
+void ApplicationController::setOnboardingSeen(bool seen) {
+    QSettings().setValue("ui/hasSeenOnboarding", seen);
+}
+
+bool ApplicationController::openUserGuide() const {
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.filePath("USER_GUIDE.md"),
+        appDir.filePath("../../docs/USER_GUIDE.md"),
+        QDir::current().filePath("docs/USER_GUIDE.md"),
+    };
+    for (const auto& candidate : candidates) {
+        QFileInfo file(candidate);
+        if (file.exists() && file.isFile()) {
+            return QDesktopServices::openUrl(QUrl::fromLocalFile(file.absoluteFilePath()));
+        }
+    }
+    return false;
+}
+
+QVariantMap ApplicationController::getAiModelStatus() const {
+    QSettings settings;
+    QVariantMap result;
+    QVariantList modelCandidates;
+    QVariantList executableCandidates;
+    QVariantList embeddedAgents;
+    QVariantList embeddedModelFolders;
+
+    const QString configuredModel = settings.value("ai/modelPath", "").toString().trimmed();
+    const bool modelEnabled = settings.value("ai/modelEnabled", true).toBool();
+    const QString envModel = QProcessEnvironment::systemEnvironment().value("KILLENGINE_QWEN_GGUF").trimmed();
+    const QString envExe = QProcessEnvironment::systemEnvironment().value("KILLENGINE_LLAMA_CLI").trimmed();
+    const auto model = killai::ModelLocator::findQwenGguf();
+
+    for (const auto& path : killai::ModelLocator::candidateModelPaths()) {
+        QFileInfo file(path);
+        QVariantMap item;
+        item["path"] = path;
+        item["exists"] = file.exists() && file.isFile();
+        item["isGguf"] = file.suffix().compare("gguf", Qt::CaseInsensitive) == 0;
+        item["source"] = path == configuredModel
+            ? QString("settings")
+            : (path == envModel ? QString("KILLENGINE_QWEN_GGUF") : QString("candidate"));
+        if (file.exists()) {
+            item["absolutePath"] = file.absoluteFilePath();
+            item["sizeBytes"] = static_cast<qlonglong>(file.size());
+        }
+        modelCandidates.append(item);
+    }
+
+    QString executablePath;
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList exeCandidates = {
+        envExe,
+        appDir.filePath("llama-cli.exe"),
+        appDir.filePath("llama.cpp/llama-cli.exe"),
+        appDir.filePath("../../third_party/llama.cpp/llama-cli.exe"),
+        appDir.filePath("../../third_party/llama.cpp/build/bin/Release/llama-cli.exe"),
+        appDir.filePath("../../third_party/llama.cpp/build/bin/llama-cli.exe"),
+        QDir::current().filePath("third_party/llama.cpp/llama-cli.exe"),
+        QDir::current().filePath("third_party/llama.cpp/build/bin/Release/llama-cli.exe"),
+        QDir::current().filePath("third_party/llama.cpp/build/bin/llama-cli.exe"),
+    };
+    QSet<QString> seenExeCandidates;
+    for (const auto& candidate : exeCandidates) {
+        const QString trimmed = candidate.trimmed();
+        if (trimmed.isEmpty() || seenExeCandidates.contains(trimmed)) {
+            continue;
+        }
+        seenExeCandidates.insert(trimmed);
+        QFileInfo file(trimmed);
+        const bool exists = file.exists() && file.isFile();
+        if (executablePath.isEmpty() && exists) {
+            executablePath = file.absoluteFilePath();
+        }
+        QVariantMap item;
+        item["path"] = trimmed;
+        item["exists"] = exists;
+        item["source"] = trimmed == envExe ? QString("KILLENGINE_LLAMA_CLI") : QString("candidate");
+        if (exists) {
+            item["absolutePath"] = file.absoluteFilePath();
+            item["sizeBytes"] = static_cast<qlonglong>(file.size());
+        }
+        executableCandidates.append(item);
+    }
+
+    const QStringList modelRootCandidates = {
+        appDir.filePath("model"),
+        appDir.filePath("../../model"),
+        QDir::current().filePath("model"),
+    };
+    QSet<QString> seenModelRoots;
+    for (const auto& rootCandidate : modelRootCandidates) {
+        QFileInfo rootInfo(rootCandidate);
+        if (!rootInfo.exists() || !rootInfo.isDir()) {
+            continue;
+        }
+        const QString rootPath = rootInfo.canonicalFilePath().isEmpty()
+            ? rootInfo.absoluteFilePath()
+            : rootInfo.canonicalFilePath();
+        if (seenModelRoots.contains(rootPath)) {
+            continue;
+        }
+        seenModelRoots.insert(rootPath);
+
+        const QDir rootDir(rootPath);
+        const auto subdirs = rootDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const auto& subdirInfo : subdirs) {
+            const QDir subdir(subdirInfo.absoluteFilePath());
+            const auto ggufFiles = subdir.entryInfoList(QStringList{"*.gguf"}, QDir::Files, QDir::Name);
+
+            QVariantMap modelFolder;
+            modelFolder["id"] = subdirInfo.fileName();
+            modelFolder["path"] = subdirInfo.absoluteFilePath();
+            modelFolder["hasGguf"] = !ggufFiles.isEmpty();
+            modelFolder["ggufCount"] = ggufFiles.size();
+            if (!ggufFiles.isEmpty()) {
+                modelFolder["primaryModelPath"] = ggufFiles.first().absoluteFilePath();
+                modelFolder["primaryModelSizeBytes"] = static_cast<qlonglong>(ggufFiles.first().size());
+            }
+            embeddedModelFolders.append(modelFolder);
+
+            const QFileInfo manifestInfo(subdir.filePath("MODEL_MANIFEST.json"));
+            if (!manifestInfo.exists() || !manifestInfo.isFile()) {
+                continue;
+            }
+
+            QVariantMap agent;
+            agent["id"] = subdirInfo.fileName();
+            agent["displayName"] = subdirInfo.fileName();
+            agent["role"] = QString("agent");
+            agent["provider"] = QString("llama.cpp");
+            agent["manifestPath"] = manifestInfo.absoluteFilePath();
+            agent["valid"] = false;
+            agent["modelFound"] = false;
+
+            QFile manifestFile(manifestInfo.absoluteFilePath());
+            if (!manifestFile.open(QIODevice::ReadOnly)) {
+                agent["error"] = QString("Manifest illisible.");
+                embeddedAgents.append(agent);
+                continue;
+            }
+
+            const QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
+            if (!doc.isObject()) {
+                agent["error"] = QString("Manifest JSON invalide.");
+                embeddedAgents.append(agent);
+                continue;
+            }
+
+            const QJsonObject object = doc.object();
+            agent["valid"] = true;
+            agent["id"] = object.value("id").toString(subdirInfo.fileName());
+            agent["displayName"] = object.value("displayName").toString(agent.value("id").toString());
+            agent["role"] = object.value("role").toString("agent");
+            agent["provider"] = object.value("provider").toString("llama.cpp");
+            agent["required"] = object.value("required").toBool(true);
+
+            const QString manifestModelPath = object.value("modelPath").toString().trimmed();
+            const QFileInfo manifestModelInfo(manifestModelPath.isEmpty()
+                ? QString()
+                : subdir.filePath(manifestModelPath));
+            agent["modelPath"] = manifestModelInfo.absoluteFilePath();
+            agent["modelFound"] = manifestModelInfo.exists() && manifestModelInfo.isFile();
+            if (manifestModelInfo.exists()) {
+                agent["modelSizeBytes"] = static_cast<qlonglong>(manifestModelInfo.size());
+            }
+            embeddedAgents.append(agent);
+        }
+    }
+
+    result["success"] = true;
+    result["enabled"] = modelEnabled;
+    result["backend"] = modelEnabled && model.found && !executablePath.isEmpty() ? QString("llama.cpp") : QString("deterministic");
+    result["ready"] = modelEnabled && model.found && !executablePath.isEmpty();
+    result["available"] = model.found && !executablePath.isEmpty();
+    result["configuredModelPath"] = configuredModel;
+    result["envModelPath"] = envModel;
+    result["envExecutablePath"] = envExe;
+    result["modelFound"] = model.found;
+    result["modelPath"] = model.path;
+    result["modelSource"] = model.source;
+    result["modelError"] = model.errorMessage;
+    result["executableFound"] = !executablePath.isEmpty();
+    result["executablePath"] = executablePath;
+    result["modelCandidates"] = modelCandidates;
+    result["executableCandidates"] = executableCandidates;
+    result["embeddedAgents"] = embeddedAgents;
+    result["embeddedAgentCount"] = embeddedAgents.size();
+    result["embeddedModelFolders"] = embeddedModelFolders;
+    result["threads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
+    result["message"] = result.value("ready").toBool()
+        ? QString("IA embarquée prête.")
+        : QString("IA embarquée indisponible: modèle ou runtime manquant.");
+    return result;
+}
+
+QVariantMap ApplicationController::browseForModelFile() {
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString path = QFileDialog::getOpenFileName(
+        nullptr,
+        "Choisir un modèle GGUF",
+        QString(),
+        "Modèles GGUF (*.gguf);;Tous les fichiers (*.*)");
+
+    if (path.isEmpty()) {
+        result["cancelled"] = true;
+        return result;
+    }
+
+    result["success"] = true;
+    result["path"] = path;
     return result;
 }
 
@@ -6424,7 +8903,12 @@ QVariantMap ApplicationController::saveSettings(const QVariantMap& incoming) {
     settings.setValue(
         "diagnostics/smartSearchDebugMaxEvents",
         std::clamp(incoming.value("smartSearchDebugMaxEvents", 30).toInt(), 5, 200));
+    const QString autoRiskMode = incoming.value("autoRiskMode", "Safe").toString();
+    settings.setValue(
+        "ai/autoRiskMode",
+        (autoRiskMode == "Expert" || autoRiskMode == "Trainer") ? autoRiskMode : QString("Safe"));
     settings.setValue("ai/modelPath", incoming.value("modelPath", "").toString().trimmed());
+    settings.setValue("ai/modelEnabled", incoming.value("modelEnabled", true).toBool());
     settings.setValue(
         "ai/modelThreads",
         std::clamp(incoming.value("modelThreads", 4).toInt(), 1, 32));
@@ -6917,6 +9401,15 @@ QVariantMap ApplicationController::loadProfile(const QString& profileName) {
         patchEntry["disassembly"] = patch.disassembly;
         patchEntry["riskLevel"] = patch.riskLevel;
         patchEntry["description"] = patch.description;
+        patchEntry["signatureScore"] = patch.signatureScore;
+        patchEntry["signatureLevel"] = patch.signatureLevel;
+        patchEntry["signatureWarning"] = patch.signatureWarning;
+        patchEntry["signatureFixedBytes"] = patch.signatureFixedBytes;
+        patchEntry["signatureWildcardBytes"] = patch.signatureWildcardBytes;
+        patchEntry["signatureUniqueFixedBytes"] = patch.signatureUniqueFixedBytes;
+        patchEntry["signatureFixedRatio"] = patch.signatureFixedRatio;
+        patchEntry["trainerSafe"] = patch.trainerSafe;
+        patchEntry["signatureMatches"] = patch.signatureMatches;
         patchesList.append(patchEntry);
     }
     result["patches"] = patchesList;
@@ -7072,6 +9565,34 @@ QVariantMap ApplicationController::saveProfileCodePatch(
         result["error"] = parsedPattern.error;
         return result;
     }
+    const auto patternQuality = killcore::evaluateAobPatternQuality(parsedPattern);
+    result["signatureQuality"] = aobPatternQualityToVariantMap(patternQuality);
+    result["signatureRisk"] = patternQuality.level;
+
+    const bool allowWeakAob = metadata.value("allowWeakAob", false).toBool();
+    if (!allowWeakAob && (patternQuality.fixedBytes < 3 || patternQuality.score < 35)) {
+        result["error"] = QString("Signature AOB trop faible pour Trainer (%1/100, %2 octet(s) fixe(s)). Allonge la signature ou ajoute des octets fixes.")
+                              .arg(patternQuality.score)
+                              .arg(patternQuality.fixedBytes);
+        result["signatureWarning"] = patternQuality.warning;
+        appendScanTelemetry("trainer_patch_save_blocked", result);
+        return result;
+    }
+
+    killcore::AobScanOptions uniquenessOptions;
+    uniquenessOptions.executableOnly = true;
+    uniquenessOptions.imageOnly = true;
+    uniquenessOptions.maxResults = 2;
+    const auto uniquenessScan = killcore::scanAobPattern(m_handle, parsedPattern, uniquenessOptions);
+    result["signatureMatches"] = uniquenessScan.matchesFound;
+    if (!uniquenessScan.success || uniquenessScan.matchesFound != 1) {
+        result["error"] = uniquenessScan.matchesFound == 0
+            ? QString("Signature AOB introuvable dans le code image executable.")
+            : QString("Signature AOB non unique (%1 matches). Sauvegarde Trainer bloquée.").arg(uniquenessScan.matchesFound);
+        appendScanTelemetry("trainer_patch_save_blocked", result);
+        return result;
+    }
+
     const auto parsedPatch = killcore::parsePatchBytes(patchBytes);
     if (!parsedPatch.isValid()) {
         result["error"] = parsedPatch.error;
@@ -7118,6 +9639,15 @@ QVariantMap ApplicationController::saveProfileCodePatch(
     patch.disassembly = metadata.value("disassembly").toString();
     patch.riskLevel = metadata.value("riskLevel").toString();
     patch.description = metadata.value("description").toString();
+    patch.signatureScore = patternQuality.score;
+    patch.signatureLevel = patternQuality.level;
+    patch.signatureWarning = patternQuality.warning;
+    patch.signatureFixedBytes = patternQuality.fixedBytes;
+    patch.signatureWildcardBytes = patternQuality.wildcardBytes;
+    patch.signatureUniqueFixedBytes = patternQuality.uniqueFixedBytes;
+    patch.signatureFixedRatio = patternQuality.fixedRatio;
+    patch.trainerSafe = patternQuality.trainerSafe;
+    patch.signatureMatches = uniquenessScan.matchesFound;
 
     bool replaced = false;
     for (auto& existing : profile.patches) {
@@ -7143,6 +9673,9 @@ QVariantMap ApplicationController::saveProfileCodePatch(
     result["moduleOffset"] = QString::number(moduleOffset, 16).toUpper();
     result["patchCount"] = profile.patches.size();
     result["replaced"] = replaced;
+    result["signatureMatches"] = uniquenessScan.matchesFound;
+    result["signatureWarning"] = patternQuality.warning;
+    appendScanTelemetry("trainer_patch_saved", result);
     return result;
 }
 
@@ -7181,6 +9714,17 @@ QVariantMap ApplicationController::applyProfileCodePatch(const QString& profileN
         result["error"] = pattern.error;
         return result;
     }
+    const auto quality = killcore::evaluateAobPatternQuality(pattern);
+    result["signatureQuality"] = aobPatternQualityToVariantMap(quality);
+    result["signatureRisk"] = quality.level;
+    if (quality.fixedBytes < 3 || quality.score < 35) {
+        result["error"] = QString("Patch bloqué: signature AOB trop faible (%1/100, %2 octet(s) fixe(s)).")
+                              .arg(quality.score)
+                              .arg(quality.fixedBytes);
+        result["signatureWarning"] = quality.warning;
+        appendScanTelemetry("trainer_patch_apply_blocked", result);
+        return result;
+    }
 
     killcore::AobScanOptions options;
     options.executableOnly = true;
@@ -7189,6 +9733,13 @@ QVariantMap ApplicationController::applyProfileCodePatch(const QString& profileN
     const auto scan = killcore::scanAobPattern(m_handle, pattern, options);
     if (!scan.success || scan.matches.isEmpty()) {
         result["error"] = scan.error.isEmpty() ? QString("Signature AOB introuvable.") : scan.error;
+        return result;
+    }
+    result["signatureMatches"] = scan.matchesFound;
+    if (scan.matchesFound != 1) {
+        result["error"] = QString("Patch bloqué: signature AOB non unique (%1 matches). Regénère une signature plus spécifique.")
+                              .arg(scan.matchesFound);
+        appendScanTelemetry("trainer_patch_apply_blocked", result);
         return result;
     }
 
@@ -7215,6 +9766,10 @@ QVariantMap ApplicationController::applyProfileCodePatch(const QString& profileN
     result["matchedAddress"] = QString::number(selectedAddress, 16).toUpper();
     result["matchCount"] = scan.matches.size();
     result["aobPattern"] = patch->aobPattern;
+    result["signatureQuality"] = aobPatternQualityToVariantMap(quality);
+    result["signatureRisk"] = quality.level;
+    result["signatureMatches"] = scan.matchesFound;
+    appendScanTelemetry(result.value("success").toBool() ? "trainer_patch_apply" : "trainer_patch_apply_failed", result);
     return result;
 }
 
@@ -7405,6 +9960,15 @@ QVariantMap ApplicationController::inspectProfileCodePatches(const QString& prof
         state["patchName"] = patch.name;
         state["module"] = patch.module;
         state["moduleOffset"] = QString::number(patch.moduleOffset, 16).toUpper();
+        state["signatureScore"] = patch.signatureScore;
+        state["signatureLevel"] = patch.signatureLevel;
+        state["signatureWarning"] = patch.signatureWarning;
+        state["signatureFixedBytes"] = patch.signatureFixedBytes;
+        state["signatureWildcardBytes"] = patch.signatureWildcardBytes;
+        state["signatureUniqueFixedBytes"] = patch.signatureUniqueFixedBytes;
+        state["signatureFixedRatio"] = patch.signatureFixedRatio;
+        state["trainerSafe"] = patch.trainerSafe;
+        state["savedSignatureMatches"] = patch.signatureMatches;
         state["success"] = true;
         state["active"] = false;
 
@@ -7491,7 +10055,7 @@ QVariantMap ApplicationController::inspectProfileCodePatches(const QString& prof
 }
 
 // ---------------------------------------------------------------------------
-// Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
+// Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -7654,6 +10218,95 @@ QVariantMap ApplicationController::resolvePointerChain(const QVariantMap& chainM
         steps.append(QString::number(addr, 16));
     }
     result["steps"] = steps;
+
+    return result;
+}
+
+QVariantMap ApplicationController::suggestStableLocatorForAddress(
+    const QString& addressHex,
+    const QVariantMap& options) {
+
+    QVariantMap result;
+    result["success"] = false;
+    result["chainCount"] = 0;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+
+    uint64_t targetAddress = 0;
+    if (!parseHexAddress(addressHex, &targetAddress)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    // Bornes volontairement modestes : cette methode est pensee pour un appel
+    // explicite juste apres une ecriture confirmee, pas pour tourner en fond.
+    QVariantMap scanOptions;
+    scanOptions["maxDepth"] = options.value("maxDepth", 3);
+    scanOptions["maxOffset"] = options.value("maxOffset", 0x1000);
+    scanOptions["maxResults"] = options.value("maxResults", 5);
+    scanOptions["onlyModuleBase"] = options.value("onlyModuleBase", true);
+    scanOptions["alignment"] = options.value("alignment", 8);
+    if (options.contains("baseModules")) {
+        scanOptions["baseModules"] = options.value("baseModules");
+    }
+
+    const QVariantMap scanResult = scanPointerChains(addressHex, scanOptions);
+    result["success"] = scanResult.value("success").toBool();
+    result["elapsedMs"] = scanResult.value("elapsedMs");
+    if (!scanResult.value("error").toString().isEmpty()) {
+        result["error"] = scanResult.value("error");
+    }
+    if (!result["success"].toBool()) {
+        return result;
+    }
+
+    const QVariantList chains = scanResult.value("chains").toList();
+    result["chainCount"] = chains.size();
+    if (chains.isEmpty()) {
+        result["message"] = QStringLiteral(
+            "Aucune chaine de pointeurs stable trouvee vers 0x%1 dans les bornes explorees. "
+            "L'adresse absolue devra etre re-recherchee si le processus redemarre.")
+            .arg(QString::number(targetAddress, 16).toUpper());
+        return result;
+    }
+
+    // Meilleure chaine = la plus courte (moins de niveaux = plus stable, plus
+    // rapide a resoudre) ; a profondeur egale, le plus petit offset de base.
+    QVariantMap best = chains.first().toMap();
+    for (const auto& candidate : chains) {
+        const QVariantMap chain = candidate.toMap();
+        const int candidateDepth = chain.value("depth").toInt();
+        const int bestDepth = best.value("depth").toInt();
+        if (candidateDepth < bestDepth) {
+            best = chain;
+        } else if (candidateDepth == bestDepth) {
+            const qulonglong candidateBase = chain.value("baseOffset").toString().toULongLong(nullptr, 16);
+            const qulonglong bestBase = best.value("baseOffset").toString().toULongLong(nullptr, 16);
+            if (candidateBase < bestBase) {
+                best = chain;
+            }
+        }
+    }
+
+    result["bestChain"] = best;
+    result["message"] = QStringLiteral(
+        "%1 chaine(s) de pointeurs stable(s) trouvee(s) vers 0x%2. "
+        "Meilleure option : %3 (profondeur %4). Sauvegarde-la dans un profil pour qu'elle survive a un redemarrage.")
+        .arg(chains.size())
+        .arg(QString::number(targetAddress, 16).toUpper())
+        .arg(best.value("label").toString())
+        .arg(best.value("depth").toInt());
+
+    appendScanTelemetry("suggest_stable_locator", {
+        {"targetAddress", QString::number(targetAddress, 16)},
+        {"success", result.value("success")},
+        {"chainCount", result.value("chainCount")},
+        {"bestDepth", best.value("depth")},
+        {"elapsedMs", result.value("elapsedMs")},
+    });
 
     return result;
 }

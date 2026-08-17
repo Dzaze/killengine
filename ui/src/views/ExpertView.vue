@@ -12,6 +12,7 @@ import {
   type PointerChainInfo,
   type PointerChainResolveResult,
   type PointerScanResult,
+  type StableLocatorSuggestion,
   type UiStringCandidate,
   type UiStringInvestigationFinishResult,
   type UiStringInvestigationStartResult,
@@ -22,6 +23,19 @@ import {
   type UiStringSourceTrackResult,
   type UiStringTrackResult,
 } from '@/services/backend'
+
+import InfoDot from '@/components/expert/InfoDot.vue'
+import RiskBadge from '@/components/expert/RiskBadge.vue'
+import type { RiskLevel } from '@/components/expert/risk'
+import RegionPanel from '@/components/expert/RegionPanel.vue'
+import NextScanPanel from '@/components/expert/NextScanPanel.vue'
+import WatchLivePanel from '@/components/expert/WatchLivePanel.vue'
+import GroupScanPanel from '@/components/expert/GroupScanPanel.vue'
+import PointerChainWatchPanel from '@/components/expert/PointerChainWatchPanel.vue'
+import ActionLogPanel from '@/components/expert/ActionLogPanel.vue'
+import InjectionPanel from '@/components/expert/InjectionPanel.vue'
+import { formatNumber, formatRate, formatBytes } from '@/utils/format'
+import { valueTypeOptions } from '@/utils/valueTypes'
 
 const store = useAppStore()
 const selectedCandidateAddresses = ref<string[]>([])
@@ -38,6 +52,41 @@ const pointerScanResult = ref<PointerScanResult | null>(null)
 const pointerScanBusy = ref(false)
 const pointerResolveResult = ref<PointerChainResolveResult | null>(null)
 const selectedPointerChainIndex = ref<number>(-1)
+
+// Suggestion de chaîne de pointeurs après une écriture confirmée sur une seule
+// adresse : évite de repasser manuellement par le panneau Pointer Chains.
+const stableLocatorResult = ref<StableLocatorSuggestion | null>(null)
+const stableLocatorBusy = ref(false)
+const stableLocatorForAddress = ref('')
+
+// Tenue live du freeze BP : BreakpointFreezeManager collecte deja hits/
+// rewrites/errors, mais rien ne les affichait avant l'arret. Sondage leger
+// (1s) pendant que le freeze BP est actif, arrete des qu'il ne l'est plus.
+const breakpointFreezeStats = ref<Record<string, unknown> | null>(null)
+let breakpointFreezeStatsTimer: ReturnType<typeof setInterval> | null = null
+
+function stopBreakpointFreezeStatsPolling() {
+  if (breakpointFreezeStatsTimer !== null) {
+    clearInterval(breakpointFreezeStatsTimer)
+    breakpointFreezeStatsTimer = null
+  }
+}
+
+async function pollBreakpointFreezeStats() {
+  const controller = backend.getController()
+  if (!controller.getBreakpointFreezeStats) return
+  breakpointFreezeStats.value = await controller.getBreakpointFreezeStats()
+}
+
+watch(() => store.breakpointFreezeEnabled, (enabled) => {
+  stopBreakpointFreezeStatsPolling()
+  if (enabled) {
+    void pollBreakpointFreezeStats()
+    breakpointFreezeStatsTimer = setInterval(() => { void pollBreakpointFreezeStats() }, 1000)
+  } else {
+    breakpointFreezeStats.value = null
+  }
+})
 
 // AOB signatures — base du futur trainer engine.
 const aobPattern = ref('')
@@ -82,6 +131,11 @@ const findWhatWritesBusy = ref(false)
 const findWhatWritesAcknowledged = ref(false)
 const findWhatWritesTimeoutMs = ref(7000)
 const structureProbeResult = ref<Record<string, unknown> | null>(null)
+const structureCaptureA = ref<StructureProbeRow[] | null>(null)
+const structureCaptureB = ref<StructureProbeRow[] | null>(null)
+const structureCaptureAName = ref('')
+const structureCaptureBName = ref('')
+const structureTemplateName = ref('')
 const selectedFindWhatWritesRip = ref('')
 const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
@@ -134,8 +188,12 @@ interface IntelligentCandidate {
 interface StructureProbeRow {
   offset: number
   address: string
-  int32: number
-  float32: number
+  type?: string
+  value?: unknown
+  valueText?: string
+  rawHex?: string
+  int32?: number
+  float32?: number
   marker: string
 }
 
@@ -166,6 +224,7 @@ onBeforeUnmount(() => {
     clearInterval(uiStringTextLiveTimer)
     uiStringTextLiveTimer = null
   }
+  stopBreakpointFreezeStatsPolling()
 })
 
 async function toggleUiStringLiveInvestigation() {
@@ -299,9 +358,9 @@ function usePointerChainAsCandidate(chain: PointerChainInfo) {
 }
 
 async function savePointerChain(chain: PointerChainInfo) {
-  const profileName = window.prompt('Nom du profil :', 'StarCraft2')
+  const profileName = window.prompt('Nom du profil :', cleanTrainerName(store.processName || 'Jeu cible', 'Jeu cible'))
   if (!profileName) return
-  const targetName = window.prompt('Nom de la cible :', 'Minerals')
+  const targetName = window.prompt('Nom de la cible :', 'Ressource')
   if (!targetName) return
   try {
     const controller = backend.getController()
@@ -320,6 +379,51 @@ async function savePointerChain(chain: PointerChainInfo) {
   } catch (e) {
     window.alert('Erreur : ' + String(e))
   }
+}
+
+async function suggestStableLocator(addressHex: string) {
+  if (!addressHex.trim()) return
+  stableLocatorBusy.value = true
+  stableLocatorResult.value = null
+  stableLocatorForAddress.value = addressHex
+  try {
+    const controller = backend.getController()
+    if (controller.suggestStableLocatorForAddress) {
+      stableLocatorResult.value = await controller.suggestStableLocatorForAddress(addressHex, {})
+    } else {
+      stableLocatorResult.value = { success: false, chainCount: 0, error: 'Methode backend indisponible (mock mode).' }
+    }
+  } catch (e) {
+    stableLocatorResult.value = { success: false, chainCount: 0, error: String(e) }
+  } finally {
+    stableLocatorBusy.value = false
+  }
+}
+
+function saveStableLocator() {
+  if (stableLocatorResult.value?.bestChain) {
+    // savePointerChain() sauvegarde avec le type actuellement affiché dans le
+    // panneau Pointer Chains ; on l'aligne sur le type réellement écrit avant.
+    pointerScanValueType.value = store.exactScanType
+    void savePointerChain(stableLocatorResult.value.bestChain)
+  }
+}
+
+function bookmarkPointerChain(chain: PointerChainInfo) {
+  store.addWorkspaceBookmark({
+    kind: 'pointer',
+    label: chain.label || `Pointer chain ${chain.depth}`,
+    address: pointerScanAddress.value,
+    type: pointerScanValueType.value,
+    note: `profondeur ${chain.depth}`,
+    payload: {
+      chain,
+      targetAddress: pointerScanAddress.value,
+      maxDepth: pointerScanMaxDepth.value,
+      maxOffset: pointerScanMaxOffset.value,
+      resolved: pointerResolveResult.value?.success ? pointerResolveResult.value.finalAddress : undefined,
+    },
+  })
 }
 
 async function scanAobSignature() {
@@ -510,6 +614,59 @@ function useAobMatchAddress(address: string) {
   void store.readMemoryPreview(address, 128)
 }
 
+function bookmarkAobMatch(match: Record<string, unknown>) {
+  const address = String(match.address ?? '').replace(/^0x/i, '').toUpperCase()
+  if (!address) return
+  store.addWorkspaceBookmark({
+    kind: 'aob',
+    label: `AOB 0x${address}`,
+    address,
+    type: 'Code',
+    note: `${String(match.module || match.memoryType || 'code')} ${match.moduleOffset ? `+0x${String(match.moduleOffset)}` : ''}`.trim(),
+    payload: {
+      aobPattern: aobPattern.value.trim(),
+      module: match.module,
+      moduleOffset: match.moduleOffset,
+      protection: match.protection,
+      executableOnly: aobExecutableOnly.value,
+      imageOnly: aobImageOnly.value,
+    },
+  })
+}
+
+function bookmarkCurrentCodePatch() {
+  const address = codePatchAddress.value.trim().replace(/^0x/i, '').toUpperCase()
+  if (!address) return
+  const suggestion = selectedPatchSuggestion()
+  const quality = currentAobQuality()
+  store.addWorkspaceBookmark({
+    kind: 'aob',
+    label: codePatchProfilePatchName.value.trim() || `Patch 0x${address}`,
+    address,
+    type: 'CodePatch',
+    value: codePatchBytes.value.trim(),
+    note: codePatchSuggestionResult.value?.disassembly || suggestion?.description || codePatchProfileDescription.value.trim(),
+    payload: {
+      patchBytes: codePatchBytes.value.trim(),
+      aobPattern: (codePatchSuggestionResult.value?.stableAobPattern || aobPattern.value).trim(),
+      originalBytes: codePatchResult.value?.originalBytes || codePatchSuggestionResult.value?.bytes || '',
+      disassembly: codePatchSuggestionResult.value?.disassembly || '',
+      riskLevel: suggestion?.riskLevel || '',
+      profileName: codePatchProfileName.value.trim(),
+      signatureQuality: quality,
+      signatureScore: quality?.score,
+      signatureLevel: quality?.level,
+      signatureWarning: quality?.warning,
+      signatureFixedBytes: quality?.fixedBytes,
+      signatureWildcardBytes: quality?.wildcardBytes,
+      signatureUniqueFixedBytes: quality?.uniqueFixedBytes,
+      signatureFixedRatio: quality?.fixedRatio,
+      trainerSafe: quality?.trainerSafe,
+      signatureMatches: Number(aobResult.value?.matchesFound ?? 0) || undefined,
+    },
+  })
+}
+
 async function selectAobPatchAddress(address: string) {
   codePatchAddress.value = address
   store.memoryPreviewAddress = address
@@ -529,7 +686,7 @@ function cleanTrainerName(value: string, fallback: string) {
 }
 
 function defaultTrainerProfileName() {
-  return cleanTrainerName(store.processName || 'StarCraft2', 'StarCraft2')
+  return cleanTrainerName(store.processName || 'Trainer', 'Trainer')
 }
 
 function defaultPatchNameFromHit(hit: Record<string, unknown>) {
@@ -541,6 +698,23 @@ function defaultPatchNameFromHit(hit: Record<string, unknown>) {
 function selectedPatchSuggestion() {
   const patchBytes = codePatchBytes.value.trim()
   return codePatchSuggestionResult.value?.suggestions?.find((suggestion) => suggestion.bytesText === patchBytes)
+}
+
+function currentAobQuality() {
+  return codePatchSuggestionResult.value?.signatureQuality
+    || aobResult.value?.signatureQuality
+    || aobSignatureResult.value?.signatureQuality
+}
+
+function aobQualityBlocksTrainer() {
+  const quality = currentAobQuality()
+  if (!quality) return ''
+  const score = Number(quality.score ?? 0)
+  const fixedBytes = Number(quality.fixedBytes ?? 0)
+  if (fixedBytes < 3 || score < 35) {
+    return `Signature AOB trop faible (${score}/100, ${fixedBytes} octet(s) fixe(s)). Allonge la signature ou régénère une AOB plus stable.`
+  }
+  return ''
 }
 
 async function suggestSelectedCodePatches() {
@@ -574,6 +748,7 @@ async function applySelectedCodePatch() {
   const address = codePatchAddress.value.trim()
   const bytes = codePatchBytes.value.trim()
   if (!address || !bytes) return
+  if (!await store.confirmRiskAction('patch', 'Patch code', `Adresse 0x${address.replace(/^0x/i, '')}, bytes ${bytes}.`)) return
   codePatchBusy.value = true
   codePatchResult.value = null
   try {
@@ -616,6 +791,16 @@ async function saveSelectedCodePatchProfile() {
   const pattern = (codePatchSuggestionResult.value?.stableAobPattern || aobPattern.value).trim()
   const patchBytes = codePatchBytes.value.trim()
   if (!profileName || !patchName || !address || !pattern || !patchBytes) return
+  const qualityError = aobQualityBlocksTrainer()
+  if (qualityError) {
+    codePatchProfileResult.value = {
+      success: false,
+      profileName,
+      patchName,
+      error: qualityError,
+    }
+    return
+  }
 
   codePatchProfileBusy.value = true
   codePatchProfileResult.value = null
@@ -636,6 +821,7 @@ async function saveSelectedCodePatchProfile() {
         disassembly: codePatchSuggestionResult.value?.disassembly || '',
         riskLevel: selectedPatchSuggestion()?.riskLevel || '',
         description: codePatchProfileDescription.value.trim(),
+        signatureQuality: currentAobQuality(),
       },
     )
   } catch (e) {
@@ -681,6 +867,16 @@ async function saveTrainerPatchFromHit(hit: Record<string, unknown>) {
     }
 
     const matchesFound = Number(aobResult.value?.matchesFound ?? 0)
+    const qualityError = aobQualityBlocksTrainer()
+    if (qualityError) {
+      codePatchProfileResult.value = {
+        success: false,
+        profileName: codePatchProfileName.value.trim(),
+        patchName: codePatchProfilePatchName.value.trim(),
+        error: qualityError,
+      }
+      return
+    }
     if (!aobResult.value?.success || matchesFound !== 1) {
       codePatchProfileResult.value = {
         success: false,
@@ -858,6 +1054,51 @@ async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) 
   const targetValue = displayedNumericValue()
   structureProbeResult.value = null
   try {
+    const controller = backend.getController()
+    if (controller.analyzeStructureMemory) {
+      const result = await controller.analyzeStructureMemory(base.toString(16).toUpperCase(), 256)
+      if (result.success !== true) {
+        structureProbeResult.value = { success: false, error: String(result.error || 'Analyse structure impossible.') }
+        return
+      }
+      const fields = Array.isArray(result.fields) ? result.fields as Array<Record<string, unknown>> : []
+      const rows = fields
+        .map((field): StructureProbeRow => {
+          const fieldAddress = addressNumber(String(field.address ?? ''))
+          const offset = Number(field.offset ?? 0)
+          const value = field.value
+          const markerParts: string[] = []
+          if (fieldAddress === address) markerParts.push('source')
+          if (targetValue !== null) {
+            const numeric = Number(value)
+            if (Number.isFinite(numeric) && Math.abs(numeric - targetValue) < 0.001) markerParts.push('valeur affichée')
+            if (Number.isFinite(numeric) && [10, 100, 1000, 4096, 65536].some((scale) => Math.trunc(numeric) === Math.trunc(targetValue * scale))) {
+              markerParts.push('fixed-point')
+            }
+          }
+          return {
+            offset: fieldAddress === 0 ? offset - 128 : fieldAddress - address,
+            address: String(field.address ?? '').toUpperCase(),
+            type: String(field.type ?? ''),
+            value,
+            valueText: String(field.valueText ?? ''),
+            rawHex: String(field.rawHex ?? ''),
+            marker: markerParts.join(' · '),
+          }
+        })
+        .filter((row) => row.marker || Math.abs(row.offset) <= 32)
+        .slice(0, 160)
+      structureProbeResult.value = {
+        success: true,
+        base: String(result.baseAddress ?? base.toString(16).toUpperCase()),
+        address: candidate.address,
+        rows,
+        rowCount: rows.length,
+        fieldCount: result.fieldCount,
+      }
+      return
+    }
+
     const preview = await backend.getController().readMemoryPreview(base.toString(16).toUpperCase(), 256)
     if (!preview.success && !preview.partial) {
       structureProbeResult.value = { success: false, error: preview.error || 'Lecture structure impossible.' }
@@ -895,6 +1136,81 @@ async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) 
     }
   } catch (e) {
     structureProbeResult.value = { success: false, error: String(e) }
+  }
+}
+
+function structureRowCanBecomeTrainer(row: StructureProbeRow): boolean {
+  const type = String(row.type ?? '')
+  return Boolean(row.address && row.value !== undefined && /^(Int|UInt|Float)/.test(type))
+}
+
+function createTrainerFromStructureRow(row: StructureProbeRow) {
+  if (!structureRowCanBecomeTrainer(row)) return
+  const feature = store.createTrainerFeature({
+    name: `Struct ${row.type} 0x${row.address}`,
+    action: 'write',
+    address: row.address,
+    valueType: String(row.type ?? 'Int32'),
+    value: String(row.value ?? ''),
+  })
+  if (feature) store.activeView = 'trainer'
+}
+
+function bookmarkStructureRow(row: StructureProbeRow) {
+  store.addWorkspaceBookmark({
+    kind: 'structure_field',
+    label: `Struct ${row.type || 'field'} 0x${row.address}`,
+    address: row.address,
+    type: row.type,
+    value: String(row.value ?? row.int32 ?? ''),
+    note: row.valueText || row.marker || '',
+    payload: {
+      offset: row.offset,
+      rawHex: row.rawHex,
+      marker: row.marker,
+    },
+  })
+}
+
+function cloneStructureRows() {
+  return structureProbeRows.value.map((row) => ({ ...row }))
+}
+
+function captureStructure(slot: 'A' | 'B') {
+  const rows = cloneStructureRows()
+  if (rows.length === 0) return
+  const label = `0x${String(structureProbeResult.value?.address ?? structureProbeResult.value?.base ?? '')} · ${new Date().toLocaleTimeString('fr-FR')}`
+  if (slot === 'A') {
+    structureCaptureA.value = rows
+    structureCaptureAName.value = label
+  } else {
+    structureCaptureB.value = rows
+    structureCaptureBName.value = label
+  }
+}
+
+function saveCurrentStructureTemplate() {
+  const rows = structureProbeRows.value
+  if (rows.length === 0) return
+  const baseAddress = String(structureProbeResult.value?.base ?? structureProbeResult.value?.address ?? '').replace(/^0x/i, '').toUpperCase()
+  const template = store.saveStructureTemplate({
+    name: structureTemplateName.value || `Structure 0x${String(structureProbeResult.value?.address ?? baseAddress)}`,
+    baseAddress,
+    size: Number(structureProbeResult.value?.bytesRead ?? 256),
+    fields: rows
+      .filter((row) => row.type)
+      .map((row) => ({
+        offset: row.offset,
+        type: String(row.type ?? ''),
+        label: row.marker || String(row.type ?? ''),
+        note: row.valueText || '',
+        sampleValue: String(row.value ?? ''),
+        rawHex: row.rawHex,
+      })),
+  })
+  if (template) {
+    structureTemplateName.value = ''
+    store.activeView = 'settings'
   }
 }
 
@@ -1094,6 +1410,8 @@ function addIntelligenceCandidate(
     map.set(sourceKey(candidate), candidate)
   }
 }
+
+const findWhatWritesHits = computed(() => (findWhatWritesResult.value?.hits as Array<Record<string, unknown>> | undefined) ?? [])
 
 const intelligentUiCandidates = computed<IntelligentCandidate[]>(() => {
   const merged = new Map<string, UiStringSourceCandidate>()
@@ -1489,6 +1807,20 @@ function watchCurrentUiSourceBatch() {
   if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
 }
 
+// Chaînage réel : dès qu'une capture Find What Writes réussit, on enchaîne
+// automatiquement sur la génération AOB + suggestions de patch du meilleur
+// hit — au lieu d'attendre que l'utilisateur clique manuellement "Analyser"
+// sur chaque ligne. Réutilise exactement generateAobSignatureFromHit() (le
+// même chemin que le clic manuel), rien n'est dupliqué côté backend. Reste
+// lecture seule : ni "Trainer" (sauvegarde) ni "Patcher" (écriture) ne sont
+// déclenchés automatiquement, l'utilisateur garde la main sur ces étapes.
+async function autoChainFindWhatWritesResult() {
+  if (!findWhatWritesResult.value?.success) return
+  const hits = findWhatWritesHits.value
+  if (hits.length === 0) return
+  await generateAobSignatureFromHit(hits[0])
+}
+
 async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
   if (!findWhatWritesAcknowledged.value) {
     findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: 'Active "Debugger autorisé" avant de lancer Écrit par.' }
@@ -1502,6 +1834,7 @@ async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
       timeoutMs: findWhatWritesTimeoutMs.value,
       maxHits: 12,
     })
+    await autoChainFindWhatWritesResult()
   } catch (e) {
     findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: String(e) }
   } finally {
@@ -1510,6 +1843,9 @@ async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
 }
 
 async function runFindWhatWrites(address: string, options: Record<string, unknown>) {
+  if (!await store.confirmRiskAction('debug', 'Find what writes', `Adresse 0x${address.replace(/^0x/i, '')}, timeout ${String(options.timeoutMs ?? '?')} ms.`)) {
+    return { success: false, hitCount: 0, hits: [], cancelled: true, error: 'Capture debugger annulée par l’utilisateur.' }
+  }
   const controller = backend.getController()
   const findWhatWritesAsync = controller.findWhatWritesAsync
   const findWhatWritesFinished = controller.findWhatWritesFinished
@@ -1604,6 +1940,86 @@ async function cancelFindWhatWritesCapture() {
   }
 }
 
+// ---- Find What Accesses (P1) : instructions qui LISSENT l'adresse ----
+const findWhatAccessesResult = ref<Record<string, unknown> | null>(null)
+const findWhatAccessesBusy = ref(false)
+
+async function runFindWhatAccesses(address: string, options: Record<string, unknown>) {
+  if (!await store.confirmRiskAction('debug', 'Find what accesses', 'Adresse 0x' + address.replace(/^0x/i, '') + ', timeout ' + String(options.timeoutMs ?? '?') + ' ms.')) {
+    return { success: false, hitCount: 0, hits: [], cancelled: true, error: 'Capture debugger annulee par l utilisateur.' }
+  }
+  const controller = backend.getController()
+  const fn = controller.findWhatAccessesAsync
+  const sig = controller.findWhatAccessesFinished
+  if (!fn || !sig) {
+    return { success: false, hitCount: 0, hits: [], error: 'Find What Accesses non disponible dans ce backend.' }
+  }
+  return new Promise<Record<string, unknown>>((resolve) => {
+    let requestId: number | null = null
+    let settled = false
+    const earlyPayloads: Array<Record<string, unknown>> = []
+    const timeout = window.setTimeout(() => {
+      settled = true
+      sig.disconnect?.(handler)
+      resolve({ success: false, hitCount: 0, hits: [], error: 'Timeout de la capture Find What Accesses.' })
+    }, 20000)
+
+    const handler = (payload: Record<string, unknown>) => {
+      if (requestId === null) {
+        earlyPayloads.push(payload)
+        return
+      }
+      if (Number(payload.requestId) !== requestId) return
+      settled = true
+      window.clearTimeout(timeout)
+      sig.disconnect?.(handler)
+      resolve(payload)
+    }
+    sig.connect(handler)
+
+    void fn(address, options).then((start) => {
+      if (settled) return
+      if (start.success !== true || start.started !== true) {
+        settled = true
+        window.clearTimeout(timeout)
+        sig.disconnect?.(handler)
+        resolve({ success: false, hitCount: 0, hits: [], error: String(start.error ?? 'Impossible de demarrer Find What Accesses async.') })
+        return
+      }
+      requestId = Number(start.requestId)
+      for (const payload of earlyPayloads.splice(0)) {
+        handler(payload)
+        if (settled) break
+      }
+    }).catch((error) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
+      sig.disconnect?.(handler)
+      resolve({ success: false, hitCount: 0, hits: [], error: String(error) })
+    })
+  })
+}
+
+async function findWhatAccessesForSource(candidate: UiStringSourceCandidate) {
+  if (!findWhatWritesAcknowledged.value) {
+    findWhatAccessesResult.value = { success: false, hitCount: 0, hits: [], error: 'Active le consentement debugger avant de lancer Lu par.' }
+    return
+  }
+  findWhatAccessesBusy.value = true
+  findWhatAccessesResult.value = null
+  try {
+    findWhatAccessesResult.value = await runFindWhatAccesses(candidate.address, {
+      size: findWhatWritesSizeForType(candidate.type),
+      timeoutMs: findWhatWritesTimeoutMs.value,
+      maxHits: 12,
+    })
+  } catch (e) {
+    findWhatAccessesResult.value = { success: false, hitCount: 0, hits: [], error: String(e) }
+  } finally {
+    findWhatAccessesBusy.value = false
+  }
+}
 async function findWhatWritesForUiString(candidate: UiStringCandidate) {
   if (!findWhatWritesAcknowledged.value) {
     findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: 'Active "Debugger autorisé" avant de lancer Écrit par.' }
@@ -1621,6 +2037,7 @@ async function findWhatWritesForUiString(candidate: UiStringCandidate) {
       encoding: candidate.encoding,
       text: candidate.text,
     })
+    await autoChainFindWhatWritesResult()
   } catch (e) {
     findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: String(e) }
   } finally {
@@ -1696,8 +2113,28 @@ const writePlan = computed(() => selectedWriteTargets.value.map((target) => {
   }
 }))
 const writeFailures = computed(() => (store.writeResult?.results ?? []).filter((result) => !result.success))
-const findWhatWritesHits = computed(() => (findWhatWritesResult.value?.hits as Array<Record<string, unknown>> | undefined) ?? [])
 const structureProbeRows = computed(() => (structureProbeResult.value?.rows as StructureProbeRow[] | undefined) ?? [])
+const structureDiffRows = computed(() => {
+  const aRows = structureCaptureA.value ?? []
+  const bRows = structureCaptureB.value ?? []
+  if (aRows.length === 0 || bRows.length === 0) return []
+  const keyFor = (row: StructureProbeRow) => `${row.offset}:${row.type ?? ''}`
+  const aByKey = new Map(aRows.map((row) => [keyFor(row), row]))
+  return bRows
+    .map((after) => {
+      const before = aByKey.get(keyFor(after))
+      const beforeValue = before ? String(before.value ?? before.int32 ?? '') : ''
+      const afterValue = String(after.value ?? after.int32 ?? '')
+      return {
+        ...after,
+        beforeValue,
+        afterValue,
+        changed: beforeValue !== afterValue,
+      }
+    })
+    .filter((row) => row.changed || Math.abs(row.offset) <= 32)
+    .slice(0, 160)
+})
 const selectedCandidateTypes = computed(() => Array.from(new Set(
   selectedWriteTargets.value.map((target) => String(target.variantLabel || target.type)),
 )))
@@ -1720,10 +2157,115 @@ const writeButtonLabel = computed(() => hasSelectedWriteTargets.value
   ? `Écrire ${selectedCandidateAddresses.value.length}`
   : 'Écrire')
 const expertDense = computed(() => store.uiMode === 'expert')
+const expertScenarioPresets = computed(() => store.workflowPresets.filter((preset) => preset.id.startsWith('scenario-')))
+
+// P3 - Les 13 panneaux Expert sont regroupes en 4 etapes de workflow.
+// L'ordre relatif des panneaux dans le template correspond deja aux etapes,
+// donc un simple filtre suffit: aucun bloc n'a besoin d'etre deplace.
+type ExpertStepId = 'find' | 'inspect' | 'act' | 'persist'
+
+const expertSteps: Array<{ id: ExpertStepId; risk: RiskLevel }> = [
+  { id: 'find', risk: 'read' },
+  { id: 'inspect', risk: 'read' },
+  { id: 'act', risk: 'write' },
+  { id: 'persist', risk: 'code' },
+]
+
+// Défaut sur 'all' : le workflow réel va constamment de "trouver" à "agir"
+// (trouver un candidat -> l'écrire tout de suite pour tester), donc masquer
+// le panneau Write par défaut le rend invisible en pratique. Le filtre par
+// étape reste disponible pour qui le veut, mais rien n'est caché sans un
+// clic explicite de l'utilisateur.
+const activeStep = ref<ExpertStepId | 'all'>('all')
+
+function showStep(id: ExpertStepId) {
+  return activeStep.value === 'all' || activeStep.value === id
+}
+
+// Compteur affiche sur l'onglet d'etape: montre ou en est le travail sans
+// forcer une navigation automatique (un changement d'onglet subi est pire
+// qu'un onglet a cliquer).
+function stepCount(id: ExpertStepId): number {
+  if (id === 'find') return store.candidatePage?.totalCount ?? 0
+  if (id === 'inspect') return store.watchedAddresses.length
+  if (id === 'act') return selectedCandidateAddresses.value.length
+  return aobResult.value?.matchesFound ?? 0
+}
+
+// "Nouveau scan" ne videait avant que le candidate store guidé
+// (store.resetWorkflow) : les résultats des autres panneaux (Trace UI
+// string, AOB, patch, pointer chains, find what writes, structures) restaient
+// affichés comme s'ils appartenaient à la nouvelle recherche. Ne touche
+// volontairement PAS aux surveillances actives (watch, freeze polling/BP en
+// cours) : ce sont des actions délibérées et indépendantes de "quelle valeur
+// je cherche maintenant" — les arrêter silencieusement serait une surprise,
+// pas une aide.
+async function startNewScan() {
+  await store.resetWorkflow()
+
+  if (uiStringLiveInvestigation.value) {
+    await toggleUiStringLiveInvestigation() // ferme proprement côté backend (finishUiStringInvestigation)
+  }
+  if (uiStringTextLiveEnabled.value) {
+    setUiStringTextLiveEnabled(false)
+  }
+
+  selectedCandidateAddresses.value = []
+  selectedWriteTargetOverrides.value = {}
+
+  pointerScanAddress.value = ''
+  pointerScanResult.value = null
+  pointerResolveResult.value = null
+  selectedPointerChainIndex.value = -1
+
+  stableLocatorResult.value = null
+  stableLocatorForAddress.value = ''
+
+  aobPattern.value = ''
+  aobResult.value = null
+  aobStabilizeResult.value = null
+  aobSignatureResult.value = null
+  codePatchAddress.value = ''
+  codePatchBytes.value = '90 90'
+  codePatchResult.value = null
+  codePatchSuggestionResult.value = null
+  codePatchProfileName.value = ''
+  codePatchProfilePatchName.value = ''
+  codePatchProfileDescription.value = ''
+  codePatchProfileResult.value = null
+
+  uiStringValue.value = ''
+  uiStringNextValue.value = ''
+  uiStringResult.value = null
+  uiStringTrackResult.value = null
+  uiStringSourceResult.value = null
+  uiStringSourceTrackResult.value = null
+  uiStringOriginResult.value = null
+  uiStringCandidates.value = []
+  uiStringSourceCandidates.value = []
+  selectedUiStringAddresses.value = []
+  selectedUiSourceAddresses.value = []
+  uiStringLiveTexts.value = {}
+  uiStringInvestigationStartResult.value = null
+  uiStringInvestigationFinishResult.value = null
+  uiStringSourceBatchIndex.value = 0
+
+  findWhatWritesResult.value = null
+  findWhatWritesAcknowledged.value = false
+  selectedFindWhatWritesRip.value = ''
+  findWhatAccessesResult.value = null
+
+  structureProbeResult.value = null
+  structureCaptureA.value = null
+  structureCaptureB.value = null
+  structureCaptureAName.value = ''
+  structureCaptureBName.value = ''
+  structureTemplateName.value = ''
+}
+
 const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0) > 0)
 const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau scan' : 'Premier scan')
 const unknownGuideReady = computed(() => Boolean(store.unknownSnapshotResult?.success) || hasCandidateContext.value)
-const valueTypeOptions = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Float32', 'Float64']
 
 const unknownGuideActions = [
   { mode: 'increased', label: 'ça augmente' },
@@ -1734,21 +2276,6 @@ const unknownGuideActions = [
 const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096] // -1 = Auto
 const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
 
-function formatNumber(value: number | undefined) {
-  return new Intl.NumberFormat('fr-FR').format(value ?? 0)
-}
-
-function formatRate(value: number | undefined) {
-  return `${formatNumber(Math.round(value ?? 0))}/s`
-}
-
-function formatBytes(value: number | undefined) {
-  const bytes = value ?? 0
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} Go`
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} Ko`
-  return `${formatNumber(bytes)} o`
-}
 
 function encodedDisplayWriteValue(value: string, variantLabel?: string): string {
   const cleanValue = value.trim().replace(',', '.')
@@ -1915,7 +2442,7 @@ onMounted(() => {
         <p>{{ store.isAttached ? store.processName : store.statusText }}</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-secondary" :disabled="store.scanBusy" @click="store.resetWorkflow()">
+        <button class="btn btn-secondary" :disabled="store.scanBusy" @click="startNewScan()">
           Nouveau scan
         </button>
         <button class="btn btn-secondary" @click="store.doPing()">
@@ -1929,6 +2456,19 @@ onMounted(() => {
     </div>
 
     <template v-else>
+      <div class="preset-row">
+        <span class="hint preset-row-label">Scénarios courants :</span>
+        <button
+          v-for="preset in expertScenarioPresets"
+          :key="preset.id"
+          class="btn btn-secondary compact"
+          type="button"
+          @click="store.applyWorkflowPreset(preset.id)"
+        >
+          {{ preset.title }}
+        </button>
+      </div>
+
       <div v-if="store.scanStatusText" class="scan-status" :class="{ active: store.scanBusy }">
         <div class="scan-status-head">
           <strong>{{ store.scanStatusText }}</strong>
@@ -1968,26 +2508,47 @@ onMounted(() => {
         </div>
       </div>
 
-      <section v-if="store.expertRegionSize || store.expertRegionProtection" class="panel region-context">
-        <div class="panel-title">
-          <h2>Région active</h2>
-          <span>{{ formatBytes(store.expertRegionSize) }}</span>
-        </div>
-        <div class="metrics">
-          <span>Début: {{ store.expertStartAddress || '-' }}</span>
-          <span>Fin: {{ store.expertStopAddress || '-' }}</span>
-          <span>Protection: {{ store.expertRegionProtection || '-' }}</span>
-          <span>État: {{ store.expertRegionState || '-' }}</span>
-          <span>Type: {{ store.expertRegionType || '-' }}</span>
-        </div>
-      </section>
+      <nav class="workflow-steps" aria-label="Étapes du Mode Expert">
+        <button
+          v-for="step in expertSteps"
+          :key="step.id"
+          type="button"
+          class="workflow-step"
+          :class="{ active: activeStep === step.id }"
+          @click="activeStep = step.id"
+        >
+          <span class="workflow-step-head">
+            <span class="workflow-step-title">{{ $t(`help.step.${step.id}.title`) }}</span>
+            <RiskBadge v-if="step.risk !== 'read'" :level="step.risk" />
+            <span v-if="stepCount(step.id)" class="workflow-step-count">{{ formatNumber(stepCount(step.id)) }}</span>
+          </span>
+          <span class="workflow-step-what">{{ $t(`help.step.${step.id}.what`) }}</span>
+        </button>
+        <button
+          type="button"
+          class="workflow-step compact-step"
+          :class="{ active: activeStep === 'all' }"
+          @click="activeStep = 'all'"
+        >
+          <span class="workflow-step-head">
+            <span class="workflow-step-title">Tout</span>
+          </span>
+          <span class="workflow-step-what">Afficher les panneaux des quatre étapes en même temps.</span>
+        </button>
+      </nav>
 
-      <section class="panel">
+      <RegionPanel v-show="showStep('inspect')" v-if="store.expertRegionSize || store.expertRegionProtection" />
+
+      <section v-show="showStep('find')" class="panel">
         <div class="panel-title">
-          <h2>{{ $t('scan.exact') }}</h2>
+          <div class="panel-heading">
+            <h2>{{ $t('scan.exact') }}</h2>
+            <InfoDot topic="scanExact" />
+            <RiskBadge level="read" />
+          </div>
           <div class="panel-actions">
             <span v-if="store.exactScanResult?.partial">{{ $t('scan.partial') }}</span>
-            <button class="btn btn-secondary compact" type="button" :disabled="store.scanBusy" @click="store.resetWorkflow()">
+            <button class="btn btn-secondary compact" type="button" :disabled="store.scanBusy" @click="startNewScan()">
               Nouveau scan
             </button>
           </div>
@@ -2079,54 +2640,56 @@ onMounted(() => {
           <span v-if="store.exactScanResult.bytesPerSecond">Débit: {{ formatRate(store.exactScanResult.bytesPerSecond) }}</span>
         </div>
         <p v-if="store.exactScanResult?.error" class="error">{{ store.exactScanResult.error }}</p>
+        <div class="encrypted-scan-panel">
+          <div class="source-list-title">
+            <strong>Scan chiffré</strong>
+            <span>XOR/Add/Sub/NOT · writable</span>
+          </div>
+          <div class="controls encrypted-controls">
+            <select v-model="store.encryptedScanMode" class="input select compact-input" :disabled="store.scanBusy">
+              <option value="xor">XOR</option>
+              <option value="add">Add</option>
+              <option value="sub">Sub</option>
+              <option value="not">NOT</option>
+            </select>
+            <input v-model="store.encryptedScanKey" class="input compact-input" placeholder="clé 0x42" :disabled="store.scanBusy || store.encryptedScanMode === 'not'" />
+            <select v-model.number="store.encryptedScanKeySearchBits" class="input select compact-input" :disabled="store.scanBusy || store.encryptedScanMode === 'not'">
+              <option :value="0">clé fixe</option>
+              <option :value="8">brute 8-bit</option>
+              <option :value="16">brute 16-bit</option>
+            </select>
+            <button class="btn btn-primary compact" type="button" :disabled="!store.exactScanValue.trim() || store.scanBusy" @click="store.doEncryptedScan()">
+              Scanner
+            </button>
+          </div>
+          <div v-if="store.encryptedScanResult" class="metrics">
+            <span>Matches: {{ formatNumber(store.encryptedScanResult.matchesFound) }}</span>
+            <span>Régions: {{ formatNumber(store.encryptedScanResult.regionsScanned) }}</span>
+            <span>Lu: {{ formatBytes(store.encryptedScanResult.bytesScanned) }}</span>
+            <span v-if="store.encryptedScanResult.partial">partiel</span>
+          </div>
+          <p v-if="store.encryptedScanResult?.error" class="error">{{ store.encryptedScanResult.error }}</p>
+          <div v-if="store.encryptedScanResult?.matches.length" class="encrypted-result-list">
+            <div v-for="match in store.encryptedScanResult.matches.slice(0, 12)" :key="`${match.address}:${match.variantLabel}`" class="source-row">
+              <code>0x{{ match.address }}</code>
+              <span>{{ match.type }}</span>
+              <span>{{ match.variantLabel || '-' }}</span>
+              <button class="btn btn-secondary compact" type="button" @click="store.selectCandidate(match.address, match.type)">Utiliser</button>
+              <button class="btn btn-secondary compact" type="button" @click="store.addAddressToWatch(match.address, match.type)">Watch</button>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-title">
-          <h2>{{ $t('scan.nextScan') }}</h2>
-          <button
-            class="btn btn-secondary compact"
-            type="button"
-            :disabled="store.scanBusy || !store.candidatePage?.totalCount"
-            @click="store.undoCandidateScan()"
-          >
-            Restaurer réduction
-          </button>
-        </div>
-        <div class="controls next-controls">
-          <select v-model="store.nextScanMode" class="input select" :disabled="store.scanBusy || !hasCandidateContext">
-            <option value="exact">{{ $t('scan.modeExact') }}</option>
-            <option value="changed">{{ $t('scan.modeChanged') }}</option>
-            <option value="unchanged">{{ $t('scan.modeUnchanged') }}</option>
-            <option value="increased">{{ $t('scan.modeIncreased') }}</option>
-            <option value="decreased">{{ $t('scan.modeDecreased') }}</option>
-            <option value="delta">{{ $t('scan.modeDelta') }}</option>
-          </select>
-          <input
-            v-model="store.nextScanValue"
-            :disabled="store.scanBusy || !hasCandidateContext || (store.nextScanMode !== 'exact' && store.nextScanMode !== 'delta')"
-            :placeholder="$t('scan.nextValue')"
-            class="input"
-            @keyup.enter="store.doNextScan()"
-          />
-          <button class="btn btn-primary" :disabled="store.scanBusy || !hasCandidateContext" @click="store.doNextScan()">
-            <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
-            <span>{{ store.scanBusy ? 'Scan...' : $t('scan.nextScan') }}</span>
-          </button>
-        </div>
-        <div v-if="store.nextScanResult" class="metrics">
-          <span>{{ $t('scan.remaining') }}: {{ formatNumber(store.nextScanResult.remaining) }}</span>
-          <span>{{ $t('scan.checked') }}: {{ formatNumber(store.nextScanResult.checked) }}</span>
-          <span>{{ $t('scan.unreadable') }}: {{ formatNumber(store.nextScanResult.unreadable) }}</span>
-          <span v-if="store.nextScanResult.elapsedMs">Temps: {{ formatNumber(store.nextScanResult.elapsedMs) }} ms</span>
-          <span v-if="store.nextScanResult.candidatesPerSecond">Débit: {{ formatRate(store.nextScanResult.candidatesPerSecond) }}</span>
-        </div>
-        <p v-if="store.nextScanResult?.error" class="error">{{ store.nextScanResult.error }}</p>
-      </section>
+      <NextScanPanel v-show="showStep('find')" />
 
-      <section class="panel">
+      <section v-show="showStep('find')" class="panel">
         <div class="panel-title">
-          <h2>{{ $t('unknown.title') }}</h2>
+          <div class="panel-heading">
+            <h2>{{ $t('unknown.title') }}</h2>
+            <InfoDot topic="unknown" />
+            <RiskBadge level="read" />
+          </div>
         </div>
         <div class="controls unknown-controls">
           <select v-model="store.unknownScanType" class="input select" :disabled="store.scanBusy">
@@ -2147,11 +2710,14 @@ onMounted(() => {
               <option v-for="mb in unknownSnapshotPresets" :key="mb" :value="mb">{{ unknownDepthLabel(mb) }}</option>
             </select>
           </label>
-          <button class="btn btn-secondary" :disabled="store.scanBusy" @click="store.captureUnknownSnapshot()">
+          <button class="btn btn-primary" :disabled="store.scanBusy" @click="store.captureUnknownSnapshot()">
             <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
             <span>{{ store.scanBusy ? 'Capture...' : $t('unknown.capture') }}</span>
           </button>
         </div>
+        <p class="hint unknown-guide-warning">
+          ⚠️ Avant de cliquer : as-tu bien fait l'action dans le jeu ? "Ça augmente/diminue/change" doit suivre un vrai changement, "stable" doit suivre l'absence de changement. Cliquer le mauvais bouton peut faire tomber tes candidats à 0 d'un coup — utilise "Restaurer réduction" (panneau Scan suivant, un peu plus haut) si ça arrive.
+        </p>
         <div class="unknown-guide">
           <button
             v-for="action in unknownGuideActions"
@@ -2214,16 +2780,21 @@ onMounted(() => {
         </p>
       </section>
 
-      <section class="panel ui-string-panel">
+      <section v-show="showStep('find')" class="panel ui-string-panel">
         <div class="panel-title">
-          <h2>Trace UI string</h2>
+          <div class="panel-heading">
+            <h2>Trace UI string</h2>
+            <InfoDot topic="uiString" />
+            <RiskBadge level="read" />
+          </div>
           <span v-if="uiStringResult">{{ formatNumber(uiStringCandidates.length) }} candidat(s)</span>
         </div>
+        <p class="hint">Étape 1 : tape la valeur telle qu'affichée à l'écran, clique Scanner texte. Étape 2 : change cette valeur dans le jeu, tape la nouvelle valeur affichée, puis clique Scan suivant (texte) et, si tu as déjà lancé Analyser sources plus bas, Scan suivant (sources) aussi.</p>
         <div class="controls ui-string-controls">
           <input
             v-model="uiStringValue"
             class="input"
-            placeholder="Texte affiché (ex: 50)"
+            placeholder="Étape 1 : texte affiché (ex: 50)"
             :disabled="uiStringBusy || store.scanBusy"
             @keyup.enter="scanUiStrings()"
           />
@@ -2234,15 +2805,15 @@ onMounted(() => {
           <input
             v-model="uiStringNextValue"
             class="input"
-            placeholder="Nouvelle valeur affichée"
+            placeholder="Étape 2 : nouvelle valeur affichée"
             :disabled="uiStringBusy || uiStringCandidates.length === 0"
             @keyup.enter="trackUiStrings()"
           />
-          <button class="btn btn-secondary" :disabled="uiStringBusy || uiStringCandidates.length === 0 || !uiStringNextValue.trim()" @click="trackUiStrings()">
-            Filtrer strings
+          <button class="btn btn-primary" :disabled="uiStringBusy || uiStringCandidates.length === 0 || !uiStringNextValue.trim()" @click="trackUiStrings()">
+            Scan suivant (texte)
           </button>
           <button class="btn btn-primary" :disabled="uiStringBusy || uiStringSourceCandidates.length === 0 || !uiStringNextValue.trim()" @click="trackUiStringSources()">
-            Tracker sources
+            Scan suivant (sources)
           </button>
         </div>
         <div class="ui-investigation" :class="{ active: uiStringLiveInvestigation }">
@@ -2255,7 +2826,7 @@ onMounted(() => {
             <strong>{{ uiStringLiveInvestigation ? 'Enquête armée' : 'Enquête live prête' }}</strong>
             <span>
               {{ uiStringLiveInvestigation
-                ? `Snapshot capturé. Modifie la valeur dans SC2, puis clique Arrêter et comparer · ${formatNumber(uiStringInvestigationElapsed)} s`
+                ? `Snapshot capturé. Modifie la valeur dans le jeu cible, puis clique Arrêter et comparer · ${formatNumber(uiStringInvestigationElapsed)} s`
                 : 'Démarre avant de modifier la ressource pour chercher au-delà de la simple string UI.' }}
             </span>
           </div>
@@ -2348,6 +2919,7 @@ onMounted(() => {
           </label>
           <label class="compact-select">
             <span>Écrit par</span>
+            <InfoDot topic="findWhatWrites" />
             <select v-model.number="findWhatWritesTimeoutMs" class="input select" :disabled="findWhatWritesBusy">
               <option v-for="timeout in findWhatWritesTimeoutOptions" :key="timeout" :value="timeout">
                 {{ timeout / 1000 }} s
@@ -2357,6 +2929,7 @@ onMounted(() => {
         </div>
         <p class="debugger-guard">
           <strong>Écrit par</strong> attache le debugger Windows au processus pendant la capture. À utiliser sur une cible de test ou solo, puis fais varier la valeur pendant la fenêtre choisie.
+          Dès qu'une instruction est capturée, la signature AOB et les suggestions de patch se génèrent automatiquement ci-dessous (lecture seule) — sauvegarder en Trainer ou patcher reste toujours un clic manuel séparé.
         </p>
         <div v-if="uiStringResult" class="metrics">
           <span>Matches: {{ formatNumber(uiStringResult.matchesFound) }}</span>
@@ -2386,6 +2959,9 @@ onMounted(() => {
         <p v-if="uiStringTrackResult?.error" class="error">{{ uiStringTrackResult.error }}</p>
         <p v-if="uiStringSourceResult?.error" class="error">{{ uiStringSourceResult.error }}</p>
         <p v-if="uiStringSourceTrackResult?.error" class="error">{{ uiStringSourceTrackResult.error }}</p>
+        <p v-if="uiStringCandidates.length > 0" class="hint">
+          Étape 3 (optionnelle) : clique Analyser sources pour chercher les nombres qui alimentent ce texte — ça débloque le bouton Scan suivant (sources) plus haut. Trop de résultats ? Change encore la valeur en jeu puis reclique Scan suivant (sources), ou essaie Auto origine qui enchaîne tout.
+        </p>
         <div v-if="uiStringCandidates.length > 0" class="selection-toolbar">
           <button class="btn btn-secondary compact" type="button" @click="toggleAllUiStringSelection()">
             {{ selectedUiStringAddresses.length === uiStringCandidates.length ? 'Tout décocher' : 'Tout cocher' }}
@@ -2445,7 +3021,7 @@ onMounted(() => {
             <button class="btn btn-primary compact" type="button" @click="analyzeUiStringSources(candidate)">Sources</button>
             <button class="btn btn-secondary compact" type="button" @click="inspectUiStringOrigins(candidate)">Origine</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">Watch octets</button>
-            <button class="btn btn-secondary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForUiString(candidate)">
+            <button class="btn btn-primary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForUiString(candidate)">
               Écrit par
             </button>
             <button class="btn btn-secondary compact" type="button" @click="useUiStringCandidate(candidate)">Assistant</button>
@@ -2465,7 +3041,7 @@ onMounted(() => {
               Annuler capture
             </button>
           </div>
-          <p v-if="findWhatWritesBusy" class="hint">Capture en cours : modifie la valeur dans SC2 pendant {{ findWhatWritesTimeoutMs / 1000 }} seconde(s).</p>
+          <p v-if="findWhatWritesBusy" class="hint">Capture en cours : modifie la valeur dans le jeu cible pendant {{ findWhatWritesTimeoutMs / 1000 }} seconde(s).</p>
           <p v-if="findWhatWritesResult?.error" class="error">{{ findWhatWritesResult.error }}</p>
           <div
             v-for="hit in findWhatWritesHits.slice(0, 12)"
@@ -2554,7 +3130,7 @@ onMounted(() => {
             <button class="btn btn-secondary compact" type="button" @click="selectIntelligentUiCandidate(candidate)">Cocher</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate.source)">Watch</button>
             <button class="btn btn-secondary compact" type="button" @click="analyzeStructureAroundSource(candidate.source)">Struct</button>
-            <button class="btn btn-secondary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate.source)">Écrit par</button>
+            <button class="btn btn-primary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate.source)">Écrit par</button>
           </div>
         </div>
         <div v-if="structureProbeResult" class="structure-panel">
@@ -2562,7 +3138,39 @@ onMounted(() => {
             <strong>Structure autour source</strong>
             <span v-if="structureProbeResult.address">0x{{ structureProbeResult.address }} · {{ formatNumber(Number(structureProbeResult.rowCount ?? 0)) }} ligne(s)</span>
           </div>
+          <div class="structure-actions">
+            <button class="btn btn-secondary compact" type="button" :disabled="structureProbeRows.length === 0" @click="captureStructure('A')">
+              Capture A
+            </button>
+            <button class="btn btn-secondary compact" type="button" :disabled="structureProbeRows.length === 0" @click="captureStructure('B')">
+              Capture B
+            </button>
+            <input v-model="structureTemplateName" class="input compact-input" placeholder="Nom template" />
+            <button class="btn btn-primary compact" type="button" :disabled="structureProbeRows.length === 0" @click="saveCurrentStructureTemplate()">
+              Sauver template
+            </button>
+            <span v-if="structureCaptureAName">A: {{ structureCaptureAName }}</span>
+            <span v-if="structureCaptureBName">B: {{ structureCaptureBName }}</span>
+          </div>
           <p v-if="structureProbeResult.error" class="error">{{ structureProbeResult.error }}</p>
+          <div v-if="structureDiffRows.length > 0" class="structure-diff">
+            <div class="source-list-title">
+              <strong>Diff A/B</strong>
+              <span>{{ formatNumber(structureDiffRows.filter((row) => row.changed).length) }} changement(s)</span>
+            </div>
+            <div
+              v-for="row in structureDiffRows"
+              :key="`diff:${row.offset}:${row.type}`"
+              class="structure-row"
+              :class="{ marked: row.changed }"
+            >
+              <code>0x{{ row.address }}</code>
+              <span>{{ row.offset >= 0 ? '+' : '' }}{{ row.offset }}</span>
+              <strong>{{ row.type || 'field' }}</strong>
+              <span>{{ row.beforeValue || '-' }} → {{ row.afterValue || '-' }}</span>
+              <span>{{ row.changed ? 'changé' : 'stable' }}</span>
+            </div>
+          </div>
           <div
             v-for="row in structureProbeRows"
             :key="row.address"
@@ -2571,9 +3179,25 @@ onMounted(() => {
           >
             <code>0x{{ row.address }}</code>
             <span>{{ row.offset >= 0 ? '+' : '' }}{{ row.offset }}</span>
-            <strong>i32 {{ formatNumber(row.int32) }}</strong>
-            <span>f32 {{ Number.isFinite(row.float32) ? row.float32.toFixed(3) : '-' }}</span>
+            <strong>{{ row.type ? `${row.type} ${String(row.value ?? '')}` : `i32 ${formatNumber(Number(row.int32 ?? 0))}` }}</strong>
+            <span>{{ row.valueText || (Number.isFinite(row.float32) ? `f32 ${Number(row.float32).toFixed(3)}` : '-') }}</span>
+            <code v-if="row.rawHex">{{ row.rawHex }}</code>
             <span>{{ row.marker || '-' }}</span>
+            <button
+              v-if="structureRowCanBecomeTrainer(row)"
+              class="btn btn-secondary compact"
+              type="button"
+              @click="createTrainerFromStructureRow(row)"
+            >
+              Trainer
+            </button>
+            <button
+              class="btn btn-secondary compact"
+              type="button"
+              @click="bookmarkStructureRow(row)"
+            >
+              Note
+            </button>
           </div>
         </div>
         <div v-if="uiStringSourceCandidates.length > 0" ref="uiStringSourcesPanelRef" class="source-list">
@@ -2629,7 +3253,7 @@ onMounted(() => {
             </div>
           </div>
           <p v-if="selectedUiSourceAddresses.length > 50" class="source-warning">
-            Sélection massive : écrire beaucoup d'adresses peut rendre SC2 instable. Teste plutôt par petits paquets.
+            Sélection massive : écrire beaucoup d'adresses peut rendre la cible instable. Teste plutôt par petits paquets.
           </p>
           <div
             v-for="candidate in filteredUiStringSourceCandidates"
@@ -2654,16 +3278,20 @@ onMounted(() => {
             <button class="btn btn-primary compact" type="button" @click="useUiSourceCandidate(candidate)">Utiliser</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate)">Watch</button>
             <button class="btn btn-secondary compact" type="button" @click="analyzeStructureAroundSource(candidate)">Struct</button>
-            <button class="btn btn-secondary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate)">
+            <button class="btn btn-primary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate)">
               Écrit par
-            </button>
+            </button> <button class="btn btn-secondary compact" type="button" :disabled="findWhatAccessesBusy || !findWhatWritesAcknowledged" @click="findWhatAccessesForSource(candidate)">Lu par</button>
           </div>
         </div>
       </section>
 
-      <section class="panel">
+      <section v-show="showStep('inspect')" class="panel">
         <div class="panel-title">
-          <h2>Candidats</h2>
+          <div class="panel-heading">
+            <h2>Candidats</h2>
+            <InfoDot topic="candidates" />
+            <RiskBadge level="read" />
+          </div>
           <span>{{ formatNumber(store.candidatePage?.totalCount) }} · {{ selectedCandidateAddresses.length }} sélectionné(s)</span>
         </div>
         <div class="candidate-toolbar">
@@ -2771,9 +3399,13 @@ onMounted(() => {
         </div>
       </section>
 
-      <section ref="writePanelRef" class="panel">
+      <section v-show="showStep('act')" ref="writePanelRef" class="panel">
         <div class="panel-title">
-          <h2>{{ $t('write.title') }}</h2>
+          <div class="panel-heading">
+            <h2>{{ $t('write.title') }}</h2>
+            <InfoDot topic="write" />
+            <RiskBadge level="write" />
+          </div>
           <div class="panel-title-actions">
             <button
               v-if="uiStringSourceCandidates.length > 0"
@@ -2819,9 +3451,29 @@ onMounted(() => {
               <option v-for="ms in freezeIntervalPresets" :key="ms" :value="ms">{{ ms }} ms</option>
             </select>
           </label>
-          <button class="btn btn-secondary" :disabled="hasSelectedWriteTargets || (store.freezeEnabled ? !store.selectedCandidateAddress : !store.canWriteSelectedValue)" @click="store.toggleFreeze()">
+          <button class="btn" :class="store.freezeEnabled ? 'btn-secondary' : 'btn-primary'" :disabled="hasSelectedWriteTargets || (store.freezeEnabled ? !store.selectedCandidateAddress : !store.canWriteSelectedValue)" @click="store.toggleFreeze()">
             {{ store.freezeEnabled ? $t('write.stopFreeze') : $t('write.freeze') }}
           </button>
+          <button
+            class="btn btn-secondary"
+            :disabled="hasSelectedWriteTargets || store.breakpointFreezeEnabled || !store.canWriteSelectedValue"
+            title="Hardware breakpoint: intercepte les écritures et réécrit immédiatement la valeur."
+            @click="store.startBreakpointFreeze()"
+          >
+            Freeze BP
+          </button>
+          <InfoDot topic="freezeBp" align="right" />
+          <button
+            class="btn btn-secondary"
+            :disabled="!store.breakpointFreezeEnabled"
+            title="Arrêter le freeze par hardware breakpoint."
+            @click="store.stopBreakpointFreeze()"
+          >
+            Stop BP
+          </button>
+          <span v-if="store.breakpointFreezeEnabled && breakpointFreezeStats" class="bp-live-stats" :class="{ warning: breakpointFreezeStats.healthy === false }">
+            {{ formatNumber(Number(breakpointFreezeStats.hits ?? 0)) }} hits · {{ formatNumber(Number(breakpointFreezeStats.rewrites ?? 0)) }} corrigé(s)<template v-if="Number(breakpointFreezeStats.errors ?? 0) > 0"> · {{ formatNumber(Number(breakpointFreezeStats.errors ?? 0)) }} erreur(s)</template>
+          </span>
         </div>
         <div v-if="hasSelectedWriteTargets" class="write-plan">
           <div class="write-plan-title">
@@ -2850,9 +3502,40 @@ onMounted(() => {
           <span v-if="store.writeResult?.protectionChanged">VirtualProtectEx{{ store.writeResult.protectionChangedCount ? `: ${formatNumber(store.writeResult.protectionChangedCount)}` : '' }}</span>
           <span v-if="store.writeResult?.verified">{{ $t('write.verified') }}</span>
           <span v-if="store.writeResult?.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
+          <span v-if="store.writeResult?.mode === 'breakpoint'">BP: {{ store.breakpointFreezeEnabled ? 'on' : 'off' }}</span>
+          <span v-if="store.writeResult?.rewrites !== undefined">rewrites: {{ formatNumber(store.writeResult.rewrites) }}</span>
           <span v-if="store.freezeIntervalResult">intervalle: {{ store.freezeIntervalMs }} ms</span>
         </div>
         <p v-if="store.writeResult?.error" class="error">{{ store.writeResult.error }}</p>
+        <div
+          v-if="store.writeResult?.success && !hasSelectedWriteTargets && store.selectedCandidateAddress"
+          class="stable-locator"
+        >
+          <button
+            class="btn btn-secondary compact"
+            type="button"
+            :disabled="stableLocatorBusy"
+            @click="suggestStableLocator(store.selectedCandidateAddress)"
+          >
+            <span v-if="stableLocatorBusy" class="btn-spinner" aria-hidden="true"></span>
+            <span>{{ stableLocatorBusy ? 'Recherche...' : 'Stabiliser cette adresse' }}</span>
+          </button>
+          <InfoDot text="Cherche une chaîne de pointeurs stable (module + offsets) vers l'adresse qui vient d'être écrite, pour qu'elle survive à un redémarrage du processus cible. Lecture seule, bornée." />
+          <span v-if="stableLocatorResult && stableLocatorForAddress === store.selectedCandidateAddress" class="stable-locator-result">
+            <template v-if="stableLocatorResult.success && stableLocatorResult.bestChain">
+              <span class="hint">{{ stableLocatorResult.message }}</span>
+              <button class="btn btn-secondary compact" type="button" @click="saveStableLocator()">
+                Sauvegarder dans un profil
+              </button>
+            </template>
+            <template v-else-if="stableLocatorResult.success">
+              <span class="hint">{{ stableLocatorResult.message }}</span>
+            </template>
+            <template v-else>
+              <span class="hint">{{ stableLocatorResult.error || 'Recherche indisponible.' }}</span>
+            </template>
+          </span>
+        </div>
         <div v-if="writeFailures.length" class="write-fail-list">
           <div class="source-list-title">
             <strong>Échecs d'écriture</strong>
@@ -2867,51 +3550,15 @@ onMounted(() => {
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-title">
-          <h2>Watch live</h2>
-          <span>{{ store.watchedAddresses.length }} adresse(s) · {{ store.watchLiveReadLimit }}/cycle</span>
-          <button
-            class="btn btn-secondary compact"
-            type="button"
-            :disabled="store.watchedAddresses.length === 0"
-            @click="store.refreshWatchedAddresses()"
-          >
-            Rafraîchir
-          </button>
-          <button
-            class="btn btn-secondary compact"
-            type="button"
-            :disabled="store.watchedAddresses.length === 0"
-            @click="store.setWatchLiveEnabled(!store.watchLiveEnabled)"
-          >
-            {{ store.watchLiveEnabled ? 'Arrêter' : 'Démarrer' }}
-          </button>
-          <button
-            class="btn btn-secondary compact"
-            type="button"
-            :disabled="store.watchedAddresses.length === 0"
-            @click="store.clearWatchedAddresses()"
-          >
-            Vider
-          </button>
-        </div>
-        <div v-if="store.watchedAddresses.length === 0" class="hint">Sélectionne un candidat ou clique Watch pour surveiller une adresse.</div>
-        <div v-else class="watch-list">
-          <div v-for="item in store.watchedAddresses" :key="item.address" class="watch-row" :class="{ changed: item.changed }">
-            <code>0x{{ item.address }}</code>
-            <span>{{ item.type }}</span>
-            <strong>{{ item.value || '-' }}</strong>
-            <span v-if="item.previousValue">avant: {{ item.previousValue }}</span>
-            <span>{{ item.updatedAt }}</span>
-            <button class="btn btn-secondary compact" @click="store.removeAddressFromWatch(item.address)">Retirer</button>
-          </div>
-        </div>
-      </section>
+      <WatchLivePanel v-show="showStep('inspect')" />
 
-      <section class="panel aob-panel">
+      <section v-show="showStep('persist')" class="panel aob-panel">
         <div class="panel-title">
-          <h2>AOB signatures</h2>
+          <div class="panel-heading">
+            <h2>AOB signatures</h2>
+            <InfoDot topic="aob" />
+            <RiskBadge level="code" />
+          </div>
           <span v-if="aobResult">{{ formatNumber(aobResult.matchesFound) }} match(es)</span>
         </div>
         <div class="controls aob-controls">
@@ -2942,13 +3589,23 @@ onMounted(() => {
           <span>Régions: {{ formatNumber(aobResult.regionsScanned) }}</span>
           <span>Lu: {{ formatBytes(aobResult.bytesScanned) }}</span>
           <span v-if="aobResult.patternBytes">Pattern: {{ formatNumber(aobResult.patternBytes) }} o</span>
+          <span v-if="aobResult.signatureQuality" :class="`quality-${aobResult.signatureQuality.level}`">
+            Qualité: {{ aobResult.signatureQuality.level }} · {{ aobResult.signatureQuality.score }}/100
+          </span>
+          <span v-if="aobResult.signatureQuality">
+            Fixes: {{ formatNumber(aobResult.signatureQuality.fixedBytes) }} / Wildcards: {{ formatNumber(aobResult.signatureQuality.wildcardBytes) }}
+          </span>
           <span v-if="aobResult.partial" class="warning-text">résultats limités</span>
         </div>
         <div v-if="aobSignatureResult" class="metrics">
           <span>Signature: {{ aobSignatureResult.success ? 'OK' : 'FAIL' }}</span>
           <span v-if="aobSignatureResult.module">{{ aobSignatureResult.module }} +0x{{ aobSignatureResult.moduleOffset }}</span>
           <span v-if="aobSignatureResult.patternBytes">{{ formatNumber(aobSignatureResult.patternBytes) }} o</span>
+          <span v-if="aobSignatureResult.signatureQuality" :class="`quality-${aobSignatureResult.signatureQuality.level}`">
+            Qualité: {{ aobSignatureResult.signatureQuality.level }} · {{ aobSignatureResult.signatureQuality.score }}/100
+          </span>
         </div>
+        <p v-if="aobResult?.signatureWarning" class="hint">{{ aobResult.signatureWarning }}</p>
         <p v-if="aobSignatureResult?.warning" class="hint">{{ aobSignatureResult.warning }}</p>
         <p v-if="aobSignatureResult?.error" class="error">{{ aobSignatureResult.error }}</p>
         <p v-if="aobResult?.error" class="error">{{ aobResult.error }}</p>
@@ -2970,7 +3627,7 @@ onMounted(() => {
             <span v-if="codePatchBusy" class="btn-spinner" aria-hidden="true"></span>
             Appliquer
           </button>
-          <button class="btn btn-secondary" :disabled="codePatchSuggestBusy || !codePatchAddress.trim()" @click="suggestSelectedCodePatches()">
+          <button class="btn btn-primary" :disabled="codePatchSuggestBusy || !codePatchAddress.trim()" @click="suggestSelectedCodePatches()">
             <span v-if="codePatchSuggestBusy" class="btn-spinner" aria-hidden="true"></span>
             Analyser
           </button>
@@ -2980,6 +3637,9 @@ onMounted(() => {
           </button>
           <button class="btn btn-secondary" :disabled="codePatchBusy || !codePatchAddress.trim()" @click="restoreSelectedCodePatch()">
             Restaurer
+          </button>
+          <button class="btn btn-secondary" :disabled="!codePatchAddress.trim()" @click="bookmarkCurrentCodePatch()">
+            Bookmark
           </button>
         </div>
         <div v-if="aobStabilizeResult" class="metrics">
@@ -2994,6 +3654,9 @@ onMounted(() => {
           <span v-if="codePatchSuggestionResult.mnemonicHint">{{ codePatchSuggestionResult.mnemonicHint }}</span>
           <span v-if="codePatchSuggestionResult.category">{{ codePatchSuggestionResult.category }}</span>
           <span v-if="codePatchSuggestionResult.decoder">{{ codePatchSuggestionResult.decoder }}</span>
+          <span v-if="codePatchSuggestionResult.signatureQuality" :class="`quality-${codePatchSuggestionResult.signatureQuality.level}`">
+            AOB {{ codePatchSuggestionResult.signatureQuality.level }} · {{ codePatchSuggestionResult.signatureQuality.score }}/100
+          </span>
         </div>
         <p v-if="codePatchSuggestionResult?.disassembly" class="hint">{{ codePatchSuggestionResult.disassembly }}</p>
         <p v-if="codePatchSuggestionResult?.stableAobPattern" class="hint">AOB stable: {{ codePatchSuggestionResult.stableAobPattern }}</p>
@@ -3064,17 +3727,24 @@ onMounted(() => {
             <span>{{ match.moduleOffset ? `+0x${match.moduleOffset}` : match.protection || '-' }}</span>
             <button class="btn btn-secondary compact" type="button" @click="useAobMatchAddress(match.address)">Lire</button>
             <button class="btn btn-primary compact" type="button" @click="selectAobPatchAddress(match.address)">Patch</button>
+            <button class="btn btn-secondary compact" type="button" @click="bookmarkAobMatch(match)">Note</button>
           </div>
         </div>
       </section>
 
-      <section class="panel pointer-chain-panel">
+      <InjectionPanel v-show="showStep('persist')" v-if="expertDense" />
+
+      <section v-show="showStep('inspect')" class="panel pointer-chain-panel">
         <div class="panel-title">
-          <h2>Pointer Chains <span class="hint-inline">(StarCraft 2 / jeux modernes)</span></h2>
+          <div class="panel-heading">
+            <h2>Pointer Chains <span class="hint-inline">(jeux modernes / applications dynamiques)</span></h2>
+            <InfoDot topic="pointerChains" />
+            <RiskBadge level="read" />
+          </div>
           <span v-if="pointerScanResult">{{ formatNumber(pointerScanResult.chainCount) }} chaine(s)</span>
         </div>
         <p class="hint">
-          Pour les jeux modernes (StarCraft 2, etc.), les ressources sont allouees dynamiquement.
+          Pour les jeux modernes et applications avec allocations dynamiques, les ressources changent souvent d'adresse.
           Trouve d'abord l'adresse avec un scan normal, puis utilise le scanner de pointeurs pour
           decouvrir une chaine stable qui survivra aux redemarrages.
         </p>
@@ -3156,6 +3826,12 @@ onMounted(() => {
               >
                 Sauver profil
               </button>
+              <button
+                class="btn btn-secondary compact"
+                @click="bookmarkPointerChain(chain)"
+              >
+                Note
+              </button>
             </div>
           </div>
         </div>
@@ -3165,19 +3841,9 @@ onMounted(() => {
         </p>
       </section>
 
-      <section v-if="expertDense" class="panel">
-        <div class="panel-title">
-          <h2>Journal utilisateur</h2>
-          <span>{{ store.actionLog.length }} entrée(s)</span>
-        </div>
-        <div class="action-log">
-          <div v-for="entry in store.actionLog.slice(0, 18)" :key="entry.id" class="action-entry" :class="entry.status">
-            <span>{{ entry.time }}</span>
-            <strong>{{ entry.title }}</strong>
-            <em>{{ entry.detail }}</em>
-          </div>
-        </div>
-      </section>
+      <GroupScanPanel v-show="showStep('find')" v-if="expertDense" :find-what-accesses-result="findWhatAccessesResult" />
+      <PointerChainWatchPanel v-show="showStep('inspect')" v-if="expertDense" />
+      <ActionLogPanel v-show="showStep('persist')" v-if="expertDense" />
     </template>
   </div>
 </template>
@@ -3219,6 +3885,78 @@ onMounted(() => {
 .page-info {
   color: var(--text-dim);
   font-size: 12px;
+}
+
+.workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr) auto;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.workflow-step {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.workflow-step:hover {
+  border-color: var(--accent-hover);
+}
+
+.workflow-step.active {
+  border-color: var(--accent);
+  background: var(--bg-accent);
+}
+
+.workflow-step.compact-step {
+  max-width: 150px;
+}
+
+.workflow-step-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.workflow-step-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.workflow-step.active .workflow-step-title {
+  color: var(--accent-hover);
+}
+
+.workflow-step-count {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.workflow-step-what {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.panel-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .empty-state {
@@ -3487,6 +4225,19 @@ onMounted(() => {
 
 .warning-text {
   color: var(--warning);
+}
+
+.quality-strong {
+  color: var(--success);
+}
+
+.quality-medium {
+  color: var(--warning);
+}
+
+.quality-weak,
+.quality-invalid {
+  color: var(--error);
 }
 
 .unknown-guide {
@@ -3866,7 +4617,7 @@ onMounted(() => {
 
 .structure-panel {
   display: flex;
-  max-height: 240px;
+  max-height: 360px;
   flex-direction: column;
   gap: 4px;
   margin-top: 10px;
@@ -3879,7 +4630,7 @@ onMounted(() => {
 
 .structure-row {
   display: grid;
-  grid-template-columns: minmax(130px, 1fr) 58px minmax(90px, 1fr) minmax(90px, 1fr) minmax(110px, 1fr);
+  grid-template-columns: minmax(130px, 1fr) 58px minmax(90px, 1fr) minmax(110px, 1fr) minmax(95px, 1fr) minmax(70px, auto) minmax(58px, auto);
   gap: 8px;
   align-items: center;
   min-height: 28px;
@@ -3888,6 +4639,26 @@ onMounted(() => {
   border-radius: 4px;
   color: var(--text-dim);
   font-size: 12px;
+}
+
+.structure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.structure-actions span {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.structure-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .structure-row.marked {
@@ -4131,6 +4902,35 @@ onMounted(() => {
   color: var(--success);
 }
 
+.stable-locator {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+}
+
+.bp-live-stats {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.bp-live-stats.warning {
+  color: var(--warning);
+}
+
+.stable-locator-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .write-fail-list {
   display: grid;
   gap: 4px;
@@ -4200,6 +5000,10 @@ onMounted(() => {
   background: var(--accent);
   color: var(--bg-primary);
   font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 
 .btn-secondary {
@@ -4644,5 +5448,62 @@ onMounted(() => {
   .pointer-chain-controls {
     grid-template-columns: 1fr;
   }
+}
+
+/* P1 : scan groupe + watch chains */
+.group-scan-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.group-scan-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.group-scan-row .input-mini,
+.row-actions .input-mini {
+  width: 90px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.group-scan-row .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-scan-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+
+.group-scan-result-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.row-actions .input-mini {
+  width: 70px;
 }
 </style>

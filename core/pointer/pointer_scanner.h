@@ -30,10 +30,10 @@ struct PointerScanOptions {
     size_t maxResults{100};
 
     /// Si vrai, seules les chaînes dont la base est dans un module statique
-    /// (survit à l'ASLR) sont acceptées. Recommandé pour StarCraft 2.
+    /// (survit à l'ASLR) sont acceptées. Recommandé pour les cibles modernes.
     bool onlyModuleBase{true};
 
-    /// Si non vide, restreint la base aux modules listés (ex: ["SC2.exe"]).
+    /// Si non vide, restreint la base aux modules listés (ex: ["game.exe"]).
     /// Si vide, tous les modules sont acceptés comme base potentielle.
     QStringList baseModules;
 

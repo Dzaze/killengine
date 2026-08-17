@@ -37,7 +37,7 @@ struct BreakpointHit {
     uint64_t valueBefore{0};    ///< Valeur avant l'écriture (si BreakpointType::Write)
     uint64_t valueAfter{0};     ///< Valeur après l'écriture
     uint64_t threadId{0};       ///< Thread qui a déclenché
-    QString module;             ///< Module contenant l'instruction (ex: "SC2.exe")
+    QString module;             ///< Module contenant l'instruction (ex: "game.exe")
     uint64_t moduleOffset{0};   ///< Offset dans le module
 };
 
@@ -182,6 +182,28 @@ QList<BreakpointHit> findWhatWrites(
     size_t maxHits = 10);
 
 QList<BreakpointHit> findWhatWrites(
+    uint32_t pid,
+    uint64_t address,
+    BreakpointSize size,
+    int timeoutMs,
+    size_t maxHits,
+    const CancellationToken* cancellation);
+
+/**
+ * @brief Utilitaire de haut niveau : trouve les instructions qui lisent une adresse.
+ *
+ * Variante "Find What Accesses" : pose un breakpoint Access (lecture/ecriture).
+ * C'est souvent l'instruction qui LIT la valeur qui revele la structure proprietaire
+ * (boucle de rendu UI, calcul gameplay), pas celle qui l'ecrit.
+ */
+QList<BreakpointHit> findWhatAccesses(
+    uint32_t pid,
+    uint64_t address,
+    BreakpointSize size = BreakpointSize::DWord,
+    int timeoutMs = 5000,
+    size_t maxHits = 10);
+
+QList<BreakpointHit> findWhatAccesses(
     uint32_t pid,
     uint64_t address,
     BreakpointSize size,

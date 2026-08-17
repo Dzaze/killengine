@@ -8,7 +8,7 @@
     "build": "b10331-7ba604f1c"
   },
   "model": {
-    "path": "models/Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+    "path": "model/qwen/Qwen_Qwen3.5-2B-Q4_K_M.gguf",
     "family": "Qwen3.5-2B",
     "format": "GGUF",
     "quantization": "Q4_K_M"

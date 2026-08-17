@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppStore } from '@/stores/app'
+import { useAppStore, type WorkspaceBookmark } from '@/stores/app'
 
 const store = useAppStore()
 const { locale } = useI18n()
@@ -14,10 +14,49 @@ const runtimeRows = computed(() => [
 ])
 
 const debugEvents = computed(() => [...store.smartSearchDebugEvents].reverse())
+const learnedAutoProfile = computed(() => store.autoResolveReport?.learnedProfile ?? {})
+const strategyWins = computed(() => {
+  const wins = learnedAutoProfile.value.strategyWins
+  return wins && typeof wins === 'object' ? wins as Record<string, unknown> : {}
+})
 const valueTypes = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Float32', 'Float64']
 const performanceModes = ['Auto', 'Eco', 'Normal', 'Performance', 'Max']
+const autoRiskModes = ['Safe', 'Expert', 'Trainer']
 const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096, 8192]
 const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
+const workspaceExportText = ref('')
+const workspaceExportStatus = ref('')
+const auditExportText = ref('')
+const auditExportStatus = ref('')
+const workspaceImportText = ref('')
+const workspaceImportPreview = ref<Record<string, unknown> | null>(null)
+const workspaceImportStatus = ref('')
+const selectedStructureTemplateId = ref<number | null>(null)
+const workspaceProjectName = ref('')
+const bookmarkLabel = ref('')
+const bookmarkAddress = ref('')
+const bookmarkType = ref('Int32')
+const bookmarkValue = ref('')
+const bookmarkNote = ref('')
+const selectedStructureTemplate = computed(() =>
+  store.structureTemplates.find((template) => template.id === selectedStructureTemplateId.value) ?? null,
+)
+const visibleModelCandidates = computed(() =>
+  (store.aiModelStatus?.modelCandidates ?? []).slice(0, 6),
+)
+const visibleExecutableCandidates = computed(() =>
+  (store.aiModelStatus?.executableCandidates ?? []).slice(0, 6),
+)
+const visibleEmbeddedAgents = computed(() =>
+  (store.aiModelStatus?.embeddedAgents ?? []).slice(0, 8).map((agent) => ({
+    id: String(agent.id ?? ''),
+    displayName: String(agent.displayName ?? agent.id ?? 'Agent IA'),
+    role: String(agent.role ?? 'agent'),
+    modelPath: String(agent.modelPath ?? ''),
+    modelFound: agent.modelFound === true,
+    valid: agent.valid !== false,
+  })),
+)
 
 function formatBytes(value: number | undefined) {
   const bytes = value ?? 0
@@ -67,6 +106,80 @@ watch(
 async function saveAll() {
   locale.value = store.appLanguage
   await store.saveSettings()
+}
+
+function showWorkspaceExport() {
+  workspaceExportText.value = store.exportWorkspaceJson()
+  workspaceExportStatus.value = ''
+}
+
+function showWorkspaceMarkdownExport() {
+  workspaceExportText.value = store.exportWorkspaceMarkdown()
+  workspaceExportStatus.value = ''
+}
+
+function showAuditJsonExport() {
+  auditExportText.value = store.exportActionLogJson()
+  auditExportStatus.value = ''
+}
+
+function showAuditMarkdownExport() {
+  auditExportText.value = store.exportActionLogMarkdown()
+  auditExportStatus.value = ''
+}
+
+async function copyWorkspaceExport() {
+  if (!workspaceExportText.value) return
+  await navigator.clipboard?.writeText(workspaceExportText.value)
+  workspaceExportStatus.value = 'Export copié.'
+}
+
+async function copyAuditExport() {
+  if (!auditExportText.value) return
+  await navigator.clipboard?.writeText(auditExportText.value)
+  auditExportStatus.value = 'Audit copié.'
+}
+
+function previewWorkspaceImport() {
+  workspaceImportPreview.value = store.previewWorkspaceImport(workspaceImportText.value)
+  workspaceImportStatus.value = workspaceImportPreview.value.success === true ? 'Aperçu prêt.' : String(workspaceImportPreview.value.error ?? 'Import invalide.')
+}
+
+function importWorkspace() {
+  const result = store.importWorkspaceJson(workspaceImportText.value)
+  workspaceImportPreview.value = result
+  workspaceImportStatus.value = result.success === true ? 'Workspace importé.' : String(result.error ?? 'Import refusé.')
+  if (result.success === true) workspaceImportText.value = ''
+}
+
+function saveWorkspaceProject() {
+  const project = store.saveCurrentWorkspaceProject(workspaceProjectName.value)
+  if (project) workspaceProjectName.value = ''
+}
+
+function addManualBookmark() {
+  const bookmark = store.addWorkspaceBookmark({
+    kind: bookmarkAddress.value.trim() ? 'address' : 'note',
+    label: bookmarkLabel.value || bookmarkAddress.value || 'Note workspace',
+    address: bookmarkAddress.value,
+    type: bookmarkAddress.value.trim() ? bookmarkType.value : undefined,
+    value: bookmarkValue.value,
+    note: bookmarkNote.value,
+  })
+  if (bookmark) {
+    bookmarkLabel.value = ''
+    bookmarkAddress.value = ''
+    bookmarkValue.value = ''
+    bookmarkNote.value = ''
+  }
+}
+
+function bookmarkToWrite(bookmark: WorkspaceBookmark) {
+  store.useWorkspaceBookmarkAsWriteTarget(bookmark.id)
+}
+
+function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freeze_polling') {
+  store.createTrainerFeatureFromBookmark(bookmark.id, action)
 }
 </script>
 
@@ -205,20 +318,334 @@ async function saveAll() {
     <section class="panel">
       <div class="panel-title">
         <h2>IA locale</h2>
+        <div class="panel-actions">
+          <span class="status-pill" :class="store.aiModelStatus?.ready ? 'ok' : 'warn'">
+            {{ store.aiModelStatus?.ready ? 'IA prête' : 'IA indisponible' }}
+          </span>
+          <button class="btn btn-secondary compact" :disabled="store.aiModelStatusLoading" @click="store.refreshAiModelStatus()">
+            {{ store.aiModelStatusLoading ? 'Vérif...' : 'Vérifier' }}
+          </button>
+        </div>
       </div>
       <div class="settings-grid">
         <label class="wide">
-          <span>Chemin modèle GGUF</span>
-          <input v-model="store.settingModelPath" class="input" placeholder="Optionnel : chemin complet vers qwen.gguf" />
+          <span>Chemin personnalisé GGUF</span>
+          <div class="model-path-row">
+            <input v-model="store.settingModelPath" class="input" placeholder="Avancé : vide = modèle embarqué dans model\\qwen\\*.gguf" />
+            <button class="btn btn-secondary compact" type="button" @click="store.browseForModel()">Parcourir…</button>
+          </div>
         </label>
         <label>
           <span>Threads modèle</span>
           <input v-model.number="store.settingModelThreads" class="input" type="number" min="1" max="32" step="1" />
         </label>
+        <label>
+          <span>Niveau Auto</span>
+          <select v-model="store.settingAutoRiskMode" class="input select">
+            <option v-for="mode in autoRiskModes" :key="mode">{{ mode }}</option>
+          </select>
+        </label>
+      </div>
+      <div class="model-status-grid">
+        <div class="runtime-cell">
+          <span>Backend</span>
+          <strong>{{ store.aiModelStatus?.backend || '-' }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Produit</span>
+          <strong>IA embarquée requise</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Agents IA</span>
+          <strong>{{ store.aiModelStatus?.embeddedAgentCount ?? visibleEmbeddedAgents.length }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Modèle</span>
+          <strong>{{ store.aiModelStatus?.modelFound ? 'trouvé' : 'absent' }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>llama-cli</span>
+          <strong>{{ store.aiModelStatus?.executableFound ? 'trouvé' : 'absent' }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Threads</span>
+          <strong>{{ store.aiModelStatus?.threads ?? store.settingModelThreads }}</strong>
+        </div>
+      </div>
+      <div class="path-row">
+        <span>Modèle détecté</span>
+        <code>{{ store.aiModelStatus?.modelPath || store.settingModelPath || '-' }}</code>
+      </div>
+      <div class="path-row">
+        <span>Runtime actif</span>
+        <code>{{ store.aiModelStatus?.executablePath || '-' }}</code>
+      </div>
+      <div v-if="visibleEmbeddedAgents.length" class="embedded-agent-list">
+        <strong>Agents embarqués</strong>
+        <div v-for="agent in visibleEmbeddedAgents" :key="agent.id" class="candidate-path">
+          <span :class="agent.modelFound && agent.valid ? 'ok-text' : 'dim-text'">{{ agent.modelFound && agent.valid ? 'OK' : '--' }}</span>
+          <code>{{ agent.displayName }} · {{ agent.role }} · {{ agent.modelPath || '-' }}</code>
+        </div>
+      </div>
+      <p v-if="store.aiModelStatus?.message" class="status-line">{{ store.aiModelStatus.message }}</p>
+      <p v-if="store.aiModelStatus?.modelError && !store.aiModelStatus?.modelFound" class="warning">{{ store.aiModelStatus.modelError }}</p>
+      <p v-if="store.aiModelStatusError" class="error">{{ store.aiModelStatusError }}</p>
+      <p class="hint">
+        Le produit cherche automatiquement les IA embarquées dans <code>model\&lt;nom_ia&gt;\*.gguf</code> à côté de KillEngine.exe. Le chemin personnalisé sert seulement d'override avancé.
+      </p>
+      <details class="model-candidates">
+        <summary>Chemins inspectés</summary>
+        <div class="candidate-columns">
+          <div>
+            <strong>Modèles GGUF</strong>
+            <div v-for="candidate in visibleModelCandidates" :key="String(candidate.path)" class="candidate-path">
+              <span :class="candidate.exists ? 'ok-text' : 'dim-text'">{{ candidate.exists ? 'OK' : '--' }}</span>
+              <code>{{ candidate.path }}</code>
+            </div>
+          </div>
+          <div>
+            <strong>llama-cli</strong>
+            <div v-for="candidate in visibleExecutableCandidates" :key="String(candidate.path)" class="candidate-path">
+              <span :class="candidate.exists ? 'ok-text' : 'dim-text'">{{ candidate.exists ? 'OK' : '--' }}</span>
+              <code>{{ candidate.path }}</code>
+            </div>
+          </div>
+        </div>
+      </details>
+      <p class="hint">
+        Safe autorise seulement les actions sans danger et les écritures confirmées. Expert débloque debugger/patch confirmés. Trainer prépare les actions avancées type hook/injection.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Workspace IA / Trainer</h2>
+      </div>
+      <div class="runtime-grid">
+        <div class="runtime-cell">
+          <span>Investigation active</span>
+          <strong>{{ store.activeInvestigation ? store.activeInvestigation.steps.length : 0 }} étape(s)</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Archives Investigation</span>
+          <strong>{{ store.investigationArchive.length }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Features Trainer</span>
+          <strong>{{ store.trainerFeatures.length }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Templates Structure</span>
+          <strong>{{ store.structureTemplates.length }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Bookmarks</span>
+          <strong>{{ store.workspaceBookmarks.length }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Projets locaux</span>
+          <strong>{{ store.workspaceProjects.length }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Audit actions</span>
+          <strong>{{ store.actionLog.length }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Processus mémoire Auto</span>
+          <strong>{{ store.processName || 'global' }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Dernière stratégie</span>
+          <strong>{{ learnedAutoProfile.lastSuccessfulAuditEvent || '-' }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Dernière adresse</span>
+          <strong>{{ learnedAutoProfile.lastSuccessfulAddress ? `0x${learnedAutoProfile.lastSuccessfulAddress}` : '-' }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Dernier type</span>
+          <strong>{{ learnedAutoProfile.lastSuccessfulValueType || '-' }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Stratégies gagnantes</span>
+          <strong>{{ Object.keys(strategyWins).length }}</strong>
+        </div>
+      </div>
+      <div class="path-row">
+        <span>Pattern AOB appris</span>
+        <code>{{ learnedAutoProfile.lastSuccessfulAobPattern || '-' }}</code>
+      </div>
+      <div class="panel-actions workspace-actions">
+        <button class="btn btn-secondary compact" @click="showWorkspaceExport()">Exporter workspace JSON</button>
+        <button class="btn btn-secondary compact" @click="showWorkspaceMarkdownExport()">Exporter workspace MD</button>
+        <button class="btn btn-secondary compact" @click="showAuditJsonExport()">Exporter audit JSON</button>
+        <button class="btn btn-secondary compact" @click="showAuditMarkdownExport()">Exporter audit MD</button>
+        <button class="btn btn-secondary compact" @click="store.clearInvestigation()">Vider investigation active</button>
+        <button class="btn btn-secondary compact" @click="store.clearInvestigationArchive()">Vider archives</button>
+        <button class="btn btn-secondary compact" @click="store.clearTrainerFeatures()">Vider trainer local</button>
+        <button class="btn btn-secondary compact" @click="store.clearStructureTemplates()">Vider templates structure</button>
+        <button class="btn btn-secondary compact" @click="store.clearWorkspaceBookmarks()">Vider bookmarks</button>
+        <button class="btn btn-secondary compact" @click="store.clearWorkspaceProjects()">Vider projets</button>
+        <button class="btn btn-secondary compact" @click="store.clearActionLog()">Vider audit</button>
+        <button class="btn btn-secondary compact" @click="store.clearAutoResolveMemory(false)">Vider mémoire Auto processus</button>
+        <button class="btn btn-secondary compact danger-action" @click="store.clearAutoResolveMemory(true)">Vider mémoire Auto globale</button>
       </div>
       <p class="hint">
-        Le runtime actuel continue d'utiliser la détection automatique ou KILLENGINE_QWEN_GGUF ; ce champ prépare le Model Manager.
+        Ces actions suppriment les mémoires locales de pilotage IA et Trainer. Les profils sauvegardés via ProfileStore ne sont pas supprimés ici.
       </p>
+      <div class="project-panel">
+        <div class="panel-title">
+          <h3>Projets Workspace</h3>
+          <div class="panel-actions">
+            <input v-model="workspaceProjectName" class="input project-name-input" placeholder="Nom du projet" />
+            <button class="btn btn-secondary compact" @click="saveWorkspaceProject()">Sauver projet</button>
+          </div>
+        </div>
+        <div v-if="store.workspaceProjects.length === 0" class="empty-line">Aucun projet local.</div>
+        <div v-for="project in store.workspaceProjects.slice(0, 12)" :key="project.id" class="project-row">
+          <div>
+            <strong>{{ project.name }}</strong>
+            <span>{{ project.processName || '-' }} · {{ project.trainerFeatureCount }} feature(s) · {{ project.structureTemplateCount }} template(s) · {{ project.bookmarkCount }} bookmark(s) · {{ project.auditCount || 0 }} audit(s)</span>
+          </div>
+          <div class="panel-actions">
+            <button class="btn btn-secondary compact" @click="store.loadWorkspaceProject(project.id)">Charger</button>
+            <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceProject(project.id)">Supprimer</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="store.workspaceBookmarks.length > 0" class="bookmark-list">
+        <div class="panel-title">
+          <h3>Bookmarks / Notes</h3>
+          <span>{{ store.workspaceBookmarks.length }}</span>
+        </div>
+        <div class="bookmark-create">
+          <input v-model="bookmarkLabel" class="input" placeholder="Label" />
+          <input v-model="bookmarkAddress" class="input" placeholder="Adresse hex optionnelle" />
+          <select v-model="bookmarkType" class="select">
+            <option v-for="type in valueTypes" :key="type" :value="type">{{ type }}</option>
+          </select>
+          <input v-model="bookmarkValue" class="input" placeholder="Valeur optionnelle" />
+          <input v-model="bookmarkNote" class="input bookmark-note-input" placeholder="Note" />
+          <button class="btn btn-secondary compact" @click="addManualBookmark()">Ajouter</button>
+        </div>
+        <div v-for="bookmark in store.workspaceBookmarks.slice(0, 20)" :key="bookmark.id" class="bookmark-row">
+          <div>
+            <strong>{{ bookmark.label }}</strong>
+            <span>{{ bookmark.kind }} · {{ bookmark.address ? `0x${bookmark.address}` : '-' }} · {{ bookmark.type || '-' }} · {{ bookmark.note || '-' }}</span>
+          </div>
+          <div class="panel-actions">
+            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToWrite(bookmark)">Write</button>
+            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToTrainer(bookmark, 'write')">Trainer</button>
+            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToTrainer(bookmark, 'freeze_polling')">Freeze</button>
+            <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceBookmark(bookmark.id)">Supprimer</button>
+          </div>
+        </div>
+      </div>
+      <div v-else class="bookmark-list">
+        <div class="panel-title">
+          <h3>Bookmarks / Notes</h3>
+          <span>0</span>
+        </div>
+        <div class="bookmark-create">
+          <input v-model="bookmarkLabel" class="input" placeholder="Label" />
+          <input v-model="bookmarkAddress" class="input" placeholder="Adresse hex optionnelle" />
+          <select v-model="bookmarkType" class="select">
+            <option v-for="type in valueTypes" :key="type" :value="type">{{ type }}</option>
+          </select>
+          <input v-model="bookmarkValue" class="input" placeholder="Valeur optionnelle" />
+          <input v-model="bookmarkNote" class="input bookmark-note-input" placeholder="Note" />
+          <button class="btn btn-secondary compact" @click="addManualBookmark()">Ajouter</button>
+        </div>
+      </div>
+      <div class="workspace-import">
+        <div class="panel-title">
+          <h3>Importer workspace JSON</h3>
+          <div class="panel-actions">
+            <button class="btn btn-secondary compact" :disabled="!workspaceImportText.trim()" @click="previewWorkspaceImport()">Aperçu</button>
+            <button class="btn btn-secondary compact danger-action" :disabled="workspaceImportPreview?.success !== true" @click="importWorkspace()">Importer</button>
+          </div>
+        </div>
+        <textarea v-model="workspaceImportText" class="workspace-import-input" placeholder="Coller un export Workspace JSON ici" />
+        <p v-if="workspaceImportStatus" class="status-line">{{ workspaceImportStatus }}</p>
+        <div v-if="workspaceImportPreview?.success === true" class="import-preview">
+          <span>Investigation active: {{ workspaceImportPreview.activeInvestigation }}</span>
+          <span>Archives: {{ workspaceImportPreview.archiveCount }}</span>
+          <span>Features: {{ workspaceImportPreview.trainerFeatureCount }}</span>
+          <span>Templates: {{ workspaceImportPreview.structureTemplateCount }}</span>
+          <span>Bookmarks: {{ workspaceImportPreview.bookmarkCount }}</span>
+          <span>Audit: {{ workspaceImportPreview.auditCount || 0 }}</span>
+          <span>Preset: {{ workspaceImportPreview.lastPresetId || '-' }}</span>
+          <span>Settings: {{ workspaceImportPreview.hasSettings ? 'oui' : 'non' }}</span>
+        </div>
+      </div>
+      <div v-if="store.structureTemplates.length > 0" class="template-list">
+        <div class="panel-title">
+          <h3>Templates Structure</h3>
+          <span>{{ store.structureTemplates.length }}</span>
+        </div>
+        <div v-for="template in store.structureTemplates.slice(0, 12)" :key="template.id" class="template-row">
+          <div>
+            <strong>{{ template.name }}</strong>
+            <span>0x{{ template.baseAddress }} · {{ template.fieldCount }} champ(s) · {{ template.processName || '-' }}</span>
+          </div>
+          <div class="panel-actions">
+            <button class="btn btn-secondary compact" @click="selectedStructureTemplateId = template.id">Détails</button>
+            <button class="btn btn-secondary compact danger-action" @click="store.deleteStructureTemplate(template.id)">Supprimer</button>
+          </div>
+        </div>
+        <div v-if="selectedStructureTemplate" class="template-detail">
+          <div class="panel-title">
+            <h3>{{ selectedStructureTemplate.name }}</h3>
+            <button class="btn btn-secondary compact" @click="selectedStructureTemplateId = null">Fermer</button>
+          </div>
+          <div
+            v-for="field in selectedStructureTemplate.fields.slice(0, 80)"
+            :key="`${selectedStructureTemplate.id}:${field.offset}:${field.type}`"
+            class="template-field-row"
+          >
+            <code>{{ field.offset >= 0 ? '+' : '' }}{{ field.offset }}</code>
+            <strong>{{ field.type }}</strong>
+            <span>{{ field.label || '-' }}</span>
+            <span>{{ field.sampleValue || '-' }}</span>
+            <span>{{ field.note || '-' }}</span>
+          </div>
+        </div>
+      </div>
+      <div v-if="workspaceExportText" class="workspace-export">
+        <div class="panel-title">
+          <h3>Export workspace</h3>
+          <div class="panel-actions">
+            <button class="btn btn-secondary compact" @click="copyWorkspaceExport()">Copier</button>
+            <button class="btn btn-secondary compact" @click="workspaceExportText = ''">Fermer</button>
+          </div>
+        </div>
+        <p v-if="workspaceExportStatus" class="status-line">{{ workspaceExportStatus }}</p>
+        <pre>{{ workspaceExportText }}</pre>
+      </div>
+      <div class="audit-panel">
+        <div class="panel-title">
+          <h3>Audit actions</h3>
+          <span>{{ store.actionLog.length }}</span>
+        </div>
+        <div v-if="store.actionLog.length === 0" class="empty-line">Aucune action auditée.</div>
+        <div v-for="entry in store.actionLog.slice(0, 20)" :key="entry.id" class="audit-row">
+          <div>
+            <strong>{{ entry.title }}</strong>
+            <span>{{ entry.time }} · {{ entry.kind }} · {{ entry.status }}{{ entry.detail ? ` · ${entry.detail}` : '' }}</span>
+          </div>
+        </div>
+      </div>
+      <div v-if="auditExportText" class="workspace-export">
+        <div class="panel-title">
+          <h3>Export audit</h3>
+          <div class="panel-actions">
+            <button class="btn btn-secondary compact" @click="copyAuditExport()">Copier</button>
+            <button class="btn btn-secondary compact" @click="auditExportText = ''">Fermer</button>
+          </div>
+        </div>
+        <p v-if="auditExportStatus" class="status-line">{{ auditExportStatus }}</p>
+        <pre>{{ auditExportText }}</pre>
+      </div>
     </section>
 
     <section class="panel">
@@ -377,6 +804,196 @@ async function saveAll() {
   gap: 8px;
 }
 
+.workspace-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.workspace-export {
+  margin-top: 12px;
+}
+
+.workspace-import {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.project-panel,
+.bookmark-list,
+.audit-panel {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.project-name-input {
+  min-width: 180px;
+}
+
+.bookmark-create {
+  display: grid;
+  grid-template-columns: 1fr 1fr 120px 140px 1.5fr auto;
+  gap: 8px;
+  padding: 10px 0;
+}
+
+.bookmark-note-input {
+  min-width: 0;
+}
+
+.project-row,
+.bookmark-row,
+.audit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.project-row:first-of-type,
+.bookmark-row:first-of-type,
+.audit-row:first-of-type {
+  border-top: none;
+}
+
+.project-row div,
+.bookmark-row div,
+.audit-row div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.project-row span,
+.bookmark-row span,
+.audit-row span {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .bookmark-create {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.workspace-import-input {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 10px;
+}
+
+.import-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.import-preview span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.template-list {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.template-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.template-row:first-of-type {
+  border-top: none;
+}
+
+.template-row div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.template-row span {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-detail {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.template-field-row {
+  display: grid;
+  grid-template-columns: 58px minmax(70px, 0.5fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(140px, 1.4fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.template-field-row:first-of-type {
+  border-top: none;
+}
+
+.template-field-row code,
+.template-field-row strong,
+.template-field-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-export pre {
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .header {
   margin-bottom: 18px;
 }
@@ -407,6 +1024,11 @@ async function saveAll() {
 .panel-title h2 {
   color: var(--text-primary);
   font-size: 15px;
+}
+
+.panel-title h3 {
+  color: var(--text-primary);
+  font-size: 13px;
 }
 
 .setting-row strong,
@@ -490,6 +1112,16 @@ async function saveAll() {
   grid-column: span 2;
 }
 
+.model-path-row {
+  display: flex;
+  gap: 8px;
+}
+
+.model-path-row .input {
+  flex: 1;
+  min-width: 0;
+}
+
 .toggle-row {
   align-items: flex-start;
   justify-content: center;
@@ -561,6 +1193,13 @@ async function saveAll() {
   gap: 8px;
 }
 
+.model-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .runtime-cell {
   min-height: 72px;
   padding: 11px;
@@ -574,6 +1213,72 @@ async function saveAll() {
   margin-top: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.status-pill.ok {
+  border-color: rgba(158, 206, 106, 0.45);
+  color: var(--success);
+}
+
+.status-pill.warn {
+  border-color: rgba(224, 175, 104, 0.45);
+  color: var(--warning);
+}
+
+.model-candidates {
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.embedded-agent-list {
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.embedded-agent-list > strong {
+  color: var(--text);
+}
+
+.model-candidates summary {
+  cursor: pointer;
+}
+
+.candidate-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.candidate-path {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.candidate-path code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ok-text {
+  color: var(--success);
+}
+
+.dim-text {
+  color: var(--text-dim);
 }
 
 .ping-line {
@@ -679,13 +1384,24 @@ code {
   color: var(--text-secondary);
 }
 
+.danger-action {
+  color: var(--error);
+}
+
 .btn-primary {
   background: var(--accent);
-  color: #0b1020;
+  color: var(--bg-primary);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 
 @media (max-width: 850px) {
   .runtime-grid,
+  .model-status-grid,
+  .candidate-columns,
   .path-row,
   .settings-grid {
     grid-template-columns: 1fr;

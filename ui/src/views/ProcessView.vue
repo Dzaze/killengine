@@ -350,6 +350,10 @@ onMounted(async () => {
   font-weight: 600;
 }
 
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
 .btn-secondary {
   background: var(--bg-accent);
   color: var(--text-secondary);

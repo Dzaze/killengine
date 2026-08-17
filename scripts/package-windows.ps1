@@ -2,11 +2,13 @@
 # Usage:
 #   .\scripts\package-windows.ps1
 #   .\scripts\package-windows.ps1 -SkipBuild
-#   .\scripts\package-windows.ps1 -IncludeModel
+#   .\scripts\package-windows.ps1 -ExcludeModel
+#   .\scripts\package-windows.ps1 -RequireSigning   (fail the build instead of shipping KillEngine.exe unsigned; see docs/CODE_SIGNING.md)
 
 param(
     [switch]$SkipBuild,
-    [switch]$IncludeModel
+    [switch]$ExcludeModel,
+    [switch]$RequireSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +29,17 @@ function Copy-ItemIfExists {
     if (Test-Path $Path) {
         Copy-Item -LiteralPath $Path -Destination $Destination -Recurse -Force
     }
+}
+
+function Find-FirstExistingFile {
+    param([Parameter(Mandatory = $true)][string[]]$Paths)
+
+    foreach ($path in $Paths) {
+        if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $path).Path
+        }
+    }
+    return $null
 }
 
 if (-not $SkipBuild) {
@@ -52,6 +65,10 @@ New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 $excludedNames = @(
     "killengine_unit_tests.exe",
     "killengine_unit_tests.pdb",
+    "killengine_integration_tests.exe",
+    "killengine_integration_tests.pdb",
+    "KillEngineBenchmark.exe",
+    "KillEngineBenchmark.pdb",
     "KillEngineTestTarget.exe",
     "KillEngineTestTarget.pdb",
     "lz4.pdb"
@@ -92,6 +109,8 @@ foreach ($pattern in $debugPatterns) {
         Remove-Item -Force
 }
 
+$signResult = & (Join-Path $repoRoot "scripts\codesign.ps1") -Path (Join-Path $packageRoot "KillEngine.exe") -RequireSigning:$RequireSigning
+
 Copy-ItemIfExists -Path (Join-Path $repoRoot "README.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "LICENSE") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "KILLENGINE_PROJECT_SPEC.md") -Destination $packageRoot
@@ -99,16 +118,51 @@ Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\PHASE_TRACKER.md") -Destinati
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\USER_GUIDE.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\V1_REGRESSION_CHECKLIST.md") -Destination $packageRoot
 
-$modelsOut = Join-Path $packageRoot "models"
-New-Item -ItemType Directory -Force -Path $modelsOut | Out-Null
-Copy-ItemIfExists -Path (Join-Path $repoRoot "models\README.md") -Destination $modelsOut
+$llamaCli = Find-FirstExistingFile -Paths @(
+    (Join-Path $repoRoot "third_party\llama.cpp\llama-cli.exe"),
+    (Join-Path $repoRoot "third_party\llama.cpp\build\bin\Release\llama-cli.exe"),
+    (Join-Path $repoRoot "third_party\llama.cpp\build\bin\llama-cli.exe"),
+    (Join-Path $buildBin "llama-cli.exe")
+)
 
-if ($IncludeModel) {
-    Get-ChildItem -LiteralPath (Join-Path $repoRoot "models") -File -Include "*.gguf" -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination $modelsOut -Force
-        }
+if ($llamaCli) {
+    Copy-Item -LiteralPath $llamaCli -Destination (Join-Path $packageRoot "llama-cli.exe") -Force
 }
+
+$modelRoot = Join-Path $repoRoot "model"
+$modelOut = Join-Path $packageRoot "model"
+New-Item -ItemType Directory -Force -Path $modelOut | Out-Null
+Copy-ItemIfExists -Path (Join-Path $modelRoot "README.md") -Destination $modelOut
+
+Get-ChildItem -LiteralPath $modelRoot -Directory -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        $destination = Join-Path $modelOut $_.Name
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        Copy-ItemIfExists -Path (Join-Path $_.FullName "README.md") -Destination $destination
+        Copy-ItemIfExists -Path (Join-Path $_.FullName "MODEL_MANIFEST.md") -Destination $destination
+        Copy-ItemIfExists -Path (Join-Path $_.FullName "MODEL_MANIFEST.json") -Destination $destination
+    }
+
+if (-not $ExcludeModel) {
+    Get-ChildItem -LiteralPath $modelRoot -Recurse -File -Filter "*.gguf" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $relative = [System.IO.Path]::GetRelativePath($modelRoot, $_.DirectoryName)
+            $destination = Join-Path $modelOut $relative
+            New-Item -ItemType Directory -Force -Path $destination | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+        }
+
+    $packagedModels = @(Get-ChildItem -LiteralPath $modelOut -Recurse -File -Filter "*.gguf" -ErrorAction SilentlyContinue)
+    if ($packagedModels.Count -eq 0) {
+        throw "No embedded .gguf model was found in $modelOut. Product packages must include AI models. Use -ExcludeModel only for lightweight development packages."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $packageRoot "llama-cli.exe") -PathType Leaf)) {
+        throw "llama-cli.exe was not found. Product packages must include the embedded AI runtime. Put it in third_party\llama.cpp or build\bin, or use -ExcludeModel only for lightweight development packages."
+    }
+}
+
+Get-ChildItem -LiteralPath $modelOut -Recurse -File -Filter "*.partial" -ErrorAction SilentlyContinue |
+    Remove-Item -Force
 
 $packageReadme = @"
 KillEngine portable package
@@ -119,13 +173,89 @@ Run:
 
 Notes:
   - This package is intended for local/offline testing.
-  - GGUF models are not included unless package-windows.ps1 is run with -IncludeModel.
-  - Place qwen.gguf in the models folder or set KILLENGINE_QWEN_GGUF.
+  - llama-cli.exe is copied automatically when present in third_party/llama.cpp.
+  - GGUF models are included by default.
+  - Use -ExcludeModel only for lightweight development packages.
+  - The normal product layout is model\<ai-name>\ next to KillEngine.exe.
+  - Agent folders use MODEL_MANIFEST.json and may point to shared GGUF weights.
+  - A custom model path is only an advanced override.
   - Logs and profiles are stored under the Windows local app data folder.
   - Read USER_GUIDE.md for the V1 user workflow.
+  - If the app does not start from a development checkout, run scripts\diagnose-launch.ps1.
 "@
 
 Set-Content -Path (Join-Path $packageRoot "PACKAGE_README.txt") -Value $packageReadme -Encoding ASCII
+
+$requiredRuntimeItems = @(
+    "KillEngine.exe",
+    "model\README.md",
+    "model\assistant\README.md",
+    "model\assistant\MODEL_MANIFEST.json",
+    "model\auto_resolver\README.md",
+    "model\auto_resolver\MODEL_MANIFEST.json",
+    "model\qwen\README.md",
+    "model\qwen\MODEL_MANIFEST.md",
+    "QtWebEngineProcess.exe",
+    "Qt6Core.dll",
+    "Qt6Gui.dll",
+    "Qt6Widgets.dll",
+    "Qt6WebChannel.dll",
+    "Qt6WebEngineCore.dll",
+    "Qt6WebEngineWidgets.dll",
+    "platforms\qwindows.dll",
+    "resources\icudtl.dat",
+    "resources\qtwebengine_resources.pak",
+    "resources\qtwebengine_resources_100p.pak",
+    "resources\qtwebengine_resources_200p.pak",
+    "resources\v8_context_snapshot.bin",
+    "translations\qtwebengine_locales\en-US.pak",
+    "PACKAGE_README.txt",
+    "USER_GUIDE.md",
+    "V1_REGRESSION_CHECKLIST.md"
+)
+
+$missingRuntimeItems = @(
+    foreach ($item in $requiredRuntimeItems) {
+        $path = Join-Path $packageRoot $item
+        if (-not (Test-Path $path)) {
+            $item
+        }
+    }
+)
+
+if ($missingRuntimeItems.Count -gt 0) {
+    throw "Portable package is missing required runtime item(s): $($missingRuntimeItems -join ', ')"
+}
+
+$forbiddenRuntimeItems = @(
+    "killengine_unit_tests.exe",
+    "killengine_integration_tests.exe",
+    "KillEngineBenchmark.exe",
+    "KillEngineTestTarget.exe"
+)
+
+$forbiddenPresent = @(
+    foreach ($item in $forbiddenRuntimeItems) {
+        $path = Join-Path $packageRoot $item
+        if (Test-Path $path) {
+            $item
+        }
+    }
+)
+
+if ($forbiddenPresent.Count -gt 0) {
+    throw "Portable package contains development executable(s): $($forbiddenPresent -join ', ')"
+}
+
+if (-not $ExcludeModel) {
+    $productModels = @(Get-ChildItem -LiteralPath (Join-Path $packageRoot "model") -Recurse -File -Filter "*.gguf" -ErrorAction SilentlyContinue)
+    if ($productModels.Count -eq 0) {
+        throw "Product package validation failed: no embedded AI model found under model\<ai-name>\*.gguf."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $packageRoot "llama-cli.exe") -PathType Leaf)) {
+        throw "Product package validation failed: llama-cli.exe is missing."
+    }
+}
 
 if (Test-Path $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
@@ -136,3 +266,4 @@ Compress-Archive -Path (Join-Path $packageRoot "*") -DestinationPath $zipPath -F
 Write-Host "Portable package ready:" -ForegroundColor Green
 Write-Host "  Folder: $packageRoot" -ForegroundColor Cyan
 Write-Host "  Zip:    $zipPath" -ForegroundColor Cyan
+Write-Host "  Signed: $($signResult.Signed)" -ForegroundColor $(if ($signResult.Signed) { "Cyan" } else { "Yellow" })

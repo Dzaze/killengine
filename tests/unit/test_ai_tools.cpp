@@ -5,6 +5,40 @@
 #include "llama_runtime.h"
 #include "model_locator.h"
 #include "tool_validator.h"
+#include "tool_registry.h"
+
+#include <QSettings>
+
+namespace {
+
+class ScopedModelDisabled {
+public:
+    ScopedModelDisabled() {
+        QSettings settings;
+        m_previous = settings.value("ai/modelEnabled", true);
+        m_previousEnv = qEnvironmentVariable("KILLENGINE_DISABLE_LLAMA");
+        qputenv("KILLENGINE_DISABLE_LLAMA", "1");
+        settings.setValue("ai/modelEnabled", false);
+        settings.sync();
+    }
+
+    ~ScopedModelDisabled() {
+        if (m_previousEnv.isNull()) {
+            qunsetenv("KILLENGINE_DISABLE_LLAMA");
+        } else {
+            qputenv("KILLENGINE_DISABLE_LLAMA", m_previousEnv.toUtf8());
+        }
+        QSettings settings;
+        settings.setValue("ai/modelEnabled", m_previous);
+        settings.sync();
+    }
+
+private:
+    QVariant m_previous;
+    QString m_previousEnv;
+};
+
+} // namespace
 
 TEST(AIToolValidatorTest, AcceptsExactScan) {
     killai::ToolValidator validator;
@@ -32,7 +66,32 @@ TEST(AIToolValidatorTest, RejectsMissingArg) {
     EXPECT_FALSE(error.isEmpty());
 }
 
+TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
+    killai::ToolRegistry registry;
+
+    EXPECT_TRUE(registry.hasTool("auto_resolve"));
+    EXPECT_TRUE(registry.hasTool("encrypted_scan"));
+    EXPECT_TRUE(registry.hasTool("trace_ui_string"));
+
+    const auto autoResolve = registry.toolMetadata("auto_resolve");
+    EXPECT_EQ(autoResolve.value("risk").toString(), "safe");
+    EXPECT_FALSE(autoResolve.value("requiresConfirmation").toBool());
+    EXPECT_TRUE(autoResolve.value("requiredArgs").toStringList().contains("query"));
+}
+
+TEST(AIToolRegistryTest, MarksRiskyToolsAsConfirmationRequired) {
+    killai::ToolRegistry registry;
+
+    for (const QString& toolName : {"write_value", "freeze_value", "find_what_writes", "generate_aob", "suggest_patch"}) {
+        const auto tool = registry.toolMetadata(toolName);
+        ASSERT_FALSE(tool.isEmpty()) << toolName.toStdString();
+        EXPECT_TRUE(tool.value("requiresConfirmation").toBool()) << toolName.toStdString();
+        EXPECT_FALSE(tool.value("safe").toBool()) << toolName.toStdString();
+    }
+}
+
 TEST(AIEngineTest, PlansExactScanFromNumber) {
+    ScopedModelDisabled disableModel;
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
 
@@ -40,10 +99,7 @@ TEST(AIEngineTest, PlansExactScanFromNumber) {
     EXPECT_EQ(result.value("status").toString(), "tool_call");
     EXPECT_EQ(result.value("tool").toString(), "exact_scan");
     EXPECT_EQ(result.value("args").toMap().value("value").toString(), "41250");
-
-    if (qEnvironmentVariableIsSet("KILLENGINE_QWEN_GGUF") && qEnvironmentVariableIsSet("KILLENGINE_LLAMA_CLI")) {
-        EXPECT_EQ(result.value("aiBackend").toString(), "llama.cpp");
-    }
+    EXPECT_EQ(result.value("aiBackend").toString(), "deterministic");
 }
 
 TEST(IntentContractTest, AcceptsGuidedScanIntent) {
@@ -78,6 +134,7 @@ TEST(IntentContractTest, ValidatesMemoryTargetAddresses) {
 }
 
 TEST(AIEngineTest, ProducesGuidedScanIntent) {
+    ScopedModelDisabled disableModel;
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
 
@@ -89,6 +146,7 @@ TEST(AIEngineTest, ProducesGuidedScanIntent) {
 }
 
 TEST(AIEngineTest, AsksClarificationForMissingWriteValue) {
+    ScopedModelDisabled disableModel;
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
 
@@ -98,6 +156,7 @@ TEST(AIEngineTest, AsksClarificationForMissingWriteValue) {
 }
 
 TEST(AIEngineTest, RecognizesNaturalRewritePhrasesInConversationSequence) {
+    ScopedModelDisabled disableModel;
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
 
@@ -119,6 +178,7 @@ TEST(AIEngineTest, RecognizesNaturalRewritePhrasesInConversationSequence) {
 }
 
 TEST(AIEngineTest, RecognizesBadTargetRecoveryRequest) {
+    ScopedModelDisabled disableModel;
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
 
@@ -167,5 +227,101 @@ TEST(LlamaRuntimeTest, ExtractsLastToolCallWhenPromptContainsJson) {
 TEST(ModelLocatorTest, ProvidesCandidateQwenPaths) {
     const auto paths = killai::ModelLocator::candidateModelPaths();
     EXPECT_FALSE(paths.isEmpty());
-    EXPECT_TRUE(paths.join('|').contains("models"));
+    EXPECT_TRUE(paths.join('|').contains("model"));
+    EXPECT_TRUE(paths.join('|').contains("qwen"));
+}
+
+// --- Contexte de session : le fallback deterministe choisit le bon outil ---
+
+TEST(AIEngineContextualFallbackTest, AsksToAttachProcessWhenDetached) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = false;
+    const auto result = engine.processQuery("cherche 41250", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_TRUE(result.value("message").toString().contains("processus"));
+}
+
+TEST(AIEngineContextualFallbackTest, RefinesWithNextScanWhenScanActive) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    context["scanActive"] = true;
+    context["candidateCount"] = static_cast<qulonglong>(120);
+    const auto result = engine.processQuery("maintenant c'est 812", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "next_scan");
+    EXPECT_EQ(result.value("args").toMap().value("mode").toString().toStdString(), "exact");
+}
+
+TEST(AIEngineContextualFallbackTest, ExactScanWhenNoActiveSearch) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    context["scanActive"] = false;
+    const auto result = engine.processQuery("j'ai 41250 argent", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "exact_scan");
+}
+
+TEST(AIEngineContextualFallbackTest, TraceUiStringForDisplayedValue) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("la valeur 60 est affichee mais introuvable", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trace_ui_string");
+    EXPECT_EQ(result.value("args").toMap().value("value").toString().toStdString(), "60");
+}
+
+TEST(AIEngineContextualFallbackTest, EncryptedScanForObfuscatedValue) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("la valeur 500 semble chiffree", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "encrypted_scan");
+    EXPECT_EQ(result.value("args").toMap().value("mode").toString().toStdString(), "xor");
+}
+
+TEST(AIEngineContextualFallbackTest, UnknownCaptureWhenValueUnknown) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    context["scanActive"] = false;
+    const auto result = engine.processQuery("je ne sais pas la valeur, elle augmente quand je gagne", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "unknown_capture");
+}
+
+TEST(AIEngineContextualFallbackTest, AutoResolveForGuidedObjectiveWithoutValue) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("trouve cette valeur et guide-moi", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "auto_resolve");
+}
+
+TEST(AIEngineContextualFallbackTest, LegacyOverloadStillPlansExactScan) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    const auto result = engine.processQuery("j'ai 41250 argent");
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "exact_scan");
 }

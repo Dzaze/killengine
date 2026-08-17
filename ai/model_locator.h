@@ -16,6 +16,7 @@ class ModelLocator {
 public:
     static ModelInfo findQwenGguf();
     static QStringList candidateModelPaths();
+    static QStringList discoverModelFiles();
 };
 
 } // namespace killai

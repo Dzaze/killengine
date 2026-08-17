@@ -3,7 +3,10 @@ import { ref, computed, nextTick, watch } from 'vue'
 import {
   backend,
   type AppSettings,
+  type AiModelStatus,
+  type AutoResolveReportResult,
   type CandidatePage,
+  type EncryptedScanResult,
   type ChatMemoryTargetsResult,
   type ExactScanResult,
   type LogTailResult,
@@ -19,8 +22,13 @@ import {
   type SmartSearchDebugEventsResult,
   type TemporaryStorageStatus,
   type UndoCandidateScanResult,
+  type UiStringCandidate,
+  type UiStringSourceCandidate,
+  type UiStringSourceResult,
+  type UiStringScanResult,
   type UnknownNextScanResult,
   type UnknownSnapshotResult,
+  type AobPatternQuality,
 } from '@/services/backend'
 
 export interface ChatMessage {
@@ -41,6 +49,7 @@ export interface ChatMessage {
   writeHistory?: string[]
   activeTargetCount?: number
   recoveryActions?: Array<Record<string, unknown>>
+  executedSafeSteps?: Array<Record<string, unknown>>
   requiresConfirmation?: boolean
   confirmationReason?: string
   isThinking?: boolean
@@ -76,6 +85,160 @@ export interface UserActionLogEntry {
   status: 'info' | 'success' | 'warning' | 'error'
 }
 
+export interface InvestigationStep {
+  id: number
+  time: string
+  title: string
+  detail: string
+  status: 'planned' | 'running' | 'success' | 'warning' | 'error' | 'checkpoint'
+  tool?: string
+  risk?: 'safe' | 'write' | 'debug' | 'patch' | 'injection'
+  confidence?: number
+  payload?: Record<string, unknown>
+}
+
+export interface InvestigationRun {
+  id: number
+  title: string
+  objective: string
+  processName: string
+  startedAt: string
+  updatedAt: string
+  status: 'active' | 'checkpoint' | 'done' | 'blocked'
+  preferredStrategy?: Record<string, unknown>
+  summary: string
+  steps: InvestigationStep[]
+  hypotheses: Array<Record<string, unknown>>
+  checkpoints: Array<Record<string, unknown>>
+}
+
+export interface TrainerFeature {
+  id: number
+  name: string
+  processName: string
+  action: 'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch'
+  locatorKind: 'absolute' | 'aob'
+  address: string
+  valueType: string
+  value: string
+  patchBytes?: string
+  aobPattern?: string
+  signatureQuality?: AobPatternQuality
+  signatureScore?: number
+  signatureLevel?: string
+  signatureWarning?: string
+  signatureFixedBytes?: number
+  signatureWildcardBytes?: number
+  signatureUniqueFixedBytes?: number
+  signatureFixedRatio?: number
+  trainerSafe?: boolean
+  signatureMatches?: number
+  hotkey?: string
+  hotkeyId?: number
+  enabled: boolean
+  status: 'idle' | 'active' | 'error' | 'ambiguous'
+  lastError: string
+  history?: Array<{
+    time: string
+    action: string
+    status: 'success' | 'warning' | 'error' | 'info'
+    detail: string
+  }>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StructureTemplateField {
+  offset: number
+  type: string
+  label: string
+  note: string
+  sampleValue: string
+  rawHex?: string
+}
+
+export interface StructureTemplate {
+  id: number
+  name: string
+  processName: string
+  baseAddress: string
+  size: number
+  fieldCount: number
+  fields: StructureTemplateField[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkspaceBookmark {
+  id: number
+  kind: 'address' | 'structure_field' | 'aob' | 'pointer' | 'note'
+  label: string
+  processName: string
+  address?: string
+  type?: string
+  value?: string
+  note: string
+  payload?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkspaceProject {
+  id: number
+  name: string
+  processName: string
+  snapshotJson: string
+  investigationCount: number
+  trainerFeatureCount: number
+  structureTemplateCount: number
+  bookmarkCount: number
+  auditCount?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RuntimeActionPlanItem {
+  id: 'watch' | 'write' | 'freeze_polling' | 'find_writes' | 'aob_patch' | 'bookmark' | 'trainer'
+  label: string
+  risk: 'safe' | 'write' | 'debug' | 'patch'
+  enabled: boolean
+  reason: string
+}
+
+export interface RuntimeActionPlan {
+  label: string
+  address: string
+  type: string
+  value: string
+  kind: string
+  isCode: boolean
+  safeCount: number
+  riskyCount: number
+  actions: RuntimeActionPlanItem[]
+}
+
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'profiles' | 'expert' | 'settings'
+
+export interface WorkflowPreset {
+  id: string
+  title: string
+  description: string
+  prompt: string
+  startView: AppView
+  mode: 'auto' | 'manual'
+  valueType?: string
+  risk: 'safe' | 'write' | 'debug' | 'patch' | 'injection'
+  nextStep: string
+}
+
+export interface RiskDialogState {
+  open: boolean
+  risk: NonNullable<InvestigationStep['risk']>
+  title: string
+  detail: string
+  mode: AppSettings['autoRiskMode']
+}
+
 export interface MemoryPreviewDecodedValue {
   label: string
   value: string
@@ -104,10 +267,11 @@ export interface UnknownGuideStep {
 
 export const useAppStore = defineStore('app', () => {
   // State
-  const activeView = ref<'assistant' | 'process' | 'memory' | 'profiles' | 'expert' | 'settings'>('assistant')
+  const activeView = ref<AppView>('assistant')
   const uiMode = ref<'beginner' | 'expert'>('beginner')
   const version = ref('...')
   const isConnected = ref(false)
+  const showOnboarding = ref(false)
   const isAttached = ref(false)
   const processName = ref('')
   const processes = ref<ProcessInfo[]>([])
@@ -134,6 +298,7 @@ export const useAppStore = defineStore('app', () => {
   const scanTelemetryFilePath = ref('')
   const smartSearchDebugEvents = ref<Array<Record<string, unknown>>>([])
   const smartSearchDebugError = ref('')
+  const autoResolveReport = ref<AutoResolveReportResult | null>(null)
   const settingsLoaded = ref(false)
   const settingsSaving = ref(false)
   const settingsStatus = ref('')
@@ -149,16 +314,180 @@ export const useAppStore = defineStore('app', () => {
   const settingFastScan = ref(true)
   const settingSmartSearchDebugEnabled = ref(true)
   const settingSmartSearchDebugMaxEvents = ref(30)
+  const settingAutoRiskMode = ref<AppSettings['autoRiskMode']>('Safe')
   const settingModelPath = ref('')
+  const settingModelEnabled = ref(true)
   const settingModelThreads = ref(4)
+  const aiModelStatus = ref<AiModelStatus | null>(null)
+  const aiModelStatusLoading = ref(false)
+  const aiModelStatusError = ref('')
+  const workflowPresets = ref<WorkflowPreset[]>([
+    {
+      id: 'exact-value',
+      title: 'Valeur directe',
+      description: 'Quand tu connais la valeur actuelle et la valeur cible.',
+      prompt: 'Valeur actuelle 100, objectif 9999',
+      startView: 'assistant',
+      mode: 'auto',
+      valueType: 'Int32',
+      risk: 'safe',
+      nextStep: 'Auto lance un scan exact puis prépare un checkpoint si peu de candidats restent.',
+    },
+    {
+      id: 'unknown-change',
+      title: 'Valeur inconnue',
+      description: 'Quand tu sais seulement que la valeur augmente, diminue ou change.',
+      prompt: 'Je ne connais pas la valeur exacte, aide-moi à la retrouver avec une recherche unknown',
+      startView: 'assistant',
+      mode: 'auto',
+      valueType: 'Auto',
+      risk: 'safe',
+      nextStep: 'Auto prépare une capture unknown, puis attend ton observation suivante.',
+    },
+    {
+      id: 'display-trace',
+      title: 'Valeur affichée introuvable',
+      description: 'Quand le scan numérique ne trouve rien mais le texte est visible à l’écran.',
+      prompt: 'La valeur affichée existe mais le scan exact ne trouve rien, lance Trace UI string',
+      startView: 'expert',
+      mode: 'manual',
+      valueType: 'Int32',
+      risk: 'safe',
+      nextStep: 'Expert ouvre Trace UI string pour chercher texte, sources numériques et backrefs.',
+    },
+    {
+      id: 'stable-trainer',
+      title: 'Transformer en trainer',
+      description: 'Quand une adresse ou signature semble fiable et doit devenir un toggle.',
+      prompt: 'Transforme la trouvaille confirmée en feature Trainer réutilisable',
+      startView: 'trainer',
+      mode: 'manual',
+      valueType: 'Int32',
+      risk: 'write',
+      nextStep: 'Trainer prépare une feature locale avec confirmation avant écriture, freeze ou patch.',
+    },
+    {
+      id: 'code-investigation',
+      title: 'Qui écrit cette valeur',
+      description: 'Quand il faut comprendre quelle instruction modifie une adresse confirmée.',
+      prompt: 'Adresse confirmée : trouver ce qui écrit dessus puis proposer une signature AOB',
+      startView: 'investigation',
+      mode: 'manual',
+      valueType: 'Int32',
+      risk: 'debug',
+      nextStep: 'Investigation garde le checkpoint; Expert lance Find What Writes uniquement après confirmation.',
+    },
+    // Scénarios courants Expert/Trainer (finition commerciale) : mêmes champs
+    // que les presets Assistant ci-dessus, réutilisent applyWorkflowPreset()
+    // tel quel — juste des données, pas un nouveau mécanisme.
+    {
+      id: 'scenario-money',
+      title: 'Argent / Or',
+      description: 'Ressource principale du jeu (pièces, or, crédits...).',
+      prompt: 'Je cherche l\'argent ou l\'or, valeur affichée à l\'écran',
+      startView: 'expert',
+      mode: 'manual',
+      valueType: 'Int32',
+      risk: 'safe',
+      nextStep: 'Lance un scan exact avec la valeur affichée dans le panneau Scan exact.',
+    },
+    {
+      id: 'scenario-health',
+      title: 'Vie / PV',
+      description: 'Points de vie ou de santé du joueur.',
+      prompt: 'Je cherche les points de vie (HP), valeur affichée à l\'écran',
+      startView: 'expert',
+      mode: 'manual',
+      valueType: 'Int32',
+      risk: 'safe',
+      nextStep: 'Lance un scan exact avec la valeur affichée, fais varier la vie en jeu puis réduis.',
+    },
+    {
+      id: 'scenario-score',
+      title: 'Score / Niveau',
+      description: 'Score, expérience ou niveau du joueur.',
+      prompt: 'Je cherche le score ou le niveau, valeur affichée à l\'écran',
+      startView: 'expert',
+      mode: 'manual',
+      valueType: 'Int32',
+      risk: 'safe',
+      nextStep: 'Lance un scan exact, ou passe en Unknown si la valeur change en continu.',
+    },
+    {
+      id: 'scenario-ammo',
+      title: 'Munitions',
+      description: 'Compteur de munitions ou de ressources consommables.',
+      prompt: 'Je cherche les munitions, valeur affichée à l\'écran',
+      startView: 'expert',
+      mode: 'manual',
+      valueType: 'Int32',
+      risk: 'safe',
+      nextStep: 'Lance un scan exact, tire une fois en jeu puis réduis avec la nouvelle valeur.',
+    },
+  ])
+  const lastWorkflowPresetId = ref('')
   const activeChatMemoryTargets = ref<Array<Record<string, unknown>>>([])
   const smartSearchContext = ref<SmartSearchContextResult | null>(null)
   const investigationReport = ref<InvestigationReport | null>(null)
+  const activeInvestigation = ref<InvestigationRun | null>(null)
+  const investigationArchive = ref<InvestigationRun[]>([])
+  const investigationStepIdCounter = ref(0)
+  const investigationRunIdCounter = ref(0)
+  const trainerFeatures = ref<TrainerFeature[]>([])
+  const trainerFeatureIdCounter = ref(0)
+  const trainerBusy = ref(false)
+  const trainerHotkeyStatus = ref('')
+  const trainerOverlayVisible = ref(false)
+  const trainerOverlayStatus = ref('')
+  const structureTemplates = ref<StructureTemplate[]>([])
+  const structureTemplateIdCounter = ref(0)
+  const workspaceBookmarks = ref<WorkspaceBookmark[]>([])
+  const workspaceBookmarkIdCounter = ref(0)
+  const workspaceProjects = ref<WorkspaceProject[]>([])
+  const workspaceProjectIdCounter = ref(0)
+  const riskDialog = ref<RiskDialogState | null>(null)
+  let riskDialogResolver: ((accepted: boolean) => void) | null = null
   const searchQuery = ref('')
   const searchResult = ref('')
   const exactScanValue = ref('')
   const exactScanType = ref('Int32')
   const exactScanResult = ref<ExactScanResult | null>(null)
+  const encryptedScanResult = ref<EncryptedScanResult | null>(null)
+// ---- Scan groupe (P1) : N valeurs avec offsets fixes connus ----
+interface GroupScanEntryInput {
+  offset: number
+  type: string
+  value: string
+}
+const groupScanEntries = ref<Array<{ offset: string, type: string, value: string }>>([
+  { offset: '0', type: 'Int32', value: '' },
+  { offset: '4', type: 'Int32', value: '' },
+])
+const groupScanResult = ref<EncryptedScanResult | null>(null)
+const groupScanBusy = ref(false)
+const groupScanMaxDistance = ref(64)
+
+// ---- Watch pointer chain (P1) : suit une chaine de pointeurs en live ----
+interface WatchedPointerChain {
+  id: number
+  label: string
+  chain: { module: string, baseOffset: string, offsets: string[] }
+  type: string
+  finalAddress: string
+  value: string
+  previousValue: string
+  changed: boolean
+  error: string
+  updatedAt: string
+}
+const watchedPointerChains = ref<WatchedPointerChain[]>([])
+let nextWatchedChainId = 1
+  const autoUiStringScanResult = ref<UiStringScanResult | null>(null)
+  const autoUiStringSourceResult = ref<UiStringSourceResult | null>(null)
+  const autoUiStringSources = ref<UiStringSourceCandidate[]>([])
+  const encryptedScanMode = ref<'xor' | 'add' | 'sub' | 'not'>('xor')
+  const encryptedScanKey = ref('0')
+  const encryptedScanKeySearchBits = ref(0)
 
   // Mode Expert (Phase 12)
   const expertModeEnabled = ref(false)
@@ -187,6 +516,7 @@ export const useAppStore = defineStore('app', () => {
   const unknownSnapshotResult = ref<UnknownSnapshotResult | null>(null)
   const unknownNextScanResult = ref<UnknownNextScanResult | null>(null)
   const unknownGuideSteps = ref<UnknownGuideStep[]>([])
+  const autoUnknownAwaitingObservation = ref(false)
   const unknownGuideStepIdCounter = ref(0)
   const selectedCandidateAddress = ref('')
   const writeValue = ref('')
@@ -194,6 +524,7 @@ export const useAppStore = defineStore('app', () => {
   const writeSafetyWarning = ref('')
   const writeSafetyAcknowledged = ref(false)
   const freezeEnabled = ref(false)
+  const breakpointFreezeEnabled = ref(false)
   const freezeIntervalMs = ref(100)
   const freezeIntervalResult = ref<Record<string, unknown> | null>(null)
   const finalCandidateTargets = ref<Array<Record<string, unknown>>>([])
@@ -203,6 +534,20 @@ export const useAppStore = defineStore('app', () => {
   const watchedAddresses = ref<WatchedAddress[]>([])
   const watchLiveReadLimit = 200
   let watchLiveTimer: ReturnType<typeof setInterval> | null = null
+
+  // Phase 20 — outils Expert manuels d'injection/hooking/auto-assembler,
+  // gardés par confirmRiskAction('injection', ...) (mode Auto = Trainer requis,
+  // cf. logique existante de confirmRiskAction). État panneau uniquement,
+  // rien n'est persisté en profil pour l'instant (pas de feature Trainer 'hook').
+  const injectDllPath = ref('')
+  const injectionResult = ref<Record<string, unknown> | null>(null)
+  const hookTargetAddress = ref('')
+  const hookFunctionAddress = ref('')
+  const activeFunctionHook = ref<Record<string, unknown> | null>(null)
+  const autoAsmScriptText = ref('')
+  const autoAsmPreview = ref<Record<string, unknown> | null>(null)
+  const autoAsmResult = ref<Record<string, unknown> | null>(null)
+  const injectionBusy = ref(false)
 
   // Chat / guided workflow state
   const messages = ref<ChatMessage[]>([])
@@ -217,6 +562,12 @@ export const useAppStore = defineStore('app', () => {
   const scanStatusText = ref('')
   const scanProgressPercent = ref(0)
   let backendScanSignalsConnected = false
+  let backendHotkeySignalConnected = false
+  let backendFreezeInstabilitySignalConnected = false
+  // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
+  // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
+  // d'une reconnexion du signal (ex: rechargement dev).
+  const freezeInstabilityNotified = new Set<string>()
 
   // Getters
   const statusText = computed(() => {
@@ -251,6 +602,30 @@ export const useAppStore = defineStore('app', () => {
     unknownGuideSteps.value = unknownGuideSteps.value.slice(0, 12)
   }
 
+  function firstNumberFromText(text: string): number | null {
+    const match = text.replace(',', '.').match(/-?\d+(?:\.\d+)?/)
+    if (!match) return null
+    const value = Number(match[0])
+    return Number.isFinite(value) ? value : null
+  }
+
+  function inferUnknownModeFromObservation(observation: string): 'increased' | 'decreased' | 'unchanged' | 'changed' {
+    const lower = observation.toLowerCase()
+    if (/(stable|pareil|inchang|m[eê]me|unchanged)/.test(lower)) return 'unchanged'
+    if (/(augmente|mont|plus|hausse|increase|increased|higher)/.test(lower)) return 'increased'
+    if (/(diminue|baisse|moins|decrease|decreased|lower)/.test(lower)) return 'decreased'
+
+    const observed = firstNumberFromText(observation)
+    const previousText = targetValueGuided.value || smartSearchContext.value?.targetValue || smartSearchContext.value?.initialValue || exactScanValue.value
+    const previous = firstNumberFromText(String(previousText ?? ''))
+    if (observed !== null && previous !== null) {
+      if (observed > previous) return 'increased'
+      if (observed < previous) return 'decreased'
+      return 'unchanged'
+    }
+    return 'changed'
+  }
+
   function addActionLog(
     kind: string,
     title: string,
@@ -267,6 +642,1873 @@ export const useAppStore = defineStore('app', () => {
       status,
     })
     actionLog.value = actionLog.value.slice(0, 80)
+    saveActionLog()
+  }
+
+  const actionLogStorageKey = 'killengine.action_log.v1'
+  const investigationStorageKey = 'killengine.investigation.v1'
+
+  function saveActionLog() {
+    try {
+      window.localStorage.setItem(actionLogStorageKey, JSON.stringify({
+        entries: actionLog.value.slice(0, 200),
+        id: actionLogIdCounter.value,
+      }))
+    } catch {
+      // Best-effort audit: runtime actions must continue even if local storage is full.
+    }
+  }
+
+  function loadActionLog() {
+    try {
+      const raw = window.localStorage.getItem(actionLogStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { entries?: UserActionLogEntry[], id?: number }
+      actionLog.value = Array.isArray(parsed.entries) ? parsed.entries.slice(0, 200) : []
+      actionLogIdCounter.value = Number(parsed.id ?? actionLog.value.reduce((max, entry) => Math.max(max, Number(entry.id) || 0), 0))
+    } catch {
+      actionLog.value = []
+      actionLogIdCounter.value = 0
+    }
+  }
+
+  function clearActionLog() {
+    actionLog.value = []
+    actionLogIdCounter.value = 0
+    saveActionLog()
+  }
+
+  function exportActionLogJson(): string {
+    return JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      processName: processName.value,
+      entries: actionLog.value,
+    }, null, 2)
+  }
+
+  function exportActionLogMarkdown(): string {
+    const lines = [
+      '# KillEngine Audit Log',
+      '',
+      `Export: ${new Date().toISOString()}`,
+      `Processus: ${processName.value || 'non attache'}`,
+      `Entrées: ${actionLog.value.length}`,
+      '',
+      ...actionLog.value.slice(0, 200).map((entry) =>
+        `- ${entry.time} [${entry.status}] ${entry.kind} - ${entry.title}${entry.detail ? `: ${entry.detail}` : ''}`,
+      ),
+    ]
+    return lines.join('\n')
+  }
+
+  function saveInvestigations() {
+    try {
+      window.localStorage.setItem(investigationStorageKey, JSON.stringify({
+        active: activeInvestigation.value,
+        archive: investigationArchive.value.slice(0, 20),
+        stepId: investigationStepIdCounter.value,
+        runId: investigationRunIdCounter.value,
+      }))
+    } catch {
+      // Best-effort persistence: analysis must keep working even if storage is unavailable.
+    }
+  }
+
+  function loadInvestigations() {
+    try {
+      const raw = window.localStorage.getItem(investigationStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as {
+        active?: InvestigationRun | null
+        archive?: InvestigationRun[]
+        stepId?: number
+        runId?: number
+      }
+      activeInvestigation.value = parsed.active ?? null
+      investigationArchive.value = Array.isArray(parsed.archive) ? parsed.archive.slice(0, 20) : []
+      investigationStepIdCounter.value = Number(parsed.stepId ?? 0)
+      investigationRunIdCounter.value = Number(parsed.runId ?? 0)
+    } catch {
+      activeInvestigation.value = null
+      investigationArchive.value = []
+    }
+  }
+
+  function startInvestigation(objective: string, title = 'Investigation Auto') {
+    if (activeInvestigation.value) {
+      investigationArchive.value.unshift({
+        ...activeInvestigation.value,
+        status: activeInvestigation.value.status === 'active' ? 'blocked' : activeInvestigation.value.status,
+      })
+      investigationArchive.value = investigationArchive.value.slice(0, 20)
+    }
+
+    investigationRunIdCounter.value += 1
+    const now = new Date().toISOString()
+    activeInvestigation.value = {
+      id: investigationRunIdCounter.value,
+      title,
+      objective,
+      processName: processName.value,
+      startedAt: now,
+      updatedAt: now,
+      status: 'active',
+      summary: '',
+      steps: [],
+      hypotheses: [],
+      checkpoints: [],
+    }
+    saveInvestigations()
+  }
+
+  function addInvestigationStep(step: Omit<InvestigationStep, 'id' | 'time'>) {
+    if (!activeInvestigation.value) {
+      startInvestigation(searchQuery.value || 'Investigation manuelle')
+    }
+    if (!activeInvestigation.value) return
+
+    investigationStepIdCounter.value += 1
+    activeInvestigation.value.steps.unshift({
+      id: investigationStepIdCounter.value,
+      time: nowTime(),
+      ...step,
+    })
+    activeInvestigation.value.updatedAt = new Date().toISOString()
+    if (step.status === 'checkpoint') activeInvestigation.value.status = 'checkpoint'
+    if (step.status === 'error') activeInvestigation.value.status = 'blocked'
+    saveInvestigations()
+  }
+
+  function applyWorkflowPreset(id: string) {
+    const preset = workflowPresets.value.find((item) => item.id === id)
+    if (!preset) {
+      addActionLog('workflow', 'Preset introuvable', id, 'warning')
+      return null
+    }
+    lastWorkflowPresetId.value = preset.id
+    searchQuery.value = preset.prompt
+    if (preset.valueType) {
+      if (preset.valueType === 'Auto') unknownScanType.value = 'Auto'
+      else exactScanType.value = preset.valueType
+    }
+    if (!activeInvestigation.value) {
+      startInvestigation(preset.prompt, `Preset: ${preset.title}`)
+    }
+    addInvestigationStep({
+      title: `Preset chargé: ${preset.title}`,
+      detail: `${preset.description} Prochaine étape: ${preset.nextStep}`,
+      status: 'planned',
+      tool: 'applyWorkflowPreset',
+      risk: preset.risk,
+      payload: {
+        presetId: preset.id,
+        mode: preset.mode,
+        prompt: preset.prompt,
+        startView: preset.startView,
+      },
+    })
+    pushMessage('assistant', `Preset chargé: ${preset.title}. ${preset.nextStep}`)
+    activeView.value = preset.startView
+    addActionLog('workflow', `Preset chargé: ${preset.title}`, preset.nextStep, 'success')
+    return preset
+  }
+
+  function updateInvestigationFromAutoResult(result: Record<string, unknown>) {
+    if (!activeInvestigation.value) return
+
+    const contextReport = typeof result.contextReport === 'object' && result.contextReport !== null
+      ? result.contextReport as Record<string, unknown>
+      : {}
+    const preferredStrategy = typeof contextReport.preferredStrategy === 'object' && contextReport.preferredStrategy !== null
+      ? contextReport.preferredStrategy as Record<string, unknown>
+      : undefined
+    const recommendations = Array.isArray(contextReport.recommendations)
+      ? contextReport.recommendations as Array<Record<string, unknown>>
+      : []
+    const nextBestAction = typeof contextReport.nextBestAction === 'object' && contextReport.nextBestAction !== null
+      ? contextReport.nextBestAction as Record<string, unknown>
+      : null
+    const telemetryInsights = Array.isArray(contextReport.telemetryInsights)
+      ? contextReport.telemetryInsights as Array<Record<string, unknown>>
+      : []
+    const displayValueReport = typeof contextReport.displayValueReport === 'object' && contextReport.displayValueReport !== null
+      ? contextReport.displayValueReport as Record<string, unknown>
+      : {}
+    const displayValueHypothesis = displayValueReport.enabled === true
+      ? [{
+          id: 'display_value_report',
+          label: 'Rapport valeurs affichees',
+          reason: String(displayValueReport.recommendation ?? 'Trace UI string et sources numeriques avant debugger.'),
+          safe: true,
+          traceUiSourceCount: displayValueReport.traceUiSourceCount,
+          globalValueHits: displayValueReport.globalValueHits,
+        }]
+      : []
+    const suggestedWrites = Array.isArray(result.suggestedWrites)
+      ? result.suggestedWrites as Array<Record<string, unknown>>
+      : []
+    const plan = Array.isArray(result.plan)
+      ? result.plan as Array<Record<string, unknown>>
+      : []
+
+    activeInvestigation.value.preferredStrategy = preferredStrategy
+    activeInvestigation.value.summary = String(result.message ?? result.error ?? '').trim()
+    activeInvestigation.value.hypotheses = [
+      ...(nextBestAction ? [{ ...nextBestAction, id: 'next_best_action', label: `Priorité: ${String(nextBestAction.label ?? nextBestAction.id ?? 'action')}` }] : []),
+      ...displayValueHypothesis,
+      ...telemetryInsights,
+      ...recommendations,
+    ].slice(0, 8)
+    activeInvestigation.value.checkpoints = [
+      ...suggestedWrites.map((item) => ({ ...item, kind: 'suggested_write', requiresConfirmation: true })),
+      ...telemetryInsights.filter((item) => item.safe === false || item.requiresConfirmation === true),
+      ...recommendations.filter((item) => item.safe === false || item.requiresConfirmation === true),
+    ].slice(0, 12)
+
+    if (plan.length > 0 && activeInvestigation.value.steps.length === 0) {
+      for (const item of plan.slice().reverse()) {
+        addInvestigationStep({
+          title: String(item.description ?? item.type ?? 'Etape planifiee'),
+          detail: String(item.type ?? 'planned'),
+          status: 'planned',
+          tool: String(item.type ?? ''),
+          risk: 'safe',
+          payload: item,
+        })
+      }
+    }
+
+    saveInvestigations()
+  }
+
+  function finishInvestigation(status: InvestigationRun['status'] = 'done') {
+    if (!activeInvestigation.value) return
+    activeInvestigation.value.status = status
+    activeInvestigation.value.updatedAt = new Date().toISOString()
+    investigationArchive.value.unshift(activeInvestigation.value)
+    investigationArchive.value = investigationArchive.value.slice(0, 20)
+    activeInvestigation.value = null
+    saveInvestigations()
+  }
+
+  function clearInvestigation() {
+    activeInvestigation.value = null
+    saveInvestigations()
+  }
+
+  function clearInvestigationArchive() {
+    investigationArchive.value = []
+    saveInvestigations()
+  }
+
+  function restoreInvestigationFromArchive(id: number) {
+    const index = investigationArchive.value.findIndex((item) => item.id === id)
+    if (index < 0) return false
+
+    if (activeInvestigation.value) {
+      investigationArchive.value.unshift({
+        ...activeInvestigation.value,
+        status: activeInvestigation.value.status === 'active' ? 'blocked' : activeInvestigation.value.status,
+        updatedAt: new Date().toISOString(),
+      })
+    }
+
+    const [restored] = investigationArchive.value.splice(index + (activeInvestigation.value ? 1 : 0), 1)
+    if (!restored) return false
+
+    activeInvestigation.value = {
+      ...restored,
+      status: restored.status === 'done' ? 'checkpoint' : restored.status,
+      updatedAt: new Date().toISOString(),
+    }
+    investigationArchive.value = investigationArchive.value.slice(0, 20)
+    saveInvestigations()
+    addActionLog('investigation', 'Archive restaurée', activeInvestigation.value.objective, 'success')
+    return true
+  }
+
+  function exportInvestigationJson(): string {
+    return JSON.stringify(activeInvestigation.value ?? {}, null, 2)
+  }
+
+  function exportInvestigationMarkdown(): string {
+    const run = activeInvestigation.value
+    if (!run) return '# Investigation\n\nAucune investigation active.\n'
+    const report = autoResolveReport.value
+    const nextBestAction = report?.nextBestAction && typeof report.nextBestAction === 'object'
+      ? report.nextBestAction as Record<string, unknown>
+      : null
+    const topCheckpoints = [...run.checkpoints]
+      .sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0))
+      .slice(0, 5)
+    const topActionPlans = topCheckpoints.map((checkpoint) => buildCheckpointActionPlan(checkpoint))
+    const guardrails = Array.isArray(report?.guardrails) ? report.guardrails.slice(0, 8) : []
+    const lines = [
+      `# ${run.title}`,
+      '',
+      `Objectif: ${run.objective}`,
+      `Processus: ${run.processName || 'non attache'}`,
+      `Statut: ${run.status}`,
+      '',
+      '## Strategie',
+      String(run.preferredStrategy?.label ?? 'Non determinee'),
+      '',
+      '## Meilleure Prochaine Action',
+      nextBestAction
+        ? `${String(nextBestAction.label ?? nextBestAction.id ?? 'Action')} (${String(nextBestAction.risk ?? 'safe')}${nextBestAction.confidence !== undefined ? `, confiance ${String(nextBestAction.confidence)}/100` : ''})`
+        : String(run.checkpoints[0]?.label ?? run.hypotheses[0]?.label ?? 'Non determinee'),
+      nextBestAction ? String(nextBestAction.reason ?? '') : String(run.checkpoints[0]?.reason ?? run.summary ?? ''),
+      '',
+      '## Etapes',
+      ...run.steps.slice().reverse().map((step) => `- [${step.status}] ${step.title} - ${step.detail}`),
+      '',
+      '## Checkpoints',
+      ...run.checkpoints.map((checkpoint) => `- ${String(checkpoint.label ?? checkpoint.address ?? checkpoint.id ?? 'checkpoint')} (${String(checkpoint.kind ?? 'checkpoint')}${checkpoint.confidenceLabel ? `, ${String(checkpoint.confidenceLabel)}` : ''})`),
+      '',
+      '## Top 5 Checkpoints Scores',
+      ...(topCheckpoints.length > 0
+        ? topCheckpoints.map((checkpoint, index) => `${index + 1}. ${String(checkpoint.label ?? checkpoint.address ?? 'checkpoint')} - ${String(checkpoint.kind ?? 'checkpoint')} - ${String(checkpoint.confidenceLabel ?? `score ${Number(checkpoint.confidenceScore ?? 0)}/100`)} - ${checkpoint.requiresConfirmation === true ? 'confirmation requise' : 'safe'}`)
+        : ['Aucun checkpoint score.']),
+      '',
+      '## Plans D Action Checkpoints',
+      ...(topActionPlans.length > 0
+        ? topActionPlans.map((plan, index) => `${index + 1}. ${plan.label} - ${plan.safeCount} safe / ${plan.riskyCount} confirmation - ${plan.actions.filter((action) => action.enabled).map((action) => `${action.label}(${action.risk})`).join(', ') || 'aucune action active'}`)
+        : ['Aucun plan d action.']),
+      '',
+      '## Garde-fous Actifs',
+      ...(guardrails.length > 0
+        ? guardrails.map((guardrail) => `- ${String(guardrail.label ?? guardrail.id ?? 'guardrail')} (${String(guardrail.risk ?? 'risk')})`)
+        : ['Aucun garde-fou remonte.']),
+      '',
+      '## Bilan Auto',
+      `Etapes safe: ${run.steps.filter((step) => step.risk === 'safe' && step.status === 'success').length}`,
+      `Checkpoints actionnables: ${run.checkpoints.length}`,
+      `Meilleure piste: ${String(run.checkpoints[0]?.label ?? run.hypotheses[0]?.label ?? 'non determinee')}`,
+      `Prochaine etape: ${String(run.hypotheses[0]?.nextAction ?? run.checkpoints[0]?.reason ?? run.summary ?? 'continuer la reduction ou valider un checkpoint')}`,
+      '',
+    ]
+    return lines.join('\n')
+  }
+
+  const trainerStorageKey = 'killengine.trainer.features.v1'
+  const structureTemplateStorageKey = 'killengine.structure.templates.v1'
+  const workspaceBookmarkStorageKey = 'killengine.workspace.bookmarks.v1'
+  const workspaceProjectStorageKey = 'killengine.workspace.projects.v1'
+
+  function saveTrainerFeatures() {
+    try {
+      window.localStorage.setItem(trainerStorageKey, JSON.stringify({
+        features: trainerFeatures.value,
+        id: trainerFeatureIdCounter.value,
+      }))
+    } catch {
+      // Best-effort persistence.
+    }
+  }
+
+  function loadTrainerFeatures() {
+    try {
+      const raw = window.localStorage.getItem(trainerStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { features?: TrainerFeature[], id?: number }
+      trainerFeatures.value = Array.isArray(parsed.features) ? parsed.features : []
+      trainerFeatureIdCounter.value = Number(parsed.id ?? 0)
+    } catch {
+      trainerFeatures.value = []
+    }
+  }
+
+  function saveStructureTemplates() {
+    try {
+      window.localStorage.setItem(structureTemplateStorageKey, JSON.stringify({
+        templates: structureTemplates.value,
+        id: structureTemplateIdCounter.value,
+      }))
+    } catch {
+      // Best-effort persistence.
+    }
+  }
+
+  function loadStructureTemplates() {
+    try {
+      const raw = window.localStorage.getItem(structureTemplateStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { templates?: StructureTemplate[], id?: number }
+      structureTemplates.value = Array.isArray(parsed.templates) ? parsed.templates.slice(0, 100) : []
+      structureTemplateIdCounter.value = Number(parsed.id ?? 0)
+    } catch {
+      structureTemplates.value = []
+      structureTemplateIdCounter.value = 0
+    }
+  }
+
+  function saveStructureTemplate(input: {
+    name?: string
+    baseAddress: string
+    size: number
+    fields: StructureTemplateField[]
+  }) {
+    const fields = input.fields
+      .filter((field) => Number.isFinite(field.offset) && field.type.trim())
+      .slice(0, 256)
+    if (fields.length === 0) {
+      addActionLog('structure', 'Template refusé', 'Aucun champ typé exploitable.', 'warning')
+      return null
+    }
+
+    structureTemplateIdCounter.value += 1
+    const now = new Date().toISOString()
+    const template: StructureTemplate = {
+      id: structureTemplateIdCounter.value,
+      name: String(input.name ?? `Structure 0x${input.baseAddress}`).trim() || `Structure 0x${input.baseAddress}`,
+      processName: processName.value,
+      baseAddress: input.baseAddress.replace(/^0x/i, '').toUpperCase(),
+      size: Math.max(0, Math.round(input.size)),
+      fieldCount: fields.length,
+      fields,
+      createdAt: now,
+      updatedAt: now,
+    }
+    structureTemplates.value.unshift(template)
+    structureTemplates.value = structureTemplates.value.slice(0, 100)
+    saveStructureTemplates()
+    addActionLog('structure', `Template sauvegardé: ${template.name}`, `${template.fieldCount} champ(s).`, 'success')
+    return template
+  }
+
+  function deleteStructureTemplate(id: number) {
+    const before = structureTemplates.value.length
+    structureTemplates.value = structureTemplates.value.filter((item) => item.id !== id)
+    if (structureTemplates.value.length !== before) {
+      saveStructureTemplates()
+      addActionLog('structure', 'Template supprimé', `id=${id}`, 'warning')
+    }
+  }
+
+  function clearStructureTemplates() {
+    structureTemplates.value = []
+    saveStructureTemplates()
+    addActionLog('structure', 'Templates vidés', 'Tous les templates locaux ont été supprimés.', 'warning')
+  }
+
+  function saveWorkspaceBookmarks() {
+    try {
+      window.localStorage.setItem(workspaceBookmarkStorageKey, JSON.stringify({
+        bookmarks: workspaceBookmarks.value,
+        id: workspaceBookmarkIdCounter.value,
+      }))
+    } catch {
+      // Best-effort persistence.
+    }
+  }
+
+  function loadWorkspaceBookmarks() {
+    try {
+      const raw = window.localStorage.getItem(workspaceBookmarkStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { bookmarks?: WorkspaceBookmark[], id?: number }
+      workspaceBookmarks.value = Array.isArray(parsed.bookmarks) ? parsed.bookmarks.slice(0, 500) : []
+      workspaceBookmarkIdCounter.value = Number(parsed.id ?? 0)
+    } catch {
+      workspaceBookmarks.value = []
+      workspaceBookmarkIdCounter.value = 0
+    }
+  }
+
+  function addWorkspaceBookmark(input: Partial<WorkspaceBookmark>) {
+    workspaceBookmarkIdCounter.value += 1
+    const now = new Date().toISOString()
+    const bookmark: WorkspaceBookmark = {
+      id: workspaceBookmarkIdCounter.value,
+      kind: input.kind ?? 'address',
+      label: String(input.label ?? input.address ?? 'Bookmark').trim() || 'Bookmark',
+      processName: String(input.processName ?? processName.value),
+      address: input.address ? String(input.address).replace(/^0x/i, '').toUpperCase() : undefined,
+      type: input.type ? String(input.type) : undefined,
+      value: input.value ? String(input.value) : undefined,
+      note: String(input.note ?? ''),
+      payload: input.payload,
+      createdAt: now,
+      updatedAt: now,
+    }
+    workspaceBookmarks.value.unshift(bookmark)
+    workspaceBookmarks.value = workspaceBookmarks.value.slice(0, 500)
+    saveWorkspaceBookmarks()
+    addActionLog('workspace', `Bookmark ajouté: ${bookmark.label}`, bookmark.address ? `0x${bookmark.address}` : bookmark.note, 'success')
+    return bookmark
+  }
+
+  function updateWorkspaceBookmark(id: number, input: Partial<WorkspaceBookmark>) {
+    const bookmark = workspaceBookmarks.value.find((item) => item.id === id)
+    if (!bookmark) return null
+    bookmark.kind = input.kind ?? bookmark.kind
+    bookmark.label = input.label !== undefined ? String(input.label).trim() || bookmark.label : bookmark.label
+    bookmark.processName = input.processName !== undefined ? String(input.processName) : bookmark.processName
+    bookmark.address = input.address !== undefined
+      ? String(input.address).replace(/^0x/i, '').trim().toUpperCase() || undefined
+      : bookmark.address
+    bookmark.type = input.type !== undefined ? String(input.type).trim() || undefined : bookmark.type
+    bookmark.value = input.value !== undefined ? String(input.value).trim() || undefined : bookmark.value
+    bookmark.note = input.note !== undefined ? String(input.note) : bookmark.note
+    bookmark.payload = input.payload !== undefined ? input.payload : bookmark.payload
+    bookmark.updatedAt = new Date().toISOString()
+    saveWorkspaceBookmarks()
+    addActionLog('workspace', `Bookmark modifié: ${bookmark.label}`, bookmark.address ? `0x${bookmark.address}` : bookmark.note, 'success')
+    return bookmark
+  }
+
+  function useWorkspaceBookmarkAsWriteTarget(id: number) {
+    const bookmark = workspaceBookmarks.value.find((item) => item.id === id)
+    if (!bookmark?.address) {
+      addActionLog('workspace', 'Bookmark inutilisable', 'Adresse manquante pour remplir Write / Freeze.', 'warning')
+      return false
+    }
+    selectedCandidateAddress.value = bookmark.address
+    if (bookmark.type) exactScanType.value = bookmark.type
+    if (bookmark.value !== undefined) writeValue.value = bookmark.value
+    addActionLog('workspace', `Bookmark chargé: ${bookmark.label}`, `Write / Freeze préparé sur 0x${bookmark.address}.`, 'success')
+    addInvestigationStep({
+      title: 'Bookmark chargé dans Write / Freeze',
+      detail: `${bookmark.label} · 0x${bookmark.address} · ${bookmark.type || exactScanType.value}`,
+      status: 'success',
+      tool: 'useWorkspaceBookmarkAsWriteTarget',
+      risk: 'safe',
+      payload: bookmark.payload ?? { bookmarkId: bookmark.id },
+    })
+    return true
+  }
+
+  function createTrainerFeatureFromBookmark(id: number, action: TrainerFeature['action'] = 'write') {
+    const bookmark = workspaceBookmarks.value.find((item) => item.id === id)
+    if (!bookmark?.address) {
+      addActionLog('trainer', 'Feature refusée', 'Bookmark sans adresse.', 'warning')
+      return null
+    }
+    const patchBytes = String(bookmark.payload?.patchBytes ?? '').trim()
+    const aobPattern = String(bookmark.payload?.aobPattern ?? '').trim()
+    const signatureQuality = bookmark.payload?.signatureQuality as AobPatternQuality | undefined
+    const inferredAction = action === 'patch' || patchBytes ? 'patch' : action
+    const feature = createTrainerFeature({
+      name: bookmark.label,
+      processName: bookmark.processName || processName.value,
+      action: inferredAction,
+      locatorKind: bookmark.kind === 'aob' || aobPattern ? 'aob' : 'absolute',
+      address: bookmark.address,
+      valueType: bookmark.type || exactScanType.value,
+      value: bookmark.value ?? writeValue.value,
+      patchBytes: patchBytes || undefined,
+      aobPattern: aobPattern || undefined,
+      signatureQuality,
+      signatureScore: Number(bookmark.payload?.signatureScore ?? signatureQuality?.score ?? 0) || undefined,
+      signatureLevel: String(bookmark.payload?.signatureLevel ?? signatureQuality?.level ?? ''),
+      signatureWarning: String(bookmark.payload?.signatureWarning ?? signatureQuality?.warning ?? ''),
+      signatureFixedBytes: Number(bookmark.payload?.signatureFixedBytes ?? signatureQuality?.fixedBytes ?? 0) || undefined,
+      signatureWildcardBytes: Number(bookmark.payload?.signatureWildcardBytes ?? signatureQuality?.wildcardBytes ?? 0) || undefined,
+      signatureUniqueFixedBytes: Number(bookmark.payload?.signatureUniqueFixedBytes ?? signatureQuality?.uniqueFixedBytes ?? 0) || undefined,
+      signatureFixedRatio: Number(bookmark.payload?.signatureFixedRatio ?? signatureQuality?.fixedRatio ?? 0) || undefined,
+      trainerSafe: Boolean(bookmark.payload?.trainerSafe ?? signatureQuality?.trainerSafe ?? false) || undefined,
+      signatureMatches: Number(bookmark.payload?.signatureMatches ?? 0) || undefined,
+    })
+    if (feature) {
+      addInvestigationStep({
+        title: 'Feature Trainer créée depuis bookmark',
+        detail: `${feature.name} · ${feature.action} · 0x${feature.address}`,
+        status: 'success',
+        tool: 'createTrainerFeatureFromBookmark',
+        risk: feature.action === 'patch' ? 'patch' : 'safe',
+        payload: { bookmarkId: bookmark.id, featureId: feature.id },
+      })
+    }
+    return feature
+  }
+
+  function createWorkspaceBookmarkFromCheckpoint(checkpoint: Record<string, unknown>) {
+    const address = checkpointAddress(checkpoint)
+    const payload = (checkpoint.payload && typeof checkpoint.payload === 'object')
+      ? checkpoint.payload as Record<string, unknown>
+      : {}
+    const aobPattern = String(checkpoint.aobPattern ?? payload.aobPattern ?? '').trim()
+    const pointerChain = checkpoint.pointerChain ?? payload.pointerChain
+    const rawKind = String(checkpoint.kind ?? '').toLowerCase()
+    const kind: WorkspaceBookmark['kind'] = aobPattern || rawKind.includes('aob') || rawKind.includes('code')
+      ? 'aob'
+      : pointerChain || rawKind.includes('pointer')
+        ? 'pointer'
+        : address
+          ? 'address'
+          : 'note'
+    const label = String(checkpoint.label ?? checkpoint.name ?? checkpoint.address ?? checkpoint.id ?? 'Checkpoint').trim() || 'Checkpoint'
+    const score = Number(checkpoint.confidenceScore ?? payload.confidenceScore ?? 0)
+    const reason = String(checkpoint.reason ?? payload.reason ?? '').trim()
+    const value = String(checkpoint.value ?? checkpoint.targetValue ?? payload.value ?? '').trim()
+    const bookmark = addWorkspaceBookmark({
+      kind,
+      label,
+      processName: String(checkpoint.processName ?? processName.value),
+      address: address || undefined,
+      type: String(checkpoint.type ?? checkpoint.valueType ?? exactScanType.value),
+      value: value || undefined,
+      note: [
+        reason,
+        score > 0 ? `score ${score}/100` : '',
+        checkpoint.requiresConfirmation === true ? 'confirmation requise' : 'safe',
+      ].filter(Boolean).join(' · '),
+      payload: {
+        ...payload,
+        checkpointKind: checkpoint.kind,
+        confidenceScore: checkpoint.confidenceScore,
+        confidenceLabel: checkpoint.confidenceLabel,
+        requiresConfirmation: checkpoint.requiresConfirmation,
+        aobPattern: aobPattern || undefined,
+        patchBytes: checkpoint.patchBytes ?? payload.patchBytes,
+        signatureQuality: checkpoint.signatureQuality ?? payload.signatureQuality,
+        signatureScore: checkpoint.signatureScore ?? payload.signatureScore,
+        signatureLevel: checkpoint.signatureLevel ?? payload.signatureLevel,
+        signatureWarning: checkpoint.signatureWarning ?? payload.signatureWarning,
+        signatureMatches: checkpoint.signatureMatches ?? payload.signatureMatches,
+      },
+    })
+    addInvestigationStep({
+      title: 'Bookmark créé depuis checkpoint',
+      detail: `${bookmark.label} · ${bookmark.address ? `0x${bookmark.address}` : bookmark.kind} · ${bookmark.type || '-'}`,
+      status: 'success',
+      tool: 'createWorkspaceBookmarkFromCheckpoint',
+      risk: 'safe',
+      payload: { bookmarkId: bookmark.id, checkpointLabel: label, kind },
+    })
+    return bookmark
+  }
+
+  function deleteWorkspaceBookmark(id: number) {
+    const before = workspaceBookmarks.value.length
+    workspaceBookmarks.value = workspaceBookmarks.value.filter((item) => item.id !== id)
+    if (workspaceBookmarks.value.length !== before) {
+      saveWorkspaceBookmarks()
+      addActionLog('workspace', 'Bookmark supprimé', `id=${id}`, 'warning')
+    }
+  }
+
+  function clearWorkspaceBookmarks() {
+    workspaceBookmarks.value = []
+    saveWorkspaceBookmarks()
+    addActionLog('workspace', 'Bookmarks vidés', 'Tous les bookmarks locaux ont été supprimés.', 'warning')
+  }
+
+  function saveWorkspaceProjects() {
+    try {
+      window.localStorage.setItem(workspaceProjectStorageKey, JSON.stringify({
+        projects: workspaceProjects.value,
+        id: workspaceProjectIdCounter.value,
+      }))
+    } catch {
+      // Best-effort persistence.
+    }
+  }
+
+  function loadWorkspaceProjects() {
+    try {
+      const raw = window.localStorage.getItem(workspaceProjectStorageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { projects?: WorkspaceProject[], id?: number }
+      workspaceProjects.value = Array.isArray(parsed.projects) ? parsed.projects.slice(0, 50) : []
+      workspaceProjectIdCounter.value = Number(parsed.id ?? 0)
+    } catch {
+      workspaceProjects.value = []
+      workspaceProjectIdCounter.value = 0
+    }
+  }
+
+  async function registerTrainerFeatureHotkey(id: number, combo: string) {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    const trimmed = combo.trim()
+    if (!feature || !trimmed) return
+    const controller = backend.getController()
+    if (!controller.registerGlobalHotkey) {
+      trainerHotkeyStatus.value = 'Hotkeys globales non exposées par ce backend.'
+      addActionLog('hotkey', 'Hotkey indisponible', trainerHotkeyStatus.value, 'warning')
+      return
+    }
+    if (feature.hotkeyId && controller.unregisterGlobalHotkey) {
+      await controller.unregisterGlobalHotkey(feature.hotkeyId)
+    }
+    const type = feature.action === 'patch' ? 'toggle_patch' : feature.action.startsWith('freeze') ? 'toggle_freeze' : 'write_value'
+    const result = await controller.registerGlobalHotkey(trimmed, {
+      type,
+      targetId: String(feature.id),
+      label: feature.name,
+      payload: { featureId: feature.id },
+    })
+    if (result.success === true) {
+      feature.hotkey = String(result.combo ?? trimmed)
+      feature.hotkeyId = Number(result.id)
+      feature.updatedAt = new Date().toISOString()
+      addTrainerFeatureHistory(feature, 'hotkey_register', 'success', feature.hotkey)
+      trainerHotkeyStatus.value = `Hotkey enregistrée: ${feature.hotkey}`
+      saveTrainerFeatures()
+      addActionLog('hotkey', 'Hotkey Trainer enregistrée', `${feature.hotkey} -> ${feature.name}`, 'success')
+    } else {
+      trainerHotkeyStatus.value = String(result.error ?? 'Hotkey refusée.')
+      addTrainerFeatureHistory(feature, 'hotkey_register', 'warning', trainerHotkeyStatus.value)
+      saveTrainerFeatures()
+      addActionLog('hotkey', 'Hotkey Trainer refusée', trainerHotkeyStatus.value, 'warning')
+    }
+  }
+
+  async function unregisterTrainerFeatureHotkey(id: number) {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    if (!feature?.hotkeyId) return
+    const controller = backend.getController()
+    if (controller.unregisterGlobalHotkey) {
+      await controller.unregisterGlobalHotkey(feature.hotkeyId)
+    }
+    feature.hotkey = ''
+    feature.hotkeyId = undefined
+    feature.updatedAt = new Date().toISOString()
+    addTrainerFeatureHistory(feature, 'hotkey_unregister', 'success', feature.name)
+    saveTrainerFeatures()
+    addActionLog('hotkey', 'Hotkey Trainer supprimée', feature.name, 'success')
+  }
+
+  async function handleGlobalHotkey(event: Record<string, unknown>) {
+    const featureId = Number(event.targetId ?? (event.payload as Record<string, unknown> | undefined)?.featureId)
+    const feature = trainerFeatures.value.find((item) => item.id === featureId)
+    if (!feature) return
+    addActionLog('hotkey', `Hotkey: ${feature.name}`, String(event.type ?? ''), 'info')
+    if (feature.enabled) {
+      await restoreTrainerFeature(feature.id)
+    } else {
+      await applyTrainerFeature(feature.id)
+    }
+  }
+
+  async function refreshTrainerOverlay() {
+    const controller = backend.getController()
+    if (!trainerOverlayVisible.value || !controller.updateTrainerOverlay) return
+    const result = await controller.updateTrainerOverlay({
+      title: processName.value ? `KillEngine Trainer - ${processName.value}` : 'KillEngine Trainer',
+      features: trainerFeatures.value.map((feature) => ({
+        name: feature.name,
+        action: feature.action,
+        enabled: feature.enabled,
+        status: feature.status,
+        hotkey: feature.hotkey,
+      })),
+    })
+    trainerOverlayStatus.value = result.success === true ? 'Overlay mis à jour.' : String(result.error ?? 'Overlay non mis à jour.')
+  }
+
+  async function setTrainerOverlay(visible: boolean) {
+    const controller = backend.getController()
+    if (!controller.setTrainerOverlayVisible) {
+      trainerOverlayStatus.value = 'Overlay Trainer non exposé par ce backend.'
+      addActionLog('overlay', 'Overlay indisponible', trainerOverlayStatus.value, 'warning')
+      return
+    }
+    const result = await controller.setTrainerOverlayVisible(visible, { x: 24, y: 24, width: 340, height: 180 })
+    trainerOverlayVisible.value = result.success === true ? visible : trainerOverlayVisible.value
+    trainerOverlayStatus.value = result.success === true ? (visible ? 'Overlay affiché.' : 'Overlay masqué.') : String(result.error ?? 'Overlay refusé.')
+    addActionLog('overlay', visible ? 'Overlay Trainer affiché' : 'Overlay Trainer masqué', trainerOverlayStatus.value, result.success === true ? 'success' : 'warning')
+    if (visible) await refreshTrainerOverlay()
+  }
+
+  function addTrainerFeatureHistory(
+    feature: TrainerFeature,
+    action: string,
+    status: NonNullable<TrainerFeature['history']>[number]['status'],
+    detail = '',
+  ) {
+    feature.history = [
+      {
+        time: new Date().toISOString(),
+        action,
+        status,
+        detail,
+      },
+      ...(feature.history ?? []),
+    ].slice(0, 30)
+  }
+
+  function createTrainerFeature(input: Partial<TrainerFeature>) {
+    const address = String(input.address ?? selectedCandidateAddress.value ?? '').replace(/^0x/i, '').trim()
+    if (!address) {
+      addActionLog('trainer', 'Feature refusée', 'Adresse manquante.', 'warning')
+      return null
+    }
+    trainerFeatureIdCounter.value += 1
+    const now = new Date().toISOString()
+    const signatureQuality = input.signatureQuality
+    const signatureScore = Number(signatureQuality?.score ?? input.signatureScore ?? 0)
+    const signatureFixedBytes = Number(signatureQuality?.fixedBytes ?? input.signatureFixedBytes ?? 0)
+    const signatureWildcardBytes = Number(signatureQuality?.wildcardBytes ?? input.signatureWildcardBytes ?? 0)
+    const signatureUniqueFixedBytes = Number(signatureQuality?.uniqueFixedBytes ?? input.signatureUniqueFixedBytes ?? 0)
+    const signatureFixedRatio = Number(signatureQuality?.fixedRatio ?? input.signatureFixedRatio ?? 0)
+    const feature: TrainerFeature = {
+      id: trainerFeatureIdCounter.value,
+      name: String(input.name ?? `Feature 0x${address}`).trim() || `Feature 0x${address}`,
+      processName: String(input.processName ?? processName.value),
+      action: input.action ?? 'write',
+      locatorKind: input.locatorKind ?? 'absolute',
+      address,
+      valueType: String(input.valueType ?? exactScanType.value ?? 'Int32'),
+      value: String(input.value ?? writeValue.value ?? ''),
+      patchBytes: input.patchBytes,
+      aobPattern: input.aobPattern,
+      signatureQuality,
+      signatureScore: Number.isFinite(signatureScore) && signatureScore > 0 ? signatureScore : undefined,
+      signatureLevel: signatureQuality?.level ?? input.signatureLevel,
+      signatureWarning: signatureQuality?.warning ?? input.signatureWarning,
+      signatureFixedBytes: Number.isFinite(signatureFixedBytes) && signatureFixedBytes > 0 ? signatureFixedBytes : undefined,
+      signatureWildcardBytes: Number.isFinite(signatureWildcardBytes) && signatureWildcardBytes >= 0 ? signatureWildcardBytes : undefined,
+      signatureUniqueFixedBytes: Number.isFinite(signatureUniqueFixedBytes) && signatureUniqueFixedBytes > 0 ? signatureUniqueFixedBytes : undefined,
+      signatureFixedRatio: Number.isFinite(signatureFixedRatio) && signatureFixedRatio > 0 ? signatureFixedRatio : undefined,
+      trainerSafe: signatureQuality?.trainerSafe ?? input.trainerSafe,
+      signatureMatches: input.signatureMatches,
+      hotkey: input.hotkey,
+      hotkeyId: input.hotkeyId,
+      enabled: false,
+      status: 'idle',
+      lastError: '',
+      history: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    addTrainerFeatureHistory(feature, 'created', 'success', `${feature.action} 0x${feature.address}`)
+    trainerFeatures.value.unshift(feature)
+    saveTrainerFeatures()
+    void refreshTrainerOverlay()
+    addActionLog('trainer', `Feature créée: ${feature.name}`, `${feature.action} 0x${feature.address}.`, 'success')
+    return feature
+  }
+
+  function createTrainerFeatureFromCheckpoint(checkpoint: Record<string, unknown>) {
+    const patchBytes = String(checkpoint.patchBytes ?? '').trim()
+    const payload = (checkpoint.payload && typeof checkpoint.payload === 'object')
+      ? checkpoint.payload as Record<string, unknown>
+      : {}
+    const signatureQuality = (checkpoint.signatureQuality ?? payload.signatureQuality) as AobPatternQuality | undefined
+    return createTrainerFeature({
+      name: String(checkpoint.label ?? checkpoint.name ?? checkpoint.address ?? 'Feature checkpoint'),
+      action: patchBytes ? 'patch' : 'write',
+      locatorKind: checkpoint.aobPattern ? 'aob' : 'absolute',
+      address: String(checkpoint.address ?? ''),
+      valueType: String(checkpoint.type ?? exactScanType.value),
+      value: String(checkpoint.value ?? writeValue.value),
+      patchBytes: patchBytes || undefined,
+      aobPattern: String(checkpoint.aobPattern ?? '').trim() || undefined,
+      signatureQuality,
+      signatureScore: Number(checkpoint.signatureScore ?? payload.signatureScore ?? 0) || undefined,
+      signatureLevel: String(checkpoint.signatureLevel ?? payload.signatureLevel ?? ''),
+      signatureWarning: String(checkpoint.signatureWarning ?? payload.signatureWarning ?? ''),
+      signatureFixedBytes: Number(checkpoint.signatureFixedBytes ?? payload.signatureFixedBytes ?? 0) || undefined,
+      signatureWildcardBytes: Number(checkpoint.signatureWildcardBytes ?? payload.signatureWildcardBytes ?? 0) || undefined,
+      signatureUniqueFixedBytes: Number(checkpoint.signatureUniqueFixedBytes ?? payload.signatureUniqueFixedBytes ?? 0) || undefined,
+      signatureFixedRatio: Number(checkpoint.signatureFixedRatio ?? payload.signatureFixedRatio ?? 0) || undefined,
+      trainerSafe: Boolean(checkpoint.trainerSafe ?? payload.trainerSafe ?? false) || undefined,
+      signatureMatches: Number(checkpoint.signatureMatches ?? payload.signatureMatches ?? 0) || undefined,
+    })
+  }
+
+  function trainerFeatureSignatureQuality(feature: TrainerFeature): AobPatternQuality | null {
+    if (feature.signatureQuality) return feature.signatureQuality
+    if (feature.signatureScore === undefined && !feature.signatureLevel) return null
+    return {
+      score: feature.signatureScore ?? 0,
+      level: feature.signatureLevel || 'unknown',
+      warning: feature.signatureWarning || '',
+      fixedBytes: feature.signatureFixedBytes ?? 0,
+      wildcardBytes: feature.signatureWildcardBytes ?? 0,
+      uniqueFixedBytes: feature.signatureUniqueFixedBytes ?? 0,
+      fixedRatio: feature.signatureFixedRatio ?? 0,
+      trainerSafe: feature.trainerSafe ?? false,
+    }
+  }
+
+  function trainerFeaturePatchBlockReason(feature: TrainerFeature): string {
+    if (feature.action !== 'patch') return ''
+    if (!feature.patchBytes?.trim()) return 'Patch incomplet : bytes manquants.'
+    if (feature.locatorKind !== 'aob') return ''
+    if (!feature.aobPattern?.trim()) return 'AOB manquant : sauvegarde une signature stable avant activation.'
+    const quality = trainerFeatureSignatureQuality(feature)
+    if (!quality) return ''
+    const score = Number(quality.score ?? 0)
+    const fixedBytes = Number(quality.fixedBytes ?? 0)
+    if (fixedBytes < 3 || score < 35) {
+      return `AOB trop faible (${score}/100, ${fixedBytes} octet(s) fixe(s)).`
+    }
+    return ''
+  }
+
+  async function resolveTrainerPatchAddress(feature: TrainerFeature): Promise<{ address: string, error: string }> {
+    if (feature.action !== 'patch' || feature.locatorKind !== 'aob' || !feature.aobPattern?.trim()) {
+      return { address: feature.address, error: '' }
+    }
+    const controller = backend.getController()
+    if (!controller.scanAobPattern) {
+      return { address: '', error: 'Scan AOB non expose par ce backend.' }
+    }
+    const scan = await controller.scanAobPattern(feature.aobPattern, {
+      executableOnly: true,
+      imageOnly: true,
+      maxResults: 2,
+    })
+    if (scan.signatureQuality) {
+      feature.signatureQuality = scan.signatureQuality
+      feature.signatureScore = scan.signatureQuality.score
+      feature.signatureLevel = scan.signatureQuality.level
+      feature.signatureWarning = scan.signatureQuality.warning
+      feature.signatureFixedBytes = scan.signatureQuality.fixedBytes
+      feature.signatureWildcardBytes = scan.signatureQuality.wildcardBytes
+      feature.signatureUniqueFixedBytes = scan.signatureQuality.uniqueFixedBytes
+      feature.signatureFixedRatio = scan.signatureQuality.fixedRatio
+      feature.trainerSafe = scan.signatureQuality.trainerSafe
+    }
+    feature.signatureMatches = Number(scan.matchesFound ?? scan.matches?.length ?? 0)
+    if (scan.success !== true) {
+      return { address: '', error: scan.error || 'Resolution AOB impossible.' }
+    }
+    if (feature.signatureMatches !== 1 || !scan.matches?.[0]?.address) {
+      return { address: '', error: `AOB non unique (${feature.signatureMatches} match(es)). Regénère une signature plus spécifique.` }
+    }
+    return { address: String(scan.matches[0].address).replace(/^0x/i, '').toUpperCase(), error: '' }
+  }
+
+  async function applyTrainerFeature(id: number) {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    if (!feature || trainerBusy.value) return
+    const blocked = trainerFeaturePatchBlockReason(feature)
+    if (blocked) {
+      feature.status = 'error'
+      feature.lastError = blocked
+      feature.updatedAt = new Date().toISOString()
+      addTrainerFeatureHistory(feature, 'apply_blocked', 'warning', blocked)
+      saveTrainerFeatures()
+      addActionLog('trainer', `Feature bloquée: ${feature.name}`, blocked, 'warning')
+      return
+    }
+    if (!await confirmRiskAction(feature.action === 'patch' ? 'patch' : 'write', `Activer feature Trainer: ${feature.name}`, `${feature.action} 0x${feature.address} ${feature.valueType} ${feature.value || feature.patchBytes || ''}`)) return
+
+    trainerBusy.value = true
+    try {
+      const controller = backend.getController()
+      let ok = false
+      let error = ''
+      if (feature.action === 'write') {
+        const result = await controller.writeMemoryValue(feature.address, feature.valueType, feature.value)
+        ok = result.success === true
+        error = result.error ?? ''
+      } else if (feature.action === 'freeze_polling') {
+        const result = await controller.setFreezeValue(feature.address, feature.valueType, feature.value, true)
+        ok = result.success === true
+        error = result.error ?? ''
+      } else if (feature.action === 'freeze_breakpoint') {
+        if (!controller.freezeWithBreakpoint) {
+          error = 'Freeze BP non expose par ce backend.'
+        } else {
+          const result = await controller.freezeWithBreakpoint(feature.address, feature.valueType, feature.value, { mode: 'rewrite' })
+          ok = result.success === true
+          error = result.error ?? ''
+        }
+      } else if (feature.action === 'patch') {
+        if (!controller.applyCodePatch) {
+          error = 'Patch code non expose par ce backend.'
+        } else {
+          const resolved = await resolveTrainerPatchAddress(feature)
+          if (resolved.error) {
+            ok = false
+            error = resolved.error
+          } else {
+            feature.address = resolved.address
+            const result = await controller.applyCodePatch(resolved.address, feature.patchBytes ?? '', { verify: true })
+            ok = result.success === true
+            error = result.error ?? ''
+          }
+        }
+      }
+      feature.enabled = ok && feature.action !== 'write'
+      feature.status = ok ? (feature.action === 'write' ? 'idle' : 'active') : 'error'
+      feature.lastError = error
+      feature.updatedAt = new Date().toISOString()
+      addTrainerFeatureHistory(feature, 'apply', ok ? 'success' : 'error', error || `0x${feature.address}`)
+      addActionLog('trainer', ok ? `Feature activée: ${feature.name}` : `Feature échouée: ${feature.name}`, error || `0x${feature.address}`, ok ? 'success' : 'error')
+    } catch (e) {
+      feature.status = 'error'
+      feature.lastError = String(e)
+      feature.updatedAt = new Date().toISOString()
+      addTrainerFeatureHistory(feature, 'apply', 'error', String(e))
+      addActionLog('trainer', `Feature échouée: ${feature.name}`, String(e), 'error')
+    } finally {
+      trainerBusy.value = false
+      saveTrainerFeatures()
+      void refreshTrainerOverlay()
+    }
+  }
+
+  async function restoreTrainerFeature(id: number) {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    if (!feature || trainerBusy.value) return
+    if (!await confirmRiskAction(feature.action === 'patch' ? 'patch' : 'write', `Restaurer feature Trainer: ${feature.name}`, `${feature.action} 0x${feature.address}.`)) return
+
+    trainerBusy.value = true
+    try {
+      const controller = backend.getController()
+      let ok = true
+      let error = ''
+      if (feature.action === 'freeze_polling') {
+        const result = await controller.setFreezeValue(feature.address, feature.valueType, feature.value, false)
+        ok = result.success === true
+        error = result.error ?? ''
+      } else if (feature.action === 'freeze_breakpoint') {
+        if (controller.stopBreakpointFreeze) {
+          const result = await controller.stopBreakpointFreeze()
+          ok = result.success === true
+          error = result.error ?? ''
+        }
+      } else if (feature.action === 'patch') {
+        if (controller.restoreCodePatch) {
+          const result = await controller.restoreCodePatch(feature.address)
+          ok = result.success === true
+          error = result.error ?? ''
+        } else {
+          ok = false
+          error = 'Restore patch non expose par ce backend.'
+        }
+      }
+      feature.enabled = false
+      feature.status = ok ? 'idle' : 'error'
+      feature.lastError = error
+      feature.updatedAt = new Date().toISOString()
+      addTrainerFeatureHistory(feature, 'restore', ok ? 'success' : 'warning', error || `0x${feature.address}`)
+      addActionLog('trainer', ok ? `Feature restaurée: ${feature.name}` : `Restauration échouée: ${feature.name}`, error || `0x${feature.address}`, ok ? 'success' : 'warning')
+    } catch (e) {
+      feature.status = 'error'
+      feature.lastError = String(e)
+      feature.updatedAt = new Date().toISOString()
+      addTrainerFeatureHistory(feature, 'restore', 'error', String(e))
+      addActionLog('trainer', `Restauration échouée: ${feature.name}`, String(e), 'error')
+    } finally {
+      trainerBusy.value = false
+      saveTrainerFeatures()
+      void refreshTrainerOverlay()
+    }
+  }
+
+  async function saveTrainerFeatureToProfile(id: number) {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    if (!feature) return
+    const controller = backend.getController()
+    const profileName = (feature.processName || processName.value || 'KillEngineTrainer')
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^a-z0-9_.-]+/gi, '_')
+      .slice(0, 80) || 'KillEngineTrainer'
+    try {
+      let result: Record<string, unknown>
+      if (feature.action === 'patch') {
+        const blocked = trainerFeaturePatchBlockReason(feature)
+        if (blocked) {
+          feature.status = 'error'
+          feature.lastError = blocked
+          feature.updatedAt = new Date().toISOString()
+          addTrainerFeatureHistory(feature, 'save_profile_blocked', 'warning', blocked)
+          saveTrainerFeatures()
+          addActionLog('trainer', `Sauvegarde profil bloquée: ${feature.name}`, blocked, 'warning')
+          return
+        }
+        if (!controller.saveProfileCodePatch) {
+          throw new Error('Sauvegarde patch profil non exposee par ce backend.')
+        }
+        result = await controller.saveProfileCodePatch(
+          profileName,
+          feature.name,
+          feature.address,
+          feature.aobPattern ?? '',
+          feature.patchBytes ?? '',
+          {
+            source: 'TrainerView',
+            action: feature.action,
+            valueType: feature.valueType,
+            createdAt: feature.createdAt,
+            signatureQuality: feature.signatureQuality,
+            signatureScore: feature.signatureScore,
+            signatureLevel: feature.signatureLevel,
+            signatureWarning: feature.signatureWarning,
+            signatureFixedBytes: feature.signatureFixedBytes,
+            signatureWildcardBytes: feature.signatureWildcardBytes,
+            signatureUniqueFixedBytes: feature.signatureUniqueFixedBytes,
+            signatureFixedRatio: feature.signatureFixedRatio,
+            trainerSafe: feature.trainerSafe,
+            signatureMatches: feature.signatureMatches,
+          },
+        )
+      } else {
+        result = await controller.saveProfileTarget(
+          profileName,
+          feature.name,
+          feature.address,
+          feature.valueType,
+          `Trainer ${feature.action} = ${feature.value}`,
+        )
+      }
+      feature.updatedAt = new Date().toISOString()
+      feature.lastError = result.success === false ? String(result.error ?? 'Sauvegarde profil echouee.') : ''
+      if (result.success === false) feature.status = 'error'
+      addTrainerFeatureHistory(feature, 'save_profile', result.success === false ? 'warning' : 'success', `${profileName} · ${feature.lastError || 'OK'}`)
+      saveTrainerFeatures()
+      addActionLog('trainer', `Profil sauvegarde: ${feature.name}`, `${profileName} · ${feature.lastError || 'OK'}`, result.success === false ? 'warning' : 'success')
+    } catch (e) {
+      feature.status = 'error'
+      feature.lastError = String(e)
+      feature.updatedAt = new Date().toISOString()
+      addTrainerFeatureHistory(feature, 'save_profile', 'error', String(e))
+      saveTrainerFeatures()
+      addActionLog('trainer', `Sauvegarde profil echouee: ${feature.name}`, String(e), 'error')
+    }
+  }
+
+  async function applyAllTrainerFeatures() {
+    for (const feature of trainerFeatures.value) {
+      if (!feature.enabled) await applyTrainerFeature(feature.id)
+    }
+  }
+
+  async function restoreAllTrainerFeatures() {
+    for (const feature of trainerFeatures.value) {
+      if (feature.enabled) await restoreTrainerFeature(feature.id)
+    }
+  }
+
+  function deleteTrainerFeature(id: number) {
+    trainerFeatures.value = trainerFeatures.value.filter((item) => item.id !== id)
+    saveTrainerFeatures()
+    void refreshTrainerOverlay()
+  }
+
+  function clearTrainerFeatures() {
+    trainerFeatures.value = []
+    saveTrainerFeatures()
+    void refreshTrainerOverlay()
+    addActionLog('trainer', 'Trainer vidé', 'Toutes les features locales ont été supprimées.', 'warning')
+  }
+
+  function exportTrainerFeaturesJson(): string {
+    return JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      processName: processName.value,
+      features: trainerFeatures.value,
+    }, null, 2)
+  }
+
+  function exportTrainerFeaturesMarkdown(): string {
+    const lines = [
+      '# Trainer Features',
+      '',
+      `Export: ${new Date().toISOString()}`,
+      `Processus: ${processName.value || 'non attache'}`,
+      `Features: ${trainerFeatures.value.length}`,
+      '',
+    ]
+    if (trainerFeatures.value.length === 0) {
+      lines.push('Aucune feature Trainer locale.')
+      return lines.join('\n')
+    }
+
+    for (const feature of trainerFeatures.value) {
+      lines.push(
+        `## ${feature.name}`,
+        '',
+        `- Action: ${feature.action}`,
+        `- Statut: ${feature.status}${feature.enabled ? ' / active' : ''}`,
+        `- Processus: ${feature.processName || '-'}`,
+        `- Locator: ${feature.locatorKind}`,
+        `- Adresse: 0x${feature.address}`,
+        `- Type: ${feature.valueType}`,
+        `- Valeur/patch: ${feature.value || feature.patchBytes || '-'}`,
+        `- Hotkey: ${feature.hotkey || '-'}`,
+        `- AOB qualite: ${feature.signatureLevel || '-'}${feature.signatureScore !== undefined ? ` (${feature.signatureScore}/100)` : ''}`,
+        `- Derniere erreur: ${feature.lastError || '-'}`,
+        '- Historique:',
+        ...(feature.history?.length
+          ? feature.history.slice(0, 8).map((item) => `  - ${item.time} [${item.status}] ${item.action}: ${item.detail}`)
+          : ['  - aucun']),
+        '',
+      )
+    }
+    return lines.join('\n')
+  }
+
+  function exportWorkspaceJson(): string {
+    return JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      app: {
+        version: version.value,
+        processName: processName.value,
+        attached: isAttached.value,
+        workflowStatus: workflowStatus.value,
+      },
+      settings: {
+        language: appLanguage.value,
+        defaultValueType: settingDefaultValueType.value,
+        performanceMode: settingPerformanceMode.value,
+        autoRiskMode: settingAutoRiskMode.value,
+        modelEnabled: settingModelEnabled.value,
+        modelPath: settingModelPath.value,
+        modelThreads: settingModelThreads.value,
+        scanMaxResults: settingScanMaxResults.value,
+        unknownSnapshotMaxMb: settingUnknownSnapshotMaxMb.value,
+      },
+      workflowPresets: {
+        lastPresetId: lastWorkflowPresetId.value,
+        available: workflowPresets.value.map((preset) => ({
+          id: preset.id,
+          title: preset.title,
+          mode: preset.mode,
+          risk: preset.risk,
+          nextStep: preset.nextStep,
+        })),
+      },
+      investigation: {
+        active: activeInvestigation.value,
+        archive: investigationArchive.value,
+      },
+      trainer: {
+        features: trainerFeatures.value,
+      },
+      structures: {
+        templates: structureTemplates.value,
+      },
+      bookmarks: {
+        items: workspaceBookmarks.value,
+      },
+      audit: {
+        entries: actionLog.value.slice(0, 200),
+      },
+      autoResolve: {
+        report: autoResolveReport.value,
+      },
+      aiModel: {
+        status: aiModelStatus.value,
+      },
+      diagnostics: {
+        logFilePath: logFilePath.value,
+        smartSearchDebugFilePath: smartSearchDebugFilePath.value,
+        scanTelemetryFilePath: scanTelemetryFilePath.value,
+      },
+    }, null, 2)
+  }
+
+  function workspaceBookmarkMarkdownLine(bookmark: WorkspaceBookmark): string {
+    const payload = bookmark.payload ?? {}
+    const details = [
+      bookmark.address ? `0x${bookmark.address}` : '',
+      bookmark.type ? `type ${bookmark.type}` : '',
+      bookmark.value !== undefined ? `valeur ${bookmark.value}` : '',
+      payload.confidenceLabel ? String(payload.confidenceLabel) : '',
+      Number(payload.confidenceScore ?? 0) > 0 ? `score ${String(payload.confidenceScore)}/100` : '',
+      payload.requiresConfirmation === true ? 'confirmation requise' : '',
+      payload.aobPattern ? `AOB ${String(payload.aobPattern).slice(0, 80)}` : '',
+      payload.patchBytes ? `patch ${String(payload.patchBytes).slice(0, 40)}` : '',
+      payload.signatureLevel ? `qualite ${String(payload.signatureLevel)}${payload.signatureScore ? ` ${String(payload.signatureScore)}/100` : ''}` : '',
+      payload.signatureMatches !== undefined ? `${String(payload.signatureMatches)} match(es)` : '',
+    ].filter(Boolean)
+    return `- ${bookmark.kind} ${bookmark.label}${details.length > 0 ? ` - ${details.join(' · ')}` : ''}${bookmark.note ? ` - ${bookmark.note}` : ''}`
+  }
+
+  function exportWorkspaceMarkdown(): string {
+    const report = autoResolveReport.value
+    const lines = [
+      '# KillEngine Workspace',
+      '',
+      `Export: ${new Date().toISOString()}`,
+      `Version: ${version.value}`,
+      `Processus: ${processName.value || 'non attache'}`,
+      `Workflow: ${workflowStatus.value}`,
+      `Preset: ${lastWorkflowPresetId.value || 'aucun'}`,
+      `Mode Auto: ${settingAutoRiskMode.value}`,
+      `IA locale: ${aiModelStatus.value?.ready ? 'llama.cpp' : 'indisponible'}`,
+      '',
+      '## Presets Disponibles',
+      '',
+      ...workflowPresets.value.map((preset) => `- ${preset.title}: ${preset.mode} / ${preset.risk} - ${preset.nextStep}`),
+      '',
+      '## Investigation',
+      '',
+      `Active: ${activeInvestigation.value ? activeInvestigation.value.objective : 'aucune'}`,
+      `Etapes actives: ${activeInvestigation.value?.steps.length ?? 0}`,
+      `Archives: ${investigationArchive.value.length}`,
+      '',
+      '## Trainer',
+      '',
+      `Features: ${trainerFeatures.value.length}`,
+      ...trainerFeatures.value.slice(0, 12).map((feature) => `- ${feature.name}: ${feature.action} 0x${feature.address} (${feature.status})`),
+      '',
+      '## Structures',
+      '',
+      `Templates: ${structureTemplates.value.length}`,
+      ...structureTemplates.value.slice(0, 12).map((template) => `- ${template.name}: ${template.fieldCount} champ(s), base 0x${template.baseAddress}`),
+      ...structureTemplates.value.slice(0, 5).flatMap((template) => [
+        '',
+        `### ${template.name}`,
+        ...template.fields.slice(0, 20).map((field) =>
+          `- ${field.offset >= 0 ? '+' : ''}${field.offset} ${field.type} ${field.label || '-'} = ${field.sampleValue || '-'}${field.note ? ` (${field.note})` : ''}`,
+        ),
+      ]),
+      '',
+      '## Bookmarks',
+      '',
+      `Bookmarks: ${workspaceBookmarks.value.length}`,
+      ...workspaceBookmarks.value.slice(0, 20).map((bookmark) => workspaceBookmarkMarkdownLine(bookmark)),
+      '',
+      '## Audit',
+      '',
+      `Entrées: ${actionLog.value.length}`,
+      ...actionLog.value.slice(0, 30).map((entry) => `- ${entry.time} [${entry.status}] ${entry.kind} - ${entry.title}${entry.detail ? `: ${entry.detail}` : ''}`),
+      '',
+      '## Rapport Auto',
+      '',
+      report
+        ? `Strategie: ${String(report.preferredStrategy?.label ?? 'non determinee')}`
+        : 'Aucun rapport Auto charge.',
+      report?.summary ? `Résumé: ${report.summary}` : '',
+      '',
+      '## Diagnostics',
+      '',
+      `Log: ${logFilePath.value || '-'}`,
+      `Smart Search JSONL: ${smartSearchDebugFilePath.value || '-'}`,
+      `Telemetry JSONL: ${scanTelemetryFilePath.value || '-'}`,
+      '',
+    ].filter((line) => line !== '')
+    return lines.join('\n')
+  }
+
+  function previewWorkspaceImport(raw: string) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      const investigation = parsed.investigation as Record<string, unknown> | undefined
+      const trainer = parsed.trainer as Record<string, unknown> | undefined
+      const structures = parsed.structures as Record<string, unknown> | undefined
+      const bookmarksRoot = parsed.bookmarks as Record<string, unknown> | undefined
+      const auditRoot = parsed.audit as Record<string, unknown> | undefined
+      const settings = parsed.settings as Record<string, unknown> | undefined
+      const presetsRoot = parsed.workflowPresets as Record<string, unknown> | undefined
+      const active = investigation?.active && typeof investigation.active === 'object' ? 1 : 0
+      const archive = Array.isArray(investigation?.archive) ? investigation.archive.length : 0
+      const features = Array.isArray(trainer?.features) ? trainer.features.length : 0
+      const templates = Array.isArray(structures?.templates) ? structures.templates.length : 0
+      const bookmarks = Array.isArray(bookmarksRoot?.items) ? bookmarksRoot.items.length : 0
+      const audit = Array.isArray(auditRoot?.entries) ? auditRoot.entries.length : 0
+      const presetId = String(presetsRoot?.lastPresetId ?? '')
+      return {
+        success: true,
+        version: Number(parsed.version ?? 0),
+        exportedAt: String(parsed.exportedAt ?? ''),
+        activeInvestigation: active,
+        archiveCount: archive,
+        trainerFeatureCount: features,
+        structureTemplateCount: templates,
+        bookmarkCount: bookmarks,
+        auditCount: audit,
+        lastPresetId: presetId,
+        hasSettings: Boolean(settings),
+      }
+    } catch (e) {
+      return {
+        success: false,
+        error: String(e),
+      }
+    }
+  }
+
+  function importWorkspaceJson(raw: string) {
+    const preview = previewWorkspaceImport(raw)
+    if (preview.success !== true) return preview
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const investigation = parsed.investigation as Record<string, unknown> | undefined
+    const trainer = parsed.trainer as Record<string, unknown> | undefined
+    const structures = parsed.structures as Record<string, unknown> | undefined
+    const bookmarksRoot = parsed.bookmarks as Record<string, unknown> | undefined
+    const auditRoot = parsed.audit as Record<string, unknown> | undefined
+    const settings = parsed.settings as Record<string, unknown> | undefined
+    const presetsRoot = parsed.workflowPresets as Record<string, unknown> | undefined
+
+    if (investigation) {
+      activeInvestigation.value =
+        investigation.active && typeof investigation.active === 'object'
+          ? investigation.active as InvestigationRun
+          : null
+      investigationArchive.value = Array.isArray(investigation.archive)
+        ? (investigation.archive as InvestigationRun[]).slice(0, 20)
+        : []
+      investigationStepIdCounter.value = Math.max(
+        investigationStepIdCounter.value,
+        activeInvestigation.value?.steps.reduce((max, step) => Math.max(max, Number(step.id) || 0), 0) ?? 0,
+        ...investigationArchive.value.map((run) => run.steps.reduce((max, step) => Math.max(max, Number(step.id) || 0), 0)),
+      )
+      investigationRunIdCounter.value = Math.max(
+        investigationRunIdCounter.value,
+        Number(activeInvestigation.value?.id ?? 0),
+        ...investigationArchive.value.map((run) => Number(run.id) || 0),
+      )
+      saveInvestigations()
+    }
+
+    if (trainer && Array.isArray(trainer.features)) {
+      trainerFeatures.value = (trainer.features as TrainerFeature[]).slice(0, 200)
+      trainerFeatureIdCounter.value = Math.max(0, ...trainerFeatures.value.map((feature) => Number(feature.id) || 0))
+      saveTrainerFeatures()
+      void refreshTrainerOverlay()
+    }
+
+    if (structures && Array.isArray(structures.templates)) {
+      structureTemplates.value = (structures.templates as StructureTemplate[]).slice(0, 100)
+      structureTemplateIdCounter.value = Math.max(0, ...structureTemplates.value.map((template) => Number(template.id) || 0))
+      saveStructureTemplates()
+    }
+
+    if (bookmarksRoot && Array.isArray(bookmarksRoot.items)) {
+      workspaceBookmarks.value = (bookmarksRoot.items as WorkspaceBookmark[]).slice(0, 500)
+      workspaceBookmarkIdCounter.value = Math.max(0, ...workspaceBookmarks.value.map((bookmark) => Number(bookmark.id) || 0))
+      saveWorkspaceBookmarks()
+    }
+
+    if (auditRoot && Array.isArray(auditRoot.entries)) {
+      actionLog.value = (auditRoot.entries as UserActionLogEntry[]).slice(0, 200)
+      actionLogIdCounter.value = Math.max(0, ...actionLog.value.map((entry) => Number(entry.id) || 0))
+      saveActionLog()
+    }
+
+    if (settings) {
+      if (settings.language === 'fr' || settings.language === 'en') appLanguage.value = settings.language
+      if (typeof settings.defaultValueType === 'string') settingDefaultValueType.value = settings.defaultValueType
+      if (['Auto', 'Eco', 'Normal', 'Performance', 'Max'].includes(String(settings.performanceMode))) {
+        settingPerformanceMode.value = settings.performanceMode as AppSettings['performanceMode']
+      }
+      if (['Safe', 'Expert', 'Trainer'].includes(String(settings.autoRiskMode))) {
+        settingAutoRiskMode.value = settings.autoRiskMode as AppSettings['autoRiskMode']
+      }
+      if (typeof settings.modelEnabled === 'boolean') settingModelEnabled.value = settings.modelEnabled
+      if (typeof settings.modelPath === 'string') settingModelPath.value = settings.modelPath
+      if (Number.isFinite(Number(settings.modelThreads))) settingModelThreads.value = Number(settings.modelThreads)
+      if (Number.isFinite(Number(settings.scanMaxResults))) settingScanMaxResults.value = Number(settings.scanMaxResults)
+      if (Number.isFinite(Number(settings.unknownSnapshotMaxMb))) settingUnknownSnapshotMaxMb.value = Number(settings.unknownSnapshotMaxMb)
+    }
+
+    const presetId = String(presetsRoot?.lastPresetId ?? '')
+    if (presetId && workflowPresets.value.some((preset) => preset.id === presetId)) {
+      lastWorkflowPresetId.value = presetId
+    }
+
+    addActionLog(
+      'workspace',
+      'Workspace importé',
+      `${preview.trainerFeatureCount} feature(s), ${preview.structureTemplateCount} template(s), ${preview.bookmarkCount} bookmark(s), ${preview.archiveCount} archive(s), ${preview.auditCount ?? 0} audit(s).`,
+      'success',
+    )
+    addInvestigationStep({
+      title: 'Workspace importé',
+      detail: `${preview.trainerFeatureCount} feature(s), ${preview.structureTemplateCount} template(s), ${preview.bookmarkCount} bookmark(s), ${preview.archiveCount} archive(s), ${preview.auditCount ?? 0} audit(s), settings=${preview.hasSettings ? 'oui' : 'non'}, preset=${String(preview.lastPresetId || '-')}.`,
+      status: 'success',
+      tool: 'importWorkspaceJson',
+      risk: 'safe',
+      payload: preview,
+    })
+    return {
+      ...preview,
+      imported: true,
+    }
+  }
+
+  function saveCurrentWorkspaceProject(name?: string) {
+    workspaceProjectIdCounter.value += 1
+    const now = new Date().toISOString()
+    const fallbackName = processName.value
+      ? `${processName.value.replace(/\.[^.]+$/, '')} workspace`
+      : 'KillEngine workspace'
+    const snapshotJson = exportWorkspaceJson()
+    const project: WorkspaceProject = {
+      id: workspaceProjectIdCounter.value,
+      name: String(name ?? fallbackName).trim() || fallbackName,
+      processName: processName.value,
+      snapshotJson,
+      investigationCount: (activeInvestigation.value ? 1 : 0) + investigationArchive.value.length,
+      trainerFeatureCount: trainerFeatures.value.length,
+      structureTemplateCount: structureTemplates.value.length,
+      bookmarkCount: workspaceBookmarks.value.length,
+      auditCount: actionLog.value.length,
+      createdAt: now,
+      updatedAt: now,
+    }
+    workspaceProjects.value.unshift(project)
+    workspaceProjects.value = workspaceProjects.value.slice(0, 50)
+    saveWorkspaceProjects()
+    addActionLog('workspace', `Projet sauvegardé: ${project.name}`, `${project.trainerFeatureCount} feature(s), ${project.structureTemplateCount} template(s).`, 'success')
+    return project
+  }
+
+  function loadWorkspaceProject(id: number) {
+    const project = workspaceProjects.value.find((item) => item.id === id)
+    if (!project) return { success: false, error: 'Projet introuvable.' }
+    const result = importWorkspaceJson(project.snapshotJson)
+    if (result.success === true) {
+      addActionLog('workspace', `Projet chargé: ${project.name}`, project.processName || '-', 'success')
+      addInvestigationStep({
+        title: 'Projet workspace chargé',
+        detail: `${project.name} · ${project.trainerFeatureCount} feature(s), ${project.structureTemplateCount} template(s), ${project.bookmarkCount} bookmark(s), ${project.auditCount ?? 0} audit(s).`,
+        status: 'success',
+        tool: 'loadWorkspaceProject',
+        risk: 'safe',
+        payload: { projectId: project.id, projectName: project.name },
+      })
+    }
+    return result
+  }
+
+  function deleteWorkspaceProject(id: number) {
+    const before = workspaceProjects.value.length
+    workspaceProjects.value = workspaceProjects.value.filter((item) => item.id !== id)
+    if (workspaceProjects.value.length !== before) {
+      saveWorkspaceProjects()
+      addActionLog('workspace', 'Projet supprimé', `id=${id}`, 'warning')
+    }
+  }
+
+  function clearWorkspaceProjects() {
+    workspaceProjects.value = []
+    saveWorkspaceProjects()
+    addActionLog('workspace', 'Projets vidés', 'Tous les projets locaux ont été supprimés.', 'warning')
+  }
+
+  async function clearAutoResolveMemory(allProcesses = false) {
+    const controller = backend.getController()
+    if (!controller.clearAutoResolveMemory) {
+      addActionLog('ai_memory', 'Mémoire Auto indisponible', 'Backend non exposé.', 'warning')
+      return { success: false, error: 'Backend non exposé.' }
+    }
+    const result = await controller.clearAutoResolveMemory(allProcesses)
+    addActionLog('ai_memory', 'Mémoire Auto vidée', String(result.message ?? ''), result.success === false ? 'warning' : 'success')
+    return result
+  }
+
+  function logAiAudit(event: string, payload: Record<string, unknown>) {
+    const controller = backend.getController()
+    if (!controller.logAiAudit) return
+    void controller.logAiAudit(event, {
+      ...payload,
+      autoRiskMode: settingAutoRiskMode.value,
+      investigationId: activeInvestigation.value?.id ?? null,
+      objective: activeInvestigation.value?.objective ?? searchQuery.value,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {})
+  }
+
+  async function confirmRiskAction(
+    risk: NonNullable<InvestigationStep['risk']>,
+    title: string,
+    detail: string,
+  ): Promise<boolean> {
+    const mode = settingAutoRiskMode.value
+    const blocked =
+      (mode === 'Safe' && (risk === 'debug' || risk === 'patch' || risk === 'injection')) ||
+      (mode === 'Expert' && risk === 'injection')
+    if (blocked) {
+      const message =
+        risk === 'injection'
+          ? 'Passe le niveau Auto en Trainer dans Settings pour autoriser injection/hook.'
+          : 'Passe le niveau Auto en Expert ou Trainer dans Settings pour autoriser debug/patch.'
+      addActionLog('risk_gate', `Bloqué par mode ${mode}: ${title}`, `${detail} ${message}`, 'warning')
+      logAiAudit('risk_blocked', { risk, title, detail, mode, reason: message })
+      addInvestigationStep({
+        title: `Risque bloqué: ${title}`,
+        detail: `${detail} ${message}`,
+        status: 'warning',
+        risk,
+        tool: 'RiskGate',
+        payload: { accepted: false, blocked: true, mode, title, detail },
+      })
+      return false
+    }
+    const accepted = await new Promise<boolean>((resolve) => {
+      if (riskDialogResolver) {
+        riskDialogResolver(false)
+      }
+      riskDialogResolver = resolve
+      riskDialog.value = { open: true, risk, title, detail, mode }
+    })
+    addActionLog('risk_gate', accepted ? `Confirmé: ${title}` : `Refusé: ${title}`, detail, accepted ? 'success' : 'warning')
+    logAiAudit(accepted ? 'risk_confirmed' : 'risk_refused', { risk, title, detail, mode })
+    addInvestigationStep({
+      title: accepted ? `Risque confirmé: ${title}` : `Risque refusé: ${title}`,
+      detail,
+      status: accepted ? 'checkpoint' : 'warning',
+      risk,
+      tool: 'RiskGate',
+      payload: { accepted, title, detail },
+    })
+    return accepted
+  }
+
+  function resolveRiskDialog(accepted: boolean) {
+    const resolver = riskDialogResolver
+    riskDialogResolver = null
+    riskDialog.value = null
+    if (resolver) {
+      resolver(accepted)
+    }
+  }
+
+  function checkpointAddress(checkpoint: Record<string, unknown>): string {
+    return String(checkpoint.address ?? checkpoint.instructionPointer ?? checkpoint.rip ?? '')
+      .replace(/^0x/i, '')
+      .trim()
+  }
+
+  function checkpointType(checkpoint: Record<string, unknown>): string {
+    return String(checkpoint.type ?? checkpoint.valueType ?? exactScanType.value ?? 'Int32')
+  }
+
+  function checkpointValue(checkpoint: Record<string, unknown>): string {
+    return String(checkpoint.value ?? checkpoint.targetValue ?? writeValue.value ?? exactScanValue.value ?? '')
+  }
+
+  function buildCheckpointActionPlan(checkpoint: Record<string, unknown>): RuntimeActionPlan {
+    const address = checkpointAddress(checkpoint)
+    const type = checkpointType(checkpoint)
+    const value = checkpointValue(checkpoint).trim()
+    const kind = String(checkpoint.kind ?? 'checkpoint')
+    const isCode =
+      kind.toLowerCase().includes('code') ||
+      kind.toLowerCase().includes('aob') ||
+      Boolean(checkpoint.patchBytes || checkpoint.aobPattern || checkpoint.instructionPointer || checkpoint.rip)
+    const hasAddress = Boolean(address)
+    const hasWritableValue = Boolean(hasAddress && value && !isCode)
+    const hasCodeTarget = Boolean(hasAddress && (isCode || checkpoint.sourceAddress))
+    const actions: RuntimeActionPlanItem[] = [
+      {
+        id: 'watch',
+        label: 'Watch',
+        risk: 'safe',
+        enabled: hasAddress && !isCode,
+        reason: hasAddress && !isCode ? 'Surveiller la valeur live sans écrire.' : 'Réservé aux checkpoints mémoire avec adresse.',
+      },
+      {
+        id: 'write',
+        label: 'Préparer write',
+        risk: 'write',
+        enabled: hasWritableValue,
+        reason: hasWritableValue ? 'Tester la valeur sous confirmation explicite.' : 'Adresse mémoire et valeur cible requises.',
+      },
+      {
+        id: 'freeze_polling',
+        label: 'Freeze',
+        risk: 'write',
+        enabled: hasWritableValue,
+        reason: hasWritableValue ? 'Stabiliser par freeze polling sous confirmation.' : 'Adresse mémoire et valeur cible requises.',
+      },
+      {
+        id: 'find_writes',
+        label: 'Find What Writes',
+        risk: 'debug',
+        enabled: hasAddress && !isCode,
+        reason: hasAddress && !isCode ? 'Capturer l’instruction qui modifie cette adresse.' : 'Le debugger part d’une adresse mémoire, pas d’un RIP déjà capturé.',
+      },
+      {
+        id: 'aob_patch',
+        label: 'AOB/Patch',
+        risk: 'patch',
+        enabled: hasCodeTarget,
+        reason: hasCodeTarget ? 'Générer une signature et proposer un patch réversible.' : 'Nécessite un RIP, une signature ou une source code.',
+      },
+      {
+        id: 'bookmark',
+        label: 'Bookmark',
+        risk: 'safe',
+        enabled: true,
+        reason: 'Conserver la piste dans le workspace avec ses preuves.',
+      },
+      {
+        id: 'trainer',
+        label: 'Créer Trainer',
+        risk: isCode ? 'patch' : 'write',
+        enabled: hasAddress,
+        reason: hasAddress ? 'Transformer la piste en feature réutilisable.' : 'Une feature Trainer nécessite une adresse ou signature.',
+      },
+    ]
+    return {
+      label: String(checkpoint.label ?? checkpoint.name ?? checkpoint.address ?? checkpoint.id ?? 'Checkpoint'),
+      address,
+      type,
+      value,
+      kind,
+      isCode,
+      safeCount: actions.filter((action) => action.enabled && action.risk === 'safe').length,
+      riskyCount: actions.filter((action) => action.enabled && action.risk !== 'safe').length,
+      actions,
+    }
+  }
+
+  async function executeCheckpointWrite(checkpoint: Record<string, unknown>, freeze = false) {
+    const address = checkpointAddress(checkpoint)
+    const type = checkpointType(checkpoint)
+    const value = checkpointValue(checkpoint)
+    if (!address || !value.trim()) {
+      addActionLog('checkpoint', 'Checkpoint incomplet', 'Adresse ou valeur manquante.', 'warning')
+      return null
+    }
+    const title = freeze ? 'Checkpoint freeze polling' : 'Checkpoint écriture'
+    if (!await confirmRiskAction('write', title, `0x${address} ${type} = ${value}.`)) return null
+
+    try {
+      const controller = backend.getController()
+      const result = freeze
+        ? await controller.setFreezeValue(address, type, value, true)
+        : await controller.writeMemoryValue(address, type, value)
+      writeResult.value = result as MemoryWriteResult
+      if (result.success === true) addAddressToWatch(address, type)
+      addActionLog(
+        'checkpoint',
+        result.success === true ? `${title} OK` : `${title} échoué`,
+        String(result.error || `0x${address}`),
+        result.success === true ? 'success' : 'error',
+      )
+      addInvestigationStep({
+        title: result.success === true ? `${title} exécuté` : `${title} échoué`,
+        detail: String(result.error || `0x${address} ${type} = ${value}`),
+        status: result.success === true ? 'success' : 'error',
+        tool: freeze ? 'setFreezeValue' : 'writeMemoryValue',
+        risk: 'write',
+        payload: result as unknown as Record<string, unknown>,
+      })
+      logAiAudit(freeze ? 'checkpoint_freeze_executed' : 'checkpoint_write_executed', {
+        success: result.success === true,
+        address,
+        type,
+        value,
+        error: result.error ?? '',
+      })
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', `${title} échoué`, String(e), 'error')
+      return null
+    }
+  }
+
+  async function executeCheckpointFindWhatWrites(checkpoint: Record<string, unknown>) {
+    const address = checkpointAddress(checkpoint)
+    const type = checkpointType(checkpoint)
+    if (!address) {
+      addActionLog('checkpoint', 'Debugger impossible', 'Adresse manquante.', 'warning')
+      return null
+    }
+    const sizeByType: Record<string, number> = {
+      Int8: 1, UInt8: 1, Int16: 2, UInt16: 2, Int32: 4, UInt32: 4, Float32: 4, Int64: 8, UInt64: 8, Float64: 8,
+    }
+    const size = sizeByType[type] ?? 4
+    if (!await confirmRiskAction('debug', 'Checkpoint Find What Writes', `0x${address}, taille ${size}, fenêtre 5000 ms.`)) return null
+    const controller = backend.getController()
+    if (!controller.findWhatWrites) {
+      addActionLog('checkpoint', 'Find What Writes indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const result = await controller.findWhatWrites(address, { size, timeoutMs: 5000, maxHits: 8 })
+      const hits = Array.isArray(result.hits) ? result.hits as Array<Record<string, unknown>> : []
+      if (hits.length > 0 && activeInvestigation.value) {
+        activeInvestigation.value.checkpoints = [
+          ...hits.slice(0, 6).map((hit) => ({
+            kind: 'code_writer',
+            label: `RIP 0x${String(hit.instructionPointer ?? '').replace(/^0x/i, '')}`,
+            address: String(hit.instructionPointer ?? '').replace(/^0x/i, ''),
+            sourceAddress: address,
+            module: hit.module,
+            moduleOffset: hit.moduleOffset,
+            requiresConfirmation: true,
+          })),
+          ...activeInvestigation.value.checkpoints,
+        ].slice(0, 12)
+        saveInvestigations()
+      }
+      addInvestigationStep({
+        title: hits.length > 0 ? 'Find What Writes capturé' : 'Find What Writes sans hit',
+        detail: `${hits.length} hit(s) pour 0x${address}.`,
+        status: hits.length > 0 ? 'checkpoint' : 'warning',
+        tool: 'findWhatWrites',
+        risk: 'debug',
+        payload: result,
+      })
+      logAiAudit('checkpoint_find_writes_executed', { address, type, size, hitCount: hits.length, success: result.success === true })
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', 'Find What Writes échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  async function prepareCheckpointAob(checkpoint: Record<string, unknown>) {
+    const address = checkpointAddress(checkpoint)
+    if (!address) {
+      addActionLog('checkpoint', 'AOB impossible', 'Adresse instruction manquante.', 'warning')
+      return null
+    }
+    if (!await confirmRiskAction('patch', 'Checkpoint AOB/patch', `Lire l'instruction 0x${address}, générer une signature et proposer des patchs sans application.`)) return null
+    const controller = backend.getController()
+    if (!controller.generateAobSignature || !controller.suggestCodePatches) {
+      addActionLog('checkpoint', 'AOB indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const signature = await controller.generateAobSignature(address, { beforeBytes: 0, length: 32 })
+      const suggestions = await controller.suggestCodePatches(address, { maxBytes: 16 })
+      const patchSuggestions = Array.isArray(suggestions.suggestions) ? suggestions.suggestions : []
+      if (activeInvestigation.value) {
+        activeInvestigation.value.checkpoints = [
+          ...patchSuggestions.slice(0, 4).map((patch) => {
+            const patchRecord = patch as unknown as Record<string, unknown>
+            return {
+              kind: 'code_patch_suggestion',
+              label: String(patchRecord.label ?? `Patch 0x${address}`),
+              address,
+              patchBytes: String(patchRecord.patchBytes ?? patchRecord.bytesText ?? ''),
+              risk: String(patchRecord.risk ?? patchRecord.riskLevel ?? 'medium'),
+              aobPattern: signature.pattern,
+              requiresConfirmation: true,
+            }
+          }),
+          {
+            kind: 'aob_signature',
+            label: `Signature AOB 0x${address}`,
+            address,
+            aobPattern: signature.pattern,
+            module: signature.module,
+            moduleOffset: signature.moduleOffset,
+            requiresConfirmation: true,
+          },
+          ...activeInvestigation.value.checkpoints,
+        ].slice(0, 12)
+        saveInvestigations()
+      }
+      addInvestigationStep({
+        title: 'AOB/patch préparé',
+        detail: `${patchSuggestions.length} suggestion(s), signature ${String(signature.pattern ?? '').slice(0, 80)}.`,
+        status: patchSuggestions.length > 0 ? 'checkpoint' : 'warning',
+        tool: 'generateAobSignature/suggestCodePatches',
+        risk: 'patch',
+        payload: { signature, suggestions },
+      })
+      logAiAudit('checkpoint_aob_prepared', {
+        address,
+        patchSuggestionCount: patchSuggestions.length,
+        success: signature.success === true,
+        aobPattern: String(signature.pattern ?? ''),
+        module: String(signature.module ?? ''),
+        moduleOffset: String(signature.moduleOffset ?? ''),
+      })
+      return { signature, suggestions }
+    } catch (e) {
+      addActionLog('checkpoint', 'AOB échoué', String(e), 'error')
+      return null
+    }
   }
 
   function hexToBytes(hex: string): number[] {
@@ -394,6 +2636,28 @@ export const useAppStore = defineStore('app', () => {
     nextScanValue.value = ''
     scanStatusText.value = 'Nouveau scan prêt.'
     setScanProgress(0)
+
+    // Avant : "Nouveau scan" ne vidait que le candidate store côté guidé, en
+    // laissant la région active, la cible d'écriture, le dernier résultat de
+    // write/freeze et le scan groupé d'une enquête précédente affichés comme
+    // si c'était pour la nouvelle recherche. Ne touche PAS aux surveillances
+    // actives (watch, freeze polling/BP en cours) : celles-ci sont des
+    // actions délibérées et indépendantes, les arrêter silencieusement au
+    // clic serait une surprise, pas une aide.
+    expertStartAddress.value = ''
+    expertStopAddress.value = ''
+    expertRegionSize.value = 0
+    expertRegionProtection.value = ''
+    expertRegionState.value = ''
+    expertRegionType.value = ''
+    selectedCandidateAddress.value = ''
+    writeValue.value = ''
+    writeResult.value = null
+    writeSafetyWarning.value = ''
+    writeSafetyAcknowledged.value = false
+    freezeIntervalResult.value = null
+    groupScanResult.value = null
+
     await refreshSmartSearchContext()
   }
 
@@ -424,14 +2688,64 @@ export const useAppStore = defineStore('app', () => {
         })
         backendScanSignalsConnected = true
       }
+      if (!backendHotkeySignalConnected) {
+        controller.globalHotkeyTriggered?.connect((event) => {
+          void handleGlobalHotkey(event)
+        })
+        backendHotkeySignalConnected = true
+      }
+      if (!backendFreezeInstabilitySignalConnected) {
+        // Détection automatique côté C++ (applyFreezeTick) : un freeze par
+        // polling qui ne tient pas se signale tout seul, sans que
+        // l'utilisateur ait besoin de le remarquer et de le décrire.
+        controller.freezeInstabilityDetected?.connect((info) => {
+          const address = String(info.address ?? '')
+          const key = address.toLowerCase()
+          if (freezeInstabilityNotified.has(key)) return
+          freezeInstabilityNotified.add(key)
+          pushMessage(
+            'assistant',
+            String(info.message ?? `Le freeze sur 0x${address} ne tient pas.`) + ' ' + String(info.suggestion ?? ''),
+            {
+              recoveryActions: [
+                {
+                  id: 'escalate_freeze_bp',
+                  label: 'Passer en Freeze BP',
+                  address,
+                  requiresConfirmation: true,
+                },
+                { id: 'open_expert', label: 'Ouvrir Expert' },
+              ],
+            },
+          )
+        })
+        backendFreezeInstabilitySignalConnected = true
+      }
       version.value = await controller.getVersion()
+      loadActionLog()
+      loadInvestigations()
+      loadTrainerFeatures()
+      loadStructureTemplates()
+      loadWorkspaceBookmarks()
+      loadWorkspaceProjects()
       await loadSettings()
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
+      showOnboarding.value = controller.hasSeenOnboarding ? !(await controller.hasSeenOnboarding()) : false
       console.log('[KillEngine] Version:', version.value)
     } catch (e) {
       console.error('[KillEngine] Backend connection failed:', e)
     }
+  }
+
+  async function dismissOnboarding() {
+    showOnboarding.value = false
+    const controller = backend.getController()
+    await controller.setOnboardingSeen?.(true)
+  }
+
+  async function openUserGuide() {
+    await backend.getController().openUserGuide?.()
   }
 
   async function refreshProcesses() {
@@ -550,6 +2864,7 @@ export const useAppStore = defineStore('app', () => {
         .getSmartSearchDebugEvents(settingSmartSearchDebugMaxEvents.value)
       smartSearchDebugEvents.value = debugResult.events ?? []
       smartSearchDebugError.value = debugResult.error ?? ''
+      await refreshAutoResolveReport()
     } catch (e) {
       logFilePath.value = ''
       logLines.value = []
@@ -560,8 +2875,17 @@ export const useAppStore = defineStore('app', () => {
       scanTelemetryFilePath.value = ''
       smartSearchDebugEvents.value = []
       smartSearchDebugError.value = String(e)
+      autoResolveReport.value = null
       console.error('[KillEngine] Failed to refresh diagnostics:', e)
     }
+  }
+
+  async function refreshAutoResolveReport() {
+    const controller = backend.getController()
+    autoResolveReport.value = controller.getAutoResolveReport
+      ? await controller.getAutoResolveReport(settingSmartSearchDebugMaxEvents.value)
+      : null
+    return autoResolveReport.value
   }
 
   async function refreshLogTail() {
@@ -654,7 +2978,9 @@ export const useAppStore = defineStore('app', () => {
     settingFastScan.value = settings.fastScan !== false
     settingSmartSearchDebugEnabled.value = settings.smartSearchDebugEnabled !== false
     settingSmartSearchDebugMaxEvents.value = Number(settings.smartSearchDebugMaxEvents || 30)
+    settingAutoRiskMode.value = settings.autoRiskMode || 'Safe'
     settingModelPath.value = settings.modelPath || ''
+    settingModelEnabled.value = settings.modelEnabled !== false
     settingModelThreads.value = Number(settings.modelThreads || 4)
   }
 
@@ -672,7 +2998,9 @@ export const useAppStore = defineStore('app', () => {
       fastScan: settingFastScan.value,
       smartSearchDebugEnabled: settingSmartSearchDebugEnabled.value,
       smartSearchDebugMaxEvents: settingSmartSearchDebugMaxEvents.value,
+      autoRiskMode: settingAutoRiskMode.value,
       modelPath: settingModelPath.value,
+      modelEnabled: settingModelEnabled.value,
       modelThreads: settingModelThreads.value,
     }
   }
@@ -683,10 +3011,46 @@ export const useAppStore = defineStore('app', () => {
       applySettings(settings)
       settingsLoaded.value = true
       settingsStatus.value = ''
+      await refreshAiModelStatus()
       return settings
     } catch (e) {
       settingsStatus.value = 'Impossible de charger les paramètres : ' + String(e)
       return null
+    }
+  }
+
+  async function refreshAiModelStatus() {
+    aiModelStatusLoading.value = true
+    aiModelStatusError.value = ''
+    try {
+      const controller = backend.getController()
+      if (!controller.getAiModelStatus) {
+        aiModelStatus.value = null
+        aiModelStatusError.value = 'Statut IA non exposé par ce backend.'
+        return null
+      }
+      const status = await controller.getAiModelStatus()
+      aiModelStatus.value = status
+      aiModelStatusError.value = status.success === false ? String(status.error ?? status.message ?? 'Statut IA indisponible.') : ''
+      return status
+    } catch (e) {
+      aiModelStatus.value = null
+      aiModelStatusError.value = String(e)
+      return null
+    } finally {
+      aiModelStatusLoading.value = false
+    }
+  }
+
+  async function browseForModel() {
+    const controller = backend.getController()
+    if (!controller.browseForModelFile) {
+      aiModelStatusError.value = 'Sélecteur de fichier non exposé par ce backend.'
+      return
+    }
+    const result = await controller.browseForModelFile()
+    if (result.success === true && typeof result.path === 'string') {
+      settingModelPath.value = result.path
     }
   }
 
@@ -698,6 +3062,7 @@ export const useAppStore = defineStore('app', () => {
       settingsLoaded.value = true
       settingsStatus.value = 'Paramètres sauvegardés.'
       await refreshDiagnostics()
+      await refreshAiModelStatus()
       return saved
     } catch (e) {
       settingsStatus.value = 'Sauvegarde impossible : ' + String(e)
@@ -765,6 +3130,124 @@ export const useAppStore = defineStore('app', () => {
     return Array.isArray(top) ? top : []
   }
 
+  function promoteEncryptedMatchesToCheckpoints(value: string, matches: Array<Record<string, unknown>>) {
+    if (!activeInvestigation.value || matches.length === 0) return
+    const scored = matches
+      .map((match) => {
+        const confidence = Number(match.confidence ?? 0)
+        const score = Math.max(35, Math.min(82, Math.round(confidence > 1 ? confidence : confidence * 100) || 55))
+        return { match, score }
+      })
+      .sort((a, b) => b.score - a.score)
+    activeInvestigation.value.checkpoints = [
+      ...scored.slice(0, 8).map(({ match, score }) => ({
+        kind: 'encrypted_hit',
+        label: `Scan chiffre 0x${String(match.address ?? '').replace(/^0x/i, '')}`,
+        address: String(match.address ?? '').replace(/^0x/i, ''),
+        type: String(match.type ?? 'Int32'),
+        value,
+        mode: String(match.encryptedMode ?? match.mode ?? 'auto'),
+        key: String(match.key ?? ''),
+        confidenceScore: score,
+        confidenceLabel: `score ${score}/100`,
+        requiresConfirmation: true,
+      })),
+      ...activeInvestigation.value.checkpoints,
+    ].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)).slice(0, 12)
+    saveInvestigations()
+  }
+
+  function promoteUiStringMatchesToCheckpoints(value: string, matches: Array<Record<string, unknown>>) {
+    if (!activeInvestigation.value || matches.length === 0) return
+    const scored = matches
+      .map((match) => {
+        const encoding = String(match.encoding ?? '')
+        const writableBonus = match.writable === true ? 8 : 0
+        const score = Math.min(74, 44 + writableBonus + (encoding === 'utf16' ? 6 : 0))
+        return { match, score }
+      })
+      .sort((a, b) => b.score - a.score)
+    activeInvestigation.value.checkpoints = [
+      ...scored.slice(0, 8).map(({ match, score }) => ({
+        kind: 'ui_string_hit',
+        label: `String UI 0x${String(match.address ?? '').replace(/^0x/i, '')}`,
+        address: String(match.address ?? '').replace(/^0x/i, ''),
+        type: 'String',
+        value,
+        encoding: String(match.encoding ?? ''),
+        byteLength: match.byteLength,
+        confidenceScore: score,
+        confidenceLabel: `score ${score}/100`,
+        requiresConfirmation: false,
+        reason: 'String affichee candidate; analyser les sources numeriques avant toute ecriture.',
+      })),
+      ...activeInvestigation.value.checkpoints,
+    ].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)).slice(0, 12)
+    saveInvestigations()
+  }
+
+  async function analyzeAutoUiStringSourcesFromMatches(value: string, matches: UiStringCandidate[]) {
+    const controller = backend.getController()
+    if (!controller.analyzeUiStringSources || matches.length === 0) return
+    const sourceMap = new Map<string, UiStringSourceCandidate>()
+    for (const candidate of matches.slice(0, 5)) {
+      const sourceResult = await controller.analyzeUiStringSources(candidate, value, {
+        radiusBytes: 1024 * 1024,
+        maxResults: 80,
+        includeScaled: true,
+      })
+      if (!sourceResult.success) continue
+      for (const source of sourceResult.candidates) {
+        const key = `${source.address.replace(/^0x/i, '')}:${source.type}:${source.variantLabel ?? ''}`
+        const existing = sourceMap.get(key)
+        if (!existing || (source.confidence ?? 0) > (existing.confidence ?? 0)) {
+          sourceMap.set(key, source)
+        }
+      }
+    }
+    autoUiStringSources.value = Array.from(sourceMap.values())
+      .sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))
+      .slice(0, 80)
+    autoUiStringSourceResult.value = {
+      success: autoUiStringSources.value.length > 0,
+      partial: false,
+      matchesFound: autoUiStringSources.value.length,
+      matchesReturned: autoUiStringSources.value.length,
+      bytesScanned: 0,
+      error: '',
+      candidates: autoUiStringSources.value,
+    } as unknown as UiStringSourceResult
+    if (autoUiStringSources.value.length > 0 && activeInvestigation.value) {
+      activeInvestigation.value.checkpoints = [
+        ...autoUiStringSources.value.slice(0, 8).map((source) => {
+          const score = Math.min(95, Math.max(50, Math.round(Number(source.confidence ?? 0) * 100) || 65))
+          return {
+            kind: 'ui_numeric_source',
+            label: `Source UI 0x${source.address.replace(/^0x/i, '')}`,
+            address: source.address.replace(/^0x/i, ''),
+            type: source.type,
+            value,
+            variantLabel: source.variantLabel,
+            confidence: source.confidence,
+            confidenceScore: score,
+            confidenceLabel: `score ${score}/100`,
+            requiresConfirmation: true,
+          }
+        }),
+        ...activeInvestigation.value.checkpoints,
+      ].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)).slice(0, 12)
+      addInvestigationStep({
+        title: 'Sources UI auto analysées',
+        detail: `${autoUiStringSources.value.length} source(s) numérique(s) depuis Trace UI fallback.`,
+        status: 'checkpoint',
+        tool: 'analyzeUiStringSources',
+        risk: 'safe',
+        payload: autoUiStringSourceResult.value as unknown as Record<string, unknown>,
+      })
+      saveInvestigations()
+    }
+  }
+
   function investigationAssistantReply(query: string): string {
     const report = investigationReport.value
     if (!report) return ''
@@ -796,7 +3279,11 @@ export const useAppStore = defineStore('app', () => {
 
     const matchesFound = Number(report.aob?.matchesFound ?? Number.NaN)
     if (Number.isFinite(matchesFound)) {
-      if (matchesFound === 1) lines.push('AOB : signature unique, bonne candidate pour un patch trainer.')
+      const weakQuality = Number(report.aob?.weakQualityCount ?? 0)
+      const blockedTrainer = Number(report.aob?.trainerBlockedCount ?? 0)
+      if (weakQuality > 0 || blockedTrainer > 0) {
+        lines.push(`AOB : ${weakQuality} signature(s) faible(s), ${blockedTrainer} blocage(s) Trainer. Stabilise avant de sauver/appliquer.`)
+      } else if (matchesFound === 1) lines.push('AOB : signature unique et qualité acceptable, bonne candidate pour un patch trainer.')
       else if (matchesFound > 1) lines.push(`AOB : ${matchesFound} matches, il faut stabiliser avant de patcher.`)
       else lines.push('AOB : aucune signature exploitable pour le moment.')
     }
@@ -875,12 +3362,19 @@ export const useAppStore = defineStore('app', () => {
       }
 
       // Construction du message assistant
+      // `result.rationale` (AIEngine::makeToolCall, moteur IA complet) est plus
+      // specifique quand il existe (retry multi-type, pivot chiffre, reduction
+      // contextuelle...) que `result.intentRationale` (classifieur simple,
+      // toujours present mais plus generique) : on prefere le premier.
+      const decisionRationale = result.rationale
+        ? String(result.rationale)
+        : (result.intentRationale ? String(result.intentRationale) : undefined)
       const extras: Partial<ChatMessage> = {
         workflowStatus: wfStatus || undefined,
         candidateCount,
         targetValue: result.targetValue ? String(result.targetValue) : undefined,
         intent: result.intent ? String(result.intent) : undefined,
-        intentRationale: result.intentRationale ? String(result.intentRationale) : undefined,
+        intentRationale: decisionRationale,
       }
 
       if (result.requiresConfirmation) {
@@ -934,6 +3428,217 @@ export const useAppStore = defineStore('app', () => {
       await refreshSmartSearchContext()
     } catch (e) {
       updateMessage(thinkingMessage.id, 'Erreur de recherche : ' + String(e), { isThinking: false, isError: true })
+    } finally {
+      isSearching.value = false
+    }
+  }
+
+  async function doAutoResolve() {
+    const query = searchQuery.value.trim()
+    if (!query || isSearching.value) return
+
+    const controller = backend.getController()
+    if (!controller.startAutoResolve) {
+      pushMessage('assistant', 'Auto-résolution non exposée par ce backend.', { isError: true })
+      return
+    }
+
+    pushMessage('user', `Auto: ${query}`)
+    startInvestigation(query, 'Auto Resolve')
+    addInvestigationStep({
+      title: 'Objectif utilisateur',
+      detail: query,
+      status: 'running',
+      tool: 'startAutoResolve',
+      risk: 'safe',
+    })
+    const thinkingMessage = pushMessage('assistant', 'Je prépare un plan auto et je lance la première action sûre...', { isThinking: true })
+    searchQuery.value = ''
+    isSearching.value = true
+    await letChatRenderBeforeBackendWork()
+
+    try {
+      if (autoUnknownAwaitingObservation.value || (unknownSnapshotResult.value?.success === true && /^(changed|stable|inchang|augment|diminu|baisse|hausse|plus|moins|-?\d)/i.test(query))) {
+        const handledUnknown = await runAutoUnknownObservation(query, thinkingMessage.id)
+        if (handledUnknown) return
+      }
+
+      const result = await controller.startAutoResolve(query, { executeSafe: true, maxSafeSteps: 3 })
+      updateInvestigationFromAutoResult(result as Record<string, unknown>)
+      searchResult.value = result.message ?? JSON.stringify(result, null, 2)
+
+      if (result.firstAction) {
+        if (String(result.safeAction ?? '') === 'next_scan') {
+          nextScanResult.value = result.firstAction as unknown as NextScanResult
+        } else {
+          exactScanResult.value = result.firstAction as unknown as ExactScanResult
+        }
+        candidatePageIndex.value = 0
+        await refreshCandidates()
+      }
+
+      if (result.fallbackAction && typeof result.fallbackAction === 'object') {
+        const fallback = result.fallbackAction as Record<string, unknown>
+        if ('keySearchBits' in fallback || fallback.mode === 'xor' || fallback.mode === 'auto') {
+          encryptedScanResult.value = fallback as unknown as EncryptedScanResult
+          promoteEncryptedMatchesToCheckpoints(
+            String(result.initialValue ?? query),
+            Array.isArray(fallback.matches) ? fallback.matches as Array<Record<string, unknown>> : [],
+          )
+        }
+      }
+      if (result.fallbackTraceUiAction && typeof result.fallbackTraceUiAction === 'object') {
+        const trace = result.fallbackTraceUiAction as Record<string, unknown>
+        autoUiStringScanResult.value = trace as unknown as UiStringScanResult
+        const traceMatches = Array.isArray(trace.matches) ? trace.matches as Array<Record<string, unknown>> : []
+        promoteUiStringMatchesToCheckpoints(
+          String(result.initialValue ?? query),
+          traceMatches,
+        )
+        await analyzeAutoUiStringSourcesFromMatches(
+          String(result.initialValue ?? query),
+          traceMatches as unknown as UiStringCandidate[],
+        )
+      }
+      if (result.unknownCaptureAction && typeof result.unknownCaptureAction === 'object') {
+        unknownSnapshotResult.value = result.unknownCaptureAction as unknown as UnknownSnapshotResult
+        autoUnknownAwaitingObservation.value = unknownSnapshotResult.value.success === true
+      }
+
+      if (Array.isArray(result.executedSafeSteps)) {
+        for (const step of result.executedSafeSteps.slice(0, 5) as Array<Record<string, unknown>>) {
+          addInvestigationStep({
+            title: `Auto safe: ${String(step.tool ?? 'outil')}`,
+            detail: String(step.detail ?? step.status ?? ''),
+            status: String(step.status ?? '') === 'error' ? 'warning' : 'success',
+            tool: String(step.tool ?? 'auto_safe_action'),
+            risk: 'safe',
+            payload: step,
+          })
+        }
+      } else if (result.firstAction) {
+        addInvestigationStep({
+          title: String(result.safeAction ?? result.actionStatus ?? 'Action safe executee'),
+          detail: `${candidatePage.value?.totalCount ?? extractCandidateCount(result) ?? 0} candidat(s)`,
+          status: result.success === false ? 'warning' : 'success',
+          tool: String(result.safeAction ?? 'auto_safe_action'),
+          risk: 'safe',
+          payload: result.firstAction as Record<string, unknown>,
+        })
+      }
+
+      const wfStatus = (result.workflowStatus as string | undefined) ?? ''
+      if (wfStatus) workflowStatus.value = wfStatus
+      if (result.targetValue) targetValueGuided.value = String(result.targetValue)
+
+      const candidateCount = extractCandidateCount(result)
+      if (candidateCount !== undefined && candidateCount >= 0) {
+        candidateHistory.value.push(candidateCount)
+      }
+
+      const planLines = Array.isArray(result.plan)
+        ? result.plan.slice(0, 6).map((step, index) => {
+            const row = step as Record<string, unknown>
+            return `${index + 1}. ${String(row.description ?? row.type ?? 'Étape')}`
+          })
+        : []
+      const executedSafeSteps = Array.isArray(result.executedSafeSteps)
+        ? result.executedSafeSteps.slice(0, 5) as Array<Record<string, unknown>>
+        : []
+
+      const nextActions = Array.isArray(result.nextActions)
+        ? (result.nextActions as Array<Record<string, unknown>>)
+        : []
+      const contextReport = typeof result.contextReport === 'object' && result.contextReport !== null
+        ? result.contextReport as Record<string, unknown>
+        : {}
+      const nextBestAction = typeof contextReport.nextBestAction === 'object' && contextReport.nextBestAction !== null
+        ? contextReport.nextBestAction as Record<string, unknown>
+        : null
+      const reportRecommendations = Array.isArray(contextReport.recommendations)
+        ? contextReport.recommendations as Array<Record<string, unknown>>
+        : []
+      const telemetryInsights = Array.isArray(contextReport.telemetryInsights)
+        ? contextReport.telemetryInsights as Array<Record<string, unknown>>
+        : []
+      const displayValueReport = typeof contextReport.displayValueReport === 'object' && contextReport.displayValueReport !== null
+        ? contextReport.displayValueReport as Record<string, unknown>
+        : {}
+      const mergedActions = nextBestAction ? [nextBestAction, ...nextActions] : [...nextActions]
+      for (const action of reportRecommendations) {
+        const id = String(action.id ?? '')
+        if (!id || mergedActions.some((existing) => String(existing.id ?? '') === id)) continue
+        mergedActions.push(action)
+      }
+      const nextBestHint = nextBestAction
+        ? `Priorité assistant: ${String(nextBestAction.label ?? nextBestAction.id)}${Number.isFinite(Number(nextBestAction.confidence)) ? ` (${Number(nextBestAction.confidence)}/100)` : ''} — ${String(nextBestAction.reason ?? '')}`
+        : ''
+      const reportSummary = String(contextReport.summary ?? '').trim()
+      const learnedProfile = typeof contextReport.learnedProfile === 'object' && contextReport.learnedProfile !== null
+        ? contextReport.learnedProfile as Record<string, unknown>
+        : {}
+      const learnedStarts = Number(learnedProfile.starts ?? 0)
+      const learnedNoCandidate = Number(learnedProfile.noCandidateCount ?? 0)
+      const learnedHint = learnedStarts > 0
+        ? `Mémoire jeu: ${learnedStarts} passe(s) Auto, ${learnedNoCandidate} sans candidat.`
+        : ''
+      const preferredStrategy = typeof contextReport.preferredStrategy === 'object' && contextReport.preferredStrategy !== null
+        ? contextReport.preferredStrategy as Record<string, unknown>
+        : {}
+      const strategyLabel = String(preferredStrategy.label ?? '').trim()
+      const strategyScore = Number(preferredStrategy.score ?? Number.NaN)
+      const strategyReason = String(preferredStrategy.reason ?? '').trim()
+      const strategyHint = strategyLabel
+        ? `Stratégie: ${strategyLabel}${Number.isFinite(strategyScore) ? ` (${strategyScore})` : ''}${strategyReason ? ` — ${strategyReason}` : ''}`
+        : ''
+      const insightHint = telemetryInsights.length > 0
+        ? `Signal telemetry: ${String(telemetryInsights[0].label ?? telemetryInsights[0].id)} — ${String(telemetryInsights[0].nextAction ?? telemetryInsights[0].reason ?? '')}`
+        : ''
+      const displayValueHint = displayValueReport.enabled === true
+        ? `Rapport valeurs affichées: ${String(displayValueReport.recommendation ?? 'Trace UI string puis sources numeriques confirmees.')}`
+        : ''
+
+      const baseMessage = String(result.message ?? result.error ?? 'Plan auto généré.').trim()
+      const messageParts = [baseMessage]
+      if (nextBestHint) messageParts.push(nextBestHint)
+      if (reportSummary) messageParts.push(`Contexte: ${reportSummary}`)
+      if (learnedHint) messageParts.push(learnedHint)
+      if (strategyHint) messageParts.push(strategyHint)
+      if (insightHint) messageParts.push(insightHint)
+      if (displayValueHint) messageParts.push(displayValueHint)
+      if (planLines.length > 0) messageParts.push(`Plan:\n${planLines.join('\n')}`)
+      const message = messageParts.join('\n\n')
+
+      updateMessage(thinkingMessage.id, message, {
+        isThinking: false,
+        isError: Boolean(result.error),
+        workflowStatus: wfStatus || undefined,
+        candidateCount,
+        targetValue: result.targetValue ? String(result.targetValue) : undefined,
+        recoveryActions: mergedActions,
+        executedSafeSteps,
+        intent: 'AutoResolve',
+        intentRationale: 'Planification proactive avec exécution des actions sûres uniquement.',
+      })
+      if (result.requiresConfirmation) {
+        addInvestigationStep({
+          title: 'Checkpoint confirmation',
+          detail: String(result.confirmationReason ?? 'Confirmation utilisateur requise.'),
+          status: 'checkpoint',
+          risk: 'write',
+          payload: result as Record<string, unknown>,
+        })
+      }
+      await refreshSmartSearchContext()
+    } catch (e) {
+      addInvestigationStep({
+        title: 'Erreur Auto Resolve',
+        detail: String(e),
+        status: 'error',
+        tool: 'startAutoResolve',
+        risk: 'safe',
+      })
+      updateMessage(thinkingMessage.id, 'Erreur auto-résolution : ' + String(e), { isThinking: false, isError: true })
     } finally {
       isSearching.value = false
     }
@@ -1010,7 +3715,7 @@ export const useAppStore = defineStore('app', () => {
   async function doExactScan() {
     if (!exactScanValue.value.trim() || scanBusy.value) return
 
-    // Le mode Auto (multi-type) est crucial pour StarCraft 2 : il cherche
+    // Le mode Auto (multi-type) est crucial pour les cibles modernes : il cherche
     // Int/UInt, Float et variantes fixed-point en une fois.
     const isAutoType = exactScanType.value.toLowerCase() === 'auto'
 
@@ -1087,6 +3792,221 @@ export const useAppStore = defineStore('app', () => {
       }
       scanStatusText.value = 'Scan échoué.'
       addActionLog('scan', 'Scan exact échoué', String(e), 'error')
+    } finally {
+      scanBusy.value = false
+    }
+  }
+
+  async function doGroupScan() {
+    if (scanBusy.value) return
+    const controller = backend.getController()
+    if (!controller.scanGroupScan) {
+      groupScanResult.value = {
+        success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
+        matchesFound: 0, matchesReturned: 0,
+        error: 'Scan groupe non exposé par ce backend.', matches: [],
+      }
+      addActionLog('scan', 'Scan groupe indisponible', groupScanResult.value.error, 'warning')
+      return
+    }
+    const entries = groupScanEntries.value
+      .filter((entry) => entry.value.trim() !== '' && entry.offset.trim() !== '')
+      .map((entry): GroupScanEntryInput => ({ offset: Number(entry.offset), type: entry.type, value: entry.value.trim() }))
+    if (entries.length < 2) {
+      groupScanResult.value = {
+        success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
+        matchesFound: 0, matchesReturned: 0,
+        error: 'Renseigne au moins 2 valeurs avec leurs offsets.', matches: [],
+      }
+      return
+    }
+
+    try {
+      scanBusy.value = true
+      groupScanBusy.value = true
+      setScanProgress(0)
+      scanStatusText.value = 'Scan groupe en cours...'
+      addActionLog('scan', `Scan groupe (${entries.length} valeurs)`, entries.map((e) => `+${e.offset}:${e.value}`).join(' '), 'info')
+      groupScanResult.value = await controller.scanGroupScan(entries, {
+        maxDistance: groupScanMaxDistance.value,
+        maxResults: 1000,
+        startAddress: expertStartAddress.value.trim() || undefined,
+        stopAddress: expertStopAddress.value.trim() || undefined,
+        alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
+        writableOnly: true,
+      })
+      setScanProgress(1)
+      if (groupScanResult.value.success) {
+        addActionLog('scan', 'Scan groupe terminé', `${groupScanResult.value.matchesFound} structure(s) trouvée(s).`, 'success')
+      } else {
+        addActionLog('scan', 'Scan groupe échoué', groupScanResult.value.error, 'error')
+      }
+    } catch (e) {
+      groupScanResult.value = {
+        success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
+        matchesFound: 0, matchesReturned: 0, error: String(e), matches: [],
+      }
+      addActionLog('scan', 'Scan groupe échoué', String(e), 'error')
+    } finally {
+      scanBusy.value = false
+      groupScanBusy.value = false
+      scanStatusText.value = ''
+    }
+  }
+
+  function addGroupScanEntry() {
+    const last = groupScanEntries.value[groupScanEntries.value.length - 1]
+    const lastOffset = last ? Number(last.offset || '0') : 0
+    groupScanEntries.value.push({ offset: String(lastOffset + 4), type: last?.type ?? 'Int32', value: '' })
+  }
+
+  function removeGroupScanEntry(index: number) {
+    if (groupScanEntries.value.length <= 2) return
+    groupScanEntries.value.splice(index, 1)
+  }
+
+  function clearGroupScanEntries() {
+    groupScanEntries.value = [{ offset: '0', type: 'Int32', value: '' }, { offset: '4', type: 'Int32', value: '' }]
+    groupScanResult.value = null
+  }
+
+  // ---- Watch pointer chain ----
+  async function addWatchedPointerChain(chain: { module: string, baseOffset: string, offsets: string[] }, type = 'Int32', label = '') {
+    const controller = backend.getController()
+    if (!controller.resolvePointerChain) return null
+    try {
+      const resolve = await controller.resolvePointerChain(chain)
+      if (!resolve.success || !resolve.finalAddress) {
+        addActionLog('watch', 'Chaîne non résolue', resolve.error ?? 'Résolution impossible.', 'warning')
+        return null
+      }
+      const normalized = resolve.finalAddress.replace(/^0x/i, '')
+      const entry: WatchedPointerChain = {
+        id: nextWatchedChainId++,
+        label: label || `Chaîne #${nextWatchedChainId - 1}`,
+        chain: { ...chain },
+        type,
+        finalAddress: normalized,
+        value: '',
+        previousValue: '',
+        changed: false,
+        error: '',
+        updatedAt: new Date().toLocaleTimeString(),
+      }
+      watchedPointerChains.value.push(entry)
+      await refreshWatchedPointerChain(entry.id)
+      return entry
+    } catch (e) {
+      addActionLog('watch', 'Erreur ajout chaîne', String(e), 'error')
+      return null
+    }
+  }
+
+  async function refreshWatchedPointerChain(id: number): Promise<WatchedPointerChain | null> {
+    const entry = watchedPointerChains.value.find((item) => item.id === id)
+    if (!entry) return null
+    const controller = backend.getController()
+    let updated = entry
+    try {
+      if (controller.resolvePointerChain) {
+        const resolve = await controller.resolvePointerChain(entry.chain)
+        if (resolve.success && resolve.finalAddress) {
+          entry.finalAddress = resolve.finalAddress.replace(/^0x/i, '')
+        } else if (!resolve.success) {
+          entry.error = resolve.error ?? 'Résolution impossible.'
+        }
+      }
+      const preview = await controller.readMemoryPreview(entry.finalAddress, valueTypeReadSize(entry.type))
+      const value = decodeTypedPreviewValue(preview, entry.type)
+      updated = {
+        ...entry,
+        previousValue: entry.value,
+        value,
+        changed: entry.value !== '' && value !== entry.value,
+        error: preview.success ? '' : preview.error,
+        updatedAt: new Date().toLocaleTimeString(),
+      }
+    } catch (e) {
+      updated = { ...entry, error: String(e), updatedAt: new Date().toLocaleTimeString() }
+    }
+    watchedPointerChains.value = watchedPointerChains.value.map((item) => (item.id === id ? updated : item))
+    return updated
+  }
+
+  async function refreshWatchedPointerChains() {
+    for (const entry of watchedPointerChains.value.slice(0, 20)) {
+      await refreshWatchedPointerChain(entry.id)
+    }
+  }
+
+  function removeWatchedPointerChain(id: number) {
+    watchedPointerChains.value = watchedPointerChains.value.filter((item) => item.id !== id)
+  }
+
+  function clearWatchedPointerChains() {
+    watchedPointerChains.value = []
+  }
+async function doEncryptedScan() {
+    if (!exactScanValue.value.trim() || scanBusy.value) return
+
+    const controller = backend.getController()
+    if (!controller.scanEncryptedValue) {
+      encryptedScanResult.value = {
+        success: false,
+        partial: false,
+        regionsScanned: 0,
+        bytesScanned: 0,
+        matchesFound: 0,
+        matchesReturned: 0,
+        error: 'Scan chiffré non exposé par ce backend.',
+        matches: [],
+      }
+      addActionLog('scan', 'Scan chiffré indisponible', encryptedScanResult.value.error, 'warning')
+      return
+    }
+
+    try {
+      scanBusy.value = true
+      setScanProgress(0)
+      scanStatusText.value = 'Scan chiffré en cours...'
+      addActionLog('scan', `Scan chiffré ${encryptedScanMode.value.toUpperCase()} ${exactScanValue.value}`, `${exactScanType.value}.`, 'info')
+      encryptedScanResult.value = await controller.scanEncryptedValue(
+        exactScanValue.value,
+        exactScanType.value === 'Auto' ? 'Int32' : exactScanType.value,
+        {
+          mode: encryptedScanMode.value,
+          key: encryptedScanKey.value,
+          keySearchBits: encryptedScanKeySearchBits.value,
+          startAddress: expertStartAddress.value.trim() || undefined,
+          stopAddress: expertStopAddress.value.trim() || undefined,
+          alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
+          writableOnly: true,
+          executableOnly: expertExecutableOnly.value,
+          copyOnWriteOnly: expertCopyOnWriteOnly.value,
+          maxResults: 1000,
+        },
+      )
+      setScanProgress(100)
+      scanStatusText.value = encryptedScanResult.value.success ? 'Scan chiffré terminé.' : 'Scan chiffré échoué.'
+      addActionLog(
+        'scan',
+        encryptedScanResult.value.success ? 'Scan chiffré terminé' : 'Scan chiffré échoué',
+        `${encryptedScanResult.value.matchesFound} match(es), ${encryptedScanResult.value.regionsScanned} région(s).`,
+        encryptedScanResult.value.success ? 'success' : 'warning',
+      )
+    } catch (e) {
+      encryptedScanResult.value = {
+        success: false,
+        partial: false,
+        regionsScanned: 0,
+        bytesScanned: 0,
+        matchesFound: 0,
+        matchesReturned: 0,
+        error: String(e),
+        matches: [],
+      }
+      scanStatusText.value = 'Scan chiffré échoué.'
+      addActionLog('scan', 'Scan chiffré échoué', String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -1188,6 +4108,222 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function runAutoEncryptedScan(value: string) {
+    const trimmed = value.trim()
+    if (!trimmed || scanBusy.value) return
+    exactScanValue.value = trimmed
+    exactScanType.value = 'Int32'
+    encryptedScanKey.value = '0'
+    encryptedScanKeySearchBits.value = 16
+    addInvestigationStep({
+      title: 'Scan chiffre guide',
+      detail: `XOR/Add/Sub/NOT 16-bit borne depuis la valeur ${trimmed}.`,
+      status: 'running',
+      tool: 'scanEncryptedValue',
+      risk: 'safe',
+    })
+    const modes: Array<typeof encryptedScanMode.value> = ['xor', 'add', 'sub', 'not']
+    const mergedMatches = new Map<string, Record<string, unknown>>()
+    let aggregateRegions = 0
+    let aggregateBytes = 0
+    let firstError = ''
+    for (const mode of modes) {
+      encryptedScanMode.value = mode
+      await doEncryptedScan()
+      const result = encryptedScanResult.value
+      if (!result) continue
+      aggregateRegions = Math.max(aggregateRegions, result.regionsScanned)
+      aggregateBytes += result.bytesScanned
+      if (!result.success && !firstError) firstError = result.error
+      for (const match of result.matches ?? []) {
+        const key = `${match.address}:${match.type}:${mode}:${String((match as Record<string, unknown>).key ?? result.key ?? '')}`
+        mergedMatches.set(key, { ...match, encryptedMode: mode, key: result.key, keySearchBits: result.keySearchBits })
+      }
+      if (mergedMatches.size >= 500) break
+    }
+    const matches = Array.from(mergedMatches.values()).slice(0, 500)
+    encryptedScanResult.value = {
+      success: matches.length > 0,
+      partial: mergedMatches.size >= 500,
+      regionsScanned: aggregateRegions,
+      bytesScanned: aggregateBytes,
+      matchesFound: mergedMatches.size,
+      matchesReturned: matches.length,
+      maxResults: 500,
+      error: firstError,
+      matches: matches as unknown as EncryptedScanResult['matches'],
+      mode: 'auto',
+      key: '0',
+      keySearchBits: 16,
+    }
+    promoteEncryptedMatchesToCheckpoints(trimmed, matches)
+    addInvestigationStep({
+      title: 'Scan chiffre termine',
+      detail: `${encryptedScanResult.value?.matchesFound ?? 0} match(es), ${encryptedScanResult.value?.matchesReturned ?? 0} retourne(s).`,
+      status: encryptedScanResult.value?.success ? 'success' : 'warning',
+      tool: 'scanEncryptedValue',
+      risk: 'safe',
+      payload: encryptedScanResult.value as unknown as Record<string, unknown>,
+    })
+    pushMessage(
+      'assistant',
+      encryptedScanResult.value?.success
+        ? `Scan chiffré guidé terminé : ${encryptedScanResult.value.matchesFound} match(es).`
+        : `Scan chiffré guidé sans résultat exploitable : ${encryptedScanResult.value?.error ?? 'aucun match'}.`,
+      { isError: encryptedScanResult.value?.success === false },
+    )
+  }
+
+  async function runAutoTraceUiString(value: string) {
+    const trimmed = value.trim()
+    if (!trimmed || scanBusy.value) return
+    const controller = backend.getController()
+    if (!controller.scanUiStrings) {
+      pushMessage('assistant', 'Trace UI string non exposé par ce backend.', { isError: true })
+      return
+    }
+    scanBusy.value = true
+    addInvestigationStep({
+      title: 'Trace UI string guide',
+      detail: `Recherche de la valeur affichee "${trimmed}" en ASCII/UTF-16.`,
+      status: 'running',
+      tool: 'scanUiStrings',
+      risk: 'safe',
+    })
+    try {
+      const previousStrings = autoUiStringScanResult.value?.matches ?? []
+      if (previousStrings.length > 0 && controller.trackUiStringCandidates) {
+        const tracked = await controller.trackUiStringCandidates(previousStrings.slice(0, 100), trimmed)
+        autoUiStringScanResult.value = {
+          success: tracked.success,
+          matchesFound: tracked.remaining,
+          matchesReturned: tracked.survivors.length,
+          regionsScanned: 0,
+          bytesScanned: 0,
+          partial: false,
+          error: tracked.error,
+          matches: tracked.survivors,
+        }
+        addInvestigationStep({
+          title: 'Trace UI tracking',
+          detail: `${tracked.survivors.length} string(s) suivie(s) vers "${trimmed}".`,
+          status: tracked.success ? 'success' : 'warning',
+          tool: 'trackUiStringCandidates',
+          risk: 'safe',
+          payload: tracked as unknown as Record<string, unknown>,
+        })
+      } else {
+        autoUiStringScanResult.value = await controller.scanUiStrings(trimmed, {
+          writableOnly: false,
+          maxResults: 500,
+        })
+      }
+      const sourceMap = new Map<string, UiStringSourceCandidate>()
+      let sourcePartial = false
+      let sourceError = ''
+      if (autoUiStringScanResult.value.success && controller.analyzeUiStringSources) {
+        const stringCandidates = autoUiStringScanResult.value.matches.slice(0, 5) as UiStringCandidate[]
+        for (const candidate of stringCandidates) {
+          const sourceResult = await controller.analyzeUiStringSources(candidate, trimmed, {
+            radiusBytes: 4 * 1024 * 1024,
+            maxResults: 250,
+            alignment: 1,
+          })
+          sourcePartial = sourcePartial || Boolean(sourceResult.partial)
+          if (!sourceResult.success && !sourceError) sourceError = sourceResult.error
+          for (const source of sourceResult.candidates) {
+            const key = `${source.address.replace(/^0x/i, '')}:${source.type}:${source.variantLabel ?? ''}`
+            const existing = sourceMap.get(key)
+            if (!existing || (source.confidence ?? 0) > (existing.confidence ?? 0)) {
+              sourceMap.set(key, source)
+            }
+          }
+        }
+      }
+      autoUiStringSources.value = Array.from(sourceMap.values())
+        .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+      autoUiStringSourceResult.value = {
+        success: autoUiStringSources.value.length > 0,
+        partial: sourcePartial,
+        matchesFound: autoUiStringSources.value.length,
+        matchesReturned: autoUiStringSources.value.length,
+        bytesScanned: 0,
+        radiusBytes: 4 * 1024 * 1024,
+        error: sourceError,
+        candidates: autoUiStringSources.value,
+      }
+      addInvestigationStep({
+        title: 'Trace UI string termine',
+        detail: `${autoUiStringScanResult.value.matchesFound} string(s), ${autoUiStringSources.value.length} source(s) numerique(s).`,
+        status: autoUiStringScanResult.value.success ? 'success' : 'warning',
+        tool: 'scanUiStrings',
+        risk: 'safe',
+        payload: autoUiStringScanResult.value as unknown as Record<string, unknown>,
+      })
+      if (autoUiStringSources.value.length > 0 && activeInvestigation.value) {
+        activeInvestigation.value.checkpoints = [
+          ...autoUiStringSources.value.slice(0, 8).map((source) => ({
+            kind: 'ui_numeric_source',
+            label: `Source UI 0x${source.address.replace(/^0x/i, '')}`,
+            address: source.address.replace(/^0x/i, ''),
+            type: source.type,
+            value: trimmed,
+            variantLabel: source.variantLabel,
+            confidence: source.confidence,
+            requiresConfirmation: true,
+          })),
+          ...activeInvestigation.value.checkpoints,
+        ].slice(0, 12)
+        activeInvestigation.value.hypotheses = [
+          {
+            id: 'trace_ui_sources',
+            label: 'Sources numeriques proches des strings UI',
+            reason: `${autoUiStringSources.value.length} source(s) trouvee(s); tester par petits lots avant freeze.`,
+            safe: false,
+            requiresConfirmation: true,
+          },
+          ...activeInvestigation.value.hypotheses,
+        ].slice(0, 8)
+        saveInvestigations()
+      }
+      pushMessage(
+        'assistant',
+        autoUiStringScanResult.value.success
+          ? `Trace UI string a trouvé ${autoUiStringScanResult.value.matchesFound} string(s) et ${autoUiStringSources.value.length} source(s) numérique(s). Les meilleures sources sont dans Investigation/Trainer.`
+          : `Trace UI string n'a pas donné de piste exploitable : ${autoUiStringScanResult.value.error || 'aucun match'}.`,
+        { isError: autoUiStringScanResult.value.success === false },
+      )
+    } catch (e) {
+      autoUiStringScanResult.value = {
+        success: false,
+        matchesFound: 0,
+        matchesReturned: 0,
+        regionsScanned: 0,
+        bytesScanned: 0,
+        error: String(e),
+        matches: [],
+      }
+      autoUiStringSourceResult.value = {
+        success: false,
+        matchesFound: 0,
+        matchesReturned: 0,
+        bytesScanned: 0,
+        error: String(e),
+        candidates: [],
+      }
+      autoUiStringSources.value = []
+      addInvestigationStep({
+        title: 'Trace UI string echoue',
+        detail: String(e),
+        status: 'error',
+        tool: 'scanUiStrings',
+        risk: 'safe',
+      })
+    } finally {
+      scanBusy.value = false
+    }
+  }
+
   async function cancelActiveScan() {
     if (!scanBusy.value) return
     scanStatusText.value = 'Annulation demandée...'
@@ -1221,6 +4357,7 @@ export const useAppStore = defineStore('app', () => {
       unknownNextScanResult.value = null
       unknownScanMode.value = 'changed'
       unknownGuideSteps.value = []
+      autoUnknownAwaitingObservation.value = unknownSnapshotResult.value.success === true
       pushUnknownGuideStep({
         mode: 'capture',
         label: 'capture',
@@ -1363,6 +4500,90 @@ export const useAppStore = defineStore('app', () => {
       status,
       detail,
     })
+    autoUnknownAwaitingObservation.value = status !== 'error' && afterCount > 25
+  }
+
+  async function runAutoUnknownObservation(observation: string, thinkingMessageId?: number) {
+    const trimmed = observation.trim()
+    if (!trimmed) return false
+
+    if (!unknownSnapshotResult.value?.success) {
+      addInvestigationStep({
+        title: 'Unknown Auto capture',
+        detail: 'Aucun snapshot actif : capture initiale avant observation.',
+        status: 'running',
+        tool: 'captureUnknownSnapshotAsync',
+        risk: 'safe',
+      })
+      await captureUnknownSnapshot()
+      const message = unknownSnapshotResult.value?.success
+        ? 'Snapshot Unknown capturé. Fais varier la valeur dans le processus, puis donne-moi la nouvelle observation pour que je lance increased/decreased/changed/stable.'
+        : `Capture Unknown impossible : ${unknownSnapshotResult.value?.error ?? 'erreur inconnue'}.`
+      if (thinkingMessageId !== undefined) {
+        updateMessage(thinkingMessageId, message, { isThinking: false, isError: unknownSnapshotResult.value?.success !== true })
+      } else {
+        pushMessage('assistant', message, { isError: unknownSnapshotResult.value?.success !== true })
+      }
+      return true
+    }
+
+    const mode = inferUnknownModeFromObservation(trimmed)
+    addInvestigationStep({
+      title: 'Unknown Auto comparaison',
+      detail: `Observation "${trimmed}" -> mode ${mode}.`,
+      status: 'running',
+      tool: 'unknownNextScanAsync',
+      risk: 'safe',
+    })
+    await runUnknownGuideStep(mode)
+
+    const total = candidatePage.value?.totalCount ?? unknownNextScanResult.value?.stored ?? 0
+    const candidates = candidatePage.value?.candidates ?? []
+    if (total > 0 && total <= 25 && activeInvestigation.value) {
+      activeInvestigation.value.checkpoints = [
+        ...candidates.slice(0, 10).map((candidate) => ({
+          kind: 'unknown_candidate',
+          label: `Unknown 0x${candidate.address}`,
+          address: candidate.address,
+          type: String(candidate.type ?? unknownScanType.value),
+          value: firstNumberFromText(trimmed) !== null ? String(firstNumberFromText(trimmed)) : trimmed,
+          confidence: candidate.confidence,
+          variantLabel: candidate.variantLabel,
+          requiresConfirmation: true,
+        })),
+        ...activeInvestigation.value.checkpoints,
+      ].slice(0, 12)
+      saveInvestigations()
+    }
+
+    const status = unknownNextScanResult.value?.error ? 'error' : total <= 25 && total > 0 ? 'checkpoint' : 'success'
+    addInvestigationStep({
+      title: 'Unknown Auto terminé',
+      detail: total > 0
+        ? `${total} candidat(s) après ${mode}.${total <= 25 ? ' Checkpoints prêts.' : ' Continue avec une autre variation.'}`
+        : `Aucun candidat après ${mode}.`,
+      status,
+      tool: 'unknownNextScanAsync',
+      risk: 'safe',
+      payload: unknownNextScanResult.value as unknown as Record<string, unknown>,
+    })
+    logAiAudit('unknown_auto_observation', {
+      observation: trimmed,
+      mode,
+      candidateCount: total,
+      success: !unknownNextScanResult.value?.error,
+    })
+
+    const message = total > 0
+      ? `Unknown ${mode} terminé : ${total} candidat(s). ${total <= 25 ? 'J’ai préparé des checkpoints dans Investigation pour tester/freeze sous confirmation.' : 'Fais encore varier la valeur et redonne-moi la nouvelle observation.'}`
+      : `Unknown ${mode} n’a rien gardé. Prochaine piste : Trace UI string ou scan chiffré borné.`
+    if (thinkingMessageId !== undefined) {
+      updateMessage(thinkingMessageId, message, { isThinking: false, isError: Boolean(unknownNextScanResult.value?.error), candidateCount: total })
+    } else {
+      pushMessage('assistant', message, { isError: Boolean(unknownNextScanResult.value?.error), candidateCount: total })
+    }
+    await refreshSmartSearchContext()
+    return true
   }
 
   function openExpertAtAddress(address: string, type = exactScanType.value) {
@@ -1627,7 +4848,15 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function writeSelectedAddresses(addresses: string[], type: string, value: string) {
-    if (addresses.length === 0 || !value.trim()) return
+    if (addresses.length === 0) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Aucune adresse sélectionnée.' }
+      return
+    }
+    if (!value.trim()) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire.' }
+      return
+    }
+    if (!await confirmRiskAction('write', 'Ecriture memoire multiple', `${addresses.length} adresse(s), type ${type}, valeur ${value}.`)) return
     try {
       const results: MemoryWriteResult[] = []
       for (const address of addresses) {
@@ -1647,7 +4876,15 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function writeSelectedTargets(targets: MemoryWriteTarget[], value: string) {
-    if (targets.length === 0 || !value.trim()) return
+    if (targets.length === 0) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Aucune cible sélectionnée.' }
+      return
+    }
+    if (!value.trim()) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire.' }
+      return
+    }
+    if (!await confirmRiskAction('write', 'Ecriture memoire avec variants', `${targets.length} cible(s), valeur affichee ${value}.`)) return
     try {
       const controller = backend.getController()
       if (controller.writeMemoryValuesWithVariants) {
@@ -1671,13 +4908,53 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // Automatisation IA : après une écriture réussie sur une adresse unique,
+  // cherche silencieusement (lecture seule, bornée) une chaîne de pointeurs
+  // stable, sans que l'utilisateur ait besoin de savoir que ce bouton existe
+  // dans Expert. Ne notifie que si une chaîne est réellement trouvée — pas de
+  // bruit pour chaque écriture. Dédupliqué par adresse pour la session en
+  // cours pour ne pas ressasher la même suggestion à chaque nouvelle écriture
+  // sur la même adresse (freeze, retest, etc.).
+  const stableLocatorSuggested = new Set<string>()
+
+  async function autoSuggestStableLocatorIfWorthwhile(addressHex: string) {
+    const key = addressHex.toLowerCase()
+    if (!addressHex || stableLocatorSuggested.has(key)) return
+    stableLocatorSuggested.add(key)
+    try {
+      const controller = backend.getController()
+      if (!controller.suggestStableLocatorForAddress) return
+      const result = await controller.suggestStableLocatorForAddress(addressHex, {})
+      if (result.success && result.bestChain) {
+        pushMessage(
+          'assistant',
+          `🔗 J'ai trouvé une chaîne de pointeurs stable pour 0x${addressHex} (${result.message ?? 'profondeur ' + (result.bestChain.depth ?? '?')}). ` +
+            `Elle survivra à un redémarrage du jeu — ouvre Expert > Write et clique "Sauvegarder dans un profil" pour la garder.`,
+        )
+      }
+    } catch {
+      // Suggestion best-effort : ne doit jamais interrompre le flux d'écriture principal.
+    }
+  }
+
   async function writeSelectedValue() {
-    if (!selectedCandidateAddress.value || !writeValue.value.trim()) return
+    // Avant : retour silencieux si rien n'est sélectionné/rempli — l'utilisateur
+    // clique Écrire, rien ne se passe, aucun indice pourquoi. Message explicite
+    // à la place, affiché au même endroit que les autres erreurs d'écriture.
+    if (!selectedCandidateAddress.value) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Aucune adresse sélectionnée : clique une adresse dans Candidats avant d\'écrire.' }
+      return
+    }
+    if (!writeValue.value.trim()) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire avant de cliquer sur Écrire.' }
+      return
+    }
     updateWriteSafetyWarning()
     if (writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
       addActionLog('write_guard', 'Écriture bloquée', writeSafetyWarning.value, 'warning')
       return
     }
+    if (!await confirmRiskAction('write', 'Ecriture memoire', `0x${selectedCandidateAddress.value} ${exactScanType.value} = ${writeValue.value}.`)) return
     try {
       writeResult.value = await backend
         .getController()
@@ -1689,6 +4966,9 @@ export const useAppStore = defineStore('app', () => {
         `${exactScanType.value} = ${writeValue.value}${writeSafetyWarning.value ? ` · ${writeSafetyWarning.value}` : ''}.`,
         writeResult.value.success ? 'success' : 'error',
       )
+      if (writeResult.value.success && writeResult.value.verified) {
+        void autoSuggestStableLocatorIfWorthwhile(selectedCandidateAddress.value)
+      }
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
       addActionLog('write', `Écriture échouée 0x${selectedCandidateAddress.value}`, String(e), 'error')
@@ -1758,6 +5038,7 @@ export const useAppStore = defineStore('app', () => {
       addActionLog('write_guard', 'Freeze bloqué', writeSafetyWarning.value, 'warning')
       return
     }
+    if (!await confirmRiskAction('write', 'Freeze memoire', `0x${normalized} ${type} = ${currentValue}.`)) return
 
     try {
       writeResult.value = await backend
@@ -1787,6 +5068,7 @@ export const useAppStore = defineStore('app', () => {
       addActionLog('write_guard', 'Freeze bloqué', writeSafetyWarning.value, 'warning')
       return
     }
+    if (nextState && !await confirmRiskAction('write', 'Freeze memoire', `0x${selectedCandidateAddress.value} ${exactScanType.value} = ${writeValue.value}.`)) return
     try {
       writeResult.value = await backend
         .getController()
@@ -1799,6 +5081,250 @@ export const useAppStore = defineStore('app', () => {
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: freezeEnabled.value }
       addActionLog('freeze', 'Freeze échoué', String(e), 'error')
+    }
+  }
+
+  async function startBreakpointFreeze() {
+    if (!selectedCandidateAddress.value || !writeValue.value.trim()) return
+    updateWriteSafetyWarning()
+    if (writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
+      addActionLog('write_guard', 'Freeze BP bloqué', writeSafetyWarning.value, 'warning')
+      return
+    }
+    if (!await confirmRiskAction('debug', 'Freeze par hardware breakpoint', `0x${selectedCandidateAddress.value} ${exactScanType.value} = ${writeValue.value}. Debug registers/attach requis.`)) return
+
+    const controller = backend.getController()
+    if (!controller.freezeWithBreakpoint) {
+      writeResult.value = {
+        success: false,
+        verified: false,
+        bytesWritten: 0,
+        error: 'Freeze par breakpoint non exposé par ce backend.',
+        enabled: breakpointFreezeEnabled.value,
+      }
+      addActionLog('freeze', 'Freeze BP indisponible', writeResult.value.error, 'warning')
+      return
+    }
+
+    try {
+      writeResult.value = await controller.freezeWithBreakpoint(
+        selectedCandidateAddress.value,
+        exactScanType.value,
+        writeValue.value,
+        { mode: 'rewrite' },
+      )
+      breakpointFreezeEnabled.value = writeResult.value.success === true
+      if (breakpointFreezeEnabled.value) {
+        addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
+      }
+      addActionLog(
+        'freeze',
+        breakpointFreezeEnabled.value ? 'Freeze BP activé' : 'Freeze BP échoué',
+        `0x${selectedCandidateAddress.value} = ${writeValue.value}.`,
+        breakpointFreezeEnabled.value ? 'success' : 'error',
+      )
+    } catch (e) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: breakpointFreezeEnabled.value }
+      addActionLog('freeze', 'Freeze BP échoué', String(e), 'error')
+    }
+  }
+
+  // Escalade proposee par le chat Assistant apres freezeInstabilityDetected
+  // (freeze polling qui derive) : contrairement a startBreakpointFreeze(),
+  // l'utilisateur n'a que l'adresse en main, pas le type/la valeur — le
+  // backend reutilise directement la FreezeEntry polling existante.
+  async function escalateFreezeToBreakpoint(address: string) {
+    if (!address.trim()) return
+    if (!await confirmRiskAction('debug', 'Freeze par hardware breakpoint', `0x${address} : le freeze polling ne tient pas, passage en Freeze BP. Debug registers/attach requis.`)) return
+
+    const controller = backend.getController()
+    if (!controller.escalatePollingFreezeToBreakpoint) {
+      pushMessage('assistant', 'Freeze par breakpoint non exposé par ce backend.')
+      addActionLog('freeze', 'Freeze BP indisponible', 'escalatePollingFreezeToBreakpoint absent du backend.', 'warning')
+      return
+    }
+
+    try {
+      const result = await controller.escalatePollingFreezeToBreakpoint(address)
+      const ok = result.success === true
+      breakpointFreezeEnabled.value = ok || breakpointFreezeEnabled.value
+      if (ok) {
+        selectedCandidateAddress.value = address
+        if (result.type) exactScanType.value = String(result.type)
+        addAddressToWatch(address, String(result.type ?? exactScanType.value))
+      }
+      addActionLog(
+        'freeze',
+        ok ? 'Freeze BP activé (escalade)' : 'Freeze BP échoué (escalade)',
+        `0x${address}. ${String(result.error ?? '')}`.trim(),
+        ok ? 'success' : 'error',
+      )
+      pushMessage(
+        'assistant',
+        ok
+          ? `Freeze BP actif sur 0x${address} : l'écriture est maintenant bloquée à la source, ça devrait tenir même si la cible réécrit vite.`
+          : `Échec du passage en Freeze BP sur 0x${address}${result.error ? ` : ${String(result.error)}` : '.'}`,
+      )
+    } catch (e) {
+      addActionLog('freeze', 'Freeze BP échoué (escalade)', String(e), 'error')
+      pushMessage('assistant', `Échec du passage en Freeze BP sur 0x${address} : ${String(e)}`)
+    }
+  }
+
+  async function injectDll() {
+    const path = injectDllPath.value.trim()
+    if (!path) return
+    if (!await confirmRiskAction('injection', 'Injection DLL', `Injecter "${path}" dans le processus attaché via CreateRemoteThread + LoadLibraryW.`)) return
+
+    const controller = backend.getController()
+    if (!controller.injectDllIntoProcess) {
+      injectionResult.value = { success: false, error: 'Injection DLL non exposée par ce backend.' }
+      addActionLog('injection', 'Injection DLL indisponible', injectionResult.value.error as string, 'warning')
+      return
+    }
+
+    injectionBusy.value = true
+    try {
+      injectionResult.value = await controller.injectDllIntoProcess(path)
+      const ok = injectionResult.value.success === true
+      addActionLog('injection', ok ? 'DLL injectée' : 'Injection DLL échouée', `${path}. ${String(injectionResult.value.error ?? '')}`.trim(), ok ? 'success' : 'error')
+    } catch (e) {
+      injectionResult.value = { success: false, error: String(e) }
+      addActionLog('injection', 'Injection DLL échouée', String(e), 'error')
+    } finally {
+      injectionBusy.value = false
+    }
+  }
+
+  async function installHook() {
+    const target = hookTargetAddress.value.trim()
+    const hook = hookFunctionAddress.value.trim()
+    if (!target || !hook) return
+    if (!await confirmRiskAction('injection', 'Installation hook', `Installer un inline hook sur 0x${target} -> 0x${hook}. Intercepte tous les appels à cette fonction.`)) return
+
+    const controller = backend.getController()
+    if (!controller.installFunctionHook) {
+      activeFunctionHook.value = { success: false, error: 'Hooking non exposé par ce backend.' }
+      addActionLog('injection', 'Hook indisponible', activeFunctionHook.value.error as string, 'warning')
+      return
+    }
+
+    injectionBusy.value = true
+    try {
+      activeFunctionHook.value = await controller.installFunctionHook(target, hook)
+      const ok = activeFunctionHook.value.success === true
+      addActionLog('injection', ok ? 'Hook installé' : 'Installation hook échouée', `0x${target} -> 0x${hook}. ${String(activeFunctionHook.value.error ?? '')}`.trim(), ok ? 'success' : 'error')
+    } catch (e) {
+      activeFunctionHook.value = { success: false, error: String(e) }
+      addActionLog('injection', 'Installation hook échouée', String(e), 'error')
+    } finally {
+      injectionBusy.value = false
+    }
+  }
+
+  async function removeHook() {
+    const target = hookTargetAddress.value.trim()
+    if (!target) return
+
+    const controller = backend.getController()
+    if (!controller.removeFunctionHook) {
+      addActionLog('injection', 'Retrait hook indisponible', 'removeFunctionHook absent du backend.', 'warning')
+      return
+    }
+
+    injectionBusy.value = true
+    try {
+      const result = await controller.removeFunctionHook(target)
+      const ok = result.success === true
+      if (ok) activeFunctionHook.value = null
+      addActionLog('injection', ok ? 'Hook retiré' : 'Retrait hook échoué', `0x${target}. ${String(result.error ?? '')}`.trim(), ok ? 'success' : 'error')
+    } catch (e) {
+      addActionLog('injection', 'Retrait hook échoué', String(e), 'error')
+    } finally {
+      injectionBusy.value = false
+    }
+  }
+
+  async function previewAutoAsmScript() {
+    const script = autoAsmScriptText.value
+    if (!script.trim()) return
+    const controller = backend.getController()
+    if (!controller.parseAutoAssemblerScript) {
+      autoAsmPreview.value = { success: false, parseError: 'Aperçu auto-assembler non exposé par ce backend.' }
+      return
+    }
+    autoAsmPreview.value = await controller.parseAutoAssemblerScript(script)
+  }
+
+  async function executeAutoAsmScript() {
+    const script = autoAsmScriptText.value
+    if (!script.trim()) return
+    if (!await confirmRiskAction('injection', 'Exécution script auto-assembler', 'Alloue de la mémoire et patche le processus attaché avec le code compilé du script. Vérifie l\'aperçu avant de confirmer.')) return
+
+    const controller = backend.getController()
+    if (!controller.executeAutoAssemblerScript) {
+      autoAsmResult.value = { success: false, error: 'Exécution auto-assembler non exposée par ce backend.' }
+      addActionLog('injection', 'Auto-assembler indisponible', autoAsmResult.value.error as string, 'warning')
+      return
+    }
+
+    injectionBusy.value = true
+    try {
+      autoAsmResult.value = await controller.executeAutoAssemblerScript(script)
+      const ok = autoAsmResult.value.success === true
+      addActionLog('injection', ok ? 'Script auto-assembler exécuté' : 'Exécution script échouée', String(autoAsmResult.value.error ?? ''), ok ? 'success' : 'error')
+    } catch (e) {
+      autoAsmResult.value = { success: false, error: String(e) }
+      addActionLog('injection', 'Exécution script échouée', String(e), 'error')
+    } finally {
+      injectionBusy.value = false
+    }
+  }
+
+  async function restoreAutoAsmScript() {
+    const controller = backend.getController()
+    if (!controller.restoreAutoAssemblerScript) {
+      addActionLog('injection', 'Restauration auto-assembler indisponible', 'restoreAutoAssemblerScript absent du backend.', 'warning')
+      return
+    }
+
+    injectionBusy.value = true
+    try {
+      const result = await controller.restoreAutoAssemblerScript()
+      const ok = result.success === true
+      if (ok) autoAsmResult.value = null
+      addActionLog('injection', ok ? 'Script auto-assembler restauré' : 'Restauration script échouée', String(result.error ?? ''), ok ? 'success' : 'error')
+    } catch (e) {
+      addActionLog('injection', 'Restauration script échouée', String(e), 'error')
+    } finally {
+      injectionBusy.value = false
+    }
+  }
+
+  async function stopBreakpointFreeze() {
+    const controller = backend.getController()
+    if (!controller.stopBreakpointFreeze) {
+      writeResult.value = {
+        success: false,
+        verified: false,
+        bytesWritten: 0,
+        error: 'Arrêt du freeze par breakpoint non exposé par ce backend.',
+        enabled: breakpointFreezeEnabled.value,
+      }
+      return
+    }
+
+    try {
+      writeResult.value = await controller.stopBreakpointFreeze()
+      if (writeResult.value.success) {
+        breakpointFreezeEnabled.value = false
+      }
+      const hits = writeResult.value.hits !== undefined ? ` hits=${writeResult.value.hits}` : ''
+      const rewrites = writeResult.value.rewrites !== undefined ? ` rewrites=${writeResult.value.rewrites}` : ''
+      addActionLog('freeze', 'Freeze BP arrêté', `${hits}${rewrites}`.trim() || 'Session arrêtée.', writeResult.value.success ? 'success' : 'warning')
+    } catch (e) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: breakpointFreezeEnabled.value }
+      addActionLog('freeze', 'Arrêt Freeze BP échoué', String(e), 'error')
     }
   }
 
@@ -1841,6 +5367,9 @@ export const useAppStore = defineStore('app', () => {
     activeView,
     uiMode,
     isConnected,
+    showOnboarding,
+    dismissOnboarding,
+    openUserGuide,
     isAttached,
     processName,
     processes,
@@ -1867,6 +5396,7 @@ export const useAppStore = defineStore('app', () => {
     scanTelemetryFilePath,
     smartSearchDebugEvents,
     smartSearchDebugError,
+    autoResolveReport,
     settingsLoaded,
     settingsSaving,
     settingsStatus,
@@ -1882,16 +5412,41 @@ export const useAppStore = defineStore('app', () => {
     settingFastScan,
     settingSmartSearchDebugEnabled,
     settingSmartSearchDebugMaxEvents,
+    settingAutoRiskMode,
     settingModelPath,
+    settingModelEnabled,
     settingModelThreads,
+    aiModelStatus,
+    aiModelStatusLoading,
+    aiModelStatusError,
+    workflowPresets,
+    lastWorkflowPresetId,
     activeChatMemoryTargets,
     smartSearchContext,
     investigationReport,
+    activeInvestigation,
+    investigationArchive,
+    trainerFeatures,
+    trainerBusy,
+    trainerHotkeyStatus,
+    trainerOverlayVisible,
+    trainerOverlayStatus,
+    structureTemplates,
+    workspaceBookmarks,
+    workspaceProjects,
+    riskDialog,
     searchQuery,
     searchResult,
     exactScanValue,
     exactScanType,
     exactScanResult,
+    encryptedScanResult,
+    autoUiStringScanResult,
+    autoUiStringSourceResult,
+    autoUiStringSources,
+    encryptedScanMode,
+    encryptedScanKey,
+    encryptedScanKeySearchBits,
     expertModeEnabled,
     expertStartAddress,
     expertStopAddress,
@@ -1918,6 +5473,7 @@ export const useAppStore = defineStore('app', () => {
     unknownSnapshotResult,
     unknownNextScanResult,
     unknownGuideSteps,
+    autoUnknownAwaitingObservation,
     selectedCandidateAddress,
     writeValue,
     writeResult,
@@ -1925,6 +5481,7 @@ export const useAppStore = defineStore('app', () => {
     writeSafetyAcknowledged,
     canWriteSelectedValue,
     freezeEnabled,
+    breakpointFreezeEnabled,
     freezeIntervalMs,
     freezeIntervalResult,
     finalCandidateTargets,
@@ -1953,7 +5510,10 @@ export const useAppStore = defineStore('app', () => {
     doPing,
     loadSettings,
     saveSettings,
+    refreshAiModelStatus,
+    browseForModel,
     refreshDiagnostics,
+    refreshAutoResolveReport,
     refreshLogTail,
     exportDiagnostics,
     refreshTemporaryStorageStatus,
@@ -1961,9 +5521,63 @@ export const useAppStore = defineStore('app', () => {
     refreshActiveChatMemoryTargets,
     refreshSmartSearchContext,
     setInvestigationReport,
+    startInvestigation,
+    addInvestigationStep,
+    applyWorkflowPreset,
+    updateInvestigationFromAutoResult,
+    finishInvestigation,
+    clearInvestigation,
+    clearInvestigationArchive,
+    restoreInvestigationFromArchive,
+    exportInvestigationJson,
+    exportInvestigationMarkdown,
+    clearActionLog,
+    exportActionLogJson,
+    exportActionLogMarkdown,
+    confirmRiskAction,
+    resolveRiskDialog,
+    buildCheckpointActionPlan,
+    executeCheckpointWrite,
+    executeCheckpointFindWhatWrites,
+    prepareCheckpointAob,
+    createTrainerFeature,
+    createTrainerFeatureFromCheckpoint,
+    applyTrainerFeature,
+    restoreTrainerFeature,
+    applyAllTrainerFeatures,
+    restoreAllTrainerFeatures,
+    deleteTrainerFeature,
+    saveTrainerFeatureToProfile,
+    clearTrainerFeatures,
+    exportTrainerFeaturesJson,
+    exportTrainerFeaturesMarkdown,
+    exportWorkspaceJson,
+    exportWorkspaceMarkdown,
+    previewWorkspaceImport,
+    importWorkspaceJson,
+    saveStructureTemplate,
+    deleteStructureTemplate,
+    clearStructureTemplates,
+    addWorkspaceBookmark,
+    updateWorkspaceBookmark,
+    createWorkspaceBookmarkFromCheckpoint,
+    useWorkspaceBookmarkAsWriteTarget,
+    createTrainerFeatureFromBookmark,
+    deleteWorkspaceBookmark,
+    clearWorkspaceBookmarks,
+    saveCurrentWorkspaceProject,
+    loadWorkspaceProject,
+    deleteWorkspaceProject,
+    clearWorkspaceProjects,
+    registerTrainerFeatureHotkey,
+    unregisterTrainerFeatureHotkey,
+    setTrainerOverlay,
+    refreshTrainerOverlay,
+    clearAutoResolveMemory,
     clearActiveChatMemoryTargets,
     clearSmartSearchDebug,
     doSearch,
+    doAutoResolve,
     updateMessage,
     startNewSearchContext,
     useSuggestedAddresses,
@@ -1971,6 +5585,23 @@ export const useAppStore = defineStore('app', () => {
     searchValueAsType,
     testSingleSuggestedAddress,
     doExactScan,
+    doEncryptedScan,
+    doGroupScan,
+    addGroupScanEntry,
+    removeGroupScanEntry,
+    clearGroupScanEntries,
+    groupScanEntries,
+    groupScanResult,
+    groupScanBusy,
+    groupScanMaxDistance,
+    addWatchedPointerChain,
+    refreshWatchedPointerChain,
+    refreshWatchedPointerChains,
+    removeWatchedPointerChain,
+    clearWatchedPointerChains,
+    watchedPointerChains,
+    runAutoEncryptedScan,
+    runAutoTraceUiString,
     cancelActiveScan,
     refreshCandidates,
     nextCandidatePage,
@@ -1980,6 +5611,7 @@ export const useAppStore = defineStore('app', () => {
     captureUnknownSnapshot,
     doUnknownNextScan,
     runUnknownGuideStep,
+    runAutoUnknownObservation,
     selectCandidate,
     openExpertAtAddress,
     openExpertForRegion,
@@ -2004,6 +5636,24 @@ export const useAppStore = defineStore('app', () => {
     rollbackLastWriteBatch,
     freezeCandidateCurrent,
     toggleFreeze,
+    startBreakpointFreeze,
+    escalateFreezeToBreakpoint,
+    injectDllPath,
+    injectionResult,
+    hookTargetAddress,
+    hookFunctionAddress,
+    activeFunctionHook,
+    autoAsmScriptText,
+    autoAsmPreview,
+    autoAsmResult,
+    injectionBusy,
+    injectDll,
+    installHook,
+    removeHook,
+    previewAutoAsmScript,
+    executeAutoAsmScript,
+    restoreAutoAsmScript,
+    stopBreakpointFreeze,
     setFreezeInterval,
     pushMessage,
     tellNewValue,

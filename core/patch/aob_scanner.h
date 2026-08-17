@@ -50,8 +50,21 @@ struct AobScanResult {
     QList<AobMatch> matches;
 };
 
+struct AobPatternQuality {
+    int score{0};
+    QString level;
+    QString warning;
+    int patternBytes{0};
+    int fixedBytes{0};
+    int wildcardBytes{0};
+    int uniqueFixedBytes{0};
+    double fixedRatio{0.0};
+    bool trainerSafe{false};
+};
+
 AobPattern parseAobPattern(const QString& patternText);
 QString bytesToAobPattern(const QByteArray& bytes);
+AobPatternQuality evaluateAobPatternQuality(const AobPattern& pattern);
 QList<uint64_t> searchAobBuffer(const QByteArray& haystack, const AobPattern& pattern, uint64_t baseAddress = 0);
 AobScanResult scanAobPattern(const ProcessHandle& process, const AobPattern& pattern, const AobScanOptions& options = {});
 

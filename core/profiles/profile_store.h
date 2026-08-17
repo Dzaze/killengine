@@ -29,6 +29,15 @@ struct ProfileCodePatch {
     QString disassembly;
     QString riskLevel;
     QString description;
+    int signatureScore{0};
+    QString signatureLevel;
+    QString signatureWarning;
+    int signatureFixedBytes{0};
+    int signatureWildcardBytes{0};
+    int signatureUniqueFixedBytes{0};
+    double signatureFixedRatio{0.0};
+    bool trainerSafe{false};
+    int signatureMatches{0};
 };
 
 /**

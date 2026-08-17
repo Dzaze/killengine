@@ -71,6 +71,15 @@ TEST(PointerChain, ProfileStoreRoundTripsCodePatches) {
     patch.disassembly = "mov [rip+0x1234], rax";
     patch.riskLevel = "low";
     patch.description = "Trainer patch test";
+    patch.signatureScore = 86;
+    patch.signatureLevel = "strong";
+    patch.signatureWarning = "Signature AOB robuste.";
+    patch.signatureFixedBytes = 12;
+    patch.signatureWildcardBytes = 2;
+    patch.signatureUniqueFixedBytes = 10;
+    patch.signatureFixedRatio = 0.85;
+    patch.trainerSafe = true;
+    patch.signatureMatches = 1;
     profile.patches.append(patch);
 
     const QString path = dir.filePath("starcraft2.keprofile");
@@ -89,6 +98,15 @@ TEST(PointerChain, ProfileStoreRoundTripsCodePatches) {
     EXPECT_EQ(loadedPatch.disassembly, patch.disassembly);
     EXPECT_EQ(loadedPatch.riskLevel, patch.riskLevel);
     EXPECT_EQ(loadedPatch.description, patch.description);
+    EXPECT_EQ(loadedPatch.signatureScore, patch.signatureScore);
+    EXPECT_EQ(loadedPatch.signatureLevel, patch.signatureLevel);
+    EXPECT_EQ(loadedPatch.signatureWarning, patch.signatureWarning);
+    EXPECT_EQ(loadedPatch.signatureFixedBytes, patch.signatureFixedBytes);
+    EXPECT_EQ(loadedPatch.signatureWildcardBytes, patch.signatureWildcardBytes);
+    EXPECT_EQ(loadedPatch.signatureUniqueFixedBytes, patch.signatureUniqueFixedBytes);
+    EXPECT_DOUBLE_EQ(loadedPatch.signatureFixedRatio, patch.signatureFixedRatio);
+    EXPECT_EQ(loadedPatch.trainerSafe, patch.trainerSafe);
+    EXPECT_EQ(loadedPatch.signatureMatches, patch.signatureMatches);
 }
 
 TEST(PointerChain, ProfileStoreRoundTripsPointerChainLocator) {

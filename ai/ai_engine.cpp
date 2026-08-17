@@ -2,29 +2,154 @@
 #include "intent_contract.h"
 #include "logging/logger.h"
 
+#include <QCoreApplication>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QVariantList>
 
 namespace killai {
+
+namespace {
+
+constexpr int kMaxHistoryTurns = 12;
+
+bool looksLikeBadTargets(const QString& q) {
+    return q.contains("marche pas") || q.contains("marché pas") || q.contains("pas marché")
+        || q.contains("ne marche pas") || q.contains("mauvaise adresse")
+        || q.contains("pas bon") || q.contains("rien change");
+}
+
+bool describesIncrease(const QString& q) {
+    return q.contains("augment") || q.contains("increased") || q.contains("monte")
+        || q.contains("plus grand") || q.contains("plus haut");
+}
+
+bool describesDecrease(const QString& q) {
+    return q.contains("diminu") || q.contains("decreased") || q.contains("baisse")
+        || q.contains("descend") || q.contains("plus petit") || q.contains("plus bas");
+}
+
+bool describesChange(const QString& q) {
+    return q.contains("chang") || q.contains("change") || q.contains("varie")
+        || q.contains("différent") || q.contains("different");
+}
+
+bool describesStable(const QString& q) {
+    return q.contains("pareil") || q.contains("stable") || q.contains("inchang")
+        || q.contains("unchanged") || q.contains("bouge pas");
+}
+
+QString variationMode(const QString& q, const QString& fallback = "changed") {
+    if (describesIncrease(q)) return "increased";
+    if (describesDecrease(q)) return "decreased";
+    if (describesStable(q)) return "unchanged";
+    if (describesChange(q)) return "changed";
+    return fallback;
+}
+
+} // namespace
 
 AIEngine::AIEngine(QObject* parent) : QObject(parent) {}
 AIEngine::~AIEngine() {}
 
 bool AIEngine::init() {
-    const bool llamaReady = m_llama.init();
-    if (llamaReady) {
-        const auto info = m_llama.info();
-        KE_LOG_INFO() << "AIEngine::init() - llama.cpp runtime ready model="
-                      << info.modelPath.toStdString();
-    } else {
-        KE_LOG_INFO() << "AIEngine::init() - deterministic fallback ready; llama unavailable: "
-                      << m_llama.info().errorMessage.toStdString();
-    }
+    // Keep startup non-blocking and crash-proof: embedded AI runtime is
+    // initialized lazily by the first AI flow, not during application boot.
+    KE_LOG_INFO() << "AIEngine::init() - embedded AI init deferred";
     m_ready = true;
     return true;
 }
 
 bool AIEngine::isReady() const { return m_ready; }
+
+void AIEngine::noteOutcome(const QString& query, const QString& tool, const QString& outcome) {
+    QVariantMap turn;
+    turn["query"] = query;
+    turn["tool"] = tool;
+    turn["outcome"] = outcome;
+    m_history.append(turn);
+    while (m_history.size() > kMaxHistoryTurns) {
+        m_history.removeFirst();
+    }
+}
+
+void AIEngine::clearHistory() {
+    m_history.clear();
+}
+
+QVariantMap AIEngine::lastHistoryTurn() const {
+    return m_history.isEmpty() ? QVariantMap{} : m_history.last().toMap();
+}
+
+bool AIEngine::ensureLlamaInitialized() {
+    if (qEnvironmentVariable("KILLENGINE_DISABLE_LLAMA") == "1") {
+        return false;
+    }
+    const bool runningUnitTests = QCoreApplication::applicationFilePath().contains("killengine_unit_tests", Qt::CaseInsensitive);
+    if (runningUnitTests && QProcessEnvironment::systemEnvironment().value("KILLENGINE_ENABLE_LLAMA_IN_TESTS") != "1") {
+        return false;
+    }
+    if (!QSettings().value("ai/modelEnabled", true).toBool()) {
+        return false;
+    }
+    if (m_llama.isAvailable()) {
+        return true;
+    }
+    const bool ok = m_llama.init();
+    if (ok) {
+        KE_LOG_INFO() << "AIEngine llama.cpp runtime available.";
+    } else if (!m_llama.info().errorMessage.isEmpty()) {
+        KE_LOG_INFO() << "AIEngine llama.cpp unavailable: " << m_llama.info().errorMessage.toStdString();
+    }
+    return ok;
+}
+
+QVariantMap AIEngine::modelToolCallWithRetry(const QString& query, const QVariantMap& context, QString* backend) {
+    auto generated = m_llama.planToolCall(query, m_registry, context);
+    QString error;
+    QVariantMap call = generated.success ? LlamaRuntime::extractToolCallJson(generated.output, &error) : QVariantMap{};
+
+    // Retry correctif borne: une seconde tentative si le modele a repondu
+    // mais sans JSON exploitable (hallucination de format, bavardage...).
+    if (generated.success && call.isEmpty()) {
+        KE_LOG_INFO() << "AIEngine retrying model tool call after invalid JSON: " << error.toStdString();
+        const QString correctiveQuery = query + "\n(Rappel: reponds UNIQUEMENT par l'objet JSON du schema, sans texte autour.)";
+        generated = m_llama.planToolCall(correctiveQuery, m_registry, context);
+        if (generated.success) {
+            call = LlamaRuntime::extractToolCallJson(generated.output, &error);
+        }
+    }
+
+    if (backend) *backend = generated.backend;
+    if (!generated.success) {
+        if (backend) backend->append(QString("|error:%1").arg(generated.errorMessage));
+        return {};
+    }
+    return call;
+}
+
+QVariantMap AIEngine::modelIntentWithRetry(const QString& query, QString* backend) {
+    auto generated = m_llama.planIntent(query);
+    QString error;
+    QVariantMap intent = generated.success ? LlamaRuntime::extractIntentJson(generated.output, &error) : QVariantMap{};
+
+    if (generated.success && intent.isEmpty()) {
+        KE_LOG_INFO() << "AIEngine retrying model intent after invalid JSON: " << error.toStdString();
+        const QString correctiveQuery = query + "\n(Rappel: reponds UNIQUEMENT par l'objet JSON du schema, sans texte autour.)";
+        generated = m_llama.planIntent(correctiveQuery);
+        if (generated.success) {
+            intent = LlamaRuntime::extractIntentJson(generated.output, &error);
+        }
+    }
+
+    if (backend) *backend = generated.backend;
+    if (!generated.success) {
+        if (backend) backend->append(QString("|error:%1").arg(generated.errorMessage));
+        return {};
+    }
+    return intent;
+}
 
 QVariantMap AIEngine::processIntent(const QString& query) {
     if (!m_ready) {
@@ -41,11 +166,7 @@ QVariantMap AIEngine::processIntent(const QString& query) {
     while (guardedNumberIt.hasNext()) {
         detectedNumbers.append(guardedNumberIt.next().captured(0).replace(',', '.'));
     }
-    const bool looksLikeBadTargets =
-        q.contains("marche pas") || q.contains("marché pas") || q.contains("pas marché")
-        || q.contains("ne marche pas") || q.contains("mauvaise adresse")
-        || q.contains("pas bon") || q.contains("rien change");
-    if (looksLikeBadTargets) {
+    if (looksLikeBadTargets(q)) {
         QVariantMap result;
         result["status"] = "intent";
         result["intent"] = "ReportBadTargets";
@@ -97,27 +218,23 @@ QVariantMap AIEngine::processIntent(const QString& query) {
         return result;
     }
 
-    if (m_llama.isAvailable()) {
-        const auto generated = m_llama.planIntent(query);
-        if (generated.success) {
+    if (ensureLlamaInitialized()) {
+        QString backend;
+        const QVariantMap intent = modelIntentWithRetry(query, &backend);
+        if (!intent.isEmpty()) {
             QString error;
-            QVariantMap intent = LlamaRuntime::extractIntentJson(generated.output, &error);
-            if (!intent.isEmpty()) {
-                const bool valid = IntentContract::validate(intent, &error);
-                intent["status"] = valid ? "intent" : "needs_clarification";
-                intent["aiBackend"] = "llama.cpp";
-                intent["error"] = error;
-                if (!valid && intent.value("message").toString().isEmpty()) {
-                    intent["message"] = intent.value("missing").toString().isEmpty()
-                        ? QString("Je dois préciser l'intention avant d'agir.")
-                        : intent.value("missing").toString();
-                }
-                return intent;
+            const bool valid = IntentContract::validate(intent, &error);
+            intent["status"] = valid ? "intent" : "needs_clarification";
+            intent["aiBackend"] = backend.isEmpty() ? QString("llama.cpp") : backend;
+            intent["error"] = error;
+            if (!valid && intent.value("message").toString().isEmpty()) {
+                intent["message"] = intent.value("missing").toString().isEmpty()
+                    ? QString("Je dois préciser l'intention avant d'agir.")
+                    : intent.value("missing").toString();
             }
-            KE_LOG_INFO() << "AIEngine model intent rejected: " << error.toStdString();
-        } else {
-            KE_LOG_INFO() << "AIEngine model intent generation failed: " << generated.errorMessage.toStdString();
+            return intent;
         }
+        KE_LOG_INFO() << "AIEngine model intent rejected: " << backend.toStdString();
     }
 
     QVariantMap fallback = deterministicIntent(query);
@@ -129,6 +246,10 @@ QVariantMap AIEngine::processIntent(const QString& query) {
 }
 
 QVariantMap AIEngine::processQuery(const QString& query) {
+    return processQuery(query, {});
+}
+
+QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& context) {
     const QString q = query.toLower();
 
     if (!m_ready) {
@@ -138,33 +259,35 @@ QVariantMap AIEngine::processQuery(const QString& query) {
         return result;
     }
 
-    if (m_llama.isAvailable()) {
-        const auto generated = m_llama.planToolCall(query, m_registry);
-        if (generated.success) {
+    if (ensureLlamaInitialized()) {
+        // L'historique conversationnel enrichit le contexte transmis au modele:
+        // il sait ce qui a deja echoue et peut proposer une vraie alternative.
+        QVariantMap modelContext = context;
+        if (!m_history.isEmpty()) {
+            modelContext["history"] = m_history;
+        }
+        QString backend;
+        const QVariantMap call = modelToolCallWithRetry(query, modelContext, &backend);
+        if (!call.isEmpty()) {
             QString error;
-            const QVariantMap call = LlamaRuntime::extractToolCallJson(generated.output, &error);
-            if (!call.isEmpty()) {
-                QVariantMap result;
-                result["status"] = m_validator.validate(call, &error) ? "tool_call" : "invalid_tool_call";
-                result["tool"] = call.value("tool").toString();
-                result["args"] = call.value("args").toMap();
-                result["rationale"] = "Plan généré par le modèle local llama.cpp/Qwen.";
-                result["state"] = m_stateMachine.currentStateName();
-                result["aiBackend"] = "llama.cpp";
-                result["error"] = error;
-                if (result.value("status").toString() == "tool_call") {
-                    return result;
-                }
-                KE_LOG_INFO() << "AIEngine model tool call rejected: " << error.toStdString();
-            } else {
-                KE_LOG_INFO() << "AIEngine model output rejected: " << error.toStdString();
+            QVariantMap result;
+            result["status"] = m_validator.validate(call, &error) ? "tool_call" : "invalid_tool_call";
+            result["tool"] = call.value("tool").toString();
+            result["args"] = call.value("args").toMap();
+            result["rationale"] = "Plan généré par le modèle local llama.cpp/Qwen.";
+            result["state"] = m_stateMachine.currentStateName();
+            result["aiBackend"] = backend.isEmpty() ? QString("llama.cpp") : backend;
+            result["error"] = error;
+            if (result.value("status").toString() == "tool_call") {
+                return result;
             }
+            KE_LOG_INFO() << "AIEngine model tool call rejected: " << error.toStdString();
         } else {
-            KE_LOG_INFO() << "AIEngine model generation failed: " << generated.errorMessage.toStdString();
+            KE_LOG_INFO() << "AIEngine model produced no tool call: " << backend.toStdString();
         }
     }
 
-    auto fallback = deterministicPlan(query);
+    auto fallback = deterministicPlanWithContext(query, context);
     fallback["aiBackend"] = "deterministic";
     if (m_llama.info().available == false && !m_llama.info().errorMessage.isEmpty()) {
         fallback["aiBackendNote"] = m_llama.info().errorMessage;
@@ -197,9 +320,7 @@ QVariantMap AIEngine::deterministicIntent(const QString& query) {
         numbers.append(numberIt.next().captured(0).replace(',', '.'));
     }
 
-    if (q.contains("marche pas") || q.contains("marché pas") || q.contains("pas marché")
-        || q.contains("ne marche pas") || q.contains("mauvaise adresse")
-        || q.contains("pas bon") || q.contains("rien change")) {
+    if (looksLikeBadTargets(q)) {
         result["intent"] = "ReportBadTargets";
         result["confidence"] = 0.8;
     } else if (q.contains("autre") || q.contains("nouveau") || q.contains("reset") || q.contains("recommence")) {
@@ -307,6 +428,138 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
     return result;
 }
 
+QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const QVariantMap& context) {
+    const QString q = query.toLower();
+    const bool processAttached = context.value("processAttached", true).toBool();
+    const bool scanActive = context.value("scanActive").toBool();
+    const bool unknownSnapshotActive = context.value("unknownSnapshotActive", false).toBool();
+    const auto candidateCount = context.value("candidateCount").toULongLong();
+    const QString contextTargetValue = context.value("targetValue").toString();
+    const QString contextInitialValue = context.value("initialValue").toString();
+    const QString value = firstNumber(query);
+    const bool describesVariation = describesIncrease(q) || describesDecrease(q) || describesChange(q) || describesStable(q);
+
+    // Garde-fou : sans processus attache, aucun scan n'a de sens.
+    if (!processAttached) {
+        QVariantMap result;
+        result["status"] = "needs_clarification";
+        result["message"] = "Attache d'abord un processus dans l'onglet Processus, puis relance ta recherche.";
+        result["state"] = m_stateMachine.currentStateName();
+        return result;
+    }
+
+    // Recherche active + nouvelle valeur observee => reduction plutot que nouveau scan.
+    if (scanActive && !value.isEmpty()) {
+        m_stateMachine.setState(AIState::Refining);
+        return makeToolCall("next_scan", {{"mode", "exact"}, {"value", value}}, "Une recherche est deja active: je reduis les candidats avec la nouvelle valeur observee.");
+    }
+
+    // Recherche active + variation decrite sans valeur => next_scan increased/decreased/changed.
+    if (scanActive && value.isEmpty() && describesVariation) {
+        m_stateMachine.setState(AIState::Refining);
+        return makeToolCall("next_scan", {{"mode", variationMode(q)}},
+            "Variation decrite pendant une recherche active: je reduis les candidats par comparaison.");
+    }
+
+    // Snapshot unknown capture + variation decrite => unknown_compare.
+    if (unknownSnapshotActive && value.isEmpty() && describesVariation) {
+        m_stateMachine.setState(AIState::Refining);
+        return makeToolCall("unknown_compare", {{"mode", variationMode(q)}, {"valueType", "Auto"}},
+            "Snapshot unknown actif: je compare avec la variation decrite.");
+    }
+
+    // Intentions speciales valorisees avant le scan brut.
+    if (q.contains("freeze") || q.contains("geler")) {
+        return makeToolCall("freeze_value", {
+            {"address", firstHexAddress(query)},
+            {"valueType", inferValueType(query)},
+            {"value", value},
+            {"enabled", true},
+        }, "Freeze demande par l'utilisateur.");
+    }
+    if ((q.contains("write") || q.contains("mettre")) && !value.isEmpty()) {
+        return makeToolCall("write_value", {
+            {"address", firstHexAddress(query)},
+            {"valueType", inferValueType(query)},
+            {"value", value},
+        }, "Ecriture memoire demandee.");
+    }
+
+    // Ecriture de la cible sans nouvelle valeur + peu de candidats =>
+    // checkpoint safe (prepare) plutot que write direct.
+    if ((q.contains("écri") || q.contains("ecri") || q.contains("write") || q.contains("checkpoint")
+         || q.contains("finalis") || q.contains("valide"))
+        && value.isEmpty() && scanActive && candidateCount > 0 && candidateCount <= 10
+        && !contextTargetValue.isEmpty()) {
+        return makeToolCall("prepare_write_checkpoint", {{"value", contextTargetValue}},
+            "Peu de candidats et valeur cible connue: je prepare le checkpoint d'ecriture (sans ecrire).");
+    }
+
+    // Signalement d'echec: proposer une alternative adaptee plutot que refaire pareil.
+    if (looksLikeBadTargets(q)) {
+        const QVariantMap lastTurn = lastHistoryTurn();
+        const QString lastOutcome = lastTurn.value("outcome").toString();
+        if (!contextInitialValue.isEmpty()
+            && (lastOutcome == "failed" || lastTurn.value("tool").toString() == "exact_scan")) {
+            return makeToolCall("exact_scan_multi_type", {{"value", contextInitialValue}},
+                "Les dernieres adresses ne marchent pas: je relance en multi-type pour couvrir d'autres representations.");
+        }
+        QVariantMap result;
+        result["status"] = "needs_clarification";
+        result["message"] = "Compris, ces adresses ne sont pas les bonnes. Donne-moi une valeur observee pour relancer "
+                            "en multi-type, ou decris la valeur (affichee a l'ecran, chiffree, inconnue...).";
+        result["state"] = m_stateMachine.currentStateName();
+        return result;
+    }
+
+    if (q.contains("unknown") || q.contains("inconnue")
+        || (q.contains("sais pas") && (q.contains("valeur") || q.contains("vaut")))
+        || (q.contains("augmente") && value.isEmpty() && !scanActive)
+        || (q.contains("diminue") && value.isEmpty() && !scanActive)) {
+        if (q.contains("capture") || q.contains("initial") || value.isEmpty()) {
+            m_stateMachine.setState(AIState::WaitingForUserChange);
+            return makeToolCall("unknown_capture", {}, "Capture initiale pour valeur inconnue.");
+        }
+        QString mode = "changed";
+        if (q.contains("augment") || q.contains("increased")) mode = "increased";
+        if (q.contains("diminu") || q.contains("decreased")) mode = "decreased";
+        return makeToolCall("unknown_compare", {{"mode", mode}, {"valueType", "Auto"}}, "Comparaison unknown initial value.");
+    }
+    // Valeur affichee a l'ecran introuvable en numerique.
+    if ((q.contains("affich") || q.contains("texte")) && !value.isEmpty()) {
+        return makeToolCall("trace_ui_string", {{"value", value}}, "Valeur affichee a l'ecran: je cherche la string UI puis ses sources.");
+    }
+    // Valeur potentiellement chiffree/obfusquee.
+    if ((q.contains("chiffr") || q.contains("obfusqu") || q.contains("crypt") || q.contains("xor")) && !value.isEmpty()) {
+        QVariantMap args;
+        args["value"] = value;
+        args["valueType"] = inferValueType(query);
+        args["mode"] = "xor";
+        args["keySearchBits"] = 16;
+        return makeToolCall("encrypted_scan", args, "Valeur possiblement chiffree: scan XOR/Add/Sub borne.");
+    }
+
+    if (!value.isEmpty()) {
+        if (scanActive && candidateCount > 0) {
+            m_stateMachine.setState(AIState::Refining);
+            return makeToolCall("next_scan", {{"mode", "exact"}, {"value", value}}, "Recherche active avec candidats: reduction avec la nouvelle valeur.");
+        }
+        m_stateMachine.setState(AIState::FirstScanRunning);
+        return makeToolCall("exact_scan", {{"value", value}, {"valueType", inferValueType(query)}}, "Premier scan exact depuis une valeur detectee.");
+    }
+
+    // Aucune valeur: objectifs complets ou guidance plutot que message brut.
+    if (q.contains("trouve") || q.contains("cherche") || q.contains("objectif") || q.contains("guide")) {
+        return makeToolCall("auto_resolve", {{"query", query}}, "Objectif complet sans valeur directe: mini-boucle safe Auto.");
+    }
+
+    QVariantMap result;
+    result["status"] = "needs_clarification";
+    result["message"] = "Je n'ai pas trouve de valeur ou d'action claire. Donne-moi la valeur affichee (ex: 41250), decris ce que tu cherches (ca augmente quand...), ou colle une adresse 0x....";
+    result["state"] = m_stateMachine.currentStateName();
+    result["availableTools"] = m_registry.availableTools();
+    return result;
+}
 QVariantMap AIEngine::makeToolCall(const QString& tool, const QVariantMap& args, const QString& rationale) {
     QVariantMap call;
     call["tool"] = tool;

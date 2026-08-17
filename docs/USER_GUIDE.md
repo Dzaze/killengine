@@ -27,7 +27,13 @@ Depuis le dossier de build local :
 build\bin\KillEngine.exe
 ```
 
-Si l'application ne démarre pas, ouvre `Paramètres > Diagnostic` après un prochain lancement réussi, ou regarde les logs dans le dossier local de l'application Windows. Les exports diagnostic regroupent les logs, le debug Smart Search et les rapports de crash récents.
+Si l'application ne démarre pas, lance le diagnostic depuis le dépôt :
+
+```powershell
+.\scripts\diagnose-launch.ps1
+```
+
+Le script ouvre brièvement KillEngine, collecte les événements Windows récents, copie les logs locaux et écrit un bundle sous `diagnostics\`. Après un prochain lancement réussi, `Paramètres > Diagnostic` permet aussi d'exporter les logs, le debug Smart Search et les rapports de crash récents.
 
 ## Attacher un processus
 
@@ -83,6 +89,59 @@ Tu peux donner une ou plusieurs adresses mémoire directement :
 ```
 
 KillEngine les sélectionne comme cibles actives, puis attend la valeur à écrire.
+
+## Investigation — suivre ce que fait l'IA
+
+Quand tu lances `Auto` depuis l'Assistant, KillEngine construit une **timeline d'enquête** consultable dans l'onglet `Investigation`. C'est la vue qui répond à « pourquoi il a fait ça ? ».
+
+Elle affiche :
+
+- l'**objectif** et la **stratégie** retenue, avec le processus et la valeur visée ;
+- les **étapes** exécutées une par une, filtrables par statut (`planned`, `running`, `success`, `warning`, `error`, `checkpoint`), par risque (`safe`, `write`, `debug`, `patch`, `inject`) et par outil ;
+- les **hypothèses** en cours avec leur niveau de confiance ;
+- les **garde-fous** déclenchés et la **meilleure prochaine action** recommandée ;
+- les **checkpoints** : les pistes que l'IA a trouvées mais qu'elle **n'exécutera pas sans toi**.
+
+Depuis un checkpoint, tu peux directement `Watch`, `Préparer write`, `Freeze`, `Find What Writes`, `AOB/Patch`, `Bookmark` ou `Créer Trainer`.
+
+Rien n'est écrit en mémoire tant que tu n'as pas confirmé un checkpoint.
+
+Les boutons `Markdown` / `JSON` exportent le rapport d'enquête, `Sauver projet` le range dans le projet courant, et `Archiver` le met de côté (les archives sont restaurables plus bas dans la vue).
+
+Si la vue affiche `Aucune investigation active`, c'est normal : lance `Auto` depuis l'Assistant pour créer une timeline.
+
+## Trainer — transformer une trouvaille en toggle
+
+L'onglet `Trainer` est le résultat final : tes découvertes deviennent des **features nommées** avec un interrupteur ON/OFF, réutilisables après un redémarrage.
+
+### Créer une feature
+
+Trois entrées possibles :
+
+1. `Depuis sélection` — à partir d'une adresse sélectionnée dans le Mode Expert.
+2. `Depuis checkpoints Investigation` — à partir d'une piste validée par l'IA.
+3. `Bookmark` — à partir d'un signet enregistré.
+
+Choisis ensuite le type d'action :
+
+- **Write** : écrit une valeur une fois.
+- **Freeze polling** : réécrit la valeur en boucle (règle l'intervalle dans le Mode Expert ; `16 ms` pour une cible qui réécrit vite).
+- **Freeze BP** : bloque l'écriture à la source via hardware breakpoint. Plus efficace qu'un freeze polling, mais attache le debugger au processus.
+- **Patch code** : modifie l'instruction elle-même via une signature AOB.
+
+### Utiliser les features
+
+- `ON` / `OFF` par feature, ou `Apply all` / `Restore all` pour tout basculer.
+- Une **hotkey** peut être associée à chaque feature : elle fonctionne même quand KillEngine est en arrière-plan.
+- Le statut de chaque feature est visible : `idle`, `active`, `error`, `ambiguous`.
+- `Sauver profil` rend la feature persistante entre deux sessions.
+- `Exporter JSON` / `Exporter MD` produisent un trainer partageable.
+
+### Statut `ambiguous` — important
+
+Une feature de type patch marquée `ambiguous` signifie que sa signature AOB correspond à **plusieurs endroits** dans le code, ou à aucun. KillEngine **refuse de l'appliquer** : patcher la mauvaise instruction ferait planter le programme cible.
+
+Retourne dans le Mode Expert, section `AOB signatures`, et régénère une signature plus longue ou plus stable.
 
 ## Profils
 
@@ -169,9 +228,15 @@ La page `Paramètres` permet de régler :
 - la taille de chunk mémoire ;
 - le fast scan par défaut ;
 - les options de debug Smart Search ;
-- les chemins préparés pour le modèle IA local.
+- le statut de l'IA embarquée et l'override avancé du modèle GGUF.
 
-Le Model Manager complet n'est pas encore finalisé. Si aucun modèle ou runtime local n'est disponible, KillEngine utilise le planner déterministe.
+Le layout produit attendu est `model/<nom_ia>/` à côté de `KillEngine.exe`. Après `scripts/build.ps1`, le dossier `build/bin` est synchronisé avec ce layout pour que les tests manuels reflètent l'installation.
+
+Les deux agents IA inclus sont visibles dans ce dossier:
+
+- `model/assistant/` pour l'assistant utilisateur.
+- `model/auto_resolver/` pour l'agent autonome.
+- `model/qwen/` pour les poids GGUF partagés.
 
 ## Diagnostics
 
@@ -240,16 +305,33 @@ Package portable :
 .\scripts\package-windows.ps1
 ```
 
-Inclure un modèle GGUF local dans le package :
+Package de développement léger sans modèles GGUF :
 
 ```powershell
-.\scripts\package-windows.ps1 -IncludeModel
+.\scripts\package-windows.ps1 -ExcludeModel
 ```
+
+Convention installateur IA :
+
+```text
+KillEngine.exe
+llama-cli.exe
+model/
+  assistant/
+    MODEL_MANIFEST.json
+  auto_resolver/
+    MODEL_MANIFEST.json
+  qwen/
+    *.gguf
+```
+
+Le chemin modèle personnalisé dans Paramètres est réservé au debug ou à un override avancé.
 
 ## Limites V1
 
 - La progression de scan est encore grossière.
 - Le scan multi-type automatique complet n'est pas finalisé.
-- Le Model Manager complet reste à brancher.
-- Les tests d'intégration automatisés restent à écrire.
+- Les agents IA embarqués doivent respecter `model/<nom_ia>/MODEL_MANIFEST.json`; les poids GGUF partagés restent sous `model/qwen/*.gguf`.
+- Les tests d'intégration automatisés couvrent le scan, le runtime power-up et les profils sur `KillEngineTestTarget.exe` ; la validation sur application tierce reste manuelle.
+- `Freeze BP` tient la charge sur `KillEngineTestTarget.exe` à ~1000 écritures/seconde (test automatisé, ~80% de maintien mesuré face à une cible qui réécrit en continu sans aucune pause — un rythme déjà bien plus agressif qu'un vrai jeu). `Find What Writes` et les patches de code restent expérimentaux : ils attachent un debugger ou modifient le code du processus cible, et n'ont pas encore de passe de validation sur application tierce.
 - L'outil cible les usages locaux Windows user-mode.

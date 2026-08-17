@@ -15,6 +15,7 @@ public:
     QVariantList availableTools() const;
     bool hasTool(const QString& name) const;
     QStringList requiredArgs(const QString& name) const;
+    QVariantMap toolMetadata(const QString& name) const;
 };
 
 } // namespace killai

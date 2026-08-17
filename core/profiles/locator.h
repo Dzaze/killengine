@@ -29,7 +29,7 @@ struct Locator {
     uint64_t    lastAddress{0}; // dernière adresse absolue connue (debug)
 
     /// Chaîne de pointeurs (utilisé quand kind == PointerChain).
-    /// Pour StarCraft 2 et les jeux modernes où la cible est allouée sur le tas.
+    /// Pour les jeux modernes où la cible est allouée dynamiquement sur le tas.
     PointerChain pointerChain;
 
     /// Sérialise le locator en chaîne lisible.

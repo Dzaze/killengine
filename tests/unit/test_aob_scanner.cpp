@@ -48,10 +48,69 @@ TEST(AobScanner, FindsMultipleWildcardMatches) {
     EXPECT_EQ(matches[1], 3u);
 }
 
+TEST(AobScanner, FindsOverlappingAnchoredMatches) {
+    const QByteArray haystack = QByteArray::fromHex("ABABABAB");
+    const auto pattern = parseAobPattern("AB AB");
+
+    const auto matches = searchAobBuffer(haystack, pattern, 0x2000);
+
+    ASSERT_EQ(matches.size(), 3);
+    EXPECT_EQ(matches[0], 0x2000u);
+    EXPECT_EQ(matches[1], 0x2001u);
+    EXPECT_EQ(matches[2], 0x2002u);
+}
+
+TEST(AobScanner, FindsPatternWithWildcardSuffix) {
+    const QByteArray haystack = QByteArray::fromHex("10488B0190488BFF");
+    const auto pattern = parseAobPattern("48 8B ??");
+
+    const auto matches = searchAobBuffer(haystack, pattern, 0x3000);
+
+    ASSERT_EQ(matches.size(), 2);
+    EXPECT_EQ(matches[0], 0x3001u);
+    EXPECT_EQ(matches[1], 0x3005u);
+}
+
+TEST(AobScanner, AllWildcardPatternMatchesEveryWindow) {
+    const QByteArray haystack = QByteArray::fromHex("01020304");
+    const auto pattern = parseAobPattern("?? ??");
+
+    const auto matches = searchAobBuffer(haystack, pattern, 0x4000);
+
+    ASSERT_EQ(matches.size(), 3);
+    EXPECT_EQ(matches[0], 0x4000u);
+    EXPECT_EQ(matches[1], 0x4001u);
+    EXPECT_EQ(matches[2], 0x4002u);
+}
+
 TEST(AobScanner, FormatsBytesAsAobPattern) {
     const QByteArray bytes = QByteArray::fromHex("488B05DEADBEEF");
 
     EXPECT_EQ(bytesToAobPattern(bytes), "48 8B 05 DE AD BE EF");
+}
+
+TEST(AobScanner, ScoresStrongPatternAsTrainerSafe) {
+    const auto pattern = parseAobPattern("48 89 05 AA BB CC DD 48 8B 0D 11 22 33 44");
+
+    const auto quality = evaluateAobPatternQuality(pattern);
+
+    EXPECT_EQ(quality.level, QString("strong"));
+    EXPECT_GE(quality.score, 75);
+    EXPECT_TRUE(quality.trainerSafe);
+    EXPECT_EQ(quality.fixedBytes, 14);
+    EXPECT_EQ(quality.wildcardBytes, 0);
+}
+
+TEST(AobScanner, ScoresWildcardHeavyPatternAsWeak) {
+    const auto pattern = parseAobPattern("48 ?? ?? ?? ?? ?? ??");
+
+    const auto quality = evaluateAobPatternQuality(pattern);
+
+    EXPECT_EQ(quality.level, QString("weak"));
+    EXPECT_LT(quality.score, 50);
+    EXPECT_FALSE(quality.trainerSafe);
+    EXPECT_EQ(quality.fixedBytes, 1);
+    EXPECT_EQ(quality.wildcardBytes, 6);
 }
 
 TEST(CodePatch, ParsesExactPatchBytes) {

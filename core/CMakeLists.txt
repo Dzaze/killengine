@@ -51,7 +51,7 @@ add_library(killcore STATIC
     profiles/profile_store.cpp
     profiles/locator.cpp
 
-    # Pointer chains (Phase 14 — StarCraft 2 / jeux modernes)
+    # Pointer chains (Phase 14 — jeux modernes / applications dynamiques)
     pointer/pointer_chain.cpp
     pointer/pointer_scanner.cpp
 
@@ -68,6 +68,36 @@ add_library(killcore STATIC
     patch/instruction_patch_suggester.cpp
     patch/profile_patch_state.h
     patch/profile_patch_state.cpp
+
+    # Phase 19 — Freeze par hardware breakpoint
+    debug/breakpoint_freeze.h
+    debug/breakpoint_freeze.cpp
+
+    # Phase 19 — Page Guards stealth
+    debug/page_guard.h
+    debug/page_guard.cpp
+
+    # Phase 19 — Scan de valeurs chiffrées/obfusquées
+    scanner/encrypted_scan.h
+    scanner/encrypted_scan.cpp
+
+    # Phase 19 — Analyseur de structures
+    scanner/structure_analyzer.h
+    scanner/structure_analyzer.cpp
+
+    # Phase 20 — Injection DLL + Hooking
+    inject/dll_injector.h
+    inject/dll_injector.cpp
+    inject/function_hook.h
+    inject/function_hook.cpp
+
+    # Phase 20 — Auto-assembler
+    scripting/auto_assembler.h
+    scripting/auto_assembler.cpp
+
+    # Phase 20 — Hotkeys globales
+    input/global_hotkey.h
+    input/global_hotkey.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

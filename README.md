@@ -104,7 +104,7 @@ KillEngine/
 ├── tests/            # Tests unitaires et d'intégration (Google Test)
 ├── docs/             # Documentation
 ├── scripts/          # Scripts de build et configuration
-├── models/           # Modèles GGUF (non inclus dans git)
+├── model/            # IA embarquées: agents + poids GGUF partagés
 ├── packaging/        # Scripts d'installation (Inno Setup)
 └── third_party/      # Dépendances tierces
 ```
@@ -113,18 +113,37 @@ KillEngine/
 
 MIT — voir [LICENSE](LICENSE)
 
+## Les quatre vues
+
+KillEngine s'articule autour de quatre vues, du plus guidé au plus manuel :
+
+| Vue | Rôle | Pour qui |
+| --- | --- | --- |
+| **Assistant** | Langage naturel : tu décris la valeur, KillEngine choisit et enchaîne les scans safe | Flux recommandé, débutant comme expert |
+| **Investigation** | Timeline de l'enquête : stratégie choisie, étapes exécutées, hypothèses, confiance, checkpoints à confirmer | Comprendre *pourquoi* l'IA a fait ce qu'elle a fait |
+| **Expert** | Outils manuels : scans exact/unknown/chiffré, Trace UI string, pointer scanner, write/freeze, find what writes, AOB, patches | Reprendre la main sur chaque étape |
+| **Trainer** | Features nommées, toggles ON/OFF, apply all / restore all, rollback, persistance par profil | Le résultat réutilisable |
+
+Détail de la direction produit dans [`docs/ULTIMATE_PRODUCT_GUIDELINE.md`](docs/ULTIMATE_PRODUCT_GUIDELINE.md).
+
 ## Statut
 
-Prototype avancé :
+Prototype avancé, en cours de montée en gamme produit :
 
-- Phases 0 à 11 validées au niveau prototype.
-- Phase 12 / Polissage V1 complète au niveau checklist V1.
+- Phases 0 à 12 validées, checklist V1 complète.
+- Phases 13 à 18 : scalabilité, profils, pointer chains, freeze, hardware breakpoints, AOB → patch → trainer.
 - Smart Search opérationnel : scan guidé, next scan, auto-write confirmé/restauré/vérifié, rollback batch.
-- Profils opérationnels : plusieurs cibles, résolution d'adresses, réutilisation par l'Assistant.
+- Profils opérationnels : plusieurs cibles, résolution d'adresses, patches de code persistés, réutilisation par l'Assistant.
 - Gros volumes : candidats stockés en fichier temporaire compact, next scan streaming, métriques perf et restauration de réduction.
-- IA locale optionnelle : tool-calls JSON, contrat d'intention structuré, fallback déterministe.
-- Tests unitaires : 38/38 au dernier état connu.
-- Tests d'intégration : 4/4 au dernier état connu.
-- Guide utilisateur V1 disponible dans `docs/USER_GUIDE.md`.
+- IA locale embarquée : tool-calls JSON, contrat d'intention structuré, agents sous `model/<nom_ia>/`, état dégradé si modèle/runtime manquant.
+- Phases ultimes (U1 Assistant proactif, U2 Investigation, U3 Trainer Builder) : livrées au niveau workflow, validation terrain en cours.
+- Guide utilisateur dans [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md), avancement détaillé dans [`docs/PHASE_TRACKER.md`](docs/PHASE_TRACKER.md).
 
-Voir `KILLENGINE_PROJECT_SPEC.md` pour le cahier des charges complet.
+Pour l'état des tests, se référer à `docs/PHASE_TRACKER.md` plutôt qu'à ce README : les compteurs figés se périment vite.
+
+Voir [`KILLENGINE_PROJECT_SPEC.md`](KILLENGINE_PROJECT_SPEC.md) pour le cahier des charges complet.
+
+## Contribution
+
+Trois agents IA (Codex, Cline + z.ai, Claude) contribuent en parallèle à ce dépôt.
+Lire [`AGENTS.md`](AGENTS.md) — section « Équipe d'agents » — avant toute modification.

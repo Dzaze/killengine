@@ -7,6 +7,7 @@ Current status:
 - Phase 12 / V1 polishing checklist is complete.
 - Phase 13 has been opened as the improvement baseline for precision, efficiency, conversation quality, profiles, UX, and robustness.
 - Next focus: run the manual V1 regression pass before release candidate.
+- Power-up roadmap documented in `docs/POWER_UP_ROADMAP.md`: Phase 19 targets active interception, Phase 20 targets injection/scripting/trainer UX, Phase 21 targets proactive AI workflows.
 
 Prerequisites before Phase 12:
 - [x] finish or explicitly descope Phase 7 LZ4 compression
@@ -167,8 +168,8 @@ Prerequisites before Phase 12:
     - [x] watch live des adresses candidates et sélectionnées
     - [x] candidats finaux exploitables : lecture live immédiate et freeze de la valeur actuelle depuis la liste
     - [x] Unknown guidé en Mode Expert : boutons augmenté/diminué/stable/changé avec historique compare/raffinage
-    - [x] Unknown SC2 plus sobre : capture filtrable writable/copy-on-write et raffinage backend sur candidats existants
-    - [x] Unknown SC2 profond : plafond de capture visible/modifiable dans Expert et alerte quand la limite mémoire est atteinte
+    - [x] Unknown jeux/applications exigeants plus sobre : capture filtrable writable/copy-on-write et raffinage backend sur candidats existants
+    - [x] Unknown profond : plafond de capture visible/modifiable dans Expert et alerte quand la limite mémoire est atteinte
     - [x] Unknown Auto multi-type : première comparaison sans type imposé (`Auto`) et bouton `stable` autorisé en première passe avec bornes moteur
     - [x] Anti-boucle UI : abonnements `scanFinished` installés avant démarrage exact/next scan async pour éviter les fins ratées
     - [x] profils plus intelligents avec état de résolution/réparation visible
@@ -183,11 +184,13 @@ Prerequisites before Phase 12:
     - [x] scénario profils complet : sauvegarde -> résolution -> activation -> écriture
     - [x] test logger `LevelFiltering` stabilisé après réinitialisation répétée
     - [x] validation passe expert gameplay : UI build, build global, unitaires 38/38, intégration 4/4
-    - [x] gate release automatisé `scripts/release-check.ps1` : UI type-check, UI build, configure, build, unitaires, intégration
-    - [x] package portable validé via `scripts/release-check.ps1 -Package`
+    - [x] gate release automatisé `scripts/release-check.ps1` : UI type-check, UI build, configure, build, smoke launch, unitaires, intégration
+    - [x] package portable validé via `scripts/release-check.ps1 -Package` : contenu runtime audité + smoke launch depuis `dist\KillEngine-portable`
+    - [x] diagnostic lancement reproductible : `scripts/diagnose-launch.ps1` collecte process, logs et crash Windows récents
     - [x] checklist manuelle V1 documentée dans `docs/V1_REGRESSION_CHECKLIST.md`
-    - [ ] passe de régression manuelle V1 sur Solitaire et KillEngineTestTarget
-- [x] PHASE 14 - Pointer Chains (StarCraft 2 / jeux modernes)
+    - [x] rapport manuel reproductible : `scripts/manual-validation-report.ps1` génère un compte rendu daté pour KillEngineTestTarget, cible générique et debugger prolongé
+    - [ ] passe de régression manuelle V1 sur KillEngineTestTarget et une application tierce autorisée
+- [x] PHASE 14 - Pointer Chains (jeux et applications modernes)
     - [x] PointerChain : structure + resolution multi-niveau
     - [x] PointerScanner : algorithme BFS pour trouver les chaines depuis une adresse cible
     - [x] Extension Locator : LocatorKind::PointerChain (retrocompatible)
@@ -196,12 +199,12 @@ Prerequisites before Phase 12:
     - [x] Frontend : types TypeScript + UI ExpertView (scan, test, sauvegarde profil)
     - [x] Tests unitaires : 6 tests PointerChain, dont round-trip profil pointer_chain (44/44 au total)
     - [x] Convention de resolution corrigee : chaque offset suit un dereferencement, compatible avec les chaines trouvees par le scanner
-    - [ ] Validation manuelle sur StarCraft 2
-- [x] PHASE 16 - Écriture robuste et freeze SC2
-    - [x] Diagnostic des limites de l'approche "lecture RAM pure" (`docs/SC2_IMPROVEMENT_ANALYSIS.md`)
+    - [ ] Validation manuelle sur application moderne tierce autorisée
+- [x] PHASE 16 - Écriture robuste et freeze jeux/applications exigeants
+    - [x] Diagnostic des limites de l'approche "lecture RAM pure" (`docs/SC2_IMPROVEMENT_ANALYSIS.md`, historique)
     - [x] `MemoryWriter` : retry automatique avec `VirtualProtectEx` sur pages protégées
     - [x] `MemoryWriteResult::protectionChanged` pour signaler quand la protection a dû être changée
-    - [x] `setFreezeInterval` : intervalle de polling configurable (10–2000 ms) pour jeux type SC2
+    - [x] `setFreezeInterval` : intervalle de polling configurable (10–2000 ms) pour moteurs qui réécrivent vite
     - [x] Interface `backend.ts` : `setFreezeInterval` exposée au frontend
     - [x] UI Write / Freeze : preset d'intervalle visible (16–500 ms) relié à `setFreezeInterval`
 - [ ] PHASE 17 - Find What Writes / debugger expérimental
@@ -214,13 +217,21 @@ Prerequisites before Phase 12:
     - [x] Garde-fous UX v1 : avertissement anti-debug, consentement explicite et durée de capture configurable
     - [x] Tunnel trainer v1 : bouton `Trainer` depuis un hit debugger, génération AOB + patch, sauvegarde bloquée si signature non unique
     - [x] Annulation explicite v1 : `cancelFindWhatWrites` stoppe la session async via token et bouton `Annuler capture`
-    - [ ] Validation manuelle SC2 : vérifier que l'attachement debugger capture une instruction sans bloquer le jeu
+    - [ ] Validation manuelle debugger : vérifier que l'attachement capture une instruction sans bloquer une application tierce autorisée
     - [ ] Garde-fous UX avant généralisation : validation manuelle prolongée
-- [ ] PHASE 18 - AOB signatures / trainer engine
+- [x] PHASE 18 - AOB signatures / trainer engine
     - [x] Module `core/patch/aob_scanner.*` : parsing de signatures `48 8B ??` et recherche buffer/process
     - [x] Backend `scanAobPattern(pattern, options)` : scan borné des régions exécutables/image
     - [x] UI Expert : panneau `AOB signatures` avec filtres code exécutable/module image et liste module+offset
     - [x] Tests unitaires `AobScanner.*` pour parser, wildcards et matches multiples
+    - [x] AOB wildcard accéléré : recherche ancrée type Boyer-Moore-Horspool compatible wildcards, overlaps et suffixes wildcard
+    - [x] Scoring qualité AOB : score 0-100, niveau strong/medium/weak, ratio fixes/wildcards, warning Trainer exposés au backend/UI
+    - [x] Garde-fou Trainer AOB : sauvegarde profil patch bloquée si signature trop faible ou non unique dans le code image exécutable
+    - [x] Persistance qualité Trainer : métriques AOB sauvegardées dans les `.keprofile`, visibles dans Profile et l'inspection live
+    - [x] Trainer local qualité AOB : features locales créées depuis Expert/bookmarks/checkpoints conservent score/niveau et bloquent activation/sauvegarde si signature faible
+    - [x] Trainer local AOB runtime : activation patch par signature unique rescannée avant écriture, avec adresse résolue et compteur de matches mis à jour
+    - [x] Application Trainer protégée : activation profil et `Tout appliquer` bloqués si AOB trop faible ou non unique, y compris pour vieux profils
+    - [x] IA qualité AOB : telemetry/rapport Auto détectent signatures faibles et blocages Trainer, recommandations de stabilisation exposées à l'Assistant
     - [x] Génération de signature à partir des hits `Find What Writes`
     - [x] Patch manuel de bytes exacts avec sauvegarde/restauration des bytes originaux
     - [x] Patch assisté v1 : décodage ciblé de longueur x64 + templates NOP/INT3/RET de même taille
@@ -233,8 +244,8 @@ Prerequisites before Phase 12:
     - [x] AOB auto-stabilise v1 : test de plusieurs signatures autour du RIP, sélection du premier match unique et blocage trainer si ambigu
     - [x] Trainer UX avancée v2a : inspection obligatoire avant application globale, résumé original/actif/ambigu/introuvable/invalide et désactivation des patchs risqués
     - [x] Trainer UX avancée v2b : dernier profil restauré automatiquement, inspection auto si attaché et toggles ON/OFF par patch
-    - [ ] Trainer UX avancée v2 : vue dédiée avec toggles persistants et warnings anti-multi-match bloquants avant application
-- [ ] PHASE 15 - Performance adaptive selon la machine
+    - [x] Trainer UX avancée v2 : vue dédiée avec toggles persistants et warnings anti-multi-match bloquants avant application
+- [x] PHASE 15 - Performance adaptive selon la machine
     - [x] Guideline projet : threads controles, profil centralise, UI fluide, bornes memoire
     - [x] Profil core `Auto` / `Eco` / `Normal` / `Performance` / `Max` avec detection CPU/RAM
     - [x] Tests unitaires du choix de profil et des plafonds de threads
@@ -245,7 +256,7 @@ Prerequisites before Phase 12:
     - [x] Reglages UI Parametres : threads max et memoire max
     - [x] Robustesse `MemoryReader` : fallback en blocs plus petits quand une grosse lecture echoue
     - [x] Robustesse `SnapshotStore` : fallback de capture directe pour plage explicite start/stop
-    - [x] Telemetry scan JSONL dediee (`scan_telemetry.jsonl`) pour tests SC2 et analyse performance
+    - [x] Telemetry scan JSONL dediee (`scan_telemetry.jsonl`) pour tests de cibles exigeantes et analyse performance
     - [x] Revue corrective : encodage C++ restaure, Auto unknown persistant, scans paralleles bornes aux plages expert
     - [x] Scan multi-representation etendu : Int/UInt 8/16/32/64, Float, fixed-point x10/x100/x1000/x4096/x65536
     - [x] Trace UI string : scan ASCII/UTF-16 des nombres affiches et filtrage des candidats quand l'affichage varie
@@ -258,9 +269,250 @@ Prerequisites before Phase 12:
     - [x] Rapport d'enquete structure : export presse-papiers JSON avec valeurs, strings, sources, top pistes, debugger et AOB
     - [x] Assistant enquête v1 : le rapport Expert est partagé au store et l'assistant répond aux questions "quelle piste tester / pourquoi bloqué" avec le top scoré
     - [x] Analyse de structure v1 : lecture autour d'une source sérieuse, voisins Int32/Float32 et marqueurs valeur affichée/fixed-point
+    - [x] Analyse de structure core renforcée : strings non alignées, UInt8/16/32/64, Float64 et diff de champs avec tailles fiables
+    - [x] Analyse de structure produit : backend `analyzeStructureMemory`, champs typés dans Expert et création de feature Trainer depuis un champ numérique
+    - [x] Analyse de structure V2 : captures A/B, diff visuel par offset/type/valeur, sauvegarde de templates locaux et inspection des champs dans Settings
     - [x] Tests tracker UI string : buffer simulant source numerique + texte affiche ASCII/UTF-16 + variante fixed-point
     - [x] Validation benchmarks sur KillEngineTestTarget et gros volumes de candidats
       - [x] Executable `KillEngineBenchmark` (`tests/benchmarks/benchmark_main.cpp`) : scan exact, scan multi-type, unknown capture/compare, 500k candidats synthetiques (replace/paginate/tri/filtrage)
       - [x] Script `scripts/benchmark-performance.ps1` orchestrant build + run + export CSV/JSON dans `docs/benchmark-results/`
       - [x] Doc `docs/PERFORMANCE_BENCHMARKS.md` : prerequis, lancement, metriques, interpretation, limites
       - [x] Run valide : 73/73 unitaires OK, benchmark 3.49s (exact 204ms/~767MB/s, multi-type 257ms/~611MB/s, unknown mapped 525ms, 500k candidats replace 175ms/paginate 0.23ms/tri 33-144ms/filtrage 249905 survivants)
+- [x] PHASE 19 - Interception active / hacking plus puissant
+    - [x] Roadmap detaillee : `docs/POWER_UP_ROADMAP.md`
+    - [x] Freeze par hardware breakpoint : etendre `core/debug/hardware_breakpoint.*` avec mode `RewriteValue` / `BlockWrite`
+    - [x] Pont freeze : brancher `core/freeze/freeze_manager.*` sur une session breakpoint maintenue active
+      - [x] V1 registre unifie : `FreezeManager` distingue `Polling` / `HardwareBreakpoint`, redemarre la session BP depuis les entrees actives et garde le tick polling separe
+    - [x] Backend/UI : exposer `freezeWithBreakpoint(address, value, type)` dans `ApplicationController`, `backend.ts` et Expert
+    - [x] Tests runtime power-up sur `KillEngineTestTarget.exe` : attach breakpoint freeze, injection/shellcode no-crash, helpers hook, résolution `LoadLibraryW`
+    - [x] Test runtime fort freeze BP : variable modifiée par un writer du `KillEngineTestTarget.exe`, vérifie `stats.totalHits` et `stats.rewrites`
+    - [x] Analyseur de structures : `core/scanner/structure_analyzer.*` avec dissect view, diff visuel, offsets nommes et templates de profil
+      - [x] Tests `StructureAnalyzer.*` : détection de strings non alignées, types larges et diff fiable
+      - [x] Bridge UI/backend : `analyzeStructureMemory` remplace le décodage TypeScript limité Int32/Float32
+      - [x] Templates Structure : persistance locale par processus, labels/notes/sample values, export Workspace JSON/Markdown
+    - [x] Scan de valeurs chiffrees/obfusquees : `core/scanner/encrypted_scan.*` pour XOR, add/sub, NOT et scan groupe borne
+      - [x] V1 Expert exposee : `scanEncryptedValue` backend + panneau Expert XOR/Add/Sub/NOT avec clé fixe ou brute-force borne
+    - [x] Page Guards : module garde en bac a sable non expose produit ; ne pas positionner KillEngine sur l'evasion anti-debug/stealth, preferer workflows explicites et audites
+- [x] PHASE 20 - Injection / hooks / trainer pro
+    - [x] Injection DLL : `core/inject/dll_injector.*` via `CreateRemoteThread` + `LoadLibraryW`
+    - [x] Shellcode distant : `core/inject/remote_shellcode.*` pour alloc/write/exec sans DLL disque
+    - [x] Hooks in-process : `core/inject/function_hook.*` avec detour, trampoline et restauration des bytes originaux
+    - [x] Auto-assembler : `core/scripting/auto_assembler.*` avec labels, allocation memoire, jumps et sauvegarde dans `ProfileStore`
+    - [x] Assembleur runtime : evaluer/integrer Keystone ou equivalent pour compiler les mnemonics en bytes
+      - [x] V0 interne borne : `compileAutoAsmScript` compile `nop`, `ret`, `int3`, `db/de/dd`, `jmp/call/je/jne` rel32 vers labels/adresses et refuse proprement les instructions complexes sans backend complet
+    - [x] Hotkeys globaux : `core/input/global_hotkey.*` pour toggles freeze/patch/write depuis les profils
+      - [x] V2 produit : backend `registerGlobalHotkey`/signal `globalHotkeyTriggered`, hotkeys par feature dans `TrainerView`, apply/restore via RiskGate
+    - [x] Overlay in-game : overlay Trainer externe always-on-top piloté par `ApplicationController`, état features + refresh depuis `TrainerView` sans injection in-process
+    - [x] Trainer Builder produit
+      - [x] V1 UI/store : `TrainerView.vue`, features persistantes localStorage, write/freeze/freeze BP/patch, apply/restore/all, creation depuis selection/checkpoint
+      - [x] V2 profils : sauvegarde des features Trainer vers `ProfileStore` via `saveProfileTarget` ou `saveProfileCodePatch`
+      - [x] V3 exploitation : filtres recherche/action/statut/processus, compteur de selection et export JSON des features locales
+      - [x] V4 historique : chaque feature garde les actions create/apply/restore/profile/hotkey, affichage compact et export Markdown
+      - [x] V5 checkpoints planifiés : la création depuis Investigation affiche le `RuntimeActionPlan`, peut bookmarker la piste et bloque les conversions sans cible
+- [x] PHASE 21 - AI proactive / auto-strategie
+    - [x] Direction produit ultime : `docs/ULTIMATE_PRODUCT_GUIDELINE.md` definit le cap Assistant -> Investigation -> Trainer, les regles agents et les phases premium
+    - [x] Positionnement multioutil : les libellés UI/app ne specialisent plus l'experience sur un jeu précis ; les exemples spécifiques restent limites aux docs/tests
+    - [x] Workflow auto-resolution : l'IA enchaine scan exact, unknown, write test, find-what-writes, AOB/patch avec checkpoints utilisateur
+      - [x] V1 prudente : `startAutoResolve` planifie le workflow, lance seulement le scan exact safe, remonte les prochaines actions sous garde-fous
+      - [x] V2 safe multi-tour : si une recherche guidee est active, `Auto` reduit les candidats avec la nouvelle valeur au lieu de relancer un scan neuf
+      - [x] Checkpoint candidats V1 : quand Auto tombe a peu de candidats, prepare `suggestedWrites` sans ecrire et exige confirmation
+      - [x] Execution Unknown guidee : Auto doit pouvoir lancer/cabler `captureUnknownSnapshotAsync`, attendre la variation utilisateur, puis choisir `changed/increased/decreased/stable`
+        - [x] V1 bouton Auto : capture Unknown declenchable depuis action recommandee, avec etape Investigation
+        - [x] V2 observation Auto : apres capture, Auto interprete la nouvelle observation (`increased/decreased/changed/stable`), lance `unknownNextScanAsync` et cree des checkpoints si le nombre de candidats devient bas
+      - [x] Execution Trace UI guidee : Auto doit lancer `scanUiStrings`, proposer `trackUiStringCandidates`, puis `analyzeUiStringSources` quand le scan exact echoue
+        - [x] V1 safe : action recommandee lance `scanUiStrings` borne et journalise le resultat dans Investigation
+        - [x] V2 sources : Auto analyse les sources autour des 5 meilleures strings UI, cree checkpoints numeriques et hypotheses Investigation
+        - [x] V3 tracking : si des strings UI existent deja, Auto lance `trackUiStringCandidates` sur la nouvelle valeur avant l'analyse des sources
+      - [x] Execution scan chiffre guidee : Auto doit declencher `scanEncryptedValue` avec modes bornes selon valeur/type et transformer les hits en pistes actionnables
+        - [x] V1 safe : action recommandee lance `scanEncryptedValue` XOR 16-bit borne et journalise le resultat dans Investigation
+        - [x] V2 multi-mode : Auto essaie XOR/Add/Sub/NOT bornes, fusionne les hits et cree checkpoints Investigation
+      - [x] Checkpoint write/freeze : convertir `suggestedWrites` en panneau de confirmation clair, puis executer write/freeze uniquement apres validation explicite
+      - [x] Checkpoint debugger : preparer `findWhatWrites` depuis un candidat confirme, afficher risques/duree, puis lancer uniquement apres consentement
+      - [x] Checkpoint AOB/patch : a partir d'un RIP confirme, generer signature, verifier multi-match, proposer patch sans application automatique
+    - [x] Investigation timeline : rendre l'enquete lisible, persistante et exportable
+      - [x] V1 UI/store : `InvestigationView.vue`, run active, etapes Auto, hypotheses, checkpoints, archives localStorage, export JSON/Markdown
+      - [x] V2 pilotage : filtres statut/risque/outil/recherche, compteur visible et restauration d'une archive en investigation active
+      - [x] V3 checkpoints premium : badges kind/score/confirmation, tri score décroissant, Watch/Write/Debug/AOB/Trainer plus explicites
+      - [x] V4 prochaine action : section `Meilleure prochaine action` basée sur `nextBestAction` ou meilleur checkpoint scoré
+      - [x] V5 export Markdown : top 5 checkpoints scorés, `nextBestAction` et garde-fous actifs inclus
+      - [x] V6 conservation Workspace : un checkpoint Investigation peut devenir un bookmark actionnable avec adresse/type/valeur, score, risque et payload AOB/patch conservés
+      - [x] V7 RuntimeActionPlan : chaque checkpoint produit un plan déterministe Watch/Write/Freeze/Debug/AOB/Bookmark/Trainer avec raisons, risques et export Markdown
+    - [x] Analyse de dumps et rapports : exploiter `scan_telemetry.jsonl` / rapports Expert pour proposer des hypotheses actionnables
+      - [x] Rapport IA V1 : `getAutoResolveReport` resume contexte, telemetry recente, recommandations et garde-fous
+      - [x] Scoring strategie V1 : Auto classe scan exact, reduction, Unknown, scan chiffre et Trace UI selon contexte/processus/historique
+      - [x] Decision proactive V1 : rapport IA expose `nextBestAction` unique avec outil, confiance, risque, raison et affichage prioritaire dans l'Assistant
+      - [x] Mini-boucle safe V1 : `startAutoResolve` enchaine scan/reduction puis fallback scan chiffre borne si zero candidat, expose `executedSafeSteps` et s'arrete avant action risquee
+      - [x] Mini-boucle safe V2 : fallback Trace UI string borne apres scan chiffre vide, resultats chiffrés/strings remontés dans l'UI Expert et timeline Investigation
+      - [x] Preuve Assistant V1 : `executedSafeSteps` affiche dans le chat outil/statut/metrique/detail pour rendre l'auto-pilotage auditable
+      - [x] Checkpoints safe V1 : hits chiffrés et strings UI issus de la mini-boucle Auto sont promus en checkpoints Investigation bornés et actionnables
+      - [x] Unknown auto V1 : si exact/chiffre/Trace UI sont vides, Auto capture un snapshot Unknown borné et attend une variation utilisateur
+      - [x] Sources UI auto V1 : strings UI issues du fallback Auto déclenchent l'analyse sources Top 5 côté store et créent checkpoints numériques
+      - [x] Scoring checkpoints V1 : hits chiffrés, strings UI et sources UI reçoivent `confidenceScore/confidenceLabel` et sont triés
+      - [x] Reprise continue V1 : actions Unknown réutilisent le snapshot existant et `continue_unknown_observation` guide l'utilisateur sans reset de contexte
+      - [x] Bilan Auto V1 : export Investigation Markdown résume actions safe, checkpoints, meilleure piste et prochaine étape
+      - [x] Validation U1 : `docs/U1_AUTO_RESOLVE_VALIDATION.md` définit scénario, checklist PASS/FAIL, logs et critères de validation manuelle
+      - [ ] Validation manuelle U1 : executer le scenario U1-1 -> U1-10 sur `KillEngineTestTarget.exe` et remplir la checklist PASS/FAIL (gate automatisee OK : type-check, build, 95/95 unitaires ; fix `build.ps1` GetRelativePath PS5 inclus)
+      - [x] Contrat outils IA V2 : registry expose outils modernes Auto/Trace UI/chiffré/debug/AOB avec `risk`, `safe` et `requiresConfirmation`, prompt llama mis à jour
+      - [x] Tests unitaires `AutoResolverTest` : plan safe et fallback exact-scan vers Unknown couverts
+      - [x] Synthese telemetry lisible : detecter les sequences exact->0, unknown trop large, Trace UI avec sources, AOB multi-match et proposer la prochaine action exacte
+      - [x] Rapport valeurs affichees : interpreter strings UI, sources x100/x65536, backrefs et globalValueHits pour recommander Trace UI/debug au bon moment, sans specialiser l'architecture sur un jeu precis
+      - [x] Tests rapport IA : couvrir les heuristiques rapport/scoring avec événements telemetry factices via `summarizeAutoTelemetry`
+      - [x] Rapport IA dans Investigation : refresh direct, résumé, stratégie préférée, recommandations et garde-fous visibles hors Settings
+    - [x] Apprentissage par jeu : memoriser les patterns efficaces par module, offsets, structures et signatures AOB
+      - [x] Memoire locale V1 par processus : compte passes Auto, reductions, scans sans candidat et checkpoints bas candidats via `QSettings`
+      - [x] Memoriser strategies gagnantes : stocker par process/module les strategies qui menent a write/freeze confirme
+      - [x] Memoriser patterns AOB/profils : relier signatures stables, offsets modules, variants de valeur et groupes de profil reutilisables
+      - [x] UI reset/inspection memoire IA : ajouter une vue ou action Settings pour voir/vider la memoire Auto par jeu
+        - [x] V1 Settings : compte Investigation/Trainer, vide Investigation active/archive, Trainer local, mémoire Auto process/globale via backend
+        - [x] V2 Inspection : Settings affiche derniere strategie gagnante, adresse/type appris, compteur de strategies et dernier pattern AOB
+        - [x] V3 Workspace export : Settings exporte un JSON global avec contexte app, réglages clés, Investigation, Trainer, rapport Auto et chemins diagnostics
+        - [x] V4 Exports lisibles : Markdown Trainer/Workspace + copie presse-papiers depuis Trainer et Settings
+        - [x] V5 Structures persistantes : templates Structure inclus dans Workspace, inspection détaillée et suppression depuis Settings
+        - [x] V6 Import workspace contrôlé : collage JSON, aperçu des counts, import borné Investigation/Trainer/Templates/Settings et trace Investigation
+        - [x] V7 Projets et bookmarks : sauvegarde/chargement de projets Workspace par processus, bookmarks/notes locaux, import/export Workspace complet
+        - [x] V8 Bookmarks actionnables : création manuelle, chargement en cible Write/Freeze, conversion Trainer, bookmarks depuis Structure/AOB/patch/pointer chains
+        - [x] V9 Presets de workflow : Assistant propose des chemins d'enquete rapides, cree une timeline Investigation et exporte le preset actif dans le Workspace
+        - [x] V9b Bookmarks premium : création depuis checkpoint Investigation et export Markdown enrichi avec type, valeur, score, AOB, patch, qualité et nombre de matches
+        - [x] V9c Sauvegarde projet rapide : Investigation et Trainer peuvent créer un snapshot Workspace sans passer par Settings
+        - [x] V9d Audit Workspace : journal d'actions persistant, export JSON/Markdown, import/export Workspace et panneau Settings consultable/vidable
+        - [x] V9e Projets auditables : les snapshots Workspace gardent et affichent le volume d'audit associé au projet
+        - [x] V10 Model Manager : chemin GGUF sauvegardé réellement utilisé par le locator IA, statut modèle/runtime exposé au frontend et panneau Settings de diagnostic
+        - [x] V11 IA embarquée produit : discovery automatique des poids partagés sous `model/qwen/*.gguf`, packaging `llama-cli.exe` + modèles par défaut, UI orientée modèle embarqué et override avancé
+        - [x] V11b Packaging IA produit : `package-windows.ps1` inclut les IA par défaut, `-ExcludeModel` réservé aux packages dev légers, README racine `model/` ajouté
+        - [x] V12 Positionnement IA produit : IA active par défaut, retrait du toggle "sans IA", état dégradé technique seulement si modèle/runtime embarqué manquant
+        - [x] V13 Miroir installation dev : `scripts/build.ps1` stage `llama-cli.exe`, les agents `model/<nom_ia>/` et les poids `model/qwen/*.gguf` dans `build/bin` pour que l'exe de test ait le même layout que le package installé
+        - [x] V14 Agents IA embarqués : dossiers `model/assistant/` et `model/auto_resolver/` avec manifests produit, poids GGUF partagés sous `model/qwen/`, statut backend/UI des agents
+        - [x] V15 Vérification IA release : `scripts/verify-ai-layout.ps1` valide runtime, agents, manifests, GGUF partagé et absence de `.partial`, branché dans `release-check.ps1`
+    - [x] Garde-fous UX : consentement explicite avant debug, patch, injection ou action risquee
+      - [x] V1 Assistant : actions Auto risquees marquees `Confirmer`, tooltips de risque, aucun debug/patch/freeze BP lance par clic safe
+      - [x] RiskGate V1 : confirmation bloquante et audit Investigation pour write, freeze, freeze BP, find-what-writes et patch code
+      - [x] Dialogues de confirmation reels : modales detaillees pour write, freeze BP, find-what-writes, patch, hook et injection
+      - [x] Journal d'audit IA : loguer chaque recommandation, confirmation utilisateur et action executee dans `scan_telemetry.jsonl`
+      - [x] Mode Auto niveau de risque : `Safe`, `Expert`, `Trainer` pour controler jusqu'ou l'IA peut aller sans reconfiguration
+      - [x] Non-regression lancement : hotkeys sans filtre natif avant enregistrement, init IA en fallback deterministe sans charger llama au demarrage
+    - [x] PHASE 17 - Performance IA & solutions adaptees
+      - [x] V1 Serveur llama persistant : nouveau module `ai/llama_server` demarre `llama-server.exe` une seule fois (modele charge en RAM, `cache_prompt` actif), completions HTTP local bornees, redemarrage auto si crash et fallback `llama-cli` si le serveur echoue
+      - [x] V2 Prompts cacheables : prefixe statique (systeme + regles + exemples + outils) place en tete, contexte/historique/requete dynamiques en queue pour maximiser le hit du cache de tokens du serveur persistant
+      - [x] V3 Retry correctif : seconde tentative avec rappel du format JSON quand le modele repond hors schema (tool call ou intention) au lieu de chuter directement sur le fallback deterministe
+      - [x] V4 Historique conversationnel : `AIEngine::noteOutcome` enregistre chaque tour {query, outil, outcome} (borne a 12) et le transmet au prompt ; le modele sait ce qui a echoue et propose une vraie alternative
+      - [x] V5 Contexte IA enrichi : aiContext expose desormais `unknownSnapshotActive`, `freezeCount` et `valueType` en plus du contexte existant
+      - [x] V6 Fallback deterministe adaptatif : variation decrite (augmente/diminue/change/stable) pendant un scan actif => `next_scan` increased/decreased/changed ; snapshot unknown actif => `unknown_compare` ; peu de candidats + cible connue => `prepare_write_checkpoint` (safe, sans ecrire) ; signalement d'echec apres exact_scan => relance `exact_scan_multi_type`
+      - [x] V7 Dispatch prepare_write_checkpoint : ApplicationController prepare les suggestions d'ecriture (`suggestedWrites`) sans ecrire, workflowStatus `awaiting_write_confirmation`
+      - [x] V8 Build staging : `scripts/build.ps1` copie aussi `llama-server.exe` dans `build/bin`
+      - [x] Tests : `tests/unit/test_ai_adaptive.cpp` (10 tests) + correction des 8 tests ContextualFallback preexistants qui omettaient `engine.init()` ; suite complete 115/115 OK
+    - [x] PHASE 18 UX - Lisibilité Mode Expert (à ne pas confondre avec la PHASE 18 « AOB signatures / trainer engine » de la liste principale)
+      - [x] P0 Encodage : réparation de 199 + 21 séquences de double-encodage UTF-8 dans `ui/src/views/ExpertView.vue` et `ui/src/stores/app.ts` (les libellés accentués s'affichaient `RÃ©gion active` à l'écran). Cause probable : scripts `scripts/patch-*.ps1` écrivant sans `-Encoding utf8`
+      - [x] P1 Pastilles d'aide : composant `ui/src/components/expert/InfoDot.vue` (popover au clic, fermeture Escape / clic extérieur, `aria-expanded`), posé sur les 13 panneaux + `Écrit par` et `Freeze BP`
+      - [x] P1b Textes d'aide en i18n : bloc `help.*` ajouté dans `fr.json` et `en.json` (18 sujets × à quoi ça sert / quand l'utiliser / ce que ça coûte), source unique réutilisable par l'Assistant
+      - [x] P2 Badges de risque : composants `ui/src/components/expert/RiskBadge.vue` + `risk.ts` (`read` / `write` / `code`) sur chaque panneau et sur les étapes Agir/Pérenniser
+      - [x] P3 Regroupement en 4 étapes : stepper `Trouver / Inspecter / Agir / Pérenniser` + mode `Tout`, filtrage par `v-show` sans déplacer un seul panneau (l'ordre relatif du template correspondait déjà aux étapes), compteurs indicatifs sans navigation automatique subie
+      - [x] Docs : `nav.investigation` / `nav.trainer` passés en i18n, sections Investigation et Trainer ajoutées au `docs/USER_GUIDE.md`, statut et 4 vues corrigés dans `README.md`, tailles de gros fichiers corrigées dans `AGENTS.md` (`application_controller.cpp` annoncé à 3700 puis 5000 lignes, réel ~10 000)
+      - [x] Équipe : section « 3 modèles IA en parallèle » (Codex / Cline+z.ai / Claude) + règles de coexistence ajoutées à `AGENTS.md`, rappel dans `docs/ULTIMATE_PRODUCT_GUIDELINE.md`
+      - [x] Validation : `npm run type-check` OK, `npm run build` OK, vérification automatique que les 15 sujets d'aide résolvent dans les deux locales
+      - [ ] Reste à faire : validation visuelle dans l'app Qt (non lancée), et extraction des 13 panneaux en composants sous `ui/src/components/expert/` (P5, non commencé)
+    - [x] PHASE 18 FIABILITÉ - Freeze BP durci + persistance + protocole de validation
+      - [x] Bug corrigé : `applyBreakpointsToThread` (`core/debug/hardware_breakpoint.cpp`) et `applyFreezeBreakpointsToThread` (`core/debug/breakpoint_freeze.cpp`) appelaient `SetThreadContext` sur des threads en cours d'exécution sans les suspendre — peu fiable sur Windows selon la doc Win32. Suspend/Resume ajouté autour de `GetThreadContext`/`SetThreadContext` dans les deux fichiers, y compris dans `clearFreezeBreakpointsForProcess`
+      - [x] Test de stress réaliste : `KillEngineTestTarget.exe` gagne un thread interne (`KILLENGINE_TEST_TARGET_STRESS_REWRITE`) qui réécrit `g_health` via ses propres instructions CPU à ~1000 Hz cadencé par spin-wait, plus un fichier marqueur (`%TEMP%\killengine_test_target_addresses.txt`) exposant l'adresse réelle pour éviter un scan par valeur peu fiable
+      - [x] `BreakpointFreezeHoldsUnderFastRewriteStress` : nouveau test d'intégration mesurant le hold-rate réel (~80% stable sur plusieurs runs, ~5000 échantillons par spin-wait 200µs) face à ce stress, seuil fixé à 60% avec marge sous la baseline mesurée
+      - [x] `BreakpointFreezeDoesNotInterceptExternalWriteProcessMemory` : ancien test `...RewritesValueChangedByWriter` renommé et corrigé — son assertion permissive passait que le breakpoint intercepte ou non. Documente maintenant explicitement une limite fondamentale : un hardware breakpoint ne se déclenche jamais pour un `WriteProcessMemory` externe (seul les instructions exécutées sur un thread du processus cible peuvent le déclencher)
+      - [x] `suggestStableLocatorForAddress` : nouvelle méthode `ApplicationController` (+ `backend.ts`, + bouton `Stabiliser cette adresse` dans le panneau Write d'Expert) qui cherche une chaîne de pointeurs stable après une écriture confirmée sur une adresse unique, bornée et lecture seule, réutilise directement `savePointerChainProfileTarget`
+      - [x] Découverte documentée dans `AGENTS.md` : `killai::AutoResolver::executePlan/executeStep/resolve` sont compilés mais jamais appelés — seul `planForGoal()` sert (affichage du plan). Le vrai moteur d'exécution Auto est le state-machine `ApplicationController::startAutoResolve`
+      - [x] `docs/V1_REGRESSION_CHECKLIST.md` : nouvelle section "Reliability Pass" avec protocole manuel (Freeze BP sous charge réelle, pointer chain après redémarrage, AOB après redémarrage, chaîne de fallback pire cas) sur application tierce autorisée — la validation terrain complète reste manuelle, hors de portée d'un agent seul
+      - [x] `AGENTS.md` : sections Freeze BP, Injection DLL/Hooking (`core/inject/*`, jusqu'ici non documenté malgré tests existants) et Auto-résolution IA ajoutées
+      - [x] Validation : 116/116 tests unitaires, 12/12 tests d'intégration (incluant 5 runs consécutifs du nouveau test de stress pour vérifier la stabilité statistique), build C++ et UI OK
+    - [x] PHASE 18 IA+UX - Automatisation persistance + aide Expert avec exemples
+      - [x] `autoSuggestStableLocatorIfWorthwhile` (`ui/src/stores/app.ts`) : après une écriture Expert réussie et vérifiée, cherche automatiquement en fond (silencieux si rien trouvé, dédupliqué par adresse) une chaîne de pointeurs stable et le signale par message Assistant — plus besoin de connaître le bouton manuel dans Expert
+      - [x] `docs/POWER_UP_ROADMAP.md` section H réécrite avec l'état réel du moteur Auto (state-machine `startAutoResolve` vs classe `AutoResolver` en grande partie morte) et 4 prochaines étapes concrètes
+      - [x] Demande explicite de triche en ligne / contournement anti-cheat déclinée (roadmap et implémentation) — même raisonnement que `docs/ULTIMATE_PRODUCT_GUIDELINE.md`, noté dans la roadmap pour traçabilité
+      - [x] `InfoDot.vue` + `fr.json`/`en.json` : ajout d'un exemple concret par sujet d'aide (15/15) sous chaque pastille `?` du Mode Expert — scénario "voilà ce que tu tapes, voilà ce qui se passe" pour un utilisateur novice, distinct visuellement (encart avec liseré accent)
+      - [x] Validation : `npm run type-check` OK, `npm run build` OK, vérification automatique que les 15 exemples résolvent dans les deux locales
+      - [x] Retour utilisateur (test avec plusieurs personnes néophytes) : boutons/libellés pas assez clairs, jargon anglais visible même en `fr.json` (`modeExact`, `modeChanged`... et `Next Scan`). Corrigé : libellés `scan.mode*`/`scan.nextScan`/`scan.nextValue` traduits en français clair, astuce toujours visible (pas cachée derrière `?`) ajoutée au-dessus du panneau Next Scan et du panneau Trace UI string, boutons `Filtrer strings`/`Tracker sources` renommés `Scan suivant (texte)`/`Scan suivant (sources)`, étapes numérotées dans les placeholders. Astuce dédiée ajoutée pour le cas "trop de candidats après Analyser sources" (variation + reclique, ou Auto origine)
+      - [x] Conseil IA contextuel : `getAutoResolveReport` (`application_controller.cpp`) distingue maintenant "quelques sources Trace UI exploitables" de "trop de sources pour un checkpoint fiable" (seuil `kTraceUiSourceOverflowThreshold = 40`), avec un `nextAction` concret ("change encore la valeur puis Scan suivant (sources), ou Auto origine") au lieu de proposer un freeze confirmé sur des centaines de pistes. Remonte dans le chat Assistant (`insightHint`) et dans les hypothèses Investigation. Pas de test dédié — la fonction qui le contient (`getAutoResolveReport`) n'a aucune couverture de test existante, contrairement à `killai::summarizeAutoTelemetry` qui fait doublon mais n'est jamais appelée (voir section Auto-résolution IA de `AGENTS.md`)
+      - [x] **Régression corrigée** : le stepper à 4 étapes (P3) masquait le panneau Write par défaut (`activeStep` démarrait sur `'find'`, Write est tagué `'act'`) — signalé par l'utilisateur ("la partie écrire la valeur a disparu, cliquer sur write ne fait rien"). Le workflow réel va constamment de trouver à agir, donc filtrer par étape par défaut cache une fonction centrale. Défaut changé sur `'all'` : rien n'est caché sans clic explicite, le filtre par étape reste disponible en option
+      - [x] Audit de suivi après la régression : tagging `showStep()` des 13 autres panneaux revérifié un par un, aucun autre mal classé
+      - [x] Écriture silencieuse corrigée : `writeSelectedValue`/`writeSelectedAddresses`/`writeSelectedTargets` (`ui/src/stores/app.ts`) retournaient sans rien afficher si aucune adresse/valeur n'était prête — cliquer sur Écrire ne faisait rien avec zéro indice. Message d'erreur explicite ajouté à la place, affiché au même endroit que les autres erreurs d'écriture
+      - [x] Nettoyage jargon restant dans `fr.json` : `memory.committed/readable/writable/executable`, `unknown.title/bytes`, `write.rollback/freeze/stopFreeze`, `help.nextScan.title`/`help.unknown.title` (celui-ci ne suivait pas le renommage du bouton) traduits en français clair. Noms de fonctionnalités déjà établis et cohérents ailleurs (Trace UI string, AOB signatures, Pointer chains, Trainer) laissés tels quels pour ne pas introduire d'incohérence avec la doc/le reste de l'UI
+      - [x] Validation finale : 116/116 tests unitaires, 12/12 tests d'intégration, `npm run type-check`/`build` OK, balayage mojibake complet du dépôt (0 corruption réelle, seulement les 2 exemples volontaires déjà documentés)
+    - [x] PHASE 18 CHAÎNAGE - Nettoyage AutoResolver + vrai chaînage write→patch
+      - [x] Extraction : la logique d'insights telemetry dupliquée entre `killai::summarizeAutoTelemetry` (mort, testé) et l'implémentation en ligne dans `ApplicationController::getAutoResolveReport` (vivante, non testée) est unifiée en une seule fonction pure `killai::computeAutoResolveTelemetryReport(events)` dans `ai/auto_resolver.h/.cpp`. `getAutoResolveReport` l'appelle directement au lieu de dupliquer ~160 lignes en ligne
+      - [x] Suppression code mort : `AutoResolver::executePlan`/`executeStep`/`resolve`/`validateStepResult` retirés (jamais appelés, noms d'outils incompatibles avec l'API réelle de `ApplicationController`). `planForGoal`/`stepTypeToString` conservés (toujours utilisés). `summarizeAutoTelemetry` retiré, remplacé par `computeAutoResolveTelemetryReport`
+      - [x] `tests/unit/test_auto_resolver.cpp` réécrit : test du code mort supprimé, 2 tests portés sur la nouvelle fonction extraite, 2 nouveaux tests ajoutés couvrant explicitement le cas "500 candidats après Analyser sources" (`FlagsTraceUiSourceOverflowInsteadOfReadyCheckpoint`) et la frontière du seuil — comble le trou de couverture signalé précédemment
+      - [x] **Vrai chaînage écrit → find-what-writes → AOB → patch** : `autoChainFindWhatWritesResult()` (`ui/src/views/ExpertView.vue`) enchaîne automatiquement `generateAobSignatureFromHit()` dès qu'une capture Find What Writes réussit avec au moins un hit — réutilise le chemin déjà existant du clic manuel "Analyser" (aucune logique dupliquée), signature AOB et suggestions de patch apparaissent sans clic supplémentaire dans le panneau déjà visible. Reste strictement lecture seule : sauvegarde Trainer et application de patch restent des actions manuelles
+      - [x] Documentation : `AGENTS.md` section "Auto-résolution IA" réécrite pour refléter l'état résolu (plus de "deux mécanismes à ne pas confondre"), `docs/POWER_UP_ROADMAP.md` section H mise à jour avec le nouvel état et ce qu'il reste (déclenchement amont automatique de Find What Writes après un write qui ne tient pas — pas encore instrumenté)
+      - [x] Validation : 117/117 tests unitaires (+1 net : -4 tests morts, +5 nouveaux), 12/12 tests d'intégration, build C++ et UI OK
+    - [x] PHASE 18 FIABILITÉ AUTOMATIQUE - Détection "le freeze qui ne tient pas" sans que l'utilisateur le signale
+      - [x] `FreezeEntry` (`core/freeze/freeze_manager.h/.cpp`) porte des compteurs de dérive (`consecutiveDriftTicks`/`totalDriftTicks`/`totalTicks`/`flaggedUnstable`). `recordPollTick()` détecte et notifie une seule fois par activation (seuil `kFreezePollDriftThreshold = 5` ticks consécutifs), réinitialisé par `setEntry()` si la même adresse est réarmée
+      - [x] `applyFreezeTick()` lit la valeur avant chaque réécriture (au lieu d'écrire à l'aveugle), franchissement du seuil → `emit freezeInstabilityDetected(info)` avec message et suggestion prêts à l'emploi, plus `appendScanTelemetry("freeze_poll_instability", ...)` pour l'audit
+      - [x] `ui/src/stores/app.ts` connecte le signal dans `init()`, pousse un message Assistant automatique et dédupliqué — zéro action de l'utilisateur nécessaire pour découvrir que son freeze polling ne tient pas
+      - [x] `getBreakpointFreezeStats()` : expose en direct les stats déjà collectées par `BreakpointFreezeManager` (hits/rewrites/errors), jamais surfacées avant l'arrêt jusqu'ici. Badge `bp-live-stats` dans le panneau Write d'Expert, sondé toutes les 1s pendant le freeze BP
+      - [x] Portée volontairement limitée au mode polling pour la détection proactive (déjà mesuré fiable en BP, architecture event-driven différente) — noté explicitement plutôt que laissé implicite
+      - [x] Tests : 4 nouveaux cas `FreezeManager` (tient sans notifier, franchit le seuil une seule fois, récupère en gardant l'historique, réarmement réinitialise l'état)
+      - [x] Documentation : `AGENTS.md` nouvelle section dédiée
+      - [x] Validation : 121/121 tests unitaires (+4), 12/12 tests d'intégration, build C++ et UI OK, balayage mojibake propre
+    - [x] PHASE 18 UX - "Nouveau scan" videait seulement le candidate store, pas les panneaux Expert
+      - [x] Signalé par l'utilisateur : cliquer "Nouveau scan" laissait les résultats Trace UI string, AOB/patch, pointer chains, find what writes et structures d'une enquête précédente affichés comme s'ils appartenaient à la nouvelle recherche
+      - [x] `store.resetWorkflow()` (`ui/src/stores/app.ts`) étendu : vide aussi région active, adresse/valeur/résultat d'écriture sélectionnés, résultat scan groupé — état store qui n'était pas touché avant
+      - [x] `startNewScan()` (`ui/src/views/ExpertView.vue`) : nouvelle fonction qui appelle `store.resetWorkflow()` puis vide ~35 refs locales (résultats AOB/patch/pointer chains/Trace UI string/find-what-writes/structures). Ferme proprement une enquête Trace UI live en cours via `finishUiStringInvestigation` côté backend plutôt que d'abandonner l'état à mi-chemin. Les deux boutons "Nouveau scan" du panneau appellent cette fonction au lieu de `store.resetWorkflow()` directement
+      - [x] Volontairement non touché : watch live, freeze polling/BP actifs — ce sont des surveillances délibérées et indépendantes de "quelle valeur je cherche maintenant", les arrêter silencieusement au clic serait une surprise. Refs de configuration/préférence (filtres, timeouts, rayons) laissées telles quelles, seuls les résultats/sélections sont vidés
+      - [x] Validation : `npm run type-check`/`build` OK, balayage mojibake propre. Pas de changement C++, comportement purement frontend
+    - [x] PHASE 18 BUG - "Restaurer réduction" désactivé pile quand il fallait s'en servir
+      - [x] Diagnostiqué depuis `%LOCALAPPDATA%\KillEngine\KillEngine\logs\scan_telemetry.jsonl` (l'utilisateur a suggéré de regarder les logs) : une réduction Unknown ("ça change") a fait tomber 178 candidats à 0. Le bouton `Restaurer réduction` était désactivé via `:disabled="store.scanBusy || !store.candidatePage?.totalCount"` — `totalCount` étant 0 après la réduction fautive, le bouton devenait injoignable exactement au moment où il fallait cliquer dessus
+      - [x] Corrigé : condition réduite à `:disabled="store.scanBusy"`. Le backend (`undoCandidateScan`, déjà correct) gère proprement le cas "rien à restaurer" avec un message clair — pas besoin de dupliquer cette logique côté UI
+      - [x] Confirmé que `unknownNextScan`/`unknownNextScanAsync` appellent bien `rememberCandidatesForUndo` côté C++ : la restauration fonctionne aussi bien pour les réductions Unknown que pour le Next Scan exact, un seul niveau d'historique (la réduction immédiatement précédente)
+      - [x] Avertissement renforcé au-dessus des boutons guidés Unknown (`ça augmente`/`ça diminue`/`ça change`/`stable`) : rappelle qu'un clic doit correspondre à une vraie action (ou absence d'action) dans le jeu, et pointe vers `Restaurer réduction` en cas d'erreur
+      - [x] Validation : `npm run type-check`/`build` OK, 121/121 tests unitaires (pas de changement de logique métier), balayage mojibake propre, rebuild C++ complet effectué pour que le correctif soit pris en compte au prochain lancement de KillEngine.exe
+    - [x] PHASE 18 AUDIT - Vérification des 4 chantiers `docs/POWER_UP_ROADMAP.md` demandés par l'utilisateur (structure analyzer, freeze BP, hotkeys/overlay, signature Authenticode)
+      - [x] Freeze par hardware breakpoint (roadmap section A) : déjà livré et testé, voir section dédiée `AGENTS.md`. Rien à refaire.
+      - [x] Analyseur de structures V2 (roadmap section D) : déjà livré (`core/scanner/structure_analyzer.*`, `analyzeStructureMemory`, dissect/diff/templates dans Expert et Settings). Vérifié avec `killengine_unit_tests.exe --gtest_filter=StructureAnalyzer.*` (2/2 OK). Rien à refaire.
+      - [x] Hotkeys globales + overlay Trainer (roadmap section G) : déjà livrés (`core/input/global_hotkey.*`, `registerGlobalHotkey`/`unregisterGlobalHotkey` côté backend, panneau hotkey par feature dans `TrainerView.vue` ; overlay `QWidget` always-on-top dans `ApplicationController::setTrainerOverlayVisible`/`updateTrainerOverlay`, piloté par `store.setTrainerOverlay`). Vérifié avec `killengine_unit_tests.exe --gtest_filter=GlobalHotkey.*` (2/2 OK). Rien à refaire.
+      - [x] Signature Authenticode (absente avant ce commit) : nouveau `scripts/codesign.ps1` — détecte `signtool.exe`, signe via empreinte de certificat en magasin (`KILLENGINE_CODESIGN_THUMBPRINT`, chemin requis pour tout certificat émis après le 2023-06-01, cf. règles CA/Browser Forum sur clé privée en matériel FIPS) ou `.pfx` legacy (`KILLENGINE_CODESIGN_PFX`/`KILLENGINE_CODESIGN_PFX_PASSWORD`), horodatage RFC3161, vérifie `Get-AuthenticodeSignature` après signature. Sans certificat configuré : avertissement et build non signé par défaut, échec explicite avec `-RequireSigning`. `scripts/package-windows.ps1` l'appelle automatiquement sur `KillEngine.exe` avant de zipper (nouveau flag `-RequireSigning`, relayé par `scripts/release-check.ps1 -Package -RequireSigning`). Testé manuellement sans certificat : mode silencieux (avertit, continue) et mode `-RequireSigning` (échoue proprement), les deux confirmés en exécutant le script directement.
+      - [x] `docs/CODE_SIGNING.md` (nouveau) : ce que seul l'humain peut faire — acheter/valider un certificat. Compare Azure Trusted Signing (~10 USD/mois, recommandé pour un lancement solo), SSL.com eSigner, DigiCert KeyLocker, token EV physique ; explique pourquoi un simple `.pfx` ne suffit plus depuis juin 2023 ; donne les commandes exactes pour brancher le certificat une fois obtenu.
+      - [x] Non fait, volontairement hors de portée d'un agent : l'achat du certificat lui-même et la vérification d'identité auprès du fournisseur — décision et démarche pour l'utilisateur, pas du code.
+    - [x] PHASE 18 ASSISTANT - Expliquer et proposer une alternative au lieu de constater un échec en silence
+      - [x] Diagnostiqué : `AIEngine::makeToolCall` (`ai/ai_engine.cpp`) calcule un `rationale` contextuel riche (retry multi-type, pivot chiffré, réduction contextuelle...) quand la requête passe par le moteur IA complet, mais `ui/src/stores/app.ts` ne lisait jamais `result.rationale` — seulement `result.intentRationale`, plus générique et toujours présent. La ligne "Décision : …" du chat n'affichait donc presque jamais la vraie explication d'un choix de stratégie complexe
+      - [x] Corrigé (`ui/src/stores/app.ts`, construction du message assistant dans `doSearch`) : `result.rationale` est préféré à `result.intentRationale` quand présent, fallback conservé pour ne rien régresser sur les intentions simples (freeze/write/reset directs)
+      - [x] Diagnostiqué : `applyFreezeTick()` détecte déjà très bien qu'un freeze polling dérive (`freezeInstabilityDetected`) mais le frontend se contentait de `pushMessage` en prose — jamais de bouton actionnable, contrairement au mécanisme `recoveryActions` déjà utilisé par `doAutoResolve()`/`AssistantView.vue`. `AGENTS.md` documentait lui-même ce trou
+      - [x] Nouveau `ApplicationController::escalatePollingFreezeToBreakpoint(addressHex)` (`apps/desktop/application_controller.{h,cpp}`) : réutilise directement la `FreezeEntry` polling existante (type/bytes déjà connus, aucun décodage/ré-encodage) pour basculer en Freeze BP. Fin de `freezeWithBreakpoint()` extraite dans un helper privé partagé `activateBreakpointFreezeFor(...)` pour éviter la duplication entre les deux points d'entrée (adresse saisie par l'utilisateur vs adresse déjà en freeze)
+      - [x] `ui/src/services/backend.ts` : `escalatePollingFreezeToBreakpoint` ajouté à l'interface **et** au mock (contrat C++ ↔ Vue). `ui/src/stores/app.ts` : le handler `freezeInstabilityDetected` pousse maintenant un message avec `recoveryActions` (`escalate_freeze_bp` + `open_expert`) ; nouvelle fonction `escalateFreezeToBreakpoint(address)` qui passe par le même garde-fou `confirmRiskAction('debug', ...)` que `startBreakpointFreeze()` existant — aucun bypass de confirmation. `AssistantView.vue` : nouveau cas `escalate_freeze_bp` dans `runRecoveryAction()`
+      - [x] `ai/auto_resolver.{h,cpp}` : nouveau champ `freezeInstabilityCount` et insight `freeze_instability_detected` (`safe: false`, même famille que `aob_multimatch_guard`/`audit_risky_actions`) dans `computeAutoResolveTelemetryReport`, à partir de l'événement télémétrie `freeze_poll_instability` déjà loggé mais jusque-là jamais relu par le Rapport IA/Investigation
+      - [x] Test : nouveau cas `AutoResolverTest.FlagsFreezeInstabilityWithBreakpointNextAction` (`tests/unit/test_auto_resolver.cpp`), même patron que les insights existants
+      - [x] Validation (partie explication + freeze BP) : 122/122 tests unitaires (+1), `npm run type-check`/`build` OK, build C++ complet OK
+    - [x] PHASE 18 ASSISTANT (suite, demandée explicitement le 17/08/2026) - Proposer une alternative sur le chemin normal du chat, pas seulement via le bouton "Auto"
+      - [x] Diagnostiqué avant de coder (pour ne pas dupliquer ce qui existe déjà) : `startSmartSearch` (`apps/desktop/application_controller.cpp`) a en réalité déjà un `recoveryActions` riche pour `next_scan`/`unknown_compare` retombant à 0 candidat (huit actions : `undo_reduction`, `try_changed`, `try_increased`, `retry_float32`, `retry_int64`, `retry_int32_x100`, `try_unknown_increased`, `new_search`) — ce n'était donc pas un trou générique, mais trois branches précises sans aucune `recoveryActions` : `encrypted_scan` à 0 match, `trace_ui_string` à 0 match, et `exact_scan`/`exact_scan_multi_type` à 0 candidat (qui en plus annonçait à tort `workflowStatus: awaiting_value_change` — "fais bouger la valeur" — alors qu'aucun candidat n'existait encore pour justifier une réduction)
+      - [x] Corrigé, dans les trois branches de `startSmartSearch` :
+        - `exact_scan`/`exact_scan_multi_type`, `count == 0` : nouveau `workflowStatus: "no_candidate"` (au lieu de `awaiting_value_change` trompeur) + `recoveryActions` (`try_encrypted_scan`, `trace_ui_string`, `try_unknown_changed`, `new_search`)
+        - `encrypted_scan`, `encryptedMatches == 0` : `recoveryActions` ajoutées (`trace_ui_string`, `try_unknown_changed`, `new_search`)
+        - `trace_ui_string`, `stringsFound == 0` : `recoveryActions` ajoutées (`try_encrypted_scan`, `try_unknown_changed`, `new_search`)
+      - [x] Zéro changement frontend nécessaire : les quatre ids d'action réutilisés étaient déjà tous gérés par `runRecoveryAction()` (`AssistantView.vue`), câblés à l'origine pour le bouton "Auto"/`doAutoResolve()` — la case `if (result.recoveryActions)` existait déjà aussi côté `doSearch()` (`ui/src/stores/app.ts`) sans jamais recevoir de contenu pour ces trois cas. Confirme que le mécanisme de rendu était déjà prêt partout, seul le backend ne l'alimentait pas encore pour ces branches
+      - [x] Pas de nouveau test dédié : `startSmartSearch`/`ApplicationController` n'a aucune couverture de test existante (ni unitaire ni intégration, vérifié par recherche avant de coder) — trou pré-existant, pas introduit ici. Le changement suit exactement le patron déjà en place (et non testé) du cas `next_scan` à 0 candidat. Vérifié à la place par lecture attentive du diff + build complet + suite unitaire complète (122/122, aucune régression, aucun test n'assertait sur `awaiting_value_change`/`no_candidate` pour ces branches)
+      - [x] Validation : build C++ complet OK, 122/122 tests unitaires (inchangé, aucune régression), `npm run type-check` OK (aucun fichier frontend modifié pour cette partie)
+    - [x] PHASE 18 P5 - Extraction ExpertView.vue en composants (V1 sûre, panels store-driven sans couplage croisé)
+      - [x] Audité avant de coder : `ExpertView.vue` (5699 lignes, 13 `<section class="panel">`, 81 `ref()` locaux). Le panel "Trace UI string" regroupe en réalité 4 sous-fonctionnalités (UI-string, Find What Writes, structure analyzer, candidats scorés IA) et concentre le plus fort couplage croisé (écrit directement dans les refs locaux des panels AOB et Write) — volontairement laissé en l'état, nécessite un composable partagé avant extraction. 6 panels identifiés comme store-driven et sans écriture croisée : Région active, Next scan, Watch live, Scan groupe, Watch chaînes de pointeurs, Journal utilisateur
+      - [x] Extraits en composants (`ui/src/components/expert/{RegionPanel,NextScanPanel,WatchLivePanel,GroupScanPanel,PointerChainWatchPanel,ActionLogPanel}.vue`) : chaque composant appelle `useAppStore()` directement (pas de props/emits pour l'état déjà global), suit le seul vrai précédent de composant à état de la famille (`ExpertView.vue` lui-même) — `InfoDot.vue`/`RiskBadge.vue` ne couvraient que le cas "leaf sans état partagé"
+      - [x] Un seul cas de couplage réel trouvé pendant l'extraction : le panel Scan groupe affiche `findWhatAccessesResult`, une donnée possédée/écrite par le panel Trace UI string non extrait. Passée en prop (`find-what-accesses-result`) plutôt que dupliquée en ref local ou remontée dans le store — la donnée reste possédée là où elle est écrite
+      - [x] Nouveaux `ui/src/utils/format.ts` (`formatNumber`/`formatRate`/`formatBytes`, précédemment dupliqués localement dans `ExpertView.vue`, utilisés par les panels restants et les nouveaux composants) et `ui/src/utils/valueTypes.ts` (`valueTypeOptions`, même raison)
+      - [x] Primitives de panneau partagées (`.panel`, `.panel-title`, `.panel-heading`, `.hint`, `.error`, `.metrics`, `.controls`/`.next-controls`, `.input`, `.btn`/`.btn-primary`/`.btn-secondary`/`.compact`/`.btn-spinner`, `.watch-list`/`.watch-row`, `.action-log`/`.action-entry`) ajoutées à `ui/src/assets/main.css` (global) plutôt que dupliquées dans chaque nouveau composant — ajoutées sans toucher aux règles scoped existantes dans `ExpertView.vue` (toujours utilisées par les 7 panels restants), donc zéro risque de régression visuelle sur ce qui n'a pas été extrait. Le style vraiment spécifique au Scan groupe (`.group-scan-*`, `.input-mini`, `.row-actions`) reste scoped dans son composant
+      - [x] `ExpertView.vue` : 5699 → 5492 lignes. Les 6 `<section>` remplacées par `<ComponentName v-show="showStep(...)" v-if="..." />` — Vue applique `v-show`/`v-if` sur la racine du composant enfant comme s'il s'agissait d'un élément normal, donc aucune logique de visibilité à threader dans les enfants
+      - [x] Validation : `npm run type-check` OK avec `noUnusedLocals`/`noUnusedParameters` actifs (confirme qu'aucun import n'est mort des deux côtés de l'extraction), `npm run build` OK (82 modules transformés contre 67 avant, les 6 composants + 2 utils bien pris en compte). Pas de changement C++, tests unitaires C++ non concernés
+      - [x] Volontairement pas dans cette passe : le cluster mega-panel Trace UI string / AOB / pointer chains — couplage mutuel confirmé (`generateAobSignatureFromHit()` appelé depuis le panel Trace UI string écrit dans les refs du panel AOB), a besoin d'un composable partagé (`useExpertWriteSelection()`, `useExpertAobFlow()`) avant extraction, décision d'architecture distincte plutôt que précipitée ici
+    - [x] PHASE 20 - Câblage injection / hooking / auto-assembler (outils Expert manuels gardés)
+      - [x] Audité avant de coder : `core/inject/dll_injector.h`, `core/inject/function_hook.h`, `core/scripting/auto_assembler.h` existaient déjà, API complète, testés en intégration contre `KillEngineTestTarget.exe` (`InjectDllFailsCleanlyOnMissingDll`, `InlineHookHelpersProduceValidShellcode`, `InjectShellcodeRetDoesNotCrashTarget`, `GetRemoteProcAddressFindsLoadLibraryW`), mais zéro référence dans `application_controller.cpp` — rien exposé à l'UI. L'auto-assembler n'a aucun test et son propre commentaire dit "v0 volontairement borné" (nop/ret/int3/db/jmp/call/je/jne, instructions mémoire refusées proprement)
+      - [x] Backend (`apps/desktop/application_controller.{h,cpp}`) : 6 nouvelles méthodes `Q_INVOKABLE` suivant exactement le patron `applyCodePatch`/`restoreCodePatch` (garde bytes originaux pour restore, erreurs QVariantMap explicites, `appendScanTelemetry`) : `injectDllIntoProcess`, `installFunctionHook`/`removeFunctionHook` (nouveau `QHash<uint64_t, ActiveFunctionHook> m_activeFunctionHooks`, même rôle que `m_activeCodePatches`), `parseAutoAssemblerScript` (aperçu : parse + compile sans exécuter), `executeAutoAssemblerScript`/`restoreAutoAssemblerScript` (nouveau `std::optional<killcore::AutoAsmResult> m_lastAutoAsmResult`). Les deux nouveaux membres sont vidés dans le flux d'attachement (même endroit que `m_activeCodePatches.clear()`) pour ne pas laisser une adresse d'un ancien processus attaché active
+      - [x] Frontend : `ui/src/services/backend.ts` (interface + mock, les 6 méthodes), `ui/src/stores/app.ts` (nouveaux refs `injectDllPath`/`hookTargetAddress`/`hookFunctionAddress`/`autoAsmScriptText`/résultats, 6 wrappers `injectDll`/`installHook`/`removeHook`/`previewAutoAsmScript`/`executeAutoAsmScript`/`restoreAutoAsmScript`). Chaque action risquée passe par `confirmRiskAction('injection', ...)` avant l'appel backend — `confirmRiskAction` bloquait déjà `risk === 'injection'` en mode Auto Safe/Expert et ne l'autorisait qu'en mode Trainer (logique existante, pas modifiée) : garde-fou déjà en place, pas inventé pour l'occasion
+      - [x] Nouveau `ui/src/components/expert/InjectionPanel.vue`, extrait directement en composant (cohérent avec le chantier P5) plutôt qu'ajouté en `<section>` inline. Placé derrière `expertDense` (mode power-user) + `showStep('persist')`, même catégorie que AOB/patches. Entrées d'aide `help.injection.*` ajoutées à `fr.json`/`en.json` (même format que les 15 autres topics `InfoDot` déjà présents dans Expert)
+      - [x] Validation : build C++ complet OK, 122/122 tests unitaires (inchangé), 7/7 `PowerUpRuntimeTest.*` (dont les 4 tests injection/hook déjà existants, aucune régression), `npm run type-check`/`build` OK (85 modules contre 82)
+      - [x] Volontairement pas dans cette passe : intégration Trainer (`TrainerFeature.action` n'a pas de valeur `'hook'`, reste `write | freeze_polling | freeze_breakpoint | patch`) — un hook persistant qui survit au redémarrage demanderait la même rigueur de stabilité que le scoring AOB des patches, décision d'architecture à part plutôt qu'improvisée ici
+    - [x] PHASE 18 FINITION - Model Manager (sélecteur fichier), onboarding première ouverture, presets Expert/Trainer
+      - [x] Vérifié avant de coder que la piste initiale ("model/qwen manque un MODEL_MANIFEST.json, donc absent de la liste Agents embarqués") n'était PAS un bug : lu `getAiModelStatus()` (`application_controller.cpp`) en entier — le statut produit (`ready`/`available`/`modelFound`) vient exclusivement de `killai::ModelLocator::findQwenGguf()`, totalement indépendant de la liste `embeddedAgents` (qui ne liste que les dossiers avec un manifest JSON). `model/qwen/` n'est délibérément PAS listé comme agent par design (`ULTIMATE_PRODUCT_GUIDELINE.md` : c'est le pool de poids partagé référencé par les manifests `assistant`/`auto_resolver`, pas un agent distinct) — ajouter un `MODEL_MANIFEST.json` à `model/qwen/` aurait introduit un faux troisième agent plutôt que corrigé quoi que ce soit. Rien changé sur ce point après vérification
+      - [x] Model Manager : nouveau `Q_INVOKABLE QVariantMap browseForModelFile()` (`QFileDialog::getOpenFileName`, filtre `*.gguf`) — remplace la saisie manuelle seule par un vrai sélecteur de fichier natif dans `SettingsView.vue`, le champ texte reste comme fallback avancé. Téléchargement de modèle explicitement laissé hors scope (fonctionnalité réseau à part entière : hébergement, reprise sur erreur, intégrité — mérite sa propre décision produit)
+      - [x] Onboarding : nouveaux `Q_INVOKABLE bool hasSeenOnboarding() const`/`void setOnboardingSeen(bool)` (QSettings `ui/hasSeenOnboarding`, survit à un reset partiel côté frontend) et `Q_INVOKABLE bool openUserGuide() const` (ouvre `USER_GUIDE.md` via `QDesktopServices::openUrl`, résout le chemin package ET dev). Nouvelle modale `App.vue` (calquée sur `.risk-modal` existante) montrée une seule fois au premier lancement : 3 points clés (attacher un process, décrire une valeur à l'Assistant, transformer en Trainer) plutôt que les 330 lignes du guide complet, plus un lien vers le guide complet. Un seul bouton "Commencer" marque la modale vue — pas de case "Ne plus afficher" séparée, redondante avec le flag QSettings qui gate déjà l'affichage au tout premier lancement
+      - [x] Presets Expert/Trainer : 4 nouvelles entrées `scenario-*` (Argent/Or, Vie/PV, Score/Niveau, Munitions) ajoutées au tableau `workflowPresets` déjà existant (`ui/src/stores/app.ts`) — réutilisent `applyWorkflowPreset()` tel quel, aucun nouveau mécanisme. Rendues en rangée de boutons (`.preset-row`, nouveau CSS global dans `main.css` réutilisé par les deux vues) dans `ExpertView.vue` (haut de page) et `TrainerView.vue` (sous le header) ; `TrainerView.vue` utilise la classe `.btn` seule (convention locale déjà en place dans cette vue, différente de `.btn-secondary`/`.compact`) pour rester visuellement cohérent avec ses propres boutons existants plutôt que d'introduire un style mixte scoped/global
+      - [x] Validation : build C++ complet OK, 122/122 tests unitaires (inchangé, aucune régression), `npm run type-check`/`build` OK (85 modules, stable depuis la passe précédente)
+    - [x] PHASE 18 BUG - "killengine.exe ne s'ouvre plus" après rebuild (signalé par l'utilisateur le 17/08/2026)
+      - [x] Diagnostiqué : crash `STATUS_HEAP_CORRUPTION` (0xc0000374, confirmé via l'event log Windows "Application Error", fault module `ntdll.dll`) au lancement, juste après `QWebChannel::registerObject()`. Cause : `build/apps/desktop/KillEngine_autogen/` (fichiers générés par moc) désynchronisé avec `application_controller.h` après plusieurs sessions d'ajout de `Q_INVOKABLE` — piège déjà documenté dans `AGENTS.md` ("si CMake ne détecte pas les nouveaux fichiers, supprimer le dossier build/"). Confirmé via `git stash` que la dernière baseline committée (`36ca535`) se lance sans problème — donc pas un bug de logique introduit cette session, un problème de cache de build
+      - [x] Corrigé : suppression de `build/apps/desktop/KillEngine_autogen/` puis rebuild complet (force la régénération moc). Vérifié : log de démarrage complet jusqu'à "UI loaded. Entering event loop.", 122/122 tests unitaires
+    - [x] PHASE 18 BUG - Régression signalée "l'IA n'a pas trouvé le score" (Solitaire, 17/08/2026) — en réalité un bug pré-existant, pas une régression de session
+      - [x] Diagnostiqué depuis `smart_search_debug.jsonl` (l'utilisateur a suggéré de regarder le log) : réduction à 4 candidats réussie (`next_scan` de 15→30 fonctionne), mais `auto_write_partial_or_failed` avec le détail par adresse montrant `error: "Impossible de parser '100000' comme UInt16."` sur les 4 candidats — la cible demandée (100000) dépasse le maximum d'un `UInt16` (65535)
+      - [x] Root cause dans `suggestedWritesForCandidates` (`apps/desktop/application_controller.cpp`) : construit une suggestion d'écriture "fiabilité élevée" pour chaque candidat survivant en lui assignant directement son type détecté par le scan (`UInt16` ici, un des nombreux types que la petite valeur 15 matche trivialement lors du scan multi-type), sans jamais vérifier que la valeur cible rentre dans ce type — l'échec n'apparaissait qu'au moment d'écrire, trop tard pour être utile. Confirmé identique au dernier commit (`git show HEAD:...`) : bug pré-existant non lié aux changements de cette session, juste jamais déclenché avant avec des cibles qui rentraient dans le type détecté
+      - [x] Corrigé : `suggestedWritesForCandidates` valide maintenant chaque candidat avec `killcore::parseScanValue(value, candidate.type, ...)` avant de le proposer ; un candidat dont le type ne peut pas représenter la valeur cible est filtré (au lieu d'être présenté comme prêt à écrire) et la boucle continue vers le candidat suivant jusqu'à `limit` résultats valides, plutôt que de prendre aveuglément les N premiers
+      - [x] Validation : build C++ complet OK, 122/122 tests unitaires (inchangé), lancement KillEngine.exe confirmé propre après le fix. Pas de nouveau test dédié — `suggestedWritesForCandidates` est une fonction libre dans l'anonymous namespace d'`application_controller.cpp`, aucune couverture de test existante pour cette fonction ni pour le fichier en général (trou pré-existant documenté plus haut dans ce tracker)

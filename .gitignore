@@ -46,7 +46,12 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
-# Models (too large for git)
+# Models (too large for git) — actual runtime layout is model/<ai-name>/*.gguf
+# (singular), not models/ (plural). The plural pattern below never matched
+# anything: model/qwen/*.gguf (~1.4 GB) was sitting untracked and un-ignored.
+model/**/*.gguf
+model/**/*.bin
+model/**/*.partial
 models/*.gguf
 models/*.bin
 models/*.partial
@@ -73,3 +78,5 @@ temp/
 
 # Benchmark results (machine-specific)
 docs/benchmark-results/
+docs/manual-validation-results/
+diagnostics/

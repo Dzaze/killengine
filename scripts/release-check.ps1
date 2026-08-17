@@ -2,13 +2,17 @@
 # Usage:
 #   .\scripts\release-check.ps1
 #   .\scripts\release-check.ps1 -SkipUi -Package
+#   .\scripts\release-check.ps1 -Package -ExcludeModel
+#   .\scripts\release-check.ps1 -Package -RequireSigning   (official release: fail if KillEngine.exe ships unsigned)
 
 param(
     [switch]$SkipUi,
     [switch]$SkipConfigure,
     [switch]$SkipTests,
+    [switch]$SkipLaunchSmoke,
     [switch]$Package,
-    [switch]$IncludeModel
+    [switch]$ExcludeModel,
+    [switch]$RequireSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +32,35 @@ function Invoke-Step {
     & $Script
     if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
         throw "$Name failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Invoke-KillEngineLaunchSmoke {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExePath
+    )
+
+    if (-not (Test-Path $ExePath)) {
+        throw "KillEngine.exe not found at $ExePath"
+    }
+
+    $process = Start-Process -FilePath $ExePath -PassThru
+    try {
+        Start-Sleep -Seconds 5
+        $alive = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+        if (-not $alive) {
+            throw "KillEngine.exe exited during launch smoke."
+        }
+    } finally {
+        $alive = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+        if ($alive) {
+            $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
+            if ($cim) {
+                Invoke-CimMethod -InputObject $cim -MethodName Terminate | Out-Null
+            } else {
+                Stop-Process -Id $process.Id -Force
+            }
+        }
     }
 }
 
@@ -63,6 +96,17 @@ try {
         & (Join-Path $repoRoot "scripts\build.ps1")
     }
 
+    Invoke-Step "Embedded AI layout" {
+        & (Join-Path $repoRoot "scripts\verify-ai-layout.ps1") -LayoutRoot (Join-Path $repoRoot "build\bin")
+    }
+
+    if (-not $SkipLaunchSmoke) {
+        Invoke-Step "KillEngine launch smoke" {
+            $exe = Join-Path $repoRoot "build\bin\KillEngine.exe"
+            Invoke-KillEngineLaunchSmoke -ExePath $exe
+        }
+    }
+
     if (-not $SkipTests) {
         $unitTests = Join-Path $repoRoot "build\bin\killengine_unit_tests.exe"
         $integrationTests = Join-Path $repoRoot "build\bin\killengine_integration_tests.exe"
@@ -78,10 +122,23 @@ try {
 
     if ($Package) {
         Invoke-Step "Portable package" {
-            if ($IncludeModel) {
-                & (Join-Path $repoRoot "scripts\package-windows.ps1") -SkipBuild -IncludeModel
+            if ($ExcludeModel) {
+                & (Join-Path $repoRoot "scripts\package-windows.ps1") -SkipBuild -ExcludeModel -RequireSigning:$RequireSigning
             } else {
-                & (Join-Path $repoRoot "scripts\package-windows.ps1") -SkipBuild
+                & (Join-Path $repoRoot "scripts\package-windows.ps1") -SkipBuild -RequireSigning:$RequireSigning
+            }
+        }
+
+        if (-not $SkipLaunchSmoke) {
+            Invoke-Step "Portable launch smoke" {
+                $exe = Join-Path $repoRoot "dist\KillEngine-portable\KillEngine.exe"
+                Invoke-KillEngineLaunchSmoke -ExePath $exe
+            }
+        }
+
+        if (-not $ExcludeModel) {
+            Invoke-Step "Portable embedded AI layout" {
+                & (Join-Path $repoRoot "scripts\verify-ai-layout.ps1") -LayoutRoot (Join-Path $repoRoot "dist\KillEngine-portable")
             }
         }
     }

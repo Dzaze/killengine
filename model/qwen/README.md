@@ -24,6 +24,6 @@ Le modèle sera téléchargeable via le Model Manager intégré (Phase 12) ou in
 Phase 9 peut déjà charger un modèle local si :
 
 - `llama-cli.exe` est disponible à côté de `KillEngine.exe`, dans `third_party/llama.cpp/build/bin/...`, ou via `KILLENGINE_LLAMA_CLI`.
-- le modèle GGUF est disponible sous `models/qwen.gguf`, `models/Qwen3.5-2B-Q4_K_M.gguf`, ou via `KILLENGINE_QWEN_GGUF`.
+- le modele GGUF est disponible sous `model/qwen/*.gguf`, ou via `KILLENGINE_QWEN_GGUF` pour les tests avances.
 
 Si l'un des deux manque, KillEngine garde le planner déterministe local comme fallback.

@@ -256,6 +256,22 @@ export interface ExactScanResult {
   candidateStoreMemoryBytes?: number
 }
 
+export interface EncryptedScanResult {
+  success: boolean
+  partial?: boolean
+  regionsScanned: number
+  bytesScanned: number
+  matchesFound: number
+  matchesReturned: number
+  maxResults?: number
+  error: string
+  matches: ExactScanMatch[]
+  elapsedMs?: number
+  mode?: string
+  key?: string
+  keySearchBits?: number
+}
+
 export interface CandidatePage {
   pageIndex: number
   pageSize: number
@@ -371,6 +387,13 @@ export interface MemoryWriteResult {
   temporaryVerified?: boolean
   restoredBeforeFinal?: boolean
   finalVerified?: boolean
+  mode?: string
+  hits?: number
+  rewrites?: number
+  blocks?: number
+  errors?: number
+  breakpointSize?: number
+  freezeMode?: string
 }
 
 export interface MemoryWriteTarget {
@@ -395,6 +418,18 @@ export interface AobScanMatch {
   moduleOffset?: string
 }
 
+export interface AobPatternQuality {
+  score: number
+  level: 'strong' | 'medium' | 'weak' | 'invalid' | string
+  warning?: string
+  patternBytes?: number
+  fixedBytes?: number
+  wildcardBytes?: number
+  uniqueFixedBytes?: number
+  fixedRatio?: number
+  trainerSafe?: boolean
+}
+
 export interface AobScanResult {
   success: boolean
   partial?: boolean
@@ -406,6 +441,9 @@ export interface AobScanResult {
   patternBytes?: number
   executableOnly?: boolean
   imageOnly?: boolean
+  signatureQuality?: AobPatternQuality
+  signatureRisk?: string
+  signatureWarning?: string
 }
 
 export interface AobSignatureResult {
@@ -420,6 +458,8 @@ export interface AobSignatureResult {
   hex?: string
   pattern?: string
   patternBytes?: number
+  signatureQuality?: AobPatternQuality
+  signatureRisk?: string
   module?: string
   moduleOffset?: string
 }
@@ -463,6 +503,8 @@ export interface CodePatchSuggestionResult {
   decoder?: string
   category?: string
   stableAobPattern?: string
+  signatureQuality?: AobPatternQuality
+  signatureRisk?: string
   bytesRead?: number
   bytes?: string
   suggestions?: CodePatchSuggestion[]
@@ -550,6 +592,31 @@ export interface SmartSearchContextResult {
   writeHistory?: string[]
 }
 
+export interface AutoResolveReportResult {
+  success: boolean
+  attached: boolean
+  processName: string
+  candidateCount: number
+  workflow: string
+  initialValue: string
+  targetValue: string
+  valueType: string
+  activeChatTargetCount: number
+  activeProfileTargetCount: number
+  eventCounts: Record<string, number>
+  recentSignals: Array<Record<string, unknown>>
+  recommendations: Array<Record<string, unknown>>
+  guardrails: Array<Record<string, unknown>>
+  nextBestAction?: Record<string, unknown>
+  telemetryInsights?: Array<Record<string, unknown>>
+  displayValueReport?: Record<string, unknown>
+  learnedProfile?: Record<string, unknown>
+  strategyScores?: Array<Record<string, unknown>>
+  preferredStrategy?: Record<string, unknown>
+  summary: string
+  error?: string
+}
+
 export interface AppSettings {
   success?: boolean
   language: 'fr' | 'en'
@@ -564,8 +631,35 @@ export interface AppSettings {
   fastScan: boolean
   smartSearchDebugEnabled: boolean
   smartSearchDebugMaxEvents: number
+  autoRiskMode: 'Safe' | 'Expert' | 'Trainer'
   modelPath: string
+  modelEnabled: boolean
   modelThreads: number
+}
+
+export interface AiModelStatus {
+  success: boolean
+  ready: boolean
+  available?: boolean
+  enabled?: boolean
+  backend: 'llama.cpp' | 'deterministic' | string
+  configuredModelPath: string
+  envModelPath: string
+  envExecutablePath: string
+  modelFound: boolean
+  modelPath: string
+  modelSource: string
+  modelError: string
+  executableFound: boolean
+  executablePath: string
+  modelCandidates: Array<Record<string, unknown>>
+  executableCandidates: Array<Record<string, unknown>>
+  embeddedAgents?: Array<Record<string, unknown>>
+  embeddedAgentCount?: number
+  embeddedModelFolders?: Array<Record<string, unknown>>
+  threads: number
+  message: string
+  error?: string
 }
 
   export interface PointerChainInfo {
@@ -604,6 +698,15 @@ export interface AppSettings {
     alignment?: number
   }
 
+  export interface StableLocatorSuggestion {
+    success: boolean
+    chainCount: number
+    bestChain?: PointerChainInfo
+    elapsedMs?: number
+    message?: string
+    error?: string
+  }
+
   export interface BackendController {
   getVersion(): Promise<string>
   getProcesses(): Promise<ProcessInfo[]>
@@ -640,6 +743,7 @@ export interface AppSettings {
   ): Promise<Record<string, unknown>>
   /** Phase 13 : scan multi-type + variantes de representation (precision de recherche). */
   startExactScanMultiType?(value: string, valueType: string): Promise<ExactScanResult>
+  scanEncryptedValue?(value: string, valueType: string, options: Record<string, unknown>): Promise<EncryptedScanResult>
   scanStarted?: QWebChannelSignal<void>
   scanProgress?: QWebChannelSignal<number>
   scanStatsUpdated?: QWebChannelSignal<number>
@@ -661,19 +765,58 @@ export interface AppSettings {
   rollbackLastWrite(): Promise<MemoryWriteResult>
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
+  analyzeStructureMemory?(addressHex: string, size: number): Promise<Record<string, unknown>>
+  freezeWithBreakpoint?(addressHex: string, valueType: string, value: string, options: Record<string, unknown>): Promise<MemoryWriteResult>
+  stopBreakpointFreeze?(): Promise<MemoryWriteResult>
+  /** Stats live du freeze BP actif (hits/rewrites/errors) sans attendre l'arrêt. */
+  getBreakpointFreezeStats?(): Promise<Record<string, unknown>>
+  /** Fait passer une adresse déjà en freeze polling vers Freeze BP sans que l'appelant reconnaisse type/valeur (réutilise la FreezeEntry existante). */
+  escalatePollingFreezeToBreakpoint?(addressHex: string): Promise<Record<string, unknown>>
+  /** Émis quand un freeze par polling ne tient pas (détecté automatiquement, voir applyFreezeTick côté C++). */
+  freezeInstabilityDetected?: QWebChannelSignal<Record<string, unknown>>
   findWhatWrites?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   findWhatWritesAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   cancelFindWhatWrites?(): Promise<Record<string, unknown>>
   findWhatWritesFinished?: QWebChannelSignal<Record<string, unknown>>
+findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  findWhatAccessesFinished?: QWebChannelSignal<Record<string, unknown>>
+  scanGroupScan?(entries: Array<{ offset: number, type: string, value: string }>, options: Record<string, unknown>): Promise<EncryptedScanResult>
+  writeMemoryHex?(addressHex: string, hexString: string): Promise<Record<string, unknown>>
+  dumpMemoryRegion?(addressHex: string, size: number, fileName: string): Promise<Record<string, unknown>>
+  globalHotkeyTriggered?: QWebChannelSignal<Record<string, unknown>>
   scanAobPattern?(pattern: string, options: Record<string, unknown>): Promise<AobScanResult>
   generateAobSignature?(addressHex: string, options: Record<string, unknown>): Promise<AobSignatureResult>
   applyCodePatch?(addressHex: string, bytesText: string, options: Record<string, unknown>): Promise<CodePatchResult>
   suggestCodePatches?(addressHex: string, options: Record<string, unknown>): Promise<CodePatchSuggestionResult>
   restoreCodePatch?(addressHex: string): Promise<CodePatchResult>
+  /** Phase 20 — outils Expert manuels gardés par confirmRiskAction('injection', ...) côté store. */
+  injectDllIntoProcess?(dllPath: string): Promise<Record<string, unknown>>
+  installFunctionHook?(targetAddressHex: string, hookAddressHex: string): Promise<Record<string, unknown>>
+  removeFunctionHook?(targetAddressHex: string): Promise<Record<string, unknown>>
+  parseAutoAssemblerScript?(scriptText: string): Promise<Record<string, unknown>>
+  executeAutoAssemblerScript?(scriptText: string): Promise<Record<string, unknown>>
+  restoreAutoAssemblerScript?(): Promise<Record<string, unknown>>
   setFreezeInterval(intervalMs: number): Promise<Record<string, unknown>>
+  registerGlobalHotkey?(combo: string, action: Record<string, unknown>): Promise<Record<string, unknown>>
+  unregisterGlobalHotkey?(id: number): Promise<Record<string, unknown>>
+  getGlobalHotkeys?(): Promise<Record<string, unknown>>
+  clearGlobalHotkeys?(): Promise<Record<string, unknown>>
+  setTrainerOverlayVisible?(visible: boolean, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  updateTrainerOverlay?(state: Record<string, unknown>): Promise<Record<string, unknown>>
   startSmartSearch(query: string): Promise<SmartSearchResult>
+  startAutoResolve?(query: string, options: Record<string, unknown>): Promise<SmartSearchResult>
+  getAutoResolveReport?(maxEvents: number): Promise<AutoResolveReportResult>
+  clearAutoResolveMemory?(allProcesses: boolean): Promise<Record<string, unknown>>
+  logAiAudit?(event: string, payload: Record<string, unknown>): Promise<Record<string, unknown>>
   ping(message: string): Promise<string>
   getSettings(): Promise<AppSettings>
+  getAiModelStatus?(): Promise<AiModelStatus>
+  /** Sélecteur de fichier natif pour le chemin GGUF personnalisé (remplace la saisie manuelle). */
+  browseForModelFile?(): Promise<Record<string, unknown>>
+  /** Modale de bienvenue première ouverture (QSettings, survit à un profil Windows différent). */
+  hasSeenOnboarding?(): Promise<boolean>
+  setOnboardingSeen?(seen: boolean): Promise<void>
+  openUserGuide?(): Promise<boolean>
   saveSettings(settings: AppSettings): Promise<AppSettings>
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
@@ -715,7 +858,7 @@ export interface AppSettings {
   restoreAllProfileCodePatches?(profileName: string): Promise<Record<string, unknown>>
   inspectProfileCodePatches?(profileName: string): Promise<Record<string, unknown>>
 
-  // Phase 14 — Pointer Chains (StarCraft 2 / jeux modernes)
+  // Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
   scanPointerChains?(addressHex: string, scanOptions: PointerScanOptions): Promise<PointerScanResult>
   resolvePointerChain?(chain: PointerChainInfo): Promise<PointerChainResolveResult>
   savePointerChainProfileTarget?(
@@ -725,6 +868,8 @@ export interface AppSettings {
     valueType: string,
     description: string,
   ): Promise<Record<string, unknown>>
+  /** Après une écriture confirmée : cherche une chaîne de pointeurs stable vers cette adresse. Lecture seule, bornée, à appeler explicitement (jamais automatiquement après chaque écriture). */
+  suggestStableLocatorForAddress?(addressHex: string, options: PointerScanOptions): Promise<StableLocatorSuggestion>
 }
 
 class BackendService {
@@ -1160,6 +1305,13 @@ class BackendService {
           hex: '',
         }
       },
+      async analyzeStructureMemory(_addressHex: string, _size: number) {
+        return {
+          success: false,
+          error: 'Mock backend',
+          fields: [],
+        }
+      },
       async startExactScan(_value: string, _valueType: string) {
         return {
           success: false,
@@ -1186,6 +1338,18 @@ class BackendService {
           error: 'Mock backend',
           matches: [],
           candidateStoreSize: 0,
+        }
+      },
+      async scanEncryptedValue(_value: string, _valueType: string, _options: Record<string, unknown>) {
+        return {
+          success: false,
+          partial: false,
+          regionsScanned: 0,
+          bytesScanned: 0,
+          matchesFound: 0,
+          matchesReturned: 0,
+          error: 'Mock backend',
+          matches: [],
         }
       },
       async startExactScanAsync(_value: string, _valueType: string, _expertOptions: ExpertScanOptions) {
@@ -1295,6 +1459,21 @@ class BackendService {
       async setFreezeValue(_addressHex: string, _valueType: string, _value: string, enabled: boolean) {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend', enabled }
       },
+      async freezeWithBreakpoint(_addressHex: string, _valueType: string, _value: string, _options: Record<string, unknown>) {
+        return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend', enabled: false }
+      },
+      async escalatePollingFreezeToBreakpoint(_addressHex: string) {
+        return { success: false, enabled: false, mode: 'breakpoint', error: 'Mock backend' }
+      },
+      async getBreakpointFreezeStats() {
+        return { active: false, mode: 'breakpoint', hits: 0, rewrites: 0, blocks: 0, errors: 0, healthy: true }
+      },
+      async suggestStableLocatorForAddress(_addressHex: string, _options: PointerScanOptions) {
+        return { success: false, chainCount: 0, error: 'Mock backend' }
+      },
+      async stopBreakpointFreeze() {
+        return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend', enabled: false }
+      },
       async findWhatWrites(_addressHex: string, _options: Record<string, unknown>) {
         return { success: false, hitCount: 0, hits: [], error: 'Mock backend' }
       },
@@ -1319,8 +1498,44 @@ class BackendService {
       async restoreCodePatch(_addressHex: string) {
         return { success: false, error: 'Mock backend' }
       },
+      async injectDllIntoProcess(_dllPath: string) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async installFunctionHook(_targetAddressHex: string, _hookAddressHex: string) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async removeFunctionHook(_targetAddressHex: string) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async parseAutoAssemblerScript(_scriptText: string) {
+        return { success: false, parseSuccess: false, parseError: 'Mock backend', instructions: [], allocations: [], labels: [] }
+      },
+      async executeAutoAssemblerScript(_scriptText: string) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async restoreAutoAssemblerScript() {
+        return { success: false, error: 'Mock backend' }
+      },
       async setFreezeInterval(_intervalMs: number) {
         return { success: false, error: 'Mock backend' }
+      },
+      async registerGlobalHotkey(combo: string, action: Record<string, unknown>) {
+        return { success: true, id: Math.floor(Math.random() * 100000), combo, ...action }
+      },
+      async unregisterGlobalHotkey(id: number) {
+        return { success: true, id }
+      },
+      async getGlobalHotkeys() {
+        return { success: true, hotkeys: [] }
+      },
+      async clearGlobalHotkeys() {
+        return { success: true }
+      },
+      async setTrainerOverlayVisible(visible: boolean, _options: Record<string, unknown>) {
+        return { success: true, visible }
+      },
+      async updateTrainerOverlay(state: Record<string, unknown>) {
+        return { success: true, state }
       },
       async startSmartSearch(query: string) {
         return {
@@ -1328,6 +1543,49 @@ class BackendService {
           message: 'Mock backend — Smart Search non disponible',
           query,
         }
+      },
+      async startAutoResolve(query: string, _options: Record<string, unknown>) {
+        return {
+          status: 'mock',
+          message: 'Mock backend — Auto-résolution non disponible',
+          query,
+        }
+      },
+      async getAutoResolveReport(_maxEvents: number) {
+        return {
+          success: true,
+          attached: false,
+          processName: 'mock',
+          candidateCount: 0,
+          workflow: 'idle',
+          initialValue: '',
+          targetValue: '',
+          valueType: '',
+          activeChatTargetCount: 0,
+          activeProfileTargetCount: 0,
+          eventCounts: {},
+          recentSignals: [],
+          recommendations: [],
+          guardrails: [],
+          nextBestAction: {
+            id: 'attach_process',
+            label: 'Attacher un processus',
+            safe: true,
+            confidence: 100,
+            reason: 'Mock backend sans processus attaché.',
+          },
+          telemetryInsights: [],
+          displayValueReport: {},
+          strategyScores: [],
+          preferredStrategy: {},
+          summary: 'Mock backend — aucun rapport auto.',
+        }
+      },
+      async clearAutoResolveMemory(_allProcesses: boolean) {
+        return { success: true, message: 'Mock backend — mémoire Auto vidée.' }
+      },
+      async logAiAudit(event: string, payload: Record<string, unknown>) {
+        return { success: true, event, payload }
       },
       async ping(message: string) {
         return `pong (mock): ${message}`
@@ -1346,12 +1604,52 @@ class BackendService {
           fastScan: true,
           smartSearchDebugEnabled: true,
           smartSearchDebugMaxEvents: 30,
+          autoRiskMode: 'Safe',
           modelPath: '',
+          modelEnabled: true,
           modelThreads: 4,
         }
       },
       async saveSettings(settings: AppSettings) {
         return { ...settings, success: true }
+      },
+      async getAiModelStatus() {
+        return {
+          success: true,
+          ready: false,
+          available: false,
+          enabled: true,
+          backend: 'deterministic',
+          configuredModelPath: '',
+          envModelPath: '',
+          envExecutablePath: '',
+          modelFound: false,
+          modelPath: '',
+          modelSource: '',
+          modelError: 'Mock backend.',
+          executableFound: false,
+          executablePath: '',
+          modelCandidates: [],
+          executableCandidates: [],
+          embeddedAgents: [
+            { id: 'assistant', displayName: 'Assistant IA', role: 'assistant', modelFound: false, valid: true, modelPath: '' },
+            { id: 'auto_resolver', displayName: 'Auto Resolver IA', role: 'resolver', modelFound: false, valid: true, modelPath: '' },
+          ],
+          embeddedAgentCount: 2,
+          embeddedModelFolders: [],
+          threads: 4,
+          message: 'IA embarquée indisponible dans le mock.',
+        }
+      },
+      async browseForModelFile() {
+        return { success: false, cancelled: true }
+      },
+      async hasSeenOnboarding() {
+        return true
+      },
+      async setOnboardingSeen(_seen: boolean) {},
+      async openUserGuide() {
+        return false
       },
       async getLogFilePath() {
         return 'mock://no-log-file'

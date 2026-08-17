@@ -27,10 +27,10 @@
     "refresh": "Rafraîchir",
     "attachFirst": "Attache un processus pour afficher sa carte mémoire.",
     "regions": "Régions",
-    "committed": "Committed",
-    "readable": "Readable",
-    "writable": "Writable",
-    "executable": "Executable",
+    "committed": "Réservée",
+    "readable": "Lisible",
+    "writable": "Modifiable",
+    "executable": "Exécutable",
     "all": "Tout",
     "preview": "Aperçu"
   },
@@ -51,33 +51,34 @@
     "filterAddress": "Filtrer adresse...",
     "previous": "Précédent",
     "next": "Suivant",
-    "nextScan": "Next Scan",
-    "nextValue": "Nouvelle valeur / delta",
+    "nextScan": "Scan suivant",
+    "nextValue": "Nouvelle valeur (si connue)",
     "remaining": "Restants",
     "checked": "Vérifiés",
     "unreadable": "Illisibles",
-    "modeExact": "Exact",
-    "modeChanged": "Changed",
-    "modeUnchanged": "Unchanged",
-    "modeIncreased": "Increased",
-    "modeDecreased": "Decreased",
-    "modeDelta": "Delta"
+    "modeExact": "Valeur exacte",
+    "modeChanged": "A changé",
+    "modeUnchanged": "N'a pas changé",
+    "modeIncreased": "A augmenté",
+    "modeDecreased": "A diminué",
+    "modeDelta": "Delta précis",
+    "nextScanHint": "Change la valeur dans le jeu, choisis ce qui s'est passé dans la liste, puis clique Scan suivant."
   },
   "unknown": {
-    "title": "Unknown initial value",
+    "title": "Valeur initiale inconnue",
     "capture": "Capturer",
     "compare": "Comparer",
     "regions": "Régions",
-    "bytes": "Bytes"
+    "bytes": "Octets"
   },
   "write": {
     "title": "Write / Freeze",
     "address": "Adresse",
     "value": "Valeur",
     "write": "Écrire",
-    "rollback": "Rollback",
-    "freeze": "Freeze",
-    "stopFreeze": "Stop freeze",
+    "rollback": "Annuler",
+    "freeze": "Figer",
+    "stopFreeze": "Arrêter le freeze",
     "verified": "vérifié"
   },
   "actions": {
@@ -90,6 +91,161 @@
     "memory": "Mémoire",
     "profiles": "Profils",
     "expert": "Expert",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "investigation": "Investigation",
+    "trainer": "Trainer"
+  },
+  "help": {
+    "label": {
+      "about": "Aide :",
+      "what": "À quoi ça sert",
+      "when": "Quand l'utiliser",
+      "cost": "Ce que ça coûte",
+      "example": "Exemple"
+    },
+    "risk": {
+      "read": {
+        "label": "Lecture seule",
+        "detail": "Ces outils lisent la mémoire du programme cible sans jamais la modifier."
+      },
+      "write": {
+        "label": "Écrit en mémoire",
+        "detail": "Ces outils modifient les données du programme cible. Réversible via Rollback, mais une mauvaise adresse peut le faire planter."
+      },
+      "code": {
+        "label": "Modifie le code",
+        "detail": "Ces outils attachent un debugger ou réécrivent les instructions du programme cible. Risque de plantage et de détection. À réserver aux programmes que tu contrôles."
+      }
+    },
+    "step": {
+      "find": {
+        "title": "1. Trouver",
+        "what": "Réduire la mémoire entière à une poignée d'adresses candidates."
+      },
+      "inspect": {
+        "title": "2. Inspecter",
+        "what": "Vérifier laquelle de ces adresses est la vraie valeur, et par quel chemin stable y accéder."
+      },
+      "act": {
+        "title": "3. Agir",
+        "what": "Écrire ou figer la valeur. C'est à partir d'ici que le programme cible est modifié."
+      },
+      "persist": {
+        "title": "4. Pérenniser",
+        "what": "Transformer ce qui marche en signature de code, en patch, puis en feature Trainer réutilisable."
+      }
+    },
+    "regionContext": {
+      "title": "Région active",
+      "what": "Détaille la région mémoire de l'adresse sélectionnée : bornes, protection, état et type.",
+      "when": "Pour comprendre pourquoi une écriture échoue, ou pour savoir si l'adresse est dans du Private (données du programme) plutôt que du Mapped ou de l'Image.",
+      "cost": "Lecture seule.",
+      "example": "Une adresse candidate est en 0x1A2B..., type Private, protection RW. C'est une vraie donnée du programme (pas un fichier mappé en lecture seule) : bon signe pour écrire dessus sans risquer une erreur d'accès."
+    },
+    "scanExact": {
+      "title": "Scan exact",
+      "what": "Cherche toutes les adresses mémoire qui contiennent exactement la valeur saisie.",
+      "when": "Quand tu vois la valeur à l'écran et qu'elle reste stable. C'est le point de départ le plus rapide.",
+      "cost": "Lecture seule. Le premier scan peut retourner des milliers de résultats : c'est normal, le Next Scan sert à les réduire.",
+      "example": "Tu vois 41250 comme argent à l'écran. Tape 41250, choisis Int32, clique Scanner. Des centaines d'adresses ressortent : c'est normal, c'est le point de départ, pas le résultat final."
+    },
+    "nextScan": {
+      "title": "Scan suivant",
+      "what": "Relit uniquement les candidats déjà trouvés et ne garde que ceux qui satisfont la comparaison choisie.",
+      "when": "Après un premier scan, dès que la valeur a changé dans le programme. Répète jusqu'à obtenir quelques adresses.",
+      "cost": "Lecture seule. Unchanged est la comparaison la plus bruyante : elle garde presque tout.",
+      "example": "Après le scan à 41250, tu dépenses 500 dans le jeu (nouvel argent affiché : 40750). Tape 40750, clique Next Scan Exact : la liste tombe à quelques dizaines d'adresses."
+    },
+    "unknown": {
+      "title": "Valeur initiale inconnue",
+      "what": "Photographie la mémoire sans connaître la valeur, puis compare les photos successives via ça augmente, ça diminue, ça change, stable.",
+      "when": "Quand la valeur n'est pas affichée en clair : barre de vie, jauge, pourcentage, ou valeur chiffrée.",
+      "cost": "Lecture seule, mais la capture occupe de la mémoire disque temporaire. Compte 3 à 5 comparaisons avant d'obtenir une liste utilisable.",
+      "example": "La barre de vie ne montre pas de nombre exact. Clique Capturer, encaisse un coup dans le jeu, puis clique ça diminue. Répète 2 à 3 fois jusqu'à n'avoir plus que 1 à 5 candidats."
+    },
+    "uiString": {
+      "title": "Trace UI string",
+      "what": "Part du texte affiché à l'écran plutôt que du nombre, puis remonte vers la source numérique ou le pointeur qui l'alimente.",
+      "when": "Quand les scans numériques ne trouvent rien : moteurs modernes, interface découplée, valeur recalculée au moment de l'affichage.",
+      "cost": "Lecture seule. Beaucoup de textes trouvés ne sont que des copies d'affichage et pas la source réelle : utilise Auto origine pour trancher.",
+      "example": "Un scan Int32 classique ne trouve rien pour le \"45\" affiché à l'écran. Lance Scanner texte sur \"45\" : ça remonte les endroits en mémoire où ce texte existe, puis Analyser sources cherche le nombre qui l'alimente juste à côté."
+    },
+    "candidates": {
+      "title": "Candidats",
+      "what": "Liste paginée des adresses retenues par le scan courant, avec leur valeur relue et un indice de confiance.",
+      "when": "En permanence : c'est le plan de travail. Sélectionne des adresses pour les écrire, les surveiller ou les envoyer à l'Assistant.",
+      "cost": "Lecture seule. La relecture interroge le processus cible à chaque rafraîchissement.",
+      "example": "Il reste 3 adresses après réduction. Coche-les, puis clique Envoyer à l'Assistant pour continuer la conversation avec ces pistes actives sans retaper les adresses."
+    },
+    "write": {
+      "title": "Write / Freeze",
+      "what": "Écrit une valeur aux adresses sélectionnées, et peut la réécrire en boucle (freeze) pour qu'elle ne redescende pas.",
+      "when": "Quand il ne reste que quelques candidats. Teste par petits lots avant de figer.",
+      "cost": "Modifie la mémoire du programme cible. Une mauvaise adresse peut le faire planter. Chaque écriture reste annulable via Rollback.",
+      "example": "Il reste 2 candidats après réduction. Tape 999999 dans la valeur, clique Écrire : KillEngine calcule et affiche le Plan d'écriture avant le clic final qui modifie vraiment la mémoire."
+    },
+    "freezeBp": {
+      "title": "Freeze par breakpoint",
+      "what": "Pose un hardware breakpoint sur l'adresse et réécrit la valeur au moment même où le programme tente de la modifier.",
+      "when": "Quand le freeze par polling clignote, parce que la cible réécrit la valeur plus vite que l'intervalle de scrutation.",
+      "cost": "Attache le debugger Windows au processus. Peut être détecté ou perturber la cible.",
+      "example": "Le freeze normal à 16 ms clignote parce que le jeu réécrit la valeur plus vite qu'un tick. Bascule sur Freeze BP : la valeur est corrigée à l'instant même où le jeu essaie de l'écrire."
+    },
+    "watchLive": {
+      "title": "Watch live",
+      "what": "Surveille jusqu'à 200 adresses et affiche leurs valeurs en temps réel, sans cliquer adresse par adresse.",
+      "when": "Pour départager plusieurs candidats : la bonne adresse suit ce que tu fais dans le programme.",
+      "cost": "Lecture seule. Un lot important de surveillances augmente la charge de lecture.",
+      "example": "Tu as 4 candidats suspects. Clique Watch sur chacun, puis observe en jeu : celui qui bouge exactement comme prévu (descend de 10 après un coup, par exemple) est le bon."
+    },
+    "findWhatWrites": {
+      "title": "Écrit par",
+      "what": "Attache le debugger et capture l'instruction du programme qui écrit à cette adresse : son RIP, son module et son désassemblage.",
+      "when": "Pour passer de « je connais l'adresse » à « je connais le code qui la calcule », et en faire un patch stable.",
+      "cost": "Attache le debugger Windows. Fais varier la valeur dans le programme pendant la fenêtre de capture, sinon rien n'est capturé.",
+      "example": "L'adresse trouvée refuse de rester figée. Clique Écrit par, puis frappe un coup dans le jeu pendant la capture : KillEngine affiche l'instruction exacte qui écrit cette valeur, avec son module et son offset."
+    },
+    "aob": {
+      "title": "AOB signatures",
+      "what": "Cherche une signature d'octets dans le code du programme, puis propose de patcher l'instruction trouvée.",
+      "when": "Pour créer une feature qui survit au redémarrage : une adresse change à chaque session, une signature de code non.",
+      "cost": "Modifie le code exécutable du programme. Une signature qui correspond à plusieurs endroits est bloquée, car patcher au mauvais endroit fait planter la cible.",
+      "example": "Écrit par a trouvé l'instruction à SC2.exe+0x4A1B2. Clique Signature pour générer une AOB stable, puis Analyser pour voir les patchs proposés (NOP écriture, forcer une valeur, etc.) classés par risque."
+    },
+    "pointerChains": {
+      "title": "Pointer chains",
+      "what": "Trouve un chemin stable module + offsets menant à l'adresse, au lieu de l'adresse absolue qui change à chaque lancement.",
+      "when": "Quand une adresse trouvée ne fonctionne plus après un redémarrage du programme.",
+      "cost": "Lecture seule, mais c'est le scan le plus long. Commence avec une profondeur de 3 avant de l'augmenter.",
+      "example": "L'adresse 0x7FF6... marchait hier mais plus aujourd'hui après avoir relancé le jeu. Lance un scan de pointeurs dessus : tu obtiens un chemin du style module+0x1A4 -> +0x20 -> +0x8, stable d'une session à l'autre."
+    },
+    "groupScan": {
+      "title": "Scan groupé",
+      "what": "Cherche plusieurs valeurs connues séparées par des offsets fixes, par exemple HP à +0 et Mana à +4.",
+      "when": "Quand tu connais deux ou trois valeurs voisines : ça trouve la base de la structure d'un seul coup.",
+      "cost": "Lecture seule.",
+      "example": "Tu sais que HP=100 et Mana=50 sont voisines en mémoire. Renseigne les deux valeurs avec leurs offsets relatifs (0 et +4) : KillEngine retrouve directement la base de la structure du joueur."
+    },
+    "watchPointerChains": {
+      "title": "Watch chaînes de pointeurs",
+      "what": "Suit en direct la valeur au bout d'une chaîne de pointeurs, en la résolvant à nouveau à chaque tick.",
+      "when": "Pour vérifier qu'une chaîne reste valide quand le programme réalloue ses objets.",
+      "cost": "Lecture seule.",
+      "example": "Après avoir validé une chaîne de pointeurs, clique Watch dessus pour vérifier qu'elle continue à donner la bonne valeur même quand le jeu recrée l'objet (changement de niveau, respawn...)."
+    },
+    "journal": {
+      "title": "Journal utilisateur",
+      "what": "Note libre attachée à la session d'analyse en cours.",
+      "when": "Pour garder la trace de ce qui a marché avant de le transformer en profil ou en feature Trainer.",
+      "cost": "Aucun effet sur le programme cible.",
+      "example": "Note \"AOB minerais stable sur patch 5.0.14\" pour te souvenir plus tard de ce qui a marché, avant de le transformer en profil ou en feature Trainer."
+    },
+    "injection": {
+      "title": "Injection / hooking / auto-assembler",
+      "what": "Injecte une DLL, installe un inline hook sur une fonction, ou exécute un script auto-assembler dans le processus attaché.",
+      "when": "Pour un freeze invincible qui intercepte l'écriture à la source, ou un cheat qui doit s'exécuter dans le processus cible plutôt que le lire/écrire de l'extérieur.",
+      "cost": "Modifie activement le processus cible (code injecté, instructions réécrites). Nécessite une confirmation explicite à chaque action, pas encore de feature Trainer persistante.",
+      "example": "Après avoir capturé l'instruction qui écrit une valeur (Écrit par), installe un hook dessus pour forcer la valeur à chaque appel plutôt que de la réécrire en boucle depuis l'extérieur."
+    }
   }
 }

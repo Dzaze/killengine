@@ -108,6 +108,19 @@ QJsonObject patchToJson(const ProfileCodePatch& patch) {
     if (!patch.description.isEmpty()) {
         json["description"] = patch.description;
     }
+    if (patch.signatureScore > 0 || !patch.signatureLevel.isEmpty()) {
+        QJsonObject quality;
+        quality["score"] = patch.signatureScore;
+        quality["level"] = patch.signatureLevel;
+        quality["warning"] = patch.signatureWarning;
+        quality["fixedBytes"] = patch.signatureFixedBytes;
+        quality["wildcardBytes"] = patch.signatureWildcardBytes;
+        quality["uniqueFixedBytes"] = patch.signatureUniqueFixedBytes;
+        quality["fixedRatio"] = patch.signatureFixedRatio;
+        quality["trainerSafe"] = patch.trainerSafe;
+        quality["matches"] = patch.signatureMatches;
+        json["signatureQuality"] = quality;
+    }
     return json;
 }
 
@@ -131,6 +144,16 @@ ProfileCodePatch patchFromJson(const QJsonObject& json) {
     patch.disassembly = json.value("disassembly").toString();
     patch.riskLevel = json.value("riskLevel").toString();
     patch.description = json.value("description").toString();
+    const QJsonObject quality = json.value("signatureQuality").toObject();
+    patch.signatureScore = quality.value("score").toInt();
+    patch.signatureLevel = quality.value("level").toString();
+    patch.signatureWarning = quality.value("warning").toString();
+    patch.signatureFixedBytes = quality.value("fixedBytes").toInt();
+    patch.signatureWildcardBytes = quality.value("wildcardBytes").toInt();
+    patch.signatureUniqueFixedBytes = quality.value("uniqueFixedBytes").toInt();
+    patch.signatureFixedRatio = quality.value("fixedRatio").toDouble();
+    patch.trainerSafe = quality.value("trainerSafe").toBool(false);
+    patch.signatureMatches = quality.value("matches").toInt();
     return patch;
 }
 

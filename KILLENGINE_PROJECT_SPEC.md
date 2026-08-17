@@ -24,8 +24,8 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 - Unknown initial value : capture snapshot compressé LZ4, stockage memory-mapped temporaire, puis comparaison.
 - Watch/read preview, écriture mémoire vérifiée, rollback simple, freeze simple.
 - Les scans async exposent une progression fine : par bytes/chunks lus pour le scan exact, par candidats vérifiés pour le next scan.
-- Assistant Smart Search connecté aux outils déterministes et au runtime IA local optionnel.
-- Contrat d'intention IA structuré : le modèle peut produire une intention JSON validée avant exécution, avec fallback déterministe si le modèle est absent ou imprécis.
+- Assistant Smart Search connecté aux outils déterministes et au runtime IA local embarqué.
+- Contrat d'intention IA structuré : le modèle peut produire une intention JSON validée avant exécution, avec état dégradé déterministe seulement si l'IA embarquée manque ou produit une sortie inexploitable.
 - Debug Assistant : les décisions de Smart Search et les intents sont visibles pour diagnostiquer les cas où la conversation choisit la mauvaise action.
 - Les réponses Assistant affichent une ligne de décision lisible indiquant l'intention reconnue et la raison du choix d'action.
 - Workflow guidé validé sur Microsoft Solitaire :
@@ -56,7 +56,7 @@ Dernière mise à jour : phases 9, 10 et 11 validées au niveau prototype ; Phas
 ### Limites connues de la baseline
 
 - Phase 12 / Polissage V1 est complète au niveau checklist ; il reste à faire une passe de régression manuelle avant une release candidate.
-- Le moteur IA tente maintenant d'utiliser un runtime local `llama-cli` + GGUF Qwen si disponibles, puis retombe sur le planner déterministe si le modèle ou l'exécutable manque.
+- Le moteur IA utilise le runtime local embarqué `llama-cli` + GGUF Qwen quand le package est complet ; si un fichier manque, le planner déterministe sert uniquement d'état dégradé technique.
 - Le scan multi-type automatique complet n'est pas encore implémenté : le planner choisit surtout `Int32` par défaut sauf indication contraire.
 - Le CandidateStore bascule automatiquement sur fichier temporaire compact au-delà d'un seuil, sait paginer sans hydrater toute la liste, et le `next_scan` async peut lire/écrire les candidats en streaming.
 - La page Paramètres expose l'état du stockage temporaire de scan et un nettoyage manuel qui ferme candidats/undo/snapshot puis supprime les fichiers `killengine_candidates_*.kecand` et `killengine_snapshot_*.kesnap` restants.
@@ -2396,8 +2396,10 @@ KillEngine/
 │
 ├─ third_party/
 │
-├─ models/
-│  └─ README.md
+├─ model/
+│  └─ qwen/
+│     ├─ README.md
+│     └─ *.gguf
 │
 ├─ tests/
 │  ├─ unit/
@@ -2595,17 +2597,19 @@ rejette la commande.
 Le système peut :
 
 1. demander une correction au modèle ;
-2. appliquer un fallback déterministe.
+2. passer en état dégradé déterministe audité.
 
 L’application ne doit jamais devenir inutilisable parce que le modèle hallucine.
 
 ---
 
-# 77. Fallback sans IA
+# 77. État dégradé IA
 
 Très important.
 
-KillEngine doit rester capable de scanner sans modèle.
+Le produit final est livré avec ses IA embarquées. Si un modèle ou runtime manque, KillEngine doit rester capable de scanner pour diagnostiquer l'installation, mais l'UI doit présenter cela comme un état dégradé et non comme un mode produit normal.
+
+Le layout produit des IA est sous `model/`: `model/assistant/` pour l'agent conversationnel, `model/auto_resolver/` pour l'agent autonome, et `model/qwen/` pour les poids GGUF partagés. Les dossiers agents utilisent `MODEL_MANIFEST.json` pour pointer vers les poids partagés au lieu de dupliquer le modele.
 
 Le backend possède les fonctions :
 
@@ -3155,7 +3159,7 @@ ToolRegistry
 ToolValidator
 StateMachine
 IntentContract
-fallback déterministe
+état dégradé déterministe
 ```
 
 ### Validation

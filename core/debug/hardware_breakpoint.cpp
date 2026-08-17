@@ -327,15 +327,27 @@ void HardwareBreakpointSession::setState(DebugSessionState state) {
 #ifdef Q_OS_WIN
 
 bool HardwareBreakpointSession::applyBreakpointsToThread(uint32_t threadId) {
-    HANDLE hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, threadId);
+    HANDLE hThread = OpenThread(
+        THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+        FALSE,
+        threadId);
     if (!hThread) {
         return false;
     }
+
+    // SetThreadContext n'est fiable que sur un thread suspendu (doc Win32) :
+    // appele hors d'un evenement de debug (ex: setBreakpoint() applique aux
+    // threads existants au moment de l'attache) sur un thread qui tourne
+    // activement, l'ecriture de DR0-DR7 peut silencieusement ne pas
+    // s'appliquer. Meme bug corrige dans core/debug/breakpoint_freeze.cpp.
+    const DWORD suspendCount = SuspendThread(hThread);
+    const bool suspended = suspendCount != static_cast<DWORD>(-1);
 
     CONTEXT ctx{};
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
 
     if (!GetThreadContext(hThread, &ctx)) {
+        if (suspended) ResumeThread(hThread);
         CloseHandle(hThread);
         return false;
     }
@@ -372,6 +384,7 @@ bool HardwareBreakpointSession::applyBreakpointsToThread(uint32_t threadId) {
     ctx.Dr7 = dr7;
 
     const BOOL ok = SetThreadContext(hThread, &ctx);
+    if (suspended) ResumeThread(hThread);
     CloseHandle(hThread);
 
     if (!ok) {
@@ -578,6 +591,99 @@ QList<BreakpointHit> findWhatWrites(
 #endif
 
     return hits;
+}
+
+namespace {
+
+QList<BreakpointHit> findWithBreakpointType(
+    uint32_t pid,
+    uint64_t address,
+    BreakpointType breakpointType,
+    BreakpointSize size,
+    int timeoutMs,
+    size_t maxHits,
+    const CancellationToken* cancellation) {
+
+    QList<BreakpointHit> hits;
+
+#ifdef Q_OS_WIN
+    HardwareBreakpointSession session;
+
+    if (!session.attach(pid)) {
+        return hits;
+    }
+
+    BreakpointConfig config;
+    config.address = address;
+    config.type = breakpointType;
+    config.size = size;
+
+    const int slot = session.setBreakpoint(config);
+    if (slot < 0) {
+        session.detach();
+        return hits;
+    }
+
+    std::atomic_bool watcherDone{false};
+    std::thread cancellationWatcher;
+    if (cancellation) {
+        cancellationWatcher = std::thread([&session, cancellation, &watcherDone]() {
+            while (!watcherDone.load()) {
+                if (cancellation->isCancelled()) {
+                    session.stopMonitoring();
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        });
+    }
+
+    session.monitorBlocking(maxHits, timeoutMs);
+    watcherDone.store(true);
+    if (cancellationWatcher.joinable()) {
+        cancellationWatcher.join();
+    }
+    hits = session.takeHits();
+    session.detach();
+#else
+    (void)pid;
+    (void)address;
+    (void)breakpointType;
+    (void)size;
+    (void)timeoutMs;
+    (void)maxHits;
+    (void)cancellation;
+#endif
+
+    return hits;
+}
+
+} // namespace
+
+QList<BreakpointHit> findWhatAccesses(
+    uint32_t pid,
+    uint64_t address,
+    BreakpointSize size,
+    int timeoutMs,
+    size_t maxHits) {
+    return findWhatAccesses(pid, address, size, timeoutMs, maxHits, nullptr);
+}
+
+QList<BreakpointHit> findWhatAccesses(
+    uint32_t pid,
+    uint64_t address,
+    BreakpointSize size,
+    int timeoutMs,
+    size_t maxHits,
+    const CancellationToken* cancellation) {
+    return findWithBreakpointType(
+        pid,
+        address,
+        BreakpointType::Access,
+        size,
+        timeoutMs,
+        maxHits,
+        cancellation);
 }
 
 } // namespace killcore

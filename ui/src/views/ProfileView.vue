@@ -30,6 +30,15 @@ interface ProfilePatchEntry {
   disassembly?: string
   riskLevel?: string
   description?: string
+  signatureScore?: number
+  signatureLevel?: string
+  signatureWarning?: string
+  signatureFixedBytes?: number
+  signatureWildcardBytes?: number
+  signatureUniqueFixedBytes?: number
+  signatureFixedRatio?: number
+  trainerSafe?: boolean
+  signatureMatches?: number
 }
 
 interface ProfileTargetGroup {
@@ -83,6 +92,7 @@ const trainerPatchSummary = computed(() => {
   const states = profilePatches.value.map((patch) => patchStates.value[patch.name]).filter(Boolean)
   const count = (status: string) => states.filter((state) => String(state.status ?? '') === status).length
   const inspected = profilePatches.value.length > 0 && states.length === profilePatches.value.length
+  const unsafeQuality = profilePatches.value.filter((patch) => patchQualityBlocksTrainer(patch)).length
   const risky = count('ambiguous') + count('missing') + count('invalid')
   return {
     inspected,
@@ -91,8 +101,9 @@ const trainerPatchSummary = computed(() => {
     ambiguous: count('ambiguous'),
     missing: count('missing'),
     invalid: count('invalid'),
+    unsafeQuality,
     risky,
-    canApplyAll: inspected && risky === 0,
+    canApplyAll: inspected && risky === 0 && unsafeQuality === 0,
   }
 })
 
@@ -357,7 +368,9 @@ async function applyProfilePatch(patch: ProfilePatchEntry) {
   if (!patchCanApply(patch)) {
     statusMessage.value = patchStates.value[patch.name]
       ? `⚠ Patch "${patch.name}" non applicable dans son état actuel (${patchStateLabel(patch)}).`
-      : `⚠ Vérifie l'état de "${patch.name}" avant application.`
+      : (patchQualityBlocksTrainer(patch)
+        ? `⚠ Patch "${patch.name}" bloqué : ${patchQualityBlockReason(patch)}.`
+        : `⚠ Vérifie l'état de "${patch.name}" avant application.`)
     return
   }
   trainerBusy.value = true
@@ -445,7 +458,19 @@ function patchStateDetail(patch: ProfilePatchEntry): string {
   return parts.join(' · ')
 }
 
+function patchQualityBlocksTrainer(patch: ProfilePatchEntry): boolean {
+  const score = Number(patch.signatureScore ?? 100)
+  const fixedBytes = Number(patch.signatureFixedBytes ?? 99)
+  return fixedBytes < 3 || score < 35
+}
+
+function patchQualityBlockReason(patch: ProfilePatchEntry): string {
+  if (!patchQualityBlocksTrainer(patch)) return ''
+  return `qualité AOB insuffisante (${patch.signatureScore ?? 0}/100, ${patch.signatureFixedBytes ?? 0} fixe(s))`
+}
+
 function patchCanApply(patch: ProfilePatchEntry): boolean {
+  if (patchQualityBlocksTrainer(patch)) return false
   const state = patchStates.value[patch.name]
   if (!state) return false
   const status = String(state.status ?? '')
@@ -497,7 +522,9 @@ async function applyAllProfilePatches() {
   if (!selectedProfile.value || profilePatches.value.length === 0) return
   if (!trainerPatchSummary.value.canApplyAll) {
     statusMessage.value = trainerPatchSummary.value.inspected
-      ? '⚠ Application globale bloquée : au moins un patch est ambigu, introuvable ou invalide.'
+      ? (trainerPatchSummary.value.unsafeQuality > 0
+        ? `⚠ Application globale bloquée : ${trainerPatchSummary.value.unsafeQuality} patch(s) ont une qualité AOB insuffisante.`
+        : '⚠ Application globale bloquée : au moins un patch est ambigu, introuvable ou invalide.')
       : '⚠ Vérifie d’abord l’état trainer avant d’appliquer le lot.'
     return
   }
@@ -697,18 +724,30 @@ onMounted(() => {
             <button class="btn btn-secondary btn-sm" :disabled="trainerBusy || !trainerPatchSummary.inspected" @click="restoreAllProfilePatches()">Tout restaurer</button>
           </div>
         </div>
-        <div class="trainer-summary" :class="{ armed: trainerPatchSummary.canApplyAll, blocked: trainerPatchSummary.inspected && trainerPatchSummary.risky > 0 }">
+        <div class="trainer-summary" :class="{ armed: trainerPatchSummary.canApplyAll, blocked: trainerPatchSummary.inspected && (trainerPatchSummary.risky > 0 || trainerPatchSummary.unsafeQuality > 0) }">
           <strong>{{ trainerPatchSummary.inspected ? 'Trainer vérifié' : 'Inspection requise' }}</strong>
           <span>original {{ trainerPatchSummary.original }}</span>
           <span>actif {{ trainerPatchSummary.active }}</span>
           <span>ambigu {{ trainerPatchSummary.ambiguous }}</span>
           <span>introuvable {{ trainerPatchSummary.missing }}</span>
           <span>invalide {{ trainerPatchSummary.invalid }}</span>
+          <span>qualité faible {{ trainerPatchSummary.unsafeQuality }}</span>
         </div>
         <div v-for="patch in profilePatches" :key="patch.name" class="patch-row">
           <div class="patch-info">
             <span class="target-name">{{ patch.name }}</span>
             <span v-if="patch.riskLevel" class="patch-risk">{{ patch.riskLevel }}</span>
+            <span
+              v-if="patch.signatureLevel"
+              class="patch-risk"
+              :class="`quality-${patch.signatureLevel}`"
+              :title="patch.signatureWarning"
+            >
+              AOB {{ patch.signatureLevel }} · {{ patch.signatureScore ?? 0 }}/100
+            </span>
+            <span v-if="patch.signatureFixedBytes !== undefined" class="target-locator">
+              fixes {{ patch.signatureFixedBytes }} / wildcards {{ patch.signatureWildcardBytes ?? 0 }}
+            </span>
             <span class="target-resolution" :class="patchStateClass(patch)">{{ patchStateLabel(patch) }}</span>
             <span v-if="patch.module" class="target-locator">{{ patch.module }} +0x{{ patch.moduleOffset }}</span>
           </div>
@@ -1042,6 +1081,19 @@ onMounted(() => {
   font-size: 11px;
 }
 
+.quality-strong {
+  color: var(--success);
+}
+
+.quality-medium {
+  color: var(--warning);
+}
+
+.quality-weak,
+.quality-invalid {
+  color: var(--error);
+}
+
 .patch-toggle {
   display: inline-flex;
   align-items: center;
@@ -1178,13 +1230,13 @@ onMounted(() => {
 }
 
 .btn-danger {
-  background: rgba(247, 118, 142, 0.15);
-  color: var(--error);
-  border: 1px solid rgba(247, 118, 142, 0.3);
+  background: var(--error);
+  color: white;
+  border: none;
 }
 
 .btn-danger:hover {
-  background: rgba(247, 118, 142, 0.25);
+  filter: brightness(1.08);
 }
 
 .btn:disabled {
