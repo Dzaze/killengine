@@ -124,6 +124,28 @@ QJsonObject patchToJson(const ProfileCodePatch& patch) {
     return json;
 }
 
+QJsonObject autoAsmScriptToJson(const ProfileAutoAsmScript& script) {
+    QJsonObject json;
+    json["name"] = script.name;
+    json["scriptText"] = script.scriptText;
+    if (!script.description.isEmpty()) {
+        json["description"] = script.description;
+    }
+    if (!script.riskLevel.isEmpty()) {
+        json["riskLevel"] = script.riskLevel;
+    }
+    return json;
+}
+
+ProfileAutoAsmScript autoAsmScriptFromJson(const QJsonObject& json) {
+    ProfileAutoAsmScript script;
+    script.name = json.value("name").toString();
+    script.scriptText = json.value("scriptText").toString();
+    script.description = json.value("description").toString();
+    script.riskLevel = json.value("riskLevel").toString();
+    return script;
+}
+
 ProfileTarget targetFromJson(const QJsonObject& json) {
     ProfileTarget target;
     target.name = json.value("name").toString();
@@ -199,6 +221,12 @@ bool ProfileStore::save(const Profile& profile, const QString& filename) {
     }
     root["patches"] = patchesArray;
 
+    QJsonArray autoAsmScriptsArray;
+    for (const auto& script : profile.autoAsmScripts) {
+        autoAsmScriptsArray.append(autoAsmScriptToJson(script));
+    }
+    root["autoAsmScripts"] = autoAsmScriptsArray;
+
     QJsonDocument doc(root);
 
     QFile file(filename);
@@ -251,9 +279,16 @@ bool ProfileStore::load(const QString& filename, Profile* profile) {
         profile->patches.append(patchFromJson(item.toObject()));
     }
 
+    profile->autoAsmScripts.clear();
+    const QJsonArray autoAsmScriptsArray = root.value("autoAsmScripts").toArray();
+    for (const auto& item : autoAsmScriptsArray) {
+        profile->autoAsmScripts.append(autoAsmScriptFromJson(item.toObject()));
+    }
+
     KE_LOG_INFO() << "Profile loaded: " << filename.toStdString()
                   << " (" << profile->targets.size() << " targets, "
-                  << profile->patches.size() << " patches)";
+                  << profile->patches.size() << " patches, "
+                  << profile->autoAsmScripts.size() << " auto-asm scripts)";
     return true;
 }
 

@@ -4,6 +4,8 @@
 #include <QList>
 #include <QString>
 
+#include <cstdint>
+
 namespace killcore {
 
 struct InstructionInfo {
@@ -16,6 +18,25 @@ struct InstructionInfo {
     QString rawBytesText;
     QString stableAobPattern;
     QString error;
+    // Position (offset/taille en octets dans l'instruction) du SEUL operande
+    // immediat, si l'instruction en a exactement un (ex: "mov dword [rdi+8],
+    // 0x64" a un immediat 32 bits). -1/0 si l'instruction n'a pas
+    // d'immediat, en a plusieurs (rare, pas gere pour rester simple/surs),
+    // ou si le decodeur utilise n'est pas Zydis (KILLENGINE_HAS_ZYDIS absent
+    // : le decodeur builtin ne calcule pas cette info).
+    int immediateOffset{-1};
+    int immediateSize{0};
+    // Registre de base (ex: "rdi") + deplacement de l'operande MEMOIRE
+    // destination, si celle-ci a la forme simple [base+disp] exploitable par
+    // encodeMemImmMov (core/scripting/auto_assembler.cpp) : pas d'index, pas
+    // d'echelle, pas RIP-relatif. memBaseRegister vide si l'instruction n'a
+    // pas d'operande memoire ou si sa forme est trop complexe. Rempli
+    // uniquement par le decodeur Zydis, quelle que soit la source (immediat
+    // OU registre) — sert a construire un trampoline "force cette valeur ici"
+    // meme quand suggestInstructionPatches() ne propose pas de patch d'octets
+    // direct (source registre, pas d'immediat a substituer).
+    QString memBaseRegister;
+    int64_t memDisplacement{0};
 };
 
 struct PatchSuggestion {
@@ -25,6 +46,13 @@ struct PatchSuggestion {
     QString category;
     QString riskLevel{"medium"};
     bool risky{false};
+    // Quand vrai, bytesText n'est qu'un point de depart (bytes originaux) :
+    // le frontend doit demander une valeur a l'utilisateur puis reconstruire
+    // les bytes en substituant valueSize octets (little-endian) a partir de
+    // valueOffset, plutot que d'appliquer bytesText tel quel.
+    bool needsValueInput{false};
+    int valueOffset{-1};
+    int valueSize{0};
 };
 
 InstructionInfo decodeX64InstructionLength(const QByteArray& bytes);

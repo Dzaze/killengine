@@ -1,7 +1,9 @@
 #include "auto_assembler.h"
 
 #include "logging/logger.h"
+#include "memory/memory_writer.h"
 #include "patch/instruction_patch_suggester.h"
+#include "process/process_enumerator.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -10,7 +12,9 @@
 #include <QRegularExpression>
 #include <QStringList>
 #include <QHash>
+#include <QSet>
 
+#include <algorithm>
 #include <limits>
 
 namespace killcore {
@@ -65,6 +69,7 @@ const QRegularExpression reAlloc(QStringLiteral(R"(alloc\(\s*(\w+)\s*,\s*(\d+)\s
 const QRegularExpression reDealloc(QStringLiteral(R"(dealloc\(\s*(\w+)\s*\))"));
 const QRegularExpression reLabel(QStringLiteral(R"(label\(\s*(\w+)\s*\))"));
 const QRegularExpression reLabelDef(QStringLiteral(R"(^(\w+)\s*:\s*$)"));
+const QRegularExpression reModuleLabelDef(QStringLiteral(R"RX(^"([^"]+)"\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*:\s*$)RX"));
 const QRegularExpression reMov(QStringLiteral(R"(mov\s+\[([^\]]+)\]\s*,\s*(.+))"));
 const QRegularExpression reJmp(QStringLiteral(R"((jmp|je|jne|call)\s+(\S+))"));
 const QRegularExpression reAddr(QStringLiteral(R"((?:")([^"]+)(?:"\s*\+\s*)(0x[0-9a-fA-F]+|\d+))"));
@@ -83,6 +88,93 @@ bool parseAutoAsmNumber(QString text, int64_t* out) {
         text = QStringLiteral("0x") + text.left(text.size() - 1);
     }
     return parseNumber(text, out);
+}
+
+// "mov [reg+disp], imm" : registre de base 64 bits + deplacement optionnel,
+// PAS d'index/echelle/RIP-relatif (v1 volontairement borne au cas qui
+// correspond a une adresse cible capturee par Ecrit par : "cible 0x..."
+// derriere une instruction "mov [base+disp], ..."). Table des noms de
+// registres 64 bits vers leur code 0-15 (registres etendus r8-r15 -> REX.B).
+int registerCode(const QString& name, bool* extended) {
+    static const QHash<QString, int> table = {
+        {"rax", 0}, {"rcx", 1}, {"rdx", 2}, {"rbx", 3},
+        {"rsp", 4}, {"rbp", 5}, {"rsi", 6}, {"rdi", 7},
+        {"r8", 8}, {"r9", 9}, {"r10", 10}, {"r11", 11},
+        {"r12", 12}, {"r13", 13}, {"r14", 14}, {"r15", 15},
+    };
+    const auto it = table.constFind(name.toLower());
+    if (it == table.constEnd()) return -1;
+    *extended = it.value() >= 8;
+    return it.value();
+}
+
+const QRegularExpression reMemOperand(QStringLiteral(R"(^\s*(r[a-z0-9]+)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|\d+))?\s*$)"));
+
+// Encode "mov dword ptr [baseReg+disp], imm32" (opcode C7 /0). Ecrit un
+// operande 32 bits (dword) uniquement : couvre le cas le plus courant
+// (Int32/UInt32/score/XP/vie) sans etendre la portee a byte/word/qword.
+bool encodeMemImmMov(const QString& destination, int64_t immediate, QByteArray* out, QString* error) {
+    const auto match = reMemOperand.match(destination.trimmed());
+    if (!match.hasMatch()) {
+        if (error) *error = QStringLiteral(
+            "Destination mémoire non supportée : '%1'. Seule la forme [registre64+/-déplacement] est gérée "
+            "(ex: [rdi+8], [rax-4], [rbx]) — pas d'index, d'échelle, ni d'adressage RIP-relatif.").arg(destination);
+        return false;
+    }
+
+    bool extended = false;
+    const int regCode = registerCode(match.captured(1), &extended);
+    if (regCode < 0) {
+        if (error) *error = QStringLiteral("Registre inconnu : '%1'.").arg(match.captured(1));
+        return false;
+    }
+
+    int64_t disp = 0;
+    if (!match.captured(3).isEmpty()) {
+        int64_t magnitude = 0;
+        if (!parseAutoAsmNumber(match.captured(3), &magnitude)) {
+            if (error) *error = QStringLiteral("Déplacement invalide : '%1'.").arg(match.captured(3));
+            return false;
+        }
+        disp = match.captured(2) == "-" ? -magnitude : magnitude;
+    }
+    if (disp < std::numeric_limits<int32_t>::min() || disp > std::numeric_limits<int32_t>::max()) {
+        if (error) *error = "Déplacement hors plage (max disp32).";
+        return false;
+    }
+
+    const int rmField = regCode & 0x7;
+    const bool needsSib = rmField == 4;  // rsp/r12 comme base impose un octet SIB.
+    // rbp/r13 avec mod=00 est reserve (RIP-relatif) : forcer mod=01 disp8=0
+    // plutot que de produire un encodage ambigu/invalide.
+    const bool forceDisp8Zero = rmField == 5 && disp == 0;
+
+    uint8_t mod;
+    QByteArray dispBytes;
+    if (disp == 0 && !forceDisp8Zero) {
+        mod = 0b00;
+    } else if (disp >= -128 && disp <= 127) {
+        mod = 0b01;
+        dispBytes.append(static_cast<char>(static_cast<int8_t>(disp)));
+    } else {
+        mod = 0b10;
+        appendI32(&dispBytes, disp);
+    }
+
+    QByteArray code;
+    if (extended) {
+        code.append(static_cast<char>(0x41));  // REX.B (etend ModRM.rm / SIB.base)
+    }
+    code.append(static_cast<char>(0xC7));
+    code.append(static_cast<char>((mod << 6) | (0 << 3) | (needsSib ? 0b100 : static_cast<uint8_t>(rmField))));
+    if (needsSib) {
+        code.append(static_cast<char>((0 << 6) | (0b100 << 3) | static_cast<uint8_t>(rmField)));  // pas d'index
+    }
+    code.append(dispBytes);
+    appendI32(&code, immediate);
+
+    *out = code;
+    return true;
 }
 
 bool parseRawData(const QString& mnemonic, const QString& text, QByteArray* out, QString* error) {
@@ -129,6 +221,7 @@ int encodedInstructionSize(const AutoAsmInstruction& instr, QString* error) {
         case AutoAsmInstructionType::Alloc:
         case AutoAsmInstructionType::Dealloc:
         case AutoAsmInstructionType::Label:
+        case AutoAsmInstructionType::ModuleLabel:
             return 0;
         case AutoAsmInstructionType::Nop:
         case AutoAsmInstructionType::Ret:
@@ -145,6 +238,10 @@ int encodedInstructionSize(const AutoAsmInstruction& instr, QString* error) {
             return parseRawData(instr.destination.isEmpty() ? "db" : instr.destination, instr.target, &raw, error)
                 ? raw.size()
                 : -1;
+        }
+        case AutoAsmInstructionType::Mov: {
+            QByteArray encoded;
+            return encodeMemImmMov(instr.destination, instr.value, &encoded, error) ? encoded.size() : -1;
         }
         default:
             if (error) *error = "Instruction requires a full assembler backend";
@@ -226,6 +323,24 @@ AutoAsmScript parseAutoAsmScript(const QString& scriptText) {
             instr.type = AutoAsmInstructionType::Label;
             instr.target = m.captured(1);
             instr.value = 0;
+            instr.line = lineNum;
+            script.instructions.append(instr);
+            continue;
+        }
+
+        // "module.exe"+0x1234: — ouvre une region sur un site EXISTANT du
+        // processus cible (pattern CE classique : jmp vers un trampoline
+        // alloue ailleurs). Teste AVANT reLabelDef : les deux regex ne se
+        // recoupent pas (celle-ci exige des guillemets), mais autant garder
+        // le cas le plus specifique en premier.
+        m = reModuleLabelDef.match(line);
+        if (m.hasMatch()) {
+            AutoAsmInstruction instr;
+            instr.type = AutoAsmInstructionType::ModuleLabel;
+            instr.target = m.captured(1);
+            int64_t moduleOffset = 0;
+            parseAutoAsmNumber(m.captured(2), &moduleOffset);
+            instr.offset = moduleOffset;
             instr.line = lineNum;
             script.instructions.append(instr);
             continue;
@@ -316,7 +431,27 @@ AutoAsmScript parseAutoAsmScript(const QString& scriptText) {
     return script;
 }
 
-AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t baseAddress) {
+namespace {
+
+// Resout l'adresse absolue d'un bloc "module"+offset:. Erreur si le module
+// n'est pas dans le contexte (processus non attache, ou nom de module
+// inconnu du processus cible au moment de la compilation).
+bool resolveModuleBlockBase(const QString& moduleName, int64_t moduleOffset,
+                             const AutoAsmCompileContext& context, uint64_t* out, QString* error) {
+    const auto it = context.moduleBaseAddresses.constFind(moduleName);
+    if (it == context.moduleBaseAddresses.constEnd()) {
+        if (error) *error = QStringLiteral(
+            "Module inconnu : '%1'. Vérifie que le processus est attaché et que ce module y est bien chargé."
+        ).arg(moduleName);
+        return false;
+    }
+    *out = it.value() + static_cast<uint64_t>(moduleOffset);
+    return true;
+}
+
+} // namespace
+
+AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t baseAddress, const AutoAsmCompileContext& context) {
     AutoAsmCompileResult result;
     if (!script.success) {
         result.error = script.error.isEmpty() ? "Invalid script" : script.error;
@@ -324,46 +459,109 @@ AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t 
         return result;
     }
 
-    QHash<QString, uint64_t> labelAddresses;
-    uint64_t offset = 0;
-    for (const auto& instr : script.instructions) {
-        if (instr.type == AutoAsmInstructionType::Label && instr.value == 1) {
-            labelAddresses.insert(instr.target, baseAddress + offset);
-            AutoAsmLabel label;
-            label.name = instr.target;
-            label.address = baseAddress + offset;
-            result.labels.append(label);
-            continue;
-        }
+    // "nom:" ne demarre une NOUVELLE region que si nom correspond a un
+    // alloc() connu (ex: "newmem:") ; sinon c'est un simple label local dans
+    // la region courante (ex: "returnhere:"), comme avant.
+    auto resolveAllocLabelBase = [&](const QString& name) -> std::optional<uint64_t> {
+        const auto it = context.allocationAddresses.constFind(name);
+        return it != context.allocationAddresses.constEnd() ? std::optional<uint64_t>(it.value()) : std::nullopt;
+    };
 
-        QString sizeError;
-        const int size = encodedInstructionSize(instr, &sizeError);
-        if (size < 0) {
-            result.error = sizeError;
-            result.errorLine = instr.line;
-            return result;
+    // ---- Passe 1 : resout labelAddresses en suivant les resets de curseur.
+    // `baseAddress` sert de curseur initial (retro-compat scripts a une
+    // seule region, sans aucun "nom:"/module lie).
+    QHash<QString, uint64_t> labelAddresses;
+    {
+        uint64_t cursor = baseAddress;
+        for (const auto& instr : script.instructions) {
+            if (instr.type == AutoAsmInstructionType::Label && instr.value == 1) {
+                if (const auto reset = resolveAllocLabelBase(instr.target)) {
+                    cursor = *reset;
+                }
+                labelAddresses.insert(instr.target, cursor);
+                continue;
+            }
+            if (instr.type == AutoAsmInstructionType::ModuleLabel) {
+                QString moduleError;
+                if (!resolveModuleBlockBase(instr.target, instr.offset, context, &cursor, &moduleError)) {
+                    result.error = moduleError;
+                    result.errorLine = instr.line;
+                    return result;
+                }
+                continue;
+            }
+            if (instr.type == AutoAsmInstructionType::Alloc || instr.type == AutoAsmInstructionType::Dealloc) {
+                continue;
+            }
+
+            QString sizeError;
+            const int size = encodedInstructionSize(instr, &sizeError);
+            if (size < 0) {
+                result.error = sizeError;
+                result.errorLine = instr.line;
+                return result;
+            }
+            cursor += static_cast<uint64_t>(size);
         }
-        offset += static_cast<uint64_t>(size);
+    }
+    for (auto it = labelAddresses.constBegin(); it != labelAddresses.constEnd(); ++it) {
+        result.labels.append(AutoAsmLabel{it.key(), it.value()});
     }
 
-    offset = 0;
+    // ---- Passe 2 : emet les bytes, une AutoAsmCompiledRegion par reset de
+    // curseur (donc une seule region pour un script simple, deux pour le
+    // pattern CE classique site-existant + trampoline alloue).
+    AutoAsmCompiledRegion* currentRegion = nullptr;
+    auto startRegion = [&](uint64_t address) -> AutoAsmCompiledRegion& {
+        result.regions.append(AutoAsmCompiledRegion{address, {}});
+        currentRegion = &result.regions.last();
+        return *currentRegion;
+    };
+    uint64_t cursor = baseAddress;
     for (const auto& instr : script.instructions) {
+        if (instr.type == AutoAsmInstructionType::Label) {
+            // value==0 : label(name) — simple declaration avancee, resolue en
+            // passe 1, rien a emettre. value==1 : "name:" — reset de curseur
+            // uniquement si nom lie a un alloc() connu (sinon label local).
+            if (instr.value == 1) {
+                if (const auto reset = resolveAllocLabelBase(instr.target)) {
+                    startRegion(*reset);
+                    cursor = *reset;
+                }
+            }
+            continue;
+        }
+        if (instr.type == AutoAsmInstructionType::ModuleLabel) {
+            uint64_t resolved = 0;
+            QString moduleError;
+            // Deja valide en passe 1 : ne peut plus echouer ici sauf incoherence interne.
+            resolveModuleBlockBase(instr.target, instr.offset, context, &resolved, &moduleError);
+            startRegion(resolved);
+            cursor = resolved;
+            continue;
+        }
+        if (instr.type == AutoAsmInstructionType::Alloc || instr.type == AutoAsmInstructionType::Dealloc) {
+            continue;
+        }
+        if (!currentRegion) {
+            // Script sans aucun "nom:"/module lie avant sa premiere
+            // instruction reelle : demarre quand meme une region a
+            // baseAddress, comme le faisait l'ancien modele mono-region.
+            startRegion(baseAddress);
+        }
+
         switch (instr.type) {
-            case AutoAsmInstructionType::Alloc:
-            case AutoAsmInstructionType::Dealloc:
-            case AutoAsmInstructionType::Label:
-                break;
             case AutoAsmInstructionType::Nop:
-                result.code.append('\x90');
-                offset += 1;
+                currentRegion->code.append('\x90');
+                cursor += 1;
                 break;
             case AutoAsmInstructionType::Ret:
-                result.code.append('\xC3');
-                offset += 1;
+                currentRegion->code.append('\xC3');
+                cursor += 1;
                 break;
             case AutoAsmInstructionType::Int3:
-                result.code.append('\xCC');
-                offset += 1;
+                currentRegion->code.append('\xCC');
+                cursor += 1;
                 break;
             case AutoAsmInstructionType::RawBytes: {
                 QByteArray raw;
@@ -373,8 +571,20 @@ AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t 
                     result.errorLine = instr.line;
                     return result;
                 }
-                result.code.append(raw);
-                offset += static_cast<uint64_t>(raw.size());
+                currentRegion->code.append(raw);
+                cursor += static_cast<uint64_t>(raw.size());
+                break;
+            }
+            case AutoAsmInstructionType::Mov: {
+                QByteArray encoded;
+                QString movError;
+                if (!encodeMemImmMov(instr.destination, instr.value, &encoded, &movError)) {
+                    result.error = movError;
+                    result.errorLine = instr.line;
+                    return result;
+                }
+                currentRegion->code.append(encoded);
+                cursor += static_cast<uint64_t>(encoded.size());
                 break;
             }
             case AutoAsmInstructionType::Jmp:
@@ -390,7 +600,7 @@ AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t 
                 }
 
                 const int instrSize = (instr.type == AutoAsmInstructionType::Je || instr.type == AutoAsmInstructionType::Jne) ? 6 : 5;
-                const int64_t rel = static_cast<int64_t>(target) - static_cast<int64_t>(baseAddress + offset + instrSize);
+                const int64_t rel = static_cast<int64_t>(target) - static_cast<int64_t>(cursor + instrSize);
                 if (rel < std::numeric_limits<int32_t>::min() || rel > std::numeric_limits<int32_t>::max()) {
                     result.error = "Branch target is outside rel32 range";
                     result.errorLine = instr.line;
@@ -398,15 +608,15 @@ AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t 
                 }
 
                 if (instr.type == AutoAsmInstructionType::Jmp) {
-                    result.code.append('\xE9');
+                    currentRegion->code.append('\xE9');
                 } else if (instr.type == AutoAsmInstructionType::Call) {
-                    result.code.append('\xE8');
+                    currentRegion->code.append('\xE8');
                 } else {
-                    result.code.append('\x0F');
-                    result.code.append(instr.type == AutoAsmInstructionType::Je ? '\x84' : '\x85');
+                    currentRegion->code.append('\x0F');
+                    currentRegion->code.append(instr.type == AutoAsmInstructionType::Je ? '\x84' : '\x85');
                 }
-                appendI32(&result.code, rel);
-                offset += static_cast<uint64_t>(instrSize);
+                appendI32(&currentRegion->code, rel);
+                cursor += static_cast<uint64_t>(instrSize);
                 break;
             }
             default:
@@ -456,28 +666,102 @@ AutoAsmResult executeAutoAsmScript(const ProcessHandle& process, const AutoAsmSc
         KE_LOG_INFO() << "AutoAsm: allocated " << alloc.name.toStdString() << " at 0x" << std::hex << alloc.remoteAddress;
     }
 
-    // Le parser accepte déjà la syntaxe CE-like, mais l'exécution de mnemonics
-    // nécessite un assembleur x64 fiable (Keystone/asmtk). Ne jamais retourner
-    // success=true pour un script qui n'a pas réellement été compilé/patché.
-    for (const auto& instr : script.instructions) {
-        if (instr.type != AutoAsmInstructionType::Alloc &&
-            instr.type != AutoAsmInstructionType::Dealloc &&
-            instr.type != AutoAsmInstructionType::Label) {
-            result.error = "Auto-assembler execution requires a real x64 assembler backend before patching code";
-            for (const auto& allocated : result.allocations) {
-                if (allocated.remoteAddress) {
-                    VirtualFreeEx(hProcess, reinterpret_cast<LPVOID>(allocated.remoteAddress), 0, MEM_RELEASE);
+    auto freeAllocations = [&]() {
+        for (const auto& allocated : result.allocations) {
+            if (allocated.remoteAddress) {
+                VirtualFreeEx(hProcess, reinterpret_cast<LPVOID>(allocated.remoteAddress), 0, MEM_RELEASE);
+            }
+        }
+        result.allocations.clear();
+    };
+
+    const bool hasRealInstructions = std::any_of(script.instructions.begin(), script.instructions.end(), [](const auto& instr) {
+        return instr.type != AutoAsmInstructionType::Alloc
+            && instr.type != AutoAsmInstructionType::Dealloc
+            && instr.type != AutoAsmInstructionType::Label;
+    });
+    if (!hasRealInstructions) {
+        result.success = true;
+        KE_LOG_INFO() << "AutoAsm: script allocated " << result.allocations.size() << " remote block(s); no code to write";
+        return result;
+    }
+
+    // 2. Resoudre les modules references par les blocs "module"+offset: dans
+    // le processus cible (necessaire pour rediriger un site EXISTANT, ex.
+    // repris du RIP capture par "Ecrit par" — au-dela des blocs alloues
+    // qu'executeAutoAsmScript gerait seul jusqu'ici).
+    AutoAsmCompileContext context;
+    for (const auto& alloc : result.allocations) {
+        context.allocationAddresses.insert(alloc.name, alloc.remoteAddress);
+    }
+    const bool referencesModules = std::any_of(script.instructions.begin(), script.instructions.end(), [](const auto& instr) {
+        return instr.type == AutoAsmInstructionType::ModuleLabel;
+    });
+    if (referencesModules) {
+        const auto modules = ProcessEnumerator::enumerateModules(process.pid());
+        for (const auto& instr : script.instructions) {
+            if (instr.type != AutoAsmInstructionType::ModuleLabel) continue;
+            if (context.moduleBaseAddresses.contains(instr.target)) continue;
+            for (const auto& module : modules) {
+                if (module.name.compare(instr.target, Qt::CaseInsensitive) == 0) {
+                    context.moduleBaseAddresses.insert(instr.target, module.baseAddress);
+                    break;
                 }
             }
-            result.allocations.clear();
-            return result;
         }
     }
 
-    result.success = true;
+    // 3. Compiler (une region par changement de curseur : bloc alloue ou site existant).
+    const uint64_t baseAddress = result.allocations.isEmpty() ? 0 : result.allocations.first().remoteAddress;
+    const auto compiled = compileAutoAsmScript(script, baseAddress, context);
+    if (!compiled.success) {
+        result.error = compiled.error;
+        result.errorLine = compiled.errorLine;
+        freeAllocations();
+        return result;
+    }
+    if (compiled.regions.isEmpty()) {
+        result.success = true;
+        return result;
+    }
 
-    KE_LOG_INFO() << "AutoAsm: script allocated " << result.allocations.size()
-                  << " remote blocks; no code patch emitted";
+    // 4. Ecrire chaque region. Best-effort atomique : si une region echoue
+    // apres que d'autres ont deja ete ecrites, on restaure celles-la avant
+    // de rendre la main — un patch partiel (ex: le jmp du site pose mais pas
+    // le trampoline derriere) planterait le processus cible au prochain
+    // passage sur ce code.
+    QSet<uint64_t> allocatedAddresses;
+    for (const auto& alloc : result.allocations) {
+        allocatedAddresses.insert(alloc.remoteAddress);
+    }
+
+    MemoryWriter writer(process);
+    for (const auto& region : compiled.regions) {
+        if (region.code.isEmpty()) continue;
+        const auto written = writer.write(region.baseAddress, region.code, /*verify=*/true);
+        if (!written.success || !written.verified) {
+            result.error = written.errorMessage.isEmpty()
+                ? QStringLiteral("Échec de l'écriture à 0x%1.").arg(region.baseAddress, 0, 16)
+                : written.errorMessage;
+            for (const auto& patched : result.patchedRegions) {
+                writer.write(patched.address, patched.originalBytes, /*verify=*/false);
+            }
+            result.patchedRegions.clear();
+            freeAllocations();
+            return result;
+        }
+        AutoAsmPatchedRegion patched;
+        patched.address = region.baseAddress;
+        patched.originalBytes = written.previousValue;
+        patched.size = static_cast<int>(region.code.size());
+        patched.wasAllocated = allocatedAddresses.contains(region.baseAddress);
+        result.patchedRegions.append(patched);
+
+        KE_LOG_WARN() << "AutoAsm: wrote " << region.code.size() << " byte(s) at 0x" << std::hex << region.baseAddress
+                      << (patched.wasAllocated ? " (allocated block)" : " (existing site)");
+    }
+
+    result.success = true;
 #else
     (void)process;
     result.error = "Auto-assembler is Windows-only";
@@ -488,25 +772,33 @@ AutoAsmResult executeAutoAsmScript(const ProcessHandle& process, const AutoAsmSc
 
 bool restoreAutoAsmScript(const ProcessHandle& process, const AutoAsmResult& result) {
 #ifdef Q_OS_WIN
-    if (!result.success || result.originalBytes.isEmpty()) {
+    if (!result.success) {
         return false;
     }
 
     const HANDLE hProcess = process.rawHandle();
 
-    // Restaurer les bytes originaux
-    DWORD oldProtect = 0;
-    VirtualProtectEx(hProcess, reinterpret_cast<LPVOID>(result.patchAddress),
-                     static_cast<SIZE_T>(result.originalBytes.size()),
-                     PAGE_EXECUTE_READWRITE, &oldProtect);
-
-    SIZE_T bytesWritten = 0;
-    const BOOL ok = WriteProcessMemory(hProcess, reinterpret_cast<LPVOID>(result.patchAddress),
-                                       result.originalBytes.constData(),
-                                       static_cast<SIZE_T>(result.originalBytes.size()), &bytesWritten);
-
-    VirtualProtectEx(hProcess, reinterpret_cast<LPVOID>(result.patchAddress),
-                     static_cast<SIZE_T>(result.originalBytes.size()), oldProtect, &oldProtect);
+    // Une region "site existant" (wasAllocated=false, ex: "game.exe"+0x1234:)
+    // DOIT etre restauree : sans ca le jmp injecte reste actif et le
+    // processus cible plante ou se comporte n'importe comment des que ce
+    // code repasse la. Une region "bloc alloue" n'a rien d'obligatoire a
+    // restaurer avant liberation (memoire fraiche, pas de code preexistant a
+    // reparer), mais on le fait quand meme par uniformite/prudence. On tente
+    // TOUJOURS toutes les regions (pas de retour anticipe sur un echec) pour
+    // ne jamais laisser un site existant patche parce qu'une autre region a
+    // echoue a se restaurer avant lui.
+    MemoryWriter writer(process);
+    bool restoreOk = true;
+    for (const auto& patched : result.patchedRegions) {
+        if (patched.originalBytes.isEmpty()) continue;
+        const auto written = writer.write(patched.address, patched.originalBytes, /*verify=*/true);
+        if (!written.success || !written.verified) {
+            restoreOk = false;
+            KE_LOG_WARN() << "AutoAsm: failed to restore " << patched.originalBytes.size()
+                          << " byte(s) at 0x" << std::hex << patched.address
+                          << (patched.wasAllocated ? " (allocated block)" : " (existing site — code may be left patched!)");
+        }
+    }
 
     // Libérer les allocations
     for (const auto& alloc : result.allocations) {
@@ -515,7 +807,7 @@ bool restoreAutoAsmScript(const ProcessHandle& process, const AutoAsmResult& res
         }
     }
 
-    return ok && bytesWritten == static_cast<SIZE_T>(result.originalBytes.size());
+    return restoreOk;
 #else
     (void)process;
     (void)result;

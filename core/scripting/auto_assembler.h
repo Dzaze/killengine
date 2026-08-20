@@ -3,6 +3,7 @@
 #include "process/process_handle.h"
 
 #include <QByteArray>
+#include <QHash>
 #include <QList>
 #include <QString>
 
@@ -34,6 +35,7 @@ enum class AutoAsmInstructionType {
     Alloc,          // alloc(name, size)
     Dealloc,        // dealloc(name)
     Label,          // label(name)
+    ModuleLabel,    // "module.exe"+0x1234:  (ouvre une region sur un site EXISTANT du processus cible)
     Mov,            // mov [addr], value
     Add,            // add [addr], value
     Sub,            // sub [addr], value
@@ -55,8 +57,8 @@ enum class AutoAsmInstructionType {
 /// Une instruction parsée du script.
 struct AutoAsmInstruction {
     AutoAsmInstructionType type;
-    QString target;          // adresse/label/module
-    int64_t offset{0};       // offset optionnel
+    QString target;          // adresse/label/module ; pour ModuleLabel: nom du module ("game.exe")
+    int64_t offset{0};       // offset optionnel ; pour ModuleLabel: offset dans le module
     QString destination;     // pour mov/add/sub: destination
     int64_t value{0};        // valeur immédiate
     QByteArray rawBytes;     // pour db/de
@@ -86,22 +88,51 @@ struct AutoAsmScript {
     QList<AutoAsmLabel> labels;
 };
 
+/// Une région de mémoire réellement écrite par executeAutoAsmScript, avec de
+/// quoi la restaurer. `wasAllocated` distingue un bloc fraîchement alloué
+/// (VirtualAllocEx, libéré à la restauration) d'un site EXISTANT du
+/// processus cible (ex: "game.exe"+0x1234:, bytes originaux réécrits en
+/// place à la restauration, jamais libéré).
+struct AutoAsmPatchedRegion {
+    uint64_t address{0};
+    QByteArray originalBytes;
+    int size{0};
+    bool wasAllocated{false};
+};
+
 /// Résultat de l'exécution d'un script.
 struct AutoAsmResult {
     bool success{false};
     QString error;
-    QList<AutoAsmAllocation> allocations; ///< Avec remoteAddress rempli
-    QByteArray originalBytes;             ///< Bytes originaux pour restore
-    uint64_t patchAddress{0};             ///< Adresse qui a été patchée
-    int patchSize{0};
+    int errorLine{0};                           ///< Ligne du script en cause si error vient de la compilation
+    QList<AutoAsmAllocation> allocations;       ///< Avec remoteAddress rempli
+    QList<AutoAsmPatchedRegion> patchedRegions; ///< Une entrée par région réellement écrite
+};
+
+/// Une région de code compilée, à écrire à `baseAddress` (allouée ou site existant).
+struct AutoAsmCompiledRegion {
+    uint64_t baseAddress{0};
+    QByteArray code;
+};
+
+/// Contexte de résolution d'adresses pour compileAutoAsmScript : nécessaire
+/// dès qu'un script référence un label lié à un alloc() (ex: "newmem:") ou
+/// un site existant du processus cible (ex: "game.exe"+0x1234:).
+struct AutoAsmCompileContext {
+    QHash<QString, uint64_t> allocationAddresses; ///< nom alloc() -> adresse distante déjà allouée
+    QHash<QString, uint64_t> moduleBaseAddresses; ///< nom de module -> adresse de base dans le processus cible
 };
 
 /// Résultat de compilation en bytes x64 pour les instructions supportées.
+/// Un script "simple" (aucun label lié à un alloc()/module) produit UNE
+/// région à `baseAddress`, comme avant. Un script CE-style à deux régions
+/// (site existant + trampoline alloué) produit une région par changement de
+/// curseur ("nom:" lié à un alloc(), ou "module"+offset:).
 struct AutoAsmCompileResult {
     bool success{false};
     QString error;
     int errorLine{0};
-    QByteArray code;
+    QList<AutoAsmCompiledRegion> regions;
     QList<AutoAsmLabel> labels;
 };
 
@@ -124,21 +155,35 @@ struct AutoAsmCompileResult {
 AutoAsmScript parseAutoAsmScript(const QString& scriptText);
 
 /**
- * @brief Compile le sous-ensemble runtime supporté en bytes x64.
+ * @brief Compile le sous-ensemble runtime supporté en bytes x64, une région
+ * par changement de curseur d'adresse.
  *
- * Support v0 volontairement borné : nop, ret, int3, db/de/dd, jmp/call/je/jne
- * vers adresse absolue ou label local. Les instructions mémoire complexes sont
- * refusées proprement tant qu'un backend assembleur complet n'est pas branché.
+ * Support volontairement borné : nop, ret, int3, db/de/dd, jmp/call/je/jne
+ * vers adresse absolue ou label local, mov [registre64+/-déplacement], imm32.
+ * Les instructions mémoire plus complexes (index, RIP-relatif) sont refusées
+ * proprement tant qu'un backend assembleur complet n'est pas branché.
+ *
+ * `baseAddress` sert de curseur initial pour un script sans aucun label lié
+ * a un alloc()/module (rétro-compatible avec les scripts à une seule région).
+ * `context` résout les changements de curseur explicites ("nom:" lié à un
+ * alloc() connu, ou "module"+offset:) — nécessaire dès qu'un script en utilise.
  */
-AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t baseAddress = 0);
+AutoAsmCompileResult compileAutoAsmScript(
+    const AutoAsmScript& script,
+    uint64_t baseAddress = 0,
+    const AutoAsmCompileContext& context = {});
 
 /**
  * @brief Exécute un script auto-assembler dans un processus distant.
  *
  * 1. Résout les allocations (VirtualAllocEx)
- * 2. Compile les instructions en bytes
- * 3. Sauvegarde les bytes originaux à l'adresse patchée
- * 4. Écrit le code compilé
+ * 2. Résout les modules référencés par les blocs "module"+offset: dans le processus cible
+ * 3. Compile les instructions en bytes, une région par changement de curseur
+ * 4. Sauvegarde les bytes originaux de chaque région puis écrit le code compilé
+ *
+ * Best-effort atomique : si une région échoue à s'écrire après que d'autres
+ * ont réussi, les régions déjà écrites sont restaurées avant de retourner
+ * l'erreur — le processus cible n'est jamais laissé à moitié patché.
  */
 AutoAsmResult executeAutoAsmScript(const ProcessHandle& process, const AutoAsmScript& script);
 

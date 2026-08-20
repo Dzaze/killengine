@@ -273,13 +273,50 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
                 static_cast<int>(instruction.info.raw.disp.size / 8)
             });
         }
+        int immediateCount = 0;
+        int lastImmOffset = -1;
+        int lastImmSize = 0;
         for (const auto& imm : instruction.info.raw.imm) {
             if (imm.size > 0) {
                 wildcardRanges.append({
                     static_cast<int>(imm.offset),
                     static_cast<int>(imm.size / 8)
                 });
+                ++immediateCount;
+                lastImmOffset = static_cast<int>(imm.offset);
+                lastImmSize = static_cast<int>(imm.size / 8);
             }
+        }
+        // Un seul immediat : cas simple et sur a exposer pour "forcer une
+        // valeur" (ex: mov [mem], imm32). Plusieurs immediats (rare, ex:
+        // ENTER) : pas gere, on reste sur une substitution a un seul endroit
+        // plutot que de risquer une reconstruction ambigue.
+        if (immediateCount == 1) {
+            info.immediateOffset = lastImmOffset;
+            info.immediateSize = lastImmSize;
+        }
+        // Operande memoire destination (forme [base+disp] simple uniquement)
+        // : utile independamment de l'immediat, pour construire un trampoline
+        // "mov [meme base+disp], valeur" meme quand la source est un
+        // registre (donc sans immediat a substituer).
+        for (ZyanU8 opIdx = 0; opIdx < instruction.info.operand_count; ++opIdx) {
+            const auto& operand = instruction.operands[opIdx];
+            if (operand.type != ZYDIS_OPERAND_TYPE_MEMORY) {
+                continue;
+            }
+            if (operand.mem.index != ZYDIS_REGISTER_NONE
+                || operand.mem.base == ZYDIS_REGISTER_NONE
+                || operand.mem.base == ZYDIS_REGISTER_RIP
+                || operand.mem.base == ZYDIS_REGISTER_EIP) {
+                // Adressage indexe/echelle ou RIP-relatif : hors de la portee
+                // volontairement bornee d'encodeMemImmMov, laisser vide.
+                break;
+            }
+            info.memBaseRegister = QString::fromLatin1(ZydisRegisterGetString(operand.mem.base)).toLower();
+            info.memDisplacement = operand.mem.disp.has_displacement
+                ? static_cast<int64_t>(operand.mem.disp.value)
+                : 0;
+            break;
         }
         info.stableAobPattern = bytesToWildcardPattern(bytes.left(info.length), wildcardRanges);
         return info;
@@ -367,6 +404,30 @@ QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruct
             "Empêche cette instruction d'écrire en mémoire. C'est généralement le premier test pour une ressource réécrite.",
             "memory-write",
             "low"));
+        // "NOP" fige la valeur telle qu'elle est au moment du patch — ça ne
+        // permet pas d'imposer une valeur choisie. Quand l'instruction ecrit
+        // un immediat litteral (mov [mem], imm et non mov [mem], reg), on
+        // peut a la place substituer directement les octets de cet immediat
+        // par une valeur choisie par l'utilisateur, sans toucher au reste de
+        // l'instruction (meme longueur, meme opcode/ModRM). Rien de propose
+        // ici quand la source est un registre : forcer un registre demande
+        // d'injecter du code (hook + auto-assembleur), pas un simple patch
+        // d'octets — hors de portee d'une suggestion de patch statique.
+        if (instruction.immediateSize > 0
+            && instruction.immediateOffset >= 0
+            && instruction.immediateOffset + instruction.immediateSize <= instruction.length) {
+            PatchSuggestion valueOverride = makeSuggestion(
+                "Forcer une valeur",
+                instruction.rawBytesText,
+                "Remplace l'immédiat écrit par cette instruction par une valeur de ton choix, sans toucher au reste "
+                "de l'instruction. Demande une valeur avant de pouvoir appliquer.",
+                "memory-write",
+                "medium");
+            valueOverride.needsValueInput = true;
+            valueOverride.valueOffset = instruction.immediateOffset;
+            valueOverride.valueSize = instruction.immediateSize;
+            suggestions.append(valueOverride);
+        }
     } else if (category == "conditional-jump") {
         suggestions.append(makeSuggestion(
             "Forcer non pris",

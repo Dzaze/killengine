@@ -80,7 +80,9 @@ TEST(AutoAssembler, CompilesRuntimePrimitivesAndRawBytes) {
     const auto compiled = compileAutoAsmScript(script, 0x1000);
 
     ASSERT_TRUE(compiled.success) << compiled.error.toStdString();
-    EXPECT_EQ(compiled.code.toHex(' ').toUpper(), QByteArray("90 CC 90 CC 44 33 22 11 C3"));
+    ASSERT_EQ(compiled.regions.size(), 1);
+    EXPECT_EQ(compiled.regions.front().baseAddress, 0x1000ULL);
+    EXPECT_EQ(compiled.regions.front().code.toHex(' ').toUpper(), QByteArray("90 CC 90 CC 44 33 22 11 C3"));
 }
 
 TEST(AutoAssembler, CompilesRelativeJumpToLocalLabel) {
@@ -90,14 +92,50 @@ TEST(AutoAssembler, CompilesRelativeJumpToLocalLabel) {
     const auto compiled = compileAutoAsmScript(script, 0x1000);
 
     ASSERT_TRUE(compiled.success) << compiled.error.toStdString();
-    EXPECT_EQ(compiled.code.toHex(' ').toUpper(), QByteArray("E9 01 00 00 00 90 C3"));
+    ASSERT_EQ(compiled.regions.size(), 1);
+    EXPECT_EQ(compiled.regions.front().code.toHex(' ').toUpper(), QByteArray("E9 01 00 00 00 90 C3"));
     ASSERT_EQ(compiled.labels.size(), 1);
     EXPECT_EQ(compiled.labels.front().name, QStringLiteral("done"));
     EXPECT_EQ(compiled.labels.front().address, 0x1006ULL);
 }
 
-TEST(AutoAssembler, RejectsComplexInstructionsUntilFullBackendExists) {
+TEST(AutoAssembler, CompilesRegisterRelativeMovWithImmediate) {
+    // mov dword ptr [rax+8], 9999 -> C7 40 08 0F 27 00 00
+    // (verifie independamment contre l'encodage manuel du meme motif utilise
+    // par InstructionPatchSuggester.DecodesImmediateOperandOffsetForMemoryWrite
+    // dans test_aob_scanner.cpp : C7 40 08 <imm32>)
     const auto script = parseAutoAsmScript("mov [rax+08], 9999\n");
+
+    ASSERT_TRUE(script.success) << script.error.toStdString();
+    const auto compiled = compileAutoAsmScript(script, 0x1000);
+
+    ASSERT_TRUE(compiled.success) << compiled.error.toStdString();
+    ASSERT_EQ(compiled.regions.size(), 1);
+    EXPECT_EQ(compiled.regions.front().code.toHex(' ').toUpper(), QByteArray("C7 40 08 0F 27 00 00"));
+}
+
+TEST(AutoAssembler, CompilesExtendedRegisterAndSibRequiredBase) {
+    // r8 (registre etendu) impose un prefixe REX.B ; rsp/r12 comme base
+    // impose un octet SIB (ModRM.rm=100 ne peut pas designer directement rsp/r12).
+    const auto r8Script = parseAutoAsmScript("mov [r8+4], 1\n");
+    ASSERT_TRUE(r8Script.success) << r8Script.error.toStdString();
+    const auto r8Compiled = compileAutoAsmScript(r8Script, 0x1000);
+    ASSERT_TRUE(r8Compiled.success) << r8Compiled.error.toStdString();
+    ASSERT_EQ(r8Compiled.regions.size(), 1);
+    EXPECT_EQ(r8Compiled.regions.front().code.toHex(' ').toUpper(), QByteArray("41 C7 40 04 01 00 00 00"));
+
+    const auto rspScript = parseAutoAsmScript("mov [rsp+4], 1\n");
+    ASSERT_TRUE(rspScript.success) << rspScript.error.toStdString();
+    const auto rspCompiled = compileAutoAsmScript(rspScript, 0x1000);
+    ASSERT_TRUE(rspCompiled.success) << rspCompiled.error.toStdString();
+    ASSERT_EQ(rspCompiled.regions.size(), 1);
+    EXPECT_EQ(rspCompiled.regions.front().code.toHex(' ').toUpper(), QByteArray("C7 44 24 04 01 00 00 00"));
+}
+
+TEST(AutoAssembler, RejectsComplexAddressingUntilFullBackendExists) {
+    // Adressage indexe ("[rax+rbx]") : hors de la portee volontairement
+    // bornee de encodeMemImmMov (registre de base + deplacement uniquement).
+    const auto script = parseAutoAsmScript("mov [rax+rbx], 9999\n");
 
     ASSERT_TRUE(script.success) << script.error.toStdString();
     const auto compiled = compileAutoAsmScript(script, 0x1000);
@@ -105,6 +143,119 @@ TEST(AutoAssembler, RejectsComplexInstructionsUntilFullBackendExists) {
     EXPECT_FALSE(compiled.success);
     EXPECT_EQ(compiled.errorLine, 1);
     EXPECT_FALSE(compiled.error.isEmpty());
+}
+
+TEST(AutoAssembler, StillRejectsMnemonicsTheParserDoesNotRecognizeYet) {
+    // add/sub/inc/dec/cmp/push/pop existent dans AutoAsmInstructionType (pour
+    // l'API) mais parseAutoAsmScript() ne les reconnait pas encore comme
+    // syntaxe valide — rejet des le parsing, pas seulement a la compilation.
+    const auto script = parseAutoAsmScript("add [rax+8], 1\n");
+
+    EXPECT_FALSE(script.success);
+    EXPECT_EQ(script.errorLine, 1);
+    EXPECT_FALSE(script.error.isEmpty());
+}
+
+TEST(AutoAssembler, ParsesModuleRelativeBlockOpener) {
+    const auto script = parseAutoAsmScript("\"game.exe\"+0x1000:\nnop\n");
+
+    ASSERT_TRUE(script.success) << script.error.toStdString();
+    ASSERT_EQ(script.instructions.size(), 2);
+    EXPECT_EQ(script.instructions.front().type, AutoAsmInstructionType::ModuleLabel);
+    EXPECT_EQ(script.instructions.front().target, QStringLiteral("game.exe"));
+    EXPECT_EQ(script.instructions.front().offset, 0x1000);
+}
+
+TEST(AutoAssembler, RejectsModuleBlockWhenModuleUnresolved) {
+    // Sans contexte (aucun module connu, ex: script compile hors ligne ou
+    // processus non attache), un bloc "module"+offset: doit echouer
+    // proprement plutot que de silencieusement utiliser une adresse bidon.
+    const auto script = parseAutoAsmScript("\"missing.dll\"+0x10:\nnop\n");
+    ASSERT_TRUE(script.success) << script.error.toStdString();
+
+    const auto compiled = compileAutoAsmScript(script);
+
+    EXPECT_FALSE(compiled.success);
+    EXPECT_EQ(compiled.errorLine, 1);
+    EXPECT_FALSE(compiled.error.isEmpty());
+}
+
+TEST(AutoAssembler, CompilesCeStyleTwoRegionScript) {
+    // Pattern CE classique complet : bloc alloue (trampoline "newmem") +
+    // site EXISTANT du processus cible ("game.exe"+0x1000) redirige vers
+    // lui, avec un label ("returnhere") partage entre les deux regions —
+    // exactement ce qu'executeAutoAsmScript doit maintenant savoir ecrire en
+    // deux passes WriteProcessMemory distinctes.
+    const QString scriptText = QStringLiteral(
+        "alloc(newmem, 256)\n"
+        "label(returnhere)\n"
+        "\n"
+        "newmem:\n"
+        "mov [rax+08], 9999\n"
+        "jmp returnhere\n"
+        "\n"
+        "\"game.exe\"+0x1000:\n"
+        "jmp newmem\n"
+        "nop\n"
+        "returnhere:\n"
+        "ret\n");
+
+    const auto script = parseAutoAsmScript(scriptText);
+    ASSERT_TRUE(script.success) << script.error.toStdString();
+
+    // Adresses volontairement proches (< 2 Go d'ecart) : un jmp rel32 ne
+    // couvre que +/-2 Go, contrainte reelle de l'encodage E9 deja respectee
+    // ailleurs (cf. le check "Branch target is outside rel32 range"). Une
+    // allocation VirtualAllocEx(nullptr, ...) tombe parfois bien au-dela de
+    // ca du module cible — hors de portee de ce compilateur volontairement
+    // borne (function_hook.cpp gere deja le jmp 14 octets pour ce cas via
+    // generateJumpShellcode, chemin distinct de l'auto-assembleur).
+    AutoAsmCompileContext context;
+    context.allocationAddresses.insert("newmem", 0x140100000ULL);
+    context.moduleBaseAddresses.insert("game.exe", 0x140000000ULL);
+
+    const auto compiled = compileAutoAsmScript(script, 0, context);
+    ASSERT_TRUE(compiled.success) << compiled.error.toStdString();
+    ASSERT_EQ(compiled.regions.size(), 2);
+
+    const auto& newmemRegion = compiled.regions[0];
+    const auto& siteRegion = compiled.regions[1];
+    EXPECT_EQ(newmemRegion.baseAddress, 0x140100000ULL);
+    EXPECT_EQ(siteRegion.baseAddress, 0x140001000ULL);
+
+    // newmem: "mov [rax+08], 9999" (7o, encodage deja verifie octet par octet
+    // par CompilesRegisterRelativeMovWithImmediate) suivi de "jmp returnhere" (5o).
+    ASSERT_EQ(newmemRegion.code.size(), 12);
+    EXPECT_EQ(newmemRegion.code.left(7).toHex(' ').toUpper(), QByteArray("C7 40 08 0F 27 00 00"));
+    EXPECT_EQ(static_cast<uint8_t>(newmemRegion.code.at(7)), 0xE9);
+
+    // site: "jmp newmem" (5o) + "nop" (1o) + "ret" (1o, meme region que
+    // returnhere: puisque ce label n'est PAS lie a un alloc()).
+    ASSERT_EQ(siteRegion.code.size(), 7);
+    EXPECT_EQ(static_cast<uint8_t>(siteRegion.code.at(0)), 0xE9);
+    EXPECT_EQ(static_cast<uint8_t>(siteRegion.code.at(5)), 0x90);
+    EXPECT_EQ(static_cast<uint8_t>(siteRegion.code.at(6)), 0xC3);
+
+    const auto returnhereLabel = std::find_if(compiled.labels.begin(), compiled.labels.end(), [](const auto& l) {
+        return l.name == QStringLiteral("returnhere");
+    });
+    ASSERT_NE(returnhereLabel, compiled.labels.end());
+    EXPECT_EQ(returnhereLabel->address, siteRegion.baseAddress + 5 + 1);
+
+    // "jmp returnhere" (newmemRegion, offset 7) code bien rel32 = target - (adresse_jmp + 5).
+    const uint64_t jmpReturnhereAddress = newmemRegion.baseAddress + 7;
+    const int32_t expectedRel1 = static_cast<int32_t>(
+        static_cast<int64_t>(returnhereLabel->address) - static_cast<int64_t>(jmpReturnhereAddress + 5));
+    int32_t actualRel1 = 0;
+    std::memcpy(&actualRel1, newmemRegion.code.constData() + 8, 4);
+    EXPECT_EQ(actualRel1, expectedRel1);
+
+    // "jmp newmem" (siteRegion, offset 0) code bien rel32 = target - (adresse_jmp + 5).
+    const int32_t expectedRel2 = static_cast<int32_t>(
+        static_cast<int64_t>(newmemRegion.baseAddress) - static_cast<int64_t>(siteRegion.baseAddress + 5));
+    int32_t actualRel2 = 0;
+    std::memcpy(&actualRel2, siteRegion.code.constData() + 1, 4);
+    EXPECT_EQ(actualRel2, expectedRel2);
 }
 
 TEST(GlobalHotkey, RoundTripsReadableFunctionKey) {

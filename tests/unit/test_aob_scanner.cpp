@@ -3,6 +3,8 @@
 #include "patch/instruction_patch_suggester.h"
 #include "patch/profile_patch_state.h"
 
+#include <algorithm>
+
 #include <gtest/gtest.h>
 
 using namespace killcore;
@@ -155,6 +157,107 @@ TEST(InstructionPatchSuggester, SuggestsSameLengthNopPatch) {
     EXPECT_EQ(suggestions.first().bytesText, "90 90 90 90 90 90 90");
     EXPECT_EQ(suggestions.first().riskLevel, "low");
     EXPECT_FALSE(suggestions.first().risky);
+}
+
+TEST(InstructionPatchSuggester, DecodesImmediateOperandOffsetForMemoryWrite) {
+    // mov dword ptr [rax+8], 0x64  ->  C7 40 08 64 00 00 00
+    // C7 = opcode (MOV r/m32, imm32) ; 40 = ModRM (mod=01 disp8, reg=/0, rm=rax)
+    // 08 = disp8 ; 64 00 00 00 = imm32 (little-endian 0x64)
+    const QByteArray bytes = QByteArray::fromHex("C7400864000000");
+
+    const auto instruction = decodeX64InstructionLength(bytes);
+
+    ASSERT_TRUE(instruction.success) << instruction.error.toStdString();
+    EXPECT_EQ(instruction.length, 7);
+    EXPECT_EQ(instruction.category, "memory-write");
+    if (instruction.decoder == "zydis") {
+        // L'offset/taille de l'immediat ne sont calcules que via le decodeur
+        // Zydis (cf. instruction_patch_suggester.cpp) ; le decodeur builtin
+        // de secours ne les remplit pas.
+        EXPECT_EQ(instruction.immediateOffset, 3);
+        EXPECT_EQ(instruction.immediateSize, 4);
+        EXPECT_EQ(instruction.memBaseRegister, QStringLiteral("rax"));
+        EXPECT_EQ(instruction.memDisplacement, 8);
+    }
+}
+
+TEST(InstructionPatchSuggester, DecodesMemoryOperandForRegisterSourceWrite) {
+    // mov dword ptr [rdi+8], eax  ->  89 47 08
+    // 89 = opcode (MOV r/m32, r32) ; 47 = ModRM (mod=01 disp8, reg=eax, rm=rdi)
+    // 08 = disp8 ; pas d'immediat (source = registre eax)
+    const QByteArray bytes = QByteArray::fromHex("894708");
+
+    const auto instruction = decodeX64InstructionLength(bytes);
+
+    ASSERT_TRUE(instruction.success) << instruction.error.toStdString();
+    EXPECT_EQ(instruction.length, 3);
+    EXPECT_EQ(instruction.category, "memory-write");
+    if (instruction.decoder == "zydis") {
+        // Pas d'immediat a substituer (source registre), mais l'operande
+        // memoire destination doit rester exploitable pour construire un
+        // trampoline "force cette valeur ici" (cf. ApplicationController::
+        // forceWriteInstructionValue).
+        EXPECT_EQ(instruction.immediateSize, 0);
+        EXPECT_EQ(instruction.memBaseRegister, QStringLiteral("rdi"));
+        EXPECT_EQ(instruction.memDisplacement, 8);
+    }
+}
+
+TEST(InstructionPatchSuggester, LeavesMemBaseRegisterEmptyForRipRelativeWrite) {
+    // Reprend DecodesCommonRipRelativeWriteLength ("mov [rip+...], rax") :
+    // RIP-relatif est hors de la portee d'encodeMemImmMov, memBaseRegister
+    // doit rester vide plutot que de proposer un trampoline qui ecrirait au
+    // mauvais endroit.
+    const QByteArray bytes = QByteArray::fromHex("488905DEADBEEF488B05");
+
+    const auto instruction = decodeX64InstructionLength(bytes);
+
+    ASSERT_TRUE(instruction.success) << instruction.error.toStdString();
+    if (instruction.decoder == "zydis") {
+        EXPECT_TRUE(instruction.memBaseRegister.isEmpty());
+    }
+}
+
+TEST(InstructionPatchSuggester, SuggestsValueOverrideForImmediateMemoryWrite) {
+    InstructionInfo instruction;
+    instruction.success = true;
+    instruction.length = 7;
+    instruction.mnemonicHint = "write-like";
+    instruction.category = "memory-write";
+    instruction.rawBytesText = "C7 40 08 64 00 00 00";
+    instruction.immediateOffset = 3;
+    instruction.immediateSize = 4;
+
+    const auto suggestions = suggestInstructionPatches(instruction);
+
+    const auto valueOverride = std::find_if(suggestions.begin(), suggestions.end(), [](const auto& s) {
+        return s.needsValueInput;
+    });
+    ASSERT_NE(valueOverride, suggestions.end());
+    EXPECT_EQ(valueOverride->label, "Forcer une valeur");
+    EXPECT_EQ(valueOverride->valueOffset, 3);
+    EXPECT_EQ(valueOverride->valueSize, 4);
+    // Le NOP reste la premiere suggestion (non risquee, choisie par defaut) :
+    // "Forcer une valeur" s'ajoute sans changer le comportement existant.
+    EXPECT_FALSE(suggestions.first().needsValueInput);
+}
+
+TEST(InstructionPatchSuggester, DoesNotSuggestValueOverrideWithoutImmediate) {
+    InstructionInfo instruction;
+    instruction.success = true;
+    instruction.length = 7;
+    instruction.mnemonicHint = "write-like";
+    instruction.category = "memory-write";
+    instruction.rawBytesText = "48 89 05 DE AD BE EF";
+    // Pas d'immediat (source = registre, ex: mov [rip+disp], rax) : immediateSize
+    // reste a 0 par defaut, aucune suggestion "Forcer une valeur" ne doit sortir.
+
+    const auto suggestions = suggestInstructionPatches(instruction);
+
+    const auto valueOverride = std::find_if(suggestions.begin(), suggestions.end(), [](const auto& s) {
+        return s.needsValueInput;
+    });
+    EXPECT_EQ(valueOverride, suggestions.end());
 }
 
 TEST(InstructionPatchSuggester, SuggestsBranchDirectionPatches) {

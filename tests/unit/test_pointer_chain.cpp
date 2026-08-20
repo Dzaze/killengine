@@ -60,6 +60,10 @@ TEST(PointerChain, ProfileStoreRoundTripsCodePatches) {
     Profile profile;
     profile.gameName = "StarCraft2";
     profile.executableName = "SC2_x64.exe";
+    // Utilise pour detecter qu'un patch a ete sauvegarde sur une version
+    // differente de l'executable (ApplicationController::applyProfileCodePatch) —
+    // champ deja present dans le format mais jamais couvert par un test avant.
+    profile.executableHash = "deadbeefcafef00d0123456789abcdef0123456789abcdef0123456789abcdef";
 
     ProfileCodePatch patch;
     patch.name = "Unlimited resources";
@@ -87,6 +91,7 @@ TEST(PointerChain, ProfileStoreRoundTripsCodePatches) {
 
     Profile loaded;
     ASSERT_TRUE(ProfileStore::load(path, &loaded));
+    EXPECT_EQ(loaded.executableHash, profile.executableHash);
     ASSERT_EQ(loaded.patches.size(), 1);
     const auto& loadedPatch = loaded.patches.first();
     EXPECT_EQ(loadedPatch.name, patch.name);
@@ -107,6 +112,34 @@ TEST(PointerChain, ProfileStoreRoundTripsCodePatches) {
     EXPECT_DOUBLE_EQ(loadedPatch.signatureFixedRatio, patch.signatureFixedRatio);
     EXPECT_EQ(loadedPatch.trainerSafe, patch.trainerSafe);
     EXPECT_EQ(loadedPatch.signatureMatches, patch.signatureMatches);
+}
+
+TEST(PointerChain, ProfileStoreRoundTripsAutoAsmScripts) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+
+    Profile profile;
+    profile.gameName = "StarCraft2";
+    profile.executableName = "SC2_x64.exe";
+
+    killcore::ProfileAutoAsmScript script;
+    script.name = "Infinite HP";
+    script.scriptText = "alloc(newmem,256)\nlabel(returnhere)\n\nnewmem:\nmov [rax+8], 9999\njmp returnhere\n\n\"SC2_x64.exe\"+0x123456:\njmp newmem\nnop\nreturnhere:";
+    script.description = "Fige les PV via un trampoline";
+    script.riskLevel = "high";
+    profile.autoAsmScripts.append(script);
+
+    const QString path = dir.filePath("starcraft2.keprofile");
+    ASSERT_TRUE(ProfileStore::save(profile, path));
+
+    Profile loaded;
+    ASSERT_TRUE(ProfileStore::load(path, &loaded));
+    ASSERT_EQ(loaded.autoAsmScripts.size(), 1);
+    const auto& loadedScript = loaded.autoAsmScripts.first();
+    EXPECT_EQ(loadedScript.name, script.name);
+    EXPECT_EQ(loadedScript.scriptText, script.scriptText);
+    EXPECT_EQ(loadedScript.description, script.description);
+    EXPECT_EQ(loadedScript.riskLevel, script.riskLevel);
 }
 
 TEST(PointerChain, ProfileStoreRoundTripsPointerChainLocator) {

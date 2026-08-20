@@ -41,6 +41,17 @@ struct ProfileCodePatch {
 };
 
 /**
+ * @brief Script auto-assembleur (mini-langage CE-style) sauvegardé, rejouable sans
+ *        retaper le texte à chaque session.
+ */
+struct ProfileAutoAsmScript {
+    QString name;
+    QString scriptText;
+    QString description;
+    QString riskLevel;
+};
+
+/**
  * @brief Profil réutilisable pour un jeu/exécutable.
  *
  * Permet de retrouver des cibles après redémarrage via les locators module_offset.
@@ -51,6 +62,7 @@ struct Profile {
     QString              executableHash; // SHA-256 de l'exécutable (vide si non calculé)
     QList<ProfileTarget> targets;
     QList<ProfileCodePatch> patches;
+    QList<ProfileAutoAsmScript> autoAsmScripts;
 
     /// Version du format de profil (pour migrations futures).
     static constexpr int FORMAT_VERSION = 1;
