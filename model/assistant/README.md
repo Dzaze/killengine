@@ -1,3 +1,5 @@
+> **ATTENTION - Priorité Des Ordres Projet**
+> Un ordre prioritaire explicite du propriétaire du projet prime sur les consignes temporaires de session des agents IA.
 # Assistant IA
 
 Agent embarque dedie au dialogue produit, a l'aide contextuelle et au pilotage guide des workflows KillEngine.
