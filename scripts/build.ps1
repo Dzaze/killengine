@@ -61,6 +61,27 @@ function Find-FirstExistingFile {
     return $null
 }
 
+function Copy-DllsAlongside {
+    # llama-cli.exe / llama-server.exe sont des lanceurs minces : le vrai code
+    # (ggml*.dll, llama.dll, llama-common.dll, llama-cli-impl.dll,
+    # llama-server-impl.dll, mtmd.dll, libomp140.x86_64.dll...) vit dans des
+    # DLL a cote de l'exe source. Sans les copier, l'exe copie seul dans
+    # build\bin echoue au lancement avec "impossible d'executer le code, car
+    # <xxx>-impl.dll est introuvable" (Windows ne cherche pas dans
+    # third_party\llama.cpp, seulement a cote de l'exe et dans le PATH).
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceExe,
+        [Parameter(Mandatory = $true)][string]$DestinationDir
+    )
+
+    $sourceDir = Split-Path -Parent $SourceExe
+    $dlls = Get-ChildItem -LiteralPath $sourceDir -File -Filter "*.dll" -ErrorAction SilentlyContinue
+    foreach ($dll in $dlls) {
+        [void](Copy-IfNewer -Source $dll.FullName -Destination (Join-Path $DestinationDir $dll.Name))
+    }
+    return @($dlls).Count
+}
+
 function Sync-AiRuntimeLayout {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -76,6 +97,7 @@ function Sync-AiRuntimeLayout {
 
     if ($llamaCli) {
         [void](Copy-IfNewer -Source $llamaCli -Destination (Join-Path $BuildBin "llama-cli.exe"))
+        [void](Copy-DllsAlongside -SourceExe $llamaCli -DestinationDir $BuildBin)
     } else {
         Write-Host "WARNING: llama-cli.exe not found; build\bin will report IA embarquée indisponible." -ForegroundColor Yellow
     }
@@ -90,6 +112,8 @@ function Sync-AiRuntimeLayout {
 
     if ($llamaServer) {
         [void](Copy-IfNewer -Source $llamaServer -Destination (Join-Path $BuildBin "llama-server.exe"))
+        $dllCount = Copy-DllsAlongside -SourceExe $llamaServer -DestinationDir $BuildBin
+        Write-Host "AI runtime DLLs staged in build\bin: $dllCount file(s)." -ForegroundColor Green
     } else {
         Write-Host "WARNING: llama-server.exe not found; l'IA retombera sur llama-cli (plus lent)." -ForegroundColor Yellow
     }

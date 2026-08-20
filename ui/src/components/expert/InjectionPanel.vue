@@ -1,9 +1,16 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import RiskBadge from '@/components/expert/RiskBadge.vue'
 
 const store = useAppStore()
+
+onMounted(() => {
+  if (store.isAttached) {
+    void store.refreshSavedAutoAsmScripts()
+  }
+})
 </script>
 
 <template>
@@ -62,14 +69,17 @@ const store = useAppStore()
     <div class="injection-block">
       <h3>Script auto-assembler</h3>
       <p class="hint">
-        Sous-ensemble volontairement borné : nop/ret/int3/db/jmp/call/je/jne. Les instructions mémoire
-        complexes sont refusées proprement plutôt que mal exécutées.
+        Sous-ensemble volontairement borné : nop/ret/int3/db/jmp/call/je/jne, <code>mov [registre+déplacement], immédiat</code>,
+        blocs <code>"nom:"</code> (lié à un <code>alloc()</code>) et <code>"module.exe"+offset:</code> (site existant, pattern
+        Cheat Engine classique — voir le bouton "Forcer valeur (hook)" sur une capture Écrit par pour un raccourci qui
+        génère ce script automatiquement, sans avoir à l'écrire à la main). Adressage indexé/RIP-relatif et le reste des
+        mnémoniques refusés proprement plutôt que mal exécutés.
       </p>
       <textarea
         v-model="store.autoAsmScriptText"
         class="input autoasm-textarea"
         rows="6"
-        placeholder="alloc(newmem, 256)&#10;label(returnhere)&#10;..."
+        placeholder="alloc(newmem, 256)&#10;label(returnhere)&#10;&#10;newmem:&#10;mov [rax+8], 9999&#10;jmp returnhere&#10;&#10;&quot;monjeu.exe&quot;+0x12345:&#10;jmp newmem&#10;nop&#10;returnhere:"
         :disabled="store.injectionBusy"
       ></textarea>
       <div class="row-actions">
@@ -91,6 +101,50 @@ const store = useAppStore()
       <p v-if="store.autoAsmResult" :class="store.autoAsmResult.success ? 'hint' : 'error'">
         {{ store.autoAsmResult.success ? `Actif, patch à 0x${store.autoAsmResult.patchAddress}` : store.autoAsmResult.error }}
       </p>
+
+      <div class="autoasm-save-row">
+        <input
+          v-model="store.autoAsmScriptName"
+          class="input"
+          placeholder="Nom du script (pour le sauvegarder)"
+          :disabled="store.injectionBusy"
+        />
+        <button
+          class="btn btn-secondary compact"
+          type="button"
+          :disabled="store.injectionBusy || !store.autoAsmScriptText.trim() || !store.autoAsmScriptName.trim()"
+          @click="store.saveAutoAsmScript()"
+        >
+          Sauvegarder dans le profil
+        </button>
+      </div>
+      <p v-if="store.autoAsmSaveResult" :class="store.autoAsmSaveResult.success ? 'hint' : 'error'">
+        {{ store.autoAsmSaveResult.success ? `Sauvegardé (${store.autoAsmSaveResult.scriptCount} script(s) dans ce profil)` : store.autoAsmSaveResult.error }}
+      </p>
+
+      <div class="autoasm-saved-list">
+        <div class="autoasm-saved-header">
+          <h4>Scripts sauvegardés</h4>
+          <button class="btn btn-secondary compact" type="button" :disabled="store.autoAsmSavedScriptsBusy" @click="store.refreshSavedAutoAsmScripts()">
+            {{ store.autoAsmSavedScriptsBusy ? 'Chargement...' : 'Rafraîchir' }}
+          </button>
+        </div>
+        <p v-if="!store.autoAsmSavedScripts.length" class="hint">Aucun script sauvegardé pour ce profil.</p>
+        <div v-for="saved in store.autoAsmSavedScripts" :key="String(saved.name)" class="autoasm-saved-entry">
+          <span class="autoasm-saved-name">{{ saved.name }}</span>
+          <div class="row-actions">
+            <button class="btn btn-secondary compact" type="button" @click="store.autoAsmScriptText = String(saved.scriptText ?? '')">
+              Charger
+            </button>
+            <button class="btn btn-primary compact" type="button" :disabled="store.injectionBusy" @click="store.applySavedAutoAsmScript(String(saved.name))">
+              Exécuter
+            </button>
+            <button class="btn btn-secondary compact" type="button" @click="store.deleteSavedAutoAsmScript(String(saved.name))">
+              Supprimer
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 </template>
@@ -124,5 +178,49 @@ const store = useAppStore()
   font-family: 'Cascadia Code', monospace;
   font-size: 12px;
   resize: vertical;
+}
+
+.autoasm-save-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.autoasm-saved-list {
+  margin-top: 10px;
+}
+
+.autoasm-saved-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.autoasm-saved-header h4 {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.autoasm-saved-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  margin-bottom: 4px;
+}
+
+.autoasm-saved-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

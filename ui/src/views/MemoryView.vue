@@ -17,15 +17,37 @@ const dumpSize = ref(256)
 const dumpBusy = ref(false)
 const dumpResult = ref<Record<string, unknown> | null>(null)
 
+// Visualiseur hexadecimal navigable (item roadmap : au-dela de l'apercu 64 octets)
+const hexViewerJumpAddress = ref('')
+const hexViewerRowEditAddress = ref<string | null>(null)
+const hexViewerRowEditValue = ref('')
+const hexViewerRowBusy = ref(false)
+const hexViewerRowResult = ref<Record<string, unknown> | null>(null)
+
 const regions = computed(() => store.memoryMap?.regions ?? [])
 const stats = computed(() => store.memoryMap?.stats)
+// Filtre de region par nom de module (roadmap I) : store.processModules est deja
+// peuple a l'attache (voir ProcessView), on resout juste baseAddress -> module ici
+// plutot que d'ajouter un champ module au format MemoryRegion cote backend.
+const moduleFilter = ref('')
+
+function regionModuleName(region: Record<string, unknown>): string {
+  const base = BigInt(`0x${String(region.baseAddress || '0')}`)
+  for (const mod of store.processModules) {
+    const modBase = BigInt(`0x${mod.baseAddress}`)
+    if (base >= modBase && base < modBase + BigInt(mod.size)) return mod.name
+  }
+  return ''
+}
 
 const filteredRegions = computed(() => {
+  const moduleQuery = moduleFilter.value.trim().toLowerCase()
   return regions.value.filter((region) => {
-    if (filter.value === 'committed') return region.state === 'committed'
-    if (filter.value === 'readable') return region.readable
-    if (filter.value === 'writable') return region.writable
-    if (filter.value === 'executable') return region.executable
+    if (filter.value === 'committed' && region.state !== 'committed') return false
+    if (filter.value === 'readable' && !region.readable) return false
+    if (filter.value === 'writable' && !region.writable) return false
+    if (filter.value === 'executable' && !region.executable) return false
+    if (moduleQuery && !regionModuleName(region).toLowerCase().includes(moduleQuery)) return false
     return true
   })
 })
@@ -109,6 +131,48 @@ async function dumpPreviewRegion() {
   }
 }
 
+function openHexViewer() {
+  if (!store.memoryPreviewAddress) return
+  void store.openHexViewer(store.memoryPreviewAddress)
+}
+
+function hexViewerJump() {
+  if (!hexViewerJumpAddress.value.trim()) return
+  void store.hexViewerJumpTo(hexViewerJumpAddress.value)
+}
+
+function hexViewerPrevPage() {
+  void store.hexViewerGoToOffset(-store.hexViewerPageSize)
+}
+
+function hexViewerNextPage() {
+  void store.hexViewerGoToOffset(store.hexViewerPageSize)
+}
+
+function startRowEdit(row: { address: string; bytes: string[] }) {
+  hexViewerRowEditAddress.value = hexViewerRowEditAddress.value === row.address ? null : row.address
+  hexViewerRowEditValue.value = row.bytes.join(' ')
+  hexViewerRowResult.value = null
+}
+
+async function applyRowEdit() {
+  if (!hexViewerRowEditAddress.value || !hexViewerRowEditValue.value.trim()) return
+  const address = hexViewerRowEditAddress.value
+  if (!await store.confirmRiskAction('write', 'Edition hex', 'Ecriture de bytes bruts a 0x' + address + '.')) {
+    return
+  }
+  hexViewerRowBusy.value = true
+  hexViewerRowResult.value = null
+  try {
+    hexViewerRowResult.value = await store.hexViewerWriteRow(address, hexViewerRowEditValue.value)
+    if (hexViewerRowResult.value?.success) {
+      hexViewerRowEditAddress.value = null
+    }
+  } finally {
+    hexViewerRowBusy.value = false
+  }
+}
+
 function formatBytes(bytes: number | undefined) {
   if (!bytes) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -135,13 +199,19 @@ onMounted(() => {
         <h1>{{ $t('memory.title') }}</h1>
         <p v-if="store.isAttached">{{ store.processName }}</p>
       </div>
-      <button class="btn btn-secondary" :disabled="!store.isAttached" @click="store.refreshMemoryMap()">
+      <button
+        class="btn btn-secondary"
+        :disabled="!store.isAttached"
+        :title="!store.isAttached ? $t('memory.attachFirst') : ''"
+        @click="store.refreshMemoryMap()"
+      >
         {{ $t('memory.refresh') }}
       </button>
     </div>
 
     <div v-if="!store.isAttached" class="empty-state">
-      {{ $t('memory.attachFirst') }}
+      <p>{{ $t('memory.attachFirst') }}</p>
+      <button class="btn btn-secondary" @click="store.activeView = 'process'">{{ $t('memory.goToProcess') }}</button>
     </div>
 
     <template v-else>
@@ -188,6 +258,11 @@ onMounted(() => {
         <button class="chip" :class="{ active: filter === 'executable' }" @click="filter = 'executable'">
           {{ $t('memory.executable') }}
         </button>
+        <input
+          v-model="moduleFilter"
+          class="input module-filter"
+          :placeholder="$t('memory.moduleFilterPlaceholder')"
+        />
       </div>
 
       <div
@@ -236,6 +311,14 @@ onMounted(() => {
                 @click="startHexEdit()"
               >
                 {{ hexEditMode ? 'Fermer hex' : 'Editer hex' }}
+              </button>
+              <button
+                v-if="store.memoryPreviewAddress"
+                class="preview-action-btn"
+                type="button"
+                @click="openHexViewer()"
+              >
+                Vue hexadécimale
               </button>
               <button
                 v-if="store.memoryPreviewAddress"
@@ -313,6 +396,76 @@ onMounted(() => {
         <p v-else>Aucune donnée lisible à cette adresse.</p>
       </div>
 
+      <div v-if="store.hexViewerOpen" class="hex-viewer-panel">
+        <div class="hex-viewer-toolbar">
+          <strong>Vue hexadécimale</strong>
+          <code>0x{{ store.hexViewerAddress }}</code>
+          <input
+            v-model="hexViewerJumpAddress"
+            class="hex-edit-input hex-viewer-jump-input"
+            type="text"
+            placeholder="Aller à (0x...)"
+            spellcheck="false"
+            @keyup.enter="hexViewerJump()"
+          />
+          <button class="preview-action-btn" type="button" @click="hexViewerJump()">Aller</button>
+          <button class="preview-action-btn" type="button" :disabled="store.hexViewerLoading" @click="hexViewerPrevPage()">
+            ← Page préc.
+          </button>
+          <button class="preview-action-btn" type="button" :disabled="store.hexViewerLoading" @click="hexViewerNextPage()">
+            Page suiv. →
+          </button>
+          <select
+            class="dump-select"
+            :value="store.hexViewerPageSize"
+            @change="store.hexViewerSetPageSize(Number(($event.target as HTMLSelectElement).value))"
+          >
+            <option :value="256">256 B</option>
+            <option :value="512">512 B</option>
+            <option :value="4096">4 KB</option>
+            <option :value="16384">16 KB</option>
+          </select>
+          <button class="preview-action-btn" type="button" @click="store.closeHexViewer()">Fermer</button>
+        </div>
+        <div v-if="store.hexViewerLoading" class="preview-loading">Lecture de la mémoire...</div>
+        <p v-else-if="store.hexViewerData && !store.hexViewerData.success">{{ store.hexViewerData.error }}</p>
+        <div v-else class="hex-viewer-grid">
+          <div class="hex-viewer-header-row">
+            <span class="hv-address">Adresse</span>
+            <span class="hv-bytes">Octets</span>
+            <span class="hv-ascii">ASCII</span>
+            <span class="hv-edit"></span>
+          </div>
+          <div v-for="row in store.hexViewerRows" :key="row.address" class="hex-viewer-row">
+            <span class="hv-address">{{ row.address }}</span>
+            <span class="hv-bytes">{{ row.bytes.join(' ') }}</span>
+            <span class="hv-ascii">{{ row.ascii }}</span>
+            <button class="hv-edit-btn" type="button" @click="startRowEdit(row)">
+              {{ hexViewerRowEditAddress === row.address ? 'Annuler' : 'Éditer' }}
+            </button>
+            <div v-if="hexViewerRowEditAddress === row.address" class="hex-edit-row hv-edit-form">
+              <input
+                v-model="hexViewerRowEditValue"
+                class="hex-edit-input"
+                type="text"
+                spellcheck="false"
+              />
+              <button
+                class="preview-action-btn"
+                type="button"
+                :disabled="hexViewerRowBusy"
+                @click="applyRowEdit()"
+              >
+                {{ hexViewerRowBusy ? 'Écriture...' : 'Écrire' }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-if="hexViewerRowResult" :class="hexViewerRowResult.success ? 'hex-result-ok' : 'hex-result-err'">
+          {{ hexViewerRowResult.success ? 'Écriture OK (' + (hexViewerRowResult.bytesWritten ?? 0) + ' octets)' : String(hexViewerRowResult.error ?? 'Échec') }}
+        </p>
+      </div>
+
       <div class="region-list">
         <div v-for="region in filteredRegions.slice(0, 250)" :key="`${region.baseAddress}-${region.size}`" class="region-row">
           <div class="address">0x{{ region.baseAddress }}</div>
@@ -320,6 +473,7 @@ onMounted(() => {
           <div class="protection">{{ region.protection }}</div>
           <div class="state">{{ region.state }}</div>
           <div class="type">{{ region.type }}</div>
+          <div class="module">{{ regionModuleName(region) || '-' }}</div>
           <div class="region-actions">
             <button
               class="preview-btn"
@@ -373,6 +527,10 @@ onMounted(() => {
   text-align: center;
 }
 
+.empty-state .btn {
+  margin-top: 10px;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(120px, 1fr));
@@ -404,8 +562,24 @@ onMounted(() => {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
+}
+
+.module-filter {
+  min-width: 180px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.module {
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chip,
@@ -453,7 +627,7 @@ onMounted(() => {
 
 .region-row {
   display: grid;
-  grid-template-columns: 150px 90px 120px 90px 90px 150px;
+  grid-template-columns: 150px 90px 120px 90px 90px 130px 150px;
   gap: 12px;
   align-items: center;
   padding: 8px 10px;
@@ -671,6 +845,100 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.hex-viewer-panel {
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+}
+
+.hex-viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.hex-viewer-toolbar strong {
+  color: var(--text-primary);
+}
+
+.hex-viewer-toolbar code {
+  color: var(--accent);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 12px;
+}
+
+.hex-viewer-jump-input {
+  width: 160px;
+  flex: none;
+}
+
+.hex-viewer-grid {
+  display: flex;
+  max-height: 420px;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  font-family: 'Cascadia Code', monospace;
+  font-size: 12px;
+}
+
+.hex-viewer-header-row,
+.hex-viewer-row {
+  display: grid;
+  grid-template-columns: 110px minmax(280px, 1fr) 150px 70px;
+  gap: 10px;
+  align-items: start;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.hex-viewer-header-row {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.hex-viewer-row {
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+}
+
+.hex-viewer-row:hover {
+  background: var(--bg-accent);
+}
+
+.hv-address {
+  color: var(--accent);
+}
+
+.hv-bytes {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+
+.hv-ascii {
+  color: var(--text-dim);
+}
+
+.hv-edit-btn {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg-accent);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.hv-edit-form {
+  grid-column: 1 / -1;
+  margin: 4px 0 2px;
+}
+
 @media (max-width: 900px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
@@ -679,6 +947,11 @@ onMounted(() => {
   .region-row {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .hex-viewer-header-row,
+  .hex-viewer-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -384,6 +384,7 @@ async function applyProfilePatch(patch: ProfilePatchEntry) {
     patchStates.value = { ...patchStates.value, [patch.name]: { ...result, active: Boolean(result.success || result.active) } }
     statusMessage.value = result.success
       ? `✓ Patch "${patch.name}" appliqué à 0x${result.matchedAddress ?? result.address ?? ''}.`
+        + (result.executableVersionMismatch ? ` ⚠ ${String(result.executableVersionWarning ?? '')}` : '')
       : '✗ ' + (result.error ?? `Patch "${patch.name}" impossible.`)
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
@@ -591,7 +592,8 @@ onMounted(() => {
     </div>
 
     <div v-if="!store.isAttached" class="warn-box">
-      ⚠ Attache un processus pour utiliser les profils.
+      <p>⚠ Attache un processus pour utiliser les profils.</p>
+      <button class="btn btn-secondary" @click="store.activeView = 'process'">Aller à Processus</button>
     </div>
 
     <!-- Liste des profils -->
@@ -807,6 +809,10 @@ onMounted(() => {
 }
 
 .warn-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   background: rgba(224, 175, 104, 0.1);
   border: 1px solid rgba(224, 175, 104, 0.3);
   border-radius: 8px;

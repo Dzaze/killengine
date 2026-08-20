@@ -16,6 +16,11 @@ const processFilter = ref('all')
 const searchFilter = ref('')
 const exportText = ref('')
 const exportStatus = ref('')
+const overlayHotkeyDraft = ref('')
+
+function overlayHotkeyValue() {
+  return overlayHotkeyDraft.value || store.trainerOverlayHotkey || ''
+}
 
 const scenarioPresets = computed(() => store.workflowPresets.filter((preset) => preset.id.startsWith('scenario-')))
 
@@ -187,6 +192,17 @@ async function copyTrainerExport() {
       </div>
     </header>
     <p v-if="store.trainerOverlayStatus" class="hotkey-status">{{ store.trainerOverlayStatus }}</p>
+    <div class="overlay-hotkey-row">
+      <span class="hint">Hotkey pour afficher/masquer l'overlay sans alt-tab :</span>
+      <input
+        :value="overlayHotkeyValue()"
+        class="input hotkey-input"
+        placeholder="Ctrl+Alt+F2"
+        @input="overlayHotkeyDraft = ($event.target as HTMLInputElement).value"
+      />
+      <button class="btn" :disabled="!overlayHotkeyValue().trim()" @click="store.registerOverlayHotkey(overlayHotkeyValue())">Hotkey overlay</button>
+      <button class="btn" :disabled="!store.trainerOverlayHotkeyId" @click="store.unregisterOverlayHotkey()">Retirer</button>
+    </div>
 
     <div class="preset-row">
       <span class="hint preset-row-label">Pas encore d'adresse ? Scénarios courants :</span>
@@ -584,6 +600,14 @@ p,
 .hotkey-status {
   margin-top: 10px;
   color: var(--text-secondary);
+}
+
+.overlay-hotkey-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
 }
 
 .export pre {

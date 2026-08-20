@@ -238,6 +238,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
   } else if (actionId === 'continue_unknown_observation') {
     store.pushMessage('assistant', 'Fais varier la valeur dans le processus, puis tape la nouvelle observation ici. Je reprendrai Unknown automatiquement.')
   } else if (actionId === 'try_encrypted_scan' || actionId === 'encrypted_scan') {
+    store.pendingAssistantAction = ''
     const value = actionValue || store.targetValueGuided || store.smartSearchContext?.initialValue || ''
     if (value.trim()) {
       await store.runAutoEncryptedScan(value)
@@ -246,6 +247,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
       store.pushMessage('assistant', 'Donne-moi une valeur affichée, puis je lancerai le scan chiffré borné.')
     }
   } else if (actionId === 'trace_ui_string' || actionId === 'trace_ui_sources') {
+    await store.acknowledgePendingSmartSearchRecovery()
     const value = actionValue || store.targetValueGuided || store.smartSearchContext?.initialValue || ''
     if (value.trim()) {
       await store.runAutoTraceUiString(value)
@@ -277,6 +279,31 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
   } else if (actionId === 'trainer_checkpoint') {
     store.activeView = 'expert'
     store.pushMessage('assistant', 'Checkpoint trainer : vérifie la signature AOB et les matches avant tout patch ou hook.')
+  } else if (actionId === 'find_what_writes_targets') {
+    const address = typeof action === 'string' ? '' : String(action.address ?? '')
+    const type = typeof action === 'string' ? 'Int32' : String(action.type ?? 'Int32')
+    if (!address) {
+      store.pushMessage('assistant', "Aucune adresse récente à capturer.", { isError: true })
+    } else {
+      store.pushMessage('assistant', 'Fais varier la valeur dans le jeu maintenant : je capture qui écrit sur cette adresse pendant quelques secondes...')
+      await scrollToBottom()
+      const result = await store.executeCheckpointFindWhatWrites({ address, type })
+      if (result === null) {
+        store.pushMessage('assistant', "Capture bloquée par ton mode Auto actuel (Safe). Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+      } else {
+        const hits = Array.isArray((result as Record<string, unknown>).hits) ? (result as Record<string, unknown>).hits as Array<Record<string, unknown>> : []
+        store.pushMessage(
+          'assistant',
+          hits.length > 0
+            ? `Capturé : ${hits.length} instruction(s) écrivent sur 0x${address}. Ajoutées aux checkpoints d'Investigation — tu peux y valider une piste avant d'écrire.`
+            : `Aucune écriture capturée sur 0x${address} pendant la fenêtre. Soit la valeur n'a pas changé pendant la capture (réessaie en faisant varier plus vite), soit cette adresse n'est plus la bonne.`,
+          { isError: hits.length === 0 },
+        )
+      }
+    }
+  } else if (actionId === 'open_pointer_scan') {
+    store.activeView = 'expert'
+    store.pushMessage('assistant', "Expert ouvert, section Pointeurs : lance un scan de pointeur stable vers la dernière adresse. Ça permet de la retrouver même si elle change d'une partie à l'autre.")
   }
   await scrollToBottom()
 }
@@ -353,6 +380,8 @@ function workflowLabel(status: string | undefined): string {
       return 'Adresses à vérifier'
     case 'no_candidate':
       return 'Aucun candidat restant'
+    case 'trace_ui_string_found':
+      return 'En attente : filtrer dans Expert'
     default:
       return 'Prêt'
   }
@@ -369,6 +398,7 @@ function workflowClass(status: string | undefined): string {
     case 'requires_manual_write':
     case 'awaiting_write_confirmation':
     case 'auto_resolve_planned':
+    case 'trace_ui_string_found':
       return 'wf-warning'
     case 'auto_write_partial_or_failed':
     case 'auto_write_problem':
@@ -520,9 +550,10 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
             Pourquoi bloqué ?
           </button>
         </div>
-        <p v-if="!store.isAttached" class="warn-text">
-          ⚠ Attache d'abord un processus dans l'onglet « Processus ».
-        </p>
+        <div v-if="!store.isAttached" class="warn-text">
+          <p>⚠ Attache d'abord un processus pour pouvoir chercher une valeur.</p>
+          <button class="btn btn-secondary compact" @click="store.activeView = 'process'">Aller à Processus</button>
+        </div>
       </div>
 
       <!-- Messages -->
@@ -580,11 +611,14 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           <div
             v-if="msg.autoWriteResults && msg.autoWriteResults.length > 0"
             class="auto-write-box"
-            :class="msg.autoWriteOk ? 'auto-ok' : 'auto-fail'"
+            :class="msg.invalidated ? 'auto-invalidated' : (msg.autoWriteOk ? 'auto-ok' : 'auto-fail')"
           >
             <div class="auto-write-title">
-              {{ msg.autoWriteOk ? '✓ Écriture auto réussie' : '⚠ Écriture auto partielle' }}
+              {{ msg.invalidated ? '✗ Signalé non fonctionnel ensuite' : (msg.autoWriteOk ? '✓ Écriture auto réussie' : '⚠ Écriture auto partielle') }}
             </div>
+            <p v-if="msg.invalidated" class="invalidated-note">
+              L'écriture a bien été appliquée en mémoire, mais tu as indiqué que ça n'a pas changé le comportement du jeu — ce n'est probablement pas la bonne adresse.
+            </p>
             <div v-if="writeHistoryFor(msg)" class="write-history-line">
               Historique : {{ writeHistoryFor(msg) }}
             </div>
@@ -597,7 +631,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
               class="auto-write-row"
             >
               <span>0x{{ r.address }}</span>
-              <span>{{ r.verified ? '✓ final vérifié' : '✗ non vérifié' }}</span>
+              <span>{{ msg.invalidated ? '✗ invalidé' : (r.verified ? '✓ final vérifié' : '✗ non vérifié') }}</span>
               <span v-if="writeSummaryFor(msg, r)" class="write-summary">{{ writeSummaryFor(msg, r) }}</span>
               <span v-if="r.confirmationMode" class="confirm-steps">
                 {{ r.temporaryVerified ? 'test OK' : 'test KO' }}
@@ -689,7 +723,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           <!-- Requires confirmation -->
           <div v-if="msg.requiresConfirmation" class="confirm-box">
             <span class="confirm-icon">🔐</span>
-            {{ msg.confirmationReason }}
+            {{ msg.confirmationReason || 'Confirmation nécessaire avant de continuer — vérifie les actions proposées ci-dessous.' }}
           </div>
         </div>
       </div>
@@ -1032,9 +1066,17 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 }
 
 .warn-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
   color: var(--warning);
   font-size: 12px;
-  margin-top: 16px;
+}
+
+.warn-text .btn {
+  font-size: 12px;
 }
 
 /* Messages */
@@ -1224,6 +1266,22 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 .auto-write-box.auto-fail {
   background: rgba(247, 118, 142, 0.08);
   border-color: rgba(247, 118, 142, 0.3);
+}
+
+.auto-write-box.auto-invalidated {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  opacity: 0.7;
+}
+
+.auto-write-box.auto-invalidated .auto-write-title {
+  color: var(--text-dim);
+}
+
+.invalidated-note {
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-style: italic;
 }
 
 .auto-write-title {

@@ -4,11 +4,13 @@ import {
   backend,
   type AppSettings,
   type AiModelStatus,
+  type AtomicWriteTarget,
   type AutoResolveReportResult,
   type CandidatePage,
   type EncryptedScanResult,
   type ChatMemoryTargetsResult,
   type ExactScanResult,
+  type KernelDriverStatus,
   type LogTailResult,
   type MemoryMapResult,
   type NextScanResult,
@@ -45,6 +47,7 @@ export interface ChatMessage {
   filteredWriteCandidates?: Array<Record<string, unknown>>
   autoWriteResults?: Array<Record<string, unknown>>
   autoWriteOk?: boolean
+  invalidated?: boolean
   previousTargetValue?: string
   writeHistory?: string[]
   activeTargetCount?: number
@@ -198,7 +201,7 @@ export interface WorkspaceProject {
 }
 
 export interface RuntimeActionPlanItem {
-  id: 'watch' | 'write' | 'freeze_polling' | 'find_writes' | 'aob_patch' | 'bookmark' | 'trainer'
+  id: 'watch' | 'write' | 'freeze_polling' | 'find_writes' | 'aob_patch' | 'force_value' | 'bookmark' | 'trainer'
   label: string
   risk: 'safe' | 'write' | 'debug' | 'patch'
   enabled: boolean
@@ -283,6 +286,27 @@ export const useAppStore = defineStore('app', () => {
   const memoryPreviewAscii = computed(() => bytesToAscii(hexToBytes(memoryPreview.value?.hex ?? '')))
   const memoryPreviewDecoded = computed(() => decodePreviewValues(hexToBytes(memoryPreview.value?.hex ?? '')))
   const selectedMemoryRegion = ref<Record<string, unknown> | null>(null)
+  // Visualiseur hexadécimal navigable (pagination sur une plage large, distinct de l'aperçu compact 64 o).
+  const hexViewerOpen = ref(false)
+  const hexViewerRootAddress = ref('')
+  const hexViewerAddress = ref('')
+  const hexViewerPageSize = ref(512)
+  const hexViewerData = ref<MemoryReadPreview | null>(null)
+  const hexViewerLoading = ref(false)
+  const hexViewerRows = computed(() => {
+    const bytes = hexToBytes(hexViewerData.value?.hex ?? '')
+    const baseAddress = Number.parseInt(hexViewerAddress.value || '0', 16)
+    const rows: Array<{ address: string; bytes: string[]; ascii: string }> = []
+    for (let offset = 0; offset < bytes.length; offset += 16) {
+      const rowBytes = bytes.slice(offset, offset + 16)
+      rows.push({
+        address: (baseAddress + offset).toString(16).toUpperCase().padStart(12, '0'),
+        bytes: rowBytes.map((byte) => byte.toString(16).toUpperCase().padStart(2, '0')),
+        ascii: bytesToAscii(rowBytes),
+      })
+    }
+    return rows
+  })
   const pingResult = ref('')
   const logFilePath = ref('')
   const logLines = ref<string[]>([])
@@ -299,6 +323,12 @@ export const useAppStore = defineStore('app', () => {
   const smartSearchDebugEvents = ref<Array<Record<string, unknown>>>([])
   const smartSearchDebugError = ref('')
   const autoResolveReport = ref<AutoResolveReportResult | null>(null)
+  // Memoire de pattern structuree par jeu (module+offset relatif, roadmap H.2) —
+  // distincte de learnedProfile ci-dessus qui n'a qu'un seul "dernier succes" ecrase.
+  const rememberedPatterns = ref<Array<Record<string, unknown>>>([])
+  // Sequence ordonnee (ordre + doublons conserves) des dernieres ecritures
+  // confirmees, persistee par executable — roadmap I, replay inter-session.
+  const writeHistorySequence = ref<Array<Record<string, unknown>>>([])
   const settingsLoaded = ref(false)
   const settingsSaving = ref(false)
   const settingsStatus = ref('')
@@ -315,12 +345,26 @@ export const useAppStore = defineStore('app', () => {
   const settingSmartSearchDebugEnabled = ref(true)
   const settingSmartSearchDebugMaxEvents = ref(30)
   const settingAutoRiskMode = ref<AppSettings['autoRiskMode']>('Safe')
+  // Raison du dernier blocage confirmRiskAction (mode Auto trop restrictif),
+  // distincte d'une vraie annulation utilisateur. Sans ça, les appelants qui
+  // batissent un message d'erreur apres un confirmRiskAction refuse ne
+  // peuvent pas distinguer les deux cas et affichent a tort "annule par
+  // l'utilisateur" alors que c'est le reglage Auto qui bloque.
+  const lastRiskBlockReason = ref('')
+  // Action de l'echelle d'escalade (Assistant) dont le backend attend la
+  // reponse en texte libre, quand cette action ne vit que cote frontend
+  // (ex: encrypted_scan, qui boucle sur plusieurs modes via runAutoEncryptedScan
+  // et n'a pas d'equivalent backend unique a appeler directement).
+  const pendingAssistantAction = ref('')
   const settingModelPath = ref('')
   const settingModelEnabled = ref(true)
   const settingModelThreads = ref(4)
   const aiModelStatus = ref<AiModelStatus | null>(null)
   const aiModelStatusLoading = ref(false)
   const aiModelStatusError = ref('')
+  const kernelDriverStatus = ref<KernelDriverStatus | null>(null)
+  const kernelDriverStatusLoading = ref(false)
+  const kernelDriverStatusError = ref('')
   const workflowPresets = ref<WorkflowPreset[]>([
     {
       id: 'exact-value',
@@ -439,6 +483,10 @@ export const useAppStore = defineStore('app', () => {
   const trainerHotkeyStatus = ref('')
   const trainerOverlayVisible = ref(false)
   const trainerOverlayStatus = ref('')
+  // Hotkey dediee pour afficher/masquer l'overlay lui-meme (roadmap G) — distincte
+  // des hotkeys par feature deja existantes (freeze/patch/write toggle).
+  const trainerOverlayHotkey = ref('')
+  const trainerOverlayHotkeyId = ref<number | undefined>(undefined)
   const structureTemplates = ref<StructureTemplate[]>([])
   const structureTemplateIdCounter = ref(0)
   const workspaceBookmarks = ref<WorkspaceBookmark[]>([])
@@ -534,6 +582,10 @@ let nextWatchedChainId = 1
   const watchedAddresses = ref<WatchedAddress[]>([])
   const watchLiveReadLimit = 200
   let watchLiveTimer: ReturnType<typeof setInterval> | null = null
+  // Watch expressions (roadmap I) : re-evaluation live des chaines de pointeurs
+  // watchees, distinct du timer watchLiveTimer ci-dessus (adresses fixes).
+  const watchedPointerChainsLiveEnabled = ref(false)
+  let watchedPointerChainsLiveTimer: ReturnType<typeof setInterval> | null = null
 
   // Phase 20 — outils Expert manuels d'injection/hooking/auto-assembler,
   // gardés par confirmRiskAction('injection', ...) (mode Auto = Trainer requis,
@@ -547,6 +599,11 @@ let nextWatchedChainId = 1
   const autoAsmScriptText = ref('')
   const autoAsmPreview = ref<Record<string, unknown> | null>(null)
   const autoAsmResult = ref<Record<string, unknown> | null>(null)
+  // Persistance des scripts auto-assembleur (roadmap E.4) : rejouables sans retaper le texte.
+  const autoAsmScriptName = ref('')
+  const autoAsmSavedScripts = ref<Array<Record<string, unknown>>>([])
+  const autoAsmSaveResult = ref<Record<string, unknown> | null>(null)
+  const autoAsmSavedScriptsBusy = ref(false)
   const injectionBusy = ref(false)
 
   // Chat / guided workflow state
@@ -564,6 +621,7 @@ let nextWatchedChainId = 1
   let backendScanSignalsConnected = false
   let backendHotkeySignalConnected = false
   let backendFreezeInstabilitySignalConnected = false
+  let backendWriteWatchSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
   // d'une reconnexion du signal (ex: rechargement dev).
@@ -992,6 +1050,7 @@ let nextWatchedChainId = 1
   }
 
   const trainerStorageKey = 'killengine.trainer.features.v1'
+  const overlayHotkeyStorageKey = 'killengine.trainer.overlayHotkey.v1'
   const structureTemplateStorageKey = 'killengine.structure.templates.v1'
   const workspaceBookmarkStorageKey = 'killengine.workspace.bookmarks.v1'
   const workspaceProjectStorageKey = 'killengine.workspace.projects.v1'
@@ -1016,6 +1075,22 @@ let nextWatchedChainId = 1
       trainerFeatureIdCounter.value = Number(parsed.id ?? 0)
     } catch {
       trainerFeatures.value = []
+    }
+  }
+
+  function saveOverlayHotkey() {
+    try {
+      window.localStorage.setItem(overlayHotkeyStorageKey, trainerOverlayHotkey.value)
+    } catch {
+      // Best-effort persistence.
+    }
+  }
+
+  function loadOverlayHotkey() {
+    try {
+      trainerOverlayHotkey.value = window.localStorage.getItem(overlayHotkeyStorageKey) ?? ''
+    } catch {
+      trainerOverlayHotkey.value = ''
     }
   }
 
@@ -1371,6 +1446,11 @@ let nextWatchedChainId = 1
   }
 
   async function handleGlobalHotkey(event: Record<string, unknown>) {
+    if (event.type === 'toggle_overlay') {
+      addActionLog('hotkey', 'Hotkey: Overlay', String(event.type ?? ''), 'info')
+      await setTrainerOverlay(!trainerOverlayVisible.value)
+      return
+    }
     const featureId = Number(event.targetId ?? (event.payload as Record<string, unknown> | undefined)?.featureId)
     const feature = trainerFeatures.value.find((item) => item.id === featureId)
     if (!feature) return
@@ -1379,6 +1459,62 @@ let nextWatchedChainId = 1
       await restoreTrainerFeature(feature.id)
     } else {
       await applyTrainerFeature(feature.id)
+    }
+  }
+
+  async function registerOverlayHotkey(combo: string) {
+    const trimmed = combo.trim()
+    if (!trimmed) return
+    const controller = backend.getController()
+    if (!controller.registerGlobalHotkey) {
+      trainerOverlayStatus.value = 'Hotkeys globales non exposées par ce backend.'
+      addActionLog('hotkey', 'Hotkey overlay indisponible', trainerOverlayStatus.value, 'warning')
+      return
+    }
+    if (trainerOverlayHotkeyId.value && controller.unregisterGlobalHotkey) {
+      await controller.unregisterGlobalHotkey(trainerOverlayHotkeyId.value)
+    }
+    const result = await controller.registerGlobalHotkey(trimmed, {
+      type: 'toggle_overlay',
+      label: 'Overlay Trainer',
+    })
+    if (result.success === true) {
+      trainerOverlayHotkey.value = String(result.combo ?? trimmed)
+      trainerOverlayHotkeyId.value = Number(result.id)
+      trainerOverlayStatus.value = `Hotkey overlay enregistrée: ${trainerOverlayHotkey.value}`
+      saveOverlayHotkey()
+      addActionLog('hotkey', 'Hotkey overlay enregistrée', trainerOverlayStatus.value, 'success')
+    } else {
+      trainerOverlayStatus.value = String(result.error ?? 'Hotkey overlay refusée.')
+      addActionLog('hotkey', 'Hotkey overlay refusée', trainerOverlayStatus.value, 'warning')
+    }
+  }
+
+  async function unregisterOverlayHotkey() {
+    const controller = backend.getController()
+    if (trainerOverlayHotkeyId.value && controller.unregisterGlobalHotkey) {
+      await controller.unregisterGlobalHotkey(trainerOverlayHotkeyId.value)
+    }
+    trainerOverlayHotkey.value = ''
+    trainerOverlayHotkeyId.value = undefined
+    saveOverlayHotkey()
+    addActionLog('hotkey', 'Hotkey overlay supprimée', '', 'success')
+  }
+
+  async function reregisterPersistedHotkeys() {
+    // Le gestionnaire de hotkeys cote backend (GlobalHotkeyManager) repart a
+    // zero a chaque lancement de KillEngine — les hotkeyId persistes en
+    // localStorage ne correspondent plus a rien. Sans ce re-enregistrement,
+    // une hotkey configuree lors d'une session precedente semble toujours la
+    // (visible dans l'UI) mais ne declenche plus rien tant que l'utilisateur
+    // ne la reconfigure pas manuellement.
+    for (const feature of trainerFeatures.value) {
+      if (feature.hotkey) {
+        await registerTrainerFeatureHotkey(feature.id, feature.hotkey)
+      }
+    }
+    if (trainerOverlayHotkey.value) {
+      await registerOverlayHotkey(trainerOverlayHotkey.value)
     }
   }
 
@@ -2208,6 +2344,7 @@ let nextWatchedChainId = 1
     title: string,
     detail: string,
   ): Promise<boolean> {
+    lastRiskBlockReason.value = ''
     const mode = settingAutoRiskMode.value
     const blocked =
       (mode === 'Safe' && (risk === 'debug' || risk === 'patch' || risk === 'injection')) ||
@@ -2217,6 +2354,7 @@ let nextWatchedChainId = 1
         risk === 'injection'
           ? 'Passe le niveau Auto en Trainer dans Settings pour autoriser injection/hook.'
           : 'Passe le niveau Auto en Expert ou Trainer dans Settings pour autoriser debug/patch.'
+      lastRiskBlockReason.value = `Bloqué par le mode Auto actuel (${mode}). ${message}`
       addActionLog('risk_gate', `Bloqué par mode ${mode}: ${title}`, `${detail} ${message}`, 'warning')
       logAiAudit('risk_blocked', { risk, title, detail, mode, reason: message })
       addInvestigationStep({
@@ -2319,6 +2457,15 @@ let nextWatchedChainId = 1
         risk: 'patch',
         enabled: hasCodeTarget,
         reason: hasCodeTarget ? 'Générer une signature et proposer un patch réversible.' : 'Nécessite un RIP, une signature ou une source code.',
+      },
+      {
+        id: 'force_value',
+        label: 'Forcer valeur (hook)',
+        risk: 'patch',
+        enabled: kind === 'code_writer' && hasAddress,
+        reason: kind === 'code_writer' && hasAddress
+          ? 'Installer un trampoline sur ce RIP pour forcer une valeur, même si la source est un registre.'
+          : 'Réservé aux checkpoints Find What Writes (RIP capturé).',
       },
       {
         id: 'bookmark',
@@ -2511,6 +2658,63 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function executeCheckpointForceValue(checkpoint: Record<string, unknown>, value: string) {
+    const address = checkpointAddress(checkpoint)
+    const trimmedValue = value.trim()
+    if (!address || !trimmedValue) {
+      addActionLog('checkpoint', 'Forcer valeur impossible', 'RIP ou valeur manquante.', 'warning')
+      return null
+    }
+    const controller = backend.getController()
+    if (!controller.suggestCodePatches || !controller.forceWriteInstructionValue) {
+      addActionLog('checkpoint', 'Forcer valeur indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const suggestions = await controller.suggestCodePatches(address, { maxBytes: 16 })
+      const memBaseRegister = String(suggestions.memBaseRegister ?? '').trim()
+      if (!memBaseRegister) {
+        addActionLog('checkpoint', 'Forcer valeur impossible', 'Instruction sans destination mémoire exploitable (adressage indexé ou RIP-relatif).', 'warning')
+        return null
+      }
+      const type = checkpointType(checkpoint)
+      if (!await confirmRiskAction('patch', 'Checkpoint forcer valeur (hook)', `Installer un trampoline sur RIP 0x${address} pour forcer ${type} = ${trimmedValue}.`)) return null
+      const result = await controller.forceWriteInstructionValue(
+        address,
+        Number(suggestions.instructionLength ?? 0),
+        memBaseRegister,
+        Number(suggestions.memDisplacement ?? 0),
+        type,
+        trimmedValue,
+      )
+      addActionLog(
+        'checkpoint',
+        result.success === true ? 'Forcer valeur (hook) OK' : 'Forcer valeur (hook) échoué',
+        String(result.error || `0x${address} ${type} = ${trimmedValue}`),
+        result.success === true ? 'success' : 'error',
+      )
+      addInvestigationStep({
+        title: result.success === true ? 'Checkpoint forcer valeur exécuté' : 'Checkpoint forcer valeur échoué',
+        detail: String(result.error || `0x${address} ${type} = ${trimmedValue} (trampoline)`),
+        status: result.success === true ? 'success' : 'error',
+        tool: 'forceWriteInstructionValue',
+        risk: 'patch',
+        payload: result as unknown as Record<string, unknown>,
+      })
+      logAiAudit('checkpoint_force_value_executed', {
+        success: result.success === true,
+        address,
+        type,
+        value: trimmedValue,
+        error: result.error ?? '',
+      })
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', 'Forcer valeur (hook) échoué', String(e), 'error')
+      return null
+    }
+  }
+
   function hexToBytes(hex: string): number[] {
     return hex
       .trim()
@@ -2607,6 +2811,17 @@ let nextWatchedChainId = 1
       ...extras,
       text,
       time: nowTime(),
+    }
+  }
+
+  function markAutoWriteMessagesInvalidated(addresses: string[]) {
+    if (addresses.length === 0) return
+    const normalized = new Set(addresses.map((a) => a.replace(/^0x/i, '').toLowerCase()))
+    for (const msg of messages.value) {
+      if (!msg.autoWriteResults || msg.autoWriteResults.length === 0 || msg.invalidated) continue
+      const matches = msg.autoWriteResults.some((r) =>
+        normalized.has(String(r.address ?? '').replace(/^0x/i, '').toLowerCase()))
+      if (matches) msg.invalidated = true
     }
   }
 
@@ -2721,14 +2936,44 @@ let nextWatchedChainId = 1
         })
         backendFreezeInstabilitySignalConnected = true
       }
+      if (!backendWriteWatchSignalConnected) {
+        // Détection automatique côté C++ (applyWriteWatchTick) : une valeur
+        // écrite (manuellement ou par un auto-write du chat) qui repart
+        // toute seule dans les secondes qui suivent déclenche directement le
+        // chemin "Écrit par" déjà câblé (find_what_writes_targets), au lieu
+        // d'attendre que l'utilisateur remarque que ça n'a pas tenu.
+        controller.writeDidNotHold?.connect((info) => {
+          const address = String(info.address ?? '')
+          const type = String(info.type ?? 'Int32')
+          pushMessage(
+            'assistant',
+            String(info.message ?? `La valeur écrite à 0x${address} a changé toute seule.`) + ' ' + String(info.suggestion ?? ''),
+            {
+              recoveryActions: [
+                {
+                  id: 'find_what_writes_targets',
+                  label: 'Capturer qui écrit dessus',
+                  address,
+                  type,
+                },
+                { id: 'open_expert', label: 'Ouvrir Expert' },
+              ],
+            },
+          )
+        })
+        backendWriteWatchSignalConnected = true
+      }
       version.value = await controller.getVersion()
       loadActionLog()
       loadInvestigations()
       loadTrainerFeatures()
+      loadOverlayHotkey()
+      await reregisterPersistedHotkeys()
       loadStructureTemplates()
       loadWorkspaceBookmarks()
       loadWorkspaceProjects()
       await loadSettings()
+      await refreshKernelDriverStatus()
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
       showOnboarding.value = controller.hasSeenOnboarding ? !(await controller.hasSeenOnboarding()) : false
@@ -2746,6 +2991,39 @@ let nextWatchedChainId = 1
 
   async function openUserGuide() {
     await backend.getController().openUserGuide?.()
+  }
+
+  const defenderExclusionResult = ref<{ success: boolean; cancelled?: boolean; error?: string } | null>(null)
+  const defenderExclusionBusy = ref(false)
+
+  async function requestWindowsDefenderExclusion() {
+    defenderExclusionBusy.value = true
+    defenderExclusionResult.value = null
+    try {
+      const result = await backend.getController().requestWindowsDefenderExclusion?.()
+      defenderExclusionResult.value = result ?? { success: false, error: 'Réponse backend absente.' }
+    } finally {
+      defenderExclusionBusy.value = false
+    }
+  }
+
+  async function refreshKernelDriverStatus() {
+    kernelDriverStatusLoading.value = true
+    kernelDriverStatusError.value = ''
+    try {
+      const controller = backend.getController()
+      if (!controller.probeKernelDriver) {
+        kernelDriverStatus.value = null
+        kernelDriverStatusError.value = 'Probe driver noyau non exposé par ce backend.'
+        return
+      }
+      kernelDriverStatus.value = await controller.probeKernelDriver()
+    } catch (e) {
+      kernelDriverStatus.value = null
+      kernelDriverStatusError.value = String(e)
+    } finally {
+      kernelDriverStatusLoading.value = false
+    }
   }
 
   async function refreshProcesses() {
@@ -2826,6 +3104,84 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function loadHexViewerPage() {
+    if (!hexViewerAddress.value) return
+    const controller = backend.getController()
+    if (!controller.readMemoryBlock) {
+      hexViewerData.value = {
+        success: false,
+        partial: false,
+        cancelled: false,
+        bytesRead: 0,
+        requestedBytes: hexViewerPageSize.value,
+        error: 'readMemoryBlock non disponible dans ce backend.',
+        hex: '',
+      }
+      return
+    }
+    hexViewerLoading.value = true
+    try {
+      hexViewerData.value = await controller.readMemoryBlock(hexViewerAddress.value, hexViewerPageSize.value)
+    } catch (e) {
+      hexViewerData.value = {
+        success: false,
+        partial: false,
+        cancelled: false,
+        bytesRead: 0,
+        requestedBytes: hexViewerPageSize.value,
+        error: String(e),
+        hex: '',
+      }
+    } finally {
+      hexViewerLoading.value = false
+    }
+  }
+
+  async function openHexViewer(addressHex: string) {
+    const normalized = addressHex.trim().replace(/^0x/i, '')
+    if (!normalized) return
+    hexViewerOpen.value = true
+    hexViewerRootAddress.value = normalized
+    hexViewerAddress.value = normalized
+    await loadHexViewerPage()
+  }
+
+  function closeHexViewer() {
+    hexViewerOpen.value = false
+    hexViewerData.value = null
+  }
+
+  async function hexViewerJumpTo(addressHex: string) {
+    const normalized = addressHex.trim().replace(/^0x/i, '')
+    if (!normalized) return
+    hexViewerAddress.value = normalized
+    await loadHexViewerPage()
+  }
+
+  async function hexViewerGoToOffset(deltaBytes: number) {
+    const current = Number.parseInt(hexViewerAddress.value || '0', 16)
+    const next = Math.max(0, current + deltaBytes)
+    hexViewerAddress.value = next.toString(16)
+    await loadHexViewerPage()
+  }
+
+  async function hexViewerSetPageSize(pageSize: number) {
+    hexViewerPageSize.value = pageSize
+    await loadHexViewerPage()
+  }
+
+  async function hexViewerWriteRow(rowAddressHex: string, hexString: string) {
+    const controller = backend.getController()
+    if (!controller.writeMemoryHex) {
+      return { success: false, error: 'writeMemoryHex non disponible dans ce backend.' }
+    }
+    const result = await controller.writeMemoryHex(rowAddressHex, hexString)
+    if (result.success) {
+      await loadHexViewerPage()
+    }
+    return result
+  }
+
   async function detach() {
     try {
       await backend.getController().detachProcess()
@@ -2836,6 +3192,7 @@ let nextWatchedChainId = 1
       memoryPreview.value = null
       memoryPreviewAddress.value = ''
       memoryPreviewLoading.value = false
+      closeHexViewer()
     } catch (e) {
       console.error('[KillEngine] Detach failed:', e)
     }
@@ -2865,6 +3222,8 @@ let nextWatchedChainId = 1
       smartSearchDebugEvents.value = debugResult.events ?? []
       smartSearchDebugError.value = debugResult.error ?? ''
       await refreshAutoResolveReport()
+      await refreshRememberedPatterns()
+      await refreshWriteHistorySequence()
     } catch (e) {
       logFilePath.value = ''
       logLines.value = []
@@ -2886,6 +3245,67 @@ let nextWatchedChainId = 1
       ? await controller.getAutoResolveReport(settingSmartSearchDebugMaxEvents.value)
       : null
     return autoResolveReport.value
+  }
+
+  async function refreshRememberedPatterns() {
+    const controller = backend.getController()
+    if (!controller.getRememberedPatterns) {
+      rememberedPatterns.value = []
+      return
+    }
+    const result = await controller.getRememberedPatterns()
+    rememberedPatterns.value = result.success
+      ? ((result.patterns as Array<Record<string, unknown>>) ?? [])
+      : []
+  }
+
+  async function previewRememberedPattern(pattern: Record<string, unknown>) {
+    const address = String(pattern.liveAddress ?? '')
+    if (!address) return
+    activeView.value = 'memory'
+    await readMemoryPreview(address, 64)
+  }
+
+  async function refreshWriteHistorySequence() {
+    const controller = backend.getController()
+    if (!controller.getWriteHistorySequence) {
+      writeHistorySequence.value = []
+      return
+    }
+    const result = await controller.getWriteHistorySequence()
+    writeHistorySequence.value = result.success
+      ? ((result.sequence as Array<Record<string, unknown>>) ?? [])
+      : []
+  }
+
+  async function replayWriteHistorySequence() {
+    const controller = backend.getController()
+    if (!controller.replayWriteHistorySequence) {
+      addActionLog('write-history', 'Replay indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    if (!await confirmRiskAction('write', 'Rejouer la séquence d\'écritures', `Rejouer ${writeHistorySequence.value.length} écriture(s) confirmée(s) dans l'ordre pour ce processus.`)) return null
+    try {
+      const result = await controller.replayWriteHistorySequence()
+      addActionLog(
+        'write-history',
+        result.success ? 'Replay terminé' : 'Replay échoué',
+        `${result.replayedCount ?? 0} rejouée(s), ${result.skippedCount ?? 0} ignorée(s), ${result.failedCount ?? 0} échouée(s).`,
+        result.success ? 'success' : 'warning',
+      )
+      return result
+    } catch (e) {
+      addActionLog('write-history', 'Replay échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  async function clearWriteHistorySequence() {
+    const controller = backend.getController()
+    if (!controller.clearWriteHistorySequence) return null
+    const result = await controller.clearWriteHistorySequence()
+    await refreshWriteHistorySequence()
+    return result
   }
 
   async function refreshLogTail() {
@@ -3088,6 +3508,20 @@ let nextWatchedChainId = 1
     } catch (e) {
       smartSearchContext.value = null
       console.error('[KillEngine] Failed to refresh Smart Search context:', e)
+    }
+  }
+
+  async function acknowledgePendingSmartSearchRecovery() {
+    // A appeler quand l'utilisateur repond a une relance de l'echelle de
+    // secours (ex. "Tracer le texte affiche") en cliquant le bouton plutot
+    // qu'en tapant dans le chat : ces boutons appellent leur propre pipeline
+    // frontend (runAutoTraceUiString) sans jamais repasser par
+    // startSmartSearch, seul endroit qui consommerait sinon
+    // m_pendingRecoveryAction cote backend.
+    try {
+      await backend.getController().acknowledgePendingSmartSearchRecovery?.()
+    } catch (e) {
+      console.error('[KillEngine] Failed to acknowledge pending smart search recovery:', e)
     }
   }
 
@@ -3295,6 +3729,21 @@ let nextWatchedChainId = 1
     const query = searchQuery.value.trim()
     if (!query || isSearching.value) return
 
+    // Etape 3/4 de l'echelle d'escalade (scan chiffre) : si l'assistant vient
+    // de le proposer et que la reponse ressemble a une simple valeur plutot
+    // qu'une commande explicite (nouvelle recherche, annuler...), on route
+    // directement vers runAutoEncryptedScan au lieu de repartir sur
+    // startSmartSearch, qui ne saurait pas quoi faire de ce texte libre.
+    if (pendingAssistantAction.value === 'encrypted_scan') {
+      pendingAssistantAction.value = ''
+      if (!/nouvelle recherche|oublie|annule|rollback|abandonne|laisse tomber/i.test(query)) {
+        pushMessage('user', query)
+        searchQuery.value = ''
+        await runAutoEncryptedScan(query)
+        return
+      }
+    }
+
     // Message utilisateur
     pushMessage('user', query)
 
@@ -3394,6 +3843,12 @@ let nextWatchedChainId = 1
 
       if (result.recoveryActions) {
         extras.recoveryActions = result.recoveryActions as Array<Record<string, unknown>>
+      }
+
+      pendingAssistantAction.value = typeof result.pendingRecoveryAction === 'string' ? result.pendingRecoveryAction : ''
+
+      if (Array.isArray(result.invalidatedAddresses) && result.invalidatedAddresses.length > 0) {
+        markAutoWriteMessagesInvalidated(result.invalidatedAddresses.map((a) => String(a)))
       }
 
       if (result.autoWriteResults) {
@@ -3946,6 +4401,27 @@ let nextWatchedChainId = 1
   function clearWatchedPointerChains() {
     watchedPointerChains.value = []
   }
+
+  function setWatchedPointerChainsLiveEnabled(enabled: boolean) {
+    watchedPointerChainsLiveEnabled.value = enabled
+    if (watchedPointerChainsLiveTimer) {
+      clearInterval(watchedPointerChainsLiveTimer)
+      watchedPointerChainsLiveTimer = null
+    }
+    if (enabled) {
+      void refreshWatchedPointerChains()
+      watchedPointerChainsLiveTimer = setInterval(() => {
+        void refreshWatchedPointerChains()
+      }, 1000)
+    }
+    addActionLog(
+      'watch',
+      enabled ? 'Watch expressions live activé' : 'Watch expressions live arrêté',
+      `${watchedPointerChains.value.length} chaîne(s).`,
+      enabled ? 'success' : 'info',
+    )
+  }
+
 async function doEncryptedScan() {
     if (!exactScanValue.value.trim() || scanBusy.value) return
 
@@ -4908,6 +5384,45 @@ async function doEncryptedScan() {
     }
   }
 
+  // H3 (docs/STRATEGY_ROOM.md, session Solitaire du 19/08/2026) : contrairement
+  // à writeSelectedAddresses (une écriture à la fois, l'une après l'autre),
+  // écrit toutes les adresses dans la même fenêtre critique (threads de la
+  // cible suspendues) — pour les cibles qui maintiennent des copies
+  // redondantes d'une même valeur et resynchronisent une écriture isolée.
+  async function writeSelectedAtomic(addresses: string[], type: string, value: string) {
+    if (addresses.length === 0) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Aucune adresse sélectionnée.' }
+      return
+    }
+    if (!value.trim()) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire.' }
+      return
+    }
+    if (!await confirmRiskAction('write', 'Écriture atomique multi-adresses', `${addresses.length} adresse(s) en même temps (threads de la cible suspendues), type ${type}, valeur ${value}.`)) return
+    const controller = backend.getController()
+    if (!controller.writeMemoryValuesAtomic) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Écriture atomique indisponible sur ce backend.' }
+      return
+    }
+    try {
+      const targets: AtomicWriteTarget[] = addresses.map((address) => ({ address, type, value }))
+      const result: MemoryWriteBatchResult = await controller.writeMemoryValuesAtomic(targets, {})
+      writeResult.value = result
+      const written = result.written ?? result.results?.filter((r) => r.success).length ?? 0
+      scanStatusText.value = result.success
+        ? `${written} adresse(s) écrite(s) ensemble (atomique).`
+        : `Écriture atomique partielle: ${written}/${addresses.length} réussie(s).`
+      for (const address of addresses) {
+        addAddressToWatch(address, type)
+      }
+      addActionLog('write', `Écriture atomique ${value}`, `${written}/${addresses.length} réussie(s), ${result.suspendedThreadCount ?? 0} thread(s) suspendue(s).`, result.success ? 'success' : 'warning')
+    } catch (e) {
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
+      scanStatusText.value = 'Écriture atomique échouée.'
+      addActionLog('write', 'Écriture atomique échouée', String(e), 'error')
+    }
+  }
+
   // Automatisation IA : après une écriture réussie sur une adresse unique,
   // cherche silencieusement (lecture seule, bornée) une chaîne de pointeurs
   // stable, sans que l'utilisateur ait besoin de savoir que ce bouton existe
@@ -5301,6 +5816,82 @@ async function doEncryptedScan() {
     }
   }
 
+  function autoAsmProfileName(): string {
+    return (processName.value || 'KillEngineTrainer')
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^a-z0-9_.-]+/gi, '_')
+      .slice(0, 80) || 'KillEngineTrainer'
+  }
+
+  async function refreshSavedAutoAsmScripts() {
+    const controller = backend.getController()
+    autoAsmSavedScriptsBusy.value = true
+    try {
+      const result = await controller.loadProfile(autoAsmProfileName())
+      autoAsmSavedScripts.value = result.success
+        ? ((result.autoAsmScripts as Array<Record<string, unknown>>) ?? [])
+        : []
+    } catch (e) {
+      autoAsmSavedScripts.value = []
+      console.error('[KillEngine] Failed to load saved auto-asm scripts:', e)
+    } finally {
+      autoAsmSavedScriptsBusy.value = false
+    }
+  }
+
+  async function saveAutoAsmScript() {
+    const script = autoAsmScriptText.value
+    const name = autoAsmScriptName.value.trim()
+    if (!script.trim() || !name) return
+    const controller = backend.getController()
+    if (!controller.saveProfileAutoAsmScript) {
+      autoAsmSaveResult.value = { success: false, error: 'Sauvegarde auto-assembler non exposée par ce backend.' }
+      return
+    }
+    try {
+      autoAsmSaveResult.value = await controller.saveProfileAutoAsmScript(autoAsmProfileName(), name, script, {})
+      const ok = autoAsmSaveResult.value.success === true
+      addActionLog('injection', ok ? 'Script auto-assembler sauvegardé' : 'Sauvegarde script échouée', String(autoAsmSaveResult.value.error ?? name), ok ? 'success' : 'error')
+      if (ok) await refreshSavedAutoAsmScripts()
+    } catch (e) {
+      autoAsmSaveResult.value = { success: false, error: String(e) }
+      addActionLog('injection', 'Sauvegarde script échouée', String(e), 'error')
+    }
+  }
+
+  async function applySavedAutoAsmScript(name: string) {
+    if (!await confirmRiskAction('injection', 'Exécution script sauvegardé', `Alloue de la mémoire et patche le processus attaché avec le script "${name}".`)) return
+    const controller = backend.getController()
+    if (!controller.applyProfileAutoAsmScript) {
+      autoAsmResult.value = { success: false, error: 'Exécution auto-assembler non exposée par ce backend.' }
+      return
+    }
+    injectionBusy.value = true
+    try {
+      autoAsmResult.value = await controller.applyProfileAutoAsmScript(autoAsmProfileName(), name)
+      const ok = autoAsmResult.value.success === true
+      addActionLog('injection', ok ? `Script "${name}" exécuté` : `Exécution "${name}" échouée`, String(autoAsmResult.value.error ?? ''), ok ? 'success' : 'error')
+    } catch (e) {
+      autoAsmResult.value = { success: false, error: String(e) }
+      addActionLog('injection', `Exécution "${name}" échouée`, String(e), 'error')
+    } finally {
+      injectionBusy.value = false
+    }
+  }
+
+  async function deleteSavedAutoAsmScript(name: string) {
+    const controller = backend.getController()
+    if (!controller.deleteProfileAutoAsmScript) return
+    try {
+      const result = await controller.deleteProfileAutoAsmScript(autoAsmProfileName(), name)
+      const ok = result.success === true
+      addActionLog('injection', ok ? `Script "${name}" supprimé` : `Suppression "${name}" échouée`, String(result.error ?? ''), ok ? 'success' : 'error')
+      if (ok) await refreshSavedAutoAsmScripts()
+    } catch (e) {
+      addActionLog('injection', `Suppression "${name}" échouée`, String(e), 'error')
+    }
+  }
+
   async function stopBreakpointFreeze() {
     const controller = backend.getController()
     if (!controller.stopBreakpointFreeze) {
@@ -5370,6 +5961,13 @@ async function doEncryptedScan() {
     showOnboarding,
     dismissOnboarding,
     openUserGuide,
+    defenderExclusionResult,
+    defenderExclusionBusy,
+    requestWindowsDefenderExclusion,
+    kernelDriverStatus,
+    kernelDriverStatusLoading,
+    kernelDriverStatusError,
+    refreshKernelDriverStatus,
     isAttached,
     processName,
     processes,
@@ -5381,6 +5979,13 @@ async function doEncryptedScan() {
     memoryPreviewAscii,
     memoryPreviewDecoded,
     selectedMemoryRegion,
+    hexViewerOpen,
+    hexViewerRootAddress,
+    hexViewerAddress,
+    hexViewerPageSize,
+    hexViewerData,
+    hexViewerLoading,
+    hexViewerRows,
     pingResult,
     logFilePath,
     logLines,
@@ -5397,6 +6002,7 @@ async function doEncryptedScan() {
     smartSearchDebugEvents,
     smartSearchDebugError,
     autoResolveReport,
+    rememberedPatterns,
     settingsLoaded,
     settingsSaving,
     settingsStatus,
@@ -5413,6 +6019,8 @@ async function doEncryptedScan() {
     settingSmartSearchDebugEnabled,
     settingSmartSearchDebugMaxEvents,
     settingAutoRiskMode,
+    lastRiskBlockReason,
+    pendingAssistantAction,
     settingModelPath,
     settingModelEnabled,
     settingModelThreads,
@@ -5431,6 +6039,8 @@ async function doEncryptedScan() {
     trainerHotkeyStatus,
     trainerOverlayVisible,
     trainerOverlayStatus,
+    trainerOverlayHotkey,
+    trainerOverlayHotkeyId,
     structureTemplates,
     workspaceBookmarks,
     workspaceProjects,
@@ -5505,6 +6115,12 @@ async function doEncryptedScan() {
     refreshProcessModules,
     refreshMemoryMap,
     readMemoryPreview,
+    openHexViewer,
+    closeHexViewer,
+    hexViewerJumpTo,
+    hexViewerGoToOffset,
+    hexViewerSetPageSize,
+    hexViewerWriteRow,
     attach,
     detach,
     doPing,
@@ -5514,6 +6130,12 @@ async function doEncryptedScan() {
     browseForModel,
     refreshDiagnostics,
     refreshAutoResolveReport,
+    refreshRememberedPatterns,
+    previewRememberedPattern,
+    writeHistorySequence,
+    refreshWriteHistorySequence,
+    replayWriteHistorySequence,
+    clearWriteHistorySequence,
     refreshLogTail,
     exportDiagnostics,
     refreshTemporaryStorageStatus,
@@ -5540,6 +6162,7 @@ async function doEncryptedScan() {
     executeCheckpointWrite,
     executeCheckpointFindWhatWrites,
     prepareCheckpointAob,
+    executeCheckpointForceValue,
     createTrainerFeature,
     createTrainerFeatureFromCheckpoint,
     applyTrainerFeature,
@@ -5571,10 +6194,13 @@ async function doEncryptedScan() {
     clearWorkspaceProjects,
     registerTrainerFeatureHotkey,
     unregisterTrainerFeatureHotkey,
+    registerOverlayHotkey,
+    unregisterOverlayHotkey,
     setTrainerOverlay,
     refreshTrainerOverlay,
     clearAutoResolveMemory,
     clearActiveChatMemoryTargets,
+    acknowledgePendingSmartSearchRecovery,
     clearSmartSearchDebug,
     doSearch,
     doAutoResolve,
@@ -5600,6 +6226,8 @@ async function doEncryptedScan() {
     removeWatchedPointerChain,
     clearWatchedPointerChains,
     watchedPointerChains,
+    setWatchedPointerChainsLiveEnabled,
+    watchedPointerChainsLiveEnabled,
     runAutoEncryptedScan,
     runAutoTraceUiString,
     cancelActiveScan,
@@ -5632,6 +6260,7 @@ async function doEncryptedScan() {
     writeSelectedValue,
     writeSelectedAddresses,
     writeSelectedTargets,
+    writeSelectedAtomic,
     rollbackLastWrite,
     rollbackLastWriteBatch,
     freezeCandidateCurrent,
@@ -5646,6 +6275,10 @@ async function doEncryptedScan() {
     autoAsmScriptText,
     autoAsmPreview,
     autoAsmResult,
+    autoAsmScriptName,
+    autoAsmSavedScripts,
+    autoAsmSaveResult,
+    autoAsmSavedScriptsBusy,
     injectionBusy,
     injectDll,
     installHook,
@@ -5653,6 +6286,10 @@ async function doEncryptedScan() {
     previewAutoAsmScript,
     executeAutoAsmScript,
     restoreAutoAsmScript,
+    refreshSavedAutoAsmScripts,
+    saveAutoAsmScript,
+    applySavedAutoAsmScript,
+    deleteSavedAutoAsmScript,
     stopBreakpointFreeze,
     setFreezeInterval,
     pushMessage,

@@ -55,6 +55,19 @@ export interface MemoryMapResult {
   regions: MemoryRegionInfo[]
 }
 
+export interface KernelDriverStatus {
+  success: boolean
+  status: 'unavailable' | 'connected' | 'access_denied' | 'incompatible' | 'error' | string
+  devicePath: string
+  message: string
+  capabilities: {
+    protocolVersion: number
+    healthProbe: boolean
+    processMemoryAccess: boolean
+    privilegedInstrumentation: boolean
+  }
+}
+
 export interface MemoryReadPreview {
   success: boolean
   partial: boolean
@@ -234,6 +247,8 @@ export interface ExactScanMatch {
   variantLabel?: string
   lastValueHex?: string
   lastValueNumber?: number
+  /** Cette adresse a déjà reçu une écriture confirmée avec succès (getCandidates uniquement) — distinct de la confiance de scan. */
+  writeVerified?: boolean
 }
 
 export interface ExactScanResult {
@@ -308,6 +323,10 @@ export interface NextScanResult {
   debugSamples?: Array<Record<string, unknown>>
   valueHistoryUpdates?: Array<Record<string, unknown>>
   diagnostic?: string
+  /** H1 : petit groupe de candidats identiques depuis plusieurs cycles d'affilée — probablement des copies redondantes. */
+  stableGroupCycles?: number
+  stableGroupAddresses?: string[]
+  stableGroupHint?: string
 }
 
 export interface UndoCandidateScanResult {
@@ -394,6 +413,11 @@ export interface MemoryWriteResult {
   errors?: number
   breakpointSize?: number
   freezeMode?: string
+  /** H5 : avertissement non-bloquant (ex. freeze sur une adresse jamais write-vérifiée). */
+  warning?: string
+  /** H3 (writeMemoryValuesAtomic) : nombre de threads de la cible suspendues pendant l'écriture groupée. */
+  suspendedThreadCount?: number
+  parseErrors?: Array<Record<string, unknown>>
 }
 
 export interface MemoryWriteTarget {
@@ -406,6 +430,13 @@ export interface MemoryWriteBatchResult extends MemoryWriteResult {
   written?: number
   total?: number
   results?: MemoryWriteResult[]
+}
+
+/** Cible pour writeMemoryValuesAtomic — H3, adresse + type + valeur explicites (pas de variante x100/x65536). */
+export interface AtomicWriteTarget {
+  address: string
+  type: string
+  value: string
 }
 
 export interface AobScanMatch {
@@ -480,6 +511,12 @@ export interface CodePatchResult {
   restoredBytes?: string
   bytesWritten?: number
   protectionChanged?: boolean
+  // Rempli par applyProfileCodePatch : signale que ce patch a été enregistré
+  // pour une version différente de l'exécutable attaché (hash SHA-256 du
+  // binaire différent) — la cause la plus probable quand une signature AOB
+  // qui marchait avant ne matche plus rien après une mise à jour du jeu.
+  executableVersionMismatch?: boolean
+  executableVersionWarning?: string
 }
 
 export interface CodePatchSuggestion {
@@ -489,6 +526,12 @@ export interface CodePatchSuggestion {
   category?: string
   riskLevel?: 'low' | 'medium' | 'high' | string
   risky?: boolean
+  // Quand vrai, bytesText n'est que le point de depart (bytes originaux) :
+  // il faut demander une valeur a l'utilisateur et reconstruire les bytes en
+  // substituant valueSize octets (little-endian) a partir de valueOffset.
+  needsValueInput?: boolean
+  valueOffset?: number
+  valueSize?: number
 }
 
 export interface CodePatchSuggestionResult {
@@ -508,6 +551,11 @@ export interface CodePatchSuggestionResult {
   bytesRead?: number
   bytes?: string
   suggestions?: CodePatchSuggestion[]
+  // Registre de base + déplacement de l'opérande mémoire destination (vide
+  // si non exploitable) : permet de proposer "Forcer une valeur (hook)"
+  // même quand l'instruction n'a pas d'immédiat (source registre).
+  memBaseRegister?: string
+  memDisplacement?: number
 }
 
 export interface ExpertScanOptions {
@@ -715,6 +763,8 @@ export interface AiModelStatus {
   detachProcess(): Promise<void>
   getMemoryMap(): Promise<MemoryMapResult>
   readMemoryPreview(addressHex: string, size: number): Promise<MemoryReadPreview>
+  /** Lecture large (jusqu'à 64 Ko) pour le visualiseur hexadécimal navigable — pagination distincte de l'aperçu compact. */
+  readMemoryBlock?(addressHex: string, size: number): Promise<MemoryReadPreview>
   scanUiStrings?(value: string, options: ExpertScanOptions & Record<string, unknown>): Promise<UiStringScanResult>
   trackUiStringCandidates?(candidates: UiStringCandidate[], value: string): Promise<UiStringTrackResult>
   analyzeUiStringSources?(
@@ -762,6 +812,8 @@ export interface AiModelStatus {
   unknownNextScanAsync(mode: string, valueType: string): Promise<Record<string, unknown>>
   writeMemoryValue(addressHex: string, valueType: string, value: string): Promise<MemoryWriteResult>
   writeMemoryValuesWithVariants?(targets: MemoryWriteTarget[], value: string): Promise<MemoryWriteBatchResult>
+  /** H3 : écrit plusieurs adresses dans la même fenêtre critique (threads de la cible suspendues) — pour les cibles à copies redondantes. */
+  writeMemoryValuesAtomic?(targets: AtomicWriteTarget[], options: Record<string, unknown>): Promise<MemoryWriteBatchResult>
   rollbackLastWrite(): Promise<MemoryWriteResult>
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
@@ -774,10 +826,16 @@ export interface AiModelStatus {
   escalatePollingFreezeToBreakpoint?(addressHex: string): Promise<Record<string, unknown>>
   /** Émis quand un freeze par polling ne tient pas (détecté automatiquement, voir applyFreezeTick côté C++). */
   freezeInstabilityDetected?: QWebChannelSignal<Record<string, unknown>>
+  /** Émis quand une écriture confirmée repart toute seule peu après (détecté automatiquement, voir applyWriteWatchTick côté C++). */
+  writeDidNotHold?: QWebChannelSignal<Record<string, unknown>>
   findWhatWrites?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   findWhatWritesAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   cancelFindWhatWrites?(): Promise<Record<string, unknown>>
   findWhatWritesFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** Alternative à findWhatWritesAsync qui ne passe pas par le canal de debug Win32 : PAGE_GUARD + handler injecté. */
+  startPageGuardWatchAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  cancelPageGuardWatch?(): Promise<Record<string, unknown>>
+  pageGuardWatchFinished?: QWebChannelSignal<Record<string, unknown>>
 findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   findWhatAccessesFinished?: QWebChannelSignal<Record<string, unknown>>
   scanGroupScan?(entries: Array<{ offset: number, type: string, value: string }>, options: Record<string, unknown>): Promise<EncryptedScanResult>
@@ -796,6 +854,15 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   parseAutoAssemblerScript?(scriptText: string): Promise<Record<string, unknown>>
   executeAutoAssemblerScript?(scriptText: string): Promise<Record<string, unknown>>
   restoreAutoAssemblerScript?(): Promise<Record<string, unknown>>
+  /** Génère et exécute automatiquement un script auto-assembler (trampoline + redirection du site) qui force `value` à la destination mémoire de l'instruction capturée par "Écrit par", même quand la source est un registre. Restaurable via restoreAutoAssemblerScript. */
+  forceWriteInstructionValue?(
+    ripHex: string,
+    instructionLength: number,
+    memBaseRegister: string,
+    memDisplacement: number,
+    valueType: string,
+    value: string,
+  ): Promise<Record<string, unknown>>
   setFreezeInterval(intervalMs: number): Promise<Record<string, unknown>>
   registerGlobalHotkey?(combo: string, action: Record<string, unknown>): Promise<Record<string, unknown>>
   unregisterGlobalHotkey?(id: number): Promise<Record<string, unknown>>
@@ -808,6 +875,14 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   getAutoResolveReport?(maxEvents: number): Promise<AutoResolveReportResult>
   clearAutoResolveMemory?(allProcesses: boolean): Promise<Record<string, unknown>>
   logAiAudit?(event: string, payload: Record<string, unknown>): Promise<Record<string, unknown>>
+  /** Motifs mémorisés (module+offset relatif) pour le jeu attaché — roadmap H.2. */
+  getRememberedPatterns?(): Promise<Record<string, unknown>>
+  /** Séquence ordonnée (ordre + doublons conservés) des dernières écritures confirmées — roadmap I, replay inter-session. */
+  getWriteHistorySequence?(): Promise<Record<string, unknown>>
+  /** Rejoue dans l'ordre la séquence persistée d'écritures pour l'exécutable attaché. */
+  replayWriteHistorySequence?(): Promise<Record<string, unknown>>
+  /** Vide la séquence d'écritures persistée pour l'exécutable attaché. */
+  clearWriteHistorySequence?(): Promise<Record<string, unknown>>
   ping(message: string): Promise<string>
   getSettings(): Promise<AppSettings>
   getAiModelStatus?(): Promise<AiModelStatus>
@@ -817,6 +892,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   hasSeenOnboarding?(): Promise<boolean>
   setOnboardingSeen?(seen: boolean): Promise<void>
   openUserGuide?(): Promise<boolean>
+  /** Demande une exclusion Windows Defender pour KillEngine.exe (invite UAC visible, jamais silencieux). */
+  requestWindowsDefenderExclusion?(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>
+  /** Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement). */
+  probeKernelDriver?(): Promise<KernelDriverStatus>
   saveSettings(settings: AppSettings): Promise<AppSettings>
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
@@ -830,6 +909,7 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   getActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
   clearActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
   getSmartSearchContext(): Promise<SmartSearchContextResult>
+  acknowledgePendingSmartSearchRecovery?(): Promise<void>
 
   // Phase 11 — Profils
   saveProfileTarget(
@@ -857,6 +937,15 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   applyAllProfileCodePatches?(profileName: string): Promise<Record<string, unknown>>
   restoreAllProfileCodePatches?(profileName: string): Promise<Record<string, unknown>>
   inspectProfileCodePatches?(profileName: string): Promise<Record<string, unknown>>
+  /** Sauvegarde un script auto-assembleur (texte brut) dans un profil, rejouable sans le retaper. */
+  saveProfileAutoAsmScript?(
+    profileName: string,
+    scriptName: string,
+    scriptText: string,
+    metadata: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>
+  applyProfileAutoAsmScript?(profileName: string, scriptName: string): Promise<Record<string, unknown>>
+  deleteProfileAutoAsmScript?(profileName: string, scriptName: string): Promise<Record<string, unknown>>
 
   // Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
   scanPointerChains?(addressHex: string, scanOptions: PointerScanOptions): Promise<PointerScanResult>
@@ -1516,6 +1605,16 @@ class BackendService {
       async restoreAutoAssemblerScript() {
         return { success: false, error: 'Mock backend' }
       },
+      async forceWriteInstructionValue(
+        _ripHex: string,
+        _instructionLength: number,
+        _memBaseRegister: string,
+        _memDisplacement: number,
+        _valueType: string,
+        _value: string,
+      ) {
+        return { success: false, error: 'Mock backend' }
+      },
       async setFreezeInterval(_intervalMs: number) {
         return { success: false, error: 'Mock backend' }
       },
@@ -1651,6 +1750,23 @@ class BackendService {
       async openUserGuide() {
         return false
       },
+      async requestWindowsDefenderExclusion() {
+        return { success: false, cancelled: true, error: 'Indisponible dans le mock.' }
+      },
+      async probeKernelDriver() {
+        return {
+          success: false,
+          status: 'unavailable',
+          devicePath: '\\\\.\\KillEngineKernel',
+          message: 'Driver absent dans le mock.',
+          capabilities: {
+            protocolVersion: 0,
+            healthProbe: false,
+            processMemoryAccess: false,
+            privilegedInstrumentation: false,
+          },
+        }
+      },
       async getLogFilePath() {
         return 'mock://no-log-file'
       },
@@ -1714,6 +1830,7 @@ class BackendService {
           lastAutoWriteCount: 0,
         }
       },
+      async acknowledgePendingSmartSearchRecovery() {},
       async saveProfileTarget() {
         return { success: false, error: 'Mock backend' }
       },

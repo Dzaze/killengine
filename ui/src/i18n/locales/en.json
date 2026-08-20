@@ -26,13 +26,15 @@
     "title": "Memory map",
     "refresh": "Refresh",
     "attachFirst": "Attach a process to show its memory map.",
+    "goToProcess": "Go to Process",
     "regions": "Regions",
     "committed": "Committed",
     "readable": "Readable",
     "writable": "Writable",
     "executable": "Executable",
     "all": "All",
-    "preview": "Preview"
+    "preview": "Preview",
+    "moduleFilterPlaceholder": "Filter by module (e.g. ntdll)..."
   },
   "search": {
     "title": "What do you want to find?",
@@ -211,6 +213,13 @@
       "when": "To build a feature that survives a restart: an address changes every session, a code signature does not.",
       "cost": "Modifies the executable code. A signature matching several places is blocked, because patching the wrong one crashes the target.",
       "example": "Find what writes located the instruction at SC2.exe+0x4A1B2. Click Signature to generate a stable AOB, then Analyze to see the suggested patches (NOP the write, force a value, etc.) ranked by risk."
+    },
+    "writeAtomic": {
+      "title": "Atomic multi-address write",
+      "what": "Writes several addresses at the same time, briefly suspending every thread of the target process during the operation, instead of writing one address after another. Useful when a target keeps several redundant copies of the same value and silently corrects the one that no longer matches the others.",
+      "when": "A normal write on one address succeeded (verified in memory) but nothing changes on screen, and repeated next scans show that 2 to 5 addresses stay identical to each other every cycle: that's the sign of redundant copies. Select those addresses and write them together instead of one at a time.",
+      "cost": "Every thread of the target is suspended during the write burst (a few milliseconds in practice) — the target may appear to freeze for an instant. Limited to 32 addresses. Doesn't replace a simple write test beforehand to confirm these are actually the right addresses.",
+      "example": "A value shown on screen never changes despite individual writes that verify correctly in memory. A repeated next scan reveals 2 addresses that always stay equal to each other. Selecting both and clicking \"Write together (atomic)\" finally makes the write stick — the target was comparing the two copies and reverting the one that didn't match the other."
     },
     "pointerChains": {
       "title": "Pointer chains",

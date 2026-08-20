@@ -81,6 +81,7 @@ function eventSummary(event: Record<string, unknown>) {
 async function refreshAll() {
   await store.doPing()
   await store.loadSettings()
+  await store.refreshKernelDriverStatus()
   await store.refreshDiagnostics()
 }
 
@@ -475,6 +476,52 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <span>Pattern AOB appris</span>
         <code>{{ learnedAutoProfile.lastSuccessfulAobPattern || '-' }}</code>
       </div>
+      <div v-if="store.rememberedPatterns.length" class="remembered-patterns">
+        <div class="source-list-title">
+          <strong>Motifs mémorisés pour ce jeu</strong>
+          <span>{{ store.rememberedPatterns.length }} entrée(s)</span>
+        </div>
+        <div v-for="pattern in store.rememberedPatterns" :key="`${pattern.module}:${pattern.moduleOffset}`" class="remembered-pattern-row">
+          <div class="remembered-pattern-label">
+            <strong v-if="pattern.queryLabel" :title="String(pattern.queryLabel)">{{ pattern.queryLabel }}</strong>
+            <code>{{ pattern.module }}+0x{{ pattern.moduleOffset }}</code>
+          </div>
+          <span>{{ pattern.valueType || '-' }}</span>
+          <span>{{ pattern.confirmCount }}×</span>
+          <span :class="pattern.resolved ? 'hint' : 'error'">
+            {{ pattern.resolved ? `0x${pattern.liveAddress}` : 'module absent (pas attaché ou jeu différent)' }}
+          </span>
+          <button
+            v-if="pattern.resolved"
+            class="btn btn-secondary compact"
+            type="button"
+            @click="store.previewRememberedPattern(pattern)"
+          >
+            Prévisualiser
+          </button>
+        </div>
+      </div>
+      <div v-if="store.writeHistorySequence.length" class="remembered-patterns">
+        <div class="source-list-title">
+          <strong>Historique d'écritures (replay)</strong>
+          <span>{{ store.writeHistorySequence.length }} entrée(s)</span>
+        </div>
+        <div v-for="(entry, index) in store.writeHistorySequence" :key="`${entry.module}:${entry.moduleOffset}:${entry.writtenAt}:${index}`" class="remembered-pattern-row">
+          <code>{{ entry.module }}+0x{{ entry.moduleOffset }}</code>
+          <span>{{ entry.valueType || '-' }} = {{ entry.value }}</span>
+          <span :class="entry.resolved ? 'hint' : 'error'">
+            {{ entry.resolved ? `0x${entry.liveAddress}` : 'module absent (pas attaché ou jeu différent)' }}
+          </span>
+        </div>
+        <div class="panel-actions">
+          <button class="btn btn-primary compact" type="button" @click="store.replayWriteHistorySequence()">
+            Rejouer la séquence
+          </button>
+          <button class="btn btn-secondary compact" type="button" @click="store.clearWriteHistorySequence()">
+            Vider l'historique
+          </button>
+        </div>
+      </div>
       <div class="panel-actions workspace-actions">
         <button class="btn btn-secondary compact" @click="showWorkspaceExport()">Exporter workspace JSON</button>
         <button class="btn btn-secondary compact" @click="showWorkspaceMarkdownExport()">Exporter workspace MD</button>
@@ -714,6 +761,85 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       <p v-if="store.diagnosticOpenFolderError" class="warning">{{ store.diagnosticOpenFolderError }}</p>
       <p v-if="store.logError" class="error">{{ store.logError }}</p>
       <p v-if="store.smartSearchDebugError" class="error">{{ store.smartSearchDebugError }}</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Compatibilité antivirus</h2>
+      </div>
+      <p class="hint">
+        Certains antivirus/EDR (ex. Microsoft Defender for Endpoint) bloquent parfois l'injection utilisée par
+        le breakpoint in-process ou le freeze avancé, en confondant cet usage légitime de débogage avec une
+        technique d'injection malveillante. Le bouton ci-dessous ouvre une invite d'élévation Windows (UAC)
+        pour ajouter une exclusion — rien ne se passe sans ta confirmation explicite dans cette invite.
+      </p>
+      <div class="panel-actions">
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.defenderExclusionBusy"
+          @click="store.requestWindowsDefenderExclusion()"
+        >
+          {{ store.defenderExclusionBusy ? 'En cours…' : 'Ajouter une exclusion Windows Defender' }}
+        </button>
+      </div>
+      <p v-if="store.defenderExclusionResult?.success" class="status-line">
+        Exclusion ajoutée avec succès.
+      </p>
+      <p v-else-if="store.defenderExclusionResult?.cancelled" class="warning">
+        Invite d'élévation refusée — aucune modification effectuée.
+      </p>
+      <p v-else-if="store.defenderExclusionResult?.error" class="error">
+        {{ store.defenderExclusionResult.error }}
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Driver kernel</h2>
+        <span>{{ store.kernelDriverStatus?.status ?? 'inconnu' }}</span>
+      </div>
+      <p class="hint">
+        Statut du driver optionnel `KillEngineKernel.sys`. Le driver actuel expose uniquement un probe de santé :
+        aucune lecture, écriture mémoire ou instrumentation privilégiée n'est activée par ce statut.
+      </p>
+      <div class="panel-actions">
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.kernelDriverStatusLoading"
+          @click="store.refreshKernelDriverStatus()"
+        >
+          {{ store.kernelDriverStatusLoading ? 'Probe…' : 'Tester le driver' }}
+        </button>
+      </div>
+      <div v-if="store.kernelDriverStatus" class="settings-grid compact-grid">
+        <div>
+          <strong>Device</strong>
+          <span>{{ store.kernelDriverStatus.devicePath }}</span>
+        </div>
+        <div>
+          <strong>Message</strong>
+          <span>{{ store.kernelDriverStatus.message }}</span>
+        </div>
+        <div>
+          <strong>Protocole</strong>
+          <span>{{ store.kernelDriverStatus.capabilities.protocolVersion }}</span>
+        </div>
+        <div>
+          <strong>Health probe</strong>
+          <span>{{ store.kernelDriverStatus.capabilities.healthProbe ? 'oui' : 'non' }}</span>
+        </div>
+        <div>
+          <strong>Accès mémoire kernel</strong>
+          <span>{{ store.kernelDriverStatus.capabilities.processMemoryAccess ? 'oui' : 'non' }}</span>
+        </div>
+        <div>
+          <strong>Instrumentation privilégiée</strong>
+          <span>{{ store.kernelDriverStatus.capabilities.privilegedInstrumentation ? 'oui' : 'non' }}</span>
+        </div>
+      </div>
+      <p v-if="store.kernelDriverStatusError" class="error">
+        {{ store.kernelDriverStatusError }}
+      </p>
     </section>
 
     <section class="panel">
@@ -1296,6 +1422,46 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
 .path-row:first-of-type {
   border-top: none;
+}
+
+.remembered-patterns {
+  margin-top: 12px;
+}
+
+.remembered-pattern-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 80px 50px minmax(0, 1.5fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.remembered-pattern-row code {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remembered-pattern-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.remembered-pattern-label strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .debug-list {

@@ -3,6 +3,8 @@
 #include "ai_engine.h"
 #include "candidates/candidate_store.h"
 #include "debug/breakpoint_freeze.h"
+#include "debug/inprocess_breakpoint.h"
+#include "debug/page_guard.h"
 #include "freeze/freeze_manager.h"
 #include "inject/dll_injector.h"
 #include "inject/function_hook.h"
@@ -17,6 +19,7 @@
 #include <QObject>
 #include <QByteArray>
 #include <QHash>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -86,6 +89,9 @@ public:
     /// Lit un petit aperçu mémoire en hexadécimal depuis le processus attaché.
     Q_INVOKABLE QVariantMap readMemoryPreview(const QString& addressHex, int size) const;
 
+    /// Lit une page mémoire plus large (jusqu'à 64 Ko) pour le visualiseur hexadécimal navigable.
+    Q_INVOKABLE QVariantMap readMemoryBlock(const QString& addressHex, int size) const;
+
     /// Analyse une fenêtre mémoire en champs typés exploitables par la vue Structure.
     Q_INVOKABLE QVariantMap analyzeStructureMemory(const QString& addressHex, int size) const;
 
@@ -98,6 +104,20 @@ public:
     /// Cherche des valeurs numériques plausibles autour d'une string UI déjà localisée.
     Q_INVOKABLE QVariantMap analyzeUiStringSources(
         const QVariantMap& stringCandidate,
+        const QString& value,
+        const QVariantMap& options) const;
+
+    /// Recherche générique d'une valeur numérique dans une fenêtre de mémoire
+    /// autour d'une adresse binaire quelconque (pas une string UI — voir
+    /// analyzeUiStringSources ci-dessus pour ce cas précis). Primitive dédiée
+    /// (core/scanner/memory_window_search.h) plutôt que de détourner
+    /// analyzeUiStringSources pour un usage générique — voir
+    /// docs/STRATEGY_ROOM.md, session Solitaire du 20/08/2026.
+    /// options keys: radiusBytes (défaut 65536), maxResults (défaut 200),
+    /// alignment (défaut 1), excludeBytes (défaut 8, octets ignorés à partir
+    /// de l'adresse ancre elle-même).
+    Q_INVOKABLE QVariantMap scanMemoryWindow(
+        const QString& addressHex,
         const QString& value,
         const QVariantMap& options) const;
 
@@ -182,6 +202,13 @@ public:
     /// Écrit une valeur affichée sur plusieurs cibles, en appliquant les variantes x100/x65536/etc.
     Q_INVOKABLE QVariantMap writeMemoryValuesWithVariants(const QVariantList& targets, const QString& value);
 
+    /// Écrit plusieurs adresses ({address, type, value}) dans la même fenêtre critique
+    /// (threads de la cible suspendues pendant l'écriture) — pour les cibles qui
+    /// maintiennent des copies redondantes d'une même valeur et détectent/annulent
+    /// une écriture isolée (roadmap I, session Solitaire du 19/08/2026, voir
+    /// docs/STRATEGY_ROOM.md). options: { suspendThreads: bool (def. true) }.
+    Q_INVOKABLE QVariantMap writeMemoryValuesAtomic(const QVariantList& targets, const QVariantMap& options);
+
     /// Restaure la dernière valeur écrasée par writeMemoryValue.
     Q_INVOKABLE QVariantMap rollbackLastWrite();
 
@@ -227,12 +254,52 @@ public:
     Q_INVOKABLE QVariantMap cancelFindWhatWrites();
 
     /// Find What Accesses (breakpoint lecture/ecriture) : capture les instructions qui LISSENT l'adresse.
+    /// Version bloquante (miroir de findWhatWrites) — utile notamment pour le
+    /// connecteur d'automatisation (le pipe ne peut pas relire le resultat
+    /// d'un signal Qt asynchrone, voir docs/STRATEGY_ROOM.md session Solitaire).
+    Q_INVOKABLE QVariantMap findWhatAccesses(const QString& addressHex, const QVariantMap& options);
+
     /// Version non bloquante. Le resultat arrive via findWhatAccessesFinished.
     Q_INVOKABLE QVariantMap findWhatAccessesAsync(const QString& addressHex, const QVariantMap& options);
 
     /// Scan groupe : cherche N valeurs avec offsets fixes connus (ex: HP/Mana/Stamina voisins).
     /// Entrees : liste {offset, type, value} + options standards Mode Expert.
     Q_INVOKABLE QVariantMap scanGroupScan(const QVariantList& entries, const QVariantMap& options);
+
+    /// Alternative à findWhatWritesAsync qui n'attache pas de débogueur externe : capture via
+    /// PAGE_GUARD + composant injecté au lieu d'un hardware breakpoint Win32 (DebugActiveProcess).
+    /// Utile quand un autre débogueur est déjà attaché à la cible (le canal de debug Win32
+    /// n'accepte qu'un seul propriétaire) ou pour de l'instrumentation qui doit rester active
+    /// indépendamment de l'état du canal de debug.
+    /// Version non bloquante. Le résultat arrive via pageGuardWatchFinished.
+    /// options keys: size (1-4096, défaut 4), captureWrites (défaut true), captureReads, timeoutMs, maxHits.
+    Q_INVOKABLE QVariantMap startPageGuardWatchAsync(const QString& addressHex, const QVariantMap& options);
+
+    /// Demande l'arrêt de la capture Page Guard en cours.
+    Q_INVOKABLE QVariantMap cancelPageGuardWatch();
+
+    /// Variante plus précise de startPageGuardWatchAsync : hardware breakpoint (DR0, adresse
+    /// exacte plutôt que la page de 4 Ko) posé depuis un composant injecté dans la cible — voir
+    /// core/debug/inprocess_breakpoint.h. Version non bloquante, résultat via
+    /// inProcessBreakpointWatchFinished. options keys: size (1/2/4/8, défaut 4),
+    /// captureWrites (défaut true), timeoutMs, maxHits.
+    Q_INVOKABLE QVariantMap startInProcessBreakpointWatchAsync(const QString& addressHex, const QVariantMap& options);
+
+    /// Demande l'arrêt de la capture breakpoint in-process en cours.
+    Q_INVOKABLE QVariantMap cancelInProcessBreakpointWatch();
+
+    /// Freeze via breakpoint in-process : le composant injecté réécrit lui-même la valeur figée
+    /// juste après chaque écriture interceptée, sans jamais attacher de débogueur externe (à la
+    /// différence de freezeWithBreakpoint qui, lui, dépend du canal de debug Win32). Reste actif
+    /// jusqu'à stopInProcessBreakpointFreeze().
+    Q_INVOKABLE QVariantMap startInProcessBreakpointFreeze(const QString& addressHex, const QString& valueType, const QString& value, const QVariantMap& options);
+
+    /// Arrête le freeze breakpoint in-process actif.
+    Q_INVOKABLE QVariantMap stopInProcessBreakpointFreeze();
+
+    /// Stats en direct du freeze breakpoint in-process actif (hitCount, threads armées) —
+    /// lecture directe de la mémoire partagée, pas d'attente de l'arrêt.
+    Q_INVOKABLE QVariantMap getInProcessBreakpointFreezeStats() const;
 
     /// Ecriture hexadecimale brute : "48 8B 00" -> bytes exacts a l'adresse. Sauvegarde previous pour rollback.
     Q_INVOKABLE QVariantMap writeMemoryHex(const QString& addressHex, const QString& hexString);
@@ -284,6 +351,20 @@ public:
     /// Restaure les bytes originaux du dernier script auto-assembler exécuté.
     Q_INVOKABLE QVariantMap restoreAutoAssemblerScript();
 
+    /// Génère et exécute automatiquement un script auto-assembler CE-style
+    /// (trampoline alloué + redirection du site d'écriture capturé par
+    /// "Écrit par") qui force `value` à l'adresse mémoire visée par
+    /// l'instruction, quelle que soit sa source (immédiat OU registre) —
+    /// contrairement à "Forcer une valeur" (patch d'octets), qui ne marche
+    /// que pour un immédiat littéral. Restaurable via restoreAutoAssemblerScript.
+    Q_INVOKABLE QVariantMap forceWriteInstructionValue(
+        const QString& ripHex,
+        int instructionLength,
+        const QString& memBaseRegister,
+        qlonglong memDisplacement,
+        const QString& valueType,
+        const QString& value);
+
     /// Configure l'intervalle du freeze polling (10-2000 ms, 100 ms par défaut).
     Q_INVOKABLE QVariantMap setFreezeInterval(int intervalMs);
 
@@ -321,6 +402,23 @@ public:
     /// Ajoute un événement d'audit IA dans la télémétrie locale.
     Q_INVOKABLE QVariantMap logAiAudit(const QString& event, const QVariantMap& payload);
 
+    /// Motifs mémorisés (module + offset relatif + type + AOB) pour l'exécutable attaché,
+    /// résolus en adresses live si un processus est attaché — évite de repartir d'un scan
+    /// à froid pour une cible déjà identifiée lors d'une session précédente sur ce jeu.
+    Q_INVOKABLE QVariantMap getRememberedPatterns() const;
+
+    /// Séquence ordonnée des dernières écritures confirmées (module + offset relatif),
+    /// persistée par exécutable — contrairement à rememberedPatterns (dédupliqué par
+    /// cible), garde l'ordre et les doublons pour permettre un replay fidèle.
+    Q_INVOKABLE QVariantMap getWriteHistorySequence() const;
+
+    /// Rejoue dans l'ordre la séquence persistée d'écritures pour l'exécutable attaché
+    /// (module non chargé ou résolution échouée = entrée ignorée, reste dans le rapport).
+    Q_INVOKABLE QVariantMap replayWriteHistorySequence();
+
+    /// Vide la séquence d'écritures persistée pour l'exécutable attaché.
+    Q_INVOKABLE QVariantMap clearWriteHistorySequence();
+
     /// Ping — permet au frontend de vérifier que le backend est connecté.
     Q_INVOKABLE QString ping(const QString& message);
 
@@ -335,6 +433,17 @@ public:
 
     /// Ouvre USER_GUIDE.md dans l'application par défaut du système (package: à côté de l'exe ; dev: docs/USER_GUIDE.md).
     Q_INVOKABLE bool openUserGuide() const;
+
+    /// Demande une exclusion Windows Defender (protection temps réel) pour le
+    /// dossier d'installation et KillEngine.exe — déclenche une invite UAC
+    /// visible (élévation explicite), n'agit que si l'utilisateur accepte.
+    /// Nécessaire car un cycle debug externe (findWhatWrites) suivi d'une
+    /// injection in-process peut être bloqué par certains EDR/antivirus qui
+    /// traitent cette séquence comme une heuristique d'injection de code
+    /// malveillante — voir docs/STRATEGY_ROOM.md, 20/08/2026. Ne fait RIEN
+    /// silencieusement : cette méthode existe précisément pour que ce soit
+    /// toujours un choix explicite de l'utilisateur, jamais automatique.
+    Q_INVOKABLE QVariantMap requestWindowsDefenderExclusion();
 
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
     Q_INVOKABLE QVariantMap probeKernelDriver() const;
@@ -377,6 +486,12 @@ public:
 
     /// Vide le contexte de scan (candidats, undo, snapshot unknown) pour repartir proprement.
     Q_INVOKABLE QVariantMap clearScanContext();
+
+    /// A appeler quand le frontend répond à une relance de l'échelle de secours
+    /// (buildFailureEscalationRecovery) via un bouton plutôt qu'en tapant dans le
+    /// chat (ex. bouton "Tracer le texte affiché") : ces boutons court-circuitent
+    /// startSmartSearch, donc rien d'autre ne consommerait sinon m_pendingRecoveryAction.
+    Q_INVOKABLE void acknowledgePendingSmartSearchRecovery();
 
     /// Retourne l'état du stockage temporaire des scans.
     Q_INVOKABLE QVariantMap getTemporaryStorageStatus() const;
@@ -439,6 +554,19 @@ public:
     /// Inspecte les patchs code d'un profil sans écrire, pour afficher leur état actuel.
     Q_INVOKABLE QVariantMap inspectProfileCodePatches(const QString& profileName);
 
+    /// Sauvegarde un script auto-assembleur (texte brut) dans un profil, rejouable sans le retaper.
+    Q_INVOKABLE QVariantMap saveProfileAutoAsmScript(
+        const QString& profileName,
+        const QString& scriptName,
+        const QString& scriptText,
+        const QVariantMap& metadata);
+
+    /// Charge puis exécute un script auto-assembleur sauvegardé (même chemin que l'exécution manuelle).
+    Q_INVOKABLE QVariantMap applyProfileAutoAsmScript(const QString& profileName, const QString& scriptName);
+
+    /// Supprime un script auto-assembleur sauvegardé d'un profil.
+    Q_INVOKABLE QVariantMap deleteProfileAutoAsmScript(const QString& profileName, const QString& scriptName);
+
     // -----------------------------------------------------------------------
     // Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
     // -----------------------------------------------------------------------
@@ -481,12 +609,22 @@ signals:
     void scanStatsUpdated(int candidateCount);
     void scanFinished(const QVariantMap& result);
     void findWhatWritesFinished(const QVariantMap& result);
+    void pageGuardWatchFinished(const QVariantMap& result);
+    void inProcessBreakpointWatchFinished(const QVariantMap& result);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le
     /// classique "freeze qui clignote". Détecté automatiquement, sans que
     /// l'utilisateur ait besoin de le signaler — voir applyFreezeTick().
     void freezeInstabilityDetected(const QVariantMap& info);
+
+    /// Émis quand une écriture confirmée (writeMemoryValueConfirmed, appelée
+    /// aussi bien par un write manuel Expert que par tous les auto-write du
+    /// chat Assistant) est repartie toute seule dans la fenêtre d'observation
+    /// qui suit — signe que quelque chose recalcule/réécrit cette adresse.
+    /// Détecté automatiquement (voir applyWriteWatchTick()) au lieu d'attendre
+    /// que l'utilisateur le remarque et clique "Écrit par" à la main.
+    void writeDidNotHold(const QVariantMap& info);
 
     /// Resultat d'une capture Find What Accesses async (kind = find_what_accesses).
     void findWhatAccessesFinished(const QVariantMap& result);
@@ -499,6 +637,8 @@ signals:
 
 private:
     void applyFreezeTick();
+    void applyWriteWatchTick();
+    void registerWriteWatch(uint64_t address, killcore::ValueType type, const QByteArray& expectedBytes);
     bool restartBreakpointFreezeFromRegistry(killcore::BreakpointFreezeMode mode, QString* error = nullptr);
     QVariantMap activateBreakpointFreezeFor(
         uint64_t address,
@@ -513,12 +653,24 @@ private:
     QVariantList candidateValueHistory(uint64_t address) const;
     void enrichSuggestedWritesWithHistory(QVariantList* suggestions) const;
     QVariantList filterAutoWriteSuggestionsByRegion(const QVariantList& suggestions, QVariantList* rejected) const;
-    QVariantMap writeMemoryValueConfirmed(const QString& addressHex, const QString& valueType, const QString& value);
+    QVariantMap writeMemoryValueConfirmed(const QString& addressHex, const QString& valueType, const QString& value, bool persistHistory = true);
+    void persistWriteHistorySequenceEntry(uint64_t address, killcore::ValueType type, const QString& valueText);
+    bool hasAddressBeenWriteVerified(uint64_t address) const;
+    /// Arrete au mieux les sessions de breakpoint in-process encore actives
+    /// et force l'arbitre (killcore::HwBreakpointArbiter) a Idle pour
+    /// l'ancienne cible (m_pid avant reassignation) -- appele au debut de
+    /// attachProcess() et detachProcess(). Best-effort et non bloquant
+    /// longtemps meme si la cible a deja disparu : stop() a son propre
+    /// desarmement borne a 2s (voir core/debug/inprocess_breakpoint.cpp).
+    void resetHardwareBreakpointStateForPreviousTarget();
+    void detectStableCandidateGroup(killcore::NextScanMode mode, const QList<killcore::Candidate>& survivors, QVariantMap* result);
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
     QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);
     QVariantMap writeChatMemoryTargetsFromQuery(const QString& query, const QString& value);
     QVariantMap freezeChatMemoryTargetsFromQuery(const QString& query, const QString& value);
     QVariantMap writeProfileTargetsFromQuery(const QString& query, const QString& value);
+    QVariantMap buildFailureEscalationRecovery(const QString& query, const QStringList& numbers);
+    void resetFailureEscalationState();
     QString smartSearchDebugFilePath() const;
     QString scanTelemetryFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;
@@ -535,6 +687,21 @@ private:
     struct AutoWriteTarget {
         uint64_t address{0};
         killcore::ValueType type{killcore::ValueType::Int32};
+    };
+
+    // Surveillance courte apres une ecriture confirmee : combien de sondages
+    // (applyWriteWatchTick) il reste avant d'arreter d'observer cette adresse
+    // faute de reversion detectee (watch "reussie", rien a signaler).
+    struct WriteWatchEntry {
+        uint64_t address{0};
+        killcore::ValueType type{killcore::ValueType::Int32};
+        QByteArray expectedBytes;
+        int ticksRemaining{0};
+        // Mismatches consecutifs (reset a 0 des qu'un sondage matche a
+        // nouveau) : exige plusieurs sondages d'affilee avant de conclure a
+        // une vraie reversion, pour ne pas declencher sur un simple aleas de
+        // lecture (meme principe que FreezeEntry::consecutiveDriftTicks).
+        int consecutiveMismatches{0};
     };
 
     struct ActiveProfileTarget {
@@ -570,6 +737,11 @@ private:
     std::unique_ptr<killcore::BreakpointFreezeManager> m_breakpointFreeze;
     std::unique_ptr<killcore::GlobalHotkeyManager> m_hotkeys;
     QTimer                   m_freezeTimer;
+    // Sondage independant du freeze (interval bien plus lent, pas de
+    // reecriture) : surveille juste que la valeur confirmee ecrite par
+    // writeMemoryValueConfirmed n'est pas repartie toute seule peu apres.
+    QTimer                   m_writeWatchTimer;
+    QList<WriteWatchEntry>   m_writeWatchEntries;
     QPointer<QWidget>        m_trainerOverlay;
     QPointer<QLabel>         m_trainerOverlayLabel;
     uint64_t                 m_lastWriteAddress{0};
@@ -585,12 +757,22 @@ private:
     QStringList              m_autoWriteValueHistory;
     int                      m_lastBatchStartIndex{-1};
     int                      m_lastBatchEndIndex{-1};
+    // H1 (docs/STRATEGY_ROOM.md, session Solitaire du 19/08/2026) : detecte un
+    // petit groupe de candidats qui reste identique sur plusieurs next scan
+    // "exact" d'affilee — signal statistique de copies redondantes.
+    QSet<uint64_t>           m_stableCandidateGroup;
+    int                      m_stableCandidateGroupCycles{0};
     bool                     m_scanInProgress{false};
     bool                     m_hasPreviousCandidates{false};
     int                      m_nextScanRequestId{1};
     int                      m_nextDebugRequestId{1};
     bool                     m_findWhatWritesInProgress{false};
     bool                     m_findWhatAccessesInProgress{false};
+    bool                     m_pageGuardWatchInProgress{false};
+    std::shared_ptr<killcore::PageGuardSession> m_activePageGuardSession;
+    bool                     m_inProcessBreakpointWatchInProgress{false};
+    std::shared_ptr<killcore::InProcessBreakpointSession> m_activeInProcessBreakpointSession;
+    std::shared_ptr<killcore::InProcessBreakpointSession> m_inProcessBreakpointFreezeSession;
     std::shared_ptr<killcore::CancellationToken> m_activeDebugCancellation;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     killai::AIEngine         m_ai;
@@ -598,6 +780,47 @@ private:
     QString                  m_smartSearchInitialValue;
     QString                  m_smartSearchTargetValue;
     QString                  m_smartSearchValueType{"Int32"};
+    // Derniere valeur que l'utilisateur a rapportee comme reellement affichee
+    // a l'ecran (ex: reponse a "donne-moi la nouvelle valeur observee").
+    // A ne JAMAIS confondre avec m_smartSearchTargetValue (le but jamais
+    // atteint) : seule m_smartSearchLastObservedValue a une chance d'exister
+    // litteralement en memoire/texte, donc c'est la seule valeur valide pour
+    // un traçage Trace UI string de repli.
+    QString                  m_smartSearchLastObservedValue;
+    // Nombre de tours de reduction (next_scan/unknown_compare) depuis le
+    // dernier scan frais. Destine a terme a exiger au moins 2 tours avant
+    // l'ecriture automatique (sauf confiance deja tres elevee des le
+    // premier), mais PAS ENCORE CABLE : ce compteur n'est actuellement ni lu
+    // ni incremente nulle part dans application_controller.cpp — l'ecriture
+    // automatique ne depend pas (encore) de lui. Ne pas presumer que ce
+    // garde-fou existe deja avant d'avoir verifie/implemente la logique qui
+    // l'utilise.
+    int                      m_smartSearchNarrowingRounds{0};
+    // Palier de l'echelle de secours (ReportBadTargets) sur le lot d'adresses
+    // actif : 0 = rien tente, incremente a chaque "ca n'a pas marche" pour
+    // proposer une methode differente plutot que reboucler sur le meme scan.
+    // Remis a 0 des qu'une nouvelle recherche ou un nouveau lot d'adresses est etabli.
+    int                      m_failureEscalationLevel{0};
+    // Action de l'echelle de secours dont l'assistant attend la reponse en
+    // langage libre (ex: "trace_ui_string" apres avoir demande le texte
+    // affiche). Sans ce suivi, une reponse texte contenant juste un nombre
+    // retombe sur la regle generique d'ecriture sur les adresses actives.
+    QString                  m_pendingRecoveryAction;
+    // Candidats texte trouves par le dernier scanUiStrings, conserves entre
+    // l'etape 1 (Tracer le texte affiche) et l'etape 2 (Filtrer + Analyser
+    // sources) du pipeline Trace UI string pilote depuis le chat Assistant.
+    QVariantList             m_pendingUiStringCandidates;
+    // Vrai pendant les sections de startSmartSearch qui pompent
+    // QCoreApplication::processEvents() en boucle bloquante pour eviter
+    // qu'AppHang* ne tue la fenetre : l'appel IA generique (jusqu'a 90s,
+    // pompage fait dans ai/llama_server.cpp) et l'analyse de sources
+    // numeriques du pipeline Trace UI string (jusqu'a 3 rayons x 20
+    // candidats de ReadProcessMemory, pompage fait localement). Sans ce
+    // garde-fou, un second clic pendant l'une de ces attentes reentrerait
+    // dans startSmartSearch() sur la meme pile pendant que le premier appel
+    // mute encore m_candidates / m_lastAutoWriteTargets. Rejette l'appel
+    // reentrant plutot que de laisser corrompre l'etat partage.
+    bool                     m_smartSearchBusy{false};
 };
 
 } // namespace killengine

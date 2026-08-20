@@ -26,13 +26,15 @@
     "title": "Carte mémoire",
     "refresh": "Rafraîchir",
     "attachFirst": "Attache un processus pour afficher sa carte mémoire.",
+    "goToProcess": "Aller à Processus",
     "regions": "Régions",
     "committed": "Réservée",
     "readable": "Lisible",
     "writable": "Modifiable",
     "executable": "Exécutable",
     "all": "Tout",
-    "preview": "Aperçu"
+    "preview": "Aperçu",
+    "moduleFilterPlaceholder": "Filtrer par module (ex: ntdll)..."
   },
   "search": {
     "title": "Que veux-tu trouver ?",
@@ -211,6 +213,13 @@
       "when": "Pour créer une feature qui survit au redémarrage : une adresse change à chaque session, une signature de code non.",
       "cost": "Modifie le code exécutable du programme. Une signature qui correspond à plusieurs endroits est bloquée, car patcher au mauvais endroit fait planter la cible.",
       "example": "Écrit par a trouvé l'instruction à SC2.exe+0x4A1B2. Clique Signature pour générer une AOB stable, puis Analyser pour voir les patchs proposés (NOP écriture, forcer une valeur, etc.) classés par risque."
+    },
+    "writeAtomic": {
+      "title": "Écriture atomique multi-adresses",
+      "what": "Écrit plusieurs adresses en même temps, en suspendant brièvement toutes les threads du processus cible pendant l'opération, au lieu d'écrire une adresse après l'autre. Utile quand une cible garde plusieurs copies redondantes de la même valeur et corrige silencieusement celle qui ne correspond plus aux autres.",
+      "when": "Une écriture normale sur une adresse a réussi (vérifiée en mémoire) mais rien ne change à l'écran, et un next scan répété montre que 2 à 5 adresses restent identiques entre elles à chaque cycle : c'est le signe de copies redondantes. Sélectionne ces adresses et écris-les ensemble plutôt qu'une par une.",
+      "cost": "Toutes les threads de la cible sont suspendues pendant la rafale d'écritures (quelques millisecondes en pratique) — la cible peut sembler figer un instant. Limité à 32 adresses. Ne remplace pas un test d'écriture simple au préalable pour confirmer que ces adresses sont bien les bonnes.",
+      "example": "Une valeur affichée à l'écran ne bouge jamais malgré des écritures individuelles qui se vérifient correctement en mémoire. Un next scan répété révèle 2 adresses qui restent toujours égales entre elles. En les sélectionnant toutes les deux et en cliquant \"Écrire ensemble (atomique)\", l'écriture tient enfin — la cible comparait les deux copies et annulait celle qui ne correspondait pas à l'autre."
     },
     "pointerChains": {
       "title": "Pointer chains",

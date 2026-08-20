@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
@@ -139,6 +139,32 @@ function checkpointCanAob(item: Record<string, unknown>): boolean {
   return Boolean(checkpointAddress(item) && (checkpointIsCode(item) || item.sourceAddress))
 }
 
+function checkpointCanForceValue(item: Record<string, unknown>): boolean {
+  return Boolean(checkpointAddress(item) && String(item.kind ?? '') === 'code_writer')
+}
+
+const forceValueTarget = ref<Record<string, unknown> | null>(null)
+const forceValueInput = ref('')
+const forceValueBusy = ref(false)
+const forceValueResult = ref<Record<string, unknown> | null>(null)
+
+function selectForceValueTarget(item: Record<string, unknown>) {
+  forceValueTarget.value = item
+  forceValueInput.value = ''
+  forceValueResult.value = null
+}
+
+async function applyForceValue() {
+  const item = forceValueTarget.value
+  if (!item || !forceValueInput.value.trim()) return
+  forceValueBusy.value = true
+  try {
+    forceValueResult.value = await store.executeCheckpointForceValue(item, forceValueInput.value.trim())
+  } finally {
+    forceValueBusy.value = false
+  }
+}
+
 function checkpointPlan(item: Record<string, unknown>) {
   return store.buildCheckpointActionPlan(item)
 }
@@ -160,6 +186,86 @@ function watchCheckpoint(item: Record<string, unknown>) {
   if (!address) return
   store.addAddressToWatch(address, String(item.type ?? 'Int32'))
   store.setWatchLiveEnabled(true)
+}
+
+onMounted(() => {
+  // Auto-charge le rapport IA si une enquete est active, pour que les
+  // annotations "Pourquoi" de la timeline/checkpoints soient deja peuplees
+  // sans obliger l'utilisateur a cliquer "Rapport IA" en plus.
+  if (run.value) {
+    void store.refreshAutoResolveReport()
+  }
+})
+
+// Relie le rapport IA (deja calcule cote backend, rien de nouveau a produire)
+// a la timeline : pour un outil/checkpoint donne, retrouve le strategyScore
+// ou le telemetryInsight du rapport qui explique *pourquoi* cette action a
+// ete choisie, pas seulement *quoi* a ete fait. Correlation par mots-cles sur
+// le nom d'outil/le kind de checkpoint, aucune nouvelle donnee backend.
+function reasonFromReportMatch(match: Record<string, unknown> | undefined): string {
+  if (!match) return ''
+  const label = String(match.label ?? '')
+  const reason = String(match.reason ?? '')
+  const score = match.score
+  return score !== undefined ? `${label} (score ${score}/100) — ${reason}` : `${label} — ${reason}`
+}
+
+function matchReportEntry(keyword: string): Record<string, unknown> | undefined {
+  const report = autoReport.value as Record<string, unknown> | null
+  if (!report) return undefined
+  const scores = (report.strategyScores as Array<Record<string, unknown>>) ?? []
+  const insights = (report.telemetryInsights as Array<Record<string, unknown>>) ?? []
+  const findScore = (id: string) => scores.find((s) => String(s.id ?? '') === id)
+  const findInsight = (id: string) => insights.find((i) => String(i.id ?? '') === id)
+
+  switch (keyword) {
+    case 'aob':
+      return findInsight('aob_multimatch_guard') ?? findInsight('aob_quality_guard')
+    case 'write':
+      return findInsight('freeze_instability_detected') ?? findInsight('audit_risky_actions')
+    case 'uistring':
+      return findScore('trace_ui_string') ?? findInsight('trace_ui_sources_overflow') ?? findInsight('trace_ui_sources_ready')
+    case 'unknown':
+      return findScore('unknown_capture') ?? findInsight('unknown_too_large')
+    case 'encrypted':
+      return findScore('encrypted_scan')
+    case 'reduce':
+      return findScore('reduce_with_new_value')
+    case 'exact':
+      return findScore('exact_or_multitype') ?? findInsight('exact_zero_fallback')
+    default:
+      return undefined
+  }
+}
+
+function stepStrategyReason(step: Record<string, unknown>): string {
+  const tool = String(step.tool ?? '').toLowerCase()
+  if (!tool) return ''
+  if (tool.includes('aob') || tool.includes('patch') || tool === 'forcewriteinstructionvalue') {
+    return reasonFromReportMatch(matchReportEntry('aob'))
+  }
+  if (tool.includes('findwhatwrites')) return ''
+  if (tool === 'writememoryvalue' || tool === 'setfreezevalue') {
+    return reasonFromReportMatch(matchReportEntry('write'))
+  }
+  if (tool.includes('uistring')) return reasonFromReportMatch(matchReportEntry('uistring'))
+  if (tool.includes('unknown')) return reasonFromReportMatch(matchReportEntry('unknown'))
+  if (tool.includes('encrypted')) return reasonFromReportMatch(matchReportEntry('encrypted'))
+  if (tool.includes('reduce')) return reasonFromReportMatch(matchReportEntry('reduce'))
+  if (tool.includes('exact')) return reasonFromReportMatch(matchReportEntry('exact'))
+  return ''
+}
+
+function checkpointStrategyReason(item: Record<string, unknown>): string {
+  const kind = String(item.kind ?? '')
+  if (kind === 'code_writer' || kind === 'code_patch_suggestion' || kind === 'aob_signature') {
+    return reasonFromReportMatch(matchReportEntry('aob'))
+  }
+  if (kind === 'suggested_write') return reasonFromReportMatch(matchReportEntry('write'))
+  if (kind === 'ui_string_hit' || kind === 'ui_numeric_source') return reasonFromReportMatch(matchReportEntry('uistring'))
+  if (kind === 'unknown_candidate') return reasonFromReportMatch(matchReportEntry('unknown'))
+  if (kind === 'encrypted_hit') return reasonFromReportMatch(matchReportEntry('encrypted'))
+  return ''
 }
 </script>
 
@@ -253,8 +359,10 @@ function watchCheckpoint(item: Record<string, unknown>) {
     </section>
 
     <div v-if="!run" class="empty">
-      <h2>Aucune investigation active</h2>
-      <p>Lance Auto depuis l'Assistant pour creer une timeline.</p>
+      <h2>Aucune enquête en cours</h2>
+      <p>Ce panneau montre les étapes suivies par l'IA pour trouver une valeur dans le jeu (par exemple la vie ou l'argent) : c'est la suite d'une enquête, pas son point de départ.</p>
+      <p>Pour en démarrer une : ouvre l'onglet <strong>Assistant</strong>, décris ce que tu cherches, puis clique sur le bouton <strong>Auto</strong>.</p>
+      <button class="btn primary" @click="store.activeView = 'assistant'">Aller à l'Assistant</button>
     </div>
 
     <div v-else class="grid">
@@ -293,6 +401,7 @@ function watchCheckpoint(item: Record<string, unknown>) {
             <span>{{ step.time }}</span>
           </div>
           <p>{{ step.detail }}</p>
+          <p v-if="stepStrategyReason(step)" class="step-reason">Pourquoi : {{ stepStrategyReason(step) }}</p>
           <div class="meta">
             <span>{{ step.status }}</span>
             <span v-if="step.tool">{{ step.tool }}</span>
@@ -322,6 +431,7 @@ function watchCheckpoint(item: Record<string, unknown>) {
               <span :class="item.requiresConfirmation === true ? 'risk-badge' : 'safe-badge'">{{ checkpointRiskLabel(item) }}</span>
             </div>
             <p>{{ checkpointDetail(item) || 'Confirmation requise avant action.' }}</p>
+            <p v-if="checkpointStrategyReason(item)" class="step-reason">Pourquoi : {{ checkpointStrategyReason(item) }}</p>
             <div class="action-plan">
               <span
                 v-for="action in checkpointPlan(item).actions"
@@ -338,9 +448,25 @@ function watchCheckpoint(item: Record<string, unknown>) {
               <button v-if="checkpointCanWrite(item)" class="btn mini" :title="checkpointPlanReason(item, 'freeze_polling')" @click="store.executeCheckpointWrite(item, true)">Freeze</button>
               <button v-if="checkpointCanDebug(item)" class="btn mini" :title="checkpointPlanReason(item, 'find_writes')" @click="store.executeCheckpointFindWhatWrites(item)">Find What Writes</button>
               <button v-if="checkpointCanAob(item)" class="btn mini" :title="checkpointPlanReason(item, 'aob_patch')" @click="store.prepareCheckpointAob(item)">AOB/Patch</button>
+              <button v-if="checkpointCanForceValue(item)" class="btn mini" :title="checkpointPlanReason(item, 'force_value')" @click="selectForceValueTarget(item)">Forcer valeur (hook)</button>
               <button class="btn mini" @click="bookmarkCheckpoint(item)">Bookmark</button>
               <button v-if="checkpointAddress(item)" class="btn mini" :title="checkpointPlanReason(item, 'trainer')" @click="createFromCheckpoint(item)">Créer Trainer</button>
             </div>
+            <div v-if="forceValueTarget === item" class="checkpoint-actions">
+              <input
+                v-model="forceValueInput"
+                class="input"
+                placeholder="Valeur : 999"
+                :disabled="forceValueBusy"
+                @keyup.enter="applyForceValue()"
+              />
+              <button class="btn mini" type="button" :disabled="forceValueBusy || !forceValueInput.trim()" @click="applyForceValue()">Appliquer</button>
+            </div>
+            <p v-if="forceValueTarget === item && forceValueResult" :class="forceValueResult.success ? 'hint' : 'error'">
+              {{ forceValueResult.success
+                ? `Valeur forcée : trampoline actif à 0x${forceValueResult.patchAddress}.`
+                : forceValueResult.error }}
+            </p>
           </article>
           <p v-if="checkpoints.length === 0" class="muted">Aucun checkpoint actif.</p>
         </section>
@@ -450,6 +576,33 @@ p {
 .btn.mini {
   padding: 5px 7px;
   font-size: 12px;
+}
+
+.btn.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px;
+}
+
+.empty p {
+  max-width: 640px;
+}
+
+.empty .btn {
+  margin-top: 6px;
 }
 
 .summary {
@@ -603,6 +756,12 @@ p {
 .step p,
 .card p {
   margin-top: 6px;
+}
+
+.step-reason {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-style: italic;
 }
 
 .meta {

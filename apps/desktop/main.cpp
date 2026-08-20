@@ -1,4 +1,5 @@
 #include "application_controller.h"
+#include "automation_pipe_server.h"
 #include "crash_handler.h"
 #include "logging/logger.h"
 
@@ -11,6 +12,7 @@
 #include <QUrl>
 #include <QIcon>
 #include <QDir>
+#include <QProcessEnvironment>
 #include <QStandardPaths>
 
 #include <exception>
@@ -87,6 +89,17 @@ int runApplication(int argc, char* argv[]) {
     KE_LOG_INFO() << "Creating ApplicationController...";
     killengine::ApplicationController* controller = new killengine::ApplicationController(&mainWindow);
     KE_LOG_INFO() << "ApplicationController created.";
+
+    // Connecteur d'automatisation local (demandé le 19/08/2026 : pilotage
+    // temps réel par un agent IA pendant une session de test manuelle) —
+    // désactivé par défaut, n'écoute que si explicitement demandé au lancement.
+    // Voir automation_pipe_server.h pour le protocole et les garde-fous.
+    if (QProcessEnvironment::systemEnvironment().value("KILLENGINE_AUTOMATION_PIPE") == "1") {
+        auto* automationPipe = new killengine::AutomationPipeServer(controller, &mainWindow);
+        if (!automationPipe->start()) {
+            KE_LOG_WARN() << "AutomationPipeServer: démarrage échoué, KillEngine continue sans le connecteur.";
+        }
+    }
 
     KE_LOG_INFO() << "Creating QWebChannel...";
     QWebChannel* channel = new QWebChannel(&mainWindow);

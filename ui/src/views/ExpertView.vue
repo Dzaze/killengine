@@ -99,12 +99,32 @@ const aobStabilizeBusy = ref(false)
 const aobStabilizeResult = ref<Record<string, unknown> | null>(null)
 const aobSignatureBusy = ref(false)
 const aobSignatureResult = ref<AobSignatureResult | null>(null)
+// Message affiché quand generateAobSignatureFromHit() a délibérément SAUTÉ le
+// scan auto-enchaîné parce que le pattern stable est trop faible (level
+// "weak") pour être fiable — le pattern reste pré-rempli dans aobPattern, le
+// bouton "Scanner AOB" manuel reste disponible si l'utilisateur veut quand même.
+const aobAutoScanSkippedReason = ref('')
 const codePatchAddress = ref('')
 const codePatchBytes = ref('90 90')
 const codePatchBusy = ref(false)
 const codePatchResult = ref<CodePatchResult | null>(null)
 const codePatchSuggestBusy = ref(false)
 const codePatchSuggestionResult = ref<CodePatchSuggestionResult | null>(null)
+// Suggestion "Forcer une valeur" en attente de saisie (needsValueInput) et
+// valeur tapée par l'utilisateur pour elle — séparés de codePatchBytes tant
+// que la valeur n'a pas été appliquée, pour ne jamais écraser silencieusement
+// des bytes déjà choisis manuellement.
+const valueOverrideSuggestion = ref<CodePatchSuggestion | null>(null)
+const valueOverrideInput = ref('')
+const valueOverrideError = ref('')
+// "Forcer une valeur (hook)" : marche même quand la source de l'écriture est
+// un registre (donc sans immédiat à substituer par valueOverrideSuggestion
+// ci-dessus) — installe un trampoline + redirige le site via
+// forceWriteInstructionValue. hit gardé pour ré-afficher le RIP ciblé.
+const forceHookTargetHit = ref<Record<string, unknown> | null>(null)
+const forceHookValueInput = ref('')
+const forceHookBusy = ref(false)
+const forceHookResult = ref<Record<string, unknown> | null>(null)
 const codePatchProfileName = ref('')
 const codePatchProfilePatchName = ref('')
 const codePatchProfileDescription = ref('')
@@ -130,6 +150,12 @@ const findWhatWritesResult = ref<Record<string, unknown> | null>(null)
 const findWhatWritesBusy = ref(false)
 const findWhatWritesAcknowledged = ref(false)
 const findWhatWritesTimeoutMs = ref(7000)
+// Alternative à Find What Writes qui ne passe pas par le canal de debug Win32
+// (PAGE_GUARD + handler injecté) — utile quand un autre débogueur tient déjà
+// ce canal, mais moins précis (granularité page de 4 Ko, hits rapprochés
+// potentiellement fusionnés).
+const pageGuardResult = ref<Record<string, unknown> | null>(null)
+const pageGuardBusy = ref(false)
 const structureProbeResult = ref<Record<string, unknown> | null>(null)
 const structureCaptureA = ref<StructureProbeRow[] | null>(null)
 const structureCaptureB = ref<StructureProbeRow[] | null>(null)
@@ -381,6 +407,14 @@ async function savePointerChain(chain: PointerChainInfo) {
   }
 }
 
+async function watchPointerChain(chain: PointerChainInfo) {
+  await store.addWatchedPointerChain(
+    { module: chain.module, baseOffset: chain.baseOffset, offsets: chain.offsets },
+    pointerScanValueType.value,
+    chain.label || `Chaine 0x${pointerScanAddress.value}`,
+  )
+}
+
 async function suggestStableLocator(addressHex: string) {
   if (!addressHex.trim()) return
   stableLocatorBusy.value = true
@@ -535,8 +569,14 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
   selectedFindWhatWritesRip.value = rip
   aobSignatureBusy.value = true
   aobSignatureResult.value = null
+  aobAutoScanSkippedReason.value = ''
   codePatchSuggestBusy.value = true
   codePatchSuggestionResult.value = null
+  valueOverrideSuggestion.value = null
+  valueOverrideInput.value = ''
+  valueOverrideError.value = ''
+  forceHookTargetHit.value = null
+  forceHookResult.value = null
   codePatchAddress.value = rip
   store.memoryPreviewAddress = rip
   try {
@@ -550,6 +590,7 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
       length: 24,
     })
     aobSignatureResult.value = result
+    let stablePatternIsWeak = false
     if (controller.suggestCodePatches) {
       const suggestionResult = await controller.suggestCodePatches(rip, { maxBytes: 16 })
       codePatchSuggestionResult.value = suggestionResult
@@ -559,6 +600,13 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
       }
       if (suggestionResult.success && suggestionResult.stableAobPattern) {
         aobPattern.value = suggestionResult.stableAobPattern
+        // Le pattern "stable" vient du decodage d'UNE seule instruction : pour
+        // un mov [mem], reg typique, il ne reste souvent que 2-3 octets fixes
+        // (opcode + ModRM) une fois les offsets/registres wildcardes. Un scan
+        // executable+image avec un pattern aussi court remonte des centaines
+        // de matches sans rapport — pas une vraie signature. On ne lance pas
+        // le scan auto dans ce cas, on prévient l'utilisateur pourquoi.
+        stablePatternIsWeak = suggestionResult.signatureQuality?.level === 'weak'
       }
     } else {
       codePatchSuggestionResult.value = { success: false, suggestions: [], error: 'Methode backend indisponible.' }
@@ -567,7 +615,13 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
       aobPattern.value = result.pattern
     }
     if (aobPattern.value.trim()) {
-      await scanAobSignature()
+      if (stablePatternIsWeak) {
+        aobAutoScanSkippedReason.value =
+          "Signature trop faible pour lancer le scan automatiquement (peu d'octets fixes sur cette seule instruction — risque élevé de multi-match). " +
+          'Le pattern est pré-rempli ci-dessous : élargis-le (plus de contexte autour de l\'instruction) ou clique "Scanner AOB" si tu veux quand même essayer.'
+      } else {
+        await scanAobSignature()
+      }
       void nextTick(() => {
         document.querySelector('.aob-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       })
@@ -674,7 +728,92 @@ async function selectAobPatchAddress(address: string) {
 }
 
 function useCodePatchSuggestion(suggestion: CodePatchSuggestion) {
+  if (suggestion.needsValueInput) {
+    valueOverrideSuggestion.value = suggestion
+    valueOverrideInput.value = ''
+    valueOverrideError.value = ''
+    return
+  }
+  valueOverrideSuggestion.value = null
   codePatchBytes.value = suggestion.bytesText
+}
+
+function parseValueOverrideInput(text: string): bigint | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+  try {
+    return BigInt(trimmed)
+  } catch {
+    return null
+  }
+}
+
+function applyValueOverrideSuggestion() {
+  const suggestion = valueOverrideSuggestion.value
+  valueOverrideError.value = ''
+  if (!suggestion || suggestion.valueOffset == null || !suggestion.valueSize) return
+  const originalHex = (codePatchSuggestionResult.value?.bytes || suggestion.bytesText).replace(/\s+/g, '')
+  const originalBytes = originalHex.match(/../g)?.map((byte) => parseInt(byte, 16)) ?? []
+  if (originalBytes.length < suggestion.valueOffset + suggestion.valueSize) {
+    valueOverrideError.value = "Bytes d'instruction insuffisants pour appliquer la valeur."
+    return
+  }
+  const parsed = parseValueOverrideInput(valueOverrideInput.value)
+  if (parsed === null) {
+    valueOverrideError.value = 'Valeur invalide (entier décimal ou 0x hexadécimal attendu).'
+    return
+  }
+  // Tronque a la largeur du champ immediat (modulo 2^(size*8), les BigInt
+  // negatifs se masquent en complement a deux) plutot que de rejeter
+  // silencieusement : le comportement est le meme qu'un patch manuel "je
+  // sais ce que je fais", avec un avertissement explicite si la valeur
+  // demandee ne rentrait pas telle quelle dans le champ.
+  const widthBits = BigInt(suggestion.valueSize * 8)
+  const mask = (1n << widthBits) - 1n
+  const truncated = parsed & mask
+  const minSigned = -(1n << (widthBits - 1n))
+  const maxUnsigned = (1n << widthBits) - 1n
+  if (parsed < minSigned || parsed > maxUnsigned) {
+    valueOverrideError.value = `Valeur hors plage pour un champ de ${suggestion.valueSize} octet(s) (tronquée à 0x${truncated.toString(16)}). Corrige la valeur si ce n'est pas voulu.`
+  }
+  const patched = [...originalBytes]
+  for (let i = 0; i < suggestion.valueSize; ++i) {
+    patched[suggestion.valueOffset + i] = Number((truncated >> BigInt(i * 8)) & 0xffn)
+  }
+  codePatchBytes.value = patched.map((byte) => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ')
+}
+
+function selectForceHookTarget(hit: Record<string, unknown>) {
+  forceHookTargetHit.value = hit
+  forceHookValueInput.value = ''
+  forceHookResult.value = null
+}
+
+async function applyForceHookValue() {
+  const hit = forceHookTargetHit.value
+  const suggestion = codePatchSuggestionResult.value
+  if (!hit || !suggestion?.memBaseRegister || !forceHookValueInput.value.trim()) return
+  forceHookBusy.value = true
+  forceHookResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.forceWriteInstructionValue) {
+      forceHookResult.value = { success: false, error: 'Méthode backend indisponible.' }
+      return
+    }
+    forceHookResult.value = await controller.forceWriteInstructionValue(
+      String(hit.instructionPointer ?? ''),
+      Number(suggestion.instructionLength ?? 0),
+      suggestion.memBaseRegister,
+      Number(suggestion.memDisplacement ?? 0),
+      store.exactScanType,
+      forceHookValueInput.value.trim(),
+    )
+  } catch (e) {
+    forceHookResult.value = { success: false, error: String(e) }
+  } finally {
+    forceHookBusy.value = false
+  }
 }
 
 function cleanTrainerName(value: string, fallback: string) {
@@ -722,6 +861,9 @@ async function suggestSelectedCodePatches() {
   if (!address) return
   codePatchSuggestBusy.value = true
   codePatchSuggestionResult.value = null
+  valueOverrideSuggestion.value = null
+  valueOverrideInput.value = ''
+  valueOverrideError.value = ''
   try {
     const controller = backend.getController()
     if (!controller.suggestCodePatches) {
@@ -1412,6 +1554,7 @@ function addIntelligenceCandidate(
 }
 
 const findWhatWritesHits = computed(() => (findWhatWritesResult.value?.hits as Array<Record<string, unknown>> | undefined) ?? [])
+const pageGuardHits = computed(() => (pageGuardResult.value?.hits as Array<Record<string, unknown>> | undefined) ?? [])
 
 const intelligentUiCandidates = computed<IntelligentCandidate[]>(() => {
   const merged = new Map<string, UiStringSourceCandidate>()
@@ -1828,6 +1971,8 @@ async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
   }
   findWhatWritesBusy.value = true
   findWhatWritesResult.value = null
+  forceHookTargetHit.value = null
+  forceHookResult.value = null
   try {
     findWhatWritesResult.value = await runFindWhatWrites(candidate.address, {
       size: findWhatWritesSizeForType(candidate.type),
@@ -1844,7 +1989,13 @@ async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
 
 async function runFindWhatWrites(address: string, options: Record<string, unknown>) {
   if (!await store.confirmRiskAction('debug', 'Find what writes', `Adresse 0x${address.replace(/^0x/i, '')}, timeout ${String(options.timeoutMs ?? '?')} ms.`)) {
-    return { success: false, hitCount: 0, hits: [], cancelled: true, error: 'Capture debugger annulée par l’utilisateur.' }
+    return {
+      success: false,
+      hitCount: 0,
+      hits: [],
+      cancelled: true,
+      error: store.lastRiskBlockReason || 'Capture debugger annulée par l’utilisateur.',
+    }
   }
   const controller = backend.getController()
   const findWhatWritesAsync = controller.findWhatWritesAsync
@@ -1940,13 +2091,110 @@ async function cancelFindWhatWritesCapture() {
   }
 }
 
+async function runPageGuardWatch(address: string, options: Record<string, unknown>) {
+  if (!await store.confirmRiskAction('injection', 'Page Guard (sans debugger)', 'Injecte un handler dans le processus cible pour surveiller 0x' + address.replace(/^0x/i, '') + ' sans passer par le canal de debug Win32.')) {
+    return {
+      success: false,
+      hitCount: 0,
+      hits: [],
+      cancelled: true,
+      error: store.lastRiskBlockReason || 'Capture Page Guard annulée par l’utilisateur.',
+    }
+  }
+  const controller = backend.getController()
+  const fn = controller.startPageGuardWatchAsync
+  const sig = controller.pageGuardWatchFinished
+  if (!fn || !sig) {
+    return { success: false, hitCount: 0, hits: [], error: 'Page Guard non disponible dans ce backend.' }
+  }
+  return new Promise<Record<string, unknown>>((resolve) => {
+    let requestId: number | null = null
+    let settled = false
+    const earlyPayloads: Array<Record<string, unknown>> = []
+    const timeout = window.setTimeout(() => {
+      settled = true
+      sig.disconnect?.(handler)
+      resolve({ success: false, hitCount: 0, hits: [], error: 'Timeout de la capture Page Guard.' })
+    }, 20000)
+
+    const handler = (payload: Record<string, unknown>) => {
+      if (requestId === null) {
+        earlyPayloads.push(payload)
+        return
+      }
+      if (Number(payload.requestId) !== requestId) return
+      settled = true
+      window.clearTimeout(timeout)
+      sig.disconnect?.(handler)
+      resolve(payload)
+    }
+    sig.connect(handler)
+
+    void fn(address, options).then((start) => {
+      if (settled) return
+      if (start.success !== true || start.started !== true) {
+        settled = true
+        window.clearTimeout(timeout)
+        sig.disconnect?.(handler)
+        resolve({ success: false, hitCount: 0, hits: [], error: String(start.error ?? 'Impossible de démarrer Page Guard async.') })
+        return
+      }
+      requestId = Number(start.requestId)
+      for (const payload of earlyPayloads.splice(0)) {
+        handler(payload)
+        if (settled) break
+      }
+    }).catch((error) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
+      sig.disconnect?.(handler)
+      resolve({ success: false, hitCount: 0, hits: [], error: String(error) })
+    })
+  })
+}
+
+async function pageGuardWatchForSource(candidate: UiStringSourceCandidate) {
+  pageGuardBusy.value = true
+  pageGuardResult.value = null
+  try {
+    pageGuardResult.value = await runPageGuardWatch(candidate.address, {
+      size: findWhatWritesSizeForType(candidate.type),
+      timeoutMs: findWhatWritesTimeoutMs.value,
+      maxHits: 12,
+    })
+  } catch (e) {
+    pageGuardResult.value = { success: false, hitCount: 0, hits: [], error: String(e) }
+  } finally {
+    pageGuardBusy.value = false
+  }
+}
+
+async function cancelPageGuardWatchCapture() {
+  const controller = backend.getController()
+  if (!controller.cancelPageGuardWatch) {
+    pageGuardResult.value = { success: false, hitCount: 0, hits: [], error: 'Annulation Page Guard indisponible côté backend.' }
+    return
+  }
+  const result = await controller.cancelPageGuardWatch()
+  if (result.success !== true) {
+    pageGuardResult.value = { success: false, hitCount: 0, hits: [], error: String(result.error ?? 'Annulation Page Guard impossible.') }
+  }
+}
+
 // ---- Find What Accesses (P1) : instructions qui LISSENT l'adresse ----
 const findWhatAccessesResult = ref<Record<string, unknown> | null>(null)
 const findWhatAccessesBusy = ref(false)
 
 async function runFindWhatAccesses(address: string, options: Record<string, unknown>) {
   if (!await store.confirmRiskAction('debug', 'Find what accesses', 'Adresse 0x' + address.replace(/^0x/i, '') + ', timeout ' + String(options.timeoutMs ?? '?') + ' ms.')) {
-    return { success: false, hitCount: 0, hits: [], cancelled: true, error: 'Capture debugger annulee par l utilisateur.' }
+    return {
+      success: false,
+      hitCount: 0,
+      hits: [],
+      cancelled: true,
+      error: store.lastRiskBlockReason || 'Capture debugger annulee par l utilisateur.',
+    }
   }
   const controller = backend.getController()
   const fn = controller.findWhatAccessesAsync
@@ -2027,6 +2275,8 @@ async function findWhatWritesForUiString(candidate: UiStringCandidate) {
   }
   findWhatWritesBusy.value = true
   findWhatWritesResult.value = null
+  forceHookTargetHit.value = null
+  forceHookResult.value = null
   try {
     await refreshUiStringLiveCandidate(candidate)
     findWhatWritesResult.value = await runFindWhatWrites(candidate.address, {
@@ -2251,6 +2501,8 @@ async function startNewScan() {
   uiStringSourceBatchIndex.value = 0
 
   findWhatWritesResult.value = null
+  forceHookTargetHit.value = null
+  forceHookResult.value = null
   findWhatWritesAcknowledged.value = false
   selectedFindWhatWritesRip.value = ''
   findWhatAccessesResult.value = null
@@ -2376,6 +2628,11 @@ function writeSelectedCandidates() {
   void store.writeSelectedAddresses(selectedCandidateAddresses.value, selectedWriteType.value, store.writeValue)
 }
 
+function writeSelectedCandidatesAtomic() {
+  if (selectedCandidateAddresses.value.length === 0 || !store.writeValue.trim()) return
+  void store.writeSelectedAtomic(selectedCandidateAddresses.value, selectedWriteType.value, store.writeValue)
+}
+
 function writeFromPanel() {
   if (hasSelectedWriteTargets.value) {
     writeSelectedCandidates()
@@ -2452,7 +2709,8 @@ onMounted(() => {
     </div>
 
     <div v-if="!store.isAttached" class="empty-state">
-      Attache un processus pour utiliser les outils expert.
+      <p>Attache un processus pour utiliser les outils expert.</p>
+      <button class="btn btn-secondary" @click="store.activeView = 'process'">Aller à Processus</button>
     </div>
 
     <template v-else>
@@ -2539,7 +2797,7 @@ onMounted(() => {
 
       <RegionPanel v-show="showStep('inspect')" v-if="store.expertRegionSize || store.expertRegionProtection" />
 
-      <section v-show="showStep('find')" class="panel">
+      <section v-show="showStep('find')" class="panel risk-read">
         <div class="panel-title">
           <div class="panel-heading">
             <h2>{{ $t('scan.exact') }}</h2>
@@ -2553,6 +2811,7 @@ onMounted(() => {
             </button>
           </div>
         </div>
+        <p class="panel-hint">{{ $t('help.scanExact.when') }}</p>
         <div class="controls exact-controls">
           <input
             v-model="store.exactScanValue"
@@ -2683,7 +2942,7 @@ onMounted(() => {
 
       <NextScanPanel v-show="showStep('find')" />
 
-      <section v-show="showStep('find')" class="panel">
+      <section v-show="showStep('find')" class="panel risk-read">
         <div class="panel-title">
           <div class="panel-heading">
             <h2>{{ $t('unknown.title') }}</h2>
@@ -2691,6 +2950,7 @@ onMounted(() => {
             <RiskBadge level="read" />
           </div>
         </div>
+        <p class="panel-hint">{{ $t('help.unknown.when') }}</p>
         <div class="controls unknown-controls">
           <select v-model="store.unknownScanType" class="input select" :disabled="store.scanBusy">
             <option value="Auto">Auto (multi-type)</option>
@@ -2780,7 +3040,7 @@ onMounted(() => {
         </p>
       </section>
 
-      <section v-show="showStep('find')" class="panel ui-string-panel">
+      <section v-show="showStep('find')" class="panel ui-string-panel risk-read">
         <div class="panel-title">
           <div class="panel-heading">
             <h2>Trace UI string</h2>
@@ -2789,6 +3049,7 @@ onMounted(() => {
           </div>
           <span v-if="uiStringResult">{{ formatNumber(uiStringCandidates.length) }} candidat(s)</span>
         </div>
+        <p class="panel-hint">{{ $t('help.uiString.when') }}</p>
         <p class="hint">Étape 1 : tape la valeur telle qu'affichée à l'écran, clique Scanner texte. Étape 2 : change cette valeur dans le jeu, tape la nouvelle valeur affichée, puis clique Scan suivant (texte) et, si tu as déjà lancé Analyser sources plus bas, Scan suivant (sources) aussi.</p>
         <div class="controls ui-string-controls">
           <input
@@ -2992,6 +3253,10 @@ onMounted(() => {
             Rafraîchir strings
           </button>
           <span>{{ selectedUiStringAddresses.length || uiStringCandidates.length }} suivi(s) au prochain filtre</span>
+          <label class="checkbox-label debugger-check" title="Nécessaire pour utiliser Écrit par sur les candidats ci-dessous.">
+            <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />
+            Debugger autorisé
+          </label>
         </div>
         <div v-if="uiStringCandidates.length > 0" class="ui-string-list">
           <div
@@ -3073,6 +3338,84 @@ onMounted(() => {
             >
               Trainer
             </button>
+            <button
+              v-if="isSelectedFindWhatWritesHit(hit) && codePatchSuggestionResult?.memBaseRegister"
+              class="btn btn-primary compact"
+              type="button"
+              :disabled="forceHookBusy"
+              :title="`Force une valeur à cette adresse quelle que soit la source de l'écriture (registre ou immédiat) — installe un trampoline et redirige le site, restaurable comme un script auto-assembleur.`"
+              @click="selectForceHookTarget(hit)"
+            >
+              Forcer valeur (hook)
+            </button>
+          </div>
+          <div v-if="forceHookTargetHit" class="controls value-override-controls">
+            <span class="hint">
+              Force une valeur à 0x{{ forceHookTargetHit.address }} (écrite par RIP 0x{{ forceHookTargetHit.instructionPointer }}),
+              même si la source est un registre. Type utilisé : {{ store.exactScanType }} (sélecteur de type Expert).
+            </span>
+            <input
+              v-model="forceHookValueInput"
+              class="input"
+              placeholder="Valeur : 999"
+              :disabled="forceHookBusy"
+              @keyup.enter="applyForceHookValue()"
+            />
+            <button class="btn btn-primary compact" type="button" :disabled="forceHookBusy || !forceHookValueInput.trim()" @click="applyForceHookValue()">
+              Appliquer
+            </button>
+          </div>
+          <p v-if="forceHookResult" :class="forceHookResult.success ? 'hint' : 'error'">
+            {{ forceHookResult.success
+              ? `Valeur forcée : trampoline actif à 0x${forceHookResult.patchAddress}. Restaurable via le bouton "Restaurer" du panneau Injection / Auto-assembler.`
+              : forceHookResult.error }}
+          </p>
+        </div>
+        <div v-if="pageGuardResult || pageGuardBusy" class="find-writes-panel">
+          <div class="source-list-title">
+            <strong>Page Guard (sans debugger)</strong>
+            <span>{{ formatNumber(Number(pageGuardResult?.hitCount ?? 0)) }} hit(s)</span>
+            <button
+              v-if="pageGuardBusy"
+              class="btn btn-secondary compact"
+              type="button"
+              @click="cancelPageGuardWatchCapture()"
+            >
+              Annuler capture
+            </button>
+          </div>
+          <p class="hint">Alternative sans debugger à "Écrit par" : utile quand un autre débogueur tient déjà le canal de debug Win32, mais moins précis (granularité page 4 Ko).</p>
+          <p v-if="pageGuardBusy" class="hint">Capture en cours : modifie la valeur dans le jeu cible pendant {{ findWhatWritesTimeoutMs / 1000 }} seconde(s).</p>
+          <p v-if="pageGuardResult?.warning" class="hint">{{ pageGuardResult.warning }}</p>
+          <p v-if="pageGuardResult?.error" class="error">{{ pageGuardResult.error }}</p>
+          <div
+            v-for="hit in pageGuardHits.slice(0, 12)"
+            :key="findWhatWritesHitKey(hit)"
+            class="find-writes-row"
+          >
+            <code>RIP 0x{{ hit.instructionPointer }}</code>
+            <span>cible 0x{{ hit.address }}</span>
+            <span>{{ hit.module || '-' }}</span>
+            <span>+0x{{ hit.moduleOffset || '0' }}</span>
+            <span>T{{ hit.threadId }}</span>
+            <span>{{ hit.isWrite ? 'écriture' : 'lecture' }}</span>
+            <button class="btn btn-secondary compact" type="button" @click="previewFindWhatWritesHit(hit)">
+              Aperçu
+            </button>
+            <button class="btn btn-secondary compact" type="button" @click="copyFindWhatWritesRip(hit)">
+              Copier
+            </button>
+            <button class="btn btn-primary compact" type="button" :disabled="aobSignatureBusy" @click="generateAobSignatureFromHit(hit)">
+              Analyser
+            </button>
+            <button
+              class="btn btn-primary compact"
+              type="button"
+              :disabled="codePatchTrainerFlowBusy || aobSignatureBusy || codePatchProfileBusy"
+              @click="saveTrainerPatchFromHit(hit)"
+            >
+              Trainer
+            </button>
           </div>
         </div>
         <div v-if="uiStringOriginResult" class="metrics">
@@ -3114,6 +3457,10 @@ onMounted(() => {
               <button class="btn btn-secondary compact" type="button" @click="copyInvestigationReport()">
                 Copier rapport
               </button>
+              <label class="checkbox-label debugger-check" title="Nécessaire pour utiliser Écrit par sur les candidats ci-dessous.">
+                <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />
+                Debugger autorisé
+              </label>
             </div>
           </div>
           <div
@@ -3131,6 +3478,7 @@ onMounted(() => {
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate.source)">Watch</button>
             <button class="btn btn-secondary compact" type="button" @click="analyzeStructureAroundSource(candidate.source)">Struct</button>
             <button class="btn btn-primary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate.source)">Écrit par</button>
+            <button class="btn btn-secondary compact" type="button" :disabled="pageGuardBusy" title="Sans passer par le canal de debug Win32 (DebugActiveProcess)" @click="pageGuardWatchForSource(candidate.source)">Écrit par (sans debugger)</button>
           </div>
         </div>
         <div v-if="structureProbeResult" class="structure-panel">
@@ -3250,6 +3598,10 @@ onMounted(() => {
               >
                 Envoyer {{ formatNumber(selectedUiSourceAddresses.length) }} vers Write
               </button>
+              <label class="checkbox-label debugger-check" title="Nécessaire pour utiliser Écrit par sur les candidats ci-dessous.">
+                <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />
+                Debugger autorisé
+              </label>
             </div>
           </div>
           <p v-if="selectedUiSourceAddresses.length > 50" class="source-warning">
@@ -3285,7 +3637,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <section v-show="showStep('inspect')" class="panel">
+      <section v-show="showStep('inspect')" class="panel risk-read">
         <div class="panel-title">
           <div class="panel-heading">
             <h2>Candidats</h2>
@@ -3294,6 +3646,7 @@ onMounted(() => {
           </div>
           <span>{{ formatNumber(store.candidatePage?.totalCount) }} · {{ selectedCandidateAddresses.length }} sélectionné(s)</span>
         </div>
+        <p class="panel-hint">{{ $t('help.candidates.when') }}</p>
         <div class="candidate-toolbar">
           <input
             v-model="store.candidateFilter"
@@ -3325,6 +3678,10 @@ onMounted(() => {
           <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0 || !store.writeValue.trim()" @click="writeSelectedCandidates()">
             Écrire sur sélection
           </button>
+          <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length < 2 || !store.writeValue.trim()" @click="writeSelectedCandidatesAtomic()">
+            Écrire ensemble (atomique)
+          </button>
+          <InfoDot topic="writeAtomic" align="right" />
           <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="watchCurrentCandidatePage()">
             Watch page
           </button>
@@ -3343,6 +3700,9 @@ onMounted(() => {
         <div v-if="store.candidatePage?.displaySuppressed" class="candidate-suppressed">
           {{ formatNumber(store.candidatePage.totalCount) }} candidats trouvés. Réduis avec un next scan ou filtre une adresse pour afficher une page.
         </div>
+        <p v-if="store.nextScanResult?.stableGroupHint" class="hint stable-group-hint">
+          {{ store.nextScanResult.stableGroupHint }}
+        </p>
         <div class="candidate-list">
           <div
             v-for="match in displayedCandidates"
@@ -3371,6 +3731,13 @@ onMounted(() => {
                 {{ confidencePercent(match.confidence) }}%
               </span>
               <span v-if="match.variantLabel" class="variant-label">{{ match.variantLabel }}</span>
+              <span
+                v-if="match.writeVerified"
+                class="write-verified-badge"
+                title="Cette adresse a déjà reçu une écriture confirmée avec succès — contrairement à un candidat juste stable au scan, celui-ci a été prouvé écrivable."
+              >
+                ✓ écrit
+              </span>
               <span class="visual-state">{{ store.candidateVisualState(match) }}</span>
               <span v-if="store.watchedAddresses.some((item) => item.address === match.address)" class="live-dot">watch</span>
             </div>
@@ -3399,7 +3766,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <section v-show="showStep('act')" ref="writePanelRef" class="panel">
+      <section v-show="showStep('act')" ref="writePanelRef" class="panel risk-write">
         <div class="panel-title">
           <div class="panel-heading">
             <h2>{{ $t('write.title') }}</h2>
@@ -3418,6 +3785,7 @@ onMounted(() => {
             <span v-if="store.writeResult">{{ store.writeResult.success ? 'OK' : 'FAIL' }}</span>
           </div>
         </div>
+        <p class="panel-hint">{{ $t('help.write.when') }}</p>
         <div class="controls write-controls">
           <div v-if="hasSelectedWriteTargets" class="input multi-target-summary" :title="selectedCandidateAddresses.map((address) => `0x${address}`).join(', ')">
             <strong>{{ writeTargetLabel }}</strong>
@@ -3505,8 +3873,12 @@ onMounted(() => {
           <span v-if="store.writeResult?.mode === 'breakpoint'">BP: {{ store.breakpointFreezeEnabled ? 'on' : 'off' }}</span>
           <span v-if="store.writeResult?.rewrites !== undefined">rewrites: {{ formatNumber(store.writeResult.rewrites) }}</span>
           <span v-if="store.freezeIntervalResult">intervalle: {{ store.freezeIntervalMs }} ms</span>
+          <span v-if="store.writeResult?.suspendedThreadCount !== undefined" title="Threads du processus cible suspendues pendant l'écriture atomique">
+            threads suspendues: {{ formatNumber(store.writeResult.suspendedThreadCount) }}
+          </span>
         </div>
         <p v-if="store.writeResult?.error" class="error">{{ store.writeResult.error }}</p>
+        <p v-if="store.writeResult?.warning" class="hint warning-hint">{{ store.writeResult.warning }}</p>
         <div
           v-if="store.writeResult?.success && !hasSelectedWriteTargets && store.selectedCandidateAddress"
           class="stable-locator"
@@ -3552,7 +3924,7 @@ onMounted(() => {
 
       <WatchLivePanel v-show="showStep('inspect')" />
 
-      <section v-show="showStep('persist')" class="panel aob-panel">
+      <section v-show="showStep('persist')" class="panel aob-panel risk-code">
         <div class="panel-title">
           <div class="panel-heading">
             <h2>AOB signatures</h2>
@@ -3561,6 +3933,7 @@ onMounted(() => {
           </div>
           <span v-if="aobResult">{{ formatNumber(aobResult.matchesFound) }} match(es)</span>
         </div>
+        <p class="panel-hint">{{ $t('help.aob.when') }}</p>
         <div class="controls aob-controls">
           <input
             v-model="aobPattern"
@@ -3605,6 +3978,7 @@ onMounted(() => {
             Qualité: {{ aobSignatureResult.signatureQuality.level }} · {{ aobSignatureResult.signatureQuality.score }}/100
           </span>
         </div>
+        <p v-if="aobAutoScanSkippedReason" class="warning-text">{{ aobAutoScanSkippedReason }}</p>
         <p v-if="aobResult?.signatureWarning" class="hint">{{ aobResult.signatureWarning }}</p>
         <p v-if="aobSignatureResult?.warning" class="hint">{{ aobSignatureResult.warning }}</p>
         <p v-if="aobSignatureResult?.error" class="error">{{ aobSignatureResult.error }}</p>
@@ -3675,6 +4049,21 @@ onMounted(() => {
             {{ suggestion.label }}{{ suggestion.riskLevel ? ` · ${suggestion.riskLevel}` : '' }}
           </button>
         </div>
+        <div v-if="valueOverrideSuggestion" class="controls value-override-controls">
+          <span class="hint">
+            {{ valueOverrideSuggestion.description }} ({{ valueOverrideSuggestion.valueSize }} octet(s), à l'offset {{ valueOverrideSuggestion.valueOffset }} de l'instruction).
+          </span>
+          <input
+            v-model="valueOverrideInput"
+            class="input"
+            placeholder="Valeur : 999 ou 0x3E7"
+            @keyup.enter="applyValueOverrideSuggestion()"
+          />
+          <button class="btn btn-primary compact" type="button" :disabled="!valueOverrideInput.trim()" @click="applyValueOverrideSuggestion()">
+            Appliquer valeur
+          </button>
+        </div>
+        <p v-if="valueOverrideError" class="warning-text">{{ valueOverrideError }}</p>
         <p v-if="codePatchSuggestionResult?.error" class="error">{{ codePatchSuggestionResult.error }}</p>
         <div v-if="codePatchResult" class="metrics">
           <span>Patch: {{ codePatchResult.success ? 'OK' : 'FAIL' }}</span>
@@ -3734,7 +4123,7 @@ onMounted(() => {
 
       <InjectionPanel v-show="showStep('persist')" v-if="expertDense" />
 
-      <section v-show="showStep('inspect')" class="panel pointer-chain-panel">
+      <section v-show="showStep('inspect')" class="panel pointer-chain-panel risk-read">
         <div class="panel-title">
           <div class="panel-heading">
             <h2>Pointer Chains <span class="hint-inline">(jeux modernes / applications dynamiques)</span></h2>
@@ -3743,6 +4132,7 @@ onMounted(() => {
           </div>
           <span v-if="pointerScanResult">{{ formatNumber(pointerScanResult.chainCount) }} chaine(s)</span>
         </div>
+        <p class="panel-hint">{{ $t('help.pointerChains.when') }}</p>
         <p class="hint">
           Pour les jeux modernes et applications avec allocations dynamiques, les ressources changent souvent d'adresse.
           Trouve d'abord l'adresse avec un scan normal, puis utilise le scanner de pointeurs pour
@@ -3831,6 +4221,13 @@ onMounted(() => {
                 @click="bookmarkPointerChain(chain)"
               >
                 Note
+              </button>
+              <button
+                class="btn btn-secondary compact"
+                title="Surveille cette chaine en live (adresse re-resolue a chaque cycle) dans le panneau Watch chaines de pointeurs."
+                @click="watchPointerChain(chain)"
+              >
+                Watch
               </button>
             </div>
           </div>
@@ -3965,6 +4362,10 @@ onMounted(() => {
   text-align: center;
 }
 
+.empty-state .btn {
+  margin-top: 10px;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(150px, 1fr));
@@ -4077,6 +4478,49 @@ onMounted(() => {
 .panel {
   margin-bottom: 12px;
   padding: 12px;
+}
+
+/* Repère visuel par niveau de risque, memes couleurs que RiskBadge (lecture
+   seule / ecrit en memoire / modifie le code) pour qu'un panneau se
+   reconnaisse d'un coup d'oeil dans une page Expert autrement tres dense. */
+.panel.risk-read {
+  border-left: 3px solid rgba(158, 206, 106, 0.5);
+  background: linear-gradient(90deg, rgba(158, 206, 106, 0.05), var(--bg-tertiary) 12%);
+}
+
+.panel.risk-write {
+  border-left: 3px solid rgba(224, 175, 104, 0.55);
+  background: linear-gradient(90deg, rgba(224, 175, 104, 0.07), var(--bg-tertiary) 12%);
+}
+
+.panel.risk-code {
+  border-left: 3px solid rgba(247, 118, 142, 0.55);
+  background: linear-gradient(90deg, rgba(247, 118, 142, 0.07), var(--bg-tertiary) 12%);
+}
+
+/* "Quand utiliser ce panneau" toujours visible, sans avoir a cliquer le "?"
+   (le contenu complet what/cost/example reste dans InfoDot). Reprend la
+   couleur du panneau pour rester coherent avec la bordure risk-*. */
+.panel-hint {
+  margin: 0 0 10px;
+  padding: 5px 10px;
+  border-left: 2px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.panel.risk-read .panel-hint {
+  border-left-color: rgba(158, 206, 106, 0.5);
+}
+
+.panel.risk-write .panel-hint {
+  border-left-color: rgba(224, 175, 104, 0.55);
+}
+
+.panel.risk-code .panel-hint {
+  border-left-color: rgba(247, 118, 142, 0.55);
 }
 
 .panel-title {
@@ -5091,6 +5535,14 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.stable-group-hint {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(224, 175, 104, 0.35);
+  border-radius: 6px;
+  background: rgba(224, 175, 104, 0.08);
+}
+
 .candidate-list {
   display: flex;
   max-height: 260px;
@@ -5238,6 +5690,15 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.write-verified-badge {
+  border: 1px solid rgba(158, 206, 106, 0.35);
+  border-radius: 999px;
+  color: var(--success);
+  font-size: 10px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 .visual-state,
 .live-dot {
   color: var(--text-dim);
@@ -5311,6 +5772,10 @@ onMounted(() => {
   color: var(--text-dim);
   font-size: 11px;
   font-weight: normal;
+}
+
+.warning-hint {
+  color: var(--warning);
 }
 
 .aob-controls {
