@@ -19,6 +19,7 @@ add_executable(killengine_unit_tests
     unit/test_performance_profile.cpp
     unit/test_worker_pool.cpp
     unit/test_power_up_modules.cpp
+    unit/test_kernel_driver_bridge.cpp
 )
 
 target_link_libraries(killengine_unit_tests PRIVATE

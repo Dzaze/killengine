@@ -22,6 +22,10 @@ add_library(killcore STATIC
     process/process_handle.cpp
     process/architecture.cpp
 
+    # Optional kernel driver bridge (probe/capabilities only)
+    kernel/kernel_driver_bridge.h
+    kernel/kernel_driver_bridge.cpp
+
     # Memory
     memory/memory_map.cpp
     memory/memory_reader.cpp

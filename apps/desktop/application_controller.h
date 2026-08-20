@@ -7,6 +7,7 @@
 #include "inject/dll_injector.h"
 #include "inject/function_hook.h"
 #include "input/global_hotkey.h"
+#include "kernel/kernel_driver_bridge.h"
 #include "memory/memory_reader.h"
 #include "process/process_handle.h"
 #include "profiles/profile_store.h"
@@ -334,6 +335,9 @@ public:
 
     /// Ouvre USER_GUIDE.md dans l'application par défaut du système (package: à côté de l'exe ; dev: docs/USER_GUIDE.md).
     Q_INVOKABLE bool openUserGuide() const;
+
+    /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
+    Q_INVOKABLE QVariantMap probeKernelDriver() const;
 
     /// Retourne un diagnostic lisible du runtime IA local (modèle GGUF + llama-cli).
     Q_INVOKABLE QVariantMap getAiModelStatus() const;

@@ -8663,6 +8663,27 @@ bool ApplicationController::openUserGuide() const {
     return false;
 }
 
+QVariantMap ApplicationController::probeKernelDriver() const {
+    const killcore::KernelDriverBridge bridge;
+    const auto probe = bridge.probe();
+
+    QVariantMap capabilities;
+    capabilities["protocolVersion"] = static_cast<int>(probe.capabilities.protocolVersion);
+    capabilities["healthProbe"] = probe.capabilities.healthProbe;
+    capabilities["processMemoryAccess"] = probe.capabilities.processMemoryAccess;
+    capabilities["privilegedInstrumentation"] = probe.capabilities.privilegedInstrumentation;
+
+    QVariantMap result;
+    result["success"] = probe.status == killcore::KernelDriverProbeStatus::Connected;
+    result["status"] = killcore::KernelDriverBridge::statusToString(probe.status);
+    result["devicePath"] = probe.devicePath;
+    result["message"] = probe.message;
+    result["capabilities"] = capabilities;
+
+    KE_LOG_INFO() << "probeKernelDriver: status=" << result.value("status").toString().toStdString()
+                  << " message=" << probe.message.toStdString();
+    return result;
+}
 QVariantMap ApplicationController::getAiModelStatus() const {
     QSettings settings;
     QVariantMap result;
