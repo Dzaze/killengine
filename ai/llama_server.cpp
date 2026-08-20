@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -72,6 +73,10 @@ bool httpPostJson(int port, const QByteArray& body, int timeoutMs, QByteArray* r
     }
 
     // Lecture jusqu'a fermeture de la connexion ou deadline globale.
+    // processEvents() dans la boucle: cette attente est appelee en direct
+    // depuis le thread principal Qt (cf. ApplicationController::startSmartSearch),
+    // sans pompage explicite les evenements Windows/Qt (repaint, input, ping de
+    // sonde "hang" du bureau) ne seraient jamais traites pendant l'attente.
     QByteArray all;
     const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + timeoutMs;
     while (true) {
@@ -85,6 +90,7 @@ bool httpPostJson(int port, const QByteArray& body, int timeoutMs, QByteArray* r
             if (error) *error = QString("llama-server read timeout (%1 ms).").arg(timeoutMs);
             return false;
         }
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
         if (!socket.waitForReadyRead(qMin(250, remaining))) {
             if (socket.state() == QAbstractSocket::UnconnectedState) break;
         }
@@ -121,6 +127,7 @@ bool httpPostJson(int port, const QByteArray& body, int timeoutMs, QByteArray* r
         while (all.size() < bodyStart + contentLength) {
             if (socket.state() == QAbstractSocket::UnconnectedState && socket.bytesAvailable() == 0) break;
             if (QDateTime::currentMSecsSinceEpoch() > bodyDeadline) break;
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
             socket.waitForReadyRead(250);
             all += socket.readAll();
         }
@@ -253,10 +260,16 @@ bool LlamaServer::startAndWait(QString* error) {
         return false;
     }
 
-    // Attente bornee du chargement du modele (health checks repetes).
+    // Attente bornee du chargement du modele (health checks repetes), jusqu'a
+    // startupTimeoutMs() (90s par defaut) au premier appel IA. Appelee en
+    // direct depuis le thread principal Qt (cf. ApplicationController::
+    // startSmartSearch) : sans processEvents() ici, la boucle de messages
+    // Windows n'est jamais repompee pendant toute la duree de l'attente et le
+    // systeme finit par tuer la fenetre comme non-repondante (WER "AppHangB1").
     QElapsedTimer elapsed;
     elapsed.start();
     while (elapsed.elapsed() < startupTimeoutMs()) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
         if (m_process.state() != QProcess::Running) {
             m_lastServerError = m_process.readAllStandardError();
             if (error) {
@@ -269,7 +282,7 @@ bool LlamaServer::startAndWait(QString* error) {
             KE_LOG_INFO() << "llama-server up on port " << m_port << " (startup " << elapsed.elapsed() << " ms)";
             return true;
         }
-        QThread::msleep(300);
+        QThread::msleep(250);
     }
 
     if (error) *error = "llama-server startup timeout (model load).";

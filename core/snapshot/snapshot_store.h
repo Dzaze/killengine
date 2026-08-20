@@ -70,7 +70,8 @@ public:
         const ProcessHandle& process,
         ValueType type,
         NextScanMode mode,
-        const CancellationToken* cancellation = nullptr) const;
+        const CancellationToken* cancellation = nullptr,
+        const ScanOptions& options = {}) const;
 
     void clear();
     bool isEmpty() const;

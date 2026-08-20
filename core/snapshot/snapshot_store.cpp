@@ -203,7 +203,18 @@ SnapshotResult SnapshotStore::capture(
         return result;
     }
 
+    // Rapporte la progression par region (avant traitement, y compris pour
+    // les regions ignorees) : plus simple/sur que de dupliquer l'appel a
+    // chaque `continue` ci-dessous, et suffisant pour une barre de
+    // progression (meme granularite que ScanEngine::exactScanMultiType).
+    const size_t regionsTotal = static_cast<size_t>(regions.size());
+    size_t regionIndex = 0;
     for (const auto& region : regions) {
+        if (options.progressCallback) {
+            options.progressCallback({regionsTotal, regionIndex, 0, 0, 0});
+        }
+        ++regionIndex;
+
         if (cancellation && cancellation->isCancelled()) {
             result.cancelled = true;
             result.partial = true;
@@ -352,7 +363,8 @@ UnknownScanResult SnapshotStore::compare(
     const ProcessHandle& process,
     ValueType type,
     NextScanMode mode,
-    const CancellationToken* cancellation) const {
+    const CancellationToken* cancellation,
+    const ScanOptions& options) const {
     UnknownScanResult result;
 
     if (!process.isValid()) {
@@ -378,7 +390,17 @@ UnknownScanResult SnapshotStore::compare(
     const size_t valueSize = valueTypeSize(type);
     MemoryReader reader(process);
 
+    // Meme raisonnement que SnapshotStore::capture ci-dessus : rapporte
+    // avant traitement de chaque region, y compris les cas ignores/invalides
+    // plus bas, plutot que de dupliquer l'appel a chaque `continue`.
+    const size_t regionsTotal = static_cast<size_t>(m_regions.size());
+    size_t regionIndex = 0;
     for (const auto& region : m_regions) {
+        if (options.progressCallback) {
+            options.progressCallback({regionsTotal, regionIndex, 0, 0, 0});
+        }
+        ++regionIndex;
+
         if (cancellation && cancellation->isCancelled()) {
             result.cancelled = true;
             result.partial = true;
