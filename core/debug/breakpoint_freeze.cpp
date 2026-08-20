@@ -218,6 +218,17 @@ void BreakpointFreezeManager::freezeLoop(std::shared_ptr<std::promise<bool>> sta
         }
     };
 
+    // Proprietaire unique des registres de debug pour ce PID (incident du
+    // 19-20/08/2026, voir docs/STRATEGY_ROOM.md) : local a cette fonction,
+    // qui tourne entierement sur m_freezeThread du debut a la fin (acquis
+    // avant DebugActiveProcess, libere juste avant le retour ci-dessous).
+    HwBreakpointOwnershipGuard ownership(
+        m_pid, HwBreakpointOwner::ExternalDebug, "breakpoint freeze", 0, /*drSlot=*/-1);
+    if (!ownership.acquired()) {
+        failStart(ownership.error());
+        return;
+    }
+
     HardwareBreakpointSession::enableDebugPrivilege();
 
     m_processHandle = OpenProcess(
@@ -239,6 +250,7 @@ void BreakpointFreezeManager::freezeLoop(std::shared_ptr<std::promise<bool>> sta
     attached = true;
 
     applyFreezeBreakpointsToExistingThreads(m_pid, m_configs);
+    ownership.markActive();
     m_active.store(true);
     startSignal->set_value(true);
     signalled = true;
@@ -262,6 +274,7 @@ void BreakpointFreezeManager::freezeLoop(std::shared_ptr<std::promise<bool>> sta
             continueStatus);
     }
 
+    ownership.markDisarming();
     clearFreezeBreakpointsForProcess(m_pid);
     if (attached) {
         DebugActiveProcessStop(m_pid);
@@ -270,6 +283,10 @@ void BreakpointFreezeManager::freezeLoop(std::shared_ptr<std::promise<bool>> sta
         CloseHandle(m_processHandle);
         m_processHandle = nullptr;
     }
+    // clearFreezeBreakpointsForProcess() reapplique Dr7=0 de façon
+    // synchrone (suspend/get/set/resume) sur chaque thread -- desarmement
+    // deja deterministe par construction, comme pour hardware_breakpoint.cpp.
+    ownership.confirmDisarmed(true);
     m_active.store(false);
     KE_LOG_INFO() << "BreakpointFreeze: monitoring loop ended";
 #endif

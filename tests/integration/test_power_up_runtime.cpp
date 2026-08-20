@@ -24,6 +24,7 @@
 #include "scanner/scan_types.h"
 #include "debug/breakpoint_freeze.h"
 #include "debug/hardware_breakpoint.h"
+#include "debug/page_guard.h"
 #include "inject/dll_injector.h"
 #include "inject/function_hook.h"
 
@@ -392,6 +393,103 @@ TEST(PowerUpRuntimeTest, BreakpointFreezeHoldsUnderFastRewriteStress) {
                               << "% of samples under 1000 Hz rewrite stress (target: >=60%, baseline ~80%)";
 
     EXPECT_TRUE(target.started()) << "Test target crashed during breakpoint freeze stress";
+}
+
+// Regression pour le bug signale par l'utilisateur le 19/08/2026 : "Ecrit
+// par" (findWhatWrites) faisait planter le processus attache juste apres une
+// capture reussie. Root cause : applyBreakpointsToThread() (hardware_breakpoint.cpp)
+// remettait a zero Dr0-Dr3/Dr7 a chaque reamorcage et au detachement, mais
+// jamais Dr6 (registre de statut, pas efface automatiquement par le CPU apres
+// une exception de debug — Intel SDM Vol.3B §17.2.4). Un Dr6 encore "sale"
+// (bits B0-B3 du dernier hit) qui survit au detachement peut faire planter
+// la cible au prochain evenement de debug qu'elle genere elle-meme — corrige
+// en alignant sur core/debug/breakpoint_freeze.cpp, qui le faisait deja
+// correctement. Ce test ne peut pas prouver l'absence d'un bug de timing a
+// coup sur, mais verifie au minimum que la cible survit un cycle complet
+// attache→capture→detache sous stress d'ecriture reelle, et reste lisible
+// juste apres (pas juste "le process existe encore", un process zombie
+// passerait started() sans repondre a une vraie lecture memoire).
+TEST(PowerUpRuntimeTest, FindWhatWritesDoesNotCrashTargetAfterCapture) {
+    if (!debugPrivilegesAvailable()) {
+        GTEST_SKIP() << "Debug privileges not available — skipping find what writes test";
+    }
+
+    TestTargetProcess target(/*stressRewrite=*/true);
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start";
+
+    const auto address = readTestTargetHealthAddress(target.pid());
+    ASSERT_TRUE(address.has_value()) << "Could not read g_health address from test target marker file";
+
+    const auto hits = killcore::findWhatWrites(
+        target.pid(),
+        *address,
+        killcore::BreakpointSize::DWord,
+        /*timeoutMs=*/3000,
+        /*maxHits=*/16);
+
+    ASSERT_FALSE(hits.isEmpty()) << "No write captured under stress rewrite — capture path itself is broken";
+
+    // Le point du test : la cible doit survivre au detachement et rester
+    // fonctionnelle, pas seulement "exister" comme process zombie.
+    EXPECT_TRUE(target.started()) << "Test target crashed after Find What Writes detached — Dr6 regression";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadOnly);
+    ASSERT_TRUE(handle.isValid()) << "Could not reopen test target after Find What Writes — process likely unstable";
+    killcore::MemoryReader reader(handle);
+    const auto read = reader.read(*address, sizeof(int32_t));
+    EXPECT_TRUE(read.success || read.partial) << "Could not read g_health after Find What Writes — target left in a broken state";
+}
+
+// Preuve reelle, out-of-process, du chemin complet PAGE_GUARD : injection de
+// KillEnginePageGuardHandler.dll dans KillEngineTestTarget.exe, pose de la
+// garde sur g_health, capture d'un hit pendant que la cible le reecrit en
+// stress (~1000 Hz, memes instructions CPU que le test breakpoint freeze
+// stress ci-dessus — pas de WriteProcessMemory externe, ce serait invisible
+// pour un VEH qui vit dans la cible comme pour un hardware breakpoint).
+// Contrairement au test breakpoint freeze, celui-ci ne devrait PAS necessiter
+// SeDebugPrivilege : c'est justement l'avantage annonce de PAGE_GUARD.
+TEST(PowerUpRuntimeTest, PageGuardCapturesRemoteStressRewrite) {
+    const QString handlerPath = QDir(QCoreApplication::applicationDirPath()).filePath("KillEnginePageGuardHandler.dll");
+    ASSERT_TRUE(QFile::exists(handlerPath)) << "KillEnginePageGuardHandler.dll not found next to test binary — build issue";
+
+    TestTargetProcess target(/*stressRewrite=*/true);
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start";
+
+    const auto address = readTestTargetHealthAddress(target.pid());
+    ASSERT_TRUE(address.has_value()) << "Could not read g_health address from test target marker file";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::AllAccess);
+    ASSERT_TRUE(handle.isValid()) << "Could not open test target with AllAccess (required for DLL injection)";
+
+    killcore::PageGuardConfig config;
+    config.address = *address;
+    config.size = sizeof(int32_t);
+    config.captureWrites = true;
+    config.captureReads = false;
+    config.timeoutMs = 3000;
+    config.maxHits = 5;
+    config.injectedHandlerPath = handlerPath;
+
+    killcore::PageGuardSession session;
+    const auto result = session.monitor(handle, config);
+
+    EXPECT_TRUE(result.success) << "PageGuard monitor failed: " << result.error.toStdString();
+    ASSERT_FALSE(result.hits.isEmpty()) << "No PAGE_GUARD hit captured under 1000 Hz stress rewrite — "
+                                            "handler injection or VEH install likely did not work";
+
+    const auto& hit = result.hits.first();
+    EXPECT_EQ(hit.monitoredAddress, *address);
+    EXPECT_TRUE(hit.isWrite) << "g_health stress rewrite is a write, not a read";
+    EXPECT_NE(hit.instructionPointer, 0u) << "Captured hit has no RIP — handler wiring is broken";
+    EXPECT_GE(hit.accessAddress, *address);
+    EXPECT_LT(hit.accessAddress, *address + config.size);
+    // Le RIP doit tomber dans KillEngineTestTarget.exe lui-meme (c'est son
+    // propre thread stress-rewrite qui ecrit g_health) — sinon la resolution
+    // de module dans PageGuardSession::monitorRemote() serait cassee.
+    EXPECT_EQ(hit.module.toLower(), QStringLiteral("killenginetesttarget.exe"))
+        << "Hit resolved to unexpected module: " << hit.module.toStdString();
+
+    EXPECT_TRUE(target.started()) << "Test target crashed during PAGE_GUARD capture — injected VEH destabilized it";
 }
 
 TEST(PowerUpRuntimeTest, InjectDllFailsCleanlyOnMissingDll) {

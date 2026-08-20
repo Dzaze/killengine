@@ -19,6 +19,7 @@ add_executable(killengine_unit_tests
     unit/test_performance_profile.cpp
     unit/test_worker_pool.cpp
     unit/test_power_up_modules.cpp
+    unit/test_breakpoint_arbiter.cpp
     unit/test_kernel_driver_bridge.cpp
 )
 
@@ -57,6 +58,8 @@ add_executable(killengine_integration_tests
     integration/test_main.cpp
     integration/test_memory_scan.cpp
     integration/test_power_up_runtime.cpp
+    integration/test_breakpoint_arbiter_runtime.cpp
+    integration/test_debug_detach_reproducer.cpp
 )
 target_link_libraries(killengine_integration_tests PRIVATE
     killcore

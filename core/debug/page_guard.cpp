@@ -1,6 +1,8 @@
 #include "page_guard.h"
 
+#include "inject/dll_injector.h"
 #include "logging/logger.h"
+#include "page_guard_ipc.h"
 #include "process/process_enumerator.h"
 
 #ifdef Q_OS_WIN
@@ -116,9 +118,12 @@ PageGuardResult PageGuardSession::monitor(const ProcessHandle& process, const Pa
     m_pageBase = config.address & ~0xFFFULL;
 
     if (GetProcessId(static_cast<HANDLE>(m_processHandle)) != GetCurrentProcessId()) {
-        result.error = "Out-of-process PAGE_GUARD monitoring requires an injected VEH in the target process";
+        // Un AddVectoredExceptionHandler posé ici (dans KillEngine.exe) ne
+        // reçoit que les exceptions de KillEngine lui-même — jamais celles du
+        // processus cible. Le cas réel (surveiller un jeu externe) passe donc
+        // par un handler injecté + IPC mémoire partagée, pas par ce chemin.
         s_currentSession = nullptr;
-        return result;
+        return monitorRemote(process, config);
     }
 
     {
@@ -190,6 +195,146 @@ PageGuardResult PageGuardSession::monitor(const ProcessHandle& process, const Pa
 
     return result;
 }
+
+#ifdef Q_OS_WIN
+PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, const PageGuardConfig& config) {
+    PageGuardResult result;
+
+    if (config.injectedHandlerPath.isEmpty()) {
+        result.error = "Chemin de KillEnginePageGuardHandler.dll manquant.";
+        return result;
+    }
+
+    const uint32_t pid = process.pid();
+    wchar_t mappingName[64];
+    buildPageGuardMappingName(pid, mappingName, 64);
+
+    // Cree AVANT l'injection : la DLL, une fois chargee, ouvre ce mapping par
+    // son nom (derive du PID qu'elle lit via GetCurrentProcessId() — les deux
+    // cotes n'ont donc besoin d'aucun echange prealable).
+    HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+                                        0, sizeof(PageGuardIpcState), mappingName);
+    if (!mapping) {
+        result.error = "CreateFileMapping a échoué (IPC page guard).";
+        return result;
+    }
+    auto* state = static_cast<PageGuardIpcState*>(
+        MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(PageGuardIpcState)));
+    if (!state) {
+        CloseHandle(mapping);
+        result.error = "MapViewOfFile a échoué (IPC page guard).";
+        return result;
+    }
+
+    state->active = 0;
+    state->installError = 0;
+    state->stopRequested = 0;
+    state->hitCount = 0;
+    state->watchAddress = config.address;
+    state->watchSize = static_cast<uint64_t>(config.size);
+    state->captureWrites = config.captureWrites ? 1u : 0u;
+    state->captureReads = config.captureReads ? 1u : 0u;
+
+    const auto injected = killcore::injectDll(process, config.injectedHandlerPath);
+    if (!injected.success) {
+        UnmapViewOfFile(state);
+        CloseHandle(mapping);
+        result.error = "Injection du handler PAGE_GUARD échouée: " + injected.error;
+        return result;
+    }
+
+    m_monitoring.store(true);
+    m_stopRequested.store(false);
+
+    // Attend l'installation cote cible (thread InstallThread de la DLL
+    // injectee) avant de commencer a sonder les hits, pour ne pas rater les
+    // tout premiers si une ecriture survient immediatement.
+    const auto installStart = std::chrono::steady_clock::now();
+    while (!state->active && !state->installError) {
+        if (std::chrono::steady_clock::now() - installStart > std::chrono::milliseconds(2000)) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    if (state->installError || !state->active) {
+        state->stopRequested = 1;
+        UnmapViewOfFile(state);
+        CloseHandle(mapping);
+        m_monitoring.store(false);
+        result.error = state->installError
+            ? "Le handler injecté n'a pas pu poser la garde (VirtualProtect/VEH échoué dans la cible)."
+            : "Timeout: le handler injecté ne s'est pas installé.";
+        return result;
+    }
+
+    const auto modules = ProcessEnumerator::enumerateModules(pid);
+    long lastSeenHitCount = 0;
+    const auto startTime = std::chrono::steady_clock::now();
+    const auto timeout = std::chrono::milliseconds(config.timeoutMs);
+
+    while (!m_stopRequested.load()) {
+        if (std::chrono::steady_clock::now() - startTime >= timeout) {
+            result.timedOut = true;
+            break;
+        }
+
+        // Sondage best-effort (50ms) : si plusieurs hits surviennent entre
+        // deux sondages, seul le plus recent est visible (lastHitRip/etc.
+        // n'est pas une file). Coherent avec le reste de la classe, deja
+        // documentee "moins precis" que le hardware breakpoint — un plafond
+        // maxHits/timeout court reste le bon usage (capture ponctuelle, pas
+        // un flux exhaustif).
+        const long currentHitCount = state->hitCount;
+        if (currentHitCount != lastSeenHitCount) {
+            lastSeenHitCount = currentHitCount;
+            PageGuardHit hit;
+            hit.monitoredAddress = config.address;
+            hit.instructionPointer = state->lastHitRip;
+            hit.accessAddress = state->lastHitAccessAddress;
+            hit.threadId = state->lastHitThreadId;
+            hit.isWrite = state->lastHitIsWrite != 0;
+            for (const auto& mod : modules) {
+                if (hit.instructionPointer >= mod.baseAddress && hit.instructionPointer < mod.baseAddress + mod.size) {
+                    hit.module = mod.name;
+                    hit.moduleOffset = hit.instructionPointer - mod.baseAddress;
+                    break;
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(m_hitsMutex);
+                m_pendingHits.append(hit);
+            }
+            emit hitCaptured(hit);
+            if (static_cast<size_t>(currentHitCount) >= config.maxHits) break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // Best-effort : demande l'arret cote cible (le VEH injecte laisse la
+    // garde levee au prochain cycle plutot que de re-armer, voir
+    // page_guard_handler.cpp). La DLL reste chargee dans la cible — la
+    // retirer proprement demanderait FreeLibrary a distance, plus risque
+    // qu'utile pour une session de capture ponctuelle.
+    state->stopRequested = 1;
+    UnmapViewOfFile(state);
+    CloseHandle(mapping);
+
+    result.success = true;
+    {
+        std::lock_guard<std::mutex> lock(m_hitsMutex);
+        result.hits = m_pendingHits;
+    }
+    m_monitoring.store(false);
+    emit monitoringFinished(result.hits.size());
+    KE_LOG_INFO() << "PageGuard(remote): captured " << result.hits.size() << " hits";
+    return result;
+}
+#else
+PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle&, const PageGuardConfig&) {
+    PageGuardResult result;
+    result.error = "Page guards are Windows-only";
+    return result;
+}
+#endif
 
 void PageGuardSession::startAsync(const ProcessHandle& process, const PageGuardConfig& config) {
     if (m_monitoring.load()) {

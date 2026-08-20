@@ -21,6 +21,7 @@ add_library(killcore STATIC
     process/process_enumerator.cpp
     process/process_handle.cpp
     process/architecture.cpp
+    process/process_suspend.cpp
 
     # Optional kernel driver bridge (probe/capabilities only)
     kernel/kernel_driver_bridge.h
@@ -37,6 +38,8 @@ add_library(killcore STATIC
     scanner/scan_types.cpp
     scanner/value_variants.cpp
     scanner/display_value_tracker.cpp
+    scanner/memory_window_search.h
+    scanner/memory_window_search.cpp
     scanner/candidate_confidence.cpp
     scanner/performance_profile.cpp
     scanner/worker_pool.cpp
@@ -77,9 +80,22 @@ add_library(killcore STATIC
     debug/breakpoint_freeze.h
     debug/breakpoint_freeze.cpp
 
-    # Phase 19 — Page Guards stealth
+    # Phase 19 — Page Guards (sans canal de debug Win32)
     debug/page_guard.h
     debug/page_guard.cpp
+
+    # Roadmap section F, niveau 2 — Breakpoint matériel in-process (DR0-DR7
+    # posés depuis un composant chargé dans la cible, sans dépendre du canal
+    # de debug Win32 DebugActiveProcess)
+    debug/inprocess_breakpoint.h
+    debug/inprocess_breakpoint.cpp
+
+    # Propriétaire logique unique des registres de debug (DR0-DR7) par PID,
+    # partagé entre hardware_breakpoint.cpp, breakpoint_freeze.cpp et
+    # inprocess_breakpoint.cpp — incident du 19-20/08/2026, voir
+    # docs/STRATEGY_ROOM.md
+    debug/breakpoint_arbiter.h
+    debug/breakpoint_arbiter.cpp
 
     # Phase 19 — Scan de valeurs chiffrées/obfusquées
     scanner/encrypted_scan.h
@@ -122,4 +138,39 @@ if(TARGET Zydis::Zydis)
 elseif(TARGET Zydis)
     target_link_libraries(killcore PUBLIC Zydis)
     target_compile_definitions(killcore PUBLIC KILLENGINE_HAS_ZYDIS=1)
+endif()
+
+# ---------------------------------------------------------------------------
+# Phase 19 — Page Guard : DLL injectee dans le processus cible
+#
+# Volontairement une DLL a part, SANS lien vers killcore/Qt : elle est chargee
+# dans le processus surveille (le jeu), pas dans KillEngine.exe. Une
+# dependance Qt ici forcerait le processus cible a resoudre les DLL Qt de
+# KillEngine, risque de charge/echec inutile dans un processus qu'on ne
+# controle pas. Voir core/debug/page_guard_handler/page_guard_handler.cpp.
+# ---------------------------------------------------------------------------
+add_library(KillEnginePageGuardHandler SHARED
+    debug/page_guard_ipc.h
+    debug/page_guard_handler/page_guard_handler.cpp
+)
+target_include_directories(KillEnginePageGuardHandler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+set_target_properties(KillEnginePageGuardHandler PROPERTIES OUTPUT_NAME "KillEnginePageGuardHandler")
+if(WIN32)
+    target_compile_definitions(KillEnginePageGuardHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+endif()
+
+# ---------------------------------------------------------------------------
+# Roadmap section F, niveau 2 — Breakpoint matériel in-process : DLL injectee
+# dans le processus cible, meme raisonnement que KillEnginePageGuardHandler
+# ci-dessus (SANS lien vers killcore/Qt). Voir
+# core/debug/inprocess_breakpoint_handler/inprocess_breakpoint_handler.cpp.
+# ---------------------------------------------------------------------------
+add_library(KillEngineInProcessBreakpointHandler SHARED
+    debug/inprocess_breakpoint_ipc.h
+    debug/inprocess_breakpoint_handler/inprocess_breakpoint_handler.cpp
+)
+target_include_directories(KillEngineInProcessBreakpointHandler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+set_target_properties(KillEngineInProcessBreakpointHandler PROPERTIES OUTPUT_NAME "KillEngineInProcessBreakpointHandler")
+if(WIN32)
+    target_compile_definitions(KillEngineInProcessBreakpointHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
 endif()

@@ -11,6 +11,34 @@
 
 namespace killcore {
 
+#ifdef Q_OS_WIN
+namespace {
+/// Racine-cause identifiee le 20/08/2026 (voir docs/STRATEGY_ROOM.md) via un
+/// reproducteur Win32 pur, independant de tout code KillEngine : un cycle
+/// DebugActiveProcess/DebugActiveProcessStop sur une cible, immediatement
+/// suivi de VirtualAllocEx/WriteProcessMemory/CreateRemoteThread sur cette
+/// meme cible, declenche de facon intermittente un refus ACCES REFUSE
+/// (error=5) — confirme non lie a nos flags d'acces (meme PROCESS_ALL_ACCESS
+/// litteral echoue), non lie a un delai, et TOUJOURS present apres
+/// desactivation de la protection temps reel Windows Defender classique.
+/// Cause la plus probable restante : Microsoft Defender for Endpoint (le
+/// service ATP, distinct de la protection temps reel de base, present sur
+/// cette machine) — la sequence "attache debugger -> detache -> alloue de la
+/// memoire + cree un thread distant dans la meme cible" est un heuristique
+/// classique de detection d'injection de code, meme quand l'usage est
+/// legitime (debug/instrumentation). Pas quelque chose que KillEngine peut
+/// forcer a marcher — message actionnable a la place d'une erreur Win32 nue.
+QString accessDeniedHint(DWORD err) {
+    if (err != ERROR_ACCESS_DENIED) return {};
+    return QStringLiteral(
+        " Un antivirus/EDR (ex. Microsoft Defender for Endpoint) bloque probablement cette action : "
+        "poser un breakpoint externe puis injecter dans la meme cible juste apres ressemble a une "
+        "technique d'injection de code, meme si l'usage ici est legitime. Reessaie, ou ajoute une "
+        "exclusion pour KillEngine.exe dans ton antivirus/EDR si le blocage persiste.");
+}
+} // namespace
+#endif
+
 uint64_t getRemoteProcAddress(const QString& moduleName, const QString& functionName) {
 #ifdef Q_OS_WIN
     const HMODULE hLocal = GetModuleHandleW(moduleName.toStdWString().c_str());
@@ -51,7 +79,8 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath) 
     LPVOID pRemotePath = VirtualAllocEx(hProcess, nullptr, pathSize,
                                          MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!pRemotePath) {
-        result.error = QStringLiteral("VirtualAllocEx failed (error=%1)").arg(GetLastError());
+        const DWORD err = GetLastError();
+        result.error = QStringLiteral("VirtualAllocEx failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
         return result;
     }
 
@@ -59,7 +88,8 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath) 
     SIZE_T bytesWritten = 0;
     if (!WriteProcessMemory(hProcess, pRemotePath, widePath.c_str(), pathSize, &bytesWritten) ||
         bytesWritten != pathSize) {
-        result.error = QStringLiteral("WriteProcessMemory failed (error=%1)").arg(GetLastError());
+        const DWORD err = GetLastError();
+        result.error = QStringLiteral("WriteProcessMemory failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
         VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
         return result;
     }
@@ -83,7 +113,8 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath) 
         nullptr);
 
     if (!hThread) {
-        result.error = QStringLiteral("CreateRemoteThread failed (error=%1)").arg(GetLastError());
+        const DWORD err = GetLastError();
+        result.error = QStringLiteral("CreateRemoteThread failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
         VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
         return result;
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "debug/hardware_breakpoint.h"
+#include "debug/breakpoint_arbiter.h"
 
 #include <QObject>
 #include <QByteArray>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "process/process_handle.h"
+#include "breakpoint_arbiter.h"
 
 #include <QObject>
 #include <QString>
@@ -9,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <thread>
 
 namespace killcore {
@@ -155,6 +157,9 @@ private:
     std::atomic_bool m_stopRequested{false};
     std::thread m_monitorThread;
     QList<BreakpointHit> m_pendingHits;
+    // Proprietaire unique des registres de debug pour m_pid (voir
+    // breakpoint_arbiter.h) -- acquis dans attach(), libere dans detach().
+    std::unique_ptr<HwBreakpointOwnershipGuard> m_ownership;
 
 #ifdef Q_OS_WIN
     void* m_processHandle{nullptr}; // HANDLE du processus debuggé

@@ -107,6 +107,19 @@ bool HardwareBreakpointSession::attach(uint32_t pid) {
 
     setState(DebugSessionState::Attaching);
 
+    // Proprietaire unique des registres de debug pour ce PID (incident du
+    // 19-20/08/2026, voir docs/STRATEGY_ROOM.md) : refuse proprement si un
+    // breakpoint in-process (ou une autre session externe) est deja actif ou
+    // potentiellement actif sur la meme cible.
+    m_ownership = std::make_unique<HwBreakpointOwnershipGuard>(
+        pid, HwBreakpointOwner::ExternalDebug, "external DebugActiveProcess", 0, /*drSlot=*/-1);
+    if (!m_ownership->acquired()) {
+        KE_LOG_ERROR() << "HardwareBreakpoint: " << m_ownership->error().toStdString();
+        setState(DebugSessionState::Error);
+        m_ownership.reset();
+        return false;
+    }
+
     // Activer SeDebugPrivilege
     enableDebugPrivilege();
 
@@ -118,6 +131,7 @@ bool HardwareBreakpointSession::attach(uint32_t pid) {
         KE_LOG_ERROR() << "HardwareBreakpoint: DebugActiveProcess failed for PID " << pid
                        << " (error=" << err << ")";
         setState(DebugSessionState::Error);
+        m_ownership.reset(); // rien n'a ete arme, desarmement trivialement confirme par defaut
         return false;
     }
 
@@ -131,9 +145,11 @@ bool HardwareBreakpointSession::attach(uint32_t pid) {
         // Tenter de détacher quand même
         DebugActiveProcessStop(pid);
         setState(DebugSessionState::Error);
+        m_ownership.reset();
         return false;
     }
 
+    m_ownership->markActive();
     setState(DebugSessionState::Active);
     KE_LOG_INFO() << "HardwareBreakpoint: attached to PID " << pid << " as debugger";
     return true;
@@ -151,17 +167,32 @@ void HardwareBreakpointSession::detach() {
     }
 
     setState(DebugSessionState::Detaching);
+    if (m_ownership) m_ownership->markDisarming();
 
-    // Retirer tous les breakpoints avant de détacher
+    // Retirer tous les breakpoints avant de détacher -- clearBreakpoints()
+    // reapplique Dr0-Dr7=0 de façon SYNCHRONE (suspend/get/set/resume) sur
+    // chaque thread existante, contrairement au breakpoint in-process qui a
+    // besoin d'une confirmation explicite : ici le desarmement est deja
+    // deterministe par construction.
     clearBreakpoints();
 
     if (m_pid > 0) {
-        DebugActiveProcessStop(m_pid);
+        const BOOL stopOk = DebugActiveProcessStop(m_pid);
+        if (!stopOk) {
+            KE_LOG_ERROR() << "HardwareBreakpoint: DebugActiveProcessStop FAILED for PID " << m_pid
+                           << " (error=" << GetLastError() << ") -- le process cible pourrait rester "
+                           << "marque comme debugue cote OS";
+        }
     }
 
     if (m_processHandle) {
         CloseHandle(m_processHandle);
         m_processHandle = nullptr;
+    }
+
+    if (m_ownership) {
+        m_ownership->confirmDisarmed(true);
+        m_ownership.reset();
     }
 
     m_pid = 0;
@@ -355,11 +386,21 @@ bool HardwareBreakpointSession::applyBreakpointsToThread(uint32_t threadId) {
     // Construire DR7 à partir des breakpoints actifs
     uint32_t dr7 = 0;
 
-    // D'abord tout effacer
+    // D'abord tout effacer. Dr6 (registre de statut) n'est PAS remis à zéro
+    // automatiquement par le CPU après une exception de debug (Intel SDM
+    // Vol.3B §17.2.4) — le débogueur doit le faire explicitement. L'oubli ici
+    // (corrigé le 19/08/2026, cf. core/debug/breakpoint_freeze.cpp qui l'a
+    // déjà correctement dès Phase 19) laisse Dr6 avec les bits B0-B3 du
+    // dernier hit encore posés à chaque réarmement ET au détachement — un
+    // Dr6 sale qui survit au détachement peut faire planter la cible au
+    // prochain événement de debug qu'elle génère elle-même (signalé par
+    // l'utilisateur : crash de Solitaire.exe juste après une capture "Écrit
+    // par" réussie).
     ctx.Dr0 = 0;
     ctx.Dr1 = 0;
     ctx.Dr2 = 0;
     ctx.Dr3 = 0;
+    ctx.Dr6 = 0;
     ctx.Dr7 = 0;
 
     // Puis appliquer chaque breakpoint actif

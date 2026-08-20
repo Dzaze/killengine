@@ -2,6 +2,7 @@
 
 #include "scanner/scan_types.h"
 
+#include <QByteArray>
 #include <QList>
 #include <QString>
 
@@ -40,5 +41,11 @@ QList<ValueVariant> generateScanVariants(
     const QString& rawValue,
     ValueType explicitType = ValueType::Int32,
     bool explicitTypeGiven = false);
+
+/// Convertit des octets bruts vers un double lisible, selon le type. Utilise
+/// par toute primitive de recherche memoire qui a besoin de rapporter "quelle
+/// valeur ces octets representent" (ex: scanner/memory_window_search.*).
+/// Retourne 0.0 si `bytes` est trop court pour `type`.
+double scanBytesToDouble(const QByteArray& bytes, ValueType type);
 
 } // namespace killcore

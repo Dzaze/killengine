@@ -4,6 +4,7 @@
 
 #include <QObject>
 #include <QList>
+#include <QString>
 
 #include <atomic>
 #include <cstdint>
@@ -32,6 +33,11 @@ struct PageGuardConfig {
     bool captureReads{false};       ///< Capturer les lectures
     int timeoutMs{5000};            ///< Timeout de capture
     size_t maxHits{100};            ///< Nombre max de hits
+    /// Chemin de KillEnginePageGuardHandler.dll, requis pour surveiller un
+    /// processus externe (le cas réel — un AddVectoredExceptionHandler posé
+    /// dans KillEngine.exe ne reçoit que les exceptions de KillEngine
+    /// lui-même). Ignoré si le processus surveillé est KillEngine.exe.
+    QString injectedHandlerPath;
 };
 
 /// Résultat d'une session de page guard.
@@ -43,11 +49,13 @@ struct PageGuardResult {
 };
 
 /**
- * @brief Surveillance par page guards — alternative stealth aux hardware breakpoints.
+ * @brief Surveillance par page guards — alternative aux hardware breakpoints qui ne
+ * passe pas par le canal de debug Win32.
  *
- * Contrairement aux hardware breakpoints (qui nécessitent DebugActiveProcess et sont
- * détectables par IsDebuggerPresent), les page guards utilisent VirtualProtectEx avec
- * le flag PAGE_GUARD et AddVectoredExceptionHandler. Aucun attachement debugger requis.
+ * Contrairement aux hardware breakpoints (qui nécessitent DebugActiveProcess — un canal
+ * exclusif, indisponible si un autre outil débogue déjà la cible), les page guards
+ * utilisent VirtualProtectEx avec le flag PAGE_GUARD et AddVectoredExceptionHandler.
+ * Aucun attachement debugger requis.
  *
  * Principe :
  *   1. VirtualProtectEx(addr, PAGE_READWRITE | PAGE_GUARD)
@@ -56,7 +64,8 @@ struct PageGuardResult {
  *   4. On restaure la protection (la garde est one-shot)
  *   5. On re-pose la garde si on veut continuer à capturer
  *
- * Avantage clé : indétectable par IsDebuggerPresent / CheckRemoteDebuggerPresent.
+ * Avantage clé : ne dépend pas du canal de debug Win32 exclusif, donc utilisable même
+ * quand un autre débogueur est déjà attaché à la cible.
  *
  * Inconvénient : moins précis (page entière = 4 Ko) et one-shot (il faut re-poser).
  */
@@ -90,6 +99,10 @@ private:
     static LONG WINAPI vectoredHandler(struct _EXCEPTION_POINTERS* ep);
 
     void handleViolation(uint64_t exceptionAddress, uint64_t instructionPointer, bool isWrite, uint32_t threadId);
+
+    /// Surveillance d'un processus externe via handler injecté + IPC mémoire partagée
+    /// (le VEH in-process ci-dessus ne peut pas observer les exceptions d'un autre processus).
+    PageGuardResult monitorRemote(const ProcessHandle& process, const PageGuardConfig& config);
 
     std::atomic_bool m_monitoring{false};
     std::atomic_bool m_stopRequested{false};
