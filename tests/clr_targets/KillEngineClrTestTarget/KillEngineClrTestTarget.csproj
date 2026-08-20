@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Cible de test CLR dediee pour le futur candidat 8 (ClrMD/SOS,
+    docs/POWER_UP_ROADMAP.md). Contrairement a KillEngineTestTarget.exe
+    (C++/Qt, tests/memory_targets/), ce projet doit rester un vrai process
+    managed CoreCLR standard : pas de trimming, pas de ReadyToRun, pas de
+    Native AOT, pour que ClrMD puisse s'y attacher via le DAC exactement
+    comme sur une vraie cible .NET Framework/CoreCLR. Voir
+    docs/KILLENGINE_CLR_TEST_TARGET_SPEC.md pour le detail.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>KillEngineClrTestTarget</AssemblyName>
+    <RootNamespace>KillEngine.ClrTestTarget</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishAot>false</PublishAot>
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+
+</Project>
