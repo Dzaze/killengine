@@ -95,7 +95,8 @@
     "expert": "Expert",
     "settings": "Settings",
     "investigation": "Investigation",
-    "trainer": "Trainer"
+    "trainer": "Trainer",
+    "speedhack": "Speedhack"
   },
   "help": {
     "label": {
@@ -248,6 +249,13 @@
       "when": "Use it after a scan has been reduced to a small candidate set, especially when a normal write fails or when you want to verify that the kernel path works. Requires the KillEngineKernel driver to be loaded (Settings > Kernel driver > Test driver) — the button stays hidden otherwise. If the value still reverts after a successful kernel write, the important lesson is that the address is probably not the source of truth: run \"Find what writes\", then \"Test automatically\".",
       "cost": "Requires the kernel driver installed and loaded (see Settings). One address at a time, never bulk. Read the address before and after writing so the proof is clear.",
       "example": "Solitaire score: scan 175, next scan 185, two candidates. Kernel-read both addresses, kernel-write 1337 to the right one, kernel-read again, then confirm visually in the game. If one address reverts immediately, it is probably a copy or a recomputed value."
+    },
+    "speedhack": {
+      "title": "Speedhack",
+      "what": "Injects a component into the attached process that hooks its time functions (QueryPerformanceCounter, GetTickCount, GetTickCount64, timeGetTime) and scales the returned value by a factor — speeds up or slows down anything based on them (animations, cooldowns, physics, timers).",
+      "when": "To speed through a wait (farming, load times) or slow down a hard section — same idea as Cheat Engine's speedhack. The factor can be adjusted live while active, no need to restart. The \"Pause (0x)\" preset fully freezes the clock the target perceives.",
+      "cost": "Code injection into the target process: same risk tier as \"Write via kernel\", confirmation required. Only covers modules already loaded at activation time, not calls resolved dynamically via GetProcAddress. Some protected software may detect or refuse the injection.",
+      "example": "A load time or repetitive farming grind takes too long. Enable speedhack at 4x from the Speedhack panel, or ask the Assistant to \"speed up the game\": animations and timers run 4x faster, disable to return to normal."
     },
     "pointerChains": {
       "title": "Pointer chains",

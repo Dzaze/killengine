@@ -41,6 +41,7 @@ QVariantList toolDefinitions() {
         makeTool("disassemble_backward", "Désassemble les instructions avant un RIP capturé pour repérer les champs sources d'un compteur animé.", {"address"}, "patch", true),
         makeTool("test_candidate_fields", "Teste automatiquement lequel des champs candidats (issus de disassemble_backward) tient réellement : écrit une valeur test, attend, relit, classe holds/reverts, puis restaure. Remplace la lecture manuelle d'assembleur par une preuve empirique.", {"address", "watchedAddress"}, "write", true),
         makeTool("kernel_write", "Écrit une valeur via le driver noyau (contourne les protections mémoire usermode). À utiliser seulement si l'utilisateur le demande explicitement (ex: \"écris via le kernel\") ou après échec d'une écriture usermode normale.", {"address", "valueType", "value"}, "injection", true),
+        makeTool("speedhack_set", "Accélère, ralentit, ou remet à la normale la vitesse perçue par le processus attaché (hook des fonctions de temps). mode=\"set\" avec un facteur (ex: 2.0 = 2x plus vite, 0.5 = 2x plus lent, 0.0 = pause), ou mode=\"off\" pour désactiver et revenir à la normale.", {"factor", "mode"}, "injection", true),
     };
 }
 

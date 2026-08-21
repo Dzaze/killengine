@@ -95,7 +95,8 @@
     "expert": "Expert",
     "settings": "Paramètres",
     "investigation": "Investigation",
-    "trainer": "Trainer"
+    "trainer": "Trainer",
+    "speedhack": "Speedhack"
   },
   "help": {
     "label": {
@@ -248,6 +249,13 @@
       "when": "À utiliser après un scan réduit à peu de candidats, surtout si une écriture normale échoue ou si tu veux vérifier que le chemin kernel fonctionne. Nécessite que le driver KillEngineKernel soit chargé (Paramètres > Driver kernel > Tester le driver) — le bouton reste masqué sinon. Si la valeur revient systématiquement même après une écriture kernel réussie, la leçon importante est que l'adresse écrite n'est probablement pas la source de vérité : lance \"Écrit par\", puis \"Tester automatiquement\".",
       "cost": "Nécessite le driver kernel installé et chargé (voir Paramètres). Une seule adresse à la fois, jamais de bulk. Lis l'adresse avant et après pour garder une preuve claire de ce qui a vraiment changé.",
       "example": "Score Solitaire : scan 175, next scan 185, deux candidats. Lecture kernel des deux adresses, écriture kernel de 1337 sur la bonne adresse, relecture kernel et confirmation visuelle dans le jeu. Si une adresse revient aussitôt, elle est probablement une copie ou une valeur recalculée."
+    },
+    "speedhack": {
+      "title": "Speedhack",
+      "what": "Injecte un composant dans le processus attaché qui hooke ses fonctions de temps (QueryPerformanceCounter, GetTickCount, GetTickCount64, timeGetTime) et scale la valeur retournée par un facteur — accélère ou ralentit tout ce qui se base sur ces fonctions (animations, cooldowns, physique, minuteurs).",
+      "when": "Pour accélérer une attente (farm, temps de chargement) ou ralentir un passage difficile — comme le speedhack de Cheat Engine. Le facteur peut être ajusté en direct pendant que c'est actif, pas besoin de redémarrer. Préset « Pause (0x) » gèle complètement l'horloge perçue par la cible.",
+      "cost": "Injection de code dans le processus cible : même palier de risque que « Écrire via kernel », confirmation requise. Ne couvre que les modules déjà chargés au moment de l'activation, et pas les appels résolus dynamiquement via GetProcAddress. Certains logiciels protégés peuvent détecter ou refuser une injection.",
+      "example": "Un temps de chargement ou un farm répétitif prend trop longtemps. Active le speedhack à 4x depuis le panneau Speedhack ou en demandant \"accélère le jeu\" à l'Assistant : les animations et minuteurs défilent 4 fois plus vite, désactive pour revenir à la normale."
     },
     "pointerChains": {
       "title": "Pointer chains",

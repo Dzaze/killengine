@@ -617,6 +617,20 @@ export interface CandidateFieldTestStartResult {
   error?: string
 }
 
+// Statut du speedhack (roadmap section J) : accélère/ralentit le temps perçu
+// par le processus attaché via un composant injecté. factor=1.0 vitesse
+// normale, factor=0.0 pause. hooksInstalledMask est un bitmask diagnostic
+// (voir killcore::kSpeedhackHook* côté C++), pas destiné à être décodé côté UI.
+export interface SpeedhackStatus {
+  success: boolean
+  active: boolean
+  installError?: boolean
+  factor: number
+  hooksInstalledMask?: number
+  pid?: number
+  error?: string
+}
+
 export interface CodePatchResult {
   success: boolean
   verified?: boolean
@@ -975,6 +989,11 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   testCandidateFieldsAsync?(writeInstructionAddressHex: string, knownWriteTargetAddressHex: string, options: Record<string, unknown>): Promise<CandidateFieldTestStartResult>
   cancelCandidateFieldTest?(): Promise<Record<string, unknown>>
   candidateFieldTestFinished?: QWebChannelSignal<CandidateFieldTestResult>
+  /** Roadmap section J — Speedhack : accélère/ralentit le temps perçu par la cible attachée. */
+  startSpeedhack?(factor: number): Promise<SpeedhackStatus>
+  setSpeedhackFactor?(factor: number): Promise<SpeedhackStatus>
+  stopSpeedhack?(): Promise<SpeedhackStatus>
+  getSpeedhackStatus?(): Promise<SpeedhackStatus>
   /** Phase 20 — outils Expert manuels gardés par confirmRiskAction('injection', ...) côté store. */
   injectDllIntoProcess?(dllPath: string): Promise<Record<string, unknown>>
   installFunctionHook?(targetAddressHex: string, hookAddressHex: string): Promise<Record<string, unknown>>
@@ -1738,6 +1757,18 @@ class BackendService {
       },
       async cancelCandidateFieldTest() {
         return { success: false, error: 'Mock backend' }
+      },
+      async startSpeedhack(_factor: number) {
+        return { success: false, active: false, factor: 1.0, error: 'Mock backend' }
+      },
+      async setSpeedhackFactor(_factor: number) {
+        return { success: false, active: false, factor: 1.0, error: 'Mock backend' }
+      },
+      async stopSpeedhack() {
+        return { success: true, active: false, factor: 1.0 }
+      },
+      async getSpeedhackStatus() {
+        return { success: true, active: false, factor: 1.0 }
       },
       async injectDllIntoProcess(_dllPath: string) {
         return { success: false, error: 'Mock backend' }

@@ -1735,6 +1735,10 @@ void ApplicationController::detachProcess() {
     if (m_breakpointFreeze) {
         m_breakpointFreeze->stop();
     }
+    if (m_speedhackSession) {
+        m_speedhackSession->stop();
+        m_speedhackSession.reset();
+    }
     detachClrInspector();
     resetHardwareBreakpointStateForPreviousTarget();
 
@@ -6169,6 +6173,22 @@ QString resolveInProcessBreakpointHandlerPath() {
     }
     return QString();
 }
+
+// Meme demarche que resolvePageGuardHandlerPath() pour
+// KillEngineSpeedhackHandler.dll (core/CMakeLists.txt).
+QString resolveSpeedhackHandlerPath() {
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.filePath("KillEngineSpeedhackHandler.dll"),
+        appDir.filePath("../lib/KillEngineSpeedhackHandler.dll"),
+    };
+    for (const auto& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    return QString();
+}
 } // namespace
 
 QVariantMap ApplicationController::startPageGuardWatchAsync(const QString& addressHex, const QVariantMap& options) {
@@ -6576,6 +6596,97 @@ QVariantMap ApplicationController::getInProcessBreakpointFreezeStats() const {
     result["rewrites"] = static_cast<qulonglong>(stats.hitCount);
     result["armedThreadCount"] = stats.armedThreadCount;
     result["healthy"] = stats.active && !stats.installError;
+    return result;
+}
+
+QVariantMap ApplicationController::startSpeedhack(double factor) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (m_speedhackSession && m_speedhackSession->isActive()) {
+        result["error"] = "Un speedhack est déjà actif — change le facteur au lieu d'en redémarrer un.";
+        return result;
+    }
+
+    const QString handlerPath = resolveSpeedhackHandlerPath();
+    if (handlerPath.isEmpty()) {
+        result["error"] = "KillEngineSpeedhackHandler.dll introuvable à côté de KillEngine.exe.";
+        return result;
+    }
+
+    killcore::ProcessHandle ownedHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::AllAccess);
+    if (!ownedHandle.isValid()) {
+        result["error"] = "Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).";
+        return result;
+    }
+
+    if (!m_speedhackSession) {
+        m_speedhackSession = std::make_unique<killcore::SpeedhackSession>();
+    }
+    QString startError;
+    if (!m_speedhackSession->start(ownedHandle, factor, handlerPath, &startError)) {
+        result["error"] = startError;
+        return result;
+    }
+
+    const auto stats = m_speedhackSession->stats();
+    result["success"] = true;
+    result["active"] = stats.active;
+    result["factor"] = stats.factor;
+    result["hooksInstalledMask"] = static_cast<int>(stats.hooksInstalledMask);
+    KE_LOG_INFO() << "startSpeedhack(pid=" << m_pid << ", factor=" << factor << ")";
+    return result;
+}
+
+QVariantMap ApplicationController::setSpeedhackFactor(double factor) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_speedhackSession || !m_speedhackSession->isActive()) {
+        result["error"] = "Aucun speedhack actif.";
+        return result;
+    }
+    if (!m_speedhackSession->setFactor(factor)) {
+        result["error"] = "Échec du réglage du facteur.";
+        return result;
+    }
+
+    result["success"] = true;
+    result["factor"] = factor;
+    return result;
+}
+
+QVariantMap ApplicationController::stopSpeedhack() {
+    QVariantMap result;
+    result["success"] = true;
+    result["active"] = false;
+
+    if (m_speedhackSession) {
+        m_speedhackSession->stop();
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::getSpeedhackStatus() const {
+    QVariantMap result;
+    if (!m_speedhackSession || !m_speedhackSession->isActive()) {
+        result["success"] = true;
+        result["active"] = false;
+        result["factor"] = 1.0;
+        return result;
+    }
+
+    const auto stats = m_speedhackSession->stats();
+    result["success"] = true;
+    result["active"] = stats.active;
+    result["installError"] = stats.installError;
+    result["factor"] = stats.factor;
+    result["hooksInstalledMask"] = static_cast<int>(stats.hooksInstalledMask);
+    result["pid"] = m_pid;
     return result;
 }
 
@@ -11244,6 +11355,35 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             {"address", kernelAddress},
             {"value", kernelValue},
             {"valueType", kernelValueType},
+            {"requiresConfirmation", true},
+        });
+        result["recoveryActions"] = recoveryActions;
+        stampIntent(&result);
+        return result;
+    } else if (tool == "speedhack_set") {
+        // Demande explicite en langage naturel ("ralentis le jeu", "accélère
+        // le temps", "remets la vitesse normale") : même patron que
+        // kernel_write ci-dessus, une action cliquable plutôt qu'un renvoi
+        // vers un onglet — l'Assistant lui-même décide start/setFactor/stop
+        // côté frontend selon l'état actuel (executeCheckpointSpeedhack).
+        const QString modeArg = args.value("mode", "set").toString().trimmed().toLower();
+        const bool isOff = (modeArg == "off" || modeArg == "stop");
+        const double factor = args.value("factor", 1.0).toDouble();
+
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = isOff
+            ? "Désactive le speedhack et remet la vitesse perçue à la normale."
+            : "Injecte un composant dans le processus cible pour modifier la vitesse perçue du temps.";
+        result["message"] = isOff
+            ? "Désactivation du speedhack demandée. Confirme pour remettre la vitesse normale."
+            : QString("Speedhack demandé : facteur %1x. Confirme pour appliquer.").arg(factor);
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{
+            {"id", "speedhack_apply"},
+            {"label", isOff ? "Confirmer : désactiver le speedhack" : QString("Confirmer : appliquer %1x").arg(factor)},
+            {"factor", factor},
+            {"mode", isOff ? "off" : "set"},
             {"requiresConfirmation", true},
         });
         result["recoveryActions"] = recoveryActions;

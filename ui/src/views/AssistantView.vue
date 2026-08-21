@@ -407,6 +407,41 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
         )
       }
     }
+  } else if (actionId === 'speedhack_apply') {
+    const mode = typeof action === 'string' ? 'set' : String(action.mode ?? 'set')
+    const factor = typeof action === 'string' ? 1 : Number(action.factor ?? 1)
+    if (mode === 'off') {
+      const result = await store.stopSpeedhack()
+      if (result === null) {
+        store.pushMessage('assistant', "Impossible de désactiver le speedhack (backend indisponible).", { isError: true })
+      } else {
+        store.pushMessage(
+          'assistant',
+          result.success ? 'Speedhack désactivé, vitesse remise à la normale.' : `Échec : ${result.error ?? 'raison inconnue'}`,
+          { isError: !result.success },
+        )
+      }
+    } else {
+      const alreadyActive = store.speedhackStatus?.active === true
+      const result = alreadyActive ? await store.setSpeedhackFactor(factor) : await store.startSpeedhack(factor)
+      if (result === null) {
+        store.pushMessage('assistant', "Speedhack bloqué par ton mode Auto actuel (Safe) ou refusé à la confirmation. Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+      } else {
+        store.pushMessage(
+          'assistant',
+          result.success
+            ? `Speedhack ${alreadyActive ? 'ajusté' : 'activé'} à ${factor}x sur ${store.processName || 'la cible'}.`
+            : `Speedhack échoué : ${result.error ?? 'raison inconnue'}.`,
+          {
+            isError: !result.success,
+            recoveryActions: result.success ? [{ id: 'open_speedhack', label: 'Ouvrir Speedhack' }] : undefined,
+          },
+        )
+      }
+    }
+  } else if (actionId === 'open_speedhack') {
+    store.activeView = 'speedhack'
+    store.pushMessage('assistant', "Speedhack ouvert : le slider et les presets sont là, réglables en direct.")
   } else if (actionId === 'open_pointer_scan') {
     store.activeView = 'expert'
     store.pushMessage('assistant', "Expert ouvert, section Pointeurs : lance un scan de pointeur stable vers la dernière adresse. Ça permet de la retrouver même si elle change d'une partie à l'autre.")

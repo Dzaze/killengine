@@ -90,6 +90,13 @@ add_library(killcore STATIC
     debug/inprocess_breakpoint.h
     debug/inprocess_breakpoint.cpp
 
+    # Roadmap section J — Speedhack (vitesse perçue accélérée/ralentie via un
+    # composant injecté qui hooke les fonctions de temps de la cible)
+    debug/speedhack_ipc.h
+    debug/speedhack_clock.h
+    debug/speedhack.h
+    debug/speedhack.cpp
+
     # Propriétaire logique unique des registres de debug (DR0-DR7) par PID,
     # partagé entre hardware_breakpoint.cpp, breakpoint_freeze.cpp et
     # inprocess_breakpoint.cpp — incident du 19-20/08/2026, voir
@@ -173,4 +180,23 @@ target_include_directories(KillEngineInProcessBreakpointHandler PRIVATE ${CMAKE_
 set_target_properties(KillEngineInProcessBreakpointHandler PROPERTIES OUTPUT_NAME "KillEngineInProcessBreakpointHandler")
 if(WIN32)
     target_compile_definitions(KillEngineInProcessBreakpointHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+endif()
+
+# ---------------------------------------------------------------------------
+# Roadmap section J — Speedhack : DLL injectee dans le processus cible, meme
+# raisonnement que KillEnginePageGuardHandler ci-dessus (SANS lien vers
+# killcore/Qt). Voir core/debug/speedhack_handler/speedhack_handler.cpp.
+# Lie winmm (timeGetTime) : bibliotheque systeme minimale, pas une dependance
+# applicative — n'introduit aucun risque de chargement dans la cible.
+# ---------------------------------------------------------------------------
+add_library(KillEngineSpeedhackHandler SHARED
+    debug/speedhack_ipc.h
+    debug/speedhack_clock.h
+    debug/speedhack_handler/speedhack_handler.cpp
+)
+target_include_directories(KillEngineSpeedhackHandler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+set_target_properties(KillEngineSpeedhackHandler PROPERTIES OUTPUT_NAME "KillEngineSpeedhackHandler")
+if(WIN32)
+    target_compile_definitions(KillEngineSpeedhackHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+    target_link_libraries(KillEngineSpeedhackHandler PRIVATE winmm)
 endif()

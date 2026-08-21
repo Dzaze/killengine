@@ -30,6 +30,7 @@ import {
   type ProcessModuleInfo,
   type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
+  type SpeedhackStatus,
   type TemporaryStorageStatus,
   type UndoCandidateScanResult,
   type UiStringCandidate,
@@ -228,7 +229,7 @@ export interface RuntimeActionPlan {
   actions: RuntimeActionPlanItem[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'profiles' | 'expert' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'speedhack' | 'profiles' | 'expert' | 'settings'
 
 export interface WorkflowPreset {
   id: string
@@ -383,6 +384,13 @@ export const useAppStore = defineStore('app', () => {
   const clrInspectorStatus = ref<ClrInspectorStatus | null>(null)
   const clrInspectorBusy = ref(false)
   const clrInspectorError = ref('')
+  // Roadmap section J — Speedhack : accélère/ralentit le temps perçu par la
+  // cible attachée. `speedhackFactor` est l'état local du slider (curseur
+  // en cours de manipulation) tandis que `speedhackStatus.factor` reflète la
+  // dernière valeur confirmée côté backend.
+  const speedhackStatus = ref<SpeedhackStatus | null>(null)
+  const speedhackBusy = ref(false)
+  const speedhackFactor = ref(1.0)
   const clrTypeFilter = ref('KillEngine.ClrTestTarget')
   const clrObjects = ref<ClrObjectSummary[]>([])
   const clrSelectedObject = ref<ClrObjectReadResult | null>(null)
@@ -2818,6 +2826,82 @@ let nextWatchedChainId = 1
       return result
     } catch (e) {
       addActionLog('checkpoint', 'Test de champs candidats échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  // Roadmap section J — Speedhack. start() est le seul moment gardé par
+  // confirmRiskAction (c'est l'instant de l'injection) ; setFactor() ne
+  // re-confirme jamais — ajuster un slider déjà consenti ne doit pas ouvrir
+  // un dialogue à chaque cran, même logique que le preset d'intervalle
+  // freeze existant (setFreezeInterval).
+  async function refreshSpeedhackStatus() {
+    const controller = backend.getController()
+    if (!controller.getSpeedhackStatus) return null
+    try {
+      const status = await controller.getSpeedhackStatus()
+      speedhackStatus.value = status
+      if (status.active) speedhackFactor.value = status.factor
+      return status
+    } catch (e) {
+      addActionLog('speedhack', 'Statut speedhack indisponible', String(e), 'warning')
+      return null
+    }
+  }
+
+  async function startSpeedhack(factor: number) {
+    if (!await confirmRiskAction('injection', 'Activer le speedhack', `Injecte un composant dans le processus cible pour modifier la vitesse perçue du temps (facteur ${factor}x).`)) return null
+    const controller = backend.getController()
+    if (!controller.startSpeedhack) {
+      addActionLog('speedhack', 'Speedhack indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    speedhackBusy.value = true
+    try {
+      const result = await controller.startSpeedhack(factor)
+      speedhackStatus.value = result
+      if (result.success) {
+        speedhackFactor.value = factor
+        addActionLog('speedhack', 'Speedhack activé', `Facteur ${factor}x.`, 'success')
+      } else {
+        addActionLog('speedhack', 'Speedhack échoué', result.error || 'raison inconnue', 'error')
+      }
+      logAiAudit('speedhack_start_executed', { factor, success: result.success === true })
+      return result
+    } catch (e) {
+      addActionLog('speedhack', 'Speedhack échoué', String(e), 'error')
+      return null
+    } finally {
+      speedhackBusy.value = false
+    }
+  }
+
+  async function setSpeedhackFactor(factor: number) {
+    const controller = backend.getController()
+    if (!controller.setSpeedhackFactor) return null
+    try {
+      const result = await controller.setSpeedhackFactor(factor)
+      speedhackStatus.value = result
+      if (result.success) speedhackFactor.value = factor
+      return result
+    } catch (e) {
+      addActionLog('speedhack', 'Réglage du facteur échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  async function stopSpeedhack() {
+    const controller = backend.getController()
+    if (!controller.stopSpeedhack) return null
+    try {
+      const result = await controller.stopSpeedhack()
+      speedhackStatus.value = result
+      speedhackFactor.value = 1.0
+      addActionLog('speedhack', 'Speedhack désactivé', 'Vitesse remise à la normale.', 'success')
+      logAiAudit('speedhack_stop_executed', {})
+      return result
+    } catch (e) {
+      addActionLog('speedhack', 'Arrêt du speedhack échoué', String(e), 'error')
       return null
     }
   }
@@ -6735,6 +6819,13 @@ async function doEncryptedScan() {
     executeCheckpointFindWhatWrites,
     executeCheckpointDisassembleBackward,
     executeCandidateFieldTest,
+    speedhackStatus,
+    speedhackBusy,
+    speedhackFactor,
+    refreshSpeedhackStatus,
+    startSpeedhack,
+    setSpeedhackFactor,
+    stopSpeedhack,
     executeCheckpointKernelWrite,
     prepareCheckpointAob,
     executeCheckpointForceValue,

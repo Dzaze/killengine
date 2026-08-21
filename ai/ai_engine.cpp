@@ -418,6 +418,34 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
         }, "Écriture kernel demandée explicitement par l'utilisateur.");
     }
 
+    // Speedhack : placé avant les checks génériques ci-dessous pour la même
+    // raison que wantsKernel plus haut — "ralentis le jeu" ne doit jamais
+    // tomber dans exact_scan juste parce qu'aucun nombre n'est fourni.
+    {
+        const bool wantsSpeedOff = q.contains("désactiv") || q.contains("desactiv") ||
+            ((q.contains("stop") || q.contains("arrêt") || q.contains("normal")) &&
+             (q.contains("vitesse") || q.contains("speed") || q.contains("temps") || q.contains("speedhack")));
+        const bool wantsPause = q.contains("pause") &&
+            (q.contains("temps") || q.contains("vitesse") || q.contains("speedhack") || q.contains("jeu") || q.contains("game"));
+        const bool wantsSlow = q.contains("ralent") || q.contains("slow");
+        const bool wantsFast = q.contains("accélér") || q.contains("acceler") || q.contains("speed up") || q.contains("speedup");
+        const bool wantsSpeedGeneric = q.contains("vitesse") || q.contains("speed");
+        if (wantsSpeedOff) {
+            return makeToolCall("speedhack_set", {{"mode", "off"}}, "Désactivation du speedhack demandée.");
+        }
+        if (wantsPause) {
+            return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", 0.0}}, "Pause du temps demandée (speedhack).");
+        }
+        if (wantsSlow || wantsFast || wantsSpeedGeneric) {
+            double factor = wantsSlow ? 0.5 : 2.0;
+            bool parsedOk = false;
+            const double parsed = firstNumber(query).toDouble(&parsedOk);
+            if (parsedOk && parsed > 0.0) factor = parsed;
+            return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", factor}},
+                wantsSlow ? "Ralentissement demandé (speedhack)." : "Accélération demandée (speedhack).");
+        }
+    }
+
     if (q.contains("write") || q.contains("écri") || q.contains("mettre")) {
         return makeToolCall("write_value", {
             {"address", firstHexAddress(query)},
@@ -496,6 +524,32 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             {"valueType", inferValueType(query)},
             {"value", value},
         }, "Ecriture kernel demandee explicitement par l'utilisateur.");
+    }
+    // Speedhack : place avant les checks generiques ci-dessous, meme raison
+    // que wantsKernel plus haut.
+    {
+        const bool wantsSpeedOff = q.contains("désactiv") || q.contains("desactiv") ||
+            ((q.contains("stop") || q.contains("arrêt") || q.contains("normal")) &&
+             (q.contains("vitesse") || q.contains("speed") || q.contains("temps") || q.contains("speedhack")));
+        const bool wantsPause = q.contains("pause") &&
+            (q.contains("temps") || q.contains("vitesse") || q.contains("speedhack") || q.contains("jeu") || q.contains("game"));
+        const bool wantsSlow = q.contains("ralent") || q.contains("slow");
+        const bool wantsFast = q.contains("accélér") || q.contains("acceler") || q.contains("speed up") || q.contains("speedup");
+        const bool wantsSpeedGeneric = q.contains("vitesse") || q.contains("speed");
+        if (wantsSpeedOff) {
+            return makeToolCall("speedhack_set", {{"mode", "off"}}, "Desactivation du speedhack demandee.");
+        }
+        if (wantsPause) {
+            return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", 0.0}}, "Pause du temps demandee (speedhack).");
+        }
+        if (wantsSlow || wantsFast || wantsSpeedGeneric) {
+            double factor = wantsSlow ? 0.5 : 2.0;
+            bool parsedOk = false;
+            const double parsed = value.toDouble(&parsedOk);
+            if (parsedOk && parsed > 0.0) factor = parsed;
+            return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", factor}},
+                wantsSlow ? "Ralentissement demande (speedhack)." : "Acceleration demandee (speedhack).");
+        }
     }
     if ((q.contains("write") || q.contains("mettre")) && !value.isEmpty()) {
         return makeToolCall("write_value", {

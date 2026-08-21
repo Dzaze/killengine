@@ -5,6 +5,7 @@
 #include "debug/breakpoint_freeze.h"
 #include "debug/inprocess_breakpoint.h"
 #include "debug/page_guard.h"
+#include "debug/speedhack.h"
 #include "freeze/freeze_manager.h"
 #include "inject/dll_injector.h"
 #include "inject/function_hook.h"
@@ -301,6 +302,23 @@ public:
     /// Stats en direct du freeze breakpoint in-process actif (hitCount, threads armées) —
     /// lecture directe de la mémoire partagée, pas d'attente de l'arrêt.
     Q_INVOKABLE QVariantMap getInProcessBreakpointFreezeStats() const;
+
+    /// Roadmap section J — Speedhack : accélère/ralentit le temps perçu par le
+    /// processus attaché (hook des fonctions de temps depuis un composant injecté,
+    /// voir core/debug/speedhack.h). factor=1.0 vitesse normale, factor=0.0 pause.
+    /// Réutilise un composant déjà installé sur cette cible s'il existe (pas besoin
+    /// de réinjecter pour réactiver, voir SpeedhackSession::start).
+    Q_INVOKABLE QVariantMap startSpeedhack(double factor);
+
+    /// Change le facteur en direct sans réinjecter — pour un slider côté UI.
+    Q_INVOKABLE QVariantMap setSpeedhackFactor(double factor);
+
+    /// Remet le facteur à 1.0 (vitesse normale) ; ne dé-injecte jamais (voir
+    /// core/debug/speedhack.h pour pourquoi).
+    Q_INVOKABLE QVariantMap stopSpeedhack();
+
+    /// Statut courant du speedhack (actif, facteur, fonctions hookées).
+    Q_INVOKABLE QVariantMap getSpeedhackStatus() const;
 
     /// Ecriture hexadecimale brute : "48 8B 00" -> bytes exacts a l'adresse. Sauvegarde previous pour rollback.
     Q_INVOKABLE QVariantMap writeMemoryHex(const QString& addressHex, const QString& hexString);
@@ -829,6 +847,7 @@ private:
     bool                     m_inProcessBreakpointWatchInProgress{false};
     std::shared_ptr<killcore::InProcessBreakpointSession> m_activeInProcessBreakpointSession;
     std::shared_ptr<killcore::InProcessBreakpointSession> m_inProcessBreakpointFreezeSession;
+    std::unique_ptr<killcore::SpeedhackSession> m_speedhackSession;
     std::shared_ptr<killcore::CancellationToken> m_activeDebugCancellation;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     // Test automatique des champs candidats (voir testCandidateFieldsAsync) : etat

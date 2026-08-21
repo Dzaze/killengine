@@ -10,6 +10,7 @@ import MemoryView from '@/views/MemoryView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import ProcessView from '@/views/ProcessView.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import SpeedhackView from '@/views/SpeedhackView.vue'
 import TrainerView from '@/views/TrainerView.vue'
 
 const store = useAppStore()
@@ -21,6 +22,7 @@ const currentView = computed(() => {
   if (store.activeView === 'memory') return MemoryView
   if (store.activeView === 'clr') return ClrInspectorView
   if (store.activeView === 'profiles') return ProfileView
+  if (store.activeView === 'speedhack') return SpeedhackView
   if (store.activeView === 'trainer') return TrainerView
   if (store.activeView === 'expert') return ExpertView
   if (store.activeView === 'settings') return SettingsView
@@ -97,6 +99,13 @@ watch(
           @click="store.activeView = 'trainer'"
         >
           {{ $t('nav.trainer') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'speedhack' }"
+          @click="store.activeView = 'speedhack'"
+        >
+          {{ $t('nav.speedhack') }}
         </button>
         <button
           class="nav-item"
