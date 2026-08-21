@@ -137,6 +137,13 @@
         "what": "Turn what works into a code signature, then a patch, then a reusable Trainer feature."
       }
     },
+    "processKernelAccess": {
+      "title": "Memory access mode",
+      "what": "Chooses the interactive memory read/write path after attaching: Standard uses the usual usermode APIs; Kernel routes memory previews, the hex viewer, and simple writes through KillEngineKernel when the driver is ready.",
+      "when": "You do not need kernel access to open a process, list modules, or run the first full scans. Choose Kernel when you want to work in ring 0 on the addresses you found, or when a standard write fails or does not stick.",
+      "cost": "The driver must already be loaded and report memory access. Full scans still use the standard reader until the scan engine gets a complete reader abstraction; Kernel mode applies to interactive, verifiable reads/writes.",
+      "example": "Solitaire: attach the process in Kernel mode, scan 175 then 185, then read both candidates and write 1337 to the right address. If a value reverts even through kernel, find the source with Find what writes."
+    },
     "regionContext": {
       "title": "Active region",
       "what": "Details the memory region of the selected address: bounds, protection, state and type.",
@@ -237,10 +244,10 @@
     },
     "writeKernel": {
       "title": "Write via kernel",
-      "what": "Writes the value through the KillEngineKernel driver (KeStackAttachProcess on the driver side, not usermode WriteProcessMemory) instead of a normal write. Bypasses usermode memory protections (VirtualProtect, PAGE_GUARD, some basic anti-cheats that only watch the usermode API).",
-      "when": "A normal write explicitly fails (memory protection), or holds for an instant and then repeatedly drifts back on its own. Requires the KillEngineKernel driver to be loaded (Settings > Kernel driver > Test driver) — the button stays hidden otherwise. Careful: if the value keeps reverting every frame even after a successful kernel write, it's probably not a protection but an animated counter recomputed continuously — see \"Disassemble backward\" instead of retrying in a loop.",
-      "cost": "Requires the kernel driver installed and loaded (see Settings). One address at a time, never bulk. Bypasses legitimate system protections — irreversible action without reading the original value first.",
-      "example": "A normal write to a game's XP holds for a moment then always reverts to the old value. \"Write via kernel\" succeeds where the usermode write failed — confirming the target specifically watched/protected the WriteProcessMemory API."
+      "what": "Writes the value through the KillEngineKernel driver (KeStackAttachProcess on the driver side, not usermode WriteProcessMemory) instead of a normal write. This is an access-path escalation: it proves KillEngine can read/write from ring 0 when the driver is loaded.",
+      "when": "Use it after a scan has been reduced to a small candidate set, especially when a normal write fails or when you want to verify that the kernel path works. Requires the KillEngineKernel driver to be loaded (Settings > Kernel driver > Test driver) — the button stays hidden otherwise. If the value still reverts after a successful kernel write, the important lesson is that the address is probably not the source of truth: run \"Find what writes\", then \"Test automatically\".",
+      "cost": "Requires the kernel driver installed and loaded (see Settings). One address at a time, never bulk. Read the address before and after writing so the proof is clear.",
+      "example": "Solitaire score: scan 175, next scan 185, two candidates. Kernel-read both addresses, kernel-write 1337 to the right one, kernel-read again, then confirm visually in the game. If one address reverts immediately, it is probably a copy or a recomputed value."
     },
     "pointerChains": {
       "title": "Pointer chains",

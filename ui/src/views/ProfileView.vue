@@ -330,9 +330,7 @@ async function writeProfileTarget(target: ProfileTargetEntry) {
       return
     }
 
-    const write = await backend
-      .getController()
-      .writeMemoryValue(String(resolved.address ?? ''), target.type, value)
+    const write = await store.writeMemoryValueByMode(String(resolved.address ?? ''), target.type, value)
     if (write.success) {
       statusMessage.value = `✓ "${target.name}" écrit à ${value} sur 0x${resolved.address}.`
       await store.refreshSmartSearchContext()

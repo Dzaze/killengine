@@ -79,18 +79,14 @@ function startHexEdit() {
 
 async function applyHexEdit() {
   if (!store.memoryPreviewAddress || !hexEditValue.value.trim()) return
-  if (!await store.confirmRiskAction('write', 'Edition hex', 'Ecriture de bytes bruts a 0x' + store.memoryPreviewAddress + '.')) {
+  const risk = store.kernelMemoryModeActive ? 'injection' : 'write'
+  if (!await store.confirmRiskAction(risk, 'Edition hex', 'Ecriture de bytes bruts a 0x' + store.memoryPreviewAddress + (store.kernelMemoryModeActive ? ' via driver kernel.' : '.'))) {
     return
   }
   hexEditBusy.value = true
   hexEditResult.value = null
   try {
-    const controller = backend.getController()
-    if (!controller.writeMemoryHex) {
-      hexEditResult.value = { success: false, error: 'writeMemoryHex non disponible dans ce backend.' }
-      return
-    }
-    const result = await controller.writeMemoryHex(store.memoryPreviewAddress, hexEditValue.value)
+    const result = await store.writeMemoryHexByMode(store.memoryPreviewAddress, hexEditValue.value)
     hexEditResult.value = result
     if (result.success) {
       lastWrittenHex.value = String(result.previousHex ?? '')
@@ -158,7 +154,8 @@ function startRowEdit(row: { address: string; bytes: string[] }) {
 async function applyRowEdit() {
   if (!hexViewerRowEditAddress.value || !hexViewerRowEditValue.value.trim()) return
   const address = hexViewerRowEditAddress.value
-  if (!await store.confirmRiskAction('write', 'Edition hex', 'Ecriture de bytes bruts a 0x' + address + '.')) {
+  const risk = store.kernelMemoryModeActive ? 'injection' : 'write'
+  if (!await store.confirmRiskAction(risk, 'Edition hex', 'Ecriture de bytes bruts a 0x' + address + (store.kernelMemoryModeActive ? ' via driver kernel.' : '.'))) {
     return
   }
   hexViewerRowBusy.value = true

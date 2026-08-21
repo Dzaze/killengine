@@ -2,7 +2,7 @@
 > Un ordre prioritaire explicite du propriétaire du projet prime sur les consignes temporaires de session des agents IA.
 # KillEngineClrInspector — Spécification et statut du MVP ClrMD
 
-**Statut au 20/08/2026 : ClrMD MVP — fonctionnel et validé. Intégration UI et enrichissements différés.** Build + suite de 9 auto-tests bout-en-bout entièrement verte, incluant une passe de consolidation dédiée (cycles GC multiples, objets multiples du même type, collecte réelle, kill abrupt du process cible, redémarrage avec un nouveau PID). Ce document décrit l'architecture du helper, ce qui est couvert, ce qui ne l'est pas encore, et les prochaines étapes pour l'enrichissement UI/fonctionnel du candidat #8.
+**Statut au 21/08/2026 : ClrMD MVP fonctionnel, intégration UI KillEngine livrée, déballage borné des collections livré.** Build + suite de 9 auto-tests bout-en-bout entièrement verte, incluant une passe de consolidation dédiée (cycles GC multiples, objets multiples du même type, collecte réelle, kill abrupt du process cible, redémarrage avec un nouveau PID) et une validation du déballage `List<T>`/tableau/`Dictionary<K,V>` sur le graphe `Inventory`. Ce document décrit l'architecture du helper, ce qui est couvert, ce qui ne l'est pas encore, et les prochaines étapes pour l'enrichissement du candidat #8.
 
 ## Pourquoi ce chantier
 
@@ -10,13 +10,13 @@ Suite à `docs/KILLENGINE_CLR_TEST_TARGET_SPEC.md` (cible de test CLR dédiée),
 
 > "Puisque nous avons maintenant une cible .NET déterministe et automatisable, je préfère profiter de cette base pour aller jusqu'à un MVP ClrMD fonctionnel plutôt que laisser le chantier en attente."
 
-Le MVP devait démontrer la chaîne complète **KillEngine → helper ClrMD → processus .NET cible → heap/types/champs/roots → résultat exploitable → test après GC**, avec une API/pipe propre, sans construire de panneau UI ni les fonctions avancées à ce stade.
+Le MVP initial devait démontrer la chaîne complète **KillEngine → helper ClrMD → processus .NET cible → heap/types/champs/roots → résultat exploitable → test après GC**, avec une API/pipe propre. Depuis le 21/08/2026, KillEngine expose aussi cette capacité dans l'UI et déroule les collections courantes à profondeur bornée.
 
 ## Architecture
 
 ```
 KillEngine.exe (C++/Qt, natif)
-      │  (futur : pas encore câblé dans ce MVP)
+      │  ApplicationController + QLocalSocket JSON-RPC (UI CLR)
       ▼
 KillEngineClrInspector.exe (helper .NET, tools/clr_inspector/)
       │  Microsoft.Diagnostics.Runtime (ClrMD) — DataTarget.AttachToProcess
@@ -49,7 +49,7 @@ Plutôt que de deviner l'API depuis la mémoire d'entraînement (risque réel : 
 | `detach` | — | Libère la session courante |
 | `flushCachedData` | — | `ClrRuntime.FlushCachedData()` — à appeler après un GC déclenché en dehors de cette session, avant de rejouer un heap walk, pour invalider le cache interne de segments/heap de ClrMD |
 | `findObjectsByType` | `[typeSubstring?]` (défaut `"KillEngine.ClrTestTarget"`) | `heap.EnumerateObjects()` filtré par sous-chaîne de nom de type, retourne adresse/type/taille |
-| `readObject` | `[addressHex]` | `heap.GetObject(address)` puis lecture générique de tous les champs déclarés du type : primitifs par valeur, `string` via `ReadStringField`, références d'objet (classes/tableaux) par adresse+type (pas de récursion profonde — gère nativement les cycles comme `Player.Self` sans boucle infinie) |
+| `readObject` | `[addressHex]` | `heap.GetObject(address)` puis lecture générique de tous les champs déclarés du type : primitifs par valeur, `string` via `ReadStringField`, références d'objet par adresse+type, et déballage borné (`MaxCollectionItems=32`) des collections courantes (`List<T>`, tableaux, `Dictionary<K,V>`). Pas de récursion profonde — gère nativement les cycles comme `Player.Self` sans boucle infinie |
 | `enumerateRoots` | `[typeSubstring?]` | `heap.EnumerateRoots()` filtré par le type de l'objet racine, retourne l'adresse du root, son `RootKind` (`StaticVar`/`StrongHandle`/`Stack`/...), et l'objet pointé |
 | `shutdown` | — | Arrêt propre |
 
@@ -73,7 +73,7 @@ Plutôt que de deviner l'API depuis la mémoire d'entraînement (risque réel : 
 *Suite initiale (MVP) :*
 - `Ping_TestTarget_ReturnsPong` / `Ping_Inspector_ReturnsPong` — smoke tests.
 - `Attach_ToNonClrProcess_ReturnsClearError` — attache sur un process natif volontaire (`ping.exe`) → erreur explicite (`"Aucun CLR détecté..."`), pas de crash. Miroir direct du cas Solitaire (`docs/STRATEGY_ROOM.md`) : régression garde-fou pour ne jamais supposer un CLR présent sans vérifier.
-- `FullMvpWorkflow_FindsSameLogicalObjectAfterCompactingGc` — reproduit programmatiquement toute la séquence manuelle ci-dessus (attach → find → read → roots → mutate+identité → forceGC → flush → re-find → re-read → cross-check identité), avec des assertions à chaque étape.
+- `FullMvpWorkflow_FindsSameLogicalObjectAfterCompactingGc` — reproduit programmatiquement toute la séquence manuelle ci-dessus (attach → find → read → roots → mutate+identité → forceGC → flush → re-find → re-read → cross-check identité), avec des assertions à chaque étape. Depuis le 21/08/2026, ce test valide aussi le déballage de `Inventory.Items` (`List<Item>`), `Inventory.QuickSlots` (`Item?[]`) et `Inventory.Currencies` (`Dictionary<string,int>`).
 
 *Suite de consolidation (20/08/2026, demandée explicitement avant tout commit) :*
 - `MultipleGcCycles_SameObjectSurvivesEachCycleWithConsistentIdentity` — 3 cycles successifs mutate→forceGC→flush→re-find→re-read, avec une sentinelle et une vérification d'identité différentes à chaque cycle. Garde-fou contre une régression qui ne se manifesterait qu'au 2ᵉ/3ᵉ cycle (état de cache mal invalidé, par exemple), pas couverte par un test à un seul GC.
@@ -90,10 +90,15 @@ Toute la suite tourne dans une seule collection xUnit (`ClrInspectorEndToEnd`, `
 
 **Le root `StaticVar` (`TestRoot.RootPlayer`, champ static) n'apparaît pas dans `heap.EnumerateRoots()` en attache passive live** — seul le root `StrongHandle` (`GCHandle` explicite) et des roots `Stack` transitoires (variables locales du thread de churn en cours d'exécution) ont été observés. Hypothèse la plus probable : l'énumération complète des racines statiques sur un process **vivant et non suspendu** est un best-effort côté DAC, potentiellement moins fiable qu'une attache invasive (`suspend:true`) ou qu'une analyse de dump figé. Le critère demandé ("retrouver au moins une GC root") est rempli par le root `StrongHandle`, qui utilise un mécanisme de root réellement différent — donc pas bloquant pour ce MVP — mais à investiguer avant de considérer la couverture des roots comme complète pour l'enrichissement futur (piste : tester `suspend:true` sur `AttachToProcess`, ou `DataTargetOptions.ForceCompleteRuntimeEnumeration`).
 
-## Hors scope de ce MVP, volontairement
+## Intégration UI livrée le 21/08/2026
 
-- **Panneau UI KillEngine** — rien dans `ApplicationController`/`ui/` ne consomme ce helper. Intégration future : lancer le sous-processus depuis `ApplicationController` (même patron que `requestWindowsDefenderExclusion` qui lance déjà `powershell.exe`), lui parler via `NamedPipeClientStream` côté C++ ou via `scripts/automation-pipe-call.ps1` en interne.
-- **Déballage profond des collections** (`List<T>`, `Dictionary<K,V>`, tableaux) — `readObject` retourne la référence de l'objet collection lui-même (adresse+type), pas ses éléments internes. Nécessiterait de décoder la structure interne de `List<T>`/`Dictionary<K,V>` (champs `_items`/`_size` etc., eux-mêmes des détails d'implémentation du BCL).
+- Backend natif : `ApplicationController` lance `KillEngineClrInspector.exe` au besoin, injecte un nom de pipe isolé par PID KillEngine (`KILLENGINE_CLR_INSPECTOR_PIPE_NAME`) et expose `getClrInspectorStatus`, `attachClrInspector`, `detachClrInspector`, `shutdownClrInspector`, `flushClrInspectorCache`, `findClrObjectsByType`, `readClrObject`, `enumerateClrRoots`.
+- Frontend : nouvelle vue `CLR` dans la navigation principale (`ui/src/views/ClrInspectorView.vue`), avec statut helper, attache CLR sur le process courant, filtre par sous-chaîne de type, liste d'objets, lecture d'adresse manuelle, champs de l'objet sélectionné, aperçu JSON des collections déroulées, roots GC.
+- Le helper reste optionnel : si `KillEngineClrInspector.exe` n'est pas construit ou livré, le panneau échoue avec un message clair sans casser KillEngine.
+
+## Hors scope restant, volontairement
+
+- **Déballage complet/arbitraire des collections** — le déballage livré est borné et pragmatique (`List<T>`, tableaux 1D, `Dictionary<K,V>`, 32 éléments max). Il ne prétend pas couvrir tous les types de collection BCL, les collections custom, les tableaux multidimensionnels, ni un graphe récursif profond.
 - **Écriture/mutation via ClrMD** — ce MVP est strictement lecture seule. Toute mutation de test passe par le pipe de contrôle de `KillEngineClrTestTarget` (`mutateField`), pas par ClrMD (qui n'est de toute façon pas conçu pour écrire dans un process vivant de façon fiable — ce n'est pas son cas d'usage).
 - **Publish self-contained réel** — le `.csproj` est configuré pour (`RuntimeIdentifiers=win-x64`), mais `dotnet publish -r win-x64` avec `SelfContained=true` n'a pas encore été exécuté/validé dans cette session (développement en framework-dependent pour l'itération rapide). À faire avant toute livraison à un utilisateur final.
 - **Génération de rapport / résolution de type imbriqué récursif profond, désassemblage de méthodes, GCRoot chain complet (chemin racine→objet, pas juste "un root existe")** — tout ce qui dépasse les 7 points explicitement demandés pour le MVP.

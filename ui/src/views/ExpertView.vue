@@ -1285,7 +1285,7 @@ async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) 
       return
     }
 
-    const preview = await backend.getController().readMemoryPreview(base.toString(16).toUpperCase(), 256)
+    const preview = await store.readMemoryPreviewByMode(base.toString(16).toUpperCase(), 256)
     if (!preview.success && !preview.partial) {
       structureProbeResult.value = { success: false, error: preview.error || 'Lecture structure impossible.' }
       return
@@ -1426,13 +1426,12 @@ function uiStringLiveState(candidate: UiStringCandidate) {
 }
 
 async function refreshUiStringLiveCandidate(candidate: UiStringCandidate) {
-  const controller = backend.getController()
   const key = uiStringKey(candidate)
   const previousState = uiStringLiveTexts.value[key]
   try {
     const minBytes = Math.max(1, Number(candidate.byteLength ?? 0))
     const readSize = Math.min(96, Math.max(minBytes + 8, candidate.encoding === 'utf16' ? 64 : 32))
-    const preview = await controller.readMemoryPreview(candidate.address, readSize)
+    const preview = await store.readMemoryPreviewByMode(candidate.address, readSize)
     if (!preview.success && !preview.partial) {
       uiStringLiveTexts.value = {
         ...uiStringLiveTexts.value,
@@ -3788,14 +3787,14 @@ onMounted(() => {
             Utiliser sélection
           </button>
           <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0 || !store.writeValue.trim()" @click="writeSelectedCandidates()">
-            Écrire sur sélection
+            {{ store.kernelMemoryModeActive ? 'Écrire via kernel' : 'Écrire sur sélection' }}
           </button>
           <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length < 2 || !store.writeValue.trim()" @click="writeSelectedCandidatesAtomic()">
             Écrire ensemble (atomique)
           </button>
           <InfoDot topic="writeAtomic" align="right" />
           <button
-            v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess"
+            v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess && !store.kernelMemoryModeActive"
             class="btn btn-secondary compact"
             :title="`Contourne les protections mémoire usermode — pour une adresse qui refuse de tenir une écriture normale (ex: instabilité/compteur animé).`"
             :disabled="selectedCandidateAddresses.length !== 1 || !store.writeValue.trim()"
@@ -3818,6 +3817,13 @@ onMounted(() => {
           <span>{{ store.candidatePage.fileBacked ? 'Stockage fichier' : 'Stockage RAM' }}</span>
           <span>Fichier: {{ formatBytes(store.candidatePage.candidateStoreBytes) }}</span>
           <span>RAM estimée: {{ formatBytes(store.candidatePage.candidateStoreMemoryBytes) }}</span>
+        </div>
+        <div
+          v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess"
+          class="kernel-escalation-guide"
+        >
+          <strong>Kernel prêt</strong>
+          <span>Sélectionne 1 candidat, lis/écris via kernel, puis relis. Si la valeur revient, ce n’est probablement pas un blocage d’écriture : lance Écrit par puis Tester automatiquement.</span>
         </div>
         <div v-if="store.candidatePage?.displaySuppressed" class="candidate-suppressed">
           {{ formatNumber(store.candidatePage.totalCount) }} candidats trouvés. Réduis avec un next scan ou filtre une adresse pour afficher une page.
@@ -5657,6 +5663,24 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.kernel-escalation-guide {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary));
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.kernel-escalation-guide strong {
+  color: var(--text-primary);
+}
+
 .stable-group-hint {
   margin-bottom: 8px;
   padding: 10px 12px;
@@ -6032,6 +6056,7 @@ onMounted(() => {
   .code-patch-controls,
   .code-patch-profile-controls,
   .aob-row,
+  .kernel-escalation-guide,
   .pointer-chain-controls {
     grid-template-columns: 1fr;
   }

@@ -31,6 +31,7 @@
 #include <optional>
 
 class QLabel;
+class QProcess;
 class QWidget;
 
 namespace killengine {
@@ -465,6 +466,17 @@ public:
     /// toujours un choix explicite de l'utilisateur, jamais automatique.
     Q_INVOKABLE QVariantMap requestWindowsDefenderExclusion();
 
+    /// Inspecteur CLR/ClrMD externe (lecture seule) : lance le helper .NET si
+    /// necessaire puis dialogue avec lui via JSON-RPC sur named pipe.
+    Q_INVOKABLE QVariantMap getClrInspectorStatus() const;
+    Q_INVOKABLE QVariantMap attachClrInspector();
+    Q_INVOKABLE QVariantMap detachClrInspector();
+    Q_INVOKABLE QVariantMap shutdownClrInspector();
+    Q_INVOKABLE QVariantMap flushClrInspectorCache();
+    Q_INVOKABLE QVariantMap findClrObjectsByType(const QString& typeSubstring);
+    Q_INVOKABLE QVariantMap readClrObject(const QString& addressHex);
+    Q_INVOKABLE QVariantMap enumerateClrRoots(const QString& typeSubstring);
+
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
     Q_INVOKABLE QVariantMap probeKernelDriver() const;
 
@@ -715,6 +727,10 @@ private:
     QString scanTelemetryFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;
     void appendScanTelemetry(const QString& event, const QVariantMap& payload) const;
+    QString clrInspectorPipeName() const;
+    QString findClrInspectorExecutable() const;
+    bool ensureClrInspectorStarted(QString* error = nullptr);
+    QVariantMap callClrInspectorRpc(const QString& method, const QVariantList& params, int timeoutMs = 5000);
 
     struct WriteRecord {
         uint64_t   address{0};
@@ -820,6 +836,8 @@ private:
     // avec attach debugger (celle-ci ne fait que lire/ecrire de la memoire).
     bool                     m_candidateFieldTestInProgress{false};
     std::shared_ptr<killcore::CancellationToken> m_activeCandidateFieldTestCancellation;
+    std::unique_ptr<QProcess>    m_clrInspectorProcess;
+    int                          m_clrInspectorRequestId{1};
     killai::AIEngine         m_ai;
     bool                     m_smartSearchActive{false};
     QString                  m_smartSearchInitialValue;

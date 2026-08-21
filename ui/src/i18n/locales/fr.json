@@ -137,6 +137,13 @@
         "what": "Transformer ce qui marche en signature de code, en patch, puis en feature Trainer réutilisable."
       }
     },
+    "processKernelAccess": {
+      "title": "Mode d'accès mémoire",
+      "what": "Choisit le chemin de lecture/écriture interactif après l'attache : Standard utilise les API usermode classiques ; Kernel route les aperçus mémoire, le visualiseur hex et les écritures simples via KillEngineKernel quand le driver est prêt.",
+      "when": "Tu n'as pas besoin du kernel pour ouvrir un processus, lister ses modules ou faire les premiers scans massifs. Choisis Kernel quand tu veux travailler ensuite en ring 0 sur les adresses trouvées, ou quand une écriture standard échoue ou ne tient pas.",
+      "cost": "Le driver doit déjà être chargé et annoncer Accès mémoire kernel. Les scans massifs restent encore sur le moteur de lecture standard jusqu'à abstraction complète du reader ; le mode Kernel s'applique aux lectures/écritures interactives et vérifiables.",
+      "example": "Solitaire : attache le process en mode Kernel, scanne 175 puis 185, puis relis les deux candidats et écris 1337 sur la bonne adresse. Si une valeur revient malgré le kernel, cherche la source avec Écrit par."
+    },
     "regionContext": {
       "title": "Région active",
       "what": "Détaille la région mémoire de l'adresse sélectionnée : bornes, protection, état et type.",
@@ -237,10 +244,10 @@
     },
     "writeKernel": {
       "title": "Écrire via kernel",
-      "what": "Écrit la valeur via le driver noyau KillEngineKernel (KeStackAttachProcess côté driver, pas WriteProcessMemory usermode) au lieu de l'écriture normale. Contourne les protections mémoire usermode (VirtualProtect, PAGE_GUARD, certains anti-cheat basiques qui ne surveillent que l'API usermode).",
-      "when": "Une écriture normale échoue explicitement (protection mémoire), ou tient un instant puis repart toute seule de façon répétée. Nécessite que le driver KillEngineKernel soit chargé (Paramètres > Driver kernel > Tester le driver) — le bouton reste masqué sinon. Attention : si la valeur revient systématiquement à chaque frame même après une écriture kernel réussie, ce n'est probablement pas une protection mais un compteur animé recalculé en continu — voir \"Désassembler en amont\" plutôt que de réessayer en boucle.",
-      "cost": "Nécessite le driver kernel installé et chargé (voir Paramètres). Une seule adresse à la fois, jamais de bulk. Contourne des protections légitimes du système — action irréversible sans lecture préalable de la valeur d'origine.",
-      "example": "Une écriture normale sur l'XP d'un jeu tient un instant puis revient toujours à l'ancienne valeur. \"Écrire via kernel\" réussit là où l'écriture usermode échouait — confirmant que la cible surveillait/protégeait spécifiquement l'API WriteProcessMemory."
+      "what": "Écrit la valeur via le driver noyau KillEngineKernel (KeStackAttachProcess côté driver, pas WriteProcessMemory usermode) au lieu de l'écriture normale. C'est une escalade de chemin d'accès : elle sert à prouver que KillEngine peut lire/écrire depuis le ring 0 quand le driver est chargé.",
+      "when": "À utiliser après un scan réduit à peu de candidats, surtout si une écriture normale échoue ou si tu veux vérifier que le chemin kernel fonctionne. Nécessite que le driver KillEngineKernel soit chargé (Paramètres > Driver kernel > Tester le driver) — le bouton reste masqué sinon. Si la valeur revient systématiquement même après une écriture kernel réussie, la leçon importante est que l'adresse écrite n'est probablement pas la source de vérité : lance \"Écrit par\", puis \"Tester automatiquement\".",
+      "cost": "Nécessite le driver kernel installé et chargé (voir Paramètres). Une seule adresse à la fois, jamais de bulk. Lis l'adresse avant et après pour garder une preuve claire de ce qui a vraiment changé.",
+      "example": "Score Solitaire : scan 175, next scan 185, deux candidats. Lecture kernel des deux adresses, écriture kernel de 1337 sur la bonne adresse, relecture kernel et confirmation visuelle dans le jeu. Si une adresse revient aussitôt, elle est probablement une copie ou une valeur recalculée."
     },
     "pointerChains": {
       "title": "Pointer chains",

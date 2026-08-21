@@ -138,6 +138,29 @@ public sealed class EndToEndTests
         Assert.Equal("KillEngine.ClrTestTarget.Inventory", fieldsBefore["Inventory"]!["typeName"]!.GetValue<string>());
         Assert.Equal(addressBefore, fieldsBefore["Self"]!["address"]!.GetValue<string>());
 
+        string inventoryAddress = fieldsBefore["Inventory"]!["address"]!.GetValue<string>();
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var inventoryFields = inventoryObj!["fields"]!;
+        var itemsCollection = Field(inventoryFields, "Items")!["collection"]!;
+        Assert.Equal("list", itemsCollection["kind"]!.GetValue<string>());
+        Assert.Equal(3, itemsCollection["count"]!.GetValue<int>());
+        var firstItemRef = itemsCollection["items"]![0]!;
+        Assert.Equal("KillEngine.ClrTestTarget.Item", firstItemRef["typeName"]!.GetValue<string>());
+        string firstItemAddress = firstItemRef["address"]!.GetValue<string>();
+        var firstItemObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(firstItemAddress)));
+        Assert.Equal("Sword", firstItemObj!["fields"]!["Name"]!.GetValue<string>());
+
+        var quickSlots = Field(inventoryFields, "QuickSlots")!["collection"]!;
+        Assert.Equal("array", quickSlots["kind"]!.GetValue<string>());
+        Assert.Equal(4, quickSlots["count"]!.GetValue<int>());
+        Assert.Equal("KillEngine.ClrTestTarget.Item", quickSlots["items"]![1]!["typeName"]!.GetValue<string>());
+
+        var currencies = Field(inventoryFields, "Currencies")!["collection"]!;
+        Assert.Equal("dictionary", currencies["kind"]!.GetValue<string>());
+        Assert.Equal(2, currencies["count"]!.GetValue<int>());
+        Assert.Contains(currencies["entries"]!.AsArray(), entry =>
+            entry!["key"]!.GetValue<string>() == "gold" && entry["value"]!.GetValue<int>() == 4125);
+
         // 4) Au moins une GC root retrouvee parmi nos types connus.
         var roots = await PipeClient.CallAsync(
             InspectorPipe, "enumerateRoots", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget")));
@@ -399,5 +422,16 @@ public sealed class EndToEndTests
         var found = await PipeClient.CallAsync(
             isolatedInspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
         Assert.Single(found!.AsArray());
+    }
+
+    private static JsonNode? Field(JsonNode fields, string publicName)
+    {
+        var obj = fields.AsObject();
+        if (obj.TryGetPropertyValue(publicName, out JsonNode? direct))
+        {
+            return direct;
+        }
+        string backingName = $"<{publicName}>k__BackingField";
+        return obj.TryGetPropertyValue(backingName, out JsonNode? backing) ? backing : null;
     }
 }

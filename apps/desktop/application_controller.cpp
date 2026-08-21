@@ -50,6 +50,7 @@
 #include <QLabel>
 #include <QMetaObject>
 #include <QPointer>
+#include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QVBoxLayout>
@@ -1549,6 +1550,16 @@ ApplicationController::ApplicationController(QObject* parent)
 }
 
 ApplicationController::~ApplicationController() {
+    if (m_clrInspectorProcess && m_clrInspectorProcess->state() != QProcess::NotRunning) {
+        callClrInspectorRpc(QStringLiteral("shutdown"), {}, 1000);
+        if (m_clrInspectorProcess->state() != QProcess::NotRunning) {
+            m_clrInspectorProcess->terminate();
+            if (!m_clrInspectorProcess->waitForFinished(1000)) {
+                m_clrInspectorProcess->kill();
+                m_clrInspectorProcess->waitForFinished(1000);
+            }
+        }
+    }
     if (m_breakpointFreeze) {
         m_breakpointFreeze->stop();
     }
@@ -1724,6 +1735,7 @@ void ApplicationController::detachProcess() {
     if (m_breakpointFreeze) {
         m_breakpointFreeze->stop();
     }
+    detachClrInspector();
     resetHardwareBreakpointStateForPreviousTarget();
 
     m_handle.close();
@@ -11602,6 +11614,278 @@ QVariantMap ApplicationController::requestWindowsDefenderExclusion() {
 #endif
 
     return result;
+}
+
+QString ApplicationController::clrInspectorPipeName() const {
+    return QStringLiteral("KillEngineClrInspectorPipe_%1").arg(QCoreApplication::applicationPid());
+}
+
+QString ApplicationController::findClrInspectorExecutable() const {
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.filePath("KillEngineClrInspector.exe"),
+        appDir.filePath("tools/clr_inspector/KillEngineClrInspector.exe"),
+        appDir.filePath("../../tools/clr_inspector/KillEngineClrInspector/bin/Release/net8.0/KillEngineClrInspector.exe"),
+        appDir.filePath("../../tools/clr_inspector/KillEngineClrInspector/bin/Debug/net8.0/KillEngineClrInspector.exe"),
+        QDir::current().filePath("tools/clr_inspector/KillEngineClrInspector/bin/Release/net8.0/KillEngineClrInspector.exe"),
+        QDir::current().filePath("tools/clr_inspector/KillEngineClrInspector/bin/Debug/net8.0/KillEngineClrInspector.exe"),
+    };
+    for (const auto& candidate : candidates) {
+        const QFileInfo file(candidate);
+        if (file.exists() && file.isFile()) {
+            return file.absoluteFilePath();
+        }
+    }
+    return {};
+}
+
+bool ApplicationController::ensureClrInspectorStarted(QString* error) {
+    if (m_clrInspectorProcess && m_clrInspectorProcess->state() != QProcess::NotRunning) {
+        return true;
+    }
+
+    const QString executable = findClrInspectorExecutable();
+    if (executable.isEmpty()) {
+        if (error) {
+            *error = QStringLiteral(
+                "KillEngineClrInspector.exe introuvable. Construis le helper avec "
+                "scripts/build-clr-inspector.ps1 -Configuration Release avant d'utiliser l'inspecteur CLR.");
+        }
+        return false;
+    }
+
+    m_clrInspectorProcess = std::make_unique<QProcess>();
+    m_clrInspectorProcess->setProgram(executable);
+    m_clrInspectorProcess->setWorkingDirectory(QFileInfo(executable).absolutePath());
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("KILLENGINE_CLR_INSPECTOR_PIPE_NAME"), clrInspectorPipeName());
+    m_clrInspectorProcess->setProcessEnvironment(env);
+    m_clrInspectorProcess->start();
+    if (!m_clrInspectorProcess->waitForStarted(3000)) {
+        if (error) {
+            *error = QStringLiteral("Impossible de demarrer KillEngineClrInspector.exe : %1")
+                .arg(m_clrInspectorProcess->errorString());
+        }
+        m_clrInspectorProcess.reset();
+        return false;
+    }
+
+    KE_LOG_INFO() << "ClrInspector: started helper " << executable.toStdString()
+                  << " pipe=" << clrInspectorPipeName().toStdString();
+    return true;
+}
+
+QVariantMap ApplicationController::callClrInspectorRpc(const QString& method, const QVariantList& params, int timeoutMs) {
+    QVariantMap result;
+    result["success"] = false;
+    result["method"] = method;
+
+    QString startError;
+    if (!ensureClrInspectorStarted(&startError)) {
+        result["error"] = startError;
+        return result;
+    }
+
+    QJsonObject request;
+    request["id"] = m_clrInspectorRequestId++;
+    request["method"] = method;
+    request["params"] = QJsonArray::fromVariantList(params);
+    QByteArray requestBytes = QJsonDocument(request).toJson(QJsonDocument::Compact);
+    requestBytes.append('\n');
+
+    QByteArray responseLine;
+
+#ifdef Q_OS_WIN
+    const QString pipePath = QStringLiteral("\\\\.\\pipe\\%1").arg(clrInspectorPipeName());
+    const std::wstring pipePathW = pipePath.toStdWString();
+    QElapsedTimer connectTimer;
+    connectTimer.start();
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    while (connectTimer.elapsed() < timeoutMs) {
+        pipe = CreateFileW(
+            pipePathW.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
+            nullptr);
+        if (pipe != INVALID_HANDLE_VALUE) {
+            break;
+        }
+        const DWORD err = GetLastError();
+        if (err != ERROR_PIPE_BUSY && err != ERROR_FILE_NOT_FOUND) {
+            result["error"] = QStringLiteral("Ouverture du pipe ClrMD echouee (error=%1).").arg(err);
+            return result;
+        }
+        const int remainingMs = timeoutMs - static_cast<int>(connectTimer.elapsed());
+        if (remainingMs <= 0) {
+            break;
+        }
+        WaitNamedPipeW(pipePathW.c_str(), static_cast<DWORD>(std::min(250, remainingMs)));
+    }
+
+    if (pipe == INVALID_HANDLE_VALUE) {
+        result["error"] = QStringLiteral("Pipe ClrMD indisponible : timeout sur %1").arg(pipePath);
+        return result;
+    }
+
+    DWORD written = 0;
+    if (!WriteFile(pipe, requestBytes.constData(), static_cast<DWORD>(requestBytes.size()), &written, nullptr)
+        || written != static_cast<DWORD>(requestBytes.size())) {
+        const DWORD err = GetLastError();
+        CloseHandle(pipe);
+        result["error"] = QStringLiteral("Ecriture vers le pipe ClrMD echouee (error=%1).").arg(err);
+        return result;
+    }
+
+    char buffer[512];
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
+        DWORD bytesRead = 0;
+        if (ReadFile(pipe, buffer, sizeof(buffer), &bytesRead, nullptr)) {
+            responseLine.append(buffer, static_cast<qsizetype>(bytesRead));
+            const qsizetype newline = responseLine.indexOf('\n');
+            if (newline >= 0) {
+                responseLine = responseLine.left(newline).trimmed();
+                break;
+            }
+            if (bytesRead == 0) {
+                break;
+            }
+            continue;
+        }
+        const DWORD err = GetLastError();
+        if (err == ERROR_MORE_DATA) {
+            responseLine.append(buffer, static_cast<qsizetype>(bytesRead));
+            continue;
+        }
+        if (err == ERROR_BROKEN_PIPE) {
+            break;
+        }
+        CloseHandle(pipe);
+        result["error"] = QStringLiteral("Lecture du pipe ClrMD echouee (error=%1).").arg(err);
+        return result;
+    }
+    CloseHandle(pipe);
+#else
+    result["error"] = QStringLiteral("Inspecteur CLR disponible uniquement sur Windows pour l'instant.");
+    return result;
+#endif
+
+    if (responseLine.contains('\n')) {
+        responseLine = responseLine.left(responseLine.indexOf('\n')).trimmed();
+    } else {
+        responseLine = responseLine.trimmed();
+    }
+
+    if (responseLine.isEmpty()) {
+        result["error"] = QStringLiteral("Pas de reponse du helper ClrMD.");
+        return result;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument responseDoc = QJsonDocument::fromJson(responseLine, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject()) {
+        result["error"] = QStringLiteral("Reponse ClrMD JSON invalide : %1").arg(parseError.errorString());
+        result["raw"] = QString::fromUtf8(responseLine);
+        return result;
+    }
+
+    const QJsonObject response = responseDoc.object();
+    if (response.contains("error")) {
+        result["error"] = response.value("error").toString();
+        return result;
+    }
+
+    result["success"] = true;
+    result["result"] = response.value("result").toVariant();
+    return result;
+}
+
+QVariantMap ApplicationController::getClrInspectorStatus() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["available"] = !findClrInspectorExecutable().isEmpty();
+    result["helperPath"] = findClrInspectorExecutable();
+    result["pipeName"] = clrInspectorPipeName();
+    result["running"] = m_clrInspectorProcess && m_clrInspectorProcess->state() != QProcess::NotRunning;
+    result["attachedProcess"] = m_attached;
+    result["pid"] = m_pid;
+    result["processName"] = m_processName;
+    return result;
+}
+
+QVariantMap ApplicationController::attachClrInspector() {
+    if (!m_attached || m_pid <= 0) {
+        return {{"success", false}, {"error", QStringLiteral("Aucun processus attache.")}};
+    }
+    QVariantMap response = callClrInspectorRpc(QStringLiteral("attach"), {m_pid}, 10000);
+    appendScanTelemetry(QStringLiteral("clr_inspector_attach"), {
+        {"success", response.value("success").toBool()},
+        {"pid", m_pid},
+        {"processName", m_processName},
+        {"error", response.value("error").toString()},
+    });
+    return response;
+}
+
+QVariantMap ApplicationController::detachClrInspector() {
+    if (!m_clrInspectorProcess || m_clrInspectorProcess->state() == QProcess::NotRunning) {
+        return {{"success", true}, {"result", QStringLiteral("not running")}};
+    }
+    QVariantMap response = callClrInspectorRpc(QStringLiteral("detach"), {}, 3000);
+    appendScanTelemetry(QStringLiteral("clr_inspector_detach"), {
+        {"success", response.value("success").toBool()},
+        {"error", response.value("error").toString()},
+    });
+    return response;
+}
+
+QVariantMap ApplicationController::shutdownClrInspector() {
+    if (!m_clrInspectorProcess || m_clrInspectorProcess->state() == QProcess::NotRunning) {
+        m_clrInspectorProcess.reset();
+        return {{"success", true}, {"result", QStringLiteral("not running")}};
+    }
+    QVariantMap response = callClrInspectorRpc(QStringLiteral("shutdown"), {}, 2000);
+    if (m_clrInspectorProcess && m_clrInspectorProcess->state() != QProcess::NotRunning) {
+        m_clrInspectorProcess->waitForFinished(1000);
+        if (m_clrInspectorProcess->state() != QProcess::NotRunning) {
+            m_clrInspectorProcess->terminate();
+            m_clrInspectorProcess->waitForFinished(1000);
+        }
+    }
+    m_clrInspectorProcess.reset();
+    return response;
+}
+
+QVariantMap ApplicationController::flushClrInspectorCache() {
+    return callClrInspectorRpc(QStringLiteral("flushCachedData"), {}, 5000);
+}
+
+QVariantMap ApplicationController::findClrObjectsByType(const QString& typeSubstring) {
+    const QString filter = typeSubstring.trimmed().isEmpty()
+        ? QStringLiteral("KillEngine.ClrTestTarget")
+        : typeSubstring.trimmed();
+    return callClrInspectorRpc(QStringLiteral("findObjectsByType"), {filter}, 15000);
+}
+
+QVariantMap ApplicationController::readClrObject(const QString& addressHex) {
+    const QString address = addressHex.trimmed();
+    if (address.isEmpty()) {
+        return {{"success", false}, {"error", QStringLiteral("Adresse objet CLR manquante.")}};
+    }
+    return callClrInspectorRpc(QStringLiteral("readObject"), {address}, 10000);
+}
+
+QVariantMap ApplicationController::enumerateClrRoots(const QString& typeSubstring) {
+    const QString filter = typeSubstring.trimmed();
+    QVariantList params;
+    if (!filter.isEmpty()) {
+        params.append(filter);
+    }
+    return callClrInspectorRpc(QStringLiteral("enumerateRoots"), params, 15000);
 }
 
 QVariantMap ApplicationController::probeKernelDriver() const {

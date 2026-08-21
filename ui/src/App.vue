@@ -3,6 +3,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import AssistantView from '@/views/AssistantView.vue'
+import ClrInspectorView from '@/views/ClrInspectorView.vue'
 import ExpertView from '@/views/ExpertView.vue'
 import InvestigationView from '@/views/InvestigationView.vue'
 import MemoryView from '@/views/MemoryView.vue'
@@ -18,6 +19,7 @@ const currentView = computed(() => {
   if (store.activeView === 'process') return ProcessView
   if (store.activeView === 'investigation') return InvestigationView
   if (store.activeView === 'memory') return MemoryView
+  if (store.activeView === 'clr') return ClrInspectorView
   if (store.activeView === 'profiles') return ProfileView
   if (store.activeView === 'trainer') return TrainerView
   if (store.activeView === 'expert') return ExpertView
@@ -74,6 +76,13 @@ watch(
           @click="store.activeView = 'memory'"
         >
           {{ $t('nav.memory') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'clr' }"
+          @click="store.activeView = 'clr'"
+        >
+          CLR
         </button>
         <button
           class="nav-item"

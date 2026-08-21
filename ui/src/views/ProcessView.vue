@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import InfoDot from '@/components/expert/InfoDot.vue'
 import type { ProcessInfo } from '@/services/backend'
 
 const store = useAppStore()
@@ -9,6 +10,13 @@ const selectedPid = ref<number | null>(null)
 const windowOnly = ref(false)
 
 const filteredProcesses = ref<ProcessInfo[]>([])
+const selectedProcess = computed(() => store.processes.find((p) => p.pid === selectedPid.value) ?? null)
+const kernelStatusText = computed(() => {
+  if (!store.kernelDriverStatus) return 'Non testé'
+  if (store.kernelMemoryReady) return 'Driver prêt'
+  if (store.kernelDriverStatus.status === 'connected') return 'Probe seul'
+  return 'Driver non chargé'
+})
 
 function updateFiltered() {
   filteredProcesses.value = store.processes.filter((p) => {
@@ -26,7 +34,7 @@ async function selectProcess(pid: number) {
 
 async function attach() {
   if (selectedPid.value !== null) {
-    await store.attach(selectedPid.value)
+    await store.attach(selectedPid.value, store.memoryAccessMode)
   }
 }
 
@@ -35,7 +43,7 @@ async function detach() {
 }
 
 onMounted(async () => {
-  await store.refreshProcesses()
+  await Promise.all([store.refreshProcesses(), store.refreshKernelDriverStatus()])
   updateFiltered()
 })
 </script>
@@ -103,7 +111,42 @@ onMounted(async () => {
 
     <!-- Attach button -->
     <div v-if="selectedPid !== null && !store.isAttached" class="attach-bar">
-      <span>Sélectionné: PID {{ selectedPid }}</span>
+      <div class="attach-summary">
+        <span>Sélectionné: {{ selectedProcess?.name ?? 'processus' }} · PID {{ selectedPid }}</span>
+        <small>Mode d'accès mémoire choisi avant attache.</small>
+      </div>
+      <div class="access-mode-panel">
+        <div class="access-mode-title">
+          <strong>Mode d'accès mémoire</strong>
+          <InfoDot topic="processKernelAccess" align="right" />
+        </div>
+        <div class="access-mode-options">
+          <button
+            class="mode-option"
+            :class="{ active: store.memoryAccessMode === 'standard' }"
+            type="button"
+            @click="store.setMemoryAccessMode('standard')"
+          >
+            <strong>Standard</strong>
+            <span>Lecture/écriture usermode</span>
+          </button>
+          <button
+            class="mode-option"
+            :class="{ active: store.memoryAccessMode === 'kernel' }"
+            type="button"
+            @click="store.setMemoryAccessMode('kernel')"
+          >
+            <strong>Kernel</strong>
+            <span>{{ kernelStatusText }}</span>
+          </button>
+        </div>
+        <p v-if="store.memoryAccessMode === 'kernel' && store.kernelMemoryReady" class="access-mode-hint ready">
+          Le process s'attache normalement ; les lectures/écritures interactives utiliseront le driver kernel.
+        </p>
+        <p v-else-if="store.memoryAccessMode === 'kernel'" class="access-mode-hint warning">
+          Tu peux attacher quand même, mais les lectures/écritures kernel refuseront tant que le driver n'est pas prêt.
+        </p>
+      </div>
       <button class="btn btn-primary" @click="attach">
         {{ $t('process.attach') }}
       </button>
@@ -270,14 +313,94 @@ onMounted(async () => {
 }
 
 .attach-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(320px, 1.4fr) auto;
   align-items: center;
-  justify-content: space-between;
+  gap: 14px;
   padding: 16px;
   background: var(--bg-tertiary);
   border: 1px solid var(--accent);
   border-radius: 8px;
   margin-top: 20px;
+}
+
+.attach-summary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.attach-summary span {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-summary small,
+.access-mode-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.access-mode-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.access-mode-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.access-mode-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mode-option {
+  display: grid;
+  gap: 2px;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mode-option.active {
+  border-color: var(--accent);
+  background: rgba(122, 162, 247, 0.1);
+}
+
+.mode-option strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.mode-option span {
+  font-size: 11px;
+}
+
+.access-mode-hint {
+  margin: 0;
+}
+
+.access-mode-hint.ready {
+  color: var(--success);
+}
+
+.access-mode-hint.warning {
+  color: var(--warning);
 }
 
 .module-panel {
@@ -362,5 +485,12 @@ onMounted(async () => {
 .btn-danger {
   background: var(--error);
   color: white;
+}
+
+@media (max-width: 900px) {
+  .attach-bar,
+  .access-mode-options {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

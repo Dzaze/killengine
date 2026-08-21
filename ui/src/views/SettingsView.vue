@@ -42,6 +42,19 @@ const kernelReadAddress = ref('')
 const kernelReadSize = ref(16)
 const kernelWriteAddress = ref('')
 const kernelWriteBytes = ref('')
+const kernelCapabilityLabel = computed(() => {
+  const status = store.kernelDriverStatus
+  if (!status) return 'Non testé'
+  if (status.capabilities.processMemoryAccess) return 'Lecture/écriture prêtes'
+  if (status.status === 'connected') return 'Probe seul'
+  return 'Indisponible'
+})
+const kernelLearningSteps = [
+  { label: '1. Vérifier', detail: 'Tester le driver et confirmer Accès mémoire kernel.' },
+  { label: '2. Lire', detail: 'Relire 4/8 octets avant d’écrire pour prouver la bonne adresse.' },
+  { label: '3. Écrire', detail: 'Écrire une seule adresse, puis relire immédiatement.' },
+  { label: '4. Interpréter', detail: 'Si ça revient, chercher la source avec Écrit par.' },
+]
 const selectedStructureTemplate = computed(() =>
   store.structureTemplates.find((template) => template.id === selectedStructureTemplateId.value) ?? null,
 )
@@ -807,6 +820,18 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         et l'écriture mémoire via le driver noyau sont disponibles (contourne les protections mémoire usermode
         normales — VirtualProtect/PAGE_GUARD — via un accès ring 0, pas juste un probe de santé).
       </p>
+      <div class="kernel-learning">
+        <div class="kernel-learning-head">
+          <strong>Parcours kernel</strong>
+          <span>{{ kernelCapabilityLabel }}</span>
+        </div>
+        <div class="kernel-learning-steps">
+          <div v-for="step in kernelLearningSteps" :key="step.label" class="kernel-learning-step">
+            <strong>{{ step.label }}</strong>
+            <span>{{ step.detail }}</span>
+          </div>
+        </div>
+      </div>
       <div class="panel-actions">
         <button
           class="btn btn-secondary compact"
@@ -873,7 +898,8 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <h3>Écriture mémoire (kernel)</h3>
         <p class="hint">
           Écrit directement depuis le ring 0, sans passer par les protections mémoire usermode normales — action à
-          risque équivalente à une injection, soumise à la même confirmation (mode Auto Trainer requis).
+          risque équivalente à une injection, soumise à la même confirmation. Pour apprendre proprement : lis l'adresse,
+          écris une valeur témoin, relis, puis vérifie l'effet dans la cible.
         </p>
         <div class="panel-actions">
           <input v-model="kernelWriteAddress" class="input" placeholder="Adresse hex, ex: 7FF6ABCD1000" />
@@ -1529,6 +1555,54 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
   overflow-y: auto;
 }
 
+.kernel-learning {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary));
+}
+
+.kernel-learning-head,
+.kernel-learning-step {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kernel-learning-head strong {
+  color: var(--text-primary);
+}
+
+.kernel-learning-head span,
+.kernel-learning-step span {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.kernel-learning-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.kernel-learning-step {
+  min-height: 72px;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.kernel-learning-step strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
 .log-viewer {
   max-height: 320px;
   overflow: auto;
@@ -1626,6 +1700,7 @@ code {
   .model-status-grid,
   .candidate-columns,
   .path-row,
+  .kernel-learning-steps,
   .settings-grid {
     grid-template-columns: 1fr;
   }

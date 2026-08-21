@@ -91,6 +91,57 @@ export interface KernelMemoryWriteResult {
   error?: string
 }
 
+export interface ClrInspectorStatus {
+  success: boolean
+  available: boolean
+  running: boolean
+  attachedProcess: boolean
+  pid?: number
+  processName?: string
+  helperPath?: string
+  pipeName?: string
+  error?: string
+}
+
+export interface ClrRpcResult<T = unknown> {
+  success: boolean
+  method?: string
+  result?: T
+  error?: string
+}
+
+export interface ClrObjectSummary {
+  address: string
+  typeName: string
+  size?: number
+}
+
+export interface ClrFieldInfo {
+  name: string
+  typeName?: string
+  kind?: string
+  value?: unknown
+  address?: string
+  objectTypeName?: string
+}
+
+export interface ClrObjectReadResult {
+  address: string
+  typeName: string
+  size?: number
+  fields?: Record<string, unknown>
+}
+
+export interface ClrRootInfo {
+  rootAddress?: string
+  address?: string
+  rootKind?: string
+  isPinned?: boolean
+  objectAddress?: string
+  objectTypeName?: string
+  name?: string
+}
+
 export interface UiStringCandidate {
   address: string
   encoding: 'ascii' | 'utf16' | string
@@ -971,6 +1022,15 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   openUserGuide?(): Promise<boolean>
   /** Demande une exclusion Windows Defender pour KillEngine.exe (invite UAC visible, jamais silencieux). */
   requestWindowsDefenderExclusion?(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>
+  /** Inspecteur CLR/ClrMD externe, lecture seule, via helper .NET et named pipe. */
+  getClrInspectorStatus?(): Promise<ClrInspectorStatus>
+  attachClrInspector?(): Promise<ClrRpcResult>
+  detachClrInspector?(): Promise<ClrRpcResult>
+  shutdownClrInspector?(): Promise<ClrRpcResult>
+  flushClrInspectorCache?(): Promise<ClrRpcResult>
+  findClrObjectsByType?(typeSubstring: string): Promise<ClrRpcResult<ClrObjectSummary[]>>
+  readClrObject?(addressHex: string): Promise<ClrRpcResult<ClrObjectReadResult>>
+  enumerateClrRoots?(typeSubstring: string): Promise<ClrRpcResult<ClrRootInfo[]>>
   /** Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement). */
   probeKernelDriver?(): Promise<KernelDriverStatus>
   /** Lit `size` octets sur le processus attaché via le driver noyau (KeStackAttachProcess, hors WriteProcessMemory/ReadProcessMemory usermode). Nécessite capabilities.processMemoryAccess=true. */
@@ -1844,6 +1904,37 @@ class BackendService {
       },
       async requestWindowsDefenderExclusion() {
         return { success: false, cancelled: true, error: 'Indisponible dans le mock.' }
+      },
+      async getClrInspectorStatus() {
+        return {
+          success: true,
+          available: false,
+          running: false,
+          attachedProcess: false,
+          helperPath: '',
+          pipeName: 'KillEngineClrInspectorPipe_mock',
+        }
+      },
+      async attachClrInspector() {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async detachClrInspector() {
+        return { success: true, result: 'mock detach' }
+      },
+      async shutdownClrInspector() {
+        return { success: true, result: 'mock shutdown' }
+      },
+      async flushClrInspectorCache() {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async findClrObjectsByType(_typeSubstring: string) {
+        return { success: false, error: 'Indisponible dans le mock.', result: [] }
+      },
+      async readClrObject(_addressHex: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async enumerateClrRoots(_typeSubstring: string) {
+        return { success: false, error: 'Indisponible dans le mock.', result: [] }
       },
       async probeKernelDriver() {
         return {

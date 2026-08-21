@@ -8,6 +8,11 @@ import {
   type AutoResolveReportResult,
   type CandidateFieldTestResult,
   type CandidatePage,
+  type ClrInspectorStatus,
+  type ClrObjectReadResult,
+  type ClrObjectSummary,
+  type ClrRootInfo,
+  type ClrRpcResult,
   type EncryptedScanResult,
   type ChatMemoryTargetsResult,
   type ExactScanResult,
@@ -223,7 +228,7 @@ export interface RuntimeActionPlan {
   actions: RuntimeActionPlanItem[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'profiles' | 'expert' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'profiles' | 'expert' | 'settings'
 
 export interface WorkflowPreset {
   id: string
@@ -286,6 +291,7 @@ export const useAppStore = defineStore('app', () => {
   const memoryPreview = ref<MemoryReadPreview | null>(null)
   const memoryPreviewAddress = ref('')
   const memoryPreviewLoading = ref(false)
+  const memoryAccessMode = ref<'standard' | 'kernel'>('standard')
   const memoryPreviewAscii = computed(() => bytesToAscii(hexToBytes(memoryPreview.value?.hex ?? '')))
   const memoryPreviewDecoded = computed(() => decodePreviewValues(hexToBytes(memoryPreview.value?.hex ?? '')))
   const selectedMemoryRegion = ref<Record<string, unknown> | null>(null)
@@ -372,6 +378,16 @@ export const useAppStore = defineStore('app', () => {
   const kernelMemoryReadBusy = ref(false)
   const kernelMemoryWriteResult = ref<KernelMemoryWriteResult | null>(null)
   const kernelMemoryWriteBusy = ref(false)
+  const kernelMemoryReady = computed(() => kernelDriverStatus.value?.capabilities.processMemoryAccess === true)
+  const kernelMemoryModeActive = computed(() => memoryAccessMode.value === 'kernel')
+  const clrInspectorStatus = ref<ClrInspectorStatus | null>(null)
+  const clrInspectorBusy = ref(false)
+  const clrInspectorError = ref('')
+  const clrTypeFilter = ref('KillEngine.ClrTestTarget')
+  const clrObjects = ref<ClrObjectSummary[]>([])
+  const clrSelectedObject = ref<ClrObjectReadResult | null>(null)
+  const clrRoots = ref<ClrRootInfo[]>([])
+  const clrLastResult = ref<ClrRpcResult | null>(null)
   const workflowPresets = ref<WorkflowPreset[]>([
     {
       id: 'exact-value',
@@ -1729,7 +1745,8 @@ let nextWatchedChainId = 1
       addActionLog('trainer', `Feature bloquée: ${feature.name}`, blocked, 'warning')
       return
     }
-    if (!await confirmRiskAction(feature.action === 'patch' ? 'patch' : 'write', `Activer feature Trainer: ${feature.name}`, `${feature.action} 0x${feature.address} ${feature.valueType} ${feature.value || feature.patchBytes || ''}`)) return
+    const trainerRisk = feature.action === 'patch' ? 'patch' : (feature.action === 'write' && kernelMemoryModeActive.value ? 'injection' : 'write')
+    if (!await confirmRiskAction(trainerRisk, `Activer feature Trainer: ${feature.name}`, `${feature.action} 0x${feature.address} ${feature.valueType} ${feature.value || feature.patchBytes || ''}${feature.action === 'write' && kernelMemoryModeActive.value ? ' via driver kernel' : ''}`)) return
 
     trainerBusy.value = true
     try {
@@ -1737,7 +1754,7 @@ let nextWatchedChainId = 1
       let ok = false
       let error = ''
       if (feature.action === 'write') {
-        const result = await controller.writeMemoryValue(feature.address, feature.valueType, feature.value)
+        const result = await writeMemoryValueByMode(feature.address, feature.valueType, feature.value)
         ok = result.success === true
         error = result.error ?? ''
       } else if (feature.action === 'freeze_polling') {
@@ -2511,13 +2528,15 @@ let nextWatchedChainId = 1
       return null
     }
     const title = freeze ? 'Checkpoint freeze polling' : 'Checkpoint écriture'
-    if (!await confirmRiskAction('write', title, `0x${address} ${type} = ${value}.`)) return null
+    const risk = !freeze && kernelMemoryModeActive.value ? 'injection' : 'write'
+    const route = !freeze && kernelMemoryModeActive.value ? ' via driver kernel' : ''
+    if (!await confirmRiskAction(risk, title, `0x${address} ${type} = ${value}${route}.`)) return null
 
     try {
       const controller = backend.getController()
       const result = freeze
         ? await controller.setFreezeValue(address, type, value, true)
-        : await controller.writeMemoryValue(address, type, value)
+        : await writeMemoryValueByMode(address, type, value)
       writeResult.value = result as MemoryWriteResult
       if (result.success === true) addAddressToWatch(address, type)
       addActionLog(
@@ -2530,8 +2549,8 @@ let nextWatchedChainId = 1
         title: result.success === true ? `${title} exécuté` : `${title} échoué`,
         detail: String(result.error || `0x${address} ${type} = ${value}`),
         status: result.success === true ? 'success' : 'error',
-        tool: freeze ? 'setFreezeValue' : 'writeMemoryValue',
-        risk: 'write',
+        tool: freeze ? 'setFreezeValue' : (kernelMemoryModeActive.value ? 'writeMemoryValueKernel' : 'writeMemoryValue'),
+        risk,
         payload: result as unknown as Record<string, unknown>,
       })
       logAiAudit(freeze ? 'checkpoint_freeze_executed' : 'checkpoint_write_executed', {
@@ -3293,6 +3312,88 @@ let nextWatchedChainId = 1
     }
   }
 
+  function setMemoryAccessMode(mode: 'standard' | 'kernel') {
+    memoryAccessMode.value = mode
+    addActionLog(
+      'memory_access_mode',
+      mode === 'kernel' ? 'Mode mémoire kernel' : 'Mode mémoire standard',
+      mode === 'kernel'
+        ? 'Les lectures/écritures interactives utiliseront le driver quand il est disponible.'
+        : 'Les lectures/écritures interactives utiliseront les API usermode.',
+      'info',
+    )
+  }
+
+  function kernelUnavailableResult(): MemoryWriteResult {
+    return {
+      success: false,
+      verified: false,
+      bytesWritten: 0,
+      error: 'Mode Kernel actif, mais le driver ne fournit pas Accès mémoire kernel. Repasse en Standard ou teste le driver dans Paramètres.',
+    }
+  }
+
+  async function writeMemoryValueByMode(address: string, type: string, value: string): Promise<MemoryWriteResult> {
+    const controller = backend.getController()
+    if (kernelMemoryModeActive.value) {
+      if (!kernelMemoryReady.value || !controller.writeMemoryValueKernel) return kernelUnavailableResult()
+      const result = await controller.writeMemoryValueKernel(address, type, value)
+      kernelMemoryWriteResult.value = result
+      return {
+        success: result.success,
+        verified: result.success,
+        bytesWritten: result.bytesWritten ?? 0,
+        error: result.error ?? '',
+      }
+    }
+    return controller.writeMemoryValue(address, type, value)
+  }
+
+  async function readMemoryPreviewByMode(addressHex: string, size: number): Promise<MemoryReadPreview> {
+    const controller = backend.getController()
+    if (kernelMemoryModeActive.value) {
+      if (!kernelMemoryReady.value || !controller.readMemoryKernel) {
+        return {
+          success: false,
+          partial: false,
+          cancelled: false,
+          bytesRead: 0,
+          requestedBytes: size,
+          error: 'Mode Kernel actif, mais la lecture kernel est indisponible. Repasse en Standard ou teste le driver dans Paramètres.',
+          hex: '',
+        }
+      }
+      const result = await controller.readMemoryKernel(addressHex, size)
+      kernelMemoryReadResult.value = result
+      return {
+        success: result.success,
+        partial: false,
+        cancelled: false,
+        bytesRead: result.bytesRead ?? 0,
+        requestedBytes: size,
+        error: result.error ?? '',
+        hex: result.hex ?? '',
+      }
+    }
+    return controller.readMemoryPreview(addressHex, size)
+  }
+
+  async function writeMemoryHexByMode(addressHex: string, hexString: string): Promise<Record<string, unknown>> {
+    const controller = backend.getController()
+    if (kernelMemoryModeActive.value) {
+      if (!kernelMemoryReady.value || !controller.writeMemoryKernel) {
+        return { success: false, error: 'Mode Kernel actif, mais écriture kernel indisponible.' }
+      }
+      const result = await controller.writeMemoryKernel(addressHex, hexString)
+      kernelMemoryWriteResult.value = result
+      return result as unknown as Record<string, unknown>
+    }
+    if (!controller.writeMemoryHex) {
+      return { success: false, error: 'writeMemoryHex non disponible dans ce backend.' }
+    }
+    return controller.writeMemoryHex(addressHex, hexString)
+  }
+
   async function refreshProcesses() {
     try {
       processes.value = await backend.getController().getProcesses()
@@ -3301,16 +3402,169 @@ let nextWatchedChainId = 1
     }
   }
 
-  async function attach(pid: number) {
+  async function attach(pid: number, mode: 'standard' | 'kernel' = memoryAccessMode.value) {
     try {
+      setMemoryAccessMode(mode)
       const ok = await backend.getController().attachProcess(pid)
       if (ok) {
         isAttached.value = true
         const proc = processes.value.find((p) => p.pid === pid)
         processName.value = proc?.name ?? `PID ${pid}`
+        addActionLog(
+          'attach',
+          `Attach ${processName.value}`,
+          mode === 'kernel'
+            ? 'Process attaché avec mode mémoire Kernel actif pour les lectures/écritures interactives.'
+            : 'Process attaché avec mode mémoire Standard.',
+          'success',
+        )
       }
     } catch (e) {
       console.error('[KillEngine] Attach failed:', e)
+    }
+  }
+
+  async function refreshClrInspectorStatus() {
+    const controller = backend.getController()
+    if (!controller.getClrInspectorStatus) {
+      clrInspectorStatus.value = null
+      clrInspectorError.value = 'Inspecteur CLR non exposé par ce backend.'
+      return
+    }
+    try {
+      clrInspectorStatus.value = await controller.getClrInspectorStatus()
+      clrInspectorError.value = clrInspectorStatus.value.error ?? ''
+    } catch (e) {
+      clrInspectorStatus.value = null
+      clrInspectorError.value = String(e)
+    }
+  }
+
+  async function attachClrInspector() {
+    const controller = backend.getController()
+    if (!controller.attachClrInspector) {
+      clrLastResult.value = { success: false, error: 'Inspecteur CLR non exposé par ce backend.' }
+      return
+    }
+    clrInspectorBusy.value = true
+    clrInspectorError.value = ''
+    try {
+      const result = await controller.attachClrInspector()
+      clrLastResult.value = result
+      clrInspectorError.value = result.success ? '' : (result.error ?? 'Attache CLR échouée.')
+      addActionLog(
+        'clr_inspector',
+        result.success ? 'Inspecteur CLR attaché' : 'Inspecteur CLR refusé',
+        result.success ? `PID ${clrInspectorStatus.value?.pid ?? ''}` : clrInspectorError.value,
+        result.success ? 'success' : 'warning',
+      )
+      await refreshClrInspectorStatus()
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function detachClrInspector() {
+    const controller = backend.getController()
+    if (!controller.detachClrInspector) return
+    clrInspectorBusy.value = true
+    try {
+      clrLastResult.value = await controller.detachClrInspector()
+      clrSelectedObject.value = null
+      clrObjects.value = []
+      clrRoots.value = []
+      await refreshClrInspectorStatus()
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function shutdownClrInspector() {
+    const controller = backend.getController()
+    if (!controller.shutdownClrInspector) return
+    clrInspectorBusy.value = true
+    try {
+      clrLastResult.value = await controller.shutdownClrInspector()
+      clrSelectedObject.value = null
+      clrObjects.value = []
+      clrRoots.value = []
+      await refreshClrInspectorStatus()
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function flushClrInspectorCache() {
+    const controller = backend.getController()
+    if (!controller.flushClrInspectorCache) {
+      clrLastResult.value = { success: false, error: 'flushCachedData non exposé par ce backend.' }
+      return
+    }
+    clrInspectorBusy.value = true
+    try {
+      clrLastResult.value = await controller.flushClrInspectorCache()
+      if (!clrLastResult.value.success) clrInspectorError.value = clrLastResult.value.error ?? ''
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function findClrObjects(typeSubstring = clrTypeFilter.value) {
+    const controller = backend.getController()
+    if (!controller.findClrObjectsByType) {
+      clrLastResult.value = { success: false, error: 'findObjectsByType non exposé par ce backend.' }
+      return
+    }
+    clrInspectorBusy.value = true
+    clrInspectorError.value = ''
+    try {
+      const result = await controller.findClrObjectsByType(typeSubstring.trim() || 'KillEngine.ClrTestTarget')
+      clrLastResult.value = result
+      clrObjects.value = result.success && Array.isArray(result.result) ? result.result : []
+      clrInspectorError.value = result.success ? '' : (result.error ?? '')
+    } catch (e) {
+      clrObjects.value = []
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function readClrObject(addressHex: string) {
+    const controller = backend.getController()
+    if (!controller.readClrObject) {
+      clrLastResult.value = { success: false, error: 'readObject non exposé par ce backend.' }
+      return
+    }
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.readClrObject(addressHex)
+      clrLastResult.value = result
+      clrSelectedObject.value = result.success && result.result ? result.result : null
+      clrInspectorError.value = result.success ? '' : (result.error ?? '')
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function enumerateClrRoots(typeSubstring = clrTypeFilter.value) {
+    const controller = backend.getController()
+    if (!controller.enumerateClrRoots) {
+      clrLastResult.value = { success: false, error: 'enumerateRoots non exposé par ce backend.' }
+      return
+    }
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.enumerateClrRoots(typeSubstring.trim())
+      clrLastResult.value = result
+      clrRoots.value = result.success && Array.isArray(result.result) ? result.result : []
+      clrInspectorError.value = result.success ? '' : (result.error ?? '')
+    } finally {
+      clrInspectorBusy.value = false
     }
   }
 
@@ -3346,7 +3600,7 @@ let nextWatchedChainId = 1
       hex: '',
     }
     try {
-      memoryPreview.value = await backend.getController().readMemoryPreview(addressHex, size)
+      memoryPreview.value = await readMemoryPreviewByMode(addressHex, size)
       addActionLog(
         'memory_preview',
         `Aperçu mémoire 0x${normalizedAddress}`,
@@ -3374,7 +3628,7 @@ let nextWatchedChainId = 1
   async function loadHexViewerPage() {
     if (!hexViewerAddress.value) return
     const controller = backend.getController()
-    if (!controller.readMemoryBlock) {
+    if (!kernelMemoryModeActive.value && !controller.readMemoryBlock) {
       hexViewerData.value = {
         success: false,
         partial: false,
@@ -3388,7 +3642,9 @@ let nextWatchedChainId = 1
     }
     hexViewerLoading.value = true
     try {
-      hexViewerData.value = await controller.readMemoryBlock(hexViewerAddress.value, hexViewerPageSize.value)
+      hexViewerData.value = kernelMemoryModeActive.value
+        ? await readMemoryPreviewByMode(hexViewerAddress.value, hexViewerPageSize.value)
+        : await controller.readMemoryBlock!(hexViewerAddress.value, hexViewerPageSize.value)
     } catch (e) {
       hexViewerData.value = {
         success: false,
@@ -3438,11 +3694,7 @@ let nextWatchedChainId = 1
   }
 
   async function hexViewerWriteRow(rowAddressHex: string, hexString: string) {
-    const controller = backend.getController()
-    if (!controller.writeMemoryHex) {
-      return { success: false, error: 'writeMemoryHex non disponible dans ce backend.' }
-    }
-    const result = await controller.writeMemoryHex(rowAddressHex, hexString)
+    const result = await writeMemoryHexByMode(rowAddressHex, hexString)
     if (result.success) {
       await loadHexViewerPage()
     }
@@ -3460,6 +3712,10 @@ let nextWatchedChainId = 1
       memoryPreviewAddress.value = ''
       memoryPreviewLoading.value = false
       closeHexViewer()
+      clrObjects.value = []
+      clrSelectedObject.value = null
+      clrRoots.value = []
+      await refreshClrInspectorStatus()
     } catch (e) {
       console.error('[KillEngine] Detach failed:', e)
     }
@@ -4411,11 +4667,11 @@ let nextWatchedChainId = 1
     const normalizedAddress = address.startsWith('0x') ? address.slice(2) : address
     pushMessage('user', `tester uniquement 0x${normalizedAddress} avec ${value}`)
     try {
-      const result = await backend.getController().writeMemoryValue(normalizedAddress, type, value)
+      const result = await writeMemoryValueByMode(normalizedAddress, type, value)
       writeResult.value = result
       pushMessage('assistant',
         result.success
-          ? `J'ai écrit ${value} uniquement sur 0x${normalizedAddress}. Vérifie dans le jeu si c'est la bonne adresse.`
+          ? `J'ai écrit ${value} uniquement sur 0x${normalizedAddress}${kernelMemoryModeActive.value ? ' via le driver kernel' : ''}. Vérifie dans le jeu si c'est la bonne adresse.`
           : `L'écriture sur 0x${normalizedAddress} a échoué : ${result.error}`,
         { isError: !result.success })
     } catch (e) {
@@ -4638,7 +4894,7 @@ let nextWatchedChainId = 1
           entry.error = resolve.error ?? 'Résolution impossible.'
         }
       }
-      const preview = await controller.readMemoryPreview(entry.finalAddress, valueTypeReadSize(entry.type))
+      const preview = await readMemoryPreviewByMode(entry.finalAddress, valueTypeReadSize(entry.type))
       const value = decodeTypedPreviewValue(preview, entry.type)
       updated = {
         ...entry,
@@ -5516,10 +5772,7 @@ async function doEncryptedScan() {
 
     let updated: WatchedAddress
     try {
-      const preview = await backend.getController().readMemoryPreview(
-        watched.address,
-        valueTypeReadSize(watched.type),
-      )
+      const preview = await readMemoryPreviewByMode(watched.address, valueTypeReadSize(watched.type))
       const value = decodeTypedPreviewValue(preview, watched.type)
       updated = {
         ...watched,
@@ -5599,18 +5852,19 @@ async function doEncryptedScan() {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire.' }
       return
     }
-    if (!await confirmRiskAction('write', 'Ecriture memoire multiple', `${addresses.length} adresse(s), type ${type}, valeur ${value}.`)) return
+    const risk = kernelMemoryModeActive.value ? 'injection' : 'write'
+    if (!await confirmRiskAction(risk, 'Ecriture memoire multiple', `${addresses.length} adresse(s), type ${type}, valeur ${value}${kernelMemoryModeActive.value ? ' via driver kernel' : ''}.`)) return
     try {
       const results: MemoryWriteResult[] = []
       for (const address of addresses) {
-        const result = await backend.getController().writeMemoryValue(address, type, value)
+        const result = await writeMemoryValueByMode(address, type, value)
         results.push(result)
       }
       writeResult.value = results[results.length - 1]
       scanStatusText.value = results.every((r) => r.success)
         ? `${results.length} adresse(s) écrite(s).`
         : `Écriture partielle: ${results.filter((r) => r.success).length}/${results.length} réussie(s).`
-      addActionLog('write', `Écriture multiple ${value}`, `${results.filter((r) => r.success).length}/${results.length} réussie(s).`, results.every((r) => r.success) ? 'success' : 'warning')
+      addActionLog('write', `Écriture multiple ${value}`, `${results.filter((r) => r.success).length}/${results.length} réussie(s)${kernelMemoryModeActive.value ? ' via kernel' : ''}.`, results.every((r) => r.success) ? 'success' : 'warning')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
       scanStatusText.value = 'Écriture multiple échouée.'
@@ -5627,9 +5881,32 @@ async function doEncryptedScan() {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire.' }
       return
     }
-    if (!await confirmRiskAction('write', 'Ecriture memoire avec variants', `${targets.length} cible(s), valeur affichee ${value}.`)) return
+    const risk = kernelMemoryModeActive.value ? 'injection' : 'write'
+    if (!await confirmRiskAction(risk, 'Ecriture memoire avec variants', `${targets.length} cible(s), valeur affichee ${value}${kernelMemoryModeActive.value ? ' via driver kernel' : ''}.`)) return
     try {
       const controller = backend.getController()
+      if (kernelMemoryModeActive.value) {
+        const results: MemoryWriteResult[] = []
+        for (const target of targets) {
+          results.push(await writeMemoryValueByMode(target.address, target.type, value))
+        }
+        const written = results.filter((result) => result.success).length
+        writeResult.value = {
+          success: written === targets.length,
+          verified: results.every((result) => result.verified),
+          bytesWritten: results.reduce((sum, result) => sum + (result.bytesWritten ?? 0), 0),
+          written,
+          total: targets.length,
+          results,
+          error: written === targets.length ? '' : `Écriture kernel partielle: ${written}/${targets.length}.`,
+        } as MemoryWriteBatchResult
+        scanStatusText.value = written === targets.length
+          ? `${written} adresse(s) écrite(s) via kernel.`
+          : `Écriture kernel partielle: ${written}/${targets.length} réussie(s).`
+        for (const target of targets) addAddressToWatch(target.address, target.type)
+        addActionLog('write', `Écriture auto kernel ${value}`, `${written}/${targets.length} réussie(s).`, written === targets.length ? 'success' : 'warning')
+        return
+      }
       if (controller.writeMemoryValuesWithVariants) {
         const result: MemoryWriteBatchResult = await controller.writeMemoryValuesWithVariants(targets, value)
         writeResult.value = result
@@ -5736,16 +6013,15 @@ async function doEncryptedScan() {
       addActionLog('write_guard', 'Écriture bloquée', writeSafetyWarning.value, 'warning')
       return
     }
-    if (!await confirmRiskAction('write', 'Ecriture memoire', `0x${selectedCandidateAddress.value} ${exactScanType.value} = ${writeValue.value}.`)) return
+    const risk = kernelMemoryModeActive.value ? 'injection' : 'write'
+    if (!await confirmRiskAction(risk, 'Ecriture memoire', `0x${selectedCandidateAddress.value} ${exactScanType.value} = ${writeValue.value}${kernelMemoryModeActive.value ? ' via driver kernel' : ''}.`)) return
     try {
-      writeResult.value = await backend
-        .getController()
-        .writeMemoryValue(selectedCandidateAddress.value, exactScanType.value, writeValue.value)
+      writeResult.value = await writeMemoryValueByMode(selectedCandidateAddress.value, exactScanType.value, writeValue.value)
       addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
       addActionLog(
         'write',
         `Écriture 0x${selectedCandidateAddress.value}`,
-        `${exactScanType.value} = ${writeValue.value}${writeSafetyWarning.value ? ` · ${writeSafetyWarning.value}` : ''}.`,
+        `${exactScanType.value} = ${writeValue.value}${kernelMemoryModeActive.value ? ' via kernel' : ''}${writeSafetyWarning.value ? ` · ${writeSafetyWarning.value}` : ''}.`,
         writeResult.value.success ? 'success' : 'error',
       )
       if (writeResult.value.success && writeResult.value.verified) {
@@ -6241,6 +6517,28 @@ async function doEncryptedScan() {
     kernelMemoryWriteResult,
     kernelMemoryWriteBusy,
     writeMemoryKernel,
+    setMemoryAccessMode,
+    writeMemoryValueByMode,
+    writeMemoryHexByMode,
+    memoryAccessMode,
+    kernelMemoryReady,
+    kernelMemoryModeActive,
+    clrInspectorStatus,
+    clrInspectorBusy,
+    clrInspectorError,
+    clrTypeFilter,
+    clrObjects,
+    clrSelectedObject,
+    clrRoots,
+    clrLastResult,
+    refreshClrInspectorStatus,
+    attachClrInspector,
+    detachClrInspector,
+    shutdownClrInspector,
+    flushClrInspectorCache,
+    findClrObjects,
+    readClrObject,
+    enumerateClrRoots,
     isAttached,
     processName,
     processes,
@@ -6388,6 +6686,7 @@ async function doEncryptedScan() {
     refreshProcessModules,
     refreshMemoryMap,
     readMemoryPreview,
+    readMemoryPreviewByMode,
     openHexViewer,
     closeHexViewer,
     hexViewerJumpTo,

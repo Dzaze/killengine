@@ -42,7 +42,10 @@ Le script ouvre brièvement KillEngine, collecte les événements Windows récen
 1. Ouvre l'onglet `Processus`.
 2. Clique sur `Rafraîchir`.
 3. Sélectionne le processus du jeu ou de l'application.
-4. Clique sur `Attacher`.
+4. Choisis le `Mode d'accès mémoire` :
+   - `Standard` suffit pour ouvrir le processus, lister les modules et lancer les premiers scans.
+   - `Kernel` attache le processus normalement, puis route les lectures/écritures interactives (aperçu mémoire, visualiseur hex, écritures simples) via le driver `KillEngineKernel` quand `Accès mémoire kernel = oui`.
+5. Clique sur `Attacher`.
 
 Le nom du processus attaché apparaît ensuite dans les autres vues. Si le processus n'apparaît pas, lance-le d'abord avec une fenêtre visible, puis rafraîchis.
 
@@ -222,9 +225,16 @@ La liste des candidats permet :
 
 Quand une écriture normale échoue explicitement, ou tient un instant puis revient toujours en arrière, un driver noyau optionnel (`KillEngineKernel`) permet d'écrire en contournant les protections mémoire usermode (`VirtualProtect`, `PAGE_GUARD`, certains anti-cheat basiques qui ne surveillent que l'API usermode).
 
-1. **Paramètres > Driver kernel > Tester le driver** — installe/vérifie que `KillEngineKernel.sys` est chargé. Sans ce driver, les boutons kernel restent masqués partout dans l'app.
-2. Une fois le driver connecté, un bouton `Écrire via kernel` apparaît dans le panneau `Candidats et écritures`, à côté d'`Écrire ensemble (atomique)` — sélectionne une seule adresse (le kernel écrit une cible à la fois, jamais en masse) et clique dessus au lieu d'`Écrire sur sélection`.
-3. **Dans l'Assistant**, demande-le directement en langage naturel : *« écris 9999 à 0x... via le kernel »*. L'Assistant reconnaît la demande explicite et propose un bouton de confirmation dédié — un clic suffit, mais rien ne s'exécute sans cette confirmation.
+Parcours conseillé pour apprendre sans deviner :
+
+1. **Processus > Mode d'accès mémoire > Kernel** — vérifie dès l'attache si le driver est prêt. Si besoin, `Paramètres > Driver kernel > Tester le driver` permet de reprober `KillEngineKernel.sys` et de confirmer `Accès mémoire kernel = oui`. Sans ce driver, le mode kernel refuse proprement les lectures/écritures avancées.
+2. **Réduis d'abord les candidats** avec un scan normal (`175`, puis next scan `185`, etc.). Le kernel n'est pas un remplaçant du scan : il intervient quand il reste peu d'adresses plausibles.
+3. **Relis la ou les adresses** via `Paramètres > Driver kernel > Lecture mémoire (kernel)` ou depuis le flux Expert. La preuve propre commence par "cette adresse contient bien la valeur attendue".
+4. Une fois le mode `Kernel` actif, les écritures simples du panneau `Candidats et écritures` passent par le driver. L'écriture atomique multi-adresses reste un outil séparé, car elle suspend les threads et répond à un autre problème.
+5. **Relis immédiatement après écriture**, puis vérifie l'affichage dans la cible. Si la mémoire et l'écran bougent ensemble, tu as probablement la bonne adresse.
+6. **Dans l'Assistant**, demande-le directement en langage naturel : *« écris 9999 à 0x... via le kernel »*. L'Assistant reconnaît la demande explicite et propose un bouton de confirmation dédié — un clic suffit, mais rien ne s'exécute sans cette confirmation.
+
+Exemple validé sur Solitaire : score affiché `175`, next scan après évolution à `185` → 2 candidats. Lecture kernel des deux adresses : `B9 00 00 00` (`185`). Écriture kernel de `1337` sur le bon candidat, relecture `39 05 00 00`, puis confirmation visuelle dans le jeu. Ce test prouve à la fois le scan, la lecture kernel, l'écriture kernel et l'effet réel dans le processus cible.
 
 Si la valeur revient quand même à chaque frame après une écriture kernel réussie, ce n'est probablement plus une protection à contourner mais un **compteur animé** recalculé en continu — voir la section suivante plutôt que de réessayer en boucle.
 
