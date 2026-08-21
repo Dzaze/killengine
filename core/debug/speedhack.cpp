@@ -4,6 +4,8 @@
 #include "logging/logger.h"
 
 #ifdef Q_OS_WIN
+#include <aclapi.h>
+#include <sddl.h>
 #include <windows.h>
 #endif
 
@@ -17,6 +19,44 @@ SpeedhackSession::~SpeedhackSession() {
 }
 
 #ifdef Q_OS_WIN
+namespace {
+
+struct AppContainerMappingSecurity {
+    SECURITY_ATTRIBUTES attributes{};
+    PSECURITY_DESCRIPTOR descriptor{nullptr};
+
+    AppContainerMappingSecurity() {
+        attributes.nLength = sizeof(attributes);
+        attributes.bInheritHandle = FALSE;
+    }
+
+    ~AppContainerMappingSecurity() {
+        if (descriptor) {
+            LocalFree(descriptor);
+        }
+    }
+};
+
+bool buildAppContainerMappingSecurity(AppContainerMappingSecurity* security, QString* error) {
+    if (!security) return false;
+
+    // AC = ALL APPLICATION PACKAGES, LW = Low Mandatory Level. Le label bas est
+    // nécessaire pour qu'un AppContainer puisse écrire dans le mapping créé par
+    // KillEngine (process normal/medium integrity).
+    constexpr const wchar_t* kSddl =
+        L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)(A;;GRGW;;;AC)S:(ML;;NW;;;LW)";
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kSddl, SDDL_REVISION_1, &security->descriptor, nullptr)) {
+        if (error) {
+            *error = QStringLiteral("ConvertStringSecurityDescriptorToSecurityDescriptorW(IPC speedhack AppContainer) a échoué (error=%1).")
+                         .arg(GetLastError());
+        }
+        return false;
+    }
+    security->attributes.lpSecurityDescriptor = security->descriptor;
+    return true;
+}
+
+} // namespace
 
 bool SpeedhackSession::start(const ProcessHandle& process, double factor, const QString& injectedHandlerPath, QString* error) {
     if (m_active) {
@@ -39,7 +79,17 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
             if (error) *error = "Chemin de KillEngineSpeedhackHandler.dll manquant.";
             return false;
         }
-        mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+
+        AppContainerMappingSecurity security;
+        QString securityError;
+        SECURITY_ATTRIBUTES* securityAttributes = nullptr;
+        if (buildAppContainerMappingSecurity(&security, &securityError)) {
+            securityAttributes = &security.attributes;
+        } else {
+            KE_LOG_WARN() << "Speedhack: AppContainer IPC security unavailable: " << securityError.toStdString();
+        }
+
+        mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, securityAttributes, PAGE_READWRITE,
                                       0, sizeof(SpeedhackIpcState), mappingName);
         if (!mapping) {
             if (error) *error = "CreateFileMapping a échoué (IPC speedhack).";
@@ -66,6 +116,8 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
             // déjà chargé ne relance pas DllMain, même limitation documentée
             // dans inprocess_breakpoint.h) — refus propre plutôt qu'un état
             // silencieusement faux.
+            state->factor = 1.0;
+            state->stopRequested = 1;
             UnmapViewOfFile(state);
             CloseHandle(mapping);
             if (error) *error = "Un composant speedhack existe déjà pour cette cible mais n'a jamais démarré "
@@ -85,6 +137,7 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
 
     state->active = 0;
     state->installError = 0;
+    state->stopRequested = 0;
     state->hooksInstalledMask = 0;
     state->factor = factor;
 
@@ -103,9 +156,12 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
     }
 
     if (state->installError || !state->active) {
+        const bool installError = state->installError != 0;
+        state->factor = 1.0;
+        state->stopRequested = 1;
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = state->installError
+        if (error) *error = installError
             ? "Le composant injecté n'a trouvé aucune fonction de temps à hooker dans cette cible."
             : "Timeout: le composant speedhack ne s'est pas installé.";
         return false;

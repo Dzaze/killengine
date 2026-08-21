@@ -6,36 +6,26 @@
 // dans KillEngine.exe.
 //
 // Principe : patch de l'IAT (Import Address Table), pas hook inline par
-// patch de prologue. La cible est un ensemble fixe et connu de 4 fonctions
-// systeme (QueryPerformanceCounter/GetTickCount/GetTickCount64/timeGetTime) :
-// remplacer le pointeur de 8 octets dans la table d'imports de chaque module
-// deja charge suffit a intercepter tout appel `call [IAT_slot]` genere par le
-// compilateur pour un import statique — pas besoin de decoder la longueur des
-// instructions du prologue (donc pas besoin de lier Zydis ici, contrairement
-// a instruction_patch_suggester.cpp cote KillEngine).
+// patch de prologue. La cible est un ensemble fixe et connu de fonctions temps
+// systeme. Le handler patche par NOM d'import, pas par DLL exacte, pour couvrir
+// kernel32.dll, KERNELBASE.dll et les API-set modernes (`api-ms-win-*`) qui
+// apparaissent souvent dans les apps UWP/MSIX.
 //
-// Limites acceptees (v1, voir docs/POWER_UP_ROADMAP.md section J) : ne couvre
-// pas un appel resolu dynamiquement via GetProcAddress + pointeur stocke a la
-// main, et ne re-patch pas les modules charges APRES l'installation (nouveau
-// LoadLibrary ulterieur dans la cible).
+// Limite acceptee (voir docs/POWER_UP_ROADMAP.md section J) : ne couvre pas un
+// appel resolu dynamiquement via GetProcAddress + pointeur stocke a la main.
 //
 // 1. DllMain lance un thread (jamais de travail lourd directement dans
 //    DllMain — loader lock) qui ouvre le mapping partage cree par KillEngine
-//    avant l'injection, resout les adresses reelles des 4 fonctions (via son
-//    PROPRE import kernel32/winmm — voir remarque plus bas sur l'absence de
-//    recursion), enumere les modules deja charges et patche leur IAT.
+//    avant l'injection, enumere les modules deja charges puis repasse
+//    periodiquement pour les modules charges apres l'installation.
 // 2. Chaque fonction hookee garde son propre etat "horloge virtuelle a delta
 //    scale" (killcore::scaleClockDelta, core/debug/speedhack_clock.h) : lit
 //    `factor` dans l'etat partage a chaque appel, jamais de saut de valeur
 //    meme si KillEngine change le facteur en direct.
 //
-// Remarque sur l'absence de recursion : cette DLL APPELLE les vraies
-// QueryPerformanceCounter/GetTickCount/GetTickCount64/timeGetTime par leur nom
-// (liees normalement via kernel32.lib/winmm.lib) pour obtenir la valeur reelle
-// avant de la scaler. Cela ne boucle jamais sur nos propres detours : l'IAT
-// qu'on patche est celle des AUTRES modules de la cible (l'executable
-// principal, les DLL du moteur...), pas celle de KillEngineSpeedhackHandler.dll
-// lui-meme, dont l'import reste intact et pointe vers la vraie implementation.
+// Remarque sur l'absence de recursion : cette DLL APPELLE les vraies fonctions
+// temps par son propre IAT intact. On exclut explicitement toutes les copies du
+// handler speedhack pour ne jamais patcher nos propres imports.
 
 #include "../speedhack_ipc.h"
 #include "../speedhack_clock.h"
@@ -65,6 +55,8 @@ ClockState g_qpcState;
 ClockState g_gtcState;
 ClockState g_gtc64State;
 ClockState g_tgtState;
+ClockState g_fileTimeState;
+ClockState g_preciseFileTimeState;
 
 // Spinlock leger : les appels sont courts (quelques instructions) et
 // frequents, une CRITICAL_SECTION serait une charge disproportionnee par
@@ -114,16 +106,162 @@ DWORD WINAPI DetourTimeGetTime() {
     return static_cast<DWORD>(ApplyScaling(g_tgtState, static_cast<int64_t>(timeGetTime())));
 }
 
+void WINAPI DetourGetSystemTimeAsFileTime(LPFILETIME fileTime) {
+    FILETIME real{};
+    GetSystemTimeAsFileTime(&real);
+    if (!fileTime) return;
+
+    ULARGE_INTEGER value{};
+    value.LowPart = real.dwLowDateTime;
+    value.HighPart = real.dwHighDateTime;
+    value.QuadPart = static_cast<ULONGLONG>(ApplyScaling(g_fileTimeState, static_cast<int64_t>(value.QuadPart)));
+    fileTime->dwLowDateTime = value.LowPart;
+    fileTime->dwHighDateTime = value.HighPart;
+}
+
+void WINAPI DetourGetSystemTimePreciseAsFileTime(LPFILETIME fileTime) {
+    FILETIME real{};
+    GetSystemTimePreciseAsFileTime(&real);
+    if (!fileTime) return;
+
+    ULARGE_INTEGER value{};
+    value.LowPart = real.dwLowDateTime;
+    value.HighPart = real.dwHighDateTime;
+    value.QuadPart = static_cast<ULONGLONG>(ApplyScaling(g_preciseFileTimeState, static_cast<int64_t>(value.QuadPart)));
+    fileTime->dwLowDateTime = value.LowPart;
+    fileTime->dwHighDateTime = value.HighPart;
+}
+
 struct HookTarget {
-    const wchar_t* importedFromDll; // nom du module tel qu'il apparait dans le descripteur d'import cible
-    FARPROC realAddress;
+    const char* importName;
     void* detour;
+    void* realAddresses[3];
     uint32_t maskBit;
 };
 
-// Patche toutes les entrees IAT de `module` qui pointent vers une des
-// fonctions de `targets` — ne touche jamais le module qui exporte reellement
-// la fonction (kernel32.dll/winmm.dll n'importent pas leurs propres exports).
+bool ImportNameEquals(const char* left, const char* right) {
+    if (!left || !right) return false;
+    while (*left && *right) {
+        char a = *left;
+        char b = *right;
+        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
+        if (a != b) return false;
+        ++left;
+        ++right;
+    }
+    return *left == '\0' && *right == '\0';
+}
+
+bool WideCharEqualsInsensitive(wchar_t left, wchar_t right) {
+    if (left >= L'A' && left <= L'Z') left = static_cast<wchar_t>(left - L'A' + L'a');
+    if (right >= L'A' && right <= L'Z') right = static_cast<wchar_t>(right - L'A' + L'a');
+    return left == right;
+}
+
+bool WideContainsInsensitive(const wchar_t* text, const wchar_t* needle) {
+    if (!text || !needle || !*needle) return false;
+    for (const wchar_t* cursor = text; *cursor; ++cursor) {
+        const wchar_t* a = cursor;
+        const wchar_t* b = needle;
+        while (*a && *b && WideCharEqualsInsensitive(*a, *b)) {
+            ++a;
+            ++b;
+        }
+        if (!*b) return true;
+    }
+    return false;
+}
+
+bool WideStartsWithInsensitive(const wchar_t* text, const wchar_t* prefix) {
+    if (!text || !prefix) return false;
+    while (*prefix) {
+        if (!*text || !WideCharEqualsInsensitive(*text, *prefix)) return false;
+        ++text;
+        ++prefix;
+    }
+    return true;
+}
+
+void DirectoryPrefixOf(const wchar_t* path, wchar_t* out, size_t outCount) {
+    if (!out || outCount == 0) return;
+    out[0] = L'\0';
+    if (!path || !*path) return;
+
+    size_t lastSlash = 0;
+    size_t i = 0;
+    for (; path[i] && i + 1 < outCount; ++i) {
+        out[i] = path[i];
+        if (path[i] == L'\\' || path[i] == L'/') {
+            lastSlash = i;
+        }
+    }
+    const size_t end = lastSlash > 0 ? lastSlash + 1 : i;
+    out[end < outCount ? end : outCount - 1] = L'\0';
+}
+
+bool IsSensitiveUiOrAdModule(const MODULEENTRY32W& entry) {
+    const wchar_t* name = entry.szModule;
+    const wchar_t* path = entry.szExePath;
+    return WideContainsInsensitive(name, L"webview") ||
+           WideContainsInsensitive(path, L"webview") ||
+           WideContainsInsensitive(name, L"xaml") ||
+           WideContainsInsensitive(path, L"xaml") ||
+           WideContainsInsensitive(name, L"dcomp") ||
+           WideContainsInsensitive(name, L"directcomposition") ||
+           WideContainsInsensitive(name, L"coremessaging") ||
+           WideContainsInsensitive(name, L"uiautomation") ||
+           WideContainsInsensitive(name, L"textinput") ||
+           WideContainsInsensitive(name, L"ads") ||
+           WideContainsInsensitive(name, L"advert");
+}
+
+bool ShouldPatchModule(const MODULEENTRY32W& entry, HMODULE mainModule, const wchar_t* mainModuleDir) {
+    if (wcsstr(entry.szModule, L"KillEngineSpeedhackHandler.dll") != nullptr) {
+        return false;
+    }
+    if (entry.hModule == mainModule) {
+        return true;
+    }
+    if (!entry.szExePath[0] || !mainModuleDir || !*mainModuleDir) {
+        return false;
+    }
+    if (!WideStartsWithInsensitive(entry.szExePath, mainModuleDir)) {
+        return false;
+    }
+    if (IsSensitiveUiOrAdModule(entry)) {
+        return false;
+    }
+    return true;
+}
+
+bool TargetMatchesImportedFunction(const HookTarget& target, const char* importName, uintptr_t thunkFunction) {
+    if (ImportNameEquals(importName, target.importName)) {
+        return true;
+    }
+    for (void* realAddress : target.realAddresses) {
+        if (realAddress && thunkFunction == reinterpret_cast<uintptr_t>(realAddress)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ResolveTargetAddresses(HookTarget* targets, int targetCount) {
+    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+    HMODULE kernelBase = GetModuleHandleW(L"KERNELBASE.dll");
+    HMODULE winmm = GetModuleHandleW(L"winmm.dll");
+
+    for (int t = 0; t < targetCount; ++t) {
+        targets[t].realAddresses[0] = kernel32 ? reinterpret_cast<void*>(GetProcAddress(kernel32, targets[t].importName)) : nullptr;
+        targets[t].realAddresses[1] = kernelBase ? reinterpret_cast<void*>(GetProcAddress(kernelBase, targets[t].importName)) : nullptr;
+        targets[t].realAddresses[2] = winmm ? reinterpret_cast<void*>(GetProcAddress(winmm, targets[t].importName)) : nullptr;
+    }
+}
+
+// Patche toutes les entrees IAT de `module` dont le NOM d'import correspond a
+// une fonction cible. Le nom est plus robuste que le module importeur sur
+// Windows moderne (kernel32/kernelbase/api-ms-win-*).
 void PatchModuleImports(HMODULE module, HookTarget* targets, int targetCount, volatile long* mask) {
     if (!module) return;
 
@@ -138,23 +276,30 @@ void PatchModuleImports(HMODULE module, HookTarget* targets, int targetCount, vo
 
     auto* descriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + importDir.VirtualAddress);
     for (; descriptor->Name != 0; ++descriptor) {
-        const char* dllNameA = reinterpret_cast<const char*>(base + descriptor->Name);
-        wchar_t dllNameW[64]{};
-        int i = 0;
-        for (; dllNameA[i] != '\0' && i < 63; ++i) {
-            dllNameW[i] = static_cast<wchar_t>(dllNameA[i]);
-        }
-        dllNameW[i] = L'\0';
-
-        // FirstThunk pointe vers les vraies adresses (une fois le loader
-        // passe) ; OriginalFirstThunk vers les noms — on ne modifie que le
-        // premier, jamais le second.
+        if (descriptor->FirstThunk == 0) continue;
+        auto* original = descriptor->OriginalFirstThunk != 0
+            ? reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->OriginalFirstThunk)
+            : nullptr;
         auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->FirstThunk);
         for (; thunk->u1.Function != 0; ++thunk) {
-            auto currentTarget = reinterpret_cast<FARPROC>(static_cast<uintptr_t>(thunk->u1.Function));
+            const char* importName = nullptr;
+            if (original) {
+                if (original->u1.AddressOfData == 0) break;
+                if (IMAGE_SNAP_BY_ORDINAL(original->u1.Ordinal)) {
+                    ++original;
+                    continue;
+                }
+                auto* import = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + original->u1.AddressOfData);
+                importName = reinterpret_cast<const char*>(import->Name);
+                ++original;
+            }
+
             for (int t = 0; t < targetCount; ++t) {
-                if (currentTarget != targets[t].realAddress) continue;
-                if (_wcsicmp(dllNameW, targets[t].importedFromDll) != 0) continue;
+                if (!TargetMatchesImportedFunction(targets[t], importName, thunk->u1.Function)) continue;
+                if (thunk->u1.Function == reinterpret_cast<uintptr_t>(targets[t].detour)) {
+                    InterlockedOr(mask, static_cast<LONG>(targets[t].maskBit));
+                    break;
+                }
 
                 DWORD oldProtect = 0;
                 if (!VirtualProtect(&thunk->u1.Function, sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
@@ -170,58 +315,89 @@ void PatchModuleImports(HMODULE module, HookTarget* targets, int targetCount, vo
     }
 }
 
+void PatchModuleImportsGuarded(HMODULE module, HookTarget* targets, int targetCount, volatile long* mask) {
+    __try {
+        PatchModuleImports(module, targets, targetCount, mask);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        // La cible peut charger/decharger des modules pendant notre sweep IAT.
+        // Un module partiellement initialise ne doit jamais faire tomber le
+        // process cible : on ignore ce module et on retentera au prochain pass.
+    }
+}
+
+void PatchLoadedModules(HookTarget* targets, int targetCount, HMODULE mainModule, const wchar_t* mainModuleDir) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+    if (snapshot == INVALID_HANDLE_VALUE) return;
+
+    MODULEENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Module32FirstW(snapshot, &entry)) {
+        do {
+            if (!ShouldPatchModule(entry, mainModule, mainModuleDir)) {
+                continue;
+            }
+            PatchModuleImportsGuarded(entry.hModule, targets, targetCount, &g_state->hooksInstalledMask);
+        } while (Module32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+}
+
 DWORD WINAPI InstallThread(LPVOID) {
     wchar_t name[64];
     killcore::buildSpeedhackMappingName(GetCurrentProcessId(), name, 64);
 
-    g_mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name);
+    g_mapping = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, name);
     if (!g_mapping) {
         return 1;
     }
     g_state = static_cast<killcore::SpeedhackIpcState*>(
-        MapViewOfFile(g_mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(killcore::SpeedhackIpcState)));
+        MapViewOfFile(g_mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(killcore::SpeedhackIpcState)));
     if (!g_state) {
         CloseHandle(g_mapping);
         g_mapping = nullptr;
         return 1;
     }
 
-    HookTarget targets[4] = {
-        {L"kernel32.dll", reinterpret_cast<FARPROC>(&QueryPerformanceCounter),
-         reinterpret_cast<void*>(&DetourQueryPerformanceCounter), killcore::kSpeedhackHookQueryPerformanceCounter},
-        {L"kernel32.dll", reinterpret_cast<FARPROC>(&GetTickCount),
-         reinterpret_cast<void*>(&DetourGetTickCount), killcore::kSpeedhackHookGetTickCount},
-        {L"kernel32.dll", reinterpret_cast<FARPROC>(&GetTickCount64),
-         reinterpret_cast<void*>(&DetourGetTickCount64), killcore::kSpeedhackHookGetTickCount64},
-        {L"winmm.dll", reinterpret_cast<FARPROC>(&timeGetTime),
-         reinterpret_cast<void*>(&DetourTimeGetTime), killcore::kSpeedhackHookTimeGetTime},
+    HookTarget targets[6] = {
+        {"QueryPerformanceCounter", reinterpret_cast<void*>(&DetourQueryPerformanceCounter),
+         {nullptr, nullptr, nullptr},
+         killcore::kSpeedhackHookQueryPerformanceCounter},
+        {"GetTickCount", reinterpret_cast<void*>(&DetourGetTickCount),
+         {nullptr, nullptr, nullptr},
+         killcore::kSpeedhackHookGetTickCount},
+        {"GetTickCount64", reinterpret_cast<void*>(&DetourGetTickCount64),
+         {nullptr, nullptr, nullptr},
+         killcore::kSpeedhackHookGetTickCount64},
+        {"timeGetTime", reinterpret_cast<void*>(&DetourTimeGetTime),
+         {nullptr, nullptr, nullptr},
+         killcore::kSpeedhackHookTimeGetTime},
+        {"GetSystemTimeAsFileTime", reinterpret_cast<void*>(&DetourGetSystemTimeAsFileTime),
+         {nullptr, nullptr, nullptr},
+         killcore::kSpeedhackHookGetSystemTimeAsFileTime},
+        {"GetSystemTimePreciseAsFileTime", reinterpret_cast<void*>(&DetourGetSystemTimePreciseAsFileTime),
+         {nullptr, nullptr, nullptr},
+         killcore::kSpeedhackHookGetSystemTimePreciseAsFileTime},
     };
+    ResolveTargetAddresses(targets, 6);
 
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
-    if (snapshot != INVALID_HANDLE_VALUE) {
-        MODULEENTRY32W entry{};
-        entry.dwSize = sizeof(entry);
-        if (Module32FirstW(snapshot, &entry)) {
-            do {
-                // Ne jamais patcher notre propre DLL (son import reste la
-                // vraie implementation, voir commentaire en tete de fichier)
-                // ni les modules qui EXPORTENT ces fonctions (ils ne les
-                // importent pas d'eux-memes).
-                if (_wcsicmp(entry.szModule, L"KillEngineSpeedhackHandler.dll") == 0 ||
-                    _wcsicmp(entry.szModule, L"kernel32.dll") == 0 ||
-                    _wcsicmp(entry.szModule, L"winmm.dll") == 0) {
-                    continue;
-                }
-                PatchModuleImports(entry.hModule, targets, 4, &g_state->hooksInstalledMask);
-            } while (Module32NextW(snapshot, &entry));
+    HMODULE mainModule = GetModuleHandleW(nullptr);
+    wchar_t mainModulePath[MAX_PATH]{};
+    wchar_t mainModuleDir[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, mainModulePath, MAX_PATH);
+    DirectoryPrefixOf(mainModulePath, mainModuleDir, MAX_PATH);
+
+    for (int pass = 0; pass < 120; ++pass) {
+        if (g_state->stopRequested) {
+            g_state->factor = 1.0;
+            return 0;
         }
-        CloseHandle(snapshot);
-    }
-
-    if (g_state->hooksInstalledMask != 0) {
-        InterlockedExchange(&g_state->active, 1);
-    } else {
-        InterlockedExchange(&g_state->installError, 1);
+        PatchLoadedModules(targets, 6, mainModule, mainModuleDir);
+        if (g_state->hooksInstalledMask != 0) {
+            InterlockedExchange(&g_state->active, 1);
+        } else if (pass == 20) {
+            InterlockedExchange(&g_state->installError, 1);
+        }
+        Sleep(500);
     }
     return 0;
 }

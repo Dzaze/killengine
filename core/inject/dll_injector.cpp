@@ -4,9 +4,11 @@
 #include "process/process_enumerator.h"
 
 #ifdef Q_OS_WIN
+#include <aclapi.h>
 #include <windows.h>
 #endif
 
+#include <QDir>
 #include <QFileInfo>
 
 namespace killcore {
@@ -35,6 +37,64 @@ QString accessDeniedHint(DWORD err) {
         "poser un breakpoint externe puis injecter dans la meme cible juste apres ressemble a une "
         "technique d'injection de code, meme si l'usage ici est legitime. Reessaie, ou ajoute une "
         "exclusion pour KillEngine.exe dans ton antivirus/EDR si le blocage persiste.");
+}
+
+bool prepareAppContainerReadableDllCopy(const QString& dllPath, uint32_t targetPid, QString* copiedPath, QString* error) {
+    const QFileInfo info(dllPath);
+    const QString targetPath = QDir(info.absolutePath()).filePath(
+        QStringLiteral("injected_%1_%2_%3").arg(targetPid).arg(GetTickCount64()).arg(info.fileName()));
+
+    const std::wstring source = QDir::toNativeSeparators(dllPath).toStdWString();
+    const std::wstring target = QDir::toNativeSeparators(targetPath).toStdWString();
+    if (!CopyFileW(source.c_str(), target.c_str(), FALSE)) {
+        if (error) *error = QStringLiteral("CopyFileW vers la copie AppContainer a échoué (error=%1).").arg(GetLastError());
+        return false;
+    }
+
+    uint8_t sidData[SECURITY_MAX_SID_SIZE];
+    PSID packageSid = sidData;
+    DWORD sidSize = sizeof(sidData);
+    if (!CreateWellKnownSid(WELL_KNOWN_SID_TYPE::WinBuiltinAnyPackageSid, nullptr, packageSid, &sidSize)) {
+        if (error) *error = QStringLiteral("CreateWellKnownSid(ALL APPLICATION PACKAGES) a échoué (error=%1).").arg(GetLastError());
+        return false;
+    }
+
+    PACL oldAcl = nullptr;
+    PSECURITY_DESCRIPTOR securityDescriptor = nullptr;
+    DWORD status = GetNamedSecurityInfoW(target.c_str(), SE_OBJECT_TYPE::SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                                         nullptr, nullptr, &oldAcl, nullptr, &securityDescriptor);
+    if (status != ERROR_SUCCESS) {
+        if (error) *error = QStringLiteral("GetNamedSecurityInfoW sur la copie AppContainer a échoué (error=%1).").arg(status);
+        return false;
+    }
+
+    PACL newAcl = nullptr;
+    EXPLICIT_ACCESS_W access{};
+    access.grfAccessPermissions = GENERIC_READ | GENERIC_EXECUTE;
+    access.grfAccessMode = ACCESS_MODE::SET_ACCESS;
+    access.grfInheritance = NO_INHERITANCE;
+    access.Trustee.TrusteeForm = TRUSTEE_FORM::TRUSTEE_IS_SID;
+    access.Trustee.TrusteeType = TRUSTEE_TYPE::TRUSTEE_IS_WELL_KNOWN_GROUP;
+    access.Trustee.ptstrName = static_cast<LPWCH>(packageSid);
+
+    status = SetEntriesInAclW(1, &access, oldAcl, &newAcl);
+    if (status != ERROR_SUCCESS) {
+        LocalFree(securityDescriptor);
+        if (error) *error = QStringLiteral("SetEntriesInAclW pour ALL APPLICATION PACKAGES a échoué (error=%1).").arg(status);
+        return false;
+    }
+
+    status = SetNamedSecurityInfoW(const_cast<LPWSTR>(target.c_str()), SE_OBJECT_TYPE::SE_FILE_OBJECT,
+                                   DACL_SECURITY_INFORMATION, nullptr, nullptr, newAcl, nullptr);
+    LocalFree(newAcl);
+    LocalFree(securityDescriptor);
+    if (status != ERROR_SUCCESS) {
+        if (error) *error = QStringLiteral("SetNamedSecurityInfoW sur la copie AppContainer a échoué (error=%1).").arg(status);
+        return false;
+    }
+
+    if (copiedPath) *copiedPath = targetPath;
+    return true;
 }
 } // namespace
 #endif
@@ -72,83 +132,116 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath) 
 
     const HANDLE hProcess = process.rawHandle();
 
-    // 1. Allouer de la mémoire pour le chemin DLL (unicode)
-    const std::wstring widePath = dllPath.toStdWString();
-    const SIZE_T pathSize = (widePath.size() + 1) * sizeof(wchar_t);
+    auto loadDllPath = [&](const QString& path) {
+        InjectionResult attempt;
 
-    LPVOID pRemotePath = VirtualAllocEx(hProcess, nullptr, pathSize,
-                                         MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!pRemotePath) {
-        const DWORD err = GetLastError();
-        result.error = QStringLiteral("VirtualAllocEx failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
-        return result;
-    }
+        // 1. Allouer de la mémoire pour le chemin DLL (unicode)
+        const std::wstring widePath = QDir::toNativeSeparators(path).toStdWString();
+        const SIZE_T pathSize = (widePath.size() + 1) * sizeof(wchar_t);
 
-    // 2. Écrire le chemin DLL
-    SIZE_T bytesWritten = 0;
-    if (!WriteProcessMemory(hProcess, pRemotePath, widePath.c_str(), pathSize, &bytesWritten) ||
-        bytesWritten != pathSize) {
-        const DWORD err = GetLastError();
-        result.error = QStringLiteral("WriteProcessMemory failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
+        LPVOID pRemotePath = VirtualAllocEx(hProcess, nullptr, pathSize,
+                                             MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (!pRemotePath) {
+            const DWORD err = GetLastError();
+            attempt.error = QStringLiteral("VirtualAllocEx failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
+            return attempt;
+        }
+
+        // 2. Écrire le chemin DLL
+        SIZE_T bytesWritten = 0;
+        if (!WriteProcessMemory(hProcess, pRemotePath, widePath.c_str(), pathSize, &bytesWritten) ||
+            bytesWritten != pathSize) {
+            const DWORD err = GetLastError();
+            attempt.error = QStringLiteral("WriteProcessMemory failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
+            VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
+            return attempt;
+        }
+
+        // 3. Trouver LoadLibraryW
+        const uint64_t loadLibraryAddr = getRemoteProcAddress(QStringLiteral("kernel32.dll"), QStringLiteral("LoadLibraryW"));
+        if (!loadLibraryAddr) {
+            attempt.error = "Cannot find LoadLibraryW address";
+            VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
+            return attempt;
+        }
+
+        // 4. CreateRemoteThread pour appeler LoadLibraryW(pRemotePath)
+        HANDLE hThread = CreateRemoteThread(
+            hProcess,
+            nullptr,
+            0,
+            reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibraryAddr),
+            pRemotePath,
+            0,
+            nullptr);
+
+        if (!hThread) {
+            const DWORD err = GetLastError();
+            attempt.error = QStringLiteral("CreateRemoteThread failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
+            VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
+            return attempt;
+        }
+
+        // 5. Attendre la fin du chargement
+        WaitForSingleObject(hThread, 10000); // 10s timeout
+
+        // 6. Récupérer le module chargé. GetExitCodeThread ne retourne qu'un DWORD,
+        // donc il tronque le HMODULE dans un processus 64-bit. On énumère les modules
+        // après LoadLibrary pour obtenir une base correcte.
+        DWORD exitCode = 0;
+        GetExitCodeThread(hThread, &exitCode);
+        const QString dllName = QFileInfo(path).fileName();
+        const auto modules = ProcessEnumerator::enumerateModules(process.pid());
+        for (const auto& module : modules) {
+            if (module.name.compare(dllName, Qt::CaseInsensitive) == 0) {
+                attempt.moduleBase = module.baseAddress;
+                break;
+            }
+        }
+        if (attempt.moduleBase == 0) {
+            attempt.moduleBase = static_cast<uint64_t>(exitCode);
+        }
+
+        CloseHandle(hThread);
         VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
-        return result;
-    }
 
-    // 3. Trouver LoadLibraryW
-    const uint64_t loadLibraryAddr = getRemoteProcAddress(QStringLiteral("kernel32.dll"), QStringLiteral("LoadLibraryW"));
-    if (!loadLibraryAddr) {
-        result.error = "Cannot find LoadLibraryW address";
-        VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
-        return result;
-    }
+        attempt.success = (attempt.moduleBase != 0);
+        if (!attempt.success) {
+            attempt.error = "LoadLibraryW returned NULL in remote process";
+        }
+        return attempt;
+    };
 
-    // 4. CreateRemoteThread pour appeler LoadLibraryW(pRemotePath)
-    HANDLE hThread = CreateRemoteThread(
-        hProcess,
-        nullptr,
-        0,
-        reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibraryAddr),
-        pRemotePath,
-        0,
-        nullptr);
-
-    if (!hThread) {
-        const DWORD err = GetLastError();
-        result.error = QStringLiteral("CreateRemoteThread failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
-        VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
-        return result;
-    }
-
-    // 5. Attendre la fin du chargement
-    WaitForSingleObject(hThread, 10000); // 10s timeout
-
-    // 6. Récupérer le module chargé. GetExitCodeThread ne retourne qu'un DWORD,
-    // donc il tronque le HMODULE dans un processus 64-bit. On énumère les modules
-    // après LoadLibrary pour obtenir une base correcte.
-    DWORD exitCode = 0;
-    GetExitCodeThread(hThread, &exitCode);
-    const QString dllName = QFileInfo(dllPath).fileName();
-    const auto modules = ProcessEnumerator::enumerateModules(process.pid());
-    for (const auto& module : modules) {
-        if (module.name.compare(dllName, Qt::CaseInsensitive) == 0) {
-            result.moduleBase = module.baseAddress;
-            break;
+    QString loadedPath = dllPath;
+    result = loadDllPath(dllPath);
+    if (!result.success && result.error == QStringLiteral("LoadLibraryW returned NULL in remote process")) {
+        QString copiedPath;
+        QString copyError;
+        if (prepareAppContainerReadableDllCopy(dllPath, process.pid(), &copiedPath, &copyError)) {
+            KE_LOG_WARN() << "DllInjector: LoadLibraryW returned NULL for " << dllPath.toStdString()
+                          << ", retrying with AppContainer-readable copy " << copiedPath.toStdString();
+            loadedPath = copiedPath;
+            result = loadDllPath(copiedPath);
+            if (!result.success) {
+                result.error = QStringLiteral("%1; fallback AppContainer via %2 a échoué: %3")
+                                   .arg(QStringLiteral("LoadLibraryW returned NULL in remote process"),
+                                        copiedPath,
+                                        result.error);
+            }
+        } else {
+            result.error = QStringLiteral("%1; fallback AppContainer impossible: %2")
+                               .arg(result.error, copyError);
         }
     }
-    if (result.moduleBase == 0) {
-        result.moduleBase = static_cast<uint64_t>(exitCode);
+
+
+    if (result.success) {
+        KE_LOG_INFO() << "DllInjector: injected " << loadedPath.toStdString() << " into PID " << process.pid()
+                      << " moduleBase=0x" << std::hex << result.moduleBase;
+    } else {
+        KE_LOG_WARN() << "DllInjector: injection failed for " << loadedPath.toStdString() << " into PID "
+                      << process.pid() << ": " << result.error.toStdString();
     }
-
-    CloseHandle(hThread);
-    VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
-
-    result.success = (result.moduleBase != 0);
-    if (!result.success) {
-        result.error = "LoadLibraryW returned NULL in remote process";
-    }
-
-    KE_LOG_INFO() << "DllInjector: injected " << dllPath.toStdString() << " into PID " << process.pid()
-                  << " moduleBase=0x" << std::hex << result.moduleBase;
 #else
     (void)process;
     (void)dllPath;

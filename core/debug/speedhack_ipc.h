@@ -20,11 +20,14 @@ constexpr uint32_t kSpeedhackHookQueryPerformanceCounter = 1u << 0;
 constexpr uint32_t kSpeedhackHookGetTickCount = 1u << 1;
 constexpr uint32_t kSpeedhackHookGetTickCount64 = 1u << 2;
 constexpr uint32_t kSpeedhackHookTimeGetTime = 1u << 3;
+constexpr uint32_t kSpeedhackHookGetSystemTimeAsFileTime = 1u << 4;
+constexpr uint32_t kSpeedhackHookGetSystemTimePreciseAsFileTime = 1u << 5;
 
 #pragma pack(push, 1)
 struct SpeedhackIpcState {
     volatile long active{0};          // 1 une fois au moins un hook installe dans la cible
     volatile long installError{0};    // 1 si aucun hook n'a pu etre installe (echec total)
+    volatile long stopRequested{0};   // 1 si KillEngine abandonne une installation en cours
     volatile long hooksInstalledMask{0}; // OR des kSpeedhackHook* reussis
     // factor est le seul champ que KillEngine reecrit apres l'injection, en
     // direct (curseur de slider) — voir commentaire en tete de fichier. 1.0 =

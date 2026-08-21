@@ -202,6 +202,10 @@ watch(
         <p class="risk-warning">
           Cette action modifie ou observe activement un processus local. Confirme uniquement si tu contrôles ce processus et acceptes le risque.
         </p>
+        <label v-if="store.riskDialog.rememberKey" class="risk-remember">
+          <input v-model="store.riskDialog.rememberChoice" type="checkbox" />
+          <span>{{ store.riskDialog.rememberLabel }}</span>
+        </label>
         <div class="risk-actions">
           <button type="button" class="risk-btn secondary" @click="store.resolveRiskDialog(false)">
             Annuler
@@ -425,6 +429,22 @@ body {
   margin-top: 12px;
   color: var(--text-dim);
   line-height: 1.5;
+}
+
+.risk-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.risk-remember input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--warning);
 }
 
 .onboarding-modal {

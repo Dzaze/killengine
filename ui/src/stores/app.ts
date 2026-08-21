@@ -251,6 +251,9 @@ export interface RiskDialogState {
   title: string
   detail: string
   mode: AppSettings['autoRiskMode']
+  rememberKey?: 'speedhack'
+  rememberChoice?: boolean
+  rememberLabel?: string
 }
 
 export interface MemoryPreviewDecodedValue {
@@ -538,6 +541,7 @@ export const useAppStore = defineStore('app', () => {
   const workspaceProjectIdCounter = ref(0)
   const riskDialog = ref<RiskDialogState | null>(null)
   let riskDialogResolver: ((accepted: boolean) => void) | null = null
+  const mutedRiskConfirmations = ref<Record<string, boolean>>({})
   const searchQuery = ref('')
   const searchResult = ref('')
   const exactScanValue = ref('')
@@ -2390,6 +2394,12 @@ let nextWatchedChainId = 1
   ): Promise<boolean> {
     lastRiskBlockReason.value = ''
     const mode = settingAutoRiskMode.value
+    const rememberKey = title === 'Activer le speedhack' ? 'speedhack' : undefined
+    if (rememberKey && mutedRiskConfirmations.value[rememberKey]) {
+      addActionLog('risk_gate', `Confirmation mémorisée: ${title}`, detail, 'info')
+      logAiAudit('risk_muted_accept', { risk, title, detail, mode, rememberKey })
+      return true
+    }
     const blocked =
       (mode === 'Safe' && (risk === 'debug' || risk === 'patch' || risk === 'injection')) ||
       (mode === 'Expert' && risk === 'injection')
@@ -2416,7 +2426,16 @@ let nextWatchedChainId = 1
         riskDialogResolver(false)
       }
       riskDialogResolver = resolve
-      riskDialog.value = { open: true, risk, title, detail, mode }
+      riskDialog.value = {
+        open: true,
+        risk,
+        title,
+        detail,
+        mode,
+        rememberKey,
+        rememberChoice: false,
+        rememberLabel: rememberKey === 'speedhack' ? 'Ne plus redemander pour le speedhack pendant cette session' : undefined,
+      }
     })
     addActionLog('risk_gate', accepted ? `Confirmé: ${title}` : `Refusé: ${title}`, detail, accepted ? 'success' : 'warning')
     logAiAudit(accepted ? 'risk_confirmed' : 'risk_refused', { risk, title, detail, mode })
@@ -2432,6 +2451,13 @@ let nextWatchedChainId = 1
   }
 
   function resolveRiskDialog(accepted: boolean) {
+    const dialog = riskDialog.value
+    if (accepted && dialog?.rememberKey && dialog.rememberChoice) {
+      mutedRiskConfirmations.value = {
+        ...mutedRiskConfirmations.value,
+        [dialog.rememberKey]: true,
+      }
+    }
     const resolver = riskDialogResolver
     riskDialogResolver = null
     riskDialog.value = null
@@ -2893,7 +2919,12 @@ let nextWatchedChainId = 1
     if (!controller.setSpeedhackFactor) return null
     try {
       const result = await controller.setSpeedhackFactor(factor)
-      speedhackStatus.value = result
+      speedhackStatus.value = {
+        ...(speedhackStatus.value ?? { success: true, active: true, factor }),
+        ...result,
+        active: result.active ?? speedhackStatus.value?.active ?? true,
+        factor: result.factor ?? factor,
+      }
       if (result.success) speedhackFactor.value = factor
       return result
     } catch (e) {

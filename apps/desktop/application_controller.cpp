@@ -6718,8 +6718,13 @@ QVariantMap ApplicationController::setSpeedhackFactor(double factor) {
         return result;
     }
 
+    const auto stats = m_speedhackSession->stats();
     result["success"] = true;
-    result["factor"] = factor;
+    result["active"] = stats.active;
+    result["installError"] = stats.installError;
+    result["factor"] = stats.factor;
+    result["hooksInstalledMask"] = static_cast<int>(stats.hooksInstalledMask);
+    result["pid"] = m_pid;
     return result;
 }
 
