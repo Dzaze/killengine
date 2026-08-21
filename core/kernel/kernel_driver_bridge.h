@@ -2,7 +2,12 @@
 
 #include <cstdint>
 
+#include <QByteArray>
 #include <QString>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 namespace killcore {
 
@@ -15,10 +20,10 @@ enum class KernelDriverProbeStatus {
 };
 
 struct KernelDriverCapabilities {
-    std::uint32_t protocolVersion = 0;
-    bool healthProbe = false;
-    bool processMemoryAccess = false;
-    bool privilegedInstrumentation = false;
+    std::uint32_t protocolVersion = 1; // Définis la version du protocole que le driver supporte
+    bool healthProbe = false; // Permet au driver de répondre aux requêtes de santé
+    bool processMemoryAccess = false; // Permet au driver de lire et écrire dans la mémoire des processus
+    bool privilegedInstrumentation = false; // Permet au driver d'utiliser des fonctionnalités d'instrumentation privilégiées
 };
 
 struct KernelDriverProbeResult {
@@ -39,6 +44,18 @@ public:
 
     /// Probe the optional kernel driver without enabling privileged memory operations.
     KernelDriverProbeResult probe() const;
+
+#ifdef Q_OS_WIN
+    /// Write raw bytes into another process's memory via the kernel driver
+    /// (kKillEngineKernelIoctlWriteMemory). Returns false on failure (driver
+    /// not loaded, IOCTL rejected, or a short write).
+    bool writeMemory(HANDLE processId, uint64_t address, const QByteArray& data) const;
+
+    /// Read `size` bytes from another process's memory via the kernel driver
+    /// (kKillEngineKernelIoctlReadMemory). Returns an empty QByteArray on
+    /// failure rather than a partially-filled buffer.
+    QByteArray readMemory(HANDLE processId, uint64_t address, size_t size) const;
+#endif
 
     static QString statusToString(KernelDriverProbeStatus status);
 

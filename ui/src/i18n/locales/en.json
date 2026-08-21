@@ -207,6 +207,13 @@
       "cost": "Attaches the Windows debugger. Change the value in the program during the capture window, otherwise nothing is caught.",
       "example": "The address you found refuses to stay frozen. Click Find what writes, then land a hit in-game during the capture window: KillEngine shows the exact instruction writing that value, with its module and offset."
     },
+    "disassembleBackward": {
+      "title": "Disassemble backward",
+      "what": "Reads the bytes right before the instruction captured by Find what writes, and reconstructs the instructions that lead up to it (read-only, no debugger attach). Instructions with a simple [register+displacement] memory operand are highlighted as \"candidate fields\".",
+      "when": "When a write never sticks (the value drifts back on its own): the targeted field is often the displayed result of an animated counter (e.g. displayed = current + (target - current) × progress), recomputed every frame and therefore impossible to hold with a direct write. The real source fields (current/target) are almost always read just before, in the few instructions preceding the write.",
+      "cost": "Memory read only, no debugger attach, no write. Requires a RIP already captured via Find what writes.",
+      "example": "Real case: a card game's XP never held after a direct write. Find what writes captured `mov [rsi+0x900], edx` (the displayed field). Disassemble backward traced it back to `mov ecx, [rsi+0x904]` (current) and `mov eax, [rsi+0x908]` (target) right before a float interpolation. Writing to `[rsi+0x908]` (the target) fixed it — never to `[rsi+0x900]`."
+    },
     "aob": {
       "title": "AOB signatures",
       "what": "Searches a byte signature inside the program code, then offers to patch the matched instruction.",
@@ -220,6 +227,13 @@
       "when": "A normal write on one address succeeded (verified in memory) but nothing changes on screen, and repeated next scans show that 2 to 5 addresses stay identical to each other every cycle: that's the sign of redundant copies. Select those addresses and write them together instead of one at a time.",
       "cost": "Every thread of the target is suspended during the write burst (a few milliseconds in practice) — the target may appear to freeze for an instant. Limited to 32 addresses. Doesn't replace a simple write test beforehand to confirm these are actually the right addresses.",
       "example": "A value shown on screen never changes despite individual writes that verify correctly in memory. A repeated next scan reveals 2 addresses that always stay equal to each other. Selecting both and clicking \"Write together (atomic)\" finally makes the write stick — the target was comparing the two copies and reverting the one that didn't match the other."
+    },
+    "writeKernel": {
+      "title": "Write via kernel",
+      "what": "Writes the value through the KillEngineKernel driver (KeStackAttachProcess on the driver side, not usermode WriteProcessMemory) instead of a normal write. Bypasses usermode memory protections (VirtualProtect, PAGE_GUARD, some basic anti-cheats that only watch the usermode API).",
+      "when": "A normal write explicitly fails (memory protection), or holds for an instant and then repeatedly drifts back on its own. Requires the KillEngineKernel driver to be loaded (Settings > Kernel driver > Test driver) — the button stays hidden otherwise. Careful: if the value keeps reverting every frame even after a successful kernel write, it's probably not a protection but an animated counter recomputed continuously — see \"Disassemble backward\" instead of retrying in a loop.",
+      "cost": "Requires the kernel driver installed and loaded (see Settings). One address at a time, never bulk. Bypasses legitimate system protections — irreversible action without reading the original value first.",
+      "example": "A normal write to a game's XP holds for a moment then always reverts to the old value. \"Write via kernel\" succeeds where the usermode write failed — confirming the target specifically watched/protected the WriteProcessMemory API."
     },
     "pointerChains": {
       "title": "Pointer chains",

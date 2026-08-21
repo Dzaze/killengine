@@ -38,6 +38,10 @@ const bookmarkAddress = ref('')
 const bookmarkType = ref('Int32')
 const bookmarkValue = ref('')
 const bookmarkNote = ref('')
+const kernelReadAddress = ref('')
+const kernelReadSize = ref(16)
+const kernelWriteAddress = ref('')
+const kernelWriteBytes = ref('')
 const selectedStructureTemplate = computed(() =>
   store.structureTemplates.find((template) => template.id === selectedStructureTemplateId.value) ?? null,
 )
@@ -799,8 +803,9 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <span>{{ store.kernelDriverStatus?.status ?? 'inconnu' }}</span>
       </div>
       <p class="hint">
-        Statut du driver optionnel `KillEngineKernel.sys`. Le driver actuel expose uniquement un probe de santé :
-        aucune lecture, écriture mémoire ou instrumentation privilégiée n'est activée par ce statut.
+        Statut du driver optionnel `KillEngineKernel.sys`. Si "Accès mémoire kernel" est actif ci-dessous, la lecture
+        et l'écriture mémoire via le driver noyau sont disponibles (contourne les protections mémoire usermode
+        normales — VirtualProtect/PAGE_GUARD — via un accès ring 0, pas juste un probe de santé).
       </p>
       <div class="panel-actions">
         <button
@@ -839,6 +844,58 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       </div>
       <p v-if="store.kernelDriverStatusError" class="error">
         {{ store.kernelDriverStatusError }}
+      </p>
+
+      <template v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess">
+        <h3>Lecture mémoire (kernel)</h3>
+        <p class="hint">
+          Lit sur le processus attaché ({{ store.isAttached ? store.processName : 'aucun' }}) via
+          <code>KeStackAttachProcess</code> côté driver — chemin distinct de la lecture usermode habituelle.
+        </p>
+        <div class="panel-actions">
+          <input v-model="kernelReadAddress" class="input" placeholder="Adresse hex, ex: 7FF6ABCD1000" />
+          <input v-model.number="kernelReadSize" class="input short-input" type="number" min="1" max="4096" step="1" />
+          <button
+            class="btn btn-secondary compact"
+            :disabled="store.kernelMemoryReadBusy || !store.isAttached"
+            @click="store.readMemoryKernel(kernelReadAddress, kernelReadSize)"
+          >
+            {{ store.kernelMemoryReadBusy ? 'Lecture…' : 'Lire (kernel)' }}
+          </button>
+        </div>
+        <p v-if="store.kernelMemoryReadResult?.success" class="status-line">
+          {{ store.kernelMemoryReadResult.bytesRead }} octet(s) : {{ store.kernelMemoryReadResult.hex }}
+        </p>
+        <p v-else-if="store.kernelMemoryReadResult?.error" class="error">
+          {{ store.kernelMemoryReadResult.error }}
+        </p>
+
+        <h3>Écriture mémoire (kernel)</h3>
+        <p class="hint">
+          Écrit directement depuis le ring 0, sans passer par les protections mémoire usermode normales — action à
+          risque équivalente à une injection, soumise à la même confirmation (mode Auto Trainer requis).
+        </p>
+        <div class="panel-actions">
+          <input v-model="kernelWriteAddress" class="input" placeholder="Adresse hex, ex: 7FF6ABCD1000" />
+          <input v-model="kernelWriteBytes" class="input" placeholder="Octets hex, ex: 90 90 90" />
+          <button
+            class="btn btn-secondary compact"
+            :disabled="store.kernelMemoryWriteBusy || !store.isAttached"
+            @click="store.writeMemoryKernel(kernelWriteAddress, kernelWriteBytes)"
+          >
+            {{ store.kernelMemoryWriteBusy ? 'Écriture…' : 'Écrire (kernel)' }}
+          </button>
+        </div>
+        <p v-if="store.kernelMemoryWriteResult?.success" class="status-line">
+          {{ store.kernelMemoryWriteResult.bytesWritten }} octet(s) écrits.
+        </p>
+        <p v-else-if="store.kernelMemoryWriteResult?.error" class="error">
+          {{ store.kernelMemoryWriteResult.error }}
+        </p>
+      </template>
+      <p v-else class="hint">
+        Lecture/écriture mémoire via le driver noyau indisponibles : le driver doit être connecté avec la capacité
+        "Accès mémoire kernel" active (voir ci-dessus, "Tester le driver").
       </p>
     </section>
 

@@ -7225,6 +7225,81 @@ QVariantMap ApplicationController::suggestCodePatches(const QString& addressHex,
     return result;
 }
 
+QVariantMap ApplicationController::disassembleBackward(const QString& addressHex, const QVariantMap& options) const {
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = addressHex;
+
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int windowBytes = std::clamp(options.value("windowBytes", 64).toInt(), 16, 128);
+    const int trailingBytes = 16; // Marge pour décoder entièrement l'instruction cible elle-même.
+    const uint64_t start = address >= static_cast<uint64_t>(windowBytes) ? address - static_cast<uint64_t>(windowBytes) : 0;
+    const int targetOffsetInWindow = static_cast<int>(address - start);
+
+    killcore::MemoryReader reader(m_handle);
+    const auto read = reader.readChunked(start, static_cast<size_t>(targetOffsetInWindow + trailingBytes), 4096);
+    if (!read.success && read.bytesRead == 0) {
+        const QString hint = codeReadProtectionHint(read.errorCode);
+        if (!hint.isEmpty()) {
+            result["error"] = hint;
+            result["codeReadProtected"] = true;
+        } else {
+            result["error"] = read.errorMessage.isEmpty() ? QString("Lecture mémoire impossible.") : read.errorMessage;
+        }
+        return result;
+    }
+    if (targetOffsetInWindow > read.data.size()) {
+        result["error"] = "Lecture mémoire trop courte pour atteindre l'adresse cible.";
+        return result;
+    }
+
+    const auto backward = killcore::disassembleBackwardWindow(read.data, targetOffsetInWindow);
+    result["success"] = backward.success;
+    result["error"] = backward.error;
+    if (!backward.success) {
+        return result;
+    }
+
+    QVariantList instructions;
+    QVariantList candidateFields;
+    uint64_t cursor = start + static_cast<uint64_t>(backward.startOffsetInWindow);
+    for (const auto& info : backward.instructions) {
+        QVariantMap item;
+        const QString instrAddressHex = QString::number(cursor, 16).toUpper();
+        item["address"] = instrAddressHex;
+        item["bytes"] = info.rawBytesText;
+        item["disassembly"] = info.disassembly;
+        item["mnemonicHint"] = info.mnemonicHint;
+        item["category"] = info.category;
+        item["memBaseRegister"] = info.memBaseRegister;
+        item["memDisplacement"] = static_cast<qlonglong>(info.memDisplacement);
+        const bool isCandidateField = !info.memBaseRegister.isEmpty();
+        item["isCandidateField"] = isCandidateField;
+        instructions.append(item);
+        if (isCandidateField) {
+            QVariantMap candidate = item;
+            candidateFields.append(candidate);
+        }
+        cursor += static_cast<uint64_t>(info.length);
+    }
+
+    result["instructions"] = instructions;
+    result["candidateFields"] = candidateFields;
+    result["warning"] = "Désassemblage en arrière expérimental (lecture seule). Vérifie toujours les champs candidats avant d'écrire dessus.";
+    appendScanTelemetry("disassemble_backward", result);
+    return result;
+}
+
 QVariantMap ApplicationController::restoreCodePatch(const QString& addressHex) {
     QVariantMap result;
     result["success"] = false;
@@ -10880,6 +10955,39 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["confirmationReason"] = "Cette action modifie la mémoire. Utilise l'onglet Mémoire pour confirmer manuellement.";
         stampIntent(&result);
         return result;
+    } else if (tool == "kernel_write") {
+        // Demande explicite ("écris via le kernel") : contrairement à
+        // write_value/freeze_value ci-dessus, on propose une action cliquable
+        // (recoveryActions) plutôt que de renvoyer vers l'onglet Mémoire —
+        // l'écriture kernel n'a pas d'équivalent dans ce panneau usermode, et
+        // c'est justement l'action que l'utilisateur vient de demander.
+        // Reste toujours un clic de confirmation explicite, jamais automatique.
+        const QString kernelAddress = args.value("address").toString().trimmed();
+        const QString kernelValue = args.value("value").toString().trimmed();
+        const QString kernelValueType = args.value("valueType", "Int32").toString();
+        if (kernelAddress.isEmpty() || kernelValue.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Il me faut l'adresse (0x...) et la valeur pour écrire via le driver kernel.";
+            stampIntent(&result);
+            return result;
+        }
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = "Écriture kernel : contourne les protections mémoire usermode (VirtualProtect/PAGE_GUARD). Action irréversible sans lecture préalable de la valeur d'origine.";
+        result["message"] = QString("Écriture kernel demandée : %1 (%2) à 0x%3. Confirme pour appliquer via le driver noyau.")
+                                 .arg(kernelValue, kernelValueType, kernelAddress);
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{
+            {"id", "kernel_write_targets"},
+            {"label", QString("Confirmer : écrire %1 via kernel").arg(kernelValue)},
+            {"address", kernelAddress},
+            {"value", kernelValue},
+            {"valueType", kernelValueType},
+            {"requiresConfirmation", true},
+        });
+        result["recoveryActions"] = recoveryActions;
+        stampIntent(&result);
+        return result;
     } else {
         result["actionStatus"] = "unsupported_tool";
         result["actionError"] = QString("Outil Smart Search non supporté: %1").arg(tool);
@@ -11266,6 +11374,150 @@ QVariantMap ApplicationController::probeKernelDriver() const {
 
     KE_LOG_INFO() << "probeKernelDriver: status=" << result.value("status").toString().toStdString()
                   << " message=" << probe.message.toStdString();
+    return result;
+}
+
+QVariantMap ApplicationController::readMemoryKernel(const QString& addressHex, int size) const {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    bool ok = false;
+    QString normalized = addressHex.trimmed();
+    if (normalized.startsWith("0x", Qt::CaseInsensitive)) {
+        normalized = normalized.mid(2);
+    }
+    const uint64_t address = normalized.toULongLong(&ok, 16);
+    if (!ok || address == 0) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int boundedSize = std::clamp(size, 1, 4096);
+
+#ifdef Q_OS_WIN
+    const killcore::KernelDriverBridge bridge;
+    const auto targetPid = reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(m_handle.pid()));
+    const QByteArray data = bridge.readMemory(targetPid, address, static_cast<size_t>(boundedSize));
+    if (data.isEmpty()) {
+        result["error"] = "Lecture kernel échouée (driver non chargé/non connecté, adresse invalide côté cible, ou accès refusé).";
+        KE_LOG_WARN() << "readMemoryKernel: échec pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString();
+        return result;
+    }
+    result["success"] = true;
+    result["bytesRead"] = data.size();
+    result["hex"] = QString::fromLatin1(data.toHex(' ').toUpper());
+    KE_LOG_INFO() << "readMemoryKernel: pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString()
+                  << " bytesRead=" << data.size();
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+    return result;
+}
+
+QVariantMap ApplicationController::writeMemoryKernel(const QString& addressHex, const QString& hexBytes) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    bool ok = false;
+    QString normalized = addressHex.trimmed();
+    if (normalized.startsWith("0x", Qt::CaseInsensitive)) {
+        normalized = normalized.mid(2);
+    }
+    const uint64_t address = normalized.toULongLong(&ok, 16);
+    if (!ok || address == 0) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    QString hexOnly = hexBytes;
+    hexOnly.remove(' ');
+    const QByteArray data = QByteArray::fromHex(hexOnly.toLatin1());
+    if (data.isEmpty()) {
+        result["error"] = "Octets invalides (format hexadécimal attendu, ex: \"90 90 90\").";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    const killcore::KernelDriverBridge bridge;
+    const auto targetPid = reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(m_handle.pid()));
+    const bool written = bridge.writeMemory(targetPid, address, data);
+    result["success"] = written;
+    if (written) {
+        result["bytesWritten"] = data.size();
+        KE_LOG_INFO() << "writeMemoryKernel: pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString()
+                      << " bytesWritten=" << data.size();
+    } else {
+        result["error"] = "Écriture kernel échouée (driver non chargé/non connecté, adresse invalide côté cible, ou accès refusé).";
+        KE_LOG_WARN() << "writeMemoryKernel: échec pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString();
+    }
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+    return result;
+}
+
+QVariantMap ApplicationController::writeMemoryValueKernel(const QString& addressHex, const QString& valueType, const QString& value) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(valueType, &type)) {
+        result["error"] = "Type invalide.";
+        return result;
+    }
+
+    killcore::ScanValue scanValue;
+    QString parseError;
+    if (!killcore::parseScanValue(value, type, &scanValue, &parseError)) {
+        result["error"] = parseError;
+        return result;
+    }
+
+    const QByteArray data = killcore::scanValueToBytes(scanValue);
+
+#ifdef Q_OS_WIN
+    const killcore::KernelDriverBridge bridge;
+    const auto targetPid = reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(m_handle.pid()));
+    const bool written = bridge.writeMemory(targetPid, address, data);
+    result["success"] = written;
+    if (written) {
+        result["bytesWritten"] = data.size();
+        // Meme choke point de detection "l'ecriture est repartie toute
+        // seule" que writeMemoryValue (H2, docs/STRATEGY_ROOM.md) : une
+        // ecriture kernel qui ne tient pas est justement le signal le plus
+        // fort qu'il s'agit d'un compteur anime (cf. disassembleBackward),
+        // pas d'une simple protection usermode contournable.
+        registerWriteWatch(address, type, data);
+        KE_LOG_INFO() << "writeMemoryValueKernel: pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString()
+                      << " bytesWritten=" << data.size();
+    } else {
+        result["error"] = "Écriture kernel échouée (driver non chargé/non connecté, adresse invalide côté cible, ou accès refusé).";
+        KE_LOG_WARN() << "writeMemoryValueKernel: échec pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString();
+    }
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
     return result;
 }
 

@@ -58,4 +58,24 @@ struct PatchSuggestion {
 InstructionInfo decodeX64InstructionLength(const QByteArray& bytes);
 QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruction);
 
+struct BackwardDisassemblyResult {
+    bool success{false};
+    QString error;
+    // Dans l'ordre d'execution ; la derniere entree est l'instruction qui
+    // commence exactement a targetOffsetInWindow (le RIP cible connu).
+    QList<InstructionInfo> instructions;
+    // Offset, dans windowBytes, ou commence la premiere instruction de
+    // instructions[] — permet à l'appelant de reconstruire une adresse
+    // absolue par instruction (windowBaseAddress + startOffsetInWindow + ...).
+    int startOffsetInWindow{-1};
+};
+
+// x86-64 n'a pas de decodage "en arriere" natif : on essaie de decoder en
+// avant depuis chaque offset candidat avant targetOffsetInWindow, et on ne
+// garde que le chemin qui retombe exactement sur targetOffsetInWindow (pas
+// de depassement/sous-depassement). Sert a reconstruire les instructions qui
+// precedent un RIP capture par findWhatWrites (ex: retrouver les champs
+// "actuel"/"cible" d'un compteur anime avant l'ecriture visible).
+BackwardDisassemblyResult disassembleBackwardWindow(const QByteArray& windowBytes, int targetOffsetInWindow);
+
 } // namespace killcore

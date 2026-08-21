@@ -292,12 +292,69 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
         store.pushMessage('assistant', "Capture bloquée par ton mode Auto actuel (Safe). Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
       } else {
         const hits = Array.isArray((result as Record<string, unknown>).hits) ? (result as Record<string, unknown>).hits as Array<Record<string, unknown>> : []
+        const firstRip = hits.length > 0 ? String(hits[0].instructionPointer ?? '').trim() : ''
         store.pushMessage(
           'assistant',
           hits.length > 0
             ? `Capturé : ${hits.length} instruction(s) écrivent sur 0x${address}. Ajoutées aux checkpoints d'Investigation — tu peux y valider une piste avant d'écrire.`
             : `Aucune écriture capturée sur 0x${address} pendant la fenêtre. Soit la valeur n'a pas changé pendant la capture (réessaie en faisant varier plus vite), soit cette adresse n'est plus la bonne.`,
-          { isError: hits.length === 0 },
+          {
+            isError: hits.length === 0,
+            recoveryActions: firstRip
+              ? [
+                  {
+                    id: 'disassemble_backward_targets',
+                    label: 'Chercher la vraie source',
+                    address: firstRip,
+                    reason: "Si l'écriture ne tient jamais, l'adresse ciblée est souvent un compteur animé recalculé à chaque frame — remonter le désassemblage trouve le vrai champ source.",
+                  },
+                  { id: 'open_expert', label: 'Ouvrir Expert' },
+                ]
+              : undefined,
+          },
+        )
+      }
+    }
+  } else if (actionId === 'disassemble_backward_targets') {
+    const address = typeof action === 'string' ? '' : String(action.address ?? '')
+    if (!address) {
+      store.pushMessage('assistant', "Aucun RIP capturé à désassembler.", { isError: true })
+    } else {
+      const result = await store.executeCheckpointDisassembleBackward({ address })
+      if (result === null) {
+        store.pushMessage('assistant', "Désassemblage bloqué par ton mode Auto actuel (Safe). Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+      } else {
+        const candidates = Array.isArray(result.candidateFields) ? result.candidateFields : []
+        if (candidates.length === 0) {
+          store.pushMessage('assistant', `Aucun champ candidat trouvé avant 0x${address}. L'instruction capturée n'est peut-être pas la fin d'une chaîne de calcul exploitable — essaie une autre adresse ou vérifie le désassemblage dans Expert.`, { isError: true })
+        } else {
+          const list = candidates
+            .map((field) => `[${field.memBaseRegister}+0x${Number(field.memDisplacement ?? 0).toString(16)}]`)
+            .join(', ')
+          store.pushMessage(
+            'assistant',
+            `${candidates.length} champ(s) candidat(s) trouvé(s) avant 0x${address} : ${list}. Ajoutés aux checkpoints d'Investigation. Ce sont souvent les vraies sources ("actuel"/"cible") d'un compteur animé — teste une écriture dessus plutôt que sur l'adresse affichée d'origine.`,
+          )
+        }
+      }
+    }
+  } else if (actionId === 'kernel_write_targets') {
+    const address = typeof action === 'string' ? '' : String(action.address ?? '')
+    const value = typeof action === 'string' ? '' : String(action.value ?? '')
+    const valueType = typeof action === 'string' ? 'Int32' : String(action.valueType ?? 'Int32')
+    if (!address || !value) {
+      store.pushMessage('assistant', "Adresse ou valeur manquante pour l'écriture kernel.", { isError: true })
+    } else {
+      const result = await store.executeCheckpointKernelWrite({ address, value, type: valueType })
+      if (result === null) {
+        store.pushMessage('assistant', "Écriture kernel bloquée par ton mode Auto actuel (Safe) ou refusée à la confirmation. Passe en Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+      } else {
+        store.pushMessage(
+          'assistant',
+          result.success
+            ? `Écrit ${value} à 0x${address} via le driver kernel (${result.bytesWritten ?? 0} octet(s), contourne les protections usermode).`
+            : `Écriture kernel échouée : ${result.error ?? 'raison inconnue'}. Vérifie que le driver KillEngineKernel est chargé (Paramètres > Driver kernel).`,
+          { isError: !result.success },
         )
       }
     }

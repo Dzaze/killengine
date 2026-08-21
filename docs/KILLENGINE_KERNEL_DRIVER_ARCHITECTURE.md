@@ -15,6 +15,10 @@ Texte utilisateur exact à conserver quand cette capacité devient visible dans 
 ## Niveau 0 Livré
 
 - `tools/kernel_driver/KillEngineKernel/` : driver WDK minimal `KillEngineKernel.sys`.
+  - `KillEngineKernel.cpp` : `DriverEntry`, création du device et enregistrement des dispatchers.
+  - `driver.h` : contrat interne du driver, constantes IOCTL et structure de réponse.
+  - `driver.cpp` : handlers IRP et réponse `HealthProbe`.
+  - `KillEngineKernel.inf` : manifeste d'installation.
 - `core/kernel/kernel_driver_bridge.h/.cpp` : pont user-mode optionnel vers `\\.\KillEngineKernel`.
 - `ApplicationController::probeKernelDriver()` + `ui/src/services/backend.ts` + `SettingsView.vue` : statut driver visible dans KillEngine.
 - Probe de santé uniquement : ouverture du device + IOCTL `HealthProbe`.

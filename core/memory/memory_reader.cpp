@@ -11,13 +11,10 @@
 
 namespace killcore {
 
-void CancellationToken::cancel() {
-    m_cancelled.store(true, std::memory_order_relaxed);
-}
-
-bool CancellationToken::isCancelled() const {
-    return m_cancelled.load(std::memory_order_relaxed);
-}
+// CancellationToken::cancel()/isCancelled() sont maintenant definis inline
+// dans memory_reader.h -- ne pas les redefinir ici (meme bug que celui
+// corrige entre memory_reader.h et memory_writer.h : un corps de fonction
+// non-inline duplique casse la compilation).
 
 MemoryReader::MemoryReader(const ProcessHandle& process)
     : m_process(process) {

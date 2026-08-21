@@ -207,6 +207,13 @@
       "cost": "Attache le debugger Windows. Fais varier la valeur dans le programme pendant la fenêtre de capture, sinon rien n'est capturé.",
       "example": "L'adresse trouvée refuse de rester figée. Clique Écrit par, puis frappe un coup dans le jeu pendant la capture : KillEngine affiche l'instruction exacte qui écrit cette valeur, avec son module et son offset."
     },
+    "disassembleBackward": {
+      "title": "Désassembler en amont",
+      "what": "Lit les octets juste avant l'instruction capturée par Écrit par, et reconstruit les instructions qui la précèdent (lecture seule, aucun attach debugger). Les instructions avec un opérande mémoire simple [registre+déplacement] sont mises en avant comme « champs candidats ».",
+      "when": "Quand une écriture ne tient jamais (la valeur repart toute seule) : le champ ciblé est souvent le résultat affiché d'un compteur animé (ex: affiché = actuel + (cible - actuel) × progression), recalculé à chaque frame et donc impossible à faire tenir. Les vraies sources (actuel/cible) sont presque toujours lues juste avant, dans les quelques instructions qui précèdent l'écriture.",
+      "cost": "Lecture mémoire seule, pas d'attach debugger, pas d'écriture. Nécessite d'avoir déjà un RIP capturé via Écrit par.",
+      "example": "Cas réel : l'XP d'un jeu de cartes ne tenait jamais après une écriture directe. Écrit par a capturé l'instruction `mov [rsi+0x900], edx` (le champ affiché). Désassembler en amont a remonté jusqu'à `mov ecx, [rsi+0x904]` (actuel) et `mov eax, [rsi+0x908]` (cible) juste avant une interpolation flottante. Écrire sur `[rsi+0x908]` (la cible) a résolu le problème — jamais sur `[rsi+0x900]`."
+    },
     "aob": {
       "title": "AOB signatures",
       "what": "Cherche une signature d'octets dans le code du programme, puis propose de patcher l'instruction trouvée.",
@@ -220,6 +227,13 @@
       "when": "Une écriture normale sur une adresse a réussi (vérifiée en mémoire) mais rien ne change à l'écran, et un next scan répété montre que 2 à 5 adresses restent identiques entre elles à chaque cycle : c'est le signe de copies redondantes. Sélectionne ces adresses et écris-les ensemble plutôt qu'une par une.",
       "cost": "Toutes les threads de la cible sont suspendues pendant la rafale d'écritures (quelques millisecondes en pratique) — la cible peut sembler figer un instant. Limité à 32 adresses. Ne remplace pas un test d'écriture simple au préalable pour confirmer que ces adresses sont bien les bonnes.",
       "example": "Une valeur affichée à l'écran ne bouge jamais malgré des écritures individuelles qui se vérifient correctement en mémoire. Un next scan répété révèle 2 adresses qui restent toujours égales entre elles. En les sélectionnant toutes les deux et en cliquant \"Écrire ensemble (atomique)\", l'écriture tient enfin — la cible comparait les deux copies et annulait celle qui ne correspondait pas à l'autre."
+    },
+    "writeKernel": {
+      "title": "Écrire via kernel",
+      "what": "Écrit la valeur via le driver noyau KillEngineKernel (KeStackAttachProcess côté driver, pas WriteProcessMemory usermode) au lieu de l'écriture normale. Contourne les protections mémoire usermode (VirtualProtect, PAGE_GUARD, certains anti-cheat basiques qui ne surveillent que l'API usermode).",
+      "when": "Une écriture normale échoue explicitement (protection mémoire), ou tient un instant puis repart toute seule de façon répétée. Nécessite que le driver KillEngineKernel soit chargé (Paramètres > Driver kernel > Tester le driver) — le bouton reste masqué sinon. Attention : si la valeur revient systématiquement à chaque frame même après une écriture kernel réussie, ce n'est probablement pas une protection mais un compteur animé recalculé en continu — voir \"Désassembler en amont\" plutôt que de réessayer en boucle.",
+      "cost": "Nécessite le driver kernel installé et chargé (voir Paramètres). Une seule adresse à la fois, jamais de bulk. Contourne des protections légitimes du système — action irréversible sans lecture préalable de la valeur d'origine.",
+      "example": "Une écriture normale sur l'XP d'un jeu tient un instant puis revient toujours à l'ancienne valeur. \"Écrire via kernel\" réussit là où l'écriture usermode échouait — confirmant que la cible surveillait/protégeait spécifiquement l'API WriteProcessMemory."
     },
     "pointerChains": {
       "title": "Pointer chains",

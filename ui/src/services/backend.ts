@@ -78,6 +78,19 @@ export interface MemoryReadPreview {
   hex: string
 }
 
+export interface KernelMemoryReadResult {
+  success: boolean
+  bytesRead?: number
+  hex?: string
+  error?: string
+}
+
+export interface KernelMemoryWriteResult {
+  success: boolean
+  bytesWritten?: number
+  error?: string
+}
+
 export interface UiStringCandidate {
   address: string
   encoding: 'ascii' | 'utf16' | string
@@ -495,6 +508,31 @@ export interface AobSignatureResult {
   moduleOffset?: string
 }
 
+export interface BackwardDisassemblyInstruction {
+  address: string
+  bytes: string
+  disassembly?: string
+  mnemonicHint?: string
+  category?: string
+  memBaseRegister?: string
+  memDisplacement?: number
+  // true quand l'instruction a un operande memoire [base+deplacement] simple
+  // exploitable (source Zydis) : indice qu'il s'agit potentiellement d'un
+  // champ "actuel"/"cible" source d'un compteur anime, a proposer en
+  // priorite pour une ecriture, plutot que le champ affiche d'origine.
+  isCandidateField?: boolean
+}
+
+export interface BackwardDisassemblyResult {
+  success: boolean
+  error?: string
+  warning?: string
+  address?: string
+  codeReadProtected?: boolean
+  instructions?: BackwardDisassemblyInstruction[]
+  candidateFields?: BackwardDisassemblyInstruction[]
+}
+
 export interface CodePatchResult {
   success: boolean
   verified?: boolean
@@ -847,6 +885,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   applyCodePatch?(addressHex: string, bytesText: string, options: Record<string, unknown>): Promise<CodePatchResult>
   suggestCodePatches?(addressHex: string, options: Record<string, unknown>): Promise<CodePatchSuggestionResult>
   restoreCodePatch?(addressHex: string): Promise<CodePatchResult>
+  /** Désassemble en arrière depuis un RIP connu (ex: hit findWhatWrites) pour repérer les champs sources d'un compteur animé. Lecture seule. */
+  disassembleBackward?(addressHex: string, options: Record<string, unknown>): Promise<BackwardDisassemblyResult>
   /** Phase 20 — outils Expert manuels gardés par confirmRiskAction('injection', ...) côté store. */
   injectDllIntoProcess?(dllPath: string): Promise<Record<string, unknown>>
   installFunctionHook?(targetAddressHex: string, hookAddressHex: string): Promise<Record<string, unknown>>
@@ -896,6 +936,12 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   requestWindowsDefenderExclusion?(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>
   /** Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement). */
   probeKernelDriver?(): Promise<KernelDriverStatus>
+  /** Lit `size` octets sur le processus attaché via le driver noyau (KeStackAttachProcess, hors WriteProcessMemory/ReadProcessMemory usermode). Nécessite capabilities.processMemoryAccess=true. */
+  readMemoryKernel?(addressHex: string, size: number): Promise<KernelMemoryReadResult>
+  /** Écrit des octets (hex, ex: "90 90 90") sur le processus attaché via le driver noyau. Action à risque équivalente à une injection : passe par confirmRiskAction côté store. */
+  writeMemoryKernel?(addressHex: string, hexBytes: string): Promise<KernelMemoryWriteResult>
+  /** Comme writeMemoryKernel, mais avec une valeur typée (valueType/value) au lieu d'octets hex bruts — utilisé par l'escalade kernel Expert et l'Assistant (checkpoint kernel_write). Même risque, même confirmRiskAction côté store. */
+  writeMemoryValueKernel?(addressHex: string, valueType: string, value: string): Promise<KernelMemoryWriteResult>
   saveSettings(settings: AppSettings): Promise<AppSettings>
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
@@ -1587,6 +1633,9 @@ class BackendService {
       async restoreCodePatch(_addressHex: string) {
         return { success: false, error: 'Mock backend' }
       },
+      async disassembleBackward(_addressHex: string, _options: Record<string, unknown>) {
+        return { success: false, instructions: [], candidateFields: [], error: 'Mock backend' }
+      },
       async injectDllIntoProcess(_dllPath: string) {
         return { success: false, error: 'Mock backend' }
       },
@@ -1755,17 +1804,26 @@ class BackendService {
       },
       async probeKernelDriver() {
         return {
-          success: false,
-          status: 'unavailable',
-          devicePath: '\\\\.\\KillEngineKernel',
-          message: 'Driver absent dans le mock.',
-          capabilities: {
-            protocolVersion: 0,
-            healthProbe: false,
-            processMemoryAccess: false,
-            privilegedInstrumentation: false,
-          },
-        }
+            success: true, // Indique que le probe a réussi
+            status: 'connected', // Indique que le driver est connecté
+            devicePath: '\\\\.\\KillEngineKernel', // Chemin du device
+            message: 'Driver connecté en mode probe uniquement.', // Message de succès
+            capabilities: {
+                protocolVersion: 1, // Définis la version du protocole que le driver supporte
+                healthProbe: true, // Permet au driver de répondre aux requêtes de santé
+                processMemoryAccess: true, // Permet au driver de lire et écrire dans la mémoire des processus
+                privilegedInstrumentation: true, // Permet au driver d'utiliser des fonctionnalités d'instrumentation privilégiées
+            },
+        };
+    },
+      async readMemoryKernel(_addressHex: string, _size: number) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async writeMemoryKernel(_addressHex: string, _hexBytes: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async writeMemoryValueKernel(_addressHex: string, _valueType: string, _value: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
       },
       async getLogFilePath() {
         return 'mock://no-log-file'

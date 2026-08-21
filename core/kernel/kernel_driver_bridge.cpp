@@ -20,10 +20,20 @@ namespace {
 
 constexpr std::uint32_t kKillEngineKernelDeviceType = 0x8000;
 constexpr std::uint32_t kIoctlIndexHealth = 0x801;
+constexpr std::uint32_t kIoctlIndexReadMemory = 0x802;
+constexpr std::uint32_t kIoctlIndexWriteMemory = 0x803;
 
 #ifdef _WIN32
 DWORD ioctlHealthProbe() {
     return CTL_CODE(kKillEngineKernelDeviceType, kIoctlIndexHealth, METHOD_BUFFERED, FILE_READ_DATA);
+}
+
+DWORD ioctlReadMemory() {
+    return CTL_CODE(kKillEngineKernelDeviceType, kIoctlIndexReadMemory, METHOD_BUFFERED, FILE_READ_DATA);
+}
+
+DWORD ioctlWriteMemory() {
+    return CTL_CODE(kKillEngineKernelDeviceType, kIoctlIndexWriteMemory, METHOD_BUFFERED, FILE_WRITE_DATA);
 }
 
 QString systemErrorMessage(DWORD errorCode) {
@@ -49,6 +59,17 @@ QString systemErrorMessage(DWORD errorCode) {
 KernelDriverBridge::KernelDriverBridge(QString devicePath)
     : m_devicePath(std::move(devicePath)) {}
 
+QString KernelDriverBridge::statusToString(KernelDriverProbeStatus status) {
+    switch (status) {
+        case KernelDriverProbeStatus::Unavailable:  return QStringLiteral("unavailable");
+        case KernelDriverProbeStatus::Connected:    return QStringLiteral("connected");
+        case KernelDriverProbeStatus::AccessDenied: return QStringLiteral("access_denied");
+        case KernelDriverProbeStatus::Incompatible: return QStringLiteral("incompatible");
+        case KernelDriverProbeStatus::Error:        return QStringLiteral("error");
+    }
+    return QStringLiteral("error");
+}
+
 KernelDriverProbeResult KernelDriverBridge::probe() const {
     KernelDriverProbeResult result;
     result.devicePath = m_devicePath;
@@ -60,7 +81,7 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
 #else
     const std::wstring widePath = m_devicePath.toStdWString();
     HANDLE device = CreateFileW(widePath.c_str(),
-                                GENERIC_READ,
+                                GENERIC_READ | GENERIC_WRITE,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                                 nullptr,
                                 OPEN_EXISTING,
@@ -84,6 +105,8 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
     struct HealthResponse {
         std::uint32_t protocolVersion;
         std::uint32_t flags;
+        bool processMemoryRead : 1;
+        bool processMemoryWrite : 1;
     };
 
     HealthResponse response{};
@@ -107,8 +130,8 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
 
     result.capabilities.protocolVersion = response.protocolVersion;
     result.capabilities.healthProbe = (response.flags & 0x1u) != 0;
-    result.capabilities.processMemoryAccess = false;
-    result.capabilities.privilegedInstrumentation = false;
+    result.capabilities.processMemoryAccess = response.processMemoryRead && response.processMemoryWrite;
+    result.capabilities.privilegedInstrumentation = true;
 
     if (response.protocolVersion != kProtocolVersion) {
         result.status = KernelDriverProbeStatus::Incompatible;
@@ -124,20 +147,99 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
 #endif
 }
 
-QString KernelDriverBridge::statusToString(KernelDriverProbeStatus status) {
-    switch (status) {
-    case KernelDriverProbeStatus::Unavailable:
-        return QStringLiteral("unavailable");
-    case KernelDriverProbeStatus::Connected:
-        return QStringLiteral("connected");
-    case KernelDriverProbeStatus::AccessDenied:
-        return QStringLiteral("access_denied");
-    case KernelDriverProbeStatus::Incompatible:
-        return QStringLiteral("incompatible");
-    case KernelDriverProbeStatus::Error:
-        return QStringLiteral("error");
-    }
-    return QStringLiteral("error");
+#ifdef Q_OS_WIN
+bool KernelDriverBridge::writeMemory(HANDLE processId, uint64_t address, const QByteArray& data) const {
+    #ifndef _WIN32
+        return false;
+    #else
+        const std::wstring widePath = m_devicePath.toStdWString();
+        HANDLE device = CreateFileW(widePath.c_str(),
+                                    GENERIC_READ | GENERIC_WRITE,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    nullptr,
+                                    OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+        if (device == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+    
+        struct MemoryRequest {
+            HANDLE ProcessId;
+            PVOID Address;
+            PVOID Buffer;
+            SIZE_T Size;
+        };
+    
+        MemoryRequest request{};
+        request.ProcessId = processId;
+        request.Address = reinterpret_cast<PVOID>(address);
+        QByteArray dataCopy = data;  // Crée une copie non-constante de data
+        request.Buffer = dataCopy.data();  // Utilise la copie non-constante
+        request.Size = static_cast<SIZE_T>(data.size());
+    
+        DWORD bytesReturned = 0;
+        const BOOL ok = DeviceIoControl(device,
+                                        ioctlWriteMemory(),
+                                        &request,
+                                        sizeof(request),
+                                        nullptr,
+                                        0,
+                                        &bytesReturned,
+                                        nullptr);
+        CloseHandle(device);
+        return ok && bytesReturned == request.Size;
+    #endif
 }
+#endif // Q_OS_WIN
+
+#ifdef Q_OS_WIN
+QByteArray KernelDriverBridge::readMemory(HANDLE processId, uint64_t address, size_t size) const {
+        #ifndef _WIN32
+            return QByteArray();
+        #else
+            const std::wstring widePath = m_devicePath.toStdWString();
+            HANDLE device = CreateFileW(widePath.c_str(),
+                                        GENERIC_READ | GENERIC_WRITE,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                        nullptr,
+                                        OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL,
+                                        nullptr);
+            if (device == INVALID_HANDLE_VALUE) {
+                return QByteArray();
+            }
+        
+            struct MemoryRequest {
+                HANDLE ProcessId;
+                PVOID Address;
+                PVOID Buffer;
+                SIZE_T Size;
+            };
+        
+            MemoryRequest request{};
+            request.ProcessId = processId;
+            request.Address = reinterpret_cast<PVOID>(address);
+            request.Buffer = nullptr;
+            request.Size = static_cast<SIZE_T>(size);
+        
+            QByteArray buffer(size, '\0');
+            DWORD bytesReturned = 0;
+            const BOOL ok = DeviceIoControl(device,
+                                            ioctlReadMemory(),
+                                            &request,
+                                            sizeof(request),
+                                            buffer.data(),
+                                            static_cast<DWORD>(size),
+                                            &bytesReturned,
+                                            nullptr);
+            CloseHandle(device);
+            if (ok) {
+                buffer.resize(static_cast<int>(bytesReturned));
+            }
+            return ok ? buffer : QByteArray();
+        #endif
+        }
+#endif // Q_OS_WIN
 
 } // namespace killcore

@@ -14,8 +14,8 @@ namespace killcore {
 
 class CancellationToken {
 public:
-    void cancel();
-    bool isCancelled() const;
+    void cancel() { m_cancelled.store(true, std::memory_order_relaxed); }
+    bool isCancelled() const { return m_cancelled.load(std::memory_order_relaxed); }
 
 private:
     std::atomic_bool m_cancelled{false};

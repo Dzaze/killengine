@@ -137,7 +137,7 @@ EncryptedScanOptions {
 | 0 | Polling + VirtualProtectEx | Non | ✅ Déjà fait |
 | 1 | Page Guards (`PAGE_GUARD`) | Non | ✅ Fait le 19/08/2026 |
 | 2 | Hardware breakpoint posé depuis l'intérieur de la cible (composant injecté, VEH + registres DR0-DR7) | Non | ✅ Fait le 19-20/08/2026 |
-| 3 | Kernel driver (`\\.\KillEngine`) | Non | Architecture probe-only préparée le 20/08/2026 ; driver réel hors scope tant qu'un besoin QA/debug générique n'est pas isolé |
+| 3 | Kernel driver (`\\.\KillEngineKernel`) | Non | ✅ Fait le 20/08/2026 (PHASE 39) — lecture/écriture mémoire réelles via `KeStackAttachProcess`/`ProbeForRead`/`ProbeForWrite`, pas seulement le health-probe initial ; câblé nativement à l'Assistant et au mode Expert le 20/08/2026 (PHASE 42) |
 | 4 | DMA hardware (carte PCIe) | Non | Hors scope |
 
 **Fait le 19/08/2026 (niveau 1) : `core/debug/page_guard.{h,cpp}` + `core/debug/page_guard_handler/page_guard_handler.cpp`**
@@ -203,6 +203,82 @@ EncryptedScanOptions {
 | **Filtres de région avancés** (par module, par commit charge) | `ui/src/views/MemoryView.vue` | ✅ Fait — filtre par nom de module ajouté (19/08/2026), en plus d'état/lisible/writable/exécutable | Moins de bruit |
 | **Historique d'écritures avec replay** | `apps/desktop/application_controller.cpp` (`persistWriteHistorySequenceEntry`) | ✅ Fait — séquence persistée `QSettings` par jeu, `replayWriteHistorySequence` (19/08/2026), distinct du rollback en session | Audit/debugging |
 | **Écriture multi-adresses simultanée/atomique** | `core/process/process_suspend.*`, `writeMemoryValuesAtomic` | ✅ Fait — bouton "Écrire ensemble (atomique)" + `InfoDot` dans le panneau Candidats d'Expert (19/08/2026), en plus du connecteur d'automatisation | Contourne les cibles à copies redondantes |
+| **Next scan "entre deux valeurs"** (range) | `core/scanner/scan_types.cpp` (`NextScanMode`) | ❌ Absent — vérifié le 20/08/2026 : seuls `exact`/`changed`/`unchanged`/`increased`/`decreased`/`delta` existent, pas de mode plage | Cible une plage (ex: HP entre 50 et 100) sans deux next scans successifs (`>= min` puis `<= max`) |
+| **Résolution de symboles par nom** (ex: `kernel32.dll!CreateFileW` → adresse) | `apps/desktop/application_controller.cpp` (`getProcessModules`) | ❌ Absent — vérifié le 20/08/2026 : résolution actuelle uniquement adresse→module+offset (via la liste de modules), pas de table d'exports nom→adresse | Cibler directement une fonction connue (hook, breakpoint) sans passer par Find What Writes |
+
+---
+
+## J. Speedhack (accélérer/ralentir le temps perçu d'un processus)
+
+**État réel au 20/08/2026 :** absent — vérifié par grep sur tout le repo (`speedhack`, `SetSystemTimeAdjustment`, `timeScale`), aucun résultat. Identifié en comparant KillEngine à la liste de fonctionnalités attendues d'un trainer complet (WeMod/Cheat Engine la proposent quasi systématiquement).
+
+**Problème :** Beaucoup de jeux basent cooldowns/animations/physique sur `QueryPerformanceCounter`/`GetTickCount`/`GetTickCount64`/`timeGetTime` lus par le process cible lui-même — ralentir ou accélérer les valeurs retournées change la vitesse perçue du jeu sans toucher à sa logique métier.
+
+**Ce qui existe déjà et serait réutilisé tel quel :** `core/inject/function_hook.{h,cpp}` (inline hook/detour générique), et le patron de composant injecté + IPC mémoire partagée déjà livré deux fois (`KillEnginePageGuardHandler.dll`, `core/debug/page_guard_ipc.h` ; `KillEngineInProcessBreakpointHandler.dll`) — seule la fonction hookée et le rôle de l'IPC changent.
+
+**Ce qu'il faudrait ajouter :**
+1. Nouveau composant injecté (même patron CMake séparé sans dépendance Qt/killcore) qui hooke `kernel32.dll!QueryPerformanceCounter`/`GetTickCount`/`GetTickCount64`, `winmm.dll!timeGetTime` **dans** le process cible, et multiplie la valeur retournée par un facteur lu depuis la mémoire partagée.
+2. IPC mémoire partagée nommée pour piloter le facteur depuis KillEngine sans réinjecter à chaque changement (même patron que `page_guard_ipc.h`).
+3. UI : slider de facteur (0.1x-10x) + preset "pause" dans Expert ou Trainer.
+
+**Effort :** Moyen — réutilise l'injection/hooking déjà livrés ; la nouveauté est le hook des fonctions de temps + l'IPC de facteur. **Impact :** Feature très demandée côté trainers grand public, absente aujourd'hui.
+
+**Fichiers touchés (proposés) :** nouveau `core/speedhack/` (composant injecté + IPC), `core/inject/dll_injector.cpp` (réutilisé), `apps/desktop/application_controller.cpp`, `ui/src/views/ExpertView.vue`/`TrainerView.vue`.
+
+---
+
+## K. Lua scripting
+
+**État réel au 20/08/2026 :** absent — vérifié par grep (`lua_state`, `luaL_`), zéro référence dans le repo. L'automatisation actuelle passe uniquement par l'Auto-Assembler (DSL propre, volontairement borné — voir section E) et par l'IA locale (tool-calling JSON, pas un langage général).
+
+**Problème :** Cheat Engine expose Lua pour scripter des workflows arbitraires (UI custom, logique conditionnelle, orchestration de plusieurs actions). KillEngine n'a pas d'équivalent — un utilisateur qui dépasse ce que l'Auto-Assembler borné permet (pas d'`add`/`sub`/`cmp`/boucles) n'a aucun recours scriptable.
+
+**Ce qui existe :** le pipe d'automatisation JSON-RPC déjà livré (`automation_pipe_server.h`) est le point d'ancrage le plus proche — un script Lua pourrait piloter KillEngine via ce même pipe plutôt que d'être embarqué in-process.
+
+**Ce qu'il faudrait ajouter :**
+1. Décision d'architecture d'abord : Lua **embarqué** (lier `lua5.4`/LuaJIT, bindings C vers les mêmes primitives qu'`ApplicationController`) vs Lua **externe** pilotant le pipe d'automatisation existant (plus simple, plus sûr, latence IPC au lieu d'appels directs — probablement le meilleur point de départ).
+2. Si embarqué : nouveau `core/scripting/lua_runtime.{h,cpp}`, bindings vers `readMemoryPreview`/`writeMemoryValue`/`startExactScan`/etc.
+3. UI : éditeur de script (même patron que le champ Auto-Assembler dans `InjectionPanel.vue`), Exécuter/Arrêter, logs.
+
+**Effort :** Élevé — nouvelle dépendance runtime, surface de sécurité à border (un script a accès à tout ce qu'expose l'API), UI d'édition/débogage. **Impact :** Rapproche KillEngine de la flexibilité de scripting de Cheat Engine.
+
+**Fichiers touchés (proposés) :** nouveau `core/scripting/lua_runtime.{h,cpp}` (ou wrapper externe autour du pipe existant), `apps/desktop/application_controller.h/.cpp`, nouvelle vue `ui/src/views/ScriptingView.vue`.
+
+---
+
+## L. Pointer maps / rescans après redémarrage
+
+**État réel au 20/08/2026 :** absent comme fonctionnalité dédiée — `scanPointerChains` retrouve une chaîne stable pour une session donnée, `ProfileStore` persiste des `ProfileTarget` avec chaînes résolues, mais rien ne compare **plusieurs** chaînes à la fois avant/après un redémarrage (pattern Cheat Engine "pointer map"/fichier `.PTR`).
+
+**Problème :** Après un redémarrage du jeu (nouvelle base ASLR), l'utilisateur doit revalider chaque chaîne de pointeurs une par une, sans diagnostic groupé ("ces 3 chaînes sur 5 restent valides, ces 2 ont changé").
+
+**Ce qui existe et serait réutilisé :** `core/profiles/profile_store.{h,cpp}` (`ProfileTarget`, `resolveProfileTarget`), `suggestStableLocatorForAddress` (déjà déclenché automatiquement après écriture confirmée).
+
+**Ce qu'il faudrait ajouter :**
+1. `ApplicationController::comparePointerMapAcrossRestart(profileName)` — relit chaque `ProfileTarget` du profil sur le process actuellement attaché, marque chaque chaîne valide/invalide.
+2. UI : vue tableau dans `ProfileView.vue` (cible/statut avant/statut après/action garder-ou-rescanner).
+3. Optionnel : export/import de map de pointeurs en texte simple pour partage entre utilisateurs.
+
+**Effort :** Moyen — réutilise `ProfileStore`/`resolveProfileTarget` existants ; la nouveauté est la comparaison groupée + l'UI dédiée. **Impact :** Évite de tout rescanner à l'aveugle sur une cible déjà connue.
+
+**Fichiers touchés (proposés) :** `apps/desktop/application_controller.cpp` (nouvelle méthode), `core/profiles/profile_store.h/.cpp` (champ de statut), `ui/src/views/ProfileView.vue`.
+
+---
+
+## M. Cheat table avancée : dépendances entre entrées
+
+**État réel au 20/08/2026 :** absent — chaque feature/toggle Trainer est indépendante aujourd'hui (`core/profiles/profile_store.h`, apply/restore individuels). Aucune notion de graphe de dépendances entre entrées façon Cheat Engine (ex: "active Y automatiquement quand X est activé").
+
+**Problème :** Pour une cheat table complexe (ex: "God Mode" qui doit activer Infinite HP + Infinite Mana ensemble), l'utilisateur doit activer chaque toggle séparément à la main.
+
+**Ce qu'il faudrait ajouter :**
+1. Champ `dependsOn: QStringList` sur chaque feature Trainer (référence à d'autres features par nom).
+2. Résolution d'ordre d'application (tri topologique simple), refuser un cycle de dépendances proprement.
+3. UI : sélecteur de dépendances dans le formulaire de création de feature (`TrainerView.vue`), badge visuel sur les features qui ont des prérequis.
+
+**Effort :** Faible à moyen — surtout de la donnée + validation, pas de nouvelle primitive mémoire. **Impact :** Confort pour les cheat tables complexes à plusieurs toggles liés.
+
+**Fichiers touchés (proposés) :** `core/profiles/profile_store.h/.cpp`, `apps/desktop/application_controller.cpp`, `ui/src/views/TrainerView.vue`.
 
 ---
 
@@ -250,7 +326,7 @@ Toutes les phases 19-21 ci-dessus sont closes. Les 6 candidats listés ci-dessou
    **Consolidation le 20/08/2026** (demande explicite avant tout commit — "je veux simplement consolider la qualité du module avec quelques tests de non-régression supplémentaires") : suite d'auto-tests bout-en-bout étendue de 4 à **9/9 verts** (`tools/clr_inspector/KillEngineClrInspector.Tests`) — cycles GC successifs multiples avec identité cohérente à chaque cycle, plusieurs objets du même type distingués correctement, un objet réellement rendu inatteignable puis collecté (nouveau `DisposableProbe` dans la cible de test) vérifié **dans le même test** qu'un objet qui survit — pour prouver la distinction "déplacé" vs "disparu" plutôt que la supposer, terminaison brutale du process cible pendant une session active (l'inspecteur reste vivant, répond proprement en erreur puis redevient utilisable), et redémarrage avec un nouveau PID sans résidu de la session précédente. Noms de pipe rendus paramétrables (`KILLENGINE_CLR_TEST_TARGET_PIPE_NAME`/`KILLENGINE_CLR_INSPECTOR_PIPE_NAME`) pour permettre ces scénarios sans collision avec l'instance par défaut. **Limitation `StaticVar` gardée explicitement ouverte, non bloquante** (consigne explicite de l'utilisateur — ne pas la fermer prématurément). Détail complet : `docs/KILLENGINE_CLR_INSPECTOR_SPEC.md`.
    **Ce qui reste hors scope de ce MVP, volontairement (intégration UI et enrichissements différés)** : panneau UI KillEngine, déballage profond des collections (`List`/`Dictionary`/tableaux au-delà de leur propre référence), écriture/mutation via ClrMD (lecture seule pour l'instant), intégration `ApplicationController`/pipe d'automatisation principal, résolution du root `StaticVar` en attache passive live, publish self-contained réel.
 
-**Explicitement hors scope, pas des candidats opérationnels immédiats** : DMA (section F, niveau 4 — hardware hors de portée d'un projet open par nature), driver noyau avec primitives mémoire sensibles (signature/WDK/risque système/EDR à traiter comme chantier produit séparé), contournement d'anti-cheat ou triche multijoueur en ligne (décliné explicitement le 16/08/2026 dans `docs/ULTIMATE_PRODUCT_GUIDELINE.md`, même raisonnement que pour Page Guard : l'angle légitime reste l'outillage QA/sécurité sur son propre build). Depuis le 20/08/2026, le socle **probe-only** est livré côté driver et produit : `tools/kernel_driver/KillEngineKernel/` contient le projet WDK `KillEngineKernel.sys`, `core/kernel/kernel_driver_bridge.*` détecte le device `\\.\KillEngineKernel`, et Settings expose `probeKernelDriver`. Aucune lecture/écriture noyau n'est exposée.
+**Explicitement hors scope, pas des candidats opérationnels immédiats** : DMA (section F, niveau 4 — hardware hors de portée d'un projet open par nature), contournement d'anti-cheat ou triche multijoueur en ligne (décliné explicitement le 16/08/2026 dans `docs/ULTIMATE_PRODUCT_GUIDELINE.md`, même raisonnement que pour Page Guard : l'angle légitime reste l'outillage QA/sécurité sur son propre build). Le driver noyau avec primitives mémoire sensibles, initialement classé "hors scope" ici, **a depuis été livré** : `tools/kernel_driver/KillEngineKernel/` contient le projet WDK `KillEngineKernel.sys` (build/signature/installation via `scripts/build-kernel-driver.ps1`/`scripts/install-kernel-driver.ps1`), `core/kernel/kernel_driver_bridge.*` détecte le device `\\.\KillEngineKernel` et expose lecture/écriture réelles (`readMemoryKernel`/`writeMemoryKernel`/`writeMemoryValueKernel`, pas seulement `probeKernelDriver`), câblées le 20/08/2026 (PHASE 39/42) au mode Expert (bouton d'escalade dans Candidats et écritures) et à l'Assistant (déclenchement direct sur demande explicite en chat), toujours gardées par `confirmRiskAction('injection', ...)`.
 
 ---
 

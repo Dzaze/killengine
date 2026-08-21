@@ -322,6 +322,12 @@ public:
     /// Analyse les bytes à une adresse et propose des patchs de même longueur.
     Q_INVOKABLE QVariantMap suggestCodePatches(const QString& addressHex, const QVariantMap& options);
 
+    /// Désassemble les instructions menant à addressHex (ex: le RIP d'un hit
+    /// findWhatWrites), en cherchant en arrière depuis quelques dizaines
+    /// d'octets avant. Lecture mémoire seule, aucune écriture, aucun attach
+    /// debugger. options keys: windowBytes (défaut 64, borné 16-128).
+    Q_INVOKABLE QVariantMap disassembleBackward(const QString& addressHex, const QVariantMap& options) const;
+
     /// Restaure les bytes originaux d'un patch actif.
     Q_INVOKABLE QVariantMap restoreCodePatch(const QString& addressHex);
 
@@ -447,6 +453,25 @@ public:
 
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
     Q_INVOKABLE QVariantMap probeKernelDriver() const;
+
+    /// Lit `size` octets (1-4096) sur le processus attaché via le driver noyau
+    /// (KeStackAttachProcess côté driver.cpp, pas ReadProcessMemory usermode).
+    /// Nécessite un driver connecté avec capabilities.processMemoryAccess=true
+    /// (voir probeKernelDriver) — échoue proprement sinon, jamais de crash.
+    Q_INVOKABLE QVariantMap readMemoryKernel(const QString& addressHex, int size) const;
+
+    /// Écrit des octets (chaîne hexadécimale, ex. "90 90 90") à l'adresse
+    /// donnée sur le processus attaché via le driver noyau. Contourne les
+    /// protections mémoire usermode normales (VirtualProtect/PAGE_GUARD) —
+    /// action à risque équivalente à une injection côté UI (confirmRiskAction).
+    Q_INVOKABLE QVariantMap writeMemoryKernel(const QString& addressHex, const QString& hexBytes);
+
+    /// Comme writeMemoryKernel, mais prend une valeur typée (ex: valueType="Int32",
+    /// value="9999") au lieu d'octets hexadécimaux bruts — réutilise le même
+    /// parsing que writeMemoryValue (killcore::parseValueType/parseScanValue),
+    /// pour l'écriture kernel déclenchée par l'Assistant (checkpoint
+    /// kernel_write) ou le bouton d'escalade en mode Expert.
+    Q_INVOKABLE QVariantMap writeMemoryValueKernel(const QString& addressHex, const QString& valueType, const QString& value);
 
     /// Retourne un diagnostic lisible du runtime IA local (modèle GGUF + llama-cli).
     Q_INVOKABLE QVariantMap getAiModelStatus() const;

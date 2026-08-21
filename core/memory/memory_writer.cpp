@@ -190,4 +190,71 @@ MemoryWriteResult MemoryWriter::write(uint64_t address, const QByteArray& data, 
 #endif
 }
 
+MemoryWriteResult MemoryWriter::writeChunked(
+    uint64_t address,
+    const QByteArray& data,
+    size_t chunkSize,
+    bool verify,
+    const CancellationToken* cancellation) const {
+    MemoryWriteResult result;
+    result.address = address;
+    result.requestedBytes = static_cast<size_t>(data.size());
+
+    if (data.isEmpty()) {
+        result.errorMessage = "No data to write.";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    if (!m_process.isValid()) {
+        result.errorMessage = "Process handle is not valid.";
+        return result;
+    }
+
+    MemoryReader reader(m_process);
+    const auto previous = reader.read(address, static_cast<size_t>(data.size()));
+    if (previous.success || previous.partial) {
+        result.previousValue = previous.data;
+    }
+
+    size_t totalBytesWritten = 0;
+    for (size_t offset = 0; offset < data.size(); offset += chunkSize) {
+        if (cancellation && cancellation->isCancelled()) {
+            result.cancelled = true;
+            return result;
+        }
+
+        size_t chunkSizeToWrite = std::min(chunkSize, data.size() - offset);
+        const QByteArray chunkData = data.mid(static_cast<int>(offset), static_cast<int>(chunkSizeToWrite));
+        const auto chunkResult = write(address + offset, chunkData, false);
+
+        if (!chunkResult.success) {
+            result.errorCode = chunkResult.errorCode;
+            result.errorMessage = chunkResult.errorMessage;
+            return result;
+        }
+
+        totalBytesWritten += chunkResult.bytesWritten;
+    }
+
+    result.bytesWritten = totalBytesWritten;
+    result.success = totalBytesWritten == data.size();
+
+    if (verify) {
+        const auto after = reader.read(address, static_cast<size_t>(data.size()));
+        result.verified = after.success && after.data == data;
+        if (!result.verified) {
+            result.errorMessage = "Write verification failed (value was overwritten or unreadable).";
+        }
+    } else {
+        result.verified = true;
+    }
+
+    return result;
+#else
+    result.errorMessage = "Memory writing is only implemented on Windows.";
+    return result;
+#endif
+}
+
 } // namespace killcore

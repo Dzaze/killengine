@@ -387,6 +387,67 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
     return info;
 }
 
+BackwardDisassemblyResult disassembleBackwardWindow(const QByteArray& windowBytes, int targetOffsetInWindow) {
+    BackwardDisassemblyResult result;
+    if (targetOffsetInWindow <= 0 || targetOffsetInWindow > windowBytes.size()) {
+        result.error = "Offset cible hors de la fenêtre.";
+        return result;
+    }
+
+    const int earliestStart = std::max(0, targetOffsetInWindow - 60);
+    QList<InstructionInfo> bestPath;
+    bool found = false;
+
+    for (int start = earliestStart; start < targetOffsetInWindow; ++start) {
+        QList<InstructionInfo> path;
+        int offset = start;
+
+        while (offset < targetOffsetInWindow) {
+            QByteArray instrBytes(
+                windowBytes.constData() + offset,
+                std::min<int>(15, windowBytes.size() - offset));
+            const InstructionInfo info = decodeX64InstructionLength(instrBytes);
+
+            if (!info.success || info.length <= 0) {
+                break; // Chemin invalide depuis ce start : abandonner ce candidat.
+            }
+
+            path.append(info);
+            offset += info.length;
+        }
+
+        if (offset != targetOffsetInWindow) {
+            continue; // Chemin désaligné depuis ce start : candidat suivant.
+        }
+
+        // Alignement trouvé jusqu'au RIP cible : décoder aussi l'instruction
+        // cible elle-même (au-delà de targetOffsetInWindow si windowBytes
+        // contient des octets de fin de fenêtre), pour qu'elle termine path.
+        QByteArray targetBytes(
+            windowBytes.constData() + offset,
+            std::min<int>(15, windowBytes.size() - offset));
+        const InstructionInfo targetInfo = decodeX64InstructionLength(targetBytes);
+        if (!targetInfo.success || targetInfo.length <= 0) {
+            continue;
+        }
+
+        path.append(targetInfo);
+        found = true;
+        bestPath = path; // start croissant → premier chemin trouvé = le plus tôt = le plus de contexte.
+        result.startOffsetInWindow = start;
+        break;
+    }
+
+    if (!found) {
+        result.error = "Alignement d'instructions introuvable dans la fenêtre.";
+        return result;
+    }
+
+    result.success = true;
+    result.instructions = bestPath;
+    return result;
+}
+
 QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruction) {
     QList<PatchSuggestion> suggestions;
     if (!instruction.success || instruction.length <= 0) return suggestions;

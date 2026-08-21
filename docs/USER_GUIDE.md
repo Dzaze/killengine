@@ -218,6 +218,31 @@ La liste des candidats permet :
 - rollback la dernière écriture ;
 - activer ou arrêter un freeze.
 
+### Écriture kernel (escalade)
+
+Quand une écriture normale échoue explicitement, ou tient un instant puis revient toujours en arrière, un driver noyau optionnel (`KillEngineKernel`) permet d'écrire en contournant les protections mémoire usermode (`VirtualProtect`, `PAGE_GUARD`, certains anti-cheat basiques qui ne surveillent que l'API usermode).
+
+1. **Paramètres > Driver kernel > Tester le driver** — installe/vérifie que `KillEngineKernel.sys` est chargé. Sans ce driver, les boutons kernel restent masqués partout dans l'app.
+2. Une fois le driver connecté, un bouton `Écrire via kernel` apparaît dans le panneau `Candidats et écritures`, à côté d'`Écrire ensemble (atomique)` — sélectionne une seule adresse (le kernel écrit une cible à la fois, jamais en masse) et clique dessus au lieu d'`Écrire sur sélection`.
+3. **Dans l'Assistant**, demande-le directement en langage naturel : *« écris 9999 à 0x... via le kernel »*. L'Assistant reconnaît la demande explicite et propose un bouton de confirmation dédié — un clic suffit, mais rien ne s'exécute sans cette confirmation.
+
+Si la valeur revient quand même à chaque frame après une écriture kernel réussie, ce n'est probablement plus une protection à contourner mais un **compteur animé** recalculé en continu — voir la section suivante plutôt que de réessayer en boucle.
+
+### Compteurs animés : trouver la vraie source
+
+Certains champs refusent de rester figés après une écriture, même en mode Expert : la valeur revient toute seule à chaque frame. C'est souvent le signe que l'adresse ciblée n'est pas la vraie donnée, mais un **compteur animé** — un champ recalculé en continu par le jeu, par exemple `affiché = actuel + (cible - actuel) × progression`, pour faire défiler l'affichage au lieu de le faire sauter instantanément. Écrire sur ce champ ne peut jamais tenir : il est réécrit à la frame suivante.
+
+Méthode pour trouver la vraie source (le champ que le jeu utilise réellement, pas celui qu'il affiche) :
+
+1. **Scanner la valeur affichée** normalement (scan exact multi-étapes). Évite de démarrer sur `0`, trop bruyant — pars de la première valeur non triviale observée.
+2. **`Écrit par`** sur l'adresse trouvée, pendant que la valeur change dans le jeu. KillEngine capture le RIP (l'adresse de l'instruction) qui écrit sur ce champ.
+3. **`Désassembler en amont`**, sur ce même RIP. KillEngine relit les octets qui précèdent l'écriture et reconstruit les instructions du calcul, en mettant en avant les *champs candidats* : des opérandes mémoire de la forme `[registre+déplacement]`, souvent des entiers "actuel"/"cible" utilisés juste avant pour interpoler la valeur affichée.
+4. **Écris sur le champ candidat le plus plausible** (jamais sur le champ affiché d'origine, qui restera toujours recalculé). Si plusieurs champs candidats apparaissent proches en mémoire (souvent à quelques octets d'écart), ce sont généralement le couple "actuel"/"cible" d'une même interpolation — cible est en principe celui qui tient une fois l'animation terminée.
+
+Cette méthode s'applique à tout compteur qui défile visuellement (XP, score, barre de vie/mana, monnaie) plutôt que de sauter directement à la nouvelle valeur — un indice visuel fort qu'une interpolation d'animation est en jeu. Un scan de pointeurs classique reste utile pour d'autres cas, mais pas ici : le champ affiché est structurellement un résultat dérivé, jamais la source.
+
+Une étude de cas complète (désassemblage réel, raisonnement pas à pas) est disponible dans `docs/STRATEGY_ROOM.md`.
+
 ## Paramètres
 
 La page `Paramètres` permet de régler :
@@ -286,6 +311,7 @@ Tu peux aussi vider les cibles actives depuis le bandeau de mémoire active dans
 - La valeur peut être recalculée immédiatement par le jeu.
 - L'adresse peut ne plus être valide.
 - Essaie de refaire le scan ou d'utiliser plusieurs candidats finaux si l'Assistant les propose.
+- Si la valeur revient toute seule, systématiquement, à chaque frame : voir [Compteurs animés : trouver la vraie source](#compteurs-animés--trouver-la-vraie-source).
 
 ## Build et package développeur
 

@@ -5,6 +5,7 @@ import {
   backend,
   type AobScanResult,
   type AobSignatureResult,
+  type BackwardDisassemblyResult,
   type CodePatchResult,
   type CodePatchSuggestion,
   type CodePatchSuggestionResult,
@@ -99,6 +100,8 @@ const aobStabilizeBusy = ref(false)
 const aobStabilizeResult = ref<Record<string, unknown> | null>(null)
 const aobSignatureBusy = ref(false)
 const aobSignatureResult = ref<AobSignatureResult | null>(null)
+const disassembleBackwardBusy = ref(false)
+const disassembleBackwardResult = ref<BackwardDisassemblyResult | null>(null)
 // Message affiché quand generateAobSignatureFromHit() a délibérément SAUTÉ le
 // scan auto-enchaîné parce que le pattern stable est trop faible (level
 // "weak") pour être fiable — le pattern reste pré-rempli dans aobPattern, le
@@ -632,6 +635,25 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
   } finally {
     aobSignatureBusy.value = false
     codePatchSuggestBusy.value = false
+  }
+}
+
+async function disassembleBackwardFromHit(hit: Record<string, unknown>) {
+  const rip = String(hit.instructionPointer ?? '').trim()
+  if (!rip) return
+  disassembleBackwardBusy.value = true
+  disassembleBackwardResult.value = null
+  try {
+    const controller = backend.getController()
+    if (!controller.disassembleBackward) {
+      disassembleBackwardResult.value = { success: false, error: 'Methode backend indisponible.' }
+      return
+    }
+    disassembleBackwardResult.value = await controller.disassembleBackward(rip, {})
+  } catch (e) {
+    disassembleBackwardResult.value = { success: false, error: String(e) }
+  } finally {
+    disassembleBackwardBusy.value = false
   }
 }
 
@@ -2633,6 +2655,16 @@ function writeSelectedCandidatesAtomic() {
   void store.writeSelectedAtomic(selectedCandidateAddresses.value, selectedWriteType.value, store.writeValue)
 }
 
+// Écriture d'escalade : contourne les protections mémoire usermode via le
+// driver noyau. Un seul candidat à la fois (jamais de bulk) — c'est une
+// escalade ciblée quand l'écriture normale ne tient pas, pas une alternative
+// systématique à "Écrire sur sélection".
+async function writeSelectedCandidateKernel() {
+  const address = selectedCandidateAddresses.value[0]
+  if (!address || !store.writeValue.trim()) return
+  await store.executeCheckpointKernelWrite({ address, value: store.writeValue, type: selectedWriteType.value })
+}
+
 function writeFromPanel() {
   if (hasSelectedWriteTargets.value) {
     writeSelectedCandidates()
@@ -3330,6 +3362,9 @@ onMounted(() => {
             <button class="btn btn-primary compact" type="button" :disabled="aobSignatureBusy" @click="generateAobSignatureFromHit(hit)">
               Analyser
             </button>
+            <button class="btn btn-secondary compact" type="button" :disabled="disassembleBackwardBusy" @click="disassembleBackwardFromHit(hit)">
+              Désassembler en amont
+            </button>
             <button
               class="btn btn-primary compact"
               type="button"
@@ -3408,6 +3443,9 @@ onMounted(() => {
             <button class="btn btn-primary compact" type="button" :disabled="aobSignatureBusy" @click="generateAobSignatureFromHit(hit)">
               Analyser
             </button>
+            <button class="btn btn-secondary compact" type="button" :disabled="disassembleBackwardBusy" @click="disassembleBackwardFromHit(hit)">
+              Désassembler en amont
+            </button>
             <button
               class="btn btn-primary compact"
               type="button"
@@ -3416,6 +3454,29 @@ onMounted(() => {
             >
               Trainer
             </button>
+          </div>
+        </div>
+        <div v-if="disassembleBackwardResult || disassembleBackwardBusy" class="find-writes-panel">
+          <div class="source-list-title">
+            <strong>Désassembler en amont</strong>
+            <InfoDot topic="disassembleBackward" />
+            <span v-if="disassembleBackwardResult?.instructions">{{ disassembleBackwardResult.instructions.length }} instruction(s)</span>
+          </div>
+          <p class="hint">Instructions qui précèdent l'écriture capturée — utile pour trouver le vrai champ source (actuel/cible) d'un compteur animé, plutôt que le champ affiché.</p>
+          <p v-if="disassembleBackwardBusy" class="hint">Lecture mémoire en cours...</p>
+          <p v-if="disassembleBackwardResult?.error" class="error">{{ disassembleBackwardResult.error }}</p>
+          <div
+            v-for="(instr, index) in disassembleBackwardResult?.instructions ?? []"
+            :key="`${instr.address}-${index}`"
+            class="find-writes-row"
+            :class="{ selected: instr.isCandidateField }"
+          >
+            <code>0x{{ instr.address }}</code>
+            <span>{{ instr.bytes }}</span>
+            <strong>{{ instr.disassembly || instr.mnemonicHint }}</strong>
+            <span v-if="instr.isCandidateField" class="quality-strong">
+              champ candidat : [{{ instr.memBaseRegister }}+0x{{ instr.memDisplacement?.toString(16) }}]
+            </span>
           </div>
         </div>
         <div v-if="uiStringOriginResult" class="metrics">
@@ -3682,6 +3743,16 @@ onMounted(() => {
             Écrire ensemble (atomique)
           </button>
           <InfoDot topic="writeAtomic" align="right" />
+          <button
+            v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess"
+            class="btn btn-secondary compact"
+            :title="`Contourne les protections mémoire usermode — pour une adresse qui refuse de tenir une écriture normale (ex: instabilité/compteur animé).`"
+            :disabled="selectedCandidateAddresses.length !== 1 || !store.writeValue.trim()"
+            @click="writeSelectedCandidateKernel()"
+          >
+            Écrire via kernel
+          </button>
+          <InfoDot topic="writeKernel" align="right" />
           <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="watchCurrentCandidatePage()">
             Watch page
           </button>

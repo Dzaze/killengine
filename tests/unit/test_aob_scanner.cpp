@@ -275,6 +275,59 @@ TEST(InstructionPatchSuggester, SuggestsBranchDirectionPatches) {
     EXPECT_EQ(suggestions[1].bytesText, "EB 05");
 }
 
+TEST(InstructionPatchSuggester, DisassembleBackwardWindowReconstructsAnimatedCounterSequence) {
+    // Reconstitution byte-exacte de la sequence "compteur anime" identifiee
+    // pendant l'investigation XP Solitaire (docs/STRATEGY_ROOM.md, entree du
+    // 2026-08-20) : actuel/cible entiers a [rsi+0x904]/[rsi+0x908],
+    // interpolation flottante, ecriture finale du champ AFFICHE (hors de
+    // cette fenetre). La cible connue (targetOffsetInWindow) est la derniere
+    // instruction de la sequence, addss xmm0,xmm2.
+    const QByteArray bytes = QByteArray::fromHex(
+        "8B8E04090000"       // mov      ecx,  [rsi+0x904]   (actuel)
+        "F30F108614090000"   // movss    xmm0, [rsi+0x914]
+        "F30F5C8618090000"   // subss    xmm0, [rsi+0x918]
+        "F30F5E860C090000"   // divss    xmm0, [rsi+0x90C]
+        "8B8608090000"       // mov      eax,  [rsi+0x908]   (cible)
+        "2BC1"               // sub      eax,  ecx
+        "0F57C9"             // xorps    xmm1, xmm1
+        "F3480F2AC8"         // cvtsi2ss xmm1, rax
+        "F30F59C1"           // mulss    xmm0, xmm1
+        "0F57D2"             // xorps    xmm2, xmm2
+        "F3480F2AD1"         // cvtsi2ss xmm2, rcx
+        "F30F58C2");         // addss    xmm0, xmm2           <- cible (RIP connu)
+    const int targetOffset = bytes.size() - 4; // longueur de addss xmm0,xmm2
+
+    const auto result = disassembleBackwardWindow(bytes, targetOffset);
+
+    ASSERT_TRUE(result.success) << result.error.toStdString();
+    ASSERT_EQ(result.instructions.size(), 12);
+    EXPECT_EQ(result.startOffsetInWindow, 0);
+
+    if (result.instructions.first().decoder == "zydis") {
+        EXPECT_EQ(result.instructions[0].mnemonicHint.toLower(), QStringLiteral("mov"));
+        EXPECT_EQ(result.instructions[0].memBaseRegister, QStringLiteral("rsi"));
+        EXPECT_EQ(result.instructions[0].memDisplacement, 0x904);
+
+        EXPECT_EQ(result.instructions[4].memBaseRegister, QStringLiteral("rsi"));
+        EXPECT_EQ(result.instructions[4].memDisplacement, 0x908);
+
+        EXPECT_EQ(result.instructions.last().mnemonicHint.toLower(), QStringLiteral("addss"));
+    }
+}
+
+TEST(InstructionPatchSuggester, DisassembleBackwardWindowFailsOnMisalignedTarget) {
+    // xorps xmm1, xmm1 (3 octets) ; cibler l'offset 1 tombe au milieu de
+    // l'instruction, aucun realignement possible depuis un start plus tot
+    // (il n'y a pas d'octets avant offset 0) : doit echouer proprement plutot
+    // que renvoyer une reconstruction trompeuse.
+    const QByteArray bytes = QByteArray::fromHex("0F57C9");
+
+    const auto result = disassembleBackwardWindow(bytes, 1);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_FALSE(result.error.isEmpty());
+}
+
 TEST(ProfilePatchState, ClassifiesOriginalCode) {
     const auto state = classifyProfilePatchMemoryState(1, 0, false, true);
 

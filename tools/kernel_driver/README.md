@@ -4,7 +4,15 @@
 
 Ce dossier contient le driver WDK minimal `KillEngineKernel.sys`.
 
-Le pont user-mode est `core/kernel/kernel_driver_bridge.*` et le contrat est documenté dans `docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md`.
+Fichiers principaux :
+
+- `KillEngineKernel/KillEngineKernel.cpp` : point d'entrée `DriverEntry`, création du device et câblage des dispatchers.
+- `KillEngineKernel/driver.h` : contrat interne du driver minimal, noms device/link, IOCTL health-probe et structures partagées côté noyau.
+- `KillEngineKernel/driver.cpp` : handlers `IRP_MJ_CREATE`, `IRP_MJ_CLOSE`, `IRP_MJ_DEVICE_CONTROL` et logique `HealthProbe`.
+- `KillEngineKernel/KillEngineKernel.inf` : manifeste d'installation du driver.
+- `core/kernel/kernel_driver_bridge.*` : pont user-mode vers `\\.\KillEngineKernel`.
+
+Le contrat produit est documenté dans `docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md`.
 
 Le driver livré est volontairement un "health probe" strict :
 

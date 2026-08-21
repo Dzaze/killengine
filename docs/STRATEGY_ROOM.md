@@ -36,6 +36,8 @@ Ce fichier n'est **pas** un journal de ce qui a été fait — c'est `docs/PHASE
 | 2026-08-20 | Vérification candidat #8 — Solitaire.exe n'est PAS une cible CLR (pas de COR20 header), hypothèse "tas .NET managé" invalidée | ❌ abandonné pour Solitaire précisément (→ voir raison) — 💤 ClrMD reste en veille comme capacité générale |
 | 2026-08-19 | Hypothèses d'amélioration KillEngine issues de la session Solitaire (visibilité temps réel via le pipe + logs) | ✅ 6/6 livrées (PHASE 26) |
 | 2026-08-20 | Cycle de vie des breakpoints matériels : arbitre DR0-DR7, désarmement in-process déterministe, `scanMemoryWindow` dédié | ✅ tranché — protections livrées et testées, régression injection root-causée (EDR Microsoft Defender for Endpoint, pas un bug KillEngine) et mitigée |
+| 2026-08-20 | Écriture kernel-mode (driver `KillEngineKernel.sys`) testée sur l'XP Solitaire — même conclusion que l'écriture usermode | ✅ tranché (hypothèse "détection d'écriture" définitivement éliminée) — 🟡 XP toujours non contrôlable, nouvelle piste identifiée (remonter à la fonction de calcul) |
+| 2026-08-20 | **XP Solitaire enfin contrôlable** — remontée du désassemblage depuis l'animation d'affichage jusqu'au vrai champ cible (`[RSI+0x908]`), écriture kernel confirmée persistante | ✅ **résolu** — champ identifié, écriture validée deux fois (valeur tenue, gain suivant additionné par-dessus) |
 
 ---
 
@@ -223,6 +225,80 @@ Ce fichier n'est **pas** un journal de ce qui a été fait — c'est `docs/PHASE
 - Revenir à l'hypothèse "recalcul + écrasement périodique depuis une source interne" (conclusion la plus solide de l'entrée précédente, point 5) : plutôt que de chercher un chemin de pointeurs stable vers la donnée, chercher la fonction qui **calcule** la valeur avant écriture (au lieu de celle qui écrit) — piste debugger déjà partiellement outillée (`findWhatWrites`/`findWhatAccesses`) mais jamais poussée en amont du store lui-même.
 
 **Lié à :** entrée précédente (19-20/08/2026), `docs/POWER_UP_ROADMAP.md` candidat #8 (à mettre à jour avec ce résultat), `core/scanner/structure_analyzer.*`, `apps/desktop/application_controller.cpp` (`scanMemoryWindow`, `findWhatAccesses`, `scanPointerChains`).
+
+---
+
+### [2026-08-20] Écriture kernel-mode testée sur l'XP Solitaire — même conclusion que l'écriture usermode
+
+**Contexte :** le driver `KillEngineKernel.sys` vient d'être rendu fonctionnel (lecture/écriture réelles via `KeStackAttachProcess`/`ProbeForRead`/`ProbeForWrite`, validées sur `KillEngineTestTarget.exe` — voir `docs/PHASE_TRACKER.md` PHASE 39). Question directe posée par l'utilisateur : est-ce qu'une écriture **kernel-mode**, qui contourne entièrement `WriteProcessMemory`/toute API usermode surveillable, tiendrait là où l'écriture usermode classique échouait sur l'XP (voir entrée du 19-20/08/2026 ci-dessus) ?
+
+**Hypothèse testée :** si le mécanisme qui fait "perdre" l'écriture était une détection/protection au niveau API (hook, EDR, vérification usermode), une écriture kernel-mode devrait s'en affranchir et tenir. Si c'est bien un recalcul interne périodique du jeu (conclusion la plus solide de l'entrée précédente), le kernel ne devrait rien changer.
+
+**Protocole, en session live avec l'utilisateur (KillEngine attaché à `Solitaire.exe`, PID différent de la session précédente — nouvelles adresses) :**
+1. `startExactScan("0", "Int32")` sur XP affichée à 0 → 59,3M correspondances, dépasse la capacité du candidate store (1M) → scan jeté (`partial: true`, pas de base exploitable). **Piège évité pour la suite** : ne jamais démarrer un scan exact sur une valeur aussi commune que `0` sur ce genre de cible, repartir directement sur la première valeur non triviale rapportée par l'utilisateur.
+2. `startExactScan("60", "Int32")` (XP passée à 60 en jouant) → 11 333 candidats, dans la capacité du store.
+3. `nextScan("exact", "120")` (XP passée à 120) → **3 candidats** : `0x1f1ab59c290`, `0x1f1d1627be0`, `0x1f1d1627be8` — les deux derniers espacés de exactement 8 octets, le pattern "paire jumelle" déjà documenté pour cette cible.
+4. `writeMemoryKernel` avec la sentinelle `99999` sur les 3 adresses → succès rapporté par le driver sur les 3 (`bytesWritten: 4`).
+5. Utilisateur : rien affiché à l'écran (jamais vu `99999`), puis a joué un as → affichage passé à `180`.
+6. `readMemoryKernel` sur les 3 adresses → **les 3 retournent `B4 00 00 00` = 180**, aucune trace de `99999`.
+
+**Résultat :** identique à l'échec usermode déjà documenté — la valeur écrite (sentinelle bien distincte, aucune ambiguïté possible) disparaît complètement, remplacée par la vraie valeur recalculée par le jeu. La confirmation par le driver que les 3 écritures ont réellement réussi au niveau mémoire (`success: true` à chaque fois, pas juste supposé) exclut un échec silencieux côté outillage.
+
+**Conclusion, plus solide qu'avant** : l'hypothèse "le jeu détecte/bloque l'écriture externe (API hook, EDR, vérification usermode)" est maintenant **définitivement éliminée** — un accès kernel-mode qui ne passe par aucune API Win32 surveillable donne exactement le même résultat qu'un accès usermode. Le mécanisme réel ne peut être qu'un recalcul interne : le jeu **ne lit jamais** ces adresses pour vérifier une correspondance, il se contente de **réécrire la valeur qu'il vient de calculer** à chaque événement de jeu, quel que soit ce qui s'y trouvait juste avant. Aucune technique d'écriture, aussi privilégiée soit-elle, ne peut faire tenir une valeur dans un emplacement qui n'est pas la source de vérité.
+
+**Piste retenue pour la suite (confirmée, pas nouvelle mais maintenant prioritaire par élimination)** : arrêter de cibler l'adresse mémoire, remonter à la **fonction qui calcule** la valeur avant de l'écrire — `findWhatWrites`/breakpoint sur l'instruction d'écriture (RIP déjà capturable via les outils existants), puis analyser ce qui l'alimente en amont (autre variable lue, appel de fonction, etc.) plutôt que d'agir sur le résultat déjà calculé. Session suivante : l'utilisateur relance une partie fraîche et prévient quand prêt à reprendre.
+
+**Lié à :** entrée précédente (19-20/08/2026), `docs/PHASE_TRACKER.md` PHASE 39 (driver kernel fonctionnel), `core/kernel/kernel_driver_bridge.*`, `tools/kernel_driver/KillEngineKernel/driver.cpp`, `apps/desktop/application_controller.cpp` (`readMemoryKernel`/`writeMemoryKernel`, `findWhatWrites`).
+
+---
+
+### [2026-08-20] XP Solitaire enfin contrôlable — le champ ciblé depuis le début n'était que l'animation d'affichage
+
+**Contexte :** suite immédiate de l'entrée précédente (écriture kernel-mode confirmant que ni usermode ni kernel-mode ne faisaient tenir l'XP). Deux pistes restaient : élargir le pointer scan, ou désassembler la fonction appelée dans la séquence d'écriture. Choix : la fonction appelée (`call` entre `addss xmm0,xmm2` et `cvttss2si rdx,xmm0`) — mais avant, un deuxième pointer scan (nouvelle session Solitaire, nouvelle base `0x16877070560`, mêmes paramètres maxDepth=4/maxOffset=4096) a été relancé jusqu'au bout : **71,3M pointeurs scannés, 0 chaîne trouvée**, en ~4 min. Deuxième échec reproductible sur deux PID différents — élimine solidement le pointer scan classique à ces paramètres comme piste viable pour cet objet.
+
+**Incident en cours de route :** Solitaire a crashé (~25-60s après deux cycles `findWhatWrites`/`DebugActiveProcess` rapprochés sur le même PID, 2 min d'écart). Logs KillEngine : les deux détachements sont propres (`HwBreakpointArbiter... RELEASED... désarmement confirmé`), donc pas de preuve formelle que c'est la cause, mais le timing est cohérent avec la fragilité déjà connue de cette cible face aux attaches/détaches répétées. Solitaire redémarre seul (nouveau PID), aucune perte de données (jeu Store personnel).
+
+**Désassemblage de la fonction appelée** (calculé précisément via la base de module réelle du process courant, `getProcessModules`, pas une estimation manuelle) : `0x7ff66898daf6` est un stub d'indirection IAT (`jmp [RIP+0xD973C]`, 6 octets, motif `FF 25 ?? ?? ?? ??`). Lecture du pointeur réel stocké dans ce slot → `0x7ffe6dae8050`, qui tombe dans la plage de **`ucrtbase.dll`** (confirmé via la liste de modules du process) — donc une fonction CRT générique (probablement un helper d'arrondi/troncature flottant inséré par le compilateur), **pas de la logique de jeu**. Piste éliminée : cette fonction ne calcule pas l'XP.
+
+**La vraie percée : remonter en arrière depuis `addss`, pas en avant depuis l'appel.** Lecture de 80 octets avant l'instruction `addss xmm0, xmm2` et désassemblage manuel byte-par-byte (aligné exactement sur l'octet de départ connu de `addss`, aucun octet perdu ni mal interprété) :
+
+```asm
+mov      ecx, [rsi+0x904]     ; ecx = XP "actuel"      (entier, PAS un flottant)
+movss    xmm0, [rsi+0x914]    ; horloge d'animation
+subss    xmm0, [rsi+0x918]    ; - temps de depart
+divss    xmm0, [rsi+0x90C]    ; / duree -> fraction de progression [0..1]
+mov      eax, [rsi+0x908]     ; eax = XP "cible"        (entier, PAS un flottant)
+sub      eax, ecx             ; delta = cible - actuel
+xorps    xmm1, xmm1
+cvtsi2ss xmm1, rax            ; delta en flottant
+mulss    xmm0, xmm1           ; xmm0 = fraction * delta
+xorps    xmm2, xmm2
+cvtsi2ss xmm2, rcx            ; actuel en flottant
+addss    xmm0, xmm2           ; xmm0 = actuel + fraction*delta  (= point d'entree connu)
+call     ucrtbase!<helper>    ; (helper flottant generique, sans effet sur la formule)
+cvttss2si rdx, xmm0           ; troncature en entier
+mov      [rsi+0x900], edx     ; ecrit le champ AFFICHE (celui traque depuis le debut)
+```
+
+C'est une **interpolation d'animation de compteur** classique (`affiché = actuel + (cible - actuel) × progression`). `[RSI+0x900]` (le champ traqué depuis la toute première session) n'a jamais été que le résultat de ce calcul, recalculé à chaque frame — ce qui explique *tout* ce qui a été observé sur plusieurs sessions : écritures usermode et kernel qui ne tiennent jamais, "paire jumelle" à 8 octets d'écart qui semblait redondante.
+
+**La paire jumelle n'était pas redondante — c'était `[+0x900]` (affiché) et `[+0x908]` (cible) qui coïncident une fois l'animation terminée.** Vérifié : `[+0x904]` (actuel) = 180, `[+0x908]` (cible) = 240, `[+0x900]` (affiché) = 240 — actuel et cible bien **distincts** au moment du test (l'animation avait déjà rattrapé la cible mais `actuel` n'était pas encore resynchronisé), confirmant que ce sont deux champs sémantiquement différents, pas deux copies du même nombre.
+
+**Test final, écriture kernel sur `[RSI+0x908]` (la cible, PAS l'affiché) uniquement** : sentinelle `99999` écrite → l'affichage anime progressivement jusqu'à `99999` **et tient**. Carte jouée ensuite (gain de 60) → affichage passe à **`100059` = 99999 + 60**, confirmé par capture d'écran utilisateur. Le jeu additionne son gain **par-dessus** la valeur injectée au lieu de l'ignorer ou de revenir à l'ancienne valeur — preuve définitive que `[RSI+0x908]` est la vraie source de vérité utilisée par le moteur de jeu, pas un affichage ni une copie.
+
+**Conclusion générale, au-delà de ce cas précis** : pour ce genre de compteur animé (très courant dans les jeux casual/mobile), la bonne méthode n'est **pas** de chercher un chemin de pointeurs vers le champ affiché (qui est un résultat dérivé, recalculé en continu, structurellement impossible à faire "tenir" par écriture externe), mais de **remonter le désassemblage en amont de l'instruction d'écriture** pour trouver les champs sources (souvent des entiers "actuel"/"cible" utilisés pour interpoler un flottant d'affichage) et d'écrire sur la source, pas sur le résultat. Le pointer scan classique reste utile pour d'autres cas, mais pas quand le champ ciblé est structurellement un champ dérivé/calculé.
+
+**Deuxième confirmation, après une perte de manche (même session, même PID)** : l'utilisateur a perdu une manche peu après le premier test — l'affichage est redescendu progressivement, ce qui a été signalé comme "revenu en arrière" et interprété d'abord comme une possible resynchronisation externe (sauvegarde/cloud écrasant la valeur injectée). **Vérifié avant de conclure quoi que ce soit** : lecture de `[+0x904]` (actuel) = 360 et `[+0x908]` (cible) = 0 — cohérent à 100% avec le modèle déjà établi (une perte remet la cible à 0 via la logique de jeu normale, l'animation redescendait simplement de 360 vers 0), **pas une contradiction du mécanisme trouvé**, juste un comportement de jeu légitime qu'on n'avait pas encore observé. Écriture kernel de `9999` sur `[+0x908]` (même adresse, le PID n'ayant jamais changé) → confirmé fonctionnel par l'utilisateur ("ton action a marché essai j'ai bien la valeur changé"). Preuve que la méthode tient **across un événement de reset de round**, pas seulement sur le cas testé initialement.
+
+**Méthode reproductible retenue pour cette cible (et gabarit pour tout compteur animé similaire)** :
+1. Scan exact multi-étapes sur la valeur affichée (0 est trop bruyant, démarrer sur la première valeur non triviale rapportée par l'utilisateur) jusqu'à isoler la paire d'adresses à 8 octets d'écart (`+0x900` affiché / `+0x908` cible).
+2. Base de structure = adresse `+0x900` moins `0x900`.
+3. Écrire directement sur `base+0x908` (jamais sur `base+0x900`, qui est recalculé chaque frame et ne tiendra jamais).
+4. Valable après un gain, une perte, ou un nouveau round tant que le PID/l'objet ne change pas — revérifier `+0x904`/`+0x908` avant d'écrire si le PID a changé (nouvelle base de structure probable, ASLR différent).
+
+**Statut :** ✅ **résolu, confirmé deux fois** (gain initial + après un reset de round par perte). XP Solitaire contrôlable de façon fiable via `[RSI+0x908]` (relatif à la base de structure, elle-même retrouvable par scan exact multi-étapes sur la valeur affichée comme d'habitude).
+
+**Lié à :** toutes les entrées précédentes de cette investigation (19-20/08/2026), `docs/PHASE_TRACKER.md` PHASE 39 (driver kernel), `core/kernel/kernel_driver_bridge.*`, `apps/desktop/application_controller.cpp` (`findWhatWrites`, `suggestCodePatches`, `getProcessModules`, `readMemoryKernel`/`writeMemoryKernel`).
 
 ---
 

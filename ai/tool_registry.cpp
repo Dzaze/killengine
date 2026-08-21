@@ -38,6 +38,8 @@ QVariantList toolDefinitions() {
         makeTool("find_what_writes", "Capture l'instruction qui ecrit une adresse apres confirmation explicite.", {"address", "size"}, "debug", true),
         makeTool("generate_aob", "Genere une signature AOB depuis une instruction confirmee.", {"address"}, "patch", true),
         makeTool("suggest_patch", "Suggere un patch code sans application automatique.", {"address"}, "patch", true),
+        makeTool("disassemble_backward", "Désassemble les instructions avant un RIP capturé pour repérer les champs sources d'un compteur animé.", {"address"}, "patch", true),
+        makeTool("kernel_write", "Écrit une valeur via le driver noyau (contourne les protections mémoire usermode). À utiliser seulement si l'utilisateur le demande explicitement (ex: \"écris via le kernel\") ou après échec d'une écriture usermode normale.", {"address", "valueType", "value"}, "injection", true),
     };
 }
 

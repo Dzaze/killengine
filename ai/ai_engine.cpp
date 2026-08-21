@@ -406,6 +406,18 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
         }, "Freeze demandé par l'utilisateur.");
     }
 
+    // Demande explicite du kernel avant le check d'ecriture generique
+    // ci-dessous, sinon "ecris X via le kernel" tombe dans write_value et le
+    // choix explicite de l'utilisateur est perdu.
+    const bool wantsKernel = q.contains("kernel") || q.contains("noyau");
+    if (wantsKernel && (q.contains("write") || q.contains("écri") || q.contains("mettre"))) {
+        return makeToolCall("kernel_write", {
+            {"address", firstHexAddress(query)},
+            {"valueType", inferValueType(query)},
+            {"value", firstNumber(query)},
+        }, "Écriture kernel demandée explicitement par l'utilisateur.");
+    }
+
     if (q.contains("write") || q.contains("écri") || q.contains("mettre")) {
         return makeToolCall("write_value", {
             {"address", firstHexAddress(query)},
@@ -476,6 +488,14 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             {"value", value},
             {"enabled", true},
         }, "Freeze demande par l'utilisateur.");
+    }
+    const bool wantsKernel = q.contains("kernel") || q.contains("noyau");
+    if (wantsKernel && (q.contains("write") || q.contains("mettre")) && !value.isEmpty()) {
+        return makeToolCall("kernel_write", {
+            {"address", firstHexAddress(query)},
+            {"valueType", inferValueType(query)},
+            {"value", value},
+        }, "Ecriture kernel demandee explicitement par l'utilisateur.");
     }
     if ((q.contains("write") || q.contains("mettre")) && !value.isEmpty()) {
         return makeToolCall("write_value", {

@@ -11,6 +11,8 @@ import {
   type ChatMemoryTargetsResult,
   type ExactScanResult,
   type KernelDriverStatus,
+  type KernelMemoryReadResult,
+  type KernelMemoryWriteResult,
   type LogTailResult,
   type MemoryMapResult,
   type NextScanResult,
@@ -365,6 +367,10 @@ export const useAppStore = defineStore('app', () => {
   const kernelDriverStatus = ref<KernelDriverStatus | null>(null)
   const kernelDriverStatusLoading = ref(false)
   const kernelDriverStatusError = ref('')
+  const kernelMemoryReadResult = ref<KernelMemoryReadResult | null>(null)
+  const kernelMemoryReadBusy = ref(false)
+  const kernelMemoryWriteResult = ref<KernelMemoryWriteResult | null>(null)
+  const kernelMemoryWriteBusy = ref(false)
   const workflowPresets = ref<WorkflowPreset[]>([
     {
       id: 'exact-value',
@@ -2541,6 +2547,52 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function executeCheckpointKernelWrite(checkpoint: Record<string, unknown>) {
+    const address = checkpointAddress(checkpoint)
+    const type = checkpointType(checkpoint)
+    const value = checkpointValue(checkpoint)
+    if (!address || !value.trim()) {
+      addActionLog('checkpoint', 'Écriture kernel impossible', 'Adresse ou valeur manquante.', 'warning')
+      return null
+    }
+    if (!await confirmRiskAction('injection', 'Écriture mémoire via driver noyau', `0x${address} ${type} = ${value} (contourne les protections mémoire usermode).`)) return null
+    const controller = backend.getController()
+    if (!controller.writeMemoryValueKernel) {
+      addActionLog('checkpoint', 'Écriture kernel indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const result = await controller.writeMemoryValueKernel(address, type, value)
+      writeResult.value = result as unknown as MemoryWriteResult
+      if (result.success === true) addAddressToWatch(address, type)
+      addActionLog(
+        'checkpoint',
+        result.success === true ? 'Écriture kernel OK' : 'Écriture kernel échouée',
+        String(result.error || `0x${address}`),
+        result.success === true ? 'success' : 'error',
+      )
+      addInvestigationStep({
+        title: result.success === true ? 'Écriture kernel exécutée' : 'Écriture kernel échouée',
+        detail: String(result.error || `0x${address} ${type} = ${value} via driver noyau`),
+        status: result.success === true ? 'success' : 'error',
+        tool: 'writeMemoryValueKernel',
+        risk: 'injection',
+        payload: result as unknown as Record<string, unknown>,
+      })
+      logAiAudit('checkpoint_kernel_write_executed', {
+        success: result.success === true,
+        address,
+        type,
+        value,
+        error: result.error ?? '',
+      })
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', 'Écriture kernel échouée', String(e), 'error')
+      return null
+    }
+  }
+
   async function executeCheckpointFindWhatWrites(checkpoint: Record<string, unknown>) {
     const address = checkpointAddress(checkpoint)
     const type = checkpointType(checkpoint)
@@ -2588,6 +2640,50 @@ let nextWatchedChainId = 1
       return result
     } catch (e) {
       addActionLog('checkpoint', 'Find What Writes échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  async function executeCheckpointDisassembleBackward(checkpoint: Record<string, unknown>) {
+    const address = checkpointAddress(checkpoint)
+    if (!address) {
+      addActionLog('checkpoint', 'Désassemblage impossible', 'Adresse RIP manquante.', 'warning')
+      return null
+    }
+    if (!await confirmRiskAction('patch', 'Désassembler en amont', `Lire les octets avant l'instruction 0x${address} et reconstruire les instructions précédentes (lecture seule).`)) return null
+    const controller = backend.getController()
+    if (!controller.disassembleBackward) {
+      addActionLog('checkpoint', 'Désassemblage indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const result = await controller.disassembleBackward(address, {})
+      const candidates = Array.isArray(result.candidateFields) ? result.candidateFields : []
+      if (candidates.length > 0 && activeInvestigation.value) {
+        activeInvestigation.value.checkpoints = [
+          ...candidates.slice(0, 6).map((field) => ({
+            kind: 'candidate_field',
+            label: `Champ candidat [${field.memBaseRegister}+0x${(field.memDisplacement ?? 0).toString(16)}]`,
+            address: field.address,
+            sourceAddress: address,
+            requiresConfirmation: true,
+          })),
+          ...activeInvestigation.value.checkpoints,
+        ].slice(0, 12)
+        saveInvestigations()
+      }
+      addInvestigationStep({
+        title: candidates.length > 0 ? 'Désassemblage en amont : champs candidats trouvés' : 'Désassemblage en amont sans champ candidat',
+        detail: `${candidates.length} champ(s) candidat(s) pour RIP 0x${address}.`,
+        status: candidates.length > 0 ? 'checkpoint' : 'warning',
+        tool: 'disassembleBackward',
+        risk: 'patch',
+        payload: result as unknown as Record<string, unknown>,
+      })
+      logAiAudit('checkpoint_disassemble_backward_executed', { address, candidateCount: candidates.length, success: result.success === true })
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', 'Désassemblage en amont échoué', String(e), 'error')
       return null
     }
   }
@@ -3023,6 +3119,62 @@ let nextWatchedChainId = 1
       kernelDriverStatusError.value = String(e)
     } finally {
       kernelDriverStatusLoading.value = false
+    }
+  }
+
+  async function readMemoryKernel(addressHex: string, size: number) {
+    kernelMemoryReadBusy.value = true
+    try {
+      const controller = backend.getController()
+      if (!controller.readMemoryKernel) {
+        kernelMemoryReadResult.value = { success: false, error: 'Lecture kernel non exposée par ce backend.' }
+        return
+      }
+      kernelMemoryReadResult.value = await controller.readMemoryKernel(addressHex, size)
+      addActionLog(
+        'kernel_read',
+        kernelMemoryReadResult.value.success ? `Lecture kernel 0x${addressHex}` : `Lecture kernel échouée 0x${addressHex}`,
+        kernelMemoryReadResult.value.success
+          ? `${kernelMemoryReadResult.value.bytesRead} octet(s) lus via le driver noyau.`
+          : (kernelMemoryReadResult.value.error ?? ''),
+        kernelMemoryReadResult.value.success ? 'success' : 'error',
+      )
+      logAiAudit('kernel_memory_read', { address: addressHex, size, success: kernelMemoryReadResult.value.success })
+    } catch (e) {
+      kernelMemoryReadResult.value = { success: false, error: String(e) }
+    } finally {
+      kernelMemoryReadBusy.value = false
+    }
+  }
+
+  async function writeMemoryKernel(addressHex: string, hexBytes: string) {
+    // Contourne les protections mémoire usermode normales (VirtualProtect,
+    // PAGE_GUARD) en écrivant directement depuis le ring 0 -- traité comme
+    // une injection, le palier de risque le plus strict déjà utilisé dans
+    // ce store (voir confirmRiskAction), pas comme un simple 'write'.
+    if (!await confirmRiskAction('injection', 'Écriture mémoire via driver noyau', `0x${addressHex} = ${hexBytes.trim()} (contourne les protections mémoire usermode).`)) return
+
+    kernelMemoryWriteBusy.value = true
+    try {
+      const controller = backend.getController()
+      if (!controller.writeMemoryKernel) {
+        kernelMemoryWriteResult.value = { success: false, error: 'Écriture kernel non exposée par ce backend.' }
+        return
+      }
+      kernelMemoryWriteResult.value = await controller.writeMemoryKernel(addressHex, hexBytes)
+      addActionLog(
+        'kernel_write',
+        kernelMemoryWriteResult.value.success ? `Écriture kernel 0x${addressHex}` : `Écriture kernel échouée 0x${addressHex}`,
+        kernelMemoryWriteResult.value.success
+          ? `${kernelMemoryWriteResult.value.bytesWritten} octet(s) écrits via le driver noyau.`
+          : (kernelMemoryWriteResult.value.error ?? ''),
+        kernelMemoryWriteResult.value.success ? 'success' : 'error',
+      )
+      logAiAudit('kernel_memory_write', { address: addressHex, bytes: hexBytes, success: kernelMemoryWriteResult.value.success })
+    } catch (e) {
+      kernelMemoryWriteResult.value = { success: false, error: String(e) }
+    } finally {
+      kernelMemoryWriteBusy.value = false
     }
   }
 
@@ -5968,6 +6120,12 @@ async function doEncryptedScan() {
     kernelDriverStatusLoading,
     kernelDriverStatusError,
     refreshKernelDriverStatus,
+    kernelMemoryReadResult,
+    kernelMemoryReadBusy,
+    readMemoryKernel,
+    kernelMemoryWriteResult,
+    kernelMemoryWriteBusy,
+    writeMemoryKernel,
     isAttached,
     processName,
     processes,
@@ -6161,6 +6319,8 @@ async function doEncryptedScan() {
     buildCheckpointActionPlan,
     executeCheckpointWrite,
     executeCheckpointFindWhatWrites,
+    executeCheckpointDisassembleBackward,
+    executeCheckpointKernelWrite,
     prepareCheckpointAob,
     executeCheckpointForceValue,
     createTrainerFeature,

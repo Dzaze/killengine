@@ -75,6 +75,7 @@ Le dépôt contient une vingtaine de fichiers `.md`. Cette carte existe pour que
 
 | Fichier | Rôle |
 | --- | --- |
+| **`docs/KILLENGINE_TOOLS_AND_CAPABILITIES.md`** | Inventaire rapide des outils, workflows et capacités de KillEngine — à lire quand l'utilisateur demande "que sait faire KillEngine ?" |
 | **`tecno.md`** | Fiche courte des technologies utilisées dans le projet et leur rôle — pour se repérer vite dans la stack |
 
 ### 👤 Notes personnelles de l'utilisateur — pas générées/maintenues par les agents
