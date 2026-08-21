@@ -112,6 +112,8 @@ QString findLuaExecutable(const QString& overridePath = {}) {
         appDir.filePath("runtime/lua"),
         appDir.filePath("lua"),
         appDir.absolutePath(),
+        appDir.filePath("../runtime/lua"),
+        appDir.filePath("../../runtime/lua"),
         QDir::current().filePath("runtime/lua"),
         QDir::current().filePath("third_party/lua"),
         QDir::current().filePath("third_party/lua/bin"),
