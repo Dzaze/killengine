@@ -58,6 +58,7 @@
 #include <QSettings>
 #include <QSet>
 #include <QStandardPaths>
+#include <QTemporaryFile>
 
 #include <algorithm>
 #include <chrono>
@@ -90,6 +91,68 @@ constexpr size_t kCandidateDisplayLimit = 250000;
 constexpr qsizetype kUnknownAutoMaxReturnedMatches = 250000;
 constexpr int kCandidateHistoryMaxAddresses = 10000;
 constexpr int kCandidateHistoryMaxEntriesPerAddress = 12;
+
+QString findLuaExecutable(const QString& overridePath = {}) {
+    const QString trimmedOverride = overridePath.trimmed();
+    if (!trimmedOverride.isEmpty()) {
+        const QFileInfo overrideFile(trimmedOverride);
+        if (overrideFile.exists() && overrideFile.isFile()) {
+            return overrideFile.absoluteFilePath();
+        }
+    }
+
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList executableNames = {
+        QStringLiteral("lua.exe"),
+        QStringLiteral("lua54.exe"),
+        QStringLiteral("lua5.4.exe"),
+        QStringLiteral("luajit.exe"),
+    };
+    const QStringList bundledDirectories = {
+        appDir.filePath("runtime/lua"),
+        appDir.filePath("lua"),
+        appDir.absolutePath(),
+        QDir::current().filePath("runtime/lua"),
+        QDir::current().filePath("third_party/lua"),
+        QDir::current().filePath("third_party/lua/bin"),
+        QDir::current().filePath("tools/lua"),
+    };
+    for (const auto& directory : bundledDirectories) {
+        const QDir dir(directory);
+        for (const auto& name : executableNames) {
+            const QFileInfo file(dir.filePath(name));
+            if (file.exists() && file.isFile()) {
+                return file.absoluteFilePath();
+            }
+        }
+    }
+
+    for (const auto& name : executableNames) {
+        const QString found = QStandardPaths::findExecutable(name);
+        if (!found.isEmpty()) {
+            return found;
+        }
+    }
+
+    return {};
+}
+
+QString findKillEngineLuaHelper() {
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.filePath("scripts/killengine.lua"),
+        appDir.filePath("../scripts/killengine.lua"),
+        appDir.filePath("../../scripts/killengine.lua"),
+        QDir::current().filePath("scripts/killengine.lua"),
+    };
+    for (const auto& candidate : candidates) {
+        const QFileInfo file(candidate);
+        if (file.exists() && file.isFile()) {
+            return file.absoluteFilePath();
+        }
+    }
+    return {};
+}
 
 double ratePerSecond(size_t count, qint64 elapsedMs) {
     if (elapsedMs <= 0) {
@@ -13772,6 +13835,118 @@ QVariantMap ApplicationController::deleteProfileAutoAsmScript(const QString& pro
 
     result["success"] = true;
     result["scriptCount"] = profile.autoAsmScripts.size();
+    return result;
+}
+
+QVariantMap ApplicationController::getLuaScriptingStatus() const {
+    const QString luaPath = findLuaExecutable();
+    const QString helperPath = findKillEngineLuaHelper();
+    const QFileInfo helperFile(helperPath);
+
+    QVariantMap result;
+    result["success"] = true;
+    result["available"] = !luaPath.isEmpty();
+    result["luaPath"] = luaPath;
+    result["helperAvailable"] = !helperPath.isEmpty();
+    result["helperPath"] = helperPath;
+    result["helperDirectory"] = helperFile.exists() ? helperFile.absolutePath() : QString();
+    result["pipeName"] = QStringLiteral("KillEngineAutomationPipe");
+    result["automationPipeOptIn"] = qEnvironmentVariableIsSet("KILLENGINE_AUTOMATION_PIPE");
+    result["message"] = luaPath.isEmpty()
+        ? QStringLiteral("Aucun interpréteur Lua trouvé dans runtime/lua, lua, le dossier de l'application ou le PATH.")
+        : QStringLiteral("Lua externe prêt. Les appels KillEngine passent par le pipe d'automatisation local.");
+    return result;
+}
+
+QVariantMap ApplicationController::executeLuaScript(const QString& scriptText, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString trimmedScript = scriptText.trimmed();
+    if (trimmedScript.isEmpty()) {
+        result["error"] = "Script Lua vide.";
+        return result;
+    }
+
+    const QString luaPath = findLuaExecutable(options.value("luaPath").toString());
+    if (luaPath.isEmpty()) {
+        result["error"] = "Aucun interpréteur Lua trouvé. Place lua.exe dans runtime\\lua à côté de KillEngine.exe, ajoute Lua au PATH, ou renseigne options.luaPath.";
+        return result;
+    }
+
+    QTemporaryFile scriptFile(QDir::temp().filePath("killengine-lua-XXXXXX.lua"));
+    scriptFile.setAutoRemove(true);
+    if (!scriptFile.open()) {
+        result["error"] = QStringLiteral("Impossible de créer le script temporaire Lua : %1").arg(scriptFile.errorString());
+        return result;
+    }
+    scriptFile.write(scriptText.toUtf8());
+    scriptFile.flush();
+    const QString scriptPath = scriptFile.fileName();
+    scriptFile.close();
+
+    const QString helperPath = findKillEngineLuaHelper();
+    const QFileInfo helperFile(helperPath);
+    const QString helperDir = helperFile.exists() ? helperFile.absolutePath() : QString();
+    const QString rootDir = helperDir.isEmpty()
+        ? QDir(QCoreApplication::applicationDirPath()).absolutePath()
+        : QDir(helperDir).absoluteFilePath("..");
+
+    QProcess process;
+    process.setProgram(luaPath);
+    process.setArguments({scriptPath});
+    process.setWorkingDirectory(rootDir);
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("KILLENGINE_ROOT"), QDir(rootDir).absolutePath());
+    env.insert(QStringLiteral("KILLENGINE_AUTOMATION_PIPE_NAME"), options.value("pipeName", QStringLiteral("KillEngineAutomationPipe")).toString());
+    if (!helperDir.isEmpty()) {
+        const QString existingLuaPath = env.value(QStringLiteral("LUA_PATH"));
+        const QString helperPattern = QDir(helperDir).filePath("?.lua").replace('\\', '/');
+        env.insert(QStringLiteral("LUA_PATH"), helperPattern + QStringLiteral(";") + existingLuaPath);
+    }
+    process.setProcessEnvironment(env);
+
+    const int timeoutMs = std::clamp(options.value("timeoutMs", 10000).toInt(), 1000, 120000);
+    process.start();
+    if (!process.waitForStarted(3000)) {
+        result["error"] = QStringLiteral("Impossible de démarrer Lua : %1").arg(process.errorString());
+        result["luaPath"] = luaPath;
+        return result;
+    }
+
+    bool timedOut = false;
+    if (!process.waitForFinished(timeoutMs)) {
+        timedOut = true;
+        process.kill();
+        process.waitForFinished(2000);
+    }
+
+    const QString stdoutText = QString::fromUtf8(process.readAllStandardOutput());
+    const QString stderrText = QString::fromUtf8(process.readAllStandardError());
+    const int exitCode = process.exitCode();
+
+    result["success"] = !timedOut && process.exitStatus() == QProcess::NormalExit && exitCode == 0;
+    result["timedOut"] = timedOut;
+    result["exitCode"] = exitCode;
+    result["luaPath"] = luaPath;
+    result["helperPath"] = helperPath;
+    result["stdout"] = stdoutText;
+    result["stderr"] = stderrText;
+    if (!result.value("success").toBool()) {
+        result["error"] = timedOut
+            ? QStringLiteral("Script Lua interrompu après timeout (%1 ms).").arg(timeoutMs)
+            : QStringLiteral("Script Lua terminé avec le code %1.").arg(exitCode);
+    }
+
+    appendScanTelemetry(QStringLiteral("lua_script_execute"), {
+        {"success", result.value("success").toBool()},
+        {"exitCode", exitCode},
+        {"timedOut", timedOut},
+        {"stdoutBytes", stdoutText.toUtf8().size()},
+        {"stderrBytes", stderrText.toUtf8().size()},
+    });
     return result;
 }
 

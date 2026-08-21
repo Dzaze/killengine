@@ -129,6 +129,47 @@ if ($llamaCli) {
     Copy-Item -LiteralPath $llamaCli -Destination (Join-Path $packageRoot "llama-cli.exe") -Force
 }
 
+$scriptsOut = Join-Path $packageRoot "scripts"
+New-Item -ItemType Directory -Force -Path $scriptsOut | Out-Null
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\killengine.lua") -Destination $scriptsOut -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\automation-pipe-call.ps1") -Destination $scriptsOut -Force
+
+$luaRuntimeExe = Find-FirstExistingFile -Paths @(
+    (Join-Path $repoRoot "runtime\lua\lua.exe"),
+    (Join-Path $repoRoot "runtime\lua\lua54.exe"),
+    (Join-Path $repoRoot "runtime\lua\lua5.4.exe"),
+    (Join-Path $repoRoot "runtime\lua\luajit.exe"),
+    (Join-Path $repoRoot "third_party\lua\lua.exe"),
+    (Join-Path $repoRoot "third_party\lua\lua54.exe"),
+    (Join-Path $repoRoot "third_party\lua\lua5.4.exe"),
+    (Join-Path $repoRoot "third_party\lua\luajit.exe"),
+    (Join-Path $repoRoot "third_party\lua\bin\lua.exe"),
+    (Join-Path $repoRoot "third_party\lua\bin\lua54.exe"),
+    (Join-Path $repoRoot "third_party\lua\bin\lua5.4.exe"),
+    (Join-Path $repoRoot "third_party\lua\bin\luajit.exe"),
+    (Join-Path $repoRoot "tools\lua\lua.exe"),
+    (Join-Path $repoRoot "tools\lua\lua54.exe"),
+    (Join-Path $repoRoot "tools\lua\lua5.4.exe"),
+    (Join-Path $repoRoot "tools\lua\luajit.exe"),
+    (Join-Path $buildBin "runtime\lua\lua.exe"),
+    (Join-Path $buildBin "runtime\lua\lua54.exe"),
+    (Join-Path $buildBin "runtime\lua\lua5.4.exe"),
+    (Join-Path $buildBin "runtime\lua\luajit.exe")
+)
+
+if ($luaRuntimeExe) {
+    $luaRuntimeSource = Split-Path -Parent $luaRuntimeExe
+    $luaRuntimeOut = Join-Path $packageRoot "runtime\lua"
+    New-Item -ItemType Directory -Force -Path $luaRuntimeOut | Out-Null
+    Get-ChildItem -LiteralPath $luaRuntimeSource -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in @(".exe", ".dll", ".txt", ".md") -or $_.Name -match "license|copying" } |
+        ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $luaRuntimeOut -Force
+        }
+} else {
+    Write-Warning "Lua runtime not found. Put Lua in runtime\lua, third_party\lua, third_party\lua\bin or tools\lua to bundle scripting support."
+}
+
 $modelRoot = Join-Path $repoRoot "model"
 $modelOut = Join-Path $packageRoot "model"
 New-Item -ItemType Directory -Force -Path $modelOut | Out-Null
@@ -174,6 +215,8 @@ Run:
 Notes:
   - This package is intended for local/offline testing.
   - llama-cli.exe is copied automatically when present in third_party/llama.cpp.
+  - Lua scripting uses runtime\lua\lua.exe when bundled, then falls back to PATH.
+  - Lua helper scripts live in scripts\killengine.lua and scripts\automation-pipe-call.ps1.
   - GGUF models are included by default.
   - Use -ExcludeModel only for lightweight development packages.
   - The normal product layout is model\<ai-name>\ next to KillEngine.exe.
@@ -210,6 +253,8 @@ $requiredRuntimeItems = @(
     "resources\v8_context_snapshot.bin",
     "translations\qtwebengine_locales\en-US.pak",
     "PACKAGE_README.txt",
+    "scripts\killengine.lua",
+    "scripts\automation-pipe-call.ps1",
     "USER_GUIDE.md",
     "V1_REGRESSION_CHECKLIST.md"
 )

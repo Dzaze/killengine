@@ -142,6 +142,30 @@ export interface ClrRootInfo {
   name?: string
 }
 
+export interface LuaScriptingStatus {
+  success: boolean
+  available: boolean
+  luaPath?: string
+  helperAvailable?: boolean
+  helperPath?: string
+  helperDirectory?: string
+  pipeName?: string
+  automationPipeOptIn?: boolean
+  message?: string
+  error?: string
+}
+
+export interface LuaScriptRunResult {
+  success: boolean
+  timedOut?: boolean
+  exitCode?: number
+  luaPath?: string
+  helperPath?: string
+  stdout?: string
+  stderr?: string
+  error?: string
+}
+
 export interface UiStringCandidate {
   address: string
   encoding: 'ascii' | 'utf16' | string
@@ -1108,6 +1132,9 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ): Promise<Record<string, unknown>>
   applyProfileAutoAsmScript?(profileName: string, scriptName: string): Promise<Record<string, unknown>>
   deleteProfileAutoAsmScript?(profileName: string, scriptName: string): Promise<Record<string, unknown>>
+  /** Scripting Lua externe : exécute lua.exe/LuaJIT et laisse le script piloter KillEngine via le pipe d'automatisation. */
+  getLuaScriptingStatus?(): Promise<LuaScriptingStatus>
+  executeLuaScript?(scriptText: string, options: Record<string, unknown>): Promise<LuaScriptRunResult>
 
   // Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
   scanPointerChains?(addressHex: string, scanOptions: PointerScanOptions): Promise<PointerScanResult>
@@ -2089,6 +2116,25 @@ class BackendService {
       },
       async inspectProfileCodePatches() {
         return { success: false, states: [], error: 'Mock backend' }
+      },
+      async getLuaScriptingStatus() {
+        return {
+          success: true,
+          available: false,
+          helperAvailable: false,
+          pipeName: 'KillEngineAutomationPipe',
+          automationPipeOptIn: false,
+          message: 'Mock backend — Lua externe non détecté.',
+        }
+      },
+      async executeLuaScript(_scriptText: string, _options: Record<string, unknown>) {
+        return {
+          success: false,
+          exitCode: -1,
+          stdout: '',
+          stderr: '',
+          error: 'Mock backend',
+        }
       },
     }
   }

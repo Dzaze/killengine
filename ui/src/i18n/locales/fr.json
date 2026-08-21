@@ -91,6 +91,7 @@
     "assistant": "Assistant",
     "process": "Processus",
     "memory": "Mémoire",
+    "scripting": "Lua",
     "profiles": "Profils",
     "expert": "Expert",
     "settings": "Paramètres",

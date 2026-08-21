@@ -253,6 +253,42 @@ Cette méthode s'applique à tout compteur qui défile visuellement (XP, score, 
 
 Une étude de cas complète (désassemblage réel, raisonnement pas à pas) est disponible dans `docs/STRATEGY_ROOM.md`.
 
+## Lua scripting
+
+L'onglet `Lua` permet d'exécuter un script Lua externe pour orchestrer KillEngine : scan, next scan, lecture kernel, écriture kernel, ou tout autre appel exposé par le backend. Le script ne s'injecte pas dans le processus cible ; il appelle KillEngine via le pipe d'automatisation local.
+
+Pré-requis en développement :
+
+1. Depuis le dépôt, lancer `.\scripts\setup-lua-runtime.ps1` pour construire `runtime\lua\lua.exe` depuis les sources officielles Lua. En dépannage seulement, tu peux aussi placer un `lua.exe` compatible dans `runtime\lua\` ou rendre Lua disponible dans le `PATH`.
+2. Lancer KillEngine avec le pipe actif si le script utilise `ke.call(...)` :
+
+```powershell
+$env:KILLENGINE_AUTOMATION_PIPE = "1"
+.\build\bin\KillEngine.exe
+```
+
+Exemple dans l'onglet `Lua` :
+
+```lua
+local ke = require("killengine")
+
+print(ke.call("ping", { "hello from lua" }))
+print(ke.scan_exact("40", "Int32"))
+```
+
+Le helper `scripts/killengine.lua` fournit des raccourcis (`ke.scan_exact`, `ke.next_scan`, `ke.candidates`, `ke.kernel_read`, `ke.kernel_write_value`) mais retourne pour l'instant les réponses JSON brutes. Pour un workflow critique, lis d'abord la sortie, puis exécute les écritures par étapes.
+
+Pour un package client, le layout attendu est :
+
+```text
+KillEngine.exe
+runtime\lua\lua.exe
+scripts\killengine.lua
+scripts\automation-pipe-call.ps1
+```
+
+`scripts\package-windows.ps1` copie automatiquement le runtime Lua s'il trouve un interpréteur dans `runtime\lua`, `third_party\lua`, `third_party\lua\bin` ou `tools\lua`. Le script `setup-lua-runtime.ps1` remplit directement le premier emplacement.
+
 ## Paramètres
 
 La page `Paramètres` permet de régler :

@@ -229,20 +229,21 @@ EncryptedScanOptions {
 
 ## K. Lua scripting
 
-**État réel au 20/08/2026 :** absent — vérifié par grep (`lua_state`, `luaL_`), zéro référence dans le repo. L'automatisation actuelle passe uniquement par l'Auto-Assembler (DSL propre, volontairement borné — voir section E) et par l'IA locale (tool-calling JSON, pas un langage général).
+**État réel au 21/08/2026 :** MVP externe livré. KillEngine expose un onglet `Lua`, détecte `lua.exe`/`lua54.exe`/`lua5.4.exe`/`luajit.exe` d'abord dans le runtime embarqué (`runtime/lua`, `lua`, dossier de l'application), puis sur le PATH, exécute le script dans un processus externe via `ApplicationController::executeLuaScript`, et fournit `scripts/killengine.lua` pour appeler le pipe d'automatisation JSON-RPC existant (`ke.call`, `ke.scan_exact`, `ke.next_scan`, `ke.candidates`, `ke.kernel_read`, `ke.kernel_write_value`). `scripts/setup-lua-runtime.ps1` télécharge les sources officielles Lua, vérifie le SHA256 piné, compile `lua.exe` avec MSVC et remplit `runtime/lua`. Le packaging portable copie `scripts/killengine.lua`, `scripts/automation-pipe-call.ps1` et embarque automatiquement `runtime/lua` si un interpréteur est présent dans `runtime/lua`, `third_party/lua`, `third_party/lua/bin` ou `tools/lua`. Pas de Lua embarqué in-process pour l'instant.
 
 **Problème :** Cheat Engine expose Lua pour scripter des workflows arbitraires (UI custom, logique conditionnelle, orchestration de plusieurs actions). KillEngine n'a pas d'équivalent — un utilisateur qui dépasse ce que l'Auto-Assembler borné permet (pas d'`add`/`sub`/`cmp`/boucles) n'a aucun recours scriptable.
 
-**Ce qui existe :** le pipe d'automatisation JSON-RPC déjà livré (`automation_pipe_server.h`) est le point d'ancrage le plus proche — un script Lua pourrait piloter KillEngine via ce même pipe plutôt que d'être embarqué in-process.
+**Ce qui existe :** le pipe d'automatisation JSON-RPC déjà livré (`automation_pipe_server.h`) est maintenant utilisé comme point d'ancrage Lua. Le helper Lua shell-out vers `scripts/automation-pipe-call.ps1`, donc il réutilise exactement la surface `Q_INVOKABLE` déjà validée par les agents IA.
 
-**Ce qu'il faudrait ajouter :**
-1. Décision d'architecture d'abord : Lua **embarqué** (lier `lua5.4`/LuaJIT, bindings C vers les mêmes primitives qu'`ApplicationController`) vs Lua **externe** pilotant le pipe d'automatisation existant (plus simple, plus sûr, latence IPC au lieu d'appels directs — probablement le meilleur point de départ).
-2. Si embarqué : nouveau `core/scripting/lua_runtime.{h,cpp}`, bindings vers `readMemoryPreview`/`writeMemoryValue`/`startExactScan`/etc.
-3. UI : éditeur de script (même patron que le champ Auto-Assembler dans `InjectionPanel.vue`), Exécuter/Arrêter, logs.
+**Reste à ajouter :**
+1. Exécution asynchrone annulable depuis l'UI (`Stop`) au lieu du timeout borné actuel.
+2. Parseur JSON côté Lua pour manipuler directement les réponses au lieu de retourner du JSON brut.
+3. Persistance de scripts Lua dans les profils, comme les scripts Auto-Assembler.
+4. Si besoin plus tard : Lua **embarqué** (lier `lua5.4`/LuaJIT, bindings C directs vers les primitives), après stabilisation de l'API publique.
 
-**Effort :** Élevé — nouvelle dépendance runtime, surface de sécurité à border (un script a accès à tout ce qu'expose l'API), UI d'édition/débogage. **Impact :** Rapproche KillEngine de la flexibilité de scripting de Cheat Engine.
+**Effort restant :** Moyen à élevé selon l'ambition (debugger/Stop/persistance vs Lua embarqué). **Impact :** rapproche KillEngine de la flexibilité de scripting de Cheat Engine sans ajouter de dépendance native immédiate.
 
-**Fichiers touchés (proposés) :** nouveau `core/scripting/lua_runtime.{h,cpp}` (ou wrapper externe autour du pipe existant), `apps/desktop/application_controller.h/.cpp`, nouvelle vue `ui/src/views/ScriptingView.vue`.
+**Fichiers livrés :** `apps/desktop/application_controller.h/.cpp`, `ui/src/views/ScriptingView.vue`, `ui/src/stores/app.ts`, `ui/src/services/backend.ts`, `scripts/killengine.lua`, `scripts/setup-lua-runtime.ps1`, `runtime/lua/README.md`.
 
 ---
 

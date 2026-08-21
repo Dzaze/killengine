@@ -636,6 +636,15 @@ public:
     /// Supprime un script auto-assembleur sauvegardé d'un profil.
     Q_INVOKABLE QVariantMap deleteProfileAutoAsmScript(const QString& profileName, const QString& scriptName);
 
+    /// Scripting Lua externe : détecte un interpréteur Lua disponible et
+    /// expose le chemin du helper scripts/killengine.lua. Le script pilote
+    /// KillEngine via le pipe d'automatisation local, pas par injection.
+    Q_INVOKABLE QVariantMap getLuaScriptingStatus() const;
+
+    /// Exécute un script Lua dans un processus externe (lua.exe/luajit.exe).
+    /// options: { luaPath?: string, timeoutMs?: int, pipeName?: string }.
+    Q_INVOKABLE QVariantMap executeLuaScript(const QString& scriptText, const QVariantMap& options);
+
     // -----------------------------------------------------------------------
     // Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
     // -----------------------------------------------------------------------

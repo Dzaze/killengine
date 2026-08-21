@@ -59,6 +59,8 @@ models/*.partial
 # Downloaded archives / local vendor binaries
 downloads/
 third_party/llama.cpp/
+runtime/lua/*
+!runtime/lua/README.md
 
 # vcpkg
 vcpkg_installed/

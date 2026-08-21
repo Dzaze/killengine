@@ -19,6 +19,8 @@ import {
   type KernelDriverStatus,
   type KernelMemoryReadResult,
   type KernelMemoryWriteResult,
+  type LuaScriptRunResult,
+  type LuaScriptingStatus,
   type LogTailResult,
   type MemoryMapResult,
   type NextScanResult,
@@ -229,7 +231,7 @@ export interface RuntimeActionPlan {
   actions: RuntimeActionPlanItem[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'speedhack' | 'profiles' | 'expert' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'scripting' | 'speedhack' | 'profiles' | 'expert' | 'settings'
 
 export interface WorkflowPreset {
   id: string
@@ -396,6 +398,16 @@ export const useAppStore = defineStore('app', () => {
   const clrSelectedObject = ref<ClrObjectReadResult | null>(null)
   const clrRoots = ref<ClrRootInfo[]>([])
   const clrLastResult = ref<ClrRpcResult | null>(null)
+  const luaScriptingStatus = ref<LuaScriptingStatus | null>(null)
+  const luaScriptText = ref([
+    'local ke = require("killengine")',
+    '',
+    'print("KillEngine Lua ready")',
+    'print(ke.call("ping", { "hello from lua" }))',
+  ].join('\n'))
+  const luaScriptResult = ref<LuaScriptRunResult | null>(null)
+  const luaScriptBusy = ref(false)
+  const luaScriptTimeoutMs = ref(10000)
   const workflowPresets = ref<WorkflowPreset[]>([
     {
       id: 'exact-value',
@@ -3288,6 +3300,7 @@ let nextWatchedChainId = 1
       loadWorkspaceProjects()
       await loadSettings()
       await refreshKernelDriverStatus()
+      await refreshLuaScriptingStatus()
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
       showOnboarding.value = controller.hasSeenOnboarding ? !(await controller.hasSeenOnboarding()) : false
@@ -3483,6 +3496,65 @@ let nextWatchedChainId = 1
       processes.value = await backend.getController().getProcesses()
     } catch (e) {
       console.error('[KillEngine] Failed to get processes:', e)
+    }
+  }
+
+  async function refreshLuaScriptingStatus() {
+    const controller = backend.getController()
+    if (!controller.getLuaScriptingStatus) {
+      luaScriptingStatus.value = {
+        success: false,
+        available: false,
+        helperAvailable: false,
+        message: 'Scripting Lua non exposé par ce backend.',
+      }
+      return
+    }
+    try {
+      luaScriptingStatus.value = await controller.getLuaScriptingStatus()
+    } catch (e) {
+      luaScriptingStatus.value = {
+        success: false,
+        available: false,
+        helperAvailable: false,
+        error: String(e),
+      }
+    }
+  }
+
+  async function executeLuaScript() {
+    const script = luaScriptText.value
+    if (!script.trim()) return
+    if (!await confirmRiskAction(
+      'injection',
+      'Exécution script Lua',
+      'Le script peut appeler le pipe d’automatisation KillEngine et déclencher les actions exposées par le backend.',
+    )) return
+
+    const controller = backend.getController()
+    if (!controller.executeLuaScript) {
+      luaScriptResult.value = { success: false, error: 'Exécution Lua non exposée par ce backend.' }
+      return
+    }
+
+    luaScriptBusy.value = true
+    try {
+      luaScriptResult.value = await controller.executeLuaScript(script, {
+        timeoutMs: luaScriptTimeoutMs.value,
+        pipeName: luaScriptingStatus.value?.pipeName ?? 'KillEngineAutomationPipe',
+      })
+      const ok = luaScriptResult.value.success === true
+      addActionLog(
+        'lua_script',
+        ok ? 'Script Lua exécuté' : 'Script Lua échoué',
+        String(luaScriptResult.value.error ?? luaScriptResult.value.stdout ?? '').trim(),
+        ok ? 'success' : 'error',
+      )
+    } catch (e) {
+      luaScriptResult.value = { success: false, error: String(e) }
+      addActionLog('lua_script', 'Script Lua échoué', String(e), 'error')
+    } finally {
+      luaScriptBusy.value = false
     }
   }
 
@@ -6623,6 +6695,13 @@ async function doEncryptedScan() {
     findClrObjects,
     readClrObject,
     enumerateClrRoots,
+    luaScriptingStatus,
+    luaScriptText,
+    luaScriptResult,
+    luaScriptBusy,
+    luaScriptTimeoutMs,
+    refreshLuaScriptingStatus,
+    executeLuaScript,
     isAttached,
     processName,
     processes,

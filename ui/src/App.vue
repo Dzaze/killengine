@@ -9,6 +9,7 @@ import InvestigationView from '@/views/InvestigationView.vue'
 import MemoryView from '@/views/MemoryView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import ProcessView from '@/views/ProcessView.vue'
+import ScriptingView from '@/views/ScriptingView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import SpeedhackView from '@/views/SpeedhackView.vue'
 import TrainerView from '@/views/TrainerView.vue'
@@ -21,8 +22,9 @@ const currentView = computed(() => {
   if (store.activeView === 'investigation') return InvestigationView
   if (store.activeView === 'memory') return MemoryView
   if (store.activeView === 'clr') return ClrInspectorView
-  if (store.activeView === 'profiles') return ProfileView
+  if (store.activeView === 'scripting') return ScriptingView
   if (store.activeView === 'speedhack') return SpeedhackView
+  if (store.activeView === 'profiles') return ProfileView
   if (store.activeView === 'trainer') return TrainerView
   if (store.activeView === 'expert') return ExpertView
   if (store.activeView === 'settings') return SettingsView
@@ -85,6 +87,13 @@ watch(
           @click="store.activeView = 'clr'"
         >
           CLR
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'scripting' }"
+          @click="store.activeView = 'scripting'"
+        >
+          {{ $t('nav.scripting') }}
         </button>
         <button
           class="nav-item"

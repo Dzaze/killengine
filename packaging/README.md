@@ -17,12 +17,28 @@ dist\KillEngine-portable\
 dist\KillEngine-portable.zip
 ```
 
-The package includes the deployed Qt runtime from `build\bin`, the application executable, license, README, project spec, phase tracker, user guide, and `models\README.md`.
+The package includes the deployed Qt runtime from `build\bin`, the application executable, license, README, project spec, phase tracker, user guide, AI model layout, and Lua helper scripts.
 
-Models are not included by default because GGUF files are large and ignored by git. To include local GGUF files from `models\`, run:
+GGUF models are included by default from `model\`. For a lightweight development package without model weights, run:
 
 ```powershell
-.\scripts\package-windows.ps1 -IncludeModel
+.\scripts\package-windows.ps1 -ExcludeModel
+```
+
+Lua scripting expects this runtime layout in the portable package:
+
+```text
+runtime\lua\lua.exe
+scripts\killengine.lua
+scripts\automation-pipe-call.ps1
+```
+
+`package-windows.ps1` always copies the helper scripts. It also copies a Lua runtime automatically when `lua.exe`, `lua54.exe`, `lua5.4.exe`, or `luajit.exe` is present under `runtime\lua`, `third_party\lua`, `third_party\lua\bin`, or `tools\lua`.
+
+To build the local Lua runtime from official sources:
+
+```powershell
+.\scripts\setup-lua-runtime.ps1
 ```
 
 ## Inno Setup installer
