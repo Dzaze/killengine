@@ -76,6 +76,10 @@ message entre ia.md
 tmp/
 temp/
 
+# Local agent config / personal notes (machine-specific, not shared)
+.claude/
+suite reboot.txt
+
 # Benchmark results (machine-specific)
 docs/benchmark-results/
 docs/manual-validation-results/
