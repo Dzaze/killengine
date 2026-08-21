@@ -306,6 +306,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
                     id: 'disassemble_backward_targets',
                     label: 'Chercher la vraie source',
                     address: firstRip,
+                    watchedAddress: address,
                     reason: "Si l'écriture ne tient jamais, l'adresse ciblée est souvent un compteur animé recalculé à chaque frame — remonter le désassemblage trouve le vrai champ source.",
                   },
                   { id: 'open_expert', label: 'Ouvrir Expert' },
@@ -317,6 +318,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     }
   } else if (actionId === 'disassemble_backward_targets') {
     const address = typeof action === 'string' ? '' : String(action.address ?? '')
+    const watchedAddress = typeof action === 'string' ? '' : String(action.watchedAddress ?? '')
     if (!address) {
       store.pushMessage('assistant', "Aucun RIP capturé à désassembler.", { isError: true })
     } else {
@@ -333,7 +335,54 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
             .join(', ')
           store.pushMessage(
             'assistant',
-            `${candidates.length} champ(s) candidat(s) trouvé(s) avant 0x${address} : ${list}. Ajoutés aux checkpoints d'Investigation. Ce sont souvent les vraies sources ("actuel"/"cible") d'un compteur animé — teste une écriture dessus plutôt que sur l'adresse affichée d'origine.`,
+            `${candidates.length} champ(s) candidat(s) trouvé(s) avant 0x${address} : ${list}. Ajoutés aux checkpoints d'Investigation. Ce sont souvent les vraies sources ("actuel"/"cible") d'un compteur animé, mais deviner lequel à l'œil demande de lire de l'assembleur.`,
+            {
+              recoveryActions: watchedAddress
+                ? [
+                    {
+                      id: 'test_candidate_fields',
+                      label: 'Tester automatiquement lequel tient',
+                      address,
+                      watchedAddress,
+                      reason: 'Écrit une valeur test sur chaque champ, attend quelques secondes, puis vérifie lequel tient — pas besoin de lire l\'assembleur toi-même.',
+                    },
+                  ]
+                : undefined,
+            },
+          )
+        }
+      }
+    }
+  } else if (actionId === 'test_candidate_fields') {
+    const address = typeof action === 'string' ? '' : String(action.address ?? '')
+    const watchedAddress = typeof action === 'string' ? '' : String(action.watchedAddress ?? '')
+    if (!address || !watchedAddress) {
+      store.pushMessage('assistant', "Adresse RIP ou adresse écrite manquante pour le test.", { isError: true })
+    } else {
+      store.pushMessage('assistant', 'Test en cours : écriture d\'une valeur test sur chaque champ candidat, puis vérification dans quelques secondes...')
+      await scrollToBottom()
+      const result = await store.executeCandidateFieldTest(address, watchedAddress)
+      if (result === null) {
+        store.pushMessage('assistant', "Test bloqué par ton mode Auto actuel (Safe) ou refusé à la confirmation. Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+      } else {
+        const outcomes = Array.isArray(result.results) ? result.results : []
+        const holding = outcomes.filter((o) => o.verdict === 'holds')
+        if (outcomes.length === 0) {
+          store.pushMessage('assistant', `Test échoué : ${result.error ?? 'raison inconnue'}.`, { isError: true })
+        } else {
+          const summary = outcomes
+            .map((o) => `[${o.memBaseRegister}+0x${Number(o.memDisplacement ?? 0).toString(16)}] : ${o.verdict === 'holds' ? 'tient' : o.verdict === 'reverts' ? 'repart' : 'erreur'}`)
+            .join(', ')
+          const best = holding[0]
+          store.pushMessage(
+            'assistant',
+            holding.length > 0
+              ? `Résultat : ${summary}. 0x${best.address} tient — c'est probablement la vraie source. Dis-moi la valeur à y écrire (ex: "mets 3000 à 0x${best.address}"), pas sur l'adresse affichée d'origine.`
+              : `Résultat : ${summary}. Aucun champ ne tient — essaie un autre RIP capturé, ou vérifie le désassemblage dans Expert.`,
+            {
+              isError: holding.length === 0,
+              recoveryActions: holding.length === 0 ? [{ id: 'open_expert', label: 'Ouvrir Expert' }] : undefined,
+            },
           )
         }
       }

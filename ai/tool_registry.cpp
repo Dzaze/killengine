@@ -39,6 +39,7 @@ QVariantList toolDefinitions() {
         makeTool("generate_aob", "Genere une signature AOB depuis une instruction confirmee.", {"address"}, "patch", true),
         makeTool("suggest_patch", "Suggere un patch code sans application automatique.", {"address"}, "patch", true),
         makeTool("disassemble_backward", "Désassemble les instructions avant un RIP capturé pour repérer les champs sources d'un compteur animé.", {"address"}, "patch", true),
+        makeTool("test_candidate_fields", "Teste automatiquement lequel des champs candidats (issus de disassemble_backward) tient réellement : écrit une valeur test, attend, relit, classe holds/reverts, puis restaure. Remplace la lecture manuelle d'assembleur par une preuve empirique.", {"address", "watchedAddress"}, "write", true),
         makeTool("kernel_write", "Écrit une valeur via le driver noyau (contourne les protections mémoire usermode). À utiliser seulement si l'utilisateur le demande explicitement (ex: \"écris via le kernel\") ou après échec d'une écriture usermode normale.", {"address", "valueType", "value"}, "injection", true),
     };
 }

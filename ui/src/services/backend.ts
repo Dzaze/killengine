@@ -533,6 +533,39 @@ export interface BackwardDisassemblyResult {
   candidateFields?: BackwardDisassemblyInstruction[]
 }
 
+// Verdict du test automatique d'un champ candidat (testCandidateFieldsAsync) :
+// remplace la lecture manuelle d'assembleur par une preuve empirique (écrit
+// une valeur test, attend, relit, restaure) — voir docs/USER_GUIDE.md
+// "Compteurs animés".
+export interface CandidateFieldTestOutcome {
+  address: string
+  memBaseRegister?: string
+  memDisplacement?: number
+  valueType?: string
+  verdict: 'holds' | 'reverts' | 'error'
+  ticksSurvived?: number
+  restored?: boolean
+  error?: string
+}
+
+export interface CandidateFieldTestResult {
+  requestId?: number
+  kind?: string
+  success: boolean
+  error?: string
+  results?: CandidateFieldTestOutcome[]
+  cancelled?: boolean
+}
+
+export interface CandidateFieldTestStartResult {
+  success: boolean
+  started?: boolean
+  requestId?: number
+  candidateCount?: number
+  warning?: string
+  error?: string
+}
+
 export interface CodePatchResult {
   success: boolean
   verified?: boolean
@@ -887,6 +920,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   restoreCodePatch?(addressHex: string): Promise<CodePatchResult>
   /** Désassemble en arrière depuis un RIP connu (ex: hit findWhatWrites) pour repérer les champs sources d'un compteur animé. Lecture seule. */
   disassembleBackward?(addressHex: string, options: Record<string, unknown>): Promise<BackwardDisassemblyResult>
+  /** Teste automatiquement lequel des champs candidats de disassembleBackward tient réellement (écriture test + restauration). Non bloquant, résultat via candidateFieldTestFinished. */
+  testCandidateFieldsAsync?(writeInstructionAddressHex: string, knownWriteTargetAddressHex: string, options: Record<string, unknown>): Promise<CandidateFieldTestStartResult>
+  cancelCandidateFieldTest?(): Promise<Record<string, unknown>>
+  candidateFieldTestFinished?: QWebChannelSignal<CandidateFieldTestResult>
   /** Phase 20 — outils Expert manuels gardés par confirmRiskAction('injection', ...) côté store. */
   injectDllIntoProcess?(dllPath: string): Promise<Record<string, unknown>>
   installFunctionHook?(targetAddressHex: string, hookAddressHex: string): Promise<Record<string, unknown>>
@@ -1635,6 +1672,12 @@ class BackendService {
       },
       async disassembleBackward(_addressHex: string, _options: Record<string, unknown>) {
         return { success: false, instructions: [], candidateFields: [], error: 'Mock backend' }
+      },
+      async testCandidateFieldsAsync(_writeInstructionAddressHex: string, _knownWriteTargetAddressHex: string, _options: Record<string, unknown>) {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
+      async cancelCandidateFieldTest() {
+        return { success: false, error: 'Mock backend' }
       },
       async injectDllIntoProcess(_dllPath: string) {
         return { success: false, error: 'Mock backend' }

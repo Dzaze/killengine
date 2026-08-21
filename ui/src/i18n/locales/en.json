@@ -214,6 +214,13 @@
       "cost": "Memory read only, no debugger attach, no write. Requires a RIP already captured via Find what writes.",
       "example": "Real case: a card game's XP never held after a direct write. Find what writes captured `mov [rsi+0x900], edx` (the displayed field). Disassemble backward traced it back to `mov ecx, [rsi+0x904]` (current) and `mov eax, [rsi+0x908]` (target) right before a float interpolation. Writing to `[rsi+0x908]` (the target) fixed it — never to `[rsi+0x900]`."
     },
+    "testCandidateFields": {
+      "title": "Test automatically",
+      "what": "Writes a transient test value to each candidate field found by Disassemble backward (resolved internally, no need to have run it first), waits a few seconds, reads back, then always restores the original value. Classifies each field as \"holds\" or \"reverts\".",
+      "when": "Replaces reading raw assembly by hand: instead of guessing which of the listed [register+displacement] fields is the real \"current\"/\"target\" of an animated counter, let KillEngine prove it empirically. The field that \"holds\" is almost always the right one to write.",
+      "cost": "Actually writes to memory, even if transient and restored afterward — treated as a normal write (confirmation required). Up to 5 fields tested, ~12 seconds max each.",
+      "example": "Real case: on a card game's XP, the test showed [rsi+0x900] (displayed) and [rsi+0x904] (current) reverting on their own within seconds, but [rsi+0x908] (target) holding — confirming the right address to write without reading a single line of assembly."
+    },
     "aob": {
       "title": "AOB signatures",
       "what": "Searches a byte signature inside the program code, then offers to patch the matched instruction.",

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "scanner/scan_types.h"
+
 #include <QByteArray>
 #include <QList>
 #include <QString>
@@ -77,5 +79,37 @@ struct BackwardDisassemblyResult {
 // precedent un RIP capture par findWhatWrites (ex: retrouver les champs
 // "actuel"/"cible" d'un compteur anime avant l'ecriture visible).
 BackwardDisassemblyResult disassembleBackwardWindow(const QByteArray& windowBytes, int targetOffsetInWindow);
+
+// Un champ candidat de disassembleBackwardWindow() resolu en adresse memoire
+// absolue (voir resolveCandidateFieldAddresses ci-dessous).
+struct ResolvedCandidateField {
+    uint64_t address{0};
+    QString memBaseRegister;
+    int64_t memDisplacement{0};
+    ValueType inferredType{ValueType::Int32};
+};
+
+// Resout les operandes memoire [registre+deplacement] des instructions
+// candidates (celles avec un memBaseRegister non vide) en adresses absolues,
+// a partir d'une seule adresse connue : celle reellement ecrite par la
+// DERNIERE instruction de la liste (invariant de disassembleBackwardWindow,
+// voir BackwardDisassemblyResult ci-dessus). Cette derniere instruction doit
+// donc partager le meme registre de base que les candidats a resoudre ;
+// hors de la, aucune valeur de registre live n'etant disponible, un candidat
+// dont le memBaseRegister differe reste non resolvable et est ignore.
+// L'instruction d'ecriture elle-meme est exclue du resultat : son adresse
+// (knownWriteTargetAddress) est deja connue de l'appelant comme "ne tient
+// pas" (c'est justement pourquoi il cherche une autre source).
+QList<ResolvedCandidateField> resolveCandidateFieldAddresses(
+    const QList<InstructionInfo>& instructions,
+    uint64_t knownWriteTargetAddress);
+
+// Heuristique texte sur mnemonicHint/disassembly pour deviner le type d'une
+// valeur lue/ecrite par une instruction candidate, avant d'y ecrire une
+// valeur test : motifs SSE scalaires (movss/addss/subss/mulss/divss/
+// cvtsi2ss/cvttss2si -> Float32, variantes "sd" -> Float64), sinon Int32 par
+// defaut (le cas reel confirme - docs/STRATEGY_ROOM.md, Solitaire XP - est
+// un "mov" 32 bits entier).
+ValueType inferProbeValueType(const InstructionInfo& instruction);
 
 } // namespace killcore

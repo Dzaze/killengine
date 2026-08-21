@@ -6,6 +6,7 @@ import {
   type AiModelStatus,
   type AtomicWriteTarget,
   type AutoResolveReportResult,
+  type CandidateFieldTestResult,
   type CandidatePage,
   type EncryptedScanResult,
   type ChatMemoryTargetsResult,
@@ -2684,6 +2685,120 @@ let nextWatchedChainId = 1
       return result
     } catch (e) {
       addActionLog('checkpoint', 'Désassemblage en amont échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  // Teste automatiquement lequel des champs candidats de disassembleBackward
+  // est la vraie source d'un compteur animé : écrit une valeur test sur
+  // chaque champ résolu, attend, relit, classe holds/reverts, puis restaure
+  // — remplace la lecture manuelle d'assembleur par une preuve empirique.
+  // writeInstructionAddressHex = RIP de l'écriture capturée (comme
+  // disassembleBackward), knownWriteTargetAddressHex = hit.address (adresse
+  // mémoire réellement écrite, connue depuis findWhatWrites).
+  async function executeCandidateFieldTest(writeInstructionAddressHex: string, knownWriteTargetAddressHex: string) {
+    if (!writeInstructionAddressHex || !knownWriteTargetAddressHex) {
+      addActionLog('checkpoint', 'Test de champs candidats impossible', 'Adresse RIP ou adresse écrite manquante.', 'warning')
+      return null
+    }
+    if (!await confirmRiskAction(
+      'write',
+      'Tester les champs candidats',
+      `Écrit une valeur test transitoire sur chaque champ candidat trouvé avant 0x${writeInstructionAddressHex}, `
+      + 'attend quelques secondes, puis restaure systématiquement la valeur d\'origine.',
+    )) return null
+
+    const controller = backend.getController()
+    const testCandidateFieldsAsync = controller.testCandidateFieldsAsync
+    const candidateFieldTestFinished = controller.candidateFieldTestFinished
+    if (!testCandidateFieldsAsync || !candidateFieldTestFinished) {
+      addActionLog('checkpoint', 'Test de champs candidats indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+
+    try {
+      const result = await new Promise<CandidateFieldTestResult>((resolve) => {
+        let requestId: number | null = null
+        let settled = false
+        const earlyPayloads: CandidateFieldTestResult[] = []
+        const timeout = window.setTimeout(() => {
+          settled = true
+          candidateFieldTestFinished.disconnect?.(handler)
+          resolve({ success: false, error: 'Timeout du test de champs candidats.' })
+        }, 75000)
+
+        const handler = (payload: CandidateFieldTestResult) => {
+          if (requestId === null) {
+            earlyPayloads.push(payload)
+            return
+          }
+          if (Number(payload.requestId) !== requestId) return
+          settled = true
+          window.clearTimeout(timeout)
+          candidateFieldTestFinished.disconnect?.(handler)
+          resolve(payload)
+        }
+        candidateFieldTestFinished.connect(handler)
+
+        void testCandidateFieldsAsync(writeInstructionAddressHex, knownWriteTargetAddressHex, {}).then((start) => {
+          if (settled) return
+          if (start.success !== true || start.started !== true) {
+            settled = true
+            window.clearTimeout(timeout)
+            candidateFieldTestFinished.disconnect?.(handler)
+            resolve({ success: false, error: String(start.error ?? 'Impossible de démarrer le test de champs candidats.') })
+            return
+          }
+          requestId = Number(start.requestId)
+          for (const payload of earlyPayloads.splice(0)) {
+            handler(payload)
+            if (settled) break
+          }
+        }).catch((error) => {
+          if (settled) return
+          settled = true
+          window.clearTimeout(timeout)
+          candidateFieldTestFinished.disconnect?.(handler)
+          resolve({ success: false, error: String(error) })
+        })
+      })
+
+      const outcomes = Array.isArray(result.results) ? result.results : []
+      const holding = outcomes.filter((o) => o.verdict === 'holds')
+      if (holding.length > 0 && activeInvestigation.value) {
+        activeInvestigation.value.checkpoints = [
+          ...holding.map((field) => ({
+            kind: 'candidate_field_verdict',
+            label: `Champ testé [${field.memBaseRegister}+0x${(field.memDisplacement ?? 0).toString(16)}] : tient`,
+            address: field.address,
+            sourceAddress: writeInstructionAddressHex,
+            valueType: field.valueType,
+            confidenceScore: 95,
+            confidenceLabel: `Testé empiriquement : tient ${field.ticksSurvived ?? 0} sondage(s)`,
+            requiresConfirmation: true,
+          })),
+          ...activeInvestigation.value.checkpoints,
+        ].slice(0, 12)
+        saveInvestigations()
+      }
+      addInvestigationStep({
+        title: holding.length > 0 ? 'Test de champs candidats : source trouvée' : 'Test de champs candidats : rien ne tient',
+        detail: `${outcomes.length} champ(s) testé(s), ${holding.length} tien(nen)t.`,
+        status: holding.length > 0 ? 'checkpoint' : 'warning',
+        tool: 'testCandidateFields',
+        risk: 'write',
+        payload: result as unknown as Record<string, unknown>,
+      })
+      logAiAudit('checkpoint_test_candidate_fields_executed', {
+        writeInstructionAddressHex,
+        knownWriteTargetAddressHex,
+        candidateCount: outcomes.length,
+        holdingCount: holding.length,
+        success: result.success === true,
+      })
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', 'Test de champs candidats échoué', String(e), 'error')
       return null
     }
   }
@@ -6320,6 +6435,7 @@ async function doEncryptedScan() {
     executeCheckpointWrite,
     executeCheckpointFindWhatWrites,
     executeCheckpointDisassembleBackward,
+    executeCandidateFieldTest,
     executeCheckpointKernelWrite,
     prepareCheckpointAob,
     executeCheckpointForceValue,

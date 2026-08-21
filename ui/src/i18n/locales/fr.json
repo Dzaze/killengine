@@ -214,6 +214,13 @@
       "cost": "Lecture mémoire seule, pas d'attach debugger, pas d'écriture. Nécessite d'avoir déjà un RIP capturé via Écrit par.",
       "example": "Cas réel : l'XP d'un jeu de cartes ne tenait jamais après une écriture directe. Écrit par a capturé l'instruction `mov [rsi+0x900], edx` (le champ affiché). Désassembler en amont a remonté jusqu'à `mov ecx, [rsi+0x904]` (actuel) et `mov eax, [rsi+0x908]` (cible) juste avant une interpolation flottante. Écrire sur `[rsi+0x908]` (la cible) a résolu le problème — jamais sur `[rsi+0x900]`."
     },
+    "testCandidateFields": {
+      "title": "Tester automatiquement",
+      "what": "Écrit une valeur test transitoire sur chaque champ candidat trouvé par Désassembler en amont (résolu en interne, pas besoin de l'avoir déjà lancé), attend quelques secondes, relit, puis restaure systématiquement la valeur d'origine. Classe chaque champ « tient » ou « repart ».",
+      "when": "Remplace la lecture manuelle d'assembleur : plutôt que de deviner à l'œil lequel des champs [registre+déplacement] listés est le vrai « actuel »/« cible » d'un compteur animé, laisse KillEngine le prouver par l'expérience. Le champ qui « tient » est presque toujours la bonne source à écrire.",
+      "cost": "Écrit réellement en mémoire, même si c'est transitoire et restauré à la fin — traité comme une écriture normale (confirmation requise). Jusqu'à 5 champs testés, ~12 secondes max chacun.",
+      "example": "Cas réel : sur l'XP d'un jeu de cartes, le test a montré [rsi+0x900] (affiché) et [rsi+0x904] (actuel) repartir tout seuls en quelques secondes, mais [rsi+0x908] (cible) tenir — confirmant sans lire une ligne d'assembleur que c'était la bonne adresse à écrire."
+    },
     "aob": {
       "title": "AOB signatures",
       "what": "Cherche une signature d'octets dans le code du programme, puis propose de patcher l'instruction trouvée.",

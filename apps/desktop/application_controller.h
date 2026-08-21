@@ -328,6 +328,20 @@ public:
     /// debugger. options keys: windowBytes (défaut 64, borné 16-128).
     Q_INVOKABLE QVariantMap disassembleBackward(const QString& addressHex, const QVariantMap& options) const;
 
+    /// Teste automatiquement lequel des champs candidats de disassembleBackward()
+    /// est la vraie source d'un compteur animé : écrit une valeur test sur chaque
+    /// champ résolu (voir killcore::resolveCandidateFieldAddresses), attend
+    /// quelques secondes, relit, classe holds/reverts, puis restaure — pour
+    /// remplacer la lecture manuelle d'assembleur par une preuve empirique.
+    /// writeInstructionAddressHex = RIP de l'instruction d'écriture capturée
+    /// (même entrée que disassembleBackward). knownWriteTargetAddressHex =
+    /// adresse mémoire réellement écrite (hit.address d'un hit findWhatWrites).
+    /// Non bloquant. Le résultat arrive via candidateFieldTestFinished.
+    Q_INVOKABLE QVariantMap testCandidateFieldsAsync(const QString& writeInstructionAddressHex, const QString& knownWriteTargetAddressHex, const QVariantMap& options);
+
+    /// Demande l'arrêt du test de champs candidats en cours.
+    Q_INVOKABLE QVariantMap cancelCandidateFieldTest();
+
     /// Restaure les bytes originaux d'un patch actif.
     Q_INVOKABLE QVariantMap restoreCodePatch(const QString& addressHex);
 
@@ -634,6 +648,7 @@ signals:
     void scanStatsUpdated(int candidateCount);
     void scanFinished(const QVariantMap& result);
     void findWhatWritesFinished(const QVariantMap& result);
+    void candidateFieldTestFinished(const QVariantMap& result);
     void pageGuardWatchFinished(const QVariantMap& result);
     void inProcessBreakpointWatchFinished(const QVariantMap& result);
 
@@ -800,6 +815,11 @@ private:
     std::shared_ptr<killcore::InProcessBreakpointSession> m_inProcessBreakpointFreezeSession;
     std::shared_ptr<killcore::CancellationToken> m_activeDebugCancellation;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
+    // Test automatique des champs candidats (voir testCandidateFieldsAsync) : etat
+    // dedie, distinct de m_activeDebugCancellation qui est reserve aux operations
+    // avec attach debugger (celle-ci ne fait que lire/ecrire de la memoire).
+    bool                     m_candidateFieldTestInProgress{false};
+    std::shared_ptr<killcore::CancellationToken> m_activeCandidateFieldTestCancellation;
     killai::AIEngine         m_ai;
     bool                     m_smartSearchActive{false};
     QString                  m_smartSearchInitialValue;

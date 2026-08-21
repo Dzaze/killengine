@@ -448,6 +448,66 @@ BackwardDisassemblyResult disassembleBackwardWindow(const QByteArray& windowByte
     return result;
 }
 
+QList<ResolvedCandidateField> resolveCandidateFieldAddresses(
+    const QList<InstructionInfo>& instructions,
+    uint64_t knownWriteTargetAddress) {
+    QList<ResolvedCandidateField> resolved;
+    if (instructions.isEmpty()) {
+        return resolved;
+    }
+
+    // Invariant de disassembleBackwardWindow() : la derniere entree est
+    // l'instruction qui ecrit sur knownWriteTargetAddress.
+    const InstructionInfo& writeInstruction = instructions.last();
+    if (writeInstruction.memBaseRegister.isEmpty()) {
+        return resolved; // Pas d'operande [base+disp] exploitable : rien a resoudre.
+    }
+
+    const uint64_t baseRegisterValue = knownWriteTargetAddress - static_cast<uint64_t>(writeInstruction.memDisplacement);
+
+    QList<uint64_t> seenAddresses;
+    for (int i = 0; i < instructions.size() - 1; ++i) { // Exclut l'instruction d'ecriture elle-meme.
+        const InstructionInfo& candidate = instructions.at(i);
+        if (candidate.memBaseRegister.isEmpty() || candidate.memBaseRegister != writeInstruction.memBaseRegister) {
+            continue; // Registre de base different ou absent : pas de valeur live disponible pour le resoudre.
+        }
+
+        const uint64_t candidateAddress = baseRegisterValue + static_cast<uint64_t>(candidate.memDisplacement);
+        if (candidateAddress == knownWriteTargetAddress || seenAddresses.contains(candidateAddress)) {
+            continue; // Meme champ que l'ecriture, ou doublon d'un candidat deja resolu.
+        }
+        seenAddresses.append(candidateAddress);
+
+        ResolvedCandidateField field;
+        field.address = candidateAddress;
+        field.memBaseRegister = candidate.memBaseRegister;
+        field.memDisplacement = candidate.memDisplacement;
+        field.inferredType = inferProbeValueType(candidate);
+        resolved.append(field);
+    }
+
+    return resolved;
+}
+
+ValueType inferProbeValueType(const InstructionInfo& instruction) {
+    const QString haystack = instruction.mnemonicHint.toLower() + " " + instruction.disassembly.toLower();
+    // Motifs SSE scalaire double (64 bits) d'abord : "sd" est un suffixe de "ss",
+    // donc verifier "sd" avant "ss" evite de classer un mouvement double en Float32.
+    static const QStringList doubleMarkers = {"movsd", "addsd", "subsd", "mulsd", "divsd", "cvtsi2sd", "cvttsd2si"};
+    for (const auto& marker : doubleMarkers) {
+        if (haystack.contains(marker)) {
+            return ValueType::Float64;
+        }
+    }
+    static const QStringList floatMarkers = {"movss", "addss", "subss", "mulss", "divss", "cvtsi2ss", "cvttss2si"};
+    for (const auto& marker : floatMarkers) {
+        if (haystack.contains(marker)) {
+            return ValueType::Float32;
+        }
+    }
+    return ValueType::Int32;
+}
+
 QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruction) {
     QList<PatchSuggestion> suggestions;
     if (!instruction.success || instruction.length <= 0) return suggestions;

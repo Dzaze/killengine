@@ -59,6 +59,7 @@
 #include <QStandardPaths>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -611,6 +612,27 @@ bool bytesEqual(const QByteArray& a, const QByteArray& b, killcore::ValueType ty
         return std::abs(bytesToDouble(a, type) - bytesToDouble(b, type)) < 0.000001;
     }
     return a == b;
+}
+
+// Symetrique de bytesToDouble() : sert a construire une valeur test (original +
+// delta) pour testCandidateFieldsAsync() sans passer par le pipeline
+// parseScanValue/QString habituel des ecritures normales (pas besoin de
+// formatage texte ici, seulement d'un aller-retour bytes<->double interne).
+QByteArray doubleToBytes(double value, killcore::ValueType type) {
+    QByteArray bytes(static_cast<int>(killcore::valueTypeSize(type)), '\0');
+    switch (type) {
+        case killcore::ValueType::Int8: { const int8_t v = static_cast<int8_t>(std::llround(value)); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::UInt8: { const uint8_t v = static_cast<uint8_t>(std::llround(value)); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::Int16: { const int16_t v = static_cast<int16_t>(std::llround(value)); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::UInt16: { const uint16_t v = static_cast<uint16_t>(std::llround(value)); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::Int32: { const int32_t v = static_cast<int32_t>(std::llround(value)); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::UInt32: { const uint32_t v = static_cast<uint32_t>(std::llround(value)); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::Int64: { const int64_t v = static_cast<int64_t>(std::llround(value)); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::UInt64: { const uint64_t v = static_cast<uint64_t>(std::llround(value)); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::Float32: { const float v = static_cast<float>(value); std::memcpy(bytes.data(), &v, sizeof(v)); break; }
+        case killcore::ValueType::Float64: { std::memcpy(bytes.data(), &value, sizeof(value)); break; }
+    }
+    return bytes;
 }
 
 QString unknownVariantLabel() {
@@ -7297,6 +7319,233 @@ QVariantMap ApplicationController::disassembleBackward(const QString& addressHex
     result["candidateFields"] = candidateFields;
     result["warning"] = "Désassemblage en arrière expérimental (lecture seule). Vérifie toujours les champs candidats avant d'écrire dessus.";
     appendScanTelemetry("disassemble_backward", result);
+    return result;
+}
+
+// Cadence et garde-fous du sondage "tient/repart" ci-dessous : mêmes valeurs que
+// applyWriteWatchTick()/m_writeWatchTimer (1.5s/tick, ~12s, 2 mismatches consecutifs
+// pour confirmer une reversion), mais etat et logique dedies — m_activeDebugCancellation
+// et registerWriteWatch() restent reserves a leurs usages existants (attach debugger,
+// et surveillance passive des ecritures normales), voir commentaire sur
+// m_activeCandidateFieldTestCancellation dans le header.
+constexpr int kCandidateTestTicks = 8;
+constexpr int kCandidateTestIntervalMs = 1500;
+constexpr int kCandidateTestConfirmMismatches = 2;
+constexpr int kCandidateTestMaxCount = 5;
+// Delta distinctif ajoute a la valeur d'origine pour la valeur test : assez
+// caracteristique pour qu'un "tient" soit sans ambiguite, assez petit pour
+// rester inoffensif et visible quelques secondes avant restauration.
+constexpr double kCandidateProbeDelta = 777.0;
+
+QVariantMap ApplicationController::testCandidateFieldsAsync(
+    const QString& writeInstructionAddressHex,
+    const QString& knownWriteTargetAddressHex,
+    const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["started"] = false;
+
+    if (m_candidateFieldTestInProgress) {
+        result["error"] = "Un test de champs candidats est déjà en cours.";
+        return result;
+    }
+    if (!m_attached || !m_handle.isValid() || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t writeInstructionAddress = 0;
+    if (!parseHexAddress(writeInstructionAddressHex, &writeInstructionAddress)) {
+        result["error"] = "Adresse d'instruction invalide.";
+        return result;
+    }
+    uint64_t knownWriteTargetAddress = 0;
+    if (!parseHexAddress(knownWriteTargetAddressHex, &knownWriteTargetAddress)) {
+        result["error"] = "Adresse écrite connue invalide.";
+        return result;
+    }
+
+    const int windowBytes = std::clamp(options.value("windowBytes", 64).toInt(), 16, 128);
+    const int trailingBytes = 16; // Meme marge que disassembleBackward, pour decoder l'instruction cible entierement.
+    const uint64_t start = writeInstructionAddress >= static_cast<uint64_t>(windowBytes)
+        ? writeInstructionAddress - static_cast<uint64_t>(windowBytes)
+        : 0;
+    const int targetOffsetInWindow = static_cast<int>(writeInstructionAddress - start);
+
+    killcore::MemoryReader windowReader(m_handle);
+    const auto windowRead = windowReader.readChunked(start, static_cast<size_t>(targetOffsetInWindow + trailingBytes), 4096);
+    if (!windowRead.success && windowRead.bytesRead == 0) {
+        result["error"] = windowRead.errorMessage.isEmpty() ? QString("Lecture mémoire impossible.") : windowRead.errorMessage;
+        return result;
+    }
+    if (targetOffsetInWindow > windowRead.data.size()) {
+        result["error"] = "Lecture mémoire trop courte pour atteindre l'adresse cible.";
+        return result;
+    }
+
+    const auto backward = killcore::disassembleBackwardWindow(windowRead.data, targetOffsetInWindow);
+    if (!backward.success) {
+        result["error"] = backward.error;
+        return result;
+    }
+
+    auto resolved = killcore::resolveCandidateFieldAddresses(backward.instructions, knownWriteTargetAddress);
+    if (resolved.isEmpty()) {
+        result["error"] = "Aucun champ candidat résolvable (registre de base différent de celui de l'instruction "
+                           "d'écriture, ou aucun champ mémoire simple en amont).";
+        return result;
+    }
+    // resolveCandidateFieldAddresses() rend les candidats dans l'ordre d'execution :
+    // les plus proches de l'instruction d'ecriture (les plus vraisemblables) sont en
+    // fin de liste — on inverse pour les tester en premier, puis on borne le nombre.
+    std::reverse(resolved.begin(), resolved.end());
+    if (resolved.size() > kCandidateTestMaxCount) {
+        resolved.resize(kCandidateTestMaxCount);
+    }
+
+    const int requestId = m_nextDebugRequestId++;
+    const int pid = m_pid;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_candidateFieldTestInProgress = true;
+    m_activeCandidateFieldTestCancellation = cancellation;
+
+    KE_LOG_INFO() << "testCandidateFieldsAsync(pid=" << pid
+                  << ", candidates=" << resolved.size()
+                  << ", requestId=" << requestId << ")";
+
+    std::thread([self, requestId, pid, resolved, cancellation]() {
+        killcore::ProcessHandle testHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadWrite);
+        QVariantList outcomes;
+
+        if (!testHandle.isValid()) {
+            for (const auto& candidate : resolved) {
+                QVariantMap outcome;
+                outcome["address"] = QString::number(candidate.address, 16).toUpper();
+                outcome["memBaseRegister"] = candidate.memBaseRegister;
+                outcome["memDisplacement"] = static_cast<qlonglong>(candidate.memDisplacement);
+                outcome["valueType"] = killcore::valueTypeToString(candidate.inferredType);
+                outcome["verdict"] = "error";
+                outcome["error"] = "Impossible d'ouvrir le processus en écriture.";
+                outcomes.append(outcome);
+            }
+        } else {
+            killcore::MemoryReader reader(testHandle);
+            killcore::MemoryWriter writer(testHandle);
+
+            for (const auto& candidate : resolved) {
+                if (cancellation->isCancelled()) {
+                    break;
+                }
+
+                QVariantMap outcome;
+                outcome["address"] = QString::number(candidate.address, 16).toUpper();
+                outcome["memBaseRegister"] = candidate.memBaseRegister;
+                outcome["memDisplacement"] = static_cast<qlonglong>(candidate.memDisplacement);
+                outcome["valueType"] = killcore::valueTypeToString(candidate.inferredType);
+
+                const size_t typeSize = killcore::valueTypeSize(candidate.inferredType);
+                const auto originalRead = reader.read(candidate.address, typeSize);
+                if ((!originalRead.success && !originalRead.partial) || originalRead.bytesRead != typeSize) {
+                    outcome["verdict"] = "error";
+                    outcome["error"] = "Lecture de la valeur d'origine impossible.";
+                    outcomes.append(outcome);
+                    continue;
+                }
+
+                const double originalValue = bytesToDouble(originalRead.data, candidate.inferredType);
+                const QByteArray testBytes = doubleToBytes(originalValue + kCandidateProbeDelta, candidate.inferredType);
+
+                const auto probeWrite = writer.write(candidate.address, testBytes, true);
+                if (!probeWrite.success || !probeWrite.verified) {
+                    outcome["verdict"] = "error";
+                    outcome["error"] = probeWrite.errorMessage.isEmpty() ? "Écriture test impossible." : probeWrite.errorMessage;
+                    outcomes.append(outcome);
+                    continue;
+                }
+                const QByteArray previousValue = probeWrite.previousValue;
+
+                int consecutiveMismatches = 0;
+                int ticksSurvived = 0;
+                bool reverted = false;
+                for (int tick = 0; tick < kCandidateTestTicks; ++tick) {
+                    if (cancellation->isCancelled()) {
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(kCandidateTestIntervalMs));
+                    const auto tickRead = reader.read(candidate.address, typeSize);
+                    const bool matches = (tickRead.success || tickRead.partial)
+                        && tickRead.bytesRead == typeSize
+                        && bytesEqual(tickRead.data, testBytes, candidate.inferredType);
+                    if (matches) {
+                        consecutiveMismatches = 0;
+                        ++ticksSurvived;
+                    } else {
+                        ++consecutiveMismatches;
+                        if (consecutiveMismatches >= kCandidateTestConfirmMismatches) {
+                            reverted = true;
+                            break;
+                        }
+                    }
+                }
+
+                outcome["verdict"] = reverted ? "reverts" : "holds";
+                outcome["ticksSurvived"] = ticksSurvived;
+
+                const auto restore = writer.write(candidate.address, previousValue, true);
+                const bool restored = restore.success && restore.verified;
+                outcome["restored"] = restored;
+                if (!restored) {
+                    outcome["error"] = "Valeur test écrite mais restauration échouée — vérifie manuellement cette adresse.";
+                }
+
+                outcomes.append(outcome);
+            }
+        }
+
+        if (!self) {
+            return;
+        }
+
+        const bool cancelled = cancellation->isCancelled();
+        QMetaObject::invokeMethod(self.data(), [self, requestId, outcomes, cancelled]() {
+            if (!self) {
+                return;
+            }
+            QVariantMap finished;
+            finished["requestId"] = requestId;
+            finished["kind"] = "test_candidate_fields";
+            finished["success"] = true;
+            finished["results"] = outcomes;
+            finished["cancelled"] = cancelled;
+            self->m_candidateFieldTestInProgress = false;
+            self->m_activeCandidateFieldTestCancellation.reset();
+            emit self->candidateFieldTestFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["candidateCount"] = resolved.size();
+    result["warning"] = QString(
+        "Écrit une valeur test transitoire sur chaque champ candidat (jusqu'à %1s par champ), "
+        "puis restaure systématiquement la valeur d'origine.")
+        .arg(kCandidateTestTicks * kCandidateTestIntervalMs / 1000);
+    return result;
+}
+
+QVariantMap ApplicationController::cancelCandidateFieldTest() {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_candidateFieldTestInProgress || !m_activeCandidateFieldTestCancellation) {
+        result["error"] = "Aucun test de champs candidats actif à annuler.";
+        return result;
+    }
+    m_activeCandidateFieldTestCancellation->cancel();
+    result["success"] = true;
+    result["error"] = "";
     return result;
 }
 

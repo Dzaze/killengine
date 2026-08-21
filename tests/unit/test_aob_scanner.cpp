@@ -328,6 +328,97 @@ TEST(InstructionPatchSuggester, DisassembleBackwardWindowFailsOnMisalignedTarget
     EXPECT_FALSE(result.error.isEmpty());
 }
 
+TEST(InstructionPatchSuggester, ResolveCandidateFieldAddressesFindsActualAndTargetFields) {
+    // Variante du cas Solitaire (docs/STRATEGY_ROOM.md) dont la DERNIERE
+    // instruction est l'ecriture memoire elle-meme (mov [rsi+0x900], edx),
+    // pas la fin de la chaine de calcul flottant comme dans le test
+    // ci-dessus — c'est ce que resolveCandidateFieldAddresses() attend
+    // (invariant de disassembleBackwardWindow : la derniere entree est
+    // toujours l'instruction qui ecrit sur l'adresse cible connue).
+    const QByteArray bytes = QByteArray::fromHex(
+        "8B8E04090000"       // mov ecx, [rsi+0x904]   (actuel)
+        "8B8608090000"       // mov eax, [rsi+0x908]   (cible)
+        "899600090000");     // mov [rsi+0x900], edx   (ecriture, RIP connu)
+    const int targetOffset = bytes.size() - 6; // longueur de mov [rsi+0x900], edx
+
+    const auto result = disassembleBackwardWindow(bytes, targetOffset);
+    ASSERT_TRUE(result.success) << result.error.toStdString();
+    ASSERT_EQ(result.instructions.size(), 3);
+
+    if (result.instructions.last().decoder != "zydis") {
+        GTEST_SKIP() << "memBaseRegister non renseigne sans decodeur Zydis (KILLENGINE_HAS_ZYDIS absent).";
+    }
+
+    constexpr uint64_t knownWriteTargetAddress = 0x0000700012340900ULL;
+    const auto resolved = resolveCandidateFieldAddresses(result.instructions, knownWriteTargetAddress);
+
+    ASSERT_EQ(resolved.size(), 2);
+
+    const auto findByDisplacement = [&resolved](int64_t displacement) -> const ResolvedCandidateField* {
+        for (const auto& field : resolved) {
+            if (field.memDisplacement == displacement) return &field;
+        }
+        return nullptr;
+    };
+
+    const auto* actuel = findByDisplacement(0x904);
+    ASSERT_NE(actuel, nullptr);
+    EXPECT_EQ(actuel->address, knownWriteTargetAddress - 0x900 + 0x904);
+    EXPECT_EQ(actuel->memBaseRegister, QStringLiteral("rsi"));
+    EXPECT_EQ(actuel->inferredType, ValueType::Int32);
+
+    const auto* cible = findByDisplacement(0x908);
+    ASSERT_NE(cible, nullptr);
+    EXPECT_EQ(cible->address, knownWriteTargetAddress - 0x900 + 0x908);
+    EXPECT_EQ(cible->memBaseRegister, QStringLiteral("rsi"));
+    EXPECT_EQ(cible->inferredType, ValueType::Int32);
+
+    // L'instruction d'ecriture elle-meme (adresse == knownWriteTargetAddress)
+    // ne doit jamais ressortir : l'appelant sait deja qu'elle "ne tient pas"
+    // (c'est justement pourquoi il cherche une autre source).
+    for (const auto& field : resolved) {
+        EXPECT_NE(field.address, knownWriteTargetAddress);
+    }
+}
+
+TEST(InstructionPatchSuggester, ResolveCandidateFieldAddressesIgnoresDifferentBaseRegister) {
+    // mov ecx, [rax+0x10] (registre de base different de l'ecriture finale)
+    // suivi de mov [rsi+0x900], edx : aucune valeur live pour rax n'est
+    // disponible, le candidat doit rester non resolu plutot que de produire
+    // une adresse fausse en melangeant les registres.
+    const QByteArray bytes = QByteArray::fromHex(
+        "8B4810"             // mov ecx, [rax+0x10]
+        "899600090000");     // mov [rsi+0x900], edx
+    const int targetOffset = bytes.size() - 6;
+
+    const auto result = disassembleBackwardWindow(bytes, targetOffset);
+    ASSERT_TRUE(result.success) << result.error.toStdString();
+
+    if (result.instructions.last().decoder != "zydis") {
+        GTEST_SKIP() << "memBaseRegister non renseigne sans decodeur Zydis (KILLENGINE_HAS_ZYDIS absent).";
+    }
+
+    const auto resolved = resolveCandidateFieldAddresses(result.instructions, 0x0000700012340900ULL);
+    EXPECT_TRUE(resolved.isEmpty());
+}
+
+TEST(InstructionPatchSuggester, InferProbeValueTypeDetectsFloatAndDoubleMnemonics) {
+    InstructionInfo intMov;
+    intMov.mnemonicHint = "mov";
+    intMov.disassembly = "mov eax, [rsi+0x908]";
+    EXPECT_EQ(inferProbeValueType(intMov), ValueType::Int32);
+
+    InstructionInfo floatMov;
+    floatMov.mnemonicHint = "movss";
+    floatMov.disassembly = "movss xmm0, [rsi+0x914]";
+    EXPECT_EQ(inferProbeValueType(floatMov), ValueType::Float32);
+
+    InstructionInfo doubleMov;
+    doubleMov.mnemonicHint = "movsd";
+    doubleMov.disassembly = "movsd xmm0, [rsi+0x914]";
+    EXPECT_EQ(inferProbeValueType(doubleMov), ValueType::Float64);
+}
+
 TEST(ProfilePatchState, ClassifiesOriginalCode) {
     const auto state = classifyProfilePatchMemoryState(1, 0, false, true);
 

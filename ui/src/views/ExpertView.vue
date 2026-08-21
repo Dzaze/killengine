@@ -6,6 +6,7 @@ import {
   type AobScanResult,
   type AobSignatureResult,
   type BackwardDisassemblyResult,
+  type CandidateFieldTestResult,
   type CodePatchResult,
   type CodePatchSuggestion,
   type CodePatchSuggestionResult,
@@ -102,6 +103,8 @@ const aobSignatureBusy = ref(false)
 const aobSignatureResult = ref<AobSignatureResult | null>(null)
 const disassembleBackwardBusy = ref(false)
 const disassembleBackwardResult = ref<BackwardDisassemblyResult | null>(null)
+const testCandidateFieldsBusy = ref(false)
+const testCandidateFieldsResult = ref<CandidateFieldTestResult | null>(null)
 // Message affiché quand generateAobSignatureFromHit() a délibérément SAUTÉ le
 // scan auto-enchaîné parce que le pattern stable est trop faible (level
 // "weak") pour être fiable — le pattern reste pré-rempli dans aobPattern, le
@@ -654,6 +657,25 @@ async function disassembleBackwardFromHit(hit: Record<string, unknown>) {
     disassembleBackwardResult.value = { success: false, error: String(e) }
   } finally {
     disassembleBackwardBusy.value = false
+  }
+}
+
+// Teste automatiquement lequel des champs candidats tient réellement (écrit
+// une valeur test, attend, relit, restaure) — pas besoin d'avoir cliqué
+// "Désassembler en amont" d'abord, testCandidateFieldsAsync refait la
+// résolution des champs en interne à partir du RIP et de l'adresse écrite.
+async function testCandidateFieldsFromHit(hit: Record<string, unknown>) {
+  const rip = String(hit.instructionPointer ?? '').trim()
+  const watchedAddress = String(hit.address ?? '').trim()
+  if (!rip || !watchedAddress) return
+  testCandidateFieldsBusy.value = true
+  testCandidateFieldsResult.value = null
+  try {
+    testCandidateFieldsResult.value = await store.executeCandidateFieldTest(rip, watchedAddress)
+  } catch (e) {
+    testCandidateFieldsResult.value = { success: false, error: String(e) }
+  } finally {
+    testCandidateFieldsBusy.value = false
   }
 }
 
@@ -3365,6 +3387,9 @@ onMounted(() => {
             <button class="btn btn-secondary compact" type="button" :disabled="disassembleBackwardBusy" @click="disassembleBackwardFromHit(hit)">
               Désassembler en amont
             </button>
+            <button class="btn btn-secondary compact" type="button" :disabled="testCandidateFieldsBusy" @click="testCandidateFieldsFromHit(hit)">
+              Tester automatiquement
+            </button>
             <button
               class="btn btn-primary compact"
               type="button"
@@ -3446,6 +3471,9 @@ onMounted(() => {
             <button class="btn btn-secondary compact" type="button" :disabled="disassembleBackwardBusy" @click="disassembleBackwardFromHit(hit)">
               Désassembler en amont
             </button>
+            <button class="btn btn-secondary compact" type="button" :disabled="testCandidateFieldsBusy" @click="testCandidateFieldsFromHit(hit)">
+              Tester automatiquement
+            </button>
             <button
               class="btn btn-primary compact"
               type="button"
@@ -3476,6 +3504,29 @@ onMounted(() => {
             <strong>{{ instr.disassembly || instr.mnemonicHint }}</strong>
             <span v-if="instr.isCandidateField" class="quality-strong">
               champ candidat : [{{ instr.memBaseRegister }}+0x{{ instr.memDisplacement?.toString(16) }}]
+            </span>
+          </div>
+        </div>
+        <div v-if="testCandidateFieldsResult || testCandidateFieldsBusy" class="find-writes-panel">
+          <div class="source-list-title">
+            <strong>Tester automatiquement</strong>
+            <InfoDot topic="testCandidateFields" />
+            <span v-if="testCandidateFieldsResult?.results">{{ testCandidateFieldsResult.results.length }} champ(s) testé(s)</span>
+          </div>
+          <p class="hint">Écrit une valeur test transitoire sur chaque champ candidat, attend quelques secondes, relit, puis restaure — pour savoir lequel tient sans lire d'assembleur.</p>
+          <p v-if="testCandidateFieldsBusy" class="hint">Test en cours (peut prendre jusqu'à une minute selon le nombre de champs)...</p>
+          <p v-if="testCandidateFieldsResult?.error" class="error">{{ testCandidateFieldsResult.error }}</p>
+          <div
+            v-for="(outcome, index) in testCandidateFieldsResult?.results ?? []"
+            :key="`${outcome.address}-${index}`"
+            class="find-writes-row"
+            :class="{ selected: outcome.verdict === 'holds' }"
+          >
+            <code>0x{{ outcome.address }}</code>
+            <span>[{{ outcome.memBaseRegister }}+0x{{ outcome.memDisplacement?.toString(16) }}]</span>
+            <span>{{ outcome.valueType }}</span>
+            <span :class="outcome.verdict === 'holds' ? 'quality-strong' : outcome.verdict === 'reverts' ? 'hint' : 'error'">
+              {{ outcome.verdict === 'holds' ? `tient (${outcome.ticksSurvived ?? 0} sondage(s))` : outcome.verdict === 'reverts' ? 'repart' : (outcome.error || 'erreur') }}
             </span>
           </div>
         </div>
