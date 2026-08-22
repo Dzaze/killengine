@@ -58,8 +58,15 @@ public sealed class MethodDispatcher
                 experience = player.Experience,
                 stamina = player.Stamina,
                 isAlive = player.IsAlive,
+                statsRank = player.Stats.Rank,
+                statsLuck = player.Stats.Luck,
                 itemCount = player.Inventory.Items.Count,
+                firstItemValue = player.Inventory.Items.Count > 0 ? player.Inventory.Items[0].Value : (int?)null,
+                quickSlot0Name = player.Inventory.QuickSlots[0]?.Name,
+                quickSlot1Name = player.Inventory.QuickSlots[1]?.Name,
+                quickSlot2Name = player.Inventory.QuickSlots[2]?.Name,
                 gold = player.Inventory.Currencies.GetValueOrDefault("gold"),
+                gems = player.Inventory.Currencies.GetValueOrDefault("gems"),
             },
         };
     }

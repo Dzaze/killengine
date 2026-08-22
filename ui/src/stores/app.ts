@@ -8,9 +8,11 @@ import {
   type AutoResolveReportResult,
   type CandidateFieldTestResult,
   type CandidatePage,
+  type ClrFieldLocatorResult,
   type ClrInspectorStatus,
   type ClrObjectReadResult,
   type ClrObjectSummary,
+  type ClrPathWriteOperation,
   type ClrRootInfo,
   type ClrRpcResult,
   type EncryptedScanResult,
@@ -130,13 +132,17 @@ export interface TrainerFeature {
   id: number
   name: string
   processName: string
-  action: 'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch'
-  locatorKind: 'absolute' | 'aob'
+  action: 'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch' | 'clr_write'
+  locatorKind: 'absolute' | 'aob' | 'clr_field'
   address: string
   valueType: string
   value: string
   patchBytes?: string
   aobPattern?: string
+  clrTypeSubstring?: string
+  clrIdentityField?: string
+  clrIdentityValue?: string
+  clrFieldName?: string
   signatureQuality?: AobPatternQuality
   signatureScore?: number
   signatureLevel?: string
@@ -401,6 +407,7 @@ export const useAppStore = defineStore('app', () => {
   const clrSelectedObject = ref<ClrObjectReadResult | null>(null)
   const clrRoots = ref<ClrRootInfo[]>([])
   const clrLastResult = ref<ClrRpcResult | null>(null)
+  const clrFieldLocatorResult = ref<ClrFieldLocatorResult | null>(null)
   const luaScriptingStatus = ref<LuaScriptingStatus | null>(null)
   const luaScriptText = ref([
     'local ke = require("killengine")',
@@ -1614,8 +1621,13 @@ let nextWatchedChainId = 1
 
   function createTrainerFeature(input: Partial<TrainerFeature>) {
     const address = String(input.address ?? selectedCandidateAddress.value ?? '').replace(/^0x/i, '').trim()
-    if (!address) {
+    const isClrFeature = input.action === 'clr_write' || input.locatorKind === 'clr_field'
+    if (!address && !isClrFeature) {
       addActionLog('trainer', 'Feature refusée', 'Adresse manquante.', 'warning')
+      return null
+    }
+    if (isClrFeature && (!String(input.clrTypeSubstring ?? '').trim() || !String(input.clrIdentityField ?? '').trim() || !String(input.clrIdentityValue ?? '').trim() || !String(input.clrFieldName ?? '').trim())) {
+      addActionLog('trainer', 'Feature CLR refusée', 'Locator CLR incomplet.', 'warning')
       return null
     }
     trainerFeatureIdCounter.value += 1
@@ -1628,15 +1640,19 @@ let nextWatchedChainId = 1
     const signatureFixedRatio = Number(signatureQuality?.fixedRatio ?? input.signatureFixedRatio ?? 0)
     const feature: TrainerFeature = {
       id: trainerFeatureIdCounter.value,
-      name: String(input.name ?? `Feature 0x${address}`).trim() || `Feature 0x${address}`,
+      name: String(input.name ?? (isClrFeature ? `CLR ${input.clrFieldName ?? 'field'}` : `Feature 0x${address}`)).trim() || (isClrFeature ? `CLR ${input.clrFieldName ?? 'field'}` : `Feature 0x${address}`),
       processName: String(input.processName ?? processName.value),
       action: input.action ?? 'write',
-      locatorKind: input.locatorKind ?? 'absolute',
+      locatorKind: input.locatorKind ?? (isClrFeature ? 'clr_field' : 'absolute'),
       address,
       valueType: String(input.valueType ?? exactScanType.value ?? 'Int32'),
       value: String(input.value ?? writeValue.value ?? ''),
       patchBytes: input.patchBytes,
       aobPattern: input.aobPattern,
+      clrTypeSubstring: input.clrTypeSubstring,
+      clrIdentityField: input.clrIdentityField,
+      clrIdentityValue: input.clrIdentityValue,
+      clrFieldName: input.clrFieldName,
       signatureQuality,
       signatureScore: Number.isFinite(signatureScore) && signatureScore > 0 ? signatureScore : undefined,
       signatureLevel: signatureQuality?.level ?? input.signatureLevel,
@@ -1656,12 +1672,39 @@ let nextWatchedChainId = 1
       createdAt: now,
       updatedAt: now,
     }
-    addTrainerFeatureHistory(feature, 'created', 'success', `${feature.action} 0x${feature.address}`)
+    const locationText = feature.locatorKind === 'clr_field'
+      ? `${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue}`
+      : `0x${feature.address}`
+    addTrainerFeatureHistory(feature, 'created', 'success', `${feature.action} ${locationText}`)
     trainerFeatures.value.unshift(feature)
     saveTrainerFeatures()
     void refreshTrainerOverlay()
-    addActionLog('trainer', `Feature créée: ${feature.name}`, `${feature.action} 0x${feature.address}.`, 'success')
+    addActionLog('trainer', `Feature créée: ${feature.name}`, `${feature.action} ${locationText}.`, 'success')
     return feature
+  }
+
+  function createTrainerClrFieldFeature(input: {
+    name?: string
+    typeSubstring: string
+    identityField: string
+    identityValue: string
+    targetField: string
+    valueType: string
+    value: string
+    address?: string
+  }) {
+    return createTrainerFeature({
+      name: input.name || `CLR ${input.targetField}`,
+      action: 'clr_write',
+      locatorKind: 'clr_field',
+      address: String(input.address ?? '').replace(/^0x/i, '').trim(),
+      valueType: input.valueType,
+      value: input.value,
+      clrTypeSubstring: input.typeSubstring,
+      clrIdentityField: input.identityField,
+      clrIdentityValue: input.identityValue,
+      clrFieldName: input.targetField,
+    })
   }
 
   function createTrainerFeatureFromCheckpoint(checkpoint: Record<string, unknown>) {
@@ -1770,14 +1813,34 @@ let nextWatchedChainId = 1
       return
     }
     const trainerRisk = feature.action === 'patch' ? 'patch' : (feature.action === 'write' && kernelMemoryModeActive.value ? 'injection' : 'write')
-    if (!await confirmRiskAction(trainerRisk, `Activer feature Trainer: ${feature.name}`, `${feature.action} 0x${feature.address} ${feature.valueType} ${feature.value || feature.patchBytes || ''}${feature.action === 'write' && kernelMemoryModeActive.value ? ' via driver kernel' : ''}`)) return
+    const riskDetail = feature.locatorKind === 'clr_field'
+      ? `${feature.action} ${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue} -> ${feature.value}`
+      : `${feature.action} 0x${feature.address} ${feature.valueType} ${feature.value || feature.patchBytes || ''}${feature.action === 'write' && kernelMemoryModeActive.value ? ' via driver kernel' : ''}`
+    if (!await confirmRiskAction(trainerRisk, `Activer feature Trainer: ${feature.name}`, riskDetail)) return
 
     trainerBusy.value = true
     try {
       const controller = backend.getController()
       let ok = false
       let error = ''
-      if (feature.action === 'write') {
+      if (feature.action === 'clr_write') {
+        if (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName) {
+          error = 'Locator CLR incomplet.'
+        } else {
+          const locator = await findClrObjectsByFieldValue(feature.clrTypeSubstring, feature.clrIdentityField, feature.clrIdentityValue, 1)
+          const match = clrFieldLocatorResult.value?.matches?.[0]
+          if (!locator?.success || !match?.address) {
+            error = locator?.error ?? 'Objet CLR introuvable.'
+          } else if (!controller.writeClrPrimitiveField) {
+            error = 'writePrimitiveField non exposé par ce backend.'
+          } else {
+            const write = await controller.writeClrPrimitiveField(match.address, feature.clrFieldName, feature.value)
+            ok = write?.success === true
+            error = write?.error ?? ''
+            feature.address = String(match.address).replace(/^0x/i, '')
+          }
+        }
+      } else if (feature.action === 'write') {
         const result = await writeMemoryValueByMode(feature.address, feature.valueType, feature.value)
         ok = result.success === true
         error = result.error ?? ''
@@ -1809,12 +1872,15 @@ let nextWatchedChainId = 1
           }
         }
       }
-      feature.enabled = ok && feature.action !== 'write'
-      feature.status = ok ? (feature.action === 'write' ? 'idle' : 'active') : 'error'
+      feature.enabled = ok && feature.action !== 'write' && feature.action !== 'clr_write'
+      feature.status = ok ? (feature.action === 'write' || feature.action === 'clr_write' ? 'idle' : 'active') : 'error'
       feature.lastError = error
       feature.updatedAt = new Date().toISOString()
-      addTrainerFeatureHistory(feature, 'apply', ok ? 'success' : 'error', error || `0x${feature.address}`)
-      addActionLog('trainer', ok ? `Feature activée: ${feature.name}` : `Feature échouée: ${feature.name}`, error || `0x${feature.address}`, ok ? 'success' : 'error')
+      const detail = feature.locatorKind === 'clr_field'
+        ? (error || `${feature.clrFieldName} @ 0x${feature.address}`)
+        : (error || `0x${feature.address}`)
+      addTrainerFeatureHistory(feature, 'apply', ok ? 'success' : 'error', detail)
+      addActionLog('trainer', ok ? `Feature activée: ${feature.name}` : `Feature échouée: ${feature.name}`, detail, ok ? 'success' : 'error')
     } catch (e) {
       feature.status = 'error'
       feature.lastError = String(e)
@@ -1887,7 +1953,24 @@ let nextWatchedChainId = 1
       .slice(0, 80) || 'KillEngineTrainer'
     try {
       let result: Record<string, unknown>
-      if (feature.action === 'patch') {
+      if (feature.action === 'clr_write') {
+        if (!controller.saveClrFieldProfileTarget) {
+          throw new Error('Sauvegarde profil CLR non exposee par ce backend.')
+        }
+        if (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName) {
+          throw new Error('Locator CLR incomplet.')
+        }
+        result = await controller.saveClrFieldProfileTarget(
+          profileName,
+          feature.name,
+          feature.clrTypeSubstring,
+          feature.clrIdentityField,
+          feature.clrIdentityValue,
+          feature.clrFieldName,
+          feature.valueType,
+          `Trainer CLR ${feature.clrFieldName} = ${feature.value}`,
+        )
+      } else if (feature.action === 'patch') {
         const blocked = trainerFeaturePatchBlockReason(feature)
         if (blocked) {
           feature.status = 'error'
@@ -2005,7 +2088,10 @@ let nextWatchedChainId = 1
         `- Statut: ${feature.status}${feature.enabled ? ' / active' : ''}`,
         `- Processus: ${feature.processName || '-'}`,
         `- Locator: ${feature.locatorKind}`,
-        `- Adresse: 0x${feature.address}`,
+        `- Adresse: ${feature.address ? `0x${feature.address}` : '-'}`,
+        feature.locatorKind === 'clr_field'
+          ? `- CLR: ${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue}`
+          : '',
         `- Type: ${feature.valueType}`,
         `- Valeur/patch: ${feature.value || feature.patchBytes || '-'}`,
         `- Hotkey: ${feature.hotkey || '-'}`,
@@ -3721,6 +3807,45 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function findClrObjectsByFieldValue(typeSubstring: string, fieldName: string, expectedValue: string, maxResults = 20) {
+    const controller = backend.getController()
+    const typeFilter = typeSubstring.trim()
+    const field = fieldName.trim()
+    const value = expectedValue.trim()
+    if (!controller.findClrObjectsByFieldValue) {
+      clrLastResult.value = { success: false, error: 'findObjectsByFieldValue non exposé par ce backend.' }
+      clrInspectorError.value = clrLastResult.value.error ?? ''
+      return clrLastResult.value
+    }
+    if (!typeFilter || !field || !value) return { success: false, error: 'Locator CLR incomplet.' }
+
+    clrInspectorBusy.value = true
+    clrInspectorError.value = ''
+    try {
+      const bounded = Math.min(200, Math.max(1, Math.round(maxResults)))
+      const result = await controller.findClrObjectsByFieldValue(typeFilter, field, value, bounded)
+      clrLastResult.value = result
+      clrFieldLocatorResult.value = result.success && result.result ? result.result : null
+      clrInspectorError.value = result.success ? '' : (result.error ?? '')
+      addActionLog(
+        'clr_inspector',
+        result.success ? 'Locator CLR exécuté' : 'Locator CLR échoué',
+        result.success
+          ? `${clrFieldLocatorResult.value?.matchesReturned ?? 0} match(es) pour ${typeFilter}.${field} = ${value}.`
+          : (result.error ?? ''),
+        result.success ? 'success' : 'warning',
+      )
+      return result
+    } catch (e) {
+      clrFieldLocatorResult.value = null
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
   async function readClrObject(addressHex: string) {
     const controller = backend.getController()
     if (!controller.readClrObject) {
@@ -3733,6 +3858,133 @@ let nextWatchedChainId = 1
       clrLastResult.value = result
       clrSelectedObject.value = result.success && result.result ? result.result : null
       clrInspectorError.value = result.success ? '' : (result.error ?? '')
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function writeClrPrimitiveField(objectAddressHex: string, fieldName: string, value: string) {
+    const controller = backend.getController()
+    const address = objectAddressHex.trim()
+    const field = fieldName.trim()
+    const text = value.trim()
+    if (!controller.writeClrPrimitiveField) {
+      clrLastResult.value = { success: false, error: 'writePrimitiveField non exposé par ce backend.' }
+      clrInspectorError.value = clrLastResult.value.error ?? ''
+      return
+    }
+    if (!address || !field || !text) return
+    if (!await confirmRiskAction('write', 'Écriture champ CLR', `${address}.${field} = ${text}. Champ primitif managé dans le processus attaché.`)) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.writeClrPrimitiveField(address, field, text)
+      clrLastResult.value = result
+      clrInspectorError.value = result.success ? '' : (result.error ?? '')
+      const writeResult = result.result as Record<string, unknown> | undefined
+      addActionLog(
+        'clr_inspector',
+        result.success ? 'Champ CLR écrit' : 'Écriture champ CLR échouée',
+        result.success
+          ? `${field} @ ${String(writeResult?.fieldAddress ?? address)} = ${String(writeResult?.value ?? text)}`
+          : (result.error ?? ''),
+        result.success ? 'success' : 'error',
+      )
+      if (result.success) {
+        await readClrObject(address)
+      }
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      addActionLog('clr_inspector', 'Écriture champ CLR échouée', String(e), 'error')
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function writeClrPrimitivePath(objectAddressHex: string, path: string, value: string) {
+    const controller = backend.getController()
+    const address = objectAddressHex.trim()
+    const pathText = path.trim()
+    const text = value.trim()
+    if (!controller.writeClrPrimitivePath) {
+      clrLastResult.value = { success: false, error: 'writePrimitivePath non exposé par ce backend.' }
+      clrInspectorError.value = clrLastResult.value.error ?? ''
+      return
+    }
+    if (!address || !pathText || !text) return
+    if (!await confirmRiskAction('write', 'Écriture chemin CLR', `${address}.${pathText} = ${text}. Chemin symbolique managé dans le processus attaché.`)) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.writeClrPrimitivePath(address, pathText, text)
+      clrLastResult.value = result
+      clrInspectorError.value = result.success ? '' : (result.error ?? '')
+      const writeResult = result.result as Record<string, unknown> | undefined
+      addActionLog(
+        'clr_inspector',
+        result.success ? 'Chemin CLR écrit' : 'Écriture chemin CLR échouée',
+        result.success
+          ? `${pathText} @ ${String(writeResult?.fieldAddress ?? address)} = ${String(writeResult?.value ?? text)}`
+          : (result.error ?? ''),
+        result.success ? 'success' : 'error',
+      )
+      if (result.success) {
+        await readClrObject(address)
+      }
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      addActionLog('clr_inspector', 'Écriture chemin CLR échouée', String(e), 'error')
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function writeClrPrimitivePathBatch(objectAddressHex: string, operations: ClrPathWriteOperation[]) {
+    const controller = backend.getController()
+    const address = objectAddressHex.trim()
+    const sanitized = operations
+      .map((operation) => ({ path: operation.path.trim(), value: operation.value.trim() }))
+      .filter((operation) => operation.path && operation.value)
+      .slice(0, 32)
+    if (!controller.writeClrPrimitivePathBatch) {
+      clrLastResult.value = { success: false, error: 'writePrimitivePathBatch non exposé par ce backend.' }
+      clrInspectorError.value = clrLastResult.value.error ?? ''
+      return
+    }
+    if (!address || sanitized.length === 0) return
+    const preview = sanitized.map((operation) => `${operation.path} = ${operation.value}`).join(', ')
+    if (!await confirmRiskAction('write', 'Transaction CLR', `${address}: ${preview}. Rollback tenté si une écriture échoue.`)) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.writeClrPrimitivePathBatch(address, sanitized)
+      clrLastResult.value = result
+      const inner = result.result as Record<string, unknown> | undefined
+      const innerSuccess = Boolean(inner?.success ?? result.success)
+      clrInspectorError.value = result.success && innerSuccess ? '' : String(inner?.error ?? result.error ?? '')
+      addActionLog(
+        'clr_inspector',
+        result.success && innerSuccess ? 'Transaction CLR appliquée' : 'Transaction CLR échouée',
+        result.success && innerSuccess
+          ? `${sanitized.length} opération(s) appliquée(s).`
+          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ' Rollback OK.' : ''}`,
+        result.success && innerSuccess ? 'success' : 'error',
+      )
+      if (result.success) {
+        await readClrObject(address)
+      }
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      addActionLog('clr_inspector', 'Transaction CLR échouée', String(e), 'error')
+      return clrLastResult.value
     } finally {
       clrInspectorBusy.value = false
     }
@@ -6718,13 +6970,18 @@ async function doEncryptedScan() {
     clrSelectedObject,
     clrRoots,
     clrLastResult,
+    clrFieldLocatorResult,
     refreshClrInspectorStatus,
     attachClrInspector,
     detachClrInspector,
     shutdownClrInspector,
     flushClrInspectorCache,
     findClrObjects,
+    findClrObjectsByFieldValue,
     readClrObject,
+    writeClrPrimitiveField,
+    writeClrPrimitivePath,
+    writeClrPrimitivePathBatch,
     enumerateClrRoots,
     luaScriptingStatus,
     luaScriptText,
@@ -6940,6 +7197,7 @@ async function doEncryptedScan() {
     prepareCheckpointAob,
     executeCheckpointForceValue,
     createTrainerFeature,
+    createTrainerClrFieldFeature,
     createTrainerFeatureFromCheckpoint,
     applyTrainerFeature,
     restoreTrainerFeature,

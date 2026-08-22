@@ -3,11 +3,13 @@
 #   .\scripts\package-windows.ps1
 #   .\scripts\package-windows.ps1 -SkipBuild
 #   .\scripts\package-windows.ps1 -ExcludeModel
+#   .\scripts\package-windows.ps1 -SkipClrInspector
 #   .\scripts\package-windows.ps1 -RequireSigning   (fail the build instead of shipping KillEngine.exe unsigned; see docs/CODE_SIGNING.md)
 
 param(
     [switch]$SkipBuild,
     [switch]$ExcludeModel,
+    [switch]$SkipClrInspector,
     [switch]$RequireSigning
 )
 
@@ -170,6 +172,36 @@ if ($luaRuntimeExe) {
     Write-Warning "Lua runtime not found. Put Lua in runtime\lua, third_party\lua, third_party\lua\bin or tools\lua to bundle scripting support."
 }
 
+if (-not $SkipClrInspector) {
+    $dotnetCmd = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $dotnetCmd) {
+        throw "SDK .NET introuvable sur le PATH. Installe le SDK .NET 8+ ou relance avec -SkipClrInspector pour un package sans inspecteur CLR."
+    }
+
+    $clrProject = Join-Path $repoRoot "tools\clr_inspector\KillEngineClrInspector\KillEngineClrInspector.csproj"
+    if (-not (Test-Path -LiteralPath $clrProject -PathType Leaf)) {
+        throw "Projet KillEngineClrInspector introuvable: $clrProject"
+    }
+
+    $clrOut = Join-Path $packageRoot "tools\clr_inspector"
+    New-Item -ItemType Directory -Force -Path $clrOut | Out-Null
+    Write-Host "Publishing KillEngineClrInspector self-contained..." -ForegroundColor Cyan
+    & dotnet publish $clrProject -c Release -r win-x64 --self-contained true -o $clrOut `
+        -p:DebugType=None -p:DebugSymbols=false
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish KillEngineClrInspector a échoué (code $LASTEXITCODE)."
+    }
+
+    if (-not (Test-Path -LiteralPath (Join-Path $clrOut "KillEngineClrInspector.exe") -PathType Leaf)) {
+        throw "Publication ClrMD invalide: KillEngineClrInspector.exe absent de $clrOut"
+    }
+
+    Get-ChildItem -LiteralPath $clrOut -Recurse -File -Include "*.pdb", "*.xml" -ErrorAction SilentlyContinue |
+        Remove-Item -Force
+} else {
+    Write-Warning "KillEngineClrInspector skipped. The CLR view will require a dev-built helper or will report it as unavailable."
+}
+
 $modelRoot = Join-Path $repoRoot "model"
 $modelOut = Join-Path $packageRoot "model"
 New-Item -ItemType Directory -Force -Path $modelOut | Out-Null
@@ -217,8 +249,10 @@ Notes:
   - llama-cli.exe is copied automatically when present in third_party/llama.cpp.
   - Lua scripting uses runtime\lua\lua.exe when bundled, then falls back to PATH.
   - Lua helper scripts live in scripts\killengine.lua and scripts\automation-pipe-call.ps1.
+  - CLR inspection uses tools\clr_inspector\KillEngineClrInspector.exe when bundled.
   - GGUF models are included by default.
   - Use -ExcludeModel only for lightweight development packages.
+  - Use -SkipClrInspector only for lightweight development packages without the CLR helper.
   - The normal product layout is model\<ai-name>\ next to KillEngine.exe.
   - Agent folders use MODEL_MANIFEST.json and may point to shared GGUF weights.
   - A custom model path is only an advanced override.
@@ -258,6 +292,12 @@ $requiredRuntimeItems = @(
     "USER_GUIDE.md",
     "V1_REGRESSION_CHECKLIST.md"
 )
+
+if (-not $SkipClrInspector) {
+    $requiredRuntimeItems += @(
+        "tools\clr_inspector\KillEngineClrInspector.exe"
+    )
+}
 
 $missingRuntimeItems = @(
     foreach ($item in $requiredRuntimeItems) {

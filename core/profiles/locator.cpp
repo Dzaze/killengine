@@ -13,6 +13,12 @@ QString Locator::toString() const {
             return QString("0x%1").arg(lastAddress, 0, 16);
         case LocatorKind::PointerChain:
             return pointerChain.toString();
+        case LocatorKind::ClrField:
+            return QString("CLR %1[%2=%3].%4")
+                .arg(clrField.typeSubstring,
+                     clrField.identityField,
+                     clrField.identityValue,
+                     clrField.targetField);
     }
     return {};
 }
@@ -25,6 +31,8 @@ bool Locator::isValid() const {
             return lastAddress > 0;
         case LocatorKind::PointerChain:
             return pointerChain.isValid();
+        case LocatorKind::ClrField:
+            return clrField.isValid();
     }
     return false;
 }
@@ -57,6 +65,8 @@ bool resolveLocatorAddress(const ProcessHandle& handle, const Locator& locator, 
             *address = result.finalAddress;
             return true;
         }
+        case LocatorKind::ClrField:
+            return false;
     }
     return false;
 }

@@ -177,3 +177,40 @@ TEST(PointerChain, ProfileStoreRoundTripsPointerChainLocator) {
     EXPECT_EQ(loadedTarget.locator.pointerChain.offsets[2], 0x20);
     EXPECT_EQ(loadedTarget.locator.lastAddress, 0x7ff600001234);
 }
+
+TEST(PointerChain, ProfileStoreRoundTripsClrFieldLocator) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+
+    Profile profile;
+    profile.gameName = "ManagedGame";
+    profile.executableName = "ManagedGame.exe";
+
+    ProfileTarget target;
+    target.name = "PlayerHealth";
+    target.type = ValueType::Int32;
+    target.locator.kind = LocatorKind::ClrField;
+    target.locator.lastAddress = 0x2476e00acd8;
+    target.locator.clrField.typeSubstring = "Game.Player";
+    target.locator.clrField.identityField = "Name";
+    target.locator.clrField.identityValue = "MainPlayer";
+    target.locator.clrField.targetField = "Health";
+    target.description = "CLR field locator test";
+    profile.targets.append(target);
+
+    const QString path = dir.filePath("managed.keprofile");
+    ASSERT_TRUE(ProfileStore::save(profile, path));
+
+    Profile loaded;
+    ASSERT_TRUE(ProfileStore::load(path, &loaded));
+    ASSERT_EQ(loaded.targets.size(), 1);
+    const auto& loadedTarget = loaded.targets.first();
+    EXPECT_EQ(loadedTarget.locator.kind, LocatorKind::ClrField);
+    EXPECT_EQ(loadedTarget.locator.lastAddress, 0x2476e00acd8);
+    EXPECT_EQ(loadedTarget.locator.clrField.typeSubstring, "Game.Player");
+    EXPECT_EQ(loadedTarget.locator.clrField.identityField, "Name");
+    EXPECT_EQ(loadedTarget.locator.clrField.identityValue, "MainPlayer");
+    EXPECT_EQ(loadedTarget.locator.clrField.targetField, "Health");
+    EXPECT_TRUE(loadedTarget.locator.isValid());
+    EXPECT_TRUE(loadedTarget.locator.toString().contains("CLR"));
+}

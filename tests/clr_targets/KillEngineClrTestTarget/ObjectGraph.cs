@@ -21,11 +21,31 @@ public sealed class Item
     public double Weight;
 }
 
+public struct PlayerStats
+{
+    public int Rank;
+    public float Luck;
+}
+
 public sealed class Inventory
 {
     public List<Item> Items { get; } = new();
     public Item?[] QuickSlots { get; } = new Item?[4];
     public Dictionary<string, int> Currencies { get; } = new();
+    public CustomBag<Item> CustomItems { get; } = new();
+}
+
+public sealed class CustomBag<T>
+{
+    private T?[] _items = new T?[8];
+    private int _size;
+
+    public int Count => _size;
+
+    public void Add(T item)
+    {
+        _items[_size++] = item;
+    }
 }
 
 public sealed class Player
@@ -35,6 +55,7 @@ public sealed class Player
     public long Experience;
     public float Stamina;
     public bool IsAlive;
+    public PlayerStats Stats;
     public Inventory Inventory = new();
 
     // Auto-reference intentionnelle : miroir du pattern observe dans l'objet
@@ -98,6 +119,8 @@ public static class TestRoot
         inventory.Items.Add(sword);
         inventory.Items.Add(shield);
         inventory.Items.Add(potion);
+        inventory.CustomItems.Add(sword);
+        inventory.CustomItems.Add(potion);
 
         inventory.QuickSlots[0] = sword;
         inventory.QuickSlots[1] = potion;
@@ -107,11 +130,12 @@ public static class TestRoot
 
         var player = new Player
         {
-            Name = "TestSubject",
+            Name = new string("TestSubject".ToCharArray()),
             Health = 100,
             Experience = 5000,
             Stamina = 75.0f,
             IsAlive = true,
+            Stats = new PlayerStats { Rank = 7, Luck = 1.25f },
             Inventory = inventory,
         };
         player.Self = player;

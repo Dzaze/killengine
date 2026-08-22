@@ -114,15 +114,33 @@ export interface ClrObjectSummary {
   address: string
   typeName: string
   size?: number
+  identityField?: string
+  identityValue?: unknown
+}
+
+export interface ClrFieldLocatorResult {
+  success: boolean
+  typeSubstring: string
+  fieldName: string
+  expectedValue: string
+  scannedObjects: number
+  typeMatches: number
+  matchesReturned: number
+  maxResults: number
+  matches: ClrObjectSummary[]
 }
 
 export interface ClrFieldInfo {
   name: string
   typeName?: string
+  elementType?: string
   kind?: string
   value?: unknown
   address?: string
+  size?: number
+  writable?: boolean
   objectTypeName?: string
+  error?: string
 }
 
 export interface ClrObjectReadResult {
@@ -130,6 +148,12 @@ export interface ClrObjectReadResult {
   typeName: string
   size?: number
   fields?: Record<string, unknown>
+  fieldDetails?: ClrFieldInfo[]
+}
+
+export interface ClrPathWriteOperation {
+  path: string
+  value: string
 }
 
 export interface ClrRootInfo {
@@ -1065,14 +1089,18 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   openUserGuide?(): Promise<boolean>
   /** Demande une exclusion Windows Defender pour KillEngine.exe (invite UAC visible, jamais silencieux). */
   requestWindowsDefenderExclusion?(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>
-  /** Inspecteur CLR/ClrMD externe, lecture seule, via helper .NET et named pipe. */
+  /** Inspecteur CLR/ClrMD externe via helper .NET et named pipe. */
   getClrInspectorStatus?(): Promise<ClrInspectorStatus>
   attachClrInspector?(): Promise<ClrRpcResult>
   detachClrInspector?(): Promise<ClrRpcResult>
   shutdownClrInspector?(): Promise<ClrRpcResult>
   flushClrInspectorCache?(): Promise<ClrRpcResult>
   findClrObjectsByType?(typeSubstring: string): Promise<ClrRpcResult<ClrObjectSummary[]>>
+  findClrObjectsByFieldValue?(typeSubstring: string, fieldName: string, expectedValue: string, maxResults: number): Promise<ClrRpcResult<ClrFieldLocatorResult>>
   readClrObject?(addressHex: string): Promise<ClrRpcResult<ClrObjectReadResult>>
+  writeClrPrimitiveField?(objectAddressHex: string, fieldName: string, value: string): Promise<ClrRpcResult>
+  writeClrPrimitivePath?(objectAddressHex: string, path: string, value: string): Promise<ClrRpcResult>
+  writeClrPrimitivePathBatch?(objectAddressHex: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
   enumerateClrRoots?(typeSubstring: string): Promise<ClrRpcResult<ClrRootInfo[]>>
   /** Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement). */
   probeKernelDriver?(): Promise<KernelDriverStatus>
@@ -1102,6 +1130,16 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
     profileName: string,
     targetName: string,
     addressHex: string,
+    valueType: string,
+    description: string,
+  ): Promise<Record<string, unknown>>
+  saveClrFieldProfileTarget?(
+    profileName: string,
+    targetName: string,
+    typeSubstring: string,
+    identityField: string,
+    identityValue: string,
+    targetField: string,
     valueType: string,
     description: string,
   ): Promise<Record<string, unknown>>
@@ -1988,7 +2026,19 @@ class BackendService {
       async findClrObjectsByType(_typeSubstring: string) {
         return { success: false, error: 'Indisponible dans le mock.', result: [] }
       },
+      async findClrObjectsByFieldValue(_typeSubstring: string, _fieldName: string, _expectedValue: string, _maxResults: number) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
       async readClrObject(_addressHex: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async writeClrPrimitiveField(_objectAddressHex: string, _fieldName: string, _value: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async writeClrPrimitivePath(_objectAddressHex: string, _path: string, _value: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async writeClrPrimitivePathBatch(_objectAddressHex: string, _operations: ClrPathWriteOperation[]) {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async enumerateClrRoots(_typeSubstring: string) {
@@ -2082,6 +2132,9 @@ class BackendService {
       },
       async acknowledgePendingSmartSearchRecovery() {},
       async saveProfileTarget() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async saveClrFieldProfileTarget() {
         return { success: false, error: 'Mock backend' }
       },
       async listProfiles() {

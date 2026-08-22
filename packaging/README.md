@@ -18,11 +18,22 @@ dist\KillEngine-portable.zip
 ```
 
 The package includes the deployed Qt runtime from `build\bin`, the application executable, license, README, project spec, phase tracker, user guide, AI model layout, and Lua helper scripts.
+It also publishes and bundles the ClrMD helper by default under:
+
+```text
+tools\clr_inspector\KillEngineClrInspector.exe
+```
 
 GGUF models are included by default from `model\`. For a lightweight development package without model weights, run:
 
 ```powershell
 .\scripts\package-windows.ps1 -ExcludeModel
+```
+
+For a lightweight development package without the CLR helper, run:
+
+```powershell
+.\scripts\package-windows.ps1 -ExcludeModel -SkipClrInspector
 ```
 
 Lua scripting expects this runtime layout in the portable package:

@@ -484,7 +484,7 @@ public:
     /// toujours un choix explicite de l'utilisateur, jamais automatique.
     Q_INVOKABLE QVariantMap requestWindowsDefenderExclusion();
 
-    /// Inspecteur CLR/ClrMD externe (lecture seule) : lance le helper .NET si
+    /// Inspecteur CLR/ClrMD externe : lance le helper .NET si
     /// necessaire puis dialogue avec lui via JSON-RPC sur named pipe.
     Q_INVOKABLE QVariantMap getClrInspectorStatus() const;
     Q_INVOKABLE QVariantMap attachClrInspector();
@@ -492,7 +492,11 @@ public:
     Q_INVOKABLE QVariantMap shutdownClrInspector();
     Q_INVOKABLE QVariantMap flushClrInspectorCache();
     Q_INVOKABLE QVariantMap findClrObjectsByType(const QString& typeSubstring);
+    Q_INVOKABLE QVariantMap findClrObjectsByFieldValue(const QString& typeSubstring, const QString& fieldName, const QString& expectedValue, int maxResults);
     Q_INVOKABLE QVariantMap readClrObject(const QString& addressHex);
+    Q_INVOKABLE QVariantMap writeClrPrimitiveField(const QString& objectAddressHex, const QString& fieldName, const QString& value);
+    Q_INVOKABLE QVariantMap writeClrPrimitivePath(const QString& objectAddressHex, const QString& path, const QString& value);
+    Q_INVOKABLE QVariantMap writeClrPrimitivePathBatch(const QString& objectAddressHex, const QVariantList& operations);
     Q_INVOKABLE QVariantMap enumerateClrRoots(const QString& typeSubstring);
 
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
@@ -581,6 +585,18 @@ public:
         const QString& profileName,
         const QString& targetName,
         const QString& addressHex,
+        const QString& valueType,
+        const QString& description);
+
+    /// Sauvegarde une cible CLR par locator symbolique :
+    /// type + champ d'identité + valeur -> objet courant -> champ cible.
+    Q_INVOKABLE QVariantMap saveClrFieldProfileTarget(
+        const QString& profileName,
+        const QString& targetName,
+        const QString& typeSubstring,
+        const QString& identityField,
+        const QString& identityValue,
+        const QString& targetField,
         const QString& valueType,
         const QString& description);
 
@@ -793,6 +809,11 @@ private:
         QString groupName;
         uint64_t address{0};
         killcore::ValueType type{killcore::ValueType::Int32};
+        killcore::LocatorKind locatorKind{killcore::LocatorKind::Absolute};
+        QString clrTypeSubstring;
+        QString clrIdentityField;
+        QString clrIdentityValue;
+        QString clrFieldName;
     };
 
     struct ActiveCodePatch {

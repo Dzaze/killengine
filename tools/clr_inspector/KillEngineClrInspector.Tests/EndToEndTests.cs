@@ -161,6 +161,11 @@ public sealed class EndToEndTests
         Assert.Contains(currencies["entries"]!.AsArray(), entry =>
             entry!["key"]!.GetValue<string>() == "gold" && entry["value"]!.GetValue<int>() == 4125);
 
+        var customItems = Field(inventoryFields, "CustomItems")!["collection"]!;
+        Assert.Equal("custom_field_backed", customItems["kind"]!.GetValue<string>());
+        Assert.Equal(2, customItems["collection"]!["count"]!.GetValue<int>());
+        Assert.Equal("KillEngine.ClrTestTarget.Item", customItems["collection"]!["items"]![0]!["typeName"]!.GetValue<string>());
+
         // 4) Au moins une GC root retrouvee parmi nos types connus.
         var roots = await PipeClient.CallAsync(
             InspectorPipe, "enumerateRoots", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget")));
@@ -247,6 +252,268 @@ public sealed class EndToEndTests
             var identityAfter = await PipeClient.CallAsync(TargetPipe, "getObjectIdentity");
             Assert.Equal(identityBefore!["player"]!.GetValue<int>(), identityAfter!["player"]!.GetValue<int>());
         }
+    }
+
+    [Fact]
+    public async Task WritePrimitiveField_UpdatesManagedObjectAndReportsFieldAddress()
+    {
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        var playerEntry = Assert.Single(found!.AsArray());
+        string playerAddress = playerEntry!["address"]!.GetValue<string>();
+
+        int sentinel = Random.Shared.Next(2_000_000, 2_999_999);
+        var writeResult = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitiveField",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Health"),
+                JsonValue.Create(sentinel)));
+
+        Assert.Equal("Health", writeResult!["fieldName"]!.GetValue<string>());
+        Assert.Equal("Int32", writeResult["elementType"]!.GetValue<string>());
+        Assert.Equal(4, writeResult["bytesWritten"]!.GetValue<int>());
+        Assert.True(writeResult["verified"]!.GetValue<bool>());
+        Assert.StartsWith("0x", writeResult["fieldAddress"]!.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(sentinel, writeResult["value"]!.GetValue<int>());
+
+        var obj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        Assert.Equal(sentinel, obj!["fields"]!["Health"]!.GetValue<int>());
+
+        var details = obj["fieldDetails"]!.AsArray();
+        var healthDetail = Assert.Single(details, field => field!["name"]!.GetValue<string>() == "Health");
+        Assert.True(healthDetail!["writable"]!.GetValue<bool>());
+        Assert.Equal(writeResult["fieldAddress"]!.GetValue<string>(), healthDetail["address"]!.GetValue<string>());
+
+        var status = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal(sentinel, status!["player"]!["health"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task WritePrimitivePath_UpdatesNestedReferencesAndListItems()
+    {
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        var playerEntry = Assert.Single(found!.AsArray());
+        string playerAddress = playerEntry!["address"]!.GetValue<string>();
+
+        int selfHealth = Random.Shared.Next(3_000_000, 3_499_999);
+        var selfWrite = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Self.Health"),
+                JsonValue.Create(selfHealth)));
+
+        Assert.Equal("Self.Health", selfWrite!["path"]!.GetValue<string>());
+        Assert.Equal("Health", selfWrite["fieldName"]!.GetValue<string>());
+        Assert.True(selfWrite["verified"]!.GetValue<bool>());
+        Assert.Equal(selfHealth, selfWrite["value"]!.GetValue<int>());
+
+        var selfStatus = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal(selfHealth, selfStatus!["player"]!["health"]!.GetValue<int>());
+
+        int itemValue = Random.Shared.Next(3_500_000, 3_999_999);
+        var itemWrite = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Inventory.Items[0].Value"),
+                JsonValue.Create(itemValue)));
+
+        Assert.Equal("Inventory.Items[0].Value", itemWrite!["path"]!.GetValue<string>());
+        Assert.Equal("Value", itemWrite["fieldName"]!.GetValue<string>());
+        Assert.Equal("KillEngine.ClrTestTarget.Item", itemWrite["typeName"]!.GetValue<string>());
+        Assert.True(itemWrite["verified"]!.GetValue<bool>());
+        Assert.Equal(itemValue, itemWrite["value"]!.GetValue<int>());
+
+        var itemStatus = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal(itemValue, itemStatus!["player"]!["firstItemValue"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task WritePrimitivePath_UpdatesStringReferenceStructAndDictionaryValues()
+    {
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+
+        var stringWrite = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Name"),
+                JsonValue.Create("NoviceGuide")));
+        Assert.Equal("string_in_place_same_length", stringWrite!["mode"]!.GetValue<string>());
+        Assert.True(stringWrite["verified"]!.GetValue<bool>());
+
+        var structWrite = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Stats.Rank"),
+                JsonValue.Create(42)));
+        Assert.Equal("Stats.Rank", structWrite!["path"]!.GetValue<string>());
+        Assert.True(structWrite["verified"]!.GetValue<bool>());
+
+        var dictionaryWrite = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Inventory.Currencies[gold]"),
+                JsonValue.Create(7777)));
+        Assert.Equal("Inventory.Currencies[gold]", dictionaryWrite!["path"]!.GetValue<string>());
+        Assert.True(dictionaryWrite["verified"]!.GetValue<bool>());
+
+        var items = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Item")));
+        string shieldAddress = "";
+        foreach (var entry in items!.AsArray())
+        {
+            if (entry!["typeName"]!.GetValue<string>() != "KillEngine.ClrTestTarget.Item")
+            {
+                continue;
+            }
+            string address = entry!["address"]!.GetValue<string>();
+            var item = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(address)));
+            if (item!["fields"]!["Name"]!.GetValue<string>() == "Shield")
+            {
+                shieldAddress = address;
+                break;
+            }
+        }
+        Assert.False(string.IsNullOrWhiteSpace(shieldAddress));
+
+        var referenceWrite = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Inventory.QuickSlots[2]"),
+                JsonValue.Create(shieldAddress)));
+        Assert.Equal("Inventory.QuickSlots[2]", referenceWrite!["path"]!.GetValue<string>());
+        Assert.True(referenceWrite["verified"]!.GetValue<bool>());
+
+        var status = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal("NoviceGuide", status!["player"]!["name"]!.GetValue<string>());
+        Assert.Equal(42, status["player"]!["statsRank"]!.GetValue<int>());
+        Assert.Equal(7777, status["player"]!["gold"]!.GetValue<int>());
+        Assert.Equal("Shield", status["player"]!["quickSlot2Name"]!.GetValue<string>());
+
+        var restoreName = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Name"),
+                JsonValue.Create("TestSubject")));
+        Assert.True(restoreName!["verified"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task WritePrimitivePathBatch_RollsBackAlreadyAppliedWritesOnFailure()
+    {
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+
+        await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Health"),
+                JsonValue.Create(1234)));
+
+        var batch = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePathBatch",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                new JsonArray(
+                    new JsonObject { ["path"] = "Health", ["value"] = "4321" },
+                    new JsonObject { ["path"] = "Stats.Missing", ["value"] = "99" })));
+
+        Assert.False(batch!["success"]!.GetValue<bool>());
+        Assert.Equal(1, batch["appliedBeforeFailure"]!.GetValue<int>());
+        Assert.True(batch["rolledBack"]!.GetValue<bool>());
+
+        var status = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal(1234, status!["player"]!["health"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task FieldValueLocator_RefindsObjectAfterCompactingGc()
+    {
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundBefore = await PipeClient.CallAsync(
+            InspectorPipe,
+            "findObjectsByFieldValue",
+            new JsonArray(
+                JsonValue.Create("KillEngine.ClrTestTarget.Player"),
+                JsonValue.Create("Name"),
+                JsonValue.Create("TestSubject"),
+                JsonValue.Create(5)));
+        Assert.True(foundBefore!["success"]!.GetValue<bool>());
+        var matchBefore = Assert.Single(foundBefore["matches"]!.AsArray());
+        string addressBefore = matchBefore!["address"]!.GetValue<string>();
+
+        await PipeClient.CallAsync(TargetPipe, "setChurnRate", new JsonArray(JsonValue.Create(50_000)));
+        await PipeClient.CallAsync(TargetPipe, "forceGC");
+        await PipeClient.CallAsync(TargetPipe, "setChurnRate", new JsonArray(JsonValue.Create(10)));
+        await PipeClient.CallAsync(InspectorPipe, "flushCachedData");
+
+        var foundAfter = await PipeClient.CallAsync(
+            InspectorPipe,
+            "findObjectsByFieldValue",
+            new JsonArray(
+                JsonValue.Create("KillEngine.ClrTestTarget.Player"),
+                JsonValue.Create("Name"),
+                JsonValue.Create("TestSubject"),
+                JsonValue.Create(5)));
+        Assert.True(foundAfter!["success"]!.GetValue<bool>());
+        var matchAfter = Assert.Single(foundAfter["matches"]!.AsArray());
+        string addressAfter = matchAfter!["address"]!.GetValue<string>();
+
+        var objAfter = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(addressAfter)));
+        Assert.Equal("TestSubject", objAfter!["fields"]!["Name"]!.GetValue<string>());
+        Assert.Equal(addressAfter, objAfter["fields"]!["Self"]!["address"]!.GetValue<string>());
+        Assert.False(string.IsNullOrWhiteSpace(addressBefore));
+    }
+
+    [Fact]
+    public async Task FieldValueLocator_FindsPrimitiveFieldMatches()
+    {
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe,
+            "findObjectsByFieldValue",
+            new JsonArray(
+                JsonValue.Create("KillEngine.ClrTestTarget.Item"),
+                JsonValue.Create("Value"),
+                JsonValue.Create("150"),
+                JsonValue.Create(10)));
+
+        Assert.True(found!["success"]!.GetValue<bool>());
+        var match = Assert.Single(found["matches"]!.AsArray());
+        Assert.Equal("Value", match!["identityField"]!.GetValue<string>());
+        Assert.Equal(150, match["identityValue"]!.GetValue<int>());
     }
 
     [Fact]

@@ -4,7 +4,7 @@ import { useAppStore, type TrainerFeature } from '@/stores/app'
 
 const store = useAppStore()
 const name = ref('')
-const action = ref<'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch'>('write')
+const action = ref<'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch' | 'clr_write'>('write')
 const address = ref('')
 const valueType = ref('Int32')
 const value = ref('')
@@ -139,6 +139,7 @@ function featureWarning(feature: TrainerFeature): string {
   if (feature.status === 'error') return feature.lastError || 'Feature en erreur : corrige-la avant activation.'
   if (feature.action === 'patch' && !feature.patchBytes?.trim()) return 'Patch incomplet : bytes manquants.'
   if (feature.action === 'patch' && feature.locatorKind === 'aob' && !feature.aobPattern?.trim()) return 'AOB manquant : sauvegarde une signature stable avant activation.'
+  if (feature.action === 'clr_write' && (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName)) return 'Locator CLR incomplet.'
   const qualityWarning = featureQualityWarning(feature)
   if (qualityWarning) return qualityWarning
   if (feature.action === 'freeze_breakpoint' && store.settingAutoRiskMode === 'Safe') return 'Mode Safe : passe en Expert ou Trainer pour activer un freeze breakpoint.'
@@ -273,6 +274,7 @@ async function copyTrainerExport() {
           <option value="freeze_polling">freeze_polling</option>
           <option value="freeze_breakpoint">freeze_breakpoint</option>
           <option value="patch">patch</option>
+          <option value="clr_write">clr_write</option>
         </select>
         <select v-model="statusFilter" class="input filter-input">
           <option value="all">Tous statuts</option>
@@ -291,7 +293,13 @@ async function copyTrainerExport() {
         <div class="feature-main">
           <strong>{{ feature.name }}</strong>
           <span v-if="feature.processName">{{ feature.processName }}</span>
-          <span class="mono">0x{{ feature.address }}</span>
+          <span v-if="feature.locatorKind === 'clr_field'" class="mono">
+            {{ feature.clrTypeSubstring }}.{{ feature.clrFieldName }}
+          </span>
+          <span v-else class="mono">0x{{ feature.address }}</span>
+          <span v-if="feature.locatorKind === 'clr_field'">
+            via {{ feature.clrIdentityField }}={{ feature.clrIdentityValue }}
+          </span>
           <span>{{ feature.action }} · {{ feature.valueType }} {{ feature.value || feature.patchBytes }}</span>
           <span v-if="feature.hotkey" class="hotkey-chip">{{ feature.hotkey }}</span>
           <span class="status" :class="statusClass(feature.status)">{{ feature.status }}</span>

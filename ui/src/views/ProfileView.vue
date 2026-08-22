@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
+import type { ClrFieldInfo } from '@/services/backend'
 
 const store = useAppStore()
 
@@ -18,6 +19,11 @@ interface ProfileTargetEntry {
   type: string
   locator: string
   description: string
+  locatorKind?: string
+  clrTypeSubstring?: string
+  clrIdentityField?: string
+  clrIdentityValue?: string
+  clrFieldName?: string
 }
 
 interface ProfilePatchEntry {
@@ -60,6 +66,10 @@ const targetWriteValues = ref<Record<string, string>>({})
 const targetResolveStates = ref<Record<string, Record<string, unknown>>>({})
 const patchStates = ref<Record<string, Record<string, unknown>>>({})
 const trainerBusy = ref(false)
+const clrProfileIdentityField = ref('')
+const clrProfileIdentityValue = ref('')
+const clrProfileTargetField = ref('')
+const clrProfileValueType = ref('Int32')
 const lastProfileStorageKey = 'killengine.lastProfile'
 
 const profileSaveTargets = computed(() => {
@@ -88,6 +98,23 @@ const groupedProfileTargets = computed<ProfileTargetGroup[]>(() => {
   return Array.from(groups.entries()).map(([name, targets]) => ({ name, targets }))
 })
 
+const clrObjectFields = computed<ClrFieldInfo[]>(() => {
+  const details = store.clrSelectedObject?.fieldDetails
+  return Array.isArray(details) ? details : []
+})
+
+const clrIdentityFields = computed(() => clrObjectFields.value.filter((field) => canUseAsClrIdentity(field)))
+const clrWritableFields = computed(() => clrObjectFields.value.filter((field) => field.writable))
+const canSaveClrProfileTarget = computed(() => Boolean(
+  selectedProfile.value
+  && newTargetName.value.trim()
+  && store.clrSelectedObject
+  && clrProfileIdentityField.value.trim()
+  && clrProfileIdentityValue.value.trim()
+  && clrProfileTargetField.value.trim()
+  && clrProfileValueType.value.trim(),
+))
+
 const trainerPatchSummary = computed(() => {
   const states = profilePatches.value.map((patch) => patchStates.value[patch.name]).filter(Boolean)
   const count = (status: string) => states.filter((state) => String(state.status ?? '') === status).length
@@ -110,6 +137,50 @@ const trainerPatchSummary = computed(() => {
 function profileTargetGroupName(name: string): string {
   const normalized = name.trim().toLowerCase().replace(/\s+\d+$/, '').trim()
   return normalized || 'cibles'
+}
+
+function canUseAsClrIdentity(field: ClrFieldInfo): boolean {
+  return field.kind === 'primitive'
+    || field.kind === 'string'
+    || typeof field.value === 'string'
+    || typeof field.value === 'number'
+    || typeof field.value === 'boolean'
+}
+
+function clrValueTypeForField(field: ClrFieldInfo): string {
+  const text = String(field.elementType ?? field.typeName ?? '').toLowerCase()
+  if (text.includes('int16')) return 'Int16'
+  if (text.includes('int64')) return 'Int64'
+  if (text.includes('single') || text.includes('float')) return 'Float32'
+  if (text.includes('double')) return 'Float64'
+  return 'Int32'
+}
+
+function refreshClrProfileDefaults() {
+  const identity = clrIdentityFields.value.find((field) => field.name === 'Name') ?? clrIdentityFields.value[0]
+  const writable = clrWritableFields.value.find((field) => field.name === 'Health') ?? clrWritableFields.value[0]
+  if (identity && !clrProfileIdentityField.value) {
+    clrProfileIdentityField.value = identity.name
+    clrProfileIdentityValue.value = String(identity.value ?? '')
+  }
+  if (writable && !clrProfileTargetField.value) {
+    clrProfileTargetField.value = writable.name
+    clrProfileValueType.value = clrValueTypeForField(writable)
+  }
+}
+
+function selectClrIdentityField(fieldName: string) {
+  const field = clrObjectFields.value.find((item) => item.name === fieldName)
+  if (!field) return
+  clrProfileIdentityField.value = field.name
+  clrProfileIdentityValue.value = String(field.value ?? '')
+}
+
+function selectClrTargetField(fieldName: string) {
+  const field = clrObjectFields.value.find((item) => item.name === fieldName)
+  if (!field) return
+  clrProfileTargetField.value = field.name
+  clrProfileValueType.value = clrValueTypeForField(field)
 }
 
 async function refreshProfiles() {
@@ -189,6 +260,51 @@ async function saveCurrentTarget() {
       newTargetDescription.value = ''
       await selectProfile(selectedProfile.value)
       await refreshProfiles()
+    }
+  } catch (e) {
+    statusMessage.value = '✗ Erreur : ' + String(e)
+  }
+}
+
+async function saveCurrentClrFieldTarget() {
+  if (!selectedProfile.value) {
+    statusMessage.value = '⚠ Sélectionne ou crée d\'abord un profil.'
+    return
+  }
+  if (!store.clrSelectedObject) {
+    statusMessage.value = '⚠ Lis d\'abord un objet dans la vue CLR.'
+    return
+  }
+  if (!newTargetName.value.trim()) {
+    statusMessage.value = '⚠ Donne un nom à la cible.'
+    return
+  }
+
+  const controller = backend.getController()
+  if (!controller.saveClrFieldProfileTarget) {
+    statusMessage.value = '✗ Sauvegarde de cible CLR indisponible côté backend.'
+    return
+  }
+
+  try {
+    const result = await controller.saveClrFieldProfileTarget(
+      selectedProfile.value,
+      newTargetName.value.trim(),
+      store.clrSelectedObject.typeName,
+      clrProfileIdentityField.value.trim(),
+      clrProfileIdentityValue.value.trim(),
+      clrProfileTargetField.value.trim(),
+      clrProfileValueType.value.trim(),
+      newTargetDescription.value.trim(),
+    )
+    if (result.success) {
+      statusMessage.value = `✓ Cible CLR "${newTargetName.value.trim()}" sauvegardée (${result.locator}).`
+      newTargetName.value = ''
+      newTargetDescription.value = ''
+      await selectProfile(selectedProfile.value)
+      await refreshProfiles()
+    } else {
+      statusMessage.value = '✗ ' + (result.error ?? 'Sauvegarde CLR impossible.')
     }
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
@@ -277,7 +393,8 @@ async function activateAllTargets() {
   if (!selectedProfile.value || profileTargets.value.length === 0) return
 
   let activated = 0
-  for (const target of profileTargets.value) {
+  const activatableTargets = profileTargets.value.filter((target) => target.locatorKind !== 'clr_field')
+  for (const target of activatableTargets) {
     try {
       const result = await backend.getController().activateProfileTarget(selectedProfile.value, target.name)
       if (!result.success) {
@@ -292,14 +409,18 @@ async function activateAllTargets() {
     }
   }
 
-  statusMessage.value = `✓ ${activated} cible(s) activée(s) pour l'Assistant.`
+  const skipped = profileTargets.value.length - activatableTargets.length
+  statusMessage.value = skipped > 0
+    ? `✓ ${activated} cible(s) activée(s) pour l'Assistant. ${skipped} cible(s) CLR restent utilisables via Écrire.`
+    : `✓ ${activated} cible(s) activée(s) pour l'Assistant.`
 }
 
 async function activateTargetGroup(group: ProfileTargetGroup) {
   if (!selectedProfile.value || group.targets.length === 0) return
 
   let activated = 0
-  for (const target of group.targets) {
+  const activatableTargets = group.targets.filter((target) => target.locatorKind !== 'clr_field')
+  for (const target of activatableTargets) {
     try {
       const result = await backend.getController().activateProfileTarget(selectedProfile.value, target.name)
       if (!result.success) {
@@ -315,7 +436,10 @@ async function activateTargetGroup(group: ProfileTargetGroup) {
   }
 
   await store.refreshSmartSearchContext()
-  statusMessage.value = `✓ Groupe "${group.name}" prêt dans l'Assistant (${activated} cible(s)).`
+  const skipped = group.targets.length - activatableTargets.length
+  statusMessage.value = skipped > 0
+    ? `✓ Groupe "${group.name}" prêt dans l'Assistant (${activated} cible(s)). ${skipped} cible(s) CLR restent utilisables via Écrire.`
+    : `✓ Groupe "${group.name}" prêt dans l'Assistant (${activated} cible(s)).`
 }
 
 async function writeProfileTarget(target: ProfileTargetEntry) {
@@ -330,17 +454,27 @@ async function writeProfileTarget(target: ProfileTargetEntry) {
       return
     }
 
-    const write = await store.writeMemoryValueByMode(String(resolved.address ?? ''), target.type, value)
-    if (write.success) {
+    const write = resolved.locatorKind === 'clr_field'
+      ? await store.writeClrPrimitiveField(String(resolved.address ?? ''), String(resolved.clrFieldName ?? target.clrFieldName ?? ''), value)
+      : await store.writeMemoryValueByMode(String(resolved.address ?? ''), target.type, value)
+    if (write?.success) {
       statusMessage.value = `✓ "${target.name}" écrit à ${value} sur 0x${resolved.address}.`
       await store.refreshSmartSearchContext()
     } else {
-      statusMessage.value = '✗ ' + (write.error || `Écriture impossible pour ${target.name}.`)
+      statusMessage.value = '✗ ' + (write?.error || `Écriture impossible pour ${target.name}.`)
     }
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
   }
 }
+
+watch(() => store.clrSelectedObject?.address, () => {
+  clrProfileIdentityField.value = ''
+  clrProfileIdentityValue.value = ''
+  clrProfileTargetField.value = ''
+  clrProfileValueType.value = 'Int32'
+  refreshClrProfileDefaults()
+})
 
 async function deleteSelectedProfile() {
   if (!selectedProfile.value) return
@@ -665,6 +799,37 @@ onMounted(() => {
         </div>
       </div>
 
+      <div v-if="store.clrSelectedObject" class="save-target-box">
+        <h3>Sauvegarder un champ CLR</h3>
+        <p class="hint">
+          Objet : <code>{{ store.clrSelectedObject.typeName }}</code>
+          · adresse actuelle : <code>{{ store.clrSelectedObject.address }}</code>
+        </p>
+        <div class="save-row">
+          <select v-model="clrProfileIdentityField" class="scan-input" @change="selectClrIdentityField(clrProfileIdentityField)">
+            <option value="">Champ identité</option>
+            <option v-for="field in clrIdentityFields" :key="`id-${field.name}`" :value="field.name">
+              {{ field.name }} = {{ field.value }}
+            </option>
+          </select>
+          <input v-model="clrProfileIdentityValue" placeholder="Valeur identité" class="scan-input" />
+          <select v-model="clrProfileTargetField" class="scan-input" @change="selectClrTargetField(clrProfileTargetField)">
+            <option value="">Champ à écrire</option>
+            <option v-for="field in clrWritableFields" :key="`target-${field.name}`" :value="field.name">
+              {{ field.name }} ({{ field.elementType ?? field.typeName ?? 'primitive' }})
+            </option>
+          </select>
+          <input v-model="clrProfileValueType" placeholder="Type écriture" class="scan-input" />
+          <button
+            class="btn btn-primary"
+            :disabled="!canSaveClrProfileTarget"
+            @click="saveCurrentClrFieldTarget()"
+          >
+            Sauvegarder CLR
+          </button>
+        </div>
+      </div>
+
       <!-- Cibles du profil -->
       <div v-if="profileTargets.length > 0" class="targets-list">
         <div class="targets-header">
@@ -681,6 +846,7 @@ onMounted(() => {
             <div class="target-info">
               <span class="target-name">{{ t.name }}</span>
               <span class="target-type">{{ t.type }}</span>
+              <span v-if="t.locatorKind === 'clr_field'" class="target-type">CLR</span>
               <span class="target-locator">{{ t.locator }}</span>
             </div>
             <div class="target-actions">
@@ -690,12 +856,18 @@ onMounted(() => {
               <button class="btn btn-secondary btn-sm" @click="verifyTarget(t)">Vérifier</button>
               <button
                 class="btn btn-secondary btn-sm"
-                :disabled="!store.selectedCandidateAddress"
+                :disabled="!store.selectedCandidateAddress || t.locatorKind === 'clr_field'"
                 @click="repairTargetWithCurrentAddress(t)"
               >
                 Réparer
               </button>
-              <button class="btn btn-secondary btn-sm" @click="activateTarget(t.name)">Utiliser</button>
+              <button
+                class="btn btn-secondary btn-sm"
+                :disabled="t.locatorKind === 'clr_field'"
+                @click="activateTarget(t.name)"
+              >
+                Utiliser
+              </button>
               <input
                 v-model="targetWriteValues[t.name]"
                 class="target-write-input"

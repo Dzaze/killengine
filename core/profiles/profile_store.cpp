@@ -21,6 +21,7 @@ QString locatorKindToString(LocatorKind kind) {
         case LocatorKind::ModuleOffset: return "module_offset";
         case LocatorKind::Absolute:     return "absolute";
         case LocatorKind::PointerChain: return "pointer_chain";
+        case LocatorKind::ClrField:     return "clr_field";
     }
     return "module_offset";
 }
@@ -28,6 +29,7 @@ QString locatorKindToString(LocatorKind kind) {
 LocatorKind stringToLocatorKind(const QString& str) {
     if (str == "absolute") return LocatorKind::Absolute;
     if (str == "pointer_chain") return LocatorKind::PointerChain;
+    if (str == "clr_field") return LocatorKind::ClrField;
     return LocatorKind::ModuleOffset;
 }
 
@@ -43,6 +45,15 @@ QJsonObject pointerChainToJson(const PointerChain& chain) {
     return json;
 }
 
+QJsonObject clrFieldLocatorToJson(const ClrFieldLocator& locator) {
+    QJsonObject json;
+    json["typeSubstring"] = locator.typeSubstring;
+    json["identityField"] = locator.identityField;
+    json["identityValue"] = locator.identityValue;
+    json["targetField"] = locator.targetField;
+    return json;
+}
+
 PointerChain pointerChainFromJson(const QJsonObject& json) {
     PointerChain chain;
     chain.module = json.value("module").toString();
@@ -54,6 +65,15 @@ PointerChain pointerChainFromJson(const QJsonObject& json) {
     return chain;
 }
 
+ClrFieldLocator clrFieldLocatorFromJson(const QJsonObject& json) {
+    ClrFieldLocator locator;
+    locator.typeSubstring = json.value("typeSubstring").toString();
+    locator.identityField = json.value("identityField").toString();
+    locator.identityValue = json.value("identityValue").toString();
+    locator.targetField = json.value("targetField").toString();
+    return locator;
+}
+
 QJsonObject locatorToJson(const Locator& loc) {
     QJsonObject json;
     json["kind"] = locatorKindToString(loc.kind);
@@ -62,6 +82,8 @@ QJsonObject locatorToJson(const Locator& loc) {
     json["lastAddress"] = QString::number(loc.lastAddress, 16);
     if (loc.kind == LocatorKind::PointerChain) {
         json["pointerChain"] = pointerChainToJson(loc.pointerChain);
+    } else if (loc.kind == LocatorKind::ClrField) {
+        json["clrField"] = clrFieldLocatorToJson(loc.clrField);
     }
     return json;
 }
@@ -74,6 +96,8 @@ Locator locatorFromJson(const QJsonObject& json) {
     loc.lastAddress = json.value("lastAddress").toString().toULongLong(nullptr, 16);
     if (loc.kind == LocatorKind::PointerChain) {
         loc.pointerChain = pointerChainFromJson(json.value("pointerChain").toObject());
+    } else if (loc.kind == LocatorKind::ClrField) {
+        loc.clrField = clrFieldLocatorFromJson(json.value("clrField").toObject());
     }
     return loc;
 }

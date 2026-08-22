@@ -15,6 +15,21 @@ enum class LocatorKind {
     Absolute,      // Adresse absolue (non stable, debug uniquement)
     ModuleOffset,  // Module + offset (stable via ASLR)
     PointerChain,  // Chaîne de pointeurs multi-niveau (stable, requis pour les jeux modernes)
+    ClrField,      // Objet CLR retrouvé par type + champ d'identité + valeur
+};
+
+struct ClrFieldLocator {
+    QString typeSubstring;
+    QString identityField;
+    QString identityValue;
+    QString targetField;
+
+    bool isValid() const {
+        return !typeSubstring.isEmpty()
+            && !identityField.isEmpty()
+            && !identityValue.isEmpty()
+            && !targetField.isEmpty();
+    }
 };
 
 /**
@@ -31,6 +46,11 @@ struct Locator {
     /// Chaîne de pointeurs (utilisé quand kind == PointerChain).
     /// Pour les jeux modernes où la cible est allouée dynamiquement sur le tas.
     PointerChain pointerChain;
+
+    /// Locator CLR (utilisé quand kind == ClrField).
+    /// L'adresse du tas managé peut changer après GC : on retrouve l'objet par
+    /// identité logique avant d'écrire targetField.
+    ClrFieldLocator clrField;
 
     /// Sérialise le locator en chaîne lisible.
     QString toString() const;

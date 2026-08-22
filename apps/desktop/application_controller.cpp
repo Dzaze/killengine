@@ -9252,6 +9252,13 @@ QVariantMap ApplicationController::getSmartSearchContext() const {
         entry["group"] = target.groupName;
         entry["address"] = QString::number(target.address, 16);
         entry["type"] = killcore::valueTypeToString(target.type);
+        entry["locatorKind"] = target.locatorKind == killcore::LocatorKind::ClrField ? "clr_field" : "memory";
+        if (target.locatorKind == killcore::LocatorKind::ClrField) {
+            entry["clrTypeSubstring"] = target.clrTypeSubstring;
+            entry["clrIdentityField"] = target.clrIdentityField;
+            entry["clrIdentityValue"] = target.clrIdentityValue;
+            entry["clrFieldName"] = target.clrFieldName;
+        }
         profileTargets.append(entry);
     }
 
@@ -10064,10 +10071,40 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
                 continue;
             }
 
+            ActiveProfileTarget active{
+                profileName,
+                target.name,
+                groupName,
+                0,
+                target.type,
+                target.locator.kind,
+            };
+
             uint64_t address = 0;
-            if (!killcore::resolveLocatorAddress(m_handle, target.locator, &address)) {
+            if (target.locator.kind == killcore::LocatorKind::ClrField) {
+                const auto& locator = target.locator.clrField;
+                auto locatorResult = findClrObjectsByFieldValue(
+                    locator.typeSubstring,
+                    locator.identityField,
+                    locator.identityValue,
+                    1);
+                const QVariantMap payload = locatorResult.value("result").toMap();
+                const QVariantList matches = payload.value("matches").toList();
+                if (!locatorResult.value("success").toBool() || matches.isEmpty()) {
+                    continue;
+                }
+                const QString objectAddress = matches.first().toMap().value("address").toString();
+                if (!parseHexAddress(objectAddress, &address)) {
+                    continue;
+                }
+                active.clrTypeSubstring = locator.typeSubstring;
+                active.clrIdentityField = locator.identityField;
+                active.clrIdentityValue = locator.identityValue;
+                active.clrFieldName = locator.targetField;
+            } else if (!killcore::resolveLocatorAddress(m_handle, target.locator, &address)) {
                 continue;
             }
+            active.address = address;
 
             matchedGroupName = groupName;
             bool alreadyResolved = false;
@@ -10078,7 +10115,7 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
                 }
             }
             if (!alreadyResolved) {
-                resolvedTargets.append({profileName, target.name, groupName, address, target.type});
+                resolvedTargets.append(active);
             }
         }
     }
@@ -10094,6 +10131,7 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
     m_smartSearchTargetValue = value;
     m_lastBatchStartIndex = m_writeHistory.size();
     m_lastAutoWriteTargets.clear();
+    bool wroteRawMemoryTarget = false;
 
     for (const auto& target : resolvedTargets) {
         QVariantMap suggestion;
@@ -10102,21 +10140,45 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
         suggestion["address"] = QString::number(target.address, 16);
         suggestion["type"] = killcore::valueTypeToString(target.type);
         suggestion["value"] = value;
-        const auto history = candidateValueHistory(target.address);
+        suggestion["locatorKind"] = target.locatorKind == killcore::LocatorKind::ClrField ? "clr_field" : "memory";
+        if (target.locatorKind == killcore::LocatorKind::ClrField) {
+            suggestion["clrTypeSubstring"] = target.clrTypeSubstring;
+            suggestion["clrIdentityField"] = target.clrIdentityField;
+            suggestion["clrIdentityValue"] = target.clrIdentityValue;
+            suggestion["clrFieldName"] = target.clrFieldName;
+        }
+        const QVariantList history = target.locatorKind == killcore::LocatorKind::ClrField
+            ? QVariantList{}
+            : candidateValueHistory(target.address);
         if (!history.isEmpty()) {
             suggestion["valueHistory"] = history;
         }
         suggestions.append(suggestion);
 
-        auto writeResult = writeMemoryValueConfirmed(
-            suggestion.value("address").toString(),
-            suggestion.value("type").toString(),
-            value);
+        QVariantMap writeResult;
+        if (target.locatorKind == killcore::LocatorKind::ClrField) {
+            writeResult = writeClrPrimitiveField(
+                suggestion.value("address").toString(),
+                target.clrFieldName,
+                value);
+        } else {
+            writeResult = writeMemoryValueConfirmed(
+                suggestion.value("address").toString(),
+                suggestion.value("type").toString(),
+                value);
+        }
         writeResult.insert("profile", suggestion.value("profile"));
         writeResult.insert("target", suggestion.value("target"));
         writeResult.insert("address", suggestion.value("address"));
         writeResult.insert("value", value);
         writeResult.insert("type", suggestion.value("type"));
+        writeResult.insert("locatorKind", suggestion.value("locatorKind"));
+        if (target.locatorKind == killcore::LocatorKind::ClrField) {
+            writeResult.insert("clrFieldName", target.clrFieldName);
+            writeResult.insert("clrTypeSubstring", target.clrTypeSubstring);
+            writeResult.insert("clrIdentityField", target.clrIdentityField);
+            writeResult.insert("clrIdentityValue", target.clrIdentityValue);
+        }
         if (suggestion.contains("valueHistory")) {
             writeResult.insert("valueHistory", suggestion.value("valueHistory"));
         }
@@ -10124,7 +10186,10 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
         writeResults.append(writeResult);
 
         if (writeResult.value("success").toBool()) {
-            m_lastAutoWriteTargets.append({target.address, target.type});
+            if (target.locatorKind != killcore::LocatorKind::ClrField) {
+                m_lastAutoWriteTargets.append({target.address, target.type});
+                wroteRawMemoryTarget = true;
+            }
             bool updatedActiveTarget = false;
             for (auto& activeTarget : m_activeProfileTargets) {
                 if (activeTarget.profileName == target.profileName && activeTarget.targetName == target.targetName) {
@@ -10145,9 +10210,11 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
         m_lastBatchEndIndex = -1;
         m_lastAutoWriteTargets.clear();
     }
-    if (allWritesOk && !m_lastAutoWriteTargets.isEmpty()) {
+    if (allWritesOk) {
         m_smartSearchActive = false;
-        m_chatMemoryTargets = m_lastAutoWriteTargets;
+        if (wroteRawMemoryTarget) {
+            m_chatMemoryTargets = m_lastAutoWriteTargets;
+        }
         resetFailureEscalationState();
         if (m_autoWriteValueHistory.isEmpty() && !previousTargetValue.isEmpty()) {
             appendDistinctText(&m_autoWriteValueHistory, previousTargetValue, 12);
@@ -10174,12 +10241,14 @@ QVariantMap ApplicationController::writeProfileTargetsFromQuery(const QString& q
     result["autoWriteResults"] = writeResults;
     result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
     result["autoWriteCount"] = writeResults.size();
-    result["activeTargetCount"] = m_chatMemoryTargets.size();
+    result["activeTargetCount"] = m_chatMemoryTargets.size() + m_activeProfileTargets.size();
     result["previousTargetValue"] = previousTargetValue;
     result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
-    result["rollbackNote"] = "Tu peux annuler cette écriture via le bouton rollback batch dans l'assistant.";
+    result["rollbackNote"] = wroteRawMemoryTarget
+        ? "Tu peux annuler les écritures mémoire brutes via le bouton rollback batch dans l'assistant. Les champs CLR passent par ClrMD et ne sont pas ajoutés au rollback mémoire."
+        : "Écriture CLR effectuée via ClrMD : aucun rollback mémoire brut n'a été ajouté.";
     result["message"] = allWritesOk
-        ? QString("J'ai utilisé le profil et j'ai mis %1 sur %2 cible(s) \"%3\". Je garde ces adresses actives pour les prochaines modifications.")
+        ? QString("J'ai utilisé le profil et j'ai mis %1 sur %2 cible(s) \"%3\". Les cibles CLR restent reliées à leur locator logique.")
               .arg(value)
               .arg(resolvedTargets.size())
               .arg(matchedGroupName)
@@ -12081,12 +12150,102 @@ QVariantMap ApplicationController::findClrObjectsByType(const QString& typeSubst
     return callClrInspectorRpc(QStringLiteral("findObjectsByType"), {filter}, 15000);
 }
 
+QVariantMap ApplicationController::findClrObjectsByFieldValue(const QString& typeSubstring, const QString& fieldName, const QString& expectedValue, int maxResults) {
+    const QString typeFilter = typeSubstring.trimmed();
+    const QString field = fieldName.trimmed();
+    const QString value = expectedValue.trimmed();
+    if (typeFilter.isEmpty() || field.isEmpty() || value.isEmpty()) {
+        return {{"success", false}, {"error", QStringLiteral("Type, champ et valeur requis pour le locator CLR.")}};
+    }
+    const int boundedMax = std::clamp(maxResults, 1, 200);
+    QVariantMap response = callClrInspectorRpc(QStringLiteral("findObjectsByFieldValue"), {typeFilter, field, value, boundedMax}, 20000);
+    appendScanTelemetry(QStringLiteral("clr_inspector_field_locator"), {
+        {"success", response.value("success").toBool()},
+        {"typeSubstring", typeFilter},
+        {"fieldName", field},
+        {"matchesReturned", response.value("result").toMap().value("matchesReturned").toInt()},
+        {"error", response.value("error").toString()},
+    });
+    return response;
+}
+
 QVariantMap ApplicationController::readClrObject(const QString& addressHex) {
     const QString address = addressHex.trimmed();
     if (address.isEmpty()) {
         return {{"success", false}, {"error", QStringLiteral("Adresse objet CLR manquante.")}};
     }
     return callClrInspectorRpc(QStringLiteral("readObject"), {address}, 10000);
+}
+
+QVariantMap ApplicationController::writeClrPrimitiveField(const QString& objectAddressHex, const QString& fieldName, const QString& value) {
+    const QString address = objectAddressHex.trimmed();
+    const QString field = fieldName.trimmed();
+    const QString text = value.trimmed();
+    if (address.isEmpty() || field.isEmpty() || text.isEmpty()) {
+        return {{"success", false}, {"error", QStringLiteral("Adresse objet, champ et valeur requis.")}};
+    }
+
+    QVariantMap response = callClrInspectorRpc(QStringLiteral("writePrimitiveField"), {address, field, text}, 10000);
+    appendScanTelemetry(QStringLiteral("clr_inspector_write_field"), {
+        {"success", response.value("success").toBool()},
+        {"objectAddress", address},
+        {"fieldName", field},
+        {"verified", response.value("result").toMap().value("verified").toBool()},
+        {"error", response.value("error").toString()},
+    });
+    return response;
+}
+
+QVariantMap ApplicationController::writeClrPrimitivePath(const QString& objectAddressHex, const QString& path, const QString& value) {
+    const QString address = objectAddressHex.trimmed();
+    const QString pathText = path.trimmed();
+    const QString text = value.trimmed();
+    if (address.isEmpty() || pathText.isEmpty() || text.isEmpty()) {
+        return {{"success", false}, {"error", QStringLiteral("Adresse objet, chemin et valeur requis.")}};
+    }
+
+    QVariantMap response = callClrInspectorRpc(QStringLiteral("writePrimitivePath"), {address, pathText, text}, 10000);
+    appendScanTelemetry(QStringLiteral("clr_inspector_write_path"), {
+        {"success", response.value("success").toBool()},
+        {"objectAddress", address},
+        {"path", pathText},
+        {"verified", response.value("result").toMap().value("verified").toBool()},
+        {"error", response.value("error").toString()},
+    });
+    return response;
+}
+
+QVariantMap ApplicationController::writeClrPrimitivePathBatch(const QString& objectAddressHex, const QVariantList& operations) {
+    const QString address = objectAddressHex.trimmed();
+    if (address.isEmpty()) {
+        return {{"success", false}, {"error", QStringLiteral("Adresse objet requise pour la transaction CLR.")}};
+    }
+    if (operations.isEmpty() || operations.size() > 32) {
+        return {{"success", false}, {"error", QStringLiteral("La transaction CLR attend entre 1 et 32 operations.")}};
+    }
+
+    QVariantList sanitized;
+    sanitized.reserve(operations.size());
+    for (const QVariant& item : operations) {
+        const QVariantMap op = item.toMap();
+        const QString path = op.value(QStringLiteral("path")).toString().trimmed();
+        const QString value = op.value(QStringLiteral("value")).toString().trimmed();
+        if (path.isEmpty() || value.isEmpty()) {
+            return {{"success", false}, {"error", QStringLiteral("Chaque operation CLR doit fournir path et value.")}};
+        }
+        sanitized.append(QVariantMap{{QStringLiteral("path"), path}, {QStringLiteral("value"), value}});
+    }
+
+    QVariantMap response = callClrInspectorRpc(QStringLiteral("writePrimitivePathBatch"), {address, sanitized}, 20000);
+    const QVariantMap result = response.value(QStringLiteral("result")).toMap();
+    appendScanTelemetry(QStringLiteral("clr_inspector_write_path_batch"), {
+        {"success", response.value("success").toBool() && result.value("success").toBool()},
+        {"objectAddress", address},
+        {"operationCount", sanitized.size()},
+        {"rolledBack", result.value("rolledBack").toBool()},
+        {"error", response.value("error").toString().isEmpty() ? result.value("error").toString() : response.value("error").toString()},
+    });
+    return response;
 }
 
 QVariantMap ApplicationController::enumerateClrRoots(const QString& typeSubstring) {
@@ -12954,6 +13113,124 @@ QVariantMap ApplicationController::saveProfileTarget(
     return result;
 }
 
+QVariantMap ApplicationController::saveClrFieldProfileTarget(
+    const QString& profileName,
+    const QString& targetName,
+    const QString& typeSubstring,
+    const QString& identityField,
+    const QString& identityValue,
+    const QString& targetField,
+    const QString& valueType,
+    const QString& description) {
+
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const QString cleanProfileName = profileName.trimmed();
+    const QString cleanTargetName = targetName.trimmed();
+    const QString typeFilter = typeSubstring.trimmed();
+    const QString idField = identityField.trimmed();
+    const QString idValue = identityValue.trimmed();
+    const QString field = targetField.trimmed();
+    if (cleanProfileName.isEmpty() || cleanTargetName.isEmpty() || typeFilter.isEmpty()
+        || idField.isEmpty() || idValue.isEmpty() || field.isEmpty()) {
+        result["error"] = "Profil, cible, type CLR, champ identité, valeur identité et champ cible requis.";
+        return result;
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(valueType, &type)) {
+        result["error"] = "Type invalide.";
+        return result;
+    }
+
+    QVariantMap locatorProbe = findClrObjectsByFieldValue(typeFilter, idField, idValue, 1);
+    if (!locatorProbe.value("success").toBool()) {
+        const QString error = locatorProbe.value("error").toString();
+        result["error"] = error.isEmpty() ? "Locator CLR introuvable. Attache d'abord le helper CLR." : error;
+        return result;
+    }
+    const QVariantMap locatorResult = locatorProbe.value("result").toMap();
+    const QVariantList matches = locatorResult.value("matches").toList();
+    if (matches.isEmpty()) {
+        result["error"] = "Aucun objet CLR ne correspond à ce locator.";
+        return result;
+    }
+
+    const QVariantMap firstMatch = matches.first().toMap();
+    const QString objectAddressText = firstMatch.value("address").toString();
+    uint64_t lastAddress = 0;
+    parseHexAddress(objectAddressText, &lastAddress);
+
+    killcore::Locator locator;
+    locator.kind = killcore::LocatorKind::ClrField;
+    locator.lastAddress = lastAddress;
+    locator.clrField.typeSubstring = typeFilter;
+    locator.clrField.identityField = idField;
+    locator.clrField.identityValue = idValue;
+    locator.clrField.targetField = field;
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    if (QFile::exists(path)) {
+        killcore::ProfileStore::load(path, &profile);
+    } else {
+        profile.gameName = cleanProfileName;
+        profile.executableName = m_processName;
+    }
+    if (profile.executableHash.isEmpty()) {
+        profile.executableHash = computeExecutableHash(m_handle.executablePath());
+    }
+
+    bool found = false;
+    for (auto& target : profile.targets) {
+        if (target.name == cleanTargetName) {
+            target.type = type;
+            target.locator = locator;
+            target.description = description;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        profile.targets.append({cleanTargetName, type, locator, description});
+    }
+
+    const bool saved = killcore::ProfileStore::save(profile, path);
+    result["success"] = saved;
+    result["profileName"] = cleanProfileName;
+    result["targetName"] = cleanTargetName;
+    result["locator"] = locator.toString();
+    result["locatorKind"] = "clr_field";
+    result["address"] = objectAddressText;
+    result["typeSubstring"] = typeFilter;
+    result["identityField"] = idField;
+    result["identityValue"] = idValue;
+    result["fieldName"] = field;
+    result["type"] = killcore::valueTypeToString(type);
+    result["targetCount"] = profile.targets.size();
+    if (!saved) {
+        result["error"] = "Échec de la sauvegarde du profil.";
+    }
+
+    appendScanTelemetry(QStringLiteral("clr_inspector_profile_target_save"), {
+        {"success", saved},
+        {"profileName", cleanProfileName},
+        {"targetName", cleanTargetName},
+        {"typeSubstring", typeFilter},
+        {"identityField", idField},
+        {"targetField", field},
+        {"error", result.value("error").toString()},
+    });
+
+    return result;
+}
+
 QVariantList ApplicationController::listProfiles() {
     QVariantList result;
     const auto names = killcore::ProfileStore::listProfiles();
@@ -12997,6 +13274,24 @@ QVariantMap ApplicationController::loadProfile(const QString& profileName) {
         targetEntry["type"] = killcore::valueTypeToString(target.type);
         targetEntry["locator"] = target.locator.toString();
         targetEntry["description"] = target.description;
+        switch (target.locator.kind) {
+            case killcore::LocatorKind::Absolute:
+                targetEntry["locatorKind"] = "absolute";
+                break;
+            case killcore::LocatorKind::ModuleOffset:
+                targetEntry["locatorKind"] = "module_offset";
+                break;
+            case killcore::LocatorKind::PointerChain:
+                targetEntry["locatorKind"] = "pointer_chain";
+                break;
+            case killcore::LocatorKind::ClrField:
+                targetEntry["locatorKind"] = "clr_field";
+                targetEntry["clrTypeSubstring"] = target.locator.clrField.typeSubstring;
+                targetEntry["clrIdentityField"] = target.locator.clrField.identityField;
+                targetEntry["clrIdentityValue"] = target.locator.clrField.identityValue;
+                targetEntry["clrFieldName"] = target.locator.clrField.targetField;
+                break;
+        }
         targetsList.append(targetEntry);
     }
     result["targets"] = targetsList;
@@ -13065,12 +13360,45 @@ QVariantMap ApplicationController::resolveProfileTarget(const QString& profileNa
 
     for (const auto& target : profile.targets) {
         if (target.name == targetName) {
+            if (target.locator.kind == killcore::LocatorKind::ClrField) {
+                const auto& clr = target.locator.clrField;
+                QVariantMap locatorProbe = findClrObjectsByFieldValue(clr.typeSubstring, clr.identityField, clr.identityValue, 1);
+                if (!locatorProbe.value("success").toBool()) {
+                    const QString error = locatorProbe.value("error").toString();
+                    result["error"] = error.isEmpty() ? "Impossible de résoudre le locator CLR." : error;
+                    return result;
+                }
+                const QVariantMap locatorResult = locatorProbe.value("result").toMap();
+                const QVariantList matches = locatorResult.value("matches").toList();
+                if (matches.isEmpty()) {
+                    result["error"] = "Aucun objet CLR ne correspond à ce locator.";
+                    return result;
+                }
+
+                const QVariantMap match = matches.first().toMap();
+                result["success"] = true;
+                result["address"] = match.value("address").toString();
+                result["type"] = killcore::valueTypeToString(target.type);
+                result["locator"] = target.locator.toString();
+                result["locatorKind"] = "clr_field";
+                result["clrTypeSubstring"] = clr.typeSubstring;
+                result["clrIdentityField"] = clr.identityField;
+                result["clrIdentityValue"] = clr.identityValue;
+                result["clrFieldName"] = clr.targetField;
+                result["matchesReturned"] = locatorResult.value("matchesReturned").toInt();
+                result["typeMatches"] = locatorResult.value("typeMatches").toInt();
+                return result;
+            }
+
             uint64_t address = 0;
             if (killcore::resolveLocatorAddress(m_handle, target.locator, &address)) {
                 result["success"] = true;
                 result["address"] = QString::number(address, 16);
                 result["type"] = killcore::valueTypeToString(target.type);
                 result["locator"] = target.locator.toString();
+                result["locatorKind"] = target.locator.kind == killcore::LocatorKind::PointerChain
+                    ? "pointer_chain"
+                    : (target.locator.kind == killcore::LocatorKind::Absolute ? "absolute" : "module_offset");
                 return result;
             } else {
                 result["error"] = "Impossible de résoudre le locator. Le module est peut-être absent.";
@@ -13101,6 +13429,73 @@ QVariantMap ApplicationController::activateProfileTarget(const QString& profileN
 
     for (const auto& target : profile.targets) {
         if (target.name == targetName) {
+            if (target.locator.kind == killcore::LocatorKind::ClrField) {
+                const auto& locator = target.locator.clrField;
+                auto locatorResult = findClrObjectsByFieldValue(
+                    locator.typeSubstring,
+                    locator.identityField,
+                    locator.identityValue,
+                    1);
+                const QVariantMap payload = locatorResult.value("result").toMap();
+                const QVariantList matches = payload.value("matches").toList();
+                if (!locatorResult.value("success").toBool() || matches.isEmpty()) {
+                    result["error"] = locatorResult.value("error").toString().isEmpty()
+                        ? "Impossible de retrouver l'objet CLR par son champ d'identité."
+                        : locatorResult.value("error").toString();
+                    result["locatorKind"] = "clr_field";
+                    return result;
+                }
+
+                uint64_t objectAddress = 0;
+                const QString objectAddressText = matches.first().toMap().value("address").toString();
+                if (!parseHexAddress(objectAddressText, &objectAddress)) {
+                    result["error"] = "Le locator CLR a renvoyé une adresse objet invalide.";
+                    result["locatorKind"] = "clr_field";
+                    return result;
+                }
+
+                const ActiveProfileTarget active{
+                    profileName,
+                    target.name,
+                    profileTargetGroupName(target.name),
+                    objectAddress,
+                    target.type,
+                    killcore::LocatorKind::ClrField,
+                    locator.typeSubstring,
+                    locator.identityField,
+                    locator.identityValue,
+                    locator.targetField,
+                };
+
+                bool updated = false;
+                for (auto& existing : m_activeProfileTargets) {
+                    if (existing.profileName == active.profileName && existing.targetName == active.targetName) {
+                        existing = active;
+                        updated = true;
+                        break;
+                    }
+                }
+                if (!updated) {
+                    m_activeProfileTargets.append(active);
+                }
+
+                result["success"] = true;
+                result["profileName"] = profileName;
+                result["targetName"] = target.name;
+                result["groupName"] = active.groupName;
+                result["address"] = QString::number(objectAddress, 16);
+                result["type"] = killcore::valueTypeToString(target.type);
+                result["locatorKind"] = "clr_field";
+                result["clrTypeSubstring"] = locator.typeSubstring;
+                result["clrIdentityField"] = locator.identityField;
+                result["clrIdentityValue"] = locator.identityValue;
+                result["clrFieldName"] = locator.targetField;
+                result["activeTargetCount"] = m_activeProfileTargets.size();
+                result["message"] = QString("\"%1\" activé pour l'Assistant via CLR : objet 0x%2, champ %3.")
+                                        .arg(target.name, QString::number(objectAddress, 16), locator.targetField);
+                return result;
+            }
+
             uint64_t address = 0;
             if (!killcore::resolveLocatorAddress(m_handle, target.locator, &address)) {
                 result["error"] = "Impossible d'activer cette cible. Le module est peut-être absent.";
@@ -13113,6 +13508,7 @@ QVariantMap ApplicationController::activateProfileTarget(const QString& profileN
                 profileTargetGroupName(target.name),
                 address,
                 target.type,
+                target.locator.kind,
             };
 
             bool updated = false;
