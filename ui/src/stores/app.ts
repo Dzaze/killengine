@@ -6508,10 +6508,13 @@ async function doEncryptedScan() {
     try {
       symbolResolveResult.value = await controller.resolveSymbolAddress(moduleName, functionName)
       const ok = symbolResolveResult.value.success === true
+      const detail = ok
+        ? `-> 0x${String(symbolResolveResult.value.address ?? '')}`
+        : String(symbolResolveResult.value.error ?? '')
       addActionLog(
         'injection',
         ok ? 'Symbole résolu' : 'Résolution de symbole échouée',
-        `${moduleName}!${functionName}${ok ? ` -> 0x${symbolResolveResult.value.address}` : `. ${String(symbolResolveResult.value.error ?? '')}`}`.trim(),
+        `${moduleName}!${functionName} ${detail}`.trim(),
         ok ? 'success' : 'warning',
       )
     } catch (e) {
