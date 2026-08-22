@@ -60,6 +60,14 @@ public sealed class Inventory
     public Queue<Item> ItemQueue { get; } = new();
     public Stack<Item> ItemStack { get; } = new();
     public int[,] Grid { get; } = new int[3, 4];
+
+    // Chantier "ecriture indexee dans des tableaux de STRUCTS" (docs/
+    // KILLENGINE_CLR_INSPECTOR_SPEC.md) : tableau d'elements STRUCT (pas de
+    // references, pas de primitifs) -- Coordinates est deja utilise ailleurs
+    // dans ce graphe comme struct imbriquee (PlayerStats.HomeZone.Origin),
+    // reutilise ici tel quel pour un tableau d'elements struct plutot que
+    // d'introduire un nouveau type dedie.
+    public Coordinates[] Waypoints = new Coordinates[3];
 }
 
 public sealed class CustomBag<T>
@@ -310,6 +318,10 @@ public static class TestRoot
                 inventory.Grid[row, col] = row * 10 + col;
             }
         }
+
+        inventory.Waypoints[0] = new Coordinates { X = 1, Y = 1 };
+        inventory.Waypoints[1] = new Coordinates { X = 2, Y = 2 };
+        inventory.Waypoints[2] = new Coordinates { X = 3, Y = 3 };
 
         var player = new Player
         {

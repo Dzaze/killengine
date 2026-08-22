@@ -1063,6 +1063,60 @@ public sealed class EndToEndTests
     }
 
     [Fact]
+    public async Task WritePrimitivePath_UpdatesStructArrayElementFieldDirectly()
+    {
+        // Chantier "ecriture indexee dans des tableaux de STRUCTS" :
+        // Inventory.Waypoints (Coordinates[]) -- Waypoints[1].X doit pouvoir
+        // etre ecrit directement. Composition de deux primitives DEJA
+        // existantes separement (adresse d'element de tableau via
+        // GetArrayElementAddress, adresse de champ dans un struct deja
+        // localise via ClrInstanceField.GetAddress(interior:true)) --
+        // ResolveIndexedReference/ResolveArrayElementNode (ClrSession.cs)
+        // les enchaine desormais pour ce cas precis, la ou l'index seul
+        // (element ENTIER, pas un de ses champs) reste rejete plus bas.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+
+        var write = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Inventory.Waypoints[1].X"), JsonValue.Create("555")));
+        Assert.True(write!["verified"]!.GetValue<bool>());
+        Assert.Equal(555, write["value"]!.GetValue<int>());
+
+        // Relecture ClrMD independante -- confirme que seul X a change, Y
+        // (2, pose dans BuildGraph) est intact.
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var waypointsField = Field(inventoryObj!["fields"]!, "Waypoints");
+        var waypointItems = waypointsField!["collection"]!["items"]!.AsArray();
+        Assert.Equal(555, waypointItems[1]!["fields"]!["X"]!.GetValue<int>());
+        Assert.Equal(2, waypointItems[1]!["fields"]!["Y"]!.GetValue<int>());
+
+        // Oracle independant de ClrMD : pipe de controle de la cible.
+        var status = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal(555, status!["player"]!["waypoint1X"]!.GetValue<int>());
+        Assert.Equal(2, status["player"]!["waypoint1Y"]!.GetValue<int>());
+
+        // Garde-fou : ecrire l'ELEMENT ENTIER par index (pas un champ a
+        // l'interieur) reste hors scope -- pas de valeur primitive unique a
+        // encoder -- message clair, pas de plantage ni d'ecriture partielle
+        // silencieuse.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await PipeClient.CallAsync(
+                InspectorPipe,
+                "writePrimitivePath",
+                new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Inventory.Waypoints[1]"), JsonValue.Create("0")));
+        });
+        Assert.Contains("struct", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PathWriteViaLocator_RefindsObjectAfterCompactingGcAndWritesNewAddress()
     {
         // PHASE 59 -- chantier "mutation par chemin symbolique auto-

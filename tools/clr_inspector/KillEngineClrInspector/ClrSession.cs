@@ -2126,10 +2126,19 @@ public sealed class ClrSession : IDisposable
 
     // PHASE 59 : reconnait un chemin indexe qui cible un tableau/List<T> dont
     // l'ELEMENT est un primitif (bool/int8..64/uint8..64/float/double), pas
-    // une reference d'objet. Les tableaux de STRUCTS (element value-type non
-    // primitif) restent hors scope -- ils exigeraient de muter des layouts
-    // internes imbriques, documente comme limite volontaire (voir
-    // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).
+    // une reference d'objet ni un struct. Utilise seulement pour le DERNIER
+    // segment du chemin (l'index est la feuille, ex: Scores[2]) -- quand
+    // l'index n'est PAS la feuille (ex: Waypoints[1].X), c'est
+    // ResolveIndexedReference/ResolveArrayElementNode qui gerent la
+    // composition tableau-de-structs, chantier "ecriture indexee dans des
+    // tableaux de STRUCTS" (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) -- ecrire
+    // un element de tableau de structs ENTIER par index reste hors scope
+    // (pas de valeur primitive unique a encoder), mais un champ primitif a
+    // l'interieur d'un element struct de tableau (Champ[i].SousChamp) est
+    // desormais supporte, un seul niveau de struct verifie par un test
+    // dedie (niveaux plus profonds, ex: struct-dans-struct-dans-tableau,
+    // supportes par la meme composition generique de PathNode/ResolvePathSegment
+    // mais pas explicitement testes pour ce cas precis dans ce lot).
     private static bool IsIndexedFieldPrimitiveArray(PathNode owner, PathSegment segment)
     {
         if (owner.Object is not ClrObject obj || obj.IsNull || obj.Type is null)
@@ -2196,8 +2205,10 @@ public sealed class ClrSession : IDisposable
         if (componentType is null || !IsPrimitiveElement(componentType.ElementType) || componentType.ElementType == ClrElementType.Char)
         {
             throw new ClrSessionException(
-                $"Element {segment.FieldName}[{index}] non primitif ecrivable directement -- les tableaux de structs " +
-                "imbriquees restent hors scope (voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).");
+                $"Element {segment.FieldName}[{index}] non primitif ecrivable directement en tant que FEUILLE du chemin -- " +
+                "un tableau de structs reste hors scope pour ecrire l'element ENTIER (pas de valeur primitive unique a " +
+                $"encoder), mais un champ primitif A L'INTERIEUR d'un element struct est supporte : {segment.FieldName}[{index}].NomDuChamp " +
+                "(voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).");
         }
 
         ulong elementAddress = arrayObject.Type!.GetArrayElementAddress(arrayObject.Address, index);
@@ -2324,9 +2335,16 @@ public sealed class ClrSession : IDisposable
         {
             throw new ClrSessionException($"Index hors limites pour {segment.FieldName}[{index}] (taille {logicalLength}).");
         }
-        if (arrayObject.Type?.ComponentType is null || arrayObject.Type.ComponentType.IsValueType || arrayObject.Type.ComponentType.ElementType == ClrElementType.String)
+        if (arrayObject.Type?.ComponentType is null || arrayObject.Type.ComponentType.ElementType == ClrElementType.String)
         {
             throw new ClrSessionException($"Element {segment.FieldName}[{index}] non supporte : seules les references objet sont modifiables ici.");
+        }
+        if (arrayObject.Type.ComponentType.IsValueType)
+        {
+            throw new ClrSessionException(
+                $"Element {segment.FieldName}[{index}] est un struct -- ecrire l'element ENTIER par index n'est pas supporte " +
+                $"(pas de valeur primitive unique a encoder), mais un champ primitif a l'interieur est supporte : " +
+                $"{segment.FieldName}[{index}].NomDuChamp (voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).");
         }
 
         ulong reference = ParseReferenceValue(valueText);
@@ -2594,7 +2612,7 @@ public sealed class ClrSession : IDisposable
 
             return segment.Index is null
                 ? PathNode.FromObject(next)
-                : PathNode.FromObject(ResolveIndexedReference(next, segment.Index.Value, segment.FieldName));
+                : ResolveIndexedReference(next, segment.Index.Value, segment.FieldName);
         }
 
         if (field.Type?.IsValueType == true)
@@ -2631,7 +2649,7 @@ public sealed class ClrSession : IDisposable
             }
             return segment.Index is null
                 ? PathNode.FromObject(next)
-                : PathNode.FromObject(ResolveIndexedReference(next, segment.Index.Value, segment.FieldName));
+                : ResolveIndexedReference(next, segment.Index.Value, segment.FieldName);
         }
         if (field.Type?.IsValueType == true)
         {
@@ -2646,7 +2664,33 @@ public sealed class ClrSession : IDisposable
             $"Chemin CLR non supporte : {segment.FieldName} est {field.ElementType}, pas une reference ou une struct traversable.");
     }
 
-    private static ClrObject ResolveIndexedReference(ClrObject collection, int index, string segmentName)
+    /// <summary>
+    /// Resout un segment de chemin indexe (<c>Champ[i]</c>) qui n'est PAS le
+    /// dernier segment du chemin -- l'appelant continue forcement par un
+    /// autre segment (ex: <c>Waypoints[1].X</c>). Retourne un
+    /// <see cref="PathNode"/> generique (objet OU struct) plutot qu'un
+    /// <see cref="ClrObject"/> fixe -- chantier "ecriture indexee dans des
+    /// tableaux de STRUCTS" (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) :
+    /// jusqu'ici un tableau/List&lt;T&gt; dont l'ELEMENT est un struct
+    /// (value-type non primitif) etait rejete explicitement des cette etape,
+    /// meme quand le chemin continuait par un champ primitif a l'interieur
+    /// de l'element (ex: <c>Points[2].X</c>). La composition necessaire
+    /// existait deja separement ailleurs dans ce fichier (adresse d'element
+    /// de tableau via <see cref="ClrType.GetArrayElementAddress"/>, adresse
+    /// de champ dans un struct deja localise via
+    /// <c>ClrInstanceField.GetAddress(structAddress, interior: true)</c>,
+    /// reutilisee telle quelle par <see cref="WriteFieldOnValueType"/>) --
+    /// il manquait seulement de les enchainer ici. Une fois ce noeud struct
+    /// retourne, <see cref="ResolvePathSegment"/>/<see cref="WriteFieldOnPathNode"/>
+    /// le traitent comme n'importe quel autre noeud struct deja supporte
+    /// (y compris plusieurs niveaux de struct-dans-struct si le type le
+    /// permet, sans code supplementaire) -- seul un tableau d'elements
+    /// REFERENCE (classe/string) ou PRIMITIF continue d'emprunter les
+    /// chemins dedies existants (<see cref="ResolveArrayElementNode"/>
+    /// pour les references/structs en noeud intermediaire, <see cref="WriteIndexedPrimitiveValue"/>
+    /// pour un primitif en feuille).
+    /// </summary>
+    private static PathNode ResolveIndexedReference(ClrObject collection, int index, string segmentName)
     {
         ClrType? type = collection.Type;
         if (type is null)
@@ -2656,7 +2700,7 @@ public sealed class ClrSession : IDisposable
 
         if (type.IsArray)
         {
-            return ResolveArrayReferenceElement(collection.AsArray(), type.ComponentType, index, $"{segmentName}[{index}]");
+            return ResolveArrayElementNode(collection.AsArray(), type.ComponentType, index, $"{segmentName}[{index}]");
         }
 
         string typeName = type.Name ?? "";
@@ -2673,24 +2717,44 @@ public sealed class ClrSession : IDisposable
             {
                 throw new ClrSessionException($"Stockage interne de la liste {segmentName} introuvable.");
             }
-            return ResolveArrayReferenceElement(items.AsArray(), items.Type.ComponentType, index, $"{segmentName}[{index}]");
+            return ResolveArrayElementNode(items.AsArray(), items.Type.ComponentType, index, $"{segmentName}[{index}]");
         }
 
         throw new ClrSessionException(
-            $"Chemin CLR non supporte : {segmentName}[{index}] cible {typeName}. Seuls les tableaux et List<T> de references sont supportes.");
+            $"Chemin CLR non supporte : {segmentName}[{index}] cible {typeName}. Seuls les tableaux et List<T> de references/structs sont supportes.");
     }
 
-    private static ClrObject ResolveArrayReferenceElement(ClrArray array, ClrType? componentType, int index, string label)
+    /// <summary>
+    /// Resout l'element d'un tableau CLR (index deja valide) en <see
+    /// cref="PathNode"/> -- reference d'objet (comportement historique,
+    /// <see cref="ClrArray.GetObjectValue"/>) ou struct (nouveau, chantier
+    /// "ecriture indexee dans des tableaux de STRUCTS", <see
+    /// cref="ClrArray.GetStructValue"/>). Un element STRING reste rejete ici
+    /// (les strings n'ont pas de champ traversable) : seul un chemin qui se
+    /// termine exactement sur <c>Champ[i]</c> (feuille) peut cibler une
+    /// string, via <see cref="WriteIndexedReferenceValue"/> deja existant.
+    /// </summary>
+    private static PathNode ResolveArrayElementNode(ClrArray array, ClrType? componentType, int index, string label)
     {
         int length = array.GetLength(0);
         if (index >= length)
         {
             throw new ClrSessionException($"Index hors limites pour {label} (longueur {length}).");
         }
-        if (componentType is null || componentType.ElementType == ClrElementType.String || componentType.IsValueType)
+        if (componentType is null || componentType.ElementType == ClrElementType.String)
         {
             throw new ClrSessionException(
-                $"Chemin CLR non supporte : {label} n'est pas une reference d'objet mutable avec champs.");
+                $"Chemin CLR non supporte : {label} n'est pas une reference d'objet ou un struct traversable.");
+        }
+
+        if (componentType.IsValueType)
+        {
+            ClrValueType structValue = array.GetStructValue(index);
+            if (!structValue.IsValid || structValue.Type is null)
+            {
+                throw new ClrSessionException($"Chemin CLR impossible : {label} (struct) invalide.");
+            }
+            return PathNode.FromValueType(structValue);
         }
 
         ClrObject item = array.GetObjectValue(index);
@@ -2698,7 +2762,7 @@ public sealed class ClrSession : IDisposable
         {
             throw new ClrSessionException($"Chemin CLR impossible : {label} est null.");
         }
-        return item;
+        return PathNode.FromObject(item);
     }
 
     private ClrRuntime RequireRuntime()

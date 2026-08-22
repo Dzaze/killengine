@@ -80,6 +80,10 @@ public sealed class MethodDispatcher
                 equippedItemName = player.EquippedItem?.Name,
                 equipChangeCount = player.EquipChangeCount,
                 isArmed = player.IsArmed,
+                // Chantier "ecriture indexee dans des tableaux de STRUCTS" :
+                // oracle independant de ClrMD pour Waypoints[1].X/Y.
+                waypoint1X = player.Inventory.Waypoints[1].X,
+                waypoint1Y = player.Inventory.Waypoints[1].Y,
             },
         };
     }
