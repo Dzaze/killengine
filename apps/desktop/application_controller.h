@@ -523,6 +523,25 @@ public:
     /// Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md pour le detail complet.
     Q_INVOKABLE QVariantMap callClrInstanceMethod(const QString& objectAddressHex, const QString& methodName, const QString& valueText, const QString& valueType);
 
+    /// Reconstruit un chemin root -> ... -> objet cible a travers plusieurs
+    /// sauts de references (chantier "GCRoot chain complet", docs/
+    /// KILLENGINE_CLR_INSPECTOR_SPEC.md) -- delegue integralement au helper
+    /// ClrMD (RPC findGcRootPath), aucune logique cote natif au-dela du
+    /// relai. Point le plus exploratoire du lot : un chemin trouve n'est pas
+    /// garanti le plus court, et un tas volumineux peut rendre l'appel lent
+    /// -- timeout deliberement plus large que les autres methodes RPC
+    /// (voir l'appel a callClrInspectorRpc dans l'implementation).
+    Q_INVOKABLE QVariantMap findClrGcRootPath(const QString& targetObjectAddressHex, int maxDepth, int maxRootsScanned);
+
+    /// Desassemble le code natif deja JITte d'une methode CLR (setter ou
+    /// autre) resolue via la meme voie que callClrInstanceMethod
+    /// (resolveInstanceMethodAddress cote helper ClrMD) : lit un buffer de
+    /// bytes depuis l'adresse native resolue via killcore::MemoryReader, puis
+    /// desassemble en avant via killcore::disassembleForwardWindow
+    /// (core/patch/instruction_patch_suggester.h) -- reutilise le decodeur
+    /// x64 existant, ne le reimplemente pas. Lecture seule, aucune injection.
+    Q_INVOKABLE QVariantMap disassembleClrMethod(const QString& objectAddressHex, const QString& methodName, int instructionCount);
+
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
     Q_INVOKABLE QVariantMap probeKernelDriver() const;
 
