@@ -13143,6 +13143,65 @@ QVariantMap ApplicationController::resolveProfileTarget(const QString& profileNa
     return result;
 }
 
+QVariantMap ApplicationController::comparePointerMapAcrossRestart(const QString& profileName) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    auto locatorKindLabel = [](killcore::LocatorKind kind) -> QString {
+        switch (kind) {
+            case killcore::LocatorKind::ModuleOffset: return "module_offset";
+            case killcore::LocatorKind::Absolute:     return "absolute";
+            case killcore::LocatorKind::PointerChain: return "pointer_chain";
+        }
+        return "unknown";
+    };
+
+    QVariantList entries;
+    int validCount = 0;
+    int invalidCount = 0;
+    int unsupportedCount = 0;
+
+    for (const auto& target : profile.targets) {
+        QVariantMap entry;
+        entry["targetName"] = target.name;
+        entry["locatorKind"] = locatorKindLabel(target.locator.kind);
+        entry["previousAddress"] = QString::number(target.locator.lastAddress, 16);
+
+        uint64_t address = 0;
+        if (killcore::resolveLocatorAddress(m_handle, target.locator, &address)) {
+            entry["status"] = "valid";
+            entry["address"] = QString::number(address, 16);
+            ++validCount;
+        } else {
+            entry["status"] = "invalid";
+            entry["address"] = "";
+            ++invalidCount;
+        }
+        entries.append(entry);
+    }
+
+    result["success"] = true;
+    result["profileName"] = profileName;
+    result["results"] = entries;
+    result["validCount"] = validCount;
+    result["invalidCount"] = invalidCount;
+    result["unsupportedCount"] = unsupportedCount;
+    result["error"] = "";
+    return result;
+}
+
 QVariantMap ApplicationController::activateProfileTarget(const QString& profileName, const QString& targetName) {
     QVariantMap result;
     result["success"] = false;

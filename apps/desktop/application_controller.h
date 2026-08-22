@@ -602,6 +602,13 @@ public:
     /// Résout une cible de profil en adresse absolue pour le processus courant.
     Q_INVOKABLE QVariantMap resolveProfileTarget(const QString& profileName, const QString& targetName);
 
+    /// Roadmap section L — Pointer maps : résout TOUTES les cibles d'un profil
+    /// d'un coup sur le processus attaché (utile après un redémarrage du jeu),
+    /// pour un diagnostic groupé au lieu de revalider chaque cible une par une.
+    /// Retourne {success, profileName, results: [{targetName, locatorKind,
+    /// status, address, previousAddress}], validCount, invalidCount}.
+    Q_INVOKABLE QVariantMap comparePointerMapAcrossRestart(const QString& profileName);
+
     /// Active une cible de profil pour l'utiliser directement depuis l'Assistant.
     Q_INVOKABLE QVariantMap activateProfileTarget(const QString& profileName, const QString& targetName);
 

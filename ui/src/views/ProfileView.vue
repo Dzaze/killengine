@@ -248,6 +248,32 @@ function targetResolutionClass(target: ProfileTargetEntry): string {
   return state.success ? 'ok' : 'fail'
 }
 
+// Roadmap section L — Pointer maps : diagnostic groupé de toutes les cibles du
+// profil d'un coup, utile après un redémarrage du jeu (nouvelle base ASLR)
+// pour éviter de revalider chaque chaîne une par une.
+const pointerMapCompareResult = ref<Record<string, unknown> | null>(null)
+const pointerMapCompareBusy = ref(false)
+const pointerMapResults = computed(
+  () => (pointerMapCompareResult.value?.results as Array<Record<string, unknown>>) ?? [],
+)
+
+async function comparePointerMap() {
+  if (!selectedProfile.value) return
+  pointerMapCompareBusy.value = true
+  try {
+    const controller = backend.getController()
+    if (!controller.comparePointerMapAcrossRestart) {
+      pointerMapCompareResult.value = { success: false, error: 'Vérification groupée non exposée par ce backend.' }
+      return
+    }
+    pointerMapCompareResult.value = await controller.comparePointerMapAcrossRestart(selectedProfile.value)
+  } catch (e) {
+    pointerMapCompareResult.value = { success: false, error: String(e) }
+  } finally {
+    pointerMapCompareBusy.value = false
+  }
+}
+
 async function repairTargetWithCurrentAddress(target: ProfileTargetEntry) {
   if (!selectedProfile.value || !store.selectedCandidateAddress) {
     statusMessage.value = '⚠ Sélectionne une adresse dans Expert avant de réparer cette cible.'
@@ -715,6 +741,46 @@ onMounted(() => {
         </div>
       </div>
 
+      <!-- Roadmap section L — Pointer maps : diagnostic groupé après redémarrage -->
+      <div v-if="profileTargets.length > 0" class="targets-list pointer-map-box">
+        <div class="targets-header">
+          <h3>Vérifier après redémarrage</h3>
+          <button class="btn btn-secondary btn-sm" :disabled="pointerMapCompareBusy" @click="comparePointerMap()">
+            {{ pointerMapCompareBusy ? 'Vérification...' : 'Vérifier toutes les cibles' }}
+          </button>
+        </div>
+        <p class="hint">
+          Résout toutes les cibles du profil d'un coup sur le processus attaché — utile après un redémarrage du jeu
+          (nouvelle base ASLR) pour voir immédiatement quelles chaînes restent valides.
+        </p>
+        <p v-if="pointerMapCompareResult && !pointerMapCompareResult.success" class="error">
+          {{ pointerMapCompareResult.error }}
+        </p>
+        <template v-if="pointerMapResults.length > 0">
+          <p class="hint">
+            {{ pointerMapCompareResult?.validCount }} valide(s) · {{ pointerMapCompareResult?.invalidCount }} invalide(s)
+            <template v-if="Number(pointerMapCompareResult?.unsupportedCount ?? 0) > 0">
+              · {{ pointerMapCompareResult?.unsupportedCount }} non supportée(s)
+            </template>
+          </p>
+          <div v-for="entry in pointerMapResults" :key="String(entry.targetName)" class="target-row">
+            <div class="target-info">
+              <span class="target-name">{{ entry.targetName }}</span>
+              <span class="target-type">{{ entry.locatorKind }}</span>
+            </div>
+            <div class="target-actions">
+              <span
+                class="target-resolution"
+                :class="{ ok: entry.status === 'valid', fail: entry.status === 'invalid', unsupported: entry.status === 'unsupported' }"
+              >
+                {{ entry.status === 'valid' ? `résolu 0x${entry.address}` : entry.status === 'unsupported' ? 'non supporté' : 'introuvable' }}
+              </span>
+              <span v-if="entry.previousAddress" class="target-locator">précédent : 0x{{ entry.previousAddress }}</span>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <div v-if="profilePatches.length > 0" class="patches-list">
         <div class="targets-header">
           <h3>Patchs trainer ({{ profilePatches.length }})</h3>
@@ -1169,6 +1235,15 @@ onMounted(() => {
 .target-resolution.warn {
   border-color: rgba(255, 199, 119, 0.5);
   color: var(--warning);
+}
+
+.target-resolution.unsupported {
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.pointer-map-box {
+  margin-top: 12px;
 }
 
 .target-write-input {

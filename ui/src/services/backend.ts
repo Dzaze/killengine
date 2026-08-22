@@ -1111,6 +1111,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   loadProfile(profileName: string): Promise<Record<string, unknown>>
   deleteProfile(profileName: string): Promise<boolean>
   resolveProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
+  /** Roadmap section L — Pointer maps : résout toutes les cibles du profil d'un coup (diagnostic groupé après redémarrage). */
+  comparePointerMapAcrossRestart?(profileName: string): Promise<Record<string, unknown>>
   activateProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   saveProfileCodePatch?(
     profileName: string,
@@ -2099,6 +2101,9 @@ class BackendService {
         return false
       },
       async resolveProfileTarget() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async comparePointerMapAcrossRestart(_profileName: string) {
         return { success: false, error: 'Mock backend' }
       },
       async activateProfileTarget() {

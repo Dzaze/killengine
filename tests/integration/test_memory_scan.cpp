@@ -335,3 +335,62 @@ TEST(IntegrationMemoryScanTest, ProfileWorkflowSavesResolvesActivatesAndWritesKn
     ASSERT_TRUE(rollback.success) << rollback.errorMessage.toStdString();
     ASSERT_TRUE(rollback.verified) << rollback.errorMessage.toStdString();
 }
+
+// Roadmap section L — Pointer maps : ApplicationController::comparePointerMapAcrossRestart
+// délègue directement à ProfileStore::load + resolveLocatorAddress par cible (voir
+// application_controller.cpp) ; ApplicationController n'est pas instancié dans les tests
+// (aucun précédent dans ce binaire, nécessiterait le scaffolding Qt Quick complet), donc ce
+// test couvre le même mélange valide/invalide au niveau des briques qu'il utilise réellement.
+TEST(IntegrationMemoryScanTest, PointerMapReportsMixedValidAndInvalidTargetsAcrossRestart) {
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadOnly);
+    ASSERT_TRUE(handle.isValid()) << "Could not open KillEngineTestTarget process.";
+
+    ProfileFileGuard profileFile(QString("integration_pointer_map_%1").arg(target.pid()));
+
+    killcore::Profile profile;
+    profile.gameName = "KillEngine Pointer Map Target";
+    profile.executableName = "KillEngineTestTarget.exe";
+
+    // Cible valide : module réellement chargé + petit offset garanti dans l'image.
+    killcore::ProfileTarget validTarget;
+    validTarget.name = "ValidModuleOffset";
+    validTarget.type = killcore::ValueType::Int32;
+    validTarget.locator.kind = killcore::LocatorKind::ModuleOffset;
+    validTarget.locator.module = "KillEngineTestTarget.exe";
+    validTarget.locator.offset = 0x1000;
+    profile.targets.append(validTarget);
+
+    // Cible invalide : module qui n'existe pas dans ce process (simule un module
+    // absent après un redémarrage, ex. DLL optionnelle non chargée cette fois).
+    killcore::ProfileTarget invalidTarget;
+    invalidTarget.name = "InvalidModuleOffset";
+    invalidTarget.type = killcore::ValueType::Int32;
+    invalidTarget.locator.kind = killcore::LocatorKind::ModuleOffset;
+    invalidTarget.locator.module = "ThisModuleDoesNotExist.dll";
+    invalidTarget.locator.offset = 0x1000;
+    profile.targets.append(invalidTarget);
+
+    ASSERT_TRUE(killcore::ProfileStore::save(profile, profileFile.path()));
+
+    killcore::Profile loadedProfile;
+    ASSERT_TRUE(killcore::ProfileStore::load(profileFile.path(), &loadedProfile));
+    ASSERT_EQ(loadedProfile.targets.size(), 2);
+
+    int validCount = 0;
+    int invalidCount = 0;
+    for (const auto& profileTarget : loadedProfile.targets) {
+        uint64_t address = 0;
+        const bool resolved = killcore::resolveLocatorAddress(handle, profileTarget.locator, &address);
+        if (resolved) {
+            ++validCount;
+        } else {
+            ++invalidCount;
+        }
+    }
+
+    EXPECT_EQ(validCount, 1);
+    EXPECT_EQ(invalidCount, 1);
+}
