@@ -505,7 +505,7 @@ public:
     Q_INVOKABLE QVariantMap writeClrPrimitivePathBatch(const QString& objectAddressHex, const QVariantList& operations);
     Q_INVOKABLE QVariantMap enumerateClrRoots(const QString& typeSubstring);
 
-    /// PHASE 58 : variantes "locator" de writeClrPrimitivePath/Batch --
+    /// PHASE 59 : variantes "locator" de writeClrPrimitivePath/Batch --
     /// relocalisent l'objet root via findClrObjectsByFieldValue (meme
     /// mecanisme que resolveProfileTarget/activateProfileTarget pour
     /// LocatorKind::ClrField) juste avant d'ecrire, au lieu d'exiger que
@@ -518,7 +518,7 @@ public:
     Q_INVOKABLE QVariantMap writeClrPrimitivePathByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QString& path, const QString& value);
     Q_INVOKABLE QVariantMap writeClrPrimitivePathBatchByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QVariantList& operations);
 
-    /// PHASE 58 : variante "atomique" de writeClrPrimitivePathBatch --
+    /// PHASE 59 : variante "atomique" de writeClrPrimitivePathBatch --
     /// suspend TOUTES les threads du processus attache
     /// (killcore::ProcessThreadsSuspendGuard, meme primitive RAII que
     /// writeMemoryValuesAtomic) pendant tout l'appel RPC vers le helper
@@ -538,7 +538,7 @@ public:
     /// resout l'adresse native deja JITtee du setter via le helper ClrMD
     /// (RPC resolveInstanceMethodAddress), construit un shellcode x64 fixe
     /// (this en RCX, valeur optionnelle en RDX -- ou en XMM1 si le parametre
-    /// est Single/Double, voir buildCallInstanceMethodShellcode, PHASE 58),
+    /// est Single/Double, voir buildCallInstanceMethodShellcode, PHASE 59),
     /// l'injecte via killcore::injectShellcode puis relit l'objet pour
     /// verifier best-effort. Categoriquement different des autres ecritures
     /// CLR de ce fichier : injecte et EXECUTE du code dans la cible (gate de

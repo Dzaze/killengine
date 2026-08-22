@@ -35,7 +35,7 @@ internal static class NativeSetterInvoker
     /// d'instance : "this" en RCX, valeur immediate optionnelle en RDX,
     /// call sur l'adresse native resolue. <paramref name="paramImmediate"/>
     /// est ignore si <paramref name="hasParam"/> est faux (setter 0-arg).
-    /// PHASE 58 -- <paramref name="paramIsFloat"/> : quand le parametre reel
+    /// PHASE 59 -- <paramref name="paramIsFloat"/> : quand le parametre reel
     /// est Single/Double, la convention d'appel x64 Windows le passe en XMM1
     /// (pas RDX) -- on charge quand meme le bit pattern IEEE754 dans RDX
     /// puis on le copie vers XMM1 via "movq xmm1, rdx" (66 48 0F 6E CA),

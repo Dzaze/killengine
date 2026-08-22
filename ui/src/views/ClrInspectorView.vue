@@ -16,12 +16,12 @@ const locatorType = ref('KillEngine.ClrTestTarget.Player')
 const locatorField = ref('Name')
 const locatorValue = ref('TestSubject')
 const locatorMaxResults = ref(20)
-// PHASE 58 : quand actif, "Écrire chemin"/"Transaction" relocalisent
+// PHASE 59 : quand actif, "Écrire chemin"/"Transaction" relocalisent
 // l'objet via le locator (type/champ identité/valeur identité) juste avant
 // d'écrire, au lieu d'utiliser l'adresse de l'objet actuellement lu -- utile
 // quand l'objet a pu bouger depuis la dernière lecture (GC compactant).
 const useLocatorForWrite = ref(false)
-// PHASE 58 : quand actif, la Transaction multi-champs suspend TOUTES les
+// PHASE 59 : quand actif, la Transaction multi-champs suspend TOUTES les
 // threads du process attaché pendant l'écriture (killcore::
 // ProcessThreadsSuspendGuard) -- plus sûr contre une lecture/écriture
 // concurrente d'une autre thread cible, mais best-effort (pas une garantie

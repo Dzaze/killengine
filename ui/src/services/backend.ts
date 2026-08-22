@@ -1115,7 +1115,7 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   writeClrPrimitivePath?(objectAddressHex: string, path: string, value: string): Promise<ClrRpcResult>
   writeClrPrimitivePathBatch?(objectAddressHex: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
   /**
-   * PHASE 58 : variantes "locator" de writeClrPrimitivePath/Batch --
+   * PHASE 59 : variantes "locator" de writeClrPrimitivePath/Batch --
    * relocalisent l'objet root via findClrObjectsByFieldValue juste avant
    * d'ecrire, au lieu d'exiger une adresse potentiellement perimee
    * (deplacee par un GC compactant depuis la derniere lecture). Erreur
@@ -1124,7 +1124,7 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   writeClrPrimitivePathByLocator?(typeSubstring: string, identityField: string, identityValue: string, path: string, value: string): Promise<ClrRpcResult>
   writeClrPrimitivePathBatchByLocator?(typeSubstring: string, identityField: string, identityValue: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
   /**
-   * PHASE 58 : variante "atomique" de writeClrPrimitivePathBatch -- suspend
+   * PHASE 59 : variante "atomique" de writeClrPrimitivePathBatch -- suspend
    * toutes les threads du processus attache pendant tout l'appel RPC vers
    * le helper ClrMD (killcore::ProcessThreadsSuspendGuard, meme primitive
    * que l'ecriture memoire atomique). Best-effort honnete : pas une

@@ -103,7 +103,7 @@ public sealed class Player
 
     // ------------------------------------------------------------------
     // Propriete jumelle de Vitality mais a parametre DOUBLE -- dediee au
-    // chantier "setters float/double" (PHASE 58,
+    // chantier "setters float/double" (PHASE 59,
     // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md). La convention d'appel x64
     // Windows passe ce 2e argument en XMM1, pas RDX comme Vitality (int) --
     // meme genre de logique metier (clamp + compteur separe) pour prouver
@@ -129,7 +129,7 @@ public sealed class Player
 
     // Tableau de primitifs (int[]) accessible depuis Player -- dedie au
     // chantier "ecriture directe par index dans un tableau primitif"
-    // (PHASE 58). writePrimitivePath doit pouvoir ecrire Scores[i]
+    // (PHASE 59). writePrimitivePath doit pouvoir ecrire Scores[i]
     // directement dans le tableau, pas seulement le lire.
     public int[] Scores = new int[4];
 
@@ -238,7 +238,7 @@ public static class TestRoot
         player.Vitality = 500;
 
         // Warmup du setter a parametre double (set_Vigor), meme raison que
-        // ci-dessus -- necessaire pour PHASE 58 (setters float/double).
+        // ci-dessus -- necessaire pour PHASE 59 (setters float/double).
         player.Vigor = 42.5;
 
         return player;

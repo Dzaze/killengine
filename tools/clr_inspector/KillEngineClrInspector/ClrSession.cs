@@ -688,7 +688,7 @@ public sealed class ClrSession : IDisposable
     }
 
     // Types de parametre primitif supportes pour l'appel reel d'un setter
-    // (v1 : bool + entiers 8/16/32/64 signes/non signes). Etendu en PHASE 58
+    // (v1 : bool + entiers 8/16/32/64 signes/non signes). Etendu en PHASE 59
     // (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) pour couvrir Single/Double :
     // la convention d'appel x64 Windows passe un 2e argument flottant en
     // XMM1, pas RDX -- ClrSession se contente toujours de RESOUDRE l'adresse
@@ -877,7 +877,7 @@ public sealed class ClrSession : IDisposable
         PathSegment leaf = segments[^1];
         if (leaf.Index is not null)
         {
-            // PHASE 58 : un chemin indexe peut cibler soit un tableau/List<T>
+            // PHASE 59 : un chemin indexe peut cibler soit un tableau/List<T>
             // de REFERENCES (deja supporte, WriteIndexedReferenceValue) soit
             // desormais un tableau/List<T> de PRIMITIFS (ex: int[] Scores) --
             // dispatch selon le type d'element reel du champ collection avant
@@ -1246,7 +1246,7 @@ public sealed class ClrSession : IDisposable
         return ReadValueTypePrimitive(entry, valueField);
     }
 
-    // PHASE 58 : reconnait un chemin indexe qui cible un tableau/List<T> dont
+    // PHASE 59 : reconnait un chemin indexe qui cible un tableau/List<T> dont
     // l'ELEMENT est un primitif (bool/int8..64/uint8..64/float/double), pas
     // une reference d'objet. Les tableaux de STRUCTS (element value-type non
     // primitif) restent hors scope -- ils exigeraient de muter des layouts
@@ -1292,7 +1292,7 @@ public sealed class ClrSession : IDisposable
 
     /// <summary>
     /// Ecriture directe par index dans un tableau/List<T> de PRIMITIFS (ex:
-    /// int[] Scores, Scores[2] = 42) -- extension PHASE 58 de
+    /// int[] Scores, Scores[2] = 42) -- extension PHASE 59 de
     /// writePrimitivePath. Resout l'adresse de l'element via
     /// ClrType.GetArrayElementAddress, la meme primitive deja utilisee cote
     /// LECTURE (DescribeArray/ReadArrayElement) et cote ecriture de reference

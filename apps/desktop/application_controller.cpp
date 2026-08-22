@@ -12339,7 +12339,7 @@ QVariantMap ApplicationController::writeClrPrimitivePathBatch(const QString& obj
 }
 
 QVariantMap ApplicationController::writeClrPrimitivePathByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QString& path, const QString& value) {
-    // PHASE 58 : meme patron que resolveProfileTarget/activateProfileTarget
+    // PHASE 59 : meme patron que resolveProfileTarget/activateProfileTarget
     // pour LocatorKind::ClrField -- relocalise l'objet root juste avant
     // d'agir (findClrObjectsByFieldValue), jamais une adresse memorisee par
     // l'appelant qui pourrait avoir bouge apres un GC compactant.
@@ -12395,7 +12395,7 @@ QVariantMap ApplicationController::writeClrPrimitivePathBatchByLocator(const QSt
 }
 
 QVariantMap ApplicationController::writeClrPrimitivePathBatchAtomic(const QString& objectAddressHex, const QVariantList& operations) {
-    // PHASE 58 : meme patron que writeMemoryValuesAtomic -- suspend toutes
+    // PHASE 59 : meme patron que writeMemoryValuesAtomic -- suspend toutes
     // les threads du process attache (sauf le thread appelant, voir
     // ProcessThreadsSuspendGuard) pendant TOUT l'appel RPC vers le helper
     // ClrMD, pas seulement autour d'un WriteProcessMemory isole. Le helper
@@ -12449,7 +12449,7 @@ void appendImm64(QByteArray* out, uint64_t value) {
 // 0x28 = 0x20 shadow space (convention d'appel x64 Windows) + 8 octets pour
 // garder RSP aligne sur 16 octets a l'entree du "call".
 //
-// PHASE 58 -- parametre Single/Double : la convention d'appel x64 Windows
+// PHASE 59 -- parametre Single/Double : la convention d'appel x64 Windows
 // passe un 2e argument FLOTTANT en XMM1, pas RDX. On charge quand meme le
 // bit pattern IEEE754 dans RDX (immediate 64 bits, deja zero-etendu pour un
 // float 32 bits par encodeInstanceMethodParameterImmediate) puis on copie
@@ -12491,7 +12491,7 @@ QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasPara
 // Convertit le nom de type CLR renvoye par resolveInstanceMethodAddress (ex:
 // "Int32") vers le token attendu par killcore::parseValueType. Meme
 // perimetre que le helper .NET (bool + entiers 8/16/32/64 signes/non-signes
-// + Single/Double depuis PHASE 58) : killcore::ValueType n'a pas de variante
+// + Single/Double depuis PHASE 59) : killcore::ValueType n'a pas de variante
 // booleenne, "Boolean" est donc mappe sur uint8 avec normalisation texte
 // true/false -> 1/0 avant de deleguer au parseur numerique existant (pas de
 // parseur booleen reimplemente).
@@ -12627,7 +12627,7 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
     // l'appelant) doit correspondre a la meme categorie, sinon rejet clair
     // plutot que d'injecter un shellcode avec une valeur mal typee.
     uint64_t paramImmediate = 0;
-    // PHASE 58 : determine si le parametre resolu est Single/Double -- pilote
+    // PHASE 59 : determine si le parametre resolu est Single/Double -- pilote
     // le choix RDX (entiers/bool) vs XMM1 (flottants) dans le shellcode ;
     // voir buildCallInstanceMethodShellcode.
     bool paramIsFloat = false;

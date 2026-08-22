@@ -848,7 +848,7 @@ public sealed class EndToEndTests
     [Fact]
     public async Task ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithDoubleParameter_LoadsXmm1AndProducesSideEffect()
     {
-        // PHASE 58 -- chantier "setters float/double" : Player.set_Vigor
+        // PHASE 59 -- chantier "setters float/double" : Player.set_Vigor
         // prend un parametre DOUBLE, pas un entier -- la convention d'appel
         // x64 Windows le passe en XMM1, pas RDX. Preuve que le shellcode
         // charge reellement XMM1 (pas un raccourci d'ecriture memoire brute
@@ -924,7 +924,7 @@ public sealed class EndToEndTests
     [Fact]
     public async Task WritePrimitivePath_UpdatesPrimitiveArrayElementDirectly()
     {
-        // PHASE 58 -- chantier "ecriture directe par index dans un tableau
+        // PHASE 59 -- chantier "ecriture directe par index dans un tableau
         // primitif" : Player.Scores (int[]) doit pouvoir etre ecrit
         // directement par index, pas seulement lu -- distinct du cas deja
         // couvert (tableaux/List<T> de REFERENCES, ex: Inventory.Items[0]).
@@ -958,7 +958,7 @@ public sealed class EndToEndTests
     [Fact]
     public async Task PathWriteViaLocator_RefindsObjectAfterCompactingGcAndWritesNewAddress()
     {
-        // PHASE 58 -- chantier "mutation par chemin symbolique auto-
+        // PHASE 59 -- chantier "mutation par chemin symbolique auto-
         // relocalise apres GC" : reproduit exactement la composition faite
         // cote natif par ApplicationController::writeClrPrimitivePathByLocator
         // (relocaliser via findObjectsByFieldValue PUIS deleguer a
@@ -1029,7 +1029,7 @@ public sealed class EndToEndTests
     [Fact]
     public async Task WritePrimitivePathBatch_AppliesAllOperationsCorrectlyUnderConcurrentGcChurnPressure()
     {
-        // PHASE 58 -- chantier "transaction atomique avec suspension
+        // PHASE 59 -- chantier "transaction atomique avec suspension
         // coordonnee du runtime" : ApplicationController::
         // writeClrPrimitivePathBatchAtomic (cote natif) enveloppe CET appel
         // RPC existant (writePrimitivePathBatch) dans un
