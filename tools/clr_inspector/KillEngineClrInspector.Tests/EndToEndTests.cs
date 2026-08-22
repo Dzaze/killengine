@@ -845,6 +845,82 @@ public sealed class EndToEndTests
         Assert.False(statusAfterZero["player"]!["isAlive"]!.GetValue<bool>());
     }
 
+    [Fact]
+    public async Task ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithDoubleParameter_LoadsXmm1AndProducesSideEffect()
+    {
+        // PHASE 58 -- chantier "setters float/double" : Player.set_Vigor
+        // prend un parametre DOUBLE, pas un entier -- la convention d'appel
+        // x64 Windows le passe en XMM1, pas RDX. Preuve que le shellcode
+        // charge reellement XMM1 (pas un raccourci d'ecriture memoire brute
+        // du champ backing _vigor) : la valeur ecrite (250.0) DOIT etre
+        // clampee a VigorMax (100.0) et un compteur de changements SEPARE
+        // (_vigorChangeCount) s'incremente -- meme discipline que le test
+        // Vitality (int, RDX) plus haut. Process isole pour ne pas affecter
+        // les autres tests partageant le Player du fixture commun.
+        string targetDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tests", "clr_targets", "KillEngineClrTestTarget"), "KillEngineClrTestTarget.dll");
+        string inspectorDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tools", "clr_inspector", "KillEngineClrInspector"), "KillEngineClrInspector.dll");
+
+        const string isolatedTargetPipe = "KillEngineClrTestTargetPipe_VigorSetterTest";
+        const string isolatedInspectorPipe = "KillEngineClrInspectorPipe_VigorSetterTest";
+
+        await using var isolatedTarget = await ManagedProcessFixture.StartAsync(
+            targetDll, isolatedTargetPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_TEST_TARGET_PIPE_NAME"] = isolatedTargetPipe });
+        await using var isolatedInspector = await ManagedProcessFixture.StartAsync(
+            inspectorDll, isolatedInspectorPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_INSPECTOR_PIPE_NAME"] = isolatedInspectorPipe });
+
+        var attachResult = await PipeClient.CallAsync(isolatedInspectorPipe, "attach", new JsonArray(JsonValue.Create(isolatedTarget.Pid)));
+        Assert.Equal("Core", attachResult!["clrFlavor"]!.GetValue<string>());
+
+        var found = await PipeClient.CallAsync(
+            isolatedInspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+        ulong objectAddress = ParseHex(playerAddress);
+
+        // 1) Resolution reelle de l'adresse native via ClrMD -- Vigor est
+        // deja JITte par le warmup unique dans TestRoot.BuildGraph
+        // (ObjectGraph.cs).
+        var resolved = await PipeClient.CallAsync(
+            isolatedInspectorPipe,
+            "resolveInstanceMethodAddress",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Vigor")));
+        Assert.True(resolved!["success"]!.GetValue<bool>());
+        Assert.Equal("set_Vigor", resolved["methodName"]!.GetValue<string>());
+        Assert.Equal("Double", resolved["parameterType"]!.GetValue<string>());
+        Assert.False(resolved["isStatic"]!.GetValue<bool>());
+        string nativeCodeAddressHex = resolved["nativeCodeAddress"]!.GetValue<string>();
+        ulong nativeCodeAddress = ParseHex(nativeCodeAddressHex);
+        Assert.NotEqual(0UL, nativeCodeAddress);
+
+        var statusBefore = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        int changeCountBefore = statusBefore!["player"]!["vigorChangeCount"]!.GetValue<int>();
+
+        // 2) Appel reel du setter (via shellcode, XMM1) avec une valeur qui
+        // DOIT etre clampee -- 250.0 > Player.VigorMax (100.0). Le bit
+        // pattern IEEE754 du double est transmis tel quel (memcpy, pas de
+        // conversion entiere), exactement comme
+        // ApplicationController::encodeInstanceMethodParameterImmediate
+        // cote natif.
+        const double requestedValue = 250.0;
+        ulong paramImmediate = unchecked((ulong)BitConverter.DoubleToInt64Bits(requestedValue));
+        bool completed = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate, nativeCodeAddress, paramIsFloat: true);
+        Assert.True(completed, "Le thread distant n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres l'appel shellcode du setter double (XMM1).");
+
+        var statusAfter = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal(100.0, statusAfter!["player"]!["vigor"]!.GetValue<double>(), 3);
+        Assert.Equal(changeCountBefore + 1, statusAfter["player"]!["vigorChangeCount"]!.GetValue<int>());
+
+        // Cross-verification independante : relecture ClrMD directe du champ
+        // backing (_vigor), meme discipline que le test Vitality.
+        var objAfter = await PipeClient.CallAsync(isolatedInspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        Assert.Equal(100.0, objAfter!["fields"]!["_vigor"]!.GetValue<double>(), 3);
+    }
+
     private static ulong ParseHex(string hex)
     {
         string trimmed = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hex[2..] : hex;

@@ -101,6 +101,32 @@ public sealed class Player
 
     public int VitalityChangeCount => _vitalityChangeCount;
 
+    // ------------------------------------------------------------------
+    // Propriete jumelle de Vitality mais a parametre DOUBLE -- dediee au
+    // chantier "setters float/double" (PHASE 58,
+    // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md). La convention d'appel x64
+    // Windows passe ce 2e argument en XMM1, pas RDX comme Vitality (int) --
+    // meme genre de logique metier (clamp + compteur separe) pour prouver
+    // que le VRAI setter tourne, pas juste une ecriture brute du champ
+    // backing _vigor.
+    // ------------------------------------------------------------------
+    public const double VigorMax = 100.0;
+    private double _vigor;
+    private int _vigorChangeCount;
+
+    public double Vigor
+    {
+        get => _vigor;
+        set
+        {
+            double clamped = value < 0.0 ? 0.0 : (value > VigorMax ? VigorMax : value);
+            _vigor = clamped;
+            _vigorChangeCount++;
+        }
+    }
+
+    public int VigorChangeCount => _vigorChangeCount;
+
     // Propriete jumelle jamais appelee par ce process (aucun warmup dans
     // BuildGraph ci-dessous) -- dediee au test de regression "setter jamais
     // JITte" (ClrMethod.NativeCode vaut alors ulong.MaxValue, pas 0, cote
@@ -203,6 +229,10 @@ public static class TestRoot
         // dessous du seuil de bascule tiered compilation (~30 appels), donc
         // le code natif Tier0 reste stable pour toute la duree du process.
         player.Vitality = 500;
+
+        // Warmup du setter a parametre double (set_Vigor), meme raison que
+        // ci-dessus -- necessaire pour PHASE 58 (setters float/double).
+        player.Vigor = 42.5;
 
         return player;
     }

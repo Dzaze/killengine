@@ -60,6 +60,8 @@ public sealed class MethodDispatcher
                 isAlive = player.IsAlive,
                 vitality = player.Vitality,
                 vitalityChangeCount = player.VitalityChangeCount,
+                vigor = player.Vigor,
+                vigorChangeCount = player.VigorChangeCount,
                 statsRank = player.Stats.Rank,
                 statsLuck = player.Stats.Luck,
                 itemCount = player.Inventory.Items.Count,

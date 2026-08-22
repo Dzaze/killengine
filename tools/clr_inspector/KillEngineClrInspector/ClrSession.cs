@@ -688,22 +688,25 @@ public sealed class ClrSession : IDisposable
     }
 
     // Types de parametre primitif supportes pour l'appel reel d'un setter
-    // (v1) -- exactement le meme perimetre entier que IsWritablePrimitive
-    // (bool + entiers 8/16/32/64 signes/non signes), MOINS Float/Double :
+    // (v1 : bool + entiers 8/16/32/64 signes/non signes). Etendu en PHASE 58
+    // (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) pour couvrir Single/Double :
     // la convention d'appel x64 Windows passe un 2e argument flottant en
-    // XMM1, pas RDX -- shellcode fixe (mov rdx, imm64) volontairement hors
-    // scope pour ce cas, voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md.
+    // XMM1, pas RDX -- ClrSession se contente toujours de RESOUDRE l'adresse
+    // (elle ne sait rien de la convention d'appel), c'est
+    // ApplicationController::buildCallInstanceMethodShellcode (cote natif)
+    // qui charge XMM1 au lieu de RDX quand parameterType vaut "Single" ou
+    // "Double" -- voir la section dediee dans le spec doc.
     // Noms exacts tels que rapportes par ClrMethod.Signature -- verifies par
     // attache ClrMD reelle sur ce process de test (pas devines), reflexion
     // ponctuelle avant d'ecrire cette methode : Boolean/SByte/Byte/Int16/
-    // UInt16/Int32/UInt32/Int64/UInt64 pour les primitifs entiers (noms
-    // courts CLR, sans namespace) ; un type non primitif (string, objet,
-    // struct) apparait toujours prefixe de son namespace complet
+    // UInt16/Int32/UInt32/Int64/UInt64/Single/Double pour les primitifs
+    // (noms courts CLR, sans namespace) ; un type non primitif (string,
+    // objet, struct) apparait toujours prefixe de son namespace complet
     // (ex: "System.String", "KillEngine.ClrTestTarget.Item"), donc jamais en
     // collision avec cette liste.
     private static readonly HashSet<string> SupportedInstanceMethodParameterTypes = new(StringComparer.Ordinal)
     {
-        "Boolean", "SByte", "Byte", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
+        "Boolean", "SByte", "Byte", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64", "Single", "Double",
     };
 
     /// <summary>
@@ -773,8 +776,8 @@ public sealed class ClrSession : IDisposable
         {
             throw new ClrSessionException(
                 $"Type de parametre non supporte : {obj.Type.Name}.{resolvedName}({parameterType}). " +
-                "Seuls bool/int8/int16/int32/int64 (signes et non signes) sont geres en v1 -- " +
-                "pas float/double (convention d'appel XMM1, hors scope), pas string/objet/struct.");
+                "Seuls bool/int8/int16/int32/int64 (signes et non signes)/single/double sont geres -- " +
+                "pas string/objet/struct.");
         }
 
         // ClrMD reel rapporte ulong.MaxValue (pas 0) pour une methode jamais

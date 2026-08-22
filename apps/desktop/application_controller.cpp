@@ -12361,7 +12361,15 @@ void appendImm64(QByteArray* out, uint64_t value) {
 // ne pas devier sans mettre a jour docs/KILLENGINE_CLR_INSPECTOR_SPEC.md.
 // 0x28 = 0x20 shadow space (convention d'appel x64 Windows) + 8 octets pour
 // garder RSP aligne sur 16 octets a l'entree du "call".
-QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasParam, uint64_t paramImmediate, uint64_t nativeCodeAddress) {
+//
+// PHASE 58 -- parametre Single/Double : la convention d'appel x64 Windows
+// passe un 2e argument FLOTTANT en XMM1, pas RDX. On charge quand meme le
+// bit pattern IEEE754 dans RDX (immediate 64 bits, deja zero-etendu pour un
+// float 32 bits par encodeInstanceMethodParameterImmediate) puis on copie
+// RDX -> XMM1 via "movq xmm1, rdx" (66 48 0F 6E CA). RDX porte alors une
+// valeur non pertinente pour l'appelee (registre caller-saved, sans risque)
+// -- seul XMM1 est lu par le JIT pour un parametre float/double.
+QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasParam, uint64_t paramImmediate, uint64_t nativeCodeAddress, bool paramIsFloat = false) {
     QByteArray code;
     code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0x83));
     code.append(static_cast<char>(0xEC)); code.append(static_cast<char>(0x28));   // sub rsp, 0x28
@@ -12370,8 +12378,14 @@ QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasPara
     appendImm64(&code, objectAddress);
 
     if (hasParam) {
-        code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xBA)); // mov rdx, <valeur>
+        code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xBA)); // mov rdx, <valeur / bit pattern IEEE754>
         appendImm64(&code, paramImmediate);
+
+        if (paramIsFloat) {
+            code.append(static_cast<char>(0x66)); code.append(static_cast<char>(0x48));
+            code.append(static_cast<char>(0x0F)); code.append(static_cast<char>(0x6E));
+            code.append(static_cast<char>(0xCA));                                  // movq xmm1, rdx
+        }
     }
 
     code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xB8));   // mov rax, <nativeCodeAddress>
@@ -12389,17 +12403,18 @@ QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasPara
 
 // Convertit le nom de type CLR renvoye par resolveInstanceMethodAddress (ex:
 // "Int32") vers le token attendu par killcore::parseValueType. Meme
-// perimetre entier que le helper .NET (bool + entiers 8/16/32/64
-// signes/non-signes) : killcore::ValueType n'a pas de variante booleenne,
-// "Boolean" est donc mappe sur uint8 avec normalisation texte true/false ->
-// 1/0 avant de deleguer au parseur numerique existant (pas de parseur
-// booleen reimplemente).
+// perimetre que le helper .NET (bool + entiers 8/16/32/64 signes/non-signes
+// + Single/Double depuis PHASE 58) : killcore::ValueType n'a pas de variante
+// booleenne, "Boolean" est donc mappe sur uint8 avec normalisation texte
+// true/false -> 1/0 avant de deleguer au parseur numerique existant (pas de
+// parseur booleen reimplemente).
 bool clrParameterTypeToKillcoreToken(const QString& clrTypeName, QString* token, bool* isBoolean) {
     static const QHash<QString, QString> table = {
         {QStringLiteral("SByte"), QStringLiteral("int8")}, {QStringLiteral("Byte"), QStringLiteral("uint8")},
         {QStringLiteral("Int16"), QStringLiteral("int16")}, {QStringLiteral("UInt16"), QStringLiteral("uint16")},
         {QStringLiteral("Int32"), QStringLiteral("int32")}, {QStringLiteral("UInt32"), QStringLiteral("uint32")},
         {QStringLiteral("Int64"), QStringLiteral("int64")}, {QStringLiteral("UInt64"), QStringLiteral("uint64")},
+        {QStringLiteral("Single"), QStringLiteral("float32")}, {QStringLiteral("Double"), QStringLiteral("float64")},
     };
     if (clrTypeName == QStringLiteral("Boolean")) {
         *isBoolean = true;
@@ -12439,12 +12454,6 @@ bool encodeInstanceMethodParameterImmediate(const QString& valueText, const QStr
     killcore::ValueType type;
     if (!killcore::parseValueType(killcoreToken, &type)) {
         if (error) *error = QStringLiteral("Type de parametre non reconnu : %1").arg(killcoreToken);
-        return false;
-    }
-    if (type == killcore::ValueType::Float32 || type == killcore::ValueType::Float64) {
-        if (error) *error = QStringLiteral(
-            "float/double non supportes pour l'appel de setter (v1) : la convention d'appel x64 Windows passe "
-            "un 2e argument flottant en XMM1, pas RDX -- volontairement hors scope.");
         return false;
     }
 
@@ -12531,6 +12540,10 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
     // l'appelant) doit correspondre a la meme categorie, sinon rejet clair
     // plutot que d'injecter un shellcode avec une valeur mal typee.
     uint64_t paramImmediate = 0;
+    // PHASE 58 : determine si le parametre resolu est Single/Double -- pilote
+    // le choix RDX (entiers/bool) vs XMM1 (flottants) dans le shellcode ;
+    // voir buildCallInstanceMethodShellcode.
+    bool paramIsFloat = false;
     if (hasParam) {
         if (valueText.trimmed().isEmpty()) {
             result["error"] = QStringLiteral("Ce setter attend un parametre (%1) mais aucune valeur n'a ete fournie.").arg(parameterTypeName);
@@ -12542,6 +12555,7 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
             result["error"] = QStringLiteral("Type de parametre CLR non supporte : %1.").arg(parameterTypeName);
             return result;
         }
+        paramIsFloat = (killcoreToken == QStringLiteral("float32") || killcoreToken == QStringLiteral("float64"));
         if (!valueType.trimmed().isEmpty()) {
             const QString requested = valueType.trimmed().toLower();
             const bool matches = isBoolean
@@ -12564,7 +12578,7 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
     // 3) Construit le shellcode fixe et l'injecte via la primitive deja
     // existante et deja testee killcore::injectShellcode (ne reinvente pas
     // CreateRemoteThread/VirtualAllocEx).
-    const QByteArray shellcode = buildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress);
+    const QByteArray shellcode = buildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress, paramIsFloat);
     const auto injected = killcore::injectShellcode(m_handle, shellcode);
     if (!injected.success) {
         result["error"] = injected.error;

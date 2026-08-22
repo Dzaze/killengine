@@ -35,10 +35,16 @@ internal static class NativeSetterInvoker
     /// d'instance : "this" en RCX, valeur immediate optionnelle en RDX,
     /// call sur l'adresse native resolue. <paramref name="paramImmediate"/>
     /// est ignore si <paramref name="hasParam"/> est faux (setter 0-arg).
+    /// PHASE 58 -- <paramref name="paramIsFloat"/> : quand le parametre reel
+    /// est Single/Double, la convention d'appel x64 Windows le passe en XMM1
+    /// (pas RDX) -- on charge quand meme le bit pattern IEEE754 dans RDX
+    /// puis on le copie vers XMM1 via "movq xmm1, rdx" (66 48 0F 6E CA),
+    /// EXACTEMENT le meme encodage que
+    /// ApplicationController::buildCallInstanceMethodShellcode cote natif.
     /// </summary>
-    public static byte[] BuildCallInstanceMethodShellcode(ulong objectAddress, bool hasParam, ulong paramImmediate, ulong nativeCodeAddress)
+    public static byte[] BuildCallInstanceMethodShellcode(ulong objectAddress, bool hasParam, ulong paramImmediate, ulong nativeCodeAddress, bool paramIsFloat = false)
     {
-        using var ms = new MemoryStream(40);
+        using var ms = new MemoryStream(48);
         void Bytes(params byte[] b) => ms.Write(b, 0, b.Length);
         void Imm64(ulong v) => ms.Write(BitConverter.GetBytes(v), 0, 8);
 
@@ -46,7 +52,11 @@ internal static class NativeSetterInvoker
         Bytes(0x48, 0xB9); Imm64(objectAddress); // mov rcx, <objectAddress>
         if (hasParam)
         {
-            Bytes(0x48, 0xBA); Imm64(paramImmediate); // mov rdx, <valeur>
+            Bytes(0x48, 0xBA); Imm64(paramImmediate); // mov rdx, <valeur / bit pattern IEEE754>
+            if (paramIsFloat)
+            {
+                Bytes(0x66, 0x48, 0x0F, 0x6E, 0xCA); // movq xmm1, rdx
+            }
         }
         Bytes(0x48, 0xB8); Imm64(nativeCodeAddress);  // mov rax, <nativeCodeAddress>
         Bytes(0xFF, 0xD0);                    // call rax
@@ -63,9 +73,9 @@ internal static class NativeSetterInvoker
     /// au lieu d'attendre indefiniment (meme discipline que
     /// ApplicationController::callClrInstanceMethod).
     /// </summary>
-    public static bool InvokeInstanceMethod(int pid, ulong objectAddress, bool hasParam, ulong paramImmediate, ulong nativeCodeAddress, int timeoutMs = 3000)
+    public static bool InvokeInstanceMethod(int pid, ulong objectAddress, bool hasParam, ulong paramImmediate, ulong nativeCodeAddress, int timeoutMs = 3000, bool paramIsFloat = false)
     {
-        byte[] shellcode = BuildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress);
+        byte[] shellcode = BuildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress, paramIsFloat);
 
         IntPtr hProcess = OpenProcess(ProcessAllAccess, false, pid);
         if (hProcess == IntPtr.Zero)
