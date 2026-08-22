@@ -955,6 +955,77 @@ public sealed class EndToEndTests
         });
     }
 
+    [Fact]
+    public async Task PathWriteViaLocator_RefindsObjectAfterCompactingGcAndWritesNewAddress()
+    {
+        // PHASE 58 -- chantier "mutation par chemin symbolique auto-
+        // relocalise apres GC" : reproduit exactement la composition faite
+        // cote natif par ApplicationController::writeClrPrimitivePathByLocator
+        // (relocaliser via findObjectsByFieldValue PUIS deleguer a
+        // writePrimitivePath, sans jamais reutiliser une adresse memorisee).
+        // ApplicationController est un objet Qt/C++ inaccessible depuis xUnit
+        // sans harness d'automation Qt (meme limite deja documentee pour le
+        // mecanisme shellcode, voir ResolveInstanceMethodAddress_
+        // ThenRealShellcodeCall_...) -- ce test prouve donc le MECANISME
+        // sous-jacent : locator + ecriture retrouvent et mutent correctement
+        // l'objet apres un GC compactant reel, sans jamais fournir d'adresse
+        // figee entre les deux resolutions.
+        const string isolatedTargetPipe = "KillEngineClrTestTargetPipe_LocatorWriteTest";
+        const string isolatedInspectorPipe = "KillEngineClrInspectorPipe_LocatorWriteTest";
+        string targetDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tests", "clr_targets", "KillEngineClrTestTarget"), "KillEngineClrTestTarget.dll");
+        string inspectorDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tools", "clr_inspector", "KillEngineClrInspector"), "KillEngineClrInspector.dll");
+
+        await using var isolatedTarget = await ManagedProcessFixture.StartAsync(
+            targetDll, isolatedTargetPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_TEST_TARGET_PIPE_NAME"] = isolatedTargetPipe });
+        await using var isolatedInspector = await ManagedProcessFixture.StartAsync(
+            inspectorDll, isolatedInspectorPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_INSPECTOR_PIPE_NAME"] = isolatedInspectorPipe });
+
+        await PipeClient.CallAsync(isolatedInspectorPipe, "attach", new JsonArray(JsonValue.Create(isolatedTarget.Pid)));
+
+        async Task<string> ResolveAddressByLocatorAsync()
+        {
+            var located = await PipeClient.CallAsync(
+                isolatedInspectorPipe,
+                "findObjectsByFieldValue",
+                new JsonArray(
+                    JsonValue.Create("KillEngine.ClrTestTarget.Player"),
+                    JsonValue.Create("Name"),
+                    JsonValue.Create("TestSubject"),
+                    JsonValue.Create(5)));
+            Assert.True(located!["success"]!.GetValue<bool>());
+            return Assert.Single(located["matches"]!.AsArray())!["address"]!.GetValue<string>();
+        }
+
+        string addressBefore = await ResolveAddressByLocatorAsync();
+        Assert.False(string.IsNullOrWhiteSpace(addressBefore));
+
+        // GC compactant reel avec churn -- deplace potentiellement le Player
+        // (pas garanti a 100% pour CET objet precis, meme reserve deja
+        // documentee dans FullMvpWorkflow_FindsSameLogicalObjectAfterCompactingGc :
+        // la preuve centrale est que le mecanisme de re-resolution
+        // fonctionne dans les deux cas, pas une inegalite d'adresse forcee).
+        await PipeClient.CallAsync(isolatedTargetPipe, "setChurnRate", new JsonArray(JsonValue.Create(50_000)));
+        await PipeClient.CallAsync(isolatedTargetPipe, "forceGC");
+        await PipeClient.CallAsync(isolatedTargetPipe, "setChurnRate", new JsonArray(JsonValue.Create(10)));
+        await PipeClient.CallAsync(isolatedInspectorPipe, "flushCachedData");
+
+        // Rejoue la MEME operation via locator, sans jamais donner l'adresse
+        // -- doit retrouver le nouvel objet et ecrire correctement dessus.
+        string addressAfter = await ResolveAddressByLocatorAsync();
+        var write = await PipeClient.CallAsync(
+            isolatedInspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(JsonValue.Create(addressAfter), JsonValue.Create("Health"), JsonValue.Create("31415")));
+        Assert.True(write!["verified"]!.GetValue<bool>());
+
+        var status = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal(31415, status!["player"]!["health"]!.GetValue<int>());
+    }
+
     private static ulong ParseHex(string hex)
     {
         string trimmed = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hex[2..] : hex;

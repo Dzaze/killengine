@@ -16,6 +16,11 @@ const locatorType = ref('KillEngine.ClrTestTarget.Player')
 const locatorField = ref('Name')
 const locatorValue = ref('TestSubject')
 const locatorMaxResults = ref(20)
+// PHASE 58 : quand actif, "Écrire chemin"/"Transaction" relocalisent
+// l'objet via le locator (type/champ identité/valeur identité) juste avant
+// d'écrire, au lieu d'utiliser l'adresse de l'objet actuellement lu -- utile
+// quand l'objet a pu bouger depuis la dernière lecture (GC compactant).
+const useLocatorForWrite = ref(false)
 
 const clrReady = computed(() => Boolean(store.clrInspectorStatus?.running && store.clrInspectorStatus?.attachedProcess))
 
@@ -112,10 +117,19 @@ function writeField(field: ClrFieldInfo) {
 }
 
 function writePath() {
-  const objectAddress = store.clrSelectedObject?.address ?? ''
   const path = pathWritePath.value.trim()
   const value = pathWriteValue.value.trim()
-  if (!objectAddress || !path || !value) return
+  if (!path || !value) return
+  if (useLocatorForWrite.value) {
+    const type = locatorType.value.trim()
+    const field = locatorField.value.trim()
+    const idValue = locatorValue.value.trim()
+    if (!type || !field || !idValue) return
+    void store.writeClrPrimitivePathByLocator(type, field, idValue, path, value)
+    return
+  }
+  const objectAddress = store.clrSelectedObject?.address ?? ''
+  if (!objectAddress) return
   void store.writeClrPrimitivePath(objectAddress, path, value)
 }
 
@@ -136,9 +150,18 @@ function parseBatchOperations(): ClrPathWriteOperation[] {
 }
 
 function writeBatch() {
-  const objectAddress = store.clrSelectedObject?.address ?? ''
   const operations = parseBatchOperations()
-  if (!objectAddress || operations.length === 0) return
+  if (operations.length === 0) return
+  if (useLocatorForWrite.value) {
+    const type = locatorType.value.trim()
+    const field = locatorField.value.trim()
+    const idValue = locatorValue.value.trim()
+    if (!type || !field || !idValue) return
+    void store.writeClrPrimitivePathBatchByLocator(type, field, idValue, operations)
+    return
+  }
+  const objectAddress = store.clrSelectedObject?.address ?? ''
+  if (!objectAddress) return
   void store.writeClrPrimitivePathBatch(objectAddress, operations)
 }
 
@@ -456,6 +479,15 @@ onMounted(() => {
                 </button>
               </div>
             </div>
+            <label class="locator-toggle">
+              <input v-model="useLocatorForWrite" type="checkbox" />
+              <span>Utiliser un locator au lieu d'une adresse (relocalise l'objet via type/champ/valeur juste avant d'écrire — résiste à un déplacement par GC)</span>
+            </label>
+            <div v-if="useLocatorForWrite" class="locator-write-inputs">
+              <input v-model="locatorType" class="type-input" placeholder="Type (ex. KillEngine.ClrTestTarget.Player)" aria-label="Type CLR du locator d'écriture" />
+              <input v-model="locatorField" class="locator-small-input" placeholder="Champ identité" aria-label="Champ identité du locator d'écriture" />
+              <input v-model="locatorValue" class="locator-small-input" placeholder="Valeur identité" aria-label="Valeur identité du locator d'écriture" />
+            </div>
             <input
               v-model="pathWritePath"
               class="path-input"
@@ -472,7 +504,7 @@ onMounted(() => {
             />
             <button
               class="btn btn-secondary"
-              :disabled="store.clrInspectorBusy || !pathWritePath.trim() || !pathWriteValue.trim()"
+              :disabled="store.clrInspectorBusy || !pathWritePath.trim() || !pathWriteValue.trim() || (useLocatorForWrite && (!locatorType.trim() || !locatorField.trim() || !locatorValue.trim()))"
               title="Écrit uniquement un champ primitif feuille atteint par ce chemin."
               @click="writePath"
             >
@@ -491,7 +523,7 @@ onMounted(() => {
               </label>
               <button
                 class="btn btn-secondary"
-                :disabled="store.clrInspectorBusy || parseBatchOperations().length === 0"
+                :disabled="store.clrInspectorBusy || parseBatchOperations().length === 0 || (useLocatorForWrite && (!locatorType.trim() || !locatorField.trim() || !locatorValue.trim()))"
                 title="Applique les lignes dans l'ordre et tente un rollback si une opération échoue."
                 @click="writeBatch"
               >
@@ -960,6 +992,22 @@ onMounted(() => {
 
 .path-write-head {
   grid-column: 1 / -1;
+}
+
+.locator-toggle {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.locator-write-inputs {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .batch-write {

@@ -12338,6 +12338,62 @@ QVariantMap ApplicationController::writeClrPrimitivePathBatch(const QString& obj
     return response;
 }
 
+QVariantMap ApplicationController::writeClrPrimitivePathByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QString& path, const QString& value) {
+    // PHASE 58 : meme patron que resolveProfileTarget/activateProfileTarget
+    // pour LocatorKind::ClrField -- relocalise l'objet root juste avant
+    // d'agir (findClrObjectsByFieldValue), jamais une adresse memorisee par
+    // l'appelant qui pourrait avoir bouge apres un GC compactant.
+    QVariantMap locatorProbe = findClrObjectsByFieldValue(typeSubstring, identityField, identityValue, 2);
+    if (!locatorProbe.value("success").toBool()) {
+        const QString error = locatorProbe.value("error").toString();
+        return {{"success", false}, {"error", error.isEmpty() ? QStringLiteral("Locator CLR introuvable. Attache d'abord le helper CLR.") : error}};
+    }
+    const QVariantList matches = locatorProbe.value("result").toMap().value("matches").toList();
+    if (matches.isEmpty()) {
+        return {{"success", false}, {"error", QStringLiteral("Aucun objet CLR ne correspond a ce locator.")}};
+    }
+    if (matches.size() > 1) {
+        return {{"success", false}, {"error", QStringLiteral(
+            "Locator ambigu : %1 objets correspondent a ce type+champ+valeur. Precise un champ d'identite plus selectif.")
+            .arg(matches.size())}};
+    }
+
+    const QString resolvedAddress = matches.first().toMap().value("address").toString();
+    QVariantMap result = writeClrPrimitivePath(resolvedAddress, path, value);
+    result["relocated"] = true;
+    result["resolvedAddress"] = resolvedAddress;
+    result["typeSubstring"] = typeSubstring;
+    result["identityField"] = identityField;
+    result["identityValue"] = identityValue;
+    return result;
+}
+
+QVariantMap ApplicationController::writeClrPrimitivePathBatchByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QVariantList& operations) {
+    QVariantMap locatorProbe = findClrObjectsByFieldValue(typeSubstring, identityField, identityValue, 2);
+    if (!locatorProbe.value("success").toBool()) {
+        const QString error = locatorProbe.value("error").toString();
+        return {{"success", false}, {"error", error.isEmpty() ? QStringLiteral("Locator CLR introuvable. Attache d'abord le helper CLR.") : error}};
+    }
+    const QVariantList matches = locatorProbe.value("result").toMap().value("matches").toList();
+    if (matches.isEmpty()) {
+        return {{"success", false}, {"error", QStringLiteral("Aucun objet CLR ne correspond a ce locator.")}};
+    }
+    if (matches.size() > 1) {
+        return {{"success", false}, {"error", QStringLiteral(
+            "Locator ambigu : %1 objets correspondent a ce type+champ+valeur. Precise un champ d'identite plus selectif.")
+            .arg(matches.size())}};
+    }
+
+    const QString resolvedAddress = matches.first().toMap().value("address").toString();
+    QVariantMap result = writeClrPrimitivePathBatch(resolvedAddress, operations);
+    result["relocated"] = true;
+    result["resolvedAddress"] = resolvedAddress;
+    result["typeSubstring"] = typeSubstring;
+    result["identityField"] = identityField;
+    result["identityValue"] = identityValue;
+    return result;
+}
+
 QVariantMap ApplicationController::enumerateClrRoots(const QString& typeSubstring) {
     const QString filter = typeSubstring.trimmed();
     QVariantList params;

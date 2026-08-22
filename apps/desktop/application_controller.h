@@ -505,6 +505,19 @@ public:
     Q_INVOKABLE QVariantMap writeClrPrimitivePathBatch(const QString& objectAddressHex, const QVariantList& operations);
     Q_INVOKABLE QVariantMap enumerateClrRoots(const QString& typeSubstring);
 
+    /// PHASE 58 : variantes "locator" de writeClrPrimitivePath/Batch --
+    /// relocalisent l'objet root via findClrObjectsByFieldValue (meme
+    /// mecanisme que resolveProfileTarget/activateProfileTarget pour
+    /// LocatorKind::ClrField) juste avant d'ecrire, au lieu d'exiger que
+    /// l'appelant fournisse une adresse potentiellement perimee (deplacee par
+    /// un GC compactant depuis la derniere lecture). Ne dupliquent pas la
+    /// logique d'ecriture : resolvent l'adresse fraiche puis delegue a
+    /// writeClrPrimitivePath/writeClrPrimitivePathBatch. Erreur claire si 0
+    /// ou plus d'1 objet ne correspond au locator (meme discipline que
+    /// saveClrFieldProfileTarget) -- pas d'ecriture sur un locator ambigu.
+    Q_INVOKABLE QVariantMap writeClrPrimitivePathByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QString& path, const QString& value);
+    Q_INVOKABLE QVariantMap writeClrPrimitivePathBatchByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QVariantList& operations);
+
     /// Appelle REELLEMENT un setter de propriete C# d'instance dans le
     /// processus attache (pas une ecriture memoire brute du champ backing) :
     /// resout l'adresse native deja JITtee du setter via le helper ClrMD

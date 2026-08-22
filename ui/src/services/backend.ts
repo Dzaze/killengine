@@ -1114,6 +1114,15 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   writeClrPrimitiveField?(objectAddressHex: string, fieldName: string, value: string): Promise<ClrRpcResult>
   writeClrPrimitivePath?(objectAddressHex: string, path: string, value: string): Promise<ClrRpcResult>
   writeClrPrimitivePathBatch?(objectAddressHex: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
+  /**
+   * PHASE 58 : variantes "locator" de writeClrPrimitivePath/Batch --
+   * relocalisent l'objet root via findClrObjectsByFieldValue juste avant
+   * d'ecrire, au lieu d'exiger une adresse potentiellement perimee
+   * (deplacee par un GC compactant depuis la derniere lecture). Erreur
+   * claire si 0 ou plus d'1 objet ne correspond au locator.
+   */
+  writeClrPrimitivePathByLocator?(typeSubstring: string, identityField: string, identityValue: string, path: string, value: string): Promise<ClrRpcResult>
+  writeClrPrimitivePathBatchByLocator?(typeSubstring: string, identityField: string, identityValue: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
   enumerateClrRoots?(typeSubstring: string): Promise<ClrRpcResult<ClrRootInfo[]>>
   /**
    * Appelle REELLEMENT un setter de propriete C# d'instance dans le
@@ -2068,6 +2077,12 @@ class BackendService {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async writeClrPrimitivePathBatch(_objectAddressHex: string, _operations: ClrPathWriteOperation[]) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async writeClrPrimitivePathByLocator(_typeSubstring: string, _identityField: string, _identityValue: string, _path: string, _value: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async writeClrPrimitivePathBatchByLocator(_typeSubstring: string, _identityField: string, _identityValue: string, _operations: ClrPathWriteOperation[]) {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async enumerateClrRoots(_typeSubstring: string) {

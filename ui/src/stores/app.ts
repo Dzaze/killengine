@@ -3996,6 +3996,98 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function writeClrPrimitivePathByLocator(typeSubstring: string, identityField: string, identityValue: string, path: string, value: string) {
+    const controller = backend.getController()
+    const type = typeSubstring.trim()
+    const idField = identityField.trim()
+    const idValue = identityValue.trim()
+    const pathText = path.trim()
+    const text = value.trim()
+    if (!controller.writeClrPrimitivePathByLocator) {
+      clrLastResult.value = { success: false, error: 'writeClrPrimitivePathByLocator non exposé par ce backend.' }
+      clrInspectorError.value = clrLastResult.value.error ?? ''
+      return
+    }
+    if (!type || !idField || !idValue || !pathText || !text) return
+    if (!await confirmRiskAction('write', 'Écriture chemin CLR par locator', `${type} (${idField}=${idValue}).${pathText} = ${text}. Objet relocalisé juste avant l'écriture (résistant à un déplacement GC).`)) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.writeClrPrimitivePathByLocator(type, idField, idValue, pathText, text)
+      clrLastResult.value = result
+      clrInspectorError.value = result.success ? '' : (result.error ?? '')
+      const writeResult = result.result as Record<string, unknown> | undefined
+      addActionLog(
+        'clr_inspector',
+        result.success ? 'Chemin CLR écrit (locator)' : 'Écriture chemin CLR par locator échouée',
+        result.success
+          ? `${pathText} @ ${String(writeResult?.resolvedAddress ?? '?')} = ${String(writeResult?.value ?? text)}`
+          : (result.error ?? ''),
+        result.success ? 'success' : 'error',
+      )
+      const resolvedAddress = (result.result as Record<string, unknown> | undefined)?.resolvedAddress as string | undefined
+      if (result.success && resolvedAddress) {
+        await readClrObject(resolvedAddress)
+      }
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      addActionLog('clr_inspector', 'Écriture chemin CLR par locator échouée', String(e), 'error')
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  async function writeClrPrimitivePathBatchByLocator(typeSubstring: string, identityField: string, identityValue: string, operations: ClrPathWriteOperation[]) {
+    const controller = backend.getController()
+    const type = typeSubstring.trim()
+    const idField = identityField.trim()
+    const idValue = identityValue.trim()
+    const sanitized = operations
+      .map((operation) => ({ path: operation.path.trim(), value: operation.value.trim() }))
+      .filter((operation) => operation.path && operation.value)
+      .slice(0, 32)
+    if (!controller.writeClrPrimitivePathBatchByLocator) {
+      clrLastResult.value = { success: false, error: 'writeClrPrimitivePathBatchByLocator non exposé par ce backend.' }
+      clrInspectorError.value = clrLastResult.value.error ?? ''
+      return
+    }
+    if (!type || !idField || !idValue || sanitized.length === 0) return
+    const preview = sanitized.map((operation) => `${operation.path} = ${operation.value}`).join(', ')
+    if (!await confirmRiskAction('write', 'Transaction CLR par locator', `${type} (${idField}=${idValue}): ${preview}. Objet relocalisé juste avant l'écriture, rollback tenté si une opération échoue.`)) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.writeClrPrimitivePathBatchByLocator(type, idField, idValue, sanitized)
+      clrLastResult.value = result
+      const inner = result.result as Record<string, unknown> | undefined
+      const innerSuccess = Boolean(inner?.success ?? result.success)
+      clrInspectorError.value = result.success && innerSuccess ? '' : String(inner?.error ?? result.error ?? '')
+      addActionLog(
+        'clr_inspector',
+        result.success && innerSuccess ? 'Transaction CLR appliquée (locator)' : 'Transaction CLR par locator échouée',
+        result.success && innerSuccess
+          ? `${sanitized.length} opération(s) appliquée(s) @ ${String(inner?.resolvedAddress ?? '?')}.`
+          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ' Rollback OK.' : ''}`,
+        result.success && innerSuccess ? 'success' : 'error',
+      )
+      const resolvedAddress = inner?.resolvedAddress as string | undefined
+      if (result.success && resolvedAddress) {
+        await readClrObject(resolvedAddress)
+      }
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      addActionLog('clr_inspector', 'Transaction CLR par locator échouée', String(e), 'error')
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
   async function callClrInstanceMethod(objectAddressHex: string, methodName: string, valueText: string, valueType: string) {
     const controller = backend.getController()
     const address = objectAddressHex.trim()
@@ -7075,6 +7167,8 @@ async function doEncryptedScan() {
     writeClrPrimitiveField,
     writeClrPrimitivePath,
     writeClrPrimitivePathBatch,
+    writeClrPrimitivePathByLocator,
+    writeClrPrimitivePathBatchByLocator,
     callClrInstanceMethod,
     enumerateClrRoots,
     luaScriptingStatus,
