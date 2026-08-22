@@ -12610,9 +12610,18 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
     const QString nativeCodeAddressHex = resolved.value("nativeCodeAddress").toString();
     const QString parameterTypeName = resolved.value("parameterType").toString(); // vide si setter 0-arg
     const bool hasParam = !parameterTypeName.isEmpty();
+    // Chantier "setters a parametre objet/string" : le helper ClrMD a deja
+    // resolu si le parametre non primitif est un type REFERENCE (accepte)
+    // ou un type VALEUR/struct (rejete cote helper, jamais retourne ici --
+    // voir ClrSession.ResolveInstanceMethodAddress). Ce booleen pilote
+    // uniquement comment ENCODER valueText (adresse hex brute en RDX, pas de
+    // conversion IEEE754/entiere) -- il n'introduit aucune nouvelle logique
+    // de validation de type ici, le helper reste l'autorite.
+    const bool parameterIsReferenceType = resolved.value("parameterIsReferenceType").toBool();
     result["methodName"] = resolvedMethodName;
     result["nativeCodeAddress"] = nativeCodeAddressHex;
     result["parameterType"] = parameterTypeName;
+    result["parameterIsReferenceType"] = parameterIsReferenceType;
 
     uint64_t objectAddress = 0;
     uint64_t nativeCodeAddress = 0;
@@ -12636,29 +12645,88 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
             result["error"] = QStringLiteral("Ce setter attend un parametre (%1) mais aucune valeur n'a ete fournie.").arg(parameterTypeName);
             return result;
         }
-        QString killcoreToken;
-        bool isBoolean = false;
-        if (!clrParameterTypeToKillcoreToken(parameterTypeName, &killcoreToken, &isBoolean)) {
-            result["error"] = QStringLiteral("Type de parametre CLR non supporte : %1.").arg(parameterTypeName);
-            return result;
-        }
-        paramIsFloat = (killcoreToken == QStringLiteral("float32") || killcoreToken == QStringLiteral("float64"));
-        if (!valueType.trimmed().isEmpty()) {
-            const QString requested = valueType.trimmed().toLower();
-            const bool matches = isBoolean
-                ? (requested == QStringLiteral("bool") || requested == QStringLiteral("boolean"))
-                : (requested == killcoreToken);
-            if (!matches) {
-                result["error"] = QStringLiteral(
-                    "Type fourni ('%1') incoherent avec le parametre reel du setter ('%2').").arg(valueType, parameterTypeName);
+
+        if (parameterIsReferenceType) {
+            // Chantier "setters a parametre objet/string" : valueText est
+            // une adresse hex (0x...) vers un objet/string DEJA EXISTANT sur
+            // le tas managed -- PAS d'allocation d'un nouvel objet/string
+            // (demanderait JIT_NewObj/FastAllocateString ou equivalents,
+            // hors de portee, decision arbitree en amont). RDX porte
+            // directement cette adresse : plus SIMPLE a encoder que le cas
+            // float/double (pas de conversion IEEE754/entiere), voir
+            // buildCallInstanceMethodShellcode.
+            if (!valueType.trimmed().isEmpty()) {
+                static const QSet<QString> acceptedReferenceValueTypeTokens = {
+                    QStringLiteral("object"), QStringLiteral("reference"), QStringLiteral("ref"),
+                    QStringLiteral("address"), QStringLiteral("pointer"),
+                };
+                if (!acceptedReferenceValueTypeTokens.contains(valueType.trimmed().toLower())) {
+                    result["error"] = QStringLiteral(
+                        "Type fourni ('%1') incoherent avec le parametre reel du setter (reference/objet, '%2').")
+                        .arg(valueType, parameterTypeName);
+                    return result;
+                }
+            }
+
+            // "null"/"0" reste une valeur legitime (efface la reference,
+            // meme convention que ClrSession.ParseReferenceValue deja
+            // utilisee pour writePrimitivePath sur un changement de
+            // reference) -- pas d'adresse a valider dans ce cas, 0 ne pointe
+            // vers aucun objet par definition.
+            const QString trimmedValue = valueText.trimmed();
+            const bool isNullReference = trimmedValue == QStringLiteral("0")
+                || trimmedValue.compare(QStringLiteral("null"), Qt::CaseInsensitive) == 0;
+
+            uint64_t paramObjectAddress = 0;
+            if (!isNullReference) {
+                if (!parseHexAddress(trimmedValue, &paramObjectAddress)) {
+                    result["error"] = QStringLiteral(
+                        "Valeur invalide pour un parametre objet/reference ('%1') : attendu une adresse hex (0x...) "
+                        "d'un objet DEJA EXISTANT sur le tas, ou 'null'/'0' pour effacer la reference.").arg(valueText);
+                    return result;
+                }
+
+                // Validation minimale AVANT de construire/injecter le
+                // shellcode : ne fait pas confiance a une adresse arbitraire
+                // fournie par l'appelant -- la resout via le helper ClrMD
+                // (readObject, deja utilise plus bas pour la revalidation
+                // post-appel) pour confirmer qu'elle pointe reellement vers
+                // un objet CLR lisible.
+                QVariantMap paramReadResponse = callClrInspectorRpc(QStringLiteral("readObject"), {trimmedValue}, 5000);
+                if (!paramReadResponse.value("success").toBool()) {
+                    result["error"] = QStringLiteral(
+                        "Parametre objet invalide : l'adresse '%1' ne pointe pas vers un objet CLR lisible (%2).")
+                        .arg(valueText, paramReadResponse.value("error").toString());
+                    return result;
+                }
+            }
+
+            paramImmediate = paramObjectAddress;
+        } else {
+            QString killcoreToken;
+            bool isBoolean = false;
+            if (!clrParameterTypeToKillcoreToken(parameterTypeName, &killcoreToken, &isBoolean)) {
+                result["error"] = QStringLiteral("Type de parametre CLR non supporte : %1.").arg(parameterTypeName);
                 return result;
             }
-        }
+            paramIsFloat = (killcoreToken == QStringLiteral("float32") || killcoreToken == QStringLiteral("float64"));
+            if (!valueType.trimmed().isEmpty()) {
+                const QString requested = valueType.trimmed().toLower();
+                const bool matches = isBoolean
+                    ? (requested == QStringLiteral("bool") || requested == QStringLiteral("boolean"))
+                    : (requested == killcoreToken);
+                if (!matches) {
+                    result["error"] = QStringLiteral(
+                        "Type fourni ('%1') incoherent avec le parametre reel du setter ('%2').").arg(valueType, parameterTypeName);
+                    return result;
+                }
+            }
 
-        QString parseError;
-        if (!encodeInstanceMethodParameterImmediate(valueText, killcoreToken, isBoolean, &paramImmediate, &parseError)) {
-            result["error"] = parseError;
-            return result;
+            QString parseError;
+            if (!encodeInstanceMethodParameterImmediate(valueText, killcoreToken, isBoolean, &paramImmediate, &parseError)) {
+                result["error"] = parseError;
+                return result;
+            }
         }
     }
 

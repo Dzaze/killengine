@@ -633,7 +633,7 @@ onMounted(() => {
                 <span>Contrairement aux écritures ci-dessus (mémoire passive), ceci exécute réellement le vrai setter C# dans le processus attaché.</span>
               </div>
               <InfoDot
-                text="Résout l'adresse native déjà JITtée du setter via ClrMD, construit un petit shellcode x64 (this en RCX, valeur en RDX) puis l'exécute par injection dans la cible — logique métier réelle (validation, effets de bord), pas un contournement mémoire brut. Setters d'INSTANCE uniquement, 0 ou 1 paramètre primitif entier (bool/int8..int64/uint8..uint64) : pas float/double, pas string/objet/struct. Le setter doit avoir déjà été déclenché au moins une fois en jeu (JIT), sinon l'appel échoue avec un message clair."
+                text="Résout l'adresse native déjà JITtée du setter via ClrMD, construit un petit shellcode x64 (this en RCX, valeur en RDX) puis l'exécute par injection dans la cible — logique métier réelle (validation, effets de bord), pas un contournement mémoire brut. Setters d'INSTANCE uniquement, 0 ou 1 paramètre : primitif (bool/int8..int64/uint8..uint64/single/double) OU type référence (classe/string) — dans ce dernier cas, saisir l'adresse hex (0x...) d'un objet DÉJÀ EXISTANT sur le tas, pas une nouvelle valeur (pas d'allocation). Jamais de paramètre struct. Le setter doit avoir déjà été déclenché au moins une fois en jeu (JIT), sinon l'appel échoue avec un message clair."
                 align="right"
               />
             </div>
@@ -648,7 +648,7 @@ onMounted(() => {
               <input
                 v-model="callMethodValue"
                 class="path-value-input"
-                placeholder="Valeur (laisser vide si 0 argument)"
+                placeholder="Valeur, ou 0x... pour un paramètre objet/string existant"
                 aria-label="Valeur du paramètre du setter CLR"
                 @keyup.enter="callInstanceMethod"
               />
@@ -665,6 +665,7 @@ onMounted(() => {
               <template v-if="store.clrCallMethodResult.success">
                 <strong>{{ store.clrCallMethodResult.methodName }}</strong>
                 <code>{{ store.clrCallMethodResult.nativeCodeAddress }}</code>
+                <span v-if="store.clrCallMethodResult.parameterIsReferenceType">paramètre : référence (adresse existante)</span>
                 <span>vérifié : {{ store.clrCallMethodResult.verified ? 'oui' : 'non' }}</span>
               </template>
               <template v-else>

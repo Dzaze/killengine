@@ -162,6 +162,11 @@ export interface ClrCallInstanceMethodResult {
   methodName?: string
   nativeCodeAddress?: string
   parameterType?: string
+  /** Chantier "setters a parametre objet/string" : true si le parametre resolu
+   *  est un type reference (classe/string) -- valueText doit alors etre une
+   *  adresse hex (0x...) d'un objet DEJA EXISTANT sur le tas, pas une valeur
+   *  primitive. */
+  parameterIsReferenceType?: boolean
   threadCompleted?: boolean
   verified?: boolean
   error?: string

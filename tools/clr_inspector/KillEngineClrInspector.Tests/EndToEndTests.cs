@@ -922,6 +922,113 @@ public sealed class EndToEndTests
     }
 
     [Fact]
+    public async Task ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithReferenceParameter_PassesExistingObjectAddressAndProducesSideEffect()
+    {
+        // Chantier "setters a parametre objet/string" : Player.set_EquippedItem
+        // prend un parametre de type REFERENCE (Item), pas primitif ni struct
+        // -- RDX porte directement l'adresse d'un objet Item DEJA EXISTANT sur
+        // le tas (pas de nouvelle allocation, hors scope arbitre en amont,
+        // voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md). Preuve que le VRAI
+        // setter tourne (pas une ecriture brute du champ backing
+        // _equippedItem) : IsArmed change EN MEME TEMPS que la reference, et
+        // EquipChangeCount s'incremente separement -- meme discipline de
+        // preuve que Vitality/Vigor plus haut. Process isole pour ne pas
+        // affecter le Player partage par les autres tests.
+        string targetDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tests", "clr_targets", "KillEngineClrTestTarget"), "KillEngineClrTestTarget.dll");
+        string inspectorDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tools", "clr_inspector", "KillEngineClrInspector"), "KillEngineClrInspector.dll");
+
+        const string isolatedTargetPipe = "KillEngineClrTestTargetPipe_ReferenceSetterTest";
+        const string isolatedInspectorPipe = "KillEngineClrInspectorPipe_ReferenceSetterTest";
+
+        await using var isolatedTarget = await ManagedProcessFixture.StartAsync(
+            targetDll, isolatedTargetPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_TEST_TARGET_PIPE_NAME"] = isolatedTargetPipe });
+        await using var isolatedInspector = await ManagedProcessFixture.StartAsync(
+            inspectorDll, isolatedInspectorPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_INSPECTOR_PIPE_NAME"] = isolatedInspectorPipe });
+
+        var attachResult = await PipeClient.CallAsync(isolatedInspectorPipe, "attach", new JsonArray(JsonValue.Create(isolatedTarget.Pid)));
+        Assert.Equal("Core", attachResult!["clrFlavor"]!.GetValue<string>());
+
+        var found = await PipeClient.CallAsync(
+            isolatedInspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+        ulong objectAddress = ParseHex(playerAddress);
+
+        // Retrouve l'adresse REELLE de l'objet Item "Shield" deja existant sur
+        // le tas (le warmup dans BuildGraph a equipe "Sword" -- ce test doit
+        // pointer vers un AUTRE objet existant, pas re-equiper le meme, pour
+        // prouver que la reference ecrite est bien celle demandee).
+        var shieldLocator = await PipeClient.CallAsync(
+            isolatedInspectorPipe,
+            "findObjectsByFieldValue",
+            new JsonArray(
+                JsonValue.Create("KillEngine.ClrTestTarget.Item"), JsonValue.Create("Name"),
+                JsonValue.Create("Shield"), JsonValue.Create(5)));
+        Assert.True(shieldLocator!["success"]!.GetValue<bool>());
+        string shieldAddress = Assert.Single(shieldLocator["matches"]!.AsArray())!["address"]!.GetValue<string>();
+        ulong shieldObjectAddress = ParseHex(shieldAddress);
+
+        // 1) Resolution reelle -- parametre non primitif resolu comme type
+        // REFERENCE (pas struct) : parameterIsReferenceType doit etre true.
+        var resolved = await PipeClient.CallAsync(
+            isolatedInspectorPipe,
+            "resolveInstanceMethodAddress",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("EquippedItem")));
+        Assert.True(resolved!["success"]!.GetValue<bool>());
+        Assert.Equal("set_EquippedItem", resolved["methodName"]!.GetValue<string>());
+        Assert.Equal("KillEngine.ClrTestTarget.Item", resolved["parameterType"]!.GetValue<string>());
+        Assert.True(resolved["parameterIsReferenceType"]!.GetValue<bool>());
+        Assert.False(resolved["isStatic"]!.GetValue<bool>());
+        string nativeCodeAddressHex = resolved["nativeCodeAddress"]!.GetValue<string>();
+        ulong nativeCodeAddress = ParseHex(nativeCodeAddressHex);
+        Assert.NotEqual(0UL, nativeCodeAddress);
+
+        var statusBefore = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal("Sword", statusBefore!["player"]!["equippedItemName"]!.GetValue<string>());
+        int equipChangeCountBefore = statusBefore["player"]!["equipChangeCount"]!.GetValue<int>();
+
+        // 2) Appel reel du setter (shellcode) -- RDX porte DIRECTEMENT
+        // l'adresse de l'objet Shield, pas de conversion IEEE754/entiere
+        // comme pour les primitifs (plus simple a encoder que le cas
+        // float/double).
+        bool completed = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate: shieldObjectAddress, nativeCodeAddress);
+        Assert.True(completed, "Le thread distant n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres l'appel shellcode du setter reference.");
+
+        var statusAfter = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal("Shield", statusAfter!["player"]!["equippedItemName"]!.GetValue<string>());
+        Assert.True(statusAfter["player"]!["isArmed"]!.GetValue<bool>());
+        Assert.Equal(equipChangeCountBefore + 1, statusAfter["player"]!["equipChangeCount"]!.GetValue<int>());
+
+        // Cross-verification independante de l'oracle cote cible : relecture
+        // ClrMD directe -- le champ reference backing (_equippedItem) doit
+        // pointer vers l'adresse Shield.
+        var objAfter = await PipeClient.CallAsync(isolatedInspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        var equippedItemField = Field(objAfter!["fields"]!, "_equippedItem");
+        Assert.NotNull(equippedItemField);
+        Assert.Equal(shieldAddress, equippedItemField!["address"]!.GetValue<string>(), StringComparer.OrdinalIgnoreCase);
+
+        // 3) Deuxieme appel reel avec "null" -- efface la reference (0 en
+        // RDX), meme convention que ClrSession.ParseReferenceValue deja
+        // utilisee ailleurs dans ce module pour writePrimitivePath. Preuve
+        // supplementaire que la logique du VRAI setter tourne : IsArmed doit
+        // redevenir false, EquipChangeCount continue de s'incrementer.
+        bool completedNull = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate: 0UL, nativeCodeAddress);
+        Assert.True(completedNull, "Le thread distant (appel null) n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres le deuxieme appel shellcode (null).");
+
+        var statusAfterNull = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Null(statusAfterNull!["player"]!["equippedItemName"]);
+        Assert.False(statusAfterNull["player"]!["isArmed"]!.GetValue<bool>());
+        Assert.Equal(equipChangeCountBefore + 2, statusAfterNull["player"]!["equipChangeCount"]!.GetValue<int>());
+    }
+
+    [Fact]
     public async Task WritePrimitivePath_UpdatesPrimitiveArrayElementDirectly()
     {
         // PHASE 59 -- chantier "ecriture directe par index dans un tableau

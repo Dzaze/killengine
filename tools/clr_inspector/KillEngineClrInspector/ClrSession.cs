@@ -1549,13 +1549,19 @@ public sealed class ClrSession : IDisposable
 
     /// <summary>
     /// Resout l'adresse native deja JITtee d'un setter d'instance reel (pas
-    /// static, 0 ou 1 parametre primitif entier) pour permettre a KillEngine
-    /// (cote natif, injection shellcode) de l'appeler directement -- ClrMD
-    /// est une API de lecture passive (DAC), elle n'execute jamais de code
-    /// cible elle-meme, cette methode se limite donc a la RESOLUTION
-    /// d'adresse. Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md pour le detail
-    /// complet du perimetre v1 et son mecanisme d'appel (shellcode x64 cote
-    /// ApplicationController::callClrInstanceMethod).
+    /// static, 0 ou 1 parametre) pour permettre a KillEngine (cote natif,
+    /// injection shellcode) de l'appeler directement -- ClrMD est une API de
+    /// lecture passive (DAC), elle n'execute jamais de code cible elle-meme,
+    /// cette methode se limite donc a la RESOLUTION d'adresse. Le parametre,
+    /// s'il y en a un, peut etre primitif (bool/int8..64/uint8..64/single/double)
+    /// OU un type REFERENCE (classe/string/interface -- chantier "setters a
+    /// parametre objet/string", <c>parameterIsReferenceType: true</c> dans le
+    /// resultat) pointant vers un objet DEJA EXISTANT sur le tas -- jamais un
+    /// type VALEUR (struct), rejete explicitement (voir <see
+    /// cref="ParseInstanceMethodParameters"/> et la resolution
+    /// IsValueType ci-dessous). Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md
+    /// pour le detail complet du perimetre et son mecanisme d'appel
+    /// (shellcode x64 cote ApplicationController::callClrInstanceMethod).
     /// </summary>
     public object ResolveInstanceMethodAddress(string objectAddressHex, string methodName)
     {
@@ -1610,12 +1616,45 @@ public sealed class ClrSession : IDisposable
                 $"Signature non supportee : {obj.Type.Name}.{resolvedName} attend {parameterCount} parametres. " +
                 "Seuls les setters a 0 ou 1 parametre sont geres en v1.");
         }
+
+        // Chantier "setters a parametre objet/string" : un parametre non
+        // primitif (jamais en collision avec SupportedInstanceMethodParameterTypes,
+        // voir le commentaire au-dessus de cette liste -- les primitifs sont
+        // toujours rapportes en nom court par ClrMethod.Signature, les types
+        // non primitifs toujours prefixes de leur namespace complet) doit
+        // etre resolu en ClrType REEL pour determiner s'il s'agit d'un type
+        // REFERENCE (classe/string/interface -- accepte, RDX porte l'adresse
+        // brute) ou d'un type VALEUR (struct -- rejete explicitement, la
+        // convention d'appel x64 d'un struct passe par valeur depend de sa
+        // taille/forme, hors de portee volontairement, voir docs/
+        // KILLENGINE_CLR_INSPECTOR_SPEC.md). Verifie par attache ClrMD reelle
+        // avant d'ecrire ce code (pas devine) : ClrMethod n'expose QUE
+        // Signature (string) pour un parametre, aucune API de resolution de
+        // type de parametre -- mais heap.GetTypeByName(nomComplet) resout
+        // avec succes un ClrType reel a partir du nom fourni par la
+        // signature (confirme pour "KillEngine.ClrTestTarget.Item",
+        // "KillEngine.ClrTestTarget.Coordinates" -- struct -- et
+        // "System.String"), avec IsValueType fiable dans les deux cas.
+        bool parameterIsReferenceType = false;
         if (parameterType is not null && !SupportedInstanceMethodParameterTypes.Contains(parameterType))
         {
-            throw new ClrSessionException(
-                $"Type de parametre non supporte : {obj.Type.Name}.{resolvedName}({parameterType}). " +
-                "Seuls bool/int8/int16/int32/int64 (signes et non signes)/single/double sont geres -- " +
-                "pas string/objet/struct.");
+            ClrType? resolvedParameterType = runtime.Heap.GetTypeByName(parameterType);
+            if (resolvedParameterType is null)
+            {
+                throw new ClrSessionException(
+                    $"Type de parametre non resolu : {obj.Type.Name}.{resolvedName}({parameterType}). " +
+                    "Ni primitif reconnu ni type reference resolvable via le tas CLR -- generique/non charge ? " +
+                    "Non supporte.");
+            }
+            if (resolvedParameterType.IsValueType)
+            {
+                throw new ClrSessionException(
+                    $"Type de parametre struct non supporte : {obj.Type.Name}.{resolvedName}({parameterType}). " +
+                    "La convention d'appel x64 d'un struct passe PAR VALEUR depend de sa taille/forme " +
+                    "(registre unique, paire de registres, ou pointeur cache vers une copie selon les cas) -- " +
+                    "trop de variantes pour un shellcode fixe sans risque reel de plantage. Hors scope volontaire.");
+            }
+            parameterIsReferenceType = true;
         }
 
         // ClrMD reel rapporte ulong.MaxValue (pas 0) pour une methode jamais
@@ -1637,6 +1676,7 @@ public sealed class ClrSession : IDisposable
             methodName = resolvedName,
             nativeCodeAddress = ToHex(method.NativeCode),
             parameterType,
+            parameterIsReferenceType,
             isStatic,
         };
     }

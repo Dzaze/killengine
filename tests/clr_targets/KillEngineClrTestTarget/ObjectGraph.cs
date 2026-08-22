@@ -154,6 +154,32 @@ public sealed class Player
 
     public int VigorChangeCount => _vigorChangeCount;
 
+    // ------------------------------------------------------------------
+    // Propriete a parametre OBJET (type reference, pas primitif) -- dediee
+    // au chantier "setters a parametre objet/string" (docs/
+    // KILLENGINE_CLR_INSPECTOR_SPEC.md). Le setter assigne une reference
+    // Item DEJA EXISTANTE sur le tas (pas de nouvelle allocation, hors
+    // scope de ce chantier) et met a jour un compteur/flag separe du champ
+    // backing -- meme discipline de preuve que Vitality/Vigor : la logique
+    // metier (pas juste une ecriture brute de _equippedItem) doit tourner.
+    // ------------------------------------------------------------------
+    private Item? _equippedItem;
+    private int _equipChangeCount;
+
+    public Item? EquippedItem
+    {
+        get => _equippedItem;
+        set
+        {
+            _equippedItem = value;
+            _equipChangeCount++;
+            IsArmed = value is not null;
+        }
+    }
+
+    public int EquipChangeCount => _equipChangeCount;
+    public bool IsArmed;
+
     // Tableau de primitifs (int[]) accessible depuis Player -- dedie au
     // chantier "ecriture directe par index dans un tableau primitif"
     // (PHASE 59). writePrimitivePath doit pouvoir ecrire Scores[i]
@@ -314,6 +340,13 @@ public static class TestRoot
         // Warmup du setter a parametre double (set_Vigor), meme raison que
         // ci-dessus -- necessaire pour PHASE 59 (setters float/double).
         player.Vigor = 42.5;
+
+        // Warmup du setter a parametre objet (set_EquippedItem), meme raison
+        // -- chantier "setters a parametre objet/string". La valeur du
+        // warmup elle-meme n'a pas d'importance (le test dedie appelle ce
+        // setter avec une adresse d'objet reelle par shellcode), seul le
+        // fait qu'il tourne au moins une fois avant l'attache compte.
+        player.EquippedItem = sword;
 
         return player;
     }

@@ -72,6 +72,14 @@ public sealed class MethodDispatcher
                 quickSlot2Name = player.Inventory.QuickSlots[2]?.Name,
                 gold = player.Inventory.Currencies.GetValueOrDefault("gold"),
                 gems = player.Inventory.Currencies.GetValueOrDefault("gems"),
+                // Chantier "setters a parametre objet/string" : oracle
+                // independant de ClrMD pour verifier que le VRAI setter
+                // set_EquippedItem a tourne (pas juste une ecriture brute du
+                // champ backing) -- equippedItemName ET isArmed changent
+                // ensemble, equipChangeCount s'incremente separement.
+                equippedItemName = player.EquippedItem?.Name,
+                equipChangeCount = player.EquipChangeCount,
+                isArmed = player.IsArmed,
             },
         };
     }
