@@ -14,6 +14,7 @@
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
+#include "process/export_resolver.h"
 #include "process/process_enumerator.h"
 #include "process/process_handle.h"
 #include "process/process_suspend.h"
@@ -1697,6 +1698,34 @@ QVariantList ApplicationController::getProcessModules(int pid) const {
 
     KE_LOG_DEBUG() << "getProcessModules(pid=" << pid << ") returned "
                    << result.size() << " modules";
+    return result;
+}
+
+QVariantMap ApplicationController::resolveSymbolAddress(const QString& moduleName, const QString& functionName) const {
+    QVariantMap result;
+    result["success"] = false;
+    result["module"] = moduleName;
+    result["function"] = functionName;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (moduleName.trimmed().isEmpty() || functionName.trimmed().isEmpty()) {
+        result["error"] = "Module et fonction requis.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    QString error;
+    if (!killcore::resolveRemoteExportAddress(m_handle, moduleName, functionName, &address, &error)) {
+        result["error"] = error.isEmpty() ? "Résolution de symbole échouée." : error;
+        return result;
+    }
+
+    result["success"] = true;
+    result["address"] = QString::number(address, 16);
+    result["error"] = "";
     return result;
 }
 

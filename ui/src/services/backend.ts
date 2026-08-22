@@ -1022,6 +1022,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   injectDllIntoProcess?(dllPath: string): Promise<Record<string, unknown>>
   installFunctionHook?(targetAddressHex: string, hookAddressHex: string): Promise<Record<string, unknown>>
   removeFunctionHook?(targetAddressHex: string): Promise<Record<string, unknown>>
+  /** Roadmap section I — résout "module!fonction" (ex. kernel32.dll!CreateFileW) en adresse absolue via la table d'export PE distante. */
+  resolveSymbolAddress?(moduleName: string, functionName: string): Promise<Record<string, unknown>>
   parseAutoAssemblerScript?(scriptText: string): Promise<Record<string, unknown>>
   executeAutoAssemblerScript?(scriptText: string): Promise<Record<string, unknown>>
   restoreAutoAssemblerScript?(): Promise<Record<string, unknown>>
@@ -1804,6 +1806,9 @@ class BackendService {
         return { success: false, error: 'Mock backend' }
       },
       async removeFunctionHook(_targetAddressHex: string) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async resolveSymbolAddress(_moduleName: string, _functionName: string) {
         return { success: false, error: 'Mock backend' }
       },
       async parseAutoAssemblerScript(_scriptText: string) {

@@ -643,6 +643,10 @@ let nextWatchedChainId = 1
   const hookTargetAddress = ref('')
   const hookFunctionAddress = ref('')
   const activeFunctionHook = ref<Record<string, unknown> | null>(null)
+  // Roadmap section I — résolution "module!fonction" -> adresse (table d'export PE distante).
+  const symbolModuleName = ref('')
+  const symbolFunctionName = ref('')
+  const symbolResolveResult = ref<Record<string, unknown> | null>(null)
   const autoAsmScriptText = ref('')
   const autoAsmPreview = ref<Record<string, unknown> | null>(null)
   const autoAsmResult = ref<Record<string, unknown> | null>(null)
@@ -6490,6 +6494,39 @@ async function doEncryptedScan() {
     }
   }
 
+  async function resolveSymbol() {
+    const moduleName = symbolModuleName.value.trim()
+    const functionName = symbolFunctionName.value.trim()
+    if (!moduleName || !functionName) return
+
+    const controller = backend.getController()
+    if (!controller.resolveSymbolAddress) {
+      symbolResolveResult.value = { success: false, error: 'Résolution de symbole non exposée par ce backend.' }
+      return
+    }
+
+    try {
+      symbolResolveResult.value = await controller.resolveSymbolAddress(moduleName, functionName)
+      const ok = symbolResolveResult.value.success === true
+      addActionLog(
+        'injection',
+        ok ? 'Symbole résolu' : 'Résolution de symbole échouée',
+        `${moduleName}!${functionName}${ok ? ` -> 0x${symbolResolveResult.value.address}` : `. ${String(symbolResolveResult.value.error ?? '')}`}`.trim(),
+        ok ? 'success' : 'warning',
+      )
+    } catch (e) {
+      symbolResolveResult.value = { success: false, error: String(e) }
+      addActionLog('injection', 'Résolution de symbole échouée', String(e), 'error')
+    }
+  }
+
+  // Réutilise l'adresse résolue comme cible de hook sans re-taper l'hexadécimal.
+  function applyResolvedSymbolToHookTarget() {
+    if (symbolResolveResult.value?.success === true && symbolResolveResult.value.address) {
+      hookTargetAddress.value = String(symbolResolveResult.value.address)
+    }
+  }
+
   async function previewAutoAsmScript() {
     const script = autoAsmScriptText.value
     if (!script.trim()) return
@@ -7048,6 +7085,11 @@ async function doEncryptedScan() {
     hookTargetAddress,
     hookFunctionAddress,
     activeFunctionHook,
+    symbolModuleName,
+    symbolFunctionName,
+    symbolResolveResult,
+    resolveSymbol,
+    applyResolvedSymbolToHookTarget,
     autoAsmScriptText,
     autoAsmPreview,
     autoAsmResult,

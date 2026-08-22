@@ -79,6 +79,12 @@ public:
     /// Retourne une liste de maps: {name, path, baseAddress, size}
     Q_INVOKABLE QVariantList getProcessModules(int pid) const;
 
+    /// Résout "module!fonction" en adresse absolue via la table d'export PE lue
+    /// dans le processus attaché (contrairement à getProcessModules, ceci marche
+    /// aussi pour l'exécutable du jeu lui-même, pas seulement les DLL système).
+    /// Retourne {success, address, module, function, error}.
+    Q_INVOKABLE QVariantMap resolveSymbolAddress(const QString& moduleName, const QString& functionName) const;
+
     /// Attache KillEngine à un processus.
     Q_INVOKABLE bool attachProcess(int pid);
 
