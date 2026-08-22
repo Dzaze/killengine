@@ -38,3 +38,18 @@ TEST(ValueParserTest, ParsesUnsignedCompactTypes) {
     EXPECT_TRUE(killcore::parseScanValue("65535", killcore::ValueType::UInt16, &value));
     EXPECT_FALSE(killcore::parseScanValue("-1", killcore::ValueType::UInt16, &value));
 }
+
+TEST(ValueParserTest, ParsesBetweenNextScanModeAndAlias) {
+    killcore::NextScanMode mode;
+    EXPECT_TRUE(killcore::parseNextScanMode("between", &mode));
+    EXPECT_EQ(mode, killcore::NextScanMode::Between);
+    EXPECT_TRUE(killcore::parseNextScanMode("range", &mode));
+    EXPECT_EQ(mode, killcore::NextScanMode::Between);
+    EXPECT_TRUE(killcore::parseNextScanMode("Between", &mode));
+    EXPECT_EQ(mode, killcore::NextScanMode::Between);
+}
+
+TEST(ValueParserTest, RejectsUnknownNextScanMode) {
+    killcore::NextScanMode mode;
+    EXPECT_FALSE(killcore::parseNextScanMode("bogus", &mode));
+}

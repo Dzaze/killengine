@@ -38,6 +38,7 @@ enum class NextScanMode {
     Increased,
     Decreased,
     Delta,
+    Between, ///< Candidats dont la valeur courante est dans [min, max] (borné, valeur = "min,max").
 };
 
 struct ScanMatch {

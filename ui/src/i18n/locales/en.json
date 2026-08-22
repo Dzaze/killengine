@@ -64,6 +64,9 @@
     "modeIncreased": "Increased",
     "modeDecreased": "Decreased",
     "modeDelta": "Delta",
+    "modeBetween": "Between two values",
+    "rangeMin": "Min",
+    "rangeMax": "Max",
     "nextScanHint": "Change the value in the game, pick what happened from the list, then click Next Scan."
   },
   "unknown": {

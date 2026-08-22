@@ -186,6 +186,10 @@ bool parseNextScanMode(const QString& text, NextScanMode* out) {
         *out = NextScanMode::Delta;
         return true;
     }
+    if (normalized == "between" || normalized == "range") {
+        *out = NextScanMode::Between;
+        return true;
+    }
 
     return false;
 }

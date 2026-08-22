@@ -8,6 +8,24 @@ import { formatNumber, formatRate } from '@/utils/format'
 const store = useAppStore()
 
 const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0) > 0)
+
+// Mode "between" : deux champs min/max composent la valeur "min,max" attendue
+// par ApplicationController::nextScan côté backend.
+const isBetweenMode = computed(() => store.nextScanMode === 'between')
+const rangeMin = computed({
+  get: () => store.nextScanValue.split(',')[0] ?? '',
+  set: (min: string) => {
+    const max = store.nextScanValue.split(',')[1] ?? ''
+    store.nextScanValue = `${min},${max}`
+  },
+})
+const rangeMax = computed({
+  get: () => store.nextScanValue.split(',')[1] ?? '',
+  set: (max: string) => {
+    const min = store.nextScanValue.split(',')[0] ?? ''
+    store.nextScanValue = `${min},${max}`
+  },
+})
 </script>
 
 <template>
@@ -43,8 +61,26 @@ const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0
         <option value="increased">{{ $t('scan.modeIncreased') }}</option>
         <option value="decreased">{{ $t('scan.modeDecreased') }}</option>
         <option value="delta">{{ $t('scan.modeDelta') }}</option>
+        <option value="between">{{ $t('scan.modeBetween') }}</option>
       </select>
+      <template v-if="isBetweenMode">
+        <input
+          v-model="rangeMin"
+          :disabled="store.scanBusy || !hasCandidateContext"
+          :placeholder="$t('scan.rangeMin')"
+          class="input"
+          @keyup.enter="store.doNextScan()"
+        />
+        <input
+          v-model="rangeMax"
+          :disabled="store.scanBusy || !hasCandidateContext"
+          :placeholder="$t('scan.rangeMax')"
+          class="input"
+          @keyup.enter="store.doNextScan()"
+        />
+      </template>
       <input
+        v-else
         v-model="store.nextScanValue"
         :disabled="store.scanBusy || !hasCandidateContext || (store.nextScanMode !== 'exact' && store.nextScanMode !== 'delta')"
         :placeholder="$t('scan.nextValue')"

@@ -4608,6 +4608,34 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         }
     }
 
+    double rangeMin = 0.0;
+    double rangeMax = 0.0;
+    if (scanMode == killcore::NextScanMode::Between) {
+        // Separateurs acceptes : ',' et ';'. Pas de '-' (ambigu avec un nombre
+        // negatif). ';' en priorite pour permettre ',' comme separateur decimal
+        // dans chaque borne (ex. "50,5;100,2").
+        const QString rangeText = value.trimmed();
+        QStringList parts = rangeText.split(';', Qt::SkipEmptyParts);
+        if (parts.size() != 2) {
+            parts = rangeText.split(',', Qt::SkipEmptyParts);
+        }
+        bool okMin = false;
+        bool okMax = false;
+        if (parts.size() == 2) {
+            rangeMin = parts[0].trimmed().replace(',', '.').toDouble(&okMin);
+            rangeMax = parts[1].trimmed().replace(',', '.').toDouble(&okMax);
+        }
+        if (!okMin || !okMax) {
+            result["error"] = "Plage invalide. Utilise le format \"min,max\" (ex. 50,100). "
+                               "Le séparateur '-' n'est pas supporté (ambigu avec un nombre négatif).";
+            return result;
+        }
+        if (rangeMin > rangeMax) {
+            result["error"] = "Plage invalide : min doit être ≤ max.";
+            return result;
+        }
+    }
+
     emit scanStarted();
     emit scanProgress(0);
     killcore::MemoryReader reader(m_handle);
@@ -4673,6 +4701,9 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
                 break;
             case killcore::NextScanMode::Delta:
                 keep = std::abs((currentNumber - previousNumber) - targetNumber) < 0.000001;
+                break;
+            case killcore::NextScanMode::Between:
+                keep = currentNumber >= rangeMin && currentNumber <= rangeMax;
                 break;
         }
 
