@@ -419,6 +419,92 @@ TEST(InstructionPatchSuggester, InferProbeValueTypeDetectsFloatAndDoubleMnemonic
     EXPECT_EQ(inferProbeValueType(doubleMov), ValueType::Float64);
 }
 
+TEST(InstructionPatchSuggester, DisassembleForwardWindowDecodesKnownShellcodeSequence) {
+    // Meme sequence exacte (a valeurs d'immediat pres) que le shellcode fixe
+    // documente dans docs/KILLENGINE_CLR_INSPECTOR_SPEC.md pour l'appel reel
+    // d'un setter CLR (ApplicationController::callClrInstanceMethod) -- 8
+    // instructions x64 simples, connues et stables, bon candidat de test pour
+    // le desassemblage AVANT (chantier "desassemblage de methode").
+    const QByteArray bytes = QByteArray::fromHex(
+        "4883EC28"                   // sub rsp, 0x28
+        "48B98877665544332211"       // mov rcx, 0x1122334455667788
+        "48BA0000000000000000"       // mov rdx, 0
+        "48B80000000000000000"       // mov rax, 0
+        "FFD0"                       // call rax
+        "4883C428"                   // add rsp, 0x28
+        "33C0"                       // xor eax, eax
+        "C3");                       // ret
+
+    const auto instructions = disassembleForwardWindow(bytes, 8);
+
+    ASSERT_EQ(instructions.size(), 8);
+    for (const auto& instruction : instructions) {
+        EXPECT_TRUE(instruction.success);
+        EXPECT_GT(instruction.length, 0);
+    }
+    EXPECT_EQ(instructions[0].length, 4);   // sub rsp, 0x28
+    EXPECT_EQ(instructions[4].length, 2);   // call rax
+    EXPECT_EQ(instructions.last().length, 1); // ret
+
+    if (instructions[1].decoder != "zydis") {
+        // Le decodeur builtin (sans Zydis) traite "mov r64, imm64" (REX.W +
+        // B8-BF) comme un imm32 (limite connue, pas introduite par ce
+        // chantier) -- la longueur totale exacte n'est fiable qu'avec Zydis,
+        // meme convention de skip que le reste de ce fichier de tests.
+        GTEST_SKIP() << "Longueur exacte des mov r64,imm64 non fiable sans decodeur Zydis (KILLENGINE_HAS_ZYDIS absent).";
+    }
+    int totalLength = 0;
+    for (const auto& instruction : instructions) {
+        totalLength += instruction.length;
+    }
+    EXPECT_EQ(totalLength, bytes.size());
+    EXPECT_EQ(instructions[1].length, 10);  // mov rcx, imm64
+}
+
+TEST(InstructionPatchSuggester, DisassembleForwardWindowRespectsInstructionCountLimit) {
+    const QByteArray bytes = QByteArray::fromHex(
+        "4883EC28"                   // sub rsp, 0x28
+        "48B98877665544332211"       // mov rcx, imm64
+        "48BA0000000000000000"       // mov rdx, imm64
+        "48B80000000000000000"       // mov rax, imm64
+        "FFD0"
+        "4883C428"
+        "33C0"
+        "C3");
+
+    const auto instructions = disassembleForwardWindow(bytes, 3);
+
+    ASSERT_EQ(instructions.size(), 3);
+    EXPECT_EQ(instructions[0].length, 4);
+    if (instructions[1].decoder != "zydis") {
+        GTEST_SKIP() << "Longueur exacte des mov r64,imm64 non fiable sans decodeur Zydis (KILLENGINE_HAS_ZYDIS absent).";
+    }
+    EXPECT_EQ(instructions[1].length, 10);
+    EXPECT_EQ(instructions[2].length, 10);
+}
+
+TEST(InstructionPatchSuggester, DisassembleForwardWindowReturnsPartialResultOnTruncatedBuffer) {
+    // Buffer coupe en plein milieu de la 3e instruction (mov rdx, imm64) :
+    // les 2 premieres instructions completes doivent quand meme etre
+    // retournees (pas de tout-ou-rien), la 3e est abandonnee proprement.
+    const QByteArray fullBytes = QByteArray::fromHex(
+        "4883EC28"                   // sub rsp, 0x28 (4 octets)
+        "48B98877665544332211"       // mov rcx, imm64 (10 octets)
+        "48BA0000000000000000");     // mov rdx, imm64 (10 octets, tronque ci-dessous)
+    const QByteArray truncated = fullBytes.left(4 + 10 + 3); // 3 octets seulement de la 3e instruction
+
+    const auto instructions = disassembleForwardWindow(truncated, 10);
+
+    ASSERT_EQ(instructions.size(), 2);
+    EXPECT_TRUE(instructions[0].success);
+    EXPECT_TRUE(instructions[1].success);
+    EXPECT_EQ(instructions[0].length, 4);
+    if (instructions[1].decoder != "zydis") {
+        GTEST_SKIP() << "Longueur exacte des mov r64,imm64 non fiable sans decodeur Zydis (KILLENGINE_HAS_ZYDIS absent).";
+    }
+    EXPECT_EQ(instructions[1].length, 10);
+}
+
 TEST(ProfilePatchState, ClassifiesOriginalCode) {
     const auto state = classifyProfilePatchMemoryState(1, 0, false, true);
 
