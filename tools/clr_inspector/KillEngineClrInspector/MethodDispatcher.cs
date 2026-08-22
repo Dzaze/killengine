@@ -37,6 +37,8 @@ public sealed class MethodDispatcher
             "writePrimitivePath" => WritePrimitivePath(args),
             "writePrimitivePathBatch" => WritePrimitivePathBatch(args),
             "enumerateRoots" => EnumerateRoots(args),
+            "findStaticFields" => FindStaticFields(args),
+            "findGcRootPath" => FindGcRootPath(args),
             "shutdown" => Shutdown(),
             _ => throw new MethodDispatchException($"Methode inconnue : {method}"),
         };
@@ -117,6 +119,43 @@ public sealed class MethodDispatcher
         try
         {
             return _session.EnumerateRoots(typeSubstring);
+        }
+        catch (ClrSessionException ex)
+        {
+            throw new MethodDispatchException(ex.Message);
+        }
+    }
+
+    private object FindStaticFields(JsonArray args)
+    {
+        if (args.Count < 1 || args.Count > 2)
+        {
+            throw new MethodDispatchException("findStaticFields attend [typeSubstring, fieldNameSubstring?].");
+        }
+        string typeSubstring = args[0]?.GetValue<string>() ?? throw new MethodDispatchException("typeSubstring manquant.");
+        string? fieldNameSubstring = args.Count >= 2 && args[1] is not null ? args[1]!.GetValue<string>() : null;
+        try
+        {
+            return _session.FindStaticFields(typeSubstring, fieldNameSubstring);
+        }
+        catch (ClrSessionException ex)
+        {
+            throw new MethodDispatchException(ex.Message);
+        }
+    }
+
+    private object FindGcRootPath(JsonArray args)
+    {
+        if (args.Count < 1 || args.Count > 3)
+        {
+            throw new MethodDispatchException("findGcRootPath attend [targetObjectAddressHex, maxDepth?, maxRootsScanned?].");
+        }
+        string targetAddressHex = args[0]?.GetValue<string>() ?? throw new MethodDispatchException("targetObjectAddressHex manquant.");
+        int maxDepth = args.Count >= 2 && args[1] is not null ? args[1]!.GetValue<int>() : 8;
+        int maxRootsScanned = args.Count >= 3 && args[2] is not null ? args[2]!.GetValue<int>() : 4000;
+        try
+        {
+            return _session.FindGcRootPath(targetAddressHex, maxDepth, maxRootsScanned);
         }
         catch (ClrSessionException ex)
         {
