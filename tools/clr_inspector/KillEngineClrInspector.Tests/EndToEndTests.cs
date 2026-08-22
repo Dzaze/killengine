@@ -921,6 +921,40 @@ public sealed class EndToEndTests
         Assert.Equal(100.0, objAfter!["fields"]!["_vigor"]!.GetValue<double>(), 3);
     }
 
+    [Fact]
+    public async Task WritePrimitivePath_UpdatesPrimitiveArrayElementDirectly()
+    {
+        // PHASE 58 -- chantier "ecriture directe par index dans un tableau
+        // primitif" : Player.Scores (int[]) doit pouvoir etre ecrit
+        // directement par index, pas seulement lu -- distinct du cas deja
+        // couvert (tableaux/List<T> de REFERENCES, ex: Inventory.Items[0]).
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+
+        var write = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Scores[2]"), JsonValue.Create("777")));
+        Assert.True(write!["verified"]!.GetValue<bool>());
+        Assert.Equal(777, write["value"]!.GetValue<int>());
+
+        var status = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal(777, status!["player"]!["scores"]![2]!.GetValue<int>());
+
+        // Garde-fou : index hors limites doit rester rejete proprement (pas
+        // d'ecriture hors tableau).
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await PipeClient.CallAsync(
+                InspectorPipe,
+                "writePrimitivePath",
+                new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Scores[99]"), JsonValue.Create("1")));
+        });
+    }
+
     private static ulong ParseHex(string hex)
     {
         string trimmed = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hex[2..] : hex;

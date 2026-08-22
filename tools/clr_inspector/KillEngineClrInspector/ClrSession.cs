@@ -877,6 +877,15 @@ public sealed class ClrSession : IDisposable
         PathSegment leaf = segments[^1];
         if (leaf.Index is not null)
         {
+            // PHASE 58 : un chemin indexe peut cibler soit un tableau/List<T>
+            // de REFERENCES (deja supporte, WriteIndexedReferenceValue) soit
+            // desormais un tableau/List<T> de PRIMITIFS (ex: int[] Scores) --
+            // dispatch selon le type d'element reel du champ collection avant
+            // d'ecrire, pas de melange des deux chemins.
+            if (IsIndexedFieldPrimitiveArray(owner, leaf))
+            {
+                return WriteIndexedPrimitiveValue(owner, leaf, valueText, path);
+            }
             return WriteIndexedReferenceValue(owner, leaf, valueText, path);
         }
 
@@ -969,6 +978,11 @@ public sealed class ClrSession : IDisposable
         PathNode owner = ResolvePathOwner(rootObj, segments);
         if (leaf.Index is not null)
         {
+            if (IsIndexedFieldPrimitiveArray(owner, leaf))
+            {
+                object value = ReadIndexedPrimitiveValue(owner, leaf);
+                return ValueToWriteText(value);
+            }
             ClrObject readBack = ReadIndexedReferenceValue(owner, leaf);
             return readBack.IsNull ? "null" : ToHex(readBack.Address);
         }
@@ -1230,6 +1244,161 @@ public sealed class ClrSession : IDisposable
             throw new ClrSessionException($"Valeur du dictionnaire {segment.FieldName}[{segment.Key}] non primitive ou introuvable.");
         }
         return ReadValueTypePrimitive(entry, valueField);
+    }
+
+    // PHASE 58 : reconnait un chemin indexe qui cible un tableau/List<T> dont
+    // l'ELEMENT est un primitif (bool/int8..64/uint8..64/float/double), pas
+    // une reference d'objet. Les tableaux de STRUCTS (element value-type non
+    // primitif) restent hors scope -- ils exigeraient de muter des layouts
+    // internes imbriques, documente comme limite volontaire (voir
+    // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).
+    private static bool IsIndexedFieldPrimitiveArray(PathNode owner, PathSegment segment)
+    {
+        if (owner.Object is not ClrObject obj || obj.IsNull || obj.Type is null)
+        {
+            return false;
+        }
+
+        ClrInstanceField? field = FindField(obj.Type, segment.FieldName);
+        if (field is null || !field.IsObjectReference)
+        {
+            return false;
+        }
+
+        ClrObject collection = obj.ReadObjectField(field.Name!);
+        if (collection.IsNull || collection.Type is null)
+        {
+            return false;
+        }
+
+        ClrType? componentType = null;
+        if (collection.Type.IsArray)
+        {
+            componentType = collection.Type.ComponentType;
+        }
+        else if ((collection.Type.Name ?? "").StartsWith("System.Collections.Generic.List<", StringComparison.Ordinal))
+        {
+            ClrObject items = collection.ReadObjectField("_items");
+            if (!items.IsNull && items.Type is not null && items.Type.IsArray)
+            {
+                componentType = items.Type.ComponentType;
+            }
+        }
+
+        return componentType is not null
+            && IsPrimitiveElement(componentType.ElementType)
+            && componentType.ElementType != ClrElementType.Char;
+    }
+
+    /// <summary>
+    /// Ecriture directe par index dans un tableau/List<T> de PRIMITIFS (ex:
+    /// int[] Scores, Scores[2] = 42) -- extension PHASE 58 de
+    /// writePrimitivePath. Resout l'adresse de l'element via
+    /// ClrType.GetArrayElementAddress, la meme primitive deja utilisee cote
+    /// LECTURE (DescribeArray/ReadArrayElement) et cote ecriture de reference
+    /// (WriteIndexedReferenceValue), ecrit via WriteProcessMemory comme le
+    /// reste du module, puis relit pour verifier.
+    /// </summary>
+    private object WriteIndexedPrimitiveValue(PathNode owner, PathSegment segment, string valueText, string path)
+    {
+        int attachedPid = _attachedPid ?? throw new ClrSessionException("Aucun PID attache pour l'ecriture d'element de tableau CLR.");
+        if (owner.Object is not ClrObject obj || obj.IsNull || obj.Type is null)
+        {
+            throw new ClrSessionException($"Chemin CLR impossible : {segment.FieldName}[{segment.Index}] doit appartenir a un objet.");
+        }
+        int index = segment.Index ?? throw new ClrSessionException("Index de tableau CLR manquant.");
+
+        (ClrObject arrayObject, int logicalLength) = ResolveIndexedPrimitiveCollection(obj, segment.FieldName);
+        if (index < 0 || index >= logicalLength)
+        {
+            throw new ClrSessionException($"Index hors limites pour {segment.FieldName}[{index}] (taille {logicalLength}).");
+        }
+
+        ClrType? componentType = arrayObject.Type?.ComponentType;
+        if (componentType is null || !IsPrimitiveElement(componentType.ElementType) || componentType.ElementType == ClrElementType.Char)
+        {
+            throw new ClrSessionException(
+                $"Element {segment.FieldName}[{index}] non primitif ecrivable directement -- les tableaux de structs " +
+                "imbriquees restent hors scope (voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).");
+        }
+
+        ulong elementAddress = arrayObject.Type!.GetArrayElementAddress(arrayObject.Address, index);
+        if (elementAddress == 0)
+        {
+            throw new ClrSessionException($"Adresse de l'element {segment.FieldName}[{index}] introuvable.");
+        }
+
+        byte[] bytes = EncodePrimitive(componentType.ElementType, valueText);
+        WriteRawBytes(attachedPid, elementAddress, bytes, $"element primitif CLR {segment.FieldName}[{index}]");
+        object readBack = ReadArrayPrimitive(arrayObject.AsArray(), componentType.ElementType, index);
+        return new
+        {
+            objectAddress = ToHex(arrayObject.Address),
+            typeName = arrayObject.Type!.Name,
+            fieldName = segment.FieldName,
+            path,
+            fieldAddress = ToHex(elementAddress),
+            elementType = componentType.ElementType.ToString(),
+            bytesWritten = bytes.Length,
+            value = readBack,
+            verified = PrimitiveMatches(componentType.ElementType, valueText, readBack),
+        };
+    }
+
+    private static object ReadIndexedPrimitiveValue(PathNode owner, PathSegment segment)
+    {
+        if (owner.Object is not ClrObject obj || obj.IsNull || obj.Type is null)
+        {
+            throw new ClrSessionException($"Chemin CLR impossible : {segment.FieldName}[{segment.Index}] doit appartenir a un objet.");
+        }
+        int index = segment.Index ?? throw new ClrSessionException("Index de tableau CLR manquant.");
+
+        (ClrObject arrayObject, int logicalLength) = ResolveIndexedPrimitiveCollection(obj, segment.FieldName);
+        if (index < 0 || index >= logicalLength)
+        {
+            throw new ClrSessionException($"Index hors limites pour {segment.FieldName}[{index}] (taille {logicalLength}).");
+        }
+
+        ClrType? componentType = arrayObject.Type?.ComponentType;
+        if (componentType is null || !IsPrimitiveElement(componentType.ElementType) || componentType.ElementType == ClrElementType.Char)
+        {
+            throw new ClrSessionException($"Element {segment.FieldName}[{index}] non primitif restaurable.");
+        }
+
+        return ReadArrayPrimitive(arrayObject.AsArray(), componentType.ElementType, index);
+    }
+
+    private static (ClrObject ArrayObject, int LogicalLength) ResolveIndexedPrimitiveCollection(ClrObject obj, string fieldName)
+    {
+        ClrInstanceField? field = FindField(obj.Type!, fieldName);
+        if (field is null || !field.IsObjectReference)
+        {
+            throw new ClrSessionException($"Champ tableau CLR introuvable ou non reference : {fieldName}");
+        }
+
+        ClrObject collection = obj.ReadObjectField(field.Name!);
+        if (collection.IsNull || collection.Type is null)
+        {
+            throw new ClrSessionException($"Tableau CLR null : {fieldName}");
+        }
+
+        if (collection.Type.IsArray)
+        {
+            return (collection, collection.AsArray().GetLength(0));
+        }
+
+        if ((collection.Type.Name ?? "").StartsWith("System.Collections.Generic.List<", StringComparison.Ordinal))
+        {
+            int logicalLength = SafeReadIntField(collection, "_size");
+            ClrObject items = collection.ReadObjectField("_items");
+            if (items.IsNull || items.Type is null || !items.Type.IsArray)
+            {
+                throw new ClrSessionException($"Stockage interne de la liste {fieldName} introuvable.");
+            }
+            return (items, logicalLength);
+        }
+
+        throw new ClrSessionException($"{fieldName} n'est pas un tableau ou List<T> primitif supporte.");
     }
 
     private object WriteIndexedReferenceValue(PathNode owner, PathSegment segment, string valueText, string path)

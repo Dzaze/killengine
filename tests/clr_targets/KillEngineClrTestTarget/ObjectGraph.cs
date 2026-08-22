@@ -127,6 +127,12 @@ public sealed class Player
 
     public int VigorChangeCount => _vigorChangeCount;
 
+    // Tableau de primitifs (int[]) accessible depuis Player -- dedie au
+    // chantier "ecriture directe par index dans un tableau primitif"
+    // (PHASE 58). writePrimitivePath doit pouvoir ecrire Scores[i]
+    // directement dans le tableau, pas seulement le lire.
+    public int[] Scores = new int[4];
+
     // Propriete jumelle jamais appelee par ce process (aucun warmup dans
     // BuildGraph ci-dessous) -- dediee au test de regression "setter jamais
     // JITte" (ClrMethod.NativeCode vaut alors ulong.MaxValue, pas 0, cote
@@ -219,6 +225,7 @@ public static class TestRoot
             IsAlive = true,
             Stats = new PlayerStats { Rank = 7, Luck = 1.25f },
             Inventory = inventory,
+            Scores = new[] { 10, 20, 30, 40 },
         };
         player.Self = player;
 

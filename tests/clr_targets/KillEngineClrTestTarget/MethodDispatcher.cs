@@ -62,6 +62,7 @@ public sealed class MethodDispatcher
                 vitalityChangeCount = player.VitalityChangeCount,
                 vigor = player.Vigor,
                 vigorChangeCount = player.VigorChangeCount,
+                scores = player.Scores,
                 statsRank = player.Stats.Rank,
                 statsLuck = player.Stats.Luck,
                 itemCount = player.Inventory.Items.Count,
