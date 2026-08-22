@@ -64,6 +64,62 @@ public sealed class Player
     // vrai auto-reference geree par le GC -- sert a valider qu'un futur
     // outillage ClrMD resout correctement un cycle plutot que de boucler.
     public Player? Self;
+
+    // ------------------------------------------------------------------
+    // Propriete avec un VRAI setter (logique metier au-dela d'un simple
+    // stockage de champ backing) -- dediee au chantier "appel de setter
+    // reel via shellcode" (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md,
+    // ResolveInstanceMethodAddress). Le setter :
+    //   1. clamp la valeur dans [0, VitalityMax] (une ecriture memoire brute
+    //      du champ backing _vitality ne respecterait jamais ce clamp) ;
+    //   2. incremente _vitalityChangeCount, un compteur totalement distinct
+    //      du champ backing -- preuve independante que le VRAI setter a
+    //      tourne et pas seulement une ecriture de _vitality ;
+    //   3. synchronise IsAlive a false quand la vitalite tombe a 0.
+    // Champs prives explicites (pas d'auto-propriete) pour eviter tout nom
+    // de champ backing genere par le compilateur (<Vitality>k__BackingField)
+    // qui pourrait dérouter un test lisant les champs bruts via ClrMD.
+    // ------------------------------------------------------------------
+    public const int VitalityMax = 999;
+    private int _vitality;
+    private int _vitalityChangeCount;
+
+    public int Vitality
+    {
+        get => _vitality;
+        set
+        {
+            int clamped = value < 0 ? 0 : (value > VitalityMax ? VitalityMax : value);
+            _vitality = clamped;
+            _vitalityChangeCount++;
+            if (clamped == 0)
+            {
+                IsAlive = false;
+            }
+        }
+    }
+
+    public int VitalityChangeCount => _vitalityChangeCount;
+
+    // Propriete jumelle jamais appelee par ce process (aucun warmup dans
+    // BuildGraph ci-dessous) -- dediee au test de regression "setter jamais
+    // JITte" (ClrMethod.NativeCode vaut alors ulong.MaxValue, pas 0, cote
+    // ClrMD reel -- verifie par reflexion avant d'ecrire ResolveInstanceMethodAddress,
+    // voir ClrSession.cs). ResolveInstanceMethodAddress doit renvoyer
+    // l'erreur claire documentee plutot que de tenter de forcer le JIT.
+    private int _neverCalledStat;
+    public int NeverCalledStat
+    {
+        get => _neverCalledStat;
+        set => _neverCalledStat = value;
+    }
+
+    // Methode statique dediee au test de regression "setter statique
+    // rejete" (ResolveInstanceMethodAddress doit refuser toute methode
+    // statique -- "this" en RCX n'a pas de sens pour un appel static).
+    // Corps volontairement vide : seule sa presence dans ClrType.Methods
+    // (avec l'attribut Static) importe pour ce test.
+    public static void StaticProbe(int value) { }
 }
 
 /// <summary>
@@ -139,6 +195,14 @@ public static class TestRoot
             Inventory = inventory,
         };
         player.Self = player;
+
+        // Warmup deliberement unique (pas une boucle) : force le JIT du
+        // setter reel (set_Vitality) des le demarrage du process, condition
+        // necessaire pour que ResolveInstanceMethodAddress (ClrMD) trouve un
+        // NativeCode != 0 des l'attache -- un seul appel reste tres en
+        // dessous du seuil de bascule tiered compilation (~30 appels), donc
+        // le code natif Tier0 reste stable pour toute la duree du process.
+        player.Vitality = 500;
 
         return player;
     }

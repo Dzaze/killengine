@@ -687,6 +687,149 @@ public sealed class ClrSession : IDisposable
         return results;
     }
 
+    // Types de parametre primitif supportes pour l'appel reel d'un setter
+    // (v1) -- exactement le meme perimetre entier que IsWritablePrimitive
+    // (bool + entiers 8/16/32/64 signes/non signes), MOINS Float/Double :
+    // la convention d'appel x64 Windows passe un 2e argument flottant en
+    // XMM1, pas RDX -- shellcode fixe (mov rdx, imm64) volontairement hors
+    // scope pour ce cas, voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md.
+    // Noms exacts tels que rapportes par ClrMethod.Signature -- verifies par
+    // attache ClrMD reelle sur ce process de test (pas devines), reflexion
+    // ponctuelle avant d'ecrire cette methode : Boolean/SByte/Byte/Int16/
+    // UInt16/Int32/UInt32/Int64/UInt64 pour les primitifs entiers (noms
+    // courts CLR, sans namespace) ; un type non primitif (string, objet,
+    // struct) apparait toujours prefixe de son namespace complet
+    // (ex: "System.String", "KillEngine.ClrTestTarget.Item"), donc jamais en
+    // collision avec cette liste.
+    private static readonly HashSet<string> SupportedInstanceMethodParameterTypes = new(StringComparer.Ordinal)
+    {
+        "Boolean", "SByte", "Byte", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
+    };
+
+    /// <summary>
+    /// Resout l'adresse native deja JITtee d'un setter d'instance reel (pas
+    /// static, 0 ou 1 parametre primitif entier) pour permettre a KillEngine
+    /// (cote natif, injection shellcode) de l'appeler directement -- ClrMD
+    /// est une API de lecture passive (DAC), elle n'execute jamais de code
+    /// cible elle-meme, cette methode se limite donc a la RESOLUTION
+    /// d'adresse. Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md pour le detail
+    /// complet du perimetre v1 et son mecanisme d'appel (shellcode x64 cote
+    /// ApplicationController::callClrInstanceMethod).
+    /// </summary>
+    public object ResolveInstanceMethodAddress(string objectAddressHex, string methodName)
+    {
+        var runtime = RequireRuntime();
+        ulong objectAddress = ParseHexAddress(objectAddressHex);
+
+        ClrObject obj = runtime.Heap.GetObject(objectAddress);
+        if (obj.IsNull || !obj.IsValid || obj.Type is null)
+        {
+            throw new ClrSessionException($"Adresse {objectAddressHex} : objet invalide ou null avant resolution de methode.");
+        }
+
+        string requestedName = methodName.Trim();
+        if (requestedName.Length == 0)
+        {
+            throw new ClrSessionException("Nom de methode CLR vide.");
+        }
+
+        // Nom exact d'abord ; si introuvable et que l'appelant n'a pas deja
+        // prefixe "set_", retente avec le prefixe -- permet de passer
+        // directement le nom de propriete C# ("Health") plutot que le nom
+        // de methode compile ("set_Health").
+        ClrMethod? method = obj.Type.Methods.FirstOrDefault(m => m.Name == requestedName);
+        string resolvedName = requestedName;
+        if (method is null && !requestedName.StartsWith("set_", StringComparison.Ordinal))
+        {
+            string withSetPrefix = "set_" + requestedName;
+            method = obj.Type.Methods.FirstOrDefault(m => m.Name == withSetPrefix);
+            if (method is not null)
+            {
+                resolvedName = withSetPrefix;
+            }
+        }
+        if (method is null)
+        {
+            throw new ClrSessionException(
+                $"Methode CLR introuvable sur {obj.Type.Name} : {requestedName} (ni 'set_{requestedName}').");
+        }
+
+        bool isStatic = (method.Attributes & System.Reflection.MethodAttributes.Static) != 0;
+        if (isStatic)
+        {
+            throw new ClrSessionException(
+                $"Methode statique non supportee : {obj.Type.Name}.{resolvedName}. " +
+                "Seuls les setters d'INSTANCE sont geres en v1 (this en RCX).");
+        }
+
+        (int parameterCount, string? parameterType) = ParseInstanceMethodParameters(method.Signature, resolvedName, obj.Type.Name ?? "");
+        if (parameterCount > 1)
+        {
+            throw new ClrSessionException(
+                $"Signature non supportee : {obj.Type.Name}.{resolvedName} attend {parameterCount} parametres. " +
+                "Seuls les setters a 0 ou 1 parametre sont geres en v1.");
+        }
+        if (parameterType is not null && !SupportedInstanceMethodParameterTypes.Contains(parameterType))
+        {
+            throw new ClrSessionException(
+                $"Type de parametre non supporte : {obj.Type.Name}.{resolvedName}({parameterType}). " +
+                "Seuls bool/int8/int16/int32/int64 (signes et non signes) sont geres en v1 -- " +
+                "pas float/double (convention d'appel XMM1, hors scope), pas string/objet/struct.");
+        }
+
+        // ClrMD reel rapporte ulong.MaxValue (pas 0) pour une methode jamais
+        // JITtee -- verifie par attache reelle sur ce process de test avant
+        // d'ecrire cette condition (pas devine). On tolere les deux valeurs
+        // au cas ou une version future de ClrMD revienne a 0.
+        if (method.NativeCode == 0 || method.NativeCode == ulong.MaxValue)
+        {
+            throw new ClrSessionException(
+                $"Le setter {obj.Type.Name}.{resolvedName} n'a jamais ete appele par le jeu -- impossible de resoudre " +
+                "son adresse native. Declenche-le au moins une fois en jeu avant de reessayer.");
+        }
+
+        return new
+        {
+            success = true,
+            objectAddress = ToHex(obj.Address),
+            typeName = obj.Type.Name,
+            methodName = resolvedName,
+            nativeCodeAddress = ToHex(method.NativeCode),
+            parameterType,
+            isStatic,
+        };
+    }
+
+    private static (int ParameterCount, string? ParameterType) ParseInstanceMethodParameters(string? signature, string methodName, string typeName)
+    {
+        if (string.IsNullOrEmpty(signature))
+        {
+            throw new ClrSessionException($"Signature CLR indisponible pour {typeName}.{methodName}.");
+        }
+
+        int parenStart = signature.IndexOf('(');
+        int parenEnd = signature.LastIndexOf(')');
+        if (parenStart < 0 || parenEnd <= parenStart)
+        {
+            throw new ClrSessionException($"Signature CLR illisible pour {typeName}.{methodName} : '{signature}'.");
+        }
+
+        string paramList = signature.Substring(parenStart + 1, parenEnd - parenStart - 1).Trim();
+        if (paramList.Length == 0)
+        {
+            return (0, null);
+        }
+
+        // Split naif sur ", " -- suffisant pour distinguer 0/1/plus-de-1
+        // parametre. Un type generique avec virgule interne (ex:
+        // Dictionary<K,V>, hors scope de toute facon) serait compte comme
+        // plusieurs parametres et rejete par le garde-fou "0 ou 1 parametre"
+        // -- resultat final correct (rejet) meme si le compte rapporte
+        // serait techniquement inexact dans ce cas marginal.
+        string[] parts = paramList.Split(", ", StringSplitOptions.None);
+        return parts.Length == 1 ? (1, parts[0].Trim()) : (parts.Length, null);
+    }
+
     public object WritePrimitiveField(string objectAddressHex, string fieldName, string valueText)
     {
         var runtime = RequireRuntime();

@@ -691,6 +691,166 @@ public sealed class EndToEndTests
         Assert.Single(found!.AsArray());
     }
 
+    [Fact]
+    public async Task ResolveInstanceMethodAddress_NeverCalledSetter_ReturnsClearJitError()
+    {
+        // NeverCalledStat (ObjectGraph.cs) n'a aucun warmup dans BuildGraph --
+        // son set_NeverCalledStat n'est donc jamais JITte par le process
+        // cible. ResolveInstanceMethodAddress doit renvoyer le message clair
+        // documente (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md), pas tenter de
+        // forcer une compilation JIT (impossible sans ICorDebug, hors scope).
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await PipeClient.CallAsync(
+                InspectorPipe,
+                "resolveInstanceMethodAddress",
+                new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("NeverCalledStat")));
+        });
+        Assert.Contains("jamais ete appele", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ResolveInstanceMethodAddress_StaticMethod_IsRejected()
+    {
+        // Garde-fou "instance uniquement" (this en RCX n'a pas de sens pour
+        // un appel static) : Player.StaticProbe (ObjectGraph.cs) est une
+        // methode statique dediee a ce test -- ResolveInstanceMethodAddress
+        // doit la rejeter explicitement, jamais tenter de la resoudre comme
+        // si elle prenait un "this" implicite.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await PipeClient.CallAsync(
+                InspectorPipe,
+                "resolveInstanceMethodAddress",
+                new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("StaticProbe")));
+        });
+        Assert.Contains("statique", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Cross-check : Vitality (instance normale) n'est PAS rejetee a tort
+        // par le meme garde-fou -- confirme que le test negatif ci-dessus ne
+        // masque pas un faux-positif qui rejetterait tout.
+        var resolved = await PipeClient.CallAsync(
+            InspectorPipe,
+            "resolveInstanceMethodAddress",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Vitality")));
+        Assert.False(resolved!["isStatic"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task ResolveInstanceMethodAddress_ThenRealShellcodeCall_InvokesRealSetterAndProducesSideEffect()
+    {
+        // Preuve centrale du chantier "appel de setter reel" : resout
+        // l'adresse native deja JITtee de Player.set_Vitality via ClrMD
+        // (ResolveInstanceMethodAddress), puis appelle REELLEMENT ce setter
+        // par injection shellcode (NativeSetterInvoker -- meme technique
+        // exacte que apps/desktop/application_controller.cpp::
+        // callClrInstanceMethod cote natif, voir ce fichier). La preuve que
+        // le VRAI setter a tourne (pas un raccourci d'ecriture memoire brute
+        // du champ backing) : la valeur ecrite est CLAMPEE a VitalityMax et
+        // un compteur de changements SEPARE (_vitalityChangeCount)
+        // s'incremente -- une ecriture directe de _vitality ne produirait
+        // jamais ces deux effets de bord. Verifie via le pipe de controle de
+        // la cible (oracle independant de ClrMD), meme discipline que
+        // WritePrimitiveField_UpdatesManagedObjectAndReportsFieldAddress.
+        //
+        // Process isole (pas le fixture partage) : ce test amene
+        // deliberement IsAlive a false en fin de sequence, effet qui ne doit
+        // affecter aucun autre test partageant le Player du fixture commun.
+        string targetDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tests", "clr_targets", "KillEngineClrTestTarget"), "KillEngineClrTestTarget.dll");
+        string inspectorDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tools", "clr_inspector", "KillEngineClrInspector"), "KillEngineClrInspector.dll");
+
+        const string isolatedTargetPipe = "KillEngineClrTestTargetPipe_SetterCallTest";
+        const string isolatedInspectorPipe = "KillEngineClrInspectorPipe_SetterCallTest";
+
+        await using var isolatedTarget = await ManagedProcessFixture.StartAsync(
+            targetDll, isolatedTargetPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_TEST_TARGET_PIPE_NAME"] = isolatedTargetPipe });
+        await using var isolatedInspector = await ManagedProcessFixture.StartAsync(
+            inspectorDll, isolatedInspectorPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_INSPECTOR_PIPE_NAME"] = isolatedInspectorPipe });
+
+        var attachResult = await PipeClient.CallAsync(isolatedInspectorPipe, "attach", new JsonArray(JsonValue.Create(isolatedTarget.Pid)));
+        Assert.Equal("Core", attachResult!["clrFlavor"]!.GetValue<string>());
+
+        var found = await PipeClient.CallAsync(
+            isolatedInspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+        ulong objectAddress = ParseHex(playerAddress);
+
+        // 1) Resolution reelle de l'adresse native via ClrMD (Vitality ->
+        // fallback automatique vers set_Vitality, deja JITte par le warmup
+        // unique dans TestRoot.BuildGraph, ObjectGraph.cs).
+        var resolved = await PipeClient.CallAsync(
+            isolatedInspectorPipe,
+            "resolveInstanceMethodAddress",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Vitality")));
+        Assert.True(resolved!["success"]!.GetValue<bool>());
+        Assert.Equal("set_Vitality", resolved["methodName"]!.GetValue<string>());
+        Assert.Equal("Int32", resolved["parameterType"]!.GetValue<string>());
+        Assert.False(resolved["isStatic"]!.GetValue<bool>());
+        string nativeCodeAddressHex = resolved["nativeCodeAddress"]!.GetValue<string>();
+        Assert.StartsWith("0x", nativeCodeAddressHex, StringComparison.OrdinalIgnoreCase);
+        ulong nativeCodeAddress = ParseHex(nativeCodeAddressHex);
+        Assert.NotEqual(0UL, nativeCodeAddress);
+
+        var statusBefore = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        int changeCountBefore = statusBefore!["player"]!["vitalityChangeCount"]!.GetValue<int>();
+
+        // 2) Appel reel du setter (via shellcode) avec une valeur qui DOIT
+        // etre clampee -- 1500 > Player.VitalityMax (999). Une ecriture
+        // memoire brute du champ backing accepterait 1500 tel quel ; le
+        // vrai setter, lui, la ramene a 999.
+        bool completed = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate: unchecked((ulong)(long)1500), nativeCodeAddress);
+        Assert.True(completed, "Le thread distant n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres l'appel shellcode du setter.");
+
+        var statusAfterClamp = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal(999, statusAfterClamp!["player"]!["vitality"]!.GetValue<int>());
+        Assert.Equal(changeCountBefore + 1, statusAfterClamp["player"]!["vitalityChangeCount"]!.GetValue<int>());
+        Assert.True(statusAfterClamp["player"]!["isAlive"]!.GetValue<bool>());
+
+        // Cross-verification independante de l'oracle cote cible : relecture
+        // ClrMD directe des champs backing (memes valeurs attendues).
+        var objAfterClamp = await PipeClient.CallAsync(isolatedInspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        Assert.Equal(999, objAfterClamp!["fields"]!["_vitality"]!.GetValue<int>());
+        Assert.Equal(changeCountBefore + 1, objAfterClamp["fields"]!["_vitalityChangeCount"]!.GetValue<int>());
+
+        // 3) Deuxieme appel reel avec 0 -- doit declencher le deuxieme effet
+        // de bord metier (IsAlive => false), preuve supplementaire que la
+        // logique du VRAI setter s'execute (une ecriture brute de _vitality
+        // ne toucherait jamais IsAlive).
+        bool completedZero = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate: 0UL, nativeCodeAddress);
+        Assert.True(completedZero, "Le thread distant (appel 0) n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres le deuxieme appel shellcode du setter.");
+
+        var statusAfterZero = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal(0, statusAfterZero!["player"]!["vitality"]!.GetValue<int>());
+        Assert.Equal(changeCountBefore + 2, statusAfterZero["player"]!["vitalityChangeCount"]!.GetValue<int>());
+        Assert.False(statusAfterZero["player"]!["isAlive"]!.GetValue<bool>());
+    }
+
+    private static ulong ParseHex(string hex)
+    {
+        string trimmed = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hex[2..] : hex;
+        return ulong.Parse(trimmed, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private static JsonNode? Field(JsonNode fields, string publicName)
     {
         var obj = fields.AsObject();

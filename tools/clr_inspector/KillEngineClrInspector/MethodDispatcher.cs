@@ -32,6 +32,7 @@ public sealed class MethodDispatcher
             "findObjectsByType" => FindObjectsByType(args),
             "findObjectsByFieldValue" => FindObjectsByFieldValue(args),
             "readObject" => ReadObject(args),
+            "resolveInstanceMethodAddress" => ResolveInstanceMethodAddress(args),
             "writePrimitiveField" => WritePrimitiveField(args),
             "writePrimitivePath" => WritePrimitivePath(args),
             "writePrimitivePathBatch" => WritePrimitivePathBatch(args),
@@ -116,6 +117,24 @@ public sealed class MethodDispatcher
         try
         {
             return _session.EnumerateRoots(typeSubstring);
+        }
+        catch (ClrSessionException ex)
+        {
+            throw new MethodDispatchException(ex.Message);
+        }
+    }
+
+    private object ResolveInstanceMethodAddress(JsonArray args)
+    {
+        if (args.Count != 2)
+        {
+            throw new MethodDispatchException("resolveInstanceMethodAddress attend [objectAddressHex, methodName].");
+        }
+        string objectAddressHex = args[0]?.GetValue<string>() ?? throw new MethodDispatchException("objectAddressHex manquant.");
+        string methodName = args[1]?.GetValue<string>() ?? throw new MethodDispatchException("methodName manquant.");
+        try
+        {
+            return _session.ResolveInstanceMethodAddress(objectAddressHex, methodName);
         }
         catch (ClrSessionException ex)
         {
