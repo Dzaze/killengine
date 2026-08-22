@@ -9,7 +9,9 @@ import {
   type CandidateFieldTestResult,
   type CandidatePage,
   type ClrCallInstanceMethodResult,
+  type ClrDisassembleMethodResult,
   type ClrFieldLocatorResult,
+  type ClrGcRootPathResult,
   type ClrInspectorStatus,
   type ClrObjectReadResult,
   type ClrObjectSummary,
@@ -410,6 +412,8 @@ export const useAppStore = defineStore('app', () => {
   const clrLastResult = ref<ClrRpcResult | null>(null)
   const clrFieldLocatorResult = ref<ClrFieldLocatorResult | null>(null)
   const clrCallMethodResult = ref<ClrCallInstanceMethodResult | null>(null)
+  const clrGcRootPathResult = ref<ClrGcRootPathResult | null>(null)
+  const clrDisassembleResult = ref<ClrDisassembleMethodResult | null>(null)
   const luaScriptingStatus = ref<LuaScriptingStatus | null>(null)
   const luaScriptText = ref([
     'local ke = require("killengine")',
@@ -4200,6 +4204,90 @@ let nextWatchedChainId = 1
     }
   }
 
+  // Chantier "GCRoot chain complet" -- le point le plus exploratoire du lot
+  // (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) : un chemin trouvé n'est pas
+  // garanti le plus court, et l'appel peut être lent sur un gros tas (timeout
+  // natif volontairement large, voir ApplicationController::findClrGcRootPath).
+  async function findClrGcRootPath(targetObjectAddressHex: string, maxDepth = 8, maxRootsScanned = 4000) {
+    const controller = backend.getController()
+    const address = targetObjectAddressHex.trim()
+    if (!controller.findClrGcRootPath) {
+      clrGcRootPathResult.value = { success: false, error: 'findClrGcRootPath non exposé par ce backend.' }
+      clrInspectorError.value = clrGcRootPathResult.value.error ?? ''
+      return
+    }
+    if (!address) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.findClrGcRootPath(address, maxDepth, maxRootsScanned)
+      clrLastResult.value = result
+      clrGcRootPathResult.value = (result.result as ClrGcRootPathResult | undefined) ?? {
+        success: result.success,
+        error: result.error,
+      }
+      const innerSuccess = clrGcRootPathResult.value?.success ?? result.success
+      clrInspectorError.value = innerSuccess ? '' : (clrGcRootPathResult.value?.error ?? clrGcRootPathResult.value?.message ?? result.error ?? '')
+      addActionLog(
+        'clr_inspector',
+        innerSuccess ? 'Chemin GC root trouvé' : 'Chemin GC root introuvable',
+        innerSuccess
+          ? `${clrGcRootPathResult.value?.rootKind ?? '?'} → ${clrGcRootPathResult.value?.depth ?? 0} saut(s) → ${address}`
+          : (clrGcRootPathResult.value?.message ?? clrGcRootPathResult.value?.error ?? result.error ?? ''),
+        innerSuccess ? 'success' : 'error',
+      )
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrGcRootPathResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
+  // Chantier "désassemblage de méthode" -- lecture seule, aucune injection.
+  async function disassembleClrMethod(objectAddressHex: string, methodName: string, instructionCount = 24) {
+    const controller = backend.getController()
+    const address = objectAddressHex.trim()
+    const method = methodName.trim()
+    if (!controller.disassembleClrMethod) {
+      clrDisassembleResult.value = { success: false, error: 'disassembleClrMethod non exposé par ce backend.' }
+      clrInspectorError.value = clrDisassembleResult.value.error ?? ''
+      return
+    }
+    if (!address || !method) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.disassembleClrMethod(address, method, instructionCount)
+      clrLastResult.value = result
+      clrDisassembleResult.value = (result.result as ClrDisassembleMethodResult | undefined) ?? {
+        success: result.success,
+        error: result.error,
+      }
+      const innerSuccess = clrDisassembleResult.value?.success ?? result.success
+      clrInspectorError.value = innerSuccess ? '' : (clrDisassembleResult.value?.error ?? result.error ?? '')
+      addActionLog(
+        'clr_inspector',
+        innerSuccess ? 'Méthode CLR désassemblée' : 'Désassemblage CLR échoué',
+        innerSuccess
+          ? `${clrDisassembleResult.value?.methodName ?? method} @ ${clrDisassembleResult.value?.nativeCodeAddress ?? '?'} (${clrDisassembleResult.value?.returnedInstructionCount ?? 0} instruction(s))`
+          : (clrDisassembleResult.value?.error ?? result.error ?? ''),
+        innerSuccess ? 'success' : 'error',
+      )
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrDisassembleResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
   async function refreshProcessModules(pid: number) {
     try {
       processModules.value = await backend.getController().getProcessModules(pid)
@@ -7201,6 +7289,10 @@ async function doEncryptedScan() {
     clrLastResult,
     clrFieldLocatorResult,
     clrCallMethodResult,
+    clrGcRootPathResult,
+    clrDisassembleResult,
+    findClrGcRootPath,
+    disassembleClrMethod,
     refreshClrInspectorStatus,
     attachClrInspector,
     detachClrInspector,

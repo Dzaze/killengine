@@ -21,10 +21,28 @@ public sealed class Item
     public double Weight;
 }
 
+// Chantier 2 (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md, "Resolution recursive
+// des structs imbriques dans un struct") : PlayerStats.HomeZone est un struct
+// (Zone) qui contient lui-meme un struct (Coordinates) -- deux niveaux
+// d'imbrication en plus du struct racine PlayerStats, pour verifier le
+// deballage recursif borne jusqu'a la feuille primitive.
+public struct Coordinates
+{
+    public int X;
+    public int Y;
+}
+
+public struct Zone
+{
+    public Coordinates Origin;
+    public int Radius;
+}
+
 public struct PlayerStats
 {
     public int Rank;
     public float Luck;
+    public Zone HomeZone;
 }
 
 public sealed class Inventory
@@ -33,6 +51,15 @@ public sealed class Inventory
     public Item?[] QuickSlots { get; } = new Item?[4];
     public Dictionary<string, int> Currencies { get; } = new();
     public CustomBag<Item> CustomItems { get; } = new();
+
+    // Chantier 1 (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md, "Plus de collections
+    // BCL dans le deballage") : couverture HashSet<T>/Queue<T>/Stack<T> et
+    // tableau multidimensionnel, en plus des List<T>/tableau 1D/Dictionary<K,V>
+    // deja couverts.
+    public HashSet<string> Tags { get; } = new();
+    public Queue<Item> ItemQueue { get; } = new();
+    public Stack<Item> ItemStack { get; } = new();
+    public int[,] Grid { get; } = new int[3, 4];
 }
 
 public sealed class CustomBag<T>
@@ -216,6 +243,48 @@ public static class TestRoot
         inventory.Currencies["gold"] = 4125;
         inventory.Currencies["gems"] = 12;
 
+        // "temp" est ajoute PUIS retire expres : force une vraie entree
+        // libre (free-list) dans le buffer interne _entries du HashSet<T>,
+        // condition necessaire pour verifier concretement que le deballage
+        // ignore les entrees supprimees plutot que de les rapporter comme
+        // valeurs valides (voir investigation dans
+        // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md : contrairement a
+        // Dictionary<K,V>, HashSet<T>.Entry.HashCode n'est PAS masque a une
+        // valeur non-negative -- un hash naturellement negatif est un
+        // element valide, la detection d'entree libre doit se faire
+        // autrement).
+        inventory.Tags.Add("common");
+        inventory.Tags.Add("starter");
+        inventory.Tags.Add("temp");
+        inventory.Tags.Add("verified");
+        inventory.Tags.Remove("temp");
+
+        // Enqueue/Dequeue/Enqueue delibere pour forcer un vrai wraparound du
+        // buffer circulaire interne (_head > 0 et _tail qui revient a 0) --
+        // condition necessaire pour verifier que le deballage de Queue<T>
+        // gere correctement l'indexation circulaire, pas seulement le cas
+        // trivial _head == 0. Contenu logique final (avant -> arriere) :
+        // shield, potion, sword.
+        inventory.ItemQueue.Enqueue(sword);
+        inventory.ItemQueue.Enqueue(shield);
+        inventory.ItemQueue.Enqueue(potion);
+        inventory.ItemQueue.Dequeue();
+        inventory.ItemQueue.Enqueue(sword);
+
+        // Push/Pop/Push : contenu logique final (bas -> haut) : potion, shield.
+        inventory.ItemStack.Push(potion);
+        inventory.ItemStack.Push(sword);
+        inventory.ItemStack.Pop();
+        inventory.ItemStack.Push(shield);
+
+        for (int row = 0; row < inventory.Grid.GetLength(0); row++)
+        {
+            for (int col = 0; col < inventory.Grid.GetLength(1); col++)
+            {
+                inventory.Grid[row, col] = row * 10 + col;
+            }
+        }
+
         var player = new Player
         {
             Name = new string("TestSubject".ToCharArray()),
@@ -223,7 +292,12 @@ public static class TestRoot
             Experience = 5000,
             Stamina = 75.0f,
             IsAlive = true,
-            Stats = new PlayerStats { Rank = 7, Luck = 1.25f },
+            Stats = new PlayerStats
+            {
+                Rank = 7,
+                Luck = 1.25f,
+                HomeZone = new Zone { Origin = new Coordinates { X = 12, Y = -4 }, Radius = 30 },
+            },
             Inventory = inventory,
             Scores = new[] { 10, 20, 30, 40 },
         };

@@ -1077,6 +1077,225 @@ public sealed class EndToEndTests
         Assert.Equal(9, status["player"]!["statsRank"]!.GetValue<int>());
     }
 
+    [Fact]
+    public async Task ReadObject_UnpacksHashSetQueueStackAndMultiDimArrayCorrectly()
+    {
+        // Chantier "Plus de collections BCL dans le deballage" : HashSet<T>,
+        // Queue<T>, Stack<T> et tableau multidimensionnel (Inventory.Tags/
+        // ItemQueue/ItemStack/Grid, ObjectGraph.cs). Le graphe force
+        // deliberement un vrai wraparound de buffer circulaire (Queue) et une
+        // vraie entree free-list (HashSet, apres un Remove()) -- voir les
+        // commentaires de ClrSession.DescribeHashSet/DescribeQueue pour le
+        // detail de ce qui a ete verifie par attache reelle avant d'ecrire ce
+        // code (pas devine).
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var inventoryFields = inventoryObj!["fields"]!;
+
+        // HashSet<string> Tags : "common"/"starter"/"verified" vivants,
+        // "temp" ajoute PUIS retire (entree free-list qui ne doit PAS
+        // apparaitre). count doit refleter le compte REEL (3), pas le nombre
+        // de slots physiquement alloues.
+        var tags = Field(inventoryFields, "Tags")!["collection"]!;
+        Assert.Equal("hashset", tags["kind"]!.GetValue<string>());
+        Assert.Equal(3, tags["count"]!.GetValue<int>());
+        var tagValues = tags["items"]!.AsArray().Select(v => v!.GetValue<string>()).OrderBy(v => v).ToArray();
+        Assert.Equal(new[] { "common", "starter", "verified" }, tagValues);
+
+        // Queue<Item> ItemQueue : Enqueue(sword,shield,potion) puis
+        // Dequeue() puis Enqueue(sword) force un vrai wraparound circulaire
+        // (_head=1, _tail revient a 0) -- ordre logique attendu (avant vers
+        // arriere) : Shield, Potion, Sword.
+        var queue = Field(inventoryFields, "ItemQueue")!["collection"]!;
+        Assert.Equal("queue", queue["kind"]!.GetValue<string>());
+        Assert.Equal(3, queue["count"]!.GetValue<int>());
+        var queueNames = new List<string>();
+        foreach (var item in queue["items"]!.AsArray())
+        {
+            var itemObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(item!["address"]!.GetValue<string>())));
+            queueNames.Add(itemObj!["fields"]!["Name"]!.GetValue<string>());
+        }
+        Assert.Equal(new[] { "Shield", "Potion", "Sword" }, queueNames);
+
+        // Stack<Item> ItemStack : Push(potion), Push(sword), Pop(), Push(shield)
+        // -- contenu final bas->haut = [potion, shield]. Restitue "sommet
+        // d'abord" (Pop()) : [Shield, Potion].
+        var stack = Field(inventoryFields, "ItemStack")!["collection"]!;
+        Assert.Equal("stack", stack["kind"]!.GetValue<string>());
+        Assert.Equal(2, stack["count"]!.GetValue<int>());
+        var stackNames = new List<string>();
+        foreach (var item in stack["items"]!.AsArray())
+        {
+            var itemObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(item!["address"]!.GetValue<string>())));
+            stackNames.Add(itemObj!["fields"]!["Name"]!.GetValue<string>());
+        }
+        Assert.Equal(new[] { "Shield", "Potion" }, stackNames);
+
+        // int[,] Grid (3x4), rempli par row*10+col -- deballage en liste
+        // plate "row-major" bornee, avec les dimensions exposees separement.
+        var grid = Field(inventoryFields, "Grid")!["collection"]!;
+        Assert.Equal("multidim_array", grid["kind"]!.GetValue<string>());
+        Assert.Equal(2, grid["rank"]!.GetValue<int>());
+        Assert.Equal(new[] { 3, 4 }, grid["dimensions"]!.AsArray().Select(v => v!.GetValue<int>()));
+        Assert.Equal(
+            new[] { 0, 1, 2, 3, 10, 11, 12, 13, 20, 21, 22, 23 },
+            grid["items"]!.AsArray().Select(v => v!.GetValue<int>()));
+    }
+
+    [Fact]
+    public async Task ReadObject_UnpacksNestedStructInsideStructRecursively()
+    {
+        // Chantier "Resolution recursive des structs imbriques" :
+        // Player.Stats (PlayerStats) contient HomeZone (Zone), qui contient
+        // Origin (Coordinates) -- 3 niveaux de struct avant d'atteindre les
+        // feuilles primitives (X/Y/Radius). Avant ce chantier, un placeholder
+        // texte fixe etait renvoye des le premier niveau de struct-dans-struct.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+
+        var stats = playerObj!["fields"]!["Stats"]!;
+        Assert.Equal("KillEngine.ClrTestTarget.PlayerStats", stats["typeName"]!.GetValue<string>());
+        // Rank n'est PAS verifie a une valeur fixe : le meme fixture partage
+        // (TargetAndInspectorFixture) est mute de facon permanente par
+        // WritePrimitivePath_UpdatesStringReferenceStructAndDictionaryValues
+        // (Stats.Rank = 42), et xUnit ne garantit pas d'ordre d'execution --
+        // seule la STRUCTURE du deballage recursif nous interesse ici, pas la
+        // valeur precise de ce champ particulier.
+        Assert.True(stats["fields"]!["Rank"]!.GetValue<int>() is 7 or 42);
+
+        var homeZone = stats["fields"]!["HomeZone"]!;
+        Assert.Equal("KillEngine.ClrTestTarget.Zone", homeZone["typeName"]!.GetValue<string>());
+        Assert.Equal(30, homeZone["fields"]!["Radius"]!.GetValue<int>());
+
+        var origin = homeZone["fields"]!["Origin"]!;
+        Assert.Equal("KillEngine.ClrTestTarget.Coordinates", origin["typeName"]!.GetValue<string>());
+        Assert.Equal(12, origin["fields"]!["X"]!.GetValue<int>());
+        Assert.Equal(-4, origin["fields"]!["Y"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task FindStaticFields_ResolvesTestRootStaticFieldsDirectlyWithoutEnumerateRoots()
+    {
+        // Chantier "investigation du root StaticVar manquant" : heap.
+        // EnumerateRoots() ne rapporte jamais TestRoot.RootPlayer comme root
+        // StaticVar (limite documentee, confirmee ne pas etre resolue par
+        // suspend:true ni ForceCompleteRuntimeEnumeration). findStaticFields
+        // resout le meme besoin par un mecanisme different et fiable :
+        // ClrType.StaticFields, qui fonctionne en attache PASSIVE.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var result = await PipeClient.CallAsync(
+            InspectorPipe, "findStaticFields", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.TestRoot")));
+        Assert.True(result!["success"]!.GetValue<bool>());
+        var matches = result["matches"]!.AsArray();
+
+        var rootPlayerMatch = Assert.Single(matches, m => m!["fieldName"]!.GetValue<string>() == "RootPlayer");
+        Assert.Equal("KillEngine.ClrTestTarget.Player", rootPlayerMatch!["objectTypeName"]!.GetValue<string>());
+        string objectAddress = rootPlayerMatch["objectAddress"]!.GetValue<string>();
+
+        // Cross-verification : l'objet retrouve par le champ static est bien
+        // lisible via readObject a cette meme adresse (mecanisme totalement
+        // different de la resolution, meme resultat).
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(objectAddress)));
+        Assert.Equal(objectAddress, playerObj!["address"]!.GetValue<string>());
+        Assert.Equal("KillEngine.ClrTestTarget.Player", playerObj["typeName"]!.GetValue<string>());
+
+        // DisposableSlot est un champ static reference nullable, actuellement
+        // vide dans ce contexte partage (sauf s'il a ete peuple par un autre
+        // test du meme fixture juste avant) -- on verifie seulement qu'il est
+        // rapporte avec un objectAddress null OU une adresse plausible (0x...),
+        // jamais une exception.
+        var disposableSlotMatch = Assert.Single(matches, m => m!["fieldName"]!.GetValue<string>() == "DisposableSlot");
+        Assert.True(disposableSlotMatch!["objectAddress"] is null || disposableSlotMatch["objectAddress"]!.GetValue<string>().StartsWith("0x"));
+    }
+
+    [Fact]
+    public async Task FindGcRootPath_FindsPlausibleVerifiableChainFromRootToNestedItem()
+    {
+        // Chantier "GCRoot chain complet" -- le plus exploratoire du lot.
+        // Cible : l'Item "Shield" (Inventory.Items[1]), atteignable UNIQUEMENT
+        // via des references imbriquees (List<Item>._items, Queue<Item>._array
+        // ou Stack<Item>._array -- PAS QuickSlots, qui ne contient que
+        // sword/potion). Verifie honnetement que chaque saut du chemin
+        // retourne correspond a une reference REELLEMENT lisible via
+        // readObject sur l'objet precedent -- pas seulement "success:true".
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var itemsCollection = Field(inventoryObj!["fields"]!, "Items")!["collection"]!;
+        string shieldAddress = itemsCollection["items"]![1]!["address"]!.GetValue<string>();
+        var shieldObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(shieldAddress)));
+        Assert.Equal("Shield", shieldObj!["fields"]!["Name"]!.GetValue<string>());
+
+        var pathResult = await PipeClient.CallAsync(
+            InspectorPipe, "findGcRootPath", new JsonArray(JsonValue.Create(shieldAddress), JsonValue.Create(8), JsonValue.Create(4000)));
+
+        Assert.True(pathResult!["success"]!.GetValue<bool>(), pathResult["message"]?.GetValue<string>() ?? pathResult.ToString());
+        var path = pathResult["path"]!.AsArray();
+        Assert.NotEmpty(path);
+        Assert.Equal(shieldAddress, path[^1]!["objectAddress"]!.GetValue<string>());
+        Assert.False(pathResult["shortestPathGuaranteed"]!.GetValue<bool>()); // honnetete documentee : pas garanti le plus court
+
+        // Verifie chaque saut : l'objet COURANT (en partant de l'objet du
+        // root) doit reellement exposer, via readObject, une reference vers
+        // l'objet suivant du chemin -- preuve que le chemin n'est pas
+        // fabrique, chaque maillon existe vraiment dans le graphe managé live.
+        string currentAddress = pathResult["rootObjectAddress"]!.GetValue<string>();
+        foreach (var step in path)
+        {
+            string expectedNext = step!["objectAddress"]!.GetValue<string>();
+            var current = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(currentAddress)));
+            Assert.True(
+                JsonContainsAddress(current, expectedNext),
+                $"Saut de chemin non verifiable : aucune reference vers {expectedNext} trouvee sur {currentAddress}.");
+            currentAddress = expectedNext;
+        }
+    }
+
+    private static bool JsonContainsAddress(JsonNode? node, string address)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                if (obj.TryGetPropertyValue("address", out JsonNode? addressNode)
+                    && addressNode is not null
+                    && string.Equals(addressNode.GetValue<string>(), address, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                foreach (var property in obj)
+                {
+                    if (JsonContainsAddress(property.Value, address)) return true;
+                }
+                return false;
+            case JsonArray array:
+                foreach (var item in array)
+                {
+                    if (JsonContainsAddress(item, address)) return true;
+                }
+                return false;
+            default:
+                return false;
+        }
+    }
+
     private static ulong ParseHex(string hex)
     {
         string trimmed = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hex[2..] : hex;

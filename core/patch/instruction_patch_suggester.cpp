@@ -448,6 +448,28 @@ BackwardDisassemblyResult disassembleBackwardWindow(const QByteArray& windowByte
     return result;
 }
 
+QList<InstructionInfo> disassembleForwardWindow(const QByteArray& windowBytes, int instructionCountLimit) {
+    QList<InstructionInfo> instructions;
+    const int limit = std::max(0, instructionCountLimit);
+    int offset = 0;
+
+    while (instructions.size() < limit && offset < windowBytes.size()) {
+        QByteArray instrBytes(
+            windowBytes.constData() + offset,
+            std::min<int>(15, windowBytes.size() - offset));
+        const InstructionInfo info = decodeX64InstructionLength(instrBytes);
+
+        if (!info.success || info.length <= 0) {
+            break; // Arret premature : ce qui a deja ete decode est conserve.
+        }
+
+        instructions.append(info);
+        offset += info.length;
+    }
+
+    return instructions;
+}
+
 QList<ResolvedCandidateField> resolveCandidateFieldAddresses(
     const QList<InstructionInfo>& instructions,
     uint64_t knownWriteTargetAddress) {

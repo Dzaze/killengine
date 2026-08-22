@@ -12717,6 +12717,114 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
     return result;
 }
 
+QVariantMap ApplicationController::findClrGcRootPath(const QString& targetObjectAddressHex, int maxDepth, int maxRootsScanned) {
+    const QString address = targetObjectAddressHex.trimmed();
+    if (address.isEmpty()) {
+        QVariantMap result;
+        result["success"] = false;
+        result["error"] = QStringLiteral("Adresse objet cible requise.");
+        return result;
+    }
+
+    const int boundedDepth = std::clamp(maxDepth, 1, 12);
+    const int boundedRoots = std::clamp(maxRootsScanned, 1, 20000);
+
+    // Chantier le plus exploratoire du lot : un parcours BFS par-root sur un
+    // gros tas peut prendre plusieurs secondes (voir ClrSession.FindGcRootPath
+    // cote helper, borne en interne par un budget de temps ET un nombre total
+    // de noeuds visites). Timeout cote appelant natif volontairement plus
+    // large que findObjectsByFieldValue (20000 ms) puisque ce parcours est
+    // structurellement plus couteux -- aligne sur le budget de temps interne
+    // du helper (15s) plus une marge pour l'aller-retour pipe.
+    return callClrInspectorRpc(QStringLiteral("findGcRootPath"), {address, boundedDepth, boundedRoots}, 25000);
+}
+
+QVariantMap ApplicationController::disassembleClrMethod(const QString& objectAddressHex, const QString& methodName, int instructionCount) {
+    QVariantMap result;
+    result["success"] = false;
+    result["objectAddress"] = objectAddressHex;
+    result["methodName"] = methodName;
+
+    const QString address = objectAddressHex.trimmed();
+    const QString method = methodName.trimmed();
+    if (address.isEmpty() || method.isEmpty()) {
+        result["error"] = QStringLiteral("Adresse objet et nom de methode requis.");
+        return result;
+    }
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = QStringLiteral("Aucun processus attache.");
+        return result;
+    }
+
+    // 1) Resolution de l'adresse native deja JITtee -- meme voie RPC que
+    // callClrInstanceMethod (resolveInstanceMethodAddress). Duplique
+    // volontairement l'appel minimal plutot que de factoriser : les deux
+    // methodes divergent ensuite completement (l'une injecte/execute, l'autre
+    // lit passivement), factoriser au-dela de cet appel commun ajouterait un
+    // couplage pour peu de gain.
+    QVariantMap resolveResponse = callClrInspectorRpc(QStringLiteral("resolveInstanceMethodAddress"), {address, method}, 10000);
+    if (!resolveResponse.value("success").toBool()) {
+        result["error"] = resolveResponse.value("error").toString();
+        return result;
+    }
+
+    const QVariantMap resolved = resolveResponse.value("result").toMap();
+    const QString resolvedMethodName = resolved.value("methodName").toString();
+    const QString nativeCodeAddressHex = resolved.value("nativeCodeAddress").toString();
+    result["methodName"] = resolvedMethodName;
+    result["nativeCodeAddress"] = nativeCodeAddressHex;
+
+    uint64_t nativeCodeAddress = 0;
+    if (!parseHexAddress(nativeCodeAddressHex, &nativeCodeAddress)) {
+        result["error"] = QStringLiteral("Adresse native invalide apres resolution.");
+        return result;
+    }
+
+    // 2) Lit un buffer de bytes depuis l'adresse native resolue -- 15 octets
+    // est la longueur MAX d'une instruction x64, donc instructionCount * 15
+    // couvre le pire cas ; borne a une taille raisonnable (960 octets = 64
+    // instructions max) pour ne jamais lire un buffer demesure.
+    const int boundedCount = std::clamp(instructionCount, 1, 64);
+    const int bufferSize = std::clamp(boundedCount * 15, 32, 960);
+
+    killcore::MemoryReader reader(m_handle);
+    const auto read = reader.readChunked(nativeCodeAddress, static_cast<size_t>(bufferSize), 4096);
+    if (!read.success && !read.partial) {
+        result["error"] = QStringLiteral("Lecture du code natif JITte echouee : %1").arg(read.errorMessage);
+        return result;
+    }
+
+    // 3) Desassemble en avant via le decodeur x64 existant (ne le
+    // reimplemente pas) -- liste partielle possible si le buffer est trop
+    // court ou si un decodage echoue avant instructionCount atteint.
+    const QList<killcore::InstructionInfo> decoded = killcore::disassembleForwardWindow(read.data, boundedCount);
+
+    QVariantList instructions;
+    uint64_t cumulativeOffset = 0;
+    for (const auto& instruction : decoded) {
+        QVariantMap entry;
+        entry["address"] = QStringLiteral("0x%1").arg(nativeCodeAddress + cumulativeOffset, 0, 16);
+        entry["length"] = instruction.length;
+        entry["disassembly"] = instruction.disassembly;
+        entry["mnemonicHint"] = instruction.mnemonicHint;
+        entry["rawBytesText"] = instruction.rawBytesText;
+        entry["decoder"] = instruction.decoder;
+        instructions.append(entry);
+        cumulativeOffset += static_cast<uint64_t>(instruction.length);
+    }
+
+    result["success"] = !instructions.isEmpty();
+    result["instructions"] = instructions;
+    result["requestedInstructionCount"] = boundedCount;
+    result["returnedInstructionCount"] = instructions.size();
+    result["truncated"] = instructions.size() < boundedCount;
+    result["bufferBytesRead"] = static_cast<int>(read.bytesRead);
+    if (instructions.isEmpty()) {
+        result["error"] = QStringLiteral("Aucune instruction decodee depuis l'adresse native resolue.");
+    }
+    return result;
+}
+
 QVariantMap ApplicationController::probeKernelDriver() const {
     const killcore::KernelDriverBridge bridge;
     const auto probe = bridge.probe();

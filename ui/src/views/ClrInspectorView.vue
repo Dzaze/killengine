@@ -27,6 +27,9 @@ const useLocatorForWrite = ref(false)
 // concurrente d'une autre thread cible, mais best-effort (pas une garantie
 // absolue d'absence de deadlock, voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).
 const suspendDuringBatch = ref(false)
+const gcRootTargetAddress = ref('')
+const disassembleMethodName = ref('')
+const disassembleInstructionCount = ref(24)
 
 const clrReady = computed(() => Boolean(store.clrInspectorStatus?.running && store.clrInspectorStatus?.attachedProcess))
 
@@ -187,6 +190,23 @@ function callInstanceMethod() {
   // valueType volontairement vide : le type reel du parametre, resolu via
   // ClrMD (ResolveInstanceMethodAddress), pilote l'encodage cote natif.
   void store.callClrInstanceMethod(objectAddress, method, value, '')
+}
+
+function findGcRootPath() {
+  const target = gcRootTargetAddress.value.trim() || store.clrSelectedObject?.address || ''
+  if (!target) return
+  void store.findClrGcRootPath(target)
+}
+
+function useSelectedObjectAsGcRootTarget() {
+  gcRootTargetAddress.value = store.clrSelectedObject?.address ?? ''
+}
+
+function disassembleSelectedMethod() {
+  const objectAddress = store.clrSelectedObject?.address ?? ''
+  const method = disassembleMethodName.value.trim()
+  if (!objectAddress || !method) return
+  void store.disassembleClrMethod(objectAddress, method, disassembleInstructionCount.value)
 }
 
 function trainerValueType(field: ClrFieldInfo): string {
@@ -592,6 +612,73 @@ onMounted(() => {
               </template>
             </div>
           </div>
+
+          <div v-if="store.clrSelectedObject" class="setter-call">
+            <div class="setter-call-head">
+              <div>
+                <strong>Désassembler ce setter (lecture seule)</strong>
+                <span>Résout l'adresse native déjà JITtée puis désassemble en avant — aucune exécution, contrairement au panneau ci-dessus.</span>
+              </div>
+              <InfoDot
+                text="Réutilise la même résolution ClrMD que l'appel de setter (resolveInstanceMethodAddress), puis lit le code natif déjà JITté et le désassemble instruction par instruction (décodeur x64 existant du module de patch). Purement en lecture — n'exécute jamais le code cible."
+                align="right"
+              />
+            </div>
+            <div class="setter-call-inputs">
+              <input
+                v-model="disassembleMethodName"
+                class="path-input"
+                placeholder="Propriété ou méthode (ex. Vitality, set_Vitality)"
+                aria-label="Nom de la méthode CLR à désassembler"
+                @keyup.enter="disassembleSelectedMethod"
+              />
+              <input
+                v-model.number="disassembleInstructionCount"
+                type="number"
+                min="1"
+                max="64"
+                class="path-value-input"
+                aria-label="Nombre d'instructions à désassembler"
+              />
+              <button
+                class="btn btn-secondary"
+                :disabled="store.clrInspectorBusy || !disassembleMethodName.trim()"
+                title="Résout l'adresse native déjà JITtée puis désassemble en avant (lecture seule)."
+                @click="disassembleSelectedMethod"
+              >
+                Désassembler
+              </button>
+            </div>
+            <div v-if="store.clrDisassembleResult" class="setter-call-result" :class="{ ok: store.clrDisassembleResult.success, err: !store.clrDisassembleResult.success }">
+              <template v-if="store.clrDisassembleResult.success">
+                <strong>{{ store.clrDisassembleResult.methodName }}</strong>
+                <code>{{ store.clrDisassembleResult.nativeCodeAddress }}</code>
+                <span>{{ store.clrDisassembleResult.returnedInstructionCount }} instruction(s){{ store.clrDisassembleResult.truncated ? ' (tronqué)' : '' }}</span>
+              </template>
+              <template v-else>
+                {{ store.clrDisassembleResult.error }}
+              </template>
+            </div>
+            <div v-if="store.clrDisassembleResult?.instructions?.length" class="table-wrap disassembly-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Adresse</th>
+                    <th>Octets</th>
+                    <th>Instruction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(instruction, index) in store.clrDisassembleResult.instructions" :key="`${instruction.address}-${index}`">
+                    <td><code>{{ instruction.address }}</code></td>
+                    <td><code>{{ instruction.rawBytesText }}</code></td>
+                    <td>{{ instruction.disassembly || instruction.mnemonicHint }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div class="table-wrap">
             <table>
               <thead>
@@ -692,6 +779,65 @@ onMounted(() => {
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div class="gcroot-path">
+          <div class="panel-head">
+            <h3>Chemin root → objet (exploratoire)</h3>
+            <InfoDot
+              text="Reconstruit un chemin complet root -> ... -> objet cible à travers plusieurs sauts de références (équivalent approximatif de !gcroot SOS/WinDbg). Retourne le PREMIER chemin trouvé par un parcours en largeur borné par root, pas garanti le plus court. Peut être lent sur un gros tas (budget de temps/nœuds interne côté helper)."
+              align="right"
+            />
+          </div>
+          <div class="setter-call-inputs">
+            <input
+              v-model="gcRootTargetAddress"
+              class="path-input"
+              placeholder="Adresse objet cible (0x...)"
+              aria-label="Adresse de l'objet cible pour le chemin GC root"
+              @keyup.enter="findGcRootPath"
+            />
+            <button
+              class="btn btn-secondary"
+              :disabled="store.clrInspectorBusy || !store.clrSelectedObject"
+              title="Utilise l'adresse de l'objet actuellement sélectionné."
+              @click="useSelectedObjectAsGcRootTarget"
+            >
+              Objet sélectionné
+            </button>
+            <button
+              class="btn btn-secondary"
+              :disabled="store.clrInspectorBusy || !(gcRootTargetAddress.trim() || store.clrSelectedObject)"
+              @click="findGcRootPath"
+            >
+              Retrouver le chemin
+            </button>
+          </div>
+          <div v-if="store.clrGcRootPathResult" class="setter-call-result" :class="{ ok: store.clrGcRootPathResult.success, err: !store.clrGcRootPathResult.success }">
+            <template v-if="store.clrGcRootPathResult.success">
+              <strong>{{ store.clrGcRootPathResult.rootKind }}</strong>
+              <code>{{ store.clrGcRootPathResult.rootObjectAddress }}</code>
+              <span>{{ store.clrGcRootPathResult.depth }} saut(s), {{ store.clrGcRootPathResult.nodesVisited }} nœud(s) visité(s)</span>
+            </template>
+            <template v-else>
+              {{ store.clrGcRootPathResult.message || store.clrGcRootPathResult.error }}
+            </template>
+          </div>
+          <ol v-if="store.clrGcRootPathResult?.path?.length" class="gcroot-steps">
+            <li>
+              <code>{{ store.clrGcRootPathResult.rootObjectAddress }}</code>
+              <span>{{ store.clrGcRootPathResult.rootObjectTypeName }}</span>
+              <em>(objet du root {{ store.clrGcRootPathResult.rootKind }})</em>
+            </li>
+            <li v-for="(step, index) in store.clrGcRootPathResult.path" :key="index">
+              <span class="step-hop">
+                {{ step.kind === 'index' ? `[${step.index}]` : `.${step.fieldName}` }}
+              </span>
+              →
+              <code>{{ step.objectAddress }}</code>
+              <span>{{ step.typeName }}</span>
+            </li>
+          </ol>
         </div>
       </section>
     </template>
@@ -1099,6 +1245,42 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
+}
+
+.disassembly-wrap {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.gcroot-path {
+  margin: 14px 0 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gcroot-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.gcroot-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step-hop {
+  color: var(--text-primary);
+  font-family: monospace;
 }
 
 .path-input,

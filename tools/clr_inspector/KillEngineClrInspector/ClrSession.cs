@@ -21,6 +21,17 @@ public sealed record PathWriteOperation(string Path, string Value);
 public sealed class ClrSession : IDisposable
 {
     private const int MaxCollectionItems = 32;
+
+    // Chantier "resolution recursive des structs imbriques" (docs/
+    // KILLENGINE_CLR_INSPECTOR_SPEC.md) : profondeur maximale de deballage
+    // struct-dans-struct. Borne deliberee -- un struct generique complexe
+    // pourrait sinon se referencer indirectement et provoquer une recursion
+    // couteuse ou une boucle (les structs .NET ne peuvent pas former de cycle
+    // direct par valeur, mais un type generique imbrique profondement reste
+    // possible). 4 niveaux couvre largement les cas reels (struct de struct
+    // de struct), au-dela un placeholder explicite est renvoye plutot que de
+    // continuer a deployer.
+    private const int MaxValueTypeDepth = 4;
     private const uint ProcessVmWrite = 0x0020;
     private const uint ProcessVmOperation = 0x0008;
 
@@ -298,7 +309,7 @@ public sealed class ClrSession : IDisposable
         };
     }
 
-    private static object? ReadFieldValue(ClrObject obj, ClrInstanceField field)
+    private static object? ReadFieldValue(ClrObject obj, ClrInstanceField field, int depth = 0)
     {
         if (field.ElementType == ClrElementType.String)
         {
@@ -335,10 +346,18 @@ public sealed class ClrSession : IDisposable
             return DescribeObjectReference(refObj, depth: 0);
         }
 
-        // Champ value-type (struct) autre que primitif : hors perimetre MVP
-        // (ex: decimal, struct utilisateur imbriquee) -- volontairement pas
-        // decode ici, voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md "hors scope MVP".
-        return $"<value-type non deroule: {field.Type?.Name ?? field.ElementType.ToString()}>";
+        // Champ value-type (struct) autre que primitif : deballage recursif
+        // borne (chantier "resolution recursive des structs imbriques",
+        // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) -- reutilise DescribeValueType,
+        // la meme logique deja utilisee pour un struct racine d'element de
+        // collection (List<T>/tableau/Dictionary<K,V> de structs).
+        if (depth < MaxValueTypeDepth && field.Type?.IsValueType == true)
+        {
+            ClrValueType nested = obj.ReadValueTypeField(field.Name!);
+            return DescribeValueType(nested, depth + 1);
+        }
+
+        return $"<value-type non deroule (profondeur max {MaxValueTypeDepth} atteinte): {field.Type?.Name ?? field.ElementType.ToString()}>";
     }
 
     private static object DescribeObjectReference(ClrObject obj, int depth)
@@ -370,6 +389,15 @@ public sealed class ClrSession : IDisposable
         {
             if (type.IsArray)
             {
+                // Tableaux multidimensionnels (ex: int[,]) : Rank > 1, verifie
+                // par attache ClrMD reelle (ClrArray.Rank/GetLength(d), voir
+                // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md, chantier "Plus de
+                // collections BCL"). Les tableaux 1D restent geres par
+                // DescribeArray comme avant.
+                if (obj.AsArray().Rank > 1)
+                {
+                    return DescribeMultiDimensionalArray(obj, depth);
+                }
                 return DescribeArray(obj, null, depth);
             }
 
@@ -384,6 +412,21 @@ public sealed class ClrSession : IDisposable
             if (typeName.StartsWith("System.Collections.Generic.Dictionary<", StringComparison.Ordinal))
             {
                 return DescribeDictionary(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.HashSet<", StringComparison.Ordinal))
+            {
+                return DescribeHashSet(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.Queue<", StringComparison.Ordinal))
+            {
+                return DescribeQueue(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.Stack<", StringComparison.Ordinal))
+            {
+                return DescribeStack(obj, depth);
             }
 
             object? customCollection = DescribeFieldBackedCollection(obj, depth);
@@ -537,6 +580,257 @@ public sealed class ClrSession : IDisposable
         };
     }
 
+    /// <summary>
+    /// HashSet&lt;T&gt; -- layout interne verifie par attache ClrMD reelle sur
+    /// KillEngineClrTestTarget (script jetable, pas devine) : buffer prive
+    /// `_entries` (`HashSet&lt;T&gt;+Entry[]`, champs `HashCode`/`Next`/`Value`,
+    /// PAS `hashCode`/`next`/`value` en minuscule comme `Dictionary&lt;K,V&gt;.Entry`
+    /// -- deux structures internes distinctes malgre la ressemblance de nom)
+    /// + compteurs `_count`/`_freeCount`.
+    ///
+    /// **Piege reel rencontre pendant la verification** (documente plutot que
+    /// silencie) : une premiere version de cette methode reutilisait par
+    /// analogie l'heuristique de <see cref="DescribeDictionary"/> ("HashCode
+    /// negatif == entree supprimee"), correcte pour `Dictionary&lt;K,V&gt;`
+    /// (son `hashCode` est masque a une valeur TOUJOURS non-negative quand
+    /// l'entree est vivante, `&amp; 0x7FFFFFFF`). Une attache ClrMD reelle sur
+    /// `Inventory.Tags` avec un `Remove()` volontaire (`ObjectGraph.cs`) a
+    /// revele que `HashSet&lt;T&gt;.Entry.HashCode` n'est PAS masque : des
+    /// entrees bien VIVANTES ("common", "starter", "verified") ont un
+    /// `HashCode` negatif tout a fait normal, ce qui faisait disparaitre a
+    /// tort la totalite du HashSet. Le marqueur fiable (identique a
+    /// `HashSet&lt;T&gt;.Enumerator.MoveNext()` cote BCL) est le champ `Next` :
+    /// `&gt;= -1` pour une entree vivante (fin de chaine de bucket ou
+    /// chainage normal), `&lt;= -2` pour une entree du free-list (encodage
+    /// `StartOfFreeList(-3) - prochainIndexLibre`). L'iteration est aussi
+    /// bornee a `_count` slots (pas la longueur physique du tableau, qui peut
+    /// contenir des slots jamais initialises au-dela) -- le nombre
+    /// d'elements REELLEMENT vivants est `_count - _freeCount` (litteralement
+    /// `HashSet&lt;T&gt;.Count` cote BCL).
+    /// </summary>
+    private static object DescribeHashSet(ClrObject obj, int depth)
+    {
+        ClrObject entriesObject = obj.ReadObjectField("_entries");
+        if (entriesObject.IsNull || entriesObject.Type is null || !entriesObject.Type.IsArray)
+        {
+            return new { kind = "hashset", count = 0, returned = 0, items = Array.Empty<object?>() };
+        }
+
+        int usedSlots = Math.Max(0, SafeReadIntField(obj, "_count"));
+        int freeCount = Math.Max(0, SafeReadIntField(obj, "_freeCount"));
+        int liveCount = Math.Max(0, usedSlots - freeCount);
+        ClrArray entriesArray = entriesObject.AsArray();
+        int physicalLength = entriesArray.GetLength(0);
+        int slotsToScan = Math.Min(usedSlots, physicalLength);
+        ClrType? entryType = entriesObject.Type.ComponentType;
+        ClrInstanceField? valueField = entryType?.GetFieldByName("Value");
+
+        var items = new List<object?>();
+        for (int i = 0; i < slotsToScan && items.Count < MaxCollectionItems; ++i)
+        {
+            ClrValueType entry = entriesArray.GetStructValue(i);
+            int next = TryReadValueTypeIntField(entry, "Next", out int n) ? n : -1;
+            if (next < -1)
+            {
+                continue;
+            }
+            items.Add(valueField is null ? null : ReadValueTypeFieldValue(entry, valueField, depth));
+        }
+
+        return new
+        {
+            kind = "hashset",
+            elementType = valueField?.Type?.Name,
+            count = liveCount,
+            returned = items.Count,
+            truncated = liveCount > items.Count,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// Queue&lt;T&gt; -- layout interne verifie par attache ClrMD reelle : buffer
+    /// prive `_array` + `_head`/`_tail`/`_size` (buffer CIRCULAIRE, pas un
+    /// simple tableau 0.._size comme List&lt;T&gt;). L'element logique i est a
+    /// l'index physique `(_head + i) % capacite` -- verifie concretement avec
+    /// une sequence Enqueue/Dequeue/Enqueue qui force `_head > 0` ET un
+    /// retour a zero de `_tail` (voir ObjectGraph.cs, `Inventory.ItemQueue`,
+    /// et docs/KILLENGINE_CLR_INSPECTOR_SPEC.md pour le detail de la verification).
+    /// </summary>
+    private static object DescribeQueue(ClrObject obj, int depth)
+    {
+        ClrObject arrayObject = obj.ReadObjectField("_array");
+        if (arrayObject.IsNull || arrayObject.Type is null || !arrayObject.Type.IsArray)
+        {
+            return new { kind = "queue", count = 0, returned = 0, items = Array.Empty<object?>() };
+        }
+
+        int head = SafeReadIntField(obj, "_head");
+        int size = Math.Max(0, SafeReadIntField(obj, "_size"));
+        ClrArray array = arrayObject.AsArray();
+        int capacity = array.GetLength(0);
+        int returned = Math.Max(0, Math.Min(size, MaxCollectionItems));
+        ClrType? componentType = arrayObject.Type.ComponentType;
+
+        var items = new List<object?>(returned);
+        for (int i = 0; i < returned; ++i)
+        {
+            int physicalIndex = capacity == 0 ? 0 : (head + i) % capacity;
+            items.Add(ReadArrayElement(array, componentType, physicalIndex, depth));
+        }
+
+        return new
+        {
+            kind = "queue",
+            elementType = componentType?.Name,
+            count = size,
+            returned = items.Count,
+            truncated = size > items.Count,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// Stack&lt;T&gt; -- layout interne verifie par attache ClrMD reelle : buffer
+    /// prive `_array` + `_size`, PAS de champ de tete circulaire (contrairement
+    /// a Queue&lt;T&gt;) -- les elements 0.._size-1 sont dans l'ordre d'empilement
+    /// (index 0 = premier empile / le plus ancien). Restitue en ordre "sommet
+    /// d'abord" (items[0] = ce que Pop() renverrait), pour matcher
+    /// Stack&lt;T&gt;.GetEnumerator() cote BCL -- verifie avec une sequence
+    /// Push/Pop/Push (voir ObjectGraph.cs, `Inventory.ItemStack`).
+    /// </summary>
+    private static object DescribeStack(ClrObject obj, int depth)
+    {
+        ClrObject arrayObject = obj.ReadObjectField("_array");
+        if (arrayObject.IsNull || arrayObject.Type is null || !arrayObject.Type.IsArray)
+        {
+            return new { kind = "stack", count = 0, returned = 0, items = Array.Empty<object?>() };
+        }
+
+        int size = Math.Max(0, SafeReadIntField(obj, "_size"));
+        ClrArray array = arrayObject.AsArray();
+        int returned = Math.Max(0, Math.Min(size, MaxCollectionItems));
+        ClrType? componentType = arrayObject.Type.ComponentType;
+
+        var items = new List<object?>(returned);
+        for (int i = 0; i < returned; ++i)
+        {
+            int physicalIndex = size - 1 - i;
+            items.Add(ReadArrayElement(array, componentType, physicalIndex, depth));
+        }
+
+        return new
+        {
+            kind = "stack",
+            elementType = componentType?.Name,
+            count = size,
+            returned = items.Count,
+            truncated = size > items.Count,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// Tableau multidimensionnel (ex: int[,], Rank > 1) -- API confirmee par
+    /// attache ClrMD reelle : <see cref="ClrArray.Rank"/>, <see
+    /// cref="ClrArray.GetLength"/>, et les surcharges indexees par
+    /// <c>int[]</c> (<see cref="ClrArray.GetValue{T}(int[])"/>, <c>GetObjectValue(int[])</c>,
+    /// <c>GetStructValue(int[])</c>). Restitue en liste PLATE (ordre "row-major",
+    /// dernier indice varie le plus vite) plutot qu'en tableau de tableaux --
+    /// plus simple a borner uniformement par <see cref="MaxCollectionItems"/>
+    /// sur le nombre total d'elements plutot que par dimension ; les
+    /// dimensions sont exposees separement pour reconstruire la structure
+    /// cote appelant si besoin.
+    /// </summary>
+    private static object DescribeMultiDimensionalArray(ClrObject arrayObject, int depth)
+    {
+        ClrArray array = arrayObject.AsArray();
+        int rank = array.Rank;
+        var dimensions = new int[rank];
+        long total = 1;
+        for (int d = 0; d < rank; ++d)
+        {
+            dimensions[d] = array.GetLength(d);
+            total *= dimensions[d];
+        }
+
+        ClrType? componentType = arrayObject.Type?.ComponentType;
+        int returned = (int)Math.Max(0, Math.Min(total, MaxCollectionItems));
+        var items = new List<object?>(returned);
+        var indices = new int[rank];
+        for (int flat = 0; flat < returned; ++flat)
+        {
+            int remaining = flat;
+            for (int d = rank - 1; d >= 0; --d)
+            {
+                indices[d] = dimensions[d] == 0 ? 0 : remaining % dimensions[d];
+                remaining /= Math.Max(1, dimensions[d]);
+            }
+            items.Add(ReadMultiDimensionalElement(array, componentType, indices, depth));
+        }
+
+        return new
+        {
+            kind = "multidim_array",
+            rank,
+            dimensions,
+            elementType = componentType?.Name,
+            count = total,
+            returned = items.Count,
+            truncated = total > items.Count,
+            indexOrder = "row-major (flat = ((i0 * dim1 + i1) * dim2 + i2) ... ; dernier indice varie le plus vite)",
+            items,
+        };
+    }
+
+    private static object? ReadMultiDimensionalElement(ClrArray array, ClrType? componentType, int[] indices, int depth)
+    {
+        if (componentType is null)
+        {
+            return null;
+        }
+
+        if (componentType.ElementType == ClrElementType.String)
+        {
+            ClrObject str = array.GetObjectValue(indices);
+            return str.IsNull ? null : str.AsString(4096);
+        }
+
+        if (IsPrimitiveElement(componentType.ElementType))
+        {
+            return ReadMultiDimensionalPrimitive(array, componentType.ElementType, indices);
+        }
+
+        if (!componentType.IsValueType)
+        {
+            ClrObject refObj = array.GetObjectValue(indices);
+            return refObj.IsNull ? null : DescribeObjectReference(refObj, depth);
+        }
+
+        ClrValueType value = array.GetStructValue(indices);
+        return DescribeValueType(value, depth);
+    }
+
+    private static object ReadMultiDimensionalPrimitive(ClrArray array, ClrElementType elementType, int[] indices)
+    {
+        return elementType switch
+        {
+            ClrElementType.Boolean => array.GetValue<bool>(indices),
+            ClrElementType.Char => (int)array.GetValue<char>(indices),
+            ClrElementType.Int8 => array.GetValue<sbyte>(indices),
+            ClrElementType.UInt8 => array.GetValue<byte>(indices),
+            ClrElementType.Int16 => array.GetValue<short>(indices),
+            ClrElementType.UInt16 => array.GetValue<ushort>(indices),
+            ClrElementType.Int32 => array.GetValue<int>(indices),
+            ClrElementType.UInt32 => array.GetValue<uint>(indices),
+            ClrElementType.Int64 => array.GetValue<long>(indices),
+            ClrElementType.UInt64 => array.GetValue<ulong>(indices),
+            ClrElementType.Float => array.GetValue<float>(indices),
+            ClrElementType.Double => array.GetValue<double>(indices),
+            _ => $"<primitif non gere: {elementType}>",
+        };
+    }
+
     private static object DescribeValueType(ClrValueType value, int depth)
     {
         var fields = new Dictionary<string, object?>();
@@ -582,7 +876,22 @@ public sealed class ClrSession : IDisposable
             }
             return refObj.IsNull ? null : DescribeObjectReference(refObj, depth);
         }
-        return $"<value-type non deroule: {field.Type?.Name ?? field.ElementType.ToString()}>";
+
+        // Struct imbriquee DANS un struct (ex: PlayerStats.HomeZone de type
+        // Zone, qui contient elle-meme Coordinates) -- c'etait le placeholder
+        // texte fixe avant le chantier "resolution recursive des structs
+        // imbriques" (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md). Deballage
+        // recursif borne par MaxValueTypeDepth : au-dela, placeholder
+        // explicite plutot que de continuer (protection contre un type
+        // generique imbrique de facon degeneree, pas une vraie boucle -- les
+        // structs .NET ne peuvent pas se contenir eux-memes par valeur).
+        if (depth < MaxValueTypeDepth)
+        {
+            ClrValueType nested = value.ReadValueTypeField(field);
+            return DescribeValueType(nested, depth + 1);
+        }
+
+        return $"<profondeur maximale de struct imbriquee atteinte ({MaxValueTypeDepth}): {field.Type?.Name ?? field.ElementType.ToString()}>";
     }
 
     private static bool IsPrimitiveElement(ClrElementType elementType)
@@ -685,6 +994,393 @@ public sealed class ClrSession : IDisposable
             });
         }
         return results;
+    }
+
+    /// <summary>
+    /// Chantier "investigation du root StaticVar manquant" (docs/
+    /// KILLENGINE_CLR_INSPECTOR_SPEC.md) : <see cref="EnumerateRoots"/>
+    /// (heap.EnumerateRoots) ne rapporte JAMAIS de root de type StaticVar sur
+    /// ce runtime/cette version de ClrMD, meme avec une attache invasive
+    /// (`suspend:true`) ou l'option `DataTargetOptions.ForceCompleteRuntimeEnumeration`
+    /// -- verifie par attache reelle avant d'ecrire cette methode (script
+    /// jetable dans le scratchpad de session), pas suppose. En revanche,
+    /// ClrMD expose un mecanisme COMPLETEMENT DIFFERENT et fiable pour lire
+    /// un champ static directement, sans dependre de l'enumeration des roots
+    /// et sans attache invasive : <see cref="ClrType.StaticFields"/> +
+    /// <see cref="ClrStaticField.ReadObject"/>/<c>Read&lt;T&gt;</c>/<c>ReadString</c>
+    /// par <see cref="ClrAppDomain"/>. Cette methode resout donc le besoin
+    /// pratique ("retrouver l'objet reference par un champ static connu")
+    /// par un chemin different de celui envisage au depart (pas un nouveau
+    /// mode d'attache "suspended", une API de lecture directe qui fonctionne
+    /// deja en attache passive). Les types sont retrouves en parcourant
+    /// `ClrModule.EnumerateTypeDefToMethodTableMap()` de chaque module charge
+    /// (necessaire car un type purement static comme `TestRoot`, jamais
+    /// instancie, n'apparait pas dans `heap.EnumerateObjects()`).
+    /// </summary>
+    public object FindStaticFields(string typeSubstring, string? fieldNameSubstring)
+    {
+        var runtime = RequireRuntime();
+        string typeFilter = typeSubstring.Trim();
+        if (typeFilter.Length == 0)
+        {
+            throw new ClrSessionException("Type requis pour enumerer des champs static CLR.");
+        }
+        string? fieldFilter = string.IsNullOrWhiteSpace(fieldNameSubstring) ? null : fieldNameSubstring.Trim();
+
+        var results = new List<object>();
+        var seenMethodTables = new HashSet<ulong>();
+        int typesScanned = 0;
+
+        foreach (ClrModule module in runtime.EnumerateModules())
+        {
+            foreach ((ulong methodTable, int _) in module.EnumerateTypeDefToMethodTableMap())
+            {
+                if (!seenMethodTables.Add(methodTable))
+                {
+                    continue;
+                }
+
+                ClrType? type = runtime.GetTypeByMethodTable(methodTable);
+                if (type?.Name is null || type.StaticFields.Length == 0)
+                {
+                    continue;
+                }
+                if (!type.Name.Contains(typeFilter, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                typesScanned++;
+
+                foreach (ClrStaticField field in type.StaticFields)
+                {
+                    if (fieldFilter is not null &&
+                        (field.Name is null || !field.Name.Contains(fieldFilter, StringComparison.Ordinal)))
+                    {
+                        continue;
+                    }
+
+                    foreach (ClrAppDomain domain in runtime.AppDomains)
+                    {
+                        results.Add(DescribeStaticFieldValue(type, field, domain));
+                        if (results.Count >= 200)
+                        {
+                            return BuildStaticFieldsResult(results, typeFilter, fieldFilter, typesScanned);
+                        }
+                    }
+                }
+            }
+        }
+
+        return BuildStaticFieldsResult(results, typeFilter, fieldFilter, typesScanned);
+    }
+
+    private static object BuildStaticFieldsResult(List<object> results, string typeFilter, string? fieldFilter, int typesScanned)
+    {
+        return new
+        {
+            success = results.Count > 0,
+            typeSubstring = typeFilter,
+            fieldNameSubstring = fieldFilter,
+            typesScanned,
+            matches = results,
+        };
+    }
+
+    private static object DescribeStaticFieldValue(ClrType type, ClrStaticField field, ClrAppDomain domain)
+    {
+        object? value = null;
+        string? objectAddress = null;
+        string? objectTypeName = null;
+        try
+        {
+            if (!field.IsInitialized(domain))
+            {
+                value = "<non initialise>";
+            }
+            else if (field.IsObjectReference)
+            {
+                ClrObject refObj = field.ReadObject(domain);
+                if (!refObj.IsNull)
+                {
+                    objectAddress = ToHex(refObj.Address);
+                    objectTypeName = refObj.Type?.Name;
+                }
+                value = objectAddress;
+            }
+            else if (field.ElementType == ClrElementType.String)
+            {
+                value = field.ReadString(domain);
+            }
+            else if (field.IsPrimitive)
+            {
+                value = ReadStaticPrimitive(field, domain);
+            }
+            else
+            {
+                value = $"<champ static value-type non deroule: {field.Type?.Name ?? field.ElementType.ToString()}>";
+            }
+        }
+        catch (Exception ex)
+        {
+            value = $"<erreur lecture: {ex.Message}>";
+        }
+
+        return new
+        {
+            typeName = type.Name,
+            fieldName = field.Name,
+            elementType = field.ElementType.ToString(),
+            appDomainId = domain.Id,
+            value,
+            objectAddress,
+            objectTypeName,
+        };
+    }
+
+    private static object ReadStaticPrimitive(ClrStaticField field, ClrAppDomain domain)
+    {
+        return field.ElementType switch
+        {
+            ClrElementType.Boolean => field.Read<bool>(domain),
+            ClrElementType.Char => (int)field.Read<char>(domain),
+            ClrElementType.Int8 => field.Read<sbyte>(domain),
+            ClrElementType.UInt8 => field.Read<byte>(domain),
+            ClrElementType.Int16 => field.Read<short>(domain),
+            ClrElementType.UInt16 => field.Read<ushort>(domain),
+            ClrElementType.Int32 => field.Read<int>(domain),
+            ClrElementType.UInt32 => field.Read<uint>(domain),
+            ClrElementType.Int64 => field.Read<long>(domain),
+            ClrElementType.UInt64 => field.Read<ulong>(domain),
+            ClrElementType.Float => field.Read<float>(domain),
+            ClrElementType.Double => field.Read<double>(domain),
+            _ => $"<primitif static non gere: {field.ElementType}>",
+        };
+    }
+
+    // Chantier "GCRoot chain complet" (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) :
+    // bornes par defaut/max pour FindGcRootPath. Point le plus exploratoire
+    // de ce lot -- voir la doc pour l'honnetete sur ce qui marche vraiment
+    // (un chemin trouve, pas garanti le plus court) vs les limites connues
+    // (scan potentiellement lent sur un gros tas).
+    private const int MaxGcRootPathDepth = 12;
+    private const int MaxGcRootsScanned = 20_000;
+    private const int MaxGcRootPathArrayElementsPerNode = 64;
+    private const int MaxGcRootPathTotalNodesVisited = 200_000;
+    private static readonly TimeSpan GcRootPathTimeBudget = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Reconstruit un chemin root -> ... -> objet cible a travers plusieurs
+    /// sauts de references (equivalent approximatif de `!gcroot` SOS/WinDbg,
+    /// pas une reimplementation exacte). Pour chaque root retourne par
+    /// `heap.EnumerateRoots()` (borne a <paramref name="maxRootsScanned"/>),
+    /// fait un parcours en LARGEUR (BFS) borne en profondeur
+    /// (<paramref name="maxDepth"/>) depuis l'objet racine, en explorant les
+    /// champs de reference d'instance de chaque objet visite ainsi que les
+    /// elements des tableaux/listes rencontres (bornes a
+    /// <see cref="MaxGcRootPathArrayElementsPerNode"/> elements par noeud
+    /// tableau -- reutilise la meme logique d'acces aux elements de tableau
+    /// que <see cref="ReadArrayElement"/>/<see cref="DescribeArray"/>
+    /// ailleurs dans ce fichier, juste sans deballage complet de la valeur).
+    /// Les objets deja visites sont marques (meme principe que la gestion de
+    /// cycle existante pour `Player.Self`) pour eviter une boucle infinie.
+    ///
+    /// **Honnete sur les limites** : retourne le PREMIER chemin trouve, pas
+    /// garanti le plus court -- un vrai plus-court-chemin global exigerait un
+    /// BFS unique multi-source depuis TOUS les roots simultanement (plus
+    /// efficace mais notablement plus complexe a implementer et a borner
+    /// correctement), pas fait ici faute de temps disponible pour ce lot.
+    /// Sur un gros tas avec beaucoup d'objets/references, ce parcours peut
+    /// etre LENT (potentiellement plusieurs secondes) : borne par un budget
+    /// de temps (<see cref="GcRootPathTimeBudget"/>) ET un nombre total de
+    /// noeuds visites (<see cref="MaxGcRootPathTotalNodesVisited"/>, pas
+    /// seulement par root) pour ne jamais bloquer indefiniment le pipe
+    /// JSON-RPC -- voir aussi le timeout cote appelant natif
+    /// (`ApplicationController::findClrGcRootPath`, aligne sur un ordre de
+    /// grandeur plus large que celui de `findObjectsByFieldValue`).
+    /// </summary>
+    public object FindGcRootPath(string targetAddressHex, int maxDepth, int maxRootsScanned)
+    {
+        var runtime = RequireRuntime();
+        ulong targetAddress = ParseHexAddress(targetAddressHex);
+        var heap = runtime.Heap;
+
+        int depthLimit = Math.Clamp(maxDepth, 1, MaxGcRootPathDepth);
+        int rootsLimit = Math.Clamp(maxRootsScanned, 1, MaxGcRootsScanned);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        int rootsScanned = 0;
+        long nodesVisited = 0;
+        bool budgetExceeded = false;
+
+        foreach (ClrRoot root in heap.EnumerateRoots())
+        {
+            if (rootsScanned >= rootsLimit)
+            {
+                break;
+            }
+            rootsScanned++;
+
+            ClrObject rootObj = root.Object;
+            if (rootObj.IsNull)
+            {
+                continue;
+            }
+
+            if (rootObj.Address == targetAddress)
+            {
+                return BuildFoundGcRootPathResult(root, new List<object>(), targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
+            }
+
+            var visited = new HashSet<ulong> { rootObj.Address };
+            var queue = new Queue<(ClrObject Obj, List<object> Path)>();
+            queue.Enqueue((rootObj, new List<object>()));
+
+            while (queue.Count > 0)
+            {
+                if (stopwatch.Elapsed > GcRootPathTimeBudget || nodesVisited > MaxGcRootPathTotalNodesVisited)
+                {
+                    budgetExceeded = true;
+                    break;
+                }
+
+                (ClrObject current, List<object> path) = queue.Dequeue();
+                if (path.Count >= depthLimit)
+                {
+                    continue;
+                }
+
+                foreach ((string kind, string? fieldName, int? index, ClrObject child) in
+                         EnumerateGcRootPathReferences(current, MaxGcRootPathArrayElementsPerNode))
+                {
+                    nodesVisited++;
+                    if (visited.Contains(child.Address))
+                    {
+                        continue;
+                    }
+
+                    var newPath = new List<object>(path)
+                    {
+                        new { kind, fieldName, index, objectAddress = ToHex(child.Address), typeName = child.Type?.Name },
+                    };
+
+                    if (child.Address == targetAddress)
+                    {
+                        return BuildFoundGcRootPathResult(root, newPath, targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
+                    }
+
+                    visited.Add(child.Address);
+                    queue.Enqueue((child, newPath));
+
+                    if (nodesVisited > MaxGcRootPathTotalNodesVisited)
+                    {
+                        budgetExceeded = true;
+                        break;
+                    }
+                }
+
+                if (budgetExceeded)
+                {
+                    break;
+                }
+            }
+
+            if (budgetExceeded)
+            {
+                break;
+            }
+        }
+
+        return new
+        {
+            success = false,
+            targetAddress = ToHex(targetAddress),
+            rootsScanned,
+            nodesVisited,
+            elapsedMs = stopwatch.ElapsedMilliseconds,
+            budgetExceeded,
+            message = budgetExceeded
+                ? "Budget de temps/noeuds visites epuise avant de trouver un chemin -- augmenter maxDepth/maxRootsScanned ou reessayer (le resultat n'est pas une preuve d'absence de chemin, voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md)."
+                : "Aucun chemin trouve dans les limites exploree (rootsScanned/maxDepth) -- l'objet cible n'est peut-etre atteignable que via un type de collection ou une reference non parcourue par cette version bornee (WeakReference, ConditionalWeakTable, champs statiques intermediaires, etc.).",
+        };
+    }
+
+    private static object BuildFoundGcRootPathResult(ClrRoot root, List<object> path, ulong targetAddress, int rootsScanned, long nodesVisited, TimeSpan elapsed)
+    {
+        return new
+        {
+            success = true,
+            targetAddress = ToHex(targetAddress),
+            rootKind = root.RootKind.ToString(),
+            rootAddress = ToHex(root.Address),
+            rootObjectAddress = ToHex(root.Object.Address),
+            rootObjectTypeName = root.Object.Type?.Name,
+            depth = path.Count,
+            path,
+            rootsScanned,
+            nodesVisited,
+            elapsedMs = elapsed.TotalMilliseconds,
+            shortestPathGuaranteed = false,
+            note = "Premier chemin trouve par un BFS par-root (pas un BFS multi-source global) -- pas garanti le plus court. Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md.",
+        };
+    }
+
+    private static IEnumerable<(string Kind, string? FieldName, int? Index, ClrObject Child)> EnumerateGcRootPathReferences(ClrObject current, int maxArrayElementsPerNode)
+    {
+        ClrType? type = current.Type;
+        if (type is null)
+        {
+            yield break;
+        }
+
+        if (type.IsArray)
+        {
+            ClrType? componentType = type.ComponentType;
+            if (componentType is not null && !componentType.IsValueType && componentType.ElementType != ClrElementType.String)
+            {
+                ClrArray array = current.AsArray();
+                int length = Math.Min(array.GetLength(0), maxArrayElementsPerNode);
+                for (int i = 0; i < length; ++i)
+                {
+                    ClrObject element;
+                    try
+                    {
+                        element = array.GetObjectValue(i);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+                    if (element.IsNull)
+                    {
+                        continue;
+                    }
+                    yield return ("index", null, i, element);
+                }
+            }
+            yield break;
+        }
+
+        foreach (ClrInstanceField field in type.Fields)
+        {
+            if (!field.IsObjectReference || field.Name is null || field.ElementType == ClrElementType.String)
+            {
+                continue;
+            }
+            ClrObject child;
+            try
+            {
+                child = current.ReadObjectField(field.Name);
+            }
+            catch
+            {
+                continue;
+            }
+            if (child.IsNull)
+            {
+                continue;
+            }
+            yield return ("field", field.Name, null, child);
+        }
     }
 
     // Types de parametre primitif supportes pour l'appel reel d'un setter

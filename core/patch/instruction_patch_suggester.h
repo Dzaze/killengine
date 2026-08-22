@@ -80,6 +80,22 @@ struct BackwardDisassemblyResult {
 // "actuel"/"cible" d'un compteur anime avant l'ecriture visible).
 BackwardDisassemblyResult disassembleBackwardWindow(const QByteArray& windowBytes, int targetOffsetInWindow);
 
+// Desassemblage AVANT (le sens "naturel" x86-64, contrairement a
+// disassembleBackwardWindow ci-dessus) : decode une instruction depuis
+// l'offset courant de windowBytes, avance de instruction.length octets,
+// repete jusqu'a instructionCountLimit instructions decodees OU fin du
+// buffer OU echec de decodage. Sert au chantier "desassemblage de methode"
+// (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) : desassembler le code natif JITte
+// d'une methode CLR deja resolue (ClrMethod.NativeCode) depuis son adresse de
+// depart, pas depuis un RIP connu au milieu d'une sequence comme
+// disassembleBackwardWindow. Meme esprit "pas de tout-ou-rien" que le reste
+// du module : un echec de decodage ou une fin de buffer premature retourne
+// simplement la liste partielle deja decodee (moins d'elements que
+// instructionCountLimit) plutot que de tout rejeter -- chaque InstructionInfo
+// porte deja son propre `success`, donc l'appelant peut distinguer une liste
+// complete d'une liste tronquee via `result.size() < instructionCountLimit`.
+QList<InstructionInfo> disassembleForwardWindow(const QByteArray& windowBytes, int instructionCountLimit);
+
 // Un champ candidat de disassembleBackwardWindow() resolu en adresse memoire
 // absolue (voir resolveCandidateFieldAddresses ci-dessous).
 struct ResolvedCandidateField {

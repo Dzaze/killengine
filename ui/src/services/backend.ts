@@ -177,6 +177,55 @@ export interface ClrRootInfo {
   name?: string
 }
 
+/** Une étape du chemin root -> ... -> objet cible (chantier "GCRoot chain complet"). */
+export interface ClrGcRootPathStep {
+  kind: string
+  fieldName?: string | null
+  index?: number | null
+  objectAddress: string
+  typeName?: string
+}
+
+export interface ClrGcRootPathResult {
+  success: boolean
+  targetAddress?: string
+  rootKind?: string
+  rootAddress?: string
+  rootObjectAddress?: string
+  rootObjectTypeName?: string
+  depth?: number
+  path?: ClrGcRootPathStep[]
+  rootsScanned?: number
+  nodesVisited?: number
+  elapsedMs?: number
+  budgetExceeded?: boolean
+  shortestPathGuaranteed?: boolean
+  note?: string
+  message?: string
+  error?: string
+}
+
+export interface ClrDisassembledInstruction {
+  address: string
+  length: number
+  disassembly?: string
+  mnemonicHint?: string
+  rawBytesText?: string
+  decoder?: string
+}
+
+export interface ClrDisassembleMethodResult {
+  success: boolean
+  objectAddress?: string
+  methodName?: string
+  nativeCodeAddress?: string
+  instructions?: ClrDisassembledInstruction[]
+  requestedInstructionCount?: number
+  returnedInstructionCount?: number
+  truncated?: boolean
+  error?: string
+}
+
 export interface LuaScriptingStatus {
   success: boolean
   available: boolean
@@ -1132,6 +1181,22 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
    */
   writeClrPrimitivePathBatchAtomic?(objectAddressHex: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
   enumerateClrRoots?(typeSubstring: string): Promise<ClrRpcResult<ClrRootInfo[]>>
+  /**
+   * Reconstruit un chemin root -> ... -> objet cible a travers plusieurs
+   * sauts de references (chantier "GCRoot chain complet") -- equivalent
+   * approximatif de `!gcroot` SOS/WinDbg, pas une implementation exacte.
+   * Chantier le plus exploratoire : un chemin trouve n'est pas garanti le
+   * plus court, et l'appel peut etre lent sur un gros tas (timeout natif
+   * volontairement large, voir ApplicationController::findClrGcRootPath).
+   */
+  findClrGcRootPath?(targetObjectAddressHex: string, maxDepth: number, maxRootsScanned: number): Promise<ClrRpcResult<ClrGcRootPathResult>>
+  /**
+   * Desassemble le code natif deja JITte d'une methode CLR resolue (meme
+   * resolution d'adresse que callClrInstanceMethod, mais lecture seule --
+   * aucune injection/execution). Utile pour inspecter le setter reel avant
+   * de decider de l'appeler.
+   */
+  disassembleClrMethod?(objectAddressHex: string, methodName: string, instructionCount: number): Promise<ClrRpcResult<ClrDisassembleMethodResult>>
   /**
    * Appelle REELLEMENT un setter de propriete C# d'instance dans le
    * processus attache (resolution d'adresse native JITtee via ClrMD +
@@ -2098,6 +2163,12 @@ class BackendService {
       },
       async enumerateClrRoots(_typeSubstring: string) {
         return { success: false, error: 'Indisponible dans le mock.', result: [] }
+      },
+      async findClrGcRootPath(_targetObjectAddressHex: string, _maxDepth: number, _maxRootsScanned: number) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async disassembleClrMethod(_objectAddressHex: string, _methodName: string, _instructionCount: number) {
+        return { success: false, error: 'Indisponible dans le mock.' }
       },
       async callClrInstanceMethod(_objectAddressHex: string, _methodName: string, _valueText: string, _valueType: string) {
         return { success: false, error: 'Indisponible dans le mock.' }
