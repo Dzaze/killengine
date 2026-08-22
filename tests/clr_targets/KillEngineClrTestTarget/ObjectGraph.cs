@@ -60,6 +60,14 @@ public sealed class Inventory
     public Queue<Item> ItemQueue { get; } = new();
     public Stack<Item> ItemStack { get; } = new();
     public int[,] Grid { get; } = new int[3, 4];
+
+    // Chantier 2 (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md, "LinkedList<T> et
+    // SortedDictionary<K,V>/SortedSet<T> dans le deballage") : layout interne
+    // verifie par attache ClrMD reelle avant d'ecrire le code de deballage,
+    // meme methodologie que HashSet<T>/Queue<T>/Stack<T> ci-dessus.
+    public LinkedList<string> LinkedTags { get; } = new();
+    public SortedDictionary<string, int> SortedCurrencies { get; } = new();
+    public SortedSet<int> SortedScores { get; } = new();
 }
 
 public sealed class CustomBag<T>
@@ -284,6 +292,29 @@ public static class TestRoot
                 inventory.Grid[row, col] = row * 10 + col;
             }
         }
+
+        // Chantier 2 (LinkedList<T>/SortedDictionary<K,V>/SortedSet<T>) :
+        // sequence deliberement en DESORDRE d'allocation pour prouver que
+        // readObject restitue l'ORDRE LOGIQUE (pas l'ordre d'allocation
+        // memoire). AddFirst/AddLast/Remove pour LinkedList<T> ; insertions
+        // desordonnees pour les deux collections triees.
+        inventory.LinkedTags.AddLast("second");
+        inventory.LinkedTags.AddLast("temp-to-remove");
+        inventory.LinkedTags.AddFirst("first");
+        inventory.LinkedTags.AddLast("third");
+        inventory.LinkedTags.Remove("temp-to-remove");
+        // Ordre logique final attendu : first, second, third.
+
+        inventory.SortedCurrencies["silver"] = 500;
+        inventory.SortedCurrencies["copper"] = 9000;
+        inventory.SortedCurrencies["gold"] = 12;
+        // Ordre logique trie par cle attendu : copper, gold, silver.
+
+        inventory.SortedScores.Add(42);
+        inventory.SortedScores.Add(7);
+        inventory.SortedScores.Add(99);
+        inventory.SortedScores.Add(15);
+        // Ordre logique trie attendu : 7, 15, 42, 99.
 
         var player = new Player
         {

@@ -22,6 +22,18 @@ public sealed class ClrSession : IDisposable
 {
     private const int MaxCollectionItems = 32;
 
+    // Chantier "LinkedList<T>/SortedDictionary<K,V>/SortedSet<T>" (docs/
+    // KILLENGINE_CLR_INSPECTOR_SPEC.md) : borne de securite sur le nombre de
+    // noeuds d'arbre visites pendant un parcours en ordre (in-order) de
+    // SortedDictionary/SortedSet. Un arbre rouge-noir bien forme garantit une
+    // hauteur O(log n), et le parcours iteratif s'arrete des que
+    // MaxCollectionItems elements ont ete produits -- cette borne ne devrait
+    // donc jamais etre atteinte en usage normal, meme sur un tres gros
+    // SortedDictionary/SortedSet. Elle protege uniquement contre une
+    // structure corrompue/degenerescente (pas un scenario legitime), d'ou une
+    // valeur genereuse plutot que calibree.
+    private const int MaxSortedTreeNodesVisited = 5_000;
+
     // Chantier "resolution recursive des structs imbriques" (docs/
     // KILLENGINE_CLR_INSPECTOR_SPEC.md) : profondeur maximale de deballage
     // struct-dans-struct. Borne deliberee -- un struct generique complexe
@@ -343,6 +355,26 @@ public sealed class ClrSession : IDisposable
             {
                 return null;
             }
+            // Piege reel rencontre par attache ClrMD reelle en verifiant
+            // LinkedList<T>.item avant d'ecrire le chantier "LinkedList<T>/
+            // SortedDictionary<K,V>/SortedSet<T>" (docs/
+            // KILLENGINE_CLR_INSPECTOR_SPEC.md) : pour un champ dont le type
+            // declare est un PARAMETRE GENERIQUE T instancie en reference
+            // (ex: LinkedListNode<string>.item), ClrMD rapporte
+            // field.ElementType == Class (partage de code generique canonique
+            // cote CLR pour les types reference), PAS ElementType.String --
+            // meme quand le type reel resolu de l'instance (refObj.Type.Name)
+            // est bel et bien "System.String". Le check ElementType.String en
+            // tete de cette methode (qui suffit pour un champ string DIRECT,
+            // non generique, ex: Player.Name) ne suffit donc pas ici. Meme
+            // garde-fou deja en place pour les champs struct generiques dans
+            // ReadValueTypeFieldValue plus bas (HashSet<T>.Entry.Value,
+            // Dictionary<K,V>.Entry.key/value, etc.) -- applique ici aussi
+            // pour les champs objet directs.
+            if (refObj.Type?.IsString == true)
+            {
+                return refObj.AsString(4096);
+            }
             return DescribeObjectReference(refObj, depth: 0);
         }
 
@@ -427,6 +459,21 @@ public sealed class ClrSession : IDisposable
             if (typeName.StartsWith("System.Collections.Generic.Stack<", StringComparison.Ordinal))
             {
                 return DescribeStack(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.LinkedList<", StringComparison.Ordinal))
+            {
+                return DescribeLinkedList(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.SortedDictionary<", StringComparison.Ordinal))
+            {
+                return DescribeSortedDictionary(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.SortedSet<", StringComparison.Ordinal))
+            {
+                return DescribeSortedSet(obj, depth);
             }
 
             object? customCollection = DescribeFieldBackedCollection(obj, depth);
@@ -726,6 +773,210 @@ public sealed class ClrSession : IDisposable
             count = size,
             returned = items.Count,
             truncated = size > items.Count,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// LinkedList&lt;T&gt; -- layout interne verifie par attache ClrMD reelle sur
+    /// KillEngineClrTestTarget (script jetable dans le scratchpad de session,
+    /// pas devine) : PAS de buffer tableau -- chaine de noeuds
+    /// `LinkedListNode&lt;T&gt;` (classe, pas struct) relies par les champs
+    /// d'instance `next`/`prev` (minuscule), chaque noeud portant sa valeur
+    /// dans le champ `item` (minuscule) et un lien `list` vers la
+    /// `LinkedList&lt;T&gt;` proprietaire. La liste elle-meme expose `head`
+    /// (le PREMIER noeud logique, ou null si vide) et `count`.
+    ///
+    /// **Confirme CIRCULAIRE en interne** (verifie concretement avec une
+    /// sequence AddFirst/AddLast/Remove qui produit 3 noeuds vivants, voir
+    /// `Inventory.LinkedTags`/`ObjectGraph.cs`) : en partant de `head` et en
+    /// suivant `next` a repetition, le noeud `count`-ieme (dernier logique)
+    /// a bien `next` qui pointe DE NOUVEAU vers `head` plutot que vers
+    /// `null` -- la sortie de boucle doit donc se faire par comptage
+    /// (`count` noeuds parcourus) et/ou en detectant le retour a l'adresse
+    /// de `head`, jamais en attendant un `next` null qui n'arrive pas.
+    /// `prev` n'est pas utilise ici (parcours avant uniquement).
+    /// </summary>
+    private static object DescribeLinkedList(ClrObject obj, int depth)
+    {
+        int count = Math.Max(0, SafeReadIntField(obj, "count"));
+        ClrObject headObj = obj.ReadObjectField("head");
+        var items = new List<object?>();
+        string? elementType = null;
+
+        if (!headObj.IsNull)
+        {
+            ulong headAddress = headObj.Address;
+            ClrObject current = headObj;
+            int steps = Math.Min(count, MaxCollectionItems);
+
+            for (int i = 0; i < steps; ++i)
+            {
+                ClrInstanceField? itemField = current.Type?.GetFieldByName("item");
+                elementType ??= itemField?.Type?.Name;
+                items.Add(itemField is null ? null : ReadFieldValue(current, itemField, depth));
+
+                ClrObject next = current.ReadObjectField("next");
+                if (next.IsNull || next.Address == headAddress)
+                {
+                    // Fin de la chaine circulaire (retour a head) ou noeud
+                    // orphelin inattendu -- s'arrete proprement plutot que de
+                    // boucler.
+                    break;
+                }
+                current = next;
+            }
+        }
+
+        return new
+        {
+            kind = "linkedlist",
+            elementType,
+            count,
+            returned = items.Count,
+            truncated = count > items.Count,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// Parcours EN ORDRE (in-order : gauche, noeud, droite) iteratif d'un
+    /// arbre rouge-noir interne partage par `SortedSet&lt;T&gt;` et le
+    /// `TreeSet&lt;T&gt;` prive de `SortedDictionary&lt;K,V&gt;` -- verifie par
+    /// attache ClrMD reelle : les deux s'appuient sur la MEME classe de noeud
+    /// generique `SortedSet&lt;T&gt;+Node` (proprietes auto-implementees, donc
+    /// champs backing `&lt;Left&gt;k__BackingField`/`&lt;Right&gt;k__BackingField`/
+    /// `&lt;Item&gt;k__BackingField`/`&lt;Color&gt;k__BackingField` -- `Color` n'est
+    /// pas lu ici, non necessaire pour restituer le contenu). Un parcours
+    /// in-order d'un arbre binaire de recherche produit naturellement les
+    /// elements TRIES, sans reimplementer de logique de comparaison --
+    /// exactement ce que `SortedSet&lt;T&gt;.GetEnumerator()`/
+    /// `SortedDictionary&lt;K,V&gt;.GetEnumerator()` font cote BCL.
+    ///
+    /// Implementation ITERATIVE (pile explicite, pas de recursion) : s'arrete
+    /// des que <paramref name="limit"/> noeuds ont ete produits, borne
+    /// additionnellement par <see cref="MaxSortedTreeNodesVisited"/> comme
+    /// garde-fou contre une structure corrompue/degenerescente (un arbre
+    /// rouge-noir bien forme a une hauteur O(log n), donc cette seconde borne
+    /// ne devrait jamais etre le facteur limitant en usage normal).
+    /// </summary>
+    private static List<ClrObject> WalkSortedTreeNodesInOrder(ClrObject root, int limit)
+    {
+        var result = new List<ClrObject>(Math.Max(0, Math.Min(limit, MaxCollectionItems)));
+        if (root.IsNull || limit <= 0)
+        {
+            return result;
+        }
+
+        var stack = new Stack<ClrObject>();
+        ClrObject current = root;
+        int nodesVisited = 0;
+
+        while ((!current.IsNull || stack.Count > 0) && result.Count < limit)
+        {
+            while (!current.IsNull)
+            {
+                if (nodesVisited >= MaxSortedTreeNodesVisited)
+                {
+                    return result;
+                }
+                nodesVisited++;
+                stack.Push(current);
+                current = current.ReadObjectField("<Left>k__BackingField");
+            }
+
+            current = stack.Pop();
+            result.Add(current);
+            current = current.ReadObjectField("<Right>k__BackingField");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// SortedDictionary&lt;K,V&gt; -- layout interne verifie par attache ClrMD
+    /// reelle : pas de buffer tableau, delegue entierement a un champ prive
+    /// `_set` de type `TreeSet&lt;KeyValuePair&lt;K,V&gt;&gt;` (arbre rouge-noir),
+    /// lui-meme expose son compte via `count` et sa racine via `root`. Chaque
+    /// noeud de l'arbre porte la paire cle/valeur ENTIERE dans son champ
+    /// `&lt;Item&gt;k__BackingField` (un `KeyValuePair&lt;K,V&gt;`, struct) --
+    /// deballe via les memes noms de champs internes `key`/`value` (minuscule)
+    /// que `Dictionary&lt;K,V&gt;.Entry` (verifie identique par attache reelle).
+    /// Parcours in-order via <see cref="WalkSortedTreeNodesInOrder"/> --
+    /// restitue les entrees TRIEES PAR CLE (verifie concretement avec des
+    /// insertions volontairement en DESORDRE, voir
+    /// `Inventory.SortedCurrencies`/`ObjectGraph.cs`).
+    /// </summary>
+    private static object DescribeSortedDictionary(ClrObject obj, int depth)
+    {
+        ClrObject setObj = obj.ReadObjectField("_set");
+        if (setObj.IsNull)
+        {
+            return new { kind = "sorted_dictionary", count = 0, returned = 0, entries = Array.Empty<object?>() };
+        }
+
+        int count = Math.Max(0, SafeReadIntField(setObj, "count"));
+        ClrObject rootObj = setObj.ReadObjectField("root");
+        List<ClrObject> nodes = WalkSortedTreeNodesInOrder(rootObj, Math.Min(count, MaxCollectionItems));
+
+        var entries = new List<object?>(nodes.Count);
+        foreach (ClrObject node in nodes)
+        {
+            ClrInstanceField? itemField = node.Type?.GetFieldByName("<Item>k__BackingField");
+            if (itemField is null || itemField.Type?.IsValueType != true)
+            {
+                entries.Add(null);
+                continue;
+            }
+            ClrValueType kvp = node.ReadValueTypeField(itemField.Name!);
+            entries.Add(new
+            {
+                key = ReadValueTypeFieldByName(kvp, "key", depth),
+                value = ReadValueTypeFieldByName(kvp, "value", depth),
+            });
+        }
+
+        return new
+        {
+            kind = "sorted_dictionary",
+            count,
+            returned = entries.Count,
+            truncated = count > entries.Count,
+            entries,
+        };
+    }
+
+    /// <summary>
+    /// SortedSet&lt;T&gt; -- meme arbre rouge-noir que le `TreeSet` interne de
+    /// `SortedDictionary&lt;K,V&gt;` ci-dessus (racine directement sur le champ
+    /// `root` de l'objet, pas besoin de descendre via un champ `_set`
+    /// intermediaire). Chaque noeud porte sa valeur DIRECTEMENT dans
+    /// `&lt;Item&gt;k__BackingField` (pas une paire cle/valeur). Parcours in-order
+    /// via <see cref="WalkSortedTreeNodesInOrder"/> -- restitue les elements
+    /// TRIES (verifie concretement avec des insertions volontairement en
+    /// DESORDRE, voir `Inventory.SortedScores`/`ObjectGraph.cs`).
+    /// </summary>
+    private static object DescribeSortedSet(ClrObject obj, int depth)
+    {
+        int count = Math.Max(0, SafeReadIntField(obj, "count"));
+        ClrObject rootObj = obj.ReadObjectField("root");
+        List<ClrObject> nodes = WalkSortedTreeNodesInOrder(rootObj, Math.Min(count, MaxCollectionItems));
+
+        ClrInstanceField? itemField = null;
+        var items = new List<object?>(nodes.Count);
+        foreach (ClrObject node in nodes)
+        {
+            itemField ??= node.Type?.GetFieldByName("<Item>k__BackingField");
+            items.Add(itemField is null ? null : ReadFieldValue(node, itemField, depth));
+        }
+
+        return new
+        {
+            kind = "sorted_set",
+            elementType = itemField?.Type?.Name,
+            count,
+            returned = items.Count,
+            truncated = count > items.Count,
             items,
         };
     }

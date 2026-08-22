@@ -1150,6 +1150,68 @@ public sealed class EndToEndTests
     }
 
     [Fact]
+    public async Task ReadObject_UnpacksLinkedListSortedDictionaryAndSortedSetInLogicalOrder()
+    {
+        // Chantier "LinkedList<T>/SortedDictionary<K,V>/SortedSet<T> dans le
+        // deballage" -- layout interne verifie par attache ClrMD reelle avant
+        // d'ecrire ClrSession.DescribeLinkedList/DescribeSortedDictionary/
+        // DescribeSortedSet (script jetable, pas devine, voir les
+        // commentaires de ces methodes pour le detail). Le graphe de test
+        // (Inventory.LinkedTags/SortedCurrencies/SortedScores, ObjectGraph.cs)
+        // peuple ces 3 collections dans un ORDRE D'ALLOCATION deliberement
+        // different de l'ordre LOGIQUE attendu -- ce test verifie que
+        // readObject restitue bien l'ordre LOGIQUE (liste chainee : ordre
+        // d'insertion logique ; collections triees : ordre de tri), pas
+        // l'ordre d'allocation memoire.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var inventoryFields = inventoryObj!["fields"]!;
+
+        // LinkedList<string> LinkedTags : AddLast(second), AddLast(temp),
+        // AddFirst(first), AddLast(third), Remove(temp) -- ordre logique
+        // final attendu (tete -> queue) : first, second, third. La liste
+        // est CIRCULAIRE en interne (verifie par attache reelle) : ce test
+        // couvre implicitement que le deballage s'arrete correctement au
+        // lieu de boucler indefiniment.
+        var linkedTags = Field(inventoryFields, "LinkedTags")!["collection"]!;
+        Assert.Equal("linkedlist", linkedTags["kind"]!.GetValue<string>());
+        Assert.Equal(3, linkedTags["count"]!.GetValue<int>());
+        Assert.Equal(
+            new[] { "first", "second", "third" },
+            linkedTags["items"]!.AsArray().Select(v => v!.GetValue<string>()));
+
+        // SortedDictionary<string,int> SortedCurrencies : inserees dans
+        // l'ordre silver/copper/gold -- ordre logique trie PAR CLE attendu :
+        // copper, gold, silver.
+        var sortedCurrencies = Field(inventoryFields, "SortedCurrencies")!["collection"]!;
+        Assert.Equal("sorted_dictionary", sortedCurrencies["kind"]!.GetValue<string>());
+        Assert.Equal(3, sortedCurrencies["count"]!.GetValue<int>());
+        var currencyEntries = sortedCurrencies["entries"]!.AsArray();
+        Assert.Equal(
+            new[] { "copper", "gold", "silver" },
+            currencyEntries.Select(e => e!["key"]!.GetValue<string>()));
+        Assert.Equal(
+            new[] { 9000, 12, 500 },
+            currencyEntries.Select(e => e!["value"]!.GetValue<int>()));
+
+        // SortedSet<int> SortedScores : inserees dans l'ordre 42/7/99/15 --
+        // ordre logique trie attendu : 7, 15, 42, 99.
+        var sortedScores = Field(inventoryFields, "SortedScores")!["collection"]!;
+        Assert.Equal("sorted_set", sortedScores["kind"]!.GetValue<string>());
+        Assert.Equal(4, sortedScores["count"]!.GetValue<int>());
+        Assert.Equal(
+            new[] { 7, 15, 42, 99 },
+            sortedScores["items"]!.AsArray().Select(v => v!.GetValue<int>()));
+    }
+
+    [Fact]
     public async Task ReadObject_UnpacksNestedStructInsideStructRecursively()
     {
         // Chantier "Resolution recursive des structs imbriques" :
