@@ -4088,6 +4088,51 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function writeClrPrimitivePathBatchAtomic(objectAddressHex: string, operations: ClrPathWriteOperation[]) {
+    const controller = backend.getController()
+    const address = objectAddressHex.trim()
+    const sanitized = operations
+      .map((operation) => ({ path: operation.path.trim(), value: operation.value.trim() }))
+      .filter((operation) => operation.path && operation.value)
+      .slice(0, 32)
+    if (!controller.writeClrPrimitivePathBatchAtomic) {
+      clrLastResult.value = { success: false, error: 'writeClrPrimitivePathBatchAtomic non exposé par ce backend.' }
+      clrInspectorError.value = clrLastResult.value.error ?? ''
+      return
+    }
+    if (!address || sanitized.length === 0) return
+    const preview = sanitized.map((operation) => `${operation.path} = ${operation.value}`).join(', ')
+    if (!await confirmRiskAction('write', 'Transaction CLR atomique (process suspendu)', `${address}: ${preview}. Suspend TOUTES les threads du processus attaché pendant l'écriture -- best-effort, pas une garantie absolue d'absence de deadlock.`)) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.writeClrPrimitivePathBatchAtomic(address, sanitized)
+      clrLastResult.value = result
+      const inner = result.result as Record<string, unknown> | undefined
+      const innerSuccess = Boolean(inner?.success ?? result.success)
+      clrInspectorError.value = result.success && innerSuccess ? '' : String(inner?.error ?? result.error ?? '')
+      addActionLog(
+        'clr_inspector',
+        result.success && innerSuccess ? 'Transaction CLR atomique appliquée' : 'Transaction CLR atomique échouée',
+        result.success && innerSuccess
+          ? `${sanitized.length} opération(s) appliquée(s), ${String(inner?.suspendedThreadCount ?? 0)} thread(s) suspendue(s) pendant l'écriture.`
+          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ' Rollback OK.' : ''}`,
+        result.success && innerSuccess ? 'success' : 'error',
+      )
+      if (result.success) {
+        await readClrObject(address)
+      }
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      addActionLog('clr_inspector', 'Transaction CLR atomique échouée', String(e), 'error')
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
   async function callClrInstanceMethod(objectAddressHex: string, methodName: string, valueText: string, valueType: string) {
     const controller = backend.getController()
     const address = objectAddressHex.trim()
@@ -7169,6 +7214,7 @@ async function doEncryptedScan() {
     writeClrPrimitivePathBatch,
     writeClrPrimitivePathByLocator,
     writeClrPrimitivePathBatchByLocator,
+    writeClrPrimitivePathBatchAtomic,
     callClrInstanceMethod,
     enumerateClrRoots,
     luaScriptingStatus,

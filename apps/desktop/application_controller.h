@@ -518,6 +518,21 @@ public:
     Q_INVOKABLE QVariantMap writeClrPrimitivePathByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QString& path, const QString& value);
     Q_INVOKABLE QVariantMap writeClrPrimitivePathBatchByLocator(const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QVariantList& operations);
 
+    /// PHASE 58 : variante "atomique" de writeClrPrimitivePathBatch --
+    /// suspend TOUTES les threads du processus attache
+    /// (killcore::ProcessThreadsSuspendGuard, meme primitive RAII que
+    /// writeMemoryValuesAtomic) pendant tout l'appel RPC vers le helper
+    /// ClrMD, puis reprend les threads avant de retourner le resultat. Le
+    /// helper .NET lui-meme ignore que le process est suspendu -- la
+    /// garantie est apportee entierement cote natif, autour de l'appel RPC
+    /// complet. Risque documente honnetement (pas une atomicite parfaite) :
+    /// suspendre toutes les threads pendant une operation ClrMD peut
+    /// interagir avec le GC/JIT si l'un de ces sous-systemes attendait un
+    /// signal d'une thread desormais suspendue -- best-effort, comme le
+    /// reste du module pour les fenetres GC. Voir
+    /// docs/KILLENGINE_CLR_INSPECTOR_SPEC.md.
+    Q_INVOKABLE QVariantMap writeClrPrimitivePathBatchAtomic(const QString& objectAddressHex, const QVariantList& operations);
+
     /// Appelle REELLEMENT un setter de propriete C# d'instance dans le
     /// processus attache (pas une ecriture memoire brute du champ backing) :
     /// resout l'adresse native deja JITtee du setter via le helper ClrMD

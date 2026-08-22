@@ -21,6 +21,12 @@ const locatorMaxResults = ref(20)
 // d'écrire, au lieu d'utiliser l'adresse de l'objet actuellement lu -- utile
 // quand l'objet a pu bouger depuis la dernière lecture (GC compactant).
 const useLocatorForWrite = ref(false)
+// PHASE 58 : quand actif, la Transaction multi-champs suspend TOUTES les
+// threads du process attaché pendant l'écriture (killcore::
+// ProcessThreadsSuspendGuard) -- plus sûr contre une lecture/écriture
+// concurrente d'une autre thread cible, mais best-effort (pas une garantie
+// absolue d'absence de deadlock, voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).
+const suspendDuringBatch = ref(false)
 
 const clrReady = computed(() => Boolean(store.clrInspectorStatus?.running && store.clrInspectorStatus?.attachedProcess))
 
@@ -162,6 +168,10 @@ function writeBatch() {
   }
   const objectAddress = store.clrSelectedObject?.address ?? ''
   if (!objectAddress) return
+  if (suspendDuringBatch.value) {
+    void store.writeClrPrimitivePathBatchAtomic(objectAddress, operations)
+    return
+  }
   void store.writeClrPrimitivePathBatch(objectAddress, operations)
 }
 
@@ -520,6 +530,10 @@ onMounted(() => {
                   placeholder="Health=100&#10;Stats.Rank=7&#10;Inventory.Currencies[gold]=4125"
                   aria-label="Operations de transaction CLR, une ligne chemin egal valeur"
                 ></textarea>
+              </label>
+              <label v-if="!useLocatorForWrite" class="locator-toggle batch-suspend-toggle">
+                <input v-model="suspendDuringBatch" type="checkbox" />
+                <span>Suspendre le process pendant la transaction (plus sûr, plus risqué — suspend toutes les threads cible, best-effort contre un deadlock)</span>
               </label>
               <button
                 class="btn btn-secondary"
@@ -1016,6 +1030,10 @@ onMounted(() => {
   grid-template-columns: minmax(240px, 1fr) auto;
   gap: 8px;
   align-items: end;
+}
+
+.batch-suspend-toggle {
+  grid-column: 1 / -1;
 }
 
 .warning-band {

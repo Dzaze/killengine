@@ -1026,6 +1026,57 @@ public sealed class EndToEndTests
         Assert.Equal(31415, status!["player"]!["health"]!.GetValue<int>());
     }
 
+    [Fact]
+    public async Task WritePrimitivePathBatch_AppliesAllOperationsCorrectlyUnderConcurrentGcChurnPressure()
+    {
+        // PHASE 58 -- chantier "transaction atomique avec suspension
+        // coordonnee du runtime" : ApplicationController::
+        // writeClrPrimitivePathBatchAtomic (cote natif) enveloppe CET appel
+        // RPC existant (writePrimitivePathBatch) dans un
+        // killcore::ProcessThreadsSuspendGuard -- rien de nouveau cote
+        // helper .NET, la garantie de suspension est entierement apportee
+        // par ApplicationController. Aucun harness Qt/C++ n'existe dans ce
+        // depot pour piloter ApplicationController depuis xUnit (meme limite
+        // deja documentee ailleurs dans ce fichier) -- ce test NE PROUVE
+        // DONC PAS la suspension elle-meme (aucune assertion "aucune autre
+        // thread n'a tourne pendant la fenetre" n'est faite, ce serait une
+        // fausse preuve). Il verifie uniquement que la transaction
+        // multi-champs sous-jacente reste FONCTIONNELLEMENT correcte (toutes
+        // les valeurs ecrites et verifiees) sous une pression memoire
+        // concurrente reelle (GcChurnWorker a taux eleve pendant l'appel).
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+
+        await PipeClient.CallAsync(TargetPipe, "setChurnRate", new JsonArray(JsonValue.Create(80_000)));
+        try
+        {
+            var batch = await PipeClient.CallAsync(
+                InspectorPipe,
+                "writePrimitivePathBatch",
+                new JsonArray(
+                    JsonValue.Create(playerAddress),
+                    new JsonArray(
+                        new JsonObject { ["path"] = "Health", ["value"] = "5150" },
+                        new JsonObject { ["path"] = "Scores[0]", ["value"] = "111" },
+                        new JsonObject { ["path"] = "Stats.Rank", ["value"] = "9" })));
+
+            Assert.True(batch!["success"]!.GetValue<bool>());
+            Assert.Equal(3, batch["applied"]!.GetValue<int>());
+        }
+        finally
+        {
+            await PipeClient.CallAsync(TargetPipe, "setChurnRate", new JsonArray(JsonValue.Create(10)));
+        }
+
+        var status = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal(5150, status!["player"]!["health"]!.GetValue<int>());
+        Assert.Equal(111, status["player"]!["scores"]![0]!.GetValue<int>());
+        Assert.Equal(9, status["player"]!["statsRank"]!.GetValue<int>());
+    }
+
     private static ulong ParseHex(string hex)
     {
         string trimmed = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hex[2..] : hex;

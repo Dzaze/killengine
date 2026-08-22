@@ -12394,6 +12394,37 @@ QVariantMap ApplicationController::writeClrPrimitivePathBatchByLocator(const QSt
     return result;
 }
 
+QVariantMap ApplicationController::writeClrPrimitivePathBatchAtomic(const QString& objectAddressHex, const QVariantList& operations) {
+    // PHASE 58 : meme patron que writeMemoryValuesAtomic -- suspend toutes
+    // les threads du process attache (sauf le thread appelant, voir
+    // ProcessThreadsSuspendGuard) pendant TOUT l'appel RPC vers le helper
+    // ClrMD, pas seulement autour d'un WriteProcessMemory isole. Le helper
+    // .NET (ClrSession.WritePrimitivePathBatch) n'a besoin de rien savoir de
+    // cette suspension -- c'est une garantie apportee entierement par
+    // l'appelant natif. Best-effort honnete, pas une atomicite parfaite :
+    // voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md pour le risque documente
+    // (interaction possible avec un GC/JIT qui attendait un signal d'une
+    // thread desormais suspendue).
+    if (!m_attached || m_pid <= 0) {
+        return {{"success", false}, {"error", QStringLiteral("Aucun processus attache.")}};
+    }
+
+    int suspendedThreadCount = 0;
+    QVariantMap response;
+    {
+        killcore::ProcessThreadsSuspendGuard suspendGuard(static_cast<uint32_t>(m_pid));
+        suspendedThreadCount = suspendGuard.suspendedCount();
+        response = writeClrPrimitivePathBatch(objectAddressHex, operations);
+        // suspendGuard sort de portee ici -> reprend toutes les threads
+        // suspendues AVANT de retourner le resultat a l'appelant (pas de
+        // travail superflu pendant que la cible est figee).
+    }
+
+    response["suspendedThreadCount"] = suspendedThreadCount;
+    response["suspendedDuringTransaction"] = true;
+    return response;
+}
+
 QVariantMap ApplicationController::enumerateClrRoots(const QString& typeSubstring) {
     const QString filter = typeSubstring.trimmed();
     QVariantList params;

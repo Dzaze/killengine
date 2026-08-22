@@ -1123,6 +1123,14 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
    */
   writeClrPrimitivePathByLocator?(typeSubstring: string, identityField: string, identityValue: string, path: string, value: string): Promise<ClrRpcResult>
   writeClrPrimitivePathBatchByLocator?(typeSubstring: string, identityField: string, identityValue: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
+  /**
+   * PHASE 58 : variante "atomique" de writeClrPrimitivePathBatch -- suspend
+   * toutes les threads du processus attache pendant tout l'appel RPC vers
+   * le helper ClrMD (killcore::ProcessThreadsSuspendGuard, meme primitive
+   * que l'ecriture memoire atomique). Best-effort honnete : pas une
+   * atomicite parfaite, voir la doc native pour le risque documente.
+   */
+  writeClrPrimitivePathBatchAtomic?(objectAddressHex: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
   enumerateClrRoots?(typeSubstring: string): Promise<ClrRpcResult<ClrRootInfo[]>>
   /**
    * Appelle REELLEMENT un setter de propriete C# d'instance dans le
@@ -2083,6 +2091,9 @@ class BackendService {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async writeClrPrimitivePathBatchByLocator(_typeSubstring: string, _identityField: string, _identityValue: string, _operations: ClrPathWriteOperation[]) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async writeClrPrimitivePathBatchAtomic(_objectAddressHex: string, _operations: ClrPathWriteOperation[]) {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async enumerateClrRoots(_typeSubstring: string) {
