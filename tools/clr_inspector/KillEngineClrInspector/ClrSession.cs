@@ -1420,34 +1420,48 @@ public sealed class ClrSession : IDisposable
     private static readonly TimeSpan GcRootPathTimeBudget = TimeSpan.FromSeconds(15);
 
     /// <summary>
-    /// Reconstruit un chemin root -> ... -> objet cible a travers plusieurs
-    /// sauts de references (equivalent approximatif de `!gcroot` SOS/WinDbg,
-    /// pas une reimplementation exacte). Pour chaque root retourne par
-    /// `heap.EnumerateRoots()` (borne a <paramref name="maxRootsScanned"/>),
-    /// fait un parcours en LARGEUR (BFS) borne en profondeur
-    /// (<paramref name="maxDepth"/>) depuis l'objet racine, en explorant les
-    /// champs de reference d'instance de chaque objet visite ainsi que les
-    /// elements des tableaux/listes rencontres (bornes a
+    /// Reconstruit le PLUS COURT chemin root -> ... -> objet cible a travers
+    /// plusieurs sauts de references (equivalent approximatif de `!gcroot`
+    /// SOS/WinDbg, pas une reimplementation exacte). Contrairement a la
+    /// version initiale de ce chantier (BFS independant par root, premier
+    /// chemin trouve pas garanti le plus court), cette version fait un seul
+    /// BFS MULTI-SOURCE : tous les objets de <c>heap.EnumerateRoots()</c>
+    /// (bornes a <paramref name="maxRootsScanned"/>) sont enfiles ENSEMBLE a
+    /// la profondeur 0 dans UNE SEULE queue/UN SEUL ensemble <c>visited</c>
+    /// partages (dedoublonnage : si plusieurs roots pointent vers le meme
+    /// objet, il n'est enfile qu'une fois -- le premier root rencontre dans
+    /// l'ordre d'enumeration "gagne" et sert de racine rapportee, choix
+    /// deterministe et sans consequence puisque tous les roots de depart sont
+    /// a egale profondeur 0). Un BFS explorant par profondeur croissante
+    /// uniforme garantit que le PREMIER moment ou l'objet cible est atteint
+    /// correspond au plus court chemin en nombre de sauts parmi TOUTES les
+    /// sources combinees (propriete standard d'un BFS multi-source).
+    ///
+    /// Explore les champs de reference d'instance de chaque objet visite
+    /// ainsi que les elements des tableaux/listes rencontres (bornes a
     /// <see cref="MaxGcRootPathArrayElementsPerNode"/> elements par noeud
     /// tableau -- reutilise la meme logique d'acces aux elements de tableau
     /// que <see cref="ReadArrayElement"/>/<see cref="DescribeArray"/>
     /// ailleurs dans ce fichier, juste sans deballage complet de la valeur).
-    /// Les objets deja visites sont marques (meme principe que la gestion de
-    /// cycle existante pour `Player.Self`) pour eviter une boucle infinie.
+    /// Les objets deja visites (par n'importe quelle source) sont marques
+    /// (meme principe que la gestion de cycle existante pour `Player.Self`)
+    /// pour eviter une boucle infinie ET pour ne jamais revisiter un noeud
+    /// deja atteint par un chemin plus court ou de longueur egale.
     ///
-    /// **Honnete sur les limites** : retourne le PREMIER chemin trouve, pas
-    /// garanti le plus court -- un vrai plus-court-chemin global exigerait un
-    /// BFS unique multi-source depuis TOUS les roots simultanement (plus
-    /// efficace mais notablement plus complexe a implementer et a borner
-    /// correctement), pas fait ici faute de temps disponible pour ce lot.
-    /// Sur un gros tas avec beaucoup d'objets/references, ce parcours peut
-    /// etre LENT (potentiellement plusieurs secondes) : borne par un budget
-    /// de temps (<see cref="GcRootPathTimeBudget"/>) ET un nombre total de
-    /// noeuds visites (<see cref="MaxGcRootPathTotalNodesVisited"/>, pas
-    /// seulement par root) pour ne jamais bloquer indefiniment le pipe
-    /// JSON-RPC -- voir aussi le timeout cote appelant natif
-    /// (`ApplicationController::findClrGcRootPath`, aligne sur un ordre de
-    /// grandeur plus large que celui de `findObjectsByFieldValue`).
+    /// Bornes identiques a la version precedente, juste appliquees a une
+    /// structure a source unique-mais-multiple au lieu d'une boucle externe
+    /// par root : <paramref name="maxDepth"/>/<see cref="MaxGcRootPathDepth"/>
+    /// (profondeur), <paramref name="maxRootsScanned"/>/<see
+    /// cref="MaxGcRootsScanned"/> (nombre de sources initiales), <see
+    /// cref="MaxGcRootPathArrayElementsPerNode"/> (elements de tableau par
+    /// noeud), <see cref="MaxGcRootPathTotalNodesVisited"/> (compteur GLOBAL
+    /// de noeuds visites -- deja global dans la version precedente, pas de
+    /// changement de semantique ici) et <see cref="GcRootPathTimeBudget"/>
+    /// (budget de temps global). Le travail total abattu est en fait
+    /// STRICTEMENT INFERIEUR OU EGAL a la version precedente : chaque objet
+    /// du tas n'est plus explore qu'une seule fois au total (au lieu
+    /// potentiellement une fois par root qui l'atteint), donc pas de
+    /// regression de performance sur un gros tas -- au contraire.
     /// </summary>
     public object FindGcRootPath(string targetAddressHex, int maxDepth, int maxRootsScanned)
     {
@@ -1463,6 +1477,14 @@ public sealed class ClrSession : IDisposable
         long nodesVisited = 0;
         bool budgetExceeded = false;
 
+        // Un seul ensemble "visited" partage par TOUTES les sources -- coeur
+        // de la garantie multi-source. Les noeuds racine (profondeur 0) ont
+        // OriginRoot renseigne et ParentAddress null ; les autres noeuds
+        // portent le lien vers leur parent dans le BFS pour permettre de
+        // reconstruire le chemin par remontee une fois la cible trouvee.
+        var visited = new Dictionary<ulong, GcRootPathVisitedNode>();
+        var queue = new Queue<ClrObject>();
+
         foreach (ClrRoot root in heap.EnumerateRoots())
         {
             if (rootsScanned >= rootsLimit)
@@ -1472,65 +1494,63 @@ public sealed class ClrSession : IDisposable
             rootsScanned++;
 
             ClrObject rootObj = root.Object;
-            if (rootObj.IsNull)
+            if (rootObj.IsNull || visited.ContainsKey(rootObj.Address))
+            {
+                // Dedoublonnage : un objet deja enfile par un root precedent
+                // (a la meme profondeur 0) n'est pas re-enfile -- le premier
+                // root rencontre reste celui rapporte pour cet objet.
+                continue;
+            }
+
+            visited[rootObj.Address] = new GcRootPathVisitedNode(OriginRoot: root, ParentAddress: null, Kind: null, FieldName: null, Index: null, TypeName: rootObj.Type?.Name, Depth: 0);
+
+            if (rootObj.Address == targetAddress)
+            {
+                return BuildFoundGcRootPathResultMultiSource(visited, targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
+            }
+
+            queue.Enqueue(rootObj);
+        }
+
+        while (queue.Count > 0)
+        {
+            if (stopwatch.Elapsed > GcRootPathTimeBudget || nodesVisited > MaxGcRootPathTotalNodesVisited)
+            {
+                budgetExceeded = true;
+                break;
+            }
+
+            ClrObject current = queue.Dequeue();
+            int currentDepth = visited[current.Address].Depth;
+            if (currentDepth >= depthLimit)
             {
                 continue;
             }
 
-            if (rootObj.Address == targetAddress)
+            foreach ((string kind, string? fieldName, int? index, ClrObject child) in
+                     EnumerateGcRootPathReferences(current, MaxGcRootPathArrayElementsPerNode))
             {
-                return BuildFoundGcRootPathResult(root, new List<object>(), targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
-            }
-
-            var visited = new HashSet<ulong> { rootObj.Address };
-            var queue = new Queue<(ClrObject Obj, List<object> Path)>();
-            queue.Enqueue((rootObj, new List<object>()));
-
-            while (queue.Count > 0)
-            {
-                if (stopwatch.Elapsed > GcRootPathTimeBudget || nodesVisited > MaxGcRootPathTotalNodesVisited)
+                nodesVisited++;
+                if (visited.ContainsKey(child.Address))
                 {
-                    budgetExceeded = true;
-                    break;
-                }
-
-                (ClrObject current, List<object> path) = queue.Dequeue();
-                if (path.Count >= depthLimit)
-                {
+                    // Deja atteint (par cette source ou une autre) a une
+                    // profondeur <= celle-ci -- BFS garantit que le premier
+                    // ajout est deja le plus court, rien a mettre a jour.
                     continue;
                 }
 
-                foreach ((string kind, string? fieldName, int? index, ClrObject child) in
-                         EnumerateGcRootPathReferences(current, MaxGcRootPathArrayElementsPerNode))
+                visited[child.Address] = new GcRootPathVisitedNode(OriginRoot: null, ParentAddress: current.Address, Kind: kind, FieldName: fieldName, Index: index, TypeName: child.Type?.Name, Depth: currentDepth + 1);
+
+                if (child.Address == targetAddress)
                 {
-                    nodesVisited++;
-                    if (visited.Contains(child.Address))
-                    {
-                        continue;
-                    }
-
-                    var newPath = new List<object>(path)
-                    {
-                        new { kind, fieldName, index, objectAddress = ToHex(child.Address), typeName = child.Type?.Name },
-                    };
-
-                    if (child.Address == targetAddress)
-                    {
-                        return BuildFoundGcRootPathResult(root, newPath, targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
-                    }
-
-                    visited.Add(child.Address);
-                    queue.Enqueue((child, newPath));
-
-                    if (nodesVisited > MaxGcRootPathTotalNodesVisited)
-                    {
-                        budgetExceeded = true;
-                        break;
-                    }
+                    return BuildFoundGcRootPathResultMultiSource(visited, targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
                 }
 
-                if (budgetExceeded)
+                queue.Enqueue(child);
+
+                if (nodesVisited > MaxGcRootPathTotalNodesVisited)
                 {
+                    budgetExceeded = true;
                     break;
                 }
             }
@@ -1555,8 +1575,45 @@ public sealed class ClrSession : IDisposable
         };
     }
 
-    private static object BuildFoundGcRootPathResult(ClrRoot root, List<object> path, ulong targetAddress, int rootsScanned, long nodesVisited, TimeSpan elapsed)
+    /// <summary>
+    /// Noeud du BFS multi-source de <see cref="FindGcRootPath"/>. Un noeud
+    /// racine (profondeur 0, direct dans <c>heap.EnumerateRoots()</c>) porte
+    /// <see cref="OriginRoot"/> et un <see cref="ParentAddress"/> null ; tout
+    /// autre noeud porte le lien vers son parent dans le BFS (adresse +
+    /// nature de la reference qui y mene) pour permettre de reconstruire le
+    /// chemin par remontee une fois la cible trouvee.
+    /// </summary>
+    private readonly record struct GcRootPathVisitedNode(ClrRoot? OriginRoot, ulong? ParentAddress, string? Kind, string? FieldName, int? Index, string? TypeName, int Depth);
+
+    private static object BuildFoundGcRootPathResultMultiSource(Dictionary<ulong, GcRootPathVisitedNode> visited, ulong targetAddress, int rootsScanned, long nodesVisited, TimeSpan elapsed)
     {
+        var reversedPath = new List<object>();
+        ulong currentAddress = targetAddress;
+        GcRootPathVisitedNode currentNode = visited[currentAddress];
+
+        while (currentNode.ParentAddress is ulong parentAddress)
+        {
+            reversedPath.Add(new
+            {
+                kind = currentNode.Kind,
+                fieldName = currentNode.FieldName,
+                index = currentNode.Index,
+                objectAddress = ToHex(currentAddress),
+                typeName = currentNode.TypeName,
+            });
+            currentAddress = parentAddress;
+            currentNode = visited[currentAddress];
+        }
+        reversedPath.Reverse();
+
+        // A ce point, currentNode est un noeud racine (ParentAddress null),
+        // donc OriginRoot est necessairement renseigne (invariant garanti a
+        // la construction : seuls les noeuds racine ont ParentAddress null).
+        // ClrRoot est une classe (pas une struct) dans ClrMD 4.0.732401,
+        // verifie par reflexion avant d'ecrire ce code -- pas de `.Value`
+        // ici, juste le null-forgiving operator sur la reference.
+        ClrRoot root = currentNode.OriginRoot!;
+
         return new
         {
             success = true,
@@ -1565,13 +1622,13 @@ public sealed class ClrSession : IDisposable
             rootAddress = ToHex(root.Address),
             rootObjectAddress = ToHex(root.Object.Address),
             rootObjectTypeName = root.Object.Type?.Name,
-            depth = path.Count,
-            path,
+            depth = reversedPath.Count,
+            path = reversedPath,
             rootsScanned,
             nodesVisited,
             elapsedMs = elapsed.TotalMilliseconds,
-            shortestPathGuaranteed = false,
-            note = "Premier chemin trouve par un BFS par-root (pas un BFS multi-source global) -- pas garanti le plus court. Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md.",
+            shortestPathGuaranteed = true,
+            note = "Plus court chemin garanti (BFS multi-source unique explorant simultanement tous les roots scannes -- voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).",
         };
     }
 

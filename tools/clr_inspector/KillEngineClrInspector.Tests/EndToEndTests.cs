@@ -1313,7 +1313,14 @@ public sealed class EndToEndTests
         var path = pathResult["path"]!.AsArray();
         Assert.NotEmpty(path);
         Assert.Equal(shieldAddress, path[^1]!["objectAddress"]!.GetValue<string>());
-        Assert.False(pathResult["shortestPathGuaranteed"]!.GetValue<bool>()); // honnetete documentee : pas garanti le plus court
+        // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source) :
+        // FindGcRootPath garantit desormais le plus court chemin -- voir le
+        // nouveau test dedie FindGcRootPath_ReturnsTheShorterOfTwoDistinctPaths
+        // pour la preuve concrete (deux chemins de longueurs differentes vers
+        // la meme cible). Ce test-ci continue de verifier le MECANISME
+        // (chaque saut du chemin retourne est reellement lisible), inchange
+        // par le passage au multi-source.
+        Assert.True(pathResult["shortestPathGuaranteed"]!.GetValue<bool>());
 
         // Verifie chaque saut : l'objet COURANT (en partant de l'objet du
         // root) doit reellement exposer, via readObject, une reference vers
@@ -1329,6 +1336,68 @@ public sealed class EndToEndTests
                 $"Saut de chemin non verifiable : aucune reference vers {expectedNext} trouvee sur {currentAddress}.");
             currentAddress = expectedNext;
         }
+    }
+
+    [Fact]
+    public async Task FindGcRootPath_ReturnsTheShorterOfTwoDistinctPaths()
+    {
+        // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source) --
+        // preuve concrete que findGcRootPath retourne le PLUS COURT des deux
+        // chemins existants, pas juste "un" chemin choisi par l'ordre
+        // d'enumeration des roots. Le graphe de test (ObjectGraph.cs) expose
+        // deliberement DEUX chemins de longueurs differentes vers la MEME
+        // instance de ShortestPathProbe :
+        //   - COURT (1 saut) : TestRoot.ShortestPathShortcutHandle (root
+        //     StrongHandle distinct) -> ShortestPathShortcut.Target -> Probe.
+        //   - LONG (4 sauts) : TestRoot.RootHandle -> Inventory ->
+        //     LongChainStart -> Next -> Next -> Leaf -> Probe (le meme
+        //     objet).
+        // L'ancienne version (BFS independant par root, premier chemin
+        // trouve gagne) aurait pu retourner l'un OU l'autre selon l'ordre
+        // d'enumeration de heap.EnumerateRoots() -- pas garanti. Le BFS
+        // multi-source doit TOUJOURS retourner le chemin a 1 saut, quel que
+        // soit cet ordre.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundProbe = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.ShortestPathProbe")));
+        string probeAddress = Assert.Single(foundProbe!.AsArray())!["address"]!.GetValue<string>();
+
+        var pathResult = await PipeClient.CallAsync(
+            InspectorPipe, "findGcRootPath", new JsonArray(JsonValue.Create(probeAddress), JsonValue.Create(8), JsonValue.Create(4000)));
+
+        Assert.True(pathResult!["success"]!.GetValue<bool>(), pathResult["message"]?.GetValue<string>() ?? pathResult.ToString());
+        Assert.True(pathResult["shortestPathGuaranteed"]!.GetValue<bool>());
+
+        // Le chemin retourne doit etre le COURT (1 saut), pas le long (4
+        // sauts) -- la garantie centrale de ce chantier.
+        Assert.Equal(1, pathResult["depth"]!.GetValue<int>());
+        var path = pathResult["path"]!.AsArray();
+        Assert.Single(path);
+        Assert.Equal(probeAddress, path[0]!["objectAddress"]!.GetValue<string>());
+
+        // L'objet racine du chemin retenu doit etre le ShortestPathShortcut
+        // (root du chemin COURT), pas l'Inventory (root du chemin LONG).
+        Assert.Contains("ShortestPathShortcut", pathResult["rootObjectTypeName"]!.GetValue<string>());
+
+        // Verification independante : le chemin long existe bel et bien
+        // aussi dans le graphe reel (pas juste suppose par construction) --
+        // le lit via readObject en partant d'Inventory pour confirmer que
+        // les 4 sauts sont reellement presents, meme si ce n'est pas celui
+        // que findGcRootPath a choisi de retourner.
+        var foundInventory = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Inventory")));
+        string inventoryAddress = Assert.Single(foundInventory!.AsArray())!["address"]!.GetValue<string>();
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var longChainStart = Field(inventoryObj!["fields"]!, "LongChainStart")!;
+        string node1Address = longChainStart["address"]!.GetValue<string>();
+        var node1Obj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(node1Address)));
+        var node2 = Field(node1Obj!["fields"]!, "Next")!;
+        var node2Obj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(node2["address"]!.GetValue<string>())));
+        var node3 = Field(node2Obj!["fields"]!, "Next")!;
+        var node3Obj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(node3["address"]!.GetValue<string>())));
+        var leaf = Field(node3Obj!["fields"]!, "Leaf")!;
+        Assert.Equal(probeAddress, leaf["address"]!.GetValue<string>());
     }
 
     [Fact]

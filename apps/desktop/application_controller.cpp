@@ -12729,13 +12729,14 @@ QVariantMap ApplicationController::findClrGcRootPath(const QString& targetObject
     const int boundedDepth = std::clamp(maxDepth, 1, 12);
     const int boundedRoots = std::clamp(maxRootsScanned, 1, 20000);
 
-    // Chantier le plus exploratoire du lot : un parcours BFS par-root sur un
-    // gros tas peut prendre plusieurs secondes (voir ClrSession.FindGcRootPath
-    // cote helper, borne en interne par un budget de temps ET un nombre total
-    // de noeuds visites). Timeout cote appelant natif volontairement plus
-    // large que findObjectsByFieldValue (20000 ms) puisque ce parcours est
-    // structurellement plus couteux -- aligne sur le budget de temps interne
-    // du helper (15s) plus une marge pour l'aller-retour pipe.
+    // BFS multi-source garantissant le plus court chemin (voir
+    // ClrSession.FindGcRootPath cote helper, borne en interne par un budget
+    // de temps ET un nombre total de noeuds visites -- un gros tas peut donc
+    // toujours prendre plusieurs secondes). Timeout cote appelant natif
+    // volontairement plus large que findObjectsByFieldValue (20000 ms)
+    // puisque ce parcours reste structurellement plus couteux -- aligne sur
+    // le budget de temps interne du helper (15s) plus une marge pour
+    // l'aller-retour pipe.
     return callClrInspectorRpc(QStringLiteral("findGcRootPath"), {address, boundedDepth, boundedRoots}, 25000);
 }
 

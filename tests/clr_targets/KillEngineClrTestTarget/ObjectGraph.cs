@@ -68,6 +68,16 @@ public sealed class Inventory
     public LinkedList<string> LinkedTags { get; } = new();
     public SortedDictionary<string, int> SortedCurrencies { get; } = new();
     public SortedSet<int> SortedScores { get; } = new();
+
+    // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source,
+    // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) : depart d'une chaine LONGUE
+    // (4 sauts au total depuis le root StrongHandle qui pointe sur cette
+    // Inventory) vers ShortestPathProbe -- assignee dans TestRoot.BuildGraph.
+    // Un second root INDEPENDANT (TestRoot.ShortestPathShortcutHandle)
+    // atteint le MEME ShortestPathProbe en seulement 1 saut. Sert a prouver
+    // que findGcRootPath retourne bien le plus court des deux, pas
+    // seulement "un" chemin choisi par l'ordre d'enumeration des roots.
+    public ShortestPathChainNode? LongChainStart;
 }
 
 public sealed class CustomBag<T>
@@ -81,6 +91,25 @@ public sealed class CustomBag<T>
     {
         _items[_size++] = item;
     }
+}
+
+// Chantier "vrai plus-court-chemin GCRoot" -- voir Inventory.LongChainStart
+// et TestRoot.ShortestPathShortcutHandle pour le detail des deux chemins de
+// longueurs differentes vers la meme instance de ShortestPathProbe.
+public sealed class ShortestPathProbe
+{
+    public string Marker = "shortest-path-leaf";
+}
+
+public sealed class ShortestPathChainNode
+{
+    public ShortestPathChainNode? Next;
+    public ShortestPathProbe? Leaf;
+}
+
+public sealed class ShortestPathShortcut
+{
+    public ShortestPathProbe? Target;
 }
 
 public sealed class Player
@@ -214,6 +243,19 @@ public static class TestRoot
     // les deux (ClrRuntime.EnumerateHandles vs racines statiques classiques).
     public static readonly GCHandle RootHandle = GCHandle.Alloc(RootPlayer.Inventory, GCHandleType.Normal);
 
+    // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source,
+    // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) : SECOND root StrongHandle
+    // INDEPENDANT de RootHandle ci-dessus, pointant sur un objet
+    // ShortestPathShortcut qui reference EN 1 SEUL SAUT la MEME instance de
+    // ShortestPathProbe que celle atteinte en 4 SAUTS depuis
+    // RootHandle -> Inventory -> LongChainStart -> Next -> Next -> Leaf.
+    // Initialise APRES RootPlayer (l'ordre textuel des initialiseurs de
+    // champs static garantit que RootPlayer.Inventory.LongChainStart est
+    // deja peuple par BuildGraph() au moment ou cette ligne s'execute).
+    public static readonly GCHandle ShortestPathShortcutHandle = GCHandle.Alloc(
+        new ShortestPathShortcut { Target = RootPlayer.Inventory.LongChainStart!.Next!.Next!.Leaf },
+        GCHandleType.Normal);
+
     // Mutable (pas readonly) volontairement : seul champ du graphe de test
     // qu'on doit pouvoir vider a la demande pour rendre un objet reellement
     // inatteignable, condition necessaire au test "collecte reelle" ci-dessus.
@@ -315,6 +357,22 @@ public static class TestRoot
         inventory.SortedScores.Add(99);
         inventory.SortedScores.Add(15);
         // Ordre logique trie attendu : 7, 15, 42, 99.
+
+        // Chantier "vrai plus-court-chemin GCRoot" : chaine de 3 noeuds vers
+        // ShortestPathProbe, soit 4 sauts au total depuis le root
+        // StrongHandle qui pointe sur cette Inventory (RootHandle ci-dessous,
+        // Inventory = objet racine a profondeur 0, LongChainStart = 1, Next =
+        // 2, Next = 3, Leaf = 4). TestRoot.ShortestPathShortcutHandle
+        // referencera plus bas la MEME instance de probe en seulement 1 saut
+        // depuis un root distinct -- voir la doc sur le champ.
+        var shortestPathProbe = new ShortestPathProbe();
+        inventory.LongChainStart = new ShortestPathChainNode
+        {
+            Next = new ShortestPathChainNode
+            {
+                Next = new ShortestPathChainNode { Leaf = shortestPathProbe },
+            },
+        };
 
         var player = new Player
         {

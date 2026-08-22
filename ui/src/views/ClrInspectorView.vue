@@ -900,7 +900,7 @@ onMounted(() => {
           <div class="panel-head">
             <h3>Chemin root → objet (exploratoire)</h3>
             <InfoDot
-              text="Reconstruit un chemin complet root -> ... -> objet cible à travers plusieurs sauts de références (équivalent approximatif de !gcroot SOS/WinDbg). Retourne le PREMIER chemin trouvé par un parcours en largeur borné par root, pas garanti le plus court. Peut être lent sur un gros tas (budget de temps/nœuds interne côté helper)."
+              text="Reconstruit le PLUS COURT chemin root -> ... -> objet cible à travers plusieurs sauts de références (équivalent approximatif de !gcroot SOS/WinDbg), via un parcours en largeur multi-source garanti optimal (shortestPathGuaranteed). Peut être lent sur un gros tas (budget de temps/nœuds interne côté helper)."
               align="right"
             />
           </div>
