@@ -79,6 +79,12 @@ public:
     /// Retourne une liste de maps: {name, path, baseAddress, size}
     Q_INVOKABLE QVariantList getProcessModules(int pid) const;
 
+    /// Résout "module!fonction" en adresse absolue via la table d'export PE lue
+    /// dans le processus attaché (contrairement à getProcessModules, ceci marche
+    /// aussi pour l'exécutable du jeu lui-même, pas seulement les DLL système).
+    /// Retourne {success, address, module, function, error}.
+    Q_INVOKABLE QVariantMap resolveSymbolAddress(const QString& moduleName, const QString& functionName) const;
+
     /// Attache KillEngine à un processus.
     Q_INVOKABLE bool attachProcess(int pid);
 
@@ -629,6 +635,13 @@ public:
 
     /// Résout une cible de profil en adresse absolue pour le processus courant.
     Q_INVOKABLE QVariantMap resolveProfileTarget(const QString& profileName, const QString& targetName);
+
+    /// Roadmap section L — Pointer maps : résout TOUTES les cibles d'un profil
+    /// d'un coup sur le processus attaché (utile après un redémarrage du jeu),
+    /// pour un diagnostic groupé au lieu de revalider chaque cible une par une.
+    /// Retourne {success, profileName, results: [{targetName, locatorKind,
+    /// status, address, previousAddress}], validCount, invalidCount}.
+    Q_INVOKABLE QVariantMap comparePointerMapAcrossRestart(const QString& profileName);
 
     /// Active une cible de profil pour l'utiliser directement depuis l'Assistant.
     Q_INVOKABLE QVariantMap activateProfileTarget(const QString& profileName, const QString& targetName);

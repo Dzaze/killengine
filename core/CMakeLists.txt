@@ -23,6 +23,12 @@ add_library(killcore STATIC
     process/architecture.cpp
     process/process_suspend.cpp
 
+    # Roadmap section I — Résolution de symbole par nom (table d'export PE lue
+    # à distance, pour hooker/breaker une fonction connue sans passer par Find
+    # What Writes)
+    process/export_resolver.h
+    process/export_resolver.cpp
+
     # Optional kernel driver bridge (probe/capabilities only)
     kernel/kernel_driver_bridge.h
     kernel/kernel_driver_bridge.cpp

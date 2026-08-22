@@ -49,6 +49,27 @@ onMounted(() => {
 
     <div class="injection-block">
       <h3>Inline hook</h3>
+      <div class="symbol-resolve-row">
+        <input v-model="store.symbolModuleName" class="input" placeholder="Module (ex. kernel32.dll)" :disabled="store.injectionBusy" />
+        <input v-model="store.symbolFunctionName" class="input" placeholder="Fonction (ex. CreateFileW)" :disabled="store.injectionBusy" @keyup.enter="store.resolveSymbol()" />
+        <button
+          class="btn btn-secondary compact"
+          type="button"
+          :disabled="store.injectionBusy || !store.symbolModuleName.trim() || !store.symbolFunctionName.trim()"
+          @click="store.resolveSymbol()"
+        >
+          Résoudre
+        </button>
+      </div>
+      <p v-if="store.symbolResolveResult" :class="store.symbolResolveResult.success ? 'hint' : 'error'">
+        <template v-if="store.symbolResolveResult.success">
+          {{ store.symbolModuleName }}!{{ store.symbolFunctionName }} = 0x{{ store.symbolResolveResult.address }}
+          <button class="btn btn-secondary compact" type="button" @click="store.applyResolvedSymbolToHookTarget()">
+            Utiliser comme cible
+          </button>
+        </template>
+        <template v-else>{{ store.symbolResolveResult.error }}</template>
+      </p>
       <div class="controls injection-controls">
         <input v-model="store.hookTargetAddress" class="input" placeholder="Adresse cible (0x...)" :disabled="store.injectionBusy" />
         <input v-model="store.hookFunctionAddress" class="input" placeholder="Adresse hook (0x...)" :disabled="store.injectionBusy" />
@@ -170,6 +191,13 @@ onMounted(() => {
 
 .injection-controls {
   grid-template-columns: 1fr auto;
+}
+
+.symbol-resolve-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .autoasm-textarea {

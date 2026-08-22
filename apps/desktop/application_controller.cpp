@@ -14,6 +14,7 @@
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
+#include "process/export_resolver.h"
 #include "process/process_enumerator.h"
 #include "process/process_handle.h"
 #include "process/process_suspend.h"
@@ -1697,6 +1698,34 @@ QVariantList ApplicationController::getProcessModules(int pid) const {
 
     KE_LOG_DEBUG() << "getProcessModules(pid=" << pid << ") returned "
                    << result.size() << " modules";
+    return result;
+}
+
+QVariantMap ApplicationController::resolveSymbolAddress(const QString& moduleName, const QString& functionName) const {
+    QVariantMap result;
+    result["success"] = false;
+    result["module"] = moduleName;
+    result["function"] = functionName;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (moduleName.trimmed().isEmpty() || functionName.trimmed().isEmpty()) {
+        result["error"] = "Module et fonction requis.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    QString error;
+    if (!killcore::resolveRemoteExportAddress(m_handle, moduleName, functionName, &address, &error)) {
+        result["error"] = error.isEmpty() ? "Résolution de symbole échouée." : error;
+        return result;
+    }
+
+    result["success"] = true;
+    result["address"] = QString::number(address, 16);
+    result["error"] = "";
     return result;
 }
 
@@ -4299,6 +4328,33 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         }
     }
 
+    double rangeMin = 0.0;
+    double rangeMax = 0.0;
+    if (scanMode == killcore::NextScanMode::Between) {
+        // Meme regle que la version synchrone de nextScan() : separateurs ','/';'
+        // uniquement, pas de '-' (ambigu avec un nombre negatif).
+        const QString rangeText = value.trimmed();
+        QStringList parts = rangeText.split(';', Qt::SkipEmptyParts);
+        if (parts.size() != 2) {
+            parts = rangeText.split(',', Qt::SkipEmptyParts);
+        }
+        bool okMin = false;
+        bool okMax = false;
+        if (parts.size() == 2) {
+            rangeMin = parts[0].trimmed().replace(',', '.').toDouble(&okMin);
+            rangeMax = parts[1].trimmed().replace(',', '.').toDouble(&okMax);
+        }
+        if (!okMin || !okMax) {
+            result["error"] = "Plage invalide. Utilise le format \"min,max\" (ex. 50,100). "
+                               "Le séparateur '-' n'est pas supporté (ambigu avec un nombre négatif).";
+            return result;
+        }
+        if (rangeMin > rangeMax) {
+            result["error"] = "Plage invalide : min doit être ≤ max.";
+            return result;
+        }
+    }
+
     const int requestId = m_nextScanRequestId++;
     const int pid = m_pid;
     const QPointer<ApplicationController> self(this);
@@ -4309,7 +4365,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, mode, value, scanMode, firstCandidateType, candidateSnapshot, candidateThreshold, targetNumber, cancellation]() mutable {
+    std::thread([self, requestId, pid, mode, value, scanMode, firstCandidateType, candidateSnapshot, candidateThreshold, targetNumber, rangeMin, rangeMax, cancellation]() mutable {
         QElapsedTimer timer;
         timer.start();
         QVariantMap finished;
@@ -4413,6 +4469,9 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                         break;
                     case killcore::NextScanMode::Delta:
                         keep = std::abs((currentNumber - previousNumber) - targetNumber) < 0.000001;
+                        break;
+                    case killcore::NextScanMode::Between:
+                        keep = currentNumber >= rangeMin && currentNumber <= rangeMax;
                         break;
                 }
 
@@ -4608,6 +4667,34 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         }
     }
 
+    double rangeMin = 0.0;
+    double rangeMax = 0.0;
+    if (scanMode == killcore::NextScanMode::Between) {
+        // Separateurs acceptes : ',' et ';'. Pas de '-' (ambigu avec un nombre
+        // negatif). ';' en priorite pour permettre ',' comme separateur decimal
+        // dans chaque borne (ex. "50,5;100,2").
+        const QString rangeText = value.trimmed();
+        QStringList parts = rangeText.split(';', Qt::SkipEmptyParts);
+        if (parts.size() != 2) {
+            parts = rangeText.split(',', Qt::SkipEmptyParts);
+        }
+        bool okMin = false;
+        bool okMax = false;
+        if (parts.size() == 2) {
+            rangeMin = parts[0].trimmed().replace(',', '.').toDouble(&okMin);
+            rangeMax = parts[1].trimmed().replace(',', '.').toDouble(&okMax);
+        }
+        if (!okMin || !okMax) {
+            result["error"] = "Plage invalide. Utilise le format \"min,max\" (ex. 50,100). "
+                               "Le séparateur '-' n'est pas supporté (ambigu avec un nombre négatif).";
+            return result;
+        }
+        if (rangeMin > rangeMax) {
+            result["error"] = "Plage invalide : min doit être ≤ max.";
+            return result;
+        }
+    }
+
     emit scanStarted();
     emit scanProgress(0);
     killcore::MemoryReader reader(m_handle);
@@ -4673,6 +4760,9 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
                 break;
             case killcore::NextScanMode::Delta:
                 keep = std::abs((currentNumber - previousNumber) - targetNumber) < 0.000001;
+                break;
+            case killcore::NextScanMode::Between:
+                keep = currentNumber >= rangeMin && currentNumber <= rangeMax;
                 break;
         }
 
@@ -13677,6 +13767,65 @@ QVariantMap ApplicationController::resolveProfileTarget(const QString& profileNa
     }
 
     result["error"] = "Cible introuvable dans le profil.";
+    return result;
+}
+
+QVariantMap ApplicationController::comparePointerMapAcrossRestart(const QString& profileName) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    auto locatorKindLabel = [](killcore::LocatorKind kind) -> QString {
+        switch (kind) {
+            case killcore::LocatorKind::ModuleOffset: return "module_offset";
+            case killcore::LocatorKind::Absolute:     return "absolute";
+            case killcore::LocatorKind::PointerChain: return "pointer_chain";
+        }
+        return "unknown";
+    };
+
+    QVariantList entries;
+    int validCount = 0;
+    int invalidCount = 0;
+    int unsupportedCount = 0;
+
+    for (const auto& target : profile.targets) {
+        QVariantMap entry;
+        entry["targetName"] = target.name;
+        entry["locatorKind"] = locatorKindLabel(target.locator.kind);
+        entry["previousAddress"] = QString::number(target.locator.lastAddress, 16);
+
+        uint64_t address = 0;
+        if (killcore::resolveLocatorAddress(m_handle, target.locator, &address)) {
+            entry["status"] = "valid";
+            entry["address"] = QString::number(address, 16);
+            ++validCount;
+        } else {
+            entry["status"] = "invalid";
+            entry["address"] = "";
+            ++invalidCount;
+        }
+        entries.append(entry);
+    }
+
+    result["success"] = true;
+    result["profileName"] = profileName;
+    result["results"] = entries;
+    result["validCount"] = validCount;
+    result["invalidCount"] = invalidCount;
+    result["unsupportedCount"] = unsupportedCount;
+    result["error"] = "";
     return result;
 }
 

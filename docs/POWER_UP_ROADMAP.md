@@ -203,8 +203,8 @@ EncryptedScanOptions {
 | **Filtres de région avancés** (par module, par commit charge) | `ui/src/views/MemoryView.vue` | ✅ Fait — filtre par nom de module ajouté (19/08/2026), en plus d'état/lisible/writable/exécutable | Moins de bruit |
 | **Historique d'écritures avec replay** | `apps/desktop/application_controller.cpp` (`persistWriteHistorySequenceEntry`) | ✅ Fait — séquence persistée `QSettings` par jeu, `replayWriteHistorySequence` (19/08/2026), distinct du rollback en session | Audit/debugging |
 | **Écriture multi-adresses simultanée/atomique** | `core/process/process_suspend.*`, `writeMemoryValuesAtomic` | ✅ Fait — bouton "Écrire ensemble (atomique)" + `InfoDot` dans le panneau Candidats d'Expert (19/08/2026), en plus du connecteur d'automatisation | Contourne les cibles à copies redondantes |
-| **Next scan "entre deux valeurs"** (range) | `core/scanner/scan_types.cpp` (`NextScanMode`) | ❌ Absent — vérifié le 20/08/2026 : seuls `exact`/`changed`/`unchanged`/`increased`/`decreased`/`delta` existent, pas de mode plage | Cible une plage (ex: HP entre 50 et 100) sans deux next scans successifs (`>= min` puis `<= max`) |
-| **Résolution de symboles par nom** (ex: `kernel32.dll!CreateFileW` → adresse) | `apps/desktop/application_controller.cpp` (`getProcessModules`) | ❌ Absent — vérifié le 20/08/2026 : résolution actuelle uniquement adresse→module+offset (via la liste de modules), pas de table d'exports nom→adresse | Cibler directement une fonction connue (hook, breakpoint) sans passer par Find What Writes |
+| **Next scan "entre deux valeurs"** (range) | `core/scanner/scan_types.cpp` (`NextScanMode::Between`), `apps/desktop/application_controller.cpp` (`nextScan`) | ✅ Fait (22/08/2026) — mode `between`/`range`, valeur au format `"min,max"` (ou `min;max`), non supporté par l'unknown scan (comme `Exact`/`Delta`) | Cible une plage (ex: HP entre 50 et 100) en un seul next scan |
+| **Résolution de symboles par nom** (ex: `kernel32.dll!CreateFileW` → adresse) | `core/process/export_resolver.h/.cpp`, `apps/desktop/application_controller.cpp` (`resolveSymbolAddress`) | ✅ Fait (22/08/2026) — parcourt la table d'export PE lue **dans le process distant** (pas le fichier disque, RVA résolus contre l'image mappée), gère les forwarders (erreur explicite plutôt que fausse adresse) | Cibler directement une fonction connue (hook, breakpoint) sans passer par Find What Writes |
 
 ---
 
@@ -249,20 +249,13 @@ EncryptedScanOptions {
 
 ## L. Pointer maps / rescans après redémarrage
 
-**État réel au 20/08/2026 :** absent comme fonctionnalité dédiée — `scanPointerChains` retrouve une chaîne stable pour une session donnée, `ProfileStore` persiste des `ProfileTarget` avec chaînes résolues, mais rien ne compare **plusieurs** chaînes à la fois avant/après un redémarrage (pattern Cheat Engine "pointer map"/fichier `.PTR`).
+**État réel au 22/08/2026 :** ✅ Fait — `ApplicationController::comparePointerMapAcrossRestart(profileName)` résout toutes les `ProfileTarget` d'un profil en une seule fois sur le process attaché (au lieu de `resolveProfileTarget` cible par cible) et retourne un statut `valid`/`invalid`/`unsupported` par cible (`unsupported` réservé aux locators qu'un futur `LocatorKind` ne saurait pas résoudre — aucun cas de ce type dans l'enum actuel, qui ne connaît que `Absolute`/`ModuleOffset`/`PointerChain`). `ui/src/views/ProfileView.vue` ajoute une section "Vérifier après redémarrage" : bouton qui liste chaque cible avec pastille verte/rouge/grise et adresse résolue vs `lastAddress` connue.
 
-**Problème :** Après un redémarrage du jeu (nouvelle base ASLR), l'utilisateur doit revalider chaque chaîne de pointeurs une par une, sans diagnostic groupé ("ces 3 chaînes sur 5 restent valides, ces 2 ont changé").
+**Problème (résolu) :** Après un redémarrage du jeu (nouvelle base ASLR), l'utilisateur devait revalider chaque chaîne de pointeurs une par une, sans diagnostic groupé ("ces 3 chaînes sur 5 restent valides, ces 2 ont changé").
 
-**Ce qui existe et serait réutilisé :** `core/profiles/profile_store.{h,cpp}` (`ProfileTarget`, `resolveProfileTarget`), `suggestStableLocatorForAddress` (déjà déclenché automatiquement après écriture confirmée).
+**Reste en dehors du périmètre livré (hors scope volontaire) :** pas de rescan automatique des cibles invalides (l'utilisateur décide de l'action, ex. bouton "Réparer" déjà existant sur chaque cible) ; pas d'export/import de map de pointeurs en texte partageable.
 
-**Ce qu'il faudrait ajouter :**
-1. `ApplicationController::comparePointerMapAcrossRestart(profileName)` — relit chaque `ProfileTarget` du profil sur le process actuellement attaché, marque chaque chaîne valide/invalide.
-2. UI : vue tableau dans `ProfileView.vue` (cible/statut avant/statut après/action garder-ou-rescanner).
-3. Optionnel : export/import de map de pointeurs en texte simple pour partage entre utilisateurs.
-
-**Effort :** Moyen — réutilise `ProfileStore`/`resolveProfileTarget` existants ; la nouveauté est la comparaison groupée + l'UI dédiée. **Impact :** Évite de tout rescanner à l'aveugle sur une cible déjà connue.
-
-**Fichiers touchés (proposés) :** `apps/desktop/application_controller.cpp` (nouvelle méthode), `core/profiles/profile_store.h/.cpp` (champ de statut), `ui/src/views/ProfileView.vue`.
+**Fichiers livrés :** `apps/desktop/application_controller.h/.cpp` (`comparePointerMapAcrossRestart`), `ui/src/services/backend.ts`, `ui/src/views/ProfileView.vue`.
 
 ---
 

@@ -95,6 +95,7 @@ bool matchesMode(const char* previous, const char* current, ValueType type, Next
             return now < prev;
         case NextScanMode::Exact:
         case NextScanMode::Delta:
+        case NextScanMode::Between:
             return false;
     }
     return false;
@@ -382,7 +383,7 @@ UnknownScanResult SnapshotStore::compare(
         return result;
     }
 
-    if (mode == NextScanMode::Exact || mode == NextScanMode::Delta) {
+    if (mode == NextScanMode::Exact || mode == NextScanMode::Delta || mode == NextScanMode::Between) {
         result.errorMessage = "Unknown scan supports changed/unchanged/increased/decreased.";
         return result;
     }

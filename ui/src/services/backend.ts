@@ -1057,6 +1057,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   injectDllIntoProcess?(dllPath: string): Promise<Record<string, unknown>>
   installFunctionHook?(targetAddressHex: string, hookAddressHex: string): Promise<Record<string, unknown>>
   removeFunctionHook?(targetAddressHex: string): Promise<Record<string, unknown>>
+  /** Roadmap section I — résout "module!fonction" (ex. kernel32.dll!CreateFileW) en adresse absolue via la table d'export PE distante. */
+  resolveSymbolAddress?(moduleName: string, functionName: string): Promise<Record<string, unknown>>
   parseAutoAssemblerScript?(scriptText: string): Promise<Record<string, unknown>>
   executeAutoAssemblerScript?(scriptText: string): Promise<Record<string, unknown>>
   restoreAutoAssemblerScript?(): Promise<Record<string, unknown>>
@@ -1169,6 +1171,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   loadProfile(profileName: string): Promise<Record<string, unknown>>
   deleteProfile(profileName: string): Promise<boolean>
   resolveProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
+  /** Roadmap section L — Pointer maps : résout toutes les cibles du profil d'un coup (diagnostic groupé après redémarrage). */
+  comparePointerMapAcrossRestart?(profileName: string): Promise<Record<string, unknown>>
   activateProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   saveProfileCodePatch?(
     profileName: string,
@@ -1866,6 +1870,9 @@ class BackendService {
       async removeFunctionHook(_targetAddressHex: string) {
         return { success: false, error: 'Mock backend' }
       },
+      async resolveSymbolAddress(_moduleName: string, _functionName: string) {
+        return { success: false, error: 'Mock backend' }
+      },
       async parseAutoAssemblerScript(_scriptText: string) {
         return { success: false, parseSuccess: false, parseError: 'Mock backend', instructions: [], allocations: [], labels: [] }
       },
@@ -2172,6 +2179,9 @@ class BackendService {
         return false
       },
       async resolveProfileTarget() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async comparePointerMapAcrossRestart(_profileName: string) {
         return { success: false, error: 'Mock backend' }
       },
       async activateProfileTarget() {

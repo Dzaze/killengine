@@ -27,6 +27,7 @@
 #include "debug/page_guard.h"
 #include "inject/dll_injector.h"
 #include "inject/function_hook.h"
+#include "process/export_resolver.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -585,4 +586,47 @@ TEST(PowerUpRuntimeTest, GetRemoteProcAddressFindsLoadLibraryW) {
     EXPECT_NE(addr, 0ULL);
     EXPECT_TRUE(addr > 0x10000 && addr < 0x7FFFFFFFFFFFULL)
         << "LoadLibraryW address looks invalid: 0x" << std::hex << addr;
+}
+
+// Roadmap section I — résolution "module!fonction" via la table d'export PE lue
+// dans le process cible (pas via GetProcAddress local, voir export_resolver.h).
+TEST(PowerUpRuntimeTest, ResolveRemoteExportAddressFindsCreateFileWOnTestTarget) {
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadOnly);
+    ASSERT_TRUE(handle.isValid()) << "Could not open KillEngineTestTarget process.";
+
+    uint64_t address = 0;
+    QString error;
+    const bool resolved = killcore::resolveRemoteExportAddress(
+        handle, QStringLiteral("kernel32.dll"), QStringLiteral("CreateFileW"), &address, &error);
+
+    ASSERT_TRUE(resolved) << error.toStdString();
+    EXPECT_NE(address, 0ULL);
+    EXPECT_TRUE(address > 0x10000 && address < 0x7FFFFFFFFFFFULL)
+        << "CreateFileW address looks invalid: 0x" << std::hex << address;
+
+    // Tolère l'extension .dll absente/présente et la casse (comparaison insensible).
+    uint64_t addressWithoutExtension = 0;
+    EXPECT_TRUE(killcore::resolveRemoteExportAddress(
+        handle, QStringLiteral("KERNEL32"), QStringLiteral("CreateFileW"), &addressWithoutExtension, &error));
+    EXPECT_EQ(address, addressWithoutExtension);
+}
+
+TEST(PowerUpRuntimeTest, ResolveRemoteExportAddressReportsMissingFunction) {
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadOnly);
+    ASSERT_TRUE(handle.isValid()) << "Could not open KillEngineTestTarget process.";
+
+    uint64_t address = 0;
+    QString error;
+    const bool resolved = killcore::resolveRemoteExportAddress(
+        handle, QStringLiteral("kernel32.dll"), QStringLiteral("ThisFunctionDoesNotExist"), &address, &error);
+
+    EXPECT_FALSE(resolved);
+    EXPECT_EQ(address, 0ULL);
+    EXPECT_FALSE(error.isEmpty());
 }
