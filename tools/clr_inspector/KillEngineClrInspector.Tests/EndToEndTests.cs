@@ -1269,6 +1269,59 @@ public sealed class EndToEndTests
         }
     }
 
+    [Fact]
+    public async Task GenerateObjectReport_WalksReachableGraphAndIncludesGcRootChain()
+    {
+        // Chantier "rapport d'objet" : depuis Inventory (atteignable en 1 saut
+        // via le root StrongHandle -- meme objet deja utilise par
+        // FindGcRootPath_FindsPlausibleVerifiableChainFromRootToNestedItem,
+        // choisi ici pour la meme raison : chemin GCRoot deterministe, pas
+        // suppose). Verifie que le rapport (1) decrit bien la racine, (2)
+        // traverse au moins un champ reference connu (Items, List<Item>) et
+        // le rapporte avec sa provenance (discoveredVia), et (3) inclut un
+        // chemin GCRoot reellement trouve (pas seulement "success:true").
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var report = await PipeClient.CallAsync(
+            InspectorPipe,
+            "generateObjectReport",
+            new JsonArray(JsonValue.Create(inventoryAddress), JsonValue.Create(2), JsonValue.Create(30), JsonValue.Create(true)));
+
+        Assert.True(report!["success"]!.GetValue<bool>());
+        Assert.Equal(inventoryAddress, report["rootAddress"]!.GetValue<string>());
+        Assert.Contains("Inventory", report["rootTypeName"]!.GetValue<string>());
+
+        var nodes = report["nodes"]!.AsArray();
+        Assert.True(nodes.Count > 1, "Le rapport n'a traverse aucune reference -- devrait au moins atteindre Items/QuickSlots/CustomItems.");
+
+        var rootNode = nodes[0]!;
+        Assert.Equal(inventoryAddress, rootNode["address"]!.GetValue<string>());
+        Assert.Equal(0, rootNode["depth"]!.GetValue<int>());
+        Assert.Null(rootNode["discoveredVia"]);
+
+        // "Items" est une auto-propriete -- le champ CLR reel sous-jacent est
+        // le backing field genere par le compilateur (<Items>k__BackingField),
+        // pas "Items" litteralement (meme convention que le helper Field()
+        // ci-dessous, deja utilise par les autres tests de ce fichier).
+        // Match exact requis : "CustomItems" contient aussi la sous-chaine
+        // "Items", un Contains() imprecis matcherait les deux champs.
+        var itemsNode = Assert.Single(nodes, n =>
+            n!["discoveredVia"] is JsonObject via && via["fieldName"]?.GetValue<string>() == "<Items>k__BackingField");
+        Assert.Contains("List", itemsNode!["node"]!["typeName"]!.GetValue<string>());
+        Assert.Equal(1, itemsNode["depth"]!.GetValue<int>());
+
+        var gcRootChain = report["gcRootChain"];
+        Assert.NotNull(gcRootChain);
+        Assert.True(gcRootChain!["success"]!.GetValue<bool>(), gcRootChain["message"]?.GetValue<string>() ?? gcRootChain.ToString());
+        Assert.Equal(inventoryAddress, gcRootChain["targetAddress"]!.GetValue<string>());
+    }
+
     private static bool JsonContainsAddress(JsonNode? node, string address)
     {
         switch (node)

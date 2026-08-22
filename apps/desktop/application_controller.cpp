@@ -12739,6 +12739,29 @@ QVariantMap ApplicationController::findClrGcRootPath(const QString& targetObject
     return callClrInspectorRpc(QStringLiteral("findGcRootPath"), {address, boundedDepth, boundedRoots}, 25000);
 }
 
+QVariantMap ApplicationController::generateClrObjectReport(const QString& objectAddressHex, int maxDepth, int maxNodes, bool includeGcRootChain) {
+    const QString address = objectAddressHex.trimmed();
+    if (address.isEmpty()) {
+        QVariantMap result;
+        result["success"] = false;
+        result["error"] = QStringLiteral("Adresse objet requise.");
+        return result;
+    }
+
+    // Bornes deliberement plus faibles que findClrGcRootPath : DescribeObject
+    // (cote helper) fait un travail bien plus lourd par noeud (deballage
+    // complet des champs/collections) que la simple enumeration de
+    // references du chemin GCRoot -- voir ClrSession.GenerateObjectReport.
+    // 0 = laisse le helper appliquer ses valeurs par defaut (3/50).
+    const int boundedDepth = maxDepth <= 0 ? 0 : std::clamp(maxDepth, 1, 6);
+    const int boundedNodes = maxNodes <= 0 ? 0 : std::clamp(maxNodes, 1, 300);
+
+    return callClrInspectorRpc(
+        QStringLiteral("generateObjectReport"),
+        {address, boundedDepth, boundedNodes, includeGcRootChain},
+        25000);
+}
+
 QVariantMap ApplicationController::disassembleClrMethod(const QString& objectAddressHex, const QString& methodName, int instructionCount) {
     QVariantMap result;
     result["success"] = false;

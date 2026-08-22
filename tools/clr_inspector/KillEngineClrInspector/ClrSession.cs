@@ -1383,6 +1383,148 @@ public sealed class ClrSession : IDisposable
         }
     }
 
+    // Bornes du rapport d'objet -- volontairement plus faibles que celles de
+    // FindGcRootPath : DescribeObject() fait un travail bien plus lourd par
+    // noeud (deballage complet des champs + collections, jusqu'a
+    // MaxCollectionItems chacune) que la simple enumeration de references, un
+    // rapport sur un graphe large serait sinon soit tres lent, soit un
+    // document illisible.
+    private const int MaxObjectReportDepth = 6;
+    private const int MaxObjectReportNodes = 300;
+    private const int DefaultObjectReportDepth = 3;
+    private const int DefaultObjectReportNodes = 50;
+    private static readonly TimeSpan ObjectReportTimeBudget = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Genere un rapport borne d'un objet et de son graphe atteignable :
+    /// parcours en largeur (BFS) reutilisant EXACTEMENT
+    /// <see cref="EnumerateGcRootPathReferences"/> (meme notion de "reference
+    /// visitable" que le chemin GCRoot -- champs reference + elements de
+    /// tableau de references, donc descend aussi dans le stockage interne de
+    /// List&lt;T&gt;/Dictionary&lt;K,V&gt;/etc. via leurs champs prives,
+    /// exactement comme les tests FindGcRootPath l'ont deja verifie). Chaque
+    /// noeud visite est decrit par <see cref="DescribeObject"/> -- la MEME
+    /// sortie que <see cref="ReadObject"/> pour un seul objet (champs,
+    /// fieldDetails, collections deroulees), reutilisee telle quelle plutot
+    /// que redupliquee. Inclut aussi, optionnellement, comment atteindre
+    /// l'objet racine depuis un GC root en reutilisant
+    /// <see cref="FindGcRootPath"/> tel quel (meme honnetete sur ses limites
+    /// deja documentees : premier chemin trouve, pas garanti le plus court).
+    ///
+    /// Sortie structuree en JSON (liste plate de noeuds + aretes
+    /// discoveredVia, pas un arbre JSON imbrique) : plus simple a serialiser
+    /// et a parcourir cote appelant, et gere naturellement les cycles/
+    /// references partagees (un noeud n'apparait qu'une fois, meme s'il est
+    /// atteint par plusieurs chemins) sans dupliquer son contenu. Le rendu en
+    /// texte lisible (indentation, hierarchie) est laisse a l'appelant --
+    /// cote KillEngine, c'est `ClrInspectorView.vue` qui formate ce JSON en
+    /// document texte pour l'utilisateur.
+    /// </summary>
+    public object GenerateObjectReport(string objectAddressHex, int maxDepth, int maxNodes, bool includeGcRootChain)
+    {
+        var runtime = RequireRuntime();
+        ulong rootAddress = ParseHexAddress(objectAddressHex);
+        ClrObject rootObj = runtime.Heap.GetObject(rootAddress);
+        if (rootObj.IsNull || !rootObj.IsValid)
+        {
+            throw new ClrSessionException($"Adresse {objectAddressHex} : objet invalide ou null (probablement deplace/collecte -- relire avec findObjectsByType apres un flushCachedData).");
+        }
+
+        int depthLimit = maxDepth <= 0 ? DefaultObjectReportDepth : Math.Clamp(maxDepth, 1, MaxObjectReportDepth);
+        int nodesLimit = maxNodes <= 0 ? DefaultObjectReportNodes : Math.Clamp(maxNodes, 1, MaxObjectReportNodes);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var visited = new HashSet<ulong> { rootObj.Address };
+        var queue = new Queue<(ClrObject Obj, ulong? ParentAddress, string? Kind, string? FieldName, int? Index, int Depth)>();
+        queue.Enqueue((rootObj, null, null, null, null, 0));
+
+        var nodes = new List<object>();
+        bool truncatedByDepth = false;
+        bool truncatedByNodes = false;
+        bool truncatedByTime = false;
+
+        while (queue.Count > 0)
+        {
+            if (nodes.Count >= nodesLimit)
+            {
+                truncatedByNodes = true;
+                break;
+            }
+            if (stopwatch.Elapsed > ObjectReportTimeBudget)
+            {
+                truncatedByTime = true;
+                break;
+            }
+
+            (ClrObject current, ulong? parentAddress, string? kind, string? fieldName, int? index, int depth) = queue.Dequeue();
+
+            object described;
+            try
+            {
+                described = DescribeObject(current);
+            }
+            catch (Exception ex)
+            {
+                described = new { address = ToHex(current.Address), typeName = current.Type?.Name, error = $"<erreur lecture: {ex.Message}>" };
+            }
+
+            nodes.Add(new
+            {
+                address = ToHex(current.Address),
+                depth,
+                discoveredVia = parentAddress is null ? null : new { parentAddress = ToHex(parentAddress.Value), kind, fieldName, index },
+                node = described,
+            });
+
+            foreach ((string childKind, string? childFieldName, int? childIndex, ClrObject child) in
+                     EnumerateGcRootPathReferences(current, MaxGcRootPathArrayElementsPerNode))
+            {
+                if (visited.Contains(child.Address))
+                {
+                    continue;
+                }
+                if (depth >= depthLimit)
+                {
+                    truncatedByDepth = true;
+                    continue;
+                }
+                visited.Add(child.Address);
+                queue.Enqueue((child, current.Address, childKind, childFieldName, childIndex, depth + 1));
+            }
+        }
+
+        object? gcRootChain = null;
+        if (includeGcRootChain)
+        {
+            try
+            {
+                gcRootChain = FindGcRootPath(objectAddressHex, MaxGcRootPathDepth, MaxGcRootsScanned);
+            }
+            catch (Exception ex)
+            {
+                gcRootChain = new { success = false, error = $"<erreur resolution GCRoot: {ex.Message}>" };
+            }
+        }
+
+        return new
+        {
+            success = true,
+            rootAddress = ToHex(rootObj.Address),
+            rootTypeName = rootObj.Type?.Name,
+            generatedAtUtc = DateTime.UtcNow.ToString("o"),
+            nodeCount = nodes.Count,
+            maxDepth = depthLimit,
+            maxNodes = nodesLimit,
+            truncated = truncatedByDepth || truncatedByNodes || truncatedByTime,
+            truncatedByDepth,
+            truncatedByNodes,
+            truncatedByTime,
+            elapsedMs = stopwatch.ElapsedMilliseconds,
+            gcRootChain,
+            nodes,
+        };
+    }
+
     // Types de parametre primitif supportes pour l'appel reel d'un setter
     // (v1 : bool + entiers 8/16/32/64 signes/non signes). Etendu en PHASE 59
     // (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) pour couvrir Single/Double :

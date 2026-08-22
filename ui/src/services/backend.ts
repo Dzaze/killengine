@@ -186,6 +186,32 @@ export interface ClrGcRootPathStep {
   typeName?: string
 }
 
+/** Un noeud du graphe visite par generateObjectReport (chantier "rapport d'objet"). */
+export interface ClrObjectReportNode {
+  address: string
+  depth: number
+  discoveredVia?: { parentAddress: string; kind: string; fieldName?: string | null; index?: number | null } | null
+  node: ClrObjectReadResult
+}
+
+export interface ClrObjectReportResult {
+  success: boolean
+  rootAddress?: string
+  rootTypeName?: string
+  generatedAtUtc?: string
+  nodeCount?: number
+  maxDepth?: number
+  maxNodes?: number
+  truncated?: boolean
+  truncatedByDepth?: boolean
+  truncatedByNodes?: boolean
+  truncatedByTime?: boolean
+  elapsedMs?: number
+  gcRootChain?: ClrGcRootPathResult | null
+  nodes?: ClrObjectReportNode[]
+  error?: string
+}
+
 export interface ClrGcRootPathResult {
   success: boolean
   targetAddress?: string
@@ -1198,6 +1224,14 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
    */
   disassembleClrMethod?(objectAddressHex: string, methodName: string, instructionCount: number): Promise<ClrRpcResult<ClrDisassembleMethodResult>>
   /**
+   * Genere un rapport borne (BFS sur les references, chantier "rapport
+   * d'objet") de l'objet donne et de son graphe atteignable, plus
+   * optionnellement le chemin GCRoot vers lui. maxDepth/maxNodes a 0 =
+   * valeurs par defaut cote helper (3/50) -- volontairement plus faibles que
+   * findClrGcRootPath, voir ApplicationController::generateClrObjectReport.
+   */
+  generateClrObjectReport?(objectAddressHex: string, maxDepth: number, maxNodes: number, includeGcRootChain: boolean): Promise<ClrRpcResult<ClrObjectReportResult>>
+  /**
    * Appelle REELLEMENT un setter de propriete C# d'instance dans le
    * processus attache (resolution d'adresse native JITtee via ClrMD +
    * injection shellcode x64 + relecture) -- pas une ecriture memoire brute
@@ -2168,6 +2202,9 @@ class BackendService {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async disassembleClrMethod(_objectAddressHex: string, _methodName: string, _instructionCount: number) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async generateClrObjectReport(_objectAddressHex: string, _maxDepth: number, _maxNodes: number, _includeGcRootChain: boolean) {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async callClrInstanceMethod(_objectAddressHex: string, _methodName: string, _valueText: string, _valueType: string) {

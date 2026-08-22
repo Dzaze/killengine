@@ -30,6 +30,9 @@ const suspendDuringBatch = ref(false)
 const gcRootTargetAddress = ref('')
 const disassembleMethodName = ref('')
 const disassembleInstructionCount = ref(24)
+const reportMaxDepth = ref(3)
+const reportMaxNodes = ref(50)
+const reportIncludeGcRootChain = ref(true)
 
 const clrReady = computed(() => Boolean(store.clrInspectorStatus?.running && store.clrInspectorStatus?.attachedProcess))
 
@@ -208,6 +211,63 @@ function disassembleSelectedMethod() {
   if (!objectAddress || !method) return
   void store.disassembleClrMethod(objectAddress, method, disassembleInstructionCount.value)
 }
+
+function generateSelectedObjectReport() {
+  const objectAddress = store.clrSelectedObject?.address ?? ''
+  if (!objectAddress) return
+  void store.generateClrObjectReport(objectAddress, reportMaxDepth.value, reportMaxNodes.value, reportIncludeGcRootChain.value)
+}
+
+// Rendu texte lisible du rapport JSON (chantier "rapport d'objet") : liste
+// plate de nœuds + arêtes discoveredVia -> reconstruit une hiérarchie
+// indentée en suivant les arêtes depuis la racine (profondeur = depth du
+// nœud), pas une vraie sérialisation récursive de l'arbre -- plus simple et
+// robuste face aux cycles/références partagées déjà dédupliquées côté helper.
+const clrObjectReportText = computed(() => {
+  const report = store.clrObjectReportResult
+  if (!report) return ''
+  if (!report.success) return `Erreur : ${report.error ?? 'inconnue'}`
+
+  const lines: string[] = []
+  lines.push(`Rapport d'objet — ${report.rootTypeName ?? '?'} @ ${report.rootAddress ?? '?'}`)
+  lines.push(`Généré : ${report.generatedAtUtc ?? '?'} — ${report.nodeCount ?? 0} nœud(s), profondeur max ${report.maxDepth ?? '?'}, ${report.elapsedMs ?? 0} ms`)
+  if (report.truncated) {
+    const reasons = [
+      report.truncatedByDepth ? 'profondeur' : null,
+      report.truncatedByNodes ? 'nombre de nœuds' : null,
+      report.truncatedByTime ? 'budget de temps' : null,
+    ].filter(Boolean).join(', ')
+    lines.push(`⚠ Rapport tronqué (limite atteinte : ${reasons}) — le graphe réel est plus grand que ce qui est affiché.`)
+  }
+  lines.push('')
+
+  if (report.gcRootChain) {
+    const chain = report.gcRootChain
+    lines.push('Chemin depuis un GC root :')
+    lines.push(
+      chain.success
+        ? `  ${chain.rootKind ?? '?'} → ${(chain.path ?? []).map(step => `${step.fieldName ?? (step.index !== null && step.index !== undefined ? `[${step.index}]` : step.kind)}`).join(' → ')} → (racine du rapport)${chain.shortestPathGuaranteed ? '' : ' (premier chemin trouvé, pas garanti le plus court)'}`
+        : `  Introuvable : ${chain.message ?? chain.error ?? 'inconnu'}`,
+    )
+    lines.push('')
+  }
+
+  for (const entry of report.nodes ?? []) {
+    const indent = '  '.repeat(entry.depth)
+    const viaInfo = entry.discoveredVia
+    let via = ' (racine)'
+    if (viaInfo) {
+      const label = viaInfo.fieldName ?? (viaInfo.index !== null && viaInfo.index !== undefined ? `[${viaInfo.index}]` : viaInfo.kind)
+      via = ` (via ${label})`
+    }
+    lines.push(`${indent}• ${entry.node?.typeName ?? '?'} @ ${entry.address}${via}`)
+    for (const [name, value] of Object.entries(entry.node?.fields ?? {})) {
+      if (value !== null && typeof value === 'object') continue // référence/collection : déjà un nœud séparé ou dépliée dans "collection"
+      lines.push(`${indent}    ${name} = ${JSON.stringify(value)}`)
+    }
+  }
+  return lines.join('\n')
+})
 
 function trainerValueType(field: ClrFieldInfo): string {
   const typeName = String(field.typeName ?? field.elementType ?? '').toLowerCase()
@@ -677,6 +737,61 @@ onMounted(() => {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div v-if="store.clrSelectedObject" class="setter-call">
+            <div class="setter-call-head">
+              <div>
+                <strong>Générer un rapport</strong>
+                <span>Exporte cet objet et son graphe atteignable (champs, collections, chemin GCRoot) en un document texte — pratique pour sauvegarder ou partager sans tout re-naviguer en live.</span>
+              </div>
+              <InfoDot
+                text="Parcours borné (profondeur/nombre de nœuds/temps) du graphe managé atteignable depuis cet objet, chaque nœud décrit comme dans le panneau de lecture ci-dessus. Un graphe large sera tronqué — augmente la profondeur/le nombre de nœuds si le rapport semble incomplet, au prix d'un appel plus lent."
+                align="right"
+              />
+            </div>
+            <div class="setter-call-inputs">
+              <input
+                v-model.number="reportMaxDepth"
+                type="number"
+                min="1"
+                max="6"
+                class="path-value-input"
+                aria-label="Profondeur maximale du rapport"
+                title="Profondeur maximale (1-6, défaut 3)"
+              />
+              <input
+                v-model.number="reportMaxNodes"
+                type="number"
+                min="1"
+                max="300"
+                class="path-value-input"
+                aria-label="Nombre maximal de nœuds du rapport"
+                title="Nombre maximal de nœuds (1-300, défaut 50)"
+              />
+              <label class="locator-toggle">
+                <input v-model="reportIncludeGcRootChain" type="checkbox" />
+                Inclure le chemin GC root
+              </label>
+              <button
+                class="btn btn-secondary"
+                :disabled="store.clrInspectorBusy"
+                title="Génère le rapport (lecture seule, aucune écriture)."
+                @click="generateSelectedObjectReport"
+              >
+                Générer
+              </button>
+            </div>
+            <div v-if="store.clrObjectReportResult" class="setter-call-result" :class="{ ok: store.clrObjectReportResult.success, err: !store.clrObjectReportResult.success }">
+              <template v-if="store.clrObjectReportResult.success">
+                <strong>{{ store.clrObjectReportResult.nodeCount }} nœud(s)</strong>
+                <span>{{ store.clrObjectReportResult.elapsedMs }} ms{{ store.clrObjectReportResult.truncated ? ' — tronqué' : '' }}</span>
+              </template>
+              <template v-else>
+                {{ store.clrObjectReportResult.error }}
+              </template>
+            </div>
+            <pre v-if="clrObjectReportText" class="clr-object-report-text">{{ clrObjectReportText }}</pre>
           </div>
 
           <div class="table-wrap">
@@ -1238,6 +1353,20 @@ onMounted(() => {
 
 .setter-call-result.err {
   color: var(--error);
+}
+
+.clr-object-report-text {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 360px;
+  overflow: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 
 .path-examples {

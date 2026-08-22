@@ -14,6 +14,7 @@ import {
   type ClrGcRootPathResult,
   type ClrInspectorStatus,
   type ClrObjectReadResult,
+  type ClrObjectReportResult,
   type ClrObjectSummary,
   type ClrPathWriteOperation,
   type ClrRootInfo,
@@ -414,6 +415,7 @@ export const useAppStore = defineStore('app', () => {
   const clrCallMethodResult = ref<ClrCallInstanceMethodResult | null>(null)
   const clrGcRootPathResult = ref<ClrGcRootPathResult | null>(null)
   const clrDisassembleResult = ref<ClrDisassembleMethodResult | null>(null)
+  const clrObjectReportResult = ref<ClrObjectReportResult | null>(null)
   const luaScriptingStatus = ref<LuaScriptingStatus | null>(null)
   const luaScriptText = ref([
     'local ke = require("killengine")',
@@ -4288,6 +4290,50 @@ let nextWatchedChainId = 1
     }
   }
 
+  // Chantier "rapport d'objet" : BFS borné sur le graphe atteignable depuis
+  // un objet, chaque nœud décrit comme readObject, plus le chemin GCRoot
+  // optionnel vers la racine. maxDepth/maxNodes à 0 = valeurs par défaut
+  // côté helper (3/50) -- volontairement plus faibles que findClrGcRootPath,
+  // voir ApplicationController::generateClrObjectReport.
+  async function generateClrObjectReport(objectAddressHex: string, maxDepth = 0, maxNodes = 0, includeGcRootChain = true) {
+    const controller = backend.getController()
+    const address = objectAddressHex.trim()
+    if (!controller.generateClrObjectReport) {
+      clrObjectReportResult.value = { success: false, error: 'generateClrObjectReport non exposé par ce backend.' }
+      clrInspectorError.value = clrObjectReportResult.value.error ?? ''
+      return
+    }
+    if (!address) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.generateClrObjectReport(address, maxDepth, maxNodes, includeGcRootChain)
+      clrLastResult.value = result
+      clrObjectReportResult.value = (result.result as ClrObjectReportResult | undefined) ?? {
+        success: result.success,
+        error: result.error,
+      }
+      const innerSuccess = clrObjectReportResult.value?.success ?? result.success
+      clrInspectorError.value = innerSuccess ? '' : (clrObjectReportResult.value?.error ?? result.error ?? '')
+      addActionLog(
+        'clr_inspector',
+        innerSuccess ? 'Rapport d\'objet CLR généré' : 'Génération du rapport CLR échouée',
+        innerSuccess
+          ? `${clrObjectReportResult.value?.rootTypeName ?? '?'} @ ${address} — ${clrObjectReportResult.value?.nodeCount ?? 0} nœud(s)${clrObjectReportResult.value?.truncated ? ' (tronqué)' : ''}`
+          : (clrObjectReportResult.value?.error ?? result.error ?? ''),
+        innerSuccess ? 'success' : 'error',
+      )
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrObjectReportResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
   async function refreshProcessModules(pid: number) {
     try {
       processModules.value = await backend.getController().getProcessModules(pid)
@@ -7291,8 +7337,10 @@ async function doEncryptedScan() {
     clrCallMethodResult,
     clrGcRootPathResult,
     clrDisassembleResult,
+    clrObjectReportResult,
     findClrGcRootPath,
     disassembleClrMethod,
+    generateClrObjectReport,
     refreshClrInspectorStatus,
     attachClrInspector,
     detachClrInspector,

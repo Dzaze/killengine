@@ -562,6 +562,13 @@ public:
     /// (voir l'appel a callClrInspectorRpc dans l'implementation).
     Q_INVOKABLE QVariantMap findClrGcRootPath(const QString& targetObjectAddressHex, int maxDepth, int maxRootsScanned);
 
+    /// Genere un rapport borne de l'objet donne et de son graphe atteignable
+    /// (BFS sur les references, chaque noeud decrit comme readObject, plus le
+    /// chemin GCRoot optionnel vers l'objet racine) via ClrMD (RPC
+    /// generateObjectReport), aucune logique cote natif au-dela du relai.
+    /// maxDepth/maxNodes a 0 = valeurs par defaut cote helper (3/50).
+    Q_INVOKABLE QVariantMap generateClrObjectReport(const QString& objectAddressHex, int maxDepth, int maxNodes, bool includeGcRootChain);
+
     /// Desassemble le code natif deja JITte d'une methode CLR (setter ou
     /// autre) resolue via la meme voie que callClrInstanceMethod
     /// (resolveInstanceMethodAddress cote helper ClrMD) : lit un buffer de

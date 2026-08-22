@@ -39,6 +39,7 @@ public sealed class MethodDispatcher
             "enumerateRoots" => EnumerateRoots(args),
             "findStaticFields" => FindStaticFields(args),
             "findGcRootPath" => FindGcRootPath(args),
+            "generateObjectReport" => GenerateObjectReport(args),
             "shutdown" => Shutdown(),
             _ => throw new MethodDispatchException($"Methode inconnue : {method}"),
         };
@@ -156,6 +157,26 @@ public sealed class MethodDispatcher
         try
         {
             return _session.FindGcRootPath(targetAddressHex, maxDepth, maxRootsScanned);
+        }
+        catch (ClrSessionException ex)
+        {
+            throw new MethodDispatchException(ex.Message);
+        }
+    }
+
+    private object GenerateObjectReport(JsonArray args)
+    {
+        if (args.Count < 1 || args.Count > 4)
+        {
+            throw new MethodDispatchException("generateObjectReport attend [objectAddressHex, maxDepth?, maxNodes?, includeGcRootChain?].");
+        }
+        string objectAddressHex = args[0]?.GetValue<string>() ?? throw new MethodDispatchException("objectAddressHex manquant.");
+        int maxDepth = args.Count >= 2 && args[1] is not null ? args[1]!.GetValue<int>() : 0;
+        int maxNodes = args.Count >= 3 && args[2] is not null ? args[2]!.GetValue<int>() : 0;
+        bool includeGcRootChain = args.Count < 4 || args[3] is null || args[3]!.GetValue<bool>();
+        try
+        {
+            return _session.GenerateObjectReport(objectAddressHex, maxDepth, maxNodes, includeGcRootChain);
         }
         catch (ClrSessionException ex)
         {
