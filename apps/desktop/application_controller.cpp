@@ -12257,6 +12257,275 @@ QVariantMap ApplicationController::enumerateClrRoots(const QString& typeSubstrin
     return callClrInspectorRpc(QStringLiteral("enumerateRoots"), params, 15000);
 }
 
+namespace {
+
+void appendImm64(QByteArray* out, uint64_t value) {
+    for (int i = 0; i < 8; ++i) {
+        out->append(static_cast<char>((value >> (8 * i)) & 0xFF));
+    }
+}
+
+// Shellcode x64 fixe pour appeler un setter d'instance CLR reellement JITte :
+// pose "this" en RCX (+ la valeur en RDX si le setter attend un parametre)
+// puis "call" l'adresse native deja resolue par le helper ClrMD. Design fige,
+// ne pas devier sans mettre a jour docs/KILLENGINE_CLR_INSPECTOR_SPEC.md.
+// 0x28 = 0x20 shadow space (convention d'appel x64 Windows) + 8 octets pour
+// garder RSP aligne sur 16 octets a l'entree du "call".
+QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasParam, uint64_t paramImmediate, uint64_t nativeCodeAddress) {
+    QByteArray code;
+    code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0x83));
+    code.append(static_cast<char>(0xEC)); code.append(static_cast<char>(0x28));   // sub rsp, 0x28
+
+    code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xB9));   // mov rcx, <objectAddress>
+    appendImm64(&code, objectAddress);
+
+    if (hasParam) {
+        code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xBA)); // mov rdx, <valeur>
+        appendImm64(&code, paramImmediate);
+    }
+
+    code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xB8));   // mov rax, <nativeCodeAddress>
+    appendImm64(&code, nativeCodeAddress);
+
+    code.append(static_cast<char>(0xFF)); code.append(static_cast<char>(0xD0));   // call rax
+
+    code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0x83));
+    code.append(static_cast<char>(0xC4)); code.append(static_cast<char>(0x28));   // add rsp, 0x28
+
+    code.append(static_cast<char>(0x33)); code.append(static_cast<char>(0xC0));   // xor eax, eax
+    code.append(static_cast<char>(0xC3));                                        // ret
+    return code;
+}
+
+// Convertit le nom de type CLR renvoye par resolveInstanceMethodAddress (ex:
+// "Int32") vers le token attendu par killcore::parseValueType. Meme
+// perimetre entier que le helper .NET (bool + entiers 8/16/32/64
+// signes/non-signes) : killcore::ValueType n'a pas de variante booleenne,
+// "Boolean" est donc mappe sur uint8 avec normalisation texte true/false ->
+// 1/0 avant de deleguer au parseur numerique existant (pas de parseur
+// booleen reimplemente).
+bool clrParameterTypeToKillcoreToken(const QString& clrTypeName, QString* token, bool* isBoolean) {
+    static const QHash<QString, QString> table = {
+        {QStringLiteral("SByte"), QStringLiteral("int8")}, {QStringLiteral("Byte"), QStringLiteral("uint8")},
+        {QStringLiteral("Int16"), QStringLiteral("int16")}, {QStringLiteral("UInt16"), QStringLiteral("uint16")},
+        {QStringLiteral("Int32"), QStringLiteral("int32")}, {QStringLiteral("UInt32"), QStringLiteral("uint32")},
+        {QStringLiteral("Int64"), QStringLiteral("int64")}, {QStringLiteral("UInt64"), QStringLiteral("uint64")},
+    };
+    if (clrTypeName == QStringLiteral("Boolean")) {
+        *isBoolean = true;
+        *token = QStringLiteral("uint8");
+        return true;
+    }
+    *isBoolean = false;
+    const auto it = table.constFind(clrTypeName);
+    if (it == table.constEnd()) {
+        return false;
+    }
+    *token = it.value();
+    return true;
+}
+
+// Parse valueText selon le token killcore (deja normalise depuis le type CLR
+// resolu) en reutilisant EXACTEMENT le meme parseur numerique que
+// writeMemoryValueConfirmed/writeMemoryValuesAtomic (killcore::parseValueType
+// + killcore::parseScanValue + killcore::scanValueToBytes), puis etend les
+// octets obtenus (little-endian natif x64) sur 64 bits -- sign-extend pour
+// les types signes, zero-extend pour les non-signes (et pour le bool mappe
+// sur uint8), pour construire l'immediate RDX du shellcode.
+bool encodeInstanceMethodParameterImmediate(const QString& valueText, const QString& killcoreToken, bool isBoolean, uint64_t* outImmediate, QString* error) {
+    QString normalizedText = valueText.trimmed();
+    if (isBoolean) {
+        const QString lower = normalizedText.toLower();
+        if (lower == QStringLiteral("true") || lower == QStringLiteral("1")) {
+            normalizedText = QStringLiteral("1");
+        } else if (lower == QStringLiteral("false") || lower == QStringLiteral("0")) {
+            normalizedText = QStringLiteral("0");
+        } else {
+            if (error) *error = QStringLiteral("Valeur booleenne invalide : '%1' (attendu true/false/1/0).").arg(valueText);
+            return false;
+        }
+    }
+
+    killcore::ValueType type;
+    if (!killcore::parseValueType(killcoreToken, &type)) {
+        if (error) *error = QStringLiteral("Type de parametre non reconnu : %1").arg(killcoreToken);
+        return false;
+    }
+    if (type == killcore::ValueType::Float32 || type == killcore::ValueType::Float64) {
+        if (error) *error = QStringLiteral(
+            "float/double non supportes pour l'appel de setter (v1) : la convention d'appel x64 Windows passe "
+            "un 2e argument flottant en XMM1, pas RDX -- volontairement hors scope.");
+        return false;
+    }
+
+    killcore::ScanValue scanValue;
+    QString parseError;
+    if (!killcore::parseScanValue(normalizedText, type, &scanValue, &parseError)) {
+        if (error) *error = parseError;
+        return false;
+    }
+
+    const QByteArray bytes = killcore::scanValueToBytes(scanValue);
+    uint64_t immediate = 0;
+    const size_t copyLen = std::min<size_t>(static_cast<size_t>(bytes.size()), sizeof(immediate));
+    std::memcpy(&immediate, bytes.constData(), copyLen);
+
+    const bool isSigned = (type == killcore::ValueType::Int8 || type == killcore::ValueType::Int16
+        || type == killcore::ValueType::Int32 || type == killcore::ValueType::Int64);
+    if (isSigned && bytes.size() < 8 && bytes.size() > 0) {
+        const bool negative = (static_cast<uint8_t>(bytes[bytes.size() - 1]) & 0x80) != 0;
+        if (negative) {
+            for (int i = static_cast<int>(bytes.size()); i < 8; ++i) {
+                immediate |= (static_cast<uint64_t>(0xFF) << (8 * i));
+            }
+        }
+    }
+
+    *outImmediate = immediate;
+    return true;
+}
+
+} // namespace
+
+QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAddressHex, const QString& methodName, const QString& valueText, const QString& valueType) {
+    QVariantMap result;
+    result["success"] = false;
+    result["verified"] = false;
+    result["objectAddress"] = objectAddressHex;
+    result["methodName"] = methodName;
+
+    const QString address = objectAddressHex.trimmed();
+    const QString method = methodName.trimmed();
+    if (address.isEmpty() || method.isEmpty()) {
+        result["error"] = QStringLiteral("Adresse objet et nom de methode requis.");
+        return result;
+    }
+    if (!m_attached || !m_handle.isValid()) {
+        result["error"] = QStringLiteral("Aucun processus attache.");
+        return result;
+    }
+
+    // 1) Resolution de l'adresse native deja JITtee via le helper ClrMD --
+    // ClrMD ne peut jamais executer de code lui-meme (DAC passif), cet appel
+    // se limite a une lecture. La fenetre entre cette resolution et
+    // l'injection ci-dessous reste best-effort vis-a-vis du GC (comme le
+    // reste de ce module pour les locators), pas une garantie absolue.
+    QVariantMap resolveResponse = callClrInspectorRpc(QStringLiteral("resolveInstanceMethodAddress"), {address, method}, 10000);
+    if (!resolveResponse.value("success").toBool()) {
+        result["error"] = resolveResponse.value("error").toString();
+        appendScanTelemetry(QStringLiteral("clr_inspector_call_instance_method"), {
+            {"success", false}, {"objectAddress", address}, {"methodName", method}, {"error", result.value("error")},
+        });
+        return result;
+    }
+
+    const QVariantMap resolved = resolveResponse.value("result").toMap();
+    const QString resolvedMethodName = resolved.value("methodName").toString();
+    const QString nativeCodeAddressHex = resolved.value("nativeCodeAddress").toString();
+    const QString parameterTypeName = resolved.value("parameterType").toString(); // vide si setter 0-arg
+    const bool hasParam = !parameterTypeName.isEmpty();
+    result["methodName"] = resolvedMethodName;
+    result["nativeCodeAddress"] = nativeCodeAddressHex;
+    result["parameterType"] = parameterTypeName;
+
+    uint64_t objectAddress = 0;
+    uint64_t nativeCodeAddress = 0;
+    if (!parseHexAddress(address, &objectAddress) || !parseHexAddress(nativeCodeAddressHex, &nativeCodeAddress)) {
+        result["error"] = QStringLiteral("Adresse objet ou adresse native invalide apres resolution.");
+        return result;
+    }
+
+    // 2) Si un parametre est attendu : parse valueText en octets bruts puis
+    // en immediate 64 bits sign/zero-etendu. Le type CLR resolu (autoritaire,
+    // via ClrMD) pilote l'encodage ; valueType (si fourni explicitement par
+    // l'appelant) doit correspondre a la meme categorie, sinon rejet clair
+    // plutot que d'injecter un shellcode avec une valeur mal typee.
+    uint64_t paramImmediate = 0;
+    if (hasParam) {
+        if (valueText.trimmed().isEmpty()) {
+            result["error"] = QStringLiteral("Ce setter attend un parametre (%1) mais aucune valeur n'a ete fournie.").arg(parameterTypeName);
+            return result;
+        }
+        QString killcoreToken;
+        bool isBoolean = false;
+        if (!clrParameterTypeToKillcoreToken(parameterTypeName, &killcoreToken, &isBoolean)) {
+            result["error"] = QStringLiteral("Type de parametre CLR non supporte : %1.").arg(parameterTypeName);
+            return result;
+        }
+        if (!valueType.trimmed().isEmpty()) {
+            const QString requested = valueType.trimmed().toLower();
+            const bool matches = isBoolean
+                ? (requested == QStringLiteral("bool") || requested == QStringLiteral("boolean"))
+                : (requested == killcoreToken);
+            if (!matches) {
+                result["error"] = QStringLiteral(
+                    "Type fourni ('%1') incoherent avec le parametre reel du setter ('%2').").arg(valueType, parameterTypeName);
+                return result;
+            }
+        }
+
+        QString parseError;
+        if (!encodeInstanceMethodParameterImmediate(valueText, killcoreToken, isBoolean, &paramImmediate, &parseError)) {
+            result["error"] = parseError;
+            return result;
+        }
+    }
+
+    // 3) Construit le shellcode fixe et l'injecte via la primitive deja
+    // existante et deja testee killcore::injectShellcode (ne reinvente pas
+    // CreateRemoteThread/VirtualAllocEx).
+    const QByteArray shellcode = buildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress);
+    const auto injected = killcore::injectShellcode(m_handle, shellcode);
+    if (!injected.success) {
+        result["error"] = injected.error;
+        appendScanTelemetry(QStringLiteral("clr_inspector_call_instance_method"), {
+            {"success", false}, {"objectAddress", address}, {"methodName", resolvedMethodName}, {"error", injected.error},
+        });
+        return result;
+    }
+
+    // 4) Attend la fin du thread distant (timeout borne -- meme patron que
+    // injectDll, voir core/inject/dll_injector.cpp), sans attente infinie.
+    bool threadCompleted = false;
+#ifdef Q_OS_WIN
+    if (injected.remoteThreadHandle) {
+        const HANDLE remoteThread = reinterpret_cast<HANDLE>(injected.remoteThreadHandle);
+        const DWORD waitResult = WaitForSingleObject(remoteThread, 3000);
+        threadCompleted = (waitResult == WAIT_OBJECT_0);
+        CloseHandle(remoteThread);
+    }
+#endif
+
+    // 5) Reverifie apres coup en relisant l'objet via le helper ClrMD
+    // (comme writePrimitiveField). Contrairement a writePrimitiveField, cette
+    // methode generique ignore quel champ backing le setter modifie -- donc
+    // "verified" signifie ici "le thread distant a termine dans le delai ET
+    // l'objet reste lisible ensuite" (preuve que l'appel n'a pas fait
+    // planter/corrompre la cible), pas une comparaison de valeur exacte.
+    QVariantMap rereadResponse = callClrInspectorRpc(QStringLiteral("readObject"), {address}, 5000);
+    const bool rereadOk = rereadResponse.value("success").toBool();
+
+    result["threadCompleted"] = threadCompleted;
+    result["verified"] = threadCompleted && rereadOk;
+    result["success"] = threadCompleted && rereadOk;
+    if (!threadCompleted) {
+        result["error"] = QStringLiteral("Le thread distant n'a pas termine dans le delai imparti (timeout 3000 ms).");
+    } else if (!rereadOk) {
+        result["error"] = QStringLiteral("Appel effectue mais la relecture de l'objet a echoue apres coup : %1")
+            .arg(rereadResponse.value("error").toString());
+    }
+
+    appendScanTelemetry(QStringLiteral("clr_inspector_call_instance_method"), {
+        {"success", result.value("success").toBool()},
+        {"objectAddress", address},
+        {"methodName", resolvedMethodName},
+        {"hasParam", hasParam},
+        {"verified", result.value("verified").toBool()},
+        {"error", result.value("error").toString()},
+    });
+    return result;
+}
+
 QVariantMap ApplicationController::probeKernelDriver() const {
     const killcore::KernelDriverBridge bridge;
     const auto probe = bridge.probe();

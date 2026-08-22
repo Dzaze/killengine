@@ -499,6 +499,24 @@ public:
     Q_INVOKABLE QVariantMap writeClrPrimitivePathBatch(const QString& objectAddressHex, const QVariantList& operations);
     Q_INVOKABLE QVariantMap enumerateClrRoots(const QString& typeSubstring);
 
+    /// Appelle REELLEMENT un setter de propriete C# d'instance dans le
+    /// processus attache (pas une ecriture memoire brute du champ backing) :
+    /// resout l'adresse native deja JITtee du setter via le helper ClrMD
+    /// (RPC resolveInstanceMethodAddress), construit un shellcode x64 fixe
+    /// (this en RCX, valeur optionnelle en RDX, call sur l'adresse native),
+    /// l'injecte via killcore::injectShellcode puis relit l'objet pour
+    /// verifier best-effort. Categoriquement different des autres ecritures
+    /// CLR de ce fichier : injecte et EXECUTE du code dans la cible (gate de
+    /// risque 'injection' obligatoire cote frontend, comme
+    /// injectDllIntoProcess/installFunctionHook). Perimetre v1 volontaire :
+    /// setters d'INSTANCE uniquement, 0 ou 1 parametre PRIMITIF ENTIER
+    /// (bool/int8..int64/uint8..uint64) -- pas float/double (convention
+    /// d'appel XMM1), pas string/objet/struct. valueType peut etre laisse
+    /// vide (le type reel resolu par ClrMD pilote l'encodage), ou fourni
+    /// pour une verification de coherence supplementaire avant l'injection.
+    /// Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md pour le detail complet.
+    Q_INVOKABLE QVariantMap callClrInstanceMethod(const QString& objectAddressHex, const QString& methodName, const QString& valueText, const QString& valueType);
+
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
     Q_INVOKABLE QVariantMap probeKernelDriver() const;
 
