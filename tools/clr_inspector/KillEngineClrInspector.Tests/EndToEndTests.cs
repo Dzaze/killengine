@@ -1311,6 +1311,68 @@ public sealed class EndToEndTests
     }
 
     [Fact]
+    public async Task ReadObject_UnpacksLinkedListSortedDictionaryAndSortedSetInLogicalOrder()
+    {
+        // Chantier "LinkedList<T>/SortedDictionary<K,V>/SortedSet<T> dans le
+        // deballage" -- layout interne verifie par attache ClrMD reelle avant
+        // d'ecrire ClrSession.DescribeLinkedList/DescribeSortedDictionary/
+        // DescribeSortedSet (script jetable, pas devine, voir les
+        // commentaires de ces methodes pour le detail). Le graphe de test
+        // (Inventory.LinkedTags/SortedCurrencies/SortedScores, ObjectGraph.cs)
+        // peuple ces 3 collections dans un ORDRE D'ALLOCATION deliberement
+        // different de l'ordre LOGIQUE attendu -- ce test verifie que
+        // readObject restitue bien l'ordre LOGIQUE (liste chainee : ordre
+        // d'insertion logique ; collections triees : ordre de tri), pas
+        // l'ordre d'allocation memoire.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var inventoryFields = inventoryObj!["fields"]!;
+
+        // LinkedList<string> LinkedTags : AddLast(second), AddLast(temp),
+        // AddFirst(first), AddLast(third), Remove(temp) -- ordre logique
+        // final attendu (tete -> queue) : first, second, third. La liste
+        // est CIRCULAIRE en interne (verifie par attache reelle) : ce test
+        // couvre implicitement que le deballage s'arrete correctement au
+        // lieu de boucler indefiniment.
+        var linkedTags = Field(inventoryFields, "LinkedTags")!["collection"]!;
+        Assert.Equal("linkedlist", linkedTags["kind"]!.GetValue<string>());
+        Assert.Equal(3, linkedTags["count"]!.GetValue<int>());
+        Assert.Equal(
+            new[] { "first", "second", "third" },
+            linkedTags["items"]!.AsArray().Select(v => v!.GetValue<string>()));
+
+        // SortedDictionary<string,int> SortedCurrencies : inserees dans
+        // l'ordre silver/copper/gold -- ordre logique trie PAR CLE attendu :
+        // copper, gold, silver.
+        var sortedCurrencies = Field(inventoryFields, "SortedCurrencies")!["collection"]!;
+        Assert.Equal("sorted_dictionary", sortedCurrencies["kind"]!.GetValue<string>());
+        Assert.Equal(3, sortedCurrencies["count"]!.GetValue<int>());
+        var currencyEntries = sortedCurrencies["entries"]!.AsArray();
+        Assert.Equal(
+            new[] { "copper", "gold", "silver" },
+            currencyEntries.Select(e => e!["key"]!.GetValue<string>()));
+        Assert.Equal(
+            new[] { 9000, 12, 500 },
+            currencyEntries.Select(e => e!["value"]!.GetValue<int>()));
+
+        // SortedSet<int> SortedScores : inserees dans l'ordre 42/7/99/15 --
+        // ordre logique trie attendu : 7, 15, 42, 99.
+        var sortedScores = Field(inventoryFields, "SortedScores")!["collection"]!;
+        Assert.Equal("sorted_set", sortedScores["kind"]!.GetValue<string>());
+        Assert.Equal(4, sortedScores["count"]!.GetValue<int>());
+        Assert.Equal(
+            new[] { 7, 15, 42, 99 },
+            sortedScores["items"]!.AsArray().Select(v => v!.GetValue<int>()));
+    }
+
+    [Fact]
     public async Task ReadObject_UnpacksNestedStructInsideStructRecursively()
     {
         // Chantier "Resolution recursive des structs imbriques" :
@@ -1412,7 +1474,14 @@ public sealed class EndToEndTests
         var path = pathResult["path"]!.AsArray();
         Assert.NotEmpty(path);
         Assert.Equal(shieldAddress, path[^1]!["objectAddress"]!.GetValue<string>());
-        Assert.False(pathResult["shortestPathGuaranteed"]!.GetValue<bool>()); // honnetete documentee : pas garanti le plus court
+        // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source) :
+        // FindGcRootPath garantit desormais le plus court chemin -- voir le
+        // nouveau test dedie FindGcRootPath_ReturnsTheShorterOfTwoDistinctPaths
+        // pour la preuve concrete (deux chemins de longueurs differentes vers
+        // la meme cible). Ce test-ci continue de verifier le MECANISME
+        // (chaque saut du chemin retourne est reellement lisible), inchange
+        // par le passage au multi-source.
+        Assert.True(pathResult["shortestPathGuaranteed"]!.GetValue<bool>());
 
         // Verifie chaque saut : l'objet COURANT (en partant de l'objet du
         // root) doit reellement exposer, via readObject, une reference vers
@@ -1428,6 +1497,68 @@ public sealed class EndToEndTests
                 $"Saut de chemin non verifiable : aucune reference vers {expectedNext} trouvee sur {currentAddress}.");
             currentAddress = expectedNext;
         }
+    }
+
+    [Fact]
+    public async Task FindGcRootPath_ReturnsTheShorterOfTwoDistinctPaths()
+    {
+        // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source) --
+        // preuve concrete que findGcRootPath retourne le PLUS COURT des deux
+        // chemins existants, pas juste "un" chemin choisi par l'ordre
+        // d'enumeration des roots. Le graphe de test (ObjectGraph.cs) expose
+        // deliberement DEUX chemins de longueurs differentes vers la MEME
+        // instance de ShortestPathProbe :
+        //   - COURT (1 saut) : TestRoot.ShortestPathShortcutHandle (root
+        //     StrongHandle distinct) -> ShortestPathShortcut.Target -> Probe.
+        //   - LONG (4 sauts) : TestRoot.RootHandle -> Inventory ->
+        //     LongChainStart -> Next -> Next -> Leaf -> Probe (le meme
+        //     objet).
+        // L'ancienne version (BFS independant par root, premier chemin
+        // trouve gagne) aurait pu retourner l'un OU l'autre selon l'ordre
+        // d'enumeration de heap.EnumerateRoots() -- pas garanti. Le BFS
+        // multi-source doit TOUJOURS retourner le chemin a 1 saut, quel que
+        // soit cet ordre.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundProbe = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.ShortestPathProbe")));
+        string probeAddress = Assert.Single(foundProbe!.AsArray())!["address"]!.GetValue<string>();
+
+        var pathResult = await PipeClient.CallAsync(
+            InspectorPipe, "findGcRootPath", new JsonArray(JsonValue.Create(probeAddress), JsonValue.Create(8), JsonValue.Create(4000)));
+
+        Assert.True(pathResult!["success"]!.GetValue<bool>(), pathResult["message"]?.GetValue<string>() ?? pathResult.ToString());
+        Assert.True(pathResult["shortestPathGuaranteed"]!.GetValue<bool>());
+
+        // Le chemin retourne doit etre le COURT (1 saut), pas le long (4
+        // sauts) -- la garantie centrale de ce chantier.
+        Assert.Equal(1, pathResult["depth"]!.GetValue<int>());
+        var path = pathResult["path"]!.AsArray();
+        Assert.Single(path);
+        Assert.Equal(probeAddress, path[0]!["objectAddress"]!.GetValue<string>());
+
+        // L'objet racine du chemin retenu doit etre le ShortestPathShortcut
+        // (root du chemin COURT), pas l'Inventory (root du chemin LONG).
+        Assert.Contains("ShortestPathShortcut", pathResult["rootObjectTypeName"]!.GetValue<string>());
+
+        // Verification independante : le chemin long existe bel et bien
+        // aussi dans le graphe reel (pas juste suppose par construction) --
+        // le lit via readObject en partant d'Inventory pour confirmer que
+        // les 4 sauts sont reellement presents, meme si ce n'est pas celui
+        // que findGcRootPath a choisi de retourner.
+        var foundInventory = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Inventory")));
+        string inventoryAddress = Assert.Single(foundInventory!.AsArray())!["address"]!.GetValue<string>();
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var longChainStart = Field(inventoryObj!["fields"]!, "LongChainStart")!;
+        string node1Address = longChainStart["address"]!.GetValue<string>();
+        var node1Obj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(node1Address)));
+        var node2 = Field(node1Obj!["fields"]!, "Next")!;
+        var node2Obj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(node2["address"]!.GetValue<string>())));
+        var node3 = Field(node2Obj!["fields"]!, "Next")!;
+        var node3Obj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(node3["address"]!.GetValue<string>())));
+        var leaf = Field(node3Obj!["fields"]!, "Leaf")!;
+        Assert.Equal(probeAddress, leaf["address"]!.GetValue<string>());
     }
 
     [Fact]

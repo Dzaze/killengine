@@ -22,6 +22,18 @@ public sealed class ClrSession : IDisposable
 {
     private const int MaxCollectionItems = 32;
 
+    // Chantier "LinkedList<T>/SortedDictionary<K,V>/SortedSet<T>" (docs/
+    // KILLENGINE_CLR_INSPECTOR_SPEC.md) : borne de securite sur le nombre de
+    // noeuds d'arbre visites pendant un parcours en ordre (in-order) de
+    // SortedDictionary/SortedSet. Un arbre rouge-noir bien forme garantit une
+    // hauteur O(log n), et le parcours iteratif s'arrete des que
+    // MaxCollectionItems elements ont ete produits -- cette borne ne devrait
+    // donc jamais etre atteinte en usage normal, meme sur un tres gros
+    // SortedDictionary/SortedSet. Elle protege uniquement contre une
+    // structure corrompue/degenerescente (pas un scenario legitime), d'ou une
+    // valeur genereuse plutot que calibree.
+    private const int MaxSortedTreeNodesVisited = 5_000;
+
     // Chantier "resolution recursive des structs imbriques" (docs/
     // KILLENGINE_CLR_INSPECTOR_SPEC.md) : profondeur maximale de deballage
     // struct-dans-struct. Borne deliberee -- un struct generique complexe
@@ -343,6 +355,26 @@ public sealed class ClrSession : IDisposable
             {
                 return null;
             }
+            // Piege reel rencontre par attache ClrMD reelle en verifiant
+            // LinkedList<T>.item avant d'ecrire le chantier "LinkedList<T>/
+            // SortedDictionary<K,V>/SortedSet<T>" (docs/
+            // KILLENGINE_CLR_INSPECTOR_SPEC.md) : pour un champ dont le type
+            // declare est un PARAMETRE GENERIQUE T instancie en reference
+            // (ex: LinkedListNode<string>.item), ClrMD rapporte
+            // field.ElementType == Class (partage de code generique canonique
+            // cote CLR pour les types reference), PAS ElementType.String --
+            // meme quand le type reel resolu de l'instance (refObj.Type.Name)
+            // est bel et bien "System.String". Le check ElementType.String en
+            // tete de cette methode (qui suffit pour un champ string DIRECT,
+            // non generique, ex: Player.Name) ne suffit donc pas ici. Meme
+            // garde-fou deja en place pour les champs struct generiques dans
+            // ReadValueTypeFieldValue plus bas (HashSet<T>.Entry.Value,
+            // Dictionary<K,V>.Entry.key/value, etc.) -- applique ici aussi
+            // pour les champs objet directs.
+            if (refObj.Type?.IsString == true)
+            {
+                return refObj.AsString(4096);
+            }
             return DescribeObjectReference(refObj, depth: 0);
         }
 
@@ -427,6 +459,21 @@ public sealed class ClrSession : IDisposable
             if (typeName.StartsWith("System.Collections.Generic.Stack<", StringComparison.Ordinal))
             {
                 return DescribeStack(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.LinkedList<", StringComparison.Ordinal))
+            {
+                return DescribeLinkedList(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.SortedDictionary<", StringComparison.Ordinal))
+            {
+                return DescribeSortedDictionary(obj, depth);
+            }
+
+            if (typeName.StartsWith("System.Collections.Generic.SortedSet<", StringComparison.Ordinal))
+            {
+                return DescribeSortedSet(obj, depth);
             }
 
             object? customCollection = DescribeFieldBackedCollection(obj, depth);
@@ -726,6 +773,210 @@ public sealed class ClrSession : IDisposable
             count = size,
             returned = items.Count,
             truncated = size > items.Count,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// LinkedList&lt;T&gt; -- layout interne verifie par attache ClrMD reelle sur
+    /// KillEngineClrTestTarget (script jetable dans le scratchpad de session,
+    /// pas devine) : PAS de buffer tableau -- chaine de noeuds
+    /// `LinkedListNode&lt;T&gt;` (classe, pas struct) relies par les champs
+    /// d'instance `next`/`prev` (minuscule), chaque noeud portant sa valeur
+    /// dans le champ `item` (minuscule) et un lien `list` vers la
+    /// `LinkedList&lt;T&gt;` proprietaire. La liste elle-meme expose `head`
+    /// (le PREMIER noeud logique, ou null si vide) et `count`.
+    ///
+    /// **Confirme CIRCULAIRE en interne** (verifie concretement avec une
+    /// sequence AddFirst/AddLast/Remove qui produit 3 noeuds vivants, voir
+    /// `Inventory.LinkedTags`/`ObjectGraph.cs`) : en partant de `head` et en
+    /// suivant `next` a repetition, le noeud `count`-ieme (dernier logique)
+    /// a bien `next` qui pointe DE NOUVEAU vers `head` plutot que vers
+    /// `null` -- la sortie de boucle doit donc se faire par comptage
+    /// (`count` noeuds parcourus) et/ou en detectant le retour a l'adresse
+    /// de `head`, jamais en attendant un `next` null qui n'arrive pas.
+    /// `prev` n'est pas utilise ici (parcours avant uniquement).
+    /// </summary>
+    private static object DescribeLinkedList(ClrObject obj, int depth)
+    {
+        int count = Math.Max(0, SafeReadIntField(obj, "count"));
+        ClrObject headObj = obj.ReadObjectField("head");
+        var items = new List<object?>();
+        string? elementType = null;
+
+        if (!headObj.IsNull)
+        {
+            ulong headAddress = headObj.Address;
+            ClrObject current = headObj;
+            int steps = Math.Min(count, MaxCollectionItems);
+
+            for (int i = 0; i < steps; ++i)
+            {
+                ClrInstanceField? itemField = current.Type?.GetFieldByName("item");
+                elementType ??= itemField?.Type?.Name;
+                items.Add(itemField is null ? null : ReadFieldValue(current, itemField, depth));
+
+                ClrObject next = current.ReadObjectField("next");
+                if (next.IsNull || next.Address == headAddress)
+                {
+                    // Fin de la chaine circulaire (retour a head) ou noeud
+                    // orphelin inattendu -- s'arrete proprement plutot que de
+                    // boucler.
+                    break;
+                }
+                current = next;
+            }
+        }
+
+        return new
+        {
+            kind = "linkedlist",
+            elementType,
+            count,
+            returned = items.Count,
+            truncated = count > items.Count,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// Parcours EN ORDRE (in-order : gauche, noeud, droite) iteratif d'un
+    /// arbre rouge-noir interne partage par `SortedSet&lt;T&gt;` et le
+    /// `TreeSet&lt;T&gt;` prive de `SortedDictionary&lt;K,V&gt;` -- verifie par
+    /// attache ClrMD reelle : les deux s'appuient sur la MEME classe de noeud
+    /// generique `SortedSet&lt;T&gt;+Node` (proprietes auto-implementees, donc
+    /// champs backing `&lt;Left&gt;k__BackingField`/`&lt;Right&gt;k__BackingField`/
+    /// `&lt;Item&gt;k__BackingField`/`&lt;Color&gt;k__BackingField` -- `Color` n'est
+    /// pas lu ici, non necessaire pour restituer le contenu). Un parcours
+    /// in-order d'un arbre binaire de recherche produit naturellement les
+    /// elements TRIES, sans reimplementer de logique de comparaison --
+    /// exactement ce que `SortedSet&lt;T&gt;.GetEnumerator()`/
+    /// `SortedDictionary&lt;K,V&gt;.GetEnumerator()` font cote BCL.
+    ///
+    /// Implementation ITERATIVE (pile explicite, pas de recursion) : s'arrete
+    /// des que <paramref name="limit"/> noeuds ont ete produits, borne
+    /// additionnellement par <see cref="MaxSortedTreeNodesVisited"/> comme
+    /// garde-fou contre une structure corrompue/degenerescente (un arbre
+    /// rouge-noir bien forme a une hauteur O(log n), donc cette seconde borne
+    /// ne devrait jamais etre le facteur limitant en usage normal).
+    /// </summary>
+    private static List<ClrObject> WalkSortedTreeNodesInOrder(ClrObject root, int limit)
+    {
+        var result = new List<ClrObject>(Math.Max(0, Math.Min(limit, MaxCollectionItems)));
+        if (root.IsNull || limit <= 0)
+        {
+            return result;
+        }
+
+        var stack = new Stack<ClrObject>();
+        ClrObject current = root;
+        int nodesVisited = 0;
+
+        while ((!current.IsNull || stack.Count > 0) && result.Count < limit)
+        {
+            while (!current.IsNull)
+            {
+                if (nodesVisited >= MaxSortedTreeNodesVisited)
+                {
+                    return result;
+                }
+                nodesVisited++;
+                stack.Push(current);
+                current = current.ReadObjectField("<Left>k__BackingField");
+            }
+
+            current = stack.Pop();
+            result.Add(current);
+            current = current.ReadObjectField("<Right>k__BackingField");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// SortedDictionary&lt;K,V&gt; -- layout interne verifie par attache ClrMD
+    /// reelle : pas de buffer tableau, delegue entierement a un champ prive
+    /// `_set` de type `TreeSet&lt;KeyValuePair&lt;K,V&gt;&gt;` (arbre rouge-noir),
+    /// lui-meme expose son compte via `count` et sa racine via `root`. Chaque
+    /// noeud de l'arbre porte la paire cle/valeur ENTIERE dans son champ
+    /// `&lt;Item&gt;k__BackingField` (un `KeyValuePair&lt;K,V&gt;`, struct) --
+    /// deballe via les memes noms de champs internes `key`/`value` (minuscule)
+    /// que `Dictionary&lt;K,V&gt;.Entry` (verifie identique par attache reelle).
+    /// Parcours in-order via <see cref="WalkSortedTreeNodesInOrder"/> --
+    /// restitue les entrees TRIEES PAR CLE (verifie concretement avec des
+    /// insertions volontairement en DESORDRE, voir
+    /// `Inventory.SortedCurrencies`/`ObjectGraph.cs`).
+    /// </summary>
+    private static object DescribeSortedDictionary(ClrObject obj, int depth)
+    {
+        ClrObject setObj = obj.ReadObjectField("_set");
+        if (setObj.IsNull)
+        {
+            return new { kind = "sorted_dictionary", count = 0, returned = 0, entries = Array.Empty<object?>() };
+        }
+
+        int count = Math.Max(0, SafeReadIntField(setObj, "count"));
+        ClrObject rootObj = setObj.ReadObjectField("root");
+        List<ClrObject> nodes = WalkSortedTreeNodesInOrder(rootObj, Math.Min(count, MaxCollectionItems));
+
+        var entries = new List<object?>(nodes.Count);
+        foreach (ClrObject node in nodes)
+        {
+            ClrInstanceField? itemField = node.Type?.GetFieldByName("<Item>k__BackingField");
+            if (itemField is null || itemField.Type?.IsValueType != true)
+            {
+                entries.Add(null);
+                continue;
+            }
+            ClrValueType kvp = node.ReadValueTypeField(itemField.Name!);
+            entries.Add(new
+            {
+                key = ReadValueTypeFieldByName(kvp, "key", depth),
+                value = ReadValueTypeFieldByName(kvp, "value", depth),
+            });
+        }
+
+        return new
+        {
+            kind = "sorted_dictionary",
+            count,
+            returned = entries.Count,
+            truncated = count > entries.Count,
+            entries,
+        };
+    }
+
+    /// <summary>
+    /// SortedSet&lt;T&gt; -- meme arbre rouge-noir que le `TreeSet` interne de
+    /// `SortedDictionary&lt;K,V&gt;` ci-dessus (racine directement sur le champ
+    /// `root` de l'objet, pas besoin de descendre via un champ `_set`
+    /// intermediaire). Chaque noeud porte sa valeur DIRECTEMENT dans
+    /// `&lt;Item&gt;k__BackingField` (pas une paire cle/valeur). Parcours in-order
+    /// via <see cref="WalkSortedTreeNodesInOrder"/> -- restitue les elements
+    /// TRIES (verifie concretement avec des insertions volontairement en
+    /// DESORDRE, voir `Inventory.SortedScores`/`ObjectGraph.cs`).
+    /// </summary>
+    private static object DescribeSortedSet(ClrObject obj, int depth)
+    {
+        int count = Math.Max(0, SafeReadIntField(obj, "count"));
+        ClrObject rootObj = obj.ReadObjectField("root");
+        List<ClrObject> nodes = WalkSortedTreeNodesInOrder(rootObj, Math.Min(count, MaxCollectionItems));
+
+        ClrInstanceField? itemField = null;
+        var items = new List<object?>(nodes.Count);
+        foreach (ClrObject node in nodes)
+        {
+            itemField ??= node.Type?.GetFieldByName("<Item>k__BackingField");
+            items.Add(itemField is null ? null : ReadFieldValue(node, itemField, depth));
+        }
+
+        return new
+        {
+            kind = "sorted_set",
+            elementType = itemField?.Type?.Name,
+            count,
+            returned = items.Count,
+            truncated = count > items.Count,
             items,
         };
     }
@@ -1169,34 +1420,48 @@ public sealed class ClrSession : IDisposable
     private static readonly TimeSpan GcRootPathTimeBudget = TimeSpan.FromSeconds(15);
 
     /// <summary>
-    /// Reconstruit un chemin root -> ... -> objet cible a travers plusieurs
-    /// sauts de references (equivalent approximatif de `!gcroot` SOS/WinDbg,
-    /// pas une reimplementation exacte). Pour chaque root retourne par
-    /// `heap.EnumerateRoots()` (borne a <paramref name="maxRootsScanned"/>),
-    /// fait un parcours en LARGEUR (BFS) borne en profondeur
-    /// (<paramref name="maxDepth"/>) depuis l'objet racine, en explorant les
-    /// champs de reference d'instance de chaque objet visite ainsi que les
-    /// elements des tableaux/listes rencontres (bornes a
+    /// Reconstruit le PLUS COURT chemin root -> ... -> objet cible a travers
+    /// plusieurs sauts de references (equivalent approximatif de `!gcroot`
+    /// SOS/WinDbg, pas une reimplementation exacte). Contrairement a la
+    /// version initiale de ce chantier (BFS independant par root, premier
+    /// chemin trouve pas garanti le plus court), cette version fait un seul
+    /// BFS MULTI-SOURCE : tous les objets de <c>heap.EnumerateRoots()</c>
+    /// (bornes a <paramref name="maxRootsScanned"/>) sont enfiles ENSEMBLE a
+    /// la profondeur 0 dans UNE SEULE queue/UN SEUL ensemble <c>visited</c>
+    /// partages (dedoublonnage : si plusieurs roots pointent vers le meme
+    /// objet, il n'est enfile qu'une fois -- le premier root rencontre dans
+    /// l'ordre d'enumeration "gagne" et sert de racine rapportee, choix
+    /// deterministe et sans consequence puisque tous les roots de depart sont
+    /// a egale profondeur 0). Un BFS explorant par profondeur croissante
+    /// uniforme garantit que le PREMIER moment ou l'objet cible est atteint
+    /// correspond au plus court chemin en nombre de sauts parmi TOUTES les
+    /// sources combinees (propriete standard d'un BFS multi-source).
+    ///
+    /// Explore les champs de reference d'instance de chaque objet visite
+    /// ainsi que les elements des tableaux/listes rencontres (bornes a
     /// <see cref="MaxGcRootPathArrayElementsPerNode"/> elements par noeud
     /// tableau -- reutilise la meme logique d'acces aux elements de tableau
     /// que <see cref="ReadArrayElement"/>/<see cref="DescribeArray"/>
     /// ailleurs dans ce fichier, juste sans deballage complet de la valeur).
-    /// Les objets deja visites sont marques (meme principe que la gestion de
-    /// cycle existante pour `Player.Self`) pour eviter une boucle infinie.
+    /// Les objets deja visites (par n'importe quelle source) sont marques
+    /// (meme principe que la gestion de cycle existante pour `Player.Self`)
+    /// pour eviter une boucle infinie ET pour ne jamais revisiter un noeud
+    /// deja atteint par un chemin plus court ou de longueur egale.
     ///
-    /// **Honnete sur les limites** : retourne le PREMIER chemin trouve, pas
-    /// garanti le plus court -- un vrai plus-court-chemin global exigerait un
-    /// BFS unique multi-source depuis TOUS les roots simultanement (plus
-    /// efficace mais notablement plus complexe a implementer et a borner
-    /// correctement), pas fait ici faute de temps disponible pour ce lot.
-    /// Sur un gros tas avec beaucoup d'objets/references, ce parcours peut
-    /// etre LENT (potentiellement plusieurs secondes) : borne par un budget
-    /// de temps (<see cref="GcRootPathTimeBudget"/>) ET un nombre total de
-    /// noeuds visites (<see cref="MaxGcRootPathTotalNodesVisited"/>, pas
-    /// seulement par root) pour ne jamais bloquer indefiniment le pipe
-    /// JSON-RPC -- voir aussi le timeout cote appelant natif
-    /// (`ApplicationController::findClrGcRootPath`, aligne sur un ordre de
-    /// grandeur plus large que celui de `findObjectsByFieldValue`).
+    /// Bornes identiques a la version precedente, juste appliquees a une
+    /// structure a source unique-mais-multiple au lieu d'une boucle externe
+    /// par root : <paramref name="maxDepth"/>/<see cref="MaxGcRootPathDepth"/>
+    /// (profondeur), <paramref name="maxRootsScanned"/>/<see
+    /// cref="MaxGcRootsScanned"/> (nombre de sources initiales), <see
+    /// cref="MaxGcRootPathArrayElementsPerNode"/> (elements de tableau par
+    /// noeud), <see cref="MaxGcRootPathTotalNodesVisited"/> (compteur GLOBAL
+    /// de noeuds visites -- deja global dans la version precedente, pas de
+    /// changement de semantique ici) et <see cref="GcRootPathTimeBudget"/>
+    /// (budget de temps global). Le travail total abattu est en fait
+    /// STRICTEMENT INFERIEUR OU EGAL a la version precedente : chaque objet
+    /// du tas n'est plus explore qu'une seule fois au total (au lieu
+    /// potentiellement une fois par root qui l'atteint), donc pas de
+    /// regression de performance sur un gros tas -- au contraire.
     /// </summary>
     public object FindGcRootPath(string targetAddressHex, int maxDepth, int maxRootsScanned)
     {
@@ -1212,6 +1477,14 @@ public sealed class ClrSession : IDisposable
         long nodesVisited = 0;
         bool budgetExceeded = false;
 
+        // Un seul ensemble "visited" partage par TOUTES les sources -- coeur
+        // de la garantie multi-source. Les noeuds racine (profondeur 0) ont
+        // OriginRoot renseigne et ParentAddress null ; les autres noeuds
+        // portent le lien vers leur parent dans le BFS pour permettre de
+        // reconstruire le chemin par remontee une fois la cible trouvee.
+        var visited = new Dictionary<ulong, GcRootPathVisitedNode>();
+        var queue = new Queue<ClrObject>();
+
         foreach (ClrRoot root in heap.EnumerateRoots())
         {
             if (rootsScanned >= rootsLimit)
@@ -1221,65 +1494,63 @@ public sealed class ClrSession : IDisposable
             rootsScanned++;
 
             ClrObject rootObj = root.Object;
-            if (rootObj.IsNull)
+            if (rootObj.IsNull || visited.ContainsKey(rootObj.Address))
+            {
+                // Dedoublonnage : un objet deja enfile par un root precedent
+                // (a la meme profondeur 0) n'est pas re-enfile -- le premier
+                // root rencontre reste celui rapporte pour cet objet.
+                continue;
+            }
+
+            visited[rootObj.Address] = new GcRootPathVisitedNode(OriginRoot: root, ParentAddress: null, Kind: null, FieldName: null, Index: null, TypeName: rootObj.Type?.Name, Depth: 0);
+
+            if (rootObj.Address == targetAddress)
+            {
+                return BuildFoundGcRootPathResultMultiSource(visited, targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
+            }
+
+            queue.Enqueue(rootObj);
+        }
+
+        while (queue.Count > 0)
+        {
+            if (stopwatch.Elapsed > GcRootPathTimeBudget || nodesVisited > MaxGcRootPathTotalNodesVisited)
+            {
+                budgetExceeded = true;
+                break;
+            }
+
+            ClrObject current = queue.Dequeue();
+            int currentDepth = visited[current.Address].Depth;
+            if (currentDepth >= depthLimit)
             {
                 continue;
             }
 
-            if (rootObj.Address == targetAddress)
+            foreach ((string kind, string? fieldName, int? index, ClrObject child) in
+                     EnumerateGcRootPathReferences(current, MaxGcRootPathArrayElementsPerNode))
             {
-                return BuildFoundGcRootPathResult(root, new List<object>(), targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
-            }
-
-            var visited = new HashSet<ulong> { rootObj.Address };
-            var queue = new Queue<(ClrObject Obj, List<object> Path)>();
-            queue.Enqueue((rootObj, new List<object>()));
-
-            while (queue.Count > 0)
-            {
-                if (stopwatch.Elapsed > GcRootPathTimeBudget || nodesVisited > MaxGcRootPathTotalNodesVisited)
+                nodesVisited++;
+                if (visited.ContainsKey(child.Address))
                 {
-                    budgetExceeded = true;
-                    break;
-                }
-
-                (ClrObject current, List<object> path) = queue.Dequeue();
-                if (path.Count >= depthLimit)
-                {
+                    // Deja atteint (par cette source ou une autre) a une
+                    // profondeur <= celle-ci -- BFS garantit que le premier
+                    // ajout est deja le plus court, rien a mettre a jour.
                     continue;
                 }
 
-                foreach ((string kind, string? fieldName, int? index, ClrObject child) in
-                         EnumerateGcRootPathReferences(current, MaxGcRootPathArrayElementsPerNode))
+                visited[child.Address] = new GcRootPathVisitedNode(OriginRoot: null, ParentAddress: current.Address, Kind: kind, FieldName: fieldName, Index: index, TypeName: child.Type?.Name, Depth: currentDepth + 1);
+
+                if (child.Address == targetAddress)
                 {
-                    nodesVisited++;
-                    if (visited.Contains(child.Address))
-                    {
-                        continue;
-                    }
-
-                    var newPath = new List<object>(path)
-                    {
-                        new { kind, fieldName, index, objectAddress = ToHex(child.Address), typeName = child.Type?.Name },
-                    };
-
-                    if (child.Address == targetAddress)
-                    {
-                        return BuildFoundGcRootPathResult(root, newPath, targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
-                    }
-
-                    visited.Add(child.Address);
-                    queue.Enqueue((child, newPath));
-
-                    if (nodesVisited > MaxGcRootPathTotalNodesVisited)
-                    {
-                        budgetExceeded = true;
-                        break;
-                    }
+                    return BuildFoundGcRootPathResultMultiSource(visited, targetAddress, rootsScanned, nodesVisited, stopwatch.Elapsed);
                 }
 
-                if (budgetExceeded)
+                queue.Enqueue(child);
+
+                if (nodesVisited > MaxGcRootPathTotalNodesVisited)
                 {
+                    budgetExceeded = true;
                     break;
                 }
             }
@@ -1304,8 +1575,45 @@ public sealed class ClrSession : IDisposable
         };
     }
 
-    private static object BuildFoundGcRootPathResult(ClrRoot root, List<object> path, ulong targetAddress, int rootsScanned, long nodesVisited, TimeSpan elapsed)
+    /// <summary>
+    /// Noeud du BFS multi-source de <see cref="FindGcRootPath"/>. Un noeud
+    /// racine (profondeur 0, direct dans <c>heap.EnumerateRoots()</c>) porte
+    /// <see cref="OriginRoot"/> et un <see cref="ParentAddress"/> null ; tout
+    /// autre noeud porte le lien vers son parent dans le BFS (adresse +
+    /// nature de la reference qui y mene) pour permettre de reconstruire le
+    /// chemin par remontee une fois la cible trouvee.
+    /// </summary>
+    private readonly record struct GcRootPathVisitedNode(ClrRoot? OriginRoot, ulong? ParentAddress, string? Kind, string? FieldName, int? Index, string? TypeName, int Depth);
+
+    private static object BuildFoundGcRootPathResultMultiSource(Dictionary<ulong, GcRootPathVisitedNode> visited, ulong targetAddress, int rootsScanned, long nodesVisited, TimeSpan elapsed)
     {
+        var reversedPath = new List<object>();
+        ulong currentAddress = targetAddress;
+        GcRootPathVisitedNode currentNode = visited[currentAddress];
+
+        while (currentNode.ParentAddress is ulong parentAddress)
+        {
+            reversedPath.Add(new
+            {
+                kind = currentNode.Kind,
+                fieldName = currentNode.FieldName,
+                index = currentNode.Index,
+                objectAddress = ToHex(currentAddress),
+                typeName = currentNode.TypeName,
+            });
+            currentAddress = parentAddress;
+            currentNode = visited[currentAddress];
+        }
+        reversedPath.Reverse();
+
+        // A ce point, currentNode est un noeud racine (ParentAddress null),
+        // donc OriginRoot est necessairement renseigne (invariant garanti a
+        // la construction : seuls les noeuds racine ont ParentAddress null).
+        // ClrRoot est une classe (pas une struct) dans ClrMD 4.0.732401,
+        // verifie par reflexion avant d'ecrire ce code -- pas de `.Value`
+        // ici, juste le null-forgiving operator sur la reference.
+        ClrRoot root = currentNode.OriginRoot!;
+
         return new
         {
             success = true,
@@ -1314,13 +1622,13 @@ public sealed class ClrSession : IDisposable
             rootAddress = ToHex(root.Address),
             rootObjectAddress = ToHex(root.Object.Address),
             rootObjectTypeName = root.Object.Type?.Name,
-            depth = path.Count,
-            path,
+            depth = reversedPath.Count,
+            path = reversedPath,
             rootsScanned,
             nodesVisited,
             elapsedMs = elapsed.TotalMilliseconds,
-            shortestPathGuaranteed = false,
-            note = "Premier chemin trouve par un BFS par-root (pas un BFS multi-source global) -- pas garanti le plus court. Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md.",
+            shortestPathGuaranteed = true,
+            note = "Plus court chemin garanti (BFS multi-source unique explorant simultanement tous les roots scannes -- voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).",
         };
     }
 
