@@ -10,6 +10,8 @@ const fieldWriteValues = ref<Record<string, string>>({})
 const pathWritePath = ref('')
 const pathWriteValue = ref('')
 const batchWriteText = ref('')
+const callMethodName = ref('')
+const callMethodValue = ref('')
 const locatorType = ref('KillEngine.ClrTestTarget.Player')
 const locatorField = ref('Name')
 const locatorValue = ref('TestSubject')
@@ -142,6 +144,16 @@ function writeBatch() {
 
 function usePathExample(path: string) {
   pathWritePath.value = path
+}
+
+function callInstanceMethod() {
+  const objectAddress = store.clrSelectedObject?.address ?? ''
+  const method = callMethodName.value.trim()
+  const value = callMethodValue.value.trim()
+  if (!objectAddress || !method) return
+  // valueType volontairement vide : le type reel du parametre, resolu via
+  // ClrMD (ResolveInstanceMethodAddress), pilote l'encodage cote natif.
+  void store.callClrInstanceMethod(objectAddress, method, value, '')
 }
 
 function trainerValueType(field: ClrFieldInfo): string {
@@ -485,6 +497,53 @@ onMounted(() => {
               >
                 Transaction
               </button>
+            </div>
+          </div>
+
+          <div v-if="store.clrSelectedObject" class="setter-call warning-band">
+            <div class="setter-call-head">
+              <div>
+                <strong>Appeler un setter (action avancée — injecte du code)</strong>
+                <span>Contrairement aux écritures ci-dessus (mémoire passive), ceci exécute réellement le vrai setter C# dans le processus attaché.</span>
+              </div>
+              <InfoDot
+                text="Résout l'adresse native déjà JITtée du setter via ClrMD, construit un petit shellcode x64 (this en RCX, valeur en RDX) puis l'exécute par injection dans la cible — logique métier réelle (validation, effets de bord), pas un contournement mémoire brut. Setters d'INSTANCE uniquement, 0 ou 1 paramètre primitif entier (bool/int8..int64/uint8..uint64) : pas float/double, pas string/objet/struct. Le setter doit avoir déjà été déclenché au moins une fois en jeu (JIT), sinon l'appel échoue avec un message clair."
+                align="right"
+              />
+            </div>
+            <div class="setter-call-inputs">
+              <input
+                v-model="callMethodName"
+                class="path-input"
+                placeholder="Propriété ou méthode (ex. Health, set_Health)"
+                aria-label="Nom du setter CLR à appeler"
+                @keyup.enter="callInstanceMethod"
+              />
+              <input
+                v-model="callMethodValue"
+                class="path-value-input"
+                placeholder="Valeur (laisser vide si 0 argument)"
+                aria-label="Valeur du paramètre du setter CLR"
+                @keyup.enter="callInstanceMethod"
+              />
+              <button
+                class="btn btn-danger"
+                :disabled="store.clrInspectorBusy || !callMethodName.trim()"
+                title="Résout l'adresse native déjà JITtée puis appelle réellement ce setter par injection shellcode."
+                @click="callInstanceMethod"
+              >
+                Appeler
+              </button>
+            </div>
+            <div v-if="store.clrCallMethodResult" class="setter-call-result" :class="{ ok: store.clrCallMethodResult.success, err: !store.clrCallMethodResult.success }">
+              <template v-if="store.clrCallMethodResult.success">
+                <strong>{{ store.clrCallMethodResult.methodName }}</strong>
+                <code>{{ store.clrCallMethodResult.nativeCodeAddress }}</code>
+                <span>vérifié : {{ store.clrCallMethodResult.verified ? 'oui' : 'non' }}</span>
+              </template>
+              <template v-else>
+                {{ store.clrCallMethodResult.error }}
+              </template>
             </div>
           </div>
           <div class="table-wrap">
@@ -911,6 +970,64 @@ onMounted(() => {
   align-items: end;
 }
 
+.warning-band {
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.12);
+  border-radius: 8px;
+}
+
+.setter-call {
+  grid-column: 1 / -1;
+  padding: 12px 14px;
+  margin: 4px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setter-call-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setter-call-head strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.setter-call-head span {
+  display: block;
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-top: 2px;
+  max-width: 480px;
+}
+
+.setter-call-inputs {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(140px, 1fr) auto;
+  gap: 8px;
+}
+
+.setter-call-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.setter-call-result.ok {
+  color: var(--success);
+}
+
+.setter-call-result.err {
+  color: var(--error);
+}
+
 .path-examples {
   display: flex;
   flex-wrap: wrap;
@@ -1015,9 +1132,14 @@ code {
   .content-grid,
   .path-write,
   .batch-write,
+  .setter-call-inputs,
   .guide-steps,
   .status-band {
     grid-template-columns: 1fr;
+  }
+
+  .setter-call-head {
+    flex-direction: column;
   }
 
   .toolbar,

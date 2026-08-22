@@ -8,6 +8,7 @@ import {
   type AutoResolveReportResult,
   type CandidateFieldTestResult,
   type CandidatePage,
+  type ClrCallInstanceMethodResult,
   type ClrFieldLocatorResult,
   type ClrInspectorStatus,
   type ClrObjectReadResult,
@@ -408,6 +409,7 @@ export const useAppStore = defineStore('app', () => {
   const clrRoots = ref<ClrRootInfo[]>([])
   const clrLastResult = ref<ClrRpcResult | null>(null)
   const clrFieldLocatorResult = ref<ClrFieldLocatorResult | null>(null)
+  const clrCallMethodResult = ref<ClrCallInstanceMethodResult | null>(null)
   const luaScriptingStatus = ref<LuaScriptingStatus | null>(null)
   const luaScriptText = ref([
     'local ke = require("killengine")',
@@ -3990,6 +3992,56 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function callClrInstanceMethod(objectAddressHex: string, methodName: string, valueText: string, valueType: string) {
+    const controller = backend.getController()
+    const address = objectAddressHex.trim()
+    const method = methodName.trim()
+    const text = valueText.trim()
+    if (!controller.callClrInstanceMethod) {
+      clrCallMethodResult.value = { success: false, error: 'callClrInstanceMethod non exposé par ce backend.' }
+      clrInspectorError.value = clrCallMethodResult.value.error ?? ''
+      return
+    }
+    if (!address || !method) return
+    // Categoriquement plus a risque que writeClrPrimitive*/writeClrPrimitivePath :
+    // injecte et EXECUTE du code dans le processus cible (shellcode + thread
+    // distant), pas une ecriture memoire passive. Meme gate 'injection' que
+    // injectDllIntoProcess/installFunctionHook/le speedhack.
+    if (!await confirmRiskAction('injection', 'Appeler un setter CLR', `${address}.${method}(${text || '<0 argument>'}). Injecte et exécute réellement le setter dans le processus attaché.`)) return
+
+    clrInspectorBusy.value = true
+    try {
+      const result = await controller.callClrInstanceMethod(address, method, text, valueType.trim())
+      clrLastResult.value = result
+      clrCallMethodResult.value = (result.result as ClrCallInstanceMethodResult | undefined) ?? {
+        success: result.success,
+        error: result.error,
+      }
+      const innerSuccess = clrCallMethodResult.value?.success ?? result.success
+      clrInspectorError.value = innerSuccess ? '' : (clrCallMethodResult.value?.error ?? result.error ?? '')
+      addActionLog(
+        'clr_inspector',
+        innerSuccess ? 'Setter CLR appelé' : 'Appel de setter CLR échoué',
+        innerSuccess
+          ? `${clrCallMethodResult.value?.methodName ?? method} @ ${clrCallMethodResult.value?.nativeCodeAddress ?? '?'} (vérifié: ${clrCallMethodResult.value?.verified ? 'oui' : 'non'})`
+          : (clrCallMethodResult.value?.error ?? result.error ?? ''),
+        innerSuccess ? 'success' : 'error',
+      )
+      if (innerSuccess) {
+        await readClrObject(address)
+      }
+      return result
+    } catch (e) {
+      clrLastResult.value = { success: false, error: String(e) }
+      clrCallMethodResult.value = { success: false, error: String(e) }
+      clrInspectorError.value = String(e)
+      addActionLog('clr_inspector', 'Appel de setter CLR échoué', String(e), 'error')
+      return clrLastResult.value
+    } finally {
+      clrInspectorBusy.value = false
+    }
+  }
+
   async function enumerateClrRoots(typeSubstring = clrTypeFilter.value) {
     const controller = backend.getController()
     if (!controller.enumerateClrRoots) {
@@ -6971,6 +7023,7 @@ async function doEncryptedScan() {
     clrRoots,
     clrLastResult,
     clrFieldLocatorResult,
+    clrCallMethodResult,
     refreshClrInspectorStatus,
     attachClrInspector,
     detachClrInspector,
@@ -6982,6 +7035,7 @@ async function doEncryptedScan() {
     writeClrPrimitiveField,
     writeClrPrimitivePath,
     writeClrPrimitivePathBatch,
+    callClrInstanceMethod,
     enumerateClrRoots,
     luaScriptingStatus,
     luaScriptText,

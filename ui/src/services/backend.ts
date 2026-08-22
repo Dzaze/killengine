@@ -156,6 +156,17 @@ export interface ClrPathWriteOperation {
   value: string
 }
 
+export interface ClrCallInstanceMethodResult {
+  success: boolean
+  objectAddress?: string
+  methodName?: string
+  nativeCodeAddress?: string
+  parameterType?: string
+  threadCompleted?: boolean
+  verified?: boolean
+  error?: string
+}
+
 export interface ClrRootInfo {
   rootAddress?: string
   address?: string
@@ -1102,6 +1113,17 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   writeClrPrimitivePath?(objectAddressHex: string, path: string, value: string): Promise<ClrRpcResult>
   writeClrPrimitivePathBatch?(objectAddressHex: string, operations: ClrPathWriteOperation[]): Promise<ClrRpcResult>
   enumerateClrRoots?(typeSubstring: string): Promise<ClrRpcResult<ClrRootInfo[]>>
+  /**
+   * Appelle REELLEMENT un setter de propriete C# d'instance dans le
+   * processus attache (resolution d'adresse native JITtee via ClrMD +
+   * injection shellcode x64 + relecture) -- pas une ecriture memoire brute
+   * du champ backing. Categoriquement plus a risque que writeClrPrimitive*
+   * (injecte et EXECUTE du code cible) : passe par confirmRiskAction('injection', ...)
+   * cote store, meme discipline que injectDllIntoProcess/installFunctionHook.
+   * valueType peut etre vide si le setter n'a pas de parametre ou si l'appelant
+   * laisse le type reel resolu par ClrMD piloter l'encodage.
+   */
+  callClrInstanceMethod?(objectAddressHex: string, methodName: string, valueText: string, valueType: string): Promise<ClrRpcResult<ClrCallInstanceMethodResult>>
   /** Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement). */
   probeKernelDriver?(): Promise<KernelDriverStatus>
   /** Lit `size` octets sur le processus attaché via le driver noyau (KeStackAttachProcess, hors WriteProcessMemory/ReadProcessMemory usermode). Nécessite capabilities.processMemoryAccess=true. */
@@ -2043,6 +2065,9 @@ class BackendService {
       },
       async enumerateClrRoots(_typeSubstring: string) {
         return { success: false, error: 'Indisponible dans le mock.', result: [] }
+      },
+      async callClrInstanceMethod(_objectAddressHex: string, _methodName: string, _valueText: string, _valueType: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
       },
       async probeKernelDriver() {
         return {
