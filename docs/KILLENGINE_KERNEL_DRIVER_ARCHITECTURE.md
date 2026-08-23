@@ -4,13 +4,7 @@
 
 Statut au 20/08/2026 : driver WDK minimal livré en health-probe uniquement.
 
-## Positionnement
 
-Le connecteur kernel de KillEngine doit rester une capacité de diagnostic, QA et instrumentation locale pour des logiciels que l'utilisateur possède ou contrôle. Il ne doit pas être conçu, nommé ou documenté comme un mécanisme de contournement d'anti-cheat, d'EDR ou de protections tierces.
-
-Texte utilisateur exact à conserver quand cette capacité devient visible dans l'UI :
-
-> KillEngine est destine au developpement, au debogage, a la recherche, au QA, au modding autorise et a l'analyse de logiciels pour lesquels l'utilisateur possede une autorisation. Son utilisation sur des jeux multijoueurs ou des logiciels proteges peut violer leurs conditions d'utilisation, entrainer un bannissement de compte ou avoir d'autres consequences. L'utilisateur est responsable de l'usage qu'il en fait.
 
 ## Niveau 0 Livré
 

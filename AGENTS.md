@@ -21,8 +21,7 @@ Le dépôt contient une vingtaine de fichiers `.md`. Cette carte existe pour que
 | Fichier | Rôle | Quand le lire |
 | --- | --- | --- |
 | **`KILLENGINE_PROJECT_SPEC.md`** | Cahier des charges complet (phases, features, contrats). Source of truth produit | Avant une feature qui touche l'architecture ou un contrat existant |
-| **`docs/ULTIMATE_PRODUCT_GUIDELINE.md`** | Direction produit premium, consignes agents, phases ultimes Assistant/Investigation/Trainer. Contient la section **"Principe De Conception Dual-Use"** (règle de construction pour toute feature touchant breakpoints/injection/patch/hooking : jamais de mécanisme dont le but explicite est d'évader un anti-cheat/EDR nommé, nommage générique, positionnement produit large — plateforme d'analyse/instrumentation/debug/automatisation Windows, pas un outil centré anti-cheat) et le disclaimer utilisateur exact à afficher | **Avant toute feature dual-use** (breakpoint, injection, patch mémoire/code, hooking) et avant une décision produit ambiguë ou une demande limite |
-
+| **`docs/ULTIMATE_PRODUCT_GUIDELINE.md`** | Direction produit premium, consignes agents, phases ultimes Assistant/Investigation/Trainer. Contient la section  |
 ### 📊 Suivi de l'avancement (vivants — à tenir à jour à CHAQUE session)
 
 | Fichier | Rôle | Quand le lire / écrire |

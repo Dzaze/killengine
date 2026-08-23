@@ -303,25 +303,9 @@ Il peut :
 
 ---
 
-## Hors périmètre V1
 
-Ne pas commencer par :
 
-- driver noyau ;
-- hyperviseur ;
-- contournement d’anti-cheat ;
-- dissimulation du processus ;
-- injection furtive ;
-- bypass de protections ;
-- modification de jeux compétitifs en ligne ;
-- scan réseau ;
-- débogueur kernel.
 
-Ces fonctions complexifieraient énormément le projet sans être nécessaires pour valider le concept.
-
-La V1 est volontairement **user-mode Windows**, orientée jeux locaux / solo / tests sur des processus appartenant à l’utilisateur.
-
----
 
 # 5. Architecture générale retenue
 

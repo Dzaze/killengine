@@ -4,16 +4,7 @@
 
 KillEngine est un outil local Windows pour trouver et modifier des valeurs en mémoire dans un processus que tu possèdes ou que tu contrôles. Le mode normal passe par l'Assistant : tu décris la valeur, KillEngine choisit les scans et te guide jusqu'aux adresses finales.
 
-## Avant de commencer
 
-Utilise KillEngine uniquement sur des logiciels locaux, hors ligne, et dans un cadre autorisé. Certains jeux, anti-cheats ou logiciels protégés peuvent bloquer l'accès mémoire ou sanctionner ce type d'outil.
-
-Prépare aussi le programme cible avant de scanner :
-
-- lance le jeu ou l'application ;
-- affiche la valeur à trouver dans le jeu si elle est connue ;
-- garde la valeur stable pendant le premier scan ;
-- évite de scanner un processus qui vient de se fermer ou de redémarrer.
 
 ## Lancer KillEngine
 

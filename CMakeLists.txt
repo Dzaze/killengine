@@ -116,6 +116,7 @@ FetchContent_MakeAvailable(zydis)
 # présente sur disque, pas de dépendance réseau au configure. Cible : `minhook`.
 # ---------------------------------------------------------------------------
 add_subdirectory(tools/minhook-master/minhook-master EXCLUDE_FROM_ALL)
+add_subdirectory(tools/runtime_integrity_probe)
 
 # ---------------------------------------------------------------------------
 # Définitions globales du projet

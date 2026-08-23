@@ -449,16 +449,7 @@ Definition of Done:
 
 KillEngine doit rester un outil local, autorise et auditable.
 
-Les agents ne doivent pas implementer:
 
-- bypass anti-cheat;
-- evasion EDR/AV;
-- persistance furtive;
-- credential theft;
-- exfiltration;
-- injection dans processus tiers non autorises;
-- mecanismes de dissimulation agressive;
-- automatisation contre services en ligne.
 
 Actions toujours a confirmation explicite:
 
@@ -472,17 +463,7 @@ Actions toujours a confirmation explicite:
 - shellcode;
 - script avec effet runtime.
 
-## Principe De Conception Dual-Use
 
-KillEngine s'appuie sur des primitives dual-use (breakpoints materiels, injection DLL, patch memoire/code, hooking) qui servent aussi bien le debug/QA/instrumentation legitimes que le contournement d'anti-cheat. Regle de construction, applicable a toute nouvelle feature qui touche a ces primitives:
-
-1. Ne jamais construire un mecanisme dont le but explicite est d'evader, desactiver, tromper ou contourner un produit anti-cheat/EDR nomme (Warden, EAC, BattlEye, Vanguard, etc.).
-2. A la place: identifier le besoin technique generique derriere la demande (ex. "poser un breakpoint sans le canal de debug Win32 exclusif" plutot que "rester invisible d'EAC"), et n'implementer que la partie utile au debug/QA/analyse/instrumentation.
-3. Retirer toute logique et tout nommage specifiques a l'evasion — eviter des noms comme `stealth`, `anti_detection`, `bypass_X` quand ils ne correspondent pas au vrai besoin fonctionnel; preferer un nommage generique et reutilisable (`inprocess_breakpoint`, pas `stealth_breakpoint`).
-4. Preferer une architecture generique et reutilisable a une architecture ciblee sur un produit tiers precis.
-5. Si une implementation depend necessairement d'un mecanisme qui n'a d'autre usage que l'evasion, laisser cette partie de cote et livrer le reste plutot que de bloquer toute la feature.
-
-Exemple applique dans ce depot: `core/debug/inprocess_breakpoint.*` pose un hardware breakpoint depuis l'interieur de la cible (VEH + registres de debug) — utile quand le canal de debug Win32 externe est deja pris par un autre outil, ou pour une precision au octet pres qu'un simple Page Guard ne permet pas. Documentation et nommage restent generiques (instrumentation/QA), sans reference a un anti-cheat nomme ni framing "indetectable"/"stealth".
 
 ## Disclaimer Utilisateur
 
