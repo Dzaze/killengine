@@ -840,6 +840,14 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         >
           {{ store.kernelDriverStatusLoading ? 'Probe…' : 'Tester le driver' }}
         </button>
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.kernelDriverStartLoading || store.kernelDriverStatusLoading"
+          title="Démarre le service Windows KillEngineKernel s'il est déjà installé mais arrêté. Nécessite KillEngine lancé administrateur."
+          @click="store.startKernelDriver()"
+        >
+          {{ store.kernelDriverStartLoading ? 'Démarrage…' : 'Relancer le driver' }}
+        </button>
       </div>
       <div v-if="store.kernelDriverStatus" class="settings-grid compact-grid">
         <div>

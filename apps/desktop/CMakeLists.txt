@@ -37,6 +37,9 @@ if(WIN32)
     # deja gardee par #ifdef _WIN32 / stub sinon : miroir cote link pour que
     # ce lien Windows-only ne casse pas un futur build non-Windows.
     target_link_libraries(KillEngine PRIVATE iphlpapi)
+    # OpenSCManager/OpenService/StartService pour relancer le service kernel
+    # optionnel depuis Paramètres quand il est installé mais arrêté.
+    target_link_libraries(KillEngine PRIVATE advapi32)
     # MiniDumpWriteDump (crash_handler.cpp), deja gardee par #ifdef Q_OS_WIN
     # / stub sinon.
     target_link_libraries(KillEngine PRIVATE dbghelp)

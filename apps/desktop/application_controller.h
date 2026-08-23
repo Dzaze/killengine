@@ -595,6 +595,11 @@ public:
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
     Q_INVOKABLE QVariantMap probeKernelDriver() const;
 
+    /// Démarre le service Windows visible `KillEngineKernel` s'il est déjà
+    /// installé mais arrêté, puis relance un probe. Ne crée ni n'installe le
+    /// service : action de maintenance explicite, admin/test-signing requis.
+    Q_INVOKABLE QVariantMap startKernelDriver() const;
+
     /// Lit `size` octets (1-4096) sur le processus attaché via le driver noyau
     /// (KeStackAttachProcess côté driver.cpp, pas ReadProcessMemory usermode).
     /// Nécessite un driver connecté avec capabilities.processMemoryAccess=true

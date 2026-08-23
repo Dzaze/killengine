@@ -60,6 +60,11 @@ export interface KernelDriverStatus {
   status: 'unavailable' | 'connected' | 'access_denied' | 'incompatible' | 'error' | string
   devicePath: string
   message: string
+  error?: string
+  serviceName?: string
+  serviceState?: number
+  started?: boolean
+  alreadyRunning?: boolean
   capabilities: {
     protocolVersion: number
     healthProbe: boolean
@@ -1267,6 +1272,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   callClrInstanceMethod?(objectAddressHex: string, methodName: string, valueText: string, valueType: string): Promise<ClrRpcResult<ClrCallInstanceMethodResult>>
   /** Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement). */
   probeKernelDriver?(): Promise<KernelDriverStatus>
+  /** Démarre le service Windows KillEngineKernel s'il est installé mais arrêté, puis relance le probe. */
+  startKernelDriver?(): Promise<KernelDriverStatus>
   /** Lit `size` octets sur le processus attaché via le driver noyau (KeStackAttachProcess, hors WriteProcessMemory/ReadProcessMemory usermode). Nécessite capabilities.processMemoryAccess=true. */
   readMemoryKernel?(addressHex: string, size: number): Promise<KernelMemoryReadResult>
   /** Écrit des octets (hex, ex: "90 90 90") sur le processus attaché via le driver noyau. Action à risque équivalente à une injection : passe par confirmRiskAction côté store. */
@@ -2256,6 +2263,23 @@ class BackendService {
             },
         };
     },
+      async startKernelDriver() {
+        return {
+          success: true,
+          status: 'connected',
+          devicePath: '\\\\.\\KillEngineKernel',
+          message: 'Driver connecté en mode probe uniquement.',
+          serviceName: 'KillEngineKernel',
+          started: true,
+          alreadyRunning: false,
+          capabilities: {
+            protocolVersion: 1,
+            healthProbe: true,
+            processMemoryAccess: true,
+            privilegedInstrumentation: true,
+          },
+        }
+      },
       async readMemoryKernel(_addressHex: string, _size: number) {
         return { success: false, error: 'Indisponible dans le mock.' }
       },

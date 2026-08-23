@@ -390,6 +390,7 @@ export const useAppStore = defineStore('app', () => {
   const aiModelStatusError = ref('')
   const kernelDriverStatus = ref<KernelDriverStatus | null>(null)
   const kernelDriverStatusLoading = ref(false)
+  const kernelDriverStartLoading = ref(false)
   const kernelDriverStatusError = ref('')
   const kernelMemoryReadResult = ref<KernelMemoryReadResult | null>(null)
   const kernelMemoryReadBusy = ref(false)
@@ -2981,9 +2982,22 @@ let nextWatchedChainId = 1
   // freeze existant (setFreezeInterval).
   async function refreshSpeedhackStatus() {
     const controller = backend.getController()
-    if (!controller.getSpeedhackStat  // Roadmap section B - interception de fonctions. start() garde le
+    if (!controller.getSpeedhackStatus) return null
+    try {
+      const status = await controller.getSpeedhackStatus()
+      speedhackStatus.value = status
+      if (status.active) speedhackFactor.value = status.factor
+      return status
+    } catch (e) {
+      addActionLog('speedhack', 'Statut speedhack indisponible', String(e), 'warning')
+      return null
+    }
+  }
+
+  // Roadmap section B - interception de fonctions. start() garde le
   // confirmRiskAction injection (meme garde que le speedhack).
   async function startApiHook() {
+    const controller = backend.getController()
     if (!controller.startApiHook) {
       addActionLog('injection', 'Interception indisponible', 'Backend non exposé.', 'warning')
       return null
@@ -3008,6 +3022,7 @@ let nextWatchedChainId = 1
   }
 
   async function stopApiHook() {
+    const controller = backend.getController()
     if (!controller.stopApiHook) return null
     try {
       const result = await controller.stopApiHook()
@@ -3021,23 +3036,12 @@ let nextWatchedChainId = 1
   }
 
   async function refreshApiHookStatus() {
+    const controller = backend.getController()
     if (!controller.getApiHookStatus) return null
     try {
       apiHookStatus.value = await controller.getApiHookStatus()
       return apiHookStatus.value
     } catch {
-      return null
-    }
-  }
-
-us) return null
-    try {
-      const status = await controller.getSpeedhackStatus()
-      speedhackStatus.value = status
-      if (status.active) speedhackFactor.value = status.factor
-      return status
-    } catch (e) {
-      addActionLog('speedhack', 'Statut speedhack indisponible', String(e), 'warning')
       return null
     }
   }
@@ -3536,6 +3540,35 @@ us) return null
       kernelDriverStatusError.value = String(e)
     } finally {
       kernelDriverStatusLoading.value = false
+    }
+  }
+
+  async function startKernelDriver() {
+    kernelDriverStartLoading.value = true
+    kernelDriverStatusError.value = ''
+    try {
+      const controller = backend.getController()
+      if (!controller.startKernelDriver) {
+        kernelDriverStatusError.value = 'Démarrage driver noyau non exposé par ce backend.'
+        return
+      }
+      kernelDriverStatus.value = await controller.startKernelDriver()
+      addActionLog(
+        'kernel_driver',
+        kernelDriverStatus.value.success ? 'Driver kernel démarré' : 'Driver kernel indisponible',
+        kernelDriverStatus.value.message || kernelDriverStatus.value.error || '',
+        kernelDriverStatus.value.success ? 'success' : 'warning',
+      )
+      logAiAudit('kernel_driver_start', {
+        success: kernelDriverStatus.value.success,
+        status: kernelDriverStatus.value.status,
+        started: kernelDriverStatus.value.started === true,
+        alreadyRunning: kernelDriverStatus.value.alreadyRunning === true,
+      })
+    } catch (e) {
+      kernelDriverStatusError.value = String(e)
+    } finally {
+      kernelDriverStartLoading.value = false
     }
   }
 
@@ -7368,8 +7401,10 @@ async function doEncryptedScan() {
     requestWindowsDefenderExclusion,
     kernelDriverStatus,
     kernelDriverStatusLoading,
+    kernelDriverStartLoading,
     kernelDriverStatusError,
     refreshKernelDriverStatus,
+    startKernelDriver,
     kernelMemoryReadResult,
     kernelMemoryReadBusy,
     readMemoryKernel,

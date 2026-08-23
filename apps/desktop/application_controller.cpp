@@ -164,6 +164,25 @@ double ratePerSecond(size_t count, qint64 elapsedMs) {
     return static_cast<double>(count) * 1000.0 / static_cast<double>(elapsedMs);
 }
 
+#ifdef Q_OS_WIN
+QString windowsErrorMessage(DWORD errorCode) {
+    LPWSTR raw = nullptr;
+    const DWORD size = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                                         FORMAT_MESSAGE_IGNORE_INSERTS,
+                                     nullptr,
+                                     errorCode,
+                                     MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                     reinterpret_cast<LPWSTR>(&raw),
+                                     0,
+                                     nullptr);
+    QString message = size > 0 && raw ? QString::fromWCharArray(raw).trimmed() : QStringLiteral("Erreur Windows inconnue");
+    if (raw) {
+        LocalFree(raw);
+    }
+    return message;
+}
+#endif
+
 void emitQueuedScanProgress(const QPointer<ApplicationController>& self, int percent) {
     const int clamped = std::clamp(percent, 0, 100);
     if (!self) {
@@ -13037,6 +13056,128 @@ QVariantMap ApplicationController::probeKernelDriver() const {
     KE_LOG_INFO() << "probeKernelDriver: status=" << result.value("status").toString().toStdString()
                   << " message=" << probe.message.toStdString();
     return result;
+}
+
+QVariantMap ApplicationController::startKernelDriver() const {
+    QVariantMap result;
+    result["success"] = false;
+    result["serviceName"] = QStringLiteral("KillEngineKernel");
+    result["started"] = false;
+    result["alreadyRunning"] = false;
+
+#ifndef Q_OS_WIN
+    result["status"] = QStringLiteral("unavailable");
+    result["devicePath"] = QString::fromWCharArray(killcore::KernelDriverBridge::kDefaultDevicePath);
+    result["message"] = QStringLiteral("Démarrage du driver disponible uniquement sur Windows.");
+    appendScanTelemetry("kernel_driver_start", result);
+    return result;
+#else
+    auto addEmptyCapabilities = [&result]() {
+        QVariantMap capabilities;
+        capabilities["protocolVersion"] = static_cast<int>(killcore::KernelDriverBridge::kProtocolVersion);
+        capabilities["healthProbe"] = false;
+        capabilities["processMemoryAccess"] = false;
+        capabilities["privilegedInstrumentation"] = false;
+        result["capabilities"] = capabilities;
+    };
+
+    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) {
+        const DWORD error = GetLastError();
+        result["status"] = error == ERROR_ACCESS_DENIED ? QStringLiteral("access_denied") : QStringLiteral("error");
+        result["devicePath"] = QString::fromWCharArray(killcore::KernelDriverBridge::kDefaultDevicePath);
+        result["message"] = QStringLiteral("Impossible d'ouvrir le Service Control Manager: %1").arg(windowsErrorMessage(error));
+        result["error"] = result["message"];
+        addEmptyCapabilities();
+        appendScanTelemetry("kernel_driver_start", result);
+        return result;
+    }
+
+    SC_HANDLE service = OpenServiceW(scm, L"KillEngineKernel", SERVICE_START | SERVICE_QUERY_STATUS);
+    if (!service) {
+        const DWORD error = GetLastError();
+        result["status"] = error == ERROR_SERVICE_DOES_NOT_EXIST ? QStringLiteral("unavailable")
+                            : (error == ERROR_ACCESS_DENIED ? QStringLiteral("access_denied") : QStringLiteral("error"));
+        result["devicePath"] = QString::fromWCharArray(killcore::KernelDriverBridge::kDefaultDevicePath);
+        result["message"] = error == ERROR_SERVICE_DOES_NOT_EXIST
+            ? QStringLiteral("Service KillEngineKernel introuvable. Installe d'abord le driver depuis un terminal administrateur.")
+            : QStringLiteral("Impossible d'ouvrir le service KillEngineKernel: %1").arg(windowsErrorMessage(error));
+        result["error"] = result["message"];
+        addEmptyCapabilities();
+        CloseServiceHandle(scm);
+        appendScanTelemetry("kernel_driver_start", result);
+        return result;
+    }
+
+    SERVICE_STATUS_PROCESS status{};
+    DWORD bytesNeeded = 0;
+    if (QueryServiceStatusEx(service,
+                             SC_STATUS_PROCESS_INFO,
+                             reinterpret_cast<LPBYTE>(&status),
+                             sizeof(status),
+                             &bytesNeeded) &&
+        status.dwCurrentState == SERVICE_RUNNING) {
+        result["alreadyRunning"] = true;
+    } else if (!StartServiceW(service, 0, nullptr)) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_SERVICE_ALREADY_RUNNING) {
+            result["alreadyRunning"] = true;
+        } else {
+            result["status"] = error == ERROR_ACCESS_DENIED ? QStringLiteral("access_denied") : QStringLiteral("error");
+            result["devicePath"] = QString::fromWCharArray(killcore::KernelDriverBridge::kDefaultDevicePath);
+            result["message"] = QStringLiteral("Démarrage du service KillEngineKernel échoué: %1").arg(windowsErrorMessage(error));
+            result["error"] = result["message"];
+            addEmptyCapabilities();
+            CloseServiceHandle(service);
+            CloseServiceHandle(scm);
+            appendScanTelemetry("kernel_driver_start", result);
+            return result;
+        }
+    } else {
+        result["started"] = true;
+    }
+
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        if (QueryServiceStatusEx(service,
+                                 SC_STATUS_PROCESS_INFO,
+                                 reinterpret_cast<LPBYTE>(&status),
+                                 sizeof(status),
+                                 &bytesNeeded) &&
+            status.dwCurrentState == SERVICE_RUNNING) {
+            break;
+        }
+        Sleep(100);
+    }
+
+    result["serviceState"] = static_cast<int>(status.dwCurrentState);
+    CloseServiceHandle(service);
+    CloseServiceHandle(scm);
+
+    const QVariantMap probe = probeKernelDriver();
+    const bool serviceStarted = result.value("started").toBool();
+    const bool serviceAlreadyRunning = result.value("alreadyRunning").toBool();
+    const int serviceState = result.value("serviceState").toInt();
+    for (auto it = probe.cbegin(); it != probe.cend(); ++it) {
+        result[it.key()] = it.value();
+    }
+    result["serviceName"] = QStringLiteral("KillEngineKernel");
+    result["started"] = serviceStarted;
+    result["alreadyRunning"] = serviceAlreadyRunning;
+    result["serviceState"] = serviceState;
+    if (result.value("success").toBool()) {
+        result["message"] = serviceStarted
+            ? QStringLiteral("Driver KillEngineKernel démarré et connecté.")
+            : QStringLiteral("Driver KillEngineKernel déjà démarré et connecté.");
+    } else if (!result.contains("error")) {
+        result["error"] = result.value("message");
+    }
+
+    KE_LOG_INFO() << "startKernelDriver: status=" << result.value("status").toString().toStdString()
+                  << " started=" << result.value("started").toBool()
+                  << " alreadyRunning=" << result.value("alreadyRunning").toBool();
+    appendScanTelemetry("kernel_driver_start", result);
+    return result;
+#endif
 }
 
 QVariantMap ApplicationController::readMemoryKernel(const QString& addressHex, int size) const {
