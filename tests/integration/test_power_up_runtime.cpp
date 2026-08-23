@@ -27,6 +27,7 @@
 #include "debug/page_guard.h"
 #include "inject/dll_injector.h"
 #include "inject/function_hook.h"
+#include "inject/api_hook.h"
 #include "process/export_resolver.h"
 
 #include <QCoreApplication>
@@ -54,12 +55,21 @@ public:
     // g_health via ses propres instructions CPU (voir
     // tests/memory_targets/test_target_main.cpp). Nécessaire pour tester un
     // hardware breakpoint : WriteProcessMemory externe ne le déclenche jamais.
-    explicit TestTargetProcess(bool stressRewrite = false) {
+    // apiHookProbe=true active un thread interne qui appelle kernel32!Sleep en
+    // boucle : flot d'appels réel et déterministe pour prouver qu'un hook
+    // MinHook injecté intercepte bien des appels réels (roadmap section B),
+    // plutôt que de deviner quelle API Qt appelle en interne.
+    explicit TestTargetProcess(bool stressRewrite = false, bool apiHookProbe = false) {
         const QString targetPath = QDir(QCoreApplication::applicationDirPath()).filePath("KillEngineTestTarget.exe");
         m_process.setProgram(targetPath);
-        if (stressRewrite) {
+        if (stressRewrite || apiHookProbe) {
             QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-            env.insert("KILLENGINE_TEST_TARGET_STRESS_REWRITE", "1");
+            if (stressRewrite) {
+                env.insert("KILLENGINE_TEST_TARGET_STRESS_REWRITE", "1");
+            }
+            if (apiHookProbe) {
+                env.insert("KILLENGINE_TEST_TARGET_API_HOOK_PROBE", "1");
+            }
             m_process.setProcessEnvironment(env);
         }
         m_process.start();
@@ -492,6 +502,56 @@ TEST(PowerUpRuntimeTest, PageGuardCapturesRemoteStressRewrite) {
 
     EXPECT_TRUE(target.started()) << "Test target crashed during PAGE_GUARD capture — injected VEH destabilized it";
 }
+
+// Roadmap section B - interception de fonctions par composant injecte MinHook.
+// Preuve reelle out-of-process : injection de KillEngineApiHookHandler.dll dans
+// KillEngineTestTarget.exe, pose d'un hook MinHook sur kernel32.dll!Sleep, et
+// verification que callCount progresse reellement pendant que la cible
+// (thread probe, voir KILLENGINE_TEST_TARGET_API_HOOK_PROBE dans
+// test_target_main.cpp) appelle Sleep() en boucle. Sleep est l'exemple
+// documente dans InjectionPanel.vue : un seul argument DWORD (tient dans
+// RCX), retour void — cas simple pour le wrapper generique 4 arguments de
+// GenericDetour (api_hook_handler.cpp).
+TEST(PowerUpRuntimeTest, ApiHookCountsRealCallsOutOfProcess) {
+    const QString handlerPath = QDir(QCoreApplication::applicationDirPath()).filePath("KillEngineApiHookHandler.dll");
+    ASSERT_TRUE(QFile::exists(handlerPath)) << "KillEngineApiHookHandler.dll not found next to test binary — build issue";
+
+    TestTargetProcess target(/*stressRewrite=*/false, /*apiHookProbe=*/true);
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::AllAccess);
+    ASSERT_TRUE(handle.isValid()) << "Could not open test target with AllAccess (required for DLL injection)";
+
+    killcore::ApiHookConfig config;
+    config.moduleName = "kernel32.dll";
+    config.functionName = "Sleep";
+    config.mode = killcore::ApiHookMode::Count;
+
+    killcore::ApiHookSession session;
+    QString error;
+    const bool started = session.start(handle, config, handlerPath, &error);
+    ASSERT_TRUE(started) << "ApiHookSession::start failed: " << error.toStdString();
+    EXPECT_TRUE(session.isActive());
+
+    QThread::msleep(1500);
+
+    const auto stats = session.stats();
+    EXPECT_TRUE(stats.active);
+    EXPECT_FALSE(stats.installError);
+    EXPECT_FALSE(stats.resolveError);
+    EXPECT_GT(stats.callCount, 0u) << "Sleep() hook installed but callCount stayed at 0 — probe thread not calling "
+                                       "through the hooked address, or MinHook trampoline not wired";
+
+    session.stop();
+    EXPECT_FALSE(session.isActive());
+
+    EXPECT_TRUE(target.started()) << "Test target crashed after ApiHook install/remove — MinHook trampoline destabilized it";
+}
+
+
+
+
+
 
 TEST(PowerUpRuntimeTest, InjectDllFailsCleanlyOnMissingDll) {
     TestTargetProcess target;

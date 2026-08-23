@@ -110,6 +110,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(zydis)
 
 # ---------------------------------------------------------------------------
+# MinHook — moteur d'inline hook (trampoline robuste) pour le composant injecté
+# d'interception de fonctions (core/inject/api_hook_handler). Source locale
+# (tools/minhook-master/minhook-master, v1.3.3) plutôt que FetchContent : déjà
+# présente sur disque, pas de dépendance réseau au configure. Cible : `minhook`.
+# ---------------------------------------------------------------------------
+add_subdirectory(tools/minhook-master/minhook-master EXCLUDE_FROM_ALL)
+
+# ---------------------------------------------------------------------------
 # Définitions globales du projet
 # ---------------------------------------------------------------------------
 add_compile_definitions(

@@ -770,6 +770,20 @@ export interface SpeedhackStatus {
   error?: string
 }
 
+// Statut de l interception de fonctions (roadmap section B) : hook MinHook
+// injecte qui compte les appels d une fonction (mode 0) ou force son retour
+// (mode 1). callCount est lu en direct depuis l IPC partagee.
+export interface ApiHookStatus {
+  success: boolean
+  active: boolean
+  installError?: boolean
+  resolveError?: boolean
+  callCount?: number
+  finalCallCount?: number
+  pid?: number
+  error?: string
+}
+
 export interface CodePatchResult {
   success: boolean
   verified?: boolean
@@ -1133,6 +1147,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   setSpeedhackFactor?(factor: number): Promise<SpeedhackStatus>
   stopSpeedhack?(): Promise<SpeedhackStatus>
   getSpeedhackStatus?(): Promise<SpeedhackStatus>
+  /** Roadmap section B - interception de fonctions : hook MinHook injecte sur module!fonction. mode: 0=compter, 1=forcer retour. */
+  startApiHook?(moduleName: string, functionName: string, mode: number, forcedReturnValue: number): Promise<ApiHookStatus>
+  stopApiHook?(): Promise<ApiHookStatus>
+  getApiHookStatus?(): Promise<ApiHookStatus>
   /** Phase 20 — outils Expert manuels gardés par confirmRiskAction('injection', ...) côté store. */
   injectDllIntoProcess?(dllPath: string): Promise<Record<string, unknown>>
   installFunctionHook?(targetAddressHex: string, hookAddressHex: string): Promise<Record<string, unknown>>
@@ -1981,6 +1999,15 @@ class BackendService {
       },
       async getSpeedhackStatus() {
         return { success: true, active: false, factor: 1.0 }
+      },
+      async startApiHook(_m: string, _fn: string, _mode: number, _ret: number) {
+        return { success: false, active: false, error: 'Mock backend' }
+      },
+      async stopApiHook() {
+        return { success: true, active: false }
+      },
+      async getApiHookStatus() {
+        return { success: true, active: false }
       },
       async injectDllIntoProcess(_dllPath: string) {
         return { success: false, error: 'Mock backend' }

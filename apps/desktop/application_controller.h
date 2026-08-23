@@ -7,6 +7,7 @@
 #include "debug/page_guard.h"
 #include "debug/speedhack.h"
 #include "freeze/freeze_manager.h"
+#include "inject/api_hook.h"
 #include "inject/dll_injector.h"
 #include "inject/function_hook.h"
 #include "input/global_hotkey.h"
@@ -322,6 +323,19 @@ public:
     /// Remet le facteur à 1.0 (vitesse normale) ; ne dé-injecte jamais (voir
     /// core/debug/speedhack.h pour pourquoi).
     Q_INVOKABLE QVariantMap stopSpeedhack();
+
+    /// Roadmap section B - Interception de fonctions : pose un hook MinHook
+    /// in-process (composant injecte KillEngineApiHookHandler.dll) sur
+    /// module!fonction pour compter les appels et/ou forcer la valeur de
+    /// retour. mode: 0 = compter seulement, 1 = forcer le retour.
+    Q_INVOKABLE QVariantMap startApiHook(const QString& moduleName, const QString& functionName,
+                                        int mode, qlonglong forcedReturnValue);
+
+    /// Retire le hook et referme la session (le composant reste charge).
+    Q_INVOKABLE QVariantMap stopApiHook();
+
+    /// Statut courant (actif, compteurs d appels, erreurs).
+    Q_INVOKABLE QVariantMap getApiHookStatus() const;
 
     /// Statut courant du speedhack (actif, facteur, fonctions hookées).
     Q_INVOKABLE QVariantMap getSpeedhackStatus() const;
@@ -964,6 +978,7 @@ private:
     std::shared_ptr<killcore::InProcessBreakpointSession> m_activeInProcessBreakpointSession;
     std::shared_ptr<killcore::InProcessBreakpointSession> m_inProcessBreakpointFreezeSession;
     std::unique_ptr<killcore::SpeedhackSession> m_speedhackSession;
+    std::unique_ptr<killcore::ApiHookSession> m_apiHookSession;
     std::shared_ptr<killcore::CancellationToken> m_activeDebugCancellation;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     // Test automatique des champs candidats (voir testCandidateFieldsAsync) : etat

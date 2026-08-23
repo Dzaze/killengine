@@ -87,6 +87,40 @@ onMounted(() => {
       </p>
     </div>
 
+    <div class="injection-block api-hook-block">
+      <h3>Interception de fonctions (MinHook)</h3>
+      <p class="hint">
+        Injecte un composant qui pose un inline hook MinHook sur module!fonction dans le processus cible.
+        Mode Compter : interception passive (compteur d appels, l original reste appelé) pour confirmer qu une fonction
+        est réellement utilisée avant de patcher. Mode Forcer retour : la fonction retourne la valeur donnée sans
+        s exécuter (QA/simulation de pannes) — adapté aux retours entier/pointeur/bool uniquement.
+      </p>
+      <div class="symbol-resolve-row">
+        <input v-model="store.apiHookModuleName" class="input" placeholder="Module (ex. kernel32.dll)" :disabled="store.apiHookBusy" />
+        <input v-model="store.apiHookFunctionName" class="input" placeholder="Fonction (ex. Sleep)" :disabled="store.apiHookBusy" @keyup.enter="store.startApiHook()" />
+      </div>
+      <div class="controls injection-controls">
+        <label class="api-hook-mode">
+          <input type="radio" :value="0" v-model="store.apiHookMode" :disabled="store.apiHookBusy" /> Compter
+        </label>
+        <label class="api-hook-mode">
+          <input type="radio" :value="1" v-model="store.apiHookMode" :disabled="store.apiHookBusy" /> Forcer retour
+        </label>
+        <input v-if="store.apiHookMode === 1" v-model.number="store.apiHookForcedReturn" type="number" class="input" placeholder="Valeur de retour forcée" :disabled="store.apiHookBusy" />
+      </div>
+      <div class="row-actions">
+        <button class="btn btn-primary compact" type="button" :disabled="store.apiHookBusy || !store.apiHookModuleName.trim() || !store.apiHookFunctionName.trim()" @click="store.startApiHook()">
+          Intercepter
+        </button>
+        <button class="btn btn-secondary compact" type="button" :disabled="store.apiHookBusy || !store.apiHookStatus?.active" @click="store.stopApiHook()">
+          Retirer
+        </button>
+      </div>
+      <p v-if="store.apiHookStatus" :class="store.apiHookStatus.success ? 'hint' : 'error'">
+        {{ store.apiHookStatus.active ? `Actif, ${store.apiHookStatus.callCount ?? 0} appel(s) intercepté(s)` : (store.apiHookStatus.error || 'Inactif') }}
+      </p>
+    </div>
+
     <div class="injection-block">
       <h3>Script auto-assembler</h3>
       <p class="hint">
@@ -191,6 +225,15 @@ onMounted(() => {
 
 .injection-controls {
   grid-template-columns: 1fr auto;
+}
+
+.api-hook-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .symbol-resolve-row {

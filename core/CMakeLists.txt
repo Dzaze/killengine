@@ -125,6 +125,12 @@ add_library(killcore STATIC
     inject/function_hook.cpp
 
     # Phase 20 — Auto-assembler
+    # Roadmap section B - interception de fonctions (KillEngineApiHookHandler.dll,
+    # moteur MinHook, voir api_hook.h)
+    inject/api_hook_ipc.h
+    inject/api_hook.h
+    inject/api_hook.cpp
+
     scripting/auto_assembler.h
     scripting/auto_assembler.cpp
 
@@ -205,4 +211,22 @@ set_target_properties(KillEngineSpeedhackHandler PROPERTIES OUTPUT_NAME "KillEng
 if(WIN32)
     target_compile_definitions(KillEngineSpeedhackHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
     target_link_libraries(KillEngineSpeedhackHandler PRIVATE winmm)
+endif()
+
+# ---------------------------------------------------------------------------
+# Roadmap section B - interception de fonctions : DLL injectee dans le
+# processus cible qui pose un inline hook MinHook sur module!fonction choisi
+# par l utilisateur. Meme raisonnement que les trois handlers ci-dessus (SANS
+# lien vers killcore/Qt). Lie minhook (add_subdirectory a la racine) :
+# c est toute la valeur ajoutee - le trampoline est gere par la lib.
+# ---------------------------------------------------------------------------
+add_library(KillEngineApiHookHandler SHARED
+    inject/api_hook_ipc.h
+    inject/api_hook_handler/api_hook_handler.cpp
+)
+target_include_directories(KillEngineApiHookHandler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+set_target_properties(KillEngineApiHookHandler PROPERTIES OUTPUT_NAME "KillEngineApiHookHandler")
+if(WIN32)
+    target_compile_definitions(KillEngineApiHookHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+    target_link_libraries(KillEngineApiHookHandler PRIVATE minhook)
 endif()

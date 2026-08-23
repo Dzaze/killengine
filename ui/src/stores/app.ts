@@ -39,6 +39,7 @@ import {
   type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
   type SpeedhackStatus,
+  type ApiHookStatus,
   type TemporaryStorageStatus,
   type UndoCandidateScanResult,
   type UiStringCandidate,
@@ -406,6 +407,13 @@ export const useAppStore = defineStore('app', () => {
   const speedhackStatus = ref<SpeedhackStatus | null>(null)
   const speedhackBusy = ref(false)
   const speedhackFactor = ref(1.0)
+  // Roadmap section B - interception de fonctions (hook MinHook injecte).
+  const apiHookStatus = ref<ApiHookStatus | null>(null)
+  const apiHookBusy = ref(false)
+  const apiHookModuleName = ref('kernel32.dll')
+  const apiHookFunctionName = ref('Sleep')
+  const apiHookMode = ref(0)
+  const apiHookForcedReturn = ref(0)
   const clrTypeFilter = ref('KillEngine.ClrTestTarget')
   const clrObjects = ref<ClrObjectSummary[]>([])
   const clrSelectedObject = ref<ClrObjectReadResult | null>(null)
@@ -2973,7 +2981,56 @@ let nextWatchedChainId = 1
   // freeze existant (setFreezeInterval).
   async function refreshSpeedhackStatus() {
     const controller = backend.getController()
-    if (!controller.getSpeedhackStatus) return null
+    if (!controller.getSpeedhackStat  // Roadmap section B - interception de fonctions. start() garde le
+  // confirmRiskAction injection (meme garde que le speedhack).
+  async function startApiHook() {
+    if (!controller.startApiHook) {
+      addActionLog('injection', 'Interception indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    if (!await confirmRiskAction('injection', 'Intercepter '+apiHookModuleName.value+'!'+apiHookFunctionName.value, `Injecte un composant MinHook dans le processus cible pour intercepter les appels à ${apiHookModuleName.value}!${apiHookFunctionName.value}.`)) return null
+    apiHookBusy.value = true
+    try {
+      const result = await controller.startApiHook(apiHookModuleName.value, apiHookFunctionName.value, apiHookMode.value, apiHookForcedReturn.value)
+      apiHookStatus.value = result
+      if (result.success) {
+        addActionLog('injection', 'Interception active', `${apiHookModuleName.value}!${apiHookFunctionName.value}, mode ${apiHookMode.value === 1 ? 'forcer retour' : 'compter'}.`, 'success')
+      } else {
+        addActionLog('injection', 'Interception échouée', result.error || 'raison inconnue', 'error')
+      }
+      return result
+    } catch (e) {
+      addActionLog('injection', 'Interception échouée', String(e), 'error')
+      return null
+    } finally {
+      apiHookBusy.value = false
+    }
+  }
+
+  async function stopApiHook() {
+    if (!controller.stopApiHook) return null
+    try {
+      const result = await controller.stopApiHook()
+      apiHookStatus.value = result
+      addActionLog('injection', 'Interception retirée', result.finalCallCount !== undefined ? `${result.finalCallCount} appel(s) intercepté(s) au total.` : 'Hook retiré.', 'success')
+      return result
+    } catch (e) {
+      addActionLog('injection', 'Retrait de l interception échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  async function refreshApiHookStatus() {
+    if (!controller.getApiHookStatus) return null
+    try {
+      apiHookStatus.value = await controller.getApiHookStatus()
+      return apiHookStatus.value
+    } catch {
+      return null
+    }
+  }
+
+us) return null
     try {
       const status = await controller.getSpeedhackStatus()
       speedhackStatus.value = status
@@ -7567,6 +7624,15 @@ async function doEncryptedScan() {
     startSpeedhack,
     setSpeedhackFactor,
     stopSpeedhack,
+    apiHookStatus,
+    apiHookBusy,
+    apiHookModuleName,
+    apiHookFunctionName,
+    apiHookMode,
+    apiHookForcedReturn,
+    startApiHook,
+    stopApiHook,
+    refreshApiHookStatus,
     executeCheckpointKernelWrite,
     prepareCheckpointAob,
     executeCheckpointForceValue,

@@ -1833,6 +1833,10 @@ void ApplicationController::detachProcess() {
         m_speedhackSession->stop();
         m_speedhackSession.reset();
     }
+    if (m_apiHookSession) {
+        m_apiHookSession->stop();
+        m_apiHookSession.reset();
+    }
     detachClrInspector();
     resetHardwareBreakpointStateForPreviousTarget();
 
@@ -6331,6 +6335,22 @@ QString resolveInProcessBreakpointHandlerPath() {
 
 // Meme demarche que resolvePageGuardHandlerPath() pour
 // KillEngineSpeedhackHandler.dll (core/CMakeLists.txt).
+QString resolveApiHookHandlerPath() {
+    // KillEngineApiHookHandler.dll est produite par core/CMakeLists.txt (meme
+    // repertoire de sortie que les autres handlers injectes).
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.filePath("KillEngineApiHookHandler.dll"),
+        appDir.filePath("../lib/KillEngineApiHookHandler.dll"),
+    };
+    for (const QString& candidate : candidates) {
+        if (QFile::exists(candidate)) {
+            return candidate;
+        }
+    }
+    return QString();
+}
+
 QString resolveSpeedhackHandlerPath() {
     const QDir appDir(QCoreApplication::applicationDirPath());
     const QStringList candidates = {
@@ -6846,6 +6866,86 @@ QVariantMap ApplicationController::getSpeedhackStatus() const {
     result["installError"] = stats.installError;
     result["factor"] = stats.factor;
     result["hooksInstalledMask"] = static_cast<int>(stats.hooksInstalledMask);
+    result["pid"] = m_pid;
+    return result;
+}
+
+QVariantMap ApplicationController::startApiHook(const QString& moduleName, const QString& functionName,
+                                                int mode, qlonglong forcedReturnValue) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attache.";
+        return result;
+    }
+    if (m_apiHookSession && m_apiHookSession->isActive()) {
+        result["error"] = "Une interception est deja active - arrete-la avant d en demarrer une autre.";
+        return result;
+    }
+
+    const QString handlerPath = resolveApiHookHandlerPath();
+    if (handlerPath.isEmpty()) {
+        result["error"] = "KillEngineApiHookHandler.dll introuvable a cote de KillEngine.exe.";
+        return result;
+    }
+
+    killcore::ApiHookConfig config;
+    config.moduleName = moduleName;
+    config.functionName = functionName;
+    config.mode = mode == 1 ? killcore::ApiHookMode::ForceReturn : killcore::ApiHookMode::Count;
+    config.forcedReturnValue = static_cast<int64_t>(forcedReturnValue);
+
+    killcore::ProcessHandle ownedHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::AllAccess);
+    if (!ownedHandle.isValid()) {
+        result["error"] = "Impossible d ouvrir le processus avec les droits necessaires a l injection (PROCESS_ALL_ACCESS).";
+        return result;
+    }
+
+    if (!m_apiHookSession) {
+        m_apiHookSession = std::make_unique<killcore::ApiHookSession>();
+    }
+    QString startError;
+    if (!m_apiHookSession->start(ownedHandle, config, handlerPath, &startError)) {
+        result["error"] = startError;
+        return result;
+    }
+
+    const auto stats = m_apiHookSession->stats();
+    result["success"] = true;
+    result["active"] = stats.active;
+    result["callCount"] = static_cast<qlonglong>(stats.callCount);
+    KE_LOG_INFO() << "startApiHook(pid=" << m_pid << ", " << moduleName.toStdString()
+                  << "!" << functionName.toStdString() << ", mode=" << mode << ")";
+    return result;
+}
+
+QVariantMap ApplicationController::stopApiHook() {
+    QVariantMap result;
+    result["success"] = true;
+    result["active"] = false;
+
+    if (m_apiHookSession) {
+        const auto stats = m_apiHookSession->stats();
+        result["finalCallCount"] = static_cast<qlonglong>(stats.callCount);
+        m_apiHookSession->stop();
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::getApiHookStatus() const {
+    QVariantMap result;
+    if (!m_apiHookSession || !m_apiHookSession->isActive()) {
+        result["success"] = true;
+        result["active"] = false;
+        return result;
+    }
+    const auto stats = m_apiHookSession->stats();
+    result["success"] = true;
+    result["active"] = stats.active;
+    result["installError"] = stats.installError;
+    result["resolveError"] = stats.resolveError;
+    result["callCount"] = static_cast<qlonglong>(stats.callCount);
     result["pid"] = m_pid;
     return result;
 }

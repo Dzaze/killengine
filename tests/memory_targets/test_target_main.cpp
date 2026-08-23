@@ -24,6 +24,10 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -307,6 +311,23 @@ private:
 // ---------------------------------------------------------------------------
 static std::atomic_bool g_stressRewriteActive{false};
 
+// ---------------------------------------------------------------------------
+// ApiHook probe — appelle kernel32!Sleep en boucle pour fournir un flot reel
+// d'appels a intercepter (voir test_power_up_runtime.cpp,
+// ApiHookCountsRealCallsOutOfProcess). Meme raisonnement que le stress
+// rewriter ci-dessus : la cible fournit elle-meme une activite deterministe
+// plutot que de deviner quelle API Qt appelle en interne et a quelle
+// frequence (fragile, dependant de la version de Qt). Gate par variable
+// d'environnement pour ne jamais perturber l'usage normal de la cible.
+// ---------------------------------------------------------------------------
+static std::atomic_bool g_apiHookProbeActive{false};
+
+static void runApiHookProbeLoop() {
+    while (g_apiHookProbeActive.load(std::memory_order_relaxed)) {
+        ::Sleep(1);
+    }
+}
+
 static void runStressRewriteLoop() {
     // Delai avant de commencer a marteler g_health : laisse au harness de
     // test le temps de scanner la valeur initiale connue (100) et d'attacher
@@ -368,6 +389,12 @@ int main(int argc, char* argv[]) {
         stressThread = std::thread(runStressRewriteLoop);
     }
 
+    std::thread apiHookProbeThread;
+    if (QProcessEnvironment::systemEnvironment().contains("KILLENGINE_TEST_TARGET_API_HOOK_PROBE")) {
+        g_apiHookProbeActive.store(true);
+        apiHookProbeThread = std::thread(runApiHookProbeLoop);
+    }
+
     TestTargetWindow window;
     window.show();
 
@@ -376,6 +403,10 @@ int main(int argc, char* argv[]) {
     if (stressThread.joinable()) {
         g_stressRewriteActive.store(false);
         stressThread.join();
+    }
+    if (apiHookProbeThread.joinable()) {
+        g_apiHookProbeActive.store(false);
+        apiHookProbeThread.join();
     }
 
     return exitCode;

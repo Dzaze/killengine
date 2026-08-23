@@ -92,7 +92,7 @@ Toute extension future doit être explicitement ajoutée au protocole et garder 
 - Persistance furtive.
 - Désactivation de protections système.
 - Accès credential/token.
-- Support DMA hardware.
+- Le DMA hardware n'est pas intégré à ce jour (matériel dédié requis) — ce n'est pas une exclusion définitive, juste un chantier non commencé dans ce module.
 
 ## Étapes Futures Acceptables
 
