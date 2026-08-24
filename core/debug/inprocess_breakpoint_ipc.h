@@ -34,8 +34,7 @@ struct InProcessBreakpointIpcState {
     uint64_t watchAddress{0};         // adresse exacte surveillee (DR0)
     // Encodage identique aux bits LEN/R-W de DR7 (voir computeDr7Bits dans
     // hardware_breakpoint.cpp) : sizeCode 0=1o,1=2o,3=4o,2=8o ; rwCode
-    // 1=ecriture, 3=lecture/ecriture (l'execution, rwCode 0, n'est pas geree
-    // par ce mode observation/freeze memoire, hors de son cas d'usage).
+    // 0=execution, 1=ecriture, 3=lecture/ecriture.
     uint32_t sizeCode{3};
     uint32_t rwCode{1};
     // 0 = Capture (observe seulement, pour Find What Writes / instrumentation) ;
@@ -47,6 +46,14 @@ struct InProcessBreakpointIpcState {
     uint64_t lastHitRip{0};
     uint32_t lastHitThreadId{0};
     uint32_t armedThreadCount{0};     // threads effectivement armees a l'installation (diagnostic)
+    uint64_t lastRax{0};
+    uint64_t lastRcx{0};
+    uint64_t lastRdx{0};
+    uint64_t lastRbp{0};
+    uint64_t lastRsp{0};
+    uint64_t lastR8{0};
+    uint64_t lastR9{0};
+    uint8_t  lastXmm0[16]{};
 
     // Desarmement deterministe (piege corrige le 20/08/2026 -- voir
     // docs/STRATEGY_ROOM.md) : la thread d'installation ne se contente plus
@@ -67,7 +74,7 @@ struct InProcessBreakpointIpcState {
 /// Nom de mapping partage, derive du PID cible — connu des deux cotes sans
 /// echange prealable (meme principe que buildPageGuardMappingName).
 inline void buildInProcessBreakpointMappingName(uint32_t pid, wchar_t* buffer, size_t bufferCount) {
-    swprintf_s(buffer, bufferCount, L"Local\\KillEngineInProcessBp_%u", pid);
+    swprintf_s(buffer, bufferCount, L"Global\\KillEngineInProcessBp_%u", pid);
 }
 
 } // namespace killcore

@@ -84,6 +84,13 @@ public sealed class MethodDispatcher
                 // oracle independant de ClrMD pour Waypoints[1].X/Y.
                 waypoint1X = player.Inventory.Waypoints[1].X,
                 waypoint1Y = player.Inventory.Waypoints[1].Y,
+                // Chantier "setters a parametre struct" : oracle independant
+                // de ClrMD pour verifier que le VRAI setter set_Waypoint a
+                // tourne (clamp + compteur separe), pas juste une ecriture
+                // brute du champ backing.
+                waypointX = player.Waypoint.X,
+                waypointY = player.Waypoint.Y,
+                waypointChangeCount = player.WaypointChangeCount,
             },
         };
     }

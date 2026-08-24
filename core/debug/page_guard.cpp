@@ -6,6 +6,7 @@
 #include "process/process_enumerator.h"
 
 #ifdef Q_OS_WIN
+#include <sddl.h>
 #include <windows.h>
 #endif
 
@@ -25,6 +26,41 @@ PageGuardSession::~PageGuardSession() {
 }
 
 #ifdef Q_OS_WIN
+namespace {
+
+struct AppContainerMappingSecurity {
+    SECURITY_ATTRIBUTES attributes{};
+    PSECURITY_DESCRIPTOR descriptor{nullptr};
+
+    AppContainerMappingSecurity() {
+        attributes.nLength = sizeof(attributes);
+        attributes.bInheritHandle = FALSE;
+    }
+
+    ~AppContainerMappingSecurity() {
+        if (descriptor) {
+            LocalFree(descriptor);
+        }
+    }
+};
+
+bool buildAppContainerMappingSecurity(AppContainerMappingSecurity* security, QString* error) {
+    if (!security) return false;
+
+    constexpr const wchar_t* kSddl =
+        L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)(A;;GRGW;;;AC)S:(ML;;NW;;;LW)";
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kSddl, SDDL_REVISION_1, &security->descriptor, nullptr)) {
+        if (error) {
+            *error = QStringLiteral("ConvertStringSecurityDescriptorToSecurityDescriptorW(IPC page guard AppContainer) a échoué (error=%1).")
+                         .arg(GetLastError());
+        }
+        return false;
+    }
+    security->attributes.lpSecurityDescriptor = security->descriptor;
+    return true;
+}
+
+} // namespace
 
 LONG WINAPI PageGuardSession::vectoredHandler(EXCEPTION_POINTERS* ep) {
     if (!s_currentSession || !ep) {
@@ -212,7 +248,16 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
     // Cree AVANT l'injection : la DLL, une fois chargee, ouvre ce mapping par
     // son nom (derive du PID qu'elle lit via GetCurrentProcessId() — les deux
     // cotes n'ont donc besoin d'aucun echange prealable).
-    HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+    AppContainerMappingSecurity security;
+    QString securityError;
+    SECURITY_ATTRIBUTES* securityAttributes = nullptr;
+    if (buildAppContainerMappingSecurity(&security, &securityError)) {
+        securityAttributes = &security.attributes;
+    } else {
+        KE_LOG_WARN() << "PageGuard: AppContainer IPC security unavailable: " << securityError.toStdString();
+    }
+
+    HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, securityAttributes, PAGE_READWRITE,
                                         0, sizeof(PageGuardIpcState), mappingName);
     if (!mapping) {
         result.error = "CreateFileMapping a échoué (IPC page guard).";
@@ -228,6 +273,8 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
 
     state->active = 0;
     state->installError = 0;
+    state->installErrorStep = 0;
+    state->installLastError = 0;
     state->stopRequested = 0;
     state->hitCount = 0;
     state->watchAddress = config.address;
@@ -256,13 +303,23 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
     }
 
     if (state->installError || !state->active) {
+        const long installError = state->installError;
+        const long installErrorStep = state->installErrorStep;
+        const uint32_t installLastError = state->installLastError;
         state->stopRequested = 1;
         UnmapViewOfFile(state);
         CloseHandle(mapping);
         m_monitoring.store(false);
-        result.error = state->installError
-            ? "Le handler injecté n'a pas pu poser la garde (VirtualProtect/VEH échoué dans la cible)."
-            : "Timeout: le handler injecté ne s'est pas installé.";
+        if (installError) {
+            const QString step = installErrorStep == 1 ? "AddVectoredExceptionHandler"
+                : installErrorStep == 2 ? "VirtualProtect"
+                : "installation";
+            result.error = QString("Le handler injecté n'a pas pu poser la garde (%1 échoué dans la cible, GetLastError=%2).")
+                .arg(step)
+                .arg(installLastError);
+        } else {
+            result.error = "Timeout: le handler injecté ne s'est pas installé.";
+        }
         return result;
     }
 

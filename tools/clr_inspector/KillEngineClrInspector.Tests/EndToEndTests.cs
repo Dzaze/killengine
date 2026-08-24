@@ -846,6 +846,122 @@ public sealed class EndToEndTests
     }
 
     [Fact]
+    public async Task ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithStructParameter_PacksFieldsIntoRdxAndProducesSideEffect()
+    {
+        // Chantier "setters a parametre struct" (docs/POWER_UP_ROADMAP.md
+        // candidat #8, extension listee "non couverte a ce jour") :
+        // Player.set_Waypoint prend un parametre STRUCT (Coordinates, 8
+        // octets, deux champs Int32 X/Y) -- ni primitif ni type reference.
+        // La convention d'appel x64 Windows passe un struct de 1/2/4/8 octets
+        // PAR VALEUR dans un unique registre (RDX) : les octets bruts du
+        // struct (meme agencement memoire que quand on le lit via ClrMD,
+        // X a l'offset 0, Y a l'offset 4) sont charges tels quels, EXACTEMENT
+        // le meme mecanisme shellcode que pour un parametre primitif entier
+        // -- prouve ici en composant l'immediate a la main a partir des
+        // offsets/tailles renvoyes par resolveInstanceMethodAddress, sans
+        // aucun changement necessaire a NativeSetterInvoker/au shellcode
+        // existant. Preuve que le VRAI setter tourne (pas une ecriture
+        // memoire brute) : clamp a [0,100] sur les DEUX champs et un compteur
+        // de changements SEPARE, meme discipline que Vitality/Vigor.
+        string targetDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tests", "clr_targets", "KillEngineClrTestTarget"), "KillEngineClrTestTarget.dll");
+        string inspectorDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tools", "clr_inspector", "KillEngineClrInspector"), "KillEngineClrInspector.dll");
+
+        const string isolatedTargetPipe = "KillEngineClrTestTargetPipe_WaypointSetterTest";
+        const string isolatedInspectorPipe = "KillEngineClrInspectorPipe_WaypointSetterTest";
+
+        await using var isolatedTarget = await ManagedProcessFixture.StartAsync(
+            targetDll, isolatedTargetPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_TEST_TARGET_PIPE_NAME"] = isolatedTargetPipe });
+        await using var isolatedInspector = await ManagedProcessFixture.StartAsync(
+            inspectorDll, isolatedInspectorPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_INSPECTOR_PIPE_NAME"] = isolatedInspectorPipe });
+
+        await PipeClient.CallAsync(isolatedInspectorPipe, "attach", new JsonArray(JsonValue.Create(isolatedTarget.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            isolatedInspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+        ulong objectAddress = ParseHex(playerAddress);
+
+        // 1) Resolution reelle -- verifie que le struct est bien reconnu et
+        // decrit (taille + champs avec offsets), pas seulement accepte a
+        // l'aveugle.
+        var resolved = await PipeClient.CallAsync(
+            isolatedInspectorPipe,
+            "resolveInstanceMethodAddress",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Waypoint")));
+        Assert.True(resolved!["success"]!.GetValue<bool>());
+        Assert.Equal("set_Waypoint", resolved["methodName"]!.GetValue<string>());
+        Assert.Contains("Coordinates", resolved["parameterType"]!.GetValue<string>());
+        Assert.True(resolved["parameterIsStruct"]!.GetValue<bool>());
+        Assert.False(resolved["parameterIsReferenceType"]!.GetValue<bool>());
+        Assert.Equal(8, resolved["parameterStructSize"]!.GetValue<int>());
+        var fields = resolved["parameterStructFields"]!.AsArray()
+            .ToDictionary(f => f!["name"]!.GetValue<string>(), f => f);
+        Assert.Equal(0, fields["X"]!["offset"]!.GetValue<int>());
+        Assert.Equal(4, fields["X"]!["size"]!.GetValue<int>());
+        Assert.Equal(4, fields["Y"]!["offset"]!.GetValue<int>());
+        Assert.Equal(4, fields["Y"]!["size"]!.GetValue<int>());
+        ulong nativeCodeAddress = ParseHex(resolved["nativeCodeAddress"]!.GetValue<string>());
+        Assert.NotEqual(0UL, nativeCodeAddress);
+
+        // 2) Compose l'immediate RDX a la main depuis les offsets resolus --
+        // exactement ce que ApplicationController::callClrInstanceMethod doit
+        // faire cote natif pour un parametre struct (aucune logique
+        // supplementaire cachee cote helper .NET, la resolution ne fait que
+        // DECRIRE le layout).
+        static ulong PackStruct(IReadOnlyDictionary<string, JsonNode?> offsets, params (string Name, int Value)[] values)
+        {
+            Span<byte> buffer = stackalloc byte[8];
+            foreach (var (name, value) in values)
+            {
+                int offset = offsets[name]!["offset"]!.GetValue<int>();
+                BitConverter.GetBytes(value).CopyTo(buffer[offset..]);
+            }
+            return BitConverter.ToUInt64(buffer);
+        }
+
+        ulong immediate = PackStruct(fields!, ("X", 55), ("Y", 66));
+
+        var statusBefore = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        int changeCountBefore = statusBefore!["player"]!["waypointChangeCount"]!.GetValue<int>();
+
+        bool completed = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate: immediate, nativeCodeAddress);
+        Assert.True(completed, "Le thread distant n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres l'appel shellcode du setter struct.");
+
+        var statusAfter = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal(55, statusAfter!["player"]!["waypointX"]!.GetValue<int>());
+        Assert.Equal(66, statusAfter["player"]!["waypointY"]!.GetValue<int>());
+        Assert.Equal(changeCountBefore + 1, statusAfter["player"]!["waypointChangeCount"]!.GetValue<int>());
+
+        // 3) Deuxieme appel avec des valeurs HORS BORNES sur les DEUX champs
+        // -- doit etre clampe a [0,100], preuve que le VRAI setter tourne
+        // (une ecriture memoire brute du champ backing accepterait 500/-10
+        // tels quels).
+        ulong outOfRangeImmediate = PackStruct(fields!, ("X", 500), ("Y", -10));
+        bool completedClamp = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate: outOfRangeImmediate, nativeCodeAddress);
+        Assert.True(completedClamp, "Le thread distant (appel hors bornes) n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres le deuxieme appel shellcode du setter struct.");
+
+        var statusAfterClamp = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal(100, statusAfterClamp!["player"]!["waypointX"]!.GetValue<int>());
+        Assert.Equal(0, statusAfterClamp["player"]!["waypointY"]!.GetValue<int>());
+        Assert.Equal(changeCountBefore + 2, statusAfterClamp["player"]!["waypointChangeCount"]!.GetValue<int>());
+
+        // Cross-verification independante de l'oracle cote cible : relecture
+        // ClrMD directe du champ backing.
+        var objAfterClamp = await PipeClient.CallAsync(isolatedInspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        var waypointBackingField = objAfterClamp!["fields"]!["_waypoint"]!["fields"]!;
+        Assert.Equal(100, waypointBackingField["X"]!.GetValue<int>());
+        Assert.Equal(0, waypointBackingField["Y"]!.GetValue<int>());
+    }
+
+    [Fact]
     public async Task ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithDoubleParameter_LoadsXmm1AndProducesSideEffect()
     {
         // PHASE 59 -- chantier "setters float/double" : Player.set_Vigor
@@ -1102,18 +1218,71 @@ public sealed class EndToEndTests
         Assert.Equal(555, status!["player"]!["waypoint1X"]!.GetValue<int>());
         Assert.Equal(2, status["player"]!["waypoint1Y"]!.GetValue<int>());
 
-        // Garde-fou : ecrire l'ELEMENT ENTIER par index (pas un champ a
-        // l'interieur) reste hors scope -- pas de valeur primitive unique a
-        // encoder -- message clair, pas de plantage ni d'ecriture partielle
-        // silencieuse.
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        // L'ELEMENT ENTIER par index (Waypoints[1] seul, sans champ suivant)
+        // est desormais supporte aussi (chantier "collections concurrentes
+        // et ecriture d'element struct entier", format "Champ=Valeur,...") --
+        // voir WritePrimitivePath_UpdatesWholeStructArrayElementByIndex.
+    }
+
+    [Fact]
+    public async Task WritePrimitivePath_UpdatesWholeStructArrayElementByIndex()
+    {
+        // Dernier point laisse ouvert par le chantier "ecriture indexee dans
+        // des tableaux de STRUCTS" (PHASE 59/66, voir le test precedent) :
+        // ecrire Waypoints[1] ENTIER (les deux champs X et Y d'un coup), pas
+        // seulement Waypoints[1].X isolement. Format retenu (docs/
+        // KILLENGINE_CLR_INSPECTOR_SPEC.md, "format de saisie a definir") :
+        // "X=777,Y=888" -- tous les champs du struct sont requis.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+
+        var write = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Inventory.Waypoints[2]"), JsonValue.Create("X=777,Y=888")));
+        Assert.True(write!["verified"]!.GetValue<bool>());
+
+        // Relecture ClrMD independante -- confirme les DEUX champs ecrits.
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var waypointItems = Field(inventoryObj!["fields"]!, "Waypoints")!["collection"]!["items"]!.AsArray();
+        Assert.Equal(777, waypointItems[2]!["fields"]!["X"]!.GetValue<int>());
+        Assert.Equal(888, waypointItems[2]!["fields"]!["Y"]!.GetValue<int>());
+        // Waypoints[0] intact -- confirme que seul l'element vise a change.
+        Assert.Equal(1, waypointItems[0]!["fields"]!["X"]!.GetValue<int>());
+        Assert.Equal(1, waypointItems[0]!["fields"]!["Y"]!.GetValue<int>());
+
+        // Garde-fou 1 : champ manquant -- rejet propre, pas d'ecriture
+        // partielle silencieuse (Y non fourni).
+        var missingFieldEx = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await PipeClient.CallAsync(
                 InspectorPipe,
                 "writePrimitivePath",
-                new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Inventory.Waypoints[1]"), JsonValue.Create("0")));
+                new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Inventory.Waypoints[0]"), JsonValue.Create("X=42")));
         });
-        Assert.Contains("struct", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("manquant", missingFieldEx.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Garde-fou 1 bis : Waypoints[0] bien INCHANGE apres le rejet
+        // ci-dessus (pas de X=42 partiel malgre l'echec sur Y).
+        var afterRejected = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var waypointsAfterRejected = Field(afterRejected!["fields"]!, "Waypoints")!["collection"]!["items"]!.AsArray();
+        Assert.Equal(1, waypointsAfterRejected[0]!["fields"]!["X"]!.GetValue<int>());
+        Assert.Equal(1, waypointsAfterRejected[0]!["fields"]!["Y"]!.GetValue<int>());
+
+        // Garde-fou 2 : champ inconnu -- rejet propre.
+        var unknownFieldEx = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await PipeClient.CallAsync(
+                InspectorPipe,
+                "writePrimitivePath",
+                new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Inventory.Waypoints[0]"), JsonValue.Create("X=1,Y=2,Z=3")));
+        });
+        Assert.Contains("inconnu", unknownFieldEx.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1612,6 +1781,44 @@ public sealed class EndToEndTests
         Assert.NotNull(gcRootChain);
         Assert.True(gcRootChain!["success"]!.GetValue<bool>(), gcRootChain["message"]?.GetValue<string>() ?? gcRootChain.ToString());
         Assert.Equal(inventoryAddress, gcRootChain["targetAddress"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ReadObject_UnpacksConcurrentDictionaryIgnoringRemovedEntries()
+    {
+        // Chantier "collections concurrentes" (docs/POWER_UP_ROADMAP.md
+        // candidat #8, extension listee "non couverte a ce jour") -- layout
+        // interne verifie par attache ClrMD reelle avant d'ecrire
+        // ClrSession.DescribeConcurrentDictionary (script jetable, pas
+        // devine, voir le commentaire de cette methode pour le detail :
+        // _tables._buckets est un VolatileNode[] dont chaque struct porte
+        // une reference _node vers une chaine de Node simplement liee, et le
+        // compte reel est la somme de _tables._countPerLock, pas la longueur
+        // de _buckets). Le graphe de test (Inventory.ConcurrentCounters,
+        // ObjectGraph.cs) ajoute "hits"/"stale"/"misses", met a jour "hits"
+        // via TryUpdate et retire "stale" via TryRemove -- ce test verifie
+        // que le deballage ne rapporte que les 2 entrees reellement vivantes
+        // avec leur valeur a jour, pas un noeud fantome laisse par le retrait.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var concurrentCounters = Field(inventoryObj!["fields"]!, "ConcurrentCounters")!["collection"]!;
+
+        Assert.Equal("concurrent_dictionary", concurrentCounters["kind"]!.GetValue<string>());
+        Assert.Equal(2, concurrentCounters["count"]!.GetValue<int>());
+        Assert.Equal(2, concurrentCounters["returned"]!.GetValue<int>());
+        Assert.False(concurrentCounters["truncated"]!.GetValue<bool>());
+
+        var entries = concurrentCounters["entries"]!.AsArray()
+            .ToDictionary(e => e!["key"]!.GetValue<string>(), e => e!["value"]!.GetValue<int>());
+        Assert.Equal(new Dictionary<string, int> { ["hits"] = 41, ["misses"] = 7 }, entries);
+        Assert.DoesNotContain("stale", entries.Keys);
     }
 
     private static bool JsonContainsAddress(JsonNode? node, string address)

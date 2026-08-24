@@ -295,6 +295,90 @@
       "when": "For an invincible freeze that intercepts the write at the source, or a cheat that needs to run inside the target process rather than read/write it from the outside.",
       "cost": "Actively modifies the target process (injected code, rewritten instructions). Requires explicit confirmation for every action, no persistent Trainer feature yet.",
       "example": "After capturing the instruction that writes a value (Written by), install a hook on it to force the value on every call instead of rewriting it in a loop from the outside."
+    },
+    "clrGuide": {
+      "title": "CLR guided flow",
+      "what": "Shows where you are in the CLR Inspector flow: process attached, CLR session active, objects listed, object selected to act on.",
+      "when": "On first opening the CLR view, to see which step is still needed before you can read or write an object.",
+      "cost": "Read only. The CLR heap can move after a garbage collection (GC): for a target that must survive that, prefer the field locator and a CLR Trainer feature over a remembered raw address.",
+      "example": "Step 1 pending? Attach a .NET/CoreCLR process first via the Process view. Step 2 pending? Click Attach CLR to start the ClrMD helper."
+    },
+    "clrAttach": {
+      "title": "Attach the CLR helper",
+      "what": "Launches a dedicated .NET process (ClrMD) that attaches to the target's managed runtime to explore its heap, and lists objects whose type name contains the filter.",
+      "when": "Only on a real .NET Framework/CoreCLR process (not Mono, not IL2CPP, not UWP .NET Native). The Objects button returns nothing if the filter is too narrow or empty on a large heap.",
+      "cost": "Read only on attach. Roots lists known GC roots (stacks, statics). Flush GC cache forces ClrMD to re-read the current state after a GC or a large mutation on the target — useful if displayed objects look stale.",
+      "example": "Filter `KillEngine.ClrTestTarget` then click Objects: the list only shows types from that namespace, easier to browse than the whole heap."
+    },
+    "clrManualRead": {
+      "title": "Read a known address",
+      "what": "Directly describes the managed object at the address you paste in, without going through the list or a locator.",
+      "when": "When you already have a valid CLR object address, e.g. found via another view (GC root path, report, earlier read).",
+      "cost": "Read only. A remembered address becomes invalid after a compacting GC moves the object — prefer the stable Locator for a target that must survive a restart or a GC.",
+      "example": "Paste `0x2476e00acd8` then Enter: if the address still holds a live managed object, its fields appear in the Object read panel."
+    },
+    "clrLocator": {
+      "title": "Stable locator (find by identity)",
+      "what": "Searches the heap for every object of a given type whose identity field (e.g. Name) matches a value — instead of depending on a memory address that changes on every restart or compacting GC.",
+      "when": "As soon as you want to reuse a target later (Trainer feature, profile, repeated write): a raw address doesn't survive a game restart, a locator does.",
+      "cost": "Read only, scans the heap up to Max results. A poorly chosen identity field (a value that changes, like a score) will make relocation fail later — pick a stable field (name, unique id).",
+      "example": "Type `KillEngine.ClrTestTarget.Player`, field `Name`, value `TestSubject` → Find. Click a result to read it, same as in the Objects table."
+    },
+    "clrPathWrite": {
+      "title": "Symbolic path",
+      "what": "Describes where a primitive field to write lives by name instead of by address — can traverse references (`Inventory.Items[0].Value`) and array/list indexes.",
+      "when": "To write a field that isn't directly in the selected object's field table, or to build a reusable path independent of each sub-object's exact address.",
+      "cost": "Only writes the final primitive field of the path (never a whole object or struct). Check \"Use a locator\" so the path is resolved from an object found by identity instead of the currently read address — survives a GC move in between.",
+      "example": "Inventory object read, path `Items[0].Value`, value `999` → Write path only changes the Value field of the first item in the Items collection."
+    },
+    "clrBatchWrite": {
+      "title": "Multi-field transaction",
+      "what": "Applies several symbolic-path writes in order, one per line (`Path=Value`), and tries to roll back the ones already applied if a later operation fails.",
+      "when": "To change several related fields together (e.g. a character's Health and Mana) without leaving the object in an inconsistent state if one write fails.",
+      "cost": "Best-effort: rollback restores the old value but doesn't guarantee perfect atomicity against the game reading concurrently. Checking \"Suspend the process\" adds a real suspension of every target thread during the write (safer, riskier if it deadlocks).",
+      "example": "`Health=100` and `Stats.Rank=7` on two lines then Transaction: both fields change together; if `Stats.Rank` fails, `Health` is restored to its original value."
+    },
+    "clrCallSetter": {
+      "title": "Call a real setter",
+      "what": "Resolves the already-JITted native address of the real C# setter via ClrMD, builds a small x64 shellcode (this in RCX, value in RDX/XMM1) and runs it by injection in the attached process — unlike the writes above (passive memory), this executes the real business logic (validation, side effects).",
+      "when": "When writing the backing field directly isn't enough because the setter does more than assign the value (clamping, a separate counter, syncing another field).",
+      "cost": "Code injection into the target process — a risky action, requires explicit confirmation. Instance setters only, 0 or 1 parameter, either primitive or a reference type (class/string, given as the hex address of an already-existing object — never a struct). The setter must already have run once in-game (JIT) or the call fails cleanly.",
+      "example": "Property `Vitality`, value `999` → Call actually runs `set_Vitality(999)` in the target, with its clamp and change counter, not just a raw memory rewrite of the backing field."
+    },
+    "clrDisassemble": {
+      "title": "Disassemble a setter (read-only)",
+      "what": "Reuses the same ClrMD resolution as calling a setter to find a method's already-JITted native address, then disassembles the x64 code forward, instruction by instruction.",
+      "when": "To understand what a setter actually does before calling it, or to find where to patch/hook once the location is known.",
+      "cost": "Read only, never executes the target code. The method must already have been JITted (called at least once) or there's no native address yet to disassemble.",
+      "example": "Method `set_Vitality`, 24 instructions → Disassemble shows the clamp and the backing-field write in x64 assembly, without ever executing anything."
+    },
+    "clrReport": {
+      "title": "Generate an object report",
+      "what": "Exports the selected object and its reachable managed graph (fields, collections, optional GC root path) as a text document, walking references up to a bounded depth and node count.",
+      "when": "To save or share a complex object's state without re-navigating everything live in the other panels.",
+      "cost": "Read only. A large graph gets truncated (depth, node count, or time budget reached) — raise the bounds if the report looks incomplete, at the cost of a slower call.",
+      "example": "Inventory object selected, depth 3, 50 max nodes → Generate produces text listing the object, its fields, and the objects it references up to 3 hops away."
+    },
+    "clrGcRootPath": {
+      "title": "Root → object path (exploratory)",
+      "what": "Reconstructs the shortest path from a GC root (stack, static...) to the target object through several reference hops — an approximate equivalent of `!gcroot` (SOS/WinDbg).",
+      "when": "To understand why an object stays alive (what references it), or to build a stable navigation path to it instead of remembering its address.",
+      "cost": "Read only. Bounded breadth-first search (depth/nodes/time on the helper side) — can be slow or find nothing on a very large heap.",
+      "example": "Selected object → Selected object (button) then Find path shows the full chain, e.g. `StrongHandle → Inventory → Items[2]` down to the target object."
+    },
+    "clrFieldTable": {
+      "title": "Fields of the read object",
+      "what": "Lists the selected object's fields with their type (Kind), effective memory address, and value. A `ref` value can be opened with Read; a writable field can be written directly, turned into a Trainer feature, or used as the identity field for a locator.",
+      "when": "The simplest starting point to explore an object: no need to know a symbolic path for a field that's already visible here.",
+      "cost": "Reading is safe. Writing a field here changes the backing memory directly (no setter execution, no business validation) — for that, use the \"Call a setter\" panel below.",
+      "example": "Field `Health` with a Write button → type `100`, click Write: the memory value changes immediately, without going through the game's logic."
+    },
+    "clrRootsTable": {
+      "title": "GC roots",
+      "what": "Lists the roots ClrMD knows about — strong handles, stack variables, static fields — each pointing to a managed object that stays alive as long as its root exists.",
+      "when": "To understand what's keeping an object alive, or as a starting point to rebuild a root → object path in the panel below.",
+      "cost": "Read only. On a large heap the list can be long and may miss some StaticVar-kind roots (a known limitation of passive ClrMD attach, worked around elsewhere by a dedicated resolution).",
+      "example": "A `StrongHandle` root pointing to the `Player` object explains why that object is never collected by the GC while the handle exists."
     }
   }
 }

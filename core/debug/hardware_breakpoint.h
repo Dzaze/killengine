@@ -3,6 +3,7 @@
 #include "process/process_handle.h"
 #include "breakpoint_arbiter.h"
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QList>
@@ -41,6 +42,23 @@ struct BreakpointHit {
     uint64_t threadId{0};       ///< Thread qui a déclenché
     QString module;             ///< Module contenant l'instruction (ex: "game.exe")
     uint64_t moduleOffset{0};   ///< Offset dans le module
+    uint64_t rax{0};
+    uint64_t rbx{0};
+    uint64_t rcx{0};
+    uint64_t rdx{0};
+    uint64_t rsi{0};
+    uint64_t rdi{0};
+    uint64_t rbp{0};
+    uint64_t rsp{0};
+    uint64_t r8{0};
+    uint64_t r9{0};
+    uint64_t r10{0};
+    uint64_t r11{0};
+    uint64_t r12{0};
+    uint64_t r13{0};
+    uint64_t r14{0};
+    uint64_t r15{0};
+    QByteArray xmm0;
 };
 
 /// Configuration d'un breakpoint matériel.
@@ -212,6 +230,26 @@ QList<BreakpointHit> findWhatAccesses(
     uint32_t pid,
     uint64_t address,
     BreakpointSize size,
+    int timeoutMs,
+    size_t maxHits,
+    const CancellationToken* cancellation);
+
+/**
+ * @brief Utilitaire de haut niveau : capture quand une instruction s'exécute.
+ *
+ * Variante "break on execute" utile quand on connait un RIP mais pas encore
+ * la destination memoire runtime (ex: movups [r8], xmm0 dans un moteur UI).
+ * Les hits incluent les registres généraux et XMM0 au moment du trap.
+ */
+QList<BreakpointHit> findWhatExecutes(
+    uint32_t pid,
+    uint64_t instructionAddress,
+    int timeoutMs = 5000,
+    size_t maxHits = 10);
+
+QList<BreakpointHit> findWhatExecutes(
+    uint32_t pid,
+    uint64_t instructionAddress,
     int timeoutMs,
     size_t maxHits,
     const CancellationToken* cancellation);

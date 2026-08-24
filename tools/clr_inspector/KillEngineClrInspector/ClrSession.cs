@@ -476,6 +476,11 @@ public sealed class ClrSession : IDisposable
                 return DescribeSortedSet(obj, depth);
             }
 
+            if (typeName.StartsWith("System.Collections.Concurrent.ConcurrentDictionary<", StringComparison.Ordinal))
+            {
+                return DescribeConcurrentDictionary(obj, depth);
+            }
+
             object? customCollection = DescribeFieldBackedCollection(obj, depth);
             if (customCollection is not null)
             {
@@ -620,6 +625,87 @@ public sealed class ClrSession : IDisposable
         return new
         {
             kind = "dictionary",
+            count,
+            returned = entries.Count,
+            truncated = count > entries.Count,
+            entries,
+        };
+    }
+
+    /// <summary>
+    /// ConcurrentDictionary&lt;TKey,TValue&gt; -- layout interne verifie par
+    /// attache ClrMD reelle sur KillEngineClrTestTarget (script jetable, pas
+    /// devine) : buffer prive `_tables` (type imbrique `Tables`), qui porte
+    /// lui-meme `_buckets` (`VolatileNode[]` -- struct wrapper autour d'une
+    /// seule reference `_node` vers un `Node` ou `null`, PAS un tableau de
+    /// `Node` directement) et `_countPerLock` (`int[]`, un compteur par
+    /// plage de verrous -- la somme donne le compte REEL vivant, la longueur
+    /// physique de `_buckets` n'a aucun rapport avec le nombre d'elements).
+    /// Chaque `Node` est une CLASSE (pas un struct comme
+    /// `Dictionary&lt;K,V&gt;.Entry`) et porte `_key`/`_value`/`_next`/
+    /// `_hashcode` ; les noeuds d'un meme bucket forment une chaine
+    /// simplement liee terminee par `_next == null`. Contrairement a
+    /// `HashSet&lt;T&gt;`, il n'y a pas de free-list a filtrer : `TryRemove`
+    /// retire directement le noeud de sa chaine plutot que de le marquer
+    /// supprime en place -- confirme concretement avec le graphe de test
+    /// (`Inventory.ConcurrentCounters`, entree "stale" ajoutee puis retiree
+    /// via `TryRemove`, "hits" mise a jour via `TryUpdate` pour verifier
+    /// qu'un remplacement de noeud n'introduit pas de doublon dans la
+    /// chaine).
+    /// </summary>
+    private static object DescribeConcurrentDictionary(ClrObject obj, int depth)
+    {
+        ClrObject tablesObj = obj.ReadObjectField("_tables");
+        if (tablesObj.IsNull)
+        {
+            return new { kind = "concurrent_dictionary", count = 0, returned = 0, entries = Array.Empty<object?>() };
+        }
+
+        int count = 0;
+        ClrObject countPerLockObj = tablesObj.ReadObjectField("_countPerLock");
+        if (!countPerLockObj.IsNull && countPerLockObj.Type is { IsArray: true })
+        {
+            ClrArray countArray = countPerLockObj.AsArray();
+            for (int i = 0; i < countArray.GetLength(0); ++i)
+            {
+                count += Math.Max(0, countArray.GetValue<int>(i));
+            }
+        }
+
+        var entries = new List<object?>();
+        ClrObject bucketsObj = tablesObj.ReadObjectField("_buckets");
+        if (!bucketsObj.IsNull && bucketsObj.Type is { IsArray: true })
+        {
+            ClrArray bucketsArray = bucketsObj.AsArray();
+            int bucketCount = bucketsArray.GetLength(0);
+            for (int i = 0; i < bucketCount && entries.Count < MaxCollectionItems; ++i)
+            {
+                ClrValueType volatileNode = bucketsArray.GetStructValue(i);
+                ClrInstanceField? nodeField = volatileNode.Type?.GetFieldByName("_node");
+                if (nodeField is null) continue;
+                ClrObject node = volatileNode.ReadObjectField(nodeField);
+
+                // Borne de securite contre une chaine anormalement longue ou
+                // corrompue -- une chaine saine ne cycle jamais (chainage
+                // simple, jamais circulaire ici contrairement a LinkedList<T>).
+                int guard = 0;
+                while (!node.IsNull && entries.Count < MaxCollectionItems && guard++ < MaxCollectionItems)
+                {
+                    ClrInstanceField? keyField = node.Type?.GetFieldByName("_key");
+                    ClrInstanceField? valueField = node.Type?.GetFieldByName("_value");
+                    entries.Add(new
+                    {
+                        key = keyField is null ? null : ReadFieldValue(node, keyField, depth),
+                        value = valueField is null ? null : ReadFieldValue(node, valueField, depth),
+                    });
+                    node = node.ReadObjectField("_next");
+                }
+            }
+        }
+
+        return new
+        {
+            kind = "concurrent_dictionary",
             count,
             returned = entries.Count,
             truncated = count > entries.Count,
@@ -1861,11 +1947,14 @@ public sealed class ClrSession : IDisposable
     /// injection shellcode) de l'appeler directement -- ClrMD est une API de
     /// lecture passive (DAC), elle n'execute jamais de code cible elle-meme,
     /// cette methode se limite donc a la RESOLUTION d'adresse. Le parametre,
-    /// s'il y en a un, peut etre primitif (bool/int8..64/uint8..64/single/double)
-    /// OU un type REFERENCE (classe/string/interface -- chantier "setters a
+    /// s'il y en a un, peut etre primitif (bool/int8..64/uint8..64/single/double),
+    /// un type REFERENCE (classe/string/interface -- chantier "setters a
     /// parametre objet/string", <c>parameterIsReferenceType: true</c> dans le
-    /// resultat) pointant vers un objet DEJA EXISTANT sur le tas -- jamais un
-    /// type VALEUR (struct), rejete explicitement (voir <see
+    /// resultat) pointant vers un objet DEJA EXISTANT sur le tas, OU un type
+    /// VALEUR (struct) dont TOUS les champs sont primitifs et dont la taille
+    /// totale est 1/2/4/8 octets (<c>parameterIsStruct: true</c>, chantier
+    /// "setters a parametre struct") -- un struct plus grand ou contenant un
+    /// champ non primitif reste rejete explicitement (voir <see
     /// cref="ParseInstanceMethodParameters"/> et la resolution
     /// IsValueType ci-dessous). Voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md
     /// pour le detail complet du perimetre et son mecanisme d'appel
@@ -1932,10 +2021,10 @@ public sealed class ClrSession : IDisposable
         // non primitifs toujours prefixes de leur namespace complet) doit
         // etre resolu en ClrType REEL pour determiner s'il s'agit d'un type
         // REFERENCE (classe/string/interface -- accepte, RDX porte l'adresse
-        // brute) ou d'un type VALEUR (struct -- rejete explicitement, la
-        // convention d'appel x64 d'un struct passe par valeur depend de sa
-        // taille/forme, hors de portee volontairement, voir docs/
-        // KILLENGINE_CLR_INSPECTOR_SPEC.md). Verifie par attache ClrMD reelle
+        // brute) ou d'un type VALEUR (struct -- accepte depuis PHASE 76 dans
+        // le cas taille 1/2/4/8 octets tous champs primitifs, RDX porte alors
+        // les octets du struct empaquetes ; rejete explicitement au-dela,
+        // voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md). Verifie par attache ClrMD reelle
         // avant d'ecrire ce code (pas devine) : ClrMethod n'expose QUE
         // Signature (string) pour un parametre, aucune API de resolution de
         // type de parametre -- mais heap.GetTypeByName(nomComplet) resout
@@ -1944,6 +2033,18 @@ public sealed class ClrSession : IDisposable
         // "KillEngine.ClrTestTarget.Coordinates" -- struct -- et
         // "System.String"), avec IsValueType fiable dans les deux cas.
         bool parameterIsReferenceType = false;
+        // PHASE 76 : un parametre struct est desormais accepte dans UN cas
+        // precis -- taille totale exactement 1/2/4/8 octets ET tous ses
+        // champs d'instance primitifs -- car la convention d'appel x64
+        // Windows passe alors le struct PAR VALEUR dans un unique registre
+        // (RDX), exactement le meme mecanisme deja cable pour un parametre
+        // primitif (buildCallInstanceMethodShellcode cote natif n'a besoin
+        // d'aucun changement : seul l'immediate RDX differe). Un struct plus
+        // grand ou contenant un champ non primitif (nested struct/reference)
+        // passerait par un pointeur cache vers une copie -- ce second cas
+        // reste hors scope, garde-fou explicite plus bas.
+        List<object>? parameterStructFields = null;
+        int parameterStructSize = 0;
         if (parameterType is not null && !SupportedInstanceMethodParameterTypes.Contains(parameterType))
         {
             ClrType? resolvedParameterType = runtime.Heap.GetTypeByName(parameterType);
@@ -1956,13 +2057,33 @@ public sealed class ClrSession : IDisposable
             }
             if (resolvedParameterType.IsValueType)
             {
-                throw new ClrSessionException(
-                    $"Type de parametre struct non supporte : {obj.Type.Name}.{resolvedName}({parameterType}). " +
-                    "La convention d'appel x64 d'un struct passe PAR VALEUR depend de sa taille/forme " +
-                    "(registre unique, paire de registres, ou pointeur cache vers une copie selon les cas) -- " +
-                    "trop de variantes pour un shellcode fixe sans risque reel de plantage. Hors scope volontaire.");
+                List<ClrInstanceField> fields = resolvedParameterType.Fields.ToList();
+                List<string> nonPrimitive = fields.Where(f => !IsWritablePrimitive(f.ElementType)).Select(f => f.Name!).ToList();
+                if (nonPrimitive.Count > 0)
+                {
+                    throw new ClrSessionException(
+                        $"Type de parametre struct non supporte : {obj.Type.Name}.{resolvedName}({parameterType}) -- " +
+                        $"champ(s) non primitif(s) {string.Join(", ", nonPrimitive)} (struct-dans-struct ou reference). " +
+                        "Seul un struct dont TOUS les champs sont primitifs est supporte.");
+                }
+                int totalSize = fields.Count == 0 ? 0 : fields.Max(f => f.Offset + f.Size);
+                if (totalSize is not (1 or 2 or 4 or 8))
+                {
+                    throw new ClrSessionException(
+                        $"Type de parametre struct non supporte : {obj.Type.Name}.{resolvedName}({parameterType}) fait " +
+                        $"{totalSize} octet(s) -- seule une taille de 1/2/4/8 octets (passage PAR REGISTRE selon la " +
+                        "convention x64 Windows) est geree ; un struct plus grand passe par un pointeur cache vers " +
+                        "une copie, hors scope de ce chantier.");
+                }
+                parameterStructSize = totalSize;
+                parameterStructFields = fields
+                    .Select(f => (object)new { name = f.Name, elementType = f.ElementType.ToString(), offset = f.Offset, size = f.Size })
+                    .ToList();
             }
-            parameterIsReferenceType = true;
+            else
+            {
+                parameterIsReferenceType = true;
+            }
         }
 
         // ClrMD reel rapporte ulong.MaxValue (pas 0) pour une methode jamais
@@ -1985,6 +2106,9 @@ public sealed class ClrSession : IDisposable
             nativeCodeAddress = ToHex(method.NativeCode),
             parameterType,
             parameterIsReferenceType,
+            parameterIsStruct = parameterStructFields is not null,
+            parameterStructSize,
+            parameterStructFields,
             isStatic,
         };
     }
@@ -2071,6 +2195,14 @@ public sealed class ClrSession : IDisposable
             if (IsIndexedFieldPrimitiveArray(owner, leaf))
             {
                 return WriteIndexedPrimitiveValue(owner, leaf, valueText, path);
+            }
+            // PHASE 76 : un chemin indexe peut aussi cibler un tableau/List<T>
+            // de STRUCTS (ex: Coordinates[] Waypoints) -- ecrire l'element
+            // ENTIER par index, plutot que rejeter (WriteIndexedReferenceValue
+            // suppose une reference d'objet, pas une valeur inline).
+            if (IsIndexedFieldStructArray(owner, leaf))
+            {
+                return WriteIndexedStructValue(owner, leaf, valueText, path);
             }
             return WriteIndexedReferenceValue(owner, leaf, valueText, path);
         }
@@ -2168,6 +2300,10 @@ public sealed class ClrSession : IDisposable
             {
                 object value = ReadIndexedPrimitiveValue(owner, leaf);
                 return ValueToWriteText(value);
+            }
+            if (IsIndexedFieldStructArray(owner, leaf))
+            {
+                return ReadIndexedStructValueAsWriteText(owner, leaf);
             }
             ClrObject readBack = ReadIndexedReferenceValue(owner, leaf);
             return readBack.IsNull ? "null" : ToHex(readBack.Address);
@@ -2439,14 +2575,18 @@ public sealed class ClrSession : IDisposable
     // l'index n'est PAS la feuille (ex: Waypoints[1].X), c'est
     // ResolveIndexedReference/ResolveArrayElementNode qui gerent la
     // composition tableau-de-structs, chantier "ecriture indexee dans des
-    // tableaux de STRUCTS" (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) -- ecrire
-    // un element de tableau de structs ENTIER par index reste hors scope
-    // (pas de valeur primitive unique a encoder), mais un champ primitif a
-    // l'interieur d'un element struct de tableau (Champ[i].SousChamp) est
-    // desormais supporte, un seul niveau de struct verifie par un test
-    // dedie (niveaux plus profonds, ex: struct-dans-struct-dans-tableau,
-    // supportes par la meme composition generique de PathNode/ResolvePathSegment
-    // mais pas explicitement testes pour ce cas precis dans ce lot).
+    // tableaux de STRUCTS" (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) -- un
+    // champ primitif a l'interieur d'un element struct de tableau
+    // (Champ[i].SousChamp) est supporte, un seul niveau de struct verifie
+    // par un test dedie (niveaux plus profonds, ex: struct-dans-struct-
+    // dans-tableau, supportes par la meme composition generique de
+    // PathNode/ResolvePathSegment mais pas explicitement testes pour ce cas
+    // precis dans ce lot). Ecrire l'element de tableau de structs ENTIER
+    // par index (Waypoints[1] seul, sans champ suivant) est desormais
+    // supporte aussi, voir IsIndexedFieldStructArray/WriteIndexedStructValue
+    // plus bas -- limite a un struct dont TOUS les champs sont primitifs
+    // (struct-dans-struct-dans-tableau reste hors scope pour cette ecriture
+    // "element entier" specifiquement).
     private static bool IsIndexedFieldPrimitiveArray(PathNode owner, PathSegment segment)
     {
         if (owner.Object is not ClrObject obj || obj.IsNull || obj.Type is null)
@@ -2485,6 +2625,47 @@ public sealed class ClrSession : IDisposable
             && componentType.ElementType != ClrElementType.Char;
     }
 
+    // Chantier "ecriture d'un element de tableau/List<T> de STRUCTS ENTIER
+    // par index" (docs/POWER_UP_ROADMAP.md candidat #8, extension listee
+    // "non couverte a ce jour") -- meme forme que IsIndexedFieldPrimitiveArray
+    // ci-dessus mais reconnait l'inverse : l'element est un VALUE TYPE non
+    // primitif (struct), pas un tableau de primitifs ni de references.
+    private static bool IsIndexedFieldStructArray(PathNode owner, PathSegment segment)
+    {
+        if (owner.Object is not ClrObject obj || obj.IsNull || obj.Type is null)
+        {
+            return false;
+        }
+
+        ClrInstanceField? field = FindField(obj.Type, segment.FieldName);
+        if (field is null || !field.IsObjectReference)
+        {
+            return false;
+        }
+
+        ClrObject collection = obj.ReadObjectField(field.Name!);
+        if (collection.IsNull || collection.Type is null)
+        {
+            return false;
+        }
+
+        ClrType? componentType = null;
+        if (collection.Type.IsArray)
+        {
+            componentType = collection.Type.ComponentType;
+        }
+        else if ((collection.Type.Name ?? "").StartsWith("System.Collections.Generic.List<", StringComparison.Ordinal))
+        {
+            ClrObject items = collection.ReadObjectField("_items");
+            if (!items.IsNull && items.Type is not null && items.Type.IsArray)
+            {
+                componentType = items.Type.ComponentType;
+            }
+        }
+
+        return componentType is not null && componentType.IsValueType && !IsPrimitiveElement(componentType.ElementType);
+    }
+
     /// <summary>
     /// Ecriture directe par index dans un tableau/List<T> de PRIMITIFS (ex:
     /// int[] Scores, Scores[2] = 42) -- extension PHASE 59 de
@@ -2514,9 +2695,9 @@ public sealed class ClrSession : IDisposable
         {
             throw new ClrSessionException(
                 $"Element {segment.FieldName}[{index}] non primitif ecrivable directement en tant que FEUILLE du chemin -- " +
-                "un tableau de structs reste hors scope pour ecrire l'element ENTIER (pas de valeur primitive unique a " +
-                $"encoder), mais un champ primitif A L'INTERIEUR d'un element struct est supporte : {segment.FieldName}[{index}].NomDuChamp " +
-                "(voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).");
+                "un tableau de STRUCTS (element entier ou champ interieur) et un tableau de REFERENCES passent par un " +
+                $"autre chemin d'ecriture ; verifie {segment.FieldName}[{index}] (element entier) ou " +
+                $"{segment.FieldName}[{index}].NomDuChamp (champ interieur) (voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).");
         }
 
         ulong elementAddress = arrayObject.Type!.GetArrayElementAddress(arrayObject.Address, index);
@@ -2540,6 +2721,169 @@ public sealed class ClrSession : IDisposable
             value = readBack,
             verified = PrimitiveMatches(componentType.ElementType, valueText, readBack),
         };
+    }
+
+    /// <summary>
+    /// Ecriture ENTIERE d'un element de tableau/List&lt;T&gt; de STRUCTS par
+    /// index (ex: Coordinates[] Waypoints, Waypoints[1] = nouvel element) --
+    /// dernier point de l'extension "ecriture indexee dans des tableaux de
+    /// STRUCTS" (PHASE 59/66) laisse ouvert faute de "valeur primitive
+    /// unique a encoder" et de format de saisie defini. Format retenu :
+    /// "Champ1=Valeur1,Champ2=Valeur2" -- TOUS les champs d'instance du
+    /// struct doivent etre fournis (semantique de remplacement complet de
+    /// l'element, pas une mise a jour partielle silencieuse). Struct-dans-
+    /// struct-dans-tableau (un champ non primitif A L'INTERIEUR du struct
+    /// element) reste explicitement hors scope de cette methode -- rejet
+    /// propre plutot qu'une ecriture partielle/incorrecte.
+    /// </summary>
+    private object WriteIndexedStructValue(PathNode owner, PathSegment segment, string valueText, string path)
+    {
+        int attachedPid = _attachedPid ?? throw new ClrSessionException("Aucun PID attache pour l'ecriture d'element de tableau CLR.");
+        if (owner.Object is not ClrObject obj || obj.IsNull || obj.Type is null)
+        {
+            throw new ClrSessionException($"Chemin CLR impossible : {segment.FieldName}[{segment.Index}] doit appartenir a un objet.");
+        }
+        int index = segment.Index ?? throw new ClrSessionException("Index de tableau CLR manquant.");
+
+        (ClrObject arrayObject, int logicalLength) = ResolveIndexedPrimitiveCollection(obj, segment.FieldName);
+        if (index < 0 || index >= logicalLength)
+        {
+            throw new ClrSessionException($"Index hors limites pour {segment.FieldName}[{index}] (taille {logicalLength}).");
+        }
+
+        ClrType? componentType = arrayObject.Type?.ComponentType;
+        if (componentType is null || !componentType.IsValueType || IsPrimitiveElement(componentType.ElementType))
+        {
+            throw new ClrSessionException($"Element {segment.FieldName}[{index}] n'est pas un struct.");
+        }
+
+        List<ClrInstanceField> instanceFields = componentType.Fields.ToList();
+        Dictionary<string, string> assignments = ParseStructFieldAssignments(valueText);
+
+        List<string> missing = instanceFields.Select(f => f.Name!).Where(name => !assignments.ContainsKey(name)).ToList();
+        if (missing.Count > 0)
+        {
+            throw new ClrSessionException(
+                $"Ecriture de {segment.FieldName}[{index}] : champ(s) manquant(s) {string.Join(", ", missing)} -- " +
+                "l'ecriture d'un element struct ENTIER exige tous ses champs (format \"Champ1=Valeur1,Champ2=Valeur2\").");
+        }
+        List<string> unknown = assignments.Keys.Where(name => instanceFields.All(f => f.Name != name)).ToList();
+        if (unknown.Count > 0)
+        {
+            throw new ClrSessionException($"Ecriture de {segment.FieldName}[{index}] : champ(s) inconnu(s) {string.Join(", ", unknown)}.");
+        }
+        List<string> nonPrimitive = instanceFields.Where(f => !IsWritablePrimitive(f.ElementType)).Select(f => f.Name!).ToList();
+        if (nonPrimitive.Count > 0)
+        {
+            throw new ClrSessionException(
+                $"Ecriture de {segment.FieldName}[{index}] : champ(s) non primitif(s) {string.Join(", ", nonPrimitive)} -- " +
+                "un struct contenant un struct imbrique ou une reference ne peut pas etre ecrit ENTIER par ce chemin (extension separee, hors scope).");
+        }
+
+        ulong elementAddress = arrayObject.Type!.GetArrayElementAddress(arrayObject.Address, index);
+        if (elementAddress == 0)
+        {
+            throw new ClrSessionException($"Adresse de l'element {segment.FieldName}[{index}] introuvable.");
+        }
+
+        var writtenFields = new List<object>();
+        foreach (ClrInstanceField field in instanceFields)
+        {
+            ulong fieldAddress = field.GetAddress(elementAddress, interior: true);
+            if (fieldAddress == 0)
+            {
+                throw new ClrSessionException($"Adresse effective du champ {field.Name} introuvable dans {segment.FieldName}[{index}].");
+            }
+            byte[] bytes = EncodePrimitive(field.ElementType, assignments[field.Name!]);
+            WriteRawBytes(attachedPid, fieldAddress, bytes, $"champ struct CLR {segment.FieldName}[{index}].{field.Name}");
+            writtenFields.Add(new { name = field.Name, address = ToHex(fieldAddress), bytesWritten = bytes.Length });
+        }
+
+        ClrValueType readBack = arrayObject.AsArray().GetStructValue(index);
+        var values = new Dictionary<string, object?>();
+        bool verified = true;
+        foreach (ClrInstanceField field in instanceFields)
+        {
+            object value = ReadValueTypePrimitive(readBack, field);
+            values[field.Name!] = value;
+            if (!PrimitiveMatches(field.ElementType, assignments[field.Name!], value))
+            {
+                verified = false;
+            }
+        }
+
+        return new
+        {
+            objectAddress = ToHex(arrayObject.Address),
+            typeName = componentType.Name,
+            fieldName = segment.FieldName,
+            path,
+            elementAddress = ToHex(elementAddress),
+            fields = writtenFields,
+            value = values,
+            verified,
+        };
+    }
+
+    private static Dictionary<string, string> ParseStructFieldAssignments(string valueText)
+    {
+        var result = new Dictionary<string, string>();
+        foreach (string part in valueText.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int separator = part.IndexOf('=');
+            if (separator <= 0)
+            {
+                throw new ClrSessionException($"Format d'ecriture struct invalide (attendu \"Champ=Valeur\") : \"{part.Trim()}\".");
+            }
+            string name = part[..separator].Trim();
+            string value = part[(separator + 1)..].Trim();
+            if (name.Length == 0 || value.Length == 0)
+            {
+                throw new ClrSessionException($"Format d'ecriture struct invalide (attendu \"Champ=Valeur\") : \"{part.Trim()}\".");
+            }
+            result[name] = value;
+        }
+        if (result.Count == 0)
+        {
+            throw new ClrSessionException("Ecriture d'element struct : aucune assignation fournie (format attendu \"Champ1=Valeur1,Champ2=Valeur2\").");
+        }
+        return result;
+    }
+
+    // Symetrique de WriteIndexedStructValue, meme format texte
+    // "Champ1=Valeur1,Champ2=Valeur2" -- utilise par WritePrimitivePathBatch
+    // pour capturer la valeur AVANT ecriture et pouvoir la restaurer telle
+    // quelle en cas de rollback transactionnel.
+    private static string ReadIndexedStructValueAsWriteText(PathNode owner, PathSegment segment)
+    {
+        if (owner.Object is not ClrObject obj || obj.IsNull || obj.Type is null)
+        {
+            throw new ClrSessionException($"Chemin CLR impossible : {segment.FieldName}[{segment.Index}] doit appartenir a un objet.");
+        }
+        int index = segment.Index ?? throw new ClrSessionException("Index de tableau CLR manquant.");
+
+        (ClrObject arrayObject, int logicalLength) = ResolveIndexedPrimitiveCollection(obj, segment.FieldName);
+        if (index < 0 || index >= logicalLength)
+        {
+            throw new ClrSessionException($"Index hors limites pour {segment.FieldName}[{index}] (taille {logicalLength}).");
+        }
+        ClrType? componentType = arrayObject.Type?.ComponentType;
+        if (componentType is null || !componentType.IsValueType || IsPrimitiveElement(componentType.ElementType))
+        {
+            throw new ClrSessionException($"Element {segment.FieldName}[{index}] n'est pas un struct restaurable.");
+        }
+
+        ClrValueType structValue = arrayObject.AsArray().GetStructValue(index);
+        var parts = new List<string>();
+        foreach (ClrInstanceField field in componentType.Fields)
+        {
+            if (!IsWritablePrimitive(field.ElementType))
+            {
+                throw new ClrSessionException($"Element {segment.FieldName}[{index}] : champ non primitif {field.Name}, non restaurable par ce chemin.");
+            }
+            parts.Add($"{field.Name}={ValueToWriteText(ReadValueTypePrimitive(structValue, field))}");
+        }
+        return string.Join(",", parts);
     }
 
     private static object ReadIndexedPrimitiveValue(PathNode owner, PathSegment segment)
@@ -2649,10 +2993,16 @@ public sealed class ClrSession : IDisposable
         }
         if (arrayObject.Type.ComponentType.IsValueType)
         {
+            // Ne devrait normalement pas etre atteint : WritePrimitivePath
+            // route deja un element de tableau de structs vers
+            // WriteIndexedStructValue via IsIndexedFieldStructArray avant
+            // d'appeler cette methode. Garde-fou defensif conserve au cas ou
+            // un appelant futur invoquerait WriteIndexedReferenceValue
+            // directement sans repasser par ce dispatch.
             throw new ClrSessionException(
-                $"Element {segment.FieldName}[{index}] est un struct -- ecrire l'element ENTIER par index n'est pas supporte " +
-                $"(pas de valeur primitive unique a encoder), mais un champ primitif a l'interieur est supporte : " +
-                $"{segment.FieldName}[{index}].NomDuChamp (voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).");
+                $"Element {segment.FieldName}[{index}] est un struct -- utilise l'ecriture d'element struct " +
+                $"({segment.FieldName}[{index}] seul) ou un champ interieur ({segment.FieldName}[{index}].NomDuChamp), " +
+                "pas cette methode (voir docs/KILLENGINE_CLR_INSPECTOR_SPEC.md).");
         }
 
         ulong reference = ParseReferenceValue(valueText);

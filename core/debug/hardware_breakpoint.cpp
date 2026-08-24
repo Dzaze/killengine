@@ -531,6 +531,32 @@ bool HardwareBreakpointSession::captureHitFromDebugEvent(
     outHit->instructionPointer = instructionAddress;
     outHit->threadId = threadId;
 
+    HANDLE hThread = OpenThread(THREAD_GET_CONTEXT, FALSE, threadId);
+    if (hThread) {
+        CONTEXT ctx{};
+        ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS;
+        if (GetThreadContext(hThread, &ctx)) {
+            outHit->rax = ctx.Rax;
+            outHit->rbx = ctx.Rbx;
+            outHit->rcx = ctx.Rcx;
+            outHit->rdx = ctx.Rdx;
+            outHit->rsi = ctx.Rsi;
+            outHit->rdi = ctx.Rdi;
+            outHit->rbp = ctx.Rbp;
+            outHit->rsp = ctx.Rsp;
+            outHit->r8 = ctx.R8;
+            outHit->r9 = ctx.R9;
+            outHit->r10 = ctx.R10;
+            outHit->r11 = ctx.R11;
+            outHit->r12 = ctx.R12;
+            outHit->r13 = ctx.R13;
+            outHit->r14 = ctx.R14;
+            outHit->r15 = ctx.R15;
+            outHit->xmm0 = QByteArray(reinterpret_cast<const char*>(&ctx.Xmm0), sizeof(ctx.Xmm0));
+        }
+        CloseHandle(hThread);
+    }
+
     // Déterminer quel breakpoint a déclenché (DR6)
     // Pour simplifier, on utilise le premier breakpoint actif qui correspond
     for (int i = 0; i < 4; ++i) {
@@ -722,6 +748,30 @@ QList<BreakpointHit> findWhatAccesses(
         address,
         BreakpointType::Access,
         size,
+        timeoutMs,
+        maxHits,
+        cancellation);
+}
+
+QList<BreakpointHit> findWhatExecutes(
+    uint32_t pid,
+    uint64_t instructionAddress,
+    int timeoutMs,
+    size_t maxHits) {
+    return findWhatExecutes(pid, instructionAddress, timeoutMs, maxHits, nullptr);
+}
+
+QList<BreakpointHit> findWhatExecutes(
+    uint32_t pid,
+    uint64_t instructionAddress,
+    int timeoutMs,
+    size_t maxHits,
+    const CancellationToken* cancellation) {
+    return findWithBreakpointType(
+        pid,
+        instructionAddress,
+        BreakpointType::Execute,
+        BreakpointSize::Byte,
         timeoutMs,
         maxHits,
         cancellation);

@@ -308,6 +308,7 @@ function useFieldAsLocator(field: ClrFieldInfo) {
   locatorType.value = store.clrSelectedObject.typeName
   locatorField.value = field.name
   locatorValue.value = String(field.value ?? '')
+  locatorWizardStep.value = 3
 }
 
 function useDefaultClrTarget() {
@@ -315,10 +316,32 @@ function useDefaultClrTarget() {
   locatorField.value = 'Name'
   locatorValue.value = 'TestSubject'
   store.clrTypeFilter = 'KillEngine.ClrTestTarget'
+  locatorWizardStep.value = 3
 }
 
 function runFieldLocator() {
   void store.findClrObjectsByFieldValue(locatorType.value, locatorField.value, locatorValue.value, locatorMaxResults.value)
+}
+
+// Flux guidé du locator stable (chantier UX novice) : remplace les 3 champs
+// texte à la fois par un parcours en 3 étapes qui ne fait jamais taper un nom
+// de type/champ à l'aveugle -- étape 1 choisit un objet réel dans la liste
+// déjà chargée (réutilise readClrObject), étape 2 propose les champs de cet
+// objet en boutons (réutilise useFieldAsLocator ci-dessus), étape 3 confirme
+// et lance la recherche. Le mode avancé (texte libre) reste disponible via
+// `locatorWizardAdvanced` pour un utilisateur qui connaît déjà ses valeurs.
+const locatorWizardAdvanced = ref(false)
+const locatorWizardStep = ref<1 | 2 | 3>(1)
+
+const wizardLocatorCandidateFields = computed<ClrFieldInfo[]>(() => objectFields.value.filter(canUseAsLocator))
+
+async function chooseWizardObject(address: string) {
+  await store.readClrObject(address)
+  if (store.clrSelectedObject) locatorWizardStep.value = 2
+}
+
+function restartLocatorWizard() {
+  locatorWizardStep.value = 1
 }
 
 onMounted(() => {
@@ -358,7 +381,7 @@ onMounted(() => {
             <span>Parcours guidé</span>
             <strong>{{ clrReady ? 'CLR prêt' : 'Démarre par Attacher CLR' }}</strong>
           </div>
-          <InfoDot text="Le tas CLR peut bouger après un GC. Pour une cible durable, préfère le locator par champ et les actions Trainer CLR plutôt qu'une ancienne adresse brute." align="right" />
+          <InfoDot topic="clrGuide" align="right" />
         </div>
         <ol class="guide-steps">
           <li
@@ -391,7 +414,7 @@ onMounted(() => {
 
       <section class="toolbar">
         <label class="field-label">
-          <span>Filtre type</span>
+          <span>Filtre type<InfoDot topic="clrAttach" /></span>
           <input v-model="store.clrTypeFilter" class="type-input" placeholder="Ex. KillEngine.ClrTestTarget" />
         </label>
         <button
@@ -438,7 +461,7 @@ onMounted(() => {
 
       <div class="manual-read">
         <label class="field-label">
-          <span>Lire une adresse connue</span>
+          <span>Lire une adresse connue<InfoDot topic="clrManualRead" /></span>
           <input v-model="manualAddress" class="type-input" placeholder="Ex. 0x2476e00acd8" @keyup.enter="readManualObject" />
         </label>
         <button
@@ -457,9 +480,119 @@ onMounted(() => {
             <span>Locator stable</span>
             <strong>Retrouver un objet par identité</strong>
           </div>
-          <button class="mini-btn" type="button" @click="useDefaultClrTarget">Exemple cible test</button>
+          <div class="locator-head-actions">
+            <InfoDot topic="clrLocator" align="right" />
+            <button class="mini-btn" type="button" @click="useDefaultClrTarget">Exemple cible test</button>
+            <label class="wizard-mode-toggle">
+              <input v-model="locatorWizardAdvanced" type="checkbox" />
+              <span>Mode avancé (texte libre)</span>
+            </label>
+          </div>
         </div>
-        <div class="locator-inputs">
+
+        <template v-if="!locatorWizardAdvanced">
+          <ol class="wizard-steps">
+            <li :class="{ done: locatorWizardStep > 1, active: locatorWizardStep === 1 }">
+              <span>1. Objet</span>
+              <strong>{{ store.clrSelectedObject ? store.clrSelectedObject.typeName : 'À choisir' }}</strong>
+            </li>
+            <li :class="{ done: locatorWizardStep > 2, active: locatorWizardStep === 2 }">
+              <span>2. Champ</span>
+              <strong>{{ locatorWizardStep > 1 && locatorField ? locatorField : 'À choisir' }}</strong>
+            </li>
+            <li :class="{ active: locatorWizardStep === 3 }">
+              <span>3. Retrouver</span>
+              <strong>{{ locatorWizardStep === 3 ? 'Prêt' : 'En attente' }}</strong>
+            </li>
+          </ol>
+
+          <div v-if="locatorWizardStep === 1" class="wizard-step">
+            <p class="wizard-hint">
+              Choisis un objet représentatif du type que tu veux cibler plus tard (ex. le joueur, l'inventaire).
+              Si la liste est vide, renseigne un filtre de type dans la barre du haut puis clique Objets.
+            </p>
+            <div v-if="store.clrObjects.length" class="table-wrap wizard-object-list">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Adresse</th>
+                    <th>Type</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="obj in store.clrObjects" :key="obj.address">
+                    <td><code>{{ obj.address }}</code></td>
+                    <td>{{ obj.typeName }}</td>
+                    <td>
+                      <button class="mini-btn" :disabled="store.clrInspectorBusy" @click="chooseWizardObject(obj.address)">
+                        Choisir
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="panel-hint">Aucun objet listé pour l'instant.</p>
+          </div>
+
+          <div v-else-if="locatorWizardStep === 2" class="wizard-step">
+            <p class="wizard-hint">
+              Objet choisi : <strong>{{ store.clrSelectedObject?.typeName }}</strong> @ <code>{{ store.clrSelectedObject?.address }}</code>.
+              Choisis un champ stable (nom, identifiant...) — évite un champ qui change souvent (score, minuteur), il ferait échouer la relocalisation plus tard.
+            </p>
+            <div v-if="wizardLocatorCandidateFields.length" class="wizard-field-chips">
+              <button
+                v-for="field in wizardLocatorCandidateFields"
+                :key="field.name"
+                class="mini-btn"
+                type="button"
+                @click="useFieldAsLocator(field)"
+              >
+                {{ field.name }} = {{ valueText(field.value) }}
+              </button>
+            </div>
+            <p v-else class="panel-hint">
+              Aucun champ simple (texte/nombre/booléen) trouvé sur cet objet — reviens à l'étape 1 et choisis un autre objet, ou passe en mode avancé.
+            </p>
+            <button class="mini-btn" type="button" @click="restartLocatorWizard">← Changer d'objet</button>
+          </div>
+
+          <div v-else class="wizard-step">
+            <p class="wizard-hint">Locator prêt à utiliser.</p>
+            <div class="wizard-summary">
+              <div class="wizard-summary-item">
+                <span>Type</span>
+                <strong>{{ locatorType }}</strong>
+              </div>
+              <div class="wizard-summary-item">
+                <span>Champ</span>
+                <strong>{{ locatorField }}</strong>
+              </div>
+              <label class="field-label compact-label">
+                <span>Valeur</span>
+                <input v-model="locatorValue" class="locator-small-input" @keyup.enter="runFieldLocator" />
+              </label>
+              <label class="field-label count-label">
+                <span>Max</span>
+                <input v-model.number="locatorMaxResults" class="locator-count-input" type="number" min="1" max="200" />
+              </label>
+            </div>
+            <div class="wizard-step-actions">
+              <button class="mini-btn" type="button" @click="locatorWizardStep = 2">← Changer de champ</button>
+              <button
+                class="btn btn-secondary"
+                :disabled="store.clrInspectorBusy || !locatorType.trim() || !locatorField.trim() || !locatorValue.trim()"
+                aria-label="Retrouver les objets CLR qui correspondent au locator"
+                @click="runFieldLocator"
+              >
+                Retrouver
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <div v-else class="locator-inputs">
           <label class="field-label">
             <span>Type</span>
             <input v-model="locatorType" class="type-input" placeholder="Ex. KillEngine.ClrTestTarget.Player" />
@@ -545,7 +678,10 @@ onMounted(() => {
         <section class="panel">
           <div class="panel-head">
             <h2>Objet lu</h2>
-            <span>{{ objectFields.length }} champs</span>
+            <div class="panel-head-actions">
+              <span>{{ objectFields.length }} champs</span>
+              <InfoDot topic="clrFieldTable" align="right" />
+            </div>
           </div>
           <div v-if="store.clrSelectedObject" class="object-summary">
             <code>{{ store.clrSelectedObject.address }}</code>
@@ -556,7 +692,7 @@ onMounted(() => {
           </div>
           <div v-if="store.clrSelectedObject" class="path-write">
             <div class="path-write-head">
-              <span>Chemin symbolique depuis {{ selectedTypeLabel }}</span>
+              <span>Chemin symbolique depuis {{ selectedTypeLabel }}<InfoDot topic="clrPathWrite" align="right" /></span>
               <div class="path-examples">
                 <button
                   v-for="example in pathExamples"
@@ -602,7 +738,7 @@ onMounted(() => {
             </button>
             <div class="batch-write">
               <label class="field-label">
-                <span>Transaction multi-champs</span>
+                <span>Transaction multi-champs<InfoDot topic="clrBatchWrite" align="right" /></span>
                 <textarea
                   v-model="batchWriteText"
                   class="batch-input"
@@ -632,10 +768,7 @@ onMounted(() => {
                 <strong>Appeler un setter (action avancée — injecte du code)</strong>
                 <span>Contrairement aux écritures ci-dessus (mémoire passive), ceci exécute réellement le vrai setter C# dans le processus attaché.</span>
               </div>
-              <InfoDot
-                text="Résout l'adresse native déjà JITtée du setter via ClrMD, construit un petit shellcode x64 (this en RCX, valeur en RDX) puis l'exécute par injection dans la cible — logique métier réelle (validation, effets de bord), pas un contournement mémoire brut. Setters d'INSTANCE uniquement, 0 ou 1 paramètre : primitif (bool/int8..int64/uint8..uint64/single/double) OU type référence (classe/string) — dans ce dernier cas, saisir l'adresse hex (0x...) d'un objet DÉJÀ EXISTANT sur le tas, pas une nouvelle valeur (pas d'allocation). Jamais de paramètre struct. Le setter doit avoir déjà été déclenché au moins une fois en jeu (JIT), sinon l'appel échoue avec un message clair."
-                align="right"
-              />
+              <InfoDot topic="clrCallSetter" align="right" />
             </div>
             <div class="setter-call-inputs">
               <input
@@ -680,10 +813,7 @@ onMounted(() => {
                 <strong>Désassembler ce setter (lecture seule)</strong>
                 <span>Résout l'adresse native déjà JITtée puis désassemble en avant — aucune exécution, contrairement au panneau ci-dessus.</span>
               </div>
-              <InfoDot
-                text="Réutilise la même résolution ClrMD que l'appel de setter (resolveInstanceMethodAddress), puis lit le code natif déjà JITté et le désassemble instruction par instruction (décodeur x64 existant du module de patch). Purement en lecture — n'exécute jamais le code cible."
-                align="right"
-              />
+              <InfoDot topic="clrDisassemble" align="right" />
             </div>
             <div class="setter-call-inputs">
               <input
@@ -746,10 +876,7 @@ onMounted(() => {
                 <strong>Générer un rapport</strong>
                 <span>Exporte cet objet et son graphe atteignable (champs, collections, chemin GCRoot) en un document texte — pratique pour sauvegarder ou partager sans tout re-naviguer en live.</span>
               </div>
-              <InfoDot
-                text="Parcours borné (profondeur/nombre de nœuds/temps) du graphe managé atteignable depuis cet objet, chaque nœud décrit comme dans le panneau de lecture ci-dessus. Un graphe large sera tronqué — augmente la profondeur/le nombre de nœuds si le rapport semble incomplet, au prix d'un appel plus lent."
-                align="right"
-              />
+              <InfoDot topic="clrReport" align="right" />
             </div>
             <div class="setter-call-inputs">
               <input
@@ -871,7 +998,10 @@ onMounted(() => {
       <section class="panel roots-panel">
         <div class="panel-head">
           <h2>GC roots</h2>
-          <span>{{ store.clrRoots.length }}</span>
+          <div class="panel-head-actions">
+            <span>{{ store.clrRoots.length }}</span>
+            <InfoDot topic="clrRootsTable" align="right" />
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -900,10 +1030,7 @@ onMounted(() => {
         <div class="gcroot-path">
           <div class="panel-head">
             <h3>Chemin root → objet (exploratoire)</h3>
-            <InfoDot
-              text="Reconstruit le PLUS COURT chemin root -> ... -> objet cible à travers plusieurs sauts de références (équivalent approximatif de !gcroot SOS/WinDbg), via un parcours en largeur multi-source garanti optimal (shortestPathGuaranteed). Peut être lent sur un gros tas (budget de temps/nœuds interne côté helper)."
-              align="right"
-            />
+            <InfoDot topic="clrGcRootPath" align="right" />
           </div>
           <div class="setter-call-inputs">
             <input
@@ -1052,6 +1179,19 @@ onMounted(() => {
   margin-bottom: 4px;
 }
 
+.path-write-head span :deep(.info-dot),
+.field-label span :deep(.info-dot) {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.locator-head-actions,
+.panel-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .guide-head strong,
 .locator-head strong {
   color: var(--text-primary);
@@ -1162,6 +1302,105 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.wizard-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.wizard-steps li {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+}
+
+.wizard-steps li.done {
+  border-color: rgba(99, 230, 190, 0.38);
+}
+
+.wizard-steps li.active {
+  border-color: var(--accent);
+}
+
+.wizard-steps span {
+  display: block;
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+
+.wizard-steps strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-step {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wizard-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wizard-object-list {
+  max-height: 220px;
+}
+
+.wizard-field-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wizard-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.wizard-summary-item span {
+  display: block;
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.wizard-summary-item strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.wizard-step-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .locator-results {
@@ -1512,8 +1751,18 @@ code {
   .batch-write,
   .setter-call-inputs,
   .guide-steps,
+  .wizard-steps,
   .status-band {
     grid-template-columns: 1fr;
+  }
+
+  .locator-head-actions {
+    flex-wrap: wrap;
+  }
+
+  .wizard-summary {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .setter-call-head {

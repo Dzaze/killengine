@@ -1074,6 +1074,8 @@ export interface AiModelStatus {
     options: Record<string, unknown>,
   ): Promise<UiStringInvestigationStartResult>
   finishUiStringInvestigation?(options: Record<string, unknown>): Promise<UiStringInvestigationFinishResult>
+  startChangedPagesDiff?(options: Record<string, unknown>): Promise<Record<string, unknown>>
+  finishChangedPagesDiff?(previousValue: string, currentValue: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
   startExactScanExpert(
     value: string,
@@ -1132,6 +1134,9 @@ export interface AiModelStatus {
   pageGuardWatchFinished?: QWebChannelSignal<Record<string, unknown>>
 findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   findWhatAccessesFinished?: QWebChannelSignal<Record<string, unknown>>
+  findWhatExecutes?(instructionAddressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  startInProcessExecuteWatchAsync?(instructionAddressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  readAttachedWindowText?(options: Record<string, unknown>): Promise<Record<string, unknown>>
   scanGroupScan?(entries: Array<{ offset: number, type: string, value: string }>, options: Record<string, unknown>): Promise<EncryptedScanResult>
   writeMemoryHex?(addressHex: string, hexString: string): Promise<Record<string, unknown>>
   dumpMemoryRegion?(addressHex: string, size: number, fileName: string): Promise<Record<string, unknown>>
@@ -1938,6 +1943,12 @@ class BackendService {
           error: 'Mock backend',
         }
       },
+      async startChangedPagesDiff(_options: Record<string, unknown>) {
+        return { success: false, blocksCaptured: 0, bytesCaptured: 0, error: 'Mock backend' }
+      },
+      async finishChangedPagesDiff(_previousValue: string, _currentValue: string, _options: Record<string, unknown>) {
+        return { success: false, hits: [], hitsFound: 0, error: 'Mock backend' }
+      },
       async rollbackLastWrite() {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend' }
       },
@@ -1970,6 +1981,15 @@ class BackendService {
       },
       async cancelFindWhatWrites() {
         return { success: false, error: 'Mock backend' }
+      },
+      async findWhatExecutes(_instructionAddressHex: string, _options: Record<string, unknown>) {
+        return { success: false, hitCount: 0, hits: [], error: 'Mock backend' }
+      },
+      async startInProcessExecuteWatchAsync(_instructionAddressHex: string, _options: Record<string, unknown>) {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
+      async readAttachedWindowText(_options: Record<string, unknown>) {
+        return { success: false, windows: [], windowCount: 0, error: 'Mock backend' }
       },
       async scanAobPattern(_pattern: string, _options: Record<string, unknown>) {
         return { success: false, matches: [], matchesFound: 0, regionsScanned: 0, bytesScanned: 0, error: 'Mock backend' }

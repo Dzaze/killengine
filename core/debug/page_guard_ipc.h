@@ -18,6 +18,8 @@ namespace killcore {
 struct PageGuardIpcState {
     volatile long active{0};          // 1 une fois le VEH installe et la garde armee dans la cible
     volatile long installError{0};    // 1 si VirtualProtect/AddVectoredExceptionHandler a echoue cote cible
+    volatile long installErrorStep{0}; // 1=AddVectoredExceptionHandler, 2=VirtualProtect
+    uint32_t installLastError{0};      // GetLastError() cote cible quand disponible
     volatile long stopRequested{0};   // KillEngine demande l'arret (best-effort, voir page_guard_handler.cpp)
     volatile long hitCount{0};        // nombre total de hits (monotone, InterlockedIncrement)
     uint64_t watchAddress{0};         // adresse exacte surveillee (pas necessairement alignee page)
@@ -35,7 +37,7 @@ struct PageGuardIpcState {
 /// echange prealable (KillEngine cree le mapping avant d'injecter ; la DLL
 /// injectee l'ouvre via son propre GetCurrentProcessId() une fois chargee).
 inline void buildPageGuardMappingName(uint32_t pid, wchar_t* buffer, size_t bufferCount) {
-    swprintf_s(buffer, bufferCount, L"Local\\KillEnginePageGuard_%u", pid);
+    swprintf_s(buffer, bufferCount, L"Global\\KillEnginePageGuard_%u", pid);
 }
 
 } // namespace killcore

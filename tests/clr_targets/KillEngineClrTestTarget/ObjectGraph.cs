@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -76,6 +77,12 @@ public sealed class Inventory
     public LinkedList<string> LinkedTags { get; } = new();
     public SortedDictionary<string, int> SortedCurrencies { get; } = new();
     public SortedSet<int> SortedScores { get; } = new();
+
+    // Chantier "collections concurrentes" (docs/POWER_UP_ROADMAP.md candidat
+    // #8, extension listee "non couverte a ce jour") : layout interne verifie
+    // par attache ClrMD reelle avant d'ecrire le code de deballage, meme
+    // methodologie que HashSet<T>/Queue<T>/Stack<T>/LinkedList<T> ci-dessus.
+    public ConcurrentDictionary<string, int> ConcurrentCounters { get; } = new();
 
     // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source,
     // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) : depart d'une chaine LONGUE
@@ -224,6 +231,37 @@ public sealed class Player
 
     public int EquipChangeCount => _equipChangeCount;
     public bool IsArmed;
+
+    // ------------------------------------------------------------------
+    // Propriete a parametre STRUCT (value type, ni classe ni primitif) --
+    // dediee au chantier "setters a parametre struct" (docs/
+    // POWER_UP_ROADMAP.md candidat #8, extension listee "non couverte a ce
+    // jour"). Convention d'appel x64 Windows pour un struct PASSE PAR
+    // VALEUR : tient dans un seul registre (RDX) quand sa taille totale est
+    // exactement 1/2/4/8 octets, sinon passe par un pointeur cache vers une
+    // copie -- seul le premier cas (registre) est couvert par ce chantier.
+    // Coordinates {int X; int Y;} fait exactement 8 octets (cas le plus
+    // simple pour prouver le mecanisme, pas de trou d'alignement). Meme
+    // discipline de preuve que Vitality/Vigor/EquippedItem : clamp + compteur
+    // separe du champ backing, pour distinguer un VRAI appel de setter d'une
+    // simple ecriture memoire brute.
+    // ------------------------------------------------------------------
+    private Coordinates _waypoint;
+    private int _waypointChangeCount;
+
+    public Coordinates Waypoint
+    {
+        get => _waypoint;
+        set
+        {
+            int clampedX = value.X < 0 ? 0 : (value.X > 100 ? 100 : value.X);
+            int clampedY = value.Y < 0 ? 0 : (value.Y > 100 ? 100 : value.Y);
+            _waypoint = new Coordinates { X = clampedX, Y = clampedY };
+            _waypointChangeCount++;
+        }
+    }
+
+    public int WaypointChangeCount => _waypointChangeCount;
 
     // Tableau de primitifs (int[]) accessible depuis Player -- dedie au
     // chantier "ecriture directe par index dans un tableau primitif"
@@ -396,6 +434,20 @@ public static class TestRoot
         inventory.SortedScores.Add(15);
         // Ordre logique trie attendu : 7, 15, 42, 99.
 
+        // "stale" est ajoute PUIS retire expres, "hits" est ajoute PUIS mis a
+        // jour via TryUpdate (pas juste []=) : force une vraie entree
+        // supprimee ET une entree dont le noeud interne a ete remplace, pas
+        // seulement des insertions vierges -- condition necessaire pour
+        // verifier concretement que le deballage de ConcurrentDictionary<K,V>
+        // ignore les tombstones/buckets vides plutot que de les rapporter.
+        inventory.ConcurrentCounters["hits"] = 1;
+        inventory.ConcurrentCounters["stale"] = 999;
+        inventory.ConcurrentCounters.TryUpdate("hits", 41, 1);
+        inventory.ConcurrentCounters["misses"] = 7;
+        inventory.ConcurrentCounters.TryRemove("stale", out _);
+        // Contenu logique final attendu (ordre non garanti par la structure
+        // elle-meme) : hits=41, misses=7.
+
         // Chantier "vrai plus-court-chemin GCRoot" : chaine de 3 noeuds vers
         // ShortestPathProbe, soit 4 sauts au total depuis le root
         // StrongHandle qui pointe sur cette Inventory (RootHandle ci-dessous,
@@ -448,6 +500,10 @@ public static class TestRoot
         // setter avec une adresse d'objet reelle par shellcode), seul le
         // fait qu'il tourne au moins une fois avant l'attache compte.
         player.EquippedItem = sword;
+
+        // Warmup du setter a parametre STRUCT (set_Waypoint), meme raison --
+        // chantier "setters a parametre struct".
+        player.Waypoint = new Coordinates { X = 1, Y = 1 };
 
         return player;
     }

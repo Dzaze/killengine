@@ -246,6 +246,14 @@ LONG WINAPI VectoredHandler(EXCEPTION_POINTERS* ep) {
 
     g_state->lastHitRip = reinterpret_cast<uint64_t>(ep->ExceptionRecord->ExceptionAddress);
     g_state->lastHitThreadId = GetCurrentThreadId();
+    g_state->lastRax = ep->ContextRecord->Rax;
+    g_state->lastRcx = ep->ContextRecord->Rcx;
+    g_state->lastRdx = ep->ContextRecord->Rdx;
+    g_state->lastRbp = ep->ContextRecord->Rbp;
+    g_state->lastRsp = ep->ContextRecord->Rsp;
+    g_state->lastR8 = ep->ContextRecord->R8;
+    g_state->lastR9 = ep->ContextRecord->R9;
+    memcpy(g_state->lastXmm0, &ep->ContextRecord->Xmm0, sizeof(g_state->lastXmm0));
     InterlockedIncrement(&g_state->hitCount);
 
     return EXCEPTION_CONTINUE_EXECUTION;
@@ -257,13 +265,14 @@ DWORD WINAPI InstallThread(LPVOID) {
     wchar_t name[64];
     killcore::buildInProcessBreakpointMappingName(GetCurrentProcessId(), name, 64);
 
-    g_mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name);
+    constexpr DWORD kMappingAccess = FILE_MAP_READ | FILE_MAP_WRITE;
+    g_mapping = OpenFileMappingW(kMappingAccess, FALSE, name);
     if (!g_mapping) {
         LogStep("install:openFileMapping:failed");
         return 1;
     }
     g_state = static_cast<killcore::InProcessBreakpointIpcState*>(
-        MapViewOfFile(g_mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(killcore::InProcessBreakpointIpcState)));
+        MapViewOfFile(g_mapping, kMappingAccess, 0, 0, sizeof(killcore::InProcessBreakpointIpcState)));
     if (!g_state) {
         LogStep("install:mapViewOfFile:failed");
         CloseHandle(g_mapping);

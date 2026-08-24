@@ -164,6 +164,52 @@ double ratePerSecond(size_t count, qint64 elapsedMs) {
     return static_cast<double>(count) * 1000.0 / static_cast<double>(elapsedMs);
 }
 
+QVariantMap breakpointHitToVariant(const killcore::BreakpointHit& hit) {
+    QVariantMap item;
+    item["address"] = QString::number(hit.address, 16).toUpper();
+    item["instructionPointer"] = QString::number(hit.instructionPointer, 16).toUpper();
+    item["threadId"] = static_cast<qulonglong>(hit.threadId);
+    item["valueBefore"] = static_cast<qulonglong>(hit.valueBefore);
+    item["valueAfter"] = static_cast<qulonglong>(hit.valueAfter);
+    item["module"] = hit.module;
+    item["moduleOffset"] = QString::number(hit.moduleOffset, 16).toUpper();
+    item["rax"] = QString::number(hit.rax, 16).toUpper();
+    item["rbx"] = QString::number(hit.rbx, 16).toUpper();
+    item["rcx"] = QString::number(hit.rcx, 16).toUpper();
+    item["rdx"] = QString::number(hit.rdx, 16).toUpper();
+    item["rsi"] = QString::number(hit.rsi, 16).toUpper();
+    item["rdi"] = QString::number(hit.rdi, 16).toUpper();
+    item["rbp"] = QString::number(hit.rbp, 16).toUpper();
+    item["rsp"] = QString::number(hit.rsp, 16).toUpper();
+    item["r8"] = QString::number(hit.r8, 16).toUpper();
+    item["r9"] = QString::number(hit.r9, 16).toUpper();
+    item["r10"] = QString::number(hit.r10, 16).toUpper();
+    item["r11"] = QString::number(hit.r11, 16).toUpper();
+    item["r12"] = QString::number(hit.r12, 16).toUpper();
+    item["r13"] = QString::number(hit.r13, 16).toUpper();
+    item["r14"] = QString::number(hit.r14, 16).toUpper();
+    item["r15"] = QString::number(hit.r15, 16).toUpper();
+    item["xmm0Hex"] = QString::fromLatin1(hit.xmm0.toHex(' ').toUpper());
+    return item;
+}
+
+QVariantMap inProcessBreakpointHitToVariant(const killcore::InProcessBreakpointHit& hit) {
+    QVariantMap item;
+    item["instructionPointer"] = QString::number(hit.instructionPointer, 16).toUpper();
+    item["threadId"] = static_cast<qulonglong>(hit.threadId);
+    item["module"] = hit.module;
+    item["moduleOffset"] = QString::number(hit.moduleOffset, 16).toUpper();
+    item["rax"] = QString::number(hit.rax, 16).toUpper();
+    item["rcx"] = QString::number(hit.rcx, 16).toUpper();
+    item["rdx"] = QString::number(hit.rdx, 16).toUpper();
+    item["rbp"] = QString::number(hit.rbp, 16).toUpper();
+    item["rsp"] = QString::number(hit.rsp, 16).toUpper();
+    item["r8"] = QString::number(hit.r8, 16).toUpper();
+    item["r9"] = QString::number(hit.r9, 16).toUpper();
+    item["xmm0Hex"] = QString::fromLatin1(hit.xmm0.toHex(' ').toUpper());
+    return item;
+}
+
 #ifdef Q_OS_WIN
 QString windowsErrorMessage(DWORD errorCode) {
     LPWSTR raw = nullptr;
@@ -1583,6 +1629,14 @@ struct UiInvestigationProbeBlockState {
     QString memoryType;
 };
 
+struct ChangedPagesDiffBlockState {
+    uint64_t base{0};
+    QByteArray before;
+    uint64_t hash{0};
+    QString protection;
+    QString memoryType;
+};
+
 QList<UiInvestigationWindowState>& uiInvestigationWindows() {
     static QList<UiInvestigationWindowState> windows;
     return windows;
@@ -1590,6 +1644,11 @@ QList<UiInvestigationWindowState>& uiInvestigationWindows() {
 
 QList<UiInvestigationProbeBlockState>& uiInvestigationProbeBlocks() {
     static QList<UiInvestigationProbeBlockState> blocks;
+    return blocks;
+}
+
+QList<ChangedPagesDiffBlockState>& changedPagesDiffBlocks() {
+    static QList<ChangedPagesDiffBlockState> blocks;
     return blocks;
 }
 
@@ -1601,6 +1660,99 @@ uint64_t uiInvestigationHash(const QByteArray& bytes) {
     }
     return hash;
 }
+
+#ifdef Q_OS_WIN
+struct WindowTextChildPayload {
+    QVariantList* children{nullptr};
+    int maxChildren{0};
+};
+
+struct WindowTextEnumState {
+    DWORD pid{0};
+    int maxWindows{100};
+    int maxChildrenPerWindow{200};
+    bool includeAllVisible{false};
+    QString titleContains;
+    QVariantList windows;
+};
+
+BOOL CALLBACK enumChildWindowTextProc(HWND hwnd, LPARAM lParam) {
+    auto* payload = reinterpret_cast<WindowTextChildPayload*>(lParam);
+    if (!payload || !payload->children || payload->children->size() >= payload->maxChildren) {
+        return FALSE;
+    }
+    wchar_t textBuffer[512]{};
+    wchar_t classBuffer[256]{};
+    const int textLen = GetWindowTextW(hwnd, textBuffer, static_cast<int>(std::size(textBuffer)));
+    const int classLen = GetClassNameW(hwnd, classBuffer, static_cast<int>(std::size(classBuffer)));
+    if (textLen <= 0 && classLen <= 0) {
+        return TRUE;
+    }
+    QVariantMap child;
+    child["hwnd"] = QString::number(reinterpret_cast<quintptr>(hwnd), 16).toUpper();
+    child["text"] = textLen > 0 ? QString::fromWCharArray(textBuffer, textLen) : QString();
+    child["className"] = classLen > 0 ? QString::fromWCharArray(classBuffer, classLen) : QString();
+    RECT rect{};
+    if (GetWindowRect(hwnd, &rect)) {
+        child["x"] = static_cast<int>(rect.left);
+        child["y"] = static_cast<int>(rect.top);
+        child["width"] = static_cast<int>(rect.right - rect.left);
+        child["height"] = static_cast<int>(rect.bottom - rect.top);
+    }
+    payload->children->append(child);
+    return TRUE;
+}
+
+BOOL CALLBACK enumWindowTextProc(HWND hwnd, LPARAM lParam) {
+    auto* state = reinterpret_cast<WindowTextEnumState*>(lParam);
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!state) {
+        return TRUE;
+    }
+    wchar_t textBuffer[512]{};
+    wchar_t classBuffer[256]{};
+    const int textLen = GetWindowTextW(hwnd, textBuffer, static_cast<int>(std::size(textBuffer)));
+    const int classLen = GetClassNameW(hwnd, classBuffer, static_cast<int>(std::size(classBuffer)));
+    const QString title = textLen > 0 ? QString::fromWCharArray(textBuffer, textLen) : QString();
+    const QString className = classLen > 0 ? QString::fromWCharArray(classBuffer, classLen) : QString();
+    const bool pidMatches = pid == state->pid;
+    const bool titleMatches = !state->titleContains.isEmpty()
+        && title.contains(state->titleContains, Qt::CaseInsensitive);
+    const bool relatedVisibleFrame = state->includeAllVisible
+        && IsWindowVisible(hwnd)
+        && (titleMatches || className.compare("ApplicationFrameWindow", Qt::CaseInsensitive) == 0);
+    if (!pidMatches && !relatedVisibleFrame) {
+        return TRUE;
+    }
+    if (state->windows.size() >= state->maxWindows) {
+        return FALSE;
+    }
+
+    QVariantMap window;
+    window["hwnd"] = QString::number(reinterpret_cast<quintptr>(hwnd), 16).toUpper();
+    window["pid"] = static_cast<qulonglong>(pid);
+    window["pidMatchesAttached"] = pidMatches;
+    window["visible"] = IsWindowVisible(hwnd) != FALSE;
+    window["text"] = title;
+    window["className"] = className;
+    RECT rect{};
+    if (GetWindowRect(hwnd, &rect)) {
+        window["x"] = static_cast<int>(rect.left);
+        window["y"] = static_cast<int>(rect.top);
+        window["width"] = static_cast<int>(rect.right - rect.left);
+        window["height"] = static_cast<int>(rect.bottom - rect.top);
+    }
+
+    QVariantList children;
+    WindowTextChildPayload payload{&children, state->maxChildrenPerWindow};
+    EnumChildWindows(hwnd, enumChildWindowTextProc, reinterpret_cast<LPARAM>(&payload));
+    window["children"] = children;
+    window["childCount"] = children.size();
+    state->windows.append(window);
+    return TRUE;
+}
+#endif
 
 } // namespace
 
@@ -3513,6 +3665,258 @@ QVariantMap ApplicationController::finishUiStringInvestigation(const QVariantMap
         {"sampleCount", samples.size()},
         {"samples", samples},
     });
+    return result;
+}
+
+QVariantMap ApplicationController::startChangedPagesDiff(const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const uint64_t maxBytes = static_cast<uint64_t>(
+        std::clamp(options.value("maxBytesMb", 64).toInt(), 8, 256)) * 1024ull * 1024ull;
+    const int blockSize = std::clamp(options.value("blockSize", 64 * 1024).toInt(), 4096, 1024 * 1024);
+    const bool privateOnly = options.value("privateOnly", true).toBool();
+    const bool writableOnly = options.value("writableOnly", true).toBool();
+
+    auto& blocks = changedPagesDiffBlocks();
+    blocks.clear();
+
+    killcore::MemoryReader reader(m_handle);
+    const auto regions = killcore::MemoryMap::snapshot(m_handle);
+    uint64_t bytesCaptured = 0;
+    int regionsScanned = 0;
+    int unreadable = 0;
+    bool partial = false;
+
+    for (const auto& region : regions) {
+        if (bytesCaptured >= maxBytes) {
+            partial = true;
+            break;
+        }
+        if (!region.readable || region.guarded || region.size == 0) {
+            continue;
+        }
+        if (writableOnly && !region.writable) {
+            continue;
+        }
+        if (privateOnly && region.type != killcore::MemoryType::Private) {
+            continue;
+        }
+        ++regionsScanned;
+        uint64_t offset = 0;
+        while (offset < region.size && bytesCaptured < maxBytes) {
+            const uint64_t address = region.baseAddress + offset;
+            const size_t toRead = static_cast<size_t>(std::min<uint64_t>({
+                static_cast<uint64_t>(blockSize),
+                region.size - offset,
+                maxBytes - bytesCaptured,
+            }));
+            if (toRead == 0) {
+                break;
+            }
+            const auto read = reader.read(address, toRead);
+            if (!read.success && !read.partial) {
+                ++unreadable;
+                offset += static_cast<uint64_t>(toRead);
+                continue;
+            }
+            if (read.bytesRead > 0) {
+                const QByteArray data = read.data.left(static_cast<qsizetype>(read.bytesRead));
+                blocks.append({
+                    address,
+                    data,
+                    uiInvestigationHash(data),
+                    killcore::protectionToString(region.protection),
+                    killcore::memoryTypeToString(region.type),
+                });
+                bytesCaptured += read.bytesRead;
+            }
+            offset += static_cast<uint64_t>(toRead);
+        }
+    }
+
+    result["success"] = !blocks.isEmpty();
+    result["blocksCaptured"] = blocks.size();
+    result["bytesCaptured"] = static_cast<qulonglong>(bytesCaptured);
+    result["regionsScanned"] = regionsScanned;
+    result["unreadable"] = unreadable;
+    result["partial"] = partial;
+    result["maxBytes"] = static_cast<qulonglong>(maxBytes);
+    result["blockSize"] = blockSize;
+    result["privateOnly"] = privateOnly;
+    result["writableOnly"] = writableOnly;
+    result["error"] = blocks.isEmpty() ? "Aucun bloc private/RW lisible capturé." : QString();
+    appendScanTelemetry("changed_pages_diff_start", result);
+    return result;
+}
+
+QVariantMap ApplicationController::finishChangedPagesDiff(
+    const QString& previousValue,
+    const QString& currentValue,
+    const QVariantMap& options) {
+    QVariantMap result;
+    QVariantList hits;
+    result["success"] = false;
+    result["hits"] = hits;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    auto& blocks = changedPagesDiffBlocks();
+    if (blocks.isEmpty()) {
+        result["error"] = "Aucun diff de pages actif.";
+        return result;
+    }
+
+    const QString prev = previousValue.trimmed();
+    const QString cur = currentValue.trimmed();
+    if (prev.isEmpty() || cur.isEmpty()) {
+        result["error"] = "Valeurs précédente/actuelle requises.";
+        return result;
+    }
+
+    const int maxHits = std::clamp(options.value("maxHits", 300).toInt(), 1, 2000);
+    const int maxDistanceToChange = std::clamp(options.value("maxDistanceToChange", 256).toInt(), 0, 4096);
+    const auto previousVariants = killcore::generateScanVariants(prev, killcore::ValueType::Int32, false);
+    const auto currentVariants = killcore::generateScanVariants(cur, killcore::ValueType::Int32, false);
+    QHash<QString, QByteArray> previousByKey;
+    for (const auto& variant : previousVariants) {
+        previousByKey.insert(variantKey(variant.value.type, variant.label), killcore::scanValueToBytes(variant.value));
+    }
+
+    auto distanceToChangedRanges = [](qsizetype offset, const QList<QPair<qsizetype, qsizetype>>& ranges) {
+        qsizetype best = std::numeric_limits<qsizetype>::max();
+        for (const auto& range : ranges) {
+            if (offset >= range.first && offset < range.second) {
+                return qsizetype{0};
+            }
+            const qsizetype distance = offset < range.first ? range.first - offset : offset - range.second;
+            best = std::min(best, distance);
+        }
+        return best;
+    };
+
+    killcore::MemoryReader reader(m_handle);
+    int blocksChecked = 0;
+    int blocksChanged = 0;
+    int unreadable = 0;
+    uint64_t bytesChecked = 0;
+    uint64_t changedBytes = 0;
+    QSet<QString> seen;
+
+    for (const auto& block : blocks) {
+        if (hits.size() >= maxHits) {
+            break;
+        }
+        ++blocksChecked;
+        const auto read = reader.read(block.base, static_cast<size_t>(block.before.size()));
+        if (!read.success && !read.partial) {
+            ++unreadable;
+            continue;
+        }
+        if (read.bytesRead == 0) {
+            ++unreadable;
+            continue;
+        }
+        const QByteArray after = read.data.left(static_cast<qsizetype>(read.bytesRead));
+        bytesChecked += read.bytesRead;
+        if (uiInvestigationHash(after) == block.hash) {
+            continue;
+        }
+        ++blocksChanged;
+
+        QList<QPair<qsizetype, qsizetype>> ranges;
+        const qsizetype comparable = std::min(block.before.size(), after.size());
+        qsizetype i = 0;
+        while (i < comparable) {
+            if (block.before.at(i) == after.at(i)) {
+                ++i;
+                continue;
+            }
+            const qsizetype start = i;
+            while (i < comparable && block.before.at(i) != after.at(i)) {
+                ++i;
+            }
+            ranges.append({start, i});
+            changedBytes += static_cast<uint64_t>(i - start);
+        }
+
+        for (const auto& variant : currentVariants) {
+            if (hits.size() >= maxHits) {
+                break;
+            }
+            const QByteArray currentBytes = killcore::scanValueToBytes(variant.value);
+            if (currentBytes.isEmpty() || currentBytes.size() > after.size()) {
+                continue;
+            }
+            const QString keyBase = variantKey(variant.value.type, variant.label);
+            const QByteArray previousBytes = previousByKey.value(keyBase);
+            qsizetype from = 0;
+            while (hits.size() < maxHits) {
+                const qsizetype found = after.indexOf(currentBytes, from);
+                if (found < 0) {
+                    break;
+                }
+                from = found + 1;
+                const qsizetype distance = distanceToChangedRanges(found, ranges);
+                if (distance > maxDistanceToChange) {
+                    continue;
+                }
+                const uint64_t address = block.base + static_cast<uint64_t>(found);
+                const QString seenKey = uiStringAddress(address) + "|" + keyBase;
+                if (seen.contains(seenKey)) {
+                    continue;
+                }
+                seen.insert(seenKey);
+
+                const bool sameOffsetOldValue =
+                    !previousBytes.isEmpty()
+                    && found + previousBytes.size() <= block.before.size()
+                    && block.before.mid(found, previousBytes.size()) == previousBytes;
+                QVariantMap hit;
+                hit["address"] = uiStringAddress(address);
+                hit["type"] = killcore::valueTypeToString(variant.value.type);
+                hit["variantLabel"] = variant.label;
+                hit["previousValue"] = prev;
+                hit["currentValue"] = cur;
+                hit["lastValueHex"] = QString::fromLatin1(currentBytes.toHex(' ').toUpper());
+                hit["lastValueNumber"] = bytesToDouble(currentBytes, variant.value.type);
+                hit["previousAtSameOffset"] = sameOffsetOldValue;
+                hit["distanceToChangedBytes"] = static_cast<qulonglong>(distance);
+                hit["confidence"] = sameOffsetOldValue ? 0.92 : (distance == 0 ? 0.78 : 0.62);
+                hit["origin"] = sameOffsetOldValue ? "changed_pages_diff_old_to_new" : "changed_pages_diff_near_change";
+                hit["regionBase"] = uiStringAddress(block.base);
+                hit["protection"] = block.protection;
+                hit["memoryType"] = block.memoryType;
+                hits.append(hit);
+            }
+        }
+    }
+
+    const int capturedBlocks = blocks.size();
+    blocks.clear();
+
+    result["success"] = true;
+    result["previousValue"] = prev;
+    result["currentValue"] = cur;
+    result["hits"] = hits;
+    result["hitsFound"] = hits.size();
+    result["capturedBlocks"] = capturedBlocks;
+    result["blocksChecked"] = blocksChecked;
+    result["blocksChanged"] = blocksChanged;
+    result["bytesChecked"] = static_cast<qulonglong>(bytesChecked);
+    result["changedBytes"] = static_cast<qulonglong>(changedBytes);
+    result["unreadable"] = unreadable;
+    result["partial"] = hits.size() >= maxHits;
+    result["error"] = "";
+    appendScanTelemetry("changed_pages_diff_finish", result);
     return result;
 }
 
@@ -6186,6 +6590,108 @@ QVariantMap ApplicationController::findWhatAccesses(const QString& addressHex, c
     return result;
 }
 
+QVariantMap ApplicationController::findWhatExecutes(const QString& instructionAddressHex, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = instructionAddressHex;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(instructionAddressHex, &address)) {
+        result["error"] = "Adresse d'instruction invalide.";
+        return result;
+    }
+
+    const int timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 15000);
+    const int maxHitsInt = std::clamp(options.value("maxHits", 10).toInt(), 1, 100);
+
+    KE_LOG_INFO() << "findWhatExecutes(address=0x" << std::hex << address
+                  << ", pid=" << std::dec << m_pid
+                  << ", timeoutMs=" << timeoutMs
+                  << ", maxHits=" << maxHitsInt << ")";
+
+    const auto hits = killcore::findWhatExecutes(
+        static_cast<uint32_t>(m_pid),
+        address,
+        timeoutMs,
+        static_cast<size_t>(maxHitsInt));
+
+    QVariantList hitList;
+    for (const auto& hit : hits) {
+        hitList.append(breakpointHitToVariant(hit));
+    }
+
+    result["success"] = true;
+    result["hits"] = hitList;
+    result["hitCount"] = hitList.size();
+    result["timeoutMs"] = timeoutMs;
+    result["maxHits"] = maxHitsInt;
+    result["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture. "
+                         "Break on execute : aucune ecriture ni patch, les hits exposent les registres runtime.";
+    result["error"] = hits.isEmpty()
+        ? "Aucune exécution capturée pendant la fenêtre d'observation."
+        : QString();
+    appendScanTelemetry("find_what_executes", {
+        {"success", true},
+        {"address", instructionAddressHex},
+        {"hitCount", hitList.size()},
+        {"timeoutMs", timeoutMs},
+        {"maxHits", maxHitsInt},
+    });
+    return result;
+}
+
+QVariantMap ApplicationController::readAttachedWindowText(const QVariantMap& options) const {
+    QVariantMap result;
+    QVariantList windows;
+    result["success"] = false;
+    result["windows"] = windows;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const int maxWindows = std::clamp(options.value("maxWindows", 100).toInt(), 1, 500);
+    const int maxChildrenPerWindow = std::clamp(options.value("maxChildrenPerWindow", 200).toInt(), 0, 1000);
+    const bool includeAllVisible = options.value("includeAllVisible", true).toBool();
+    QString titleContains = options.value("titleContains", "Solitaire").toString().trimmed();
+
+#ifdef Q_OS_WIN
+    WindowTextEnumState state;
+    state.pid = static_cast<DWORD>(m_pid);
+    state.maxWindows = maxWindows;
+    state.maxChildrenPerWindow = maxChildrenPerWindow;
+    state.includeAllVisible = includeAllVisible;
+    state.titleContains = titleContains;
+
+    EnumWindows(enumWindowTextProc, reinterpret_cast<LPARAM>(&state));
+    windows = state.windows;
+    result["success"] = true;
+    result["windows"] = windows;
+    result["windowCount"] = windows.size();
+    result["includeAllVisible"] = includeAllVisible;
+    result["titleContains"] = titleContains;
+    result["error"] = "";
+#else
+    Q_UNUSED(options);
+    Q_UNUSED(includeAllVisible);
+    Q_UNUSED(titleContains);
+    result["error"] = "Lecture de texte de fenêtre disponible seulement sous Windows.";
+#endif
+
+    appendScanTelemetry("attached_window_text_read", {
+        {"success", result.value("success")},
+        {"windowCount", result.value("windowCount", 0)},
+        {"error", result.value("error")},
+    });
+    return result;
+}
+
 QVariantMap ApplicationController::findWhatWritesAsync(const QString& addressHex, const QVariantMap& options) {
     QVariantMap result;
     result["success"] = false;
@@ -6505,6 +7011,11 @@ QVariantMap ApplicationController::startPageGuardWatchAsync(const QString& addre
 
             self->m_pageGuardWatchInProgress = false;
             self->m_activePageGuardSession.reset();
+            KE_LOG_INFO() << "pageGuardWatchFinished(requestId=" << requestId
+                          << ", success=" << pageResult.success
+                          << ", hits=" << hitList.size()
+                          << ", error=" << finished["error"].toString().toStdString()
+                          << ")";
             emit self->pageGuardWatchFinished(finished);
         }, Qt::QueuedConnection);
     }).detach();
@@ -6569,6 +7080,12 @@ QVariantMap ApplicationController::startInProcessBreakpointWatchAsync(const QStr
     const int requestedSize = options.value("size", 4).toInt();
     config.size = (requestedSize == 1 || requestedSize == 2 || requestedSize == 8) ? static_cast<size_t>(requestedSize) : 4;
     config.captureWrites = options.value("captureWrites", true).toBool();
+    config.captureExecute = options.value("captureExecute", false).toBool()
+        || options.value("breakpointType").toString().compare("execute", Qt::CaseInsensitive) == 0;
+    if (config.captureExecute) {
+        config.size = 1;
+        config.captureWrites = false;
+    }
     config.timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 15000);
     config.maxHits = static_cast<size_t>(std::clamp(options.value("maxHits", 10).toInt(), 1, 100));
     config.injectedHandlerPath = handlerPath;
@@ -6624,12 +7141,7 @@ QVariantMap ApplicationController::startInProcessBreakpointWatchAsync(const QStr
 
             QVariantList hitList;
             for (const auto& hit : captureResult.hits) {
-                QVariantMap item;
-                item["instructionPointer"] = QString::number(hit.instructionPointer, 16).toUpper();
-                item["threadId"] = static_cast<qulonglong>(hit.threadId);
-                item["module"] = hit.module;
-                item["moduleOffset"] = QString::number(hit.moduleOffset, 16).toUpper();
-                hitList.append(item);
+                hitList.append(inProcessBreakpointHitToVariant(hit));
             }
 
             QVariantMap finished;
@@ -6640,6 +7152,7 @@ QVariantMap ApplicationController::startInProcessBreakpointWatchAsync(const QStr
             finished["hits"] = hitList;
             finished["hitCount"] = hitList.size();
             finished["size"] = static_cast<int>(config.size);
+            finished["captureExecute"] = config.captureExecute;
             finished["timeoutMs"] = config.timeoutMs;
             finished["maxHits"] = static_cast<int>(config.maxHits);
             finished["timedOut"] = captureResult.timedOut;
@@ -6667,6 +7180,15 @@ QVariantMap ApplicationController::startInProcessBreakpointWatchAsync(const QStr
     result["maxHits"] = static_cast<int>(config.maxHits);
     result["error"] = "";
     return result;
+}
+
+QVariantMap ApplicationController::startInProcessExecuteWatchAsync(const QString& instructionAddressHex, const QVariantMap& options) {
+    QVariantMap executeOptions = options;
+    executeOptions["captureExecute"] = true;
+    executeOptions["captureWrites"] = false;
+    executeOptions["size"] = 1;
+    const QVariantMap started = startInProcessBreakpointWatchAsync(instructionAddressHex, executeOptions);
+    return started;
 }
 
 QVariantMap ApplicationController::cancelInProcessBreakpointWatch() {
@@ -12690,6 +13212,135 @@ bool encodeInstanceMethodParameterImmediate(const QString& valueText, const QStr
     return true;
 }
 
+// PHASE 76 : meme table que clrParameterTypeToKillcoreToken ci-dessus, mais
+// indexee par nom de ClrElementType (renvoye pour chaque CHAMP d'un
+// parametre struct par ClrSession.ResolveInstanceMethodAddress -- ex.
+// "Int32","Float","Boolean") plutot que par nom de TYPE CLR complet (utilise
+// pour un parametre primitif DIRECT -- ex. "Int32","Single","Boolean"). Les
+// deux nomenclatures different pour SByte/Byte ("Int8"/"UInt8" cote
+// ElementType) et Single ("Float" cote ElementType) -- reutiliser
+// directement clrParameterTypeToKillcoreToken pour un champ de struct
+// donnerait un mauvais token pour ces trois cas precis.
+bool clrElementTypeNameToKillcoreToken(const QString& elementTypeName, QString* token, bool* isBoolean) {
+    static const QHash<QString, QString> table = {
+        {QStringLiteral("Int8"), QStringLiteral("int8")}, {QStringLiteral("UInt8"), QStringLiteral("uint8")},
+        {QStringLiteral("Int16"), QStringLiteral("int16")}, {QStringLiteral("UInt16"), QStringLiteral("uint16")},
+        {QStringLiteral("Int32"), QStringLiteral("int32")}, {QStringLiteral("UInt32"), QStringLiteral("uint32")},
+        {QStringLiteral("Int64"), QStringLiteral("int64")}, {QStringLiteral("UInt64"), QStringLiteral("uint64")},
+        {QStringLiteral("Float"), QStringLiteral("float32")}, {QStringLiteral("Double"), QStringLiteral("float64")},
+    };
+    if (elementTypeName == QStringLiteral("Boolean")) {
+        *isBoolean = true;
+        *token = QStringLiteral("uint8");
+        return true;
+    }
+    *isBoolean = false;
+    const auto it = table.constFind(elementTypeName);
+    if (it == table.constEnd()) {
+        return false;
+    }
+    *token = it.value();
+    return true;
+}
+
+// PHASE 76 : construit l'immediate RDX pour un parametre STRUCT dont
+// ClrSession.ResolveInstanceMethodAddress a deja valide le perimetre cote
+// helper (taille totale 1/2/4/8 octets, tous les champs primitifs) --
+// "structFields" porte le layout (nom/elementType/offset/size) de chaque
+// champ. Reutilise le format de saisie deja retenu pour l'ecriture d'un
+// element struct de tableau ENTIER (ClrSession.WriteIndexedStructValue) :
+// "Champ1=Valeur1,Champ2=Valeur2", tous les champs requis -- composition des
+// octets aux bons offsets dans un buffer de 8 octets, EXACTEMENT le meme
+// registre RDX que pour un parametre primitif (aucun changement necessaire a
+// buildCallInstanceMethodShellcode).
+bool encodeStructParameterImmediate(
+    const QVariantList& structFields, const QString& valueText, uint64_t* outImmediate, QString* error) {
+    QHash<QString, QString> assignments;
+    const QStringList parts = valueText.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        const int separator = part.indexOf(QLatin1Char('='));
+        const QString trimmedPart = part.trimmed();
+        if (separator <= 0) {
+            if (error) *error = QStringLiteral("Format d'ecriture struct invalide (attendu \"Champ=Valeur\") : '%1'.").arg(trimmedPart);
+            return false;
+        }
+        const QString name = part.left(separator).trimmed();
+        const QString value = part.mid(separator + 1).trimmed();
+        if (name.isEmpty() || value.isEmpty()) {
+            if (error) *error = QStringLiteral("Format d'ecriture struct invalide (attendu \"Champ=Valeur\") : '%1'.").arg(trimmedPart);
+            return false;
+        }
+        assignments.insert(name, value);
+    }
+    if (assignments.isEmpty()) {
+        if (error) *error = QStringLiteral("Parametre struct : aucune assignation fournie (format attendu \"Champ1=Valeur1,Champ2=Valeur2\").");
+        return false;
+    }
+
+    QSet<QString> knownFieldNames;
+    for (const QVariant& fieldVariant : structFields) {
+        knownFieldNames.insert(fieldVariant.toMap().value("name").toString());
+    }
+    QStringList unknown;
+    for (auto it = assignments.constBegin(); it != assignments.constEnd(); ++it) {
+        if (!knownFieldNames.contains(it.key())) {
+            unknown.append(it.key());
+        }
+    }
+    if (!unknown.isEmpty()) {
+        if (error) *error = QStringLiteral("Champ(s) inconnu(s) pour le parametre struct : %1.").arg(unknown.join(QStringLiteral(", ")));
+        return false;
+    }
+
+    uint8_t buffer[8] = {0};
+    QStringList missing;
+    for (const QVariant& fieldVariant : structFields) {
+        const QVariantMap field = fieldVariant.toMap();
+        const QString fieldName = field.value("name").toString();
+        if (!assignments.contains(fieldName)) {
+            missing.append(fieldName);
+            continue;
+        }
+
+        QString killcoreToken;
+        bool isBoolean = false;
+        const QString clrElementType = field.value("elementType").toString();
+        if (!clrElementTypeNameToKillcoreToken(clrElementType, &killcoreToken, &isBoolean)) {
+            if (error) *error = QStringLiteral("Champ struct de type non supporte : %1 (%2).").arg(fieldName, clrElementType);
+            return false;
+        }
+
+        uint64_t fieldImmediate = 0;
+        QString parseError;
+        if (!encodeInstanceMethodParameterImmediate(assignments.value(fieldName), killcoreToken, isBoolean, &fieldImmediate, &parseError)) {
+            if (error) *error = QStringLiteral("Champ %1 : %2").arg(fieldName, parseError);
+            return false;
+        }
+
+        const int offset = field.value("offset").toInt();
+        const int fieldSize = field.value("size").toInt();
+        if (offset < 0 || fieldSize <= 0 || offset + fieldSize > static_cast<int>(sizeof(buffer))) {
+            if (error) *error = QStringLiteral("Champ struct %1 : offset/taille invalide (%2/%3).").arg(fieldName).arg(offset).arg(fieldSize);
+            return false;
+        }
+        for (int i = 0; i < fieldSize; ++i) {
+            buffer[offset + i] = static_cast<uint8_t>((fieldImmediate >> (8 * i)) & 0xFF);
+        }
+    }
+
+    if (!missing.isEmpty()) {
+        if (error) *error = QStringLiteral(
+            "Champ(s) manquant(s) pour le parametre struct : %1 -- l'appel d'un setter a parametre struct exige "
+            "tous ses champs (format \"Champ1=Valeur1,Champ2=Valeur2\").").arg(missing.join(QStringLiteral(", ")));
+        return false;
+    }
+
+    uint64_t immediate = 0;
+    std::memcpy(&immediate, buffer, sizeof(buffer));
+    *outImmediate = immediate;
+    return true;
+}
+
 } // namespace
 
 QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAddressHex, const QString& methodName, const QString& valueText, const QString& valueType) {
@@ -12737,10 +13388,19 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
     // conversion IEEE754/entiere) -- il n'introduit aucune nouvelle logique
     // de validation de type ici, le helper reste l'autorite.
     const bool parameterIsReferenceType = resolved.value("parameterIsReferenceType").toBool();
+    // PHASE 76 : chantier "setters a parametre struct" -- le helper ClrMD
+    // accepte desormais un parametre struct dans le cas taille 1/2/4/8
+    // octets + tous champs primitifs (voir ClrSession.
+    // ResolveInstanceMethodAddress), et fournit le layout des champs
+    // (nom/elementType/offset/size) necessaire pour composer l'immediate RDX
+    // ci-dessous -- voir encodeStructParameterImmediate.
+    const bool parameterIsStruct = resolved.value("parameterIsStruct").toBool();
+    const QVariantList parameterStructFields = resolved.value("parameterStructFields").toList();
     result["methodName"] = resolvedMethodName;
     result["nativeCodeAddress"] = nativeCodeAddressHex;
     result["parameterType"] = parameterTypeName;
     result["parameterIsReferenceType"] = parameterIsReferenceType;
+    result["parameterIsStruct"] = parameterIsStruct;
 
     uint64_t objectAddress = 0;
     uint64_t nativeCodeAddress = 0;
@@ -12821,6 +13481,30 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
             }
 
             paramImmediate = paramObjectAddress;
+        } else if (parameterIsStruct) {
+            // PHASE 76 : valueText porte "Champ1=Valeur1,Champ2=Valeur2"
+            // (meme format que ClrSession.WriteIndexedStructValue), valide
+            // et encode par encodeStructParameterImmediate a partir du
+            // layout resolu par le helper -- RDX porte alors directement les
+            // octets bruts du struct, meme mecanisme que buildCallInstanceMethodShellcode
+            // pour un parametre primitif entier.
+            if (!valueType.trimmed().isEmpty()) {
+                static const QSet<QString> acceptedStructValueTypeTokens = {
+                    QStringLiteral("struct"), QStringLiteral("valuetype"),
+                };
+                if (!acceptedStructValueTypeTokens.contains(valueType.trimmed().toLower())) {
+                    result["error"] = QStringLiteral(
+                        "Type fourni ('%1') incoherent avec le parametre reel du setter (struct, '%2').")
+                        .arg(valueType, parameterTypeName);
+                    return result;
+                }
+            }
+
+            QString parseError;
+            if (!encodeStructParameterImmediate(parameterStructFields, valueText, &paramImmediate, &parseError)) {
+                result["error"] = parseError;
+                return result;
+            }
         } else {
             QString killcoreToken;
             bool isBoolean = false;

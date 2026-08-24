@@ -29,6 +29,7 @@ killcore::PageGuardIpcState* g_state = nullptr;
 HANDLE g_mapping = nullptr;
 void* g_vehHandle = nullptr;
 uint64_t g_pageBase = 0;
+DWORD g_guardProtect = PAGE_READWRITE | PAGE_GUARD;
 bool g_rearmPending = false;
 
 constexpr DWORD kStatusGuardPageViolation = 0x80000001;
@@ -50,7 +51,7 @@ LONG WINAPI VectoredHandler(EXCEPTION_POINTERS* ep) {
             return EXCEPTION_CONTINUE_EXECUTION;
         }
         DWORD oldProtect = 0;
-        VirtualProtect(reinterpret_cast<LPVOID>(g_pageBase), 4096, PAGE_READWRITE | PAGE_GUARD, &oldProtect);
+        VirtualProtect(reinterpret_cast<LPVOID>(g_pageBase), 4096, g_guardProtect, &oldProtect);
         return EXCEPTION_CONTINUE_EXECUTION;
     }
 
@@ -88,12 +89,13 @@ DWORD WINAPI InstallThread(LPVOID) {
     wchar_t name[64];
     killcore::buildPageGuardMappingName(GetCurrentProcessId(), name, 64);
 
-    g_mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name);
+    constexpr DWORD kMappingAccess = FILE_MAP_READ | FILE_MAP_WRITE;
+    g_mapping = OpenFileMappingW(kMappingAccess, FALSE, name);
     if (!g_mapping) {
         return 1;
     }
     g_state = static_cast<killcore::PageGuardIpcState*>(
-        MapViewOfFile(g_mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(killcore::PageGuardIpcState)));
+        MapViewOfFile(g_mapping, kMappingAccess, 0, 0, sizeof(killcore::PageGuardIpcState)));
     if (!g_state) {
         CloseHandle(g_mapping);
         g_mapping = nullptr;
@@ -104,12 +106,29 @@ DWORD WINAPI InstallThread(LPVOID) {
 
     g_vehHandle = AddVectoredExceptionHandler(1, VectoredHandler);
     if (!g_vehHandle) {
+        g_state->installErrorStep = 1;
+        g_state->installLastError = GetLastError();
         InterlockedExchange(&g_state->installError, 1);
         return 1;
     }
 
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(reinterpret_cast<LPCVOID>(g_pageBase), &mbi, sizeof(mbi))) {
+        g_state->installErrorStep = 2;
+        g_state->installLastError = GetLastError();
+        InterlockedExchange(&g_state->installError, 1);
+        RemoveVectoredExceptionHandler(g_vehHandle);
+        g_vehHandle = nullptr;
+        return 1;
+    }
+
+    const DWORD baseProtect = mbi.Protect & ~PAGE_GUARD;
+    g_guardProtect = baseProtect | PAGE_GUARD;
+
     DWORD oldProtect = 0;
-    if (!VirtualProtect(reinterpret_cast<LPVOID>(g_pageBase), 4096, PAGE_READWRITE | PAGE_GUARD, &oldProtect)) {
+    if (!VirtualProtect(reinterpret_cast<LPVOID>(g_pageBase), 4096, g_guardProtect, &oldProtect)) {
+        g_state->installErrorStep = 2;
+        g_state->installLastError = GetLastError();
         InterlockedExchange(&g_state->installError, 1);
         RemoveVectoredExceptionHandler(g_vehHandle);
         g_vehHandle = nullptr;

@@ -6,6 +6,7 @@
 #include "process/process_enumerator.h"
 
 #ifdef Q_OS_WIN
+#include <sddl.h>
 #include <windows.h>
 #endif
 
@@ -25,6 +26,38 @@ InProcessBreakpointSession::~InProcessBreakpointSession() {
 #ifdef Q_OS_WIN
 
 namespace {
+struct AppContainerMappingSecurity {
+    SECURITY_ATTRIBUTES attributes{};
+    PSECURITY_DESCRIPTOR descriptor{nullptr};
+
+    AppContainerMappingSecurity() {
+        attributes.nLength = sizeof(attributes);
+        attributes.bInheritHandle = FALSE;
+    }
+
+    ~AppContainerMappingSecurity() {
+        if (descriptor) {
+            LocalFree(descriptor);
+        }
+    }
+};
+
+bool buildAppContainerMappingSecurity(AppContainerMappingSecurity* security, QString* error) {
+    if (!security) return false;
+
+    constexpr const wchar_t* kSddl =
+        L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)(A;;GRGW;;;AC)S:(ML;;NW;;;LW)";
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kSddl, SDDL_REVISION_1, &security->descriptor, nullptr)) {
+        if (error) {
+            *error = QStringLiteral("ConvertStringSecurityDescriptorToSecurityDescriptorW(IPC breakpoint in-process AppContainer) a échoué (error=%1).")
+                         .arg(GetLastError());
+        }
+        return false;
+    }
+    security->attributes.lpSecurityDescriptor = security->descriptor;
+    return true;
+}
+
 // Même encodage que hardware_breakpoint.cpp::computeDr7Bits, mais seul DR0/
 // slot 0 nous intéresse ici (une session = une adresse surveillée) : size 1/2/4/8
 // octets -> LEN0 (0/1/3/2), écriture seule ou lecture/écriture -> R/W0 (1/3).
@@ -88,7 +121,16 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
     wchar_t mappingName[64];
     buildInProcessBreakpointMappingName(pid, mappingName, 64);
 
-    HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+    AppContainerMappingSecurity security;
+    QString securityError;
+    SECURITY_ATTRIBUTES* securityAttributes = nullptr;
+    if (buildAppContainerMappingSecurity(&security, &securityError)) {
+        securityAttributes = &security.attributes;
+    } else {
+        KE_LOG_WARN() << "InProcessBreakpoint: AppContainer IPC security unavailable: " << securityError.toStdString();
+    }
+
+    HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, securityAttributes, PAGE_READWRITE,
                                         0, sizeof(InProcessBreakpointIpcState), mappingName);
     if (!mapping) {
         result.error = "CreateFileMapping a échoué (IPC breakpoint in-process).";
@@ -128,7 +170,7 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
     state->hitCount = 0;
     state->watchAddress = config.address;
     state->sizeCode = sizeCodeFor(config.size);
-    state->rwCode = config.captureWrites ? 1u : 3u;
+    state->rwCode = config.captureExecute ? 0u : (config.captureWrites ? 1u : 3u);
     state->mode = 0; // Capture
 
     const auto injected = killcore::injectDll(process, config.injectedHandlerPath);
@@ -149,13 +191,14 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
     }
 
     if (state->installError || !state->active) {
+        const long installError = state->installError;
         breakpointOwnership.markDisarming();
         const bool disarmConfirmed = waitForDeterministicDisarm(state, pid);
         breakpointOwnership.confirmDisarmed(disarmConfirmed);
         UnmapViewOfFile(state);
         CloseHandle(mapping);
         m_monitoring.store(false);
-        result.error = state->installError
+        result.error = installError
             ? "Le composant injecté n'a pas pu poser le breakpoint (SetThreadContext/VEH échoué dans la cible)."
             : "Timeout: le composant injecté ne s'est pas installé.";
         return result;
@@ -183,6 +226,14 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
             InProcessBreakpointHit hit;
             hit.instructionPointer = state->lastHitRip;
             hit.threadId = state->lastHitThreadId;
+            hit.rax = state->lastRax;
+            hit.rcx = state->lastRcx;
+            hit.rdx = state->lastRdx;
+            hit.rbp = state->lastRbp;
+            hit.rsp = state->lastRsp;
+            hit.r8 = state->lastR8;
+            hit.r9 = state->lastR9;
+            hit.xmm0 = QByteArray(reinterpret_cast<const char*>(state->lastXmm0), sizeof(state->lastXmm0));
             for (const auto& mod : modules) {
                 if (hit.instructionPointer >= mod.baseAddress && hit.instructionPointer < mod.baseAddress + mod.size) {
                     hit.module = mod.name;
@@ -258,7 +309,16 @@ bool InProcessBreakpointSession::startFreeze(
     wchar_t mappingName[64];
     buildInProcessBreakpointMappingName(pid, mappingName, 64);
 
-    HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+    AppContainerMappingSecurity security;
+    QString securityError;
+    SECURITY_ATTRIBUTES* securityAttributes = nullptr;
+    if (buildAppContainerMappingSecurity(&security, &securityError)) {
+        securityAttributes = &security.attributes;
+    } else {
+        KE_LOG_WARN() << "InProcessBreakpoint: AppContainer IPC security unavailable: " << securityError.toStdString();
+    }
+
+    HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, securityAttributes, PAGE_READWRITE,
                                         0, sizeof(InProcessBreakpointIpcState), mappingName);
     if (!mapping) {
         if (error) *error = "CreateFileMapping a échoué (IPC breakpoint in-process).";
@@ -310,12 +370,13 @@ bool InProcessBreakpointSession::startFreeze(
     }
 
     if (state->installError || !state->active) {
+        const long installError = state->installError;
         ownership->markDisarming();
         const bool disarmConfirmed = waitForDeterministicDisarm(state, pid);
         ownership->confirmDisarmed(disarmConfirmed);
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = state->installError
+        if (error) *error = installError
             ? "Le composant injecté n'a pas pu poser le breakpoint (SetThreadContext/VEH échoué dans la cible)."
             : "Timeout: le composant injecté ne s'est pas installé.";
         return false;

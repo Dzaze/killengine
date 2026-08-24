@@ -147,6 +147,15 @@ public:
     /// Termine l'enquête live : relit les zones capturées et retourne les changements observés.
     Q_INVOKABLE QVariantMap finishUiStringInvestigation(const QVariantMap& options);
 
+    /// Option douce post-crash Solitaire : capture des pages private/RW,
+    /// puis compare seulement les pages réellement modifiées entre une
+    /// ancienne et une nouvelle valeur affichee.
+    Q_INVOKABLE QVariantMap startChangedPagesDiff(const QVariantMap& options);
+    Q_INVOKABLE QVariantMap finishChangedPagesDiff(
+        const QString& previousValue,
+        const QString& currentValue,
+        const QVariantMap& options);
+
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
 
@@ -270,6 +279,21 @@ public:
 
     /// Version non bloquante. Le resultat arrive via findWhatAccessesFinished.
     Q_INVOKABLE QVariantMap findWhatAccessesAsync(const QString& addressHex, const QVariantMap& options);
+
+    /// Break on execute : capture quand une instruction connue s'execute et
+    /// retourne les registres runtime (R8/RBP/XMM0...). Utile quand un hit
+    /// pointe vers une copie UI mais que la destination varie a chaque frame.
+    Q_INVOKABLE QVariantMap findWhatExecutes(const QString& instructionAddressHex, const QVariantMap& options);
+
+    /// Variante in-process/non DebugActiveProcess de findWhatExecutes. Utilise
+    /// le composant injecte existant et expose les derniers registres captures
+    /// par le VEH (couverture bornee aux threads armees par ce composant).
+    Q_INVOKABLE QVariantMap startInProcessExecuteWatchAsync(const QString& instructionAddressHex, const QVariantMap& options);
+
+    /// Lecture opportuniste de texte de fenetres/controles du PID attache
+    /// (UI Automation/OCR light). Ne lit pas la memoire du jeu ; sert a
+    /// synchroniser la valeur affichee quand Windows expose du texte.
+    Q_INVOKABLE QVariantMap readAttachedWindowText(const QVariantMap& options) const;
 
     /// Scan groupe : cherche N valeurs avec offsets fixes connus (ex: HP/Mana/Stamina voisins).
     /// Entrees : liste {offset, type, value} + options standards Mode Expert.

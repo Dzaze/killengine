@@ -23,6 +23,14 @@ struct InProcessBreakpointHit {
     uint64_t threadId{0};
     QString module;
     uint64_t moduleOffset{0};
+    uint64_t rax{0};
+    uint64_t rcx{0};
+    uint64_t rdx{0};
+    uint64_t rbp{0};
+    uint64_t rsp{0};
+    uint64_t r8{0};
+    uint64_t r9{0};
+    QByteArray xmm0;
 };
 
 /// Configuration d'une capture in-process (mode Capture, borné).
@@ -30,6 +38,7 @@ struct InProcessBreakpointConfig {
     uint64_t address{0};
     size_t size{4};
     bool captureWrites{true};  ///< true = écritures uniquement ; false = lecture/écriture
+    bool captureExecute{false}; ///< true = breakpoint d'execution sur address (ignore captureWrites)
     int timeoutMs{5000};
     size_t maxHits{10};
     /// Chemin de KillEngineInProcessBreakpointHandler.dll — requis, ce mode

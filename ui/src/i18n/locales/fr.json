@@ -295,6 +295,90 @@
       "when": "Pour un freeze invincible qui intercepte l'écriture à la source, ou un cheat qui doit s'exécuter dans le processus cible plutôt que le lire/écrire de l'extérieur.",
       "cost": "Modifie activement le processus cible (code injecté, instructions réécrites). Nécessite une confirmation explicite à chaque action, pas encore de feature Trainer persistante.",
       "example": "Après avoir capturé l'instruction qui écrit une valeur (Écrit par), installe un hook dessus pour forcer la valeur à chaque appel plutôt que de la réécrire en boucle depuis l'extérieur."
+    },
+    "clrGuide": {
+      "title": "Parcours guidé CLR",
+      "what": "Repère où tu en es dans le flux Inspecteur CLR : processus attaché, session CLR active, objets listés, objet sélectionné pour agir.",
+      "when": "Au premier lancement de la vue CLR, pour savoir quelle étape reste à faire avant de pouvoir lire ou écrire un objet.",
+      "cost": "Lecture seule. Le tas CLR peut bouger après un ramasse-miettes (GC) : pour une cible durable, préfère le locator par champ et une feature Trainer CLR plutôt qu'une adresse brute mémorisée.",
+      "example": "Étape 1 en attente ? Attache d'abord un processus .NET/CoreCLR via la vue Processus. Étape 2 en attente ? Clique Attacher CLR pour démarrer le helper ClrMD."
+    },
+    "clrAttach": {
+      "title": "Attacher le helper CLR",
+      "what": "Lance un processus .NET dédié (ClrMD) qui s'attache au runtime managé du processus cible pour explorer son tas, et liste les objets dont le nom de type contient le filtre saisi.",
+      "when": "Seulement sur un vrai processus .NET Framework/CoreCLR (pas Mono, pas IL2CPP, pas UWP .NET Native). Le bouton Objets ne renvoie rien si le filtre est trop précis ou vide sur un gros tas.",
+      "cost": "Lecture seule à l'attache. Roots liste les racines GC connues (piles, statiques). Flush GC cache force ClrMD à relire l'état courant après un GC ou une grosse mutation côté cible — utile si les objets affichés semblent obsolètes.",
+      "example": "Filtre `KillEngine.ClrTestTarget` puis clique Objets : la liste ne montre que les types de ce namespace, plus facile à parcourir qu'un heap entier."
+    },
+    "clrManualRead": {
+      "title": "Lire une adresse connue",
+      "what": "Décrit directement l'objet géré situé à l'adresse mémoire saisie, sans repasser par la liste ou un locator.",
+      "when": "Quand tu as déjà une adresse d'objet CLR valide, par exemple retrouvée via une autre vue (chemin GC root, rapport, ancienne lecture).",
+      "cost": "Lecture seule. Une adresse mémorisée devient invalide après un GC compactant qui déplace l'objet — préfère le Locator stable pour une cible qui doit survivre à un redémarrage ou un GC.",
+      "example": "Colle `0x2476e00acd8` puis Entrée : si l'adresse est toujours celle d'un objet géré vivant, ses champs s'affichent dans le panneau Objet lu."
+    },
+    "clrLocator": {
+      "title": "Locator stable (retrouver par identité)",
+      "what": "Recherche dans le tas tous les objets d'un type donné dont un champ d'identité (ex. Name) vaut la valeur indiquée — au lieu de dépendre d'une adresse mémoire qui change à chaque redémarrage ou GC compactant.",
+      "when": "Dès que tu veux réutiliser une cible plus tard (feature Trainer, profil, écriture répétée) : une adresse brute ne survit pas à un redémarrage du jeu, un locator si.",
+      "cost": "Lecture seule, parcourt le tas jusqu'à Max résultats. Un champ d'identité mal choisi (valeur qui change, comme un score) fera échouer la relocalisation plus tard — choisis un champ stable (nom, identifiant unique).",
+      "example": "Type `KillEngine.ClrTestTarget.Player`, champ `Name`, valeur `TestSubject` → Retrouver. Clique un résultat pour le lire, comme dans le tableau Objets."
+    },
+    "clrPathWrite": {
+      "title": "Chemin symbolique",
+      "what": "Décrit l'emplacement d'un champ primitif à écrire par son nom plutôt que par une adresse — peut traverser des références (`Inventory.Items[0].Value`) et des index de tableau/liste.",
+      "when": "Pour écrire un champ qui n'apparaît pas directement dans le tableau des champs de l'objet sélectionné, ou pour composer un chemin réutilisable indépendant de l'adresse exacte de chaque sous-objet.",
+      "cost": "N'écrit que le champ primitif final du chemin (pas un objet, pas une struct entière). Coche « Utiliser un locator » pour que le chemin soit résolu à partir d'un objet retrouvé par identité plutôt que l'adresse actuellement lue — résiste à un déplacement par GC entre-temps.",
+      "example": "Objet Inventory lu, chemin `Items[0].Value`, valeur `999` → Écrire chemin modifie uniquement le champ Value du premier élément de la collection Items."
+    },
+    "clrBatchWrite": {
+      "title": "Transaction multi-champs",
+      "what": "Applique plusieurs écritures de chemins symboliques dans l'ordre, une par ligne (`Chemin=Valeur`), et tente d'annuler (rollback) celles déjà appliquées si une opération échoue en cours de route.",
+      "when": "Pour changer plusieurs champs liés en même temps (ex. Health et Mana d'un même personnage) sans laisser l'objet dans un état incohérent si une des écritures échoue.",
+      "cost": "Best-effort : le rollback réécrit l'ancienne valeur mais ne garantit pas une atomicité parfaite face à une lecture concurrente par le jeu lui-même. Cocher « Suspendre le process » ajoute une vraie suspension de toutes les threads cibles pendant l'écriture (plus sûr, plus risqué en cas de deadlock).",
+      "example": "`Health=100` et `Stats.Rank=7` sur deux lignes puis Transaction : les deux champs changent ensemble ; si `Stats.Rank` échoue, `Health` est remis à sa valeur d'origine."
+    },
+    "clrCallSetter": {
+      "title": "Appeler un setter réel",
+      "what": "Résout l'adresse native déjà JITtée du vrai setter C# via ClrMD, construit un petit shellcode x64 (this en RCX, valeur en RDX/XMM1) puis l'exécute par injection dans le processus attaché — contrairement aux écritures ci-dessus (mémoire passive), ceci exécute la vraie logique métier (validation, effets de bord).",
+      "when": "Quand écrire directement le champ backing ne suffit pas parce que le setter fait plus qu'assigner la valeur (clamp, compteur séparé, synchronisation d'un autre champ).",
+      "cost": "Injection de code dans le processus cible — action à risque, confirmation explicite requise. Setters d'INSTANCE uniquement, 0 ou 1 paramètre primitif ou type référence (classe/string, en donnant l'adresse hex d'un objet déjà existant — jamais une struct). Le setter doit déjà avoir été appelé au moins une fois en jeu (JIT) sinon l'appel échoue proprement.",
+      "example": "Propriété `Vitality`, valeur `999` → Appeler exécute réellement `set_Vitality(999)` dans la cible, avec son clamp et son compteur de changements, pas juste une réécriture mémoire du champ backing."
+    },
+    "clrDisassemble": {
+      "title": "Désassembler un setter (lecture seule)",
+      "what": "Réutilise la même résolution ClrMD que l'appel de setter pour trouver l'adresse native déjà JITtée d'une méthode, puis désassemble le code x64 en avant, instruction par instruction.",
+      "when": "Pour comprendre ce que fait réellement un setter avant de l'appeler, ou pour repérer où patcher/hooker une fois l'emplacement connu.",
+      "cost": "Lecture seule, n'exécute jamais le code cible. La méthode doit déjà avoir été JITtée (appelée au moins une fois) sinon aucune adresse native n'existe encore à désassembler.",
+      "example": "Méthode `set_Vitality`, 24 instructions → Désassembler affiche le clamp et l'écriture du champ backing en assembleur x64, sans jamais rien exécuter."
+    },
+    "clrReport": {
+      "title": "Générer un rapport d'objet",
+      "what": "Exporte l'objet sélectionné et son graphe managé atteignable (champs, collections, chemin GC root optionnel) en un document texte, en parcourant les références jusqu'à une profondeur et un nombre de nœuds bornés.",
+      "when": "Pour sauvegarder ou partager l'état d'un objet complexe sans avoir à tout re-naviguer en live dans les autres panneaux.",
+      "cost": "Lecture seule. Un graphe large sera tronqué (profondeur, nombre de nœuds ou budget de temps atteint) — augmente les bornes si le rapport semble incomplet, au prix d'un appel plus lent.",
+      "example": "Objet Inventory sélectionné, profondeur 3, 50 nœuds max → Générer produit un texte listant l'objet, ses champs et les objets qu'il référence jusqu'à 3 sauts."
+    },
+    "clrGcRootPath": {
+      "title": "Chemin root → objet (exploratoire)",
+      "what": "Reconstruit le plus court chemin depuis une racine GC (pile, statique...) jusqu'à l'objet cible à travers plusieurs sauts de références — équivalent approximatif de `!gcroot` (SOS/WinDbg).",
+      "when": "Pour comprendre pourquoi un objet reste vivant (qui le référence), ou pour construire un chemin de navigation stable vers lui plutôt que de mémoriser son adresse.",
+      "cost": "Lecture seule. Parcours en largeur borné (profondeur/nœuds/temps côté helper) — peut être lent ou ne rien trouver sur un très gros tas.",
+      "example": "Objet sélectionné → Objet sélectionné (bouton) puis Retrouver le chemin affiche la chaîne complète, ex. `StrongHandle → Inventory → Items[2]` jusqu'à l'objet cible."
+    },
+    "clrFieldTable": {
+      "title": "Champs de l'objet lu",
+      "what": "Liste les champs de l'objet sélectionné avec leur type (Kind), leur adresse effective en mémoire et leur valeur. Une valeur `ref` peut être ouverte avec Lire ; un champ writable peut être écrit directement, transformé en feature Trainer, ou utilisé comme champ d'identité pour un locator.",
+      "when": "Point de départ le plus simple pour explorer un objet : pas besoin de connaître un chemin symbolique pour un champ visible ici directement.",
+      "cost": "La lecture est sans risque. Écrire un champ ici modifie directement la mémoire backing (pas d'exécution de setter, pas de validation métier) — pour ça, utilise le panneau « Appeler un setter » plus bas.",
+      "example": "Champ `Health` avec un bouton Écrire → tape `100`, clique Écrire : la valeur mémoire change immédiatement, sans passer par la logique du jeu."
+    },
+    "clrRootsTable": {
+      "title": "Racines GC (GC roots)",
+      "what": "Liste les racines connues par ClrMD — poignées fortes, variables de pile, champs statiques — chacune pointant vers un objet managé qui reste vivant tant que sa racine existe.",
+      "when": "Pour comprendre ce qui maintient un objet en vie, ou comme point de départ pour reconstruire un chemin root → objet dans le panneau ci-dessous.",
+      "cost": "Lecture seule. Sur un gros tas, la liste peut être longue et ne pas inclure certaines racines de type StaticVar (limitation connue de l'attache passive ClrMD, contournée ailleurs par une résolution dédiée).",
+      "example": "Une racine `StrongHandle` pointant vers l'objet `Player` explique pourquoi cet objet n'est jamais collecté par le GC tant que le handle existe."
     }
   }
 }
