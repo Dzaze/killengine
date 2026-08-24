@@ -38,6 +38,10 @@ async function attach() {
   }
 }
 
+async function startKernelDriverFromAttach() {
+  await store.startKernelDriver()
+}
+
 async function detach() {
   await store.detach()
 }
@@ -145,6 +149,29 @@ onMounted(async () => {
         </p>
         <p v-else-if="store.memoryAccessMode === 'kernel'" class="access-mode-hint warning">
           Tu peux attacher quand même, mais les lectures/écritures kernel refuseront tant que le driver n'est pas prêt.
+        </p>
+        <div v-if="store.memoryAccessMode === 'kernel'" class="kernel-driver-actions">
+          <button
+            class="btn btn-secondary"
+            type="button"
+            :disabled="store.kernelDriverStatusLoading"
+            title="Vérifie si KillEngineKernel est chargé et expose l'accès mémoire kernel."
+            @click="store.refreshKernelDriverStatus()"
+          >
+            {{ store.kernelDriverStatusLoading ? 'Test...' : 'Tester driver' }}
+          </button>
+          <button
+            class="btn btn-secondary"
+            type="button"
+            :disabled="store.kernelDriverStartLoading || store.kernelDriverStatusLoading || store.kernelMemoryReady"
+            title="Démarre le service Windows KillEngineKernel s'il est installé mais arrêté. Nécessite KillEngine lancé administrateur."
+            @click="startKernelDriverFromAttach()"
+          >
+            {{ store.kernelDriverStartLoading ? 'Chargement...' : (store.kernelMemoryReady ? 'Driver chargé' : 'Charger driver') }}
+          </button>
+        </div>
+        <p v-if="store.memoryAccessMode === 'kernel' && store.kernelDriverStatusError" class="access-mode-hint warning">
+          {{ store.kernelDriverStatusError }}
         </p>
       </div>
       <button class="btn btn-primary" @click="attach">
@@ -401,6 +428,17 @@ onMounted(async () => {
 
 .access-mode-hint.warning {
   color: var(--warning);
+}
+
+.kernel-driver-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kernel-driver-actions .btn {
+  padding: 7px 10px;
+  font-size: 12px;
 }
 
 .module-panel {
