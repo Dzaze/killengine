@@ -3,6 +3,14 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shellapi.h>
+// objbase.h avant UIAutomation.h : WIN32_LEAN_AND_MEAN (deja actif via
+// windows.h ci-dessus) exclut les headers COM/OLE par defaut, or
+// UIAutomationCore.h a besoin de la macro "interface" (-> struct) et des
+// types COM de base deja definis, sinon ses declarations "interface Ixxx :
+// IUnknown" ne parsent pas (erreurs C2146 en cascade).
+#include <objbase.h>
+#include <UIAutomation.h>
+#include <wrl/client.h>
 #endif
 
 #include "auto_resolver.h"
@@ -6692,6 +6700,187 @@ QVariantMap ApplicationController::readAttachedWindowText(const QVariantMap& opt
     return result;
 }
 
+QVariantMap ApplicationController::readUiAutomationTree(const QVariantMap& options) const {
+    QVariantMap result;
+    QVariantList elements;
+    result["success"] = false;
+    result["elements"] = elements;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    HWND targetHwnd = nullptr;
+    const QString hwndHexOption = options.value("hwndHex").toString().trimmed();
+    if (!hwndHexOption.isEmpty()) {
+        bool ok = false;
+        const quintptr hwndValue = static_cast<quintptr>(hwndHexOption.toULongLong(&ok, 16));
+        if (ok) {
+            targetHwnd = reinterpret_cast<HWND>(hwndValue);
+        }
+    }
+    if (!targetHwnd) {
+        // Meme heuristique que readAttachedWindowText : un process UWP
+        // n'expose que des fenetres IME cachees sous son propre PID, la
+        // vraie fenetre visible (ApplicationFrameWindow) appartient a un
+        // PID different.
+        WindowTextEnumState state;
+        state.pid = static_cast<DWORD>(m_pid);
+        state.maxWindows = 20;
+        state.maxChildrenPerWindow = 0;
+        state.includeAllVisible = true;
+        state.titleContains = options.value("titleContains", "Solitaire").toString();
+        EnumWindows(enumWindowTextProc, reinterpret_cast<LPARAM>(&state));
+        for (const auto& winVariant : state.windows) {
+            const auto win = winVariant.toMap();
+            if (win.value("visible").toBool() && !win.value("text").toString().isEmpty()) {
+                bool ok = false;
+                const quintptr hwndValue = static_cast<quintptr>(win.value("hwnd").toString().toULongLong(&ok, 16));
+                if (ok && hwndValue) {
+                    targetHwnd = reinterpret_cast<HWND>(hwndValue);
+                    break;
+                }
+            }
+        }
+    }
+    if (!targetHwnd) {
+        result["error"] = "Aucune fenêtre visible trouvée pour ce processus (essaie hwndHex explicite ou ajuste titleContains).";
+        return result;
+    }
+
+    const int maxElements = std::clamp(options.value("maxElements", 500).toInt(), 1, 5000);
+    const QString filterText = options.value("filterText").toString();
+
+    const HRESULT initHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    // S_FALSE = deja initialise sur ce thread (Qt le fait typiquement) --
+    // toujours SUCCEEDED, on doit quand meme equilibrer par CoUninitialize.
+    // RPC_E_CHANGED_MODE = deja initialise dans un AUTRE mode par quelqu'un
+    // d'autre : pas notre init a nous, mais COM reste utilisable.
+    const bool comInitializedHere = SUCCEEDED(initHr);
+    const bool comUsable = comInitializedHere || initHr == RPC_E_CHANGED_MODE;
+    if (!comUsable) {
+        result["error"] = QStringLiteral("CoInitializeEx a échoué (0x%1).").arg(static_cast<uint32_t>(initHr), 0, 16);
+        return result;
+    }
+
+    auto cleanupCom = [comInitializedHere]() {
+        if (comInitializedHere) {
+            CoUninitialize();
+        }
+    };
+
+    Microsoft::WRL::ComPtr<IUIAutomation> automation;
+    HRESULT hr = CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER,
+                                   __uuidof(IUIAutomation), &automation);
+    if (FAILED(hr) || !automation) {
+        cleanupCom();
+        result["error"] = QStringLiteral("CoCreateInstance(CUIAutomation) a échoué (0x%1).").arg(static_cast<uint32_t>(hr), 0, 16);
+        return result;
+    }
+
+    Microsoft::WRL::ComPtr<IUIAutomationElement> root;
+    hr = automation->ElementFromHandle(targetHwnd, &root);
+    if (FAILED(hr) || !root) {
+        cleanupCom();
+        result["error"] = QStringLiteral("ElementFromHandle (UIA) a échoué pour cette fenêtre (0x%1).").arg(static_cast<uint32_t>(hr), 0, 16);
+        return result;
+    }
+
+    // Diagnostic : nom/type du root lui-meme, meme si FindAll ne remonte
+    // ensuite aucun descendant -- permet de distinguer "mauvais element
+    // trouve" de "element correct mais arbre d'accessibilite vide/inactif".
+    BSTR rootNameBstr = nullptr;
+    root->get_CurrentName(&rootNameBstr);
+    result["rootName"] = rootNameBstr ? QString::fromWCharArray(rootNameBstr) : QString();
+    if (rootNameBstr) SysFreeString(rootNameBstr);
+    CONTROLTYPEID rootControlType = 0;
+    root->get_CurrentControlType(&rootControlType);
+    result["rootControlType"] = static_cast<int>(rootControlType);
+
+    Microsoft::WRL::ComPtr<IUIAutomationCondition> trueCondition;
+    automation->CreateTrueCondition(&trueCondition);
+
+    Microsoft::WRL::ComPtr<IUIAutomationElementArray> found;
+    hr = root->FindAll(TreeScope_Subtree, trueCondition.Get(), &found);
+    result["findAllHr"] = QStringLiteral("0x%1").arg(static_cast<uint32_t>(hr), 0, 16);
+    if (FAILED(hr) || !found) {
+        cleanupCom();
+        result["error"] = "FindAll (UIA) a échoué -- la cible ne repond peut-etre pas a l'arbre d'accessibilite.";
+        return result;
+    }
+
+    int count = 0;
+    found->get_Length(&count);
+    for (int i = 0; i < count && elements.size() < maxElements; ++i) {
+        Microsoft::WRL::ComPtr<IUIAutomationElement> element;
+        if (FAILED(found->GetElement(i, &element)) || !element) {
+            continue;
+        }
+
+        BSTR nameBstr = nullptr;
+        element->get_CurrentName(&nameBstr);
+        const QString nameStr = nameBstr ? QString::fromWCharArray(nameBstr) : QString();
+        if (nameBstr) SysFreeString(nameBstr);
+
+        CONTROLTYPEID controlType = 0;
+        element->get_CurrentControlType(&controlType);
+
+        // ValuePattern : souvent porteur du texte reel pour les controles
+        // texte/edit (un TextBlock XAML expose generalement deja sa valeur
+        // via Name, mais ValuePattern couvre les cas ou ce n'est pas le cas).
+        QString valueStr;
+        Microsoft::WRL::ComPtr<IUnknown> valuePatternUnknown;
+        if (SUCCEEDED(element->GetCurrentPattern(UIA_ValuePatternId, &valuePatternUnknown)) && valuePatternUnknown) {
+            Microsoft::WRL::ComPtr<IUIAutomationValuePattern> valuePattern;
+            if (SUCCEEDED(valuePatternUnknown.As(&valuePattern)) && valuePattern) {
+                BSTR valBstr = nullptr;
+                if (SUCCEEDED(valuePattern->get_CurrentValue(&valBstr)) && valBstr) {
+                    valueStr = QString::fromWCharArray(valBstr);
+                    SysFreeString(valBstr);
+                }
+            }
+        }
+
+        if (nameStr.isEmpty() && valueStr.isEmpty()) {
+            continue;
+        }
+        if (!filterText.isEmpty()
+            && !nameStr.contains(filterText, Qt::CaseInsensitive)
+            && !valueStr.contains(filterText, Qt::CaseInsensitive)) {
+            continue;
+        }
+
+        RECT rect{};
+        element->get_CurrentBoundingRectangle(&rect);
+
+        QVariantMap item;
+        item["name"] = nameStr;
+        item["value"] = valueStr;
+        item["controlType"] = static_cast<int>(controlType);
+        item["x"] = static_cast<int>(rect.left);
+        item["y"] = static_cast<int>(rect.top);
+        item["width"] = static_cast<int>(rect.right - rect.left);
+        item["height"] = static_cast<int>(rect.bottom - rect.top);
+        elements.append(item);
+    }
+
+    cleanupCom();
+
+    result["success"] = true;
+    result["elements"] = elements;
+    result["elementCount"] = elements.size();
+    result["scannedCount"] = count;
+    result["hwnd"] = QString::number(reinterpret_cast<quintptr>(targetHwnd), 16).toUpper();
+#else
+    Q_UNUSED(options);
+    result["error"] = "Lecture UI Automation disponible seulement sous Windows.";
+#endif
+
+    return result;
+}
+
 QVariantMap ApplicationController::findWhatWritesAsync(const QString& addressHex, const QVariantMap& options) {
     QVariantMap result;
     result["success"] = false;
@@ -7189,6 +7378,85 @@ QVariantMap ApplicationController::startInProcessExecuteWatchAsync(const QString
     executeOptions["size"] = 1;
     const QVariantMap started = startInProcessBreakpointWatchAsync(instructionAddressHex, executeOptions);
     return started;
+}
+
+QVariantMap ApplicationController::startInProcessExecuteWatch(const QString& instructionAddressHex, const QVariantMap& options) {
+    // Version bloquante de startInProcessExecuteWatchAsync -- meme raison
+    // d'etre que findWhatWrites vs findWhatWritesAsync : le pipe d'automation
+    // ne peut pas relire le resultat d'un signal Qt asynchrone
+    // (inProcessBreakpointWatchFinished), donc un agent pilotant KillEngine
+    // via le pipe n'a aucun moyen de recuperer le resultat de la version
+    // async. Celle-ci bloque l'appelant jusqu'a un hit ou le timeout, comme
+    // findWhatWrites.
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = instructionAddressHex;
+
+    if (m_inProcessBreakpointWatchInProgress) {
+        result["error"] = "Une capture breakpoint in-process est déjà en cours.";
+        return result;
+    }
+    if (!m_attached || m_pid <= 0 || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(instructionAddressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const QString handlerPath = resolveInProcessBreakpointHandlerPath();
+    if (handlerPath.isEmpty()) {
+        result["error"] = "KillEngineInProcessBreakpointHandler.dll introuvable à côté de KillEngine.exe.";
+        return result;
+    }
+
+    killcore::InProcessBreakpointConfig config;
+    config.address = address;
+    config.size = 1;
+    config.captureWrites = false;
+    config.captureExecute = true;
+    config.timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 15000);
+    config.maxHits = static_cast<size_t>(std::clamp(options.value("maxHits", 10).toInt(), 1, 100));
+    config.injectedHandlerPath = handlerPath;
+
+    killcore::ProcessHandle ownedHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::AllAccess);
+    if (!ownedHandle.isValid()) {
+        result["error"] = "Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).";
+        return result;
+    }
+
+    m_inProcessBreakpointWatchInProgress = true;
+    auto session = std::make_shared<killcore::InProcessBreakpointSession>();
+    m_activeInProcessBreakpointSession = session;
+
+    KE_LOG_INFO() << "startInProcessExecuteWatch(address=0x" << std::hex << address << std::dec
+                  << ", timeoutMs=" << config.timeoutMs << ", maxHits=" << config.maxHits << ")";
+
+    const auto captureResult = session->monitor(ownedHandle, config);
+
+    m_inProcessBreakpointWatchInProgress = false;
+    m_activeInProcessBreakpointSession.reset();
+
+    QVariantList hitList;
+    for (const auto& hit : captureResult.hits) {
+        hitList.append(inProcessBreakpointHitToVariant(hit));
+    }
+
+    result["success"] = captureResult.success;
+    result["hits"] = hitList;
+    result["hitCount"] = hitList.size();
+    result["timedOut"] = captureResult.timedOut;
+    result["timeoutMs"] = config.timeoutMs;
+    result["maxHits"] = static_cast<int>(config.maxHits);
+    result["error"] = !captureResult.success
+        ? captureResult.error
+        : captureResult.hits.isEmpty()
+        ? "Aucune exécution capturée pendant la fenêtre d'observation."
+        : QString();
+    return result;
 }
 
 QVariantMap ApplicationController::cancelInProcessBreakpointWatch() {

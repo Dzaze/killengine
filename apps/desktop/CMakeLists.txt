@@ -43,6 +43,9 @@ if(WIN32)
     # MiniDumpWriteDump (crash_handler.cpp), deja gardee par #ifdef Q_OS_WIN
     # / stub sinon.
     target_link_libraries(KillEngine PRIVATE dbghelp)
+    # IUIAutomation (readUiAutomationTree, application_controller.cpp) --
+    # CoCreateInstance(CUIAutomation) vient de uiautomationcore.dll.
+    target_link_libraries(KillEngine PRIVATE uiautomationcore)
 endif()
 
 # Set output name

@@ -290,10 +290,35 @@ public:
     /// par le VEH (couverture bornee aux threads armees par ce composant).
     Q_INVOKABLE QVariantMap startInProcessExecuteWatchAsync(const QString& instructionAddressHex, const QVariantMap& options);
 
+    /// Version bloquante de startInProcessExecuteWatchAsync (miroir de
+    /// findWhatWrites vs findWhatWritesAsync) : le pipe d'automatisation ne
+    /// peut pas relire le résultat d'un signal Qt asynchrone
+    /// (inProcessBreakpointWatchFinished), donc c'est celle-ci qu'un agent
+    /// pilotant KillEngine via le pipe doit utiliser pour obtenir les
+    /// registres capturés (RAX/RCX/RDX/RBP/RSP/R8/R9/XMM0) directement.
+    Q_INVOKABLE QVariantMap startInProcessExecuteWatch(const QString& instructionAddressHex, const QVariantMap& options);
+
     /// Lecture opportuniste de texte de fenetres/controles du PID attache
     /// (UI Automation/OCR light). Ne lit pas la memoire du jeu ; sert a
     /// synchroniser la valeur affichee quand Windows expose du texte.
     Q_INVOKABLE QVariantMap readAttachedWindowText(const QVariantMap& options) const;
+
+    /// Descend dans l'arbre UI Automation (IUIAutomation) d'une fenêtre liée
+    /// au processus attaché et retourne le Name/Value de chaque élément
+    /// (Descendants). Contrairement à readAttachedWindowText (titres de
+    /// fenêtres Win32 seulement), ceci lit le texte des contrôles individuels
+    /// (ex: un TextBlock XAML "59" ou "Bulles") directement via l'API
+    /// d'accessibilité Windows — sans toucher à la mémoire du processus, donc
+    /// aucun risque de crash lié à un debugger. Sert d'oracle de vérité fiable
+    /// pour valider un candidat mémoire (comparer la valeur UIA à la valeur
+    /// lue à une adresse), ou pour retrouver la valeur affichée quand le scan
+    /// mémoire échoue (voir docs/STRATEGY_ROOM.md, session Solitaire Bulles,
+    /// 24/08/2026).
+    /// options: hwndHex (optionnel, sinon réutilise l'heuristique de
+    /// readAttachedWindowText avec titleContains), titleContains (défaut
+    /// "Solitaire"), maxElements (défaut 500), filterText (sous-chaîne
+    /// optionnelle sur Name/Value pour réduire le bruit).
+    Q_INVOKABLE QVariantMap readUiAutomationTree(const QVariantMap& options) const;
 
     /// Scan groupe : cherche N valeurs avec offsets fixes connus (ex: HP/Mana/Stamina voisins).
     /// Entrees : liste {offset, type, value} + options standards Mode Expert.
