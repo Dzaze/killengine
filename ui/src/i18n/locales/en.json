@@ -100,7 +100,8 @@
     "settings": "Settings",
     "investigation": "Investigation",
     "trainer": "Trainer",
-    "speedhack": "Speedhack"
+    "speedhack": "Speedhack",
+    "network": "Network"
   },
   "help": {
     "label": {
@@ -260,6 +261,13 @@
       "when": "To speed through a wait (farming, load times) or slow down a hard section — same idea as Cheat Engine's speedhack. The factor can be adjusted live while active, no need to restart. The \"Pause (0x)\" preset fully freezes the clock the target perceives.",
       "cost": "Code injection into the target process: same risk tier as \"Write via kernel\", confirmation required. Only covers modules already loaded at activation time, not calls resolved dynamically via GetProcAddress. Some protected software may detect or refuse the injection.",
       "example": "A load time or repetitive farming grind takes too long. Enable speedhack at 4x from the Speedhack panel, or ask the Assistant to \"speed up the game\": animations and timers run 4x faster, disable to return to normal."
+    },
+    "network": {
+      "title": "Network",
+      "what": "Adds (or removes) a dedicated Windows Firewall rule blocking all inbound/outbound traffic for the attached process's executable.",
+      "when": "To check whether an unstable memory value comes from a background server sync rather than a purely local reallocation — block the network, observe whether the behavior changes, then restore it once the test is done.",
+      "cost": "Modifies the Windows Firewall via a UAC prompt (explicit elevation): same risk tier as speedhack, confirmation required. The rule persists even after detaching the process, until explicitly restored.",
+      "example": "A displayed counter doesn't match any stable memory address despite several scans. Block the process's network, vary the counter in-game (offline), and see if the scan converges better — if so, the value likely depends on a server sync."
     },
     "pointerChains": {
       "title": "Pointer chains",

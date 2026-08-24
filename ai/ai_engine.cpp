@@ -40,6 +40,19 @@ bool describesStable(const QString& q) {
         || q.contains("unchanged") || q.contains("bouge pas");
 }
 
+bool wantsInspectorMode(const QString& q) {
+    return q.contains("inspecteur") || q.contains("inspector") || q.contains("codex")
+        || q.contains("enquete") || q.contains("enquête") || q.contains("raisonne")
+        || q.contains("comprendre") || q.contains("preuve");
+}
+
+bool describesUiCopyOrBuffer(const QString& q) {
+    return q.contains("copie ui") || q.contains("buffer") || q.contains("buffers")
+        || q.contains("string instable") || q.contains("texte instable")
+        || q.contains("affichage decouple") || q.contains("affichage découpl")
+        || q.contains("pas ecrit sur place") || q.contains("pas écrit sur place");
+}
+
 QString variationMode(const QString& q, const QString& fallback = "changed") {
     if (describesIncrease(q)) return "increased";
     if (describesDecrease(q)) return "decreased";
@@ -477,7 +490,9 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     const QString contextTargetValue = context.value("targetValue").toString();
     const QString contextInitialValue = context.value("initialValue").toString();
     const QString value = firstNumber(query);
+    const QStringList numbers = allNumbers(query);
     const bool describesVariation = describesIncrease(q) || describesDecrease(q) || describesChange(q) || describesStable(q);
+    const bool inspectorOrUiCopy = wantsInspectorMode(q) || describesUiCopyOrBuffer(q);
 
     // Garde-fou : sans processus attache, aucun scan n'a de sens.
     if (!processAttached) {
@@ -486,6 +501,30 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         result["message"] = "Attache d'abord un processus dans l'onglet Processus, puis relance ta recherche.";
         result["state"] = m_stateMachine.currentStateName();
         return result;
+    }
+
+    // Mode Inspecteur: obtenir une preuve nouvelle avant toute ecriture.
+    if (inspectorOrUiCopy || q.contains("diff pages") || q.contains("pages modifiees") || q.contains("pages modifiées")) {
+        if (numbers.size() >= 2 && (q.contains("compare") || q.contains("compar") || q.contains("maintenant")
+            || q.contains("avant") || q.contains("apres") || q.contains("après"))) {
+            return makeToolCall("finish_changed_pages_diff", {
+                {"previousValue", numbers.at(0)},
+                {"currentValue", numbers.at(1)},
+            }, "Mode Inspecteur: je compare les pages modifiees entre l'ancienne et la nouvelle valeur affichee.");
+        }
+
+        if (q.contains("fenetre") || q.contains("fenêtre") || q.contains("window") || q.contains("uwp") || q.contains("store")) {
+            QVariantMap args;
+            if (q.contains("solitaire")) {
+                args["titleContains"] = "Solitaire";
+                args["includeAllVisible"] = true;
+            }
+            return makeToolCall("read_window_text", args,
+                "Mode Inspecteur: je verifie la fenetre visible pour synchroniser l'observation.");
+        }
+
+        return makeToolCall("start_changed_pages_diff", {},
+            "Mode Inspecteur: je capture un snapshot lecture seule avant la prochaine variation.");
     }
 
     // Recherche active + nouvelle valeur observee => reduction plutot que nouveau scan.
@@ -663,6 +702,16 @@ QString AIEngine::firstNumber(const QString& query) {
     const auto match = re.match(query);
     if (!match.hasMatch()) return {};
     return match.captured(0).replace(',', '.');
+}
+
+QStringList AIEngine::allNumbers(const QString& query) {
+    QStringList numbers;
+    const QRegularExpression re(R"([-+]?\d+(?:[\.,]\d+)?)");
+    auto it = re.globalMatch(query);
+    while (it.hasNext()) {
+        numbers.append(it.next().captured(0).replace(',', '.'));
+    }
+    return numbers;
 }
 
 QString AIEngine::firstHexAddress(const QString& query) {

@@ -528,6 +528,26 @@ public:
     /// toujours un choix explicite de l'utilisateur, jamais automatique.
     Q_INVOKABLE QVariantMap requestWindowsDefenderExclusion();
 
+    /// Coupe l'accès réseau (entrant + sortant) du processus attaché via une
+    /// règle pare-feu Windows dédiée à son exécutable — déclenche une invite
+    /// UAC visible (élévation explicite pour New-NetFirewallRule, jamais
+    /// silencieux). Cas d'usage : isoler si une valeur instable en mémoire
+    /// vient d'une synchro serveur en arrière-plan plutôt que d'une
+    /// réallocation purement locale (testé en pratique sur Solitaire, voir
+    /// docs/STRATEGY_ROOM.md, 24/08/2026). La règle persiste après un
+    /// detachProcess() — appeler unblockProcessNetwork() pour la retirer.
+    Q_INVOKABLE QVariantMap blockProcessNetwork();
+
+    /// Retire la règle posée par blockProcessNetwork() pour le processus
+    /// attaché (ou pour le dernier exécutable bloqué si entretemps détaché).
+    /// Déclenche aussi une invite UAC (Remove-NetFirewallRule).
+    Q_INVOKABLE QVariantMap unblockProcessNetwork();
+
+    /// Etat courant de blocage réseau pour le processus attaché (ou le
+    /// dernier exécutable bloqué). Lecture seule (Get-NetFirewallRule), pas
+    /// d'élévation nécessaire.
+    Q_INVOKABLE QVariantMap getProcessNetworkBlockStatus() const;
+
     /// Inspecteur CLR/ClrMD externe : lance le helper .NET si
     /// necessaire puis dialogue avec lui via JSON-RPC sur named pipe.
     Q_INVOKABLE QVariantMap getClrInspectorStatus() const;
@@ -962,6 +982,11 @@ private:
     QString                 m_processName;
     int                     m_pid{0};
     killcore::ProcessHandle m_handle;
+    // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
+    // detachProcess() pour que la regle pare-feu reste retirable meme apres
+    // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
+    QString                 m_networkBlockRuleToken;
+    QString                 m_networkBlockExePath;
     killcore::CandidateStore m_candidates;
     killcore::CandidateStore m_previousCandidates;
     QHash<uint64_t, QVariantList> m_candidateValueHistory;

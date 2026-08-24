@@ -439,6 +439,26 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
         )
       }
     }
+  } else if (actionId === 'network_block_apply') {
+    const off = typeof action === 'string' ? false : action.mode === 'off'
+    const result = off ? await store.unblockProcessNetwork() : await store.blockProcessNetwork()
+    if (result === null) {
+      store.pushMessage('assistant', "Blocage réseau bloqué par ton mode Auto actuel (Safe/Expert) ou refusé à la confirmation. Passe en Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+    } else {
+      store.pushMessage(
+        'assistant',
+        result.success
+          ? (off ? 'Réseau rétabli, règle pare-feu retirée.' : `Réseau coupé pour ${result.exePath ?? store.processName ?? 'la cible'} — compare la stabilité des scans maintenant.`)
+          : `Blocage réseau échoué : ${result.error ?? 'raison inconnue'}.`,
+        {
+          isError: !result.success,
+          recoveryActions: result.success ? [{ id: 'open_network', label: 'Ouvrir Réseau' }] : undefined,
+        },
+      )
+    }
+  } else if (actionId === 'open_network') {
+    store.activeView = 'network'
+    store.pushMessage('assistant', "Réseau ouvert : coupe ou rétablis l'accès réseau de la cible depuis là.")
   } else if (actionId === 'open_speedhack') {
     store.activeView = 'speedhack'
     store.pushMessage('assistant', "Speedhack ouvert : le slider et les presets sont là, réglables en direct.")

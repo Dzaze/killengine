@@ -39,6 +39,7 @@ import {
   type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
   type SpeedhackStatus,
+  type ProcessNetworkBlockStatus,
   type ApiHookStatus,
   type TemporaryStorageStatus,
   type UndoCandidateScanResult,
@@ -242,7 +243,7 @@ export interface RuntimeActionPlan {
   actions: RuntimeActionPlanItem[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'scripting' | 'speedhack' | 'profiles' | 'expert' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'settings'
 
 export interface WorkflowPreset {
   id: string
@@ -408,6 +409,12 @@ export const useAppStore = defineStore('app', () => {
   const speedhackStatus = ref<SpeedhackStatus | null>(null)
   const speedhackBusy = ref(false)
   const speedhackFactor = ref(1.0)
+  // Coupe le réseau du processus attaché (règle pare-feu dédiée à son
+  // exécutable) — utile pour isoler une synchro serveur en arrière-plan comme
+  // cause d'une valeur mémoire instable, avant de conclure à une réallocation
+  // purement locale (voir docs/STRATEGY_ROOM.md, 24/08/2026, cas Solitaire).
+  const networkBlockStatus = ref<ProcessNetworkBlockStatus | null>(null)
+  const networkBlockBusy = ref(false)
   // Roadmap section B - interception de fonctions (hook MinHook injecte).
   const apiHookStatus = ref<ApiHookStatus | null>(null)
   const apiHookBusy = ref(false)
@@ -3104,6 +3111,75 @@ let nextWatchedChainId = 1
       return result
     } catch (e) {
       addActionLog('speedhack', 'Arrêt du speedhack échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  // Coupe/rétablit le réseau du processus attaché (règle pare-feu Windows
+  // dédiée à son exécutable, invite UAC). Même palier de risque que le
+  // speedhack ('injection') : c'est une modification système, pas une
+  // simple lecture/écriture mémoire.
+  async function blockProcessNetwork() {
+    if (!await confirmRiskAction('injection', 'Couper le réseau du processus', `Ajoute une règle pare-feu Windows bloquant tout le trafic entrant/sortant de ${processName.value || 'ce processus'} (invite UAC requise).`)) return null
+    const controller = backend.getController()
+    if (!controller.blockProcessNetwork) {
+      addActionLog('network_block', 'Blocage réseau indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    networkBlockBusy.value = true
+    try {
+      const result = await controller.blockProcessNetwork()
+      networkBlockStatus.value = { ...result, blocked: result.success ? true : networkBlockStatus.value?.blocked ?? false }
+      if (result.success) {
+        addActionLog('network_block', 'Réseau coupé', `${result.exePath ?? processName.value} isolé du réseau.`, 'success')
+      } else if (result.cancelled) {
+        addActionLog('network_block', 'Blocage réseau annulé', 'Invite UAC refusée.', 'warning')
+      } else {
+        addActionLog('network_block', 'Blocage réseau échoué', result.error || 'raison inconnue', 'error')
+      }
+      logAiAudit('network_block_executed', { success: result.success === true })
+      return result
+    } catch (e) {
+      addActionLog('network_block', 'Blocage réseau échoué', String(e), 'error')
+      return null
+    } finally {
+      networkBlockBusy.value = false
+    }
+  }
+
+  async function unblockProcessNetwork() {
+    const controller = backend.getController()
+    if (!controller.unblockProcessNetwork) return null
+    networkBlockBusy.value = true
+    try {
+      const result = await controller.unblockProcessNetwork()
+      if (result.success) {
+        networkBlockStatus.value = { ...result, blocked: false }
+        addActionLog('network_block', 'Réseau rétabli', 'Règle pare-feu retirée.', 'success')
+      } else if (result.cancelled) {
+        addActionLog('network_block', 'Rétablissement réseau annulé', 'Invite UAC refusée.', 'warning')
+      } else {
+        addActionLog('network_block', 'Rétablissement réseau échoué', result.error || 'raison inconnue', 'error')
+      }
+      logAiAudit('network_unblock_executed', { success: result.success === true })
+      return result
+    } catch (e) {
+      addActionLog('network_block', 'Rétablissement réseau échoué', String(e), 'error')
+      return null
+    } finally {
+      networkBlockBusy.value = false
+    }
+  }
+
+  async function refreshProcessNetworkBlockStatus() {
+    const controller = backend.getController()
+    if (!controller.getProcessNetworkBlockStatus) return null
+    try {
+      const status = await controller.getProcessNetworkBlockStatus()
+      networkBlockStatus.value = status
+      return status
+    } catch (e) {
+      addActionLog('network_block', 'Statut réseau indisponible', String(e), 'warning')
       return null
     }
   }
@@ -7659,6 +7735,11 @@ async function doEncryptedScan() {
     startSpeedhack,
     setSpeedhackFactor,
     stopSpeedhack,
+    networkBlockStatus,
+    networkBlockBusy,
+    blockProcessNetwork,
+    unblockProcessNetwork,
+    refreshProcessNetworkBlockStatus,
     apiHookStatus,
     apiHookBusy,
     apiHookModuleName,

@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 #include <QVariantList>
 
@@ -60,6 +61,7 @@ private:
     QVariantMap lastHistoryTurn() const;
     static QString inferValueType(const QString& query);
     static QString firstNumber(const QString& query);
+    static QStringList allNumbers(const QString& query);
     static QString firstHexAddress(const QString& query);
 
     bool           m_ready{false};

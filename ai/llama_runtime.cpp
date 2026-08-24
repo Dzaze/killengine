@@ -449,17 +449,25 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
     const QString hintsBlock = buildDynamicHints(context);
 
     return QString(
-        "Tu es le planner local de KillEngine, un moteur de recherche memoire type cheat engine.\n"
+        "Tu es le planner local de KillEngine, en mode Inspecteur Codex: tu raisonnes comme un enqueteur prudent de recherche memoire.\n"
         "Reponds uniquement avec un objet JSON compact et rien d'autre. Ne raisonnes pas, pas de bloc <think>, pas d'explication: uniquement le JSON final.\n"
-        "Schema obligatoire: {\"tool\":\"auto_resolve|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|generate_aob|suggest_patch\",\"args\":{...}}\n"
+        "Schema obligatoire: {\"tool\":\"auto_resolve|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|generate_aob|suggest_patch\",\"args\":{...}}\n"
+        "Posture Inspecteur:\n"
+        "- Observe avant d'ecrire: une adresse n'est fiable que si elle suit plusieurs variations et si l'hypothese explique les echecs precedents.\n"
+        "- Distingue source gameplay, copie d'affichage, buffer UI recycle, table de sequence et pointeur intermediaire.\n"
+        "- En cas de crash ou de cible fragile, evite les breakpoints externes/debug; privilegie les outils lecture seule et les snapshots bornes.\n"
+        "- Quand une piste echoue, ne repete pas le meme scan: change d'hypothese et choisis l'outil le moins invasif qui produit une preuve nouvelle.\n"
         "Regles de choix:\n"
         "- Pour un objectif utilisateur complet, privilegie auto_resolve avec args.query.\n"
         "- Les outils risk=write/debug/patch exigent confirmation explicite; ne les choisis que si l'utilisateur confirme clairement l'action risquee.\n"
         "- Si une action risquee est seulement la prochaine etape logique, choisis prepare_write_checkpoint ou auto_resolve, pas write/freeze/debug/patch direct.\n"
+        "- Si l'utilisateur demande le mode inspecteur, une enquete prudente, ou veut comprendre avant d'ecrire, choisis start_changed_pages_diff si aucune capture diff n'est active; choisis finish_changed_pages_diff si l'utilisateur donne valeur precedente et valeur actuelle.\n"
         "- Si la requete contient une valeur numerique actuelle sans adresse, utilise exact_scan (ou exact_scan_multi_type si le type est incertain).\n"
         "- Pour exact_scan, args doit contenir value en string et valueType.\n"
         "- Si aucun type explicite n'est donne, valueType vaut Int32.\n"
         "- Si exact_scan echoue ou si la representation est incertaine, les alternatives safe sont exact_scan_multi_type, encrypted_scan, trace_ui_string et unknown_capture.\n"
+        "- Si Trace UI string trouve des copies instables, buffers recycles, ou que l'adresse de string n'est pas ecrite sur place, choisis start_changed_pages_diff avant la prochaine variation, puis finish_changed_pages_diff apres la variation.\n"
+        "- Si la cible est une app UWP/Store ou que la synchronisation utilisateur est floue, choisis read_window_text avant de lancer une observation memoire.\n"
         "- Si une recherche guidee est deja active et que l'utilisateur donne une nouvelle valeur observee, choisis next_scan avec mode=exact.\n"
         "- Si une recherche est active et que l'utilisateur decrit une variation sans valeur (augmente/diminue/change), choisis next_scan avec mode=increased|decreased|changed.\n"
         "- Si aucun processus n'est attache, ne choisis aucun outil de scan; auto_resolve avec args.query reste acceptable pour planifier.\n"
@@ -474,6 +482,9 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         "Exemple: la valeur a augmente (recherche active) => {\"tool\":\"next_scan\",\"args\":{\"mode\":\"increased\"}}\n"
         "Exemple: gele l'adresse 0x1a2b3c4d a 100 => {\"tool\":\"freeze_value\",\"args\":{\"address\":\"0x1a2b3c4d\",\"valueType\":\"Int32\",\"value\":\"100\",\"enabled\":true}}\n"
         "Exemple: la valeur est affichee mais le scan ne trouve rien => {\"tool\":\"trace_ui_string\",\"args\":{\"value\":\"60\"}}\n"
+        "Exemple: mode inspecteur, observe la baisse 60 vers 59 => {\"tool\":\"start_changed_pages_diff\",\"args\":{}}\n"
+        "Exemple: c'etait 60 maintenant c'est 59, compare le diff => {\"tool\":\"finish_changed_pages_diff\",\"args\":{\"previousValue\":\"60\",\"currentValue\":\"59\"}}\n"
+        "Exemple: retrouve la fenetre Solitaire pour synchroniser => {\"tool\":\"read_window_text\",\"args\":{\"titleContains\":\"Solitaire\",\"includeAllVisible\":true}}\n"
         "Exemple: je ne connais pas la valeur, elle augmente quand je gagne => {\"tool\":\"unknown_capture\",\"args\":{}}\n"
         "Outils disponibles:\n%1\n")
         .arg(tools.join('\n'))

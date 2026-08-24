@@ -7,6 +7,7 @@ import ClrInspectorView from '@/views/ClrInspectorView.vue'
 import ExpertView from '@/views/ExpertView.vue'
 import InvestigationView from '@/views/InvestigationView.vue'
 import MemoryView from '@/views/MemoryView.vue'
+import NetworkView from '@/views/NetworkView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import ProcessView from '@/views/ProcessView.vue'
 import ScriptingView from '@/views/ScriptingView.vue'
@@ -24,6 +25,7 @@ const currentView = computed(() => {
   if (store.activeView === 'clr') return ClrInspectorView
   if (store.activeView === 'scripting') return ScriptingView
   if (store.activeView === 'speedhack') return SpeedhackView
+  if (store.activeView === 'network') return NetworkView
   if (store.activeView === 'profiles') return ProfileView
   if (store.activeView === 'trainer') return TrainerView
   if (store.activeView === 'expert') return ExpertView
@@ -115,6 +117,13 @@ watch(
           @click="store.activeView = 'speedhack'"
         >
           {{ $t('nav.speedhack') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'network' }"
+          @click="store.activeView = 'network'"
+        >
+          {{ $t('nav.network') }}
         </button>
         <button
           class="nav-item"

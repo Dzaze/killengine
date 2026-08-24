@@ -100,7 +100,8 @@
     "settings": "Paramètres",
     "investigation": "Investigation",
     "trainer": "Trainer",
-    "speedhack": "Speedhack"
+    "speedhack": "Speedhack",
+    "network": "Réseau"
   },
   "help": {
     "label": {
@@ -260,6 +261,13 @@
       "when": "Pour accélérer une attente (farm, temps de chargement) ou ralentir un passage difficile — comme le speedhack de Cheat Engine. Le facteur peut être ajusté en direct pendant que c'est actif, pas besoin de redémarrer. Préset « Pause (0x) » gèle complètement l'horloge perçue par la cible.",
       "cost": "Injection de code dans le processus cible : même palier de risque que « Écrire via kernel », confirmation requise. Ne couvre que les modules déjà chargés au moment de l'activation, et pas les appels résolus dynamiquement via GetProcAddress. Certains logiciels protégés peuvent détecter ou refuser une injection.",
       "example": "Un temps de chargement ou un farm répétitif prend trop longtemps. Active le speedhack à 4x depuis le panneau Speedhack ou en demandant \"accélère le jeu\" à l'Assistant : les animations et minuteurs défilent 4 fois plus vite, désactive pour revenir à la normale."
+    },
+    "network": {
+      "title": "Réseau",
+      "what": "Ajoute (ou retire) une règle pare-feu Windows dédiée bloquant tout le trafic entrant/sortant de l'exécutable du processus attaché.",
+      "when": "Pour vérifier si une valeur mémoire instable vient d'une synchro serveur en arrière-plan plutôt que d'une réallocation purement locale — coupe le réseau, observe si le comportement change, puis rétablis-le une fois le test terminé.",
+      "cost": "Modifie le pare-feu Windows via une invite UAC (élévation explicite) : même palier de risque que le speedhack, confirmation requise. La règle persiste même après avoir détaché le processus, jusqu'à rétablissement explicite.",
+      "example": "Un compteur affiché ne correspond à aucune adresse mémoire stable malgré plusieurs scans. Coupe le réseau du processus, fais varier le compteur en jeu (hors ligne), et regarde si le scan converge mieux — si oui, la valeur dépend probablement d'une synchro serveur."
     },
     "pointerChains": {
       "title": "Pointer chains",

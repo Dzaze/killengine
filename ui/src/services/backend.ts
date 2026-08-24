@@ -775,6 +775,19 @@ export interface SpeedhackStatus {
   error?: string
 }
 
+// Statut de blockProcessNetwork()/unblockProcessNetwork() : coupe le réseau
+// du processus attaché via une règle pare-feu Windows dédiée à son exécutable.
+export interface ProcessNetworkBlockStatus {
+  success: boolean
+  blocked?: boolean
+  cancelled?: boolean
+  ruleName?: string
+  ruleOutbound?: string
+  ruleInbound?: string
+  exePath?: string
+  error?: string
+}
+
 // Statut de l interception de fonctions (roadmap section B) : hook MinHook
 // injecte qui compte les appels d une fonction (mode 0) ou force son retour
 // (mode 1). callCount est lu en direct depuis l IPC partagee.
@@ -1157,6 +1170,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   setSpeedhackFactor?(factor: number): Promise<SpeedhackStatus>
   stopSpeedhack?(): Promise<SpeedhackStatus>
   getSpeedhackStatus?(): Promise<SpeedhackStatus>
+  /** Coupe/rétablit le réseau du processus attaché (règle pare-feu dédiée, invite UAC). Utile pour isoler une synchro serveur en arrière-plan comme cause d'instabilité mémoire. */
+  blockProcessNetwork?(): Promise<ProcessNetworkBlockStatus>
+  unblockProcessNetwork?(): Promise<ProcessNetworkBlockStatus>
+  getProcessNetworkBlockStatus?(): Promise<ProcessNetworkBlockStatus>
   /** Roadmap section B - interception de fonctions : hook MinHook injecte sur module!fonction. mode: 0=compter, 1=forcer retour. */
   startApiHook?(moduleName: string, functionName: string, mode: number, forcedReturnValue: number): Promise<ApiHookStatus>
   stopApiHook?(): Promise<ApiHookStatus>
@@ -2026,6 +2043,15 @@ class BackendService {
       },
       async getSpeedhackStatus() {
         return { success: true, active: false, factor: 1.0 }
+      },
+      async blockProcessNetwork() {
+        return { success: false, blocked: false, error: 'Mock backend' }
+      },
+      async unblockProcessNetwork() {
+        return { success: false, blocked: false, error: 'Mock backend' }
+      },
+      async getProcessNetworkBlockStatus() {
+        return { success: true, blocked: false }
       },
       async startApiHook(_m: string, _fn: string, _mode: number, _ret: number) {
         return { success: false, active: false, error: 'Mock backend' }

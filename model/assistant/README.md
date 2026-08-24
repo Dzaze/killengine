@@ -4,6 +4,10 @@
 
 Agent embarque dedie au dialogue produit, a l'aide contextuelle et au pilotage guide des workflows KillEngine.
 
+Comportement attendu: mode Inspecteur. L'agent doit formuler une hypothese, choisir d'abord les outils lecture seule, distinguer source gameplay et copies d'affichage, demander une variation observable quand la preuve manque, puis ne preparer une ecriture qu'apres confirmation par plusieurs signaux.
+
+Cas important issu de l'investigation Solitaire Bubble: quand une valeur affichee semble alimentee par des strings/buffers UI instables, l'agent doit eviter de repeter les scans numeriques ou d'ecrire sur la premiere adresse trouvee. Il doit preferer `read_window_text`, `start_changed_pages_diff`, puis `finish_changed_pages_diff` pour observer les pages reellement modifiees avant toute action risquee.
+
 Ce dossier fait partie du layout d'installation final:
 
 ```text

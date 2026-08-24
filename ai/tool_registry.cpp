@@ -30,6 +30,9 @@ QVariantList toolDefinitions() {
         makeTool("encrypted_scan", "Scan chiffre borne XOR/Add/Sub/NOT sur valeur entiere affichee.", {"value", "valueType"}),
         makeTool("trace_ui_string", "Cherche la valeur affichee en ASCII/UTF-16 puis prepare analyse source.", {"value"}),
         makeTool("analyze_ui_sources", "Analyse les sources numeriques proches des strings UI confirmees.", {"value"}),
+        makeTool("read_window_text", "Observe les titres/textes de fenetres lies au processus attache pour synchroniser une investigation UI.", {}),
+        makeTool("start_changed_pages_diff", "Capture un snapshot borne des pages privees/writable avant une variation affichee; lecture seule.", {}),
+        makeTool("finish_changed_pages_diff", "Compare le snapshot de pages apres variation et cherche les encodages numeriques modifies.", {"previousValue", "currentValue"}),
         makeTool("unknown_capture", "Capture un snapshot unknown initial borne.", {}),
         makeTool("unknown_compare", "Compare le snapshot unknown initial apres variation utilisateur.", {"mode", "valueType"}),
         makeTool("prepare_write_checkpoint", "Prepare des candidats pour ecriture confirmee, sans ecrire.", {"value"}, "write", true),
@@ -42,6 +45,7 @@ QVariantList toolDefinitions() {
         makeTool("test_candidate_fields", "Teste automatiquement lequel des champs candidats (issus de disassemble_backward) tient réellement : écrit une valeur test, attend, relit, classe holds/reverts, puis restaure. Remplace la lecture manuelle d'assembleur par une preuve empirique.", {"address", "watchedAddress"}, "write", true),
         makeTool("kernel_write", "Écrit une valeur via le driver noyau (contourne les protections mémoire usermode). À utiliser seulement si l'utilisateur le demande explicitement (ex: \"écris via le kernel\") ou après échec d'une écriture usermode normale.", {"address", "valueType", "value"}, "injection", true),
         makeTool("speedhack_set", "Accélère, ralentit, ou remet à la normale la vitesse perçue par le processus attaché (hook des fonctions de temps). mode=\"set\" avec un facteur (ex: 2.0 = 2x plus vite, 0.5 = 2x plus lent, 0.0 = pause), ou mode=\"off\" pour désactiver et revenir à la normale.", {"factor", "mode"}, "injection", true),
+        makeTool("block_process_network", "Coupe (ou rétablit, mode=\"off\") le réseau entrant/sortant du processus attaché via une règle pare-feu Windows dédiée. Utile pour isoler si une valeur mémoire instable vient d'une synchro serveur en arrière-plan plutôt que d'une réallocation purement locale, avant de conclure à une réallocation locale.", {"mode"}, "injection", true),
     };
 }
 

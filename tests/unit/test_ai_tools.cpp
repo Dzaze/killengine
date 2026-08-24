@@ -72,6 +72,9 @@ TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
     EXPECT_TRUE(registry.hasTool("auto_resolve"));
     EXPECT_TRUE(registry.hasTool("encrypted_scan"));
     EXPECT_TRUE(registry.hasTool("trace_ui_string"));
+    EXPECT_TRUE(registry.hasTool("read_window_text"));
+    EXPECT_TRUE(registry.hasTool("start_changed_pages_diff"));
+    EXPECT_TRUE(registry.hasTool("finish_changed_pages_diff"));
 
     const auto autoResolve = registry.toolMetadata("auto_resolve");
     EXPECT_EQ(autoResolve.value("risk").toString(), "safe");
@@ -280,6 +283,30 @@ TEST(AIEngineContextualFallbackTest, TraceUiStringForDisplayedValue) {
     EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
     EXPECT_EQ(result.value("tool").toString().toStdString(), "trace_ui_string");
     EXPECT_EQ(result.value("args").toMap().value("value").toString().toStdString(), "60");
+}
+
+TEST(AIEngineContextualFallbackTest, InspectorModeStartsChangedPagesDiff) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("mode inspecteur, on observe les copies UI avant d'ecrire", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "start_changed_pages_diff");
+}
+
+TEST(AIEngineContextualFallbackTest, InspectorModeFinishesChangedPagesDiffWithTwoValues) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("compare le diff pages, avant 60 maintenant 59", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "finish_changed_pages_diff");
+    EXPECT_EQ(result.value("args").toMap().value("previousValue").toString().toStdString(), "60");
+    EXPECT_EQ(result.value("args").toMap().value("currentValue").toString().toStdString(), "59");
 }
 
 TEST(AIEngineContextualFallbackTest, EncryptedScanForObfuscatedValue) {

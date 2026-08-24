@@ -10179,6 +10179,21 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
         recommendations.prepend(QVariantMap{{"id", "trace_ui_string"}, {"label", "Privilégier Trace UI string"}, {"safe", true}, {"reason", "Les scans exacts récents de ce processus ont souvent fini sans candidat."}});
         recommendations.prepend(QVariantMap{{"id", "encrypted_scan"}, {"label", "Privilégier scan chiffré"}, {"safe", true}, {"reason", "Mémoire locale : plusieurs scans sans candidat sur ce processus."}});
     }
+    if (learnedProfile.value("noCandidateCount").toInt() >= 4) {
+        // Signal fort de réallocation/instabilité mémoire persistante malgré
+        // plusieurs stratégies déjà tentées (scan classique, Trace UI string,
+        // scan chiffré) : suggérer d'isoler une éventuelle synchro serveur en
+        // arrière-plan comme cause, avant de conclure à une réallocation
+        // purement locale — voir blockProcessNetwork() et
+        // docs/STRATEGY_ROOM.md, 24/08/2026 (cas Solitaire "Bulles").
+        recommendations.prepend(QVariantMap{
+            {"id", "block_process_network"},
+            {"label", "Couper le réseau du processus (diagnostic)"},
+            {"safe", false},
+            {"requiresConfirmation", true},
+            {"reason", "Plusieurs stratégies de scan ont échoué sur ce processus — la valeur est peut-être resynchronisée depuis un serveur en arrière-plan plutôt que purement locale."}
+        });
+    }
     const QString lastSuccessfulAudit = learnedProfile.value("lastSuccessfulAuditEvent").toString();
     if (!lastSuccessfulAudit.isEmpty()) {
         recommendations.prepend(QVariantMap{
@@ -12148,6 +12163,44 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             : QString("Checkpoint pret: %1 adresse(s) candidate(s) pour ecrire %2. Confirme l'ecriture pour appliquer.")
                   .arg(suggestions.size())
                   .arg(checkpointValue);
+    } else if (tool == "read_window_text") {
+        QVariantMap windowOptions = args;
+        if (!windowOptions.contains("includeAllVisible")) windowOptions["includeAllVisible"] = true;
+        actionResult = readAttachedWindowText(windowOptions);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "window_text_observed";
+            result["message"] = QString("Inspection fenêtre : %1 fenêtre(s) lue(s). On peut s'en servir pour synchroniser la prochaine variation avant de comparer la mémoire.")
+                                  .arg(actionResult.value("windowCount").toInt());
+        }
+    } else if (tool == "start_changed_pages_diff") {
+        QVariantMap diffOptions = args;
+        if (!diffOptions.contains("maxBytesMb")) diffOptions["maxBytesMb"] = 64;
+        if (!diffOptions.contains("blockSize")) diffOptions["blockSize"] = 64 * 1024;
+        if (!diffOptions.contains("privateOnly")) diffOptions["privateOnly"] = true;
+        if (!diffOptions.contains("writableOnly")) diffOptions["writableOnly"] = true;
+        actionResult = startChangedPagesDiff(diffOptions);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "awaiting_observed_variation";
+            result["message"] = QString("Mode Inspecteur : snapshot lecture seule capturé (%1 blocs, %2 Mo max). Fais varier la valeur affichée, puis donne-moi l'ancienne et la nouvelle valeur pour comparer.")
+                                  .arg(actionResult.value("blocksCaptured").toInt())
+                                  .arg(diffOptions.value("maxBytesMb").toInt());
+        }
+    } else if (tool == "finish_changed_pages_diff") {
+        QVariantMap diffOptions = args;
+        diffOptions.remove("previousValue");
+        diffOptions.remove("currentValue");
+        actionResult = finishChangedPagesDiff(
+            args.value("previousValue").toString(),
+            args.value("currentValue").toString(),
+            diffOptions);
+        if (actionResult.value("success").toBool()) {
+            const int hitCount = actionResult.value("hitCount", actionResult.value("hits").toList().size()).toInt();
+            result["workflowStatus"] = hitCount > 0 ? "diff_hits_found" : "no_candidate";
+            result["message"] = hitCount > 0
+                ? QString("Mode Inspecteur : %1 piste(s) trouvée(s) dans les pages réellement modifiées. À valider en watch ou par nouvelle variation avant toute écriture.")
+                      .arg(hitCount)
+                : QString("Mode Inspecteur : aucune piste numérique directe dans les pages modifiées. On garde l'hypothèse copie UI/buffer et on évite l'écriture directe.");
+        }
     } else if (tool == "trace_ui_string") {
         QVariantMap traceOptions;
         traceOptions["ascii"] = true;
@@ -12254,6 +12307,32 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             {"label", isOff ? "Confirmer : désactiver le speedhack" : QString("Confirmer : appliquer %1x").arg(factor)},
             {"factor", factor},
             {"mode", isOff ? "off" : "set"},
+            {"requiresConfirmation", true},
+        });
+        result["recoveryActions"] = recoveryActions;
+        stampIntent(&result);
+        return result;
+    } else if (tool == "block_process_network") {
+        // Meme patron que speedhack_set ci-dessus : action systeme (regle
+        // pare-feu + invite UAC), le frontend est seul a detenir
+        // confirmRiskAction -- on renvoie une action cliquable plutot que
+        // d'appeler blockProcessNetwork()/unblockProcessNetwork() ici.
+        const QString modeArg = args.value("mode", "on").toString().trimmed().toLower();
+        const bool isOff = (modeArg == "off" || modeArg == "stop" || modeArg == "unblock");
+
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = isOff
+            ? "Retire la règle pare-feu KillEngine posée pour ce processus."
+            : "Ajoute une règle pare-feu Windows bloquant tout le trafic entrant/sortant du processus attaché (invite UAC requise).";
+        result["message"] = isOff
+            ? "Rétablissement du réseau demandé. Confirme pour retirer la règle pare-feu."
+            : "Coupure réseau demandée, pour isoler une éventuelle synchro serveur en arrière-plan. Confirme pour appliquer.";
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{
+            {"id", "network_block_apply"},
+            {"label", isOff ? "Confirmer : rétablir le réseau" : "Confirmer : couper le réseau"},
+            {"mode", isOff ? "off" : "on"},
             {"requiresConfirmation", true},
         });
         result["recoveryActions"] = recoveryActions;
@@ -12621,6 +12700,229 @@ QVariantMap ApplicationController::requestWindowsDefenderExclusion() {
                   << " path=" << installDir.toStdString() << " process=" << exeName.toStdString();
 #else
     result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
+namespace {
+// Nom de regle pare-feu derive du nom d'executable : caracteres hors
+// [A-Za-z0-9_.-] remplaces par '_' pour eviter tout probleme de quoting dans
+// la commande PowerShell generee plus bas.
+QString sanitizeFirewallRuleToken(const QString& exeName) {
+    QString sanitized = exeName;
+    static const QRegularExpression kUnsafeChars("[^A-Za-z0-9_.-]");
+    sanitized.replace(kUnsafeChars, "_");
+    return sanitized.isEmpty() ? QStringLiteral("process") : sanitized;
+}
+
+QString firewallRuleNameOut(const QString& token) {
+    return QStringLiteral("KillEngine-NetBlock-%1-Out").arg(token);
+}
+
+QString firewallRuleNameIn(const QString& token) {
+    return QStringLiteral("KillEngine-NetBlock-%1-In").arg(token);
+}
+} // namespace
+
+QVariantMap ApplicationController::blockProcessNetwork() {
+    QVariantMap result;
+    result["success"] = false;
+    result["cancelled"] = false;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    const QString exePath = QDir::toNativeSeparators(m_handle.executablePath());
+    if (exePath.isEmpty()) {
+        result["error"] = "Chemin de l'exécutable introuvable pour le processus attaché.";
+        return result;
+    }
+    const QString ruleToken = sanitizeFirewallRuleToken(QFileInfo(exePath).fileName());
+    const QString ruleOut = firewallRuleNameOut(ruleToken);
+    const QString ruleIn = firewallRuleNameIn(ruleToken);
+
+    // Guillemets simples PowerShell pour le chemin — meme convention que
+    // requestWindowsDefenderExclusion() ci-dessus (un chemin contenant une
+    // apostrophe casserait cette commande, cas limite non gere ici).
+    const QString psCommand = QStringLiteral(
+        "New-NetFirewallRule -DisplayName '%1' -Direction Outbound -Program '%2' -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null; "
+        "New-NetFirewallRule -DisplayName '%3' -Direction Inbound -Program '%2' -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null")
+        .arg(ruleOut, exePath, ruleIn);
+
+    const std::wstring parameters =
+        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.hwnd = nullptr;
+    sei.lpVerb = L"runas"; // declenche l'invite UAC visible -- jamais silencieux
+    sei.lpFile = L"powershell.exe";
+    sei.lpParameters = parameters.c_str();
+    sei.nShow = SW_HIDE;
+
+    if (!ShellExecuteExW(&sei)) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_CANCELLED) {
+            result["cancelled"] = true;
+            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        } else {
+            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+        }
+        KE_LOG_WARN() << "blockProcessNetwork: ShellExecuteExW failed, error=" << err;
+        return result;
+    }
+
+    if (sei.hProcess) {
+        WaitForSingleObject(sei.hProcess, 15000);
+        DWORD exitCode = 1;
+        GetExitCodeProcess(sei.hProcess, &exitCode);
+        CloseHandle(sei.hProcess);
+        result["success"] = (exitCode == 0);
+        if (exitCode != 0) {
+            result["error"] = QStringLiteral("New-NetFirewallRule a échoué (code %1).").arg(exitCode);
+        }
+    } else {
+        // Pas de handle de process a attendre -- best-effort, meme logique
+        // que requestWindowsDefenderExclusion().
+        result["success"] = true;
+    }
+
+    if (result.value("success").toBool()) {
+        m_networkBlockRuleToken = ruleToken;
+        m_networkBlockExePath = exePath;
+        result["ruleOutbound"] = ruleOut;
+        result["ruleInbound"] = ruleIn;
+        result["exePath"] = exePath;
+    }
+
+    KE_LOG_INFO() << "blockProcessNetwork: success=" << result.value("success").toBool()
+                  << " exe=" << exePath.toStdString();
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::unblockProcessNetwork() {
+    QVariantMap result;
+    result["success"] = false;
+    result["cancelled"] = false;
+
+#ifdef Q_OS_WIN
+    QString ruleToken = m_networkBlockRuleToken;
+    QString exePath = m_networkBlockExePath;
+    if (ruleToken.isEmpty() && m_attached) {
+        exePath = QDir::toNativeSeparators(m_handle.executablePath());
+        if (!exePath.isEmpty()) {
+            ruleToken = sanitizeFirewallRuleToken(QFileInfo(exePath).fileName());
+        }
+    }
+    if (ruleToken.isEmpty()) {
+        result["error"] = "Aucune règle de blocage réseau KillEngine connue à retirer.";
+        return result;
+    }
+
+    const QString ruleOut = firewallRuleNameOut(ruleToken);
+    const QString ruleIn = firewallRuleNameIn(ruleToken);
+    const QString psCommand = QStringLiteral(
+        "Remove-NetFirewallRule -DisplayName '%1' -ErrorAction SilentlyContinue; "
+        "Remove-NetFirewallRule -DisplayName '%2' -ErrorAction SilentlyContinue")
+        .arg(ruleOut, ruleIn);
+
+    const std::wstring parameters =
+        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.hwnd = nullptr;
+    sei.lpVerb = L"runas";
+    sei.lpFile = L"powershell.exe";
+    sei.lpParameters = parameters.c_str();
+    sei.nShow = SW_HIDE;
+
+    if (!ShellExecuteExW(&sei)) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_CANCELLED) {
+            result["cancelled"] = true;
+            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        } else {
+            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+        }
+        KE_LOG_WARN() << "unblockProcessNetwork: ShellExecuteExW failed, error=" << err;
+        return result;
+    }
+
+    if (sei.hProcess) {
+        WaitForSingleObject(sei.hProcess, 15000);
+        DWORD exitCode = 1;
+        GetExitCodeProcess(sei.hProcess, &exitCode);
+        CloseHandle(sei.hProcess);
+        result["success"] = (exitCode == 0);
+        if (exitCode != 0) {
+            result["error"] = QStringLiteral("Remove-NetFirewallRule a échoué (code %1).").arg(exitCode);
+        }
+    } else {
+        result["success"] = true;
+    }
+
+    if (result.value("success").toBool()) {
+        m_networkBlockRuleToken.clear();
+        m_networkBlockExePath.clear();
+    }
+
+    KE_LOG_INFO() << "unblockProcessNetwork: success=" << result.value("success").toBool();
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::getProcessNetworkBlockStatus() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["blocked"] = false;
+
+#ifdef Q_OS_WIN
+    QString ruleToken = m_networkBlockRuleToken;
+    QString exePath = m_networkBlockExePath;
+    if (ruleToken.isEmpty() && m_attached) {
+        exePath = QDir::toNativeSeparators(m_handle.executablePath());
+        if (!exePath.isEmpty()) {
+            ruleToken = sanitizeFirewallRuleToken(QFileInfo(exePath).fileName());
+        }
+    }
+    if (ruleToken.isEmpty()) {
+        return result;
+    }
+    const QString ruleOut = firewallRuleNameOut(ruleToken);
+
+    QProcess check;
+    check.setProgram(QStringLiteral("powershell.exe"));
+    check.setArguments({
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+        QStringLiteral("if (Get-NetFirewallRule -DisplayName '%1' -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }").arg(ruleOut)
+    });
+    check.start();
+    // 5000ms initial etait trop court : le premier chargement du module
+    // PowerShell NetSecurity (Get-NetFirewallRule) peut a lui seul depasser
+    // 5s, observe en pratique (PHASE 84, smoke test 24/08/2026).
+    if (check.waitForFinished(10000)) {
+        const QString output = QString::fromLocal8Bit(check.readAllStandardOutput()).trimmed();
+        result["blocked"] = (output == QStringLiteral("yes"));
+        result["ruleName"] = ruleOut;
+        result["exePath"] = exePath;
+    } else {
+        result["error"] = "Impossible d'interroger le pare-feu (timeout).";
+        check.kill();
+    }
 #endif
 
     return result;
