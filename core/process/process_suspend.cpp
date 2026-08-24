@@ -6,7 +6,7 @@
 
 namespace killcore {
 
-ProcessThreadsSuspendGuard::ProcessThreadsSuspendGuard(uint32_t pid) {
+ProcessThreadsSuspendGuard::ProcessThreadsSuspendGuard(uint32_t pid, uint32_t extraExcludedThreadId) {
     const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (snapshot == INVALID_HANDLE_VALUE) {
         KE_LOG_WARN() << "ProcessThreadsSuspendGuard: CreateToolhelp32Snapshot failed, error="
@@ -32,7 +32,19 @@ ProcessThreadsSuspendGuard::ProcessThreadsSuspendGuard(uint32_t pid) {
             if (entry.th32ThreadID == callingThreadId) {
                 continue;
             }
-            const HANDLE threadHandle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, entry.th32ThreadID);
+            if (extraExcludedThreadId != 0 && entry.th32ThreadID == extraExcludedThreadId) {
+                continue;
+            }
+            // THREAD_GET_CONTEXT/SET_CONTEXT en plus de SUSPEND_RESUME : les
+            // appelants qui veulent manipuler les registres de debug pendant
+            // que tout est fige (ex: armer DR0-DR7 sans la course qui a fait
+            // planter core/debug/inprocess_breakpoint_handler.cpp le
+            // 19/08/2026 — suspendre une a une PENDANT que d'autres threads
+            // continuent de tourner) reutilisent directement ce handle plutot
+            // que de rouvrir la thread une deuxieme fois.
+            const HANDLE threadHandle = OpenThread(
+                THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT,
+                FALSE, entry.th32ThreadID);
             if (!threadHandle) {
                 continue;
             }
@@ -40,7 +52,7 @@ ProcessThreadsSuspendGuard::ProcessThreadsSuspendGuard(uint32_t pid) {
                 CloseHandle(threadHandle);
                 continue;
             }
-            m_threadHandles.append(static_cast<void*>(threadHandle));
+            m_threads.append(SuspendedThreadHandle{entry.th32ThreadID, static_cast<void*>(threadHandle)});
             ++m_suspendedCount;
         } while (Thread32Next(snapshot, &entry));
     }
@@ -49,8 +61,8 @@ ProcessThreadsSuspendGuard::ProcessThreadsSuspendGuard(uint32_t pid) {
 }
 
 ProcessThreadsSuspendGuard::~ProcessThreadsSuspendGuard() {
-    for (void* rawHandle : m_threadHandles) {
-        const HANDLE threadHandle = static_cast<HANDLE>(rawHandle);
+    for (const auto& thread : m_threads) {
+        const HANDLE threadHandle = static_cast<HANDLE>(thread.handle);
         ResumeThread(threadHandle);
         CloseHandle(threadHandle);
     }

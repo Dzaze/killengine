@@ -6,6 +6,15 @@
 
 namespace killcore {
 
+/// Une thread suspendue par ProcessThreadsSuspendGuard, avec son HANDLE ouvert
+/// (THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT — assez
+/// pour suspendre/reprendre ET lire/écrire son contexte, ex: poser des
+/// registres de debug DR0-DR7 pendant que tout est figé).
+struct SuspendedThreadHandle {
+    uint32_t threadId{0};
+    void* handle{nullptr}; // HANDLE Win32, typé void* pour ne pas inclure windows.h ici
+};
+
 /// Suspend toutes les threads d'un process (énumération via
 /// CreateToolhelp32Snapshot), pour une opération qui doit s'exécuter sans
 /// qu'aucune thread de la cible ne puisse lire/écrire pendant la fenêtre —
@@ -22,7 +31,12 @@ namespace killcore {
 /// milieu de l'opération protégée — ne jamais laisser un process cible figé.
 class ProcessThreadsSuspendGuard {
 public:
-    explicit ProcessThreadsSuspendGuard(uint32_t pid);
+    /// extraExcludedThreadId : thread supplémentaire à ne jamais suspendre
+    /// (0 = aucune), en plus du thread appelant (toujours exclu). Utile quand
+    /// une thread de la cible mérite d'être exclue même si elle diffère du
+    /// thread appelant — ex: la thread d'installation d'un composant injecté
+    /// dans CE MÊME process cible, déjà armée par ses propres moyens.
+    explicit ProcessThreadsSuspendGuard(uint32_t pid, uint32_t extraExcludedThreadId = 0);
     ~ProcessThreadsSuspendGuard();
 
     ProcessThreadsSuspendGuard(const ProcessThreadsSuspendGuard&) = delete;
@@ -33,8 +47,13 @@ public:
     /// ouvertes — pas bloquant, la fenêtre reste réduite pour les autres).
     int suspendedCount() const { return m_suspendedCount; }
 
+    /// Threads effectivement suspendues avec leur handle (voir
+    /// SuspendedThreadHandle) — utilisé pour manipuler leur contexte (DR0-DR7)
+    /// pendant que tout est figé, en plus du simple suspend/resume RAII.
+    const QList<SuspendedThreadHandle>& suspendedThreads() const { return m_threads; }
+
 private:
-    QList<void*> m_threadHandles; // HANDLE Win32, typé void* pour ne pas inclure windows.h ici
+    QList<SuspendedThreadHandle> m_threads;
     int m_suspendedCount{0};
 };
 

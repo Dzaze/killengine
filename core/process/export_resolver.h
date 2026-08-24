@@ -3,6 +3,7 @@
 #include "process/process_handle.h"
 
 #include <QString>
+#include <QStringList>
 #include <cstdint>
 
 namespace killcore {
@@ -33,6 +34,26 @@ bool resolveRemoteExportAddress(
     const QString& moduleName,
     const QString& functionName,
     uint64_t* address,
+    QString* error);
+
+/**
+ * @brief Liste les noms exportés d'un module chargé dans le process cible, en
+ *        parcourant la même table d'export PE que resolveRemoteExportAddress
+ *        (voir sa doc pour le "pourquoi lire la mémoire distante et pas le
+ *        fichier disque"). Sert à découvrir les noms d'export réels d'une
+ *        DLL sans deviner à l'aveugle nom par nom.
+ *
+ * @param filterSubstring Optionnel, insensible à la casse : ne garde que les
+ *        noms contenant cette sous-chaîne (vide = tout retourner).
+ * @param maxNames Borne dure sur le nombre de noms retournés (module système
+ *        peut exporter plusieurs milliers de symboles).
+ */
+bool listRemoteExportNames(
+    const ProcessHandle& process,
+    const QString& moduleName,
+    const QString& filterSubstring,
+    int maxNames,
+    QStringList* names,
     QString* error);
 
 } // namespace killcore

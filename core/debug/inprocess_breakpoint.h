@@ -44,6 +44,18 @@ struct InProcessBreakpointConfig {
     /// Chemin de KillEngineInProcessBreakpointHandler.dll — requis, ce mode
     /// ne couvre que la surveillance d'un processus externe (voir .cpp).
     QString injectedHandlerPath;
+    /// Arme aussi les threads DEJA EXISTANTES au moment de l'injection (pas
+    /// seulement les nouvelles, comportement par défaut historique — voir le
+    /// piège documenté dans inprocess_breakpoint_handler.cpp). Fait depuis
+    /// KillEngine.exe (process externe), pas depuis la DLL injectée : suspend
+    /// TOUT le process cible d'un coup (ProcessThreadsSuspendGuard) avant
+    /// d'écrire les registres de debug sur chaque thread, puis reprend tout —
+    /// évite la course qui avait fait planter une cible réelle en 19/08/2026
+    /// (suspendre une thread a la fois PENDANT que d'autres continuent de
+    /// tourner). Opt-in explicite : reste false pour freeze/watch classiques,
+    /// activé seulement quand couvrir les threads préexistantes est demandé
+    /// explicitement.
+    bool armExistingThreads{false};
 };
 
 struct InProcessBreakpointResult {
@@ -51,6 +63,11 @@ struct InProcessBreakpointResult {
     bool timedOut{false};
     QString error;
     QList<InProcessBreakpointHit> hits;
+    /// Nombre de threads préexistantes armées en plus de la thread
+    /// d'installation, quand config.armExistingThreads était actif (0 sinon,
+    /// y compris si l'option était activée mais qu'aucune autre thread
+    /// n'existait/n'a pu être ouverte).
+    int existingThreadsArmed{0};
 };
 
 /// Stats en direct d'un freeze in-process actif (lecture synchrone de la

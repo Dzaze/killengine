@@ -4,6 +4,7 @@
 #include "inject/dll_injector.h"
 #include "logging/logger.h"
 #include "process/process_enumerator.h"
+#include "process/process_suspend.h"
 
 #ifdef Q_OS_WIN
 #include <sddl.h>
@@ -68,6 +69,55 @@ uint32_t sizeCodeFor(size_t size) {
         case 8: return 2;
         default: return 3; // 4 octets, valeur par défaut raisonnable
     }
+}
+
+/// Arme DR0 sur toutes les threads DEJA EXISTANTES de la cible (sauf la
+/// thread d'installation, deja armee par ses propres moyens), depuis
+/// KillEngine.exe -- PAS depuis la DLL injectee. Suspend TOUT le process
+/// cible d'un coup via ProcessThreadsSuspendGuard avant d'ecrire les
+/// registres de debug, ce qui evite precisement la course qui avait fait
+/// planter une cible reelle le 19/08/2026 (une premiere version suspendait
+/// les threads UNE A LA FOIS depuis l'interieur de la cible pendant que la
+/// thread d'installation continuait a faire des appels Win32 -- risque reel
+/// de corruption si une thread suspendue tenait un verrou OS critique
+/// pendant que d'autre code du meme process continuait de tourner). Ici,
+/// rien dans la cible ne tourne pendant l'armement : tout est fige par un
+/// seul controleur externe, puis tout reprend d'un coup.
+int armExistingThreadsSafely(uint32_t pid, uint32_t installThreadId,
+                              const InProcessBreakpointConfig& config,
+                              InProcessBreakpointIpcState* state) {
+    ProcessThreadsSuspendGuard suspendGuard(pid, installThreadId);
+
+    const uint32_t rwCode = config.captureExecute ? 0u : (config.captureWrites ? 1u : 3u);
+    const uint32_t sizeCode = sizeCodeFor(config.size);
+    uint32_t dr7 = 1u; // L0 (bit 0) : active DR0
+    dr7 |= (rwCode & 0x3u) << 16;
+    dr7 |= (sizeCode & 0x3u) << 18;
+
+    int armed = 0;
+    for (const auto& thread : suspendGuard.suspendedThreads()) {
+        const HANDLE threadHandle = static_cast<HANDLE>(thread.handle);
+        CONTEXT ctx{};
+        ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+        if (!GetThreadContext(threadHandle, &ctx)) {
+            continue;
+        }
+        ctx.Dr0 = config.address;
+        ctx.Dr6 = 0;
+        ctx.Dr7 = dr7;
+        if (!SetThreadContext(threadHandle, &ctx)) {
+            continue;
+        }
+        ++armed;
+        const long idx = InterlockedIncrement(&state->armedThreadIdCount) - 1;
+        if (idx >= 0 && idx < 8) {
+            state->armedThreadIds[idx] = thread.threadId;
+        }
+    }
+    state->armedThreadCount += static_cast<uint32_t>(armed);
+    return armed;
+    // suspendGuard sort de portee ici -> ResumeThread sur toutes les threads
+    // suspendues, d'un coup (destructeur RAII).
 }
 
 /// Attend jusqu'a 2s que la cible confirme state->disarmed apres une demande
@@ -159,8 +209,9 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
         CloseHandle(mapping);
         result.error = "Un composant breakpoint in-process est déjà actif sur cette cible "
                         "(injecté lors d'un appel précédent). Arrête-le (stop) avant d'en "
-                        "démarrer un autre, ou redémarre la cible — reconfigurer un composant "
-                        "déjà chargé n'est pas encore supporté.";
+                        "démarrer un autre, ou redémarre la cible — la réutilisation sans "
+                        "redémarrage a été tentée et retirée après un crash reproductible de "
+                        "la cible en test (voir docs/PHASE_TRACKER.md).";
         return result;
     }
 
@@ -206,6 +257,13 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
 
     breakpointOwnership.markActive();
     breakpointOwnership.confirmDisarmed(false); // vraiment arme desormais, plus "rien a desarmer"
+
+    if (config.armExistingThreads) {
+        const uint32_t installThreadId = (state->armedThreadIdCount > 0) ? state->armedThreadIds[0] : 0;
+        result.existingThreadsArmed = armExistingThreadsSafely(pid, installThreadId, config, state);
+        KE_LOG_INFO() << "InProcessBreakpoint: armed " << result.existingThreadsArmed
+                      << " pre-existing thread(s) in addition to the install thread, pid=" << pid;
+    }
 
     const auto modules = ProcessEnumerator::enumerateModules(pid);
     long lastSeenHitCount = 0;

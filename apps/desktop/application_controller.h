@@ -86,6 +86,13 @@ public:
     /// Retourne {success, address, module, function, error}.
     Q_INVOKABLE QVariantMap resolveSymbolAddress(const QString& moduleName, const QString& functionName) const;
 
+    /// Liste les noms exportés d'un module chargé dans le processus attaché
+    /// (table d'export PE lue en mémoire distante, même mécanisme que
+    /// resolveSymbolAddress). Utile pour découvrir le vrai nom d'une fonction
+    /// à hooker (ex: API de ressources MRM) sans deviner à l'aveugle.
+    /// filterSubstring optionnel (insensible à la casse), maxNames défaut 500.
+    Q_INVOKABLE QVariantMap listModuleExports(const QString& moduleName, const QString& filterSubstring, int maxNames) const;
+
     /// Attache KillEngine à un processus.
     Q_INVOKABLE bool attachProcess(int pid);
 

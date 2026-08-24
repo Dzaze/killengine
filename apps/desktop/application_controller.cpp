@@ -1908,6 +1908,40 @@ QVariantMap ApplicationController::resolveSymbolAddress(const QString& moduleNam
     return result;
 }
 
+QVariantMap ApplicationController::listModuleExports(const QString& moduleName, const QString& filterSubstring, int maxNames) const {
+    QVariantMap result;
+    result["success"] = false;
+    result["module"] = moduleName;
+    QVariantList namesList;
+    result["names"] = namesList;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (moduleName.trimmed().isEmpty()) {
+        result["error"] = "Module requis.";
+        return result;
+    }
+
+    QStringList names;
+    QString error;
+    if (!killcore::listRemoteExportNames(m_handle, moduleName, filterSubstring, maxNames, &names, &error)) {
+        result["error"] = error.isEmpty() ? "Listage des exports échoué." : error;
+        return result;
+    }
+
+    for (const auto& name : names) {
+        namesList.append(name);
+    }
+
+    result["success"] = true;
+    result["names"] = namesList;
+    result["count"] = namesList.size();
+    result["error"] = "";
+    return result;
+}
+
 void ApplicationController::resetHardwareBreakpointStateForPreviousTarget() {
     if (m_pid <= 0) {
         return; // rien n'etait attache avant
@@ -7278,6 +7312,7 @@ QVariantMap ApplicationController::startInProcessBreakpointWatchAsync(const QStr
     config.timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 15000);
     config.maxHits = static_cast<size_t>(std::clamp(options.value("maxHits", 10).toInt(), 1, 100));
     config.injectedHandlerPath = handlerPath;
+    config.armExistingThreads = options.value("armExistingThreads", false).toBool();
 
     const int requestId = m_nextDebugRequestId++;
     const QString requestedAddress = addressHex;
@@ -7345,10 +7380,13 @@ QVariantMap ApplicationController::startInProcessBreakpointWatchAsync(const QStr
             finished["timeoutMs"] = config.timeoutMs;
             finished["maxHits"] = static_cast<int>(config.maxHits);
             finished["timedOut"] = captureResult.timedOut;
-            finished["warning"] = "Seules les threads créées après l'injection sont couvertes — "
-                                   "une écriture qui vient d'une thread déjà active au moment de "
-                                   "l'installation peut ne pas être capturée. Si rien n'apparaît, "
-                                   "réessaie ou utilise Find What Writes (débogueur externe).";
+            finished["existingThreadsArmed"] = captureResult.existingThreadsArmed;
+            finished["warning"] = config.armExistingThreads
+                ? QString("Threads préexistantes armées en plus de l'installation: %1.").arg(captureResult.existingThreadsArmed)
+                : "Seules les threads créées après l'injection sont couvertes — "
+                  "une écriture qui vient d'une thread déjà active au moment de "
+                  "l'installation peut ne pas être capturée. Passe armExistingThreads=true, "
+                  "ou réessaie, ou utilise Find What Writes (débogueur externe).";
             finished["error"] = !captureResult.success
                 ? captureResult.error
                 : captureResult.hits.isEmpty()
@@ -7421,6 +7459,7 @@ QVariantMap ApplicationController::startInProcessExecuteWatch(const QString& ins
     config.timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 15000);
     config.maxHits = static_cast<size_t>(std::clamp(options.value("maxHits", 10).toInt(), 1, 100));
     config.injectedHandlerPath = handlerPath;
+    config.armExistingThreads = options.value("armExistingThreads", false).toBool();
 
     killcore::ProcessHandle ownedHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::AllAccess);
     if (!ownedHandle.isValid()) {
@@ -7433,7 +7472,8 @@ QVariantMap ApplicationController::startInProcessExecuteWatch(const QString& ins
     m_activeInProcessBreakpointSession = session;
 
     KE_LOG_INFO() << "startInProcessExecuteWatch(address=0x" << std::hex << address << std::dec
-                  << ", timeoutMs=" << config.timeoutMs << ", maxHits=" << config.maxHits << ")";
+                  << ", timeoutMs=" << config.timeoutMs << ", maxHits=" << config.maxHits
+                  << ", armExistingThreads=" << config.armExistingThreads << ")";
 
     const auto captureResult = session->monitor(ownedHandle, config);
 
@@ -7451,6 +7491,7 @@ QVariantMap ApplicationController::startInProcessExecuteWatch(const QString& ins
     result["timedOut"] = captureResult.timedOut;
     result["timeoutMs"] = config.timeoutMs;
     result["maxHits"] = static_cast<int>(config.maxHits);
+    result["existingThreadsArmed"] = captureResult.existingThreadsArmed;
     result["error"] = !captureResult.success
         ? captureResult.error
         : captureResult.hits.isEmpty()
