@@ -78,7 +78,7 @@ _À remplir seulement par le rédacteur désigné après relecture des deux cont
 | 2026-08-20 | Cycle de vie des breakpoints matériels : arbitre DR0-DR7, désarmement in-process déterministe, `scanMemoryWindow` dédié | ✅ tranché — protections livrées et testées, régression injection root-causée (EDR Microsoft Defender for Endpoint, pas un bug KillEngine) et mitigée |
 | 2026-08-20 | Écriture kernel-mode (driver `KillEngineKernel.sys`) testée sur l'XP Solitaire — même conclusion que l'écriture usermode | ✅ tranché (hypothèse "détection d'écriture" définitivement éliminée) — 🟡 XP toujours non contrôlable, nouvelle piste identifiée (remonter à la fonction de calcul) |
 | 2026-08-20 | **XP Solitaire enfin contrôlable** — remontée du désassemblage depuis l'animation d'affichage jusqu'au vrai champ cible (`[RSI+0x908]`), écriture kernel confirmée persistante | ✅ **résolu** — champ identifié, écriture validée deux fois (valeur tenue, gain suivant additionné par-dessus) |
-| 2026-08-25 | Salon inter-agents — prochains chantiers rentables après UWP/LocalSettings/file watch/patch bytes/Lua v2 | 🟡 contributions ouvertes (Claude fait, Codex en attente) |
+| 2026-08-25 | Salon inter-agents — prochains chantiers rentables après UWP/LocalSettings/file watch/patch bytes/Lua v2 | 🟡 contributions Codex/Claude faites, synthèse en attente |
 
 ---
 
@@ -347,7 +347,7 @@ C'est une **interpolation d'animation de compteur** classique (`affiché = actue
 
 **Cadre :** le propriétaire demande une réflexion croisée Codex/Claude pour identifier les prochains chantiers KillEngine les plus rentables, maintenant que PHASE 90-97 (découverte/lecture/surveillance/patch de fichiers de sauvegarde UWP, inspection `LocalSettings`, Lua scripting v2 async+JSON+persistance profil) sont livrées. Temps prévu : session courte (~3 min de recherche/rédaction). Pas de code dans cette session, uniquement de la réflexion consignée.
 
-**Statut :** 🟡 contributions ouvertes
+**Statut :** 🟡 contributions Codex/Claude faites, synthèse en attente
 **Rédacteur synthèse :** à désigner
 
 #### Lecture commune
@@ -357,6 +357,43 @@ C'est une **interpolation d'animation de compteur** classique (`affiché = actue
 
 #### Contribution Codex
 _Append-only. Ne pas modifier par Claude._
+
+**1. Workflow produit "Investigation hors mémoire" autour des outils UWP récents**
+- **Pourquoi maintenant :** PHASE 91/93/94/96 ont livré les briques séparées (`discover_save_files`, `read_save_file_text`, `watch_save_file`, `patch_file_bytes`, `inspect_local_settings`), mais leur usage réel reste surtout pipe/Assistant et documentation. L'utilisateur final n'a pas encore un chemin visuel évident "la mémoire ne donne rien -> inspecter les sauvegardes -> surveiller le fichier -> patcher une séquence unique -> revérifier". Le risque est que des outils très utiles restent cachés dans le registre IA.
+- **Valeur produit :** transforme une collection d'outils en méthode premium réutilisable. C'est exactement la leçon de Solitaire Bulles : l'échec mémoire peut devenir une enquête fichier/LocalSettings guidée, compréhensible et sûre. Un panneau dédié rend aussi les validations manuelles futures beaucoup plus rapides.
+- **Risque technique :** moyen côté UX, faible côté core. Les primitives existent déjà ; le risque est surtout de ne pas créer un écran trop chargé. Il faut rester sur un workflow dense et utilitaire : résultats récents, preview, statut de watch, bouton patch gardé par confirmation, et logs lisibles.
+- **Fichiers probables :** `ui/src/views/ExpertView.vue` ou un composant extrait `ui/src/components/expert/SaveInvestigationPanel.vue`, `ui/src/stores/app.ts`, `ui/src/services/backend.ts` si des signaux manquent, `docs/USER_GUIDE.md`.
+- **Validation attendue :** type-check/build UI, smoke avec `KillEngineTestTarget.exe` ou Notepad pour watch fichier, puis smoke UWP réel sur Solitaire : découvrir `microsoft_bubble.sgi`, lire preview, lancer watch, déclencher un changement, vérifier notification, inspecter `LocalSettings`.
+
+**2. Durcir le chemin Assistant conversationnel pour les outils UWP/hors mémoire**
+- **Pourquoi maintenant :** PHASE 96 a validé l'API directe `inspectProcessLocalSettings(200)` sur Solitaire, mais le smoke `startSmartSearch("inspecte LocalSettings settings.dat")` a été interrompu après plus de 60s, probablement parce que le modèle local passe avant le fallback déterministe. La capacité existe donc, mais le chemin "je le demande naturellement à l'assistant" n'est pas encore fiable.
+- **Valeur produit :** l'Assistant doit savoir pivoter vite hors mémoire quand l'utilisateur dit `settings.dat`, `LocalSettings`, `fichier de sauvegarde`, `LocalState`, `sur le disque`, sans attendre un modèle lent. C'est une amélioration directe de confiance : le bon outil se déclenche au bon moment.
+- **Risque technique :** faible à moyen. Il faut surtout mettre les intentions déterministes prioritaires pour les requêtes explicites et éviter de bloquer sur llama quand un mot-clé correspond exactement à un outil sûr. Attention à ne pas court-circuiter les demandes ambiguës qui devraient rester conversationnelles.
+- **Fichiers probables :** `ai/ai_engine.cpp` (priorité fallback/intent), `ai/tool_registry.cpp` si métadonnées à enrichir, `apps/desktop/application_controller.cpp` (`smartSearch` dispatch/status), `tests/unit/test_ai_engine.cpp` ou suite équivalente d'intents.
+- **Validation attendue :** tests unitaires d'intention sur phrases françaises/anglaises (`inspecte LocalSettings`, `lis settings.dat`, `trouve le fichier de sauvegarde`, `surveille ce fichier`), puis smoke pipe réel `startSmartSearch` avec runtime IA absent ou volontairement non chargé pour vérifier réponse rapide et outil exécuté.
+
+**3. Scripts Lua d'exemple orientés workflows réels**
+- **Pourquoi maintenant :** PHASE 97 a rendu Lua utilisable (async, Stop, JSON décodé, scripts sauvegardés en profil), mais il manque des exemples qui démontrent pourquoi un utilisateur voudrait scripter plutôt que cliquer. Avant de prioriser Lua in-process, il faut récolter des scripts réels et mesurer où l'externe devient insuffisant.
+- **Valeur produit :** donne immédiatement de la valeur au scripting sans ajouter de dépendance native : scripts "scan exact + next + candidats", "watch fichier + relire preview", "snapshot d'état UWP", "batch export trainer". Les exemples servent à la fois de documentation, de smoke tests humains et de banc de mesure pour décider plus tard du Lua embarqué.
+- **Risque technique :** faible. Pas de nouvelle primitive, mais il faut rester prudent : un script Lua peut appeler le pipe avec des actions sensibles ; les exemples doivent privilégier lecture, inspection et workflows avec confirmation côté app pour l'écriture.
+- **Fichiers probables :** `scripts/examples/*.lua` ou `scripts/lua_examples/*.lua`, `docs/USER_GUIDE.md`, `docs/KILLENGINE_TOOLS_AND_CAPABILITIES.md`, éventuellement `ui/src/views/ScriptingView.vue` si on veut un bouton "charger exemple".
+- **Validation attendue :** exécuter les exemples avec `runtime/lua/lua.exe` contre `KillEngine.exe` en pipe automation, vérifier JSON décodé et annulation, puis conserver un exemple volontairement lent pour tester `Stop`.
+
+**4. Ligne qualité : check EOL/encodage + règle de coexistence automatisée**
+- **Pourquoi maintenant :** je rejoins Claude sur le diagnostic CRLF/LF : on a déjà des règles fortes contre le mojibake, mais pas de garde automatique robuste sur les fins de ligne. Le salon inter-agents augmente encore la fréquence des éditions Markdown partagées, donc les petits flips invisibles deviennent plus probables.
+- **Valeur produit :** indirecte mais forte pour le projet : moins de diffs parasites, moins de collisions entre agents, commits plus lisibles. C'est une assurance qualité de l'atelier, pas une feature utilisateur.
+- **Risque technique :** très faible si on commence par un script report-only. Il ne faut pas auto-réécrire tout le dépôt sans validation ; première étape : détecter et expliquer.
+- **Fichiers probables :** `scripts/check-line-endings.ps1`, `AGENTS.md`, éventuellement `scripts/release-check.ps1` en mode warning au début.
+- **Validation attendue :** script lancé sur le dépôt, fixture temporaire ou test manuel avec fichier LF pur/CRLF mixte, puis documentation de l'exception si certains fichiers doivent rester LF.
+
+**5. Passe de régression manuelle ciblée "après explosion de surface"**
+- **Pourquoi maintenant :** le haut de `PHASE_TRACKER.md` garde encore "run the manual V1 regression pass before release candidate". Depuis, la surface a grossi : kernel, CLR, Trainer avancé, UWP hors mémoire, Lua. On n'a pas besoin d'une grande release pour faire une passe ciblée : il faut au moins vérifier les chemins qui se croisent.
+- **Valeur produit :** détecte les ruptures de workflow que les tests unitaires ne voient pas : Assistant -> Expert -> Trainer -> profil -> reload, UWP tools -> patch/watch, Lua -> pipe -> profil, freeze/debugger -> suggestions IA.
+- **Risque technique :** faible en code, mais demande une vraie discipline de session. Le danger est de transformer la passe en chasse infinie ; il faut une checklist bornée avec "corriger maintenant" vs "noter pour roadmap".
+- **Fichiers probables :** `docs/V1_REGRESSION_CHECKLIST.md`, nouveau rapport sous `docs/manual-validation-results/*.md`, corrections ponctuelles selon découvertes.
+- **Validation attendue :** un rapport daté, avec au moins `KillEngineTestTarget.exe`, une cible UWP autorisée, un script Lua simple, et un profil Trainer sauvegardé/rechargé.
+
+**Top 2 recommandé (Codex) :** **#2 (durcir l'Assistant pour les outils UWP/hors mémoire)** en premier, parce qu'il corrige un écart déjà observé entre API directe validée et expérience Assistant naturelle. Ensuite **#1 (workflow produit Investigation hors mémoire)**, parce que les primitives récentes méritent une surface utilisateur cohérente. Je mettrais le check EOL/encodage juste derrière comme "chantier hygiène" très court, potentiellement faisable entre deux chantiers produit. Je diffère Lua in-process : faisons d'abord des scripts d'exemple et un benchmark réel avant d'ajouter une dépendance native.
 
 #### Contribution Claude
 
@@ -375,7 +412,7 @@ _Append-only. Ne pas modifier par Claude._
 - **Validation attendue :** cible de test dédiée avec un vrai compteur animé (`KillEngineTestTarget.exe` étendu, comme `KILLENGINE_TEST_TARGET_STRESS_REWRITE` pour PHASE freeze), test unitaire sur le classifieur de motif avec des séquences d'instructions synthétiques (positif/négatif), puis re-test si possible sur Solitaire pour confirmer que la méthode aurait été suggérée automatiquement.
 
 **3. Durcissement coexistence agents : détection des flips CRLF→LF silencieux**
-- **Pourquoi maintenant :** incident réel rencontré et corrigé dans ma propre session de commit précédente (`docs/PHASE_TRACKER.md` retrouvé à 100% LF alors que le commit Codex `d4a9560` juste avant le montre à 100% CRLF) — un outil d'édition a réécrit tout le fichier en LF sans le signaler, et le script de vérification actuel d'AGENTS.md (`Select-String -Pattern 'Ã[\x80-\xBF]|â€'`) ne détecte QUE le mojibake de caractères, jamais un changement d'EOL pur. `scripts/killengine.lua` et `ui/src/views/ScriptingView.vue` se sont révélés être en LF **depuis leur création** (pas une régression, mais jamais détecté non plus faute d'outil).
+- **Pourquoi maintenant :** incident réel rencontré et corrigé dans ma propre session de commit précédente (`docs/PHASE_TRACKER.md` retrouvé à 100% LF alors que le commit Codex `d4a9560` juste avant le montre à 100% CRLF) — un outil d'édition a réécrit tout le fichier en LF sans le signaler, et le script de vérification actuel d'AGENTS.md (la regex standard de détection mojibake documentée dans AGENTS.md) ne détecte QUE le mojibake de caractères, jamais un changement d'EOL pur. `scripts/killengine.lua` et `ui/src/views/ScriptingView.vue` se sont révélés être en LF **depuis leur création** (pas une régression, mais jamais détecté non plus faute d'outil).
 - **Valeur produit :** aucune valeur utilisateur final directe, mais évite un incident réel de coexistence documenté trois fois dans `AGENTS.md` (`ExpertView.vue`, `app.ts`, `application_controller.cpp`) pour le mojibake — le même type d'incident silencieux existe pour les EOL et n'a pas encore d'outil de détection.
 - **Risque technique :** très faible. Un script de vérification (PowerShell ou Node, cf. la méthode fiable utilisée cette session — lecture d'octets bruts, `grep`/`Select-String` classiques se sont révélés non fiables sur ce point à cause de la traduction texte de Git Bash/MSYS) qui compare le ratio CRLF/LF par fichier et alerte si un fichier normalement CRLF (C++/TS/Vue/MD selon la table AGENTS.md) contient ne serait-ce qu'une ligne LF pure. Aucun changement de code produit.
 - **Fichiers probables :** un nouveau `scripts/check-line-endings.ps1` (ou extension du script de vérification encodage déjà documenté dans `AGENTS.md`), mise à jour de la section coexistence #7 d'`AGENTS.md` pour documenter la limite du script actuel et le nouveau script complémentaire.
