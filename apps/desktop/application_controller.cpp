@@ -23,6 +23,7 @@
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
 #include "process/export_resolver.h"
+#include "process/package_storage.h"
 #include "process/process_enumerator.h"
 #include "process/process_handle.h"
 #include "process/process_suspend.h"
@@ -1938,6 +1939,82 @@ QVariantMap ApplicationController::listModuleExports(const QString& moduleName, 
     result["success"] = true;
     result["names"] = namesList;
     result["count"] = namesList.size();
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::discoverProcessSaveFiles(int maxResults) const {
+    QVariantMap result;
+    result["success"] = false;
+    QVariantList filesList;
+    result["files"] = filesList;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    QString familyName;
+    QString error;
+    if (!killcore::resolvePackageFamilyName(m_handle, &familyName, &error)) {
+        result["error"] = error.isEmpty() ? "Résolution du package échouée." : error;
+        return result;
+    }
+    result["familyName"] = familyName;
+
+    QVector<killcore::PackageSaveFileEntry> files;
+    if (!killcore::listPackageSaveFiles(familyName, maxResults, /*excludeNoise=*/true, &files, &error)) {
+        result["error"] = error.isEmpty() ? "Listage des fichiers échoué." : error;
+        return result;
+    }
+
+    for (const auto& entry : files) {
+        QVariantMap fileMap;
+        fileMap["path"] = entry.path;
+        fileMap["sizeBytes"] = entry.sizeBytes;
+        fileMap["lastWriteTime"] = entry.lastWriteTimeIso;
+        filesList.append(fileMap);
+    }
+
+    result["success"] = true;
+    result["files"] = filesList;
+    result["count"] = filesList.size();
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::readProcessSaveFileText(const QString& path, int maxBytes) const {
+    QVariantMap result;
+    result["success"] = false;
+    result["path"] = path;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    // Garde-fou : ce n'est pas une primitive de lecture de fichier arbitraire
+    // sur le disque, seulement des fichiers de sauvegarde/état sous le
+    // dossier package UWP de l'utilisateur courant.
+    const QString normalized = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()).toLower();
+    const QString allowedRoot = QDir::toNativeSeparators(
+        QDir(qEnvironmentVariable("LOCALAPPDATA")).filePath("Packages")).toLower();
+    if (allowedRoot.isEmpty() || !normalized.startsWith(allowedRoot)) {
+        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
+        return result;
+    }
+
+    QString text;
+    bool truncated = false;
+    QString error;
+    if (!killcore::readPackageSaveFileText(path, maxBytes, &text, &truncated, &error)) {
+        result["error"] = error.isEmpty() ? "Lecture du fichier échouée." : error;
+        return result;
+    }
+
+    result["success"] = true;
+    result["text"] = text;
+    result["truncated"] = truncated;
     result["error"] = "";
     return result;
 }
@@ -10503,6 +10580,22 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
             {"reason", "Plusieurs stratégies de scan ont échoué sur ce processus — la valeur est peut-être resynchronisée depuis un serveur en arrière-plan plutôt que purement locale."}
         });
     }
+    if (learnedProfile.value("noCandidateCount").toInt() >= 6) {
+        // PHASE 91 : au-dela de la coupure reseau (deja suggeree ci-dessus a
+        // 4 echecs), une instabilite memoire qui persiste encore apres
+        // isolation reseau suggere que la valeur affichee n'est peut-etre
+        // meme pas fiablement en memoire — voir docs/PHASE_TRACKER.md
+        // PHASE 90 (investigation Solitaire "Bulles") ou la vraie percee a
+        // ete de chercher un fichier de sauvegarde sur disque apres l'echec
+        // de toutes les pistes memoire.
+        recommendations.prepend(QVariantMap{
+            {"id", "discover_save_files"},
+            {"label", "Chercher un fichier de sauvegarde sur le disque"},
+            {"safe", true},
+            {"requiresConfirmation", false},
+            {"reason", "De nombreuses strategies memoire ont echoue meme apres isolation reseau — la valeur affichee vient peut-etre d'un fichier de sauvegarde plutot que d'une adresse memoire stable."}
+        });
+    }
     const QString lastSuccessfulAudit = learnedProfile.value("lastSuccessfulAuditEvent").toString();
     if (!lastSuccessfulAudit.isEmpty()) {
         recommendations.prepend(QVariantMap{
@@ -12647,6 +12740,25 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["recoveryActions"] = recoveryActions;
         stampIntent(&result);
         return result;
+    } else if (tool == "discover_save_files") {
+        const int maxResults = args.value("maxResults", 50).toInt();
+        actionResult = discoverProcessSaveFiles(maxResults);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "save_files_discovered";
+            result["message"] = QString("Fichiers de sauvegarde : %1 trouvé(s) sous le package '%2'. On peut en lire un avec read_save_file_text pour chercher la valeur affichée.")
+                                  .arg(actionResult.value("count").toInt())
+                                  .arg(actionResult.value("familyName").toString());
+        }
+    } else if (tool == "read_save_file_text") {
+        const QString path = args.value("path").toString();
+        const int maxBytes = args.value("maxBytes", 65536).toInt();
+        actionResult = readProcessSaveFileText(path, maxBytes);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "save_file_text_read";
+            result["message"] = actionResult.value("truncated").toBool()
+                ? "Fichier lu (tronqué à la taille maximale). Cherche le champ correspondant à la valeur affichée dans le texte."
+                : "Fichier lu en entier. Cherche le champ correspondant à la valeur affichée dans le texte.";
+        }
     } else {
         result["actionStatus"] = "unsupported_tool";
         result["actionError"] = QString("Outil Smart Search non supporté: %1").arg(tool);

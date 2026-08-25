@@ -93,6 +93,21 @@ public:
     /// filterSubstring optionnel (insensible à la casse), maxNames défaut 500.
     Q_INVOKABLE QVariantMap listModuleExports(const QString& moduleName, const QString& filterSubstring, int maxNames) const;
 
+    /// PHASE 91 — Découvre les fichiers de sauvegarde/état probables du
+    /// processus attaché, en résolvant son "package family name" UWP puis en
+    /// listant %LOCALAPPDATA%\Packages\<familyName>\, triés par date de
+    /// modification récente d'abord. Ne fonctionne que pour les processus
+    /// UWP/AppContainer (retourne success=false avec un message clair sinon).
+    /// Retourne {success, familyName, files: [{path, sizeBytes, lastWriteTime}], error}.
+    Q_INVOKABLE QVariantMap discoverProcessSaveFiles(int maxResults) const;
+
+    /// PHASE 91 — Lit le contenu (décodé best-effort en texte imprimable,
+    /// borné en taille) d'un fichier découvert via discoverProcessSaveFiles.
+    /// Le chemin doit être sous %LOCALAPPDATA%\Packages\ (garde-fou : ce
+    /// n'est pas une primitive de lecture de fichier arbitraire sur le disque).
+    /// Retourne {success, path, text, truncated, error}.
+    Q_INVOKABLE QVariantMap readProcessSaveFileText(const QString& path, int maxBytes) const;
+
     /// Attache KillEngine à un processus.
     Q_INVOKABLE bool attachProcess(int pid);
 

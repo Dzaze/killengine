@@ -503,6 +503,18 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         return result;
     }
 
+    // PHASE 91 : demande explicite d'investigation "hors memoire" -- la
+    // valeur affichee vient peut-etre d'un fichier de sauvegarde sur disque
+    // plutot que d'une adresse memoire stable (voir docs/PHASE_TRACKER.md
+    // PHASE 90, investigation Solitaire "Bulles").
+    if (q.contains("fichier de sauvegarde") || q.contains("fichiers de sauvegarde")
+        || q.contains("sauvegarde disque") || q.contains("sur le disque")
+        || q.contains("dans un fichier") || q.contains("save file")
+        || q.contains("localstate")) {
+        return makeToolCall("discover_save_files", {},
+            "Je cherche les fichiers de sauvegarde/etat du processus attache sur le disque.");
+    }
+
     // Mode Inspecteur: obtenir une preuve nouvelle avant toute ecriture.
     if (inspectorOrUiCopy || q.contains("diff pages") || q.contains("pages modifiees") || q.contains("pages modifiées")) {
         if (numbers.size() >= 2 && (q.contains("compare") || q.contains("compar") || q.contains("maintenant")

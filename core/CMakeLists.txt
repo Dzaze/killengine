@@ -29,6 +29,12 @@ add_library(killcore STATIC
     process/export_resolver.h
     process/export_resolver.cpp
 
+    # PHASE 91 — Découverte des fichiers de sauvegarde/état d'un process UWP
+    # (dossier %LOCALAPPDATA%\Packages\<familyName>\), pour proposer une
+    # investigation "hors mémoire" à l'IA embarquée après PHASE 90.
+    process/package_storage.h
+    process/package_storage.cpp
+
     # Optional kernel driver bridge (probe/capabilities only)
     kernel/kernel_driver_bridge.h
     kernel/kernel_driver_bridge.cpp
