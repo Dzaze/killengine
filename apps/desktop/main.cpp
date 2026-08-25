@@ -114,6 +114,10 @@ int runApplication(int argc, char* argv[]) {
     killengine::ApplicationController* controller = new killengine::ApplicationController(&mainWindow);
     KE_LOG_INFO() << "ApplicationController created.";
 
+    // PHASE 119 -- pont pipe d'automatisation -> Vue/Pinia (callVueStoreAction) :
+    // le controller a besoin de la page pour y injecter du JS via runJavaScript().
+    controller->setWebEnginePage(webEnginePage);
+
     // Connecteur d'automatisation local (demandé le 19/08/2026 : pilotage
     // temps réel par un agent IA pendant une session de test manuelle) —
     // désactivé par défaut, n'écoute que si explicitement demandé au lancement.

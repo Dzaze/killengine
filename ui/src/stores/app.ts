@@ -7955,6 +7955,32 @@ async function doEncryptedScan() {
     await refreshCandidates()
   }
 
+  // PHASE 119 -- pont pipe d'automatisation -> couche Vue/Pinia (voir
+  // docs/POWER_UP_ROADMAP.md section N). Expose UNIQUEMENT les actions
+  // listees ici sur window, pour qu'ApplicationController::callVueStoreAction
+  // (C++) puisse les invoquer via page()->runJavaScript() depuis le pipe.
+  // Liste blanche cote JS ET cote C++ (allowedVueStoreActions() dans
+  // application_controller.cpp) : les deux doivent matcher independamment
+  // pour qu'une action s'execute -- jamais de JS arbitraire, uniquement ces
+  // fonctions nommees avec leur propre signature figee.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const automationBridgeActions: Record<string, (...args: any[]) => unknown> = {
+    keepCandidate,
+    ignoreCandidate,
+    addAddressToWatch,
+  }
+  if (typeof window !== 'undefined') {
+    window.__killengineAutomationBridge = {
+      dispatch(action: string, args: unknown[]) {
+        const fn = automationBridgeActions[action]
+        if (typeof fn !== 'function') {
+          throw new Error(`Action non autorisée (bridge JS) : ${action}`)
+        }
+        return fn(...(Array.isArray(args) ? args : []))
+      },
+    }
+  }
+
   return {
     version,
     activeView,

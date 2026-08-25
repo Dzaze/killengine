@@ -65,11 +65,13 @@
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QVBoxLayout>
+#include <QWebEnginePage>
 #include <QWidget>
 #include <QSettings>
 #include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryFile>
+#include <QTimer>
 
 #include <algorithm>
 #include <chrono>
@@ -17472,6 +17474,99 @@ QVariantMap ApplicationController::suggestStableLocatorForAddress(
         {"elapsedMs", result.value("elapsedMs")},
     });
 
+    return result;
+}
+
+void ApplicationController::setWebEnginePage(QWebEnginePage* page) {
+    m_webEnginePage = page;
+}
+
+namespace {
+// PHASE 119 -- liste blanche cote C++ des actions de store Pinia autorisees
+// via callVueStoreAction(). Doit rester intentionnellement petite : chaque
+// entree ajoutee ici est une fonction de ui/src/stores/app.ts qui devient
+// executable depuis le pipe d'automatisation sans confirmRiskAction (le
+// RiskGate frontend vit cote UI, pas dans ces fonctions elles-memes -- voir
+// la note en tete d'automation_pipe_server.h sur le bypass volontaire du
+// RiskGate). La meme liste doit exister independamment cote JS
+// (window.__killengineAutomationBridge dans app.ts) : les deux doivent
+// matcher pour qu'un appel aboutisse.
+const QSet<QString>& allowedVueStoreActions() {
+    static const QSet<QString> kAllowed = {
+        QStringLiteral("keepCandidate"),
+        QStringLiteral("ignoreCandidate"),
+        QStringLiteral("addAddressToWatch"),
+    };
+    return kAllowed;
+}
+} // namespace
+
+QVariantMap ApplicationController::callVueStoreAction(const QString& action, const QVariantList& args) {
+    QVariantMap result;
+    result["success"] = false;
+    result["action"] = action;
+
+    if (!allowedVueStoreActions().contains(action)) {
+        result["error"] = "Action non autorisee (liste blanche C++ callVueStoreAction) : " + action;
+        return result;
+    }
+    if (!m_webEnginePage) {
+        result["error"] = "QWebEnginePage non initialisee (setWebEnginePage jamais appele).";
+        return result;
+    }
+
+    // Serialise [action, args] en JSON via QJsonDocument -- jamais de
+    // concatenation de string dans le script JS ci-dessous, pour qu'une
+    // valeur d'argument contenant des guillemets/backslashes ne puisse pas
+    // casser hors de son contexte de valeur JSON.
+    QJsonArray callArgs;
+    callArgs.append(action);
+    callArgs.append(QJsonArray::fromVariantList(args));
+    const QByteArray callArgsJson = QJsonDocument(callArgs).toJson(QJsonDocument::Compact);
+
+    const QString script = QStringLiteral(
+        "(function(){"
+        "try{"
+        "var call=%1;"
+        "var bridge=window.__killengineAutomationBridge;"
+        "if(!bridge||typeof bridge.dispatch!=='function'){"
+        "return {success:false,error:'bridge indisponible (page pas encore chargee ou store pas initialise)'};"
+        "}"
+        "var r=bridge.dispatch(call[0],call[1]);"
+        "return {success:true,result:(r===undefined?null:r)};"
+        "}catch(e){"
+        "return {success:false,error:String(e&&e.message?e.message:e)};"
+        "}"
+        "})()"
+    ).arg(QString::fromUtf8(callArgsJson));
+
+    QVariant jsResult;
+    bool finished = false;
+    QEventLoop loop;
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+    QObject::connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    m_webEnginePage->runJavaScript(script, [&](const QVariant& value) {
+        jsResult = value;
+        finished = true;
+        loop.quit();
+    });
+    timeoutTimer.start(5000);
+    loop.exec();
+
+    if (!finished) {
+        result["error"] = "Timeout (5s) en attendant la reponse JS -- la page a-t-elle bien fini de charger le store ?";
+        return result;
+    }
+
+    const QVariantMap jsMap = jsResult.toMap();
+    const bool jsSuccess = jsMap.value("success", false).toBool();
+    result["success"] = jsSuccess;
+    if (jsSuccess) {
+        result["result"] = jsMap.value("result");
+    } else {
+        result["error"] = jsMap.value("error", "Erreur JS inconnue (reponse non reconnue).").toString();
+    }
     return result;
 }
 

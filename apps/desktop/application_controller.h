@@ -34,6 +34,7 @@
 
 class QLabel;
 class QProcess;
+class QWebEnginePage;
 class QWidget;
 
 namespace killengine {
@@ -57,6 +58,12 @@ class ApplicationController : public QObject {
 public:
     explicit ApplicationController(QObject* parent = nullptr);
     ~ApplicationController() override;
+
+    /// Câblage interne (appelé une fois par main.cpp après création de la
+    /// QWebEnginePage) : nécessaire à callVueStoreAction() ci-dessous pour
+    /// injecter du JS dans la page. Pas Q_INVOKABLE : ne doit jamais être
+    /// rebranchable depuis le pipe d'automatisation.
+    void setWebEnginePage(QWebEnginePage* page);
 
     // -----------------------------------------------------------------------
     // Propriétés
@@ -943,6 +950,33 @@ public:
         const QString& addressHex,
         const QVariantMap& options);
 
+    // -----------------------------------------------------------------------
+    // PHASE 119 — Pont pipe d'automatisation -> couche Vue/Pinia
+    // (docs/POWER_UP_ROADMAP.md section N, decide priorite par le
+    // proprietaire le 25/08/2026)
+    // -----------------------------------------------------------------------
+
+    /// Invoque une action de store Pinia (ui/src/stores/app.ts) depuis le
+    /// pipe d'automatisation, pour les actions purement frontend qui n'ont
+    /// aucun miroir Q_INVOKABLE cote C++ (ex: keepCandidate/ignoreCandidate/
+    /// addAddressToWatch). Contrairement au reste de cette classe, ceci
+    /// n'execute AUCUNE logique C++ : construit un appel JSON-safe et
+    /// l'injecte via QWebEnginePage::runJavaScript() vers
+    /// window.__killengineAutomationBridge.dispatch(action, args), une
+    /// surface JS explicitement bornee cote store (voir app.ts). Double
+    /// liste blanche par conception (defense en profondeur, jamais un
+    /// pont "execute ce JS arbitraire") : `action` doit d'abord matcher la
+    /// liste blanche C++ interne (kAllowedVueStoreActions) AVANT meme que le
+    /// JS soit construit, PUIS le bridge JS revalide `action` de son cote
+    /// contre sa propre table de fonctions -- les deux listes doivent
+    /// matcher independamment pour qu'un appel aboutisse. `args` est un
+    /// tableau positionnel serialise en JSON via QJsonDocument (jamais de
+    /// concatenation de string), passe tel quel a la fonction de store
+    /// ciblee. Bloquant (QEventLoop + timeout 5s), comme findWhatWrites vs
+    /// findWhatWritesAsync : le pipe ne peut pas relire le resultat d'un
+    /// callback Qt asynchrone. Retourne {success, action, result, error}.
+    Q_INVOKABLE QVariantMap callVueStoreAction(const QString& action, const QVariantList& args);
+
 signals:
     void attachmentChanged();
     void scanStarted();
@@ -1198,6 +1232,9 @@ private:
     // mute encore m_candidates / m_lastAutoWriteTargets. Rejette l'appel
     // reentrant plutot que de laisser corrompre l'etat partage.
     bool                     m_smartSearchBusy{false};
+    // PHASE 119 -- pont callVueStoreAction() : page assignee par
+    // setWebEnginePage() depuis main.cpp, jamais possedee ici.
+    QPointer<QWebEnginePage> m_webEnginePage;
 };
 
 } // namespace killengine

@@ -23,6 +23,13 @@ declare global {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       webChannelTransport: any
     }
+    // PHASE 119 -- pont pipe d'automatisation -> Vue/Pinia (voir
+    // docs/POWER_UP_ROADMAP.md section N). Surface JS bornée, câblée
+    // depuis ui/src/stores/app.ts, appelée par
+    // ApplicationController::callVueStoreAction (C++) via runJavaScript().
+    __killengineAutomationBridge?: {
+      dispatch(action: string, args: unknown[]): unknown
+    }
   }
 }
 
