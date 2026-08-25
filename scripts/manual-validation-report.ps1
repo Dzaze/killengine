@@ -74,6 +74,60 @@ Notes:
 
 ~~~
 
+## Trainer Dependencies (dependsOn)
+
+- [ ] 2-3 chained Trainer features created, one depending on the other(s)
+- [ ] Toggling the dependent feature ON activates prerequisites first, in order
+- [ ] Apply all / Restore all respect the same dependency order
+- [ ] ``dependsOn`` survives profile/workspace save and reload
+- [ ] Deleting a prerequisite cleans dangling references on dependents
+- [ ] A deliberate dependency cycle is refused cleanly (no crash/hang)
+
+Notes:
+
+~~~
+
+~~~
+
+## Lua Scripting v2
+
+- [ ] Script using ``ke.call``/``ke.call_table`` runs against the attached target
+- [ ] JSON response decodes into a usable Lua table
+- [ ] ``Stop`` cancels a deliberately slow script quickly
+- [ ] Script saves to and reloads from a profile
+- [ ] Deleted saved script does not reappear after reload
+
+Notes:
+
+~~~
+
+~~~
+
+## CLR Inspector
+
+- [ ] Discovery/connect flow reaches a ready state on a managed test target
+- [ ] A managed field value reads back correctly
+- [ ] Attaching to a non-CLR process fails with a clear message (no hang/crash)
+
+Notes:
+
+~~~
+
+~~~
+
+## Kernel Driver / Probe-Only Bridge
+
+- [ ] Driver service status/restart action works from Settings
+- [ ] Probe-only IOCTL round-trip succeeds with expected structure
+- [ ] Missing/absent driver fails cleanly with a clear message
+- [ ] Marked explicitly skipped below if this machine is not set up for driver testing
+
+Notes:
+
+~~~
+
+~~~
+
 ## Generic Game / App Smoke Pass
 
 - [ ] Target is a local/offline app or authorized test target
@@ -83,6 +137,21 @@ Notes:
 - [ ] Single-address write/freeze is understandable and reversible
 - [ ] Find What Writes is only launched after explicit confirmation
 - [ ] AOB/patch suggestions block ambiguous multi-match results
+
+Notes:
+
+~~~
+
+~~~
+
+## UWP / LocalSettings / File Watch / Patch Bytes
+
+- [ ] Save files discovered on an authorized UWP target
+- [ ] Save file preview reads back correctly
+- [ ] File watch detects an external change without blocking the UI
+- [ ] Byte-sequence patch on a disposable test file confirms occurrencesFound and on-disk content
+- [ ] LocalSettings values are readable, not just raw hex
+- [ ] Assistant fast-path resolves off-memory requests without falling through to the local model first
 
 Notes:
 
@@ -117,6 +186,6 @@ Remaining fixes:
 ~~~
 "@
 
-$content | Out-File -FilePath $reportPath -Encoding UTF8
+$content | Out-File -FilePath $reportPath -Encoding utf8NoBOM
 Write-Host "Manual validation report created:" -ForegroundColor Green
 Write-Host $reportPath

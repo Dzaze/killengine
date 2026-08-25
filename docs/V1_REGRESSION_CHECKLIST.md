@@ -52,6 +52,15 @@ Expected result:
 9. Save one target into a profile, reload/activate it, write through the profile, then rollback.
 10. Confirm the action log records scan, write, rollback, profile activation, and errors clearly.
 
+## Trainer Dependencies (`dependsOn`) Manual Pass
+
+1. On `KillEngineTestTarget.exe`, create 2-3 Trainer features and set one to depend on the other(s) via the "Dépend de" selector.
+2. Toggle ON the dependent feature; confirm prerequisites activate first, in order, in the Trainer action log.
+3. Use Apply all / Restore all; confirm the same dependency order is respected and no feature is skipped or double-applied.
+4. Save the chained features into a profile or workspace, reload it, and confirm `dependsOn` is still there (not dropped on reload).
+5. Delete one prerequisite feature; confirm dependent features lose the dead reference instead of pointing at a missing id.
+6. Deliberately create a dependency cycle (A depends on B, B depends on A); confirm it is refused with a clear action-log message, not a crash or a hang.
+
 ## Assistant Manual Pass
 
 1. Ask the Assistant to find a value visible in `KillEngineTestTarget.exe`.
@@ -70,6 +79,28 @@ Expected result:
 5. Try writing to an unknown/non-writable region and confirm explicit acknowledgement is required.
 6. Start and stop freeze on a known safe writable target.
 
+## Lua Scripting v2 Manual Pass
+
+1. Open the Scripting view and run a simple script using `ke.call`/`ke.call_table` against the attached `KillEngineTestTarget.exe` (requires `KILLENGINE_AUTOMATION_PIPE=1`).
+2. Confirm the JSON response decodes into a usable Lua table (`ke.decode_json`/`ke.call_table`).
+3. Run a deliberately slow script (e.g. a loop or `os.execute` sleep), click `Stop`, and confirm cancellation returns quickly instead of waiting out the script.
+4. Save the script to a profile, reload the profile, confirm the script text loads back into the editor.
+5. Delete the saved script and confirm it is gone after reloading the profile.
+
+## CLR Inspector Manual Pass
+
+1. Attach to a managed/.NET test target (`KillEngineClrTestTarget` or another authorized CLR process).
+2. Run the CLR inspector discovery/connect flow and confirm it reaches a ready state.
+3. Read a managed field value through the inspector and confirm it matches the known test value.
+4. Attach to a non-CLR process (no COR20 header) and confirm the inspector fails with a clear message instead of hanging or crashing.
+
+## Kernel Driver / Probe-Only Bridge Manual Pass
+
+1. On a machine set up for kernel driver testing (test signing enabled), confirm the driver service status/restart action works from Settings.
+2. Confirm a probe-only IOCTL round-trip succeeds and returns the expected structure.
+3. Confirm the app fails cleanly with a clear message (no crash) when the driver is absent or not installed.
+4. If this machine is not set up for driver testing, mark this section skipped explicitly in the report rather than leaving it blank.
+
 ## Authorized Third-Party Smoke Pass
 
 1. Attach to an authorized third-party application only after the KillEngineTestTarget pass succeeds.
@@ -77,6 +108,16 @@ Expected result:
 3. Refine after changing the value.
 4. Avoid broad writes; write only to a final small candidate set.
 5. Confirm rollback and freeze are understandable from the UI.
+
+## UWP / LocalSettings / File Watch / Patch Bytes Manual Pass
+
+1. Attach to an authorized UWP application (e.g. a Store app you own, or `Notepad.exe` which is itself a UWP package).
+2. Discover save files (Expert "Fichiers de sauvegarde" panel or `discover_save_files`) and confirm results.
+3. Read a save file preview and confirm the content is readable.
+4. Start a file watch on the selected file, trigger a change externally, and confirm the change notification arrives without blocking the UI.
+5. On a disposable test file (never a real user save), patch a byte sequence via find/replace hex and confirm `occurrencesFound` plus the new content on disk; cancel/undo path stays clear.
+6. Inspect LocalSettings for the attached process and confirm readable values (not just a raw hex dump for the common types).
+7. Ask the Assistant naturally ("inspecte LocalSettings", "trouve le fichier de sauvegarde", "surveille ce fichier") and confirm it resolves in well under the old >60s regression (PHASE 96/100), not by falling through to the local model first.
 
 ## Reliability Pass — Persistence & Freeze Under Real Conditions
 
