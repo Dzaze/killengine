@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QWebChannel>
 #include <QWebEngineProfile>
+#include <QWebEnginePage>
 #include <QWebEngineSettings>
 #include <QWebEngineView>
 #include <QMainWindow>
@@ -84,6 +85,29 @@ int runApplication(int argc, char* argv[]) {
     KE_LOG_INFO() << "Creating QWebEngineView...";
     QWebEngineView* view = new QWebEngineView(&mainWindow);
     KE_LOG_INFO() << "QWebEngineView created.";
+
+    // Profil WebEngine persistant explicite -- QWebEngineProfile::defaultProfile()
+    // s'est avere ne PAS survivre a un redemarrage de l'app dans ce build (Trainer,
+    // journal d'action, workspace, tout ce qui passe par window.localStorage cote
+    // Vue perdait son contenu a chaque relance, meme apres une fermeture propre --
+    // verifie en cherchant un dossier "Local Storage"/leveldb sous le repertoire
+    // de donnees de l'app : aucun n'existait). Un profil nomme avec un chemin de
+    // stockage explicite force Chromium a ecrire une vraie base LevelDB sur disque,
+    // au lieu de dependre du profil par defaut dont le chemin peut ne pas etre
+    // fige a temps si WebEngine s'initialise avant que setApplicationName/
+    // setOrganizationName aient un effet visible pour lui.
+    const QString webEngineStoragePath =
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("webengine");
+    KE_LOG_INFO() << "WebEngine persistent storage path: " << webEngineStoragePath.toStdString();
+    auto* webEngineProfile = new QWebEngineProfile(QStringLiteral("KillEngineProfile"), &mainWindow);
+    webEngineProfile->setPersistentStoragePath(webEngineStoragePath);
+    webEngineProfile->setCachePath(QDir(webEngineStoragePath).filePath("cache"));
+    webEngineProfile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+    webEngineProfile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
+    KE_LOG_INFO() << "QWebEngineProfile offTheRecord=" << (webEngineProfile->isOffTheRecord() ? "true" : "false");
+
+    auto* webEnginePage = new QWebEnginePage(webEngineProfile, view);
+    view->setPage(webEnginePage);
 
     // Setup QWebChannel
     KE_LOG_INFO() << "Creating ApplicationController...";
