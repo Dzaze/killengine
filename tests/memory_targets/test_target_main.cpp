@@ -431,12 +431,19 @@ int main(int argc, char* argv[]) {
     {
         QFile marker(QDir::temp().filePath("killengine_test_target_addresses.txt"));
         if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            const QString line = QString("pid=%1\ng_health=0x%2\ng_counterSource=0x%3\ng_counterCurrent=0x%4\ng_counterDisplayed=0x%5\n")
+            // g_player_ptr_static est l'adresse du POINTEUR statique lui-meme (&g_player),
+            // stable d'un lancement a l'autre (offset de module fixe) -- pas l'adresse du
+            // Player alloue sur le tas derriere (qui change a chaque lancement/reallocation).
+            // C'est exactement ce qu'une chaine de pointeurs doit resoudre : [module+offset]
+            // -> pointeur -> +champ. Sert au manual pass "pointer chain survit a un restart"
+            // (docs/V1_REGRESSION_CHECKLIST.md, Reliability Pass) sans deviner l'adresse par scan.
+            const QString line = QString("pid=%1\ng_health=0x%2\ng_counterSource=0x%3\ng_counterCurrent=0x%4\ng_counterDisplayed=0x%5\ng_player_ptr_static=0x%6\n")
                 .arg(QApplication::applicationPid())
                 .arg(reinterpret_cast<quintptr>(&g_health), 0, 16)
                 .arg(reinterpret_cast<quintptr>(&g_counterSource), 0, 16)
                 .arg(reinterpret_cast<quintptr>(&g_counterCurrent), 0, 16)
-                .arg(reinterpret_cast<quintptr>(&g_counterDisplayed), 0, 16);
+                .arg(reinterpret_cast<quintptr>(&g_counterDisplayed), 0, 16)
+                .arg(reinterpret_cast<quintptr>(&g_player), 0, 16);
             marker.write(line.toUtf8());
             marker.close();
         }

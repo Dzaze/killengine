@@ -17496,6 +17496,13 @@ const QSet<QString>& allowedVueStoreActions() {
         QStringLiteral("keepCandidate"),
         QStringLiteral("ignoreCandidate"),
         QStringLiteral("addAddressToWatch"),
+        QStringLiteral("createTrainerFeature"),
+        QStringLiteral("deleteTrainerFeature"),
+        QStringLiteral("applyTrainerFeature"),
+        QStringLiteral("restoreTrainerFeature"),
+        QStringLiteral("applyAllTrainerFeatures"),
+        QStringLiteral("restoreAllTrainerFeatures"),
+        QStringLiteral("getTrainerFeaturesSnapshot"),
     };
     return kAllowed;
 }

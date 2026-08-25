@@ -109,6 +109,24 @@ QString bytesToHexPreview(const QByteArray& bytes, int maxBytes = 64) {
     return preview;
 }
 
+// Les valeurs composites de Windows.Storage.ApplicationData.LocalSettings sont exposees par
+// l'API registre (RegEnumValueW sur le hive settings.dat) avec un type trainant apres la valeur
+// brute : [donnee][FILETIME 8 octets] optionnel. Partage entre tryDecodeUtf16SettingPayload
+// (texte) et les decodeurs numeriques/booleens ci-dessous pour ne pas dupliquer la conversion
+// FILETIME -> ISO8601.
+QString appendTrailingFileTimeIfPresent(const QString& base, const QByteArray& data, int valueByteSize) {
+    QString decoded = base;
+    if (data.size() - valueByteSize == 8) {
+        quint64 fileTime = 0;
+        std::memcpy(&fileTime, data.constData() + valueByteSize, sizeof(fileTime));
+        if (fileTime > 116444736000000000ULL) {
+            const qint64 unixMs = static_cast<qint64>((fileTime - 116444736000000000ULL) / 10000ULL);
+            decoded.append(QString(" @ %1").arg(QDateTime::fromMSecsSinceEpoch(unixMs, QTimeZone::UTC).toString(Qt::ISODate)));
+        }
+    }
+    return decoded;
+}
+
 bool tryDecodeUtf16SettingPayload(const QByteArray& data, QString* preview) {
     if (preview) preview->clear();
     if (data.size() < 2 || (data.size() % 2) != 0) {
@@ -132,21 +150,24 @@ bool tryDecodeUtf16SettingPayload(const QByteArray& data, QString* preview) {
     }
 
     QString text = QString::fromWCharArray(chars, terminator);
-    QString decoded = text;
-
     const int trailingOffset = (terminator + 1) * static_cast<int>(sizeof(wchar_t));
-    if (data.size() - trailingOffset == 8) {
-        quint64 fileTime = 0;
-        std::memcpy(&fileTime, data.constData() + trailingOffset, sizeof(fileTime));
-        if (fileTime > 116444736000000000ULL) {
-            const qint64 unixMs = static_cast<qint64>((fileTime - 116444736000000000ULL) / 10000ULL);
-            decoded.append(QString(" @ %1").arg(QDateTime::fromMSecsSinceEpoch(unixMs, QTimeZone::UTC).toString(Qt::ISODate)));
-        }
-    }
-
-    if (preview) *preview = decoded;
+    if (preview) *preview = appendTrailingFileTimeIfPresent(text, data, trailingOffset);
     return true;
 }
+
+// Types composites observes sur de vrais hives settings.dat UWP (Notepad) : le registre expose
+// le type Windows.Foundation.PropertyType de la valeur WinRT d'origine, decale de 100000000
+// (ex: Int32=4 -> 100000004). Ce n'est PAS un type Win32 standard, donc invisible pour
+// RegQueryValueEx/REG_DWORD -- sans ce mapping, ces valeurs retombaient sur
+// tryDecodeUtf16SettingPayload (une heuristique "texte UTF-16 ?") qui les corrompait
+// silencieusement (ex: un Int32 de position de fenetre lu comme 1 caractere Unicode garbled)
+// plutot que de simplement echouer proprement vers un hex dump. Seuls les types reellement
+// rencontres et verifies octet-a-octet sont geres ici ; les autres continuent de retomber sur
+// l'heuristique texte puis le hex dump, comme avant.
+constexpr DWORD kAppSettingTypeBase    = 100000000;
+constexpr DWORD kAppSettingTypeInt32   = kAppSettingTypeBase + 4;
+constexpr DWORD kAppSettingTypeUInt32  = kAppSettingTypeBase + 5;
+constexpr DWORD kAppSettingTypeBoolean = kAppSettingTypeBase + 11;
 
 QString registryValuePreview(DWORD type, const QByteArray& data) {
     if (type == REG_SZ || type == REG_EXPAND_SZ) {
@@ -180,6 +201,20 @@ QString registryValuePreview(DWORD type, const QByteArray& data) {
         quint64 value = 0;
         std::memcpy(&value, data.constData(), sizeof(value));
         return QString("%1 (0x%2)").arg(value).arg(value, 16, 16, QLatin1Char('0')).toUpper();
+    }
+    if (type == kAppSettingTypeInt32 && data.size() >= 4) {
+        qint32 value = 0;
+        std::memcpy(&value, data.constData(), sizeof(value));
+        return appendTrailingFileTimeIfPresent(QString::number(value), data, sizeof(value));
+    }
+    if (type == kAppSettingTypeUInt32 && data.size() >= 4) {
+        quint32 value = 0;
+        std::memcpy(&value, data.constData(), sizeof(value));
+        return appendTrailingFileTimeIfPresent(QString::number(value), data, sizeof(value));
+    }
+    if (type == kAppSettingTypeBoolean && data.size() >= 1) {
+        const bool value = data.at(0) != 0;
+        return appendTrailingFileTimeIfPresent(value ? QStringLiteral("true") : QStringLiteral("false"), data, 1);
     }
     QString utf16Preview;
     if (tryDecodeUtf16SettingPayload(data, &utf16Preview)) {

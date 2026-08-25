@@ -2190,6 +2190,21 @@ let nextWatchedChainId = 1
     }
   }
 
+  // Lecture seule, sans effet de bord : utilisee par le pont d'automatisation
+  // (callVueStoreAction) pour verifier l'etat reel des features apres un
+  // apply/restore async dont la valeur de retour n'est pas exploitable par
+  // pipe (une fonction async retourne une Promise a la dispatch synchrone).
+  function getTrainerFeaturesSnapshot() {
+    return trainerFeatures.value.map((feature) => ({
+      id: feature.id,
+      name: feature.name,
+      enabled: feature.enabled,
+      status: feature.status,
+      lastError: feature.lastError,
+      dependsOn: feature.dependsOn ?? [],
+    }))
+  }
+
   function deleteTrainerFeature(id: number) {
     const remaining = trainerFeatures.value.filter((item) => item.id !== id)
     const now = new Date().toISOString()
@@ -7968,6 +7983,13 @@ async function doEncryptedScan() {
     keepCandidate,
     ignoreCandidate,
     addAddressToWatch,
+    createTrainerFeature,
+    deleteTrainerFeature,
+    applyTrainerFeature,
+    restoreTrainerFeature,
+    applyAllTrainerFeatures,
+    restoreAllTrainerFeatures,
+    getTrainerFeaturesSnapshot,
   }
   if (typeof window !== 'undefined') {
     window.__killengineAutomationBridge = {
