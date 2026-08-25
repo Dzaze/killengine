@@ -272,6 +272,24 @@ EncryptedScanOptions {
 
 ---
 
+## N. Pont pipe d'automatisation → couche Vue/Pinia (`runJavaScript`)
+
+**État réel au 25/08/2026 :** absent. Le pipe d'automatisation (`apps/desktop/automation_pipe_server.h/.cpp`) ne peut appeler que des méthodes `Q_INVOKABLE` d'`ApplicationController` (réflexion Qt) — tout ce qui vit uniquement côté Pinia/Vue (`ui/src/stores/app.ts`) sans jamais appeler `backend.getController()` est invisible au pipe. Découvert concrètement le 25/08/2026 en essayant de piloter `keepCandidate()`/`ignoreCandidate()`/`addAddressToWatch()` par pipe pour l'Expert Mode Manual Pass de la régression V1 (`docs/V1_REGRESSION_CHECKLIST.md`) : ces trois fonctions ne touchent que des tableaux réactifs locaux, rien à appeler côté C++.
+
+**Problème :** un agent pilotant KillEngine par pipe ne peut reproduire aucune action purement frontend (filtres d'affichage, listes de candidats gardés/ignorés, ajout à une liste de surveillance, et plus généralement tout état UI qui n'a pas de miroir C++) — seulement les vraies capacités moteur (scan/attach/write/freeze/profils/etc.).
+
+**Options envisagées :**
+1. Dupliquer l'état concerné côté backend (nouveaux `Q_INVOKABLE`) — écarté : crée deux sources de vérité à synchroniser pour un état qui n'a jamais eu besoin d'exister côté moteur.
+2. **Injection JavaScript via `QWebEngineView::page()->runJavaScript(...)`** — `ApplicationController` exposerait un nouveau point d'entrée pipe (ex: `callStoreAction(methodName, argsJson)`) qui injecte un appel JS ciblé dans le contexte de la page, vers une surface explicitement exposée par le store (pas un `eval` du texte reçu). Techniquement faisable. **Nouvelle surface de sécurité à cadrer avant de coder** : contrairement au pipe actuel (borné aux méthodes `Q_INVOKABLE` déjà auditées, chacune avec son niveau de risque connu via `confirmRiskAction` côté UI), une injection JS mal bornée pourrait exécuter n'importe quoi dans la page — la conception doit donc exposer une liste blanche explicite d'actions de store autorisées, pas un pont générique "exécute ce JS arbitraire".
+
+**Statut :** 🔴 **Nouveau projet prioritaire, décidé par le propriétaire le 25/08/2026.** Pas encore cadré techniquement (liste blanche d'actions, format d'erreur, mécanisme de dispatch côté JS), pas encore codé.
+
+**Fichiers probables :** `apps/desktop/application_controller.h/.cpp` (nouveau `Q_INVOKABLE`), `apps/desktop/automation_pipe_server.cpp` (a priori inchangé, le dispatch générique existant suffit si le nouveau `Q_INVOKABLE` a une signature simple), `ui/src/stores/app.ts` (exposer une surface JS explicite et bornée, pas le store entier).
+
+**Lié à :** discussion propriétaire du 25/08/2026 pendant l'Expert Mode Manual Pass ; `docs/PHASE_TRACKER.md` PHASE 111-118 (chantiers récents utilisant le pipe) ; `ui/src/stores/app.ts` (`keepCandidate`/`ignoreCandidate`/`addAddressToWatch`) comme cas d'usage d'origine.
+
+---
+
 ## Priorisation recommandée (impact × faisabilité)
 
 ### Phase 19 — Breakpoint freeze + Structure analyzer (gros gain, code existant)

@@ -9,6 +9,7 @@ Current status:
 - Phase 12 / V1 polishing checklist is complete.
 - Phase 13 has been opened as the improvement baseline for precision, efficiency, conversation quality, profiles, UX, and robustness.
 - Next focus: run the manual V1 regression pass before release candidate.
+- **Nouveau projet prioritaire (décidé par le propriétaire le 25/08/2026)** : pont pipe d'automatisation → couche Vue/Pinia via `QWebEngineView::page()->runJavaScript(...)`, pour que le pipe puisse aussi piloter les actions purement frontend (ex: `keepCandidate`/`ignoreCandidate`/`addAddressToWatch` — voir `docs/POWER_UP_ROADMAP.md` section N pour le détail et les options envisagées). Pas encore cadré techniquement, pas encore codé.
 - Power-up roadmap documented in `docs/POWER_UP_ROADMAP.md`: Phase 19 targets active interception, Phase 20 targets injection/scripting/trainer UX, Phase 21 targets proactive AI workflows.
 
 Prerequisites before Phase 12:
