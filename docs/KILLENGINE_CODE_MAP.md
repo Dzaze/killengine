@@ -38,6 +38,7 @@ Lecture rapide :
 | Liste des processus | `ui/src/views/ProcessView.vue` | `app.ts`: `refreshProcesses`; `backend.ts`: `getProcesses` | `ApplicationController::getProcesses` | `core/process/process_enumerator.*` | `docs/USER_GUIDE.md`, `docs/PHASE_TRACKER.md` |
 | Attacher / detacher un processus | `ProcessView.vue` | `app.ts`: `attach`, `detach`; `backend.ts`: `attachProcess`, `detachProcess` | `attachProcess`, `detachProcess` | `core/process/process_handle.*` | tests integration `KillEngineTestTarget` |
 | Liste des modules | `ProcessView.vue` | `app.ts`: `refreshProcessModules`; `backend.ts`: `getProcessModules` | `getProcessModules` | APIs Win32 module snapshot dans `ApplicationController` | `docs/USER_GUIDE.md` |
+| Fichiers de sauvegarde UWP | `ExpertView.vue` | `app.ts`: `discoverSaveFiles`, `readSaveFileText`; `backend.ts`: `discoverProcessSaveFiles`, `readProcessSaveFileText` | `discoverProcessSaveFiles`, `readProcessSaveFileText` | `core/process/package_storage.*` | tracker PHASE 91/92 |
 | Mode d'acces memoire Standard / Kernel | `ProcessView.vue` | `app.ts`: `memoryAccessMode`, `setMemoryAccessMode`, `kernelMemoryReady` | combine `probeKernelDriver` et appels read/write kernel | `core/kernel/kernel_driver_bridge.*` | `docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md` |
 | Charger / tester le driver pres de l'attache Kernel | `ProcessView.vue` | `app.ts`: `refreshKernelDriverStatus`, `startKernelDriver` | `probeKernelDriver`, `startKernelDriver` | service Windows `KillEngineKernel` + `KernelDriverBridge` | `docs/PHASE_TRACKER.md` PHASE 85 |
 

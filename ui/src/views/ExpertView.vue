@@ -1207,6 +1207,25 @@ function localNowTime(): string {
   return new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+function formatSaveFileTime(value?: string): string {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('fr-FR')
+}
+
+function saveFileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path
+}
+
+function discoverSaveFilesFromExpert() {
+  void store.discoverSaveFiles(50)
+}
+
+function readSaveFileFromExpert(path: string) {
+  void store.readSaveFileText(path, 65536)
+}
+
 function previewHexToBytes(hex: string): number[] {
   return hex
     .trim()
@@ -2849,6 +2868,61 @@ onMounted(() => {
       </nav>
 
       <RegionPanel v-show="showStep('inspect')" v-if="store.expertRegionSize || store.expertRegionProtection" />
+
+      <section v-show="showStep('inspect')" class="panel save-file-panel risk-read">
+        <div class="panel-title">
+          <div class="panel-heading">
+            <h2>Fichiers de sauvegarde</h2>
+            <RiskBadge level="read" />
+          </div>
+          <span v-if="store.discoveredSaveFiles.length > 0">{{ formatNumber(store.discoveredSaveFiles.length) }} fichier(s)</span>
+        </div>
+        <div class="panel-actions save-file-actions">
+          <button
+            class="btn btn-primary"
+            type="button"
+            :disabled="store.saveFilesBusy"
+            @click="discoverSaveFilesFromExpert()"
+          >
+            <span v-if="store.saveFilesBusy" class="btn-spinner" aria-hidden="true"></span>
+            {{ store.saveFilesBusy ? 'Découverte...' : 'Découvrir les fichiers de sauvegarde' }}
+          </button>
+          <span v-if="store.discoveredSaveFilesFamilyName">{{ store.discoveredSaveFilesFamilyName }}</span>
+        </div>
+        <p v-if="store.saveFileDiscoveryResult?.error" class="error">{{ store.saveFileDiscoveryResult.error }}</p>
+        <div v-if="store.discoveredSaveFiles.length > 0" class="save-file-list">
+          <button
+            v-for="file in store.discoveredSaveFiles"
+            :key="file.path"
+            class="save-file-row"
+            type="button"
+            :class="{ selected: store.selectedSaveFilePath === file.path }"
+            :disabled="store.saveFileTextBusy"
+            @click="readSaveFileFromExpert(file.path)"
+          >
+            <strong :title="file.path">{{ saveFileName(file.path) }}</strong>
+            <span :title="file.path">{{ file.path }}</span>
+            <span>{{ formatBytes(file.sizeBytes) }}</span>
+            <span>{{ formatSaveFileTime(file.lastWriteTime) }}</span>
+          </button>
+        </div>
+        <div v-else-if="store.saveFileDiscoveryResult?.success" class="empty compact">
+          Aucun fichier de sauvegarde probable trouvé.
+        </div>
+        <div v-if="store.saveFileTextBusy || store.selectedSaveFileText" class="save-file-preview">
+          <div class="source-list-title">
+            <strong>{{ store.saveFileTextBusy ? 'Lecture...' : saveFileName(store.selectedSaveFileText?.path || store.selectedSaveFilePath) }}</strong>
+            <span v-if="store.selectedSaveFileText?.truncated" class="warning-text">aperçu tronqué à 64 Ko</span>
+          </div>
+          <p v-if="store.selectedSaveFileText?.error" class="error">{{ store.selectedSaveFileText.error }}</p>
+          <textarea
+            v-if="store.selectedSaveFileText?.success"
+            class="input save-file-textarea"
+            readonly
+            :value="store.selectedSaveFileText.text || ''"
+          ></textarea>
+        </div>
+      </section>
 
       <section v-show="showStep('find')" class="panel risk-read">
         <div class="panel-title">
@@ -5253,6 +5327,84 @@ onMounted(() => {
   gap: 8px;
   flex-wrap: wrap;
   color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.save-file-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.save-file-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.save-file-actions span {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.save-file-list {
+  display: grid;
+  gap: 6px;
+}
+
+.save-file-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 220px) minmax(220px, 1fr) 86px minmax(150px, 190px);
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.save-file-row:hover,
+.save-file-row.selected {
+  border-color: rgba(122, 162, 247, 0.48);
+  background: rgba(122, 162, 247, 0.08);
+}
+
+.save-file-row:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.save-file-row strong,
+.save-file-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.save-file-row strong {
+  color: var(--text-primary);
+}
+
+.save-file-preview {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 4px;
+  background: rgba(13, 17, 32, 0.42);
+}
+
+.save-file-textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  white-space: pre;
+  font-family: var(--font-mono, monospace);
   font-size: 12px;
 }
 

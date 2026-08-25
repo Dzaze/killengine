@@ -36,6 +36,9 @@ import {
   type MemoryWriteTarget,
   type ProcessInfo,
   type ProcessModuleInfo,
+  type ProcessSaveFileDiscoveryResult,
+  type ProcessSaveFileInfo,
+  type ProcessSaveFileTextResult,
   type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
   type SpeedhackStatus,
@@ -305,6 +308,13 @@ export const useAppStore = defineStore('app', () => {
   const processName = ref('')
   const processes = ref<ProcessInfo[]>([])
   const processModules = ref<ProcessModuleInfo[]>([])
+  const discoveredSaveFiles = ref<ProcessSaveFileInfo[]>([])
+  const discoveredSaveFilesFamilyName = ref('')
+  const saveFileDiscoveryResult = ref<ProcessSaveFileDiscoveryResult | null>(null)
+  const selectedSaveFileText = ref<ProcessSaveFileTextResult | null>(null)
+  const selectedSaveFilePath = ref('')
+  const saveFilesBusy = ref(false)
+  const saveFileTextBusy = ref(false)
   const memoryMap = ref<MemoryMapResult | null>(null)
   const memoryPreview = ref<MemoryReadPreview | null>(null)
   const memoryPreviewAddress = ref('')
@@ -4509,6 +4519,70 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function discoverSaveFiles(maxResults = 50) {
+    saveFilesBusy.value = true
+    try {
+      const result = await backend.getController().discoverProcessSaveFiles(maxResults)
+      saveFileDiscoveryResult.value = result
+      discoveredSaveFiles.value = result.success ? (result.files ?? []) : []
+      discoveredSaveFilesFamilyName.value = result.success ? (result.familyName ?? '') : ''
+      selectedSaveFileText.value = null
+      selectedSaveFilePath.value = ''
+      addActionLog(
+        'save_files',
+        result.success ? 'Fichiers de sauvegarde découverts' : 'Découverte sauvegardes échouée',
+        result.success
+          ? `${discoveredSaveFiles.value.length} fichier(s)${discoveredSaveFilesFamilyName.value ? ` · ${discoveredSaveFilesFamilyName.value}` : ''}.`
+          : (result.error ?? 'Erreur inconnue.'),
+        result.success ? 'success' : 'warning',
+      )
+      return result
+    } catch (e) {
+      const result = { success: false, files: [], error: String(e) }
+      saveFileDiscoveryResult.value = result
+      discoveredSaveFiles.value = []
+      discoveredSaveFilesFamilyName.value = ''
+      selectedSaveFileText.value = null
+      selectedSaveFilePath.value = ''
+      console.error('[KillEngine] Failed to discover process save files:', e)
+      addActionLog('save_files', 'Découverte sauvegardes échouée', String(e), 'error')
+      return result
+    } finally {
+      saveFilesBusy.value = false
+    }
+  }
+
+  async function readSaveFileText(path: string, maxBytes = 65536) {
+    const trimmedPath = path.trim()
+    if (!trimmedPath) {
+      const result = { success: false, path, text: '', truncated: false, error: 'Chemin vide.' }
+      selectedSaveFileText.value = result
+      return result
+    }
+    selectedSaveFilePath.value = trimmedPath
+    selectedSaveFileText.value = null
+    saveFileTextBusy.value = true
+    try {
+      const result = await backend.getController().readProcessSaveFileText(trimmedPath, maxBytes)
+      selectedSaveFileText.value = result
+      addActionLog(
+        'save_files',
+        result.success ? 'Fichier de sauvegarde lu' : 'Lecture sauvegarde échouée',
+        result.success ? `${trimmedPath}${result.truncated ? ' · tronqué' : ''}` : (result.error ?? 'Erreur inconnue.'),
+        result.success ? 'success' : 'warning',
+      )
+      return result
+    } catch (e) {
+      const result = { success: false, path: trimmedPath, text: '', truncated: false, error: String(e) }
+      selectedSaveFileText.value = result
+      console.error('[KillEngine] Failed to read process save file text:', e)
+      addActionLog('save_files', 'Lecture sauvegarde échouée', String(e), 'error')
+      return result
+    } finally {
+      saveFileTextBusy.value = false
+    }
+  }
+
   async function refreshMemoryMap() {
     try {
       memoryMap.value = await backend.getController().getMemoryMap()
@@ -7536,6 +7610,13 @@ async function doEncryptedScan() {
     processName,
     processes,
     processModules,
+    discoveredSaveFiles,
+    discoveredSaveFilesFamilyName,
+    saveFileDiscoveryResult,
+    selectedSaveFileText,
+    selectedSaveFilePath,
+    saveFilesBusy,
+    saveFileTextBusy,
     memoryMap,
     memoryPreview,
     memoryPreviewAddress,
@@ -7677,6 +7758,8 @@ async function doEncryptedScan() {
     init,
     refreshProcesses,
     refreshProcessModules,
+    discoverSaveFiles,
+    readSaveFileText,
     refreshMemoryMap,
     readMemoryPreview,
     readMemoryPreviewByMode,

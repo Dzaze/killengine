@@ -21,6 +21,27 @@ export interface ProcessModuleInfo {
   size: number
 }
 
+export interface ProcessSaveFileInfo {
+  path: string
+  sizeBytes: number
+  lastWriteTime: string
+}
+
+export interface ProcessSaveFileDiscoveryResult {
+  success: boolean
+  familyName?: string
+  files: ProcessSaveFileInfo[]
+  error?: string
+}
+
+export interface ProcessSaveFileTextResult {
+  success: boolean
+  path?: string
+  text?: string
+  truncated?: boolean
+  error?: string
+}
+
 export interface MemoryRegionInfo {
   baseAddress: string
   allocationBase: string
@@ -1066,6 +1087,8 @@ export interface AiModelStatus {
   getVersion(): Promise<string>
   getProcesses(): Promise<ProcessInfo[]>
   getProcessModules(pid: number): Promise<ProcessModuleInfo[]>
+  discoverProcessSaveFiles(maxResults: number): Promise<ProcessSaveFileDiscoveryResult>
+  readProcessSaveFileText(path: string, maxBytes: number): Promise<ProcessSaveFileTextResult>
   attachProcess(pid: number): Promise<boolean>
   detachProcess(): Promise<void>
   getMemoryMap(): Promise<MemoryMapResult>
@@ -1781,6 +1804,12 @@ class BackendService {
       },
       async getProcessModules(_pid: number) {
         return []
+      },
+      async discoverProcessSaveFiles(_maxResults: number) {
+        return { success: false, files: [], error: 'Mock backend' }
+      },
+      async readProcessSaveFileText(_path: string, _maxBytes: number) {
+        return { success: false, path: _path, text: '', truncated: false, error: 'Mock backend' }
       },
       async attachProcess(_pid: number) {
         return true
