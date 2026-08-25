@@ -160,6 +160,7 @@ target_link_libraries(killcore PUBLIC
     # Windows libraries
     psapi
     dbghelp
+    advapi32
 )
 
 if(TARGET Zydis::Zydis)

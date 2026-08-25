@@ -101,6 +101,13 @@ public:
     /// Retourne {success, familyName, files: [{path, sizeBytes, lastWriteTime}], error}.
     Q_INVOKABLE QVariantMap discoverProcessSaveFiles(int maxResults) const;
 
+    /// PHASE 96 — Inspecte en lecture seule la ruche UWP
+    /// %LOCALAPPDATA%\Packages\<familyName>\Settings\settings.dat du processus
+    /// attaché. Retourne des valeurs bornées {keyPath, name, type, preview}.
+    /// Ne monte rien dans HKCU/HKLM et n'expose aucune écriture registre.
+    /// Retourne {success, familyName, settingsPath, values, count, error}.
+    Q_INVOKABLE QVariantMap inspectProcessLocalSettings(int maxValues) const;
+
     /// PHASE 91 — Lit le contenu (décodé best-effort en texte imprimable,
     /// borné en taille) d'un fichier découvert via discoverProcessSaveFiles.
     /// Le chemin doit être sous %LOCALAPPDATA%\Packages\ (garde-fou : ce

@@ -1984,6 +1984,51 @@ QVariantMap ApplicationController::discoverProcessSaveFiles(int maxResults) cons
     return result;
 }
 
+QVariantMap ApplicationController::inspectProcessLocalSettings(int maxValues) const {
+    QVariantMap result;
+    result["success"] = false;
+    QVariantList valuesList;
+    result["values"] = valuesList;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    QString familyName;
+    QString error;
+    if (!killcore::resolvePackageFamilyName(m_handle, &familyName, &error)) {
+        result["error"] = error.isEmpty() ? "Résolution du package échouée." : error;
+        return result;
+    }
+    result["familyName"] = familyName;
+
+    QVector<killcore::PackageLocalSettingsEntry> values;
+    QString settingsPath;
+    if (!killcore::inspectPackageLocalSettings(familyName, maxValues, &values, &settingsPath, &error)) {
+        result["settingsPath"] = settingsPath;
+        result["error"] = error.isEmpty() ? "Inspection LocalSettings échouée." : error;
+        return result;
+    }
+
+    for (const auto& entry : values) {
+        QVariantMap valueMap;
+        valueMap["keyPath"] = entry.keyPath;
+        valueMap["name"] = entry.name;
+        valueMap["type"] = entry.type;
+        valueMap["preview"] = entry.preview;
+        valueMap["dataSizeBytes"] = entry.dataSizeBytes;
+        valuesList.append(valueMap);
+    }
+
+    result["success"] = true;
+    result["settingsPath"] = settingsPath;
+    result["values"] = valuesList;
+    result["count"] = valuesList.size();
+    result["error"] = "";
+    return result;
+}
+
 QVariantMap ApplicationController::readProcessSaveFileText(const QString& path, int maxBytes) const {
     QVariantMap result;
     result["success"] = false;
@@ -10761,10 +10806,10 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
         // de toutes les pistes memoire.
         recommendations.prepend(QVariantMap{
             {"id", "discover_save_files"},
-            {"label", "Chercher un fichier de sauvegarde sur le disque"},
+            {"label", "Chercher fichiers et paramètres UWP sur le disque"},
             {"safe", true},
             {"requiresConfirmation", false},
-            {"reason", "De nombreuses strategies memoire ont echoue meme apres isolation reseau — la valeur affichee vient peut-etre d'un fichier de sauvegarde plutot que d'une adresse memoire stable."}
+            {"reason", "De nombreuses strategies memoire ont echoue meme apres isolation reseau — la valeur affichee vient peut-etre d'un fichier de sauvegarde ou de LocalSettings plutot que d'une adresse memoire stable."}
         });
     }
     const QString lastSuccessfulAudit = learnedProfile.value("lastSuccessfulAuditEvent").toString();
@@ -12916,9 +12961,17 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         actionResult = discoverProcessSaveFiles(maxResults);
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "save_files_discovered";
-            result["message"] = QString("Fichiers de sauvegarde : %1 trouvé(s) sous le package '%2'. On peut en lire un avec read_save_file_text pour chercher la valeur affichée.")
+            result["message"] = QString("Fichiers de sauvegarde : %1 trouvé(s) sous le package '%2'. On peut en lire un avec read_save_file_text ou inspecter LocalSettings avec inspect_local_settings.")
                                   .arg(actionResult.value("count").toInt())
                                   .arg(actionResult.value("familyName").toString());
+        }
+    } else if (tool == "inspect_local_settings") {
+        const int maxValues = args.value("maxValues", 200).toInt();
+        actionResult = inspectProcessLocalSettings(maxValues);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "local_settings_inspected";
+            result["message"] = QString("LocalSettings inspecté : %1 valeur(s) lue(s) dans settings.dat. Cherche un nom ou une valeur qui correspond à l'affichage du jeu.")
+                                  .arg(actionResult.value("count").toInt());
         }
     } else if (tool == "read_save_file_text") {
         const QString path = args.value("path").toString();

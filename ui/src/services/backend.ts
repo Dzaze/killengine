@@ -42,6 +42,23 @@ export interface ProcessSaveFileTextResult {
   error?: string
 }
 
+export interface ProcessLocalSettingsValue {
+  keyPath: string
+  name: string
+  type: string
+  preview: string
+  dataSizeBytes: number
+}
+
+export interface ProcessLocalSettingsResult {
+  success: boolean
+  familyName?: string
+  settingsPath?: string
+  values: ProcessLocalSettingsValue[]
+  count?: number
+  error?: string
+}
+
 export interface MemoryRegionInfo {
   baseAddress: string
   allocationBase: string
@@ -1088,6 +1105,7 @@ export interface AiModelStatus {
   getProcesses(): Promise<ProcessInfo[]>
   getProcessModules(pid: number): Promise<ProcessModuleInfo[]>
   discoverProcessSaveFiles(maxResults: number): Promise<ProcessSaveFileDiscoveryResult>
+  inspectProcessLocalSettings(maxValues: number): Promise<ProcessLocalSettingsResult>
   readProcessSaveFileText(path: string, maxBytes: number): Promise<ProcessSaveFileTextResult>
   attachProcess(pid: number): Promise<boolean>
   detachProcess(): Promise<void>
@@ -1807,6 +1825,9 @@ class BackendService {
       },
       async discoverProcessSaveFiles(_maxResults: number) {
         return { success: false, files: [], error: 'Mock backend' }
+      },
+      async inspectProcessLocalSettings(_maxValues: number) {
+        return { success: false, values: [], error: 'Mock backend' }
       },
       async readProcessSaveFileText(_path: string, _maxBytes: number) {
         return { success: false, path: _path, text: '', truncated: false, error: 'Mock backend' }

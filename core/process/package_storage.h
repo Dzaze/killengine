@@ -14,6 +14,14 @@ struct PackageSaveFileEntry {
     QString lastWriteTimeIso;
 };
 
+struct PackageLocalSettingsEntry {
+    QString keyPath;
+    QString name;
+    QString type;
+    QString preview;
+    qint64 dataSizeBytes = 0;
+};
+
 /**
  * @brief Résout le "package family name" (ex: Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe)
  *        d'un processus UWP/AppContainer attaché, via GetPackageFamilyName (appmodel.h).
@@ -61,6 +69,21 @@ bool readPackageSaveFileText(
     int maxBytes,
     QString* text,
     bool* truncated,
+    QString* error);
+
+/**
+ * @brief Ouvre en lecture seule la ruche UWP
+ *        %LOCALAPPDATA%\Packages\<familyName>\Settings\settings.dat avec
+ *        RegLoadAppKeyW, puis enumere les valeurs bornées sous forme lisible.
+ *
+ * Ne monte pas la ruche dans HKCU/HKLM et ne donne aucune primitive d'ecriture
+ * registre. maxValues vaut 200 par defaut si <= 0.
+ */
+bool inspectPackageLocalSettings(
+    const QString& familyName,
+    int maxValues,
+    QVector<PackageLocalSettingsEntry>* entries,
+    QString* settingsPath,
     QString* error);
 
 bool patchPackageSaveFileBytes(

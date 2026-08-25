@@ -507,6 +507,12 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     // valeur affichee vient peut-etre d'un fichier de sauvegarde sur disque
     // plutot que d'une adresse memoire stable (voir docs/PHASE_TRACKER.md
     // PHASE 90, investigation Solitaire "Bulles").
+    if (q.contains("localsettings") || q.contains("settings.dat") || q.contains("ruche registre")
+        || q.contains("registre uwp")) {
+        return makeToolCall("inspect_local_settings", {},
+            "J'inspecte en lecture seule la ruche LocalSettings/settings.dat du package UWP attache.");
+    }
+
     if (q.contains("fichier de sauvegarde") || q.contains("fichiers de sauvegarde")
         || q.contains("sauvegarde disque") || q.contains("sur le disque")
         || q.contains("dans un fichier") || q.contains("save file")

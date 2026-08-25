@@ -9,8 +9,12 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QDateTime>
+#include <QStringList>
+#include <QTimeZone>
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 namespace killcore {
@@ -68,6 +72,196 @@ bool isPathUnderLocalPackages(const QString& path) {
     }
     return normalized.startsWith(allowedRoot);
 }
+
+QString packageRootForFamily(const QString& familyName) {
+    const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+    if (localAppData.isEmpty()) {
+        return {};
+    }
+    return QDir(localAppData).filePath(QString("Packages/%1").arg(familyName));
+}
+
+#ifdef Q_OS_WIN
+QString registryTypeName(DWORD type) {
+    switch (type) {
+    case REG_SZ: return "REG_SZ";
+    case REG_EXPAND_SZ: return "REG_EXPAND_SZ";
+    case REG_MULTI_SZ: return "REG_MULTI_SZ";
+    case REG_DWORD: return "REG_DWORD";
+    case REG_QWORD: return "REG_QWORD";
+    case REG_BINARY: return "REG_BINARY";
+    case REG_NONE: return "REG_NONE";
+    default: return QString("REG_%1").arg(type);
+    }
+}
+
+QString bytesToHexPreview(const QByteArray& bytes, int maxBytes = 64) {
+    const QByteArray clipped = bytes.left(maxBytes);
+    QStringList parts;
+    parts.reserve(clipped.size());
+    for (unsigned char ch : clipped) {
+        parts.append(QString("%1").arg(static_cast<unsigned int>(ch), 2, 16, QLatin1Char('0')).toUpper());
+    }
+    QString preview = parts.join(' ');
+    if (bytes.size() > maxBytes) {
+        preview.append(" ...");
+    }
+    return preview;
+}
+
+bool tryDecodeUtf16SettingPayload(const QByteArray& data, QString* preview) {
+    if (preview) preview->clear();
+    if (data.size() < 2 || (data.size() % 2) != 0) {
+        return false;
+    }
+
+    const wchar_t* chars = reinterpret_cast<const wchar_t*>(data.constData());
+    const int charCount = static_cast<int>(data.size() / sizeof(wchar_t));
+    int terminator = -1;
+    for (int i = 0; i < charCount; ++i) {
+        if (chars[i] == L'\0') {
+            terminator = i;
+            break;
+        }
+        if (chars[i] < 0x20 && chars[i] != L'\t' && chars[i] != L'\n' && chars[i] != L'\r') {
+            return false;
+        }
+    }
+    if (terminator < 0) {
+        return false;
+    }
+
+    QString text = QString::fromWCharArray(chars, terminator);
+    QString decoded = text;
+
+    const int trailingOffset = (terminator + 1) * static_cast<int>(sizeof(wchar_t));
+    if (data.size() - trailingOffset == 8) {
+        quint64 fileTime = 0;
+        std::memcpy(&fileTime, data.constData() + trailingOffset, sizeof(fileTime));
+        if (fileTime > 116444736000000000ULL) {
+            const qint64 unixMs = static_cast<qint64>((fileTime - 116444736000000000ULL) / 10000ULL);
+            decoded.append(QString(" @ %1").arg(QDateTime::fromMSecsSinceEpoch(unixMs, QTimeZone::UTC).toString(Qt::ISODate)));
+        }
+    }
+
+    if (preview) *preview = decoded;
+    return true;
+}
+
+QString registryValuePreview(DWORD type, const QByteArray& data) {
+    if (type == REG_SZ || type == REG_EXPAND_SZ) {
+        if (data.isEmpty()) {
+            return {};
+        }
+        return QString::fromWCharArray(reinterpret_cast<const wchar_t*>(data.constData()),
+            static_cast<int>(data.size() / sizeof(wchar_t))).remove(QChar::Null);
+    }
+    if (type == REG_MULTI_SZ) {
+        QStringList items;
+        const wchar_t* chars = reinterpret_cast<const wchar_t*>(data.constData());
+        const int count = static_cast<int>(data.size() / sizeof(wchar_t));
+        int start = 0;
+        for (int i = 0; i < count; ++i) {
+            if (chars[i] == L'\0') {
+                if (i > start) {
+                    items.append(QString::fromWCharArray(chars + start, i - start));
+                }
+                start = i + 1;
+            }
+        }
+        return items.join("; ");
+    }
+    if (type == REG_DWORD && data.size() >= 4) {
+        quint32 value = 0;
+        std::memcpy(&value, data.constData(), sizeof(value));
+        return QString("%1 (0x%2)").arg(value).arg(value, 8, 16, QLatin1Char('0')).toUpper();
+    }
+    if (type == REG_QWORD && data.size() >= 8) {
+        quint64 value = 0;
+        std::memcpy(&value, data.constData(), sizeof(value));
+        return QString("%1 (0x%2)").arg(value).arg(value, 16, 16, QLatin1Char('0')).toUpper();
+    }
+    QString utf16Preview;
+    if (tryDecodeUtf16SettingPayload(data, &utf16Preview)) {
+        return utf16Preview;
+    }
+    return bytesToHexPreview(data);
+}
+
+void enumerateRegistryValues(
+    HKEY key,
+    const QString& keyPath,
+    int depth,
+    int maxValues,
+    QVector<PackageLocalSettingsEntry>* entries) {
+    if (!entries || entries->size() >= maxValues || depth > 8) {
+        return;
+    }
+
+    DWORD valueCount = 0;
+    DWORD maxValueNameLen = 0;
+    DWORD maxValueDataLen = 0;
+    DWORD subkeyCount = 0;
+    DWORD maxSubkeyLen = 0;
+    if (RegQueryInfoKeyW(
+            key,
+            nullptr,
+            nullptr,
+            nullptr,
+            &subkeyCount,
+            &maxSubkeyLen,
+            nullptr,
+            &valueCount,
+            &maxValueNameLen,
+            &maxValueDataLen,
+            nullptr,
+            nullptr) != ERROR_SUCCESS) {
+        return;
+    }
+
+    std::vector<wchar_t> valueName(static_cast<size_t>(maxValueNameLen) + 2);
+    std::vector<BYTE> valueData(static_cast<size_t>(std::max<DWORD>(maxValueDataLen, 1)));
+    for (DWORD i = 0; i < valueCount && entries->size() < maxValues; ++i) {
+        DWORD nameLen = static_cast<DWORD>(valueName.size());
+        DWORD dataLen = static_cast<DWORD>(valueData.size());
+        DWORD type = REG_NONE;
+        LONG rc = RegEnumValueW(key, i, valueName.data(), &nameLen, nullptr, &type, valueData.data(), &dataLen);
+        if (rc == ERROR_MORE_DATA) {
+            valueData.resize(dataLen);
+            nameLen = static_cast<DWORD>(valueName.size());
+            rc = RegEnumValueW(key, i, valueName.data(), &nameLen, nullptr, &type, valueData.data(), &dataLen);
+        }
+        if (rc != ERROR_SUCCESS) {
+            continue;
+        }
+
+        QByteArray data(reinterpret_cast<const char*>(valueData.data()), static_cast<int>(dataLen));
+        PackageLocalSettingsEntry entry;
+        entry.keyPath = keyPath;
+        entry.name = nameLen == 0 ? QStringLiteral("(default)") : QString::fromWCharArray(valueName.data(), static_cast<int>(nameLen));
+        entry.type = registryTypeName(type);
+        entry.preview = registryValuePreview(type, data);
+        entry.dataSizeBytes = dataLen;
+        entries->append(entry);
+    }
+
+    std::vector<wchar_t> subkeyName(static_cast<size_t>(maxSubkeyLen) + 2);
+    for (DWORD i = 0; i < subkeyCount && entries->size() < maxValues; ++i) {
+        DWORD nameLen = static_cast<DWORD>(subkeyName.size());
+        if (RegEnumKeyExW(key, i, subkeyName.data(), &nameLen, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) {
+            continue;
+        }
+        HKEY subkey = nullptr;
+        if (RegOpenKeyExW(key, subkeyName.data(), 0, KEY_READ, &subkey) != ERROR_SUCCESS || !subkey) {
+            continue;
+        }
+        const QString childName = QString::fromWCharArray(subkeyName.data(), static_cast<int>(nameLen));
+        enumerateRegistryValues(subkey, keyPath.isEmpty() ? childName : QString("%1\\%2").arg(keyPath, childName),
+            depth + 1, maxValues, entries);
+        RegCloseKey(subkey);
+    }
+}
+#endif
 
 } // namespace
 
@@ -129,7 +323,7 @@ bool listPackageSaveFiles(
         return false;
     }
 
-    const QString root = QDir(localAppData).filePath(QString("Packages/%1").arg(trimmedFamily));
+    const QString root = packageRootForFamily(trimmedFamily);
     QDir rootDir(root);
     if (!rootDir.exists()) {
         if (error) *error = QString("Dossier package introuvable: %1").arg(root);
@@ -216,6 +410,63 @@ bool readPackageSaveFileText(
 
     if (text) *text = decoded;
     return true;
+}
+
+bool inspectPackageLocalSettings(
+    const QString& familyName,
+    int maxValues,
+    QVector<PackageLocalSettingsEntry>* entries,
+    QString* settingsPath,
+    QString* error) {
+
+    if (entries) entries->clear();
+    if (settingsPath) settingsPath->clear();
+    if (!entries) {
+        return false;
+    }
+
+    const QString trimmedFamily = familyName.trimmed();
+    if (trimmedFamily.isEmpty()) {
+        if (error) *error = "Package family name vide.";
+        return false;
+    }
+
+    const QString root = packageRootForFamily(trimmedFamily);
+    if (root.isEmpty()) {
+        if (error) *error = "Variable d'environnement LOCALAPPDATA introuvable.";
+        return false;
+    }
+    const QString path = QDir(root).filePath("Settings/settings.dat");
+    if (settingsPath) *settingsPath = path;
+    if (!isPathUnderLocalPackages(path)) {
+        if (error) *error = "Chemin LocalSettings refusé : doit rester sous %LOCALAPPDATA%\\Packages\\.";
+        return false;
+    }
+    if (!QFileInfo::exists(path)) {
+        if (error) *error = QString("Ruche LocalSettings introuvable: %1").arg(path);
+        return false;
+    }
+
+#ifdef Q_OS_WIN
+    HKEY hive = nullptr;
+    const LONG rc = RegLoadAppKeyW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(path).utf16()),
+        &hive,
+        KEY_READ,
+        0,
+        0);
+    if (rc != ERROR_SUCCESS || !hive) {
+        if (error) *error = QString("RegLoadAppKeyW a échoué (%1) sur settings.dat.").arg(rc);
+        return false;
+    }
+
+    const int cap = maxValues > 0 ? std::clamp(maxValues, 1, 1000) : 200;
+    enumerateRegistryValues(hive, QString(), 0, cap, entries);
+    RegCloseKey(hive);
+    return true;
+#else
+    if (error) *error = "Non supporté sur cette plateforme.";
+    return false;
+#endif
 }
 
 bool patchPackageSaveFileBytes(
