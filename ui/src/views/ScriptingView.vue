@@ -12,9 +12,11 @@ const statusLabel = computed(() => {
 })
 
 const canRun = computed(() => Boolean(store.luaScriptText.trim()) && !store.luaScriptBusy && store.luaScriptingStatus?.available === true)
+const canSave = computed(() => Boolean(store.luaScriptText.trim()) && Boolean(store.luaScriptSaveName.trim()))
 
 onMounted(() => {
   void store.refreshLuaScriptingStatus()
+  void store.refreshSavedLuaScripts()
 })
 </script>
 
@@ -31,6 +33,9 @@ onMounted(() => {
         </button>
         <button class="btn btn-primary" :disabled="!canRun" @click="store.executeLuaScript()">
           {{ store.luaScriptBusy ? 'Exécution...' : 'Exécuter' }}
+        </button>
+        <button class="btn btn-danger" :disabled="!store.luaScriptBusy" @click="store.cancelLuaScriptExecution()">
+          Stop
         </button>
       </div>
     </div>
@@ -77,6 +82,44 @@ onMounted(() => {
         class="script-editor"
         spellcheck="false"
       />
+    </section>
+
+    <section class="saved-scripts">
+      <div class="saved-scripts-save-row">
+        <input
+          v-model="store.luaScriptSaveName"
+          class="input"
+          placeholder="Nom du script (pour le sauvegarder)"
+          :disabled="store.luaScriptBusy"
+        />
+        <button class="btn btn-secondary compact" type="button" :disabled="!canSave" @click="store.saveLuaScript()">
+          Sauvegarder dans le profil
+        </button>
+      </div>
+      <p v-if="store.luaScriptSaveResult" :class="store.luaScriptSaveResult.success ? 'hint' : 'error'">
+        {{ store.luaScriptSaveResult.success ? `Sauvegardé (${store.luaScriptSaveResult.scriptCount} script(s) dans ce profil)` : store.luaScriptSaveResult.error }}
+      </p>
+
+      <div class="saved-scripts-list">
+        <div class="saved-scripts-header">
+          <h4>Scripts sauvegardés</h4>
+          <button class="btn btn-secondary compact" type="button" :disabled="store.luaSavedScriptsBusy" @click="store.refreshSavedLuaScripts()">
+            {{ store.luaSavedScriptsBusy ? 'Chargement...' : 'Rafraîchir' }}
+          </button>
+        </div>
+        <p v-if="!store.luaSavedScripts.length" class="hint">Aucun script sauvegardé pour ce profil.</p>
+        <div v-for="saved in store.luaSavedScripts" :key="String(saved.name)" class="saved-scripts-entry">
+          <span class="saved-scripts-name">{{ saved.name }}</span>
+          <div class="saved-scripts-actions">
+            <button class="btn btn-secondary compact" type="button" @click="store.loadSavedLuaScript(String(saved.name))">
+              Charger
+            </button>
+            <button class="btn btn-secondary compact" type="button" @click="store.deleteSavedLuaScript(String(saved.name))">
+              Supprimer
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="output-grid">
@@ -214,6 +257,72 @@ onMounted(() => {
 .small-input {
   width: 96px;
   margin: 0 6px;
+}
+
+.btn-danger {
+  background: var(--error);
+  color: white;
+  border: none;
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.saved-scripts {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.saved-scripts-save-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.saved-scripts-list {
+  margin-top: 10px;
+}
+
+.saved-scripts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.saved-scripts-header h4 {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.saved-scripts-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+
+.saved-scripts-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-scripts-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .panel {

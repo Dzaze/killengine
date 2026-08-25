@@ -170,6 +170,28 @@ ProfileAutoAsmScript autoAsmScriptFromJson(const QJsonObject& json) {
     return script;
 }
 
+QJsonObject luaScriptToJson(const ProfileLuaScript& script) {
+    QJsonObject json;
+    json["name"] = script.name;
+    json["scriptText"] = script.scriptText;
+    if (!script.description.isEmpty()) {
+        json["description"] = script.description;
+    }
+    if (script.savedAtEpochMs != 0) {
+        json["savedAtEpochMs"] = QString::number(script.savedAtEpochMs);
+    }
+    return json;
+}
+
+ProfileLuaScript luaScriptFromJson(const QJsonObject& json) {
+    ProfileLuaScript script;
+    script.name = json.value("name").toString();
+    script.scriptText = json.value("scriptText").toString();
+    script.description = json.value("description").toString();
+    script.savedAtEpochMs = json.value("savedAtEpochMs").toString().toLongLong();
+    return script;
+}
+
 ProfileTarget targetFromJson(const QJsonObject& json) {
     ProfileTarget target;
     target.name = json.value("name").toString();
@@ -251,6 +273,12 @@ bool ProfileStore::save(const Profile& profile, const QString& filename) {
     }
     root["autoAsmScripts"] = autoAsmScriptsArray;
 
+    QJsonArray luaScriptsArray;
+    for (const auto& script : profile.luaScripts) {
+        luaScriptsArray.append(luaScriptToJson(script));
+    }
+    root["luaScripts"] = luaScriptsArray;
+
     QJsonDocument doc(root);
 
     QFile file(filename);
@@ -309,10 +337,17 @@ bool ProfileStore::load(const QString& filename, Profile* profile) {
         profile->autoAsmScripts.append(autoAsmScriptFromJson(item.toObject()));
     }
 
+    profile->luaScripts.clear();
+    const QJsonArray luaScriptsArray = root.value("luaScripts").toArray();
+    for (const auto& item : luaScriptsArray) {
+        profile->luaScripts.append(luaScriptFromJson(item.toObject()));
+    }
+
     KE_LOG_INFO() << "Profile loaded: " << filename.toStdString()
                   << " (" << profile->targets.size() << " targets, "
                   << profile->patches.size() << " patches, "
-                  << profile->autoAsmScripts.size() << " auto-asm scripts)";
+                  << profile->autoAsmScripts.size() << " auto-asm scripts, "
+                  << profile->luaScripts.size() << " lua scripts)";
     return true;
 }
 

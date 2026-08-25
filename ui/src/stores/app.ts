@@ -452,6 +452,11 @@ export const useAppStore = defineStore('app', () => {
   const luaScriptResult = ref<LuaScriptRunResult | null>(null)
   const luaScriptBusy = ref(false)
   const luaScriptTimeoutMs = ref(10000)
+  const luaScriptRequestId = ref<number | null>(null)
+  const luaSavedScripts = ref<Array<Record<string, unknown>>>([])
+  const luaSavedScriptsBusy = ref(false)
+  const luaScriptSaveName = ref('')
+  const luaScriptSaveResult = ref<Record<string, unknown> | null>(null)
   const workflowPresets = ref<WorkflowPreset[]>([
     {
       id: 'exact-value',
@@ -3827,9 +3832,20 @@ let nextWatchedChainId = 1
     }
   }
 
+  function logLuaScriptOutcome(payload: LuaScriptRunResult) {
+    const ok = payload.success === true
+    const label = ok ? 'Script Lua exécuté' : (payload.cancelled ? 'Script Lua annulé' : 'Script Lua échoué')
+    addActionLog(
+      'lua_script',
+      label,
+      String(payload.error ?? payload.stdout ?? '').trim(),
+      ok ? 'success' : (payload.cancelled ? 'warning' : 'error'),
+    )
+  }
+
   async function executeLuaScript() {
     const script = luaScriptText.value
-    if (!script.trim()) return
+    if (!script.trim() || luaScriptBusy.value) return
     if (!await confirmRiskAction(
       'injection',
       'Exécution script Lua',
@@ -3837,6 +3853,81 @@ let nextWatchedChainId = 1
     )) return
 
     const controller = backend.getController()
+    const options = {
+      timeoutMs: luaScriptTimeoutMs.value,
+      pipeName: luaScriptingStatus.value?.pipeName ?? 'KillEngineAutomationPipe',
+    }
+
+    const asyncFn = controller.executeLuaScriptAsync
+    const finishedSignal = controller.luaScriptExecutionFinished
+    if (asyncFn && finishedSignal) {
+      luaScriptBusy.value = true
+      luaScriptResult.value = null
+      luaScriptRequestId.value = null
+      await new Promise<void>((resolve) => {
+        let requestId: number | null = null
+        let settled = false
+        const earlyPayloads: Array<Record<string, unknown>> = []
+        const watchdog = window.setTimeout(() => {
+          if (settled) return
+          settled = true
+          finishedSignal.disconnect?.(handler)
+          luaScriptBusy.value = false
+          luaScriptRequestId.value = null
+          luaScriptResult.value = { success: false, error: 'Timeout client en attente du script Lua.' }
+          logLuaScriptOutcome(luaScriptResult.value)
+          resolve()
+        }, luaScriptTimeoutMs.value + 5000)
+
+        const handler = (payload: Record<string, unknown>) => {
+          if (requestId === null) {
+            earlyPayloads.push(payload)
+            return
+          }
+          if (Number(payload.requestId) !== requestId) return
+          settled = true
+          window.clearTimeout(watchdog)
+          finishedSignal.disconnect?.(handler)
+          luaScriptBusy.value = false
+          luaScriptRequestId.value = null
+          luaScriptResult.value = payload as unknown as LuaScriptRunResult
+          logLuaScriptOutcome(luaScriptResult.value)
+          resolve()
+        }
+        finishedSignal.connect(handler)
+
+        asyncFn(script, options).then((start) => {
+          if (settled) return
+          if (start.success !== true || start.started !== true) {
+            settled = true
+            window.clearTimeout(watchdog)
+            finishedSignal.disconnect?.(handler)
+            luaScriptBusy.value = false
+            luaScriptResult.value = { success: false, error: String(start.error ?? 'Impossible de démarrer le script Lua.') }
+            logLuaScriptOutcome(luaScriptResult.value)
+            resolve()
+            return
+          }
+          requestId = Number(start.requestId)
+          luaScriptRequestId.value = requestId
+          for (const payload of earlyPayloads.splice(0)) {
+            handler(payload)
+            if (settled) break
+          }
+        }).catch((e) => {
+          if (settled) return
+          settled = true
+          window.clearTimeout(watchdog)
+          finishedSignal.disconnect?.(handler)
+          luaScriptBusy.value = false
+          luaScriptResult.value = { success: false, error: String(e) }
+          logLuaScriptOutcome(luaScriptResult.value)
+          resolve()
+        })
+      })
+      return
+    }
+
     if (!controller.executeLuaScript) {
       luaScriptResult.value = { success: false, error: 'Exécution Lua non exposée par ce backend.' }
       return
@@ -3844,22 +3935,93 @@ let nextWatchedChainId = 1
 
     luaScriptBusy.value = true
     try {
-      luaScriptResult.value = await controller.executeLuaScript(script, {
-        timeoutMs: luaScriptTimeoutMs.value,
-        pipeName: luaScriptingStatus.value?.pipeName ?? 'KillEngineAutomationPipe',
-      })
-      const ok = luaScriptResult.value.success === true
-      addActionLog(
-        'lua_script',
-        ok ? 'Script Lua exécuté' : 'Script Lua échoué',
-        String(luaScriptResult.value.error ?? luaScriptResult.value.stdout ?? '').trim(),
-        ok ? 'success' : 'error',
-      )
+      luaScriptResult.value = await controller.executeLuaScript(script, options)
+      logLuaScriptOutcome(luaScriptResult.value)
     } catch (e) {
       luaScriptResult.value = { success: false, error: String(e) }
       addActionLog('lua_script', 'Script Lua échoué', String(e), 'error')
     } finally {
       luaScriptBusy.value = false
+    }
+  }
+
+  async function cancelLuaScriptExecution() {
+    const controller = backend.getController()
+    if (!controller.cancelLuaScriptExecution) {
+      addActionLog('lua_script', 'Annulation indisponible', 'cancelLuaScriptExecution absent du backend.', 'warning')
+      return
+    }
+    try {
+      const result = await controller.cancelLuaScriptExecution()
+      if (result.success !== true) {
+        addActionLog('lua_script', 'Annulation impossible', String(result.error ?? ''), 'warning')
+      }
+    } catch (e) {
+      addActionLog('lua_script', 'Annulation impossible', String(e), 'warning')
+    }
+  }
+
+  function luaProfileName(): string {
+    return (processName.value || 'KillEngineTrainer')
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^a-z0-9_.-]+/gi, '_')
+      .slice(0, 80) || 'KillEngineTrainer'
+  }
+
+  async function refreshSavedLuaScripts() {
+    const controller = backend.getController()
+    luaSavedScriptsBusy.value = true
+    try {
+      const result = await controller.loadProfile(luaProfileName())
+      luaSavedScripts.value = result.success
+        ? ((result.luaScripts as Array<Record<string, unknown>>) ?? [])
+        : []
+    } catch (e) {
+      luaSavedScripts.value = []
+      console.error('[KillEngine] Failed to load saved Lua scripts:', e)
+    } finally {
+      luaSavedScriptsBusy.value = false
+    }
+  }
+
+  async function saveLuaScript() {
+    const script = luaScriptText.value
+    const name = luaScriptSaveName.value.trim()
+    if (!script.trim() || !name) return
+    const controller = backend.getController()
+    if (!controller.saveProfileLuaScript) {
+      luaScriptSaveResult.value = { success: false, error: 'Sauvegarde Lua non exposée par ce backend.' }
+      return
+    }
+    try {
+      luaScriptSaveResult.value = await controller.saveProfileLuaScript(luaProfileName(), name, script, {})
+      const ok = luaScriptSaveResult.value.success === true
+      addActionLog('lua_script', ok ? 'Script Lua sauvegardé' : 'Sauvegarde script Lua échouée', String(luaScriptSaveResult.value.error ?? name), ok ? 'success' : 'error')
+      if (ok) await refreshSavedLuaScripts()
+    } catch (e) {
+      luaScriptSaveResult.value = { success: false, error: String(e) }
+      addActionLog('lua_script', 'Sauvegarde script Lua échouée', String(e), 'error')
+    }
+  }
+
+  function loadSavedLuaScript(name: string) {
+    const entry = luaSavedScripts.value.find((s) => s.name === name)
+    if (!entry) return
+    luaScriptText.value = String(entry.scriptText ?? '')
+    luaScriptSaveName.value = name
+    addActionLog('lua_script', `Script "${name}" chargé`, '', 'success')
+  }
+
+  async function deleteSavedLuaScript(name: string) {
+    const controller = backend.getController()
+    if (!controller.deleteProfileLuaScript) return
+    try {
+      const result = await controller.deleteProfileLuaScript(luaProfileName(), name)
+      const ok = result.success === true
+      addActionLog('lua_script', ok ? `Script "${name}" supprimé` : `Suppression "${name}" échouée`, String(result.error ?? ''), ok ? 'success' : 'error')
+      if (ok) await refreshSavedLuaScripts()
+    } catch (e) {
+      addActionLog('lua_script', `Suppression "${name}" échouée`, String(e), 'error')
     }
   }
 
@@ -7604,8 +7766,18 @@ async function doEncryptedScan() {
     luaScriptResult,
     luaScriptBusy,
     luaScriptTimeoutMs,
+    luaScriptRequestId,
+    luaSavedScripts,
+    luaSavedScriptsBusy,
+    luaScriptSaveName,
+    luaScriptSaveResult,
     refreshLuaScriptingStatus,
     executeLuaScript,
+    cancelLuaScriptExecution,
+    refreshSavedLuaScripts,
+    saveLuaScript,
+    loadSavedLuaScript,
+    deleteSavedLuaScript,
     isAttached,
     processName,
     processes,

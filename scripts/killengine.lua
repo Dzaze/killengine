@@ -50,6 +50,156 @@ local function json_encode(value)
   error("JSON unsupported type: " .. value_type)
 end
 
+-- Parseur JSON minimal (objets, tableaux, strings, nombres, bool, null),
+-- suffisant pour decoder les reponses JSON-RPC du pipe d'automatisation sans
+-- dependance externe non packagee. Pas un parseur JSON generique complet
+-- (pas de \uXXXX), mais couvre tout ce que le pipe/ApplicationController
+-- produisent reellement (voir automation_pipe_server.cpp).
+local function json_decode(text)
+  local pos = 1
+  local len = #text
+
+  local function skip_ws()
+    while pos <= len do
+      local c = text:sub(pos, pos)
+      if c == " " or c == "\t" or c == "\n" or c == "\r" then
+        pos = pos + 1
+      else
+        break
+      end
+    end
+  end
+
+  local parse_value
+
+  local function parse_string()
+    pos = pos + 1 -- skip opening quote
+    local out = {}
+    while pos <= len do
+      local c = text:sub(pos, pos)
+      if c == '"' then
+        pos = pos + 1
+        return table.concat(out)
+      elseif c == "\\" then
+        local nextc = text:sub(pos + 1, pos + 1)
+        if nextc == "n" then out[#out + 1] = "\n"
+        elseif nextc == "t" then out[#out + 1] = "\t"
+        elseif nextc == "r" then out[#out + 1] = "\r"
+        elseif nextc == "b" then out[#out + 1] = "\b"
+        elseif nextc == "f" then out[#out + 1] = "\f"
+        elseif nextc == '"' then out[#out + 1] = '"'
+        elseif nextc == "\\" then out[#out + 1] = "\\"
+        elseif nextc == "/" then out[#out + 1] = "/"
+        else out[#out + 1] = nextc end
+        pos = pos + 2
+      else
+        out[#out + 1] = c
+        pos = pos + 1
+      end
+    end
+    error("JSON decode: unterminated string")
+  end
+
+  local function parse_number()
+    local start = pos
+    while pos <= len and text:sub(pos, pos):match("[%d%+%-%.eE]") do
+      pos = pos + 1
+    end
+    return tonumber(text:sub(start, pos - 1))
+  end
+
+  local function parse_array()
+    pos = pos + 1 -- skip [
+    local out = {}
+    skip_ws()
+    if text:sub(pos, pos) == "]" then
+      pos = pos + 1
+      return out
+    end
+    while true do
+      skip_ws()
+      out[#out + 1] = parse_value()
+      skip_ws()
+      local c = text:sub(pos, pos)
+      if c == "," then
+        pos = pos + 1
+      elseif c == "]" then
+        pos = pos + 1
+        break
+      else
+        error("JSON decode: expected ',' or ']' at position " .. pos)
+      end
+    end
+    return out
+  end
+
+  local function parse_object()
+    pos = pos + 1 -- skip {
+    local out = {}
+    skip_ws()
+    if text:sub(pos, pos) == "}" then
+      pos = pos + 1
+      return out
+    end
+    while true do
+      skip_ws()
+      if text:sub(pos, pos) ~= '"' then
+        error("JSON decode: expected string key at position " .. pos)
+      end
+      local key = parse_string()
+      skip_ws()
+      if text:sub(pos, pos) ~= ":" then
+        error("JSON decode: expected ':' at position " .. pos)
+      end
+      pos = pos + 1
+      skip_ws()
+      out[key] = parse_value()
+      skip_ws()
+      local c = text:sub(pos, pos)
+      if c == "," then
+        pos = pos + 1
+      elseif c == "}" then
+        pos = pos + 1
+        break
+      else
+        error("JSON decode: expected ',' or '}' at position " .. pos)
+      end
+    end
+    return out
+  end
+
+  parse_value = function()
+    skip_ws()
+    local c = text:sub(pos, pos)
+    if c == '"' then
+      return parse_string()
+    elseif c == "{" then
+      return parse_object()
+    elseif c == "[" then
+      return parse_array()
+    elseif c == "t" and text:sub(pos, pos + 3) == "true" then
+      pos = pos + 4
+      return true
+    elseif c == "f" and text:sub(pos, pos + 4) == "false" then
+      pos = pos + 5
+      return false
+    elseif c == "n" and text:sub(pos, pos + 3) == "null" then
+      pos = pos + 4
+      return nil
+    elseif c:match("[%d%+%-]") then
+      return parse_number()
+    end
+    error("JSON decode: unexpected character '" .. c .. "' at position " .. pos)
+  end
+
+  skip_ws()
+  local ok, value = pcall(parse_value)
+  if not ok then
+    return nil, value
+  end
+  return value
+end
+
 local function quote_arg(value)
   value = tostring(value)
   value = value:gsub('"', '\\"')
@@ -80,6 +230,13 @@ end
 
 function ke.json(value)
   return json_encode(value)
+end
+
+-- Decode un texte JSON en table/valeur Lua. Retourne nil + message d'erreur
+-- si le texte n'est pas du JSON valide (parseur maison, voir json_decode
+-- plus haut : couvre objets/tableaux/strings/nombres/bool/null).
+function ke.decode_json(text)
+  return json_decode(text)
 end
 
 function ke.call(method, params, options)
@@ -117,6 +274,29 @@ function ke.call(method, params, options)
   return nil, output ~= "" and output or tostring(reason or code or "pipe call failed")
 end
 
+-- Comme ke.call, mais decode la reponse JSON-RPC et retourne directement
+-- le champ "result" (table Lua quand le backend renvoie un objet/tableau)
+-- au lieu du texte JSON brut. Le champ "error" de la reponse JSON-RPC (s'il
+-- existe et est non vide) devient le message d'erreur retourne en 2e valeur,
+-- au meme titre qu'un echec de ke.call lui-meme.
+function ke.call_table(method, params, options)
+  local output, err = ke.call(method, params, options)
+  if not output then
+    return nil, err
+  end
+  local decoded, decodeErr = ke.decode_json(output)
+  if decoded == nil and decodeErr then
+    return nil, "reponse JSON invalide: " .. tostring(decodeErr)
+  end
+  if type(decoded) == "table" and decoded.error ~= nil and decoded.error ~= "" then
+    return nil, tostring(decoded.error)
+  end
+  if type(decoded) == "table" then
+    return decoded.result
+  end
+  return decoded
+end
+
 function ke.ping(message)
   return ke.call("ping", { message or "lua" })
 end
@@ -143,6 +323,21 @@ end
 
 function ke.kernel_write_value(address, value_type, value)
   return ke.call("writeMemoryValueKernel", { tostring(address), value_type or "Int32", tostring(value) })
+end
+
+-- Variantes table des wrappers ci-dessus, via ke.call_table : retournent
+-- directement la table Lua decodee (candidats, resultat de scan...) au lieu
+-- du JSON brut, pour manipuler la reponse sans reparser a la main.
+function ke.scan_exact_table(value, value_type)
+  return ke.call_table("startExactScan", { tostring(value), value_type or "Int32" })
+end
+
+function ke.next_scan_table(mode, value)
+  return ke.call_table("nextScan", { mode or "exact", tostring(value or "") })
+end
+
+function ke.candidates_table(page_index, page_size, filter)
+  return ke.call_table("getCandidates", { page_index or 0, page_size or 50, filter or "" })
 end
 
 return ke

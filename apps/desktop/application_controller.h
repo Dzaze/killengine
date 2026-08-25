@@ -890,6 +890,24 @@ public:
     /// options: { luaPath?: string, timeoutMs?: int, pipeName?: string }.
     Q_INVOKABLE QVariantMap executeLuaScript(const QString& scriptText, const QVariantMap& options);
 
+    /// Version non bloquante d'executeLuaScript, annulable via
+    /// cancelLuaScriptExecution. Le résultat arrive via luaScriptExecutionFinished.
+    /// Mêmes options qu'executeLuaScript.
+    Q_INVOKABLE QVariantMap executeLuaScriptAsync(const QString& scriptText, const QVariantMap& options);
+
+    /// Demande l'arrêt (kill du processus lua.exe) du script Lua externe en cours.
+    Q_INVOKABLE QVariantMap cancelLuaScriptExecution();
+
+    /// Sauvegarde un script Lua (texte brut) dans un profil, rejouable sans le retaper.
+    Q_INVOKABLE QVariantMap saveProfileLuaScript(
+        const QString& profileName,
+        const QString& scriptName,
+        const QString& scriptText,
+        const QVariantMap& metadata);
+
+    /// Supprime un script Lua sauvegardé d'un profil.
+    Q_INVOKABLE QVariantMap deleteProfileLuaScript(const QString& profileName, const QString& scriptName);
+
     // -----------------------------------------------------------------------
     // Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
     // -----------------------------------------------------------------------
@@ -933,6 +951,7 @@ signals:
     void scanFinished(const QVariantMap& result);
     void findWhatWritesFinished(const QVariantMap& result);
     void saveFileWatchFinished(const QVariantMap& result);
+    void luaScriptExecutionFinished(const QVariantMap& result);
     void candidateFieldTestFinished(const QVariantMap& result);
     void pageGuardWatchFinished(const QVariantMap& result);
     void inProcessBreakpointWatchFinished(const QVariantMap& result);
@@ -1125,6 +1144,12 @@ private:
     // independant des cancellations de debug/scan ci-dessus.
     bool                     m_saveFileWatchInProgress{false};
     std::shared_ptr<killcore::CancellationToken> m_activeSaveFileWatchCancellation;
+    // Scripting Lua externe (executeLuaScriptAsync) : etat dedie, independant
+    // des autres cancellations ci-dessus. Le token ne fait qu'armer le kill()
+    // du QProcess lua.exe depuis le thread worker qui le possede -- pas de
+    // manipulation cross-thread du QProcess lui-meme.
+    bool                     m_luaScriptInProgress{false};
+    std::shared_ptr<killcore::CancellationToken> m_activeLuaScriptCancellation;
     std::unique_ptr<QProcess>    m_clrInspectorProcess;
     int                          m_clrInspectorRequestId{1};
     killai::AIEngine         m_ai;

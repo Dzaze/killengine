@@ -52,6 +52,17 @@ struct ProfileAutoAsmScript {
 };
 
 /**
+ * @brief Script Lua externe sauvegardé (voir docs/POWER_UP_ROADMAP.md section K),
+ *        rejouable sans retaper le texte à chaque session.
+ */
+struct ProfileLuaScript {
+    QString name;
+    QString scriptText;
+    QString description;
+    qint64  savedAtEpochMs{0};
+};
+
+/**
  * @brief Profil réutilisable pour un jeu/exécutable.
  *
  * Permet de retrouver des cibles après redémarrage via les locators module_offset.
@@ -63,6 +74,7 @@ struct Profile {
     QList<ProfileTarget> targets;
     QList<ProfileCodePatch> patches;
     QList<ProfileAutoAsmScript> autoAsmScripts;
+    QList<ProfileLuaScript> luaScripts;
 
     /// Version du format de profil (pour migrations futures).
     static constexpr int FORMAT_VERSION = 1;

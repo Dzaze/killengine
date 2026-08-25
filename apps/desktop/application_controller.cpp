@@ -167,6 +167,122 @@ QString findKillEngineLuaHelper() {
     return {};
 }
 
+/// Résultat interne partagé par executeLuaScript (bloquant) et
+/// executeLuaScriptAsync (thread worker) -- une seule implémentation du
+/// lancement de lua.exe pour éviter que les deux versions divergent.
+struct LuaScriptRunOutcome {
+    bool    started{false};
+    bool    success{false};
+    bool    timedOut{false};
+    bool    cancelled{false};
+    int     exitCode{-1};
+    QString luaPath;
+    QString helperPath;
+    QString stdoutText;
+    QString stderrText;
+    QString error;
+};
+
+/// Lance scriptText dans lua.exe/luajit.exe et attend sa fin, en pollant
+/// cancellation (si fourni) pour pouvoir kill() le process en cours de route
+/// -- utilisé par executeLuaScriptAsync depuis son propre thread, où kill()
+/// reste appelé depuis le même thread qui possède le QProcess (pas de
+/// manipulation cross-thread).
+LuaScriptRunOutcome runLuaScriptProcess(const QString& scriptText, const QVariantMap& options, killcore::CancellationToken* cancellation) {
+    LuaScriptRunOutcome outcome;
+
+    const QString trimmedScript = scriptText.trimmed();
+    if (trimmedScript.isEmpty()) {
+        outcome.error = "Script Lua vide.";
+        return outcome;
+    }
+
+    const QString luaPath = findLuaExecutable(options.value("luaPath").toString());
+    outcome.luaPath = luaPath;
+    if (luaPath.isEmpty()) {
+        outcome.error = "Aucun interpréteur Lua trouvé. Place lua.exe dans runtime\\lua à côté de KillEngine.exe, ajoute Lua au PATH, ou renseigne options.luaPath.";
+        return outcome;
+    }
+
+    QTemporaryFile scriptFile(QDir::temp().filePath("killengine-lua-XXXXXX.lua"));
+    scriptFile.setAutoRemove(true);
+    if (!scriptFile.open()) {
+        outcome.error = QStringLiteral("Impossible de créer le script temporaire Lua : %1").arg(scriptFile.errorString());
+        return outcome;
+    }
+    scriptFile.write(scriptText.toUtf8());
+    scriptFile.flush();
+    const QString scriptPath = scriptFile.fileName();
+    scriptFile.close();
+
+    const QString helperPath = findKillEngineLuaHelper();
+    outcome.helperPath = helperPath;
+    const QFileInfo helperFile(helperPath);
+    const QString helperDir = helperFile.exists() ? helperFile.absolutePath() : QString();
+    const QString rootDir = helperDir.isEmpty()
+        ? QDir(QCoreApplication::applicationDirPath()).absolutePath()
+        : QDir(helperDir).absoluteFilePath("..");
+
+    QProcess process;
+    process.setProgram(luaPath);
+    process.setArguments({scriptPath});
+    process.setWorkingDirectory(rootDir);
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("KILLENGINE_ROOT"), QDir(rootDir).absolutePath());
+    env.insert(QStringLiteral("KILLENGINE_AUTOMATION_PIPE_NAME"), options.value("pipeName", QStringLiteral("KillEngineAutomationPipe")).toString());
+    if (!helperDir.isEmpty()) {
+        const QString existingLuaPath = env.value(QStringLiteral("LUA_PATH"));
+        const QString helperPattern = QDir(helperDir).filePath("?.lua").replace('\\', '/');
+        env.insert(QStringLiteral("LUA_PATH"), helperPattern + QStringLiteral(";") + existingLuaPath);
+    }
+    process.setProcessEnvironment(env);
+
+    const int timeoutMs = std::clamp(options.value("timeoutMs", 10000).toInt(), 1000, 120000);
+    process.start();
+    if (!process.waitForStarted(3000)) {
+        outcome.error = QStringLiteral("Impossible de démarrer Lua : %1").arg(process.errorString());
+        return outcome;
+    }
+    outcome.started = true;
+
+    QElapsedTimer timer;
+    timer.start();
+    bool finished = false;
+    while (true) {
+        finished = process.waitForFinished(100);
+        if (finished) {
+            break;
+        }
+        if (cancellation && cancellation->isCancelled()) {
+            outcome.cancelled = true;
+            break;
+        }
+        if (timer.hasExpired(timeoutMs)) {
+            break;
+        }
+    }
+    if (!finished) {
+        process.kill();
+        process.waitForFinished(2000);
+    }
+    outcome.timedOut = !finished && !outcome.cancelled;
+
+    outcome.stdoutText = QString::fromUtf8(process.readAllStandardOutput());
+    outcome.stderrText = QString::fromUtf8(process.readAllStandardError());
+    outcome.exitCode = process.exitCode();
+    outcome.success = finished && process.exitStatus() == QProcess::NormalExit && outcome.exitCode == 0;
+    if (!outcome.success) {
+        outcome.error = outcome.cancelled
+            ? QStringLiteral("Script Lua annulé.")
+            : outcome.timedOut
+            ? QStringLiteral("Script Lua interrompu après timeout (%1 ms).").arg(timeoutMs)
+            : QStringLiteral("Script Lua terminé avec le code %1.").arg(outcome.exitCode);
+    }
+    return outcome;
+}
+
 double ratePerSecond(size_t count, qint64 elapsedMs) {
     if (elapsedMs <= 0) {
         return 0.0;
@@ -15901,6 +16017,21 @@ QVariantMap ApplicationController::loadProfile(const QString& profileName) {
     result["autoAsmScripts"] = autoAsmScriptsList;
     result["autoAsmScriptCount"] = autoAsmScriptsList.size();
 
+    QVariantList luaScriptsList;
+    for (const auto& script : profile.luaScripts) {
+        QVariantMap scriptEntry;
+        scriptEntry["name"] = script.name;
+        scriptEntry["scriptText"] = script.scriptText;
+        scriptEntry["description"] = script.description;
+        scriptEntry["savedAtEpochMs"] = QString::number(script.savedAtEpochMs);
+        scriptEntry["savedAt"] = script.savedAtEpochMs != 0
+            ? QDateTime::fromMSecsSinceEpoch(script.savedAtEpochMs).toString(Qt::ISODate)
+            : QString();
+        luaScriptsList.append(scriptEntry);
+    }
+    result["luaScripts"] = luaScriptsList;
+    result["luaScriptCount"] = luaScriptsList.size();
+
     return result;
 }
 
@@ -16886,95 +17017,204 @@ QVariantMap ApplicationController::getLuaScriptingStatus() const {
     return result;
 }
 
+namespace {
+QVariantMap luaScriptRunOutcomeToVariant(const LuaScriptRunOutcome& outcome) {
+    QVariantMap result;
+    result["success"] = outcome.success;
+    result["started"] = outcome.started;
+    result["timedOut"] = outcome.timedOut;
+    result["cancelled"] = outcome.cancelled;
+    result["exitCode"] = outcome.exitCode;
+    result["luaPath"] = outcome.luaPath;
+    result["helperPath"] = outcome.helperPath;
+    result["stdout"] = outcome.stdoutText;
+    result["stderr"] = outcome.stderrText;
+    result["error"] = outcome.error;
+    return result;
+}
+} // namespace
+
 QVariantMap ApplicationController::executeLuaScript(const QString& scriptText, const QVariantMap& options) {
+    const LuaScriptRunOutcome outcome = runLuaScriptProcess(scriptText, options, nullptr);
+    QVariantMap result = luaScriptRunOutcomeToVariant(outcome);
+
+    appendScanTelemetry(QStringLiteral("lua_script_execute"), {
+        {"success", outcome.success},
+        {"exitCode", outcome.exitCode},
+        {"timedOut", outcome.timedOut},
+        {"stdoutBytes", outcome.stdoutText.toUtf8().size()},
+        {"stderrBytes", outcome.stderrText.toUtf8().size()},
+    });
+    return result;
+}
+
+QVariantMap ApplicationController::executeLuaScriptAsync(const QString& scriptText, const QVariantMap& options) {
     QVariantMap result;
     result["success"] = false;
+    result["started"] = false;
 
-    const QString trimmedScript = scriptText.trimmed();
-    if (trimmedScript.isEmpty()) {
+    if (m_luaScriptInProgress) {
+        result["error"] = "Un script Lua est déjà en cours d'exécution.";
+        return result;
+    }
+    if (scriptText.trimmed().isEmpty()) {
         result["error"] = "Script Lua vide.";
         return result;
     }
 
-    const QString luaPath = findLuaExecutable(options.value("luaPath").toString());
-    if (luaPath.isEmpty()) {
-        result["error"] = "Aucun interpréteur Lua trouvé. Place lua.exe dans runtime\\lua à côté de KillEngine.exe, ajoute Lua au PATH, ou renseigne options.luaPath.";
+    const int requestId = m_nextDebugRequestId++;
+    const QString requestedScript = scriptText;
+    const QVariantMap requestedOptions = options;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_luaScriptInProgress = true;
+    m_activeLuaScriptCancellation = cancellation;
+
+    KE_LOG_INFO() << "executeLuaScriptAsync(requestId=" << requestId
+                  << ", scriptBytes=" << requestedScript.toUtf8().size() << ")";
+
+    std::thread([self, requestId, requestedScript, requestedOptions, cancellation]() {
+        const LuaScriptRunOutcome outcome = runLuaScriptProcess(requestedScript, requestedOptions, cancellation.get());
+
+        if (!self) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(self.data(), [self, requestId, outcome]() {
+            if (!self) {
+                return;
+            }
+
+            QVariantMap finished = luaScriptRunOutcomeToVariant(outcome);
+            finished["requestId"] = requestId;
+            finished["kind"] = "lua_script_execute";
+
+            self->m_luaScriptInProgress = false;
+            self->m_activeLuaScriptCancellation.reset();
+            self->appendScanTelemetry(QStringLiteral("lua_script_execute"), {
+                {"success", outcome.success},
+                {"exitCode", outcome.exitCode},
+                {"timedOut", outcome.timedOut},
+                {"cancelled", outcome.cancelled},
+                {"stdoutBytes", outcome.stdoutText.toUtf8().size()},
+                {"stderrBytes", outcome.stderrText.toUtf8().size()},
+            });
+            emit self->luaScriptExecutionFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::cancelLuaScriptExecution() {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_luaScriptInProgress || !m_activeLuaScriptCancellation) {
+        result["error"] = "Aucun script Lua actif à annuler.";
         return result;
     }
 
-    QTemporaryFile scriptFile(QDir::temp().filePath("killengine-lua-XXXXXX.lua"));
-    scriptFile.setAutoRemove(true);
-    if (!scriptFile.open()) {
-        result["error"] = QStringLiteral("Impossible de créer le script temporaire Lua : %1").arg(scriptFile.errorString());
+    m_activeLuaScriptCancellation->cancel();
+    result["success"] = true;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::saveProfileLuaScript(
+    const QString& profileName,
+    const QString& scriptName,
+    const QString& scriptText,
+    const QVariantMap& metadata) {
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString cleanProfileName = profileName.trimmed();
+    const QString cleanScriptName = scriptName.trimmed();
+    if (cleanProfileName.isEmpty() || cleanScriptName.isEmpty()) {
+        result["error"] = "Nom de profil ou de script vide.";
         return result;
     }
-    scriptFile.write(scriptText.toUtf8());
-    scriptFile.flush();
-    const QString scriptPath = scriptFile.fileName();
-    scriptFile.close();
-
-    const QString helperPath = findKillEngineLuaHelper();
-    const QFileInfo helperFile(helperPath);
-    const QString helperDir = helperFile.exists() ? helperFile.absolutePath() : QString();
-    const QString rootDir = helperDir.isEmpty()
-        ? QDir(QCoreApplication::applicationDirPath()).absolutePath()
-        : QDir(helperDir).absoluteFilePath("..");
-
-    QProcess process;
-    process.setProgram(luaPath);
-    process.setArguments({scriptPath});
-    process.setWorkingDirectory(rootDir);
-    process.setProcessChannelMode(QProcess::SeparateChannels);
-
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("KILLENGINE_ROOT"), QDir(rootDir).absolutePath());
-    env.insert(QStringLiteral("KILLENGINE_AUTOMATION_PIPE_NAME"), options.value("pipeName", QStringLiteral("KillEngineAutomationPipe")).toString());
-    if (!helperDir.isEmpty()) {
-        const QString existingLuaPath = env.value(QStringLiteral("LUA_PATH"));
-        const QString helperPattern = QDir(helperDir).filePath("?.lua").replace('\\', '/');
-        env.insert(QStringLiteral("LUA_PATH"), helperPattern + QStringLiteral(";") + existingLuaPath);
-    }
-    process.setProcessEnvironment(env);
-
-    const int timeoutMs = std::clamp(options.value("timeoutMs", 10000).toInt(), 1000, 120000);
-    process.start();
-    if (!process.waitForStarted(3000)) {
-        result["error"] = QStringLiteral("Impossible de démarrer Lua : %1").arg(process.errorString());
-        result["luaPath"] = luaPath;
+    if (scriptText.trimmed().isEmpty()) {
+        result["error"] = "Script vide.";
         return result;
     }
 
-    bool timedOut = false;
-    if (!process.waitForFinished(timeoutMs)) {
-        timedOut = true;
-        process.kill();
-        process.waitForFinished(2000);
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        profile.gameName = cleanProfileName;
+        profile.executableName = m_processName;
+    }
+    if (profile.executableHash.isEmpty() && m_handle.isValid()) {
+        profile.executableHash = computeExecutableHash(m_handle.executablePath());
     }
 
-    const QString stdoutText = QString::fromUtf8(process.readAllStandardOutput());
-    const QString stderrText = QString::fromUtf8(process.readAllStandardError());
-    const int exitCode = process.exitCode();
+    killcore::ProfileLuaScript script;
+    script.name = cleanScriptName;
+    script.scriptText = scriptText;
+    script.description = metadata.value("description").toString();
+    script.savedAtEpochMs = QDateTime::currentMSecsSinceEpoch();
 
-    result["success"] = !timedOut && process.exitStatus() == QProcess::NormalExit && exitCode == 0;
-    result["timedOut"] = timedOut;
-    result["exitCode"] = exitCode;
-    result["luaPath"] = luaPath;
-    result["helperPath"] = helperPath;
-    result["stdout"] = stdoutText;
-    result["stderr"] = stderrText;
-    if (!result.value("success").toBool()) {
-        result["error"] = timedOut
-            ? QStringLiteral("Script Lua interrompu après timeout (%1 ms).").arg(timeoutMs)
-            : QStringLiteral("Script Lua terminé avec le code %1.").arg(exitCode);
+    bool replaced = false;
+    for (auto& existing : profile.luaScripts) {
+        if (existing.name == script.name) {
+            existing = script;
+            replaced = true;
+            break;
+        }
+    }
+    if (!replaced) {
+        profile.luaScripts.append(script);
     }
 
-    appendScanTelemetry(QStringLiteral("lua_script_execute"), {
-        {"success", result.value("success").toBool()},
-        {"exitCode", exitCode},
-        {"timedOut", timedOut},
-        {"stdoutBytes", stdoutText.toUtf8().size()},
-        {"stderrBytes", stderrText.toUtf8().size()},
+    if (!killcore::ProfileStore::save(profile, path)) {
+        result["error"] = "Impossible de sauvegarder le profil.";
+        return result;
+    }
+
+    result["success"] = true;
+    result["profileName"] = cleanProfileName;
+    result["scriptName"] = cleanScriptName;
+    result["scriptCount"] = profile.luaScripts.size();
+    result["replaced"] = replaced;
+    appendScanTelemetry("lua_script_saved", result);
+    return result;
+}
+
+QVariantMap ApplicationController::deleteProfileLuaScript(const QString& profileName, const QString& scriptName) {
+    QVariantMap result;
+    result["success"] = false;
+    result["profileName"] = profileName;
+    result["scriptName"] = scriptName;
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    const int before = profile.luaScripts.size();
+    profile.luaScripts.removeIf([&](const killcore::ProfileLuaScript& script) {
+        return script.name == scriptName;
     });
+    if (profile.luaScripts.size() == before) {
+        result["error"] = "Script Lua introuvable dans ce profil.";
+        return result;
+    }
+
+    if (!killcore::ProfileStore::save(profile, path)) {
+        result["error"] = "Impossible de sauvegarder le profil.";
+        return result;
+    }
+
+    result["success"] = true;
+    result["scriptCount"] = profile.luaScripts.size();
     return result;
 }
 

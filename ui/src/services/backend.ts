@@ -315,12 +315,21 @@ export interface LuaScriptingStatus {
 
 export interface LuaScriptRunResult {
   success: boolean
+  started?: boolean
   timedOut?: boolean
+  cancelled?: boolean
   exitCode?: number
   luaPath?: string
   helperPath?: string
   stdout?: string
   stderr?: string
+  error?: string
+}
+
+export interface LuaScriptRunStartResult {
+  success: boolean
+  started: boolean
+  requestId?: number
   error?: string
 }
 
@@ -1408,6 +1417,18 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   /** Scripting Lua externe : exécute lua.exe/LuaJIT et laisse le script piloter KillEngine via le pipe d'automatisation. */
   getLuaScriptingStatus?(): Promise<LuaScriptingStatus>
   executeLuaScript?(scriptText: string, options: Record<string, unknown>): Promise<LuaScriptRunResult>
+  /** Version non bloquante d'executeLuaScript, annulable via cancelLuaScriptExecution. Le résultat arrive via luaScriptExecutionFinished. */
+  executeLuaScriptAsync?(scriptText: string, options: Record<string, unknown>): Promise<LuaScriptRunStartResult>
+  cancelLuaScriptExecution?(): Promise<Record<string, unknown>>
+  luaScriptExecutionFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** Sauvegarde un script Lua (texte brut) dans un profil, rejouable sans le retaper. */
+  saveProfileLuaScript?(
+    profileName: string,
+    scriptName: string,
+    scriptText: string,
+    metadata: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>
+  deleteProfileLuaScript?(profileName: string, scriptName: string): Promise<Record<string, unknown>>
 
   // Phase 14 — Pointer Chains (jeux modernes / applications dynamiques)
   scanPointerChains?(addressHex: string, scanOptions: PointerScanOptions): Promise<PointerScanResult>
@@ -2509,6 +2530,18 @@ class BackendService {
           stderr: '',
           error: 'Mock backend',
         }
+      },
+      async executeLuaScriptAsync(_scriptText: string, _options: Record<string, unknown>) {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
+      async cancelLuaScriptExecution() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async saveProfileLuaScript() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async deleteProfileLuaScript() {
+        return { success: false, error: 'Mock backend' }
       },
     }
   }

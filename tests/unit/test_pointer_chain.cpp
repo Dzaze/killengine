@@ -142,6 +142,34 @@ TEST(PointerChain, ProfileStoreRoundTripsAutoAsmScripts) {
     EXPECT_EQ(loadedScript.riskLevel, script.riskLevel);
 }
 
+TEST(PointerChain, ProfileStoreRoundTripsLuaScripts) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+
+    Profile profile;
+    profile.gameName = "StarCraft2";
+    profile.executableName = "SC2_x64.exe";
+
+    killcore::ProfileLuaScript script;
+    script.name = "Ping test";
+    script.scriptText = "local ke = require(\"killengine\")\nprint(ke.call(\"ping\", { \"hello\" }))";
+    script.description = "Verifie la connexion au pipe d'automatisation";
+    script.savedAtEpochMs = 1755000000000LL;
+    profile.luaScripts.append(script);
+
+    const QString path = dir.filePath("starcraft2.keprofile");
+    ASSERT_TRUE(ProfileStore::save(profile, path));
+
+    Profile loaded;
+    ASSERT_TRUE(ProfileStore::load(path, &loaded));
+    ASSERT_EQ(loaded.luaScripts.size(), 1);
+    const auto& loadedScript = loaded.luaScripts.first();
+    EXPECT_EQ(loadedScript.name, script.name);
+    EXPECT_EQ(loadedScript.scriptText, script.scriptText);
+    EXPECT_EQ(loadedScript.description, script.description);
+    EXPECT_EQ(loadedScript.savedAtEpochMs, script.savedAtEpochMs);
+}
+
 TEST(PointerChain, ProfileStoreRoundTripsPointerChainLocator) {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
