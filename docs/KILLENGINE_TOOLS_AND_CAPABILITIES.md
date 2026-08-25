@@ -3,7 +3,7 @@
 
 # KillEngine - Outils Et Capacités
 
-Dernière mise à jour : 20/08/2026.
+Dernière mise à jour : 25/08/2026.
 
 Ce document sert d'inventaire rapide des outils, workflows et capacités disponibles ou préparés dans KillEngine. Pour l'état détaillé, les preuves de validation et les limites connues, voir `docs/PHASE_TRACKER.md`, `docs/POWER_UP_ROADMAP.md`, `docs/USER_GUIDE.md`, `docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md` et `docs/KILLENGINE_CLR_INSPECTOR_SPEC.md`.
 
@@ -28,6 +28,27 @@ Ce document sert d'inventaire rapide des outils, workflows et capacités disponi
 - Édition hex inline dans la vue mémoire.
 - Analyse de fenêtre mémoire autour d'une adresse.
 - Recherche de valeurs dans une fenêtre mémoire proche d'une adresse.
+
+## Investigations Hors Mémoire Et UWP
+
+- Résolution du package family name d'un process UWP attaché.
+- Découverte des fichiers de sauvegarde sous `%LOCALAPPDATA%\Packages\<familyName>\`.
+- Filtrage anti-bruit des dossiers UWP courants (`Cache`, `EBWebView`, `GPUCache`, `VungleSDK`, etc.).
+- Lecture bornée et décodage best-effort texte des fichiers de sauvegarde.
+- Surveillance native d'un fichier de sauvegarde avec `ReadDirectoryChangesW`.
+- Annulation d'une surveillance fichier active.
+- Patch sûr d'octets dans un fichier de sauvegarde :
+  - chemin borné sous `%LOCALAPPDATA%\Packages\` ;
+  - séquence hex `find`/`replace` de même taille ;
+  - écriture refusée si la séquence est absente ou non unique.
+- Inspection lecture seule de `Settings/settings.dat` / `Windows.Storage.ApplicationData.LocalSettings`.
+- Décodage lisible des types registre courants et du payload UWP `REG_100000012`.
+- Outils Assistant associés :
+  - `discover_save_files` ;
+  - `read_save_file_text` ;
+  - `watch_save_file` ;
+  - `patch_file_bytes` ;
+  - `inspect_local_settings`.
 
 ## Scans Mémoire
 
