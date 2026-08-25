@@ -108,6 +108,32 @@ public:
     /// Retourne {success, path, text, truncated, error}.
     Q_INVOKABLE QVariantMap readProcessSaveFileText(const QString& path, int maxBytes) const;
 
+    /// PHASE 94 — Édite en place une séquence d'octets dans un fichier de
+    /// sauvegarde découvert via discoverProcessSaveFiles. findHex/replaceHex
+    /// sont des octets en hexadécimal ("35 38", "35-38", casse indifférente).
+    /// Garde-fous : les deux séquences doivent avoir exactement la même taille,
+    /// et la séquence recherchée doit apparaître une seule fois dans le fichier.
+    /// Retourne {success, path, occurrencesFound, error}.
+    Q_INVOKABLE QVariantMap patchProcessSaveFileBytes(const QString& path, const QString& findHex, const QString& replaceHex);
+
+    /// PHASE 93 — Surveille un fichier de sauvegarde (trouvé via
+    /// discoverProcessSaveFiles) pour une écriture/suppression/renommage, via
+    /// ReadDirectoryChangesW natif (core/process/file_watch.*). Remplace
+    /// l'usage manuel de Process Monitor fait en PHASE 90. Version bloquante,
+    /// utilisable directement au pipe d'automatisation (même raison que
+    /// findWhatWrites vs findWhatWritesAsync : le pipe ne relit pas un signal
+    /// Qt asynchrone). options keys: timeoutMs (défaut 5000, borné [250, 60000]).
+    /// Même garde-fou de chemin que readProcessSaveFileText.
+    /// Retourne {success, changed, changeType, cancelled, error}.
+    Q_INVOKABLE QVariantMap watchSaveFileForChanges(const QString& path, const QVariantMap& options);
+
+    /// Version non bloquante de watchSaveFileForChanges. Le résultat arrive
+    /// via saveFileWatchFinished.
+    Q_INVOKABLE QVariantMap startSaveFileWatchAsync(const QString& path, const QVariantMap& options);
+
+    /// Demande l'arrêt de la surveillance de fichier en cours.
+    Q_INVOKABLE QVariantMap cancelSaveFileWatch();
+
     /// Attache KillEngine à un processus.
     Q_INVOKABLE bool attachProcess(int pid);
 
@@ -899,6 +925,7 @@ signals:
     void scanStatsUpdated(int candidateCount);
     void scanFinished(const QVariantMap& result);
     void findWhatWritesFinished(const QVariantMap& result);
+    void saveFileWatchFinished(const QVariantMap& result);
     void candidateFieldTestFinished(const QVariantMap& result);
     void pageGuardWatchFinished(const QVariantMap& result);
     void inProcessBreakpointWatchFinished(const QVariantMap& result);
@@ -1087,6 +1114,10 @@ private:
     // avec attach debugger (celle-ci ne fait que lire/ecrire de la memoire).
     bool                     m_candidateFieldTestInProgress{false};
     std::shared_ptr<killcore::CancellationToken> m_activeCandidateFieldTestCancellation;
+    // PHASE 93 — surveillance fichier (watchSaveFileForChanges) : etat dedie,
+    // independant des cancellations de debug/scan ci-dessus.
+    bool                     m_saveFileWatchInProgress{false};
+    std::shared_ptr<killcore::CancellationToken> m_activeSaveFileWatchCancellation;
     std::unique_ptr<QProcess>    m_clrInspectorProcess;
     int                          m_clrInspectorRequestId{1};
     killai::AIEngine         m_ai;

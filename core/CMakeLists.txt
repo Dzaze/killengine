@@ -35,6 +35,11 @@ add_library(killcore STATIC
     process/package_storage.h
     process/package_storage.cpp
 
+    # PHASE 93 — Surveillance native (ReadDirectoryChangesW) d'un fichier de
+    # sauvegarde/état, remplace l'usage manuel de Process Monitor de PHASE 90.
+    process/file_watch.h
+    process/file_watch.cpp
+
     # Optional kernel driver bridge (probe/capabilities only)
     kernel/kernel_driver_bridge.h
     kernel/kernel_driver_bridge.cpp

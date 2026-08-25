@@ -22,6 +22,8 @@ add_executable(killengine_unit_tests
     unit/test_breakpoint_arbiter.cpp
     unit/test_kernel_driver_bridge.cpp
     unit/test_speedhack_clock.cpp
+    unit/test_package_storage.cpp
+    unit/test_file_watch.cpp
 )
 
 target_link_libraries(killengine_unit_tests PRIVATE

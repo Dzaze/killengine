@@ -15,6 +15,62 @@
 
 namespace killcore {
 
+namespace {
+
+bool decodeHexBytes(const QString& input, QByteArray* bytes, QString* error) {
+    if (bytes) bytes->clear();
+    QString compact;
+    compact.reserve(input.size());
+    for (const QChar ch : input) {
+        if (ch.isSpace() || ch == QLatin1Char('-')) {
+            continue;
+        }
+        if (!ch.isDigit() && (ch.toLower() < QLatin1Char('a') || ch.toLower() > QLatin1Char('f'))) {
+            if (error) *error = QString("Hex invalide: caractère '%1'.").arg(ch);
+            return false;
+        }
+        compact.append(ch);
+    }
+    if (compact.isEmpty()) {
+        if (error) *error = "Séquence hex vide.";
+        return false;
+    }
+    if ((compact.size() % 2) != 0) {
+        if (error) *error = "Séquence hex invalide: nombre impair de caractères.";
+        return false;
+    }
+
+    QByteArray decoded;
+    decoded.reserve(compact.size() / 2);
+    for (int i = 0; i < compact.size(); i += 2) {
+        bool ok = false;
+        const int value = compact.mid(i, 2).toInt(&ok, 16);
+        if (!ok || value < 0 || value > 0xFF) {
+            if (error) *error = "Séquence hex invalide.";
+            return false;
+        }
+        decoded.append(static_cast<char>(value));
+    }
+
+    if (bytes) *bytes = decoded;
+    return true;
+}
+
+bool isPathUnderLocalPackages(const QString& path) {
+    const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+    if (localAppData.isEmpty()) {
+        return false;
+    }
+    const QString normalized = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()).toLower();
+    QString allowedRoot = QDir::toNativeSeparators(QDir(localAppData).filePath("Packages")).toLower();
+    if (!allowedRoot.endsWith(QDir::separator())) {
+        allowedRoot.append(QDir::separator());
+    }
+    return normalized.startsWith(allowedRoot);
+}
+
+} // namespace
+
 bool resolvePackageFamilyName(const ProcessHandle& process, QString* familyName, QString* error) {
     if (familyName) familyName->clear();
 
@@ -159,6 +215,95 @@ bool readPackageSaveFileText(
     }
 
     if (text) *text = decoded;
+    return true;
+}
+
+bool patchPackageSaveFileBytes(
+    const QString& path,
+    const QString& findHex,
+    const QString& replaceHex,
+    QString* error,
+    int* occurrencesFound) {
+
+    if (occurrencesFound) *occurrencesFound = 0;
+    if (!isPathUnderLocalPackages(path)) {
+        if (error) *error = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\.";
+        return false;
+    }
+
+    QByteArray findBytes;
+    QByteArray replaceBytes;
+    QString parseError;
+    if (!decodeHexBytes(findHex, &findBytes, &parseError)) {
+        if (error) *error = QString("Séquence recherchée invalide: %1").arg(parseError);
+        return false;
+    }
+    if (!decodeHexBytes(replaceHex, &replaceBytes, &parseError)) {
+        if (error) *error = QString("Séquence de remplacement invalide: %1").arg(parseError);
+        return false;
+    }
+    if (findBytes.size() != replaceBytes.size()) {
+        if (error) {
+            *error = QString("La longueur doit être identique, %1 octets vs %2 octets.")
+                .arg(findBytes.size())
+                .arg(replaceBytes.size());
+        }
+        return false;
+    }
+
+    QFile file(path);
+    if (!file.exists()) {
+        if (error) *error = "Fichier introuvable.";
+        return false;
+    }
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = QString("Ouverture impossible: %1").arg(file.errorString());
+        return false;
+    }
+    QByteArray raw = file.readAll();
+    file.close();
+
+    int occurrences = 0;
+    int uniqueIndex = -1;
+    int from = 0;
+    while (from <= raw.size() - findBytes.size()) {
+        const int index = raw.indexOf(findBytes, from);
+        if (index < 0) {
+            break;
+        }
+        occurrences += 1;
+        uniqueIndex = index;
+        from = index + 1;
+    }
+    if (occurrencesFound) *occurrencesFound = occurrences;
+
+    if (occurrences == 0) {
+        if (error) *error = "Séquence introuvable.";
+        return false;
+    }
+    if (occurrences >= 2) {
+        if (error) {
+            *error = QString("%1 occurrences trouvées, séquence pas assez spécifique -- élargis le contexte autour de la valeur à changer.")
+                .arg(occurrences);
+        }
+        return false;
+    }
+
+    raw.replace(uniqueIndex, findBytes.size(), replaceBytes);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (error) *error = QString("Réécriture impossible: %1").arg(file.errorString());
+        return false;
+    }
+    const qint64 written = file.write(raw);
+    if (written != raw.size()) {
+        if (error) *error = QString("Écriture incomplète: %1/%2 octets.").arg(written).arg(raw.size());
+        return false;
+    }
+    if (!file.flush()) {
+        if (error) *error = QString("Flush impossible: %1").arg(file.errorString());
+        return false;
+    }
+    file.close();
     return true;
 }
 

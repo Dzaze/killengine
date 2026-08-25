@@ -23,6 +23,7 @@
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
 #include "process/export_resolver.h"
+#include "process/file_watch.h"
 #include "process/package_storage.h"
 #include "process/process_enumerator.h"
 #include "process/process_handle.h"
@@ -2015,6 +2016,176 @@ QVariantMap ApplicationController::readProcessSaveFileText(const QString& path, 
     result["success"] = true;
     result["text"] = text;
     result["truncated"] = truncated;
+    result["error"] = "";
+    return result;
+}
+
+namespace {
+// Meme garde-fou que readProcessSaveFileText ci-dessus -- duplique plutot que
+// factorise pour ne pas toucher a une fonction qu'une autre session edite en
+// parallele (PHASE 93, chantier "surveillance fichier").
+bool isPathUnderPackagesRoot(const QString& path) {
+    const QString normalized = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()).toLower();
+    const QString allowedRoot = QDir::toNativeSeparators(
+        QDir(qEnvironmentVariable("LOCALAPPDATA")).filePath("Packages")).toLower();
+    return !allowedRoot.isEmpty() && normalized.startsWith(allowedRoot);
+}
+} // namespace
+
+QVariantMap ApplicationController::watchSaveFileForChanges(const QString& path, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["path"] = path;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (!isPathUnderPackagesRoot(path)) {
+        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
+        return result;
+    }
+    if (m_saveFileWatchInProgress) {
+        result["error"] = "Une surveillance de fichier est déjà en cours.";
+        return result;
+    }
+
+    const int timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 60000);
+
+    m_saveFileWatchInProgress = true;
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+    m_activeSaveFileWatchCancellation = cancellation;
+
+    killcore::FileWatchOutcome outcome;
+    QString error;
+    const bool started = killcore::watchFileForChanges(path, timeoutMs, cancellation.get(), &outcome, &error);
+
+    m_saveFileWatchInProgress = false;
+    m_activeSaveFileWatchCancellation.reset();
+
+    if (!started) {
+        result["error"] = error.isEmpty() ? "Surveillance du fichier échouée." : error;
+        return result;
+    }
+
+    result["success"] = true;
+    result["changed"] = outcome.changed;
+    result["changeType"] = outcome.changeType;
+    result["cancelled"] = outcome.cancelled;
+    result["error"] = outcome.changed
+        ? ""
+        : (outcome.cancelled ? "Surveillance annulée." : "Aucun changement détecté avant le timeout.");
+    return result;
+}
+
+QVariantMap ApplicationController::startSaveFileWatchAsync(const QString& path, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["started"] = false;
+    result["path"] = path;
+
+    if (m_saveFileWatchInProgress) {
+        result["error"] = "Une surveillance de fichier est déjà en cours.";
+        return result;
+    }
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (!isPathUnderPackagesRoot(path)) {
+        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
+        return result;
+    }
+
+    const int timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 60000);
+    const int requestId = m_nextDebugRequestId++;
+    const QString requestedPath = path;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_saveFileWatchInProgress = true;
+    m_activeSaveFileWatchCancellation = cancellation;
+
+    KE_LOG_INFO() << "startSaveFileWatchAsync(path=" << requestedPath.toStdString()
+                  << ", timeoutMs=" << timeoutMs
+                  << ", requestId=" << requestId << ")";
+
+    std::thread([self, requestId, requestedPath, timeoutMs, cancellation]() {
+        killcore::FileWatchOutcome outcome;
+        QString error;
+        const bool started = killcore::watchFileForChanges(requestedPath, timeoutMs, cancellation.get(), &outcome, &error);
+
+        if (!self) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(self.data(), [self, requestId, requestedPath, started, outcome, error]() {
+            if (!self) {
+                return;
+            }
+
+            QVariantMap finished;
+            finished["requestId"] = requestId;
+            finished["kind"] = "save_file_watch";
+            finished["success"] = started;
+            finished["path"] = requestedPath;
+            finished["changed"] = outcome.changed;
+            finished["changeType"] = outcome.changeType;
+            finished["cancelled"] = outcome.cancelled;
+            finished["error"] = !started
+                ? (error.isEmpty() ? "Surveillance du fichier échouée." : error)
+                : (outcome.changed
+                       ? ""
+                       : (outcome.cancelled ? "Surveillance annulée." : "Aucun changement détecté avant le timeout."));
+
+            self->m_saveFileWatchInProgress = false;
+            self->m_activeSaveFileWatchCancellation.reset();
+            emit self->saveFileWatchFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::cancelSaveFileWatch() {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_saveFileWatchInProgress || !m_activeSaveFileWatchCancellation) {
+        result["error"] = "Aucune surveillance de fichier active à annuler.";
+        return result;
+    }
+
+    m_activeSaveFileWatchCancellation->cancel();
+    result["success"] = true;
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::patchProcessSaveFileBytes(const QString& path, const QString& findHex, const QString& replaceHex) {
+    QVariantMap result;
+    result["success"] = false;
+    result["path"] = path;
+    result["occurrencesFound"] = 0;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    QString error;
+    int occurrencesFound = 0;
+    if (!killcore::patchPackageSaveFileBytes(path, findHex, replaceHex, &error, &occurrencesFound)) {
+        result["occurrencesFound"] = occurrencesFound;
+        result["error"] = error.isEmpty() ? "Patch du fichier échoué." : error;
+        return result;
+    }
+
+    result["success"] = true;
+    result["occurrencesFound"] = 1;
     result["error"] = "";
     return result;
 }
@@ -12759,6 +12930,26 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                 ? "Fichier lu (tronqué à la taille maximale). Cherche le champ correspondant à la valeur affichée dans le texte."
                 : "Fichier lu en entier. Cherche le champ correspondant à la valeur affichée dans le texte.";
         }
+    } else if (tool == "patch_file_bytes") {
+        const QString path = args.value("path").toString();
+        const QString findHex = args.value("findHex").toString();
+        const QString replaceHex = args.value("replaceHex").toString();
+        actionResult = patchProcessSaveFileBytes(path, findHex, replaceHex);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "save_file_bytes_patched";
+            result["message"] = "Patch fichier appliqué : une occurrence unique remplacée, taille du fichier inchangée.";
+        }
+    } else if (tool == "watch_save_file") {
+        const QString path = args.value("path").toString();
+        QVariantMap watchOptions;
+        watchOptions["timeoutMs"] = args.value("timeoutMs", 5000);
+        actionResult = watchSaveFileForChanges(path, watchOptions);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "save_file_watch_finished";
+            result["message"] = actionResult.value("changed").toBool()
+                ? QString("Le fichier a changé (%1) pendant la fenêtre d'observation.").arg(actionResult.value("changeType").toString())
+                : "Aucun changement détecté pendant la fenêtre d'observation.";
+        }
     } else {
         result["actionStatus"] = "unsupported_tool";
         result["actionError"] = QString("Outil Smart Search non supporté: %1").arg(tool);
@@ -14259,8 +14450,22 @@ QVariantMap ApplicationController::callClrInstanceMethod(const QString& objectAd
     // 3) Construit le shellcode fixe et l'injecte via la primitive deja
     // existante et deja testee killcore::injectShellcode (ne reinvente pas
     // CreateRemoteThread/VirtualAllocEx).
+    // m_handle est ouvert ReadOnly par attachProcess : l'injection exige
+    // PROCESS_VM_OPERATION/VM_WRITE (VirtualAllocEx), d'ou un handle dedie
+    // AllAccess -- meme patron que startInProcessExecuteWatch. Prouve en
+    // conditions reelles le 25/08/2026 : VirtualAllocEx renvoyait
+    // systematiquement error=5 sur m_handle ReadOnly, jamais visible des
+    // tests .NET (NativeSetterInvoker ouvre son propre handle hors KillEngine).
     const QByteArray shellcode = buildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress, paramIsFloat);
-    const auto injected = killcore::injectShellcode(m_handle, shellcode);
+    killcore::ProcessHandle injectionHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::AllAccess);
+    if (!injectionHandle.isValid()) {
+        result["error"] = QStringLiteral("Impossible d'ouvrir le processus avec les droits necessaires a l'injection (PROCESS_VM_OPERATION/PROCESS_VM_WRITE).");
+        appendScanTelemetry(QStringLiteral("clr_inspector_call_instance_method"), {
+            {"success", false}, {"objectAddress", address}, {"methodName", resolvedMethodName}, {"error", result.value("error")},
+        });
+        return result;
+    }
+    const auto injected = killcore::injectShellcode(injectionHandle, shellcode);
     if (!injected.success) {
         result["error"] = injected.error;
         appendScanTelemetry(QStringLiteral("clr_inspector_call_instance_method"), {

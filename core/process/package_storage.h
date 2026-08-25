@@ -63,4 +63,11 @@ bool readPackageSaveFileText(
     bool* truncated,
     QString* error);
 
+bool patchPackageSaveFileBytes(
+    const QString& path,
+    const QString& findHex,
+    const QString& replaceHex,
+    QString* error,
+    int* occurrencesFound = nullptr);
+
 } // namespace killcore
