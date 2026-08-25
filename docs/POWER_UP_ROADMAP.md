@@ -258,18 +258,17 @@ EncryptedScanOptions {
 
 ## M. Cheat table avancée : dépendances entre entrées
 
-**État réel au 20/08/2026 :** absent — chaque feature/toggle Trainer est indépendante aujourd'hui (`core/profiles/profile_store.h`, apply/restore individuels). Aucune notion de graphe de dépendances entre entrées façon Cheat Engine (ex: "active Y automatiquement quand X est activé").
+**État réel au 25/08/2026 :** livré côté Trainer local (PHASE 103) : chaque `TrainerFeature` peut porter `dependsOn: number[]`, le formulaire de création de `TrainerView.vue` expose un sélecteur multiple de prérequis, les features affichent un badge "Dépend de", et `ui/src/stores/app.ts` applique/restaure les features selon un tri topologique borné. Un clic ON sur une feature active d'abord ses dépendances transitives ; Restore restaure les dépendants actifs avant la feature demandée ; Apply all/Restore all respectent le même ordre. Les cycles et dépendances introuvables sont refusés proprement avec un log Trainer. La suppression d'une feature nettoie les références mortes dans les autres entrées.
 
 **Problème :** Pour une cheat table complexe (ex: "God Mode" qui doit activer Infinite HP + Infinite Mana ensemble), l'utilisateur doit activer chaque toggle séparément à la main.
 
-**Ce qu'il faudrait ajouter :**
-1. Champ `dependsOn: QStringList` sur chaque feature Trainer (référence à d'autres features par nom).
-2. Résolution d'ordre d'application (tri topologique simple), refuser un cycle de dépendances proprement.
-3. UI : sélecteur de dépendances dans le formulaire de création de feature (`TrainerView.vue`), badge visuel sur les features qui ont des prérequis.
+**Ce qui reste possible plus tard :**
+1. Persistance backend/profil dédiée des dépendances entre targets, si le profil natif doit devenir une vraie cheat table complète au-delà du workspace/localStorage frontend.
+2. Edition des dépendances après création (aujourd'hui choisies à la création, puis visibles/exportées).
 
-**Effort :** Faible à moyen — surtout de la donnée + validation, pas de nouvelle primitive mémoire. **Impact :** Confort pour les cheat tables complexes à plusieurs toggles liés.
+**Impact :** Confort pour les cheat tables complexes à plusieurs toggles liés, sans nouvelle primitive mémoire.
 
-**Fichiers touchés (proposés) :** `core/profiles/profile_store.h/.cpp`, `apps/desktop/application_controller.cpp`, `ui/src/views/TrainerView.vue`.
+**Fichiers livrés :** `ui/src/stores/app.ts`, `ui/src/views/TrainerView.vue`.
 
 ---
 

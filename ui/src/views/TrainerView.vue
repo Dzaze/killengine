@@ -9,6 +9,7 @@ const address = ref('')
 const valueType = ref('Int32')
 const value = ref('')
 const patchBytes = ref('')
+const dependsOn = ref<number[]>([])
 const hotkeyDrafts = ref<Record<number, string>>({})
 const actionFilter = ref('all')
 const statusFilter = ref('all')
@@ -69,13 +70,22 @@ function createFeature() {
     valueType: valueType.value,
     value: value.value,
     patchBytes: patchBytes.value,
+    dependsOn: dependsOn.value.length > 0 ? [...dependsOn.value] : undefined,
   })
   if (created) {
     name.value = ''
     address.value = ''
     value.value = ''
     patchBytes.value = ''
+    dependsOn.value = []
   }
+}
+
+function dependencyNames(feature: TrainerFeature): string {
+  if (!feature.dependsOn?.length) return ''
+  return feature.dependsOn
+    .map((id) => store.trainerFeatures.find((item) => item.id === id)?.name ?? `#${id}`)
+    .join(', ')
 }
 
 function createFromCheckpoint(item: Record<string, unknown>) {
@@ -235,6 +245,12 @@ async function copyTrainerExport() {
         <button class="btn" @click="fillFromSelection()">Depuis sélection</button>
         <button class="btn primary" :disabled="!address.trim()" @click="createFeature()">Créer</button>
       </div>
+      <div v-if="store.trainerFeatures.length > 0" class="depends-on-row">
+        <span class="hint">Dépend de (optionnel, ex: "God Mode" dépend de "Infinite HP" + "Infinite Mana") :</span>
+        <select v-model="dependsOn" class="input depends-on-select" multiple>
+          <option v-for="feature in store.trainerFeatures" :key="feature.id" :value="feature.id">{{ feature.name }}</option>
+        </select>
+      </div>
     </section>
 
     <section v-if="checkpoints.length > 0" class="panel">
@@ -302,6 +318,7 @@ async function copyTrainerExport() {
           </span>
           <span>{{ feature.action }} · {{ feature.valueType }} {{ feature.value || feature.patchBytes }}</span>
           <span v-if="feature.hotkey" class="hotkey-chip">{{ feature.hotkey }}</span>
+          <span v-if="dependencyNames(feature)" class="depends-on-chip" :title="dependencyNames(feature)">Dépend de : {{ dependencyNames(feature) }}</span>
           <span class="status" :class="statusClass(feature.status)">{{ feature.status }}</span>
           <span v-if="featureSignatureQuality(feature)" class="quality-chip" :class="featureQualityClass(feature)">
             AOB {{ featureSignatureQuality(feature)?.level }} · {{ featureSignatureQuality(feature)?.score }}/100
@@ -568,6 +585,30 @@ p,
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
   padding: 3px 8px;
+}
+
+.depends-on-chip {
+  overflow: hidden;
+  max-width: 320px;
+  border: 1px solid rgba(224, 175, 104, 0.35);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 3px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.depends-on-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.depends-on-select {
+  min-height: 60px;
 }
 
 .history {

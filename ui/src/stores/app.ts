@@ -167,6 +167,8 @@ export interface TrainerFeature {
   signatureMatches?: number
   hotkey?: string
   hotkeyId?: number
+  /** Ids d'autres TrainerFeature qui doivent être actives avant celle-ci (ex: "God Mode" dépend de "Infinite HP" + "Infinite Mana"). */
+  dependsOn?: number[]
   enabled: boolean
   status: 'idle' | 'active' | 'error' | 'ambiguous'
   lastError: string
@@ -1720,6 +1722,7 @@ let nextWatchedChainId = 1
       signatureMatches: input.signatureMatches,
       hotkey: input.hotkey,
       hotkeyId: input.hotkeyId,
+      dependsOn: Array.isArray(input.dependsOn) ? input.dependsOn.filter((id) => Number.isFinite(id)) : undefined,
       enabled: false,
       status: 'idle',
       lastError: '',
@@ -1854,26 +1857,111 @@ let nextWatchedChainId = 1
     return { address: String(scan.matches[0].address).replace(/^0x/i, '').toUpperCase(), error: '' }
   }
 
-  async function applyTrainerFeature(id: number) {
+  /**
+   * Tri topologique (Kahn) des features Trainer d'après `dependsOn`, restreint
+   * à la clôture (targetIds + toutes leurs dépendances transitives, même
+   * hors du set demandé). order[0] n'a aucune dépendance non résolue : à
+   * appliquer avant les suivants. Pour une restauration, itérer `order` à
+   * l'envers (défaire les dépendants avant leurs dépendances).
+   * Fonction pure (features/targetIds en paramètres, aucun état du store) --
+   * vérifiée par un script Node autonome reproduisant cet algorithme
+   * (chaîne linéaire, dépendance en diamant, cycle, référence manquante),
+   * ui/ n'ayant pas de runner de tests JS/TS configuré à ce jour.
+   */
+  function resolveTrainerFeatureOrder(
+    features: TrainerFeature[],
+    targetIds: number[],
+  ): { success: boolean, order: number[], error?: string } {
+    const byId = new Map<number, TrainerFeature>()
+    for (const feature of features) byId.set(feature.id, feature)
+
+    const closure = new Set<number>()
+    const stack = [...targetIds]
+    while (stack.length > 0) {
+      const id = stack.pop() as number
+      if (closure.has(id)) continue
+      const feature = byId.get(id)
+      if (!feature) continue
+      closure.add(id)
+      for (const depId of feature.dependsOn ?? []) {
+        if (!byId.has(depId)) {
+          return { success: false, order: [], error: `"${feature.name}" dépend d'une feature introuvable (id ${depId}).` }
+        }
+        if (!closure.has(depId)) stack.push(depId)
+      }
+    }
+
+    const inDegree = new Map<number, number>()
+    const dependents = new Map<number, number[]>()
+    for (const id of closure) {
+      inDegree.set(id, 0)
+      dependents.set(id, [])
+    }
+    for (const id of closure) {
+      const feature = byId.get(id) as TrainerFeature
+      for (const depId of feature.dependsOn ?? []) {
+        inDegree.set(id, (inDegree.get(id) ?? 0) + 1)
+        dependents.get(depId)?.push(id)
+      }
+    }
+
+    const queue: number[] = []
+    for (const id of closure) if (inDegree.get(id) === 0) queue.push(id)
+    const order: number[] = []
+    while (queue.length > 0) {
+      const id = queue.shift() as number
+      order.push(id)
+      for (const dependentId of dependents.get(id) ?? []) {
+        const remaining = (inDegree.get(dependentId) ?? 0) - 1
+        inDegree.set(dependentId, remaining)
+        if (remaining === 0) queue.push(dependentId)
+      }
+    }
+
+    if (order.length !== closure.size) {
+      const cyclic = [...closure].filter((id) => (inDegree.get(id) ?? 0) > 0)
+      const names = cyclic.map((id) => byId.get(id)?.name ?? `#${id}`).join(', ')
+      return { success: false, order: [], error: `Cycle de dépendances détecté entre : ${names}.` }
+    }
+
+    return { success: true, order }
+  }
+
+  function collectTrainerFeatureDependents(targetIds: number[]): number[] {
+    const targetSet = new Set(targetIds)
+    const stack = [...targetIds]
+    while (stack.length > 0) {
+      const dependencyId = stack.pop() as number
+      for (const feature of trainerFeatures.value) {
+        if (targetSet.has(feature.id)) continue
+        if (feature.dependsOn?.includes(dependencyId)) {
+          targetSet.add(feature.id)
+          stack.push(feature.id)
+        }
+      }
+    }
+    return [...targetSet]
+  }
+
+  async function doApplyTrainerFeature(id: number): Promise<boolean> {
     const feature = trainerFeatures.value.find((item) => item.id === id)
-    if (!feature || trainerBusy.value) return
+    if (!feature) return false
+    if (feature.enabled) return true
     const blocked = trainerFeaturePatchBlockReason(feature)
     if (blocked) {
       feature.status = 'error'
       feature.lastError = blocked
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'apply_blocked', 'warning', blocked)
-      saveTrainerFeatures()
       addActionLog('trainer', `Feature bloquée: ${feature.name}`, blocked, 'warning')
-      return
+      return false
     }
     const trainerRisk = feature.action === 'patch' ? 'patch' : (feature.action === 'write' && kernelMemoryModeActive.value ? 'injection' : 'write')
     const riskDetail = feature.locatorKind === 'clr_field'
       ? `${feature.action} ${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue} -> ${feature.value}`
       : `${feature.action} 0x${feature.address} ${feature.valueType} ${feature.value || feature.patchBytes || ''}${feature.action === 'write' && kernelMemoryModeActive.value ? ' via driver kernel' : ''}`
-    if (!await confirmRiskAction(trainerRisk, `Activer feature Trainer: ${feature.name}`, riskDetail)) return
+    if (!await confirmRiskAction(trainerRisk, `Activer feature Trainer: ${feature.name}`, riskDetail)) return false
 
-    trainerBusy.value = true
     try {
       const controller = backend.getController()
       let ok = false
@@ -1936,12 +2024,34 @@ let nextWatchedChainId = 1
         : (error || `0x${feature.address}`)
       addTrainerFeatureHistory(feature, 'apply', ok ? 'success' : 'error', detail)
       addActionLog('trainer', ok ? `Feature activée: ${feature.name}` : `Feature échouée: ${feature.name}`, detail, ok ? 'success' : 'error')
+      return ok
     } catch (e) {
       feature.status = 'error'
       feature.lastError = String(e)
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'apply', 'error', String(e))
       addActionLog('trainer', `Feature échouée: ${feature.name}`, String(e), 'error')
+      return false
+    }
+  }
+
+  async function applyTrainerFeature(id: number) {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    if (!feature || trainerBusy.value) return
+    const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, [id])
+    if (!resolved.success) {
+      addActionLog('trainer', 'Activation interrompue', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
+      return
+    }
+
+    trainerBusy.value = true
+    try {
+      for (const orderedId of resolved.order) {
+        const orderedFeature = trainerFeatures.value.find((item) => item.id === orderedId)
+        if (!orderedFeature || orderedFeature.enabled) continue
+        const ok = await doApplyTrainerFeature(orderedId)
+        if (!ok) break
+      }
     } finally {
       trainerBusy.value = false
       saveTrainerFeatures()
@@ -1949,12 +2059,12 @@ let nextWatchedChainId = 1
     }
   }
 
-  async function restoreTrainerFeature(id: number) {
+  async function doRestoreTrainerFeature(id: number): Promise<boolean> {
     const feature = trainerFeatures.value.find((item) => item.id === id)
-    if (!feature || trainerBusy.value) return
-    if (!await confirmRiskAction(feature.action === 'patch' ? 'patch' : 'write', `Restaurer feature Trainer: ${feature.name}`, `${feature.action} 0x${feature.address}.`)) return
+    if (!feature) return false
+    if (!feature.enabled) return true
+    if (!await confirmRiskAction(feature.action === 'patch' ? 'patch' : 'write', `Restaurer feature Trainer: ${feature.name}`, `${feature.action} 0x${feature.address}.`)) return false
 
-    trainerBusy.value = true
     try {
       const controller = backend.getController()
       let ok = true
@@ -1985,12 +2095,37 @@ let nextWatchedChainId = 1
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'restore', ok ? 'success' : 'warning', error || `0x${feature.address}`)
       addActionLog('trainer', ok ? `Feature restaurée: ${feature.name}` : `Restauration échouée: ${feature.name}`, error || `0x${feature.address}`, ok ? 'success' : 'warning')
+      return ok
     } catch (e) {
       feature.status = 'error'
       feature.lastError = String(e)
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'restore', 'error', String(e))
       addActionLog('trainer', `Restauration échouée: ${feature.name}`, String(e), 'error')
+      return false
+    }
+  }
+
+  async function restoreTrainerFeature(id: number) {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    if (!feature || trainerBusy.value) return
+    const restoreIds = collectTrainerFeatureDependents([id]).filter((featureId) => trainerFeatures.value.some((item) => item.id === featureId && item.enabled))
+    const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, restoreIds)
+    if (!resolved.success) {
+      addActionLog('trainer', 'Restauration interrompue', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
+      return
+    }
+    const restoreSet = new Set(restoreIds)
+
+    trainerBusy.value = true
+    try {
+      for (const orderedId of [...resolved.order].reverse()) {
+        if (!restoreSet.has(orderedId)) continue
+        const orderedFeature = trainerFeatures.value.find((item) => item.id === orderedId)
+        if (!orderedFeature || !orderedFeature.enabled) continue
+        const ok = await doRestoreTrainerFeature(orderedId)
+        if (!ok) break
+      }
     } finally {
       trainerBusy.value = false
       saveTrainerFeatures()
@@ -2088,19 +2223,62 @@ let nextWatchedChainId = 1
   }
 
   async function applyAllTrainerFeatures() {
-    for (const feature of trainerFeatures.value) {
-      if (!feature.enabled) await applyTrainerFeature(feature.id)
+    const targetIds = trainerFeatures.value.filter((feature) => !feature.enabled).map((feature) => feature.id)
+    if (targetIds.length === 0) return
+    const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, targetIds)
+    if (!resolved.success) {
+      addActionLog('trainer', 'Apply all interrompu', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
+      return
+    }
+    for (const id of resolved.order) {
+      const feature = trainerFeatures.value.find((item) => item.id === id)
+      if (feature && !feature.enabled) {
+        trainerBusy.value = true
+        try {
+          const ok = await doApplyTrainerFeature(id)
+          if (!ok) break
+        } finally {
+          trainerBusy.value = false
+          saveTrainerFeatures()
+          void refreshTrainerOverlay()
+        }
+      }
     }
   }
 
   async function restoreAllTrainerFeatures() {
-    for (const feature of trainerFeatures.value) {
-      if (feature.enabled) await restoreTrainerFeature(feature.id)
+    const targetIds = trainerFeatures.value.filter((feature) => feature.enabled).map((feature) => feature.id)
+    if (targetIds.length === 0) return
+    const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, targetIds)
+    if (!resolved.success) {
+      addActionLog('trainer', 'Restore all interrompu', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
+      return
+    }
+    for (const id of [...resolved.order].reverse()) {
+      const feature = trainerFeatures.value.find((item) => item.id === id)
+      if (feature && feature.enabled) {
+        trainerBusy.value = true
+        try {
+          const ok = await doRestoreTrainerFeature(id)
+          if (!ok) break
+        } finally {
+          trainerBusy.value = false
+          saveTrainerFeatures()
+          void refreshTrainerOverlay()
+        }
+      }
     }
   }
 
   function deleteTrainerFeature(id: number) {
     trainerFeatures.value = trainerFeatures.value.filter((item) => item.id !== id)
+    for (const feature of trainerFeatures.value) {
+      if (feature.dependsOn?.includes(id)) {
+        feature.dependsOn = feature.dependsOn.filter((dependencyId) => dependencyId !== id)
+        if (feature.dependsOn.length === 0) feature.dependsOn = undefined
+        feature.updatedAt = new Date().toISOString()
+      }
+    }
     saveTrainerFeatures()
     void refreshTrainerOverlay()
   }
@@ -2149,6 +2327,7 @@ let nextWatchedChainId = 1
           : '',
         `- Type: ${feature.valueType}`,
         `- Valeur/patch: ${feature.value || feature.patchBytes || '-'}`,
+        `- Dépend de: ${feature.dependsOn?.length ? feature.dependsOn.map((id) => trainerFeatures.value.find((item) => item.id === id)?.name ?? `#${id}`).join(', ') : '-'}`,
         `- Hotkey: ${feature.hotkey || '-'}`,
         `- AOB qualite: ${feature.signatureLevel || '-'}${feature.signatureScore !== undefined ? ` (${feature.signatureScore}/100)` : ''}`,
         `- Derniere erreur: ${feature.lastError || '-'}`,
