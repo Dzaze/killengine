@@ -78,6 +78,7 @@ _À remplir seulement par le rédacteur désigné après relecture des deux cont
 | 2026-08-20 | Cycle de vie des breakpoints matériels : arbitre DR0-DR7, désarmement in-process déterministe, `scanMemoryWindow` dédié | ✅ tranché — protections livrées et testées, régression injection root-causée (EDR Microsoft Defender for Endpoint, pas un bug KillEngine) et mitigée |
 | 2026-08-20 | Écriture kernel-mode (driver `KillEngineKernel.sys`) testée sur l'XP Solitaire — même conclusion que l'écriture usermode | ✅ tranché (hypothèse "détection d'écriture" définitivement éliminée) — 🟡 XP toujours non contrôlable, nouvelle piste identifiée (remonter à la fonction de calcul) |
 | 2026-08-20 | **XP Solitaire enfin contrôlable** — remontée du désassemblage depuis l'animation d'affichage jusqu'au vrai champ cible (`[RSI+0x908]`), écriture kernel confirmée persistante | ✅ **résolu** — champ identifié, écriture validée deux fois (valeur tenue, gain suivant additionné par-dessus) |
+| 2026-08-25 | Salon inter-agents — prochains chantiers rentables après UWP/LocalSettings/file watch/patch bytes/Lua v2 | 🟡 contributions ouvertes (Claude fait, Codex en attente) |
 
 ---
 
@@ -339,6 +340,68 @@ C'est une **interpolation d'animation de compteur** classique (`affiché = actue
 **Statut :** ✅ **résolu, confirmé deux fois** (gain initial + après un reset de round par perte). XP Solitaire contrôlable de façon fiable via `[RSI+0x908]` (relatif à la base de structure, elle-même retrouvable par scan exact multi-étapes sur la valeur affichée comme d'habitude).
 
 **Lié à :** toutes les entrées précédentes de cette investigation (19-20/08/2026), `docs/PHASE_TRACKER.md` PHASE 39 (driver kernel), `core/kernel/kernel_driver_bridge.*`, `apps/desktop/application_controller.cpp` (`findWhatWrites`, `suggestCodePatches`, `getProcessModules`, `readMemoryKernel`/`writeMemoryKernel`).
+
+---
+
+### [2026-08-25] Salon inter-agents — prochains chantiers rentables après UWP hors mémoire / LocalSettings / file watch / patch bytes / Lua scripting v2
+
+**Cadre :** le propriétaire demande une réflexion croisée Codex/Claude pour identifier les prochains chantiers KillEngine les plus rentables, maintenant que PHASE 90-97 (découverte/lecture/surveillance/patch de fichiers de sauvegarde UWP, inspection `LocalSettings`, Lua scripting v2 async+JSON+persistance profil) sont livrées. Temps prévu : session courte (~3 min de recherche/rédaction). Pas de code dans cette session, uniquement de la réflexion consignée.
+
+**Statut :** 🟡 contributions ouvertes
+**Rédacteur synthèse :** à désigner
+
+#### Lecture commune
+- `docs/PHASE_TRACKER.md` : PHASE 90 à 97 (UWP save files, LocalSettings, file watch, patch bytes, Lua scripting v2).
+- `docs/POWER_UP_ROADMAP.md` : sections K (Lua), L, M, "Prochains gros chantiers", candidat #8 (CLR).
+- `docs/KILLENGINE_TOOLS_AND_CAPABILITIES.md` : inventaire capacités actuel (Investigations hors mémoire/UWP, Trainer, IA et Automation, CLR, Diagnostic/Build/Packaging).
+
+#### Contribution Codex
+_Append-only. Ne pas modifier par Claude._
+
+#### Contribution Claude
+
+**1. Cheat table avancée : dépendances entre entrées (`docs/POWER_UP_ROADMAP.md` section M)**
+- **Pourquoi maintenant :** seule section du roadmap encore marquée "absent" avec un plan déjà écrit (champ `dependsOn`, tri topologique, UI `TrainerView.vue`) — aucune investigation supplémentaire nécessaire avant de coder, contrairement à la plupart des autres candidats qui demandent d'abord une vérification terrain.
+- **Valeur produit :** rapproche le Trainer d'une vraie cheat table façon Cheat Engine ("God Mode" = plusieurs toggles liés) — actuellement chaque feature/toggle est isolée, l'utilisateur doit tout activer à la main.
+- **Risque technique :** faible. Pas de nouvelle primitive mémoire, juste de la donnée (`QStringList dependsOn`) + validation (détection de cycle) + UI. Le seul piège prévisible est l'ordre d'application/restauration (tri topologique) s'il existe des dépendances croisées avec les groupes déjà en place (features liées à un même profil).
+- **Fichiers probables :** `core/profiles/profile_store.h/.cpp` (champ + sérialisation, même patron que `ProfileLuaScript`/`ProfileAutoAsmScript` ajoutés cette session), `apps/desktop/application_controller.cpp` (résolution d'ordre avant apply/restore), `ui/src/views/TrainerView.vue`.
+- **Validation attendue :** test unitaire de tri topologique (cas simple, cas cycle refusé proprement), test de round-trip profil (comme `ProfileStoreRoundTripsLuaScripts`/`ProfileStoreRoundTripsAutoAsmScripts` déjà en place), puis vérification manuelle sur `KillEngineTestTarget.exe` avec 2-3 features chaînées.
+
+**2. Assistant IA : généraliser la méthode "champ affiché vs champ source" pour compteurs animés**
+- **Pourquoi maintenant :** la percée XP Solitaire du 20/08/2026 (`docs/STRATEGY_ROOM.md`, entrée "XP Solitaire enfin contrôlable") a produit une méthode reproductible et documentée (`méthode reproductible retenue`, 4 étapes) mais elle vit uniquement comme connaissance de session — rien dans `ai/tool_registry.cpp`/`ai_engine.cpp` ne sait aujourd'hui suggérer "ce champ est peut-être un résultat d'interpolation, cherche la source en amont" quand une écriture ne tient jamais malgré un scan stable. Ce pattern (affiché = interpolation entre actuel/cible) est très courant dans les jeux casual/mobile, pas spécifique à Solitaire.
+- **Valeur produit :** transforme une découverte ponctuelle coûteuse (plusieurs sessions de désassemblage manuel) en capacité produit réutilisable — directement dans la ligne du chaînage déjà construit (`autoChainFindWhatWritesResult`, H2/`writeDidNotHold`) qui détecte déjà "l'écriture ne tient pas" mais s'arrête à la constatation.
+- **Risque technique :** moyen. La détection "ce RIP fait une interpolation flottante" nécessite de reconnaître un motif d'instructions (mulss/addss/cvttss2si autour d'un `mov` d'écriture) dans le désassemblage déjà produit par `disassembleBackward`/`suggestCodePatches` — un vrai classifieur de motif, pas juste une heuristique de chaînage comme les H1-H6 de PHASE 26. Risque de faux positifs sur des motifs flottants qui ne sont pas des interpolations affichage/cible.
+- **Fichiers probables :** `core/patch/instruction_patch_suggester.*` (nouveau classifieur de motif), `apps/desktop/application_controller.cpp` (`disassembleBackward` déjà existant, à enrichir), `ai/tool_registry.cpp`/`ai_engine.cpp` (nouvelle suggestion), `ui/src/views/ExpertView.vue` (surfaces le "champ source probable" détecté).
+- **Validation attendue :** cible de test dédiée avec un vrai compteur animé (`KillEngineTestTarget.exe` étendu, comme `KILLENGINE_TEST_TARGET_STRESS_REWRITE` pour PHASE freeze), test unitaire sur le classifieur de motif avec des séquences d'instructions synthétiques (positif/négatif), puis re-test si possible sur Solitaire pour confirmer que la méthode aurait été suggérée automatiquement.
+
+**3. Durcissement coexistence agents : détection des flips CRLF→LF silencieux**
+- **Pourquoi maintenant :** incident réel rencontré et corrigé dans ma propre session de commit précédente (`docs/PHASE_TRACKER.md` retrouvé à 100% LF alors que le commit Codex `d4a9560` juste avant le montre à 100% CRLF) — un outil d'édition a réécrit tout le fichier en LF sans le signaler, et le script de vérification actuel d'AGENTS.md (`Select-String -Pattern 'Ã[\x80-\xBF]|â€'`) ne détecte QUE le mojibake de caractères, jamais un changement d'EOL pur. `scripts/killengine.lua` et `ui/src/views/ScriptingView.vue` se sont révélés être en LF **depuis leur création** (pas une régression, mais jamais détecté non plus faute d'outil).
+- **Valeur produit :** aucune valeur utilisateur final directe, mais évite un incident réel de coexistence documenté trois fois dans `AGENTS.md` (`ExpertView.vue`, `app.ts`, `application_controller.cpp`) pour le mojibake — le même type d'incident silencieux existe pour les EOL et n'a pas encore d'outil de détection.
+- **Risque technique :** très faible. Un script de vérification (PowerShell ou Node, cf. la méthode fiable utilisée cette session — lecture d'octets bruts, `grep`/`Select-String` classiques se sont révélés non fiables sur ce point à cause de la traduction texte de Git Bash/MSYS) qui compare le ratio CRLF/LF par fichier et alerte si un fichier normalement CRLF (C++/TS/Vue/MD selon la table AGENTS.md) contient ne serait-ce qu'une ligne LF pure. Aucun changement de code produit.
+- **Fichiers probables :** un nouveau `scripts/check-line-endings.ps1` (ou extension du script de vérification encodage déjà documenté dans `AGENTS.md`), mise à jour de la section coexistence #7 d'`AGENTS.md` pour documenter la limite du script actuel et le nouveau script complémentaire.
+- **Validation attendue :** lancer le script sur tout le dépôt une fois écrit, corriger `scripts/killengine.lua`/`ui/src/views/ScriptingView.vue` séparément si le propriétaire souhaite les uniformiser à CRLF (actuellement non fait volontairement pour ne pas polluer un diff de chantier non lié — voir commit `bddb6c6`), puis vérifier que le script détecte bien une régression injectée volontairement en test.
+
+**4. Passe de régression manuelle V1 avant release candidate**
+- **Pourquoi maintenant :** notée comme "next focus" tout en haut de `docs/PHASE_TRACKER.md` depuis la clôture de Phase 12/13, jamais exécutée depuis malgré l'empilement de PHASE 14 à 97 (scripting, CLR, kernel driver, UWP, breakpoints matériels...). Le fossé entre "fonctionnalités livrées et testées unitairement" et "expérience bout-en-bout validée par un humain sur le produit fini" grandit à chaque nouvelle phase sans jamais être re-vérifié globalement.
+- **Valeur produit :** confiance de livraison, pas une fonctionnalité — mais c'est le type de dette qui devient exponentiellement plus coûteuse à rattraper plus elle attend (`docs/V1_REGRESSION_CHECKLIST.md` existe déjà, prêt à l'emploi).
+- **Risque technique :** aucun côté code — c'est un risque *produit* si on ne le fait jamais (régression découverte par l'utilisateur final plutôt qu'en interne), pas un risque d'implémentation.
+- **Fichiers probables :** aucun changement de code a priori ; `docs/V1_REGRESSION_CHECKLIST.md` comme guide, corrections ponctuelles selon ce qui est trouvé.
+- **Validation attendue :** la passe elle-même EST la validation — nécessite un humain (ou un agent avec accès UI réel) suivant la checklist sur le produit packagé, pas juste `killengine_unit_tests.exe`.
+
+**5. Lua embarqué in-process (reste explicite de la section K, PHASE 97)**
+- **Pourquoi maintenant :** seul point encore ouvert de mon propre chantier qui vient de fermer les 3 autres restes (async/JSON/persistance) — mentionné explicitement comme limite documentée dans `docs/POWER_UP_ROADMAP.md` section K et `docs/PHASE_TRACKER.md` PHASE 97.
+- **Valeur produit :** supprime le coût process+PowerShell par appel `ke.call`/`ke.call_table` (actuellement un shell-out vers `automation-pipe-call.ps1` à chaque appel Lua→KillEngine) — pertinent seulement si un utilisateur écrit des scripts avec beaucoup d'appels serrés dans une boucle (perf), sinon confort marginal.
+- **Risque technique :** élevé — c'est le seul candidat des 5 qui change une décision d'architecture (lier `lua5.4`/LuaJIT statiquement, bindings C directs vers `ApplicationController`) plutôt que d'étendre un pattern déjà éprouvé. Effort largement supérieur aux 4 autres candidats pour un gain utilisateur incertain tant qu'aucun script réel n'a démontré une limite de performance avec l'approche externe actuelle.
+- **Fichiers probables :** nouveau module `core/scripting/lua_runtime.*`, `apps/desktop/CMakeLists.txt`/`core/CMakeLists.txt` (dépendance statique Lua), `apps/desktop/application_controller.cpp` (nouveau chemin d'exécution en parallèle de l'externe, pas un remplacement — l'externe reste utile pour isoler un script qui plante).
+- **Validation attendue :** benchmark comparatif (externe vs embarqué) sur un script avec N appels `ke.call` en boucle, pour objectiver le gain avant de justifier l'effort — actuellement zéro donnée pour trancher si ce chantier vaut son coût.
+
+**Top 2 recommandé (Claude) :** **#3 (durcissement CRLF/LF)** en premier — coût quasi nul, zéro risque, corrige une classe d'incident silencieux déjà matérialisée deux fois cette semaine (mojibake documenté trois fois dans `AGENTS.md`, EOL découvert cette session) et qui continuera de se reproduire sans détection tant qu'aucun outil ne la couvre. Puis **#1 (dépendances cheat table)** — seul chantier produit des 5 qui est immédiatement codable sans phase d'investigation préalable, scope borné, effort faible à moyen déjà estimé dans le roadmap. #2 (heuristique champ affiché/source) est la piste la plus stratégique à moyen terme (généralise une vraie percée plutôt que de la laisser dormir en connaissance de session) mais mérite une discussion de cadrage avant de coder, vu son risque de faux positifs — je la placerais en 3ᵉ si le propriétaire veut un chantier d'investigation après les deux premiers.
+
+#### Synthèse retenue
+_À remplir seulement par le rédacteur désigné après relecture des deux contributions._
+
+#### Décisions / questions propriétaire
+- ...
 
 ---
 
