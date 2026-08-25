@@ -24,6 +24,18 @@ Optional portable package gate:
 .\scripts\release-check.ps1 -Package
 ```
 
+Optional Lua examples check, best-effort (never fails the gate if `runtime\lua\` is absent on this machine):
+
+```powershell
+.\scripts\release-check.ps1 -IncludeLuaExamples
+```
+
+For a strict pipe-backed check of the Lua examples (needs `KillEngine.exe` already running with `KILLENGINE_AUTOMATION_PIPE=1`), run this separately — `-RequirePipe` is intentionally not wired into `release-check.ps1`:
+
+```powershell
+.\scripts\test-lua-examples.ps1 -RequirePipe
+```
+
 Expected result:
 
 - UI type-check passes.
@@ -37,6 +49,7 @@ Expected result:
 - Optional portable zip is produced under `dist/`.
 - Optional portable package contains only runtime executables and required Qt/WebEngine assets.
 - Optional portable package passes the embedded AI layout verifier.
+- Optional Lua examples check runs the bundled examples when `runtime\lua\` is present; warns and continues (does not fail the gate) when it is absent.
 - `dist\KillEngine-portable\KillEngine.exe` stays alive during the portable launch smoke test.
 
 ## KillEngineTestTarget Manual Pass
@@ -53,6 +66,8 @@ Expected result:
 10. Confirm the action log records scan, write, rollback, profile activation, and errors clearly.
 
 ## Trainer Dependencies (`dependsOn`) Manual Pass
+
+**Covered by automated test** (PHASE 115): `.\scripts\test-trainer-dependencies.ps1` runs the real `ui/src/stores/trainerDependencies.ts` logic (not a reimplementation) and asserts the Apply all order, the reversed Restore all order, a togglable action (`freeze_polling`, not just one-shot `write`), dead-reference cleanup on delete, and cycle/missing-reference rejection — steps 3, 5, 6 below. Run it before this manual pass to catch logic regressions cheaply; the manual pass still matters for what the script can't see: real UI wiring (clicks, confirmation dialogs) and profile/workspace persistence (step 4).
 
 1. On `KillEngineTestTarget.exe`, create 2-3 Trainer features and set one to depend on the other(s) via the "Dépend de" selector.
 2. Toggle ON the dependent feature; confirm prerequisites activate first, in order, in the Trainer action log.

@@ -493,6 +493,25 @@ Relecture faite des deux contributions et des deux réponses croisées avant ré
 
 ---
 
+### [2026-08-25] Cible synthétique "champ affiché vs champ source" — prérequis posé, heuristique toujours pas codée
+
+**Contexte :** le salon précédent (entrée juste au-dessus) a tranché que l'heuristique "champ affiché vs champ source" devait d'abord passer par une cible synthétique reproductible avant tout code Assistant/UI, pour ne pas graver l'anecdote XP Solitaire (20/08/2026) en règle générale sans corpus. Demande explicite du propriétaire (PHASE 118, un des 3 gros chantiers automatisables confiés en parallèle du chantier Lua de Codex) : construire cette cible et prouver le motif automatiquement, sans coder l'heuristique elle-même.
+
+**Ce qui a été fait :** `KillEngineTestTarget.exe` expose maintenant trois nouveaux globals (`g_counterSource`, `g_counterCurrent`, `g_counterDisplayed`) qui reproduisent fidèlement le mécanisme observé sur Solitaire : `g_counterDisplayed` est recalculé à CHAQUE tick (50ms) par interpolation de `g_counterCurrent` vers `g_counterSource` (pas à pas, 10/tick) — donc structurellement impossible à faire tenir par une écriture externe, alors que `g_counterSource` n'est réécrit par rien d'autre qu'une action explicite (bouton UI ou écriture de test) et tient indéfiniment. Adresses exposées dans le fichier marqueur existant (`%TEMP%\killengine_test_target_addresses.txt`, même patron que `g_health`) pour une lecture fiable par les tests, pas un scan par valeur.
+
+**Preuve automatisée :** `tests/integration/test_display_vs_source_target.cpp`, 3 tests (`killengine_integration_tests.exe --gtest_filter=DisplayVsSourceTargetTest.*`) :
+- `WriteToSourceHolds` : écrit sur `g_counterSource`, attend 4 ticks, relit — la valeur tient.
+- `WriteToDisplayedDoesNotHold` : écrit sur `g_counterDisplayed`, attend 3 ticks, relit — la valeur a été écrasée par le prochain recalcul (preuve inverse, symétrique).
+- `SourceChangePropagatesToDisplayedGradually` : écrit une nouvelle source, vérifie que displayed la rattrape progressivement (pas instantanément) puis complètement après assez de ticks — documente le mécanisme d'interpolation lui-même, pas juste le résultat final.
+
+**Ce qui n'est PAS fait, volontairement :** aucun classifieur/heuristique de détection automatique du motif (reconnaissance de séquences d'instructions `mulss`/`addss`/`cvttss2si` dans le désassemblage, suggestion Assistant "ce champ est peut-être dérivé"). Cette cible synthétique est la base de validation pour ce futur travail, pas le travail lui-même — un futur chantier pourra s'en servir comme fixture (positif : `g_counterDisplayed`, négatif : `g_counterSource`/`g_health`/`g_money`, tous déjà exposés) au lieu de re-solliciter Solitaire à chaque itération du classifieur.
+
+**Statut :** 🟡 prérequis rempli (cible + preuve automatisée), heuristique toujours en attente d'un chantier dédié.
+
+**Lié à :** `docs/PHASE_TRACKER.md` PHASE 116-118, `tests/memory_targets/test_target_main.cpp`, `tests/integration/test_display_vs_source_target.cpp`, entrée "XP Solitaire enfin contrôlable" (20/08/2026) pour le cas réel d'origine.
+
+---
+
 ## Archive
 
 *(vide pour l'instant — une entrée migre ici, sans être supprimée, une fois son sujet devenu obsolète au point de ne plus mériter de rester dans le sommaire actif ci-dessus — ex. un risque anticipé qui ne s'est jamais matérialisé et ne peut plus se produire)*

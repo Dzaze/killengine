@@ -11,7 +11,13 @@ const statusLabel = computed(() => {
   return 'prêt'
 })
 
-const canRun = computed(() => Boolean(store.luaScriptText.trim()) && !store.luaScriptBusy && store.luaScriptingStatus?.available === true)
+const riskModeBlocksLua = computed(() => store.settingAutoRiskMode !== 'Trainer')
+const canRun = computed(() =>
+  Boolean(store.luaScriptText.trim()) &&
+  !store.luaScriptBusy &&
+  store.luaScriptingStatus?.available === true &&
+  !riskModeBlocksLua.value,
+)
 const canSave = computed(() => Boolean(store.luaScriptText.trim()) && Boolean(store.luaScriptSaveName.trim()))
 
 onMounted(() => {
@@ -31,7 +37,12 @@ onMounted(() => {
         <button class="btn btn-secondary" :disabled="store.luaScriptBusy" @click="store.refreshLuaScriptingStatus()">
           Statut
         </button>
-        <button class="btn btn-primary" :disabled="!canRun" @click="store.executeLuaScript()">
+        <button
+          class="btn btn-primary"
+          :disabled="!canRun"
+          :title="riskModeBlocksLua ? 'Passe le mode Auto en Trainer dans Paramètres pour exécuter un script Lua.' : ''"
+          @click="store.executeLuaScript()"
+        >
           {{ store.luaScriptBusy ? 'Exécution...' : 'Exécuter' }}
         </button>
         <button class="btn btn-danger" :disabled="!store.luaScriptBusy" @click="store.cancelLuaScriptExecution()">
@@ -66,6 +77,9 @@ onMounted(() => {
     </div>
     <div v-if="store.luaScriptingStatus?.automationPipeOptIn === false" class="alert warning">
       Les appels <code>ke.call(...)</code> nécessitent KillEngine lancé avec <code>KILLENGINE_AUTOMATION_PIPE=1</code>.
+    </div>
+    <div v-if="riskModeBlocksLua" class="alert warning">
+      Le mode Auto actuel bloque l'exécution Lua. Passe en mode Trainer dans Paramètres.
     </div>
 
     <section class="editor-shell">

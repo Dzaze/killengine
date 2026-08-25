@@ -48,6 +48,17 @@ static double    g_position = 123.456;
 // Phase 7 — Unknown Initial Value (valeur invisible dans l'UI)
 static int32_t   g_hidden_score = 5000;
 
+// Cible synthétique "champ affiché vs champ source" (candidat POWER_UP_ROADMAP,
+// voir docs/STRATEGY_ROOM.md) -- reproduit le motif rencontré sur l'XP Solitaire
+// le 20/08/2026 : un champ "source" qui ne change que par une action explicite
+// du jeu, et un champ "affiché" recalculé à chaque tick par interpolation vers
+// la source, donc structurellement impossible à faire tenir par une écriture
+// externe directe (voir onCounterTick() plus bas pour le mécanisme).
+static int32_t   g_counterSource   = 1000; // "vraie" valeur cible, ne change que via setCounterSource()
+static int32_t   g_counterCurrent  = 1000; // rattrape g_counterSource de kCounterStepPerTick par tick
+static int32_t   g_counterDisplayed = 1000; // recalculé depuis g_counterCurrent à CHAQUE tick, quoi qu'il arrive
+constexpr int32_t kCounterStepPerTick = 10;
+
 // Variables supplémentaires pour tests multi-type
 static int64_t   g_big_counter = 1000000LL;
 static uint32_t  g_uint_value  = 999;
@@ -230,6 +241,27 @@ public:
 
         mainLayout->addWidget(unknownGroup);
 
+        // --- Section champ affiché vs champ source ---
+        auto* counterGroup = new QGroupBox("Displayed vs Source (candidat heuristique)");
+        auto* counterLayout = new QGridLayout(counterGroup);
+
+        m_counterSourceLabel = new QLabel("1000");
+        m_counterDisplayedLabel = new QLabel("1000");
+
+        counterLayout->addWidget(new QLabel("Source (Int32):"), 0, 0);
+        counterLayout->addWidget(m_counterSourceLabel, 0, 1);
+        counterLayout->addWidget(new QLabel("Displayed (Int32, interpolé):"), 1, 0);
+        counterLayout->addWidget(m_counterDisplayedLabel, 1, 1);
+
+        auto* counterJumpBtn = new QPushButton("Set Source +5000 (jump)");
+        counterLayout->addWidget(counterJumpBtn, 2, 0, 1, 2);
+        connect(counterJumpBtn, &QPushButton::clicked, this, [this]() {
+            g_counterSource += 5000;
+            updateLabels();
+        });
+
+        mainLayout->addWidget(counterGroup);
+
         // --- Log ---
         m_log = new QTextEdit();
         m_log->setReadOnly(true);
@@ -249,6 +281,24 @@ public:
             g_uint_value = static_cast<uint32_t>(randomInt(0, 999999));
         });
         m_noiseTimer->start();
+
+        // --- Timer d'interpolation displayed/source ---
+        // g_counterDisplayed est recalculé ICI à chaque tick, quoi qu'il
+        // arrive -- c'est ce qui rend une écriture externe sur ce champ
+        // structurellement impossible à faire tenir, contrairement à
+        // g_counterSource qui n'est jamais touché par ce timer.
+        m_counterTimer = new QTimer(this);
+        m_counterTimer->setInterval(50);
+        connect(m_counterTimer, &QTimer::timeout, this, [this]() {
+            if (g_counterCurrent < g_counterSource) {
+                g_counterCurrent = std::min(g_counterSource, g_counterCurrent + kCounterStepPerTick);
+            } else if (g_counterCurrent > g_counterSource) {
+                g_counterCurrent = std::max(g_counterSource, g_counterCurrent - kCounterStepPerTick);
+            }
+            g_counterDisplayed = g_counterCurrent;
+            updateLabels();
+        });
+        m_counterTimer->start();
 
         // Alloue le player initial
         g_player = new Player();
@@ -279,6 +329,9 @@ private:
             m_playerHealthLabel->setText(QString::number(g_player->health));
             m_playerMoneyLabel->setText(QString::number(g_player->money));
         }
+
+        m_counterSourceLabel->setText(QString::number(g_counterSource));
+        m_counterDisplayedLabel->setText(QString::number(g_counterDisplayed));
     }
 
     QLabel*     m_healthLabel{nullptr};
@@ -287,9 +340,12 @@ private:
     QLabel*     m_positionLabel{nullptr};
     QLabel*     m_playerHealthLabel{nullptr};
     QLabel*     m_playerMoneyLabel{nullptr};
+    QLabel*     m_counterSourceLabel{nullptr};
+    QLabel*     m_counterDisplayedLabel{nullptr};
     QSpinBox*   m_moneySpin{nullptr};
     QTextEdit*  m_log{nullptr};
     QTimer*     m_noiseTimer{nullptr};
+    QTimer*     m_counterTimer{nullptr};
 };
 
 #include "test_target_main.moc"
@@ -375,9 +431,12 @@ int main(int argc, char* argv[]) {
     {
         QFile marker(QDir::temp().filePath("killengine_test_target_addresses.txt"));
         if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            const QString line = QString("pid=%1\ng_health=0x%2\n")
+            const QString line = QString("pid=%1\ng_health=0x%2\ng_counterSource=0x%3\ng_counterCurrent=0x%4\ng_counterDisplayed=0x%5\n")
                 .arg(QApplication::applicationPid())
-                .arg(reinterpret_cast<quintptr>(&g_health), 0, 16);
+                .arg(reinterpret_cast<quintptr>(&g_health), 0, 16)
+                .arg(reinterpret_cast<quintptr>(&g_counterSource), 0, 16)
+                .arg(reinterpret_cast<quintptr>(&g_counterCurrent), 0, 16)
+                .arg(reinterpret_cast<quintptr>(&g_counterDisplayed), 0, 16);
             marker.write(line.toUtf8());
             marker.close();
         }

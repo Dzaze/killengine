@@ -57,6 +57,12 @@ import {
   type UnknownSnapshotResult,
   type AobPatternQuality,
 } from '@/services/backend'
+import {
+  resolveTrainerFeatureOrder,
+  collectTrainerFeatureDependents,
+  cleanupDependsOnAfterDelete,
+  isToggleableTrainerAction,
+} from './trainerDependencies'
 
 export interface ChatMessage {
   id: number
@@ -1857,92 +1863,6 @@ let nextWatchedChainId = 1
     return { address: String(scan.matches[0].address).replace(/^0x/i, '').toUpperCase(), error: '' }
   }
 
-  /**
-   * Tri topologique (Kahn) des features Trainer d'après `dependsOn`, restreint
-   * à la clôture (targetIds + toutes leurs dépendances transitives, même
-   * hors du set demandé). order[0] n'a aucune dépendance non résolue : à
-   * appliquer avant les suivants. Pour une restauration, itérer `order` à
-   * l'envers (défaire les dépendants avant leurs dépendances).
-   * Fonction pure (features/targetIds en paramètres, aucun état du store) --
-   * vérifiée par un script Node autonome reproduisant cet algorithme
-   * (chaîne linéaire, dépendance en diamant, cycle, référence manquante),
-   * ui/ n'ayant pas de runner de tests JS/TS configuré à ce jour.
-   */
-  function resolveTrainerFeatureOrder(
-    features: TrainerFeature[],
-    targetIds: number[],
-  ): { success: boolean, order: number[], error?: string } {
-    const byId = new Map<number, TrainerFeature>()
-    for (const feature of features) byId.set(feature.id, feature)
-
-    const closure = new Set<number>()
-    const stack = [...targetIds]
-    while (stack.length > 0) {
-      const id = stack.pop() as number
-      if (closure.has(id)) continue
-      const feature = byId.get(id)
-      if (!feature) continue
-      closure.add(id)
-      for (const depId of feature.dependsOn ?? []) {
-        if (!byId.has(depId)) {
-          return { success: false, order: [], error: `"${feature.name}" dépend d'une feature introuvable (id ${depId}).` }
-        }
-        if (!closure.has(depId)) stack.push(depId)
-      }
-    }
-
-    const inDegree = new Map<number, number>()
-    const dependents = new Map<number, number[]>()
-    for (const id of closure) {
-      inDegree.set(id, 0)
-      dependents.set(id, [])
-    }
-    for (const id of closure) {
-      const feature = byId.get(id) as TrainerFeature
-      for (const depId of feature.dependsOn ?? []) {
-        inDegree.set(id, (inDegree.get(id) ?? 0) + 1)
-        dependents.get(depId)?.push(id)
-      }
-    }
-
-    const queue: number[] = []
-    for (const id of closure) if (inDegree.get(id) === 0) queue.push(id)
-    const order: number[] = []
-    while (queue.length > 0) {
-      const id = queue.shift() as number
-      order.push(id)
-      for (const dependentId of dependents.get(id) ?? []) {
-        const remaining = (inDegree.get(dependentId) ?? 0) - 1
-        inDegree.set(dependentId, remaining)
-        if (remaining === 0) queue.push(dependentId)
-      }
-    }
-
-    if (order.length !== closure.size) {
-      const cyclic = [...closure].filter((id) => (inDegree.get(id) ?? 0) > 0)
-      const names = cyclic.map((id) => byId.get(id)?.name ?? `#${id}`).join(', ')
-      return { success: false, order: [], error: `Cycle de dépendances détecté entre : ${names}.` }
-    }
-
-    return { success: true, order }
-  }
-
-  function collectTrainerFeatureDependents(targetIds: number[]): number[] {
-    const targetSet = new Set(targetIds)
-    const stack = [...targetIds]
-    while (stack.length > 0) {
-      const dependencyId = stack.pop() as number
-      for (const feature of trainerFeatures.value) {
-        if (targetSet.has(feature.id)) continue
-        if (feature.dependsOn?.includes(dependencyId)) {
-          targetSet.add(feature.id)
-          stack.push(feature.id)
-        }
-      }
-    }
-    return [...targetSet]
-  }
-
   async function doApplyTrainerFeature(id: number): Promise<boolean> {
     const feature = trainerFeatures.value.find((item) => item.id === id)
     if (!feature) return false
@@ -2015,7 +1935,7 @@ let nextWatchedChainId = 1
           }
         }
       }
-      feature.enabled = ok && feature.action !== 'write' && feature.action !== 'clr_write'
+      feature.enabled = ok && isToggleableTrainerAction(feature.action)
       feature.status = ok ? (feature.action === 'write' || feature.action === 'clr_write' ? 'idle' : 'active') : 'error'
       feature.lastError = error
       feature.updatedAt = new Date().toISOString()
@@ -2109,7 +2029,7 @@ let nextWatchedChainId = 1
   async function restoreTrainerFeature(id: number) {
     const feature = trainerFeatures.value.find((item) => item.id === id)
     if (!feature || trainerBusy.value) return
-    const restoreIds = collectTrainerFeatureDependents([id]).filter((featureId) => trainerFeatures.value.some((item) => item.id === featureId && item.enabled))
+    const restoreIds = collectTrainerFeatureDependents(trainerFeatures.value, [id]).filter((featureId) => trainerFeatures.value.some((item) => item.id === featureId && item.enabled))
     const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, restoreIds)
     if (!resolved.success) {
       addActionLog('trainer', 'Restauration interrompue', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
@@ -2271,14 +2191,12 @@ let nextWatchedChainId = 1
   }
 
   function deleteTrainerFeature(id: number) {
-    trainerFeatures.value = trainerFeatures.value.filter((item) => item.id !== id)
-    for (const feature of trainerFeatures.value) {
-      if (feature.dependsOn?.includes(id)) {
-        feature.dependsOn = feature.dependsOn.filter((dependencyId) => dependencyId !== id)
-        if (feature.dependsOn.length === 0) feature.dependsOn = undefined
-        feature.updatedAt = new Date().toISOString()
-      }
-    }
+    const remaining = trainerFeatures.value.filter((item) => item.id !== id)
+    const now = new Date().toISOString()
+    const touchedIds = new Set(remaining.filter((item) => item.dependsOn?.includes(id)).map((item) => item.id))
+    trainerFeatures.value = cleanupDependsOnAfterDelete(remaining, id).map((feature) => (
+      touchedIds.has(feature.id) ? { ...feature, updatedAt: now } : feature
+    ))
     saveTrainerFeatures()
     void refreshTrainerOverlay()
   }

@@ -4,6 +4,11 @@
 #   .\scripts\release-check.ps1 -SkipUi -Package
 #   .\scripts\release-check.ps1 -Package -ExcludeModel
 #   .\scripts\release-check.ps1 -Package -RequireSigning   (official release: fail if KillEngine.exe ships unsigned)
+#   .\scripts\release-check.ps1 -IncludeLuaExamples        (optional, best-effort: never fails the gate if runtime/lua/ is absent)
+#
+# -IncludeLuaExamples runs scripts\test-lua-examples.ps1 WITHOUT -RequirePipe (pipe-backed
+# strictness is a separate, explicit command -- run it directly when you want that guarantee):
+#   .\scripts\test-lua-examples.ps1 -RequirePipe   (needs KillEngine.exe already running with KILLENGINE_AUTOMATION_PIPE=1)
 
 param(
     [switch]$SkipUi,
@@ -12,7 +17,8 @@ param(
     [switch]$SkipLaunchSmoke,
     [switch]$Package,
     [switch]$ExcludeModel,
-    [switch]$RequireSigning
+    [switch]$RequireSigning,
+    [switch]$IncludeLuaExamples
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,6 +38,22 @@ function Invoke-Step {
     & $Script
     if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
         throw "$Name failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Invoke-OptionalStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][scriptblock]$Script
+    )
+
+    Write-Host ""
+    Write-Host "==> $Name (optional, non-blocking)" -ForegroundColor Cyan
+    try {
+        & $Script
+        Write-Host "$Name : OK" -ForegroundColor Green
+    } catch {
+        Write-Warning "$Name skipped/failed, not failing the release check: $($_.Exception.Message)"
     }
 }
 
@@ -117,6 +139,22 @@ try {
 
         Invoke-Step "Integration tests" {
             & $integrationTests
+        }
+    }
+
+    if ($IncludeLuaExamples) {
+        # Best-effort by design: a missing Lua runtime (runtime/lua/ not
+        # provisioned on this machine) must never fail the release check --
+        # this step only exists to catch real regressions in the bundled
+        # examples when the runtime happens to be there. Deliberately runs
+        # WITHOUT -RequirePipe: pipe-backed strictness is a separate,
+        # explicitly documented command (see docs/V1_REGRESSION_CHECKLIST.md),
+        # not something release-check.ps1 enables implicitly.
+        Invoke-OptionalStep "Lua examples validation" {
+            & (Join-Path $repoRoot "scripts\test-lua-examples.ps1")
+            if ($LASTEXITCODE -ne 0) {
+                throw "test-lua-examples.ps1 exited with code $LASTEXITCODE"
+            }
         }
     }
 
