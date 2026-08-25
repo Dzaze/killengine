@@ -134,6 +134,8 @@ Tous les commits sont signés par le même auteur Git (`Dzaze`) : **l'historique
    ```
    Toute correspondance = fichier corrompu à réparer avant commit. Exception connue et volontaire : l'entrée « PHASE 18 UX » de `docs/PHASE_TRACKER.md` cite littéralement `` `RÃ©gion active` `` comme exemple du bug — elle matche le motif exprès, ne pas la "corriger".
 
+   **Vérification complémentaire des fins de ligne** : le scan mojibake ci-dessus ne détecte pas un flip silencieux CRLF → LF. Lancer `.\scripts\check-line-endings.ps1` pour un rapport byte-level des fichiers suivis (`CRLF`, `LF`, `mixed`, `CR`). Le script est **report-only par défaut** ; utiliser `-FailOnMixed` ou `-FailOnLfOnly` seulement quand les exceptions existantes ont été triées explicitement. Ne pas convertir un fichier LF historique au passage d'un autre chantier : le faire dans un commit dédié si le propriétaire le demande.
+
 ## Démarrage rapide
 
 ```
@@ -394,7 +396,7 @@ Un `.editorconfig` à la racine applique une partie de ces règles automatiqueme
 | | C++ (`core/`, `apps/`, `ai/`) | TS / Vue (`ui/src/`) | PowerShell (`scripts/`) |
 | --- | --- | --- | --- |
 | Indentation | 4 espaces, jamais de tab | 2 espaces, jamais de tab | 4 espaces, jamais de tab |
-| Fin de ligne | **CRLF** (100% des fichiers du repo, vérifié) | **CRLF** | **CRLF** |
+| Fin de ligne | **CRLF cible** ; vérifier avec `scripts/check-line-endings.ps1` | **CRLF cible** | **CRLF cible** |
 | Encodage | UTF-8 **sans BOM** (voir section coexistence ci-dessus) | UTF-8 sans BOM | UTF-8 sans BOM |
 | Accolades | ouvrante sur la même ligne (`if (...) {`, `void f(...) {`) | — | — |
 | Chaînes | `QString`, guillemets doubles côté C++ | guillemets **simples** (`'texte'`) | — |
