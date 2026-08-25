@@ -61,6 +61,49 @@ QString variationMode(const QString& q, const QString& fallback = "changed") {
     return fallback;
 }
 
+/// Un match d'outil "hors memoire" (fichiers de sauvegarde UWP, LocalSettings,
+/// surveillance fichier) trouve par mots-cles explicites FR/EN dans la requete.
+/// tool vide = aucun match.
+struct OffMemoryToolMatch {
+    QString tool;
+    QString rationale;
+};
+
+/// PHASE 91/99 : identifie un outil d'investigation "hors memoire" a partir de
+/// mots-cles explicites dans la requete (voir docs/PHASE_TRACKER.md PHASE 90,
+/// investigation Solitaire "Bulles" -- la valeur affichee vient parfois d'un
+/// fichier sur disque plutot que d'une adresse memoire stable). Une seule
+/// liste de mots-cles, utilisee a la fois par le fast-path de
+/// AIEngine::processQuery (court-circuite le modele local avant de le lancer)
+/// et par deterministicPlanWithContext (repli normal si le modele echoue) --
+/// jamais deux copies qui pourraient diverger.
+OffMemoryToolMatch matchOffMemoryTool(const QString& q) {
+    if (q.contains("localsettings") || q.contains("local settings") || q.contains("settings.dat")
+        || q.contains("ruche registre") || q.contains("registre uwp") || q.contains("registry hive")) {
+        return {"inspect_local_settings",
+            "J'inspecte en lecture seule la ruche LocalSettings/settings.dat du package UWP attache."};
+    }
+
+    // Sans chemin de fichier deja connu, "surveiller" n'est pas actionnable
+    // directement (watch_save_file exige un path) -- on route d'abord vers
+    // la decouverte, etape necessaire de toute facon avant de surveiller.
+    if (q.contains("watch fichier") || q.contains("surveille fichier") || q.contains("surveiller fichier")
+        || q.contains("surveillance fichier") || q.contains("watch file") || q.contains("file watch")) {
+        return {"discover_save_files",
+            "Je cherche d'abord les fichiers de sauvegarde disponibles -- tu pourras ensuite me demander de surveiller l'un d'eux."};
+    }
+
+    if (q.contains("fichier de sauvegarde") || q.contains("fichiers de sauvegarde")
+        || q.contains("sauvegarde disque") || q.contains("sur le disque") || q.contains("on disk")
+        || q.contains("dans un fichier") || q.contains("save file") || q.contains("savefile")
+        || q.contains("localstate")) {
+        return {"discover_save_files",
+            "Je cherche les fichiers de sauvegarde/etat du processus attache sur le disque."};
+    }
+
+    return {};
+}
+
 } // namespace
 
 AIEngine::AIEngine(QObject* parent) : QObject(parent) {}
@@ -270,6 +313,22 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
         result["status"] = "not_ready";
         result["message"] = "AIEngine is not initialized.";
         return result;
+    }
+
+    // PHASE 99 : fast-path pour une demande explicite d'investigation "hors
+    // memoire" -- ces requetes n'ont pas besoin d'une inference LLM et
+    // n'avaient jusqu'ici droit a l'outil deterministe qu'APRES un aller-retour
+    // au modele local (potentiellement plusieurs dizaines de secondes) qui
+    // finissait de toute facon par echouer/retomber sur ce meme outil via
+    // deterministicPlanWithContext. Court-circuite ce retard, avant meme
+    // ensureLlamaInitialized(). Ne s'applique que process attache (sinon on
+    // laisse le chemin normal produire le message de clarification usuel).
+    if (context.value("processAttached", true).toBool()) {
+        if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(offMemoryMatch.tool, {}, offMemoryMatch.rationale);
+            result["aiBackend"] = "deterministic_offmemory_fastpath";
+            return result;
+        }
     }
 
     if (ensureLlamaInitialized()) {
@@ -503,22 +562,10 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         return result;
     }
 
-    // PHASE 91 : demande explicite d'investigation "hors memoire" -- la
-    // valeur affichee vient peut-etre d'un fichier de sauvegarde sur disque
-    // plutot que d'une adresse memoire stable (voir docs/PHASE_TRACKER.md
-    // PHASE 90, investigation Solitaire "Bulles").
-    if (q.contains("localsettings") || q.contains("settings.dat") || q.contains("ruche registre")
-        || q.contains("registre uwp")) {
-        return makeToolCall("inspect_local_settings", {},
-            "J'inspecte en lecture seule la ruche LocalSettings/settings.dat du package UWP attache.");
-    }
-
-    if (q.contains("fichier de sauvegarde") || q.contains("fichiers de sauvegarde")
-        || q.contains("sauvegarde disque") || q.contains("sur le disque")
-        || q.contains("dans un fichier") || q.contains("save file")
-        || q.contains("localstate")) {
-        return makeToolCall("discover_save_files", {},
-            "Je cherche les fichiers de sauvegarde/etat du processus attache sur le disque.");
+    // PHASE 91/99 : demande explicite d'investigation "hors memoire" (voir
+    // matchOffMemoryTool ci-dessus pour la liste de mots-cles).
+    if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
+        return makeToolCall(offMemoryMatch.tool, {}, offMemoryMatch.rationale);
     }
 
     // Mode Inspecteur: obtenir une preuve nouvelle avant toute ecriture.

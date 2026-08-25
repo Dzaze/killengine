@@ -296,6 +296,81 @@ TEST(AIEngineContextualFallbackTest, InspectorModeStartsChangedPagesDiff) {
     EXPECT_EQ(result.value("tool").toString().toStdString(), "start_changed_pages_diff");
 }
 
+// PHASE 99 : demande explicite d'investigation "hors memoire" (LocalSettings,
+// fichier de sauvegarde, watch fichier) doit resoudre l'outil deterministe
+// SANS passer par le modele local -- aiBackend le prouve directement, plutot
+// que de mesurer un delai (non fiable en test).
+TEST(AIEngineContextualFallbackTest, OffMemoryFastPathInspectsLocalSettingsFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("inspecte LocalSettings settings.dat", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "inspect_local_settings");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_offmemory_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, OffMemoryFastPathInspectsLocalSettingsEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("check the local settings registry hive", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "inspect_local_settings");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_offmemory_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, OffMemoryFastPathDiscoversSaveFilesFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("cherche un fichier de sauvegarde sur le disque", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "discover_save_files");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_offmemory_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, OffMemoryFastPathDiscoversSaveFilesEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("is there a save file on disk", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "discover_save_files");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_offmemory_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, OffMemoryFastPathRoutesWatchRequestToDiscoveryFirst) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto resultFr = engine.processQuery("surveille le fichier de sauvegarde", context);
+    EXPECT_EQ(resultFr.value("tool").toString().toStdString(), "discover_save_files");
+    const auto resultEn = engine.processQuery("watch file for changes", context);
+    EXPECT_EQ(resultEn.value("tool").toString().toStdString(), "discover_save_files");
+}
+
+TEST(AIEngineContextualFallbackTest, OffMemoryFastPathStillRequiresAttachedProcess) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = false;
+    const auto result = engine.processQuery("inspecte LocalSettings settings.dat", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_TRUE(result.value("message").toString().contains("processus"));
+}
+
 TEST(AIEngineContextualFallbackTest, InspectorModeFinishesChangedPagesDiffWithTwoValues) {
     ScopedModelDisabled guard;
     killai::AIEngine engine;
