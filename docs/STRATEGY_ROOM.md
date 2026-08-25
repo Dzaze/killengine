@@ -21,8 +21,9 @@ Quand le propriétaire demande une réflexion croisée entre agents, utiliser ce
 - **Relire juste avant d'écrire** : chaque agent relit `docs/STRATEGY_ROOM.md` immédiatement avant son patch, même s'il l'a déjà lu au début de session.
 - **Append-only pendant le salon** : ne jamais réécrire la contribution d'un autre agent. Ajouter une nouvelle sous-section datée à la fin du bloc concerné.
 - **Zones propriétaires** : Codex écrit seulement dans `Contribution Codex`, Claude écrit seulement dans `Contribution Claude`.
+- **Répliques croisées obligatoires avant synthèse** : après les contributions initiales, Codex répond dans `Réponse Codex à Claude` et Claude répond dans `Réponse Claude à Codex`. Une synthèse sans ce tour de réponse est considérée comme prématurée, sauf ordre explicite du propriétaire.
 - **Synthèse unique** : une seule personne rédige `Synthèse retenue`. Par défaut, le propriétaire désigne le rédacteur ; sinon le dernier agent appelé par le propriétaire fait la synthèse après avoir relu les deux contributions.
-- **Pas de synthèse implicite** : un agent qui n'a pas relu les deux contributions ne remplit pas la synthèse. Il laisse `Synthèse retenue : à rédiger`.
+- **Pas de synthèse implicite** : un agent qui n'a pas relu les deux contributions et les deux réponses croisées ne remplit pas la synthèse. Il laisse `Synthèse retenue : à rédiger`.
 - **Promotion contrôlée** : une idée ne migre vers `docs/POWER_UP_ROADMAP.md` qu'après synthèse ou ordre explicite du propriétaire.
 - **Commit séparé** : les contributions de salon se commitent séparément des changements de code.
 
@@ -31,7 +32,7 @@ Quand le propriétaire demande une réflexion croisée entre agents, utiliser ce
 ```markdown
 ### [AAAA-MM-JJ] Salon inter-agents — sujet court
 **Cadre :** pourquoi on ouvre ce salon, temps prévu, fichiers à relire.
-**Statut :** 🟡 contributions ouvertes / ✅ synthèse faite / 💤 en veille
+**Statut :** 🟡 contributions ouvertes / 🟡 réponses croisées ouvertes / ✅ synthèse faite / 💤 en veille
 **Rédacteur synthèse :** Codex / Claude / propriétaire / à désigner
 
 #### Lecture commune
@@ -45,8 +46,14 @@ _Append-only. Ne pas modifier par Claude._
 #### Contribution Claude
 _Append-only. Ne pas modifier par Codex._
 
+#### Réponse Codex à Claude
+_Codex répond explicitement aux points Claude : accords, désaccords, questions, compromis._
+
+#### Réponse Claude à Codex
+_Claude répond explicitement aux points Codex : accords, désaccords, réponses aux questions, compromis._
+
 #### Synthèse retenue
-_À remplir seulement par le rédacteur désigné après relecture des deux contributions._
+_À remplir seulement par le rédacteur désigné après relecture des deux contributions et des deux réponses croisées._
 
 #### Décisions / questions propriétaire
 - ...
@@ -78,7 +85,7 @@ _À remplir seulement par le rédacteur désigné après relecture des deux cont
 | 2026-08-20 | Cycle de vie des breakpoints matériels : arbitre DR0-DR7, désarmement in-process déterministe, `scanMemoryWindow` dédié | ✅ tranché — protections livrées et testées, régression injection root-causée (EDR Microsoft Defender for Endpoint, pas un bug KillEngine) et mitigée |
 | 2026-08-20 | Écriture kernel-mode (driver `KillEngineKernel.sys`) testée sur l'XP Solitaire — même conclusion que l'écriture usermode | ✅ tranché (hypothèse "détection d'écriture" définitivement éliminée) — 🟡 XP toujours non contrôlable, nouvelle piste identifiée (remonter à la fonction de calcul) |
 | 2026-08-20 | **XP Solitaire enfin contrôlable** — remontée du désassemblage depuis l'animation d'affichage jusqu'au vrai champ cible (`[RSI+0x908]`), écriture kernel confirmée persistante | ✅ **résolu** — champ identifié, écriture validée deux fois (valeur tenue, gain suivant additionné par-dessus) |
-| 2026-08-25 | Salon inter-agents — prochains chantiers rentables après UWP/LocalSettings/file watch/patch bytes/Lua v2 | 🟡 contributions Codex/Claude faites, synthèse en attente |
+| 2026-08-25 | Salon inter-agents — prochains chantiers rentables après UWP/LocalSettings/file watch/patch bytes/Lua v2 | 🟡 contributions Codex/Claude faites, réponses croisées à ouvrir |
 
 ---
 
@@ -347,7 +354,7 @@ C'est une **interpolation d'animation de compteur** classique (`affiché = actue
 
 **Cadre :** le propriétaire demande une réflexion croisée Codex/Claude pour identifier les prochains chantiers KillEngine les plus rentables, maintenant que PHASE 90-97 (découverte/lecture/surveillance/patch de fichiers de sauvegarde UWP, inspection `LocalSettings`, Lua scripting v2 async+JSON+persistance profil) sont livrées. Temps prévu : session courte (~3 min de recherche/rédaction). Pas de code dans cette session, uniquement de la réflexion consignée.
 
-**Statut :** 🟡 contributions Codex/Claude faites, synthèse en attente
+**Statut :** 🟡 contributions Codex/Claude faites, réponses croisées à ouvrir
 **Rédacteur synthèse :** à désigner
 
 #### Lecture commune
@@ -434,8 +441,14 @@ _Append-only. Ne pas modifier par Claude._
 
 **Top 2 recommandé (Claude) :** **#3 (durcissement CRLF/LF)** en premier — coût quasi nul, zéro risque, corrige une classe d'incident silencieux déjà matérialisée deux fois cette semaine (mojibake documenté trois fois dans `AGENTS.md`, EOL découvert cette session) et qui continuera de se reproduire sans détection tant qu'aucun outil ne la couvre. Puis **#1 (dépendances cheat table)** — seul chantier produit des 5 qui est immédiatement codable sans phase d'investigation préalable, scope borné, effort faible à moyen déjà estimé dans le roadmap. #2 (heuristique champ affiché/source) est la piste la plus stratégique à moyen terme (généralise une vraie percée plutôt que de la laisser dormir en connaissance de session) mais mérite une discussion de cadrage avant de coder, vu son risque de faux positifs — je la placerais en 3ᵉ si le propriétaire veut un chantier d'investigation après les deux premiers.
 
+#### Réponse Codex à Claude
+_À remplir au prochain tour. Codex doit répondre explicitement aux priorités Claude : CRLF/LF, dépendances cheat table, heuristique champ affiché/source, régression manuelle et Lua in-process._
+
+#### Réponse Claude à Codex
+_À remplir au prochain tour. Claude doit répondre explicitement aux priorités Codex : Assistant UWP/hors mémoire, workflow produit hors mémoire, exemples Lua, hygiène EOL/encodage et régression ciblée._
+
 #### Synthèse retenue
-_À remplir seulement par le rédacteur désigné après relecture des deux contributions._
+_À remplir seulement par le rédacteur désigné après relecture des deux contributions et des deux réponses croisées._
 
 #### Décisions / questions propriétaire
 - ...
