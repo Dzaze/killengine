@@ -2921,6 +2921,70 @@ onMounted(() => {
             readonly
             :value="store.selectedSaveFileText.text || ''"
           ></textarea>
+
+          <div class="save-file-watch-row">
+            <button
+              class="btn btn-secondary compact"
+              type="button"
+              :disabled="store.saveFileWatchBusy || !store.selectedSaveFilePath"
+              @click="store.watchSelectedSaveFile(store.selectedSaveFilePath, 8000)"
+            >
+              <span v-if="store.saveFileWatchBusy" class="btn-spinner" aria-hidden="true"></span>
+              {{ store.saveFileWatchBusy ? 'Surveillance (8s)...' : 'Surveiller ce fichier' }}
+            </button>
+            <button
+              v-if="store.saveFileWatchBusy"
+              class="btn btn-secondary compact"
+              type="button"
+              @click="store.cancelSaveFileWatchAction()"
+            >
+              Annuler
+            </button>
+            <span v-if="store.saveFileWatchResult && !store.saveFileWatchBusy" :class="store.saveFileWatchResult.changed ? 'hint' : 'warning-text'">
+              {{ store.saveFileWatchResult.changed
+                ? `Changement détecté (${store.saveFileWatchResult.changeType ?? '?'})`
+                : (store.saveFileWatchResult.cancelled ? 'Surveillance annulée' : (store.saveFileWatchResult.error ?? 'Aucun changement avant timeout')) }}
+            </span>
+          </div>
+
+          <div class="save-file-patch-row">
+            <input v-model="store.saveFilePatchFindHex" class="input" placeholder="Octets à trouver (hex, ex: 35 38)" />
+            <input v-model="store.saveFilePatchReplaceHex" class="input" placeholder="Octets de remplacement (même longueur)" />
+            <button
+              class="btn btn-danger compact"
+              type="button"
+              :disabled="store.saveFilePatchBusy || !store.saveFilePatchFindHex.trim() || !store.saveFilePatchReplaceHex.trim()"
+              @click="store.patchSelectedSaveFileBytes(store.selectedSaveFilePath, store.saveFilePatchFindHex, store.saveFilePatchReplaceHex)"
+            >
+              {{ store.saveFilePatchBusy ? 'Patch...' : 'Patcher' }}
+            </button>
+          </div>
+          <p v-if="store.saveFilePatchResult" :class="store.saveFilePatchResult.success ? 'hint' : 'error'">
+            {{ store.saveFilePatchResult.success ? `Patché (${store.saveFilePatchResult.occurrencesFound ?? 1} occurrence).` : store.saveFilePatchResult.error }}
+          </p>
+        </div>
+
+        <div class="local-settings-block">
+          <div class="panel-actions">
+            <button
+              class="btn btn-secondary compact"
+              type="button"
+              :disabled="store.localSettingsBusy"
+              @click="store.inspectLocalSettings(200)"
+            >
+              <span v-if="store.localSettingsBusy" class="btn-spinner" aria-hidden="true"></span>
+              {{ store.localSettingsBusy ? 'Inspection...' : 'Inspecter LocalSettings' }}
+            </button>
+            <span v-if="store.localSettingsResult?.count !== undefined">{{ store.localSettingsResult.count }} valeur(s)</span>
+          </div>
+          <p v-if="store.localSettingsResult?.error" class="error">{{ store.localSettingsResult.error }}</p>
+          <div v-if="store.localSettingsResult?.values?.length" class="save-file-list local-settings-list">
+            <div v-for="value in store.localSettingsResult.values" :key="`${value.keyPath}/${value.name}`" class="local-settings-row">
+              <strong :title="value.keyPath">{{ value.name }}</strong>
+              <span>{{ value.type }}</span>
+              <span :title="value.preview">{{ value.preview }}</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -5406,6 +5470,69 @@ onMounted(() => {
   white-space: pre;
   font-family: var(--font-mono, monospace);
   font-size: 12px;
+}
+
+.save-file-watch-row,
+.save-file-patch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.save-file-patch-row .input {
+  flex: 1;
+  min-width: 140px;
+}
+
+.btn-danger {
+  background: var(--error);
+  color: white;
+  border: none;
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.local-settings-block {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(122, 162, 247, 0.16);
+}
+
+.local-settings-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.local-settings-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 90px minmax(160px, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid rgba(122, 162, 247, 0.16);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.local-settings-row strong {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-settings-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .source-actions {

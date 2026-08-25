@@ -36,9 +36,12 @@ import {
   type MemoryWriteTarget,
   type ProcessInfo,
   type ProcessModuleInfo,
+  type ProcessLocalSettingsResult,
   type ProcessSaveFileDiscoveryResult,
   type ProcessSaveFileInfo,
   type ProcessSaveFileTextResult,
+  type SaveFilePatchResult,
+  type SaveFileWatchResult,
   type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
   type SpeedhackStatus,
@@ -315,6 +318,15 @@ export const useAppStore = defineStore('app', () => {
   const selectedSaveFilePath = ref('')
   const saveFilesBusy = ref(false)
   const saveFileTextBusy = ref(false)
+  const localSettingsResult = ref<ProcessLocalSettingsResult | null>(null)
+  const localSettingsBusy = ref(false)
+  const saveFileWatchResult = ref<SaveFileWatchResult | null>(null)
+  const saveFileWatchBusy = ref(false)
+  const saveFileWatchPath = ref('')
+  const saveFilePatchResult = ref<SaveFilePatchResult | null>(null)
+  const saveFilePatchBusy = ref(false)
+  const saveFilePatchFindHex = ref('')
+  const saveFilePatchReplaceHex = ref('')
   const memoryMap = ref<MemoryMapResult | null>(null)
   const memoryPreview = ref<MemoryReadPreview | null>(null)
   const memoryPreviewAddress = ref('')
@@ -4745,6 +4757,152 @@ let nextWatchedChainId = 1
     }
   }
 
+  async function inspectLocalSettings(maxValues = 200) {
+    localSettingsBusy.value = true
+    try {
+      const result = await backend.getController().inspectProcessLocalSettings(maxValues)
+      localSettingsResult.value = result
+      addActionLog(
+        'save_files',
+        result.success ? 'LocalSettings inspecté' : 'Inspection LocalSettings échouée',
+        result.success
+          ? `${result.count ?? result.values.length} valeur(s)${result.familyName ? ` · ${result.familyName}` : ''}.`
+          : (result.error ?? 'Erreur inconnue.'),
+        result.success ? 'success' : 'warning',
+      )
+      return result
+    } catch (e) {
+      const result = { success: false, values: [], error: String(e) }
+      localSettingsResult.value = result
+      console.error('[KillEngine] Failed to inspect process LocalSettings:', e)
+      addActionLog('save_files', 'Inspection LocalSettings échouée', String(e), 'error')
+      return result
+    } finally {
+      localSettingsBusy.value = false
+    }
+  }
+
+  async function watchSelectedSaveFile(path: string, timeoutMs = 8000) {
+    const trimmedPath = path.trim()
+    if (!trimmedPath || saveFileWatchBusy.value) return
+    const controller = backend.getController()
+    const asyncFn = controller.startSaveFileWatchAsync
+    const finishedSignal = controller.saveFileWatchFinished
+    const options = { timeoutMs }
+
+    if (!asyncFn || !finishedSignal) {
+      addActionLog('save_files', 'Surveillance fichier indisponible', 'startSaveFileWatchAsync absent du backend.', 'warning')
+      return
+    }
+
+    saveFileWatchBusy.value = true
+    saveFileWatchPath.value = trimmedPath
+    saveFileWatchResult.value = null
+    await new Promise<void>((resolve) => {
+      let requestId: number | null = null
+      let settled = false
+      const earlyPayloads: Array<Record<string, unknown>> = []
+      const finalize = (payload: Record<string, unknown>) => {
+        if (settled) return
+        settled = true
+        finishedSignal.disconnect?.(handler)
+        saveFileWatchBusy.value = false
+        saveFileWatchResult.value = payload as unknown as SaveFileWatchResult
+        const ok = payload.changed === true
+        addActionLog(
+          'save_files',
+          ok ? 'Changement détecté' : (payload.cancelled ? 'Surveillance annulée' : 'Aucun changement avant timeout'),
+          `${trimmedPath}${payload.changeType ? ` · ${String(payload.changeType)}` : ''}`,
+          ok ? 'success' : 'warning',
+        )
+        resolve()
+      }
+      const handler = (payload: Record<string, unknown>) => {
+        if (requestId === null) {
+          earlyPayloads.push(payload)
+          return
+        }
+        if (Number(payload.requestId) !== requestId) return
+        finalize(payload)
+      }
+      finishedSignal.connect(handler)
+
+      asyncFn(trimmedPath, options).then((start) => {
+        if (settled) return
+        if (start.success !== true || start.started !== true) {
+          settled = true
+          finishedSignal.disconnect?.(handler)
+          saveFileWatchBusy.value = false
+          saveFileWatchResult.value = { success: false, error: String(start.error ?? 'Impossible de démarrer la surveillance.') }
+          addActionLog('save_files', 'Surveillance fichier échouée', String(start.error ?? ''), 'error')
+          resolve()
+          return
+        }
+        requestId = Number(start.requestId)
+        for (const payload of earlyPayloads.splice(0)) {
+          handler(payload)
+          if (settled) break
+        }
+      }).catch((e) => {
+        if (settled) return
+        settled = true
+        finishedSignal.disconnect?.(handler)
+        saveFileWatchBusy.value = false
+        saveFileWatchResult.value = { success: false, error: String(e) }
+        addActionLog('save_files', 'Surveillance fichier échouée', String(e), 'error')
+        resolve()
+      })
+    })
+  }
+
+  async function cancelSaveFileWatchAction() {
+    const controller = backend.getController()
+    if (!controller.cancelSaveFileWatch) return
+    try {
+      const result = await controller.cancelSaveFileWatch()
+      if (result.success !== true) {
+        addActionLog('save_files', 'Annulation surveillance impossible', String(result.error ?? ''), 'warning')
+      }
+    } catch (e) {
+      addActionLog('save_files', 'Annulation surveillance impossible', String(e), 'warning')
+    }
+  }
+
+  async function patchSelectedSaveFileBytes(path: string, findHex: string, replaceHex: string) {
+    const trimmedPath = path.trim()
+    if (!trimmedPath || !findHex.trim() || !replaceHex.trim()) return
+    if (!await confirmRiskAction(
+      'patch',
+      'Édition d\'octets dans un fichier de sauvegarde',
+      `Remplace la séquence "${findHex.trim()}" par "${replaceHex.trim()}" dans ${trimmedPath}. Refusé si la séquence n'apparaît pas exactement une fois ou si la longueur diffère.`,
+    )) return
+
+    const controller = backend.getController()
+    if (!controller.patchProcessSaveFileBytes) {
+      saveFilePatchResult.value = { success: false, error: 'Édition de fichier non exposée par ce backend.' }
+      return
+    }
+    saveFilePatchBusy.value = true
+    try {
+      const result = await controller.patchProcessSaveFileBytes(trimmedPath, findHex.trim(), replaceHex.trim())
+      saveFilePatchResult.value = result
+      addActionLog(
+        'save_files',
+        result.success ? 'Fichier patché' : 'Patch fichier échoué',
+        result.success ? `${trimmedPath} (${result.occurrencesFound ?? 1} occurrence)` : (result.error ?? 'Erreur inconnue.'),
+        result.success ? 'success' : 'error',
+      )
+      return result
+    } catch (e) {
+      const result = { success: false, error: String(e) }
+      saveFilePatchResult.value = result
+      addActionLog('save_files', 'Patch fichier échoué', String(e), 'error')
+      return result
+    } finally {
+      saveFilePatchBusy.value = false
+    }
+  }
+
   async function refreshMemoryMap() {
     try {
       memoryMap.value = await backend.getController().getMemoryMap()
@@ -7789,6 +7947,15 @@ async function doEncryptedScan() {
     selectedSaveFilePath,
     saveFilesBusy,
     saveFileTextBusy,
+    localSettingsResult,
+    localSettingsBusy,
+    saveFileWatchResult,
+    saveFileWatchBusy,
+    saveFileWatchPath,
+    saveFilePatchResult,
+    saveFilePatchBusy,
+    saveFilePatchFindHex,
+    saveFilePatchReplaceHex,
     memoryMap,
     memoryPreview,
     memoryPreviewAddress,
@@ -7932,6 +8099,10 @@ async function doEncryptedScan() {
     refreshProcessModules,
     discoverSaveFiles,
     readSaveFileText,
+    inspectLocalSettings,
+    watchSelectedSaveFile,
+    cancelSaveFileWatchAction,
+    patchSelectedSaveFileBytes,
     refreshMemoryMap,
     readMemoryPreview,
     readMemoryPreviewByMode,

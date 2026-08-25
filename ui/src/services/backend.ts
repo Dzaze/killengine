@@ -59,6 +59,24 @@ export interface ProcessLocalSettingsResult {
   error?: string
 }
 
+export interface SaveFileWatchResult {
+  success: boolean
+  started?: boolean
+  requestId?: number
+  path?: string
+  changed?: boolean
+  changeType?: string
+  cancelled?: boolean
+  error?: string
+}
+
+export interface SaveFilePatchResult {
+  success: boolean
+  path?: string
+  occurrencesFound?: number
+  error?: string
+}
+
 export interface MemoryRegionInfo {
   baseAddress: string
   allocationBase: string
@@ -1116,6 +1134,14 @@ export interface AiModelStatus {
   discoverProcessSaveFiles(maxResults: number): Promise<ProcessSaveFileDiscoveryResult>
   inspectProcessLocalSettings(maxValues: number): Promise<ProcessLocalSettingsResult>
   readProcessSaveFileText(path: string, maxBytes: number): Promise<ProcessSaveFileTextResult>
+  /** Surveille un fichier de sauvegarde (bloquant) — voir startSaveFileWatchAsync pour la version non bloquante utilisée par l'UI. */
+  watchSaveFileForChanges?(path: string, options: Record<string, unknown>): Promise<SaveFileWatchResult>
+  /** Version non bloquante de watchSaveFileForChanges. Le résultat arrive via saveFileWatchFinished. */
+  startSaveFileWatchAsync?(path: string, options: Record<string, unknown>): Promise<SaveFileWatchResult>
+  cancelSaveFileWatch?(): Promise<Record<string, unknown>>
+  saveFileWatchFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** Edite en place une séquence d'octets (find/replace hex, même longueur, occurrence unique) dans un fichier de sauvegarde. */
+  patchProcessSaveFileBytes?(path: string, findHex: string, replaceHex: string): Promise<SaveFilePatchResult>
   attachProcess(pid: number): Promise<boolean>
   detachProcess(): Promise<void>
   getMemoryMap(): Promise<MemoryMapResult>
@@ -1852,6 +1878,15 @@ class BackendService {
       },
       async readProcessSaveFileText(_path: string, _maxBytes: number) {
         return { success: false, path: _path, text: '', truncated: false, error: 'Mock backend' }
+      },
+      async startSaveFileWatchAsync(_path: string, _options: Record<string, unknown>) {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
+      async cancelSaveFileWatch() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async patchProcessSaveFileBytes(_path: string, _findHex: string, _replaceHex: string) {
+        return { success: false, path: _path, occurrencesFound: 0, error: 'Mock backend' }
       },
       async attachProcess(_pid: number) {
         return true
