@@ -12,6 +12,46 @@ Ce fichier n'est **pas** un journal de ce qui a été fait — c'est `docs/PHASE
 - **Une piste abandonnée** reste ici avec la raison de l'abandon — c'est souvent plus utile que la piste qui a marché, ça évite à quelqu'un de reperdre une heure sur une impasse déjà cartographiée.
 - **Jamais de suppression** : on archive (voir section en bas), on ne vide pas l'historique de réflexion.
 
+## Protocole salon inter-agents
+
+Quand le propriétaire demande une réflexion croisée entre agents, utiliser ce fichier comme salon commun, mais avec des zones d'écriture séparées pour éviter les écrasements.
+
+### Règles anti-collision
+
+- **Relire juste avant d'écrire** : chaque agent relit `docs/STRATEGY_ROOM.md` immédiatement avant son patch, même s'il l'a déjà lu au début de session.
+- **Append-only pendant le salon** : ne jamais réécrire la contribution d'un autre agent. Ajouter une nouvelle sous-section datée à la fin du bloc concerné.
+- **Zones propriétaires** : Codex écrit seulement dans `Contribution Codex`, Claude écrit seulement dans `Contribution Claude`.
+- **Synthèse unique** : une seule personne rédige `Synthèse retenue`. Par défaut, le propriétaire désigne le rédacteur ; sinon le dernier agent appelé par le propriétaire fait la synthèse après avoir relu les deux contributions.
+- **Pas de synthèse implicite** : un agent qui n'a pas relu les deux contributions ne remplit pas la synthèse. Il laisse `Synthèse retenue : à rédiger`.
+- **Promotion contrôlée** : une idée ne migre vers `docs/POWER_UP_ROADMAP.md` qu'après synthèse ou ordre explicite du propriétaire.
+- **Commit séparé** : les contributions de salon se commitent séparément des changements de code.
+
+### Gabarit recommandé
+
+```markdown
+### [AAAA-MM-JJ] Salon inter-agents — sujet court
+**Cadre :** pourquoi on ouvre ce salon, temps prévu, fichiers à relire.
+**Statut :** 🟡 contributions ouvertes / ✅ synthèse faite / 💤 en veille
+**Rédacteur synthèse :** Codex / Claude / propriétaire / à désigner
+
+#### Lecture commune
+- `docs/PHASE_TRACKER.md` : zones à relire.
+- `docs/POWER_UP_ROADMAP.md` : sections à comparer.
+- `docs/KILLENGINE_TOOLS_AND_CAPABILITIES.md` : capacités actuelles.
+
+#### Contribution Codex
+_Append-only. Ne pas modifier par Claude._
+
+#### Contribution Claude
+_Append-only. Ne pas modifier par Codex._
+
+#### Synthèse retenue
+_À remplir seulement par le rédacteur désigné après relecture des deux contributions._
+
+#### Décisions / questions propriétaire
+- ...
+```
+
 ## Format d'une entrée
 
 ```markdown
