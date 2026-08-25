@@ -167,6 +167,18 @@ Ce document sert d'inventaire rapide des outils, workflows et capacités disponi
   - sauvegarde dans profil.
   - Sous-ensemble borné volontairement (pas d'adressage indexé, pas de RIP-relatif, `add`/`sub`/`cmp`/`push`/`pop` pas encore reconnus) — pas un Auto-Assembler aussi complet que Cheat Engine, et pas de langage de script général type Lua (voir `docs/POWER_UP_ROADMAP.md` section K, futur chantier).
 
+## Lua Scripting
+
+- Onglet `Lua` pour exécuter un script Lua externe via `lua.exe`/`luajit.exe`.
+- Helper `scripts/killengine.lua` pour appeler le pipe d'automatisation JSON-RPC.
+- Appels bruts (`ke.call`, `ke.scan_exact`, `ke.next_scan`, `ke.candidates`) et appels décodés en tables Lua (`ke.call_table`, `ke.scan_exact_table`, `ke.next_scan_table`, `ke.candidates_table`).
+- Exécution asynchrone annulable depuis l'UI (`Stop` tue le processus Lua actif).
+- Sauvegarde/chargement/suppression de scripts Lua dans le profil courant.
+- Exemples courts sous `scripts/lua_examples/` :
+  - ping/statut ;
+  - scan exact read-only avec aperçu de candidats ;
+  - script lent annulable pour la régression manuelle.
+
 ## Pointer Chains Et Profils
 
 - Pointer chains.

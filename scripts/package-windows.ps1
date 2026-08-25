@@ -135,6 +135,10 @@ $scriptsOut = Join-Path $packageRoot "scripts"
 New-Item -ItemType Directory -Force -Path $scriptsOut | Out-Null
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\killengine.lua") -Destination $scriptsOut -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\automation-pipe-call.ps1") -Destination $scriptsOut -Force
+$luaExamples = Join-Path $repoRoot "scripts\lua_examples"
+if (Test-Path $luaExamples) {
+    Copy-Item -LiteralPath $luaExamples -Destination $scriptsOut -Recurse -Force
+}
 
 $luaRuntimeExe = Find-FirstExistingFile -Paths @(
     (Join-Path $repoRoot "runtime\lua\lua.exe"),
@@ -248,7 +252,7 @@ Notes:
   - This package is intended for local/offline testing.
   - llama-cli.exe is copied automatically when present in third_party/llama.cpp.
   - Lua scripting uses runtime\lua\lua.exe when bundled, then falls back to PATH.
-  - Lua helper scripts live in scripts\killengine.lua and scripts\automation-pipe-call.ps1.
+  - Lua helper scripts live in scripts\killengine.lua, scripts\automation-pipe-call.ps1 and scripts\lua_examples.
   - CLR inspection uses tools\clr_inspector\KillEngineClrInspector.exe when bundled.
   - GGUF models are included by default.
   - Use -ExcludeModel only for lightweight development packages.
@@ -289,6 +293,7 @@ $requiredRuntimeItems = @(
     "PACKAGE_README.txt",
     "scripts\killengine.lua",
     "scripts\automation-pipe-call.ps1",
+    "scripts\lua_examples\README.md",
     "USER_GUIDE.md",
     "V1_REGRESSION_CHECKLIST.md"
 )

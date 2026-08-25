@@ -267,7 +267,13 @@ print(ke.call("ping", { "hello from lua" }))
 print(ke.scan_exact("40", "Int32"))
 ```
 
-Le helper `scripts/killengine.lua` fournit des raccourcis (`ke.scan_exact`, `ke.next_scan`, `ke.candidates`, `ke.kernel_read`, `ke.kernel_write_value`) mais retourne pour l'instant les réponses JSON brutes. Pour un workflow critique, lis d'abord la sortie, puis exécute les écritures par étapes.
+Le helper `scripts/killengine.lua` fournit des raccourcis (`ke.scan_exact`, `ke.next_scan`, `ke.candidates`, `ke.kernel_read`, `ke.kernel_write_value`) et leurs variantes décodées (`ke.call_table`, `ke.scan_exact_table`, `ke.next_scan_table`, `ke.candidates_table`). Pour un workflow critique, lis d'abord la sortie, puis exécute les écritures par étapes.
+
+Des exemples prêts à lancer sont disponibles dans `scripts/lua_examples/` :
+
+- `01_ping_and_status.lua` : vérifie le pipe d'automatisation et le statut Lua.
+- `02_exact_scan_snapshot.lua` : lance un scan exact read-only puis affiche un aperçu borné des candidats.
+- `03_cancellable_wait.lua` : script lent pour vérifier le bouton `Stop` de l'onglet Lua.
 
 Pour un package client, le layout attendu est :
 
@@ -275,6 +281,7 @@ Pour un package client, le layout attendu est :
 KillEngine.exe
 runtime\lua\lua.exe
 scripts\killengine.lua
+scripts\lua_examples\
 scripts\automation-pipe-call.ps1
 ```
 

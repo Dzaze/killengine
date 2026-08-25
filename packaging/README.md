@@ -41,10 +41,11 @@ Lua scripting expects this runtime layout in the portable package:
 ```text
 runtime\lua\lua.exe
 scripts\killengine.lua
+scripts\lua_examples\
 scripts\automation-pipe-call.ps1
 ```
 
-`package-windows.ps1` always copies the helper scripts. It also copies a Lua runtime automatically when `lua.exe`, `lua54.exe`, `lua5.4.exe`, or `luajit.exe` is present under `runtime\lua`, `third_party\lua`, `third_party\lua\bin`, or `tools\lua`.
+`package-windows.ps1` always copies the helper scripts and Lua examples. It also copies a Lua runtime automatically when `lua.exe`, `lua54.exe`, `lua5.4.exe`, or `luajit.exe` is present under `runtime\lua`, `third_party\lua`, `third_party\lua\bin`, or `tools\lua`.
 
 To build the local Lua runtime from official sources:
 
