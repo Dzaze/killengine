@@ -314,9 +314,21 @@ Le même pattern de mitigation (message d'erreur explicite type `accessDeniedHin
 
 **Lié à :** manual pass "Reliability Pass — Pointer Chain & AOB Patch Restart Survival" du 25-26/08/2026 (`docs/manual-validation-results/manual_validation_KillEngineTestTarget_20260825_180451.md`), qui a découvert le problème en testant la survie d'un patch AOB à un restart — jamais arrivé à ce point puisque l'application initiale échoue déjà.
 
+**Contourné le 26/08/2026 (PHASE 122), pas résolu :** `core/patch/code_patch.cpp` délègue désormais l'opération sensible à `scripts/killengine-patch-relay.ps1` (sous-processus `powershell.exe`, signé/système, pas bloqué par l'EDR) quand `MemoryWriter` échoue avec `ERROR_ACCESS_DENIED` après avoir déjà épuisé son propre fallback `VirtualProtectEx`. Vérifié en direct sur cette machine via le pipe d'automatisation : `KillEngine.exe` réel échoue bien avec `errorCode=5` sur le chemin direct, puis le relais réussit (patch identité et patch réel testés, restauration testée, cible survit). Scopé à `applyCodePatch`/`restoreCodePatch` uniquement — `MemoryWriter` générique (écritures DATA) n'a pas ce fallback et n'en a pas besoin, ces écritures fonctionnent déjà. Le risque "pattern LOLBin surveillé" (paragraphe ci-dessus, décision propriétaire du 25-26/08/2026) reste entier et non mitigé davantage — voir `docs/PHASE_TRACKER.md` PHASE 122 pour le détail de la validation.
+
 ---
 
 ## Priorisation recommandée (impact × faisabilité)
+
+### État courant — 26/08/2026
+
+Les phases 19-21 historiques sont closes ou remplacées par des chantiers plus récents. La priorité opérationnelle actuelle n'est plus d'ouvrir un nouveau mode Assistant, mais de finir/stabiliser l'arsenal afin que le futur mode enquête repose sur une carte complète des outils.
+
+1. **PHASE 122 — Relais PowerShell pour les patchs AOB/code** : livré le 26/08/2026. Le fallback reste ciblé sur `applyCodePatch`/`restoreCodePatch` quand la voie directe échoue en `ERROR_ACCESS_DENIED`, sans élargir ce contournement aux écritures mémoire génériques.
+2. **Restes de validation V1 après PHASE 121/122** : Reliability Pass manuel, Authorized Third-Party Smoke Pass, fast-path Assistant en langage naturel, et vérifications ciblées déjà listées dans `docs/PHASE_TRACKER.md`.
+3. **Heuristique "champ affiché vs champ source"** : prérequis synthétique livré en PHASE 118 ; classifieur v1 livré en PHASE 128 (`core/scanner/display_source_classifier.*`, capture dynamique via `findWhatWrites` + régularité du rythme d'écriture, pas de reconnaissance statique d'opcodes). Volontairement pas encore branché Assistant/UI — reste un chantier séparé à trancher.
+4. **Lua in-process** : toujours différé ; à reconsidérer seulement si les exemples/benchmarks montrent que le shell-out actuel devient un vrai frein.
+5. **PHASE 120 — Assistant mode réflexion/enquête** : volontairement repoussée à la toute fin de l'arsenal. Ce chantier doit synthétiser tous les outils stabilisés (`scan`, `unknown`, `Trace UI string`, `AOB/patch`, freeze polling/BP, page guard, in-process breakpoint, kernel, UWP/save files, LocalSettings, file watch, Lua, CLR, Trainer, profils, etc.) avec leurs usages, risques, limites et modes de raisonnement. Ne pas le lancer comme grosse feature tant que cette surface reste mouvante.
 
 ### Phase 19 — Breakpoint freeze + Structure analyzer (gros gain, code existant)
 1. ✅ **Freeze par hardware breakpoint** (A) — tient enfin sur SC2

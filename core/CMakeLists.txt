@@ -55,6 +55,8 @@ add_library(killcore STATIC
     scanner/scan_types.cpp
     scanner/value_variants.cpp
     scanner/display_value_tracker.cpp
+    scanner/display_source_classifier.h
+    scanner/display_source_classifier.cpp
     scanner/memory_window_search.h
     scanner/memory_window_search.cpp
     scanner/candidate_confidence.cpp

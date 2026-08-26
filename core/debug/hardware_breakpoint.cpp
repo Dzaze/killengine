@@ -474,6 +474,7 @@ void HardwareBreakpointSession::monitorLoop(size_t maxHits, int timeoutMs) {
                             instructionAddress,
                             debugEvent.dwThreadId,
                             &hit)) {
+                        hit.captureElapsedMs = GetTickCount() - startTime;
                         m_pendingHits.append(hit);
                         m_hitCount.fetch_add(1);
                         ++captured;

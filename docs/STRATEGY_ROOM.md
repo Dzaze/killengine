@@ -506,9 +506,28 @@ Relecture faite des deux contributions et des deux réponses croisées avant ré
 
 **Ce qui n'est PAS fait, volontairement :** aucun classifieur/heuristique de détection automatique du motif (reconnaissance de séquences d'instructions `mulss`/`addss`/`cvttss2si` dans le désassemblage, suggestion Assistant "ce champ est peut-être dérivé"). Cette cible synthétique est la base de validation pour ce futur travail, pas le travail lui-même — un futur chantier pourra s'en servir comme fixture (positif : `g_counterDisplayed`, négatif : `g_counterSource`/`g_health`/`g_money`, tous déjà exposés) au lieu de re-solliciter Solitaire à chaque itération du classifieur.
 
-**Statut :** 🟡 prérequis rempli (cible + preuve automatisée), heuristique toujours en attente d'un chantier dédié.
+**Statut :** ✅ prérequis rempli (cible + preuve automatisée), classifieur v1 livré PHASE 128 (`core/scanner/display_source_classifier.*`) — approche dynamique (rythme/régularité des écritures observées via `findWhatWrites`) plutôt que reconnaissance statique de motifs d'opcodes, puisque la cible synthétique s'est avérée utiliser de l'arithmétique entière simple et non du flottant comme l'anecdote XP Solitaire d'origine le laissait supposer. Intégration Assistant/UI volontairement pas faite, reste un chantier séparé.
 
 **Lié à :** `docs/PHASE_TRACKER.md` PHASE 116-118, `tests/memory_targets/test_target_main.cpp`, `tests/integration/test_display_vs_source_target.cpp`, entrée "XP Solitaire enfin contrôlable" (20/08/2026) pour le cas réel d'origine.
+
+---
+
+### [2026-08-26] Priorisation après PHASE 121/122 — PHASE 120 repoussée en synthèse finale
+
+**Contexte :** après relecture de `docs/PHASE_TRACKER.md` et `docs/POWER_UP_ROADMAP.md`, le propriétaire a tranché que le futur mode réflexion/enquête de l'Assistant ne doit pas être lancé maintenant. Son intérêt dépend directement de la connaissance complète des outils KillEngine, or l'arsenal bouge encore avec PHASE 122 et les restes de validation.
+
+**Hypothèse retenue :** un Assistant enquêteur utile n'est pas seulement une UI de carnet ou une timeline d'hypothèses ; c'est une couche de raisonnement au-dessus de tout l'attirail. Il doit savoir quand utiliser chaque outil, quand ne pas l'utiliser, quel risque il porte, quel échec connu change l'interprétation, et comment passer d'une observation à l'expérience suivante.
+
+**Décision propriétaire :** PHASE 120 devient un chantier de fin d'arsenal. Elle reste importante, mais elle doit attendre que les outils et leurs validations soient suffisamment stabilisés pour que l'Assistant ait conscience de l'ensemble des capacités réelles : scan, unknown, Trace UI string, AOB/patch, freeze polling/BP, page guard, in-process breakpoint, kernel, UWP/save files, LocalSettings, file watch, Lua, CLR, Trainer, profils, et les workflows qui les relient.
+
+**Priorité opérationnelle actuelle :**
+- Claude a pris puis clôturé le chantier lourd PHASE 122 : relais PowerShell pour les patchs de code, avec garde-fous et validation réelle.
+- Codex prend les petits chantiers documentaires sans collision : clarifier roadmap/strategy/tracker, puis synchroniser l'inventaire des capacités après PHASE 122.
+- Les prochains agents doivent lire cette décision avant de proposer un nouveau gros mode Assistant.
+
+**Statut :** ✅ tranché et transféré dans `docs/POWER_UP_ROADMAP.md` + `docs/PHASE_TRACKER.md`.
+
+**Lié à :** `docs/PHASE_TRACKER.md` PHASE 120/121/122, `docs/POWER_UP_ROADMAP.md` section "État courant — 26/08/2026".
 
 ---
 

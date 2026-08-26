@@ -29,6 +29,7 @@
 #include "inject/function_hook.h"
 #include "inject/api_hook.h"
 #include "process/export_resolver.h"
+#include "patch/code_patch.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -449,6 +450,60 @@ TEST(PowerUpRuntimeTest, FindWhatWritesDoesNotCrashTargetAfterCapture) {
     killcore::MemoryReader reader(handle);
     const auto read = reader.read(*address, sizeof(int32_t));
     EXPECT_TRUE(read.success || read.partial) << "Could not read g_health after Find What Writes — target left in a broken state";
+}
+
+// PHASE 122 : preuve reelle, out-of-process, qu'applyCodePatch/restoreCodePatch
+// reussissent sur une vraie instruction de KillEngineTestTarget.exe, capturee
+// via findWhatWrites (meme methodologie que la validation manuelle de
+// PHASE 121, voir docs/POWER_UP_ROADMAP.md section O). Le patch est
+// "identite" (reecrit exactement les bytes deja presents) : zero risque
+// comportemental, y compris si l'adresse ne tombe pas sur une frontiere
+// d'instruction. Sur une machine ou l'EDR bloque VirtualProtectEx(RWX)
+// cross-process depuis KillEngine.exe (le cas documente sur cette machine),
+// ce test exerce de bout en bout le fallback relais PowerShell
+// (scripts/killengine-patch-relay.ps1) ; sur une machine sans ce blocage, il
+// exerce le chemin direct MemoryWriter. Succes attendu dans les deux cas.
+TEST(PowerUpRuntimeTest, ApplyCodePatchIdentityPatchSucceedsOnRealCodeAddress) {
+    if (!debugPrivilegesAvailable()) {
+        GTEST_SKIP() << "Debug privileges not available — skipping code patch test";
+    }
+
+    TestTargetProcess target(/*stressRewrite=*/true);
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start";
+
+    const auto address = readTestTargetHealthAddress(target.pid());
+    ASSERT_TRUE(address.has_value()) << "Could not read g_health address from test target marker file";
+
+    const auto hits = killcore::findWhatWrites(
+        target.pid(),
+        *address,
+        killcore::BreakpointSize::DWord,
+        /*timeoutMs=*/3000,
+        /*maxHits=*/4);
+    ASSERT_FALSE(hits.isEmpty()) << "No write captured under stress rewrite — cannot get a real code address to patch";
+
+    const uint64_t codeAddress = hits.first().instructionPointer;
+    ASSERT_NE(codeAddress, 0u) << "Captured hit has no instruction pointer";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadWrite);
+    ASSERT_TRUE(handle.isValid()) << "Could not open test target for code patch";
+
+    killcore::MemoryReader reader(handle);
+    const auto before = reader.read(codeAddress, 4);
+    ASSERT_TRUE(before.success) << "Could not read original code bytes to patch";
+
+    const auto applied = killcore::applyCodePatch(handle, codeAddress, before.data, /*verify=*/true);
+    EXPECT_TRUE(applied.success) << applied.error.toStdString();
+    EXPECT_TRUE(applied.verified);
+    EXPECT_EQ(applied.previousBytes, before.data);
+
+    if (applied.success) {
+        const auto restored = killcore::restoreCodePatch(handle, codeAddress, before.data, /*verify=*/true);
+        EXPECT_TRUE(restored.success) << restored.error.toStdString();
+        EXPECT_TRUE(restored.verified);
+    }
+
+    EXPECT_TRUE(target.started()) << "Test target crashed after identity code patch";
 }
 
 // Preuve reelle, out-of-process, du chemin complet PAGE_GUARD : injection de

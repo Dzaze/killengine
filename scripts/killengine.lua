@@ -239,6 +239,14 @@ function ke.decode_json(text)
   return json_decode(text)
 end
 
+-- ATTENTION (verifie en direct le 26/08/2026) : si ce script Lua est lui-meme
+-- lance par KillEngine via executeLuaScript (le SYNCHRONE), un appel ke.call
+-- ici bloque indefiniment jusqu'au timeout du script -- executeLuaScript
+-- bloque le thread qui doit justement servir cette connexion pipe imbriquee.
+-- Lance via executeLuaScriptAsync (thread separe, retourne started:true tout
+-- de suite), ke.call fonctionne normalement (~1s de latence par appel, cout
+-- du powershell.exe imbrique a chaque fois). Donc : tout script qui utilise
+-- ke.call/ke.apply_code_patch/etc. doit etre lance en async, jamais en sync.
 function ke.call(method, params, options)
   options = options or {}
   params = params or {}
@@ -323,6 +331,21 @@ end
 
 function ke.kernel_write_value(address, value_type, value)
   return ke.call("writeMemoryValueKernel", { tostring(address), value_type or "Int32", tostring(value) })
+end
+
+-- PHASE 122 : applyCodePatch/restoreCodePatch sont deja pilotables via
+-- ke.call("applyCodePatch", {...}) sans ce wrapper (n'importe quelle methode
+-- Q_INVOKABLE l'est, par reflexion QMetaMethod cote automation_pipe_server) --
+-- ceci n'est qu'un raccourci de lisibilite, pas une condition d'acces. Le
+-- fallback relais PowerShell (EDR bloque VirtualProtectEx depuis
+-- KillEngine.exe, voir docs/POWER_UP_ROADMAP.md section O) est transparent
+-- ici : options.verify controle juste la relecture de verification.
+function ke.apply_code_patch(address_hex, bytes_hex, verify)
+  return ke.call_table("applyCodePatch", { tostring(address_hex), tostring(bytes_hex), { verify = verify ~= false } })
+end
+
+function ke.restore_code_patch(address_hex)
+  return ke.call_table("restoreCodePatch", { tostring(address_hex) })
 end
 
 -- Variantes table des wrappers ci-dessus, via ke.call_table : retournent

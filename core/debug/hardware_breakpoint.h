@@ -59,6 +59,12 @@ struct BreakpointHit {
     uint64_t r14{0};
     uint64_t r15{0};
     QByteArray xmm0;
+    /// Millisecondes écoulées depuis le début de la capture (monitorLoop),
+    /// pas un timestamp absolu -- suffisant pour mesurer l'intervalle entre
+    /// hits d'une même capture (voir core/scanner/display_source_classifier.*,
+    /// qui s'en sert pour distinguer un champ réécrit à intervalle régulier
+    /// d'un champ réécrit de façon événementielle).
+    uint32_t captureElapsedMs{0};
 };
 
 /// Configuration d'un breakpoint matériel.

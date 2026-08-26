@@ -13,6 +13,8 @@
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
 #include "process/process_handle.h"
+#include "scanner/display_source_classifier.h"
+#include "debug/hardware_breakpoint.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -122,6 +124,14 @@ bool writeInt32(killcore::MemoryWriter& writer, uint64_t address, int32_t value)
     return write.success && write.verified;
 }
 
+bool debugPrivilegesAvailable() {
+#ifdef Q_OS_WIN
+    return killcore::HardwareBreakpointSession::enableDebugPrivilege();
+#else
+    return false;
+#endif
+}
+
 } // namespace
 
 TEST(DisplayVsSourceTargetTest, WriteToSourceHolds) {
@@ -210,4 +220,66 @@ TEST(DisplayVsSourceTargetTest, SourceChangePropagatesToDisplayedGradually) {
     ASSERT_TRUE(finalDisplayed.has_value());
     EXPECT_EQ(*finalDisplayed, *initialDisplayed + kDelta)
         << "Displayed should have fully caught up to the new source after enough ticks.";
+}
+
+// Preuve reelle (pas juste la logique pure testee dans
+// tests/unit/test_display_source_classifier.cpp) que le classifieur
+// distingue bien g_counterDisplayed (recalcule a chaque tick de 50ms par
+// KillEngineTestTarget, sans variable d'environnement particuliere -- voir
+// test_target_main.cpp) via une vraie capture findWhatWrites.
+TEST(DisplayVsSourceTargetTest, ClassifyLiveDisplayedFieldIsLikelyDerivedDisplay) {
+    if (!debugPrivilegesAvailable()) {
+        GTEST_SKIP() << "Debug privileges not available -- skipping classifier live test";
+    }
+
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
+
+    const auto addresses = readCounterAddresses(target.pid());
+    ASSERT_TRUE(addresses.has_value()) << "Could not read counter addresses from marker file.";
+
+    const auto classification = killcore::classifyFieldStabilityLive(
+        target.pid(),
+        addresses->displayed,
+        killcore::BreakpointSize::DWord,
+        /*captureWindowMs=*/800,
+        /*maxHits=*/12);
+
+    EXPECT_EQ(classification.verdict, killcore::FieldStabilityVerdict::LikelyDerivedDisplay)
+        << classification.rationale.toStdString();
+    EXPECT_GE(classification.writeCount, 3u);
+    EXPECT_EQ(classification.distinctInstructionCount, 1u)
+        << "g_counterDisplayed is written from a single line of code (test_target_main.cpp) -- "
+        << "more than one instruction address would mean the capture picked up noise.";
+
+    EXPECT_TRUE(target.started()) << "Test target crashed after classifier capture.";
+}
+
+// Symetrique : g_counterSource ne bouge que sur action explicite (bouton UI
+// ou ecriture de test), donc sans rien ecrire dessus pendant la fenetre de
+// capture, le classifieur doit honnetement rapporter "aucune ecriture
+// observee" plutot que de deviner un verdict.
+TEST(DisplayVsSourceTargetTest, ClassifyLiveSourceFieldWithNoWritesIsNoWritesObserved) {
+    if (!debugPrivilegesAvailable()) {
+        GTEST_SKIP() << "Debug privileges not available -- skipping classifier live test";
+    }
+
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start.";
+
+    const auto addresses = readCounterAddresses(target.pid());
+    ASSERT_TRUE(addresses.has_value()) << "Could not read counter addresses from marker file.";
+
+    const auto classification = killcore::classifyFieldStabilityLive(
+        target.pid(),
+        addresses->source,
+        killcore::BreakpointSize::DWord,
+        /*captureWindowMs=*/800,
+        /*maxHits=*/12);
+
+    EXPECT_EQ(classification.verdict, killcore::FieldStabilityVerdict::NoWritesObserved)
+        << classification.rationale.toStdString();
+    EXPECT_EQ(classification.writeCount, 0u);
+
+    EXPECT_TRUE(target.started()) << "Test target crashed after classifier capture.";
 }
