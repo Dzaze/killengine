@@ -1351,14 +1351,13 @@ function structureRowCanBecomeTrainer(row: StructureProbeRow): boolean {
 
 function createTrainerFromStructureRow(row: StructureProbeRow) {
   if (!structureRowCanBecomeTrainer(row)) return
-  const feature = store.createTrainerFeature({
+  store.createTrainerFeature({
     name: `Struct ${row.type} 0x${row.address}`,
     action: 'write',
     address: row.address,
     valueType: String(row.type ?? 'Int32'),
     value: String(row.value ?? ''),
   })
-  if (feature) store.activeView = 'trainer'
 }
 
 function bookmarkStructureRow(row: StructureProbeRow) {

@@ -286,7 +286,7 @@ function createTrainerFeature(field: ClrFieldInfo) {
   const selected = store.clrSelectedObject
   if (!selected || !field.writable || !locatorType.value.trim() || !locatorField.value.trim() || !locatorValue.value.trim()) return
   const value = fieldWriteValues.value[writeKey(field)]?.trim() || String(field.value ?? '')
-  const feature = store.createTrainerClrFieldFeature({
+  store.createTrainerClrFieldFeature({
     name: `CLR ${field.name}`,
     typeSubstring: locatorType.value,
     identityField: locatorField.value,
@@ -296,7 +296,6 @@ function createTrainerFeature(field: ClrFieldInfo) {
     value,
     address: selected.address,
   })
-  if (feature) store.activeView = 'trainer'
 }
 
 function canUseAsLocator(field: ClrFieldInfo): boolean {
