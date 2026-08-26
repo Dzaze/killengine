@@ -152,6 +152,14 @@ cd ui && npm run build
 # Run tests avec filtre
 .\build\bin\killengine_unit_tests.exe --gtest_filter=ValueVariants.*
 
+# Fast QA récent (sessions multi-agents)
+.\scripts\test-fast-qa.ps1
+.\scripts\release-check.ps1 -OnlyFastQa
+
+# Si le registre/prompt Assistant est en cours de modification par un autre agent
+.\scripts\test-fast-qa.ps1 -SkipToolRegistry
+.\scripts\release-check.ps1 -OnlyFastQa -FastQaSkipToolRegistry
+
 # Configurer le projet (première fois)
 .\scripts\configure.ps1
 ```
