@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, type WorkspaceBookmark } from '@/stores/app'
+import AssistantToolsPanel from '@/components/settings/AssistantToolsPanel.vue'
 
 const store = useAppStore()
 const { locale } = useI18n()
@@ -434,6 +435,8 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         Safe autorise seulement les actions sans danger et les écritures confirmées. Expert débloque debugger/patch confirmés. Trainer prépare les actions avancées type hook/injection.
       </p>
     </section>
+
+    <AssistantToolsPanel />
 
     <section class="panel">
       <div class="panel-title">
