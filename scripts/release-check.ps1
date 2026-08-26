@@ -5,6 +5,8 @@
 #   .\scripts\release-check.ps1 -Package -ExcludeModel
 #   .\scripts\release-check.ps1 -Package -RequireSigning   (official release: fail if KillEngine.exe ships unsigned)
 #   .\scripts\release-check.ps1 -IncludeLuaExamples        (optional, best-effort: never fails the gate if runtime/lua/ is absent)
+#   .\scripts\release-check.ps1 -OnlyFastQa
+#   .\scripts\release-check.ps1 -OnlyFastQa -FastQaSkipToolRegistry
 #   .\scripts\release-check.ps1 -IncludeRecentTargetedTests
 #   .\scripts\release-check.ps1 -OnlyRecentTargetedTests
 #   .\scripts\release-check.ps1 -OnlyAutomationPipeSafeMethods
@@ -22,6 +24,8 @@ param(
     [switch]$ExcludeModel,
     [switch]$RequireSigning,
     [switch]$IncludeLuaExamples,
+    [switch]$OnlyFastQa,
+    [switch]$FastQaSkipToolRegistry,
     [switch]$IncludeRecentTargetedTests,
     [switch]$IncludeAutomationPipeSafeMethods,
     [switch]$OnlyRecentTargetedTests,
@@ -91,6 +95,22 @@ function Invoke-KillEngineLaunchSmoke {
             }
         }
     }
+}
+
+if ($OnlyFastQa) {
+    Push-Location $repoRoot
+    try {
+        Invoke-Step "Fast QA gate" {
+            & (Join-Path $repoRoot "scripts\test-fast-qa.ps1") -SkipToolRegistry:$FastQaSkipToolRegistry
+        }
+
+        $duration = New-TimeSpan -Start $startedAt -End (Get-Date)
+        Write-Host ""
+        Write-Host ("Fast QA release check passed in {0:mm\:ss}." -f $duration) -ForegroundColor Green
+    } finally {
+        Pop-Location
+    }
+    return
 }
 
 if ($OnlyRecentTargetedTests) {

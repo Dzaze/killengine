@@ -36,6 +36,8 @@ Optional targeted replay for the most recent automated checks:
 .\scripts\test-fast-qa.ps1
 .\scripts\test-recent-targeted.ps1
 .\scripts\test-fast-qa.ps1 -SkipToolRegistry    # parallel AI registry work only
+.\scripts\release-check.ps1 -OnlyFastQa
+.\scripts\release-check.ps1 -OnlyFastQa -FastQaSkipToolRegistry    # parallel AI registry work only
 .\scripts\release-check.ps1 -OnlyRecentTargetedTests
 .\scripts\release-check.ps1 -IncludeRecentTargetedTests
 .\scripts\release-check.ps1 -OnlyAutomationPipeSafeMethods
