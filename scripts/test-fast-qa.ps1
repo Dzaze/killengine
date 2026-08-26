@@ -4,10 +4,12 @@
 #   .\scripts\test-fast-qa.ps1
 #   .\scripts\test-fast-qa.ps1 -SkipAutomationPipe
 #   .\scripts\test-fast-qa.ps1 -SkipRecentTargeted
+#   .\scripts\test-fast-qa.ps1 -SkipToolRegistry
 
 param(
     [switch]$SkipRecentTargeted,
-    [switch]$SkipAutomationPipe
+    [switch]$SkipAutomationPipe,
+    [switch]$SkipToolRegistry
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,7 +40,7 @@ Push-Location $repoRoot
 try {
     if (-not $SkipRecentTargeted) {
         Invoke-Step "Recent targeted tests" {
-            & (Join-Path $repoRoot "scripts\test-recent-targeted.ps1")
+            & (Join-Path $repoRoot "scripts\test-recent-targeted.ps1") -SkipToolRegistry:$SkipToolRegistry
         }
     }
 

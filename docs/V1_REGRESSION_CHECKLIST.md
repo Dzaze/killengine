@@ -35,6 +35,7 @@ Optional targeted replay for the most recent automated checks:
 ```powershell
 .\scripts\test-fast-qa.ps1
 .\scripts\test-recent-targeted.ps1
+.\scripts\test-fast-qa.ps1 -SkipToolRegistry    # parallel AI registry work only
 .\scripts\release-check.ps1 -OnlyRecentTargetedTests
 .\scripts\release-check.ps1 -IncludeRecentTargetedTests
 .\scripts\release-check.ps1 -OnlyAutomationPipeSafeMethods
@@ -62,6 +63,7 @@ Expected result:
 - Optional portable package passes the embedded AI layout verifier.
 - Optional Lua examples check runs the bundled examples when `runtime\lua\` is present; warns and continues (does not fail the gate) when it is absent.
 - Optional fast QA gate runs the recent targeted tests and the automation pipe safe-methods battery in one command.
+- Optional fast QA with `-SkipToolRegistry` leaves `AIToolRegistryTest.*` out during active AI registry work, but should not replace the normal gate before merge/release.
 - Optional recent targeted tests replay the Trainer fast-path, Field Stability fast-path, AI registry, DisplaySourceClassifier, AutoAssembler, ProfileStore, and DisplayVsSourceTarget suites.
 - Optional automation pipe safe-methods check starts a real `KillEngine.exe`/`KillEngineTestTarget.exe` pair and verifies safe pipe methods only.
 - `dist\KillEngine-portable\KillEngine.exe` stays alive during the portable launch smoke test.

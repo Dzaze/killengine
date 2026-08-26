@@ -3,10 +3,12 @@
 #   .\scripts\test-recent-targeted.ps1
 #   .\scripts\test-recent-targeted.ps1 -List
 #   .\scripts\test-recent-targeted.ps1 -SkipIntegration
+#   .\scripts\test-recent-targeted.ps1 -SkipToolRegistry
 
 param(
     [switch]$List,
-    [switch]$SkipIntegration
+    [switch]$SkipIntegration,
+    [switch]$SkipToolRegistry
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,12 +16,26 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $unitTests = Join-Path $repoRoot "build\bin\killengine_unit_tests.exe"
 $integrationTests = Join-Path $repoRoot "build\bin\killengine_integration_tests.exe"
-$recentUnitFilter = "AIToolRegistryTest.*:AIEngineContextualFallbackTest.TrainerFastPath*:AIEngineContextualFallbackTest.FieldStabilityFastPath*:DisplaySourceClassifier.*:AutoAssembler.*:ProfileStore.*"
+$recentUnitSuites = @(
+    "AIToolRegistryTest.*",
+    "AIEngineContextualFallbackTest.TrainerFastPath*",
+    "AIEngineContextualFallbackTest.FieldStabilityFastPath*",
+    "DisplaySourceClassifier.*",
+    "AutoAssembler.*",
+    "ProfileStore.*"
+)
+if ($SkipToolRegistry) {
+    $recentUnitSuites = $recentUnitSuites | Where-Object { $_ -ne "AIToolRegistryTest.*" }
+}
+$recentUnitFilter = $recentUnitSuites -join ":"
 $recentIntegrationFilter = "DisplayVsSourceTargetTest.*"
 
 function Write-RecentFilters {
     Write-Host "Recent targeted unit filter:" -ForegroundColor Cyan
     Write-Host "  $recentUnitFilter"
+    if ($SkipToolRegistry) {
+        Write-Host "  (AIToolRegistryTest.* skipped by request)" -ForegroundColor Yellow
+    }
     if (-not $SkipIntegration) {
         Write-Host "Recent targeted integration filter:" -ForegroundColor Cyan
         Write-Host "  $recentIntegrationFilter"
