@@ -36,6 +36,8 @@ Optional targeted replay for the most recent automated checks:
 .\scripts\test-recent-targeted.ps1
 .\scripts\release-check.ps1 -OnlyRecentTargetedTests
 .\scripts\release-check.ps1 -IncludeRecentTargetedTests
+.\scripts\release-check.ps1 -OnlyAutomationPipeSafeMethods
+.\scripts\release-check.ps1 -IncludeAutomationPipeSafeMethods
 ```
 
 For a strict pipe-backed check of the Lua examples (needs `KillEngine.exe` already running with `KILLENGINE_AUTOMATION_PIPE=1`), run this separately — `-RequirePipe` is intentionally not wired into `release-check.ps1`:
@@ -59,6 +61,7 @@ Expected result:
 - Optional portable package passes the embedded AI layout verifier.
 - Optional Lua examples check runs the bundled examples when `runtime\lua\` is present; warns and continues (does not fail the gate) when it is absent.
 - Optional recent targeted tests replay the Trainer fast-path, Field Stability fast-path, AI registry, DisplaySourceClassifier, AutoAssembler, ProfileStore, and DisplayVsSourceTarget suites.
+- Optional automation pipe safe-methods check starts a real `KillEngine.exe`/`KillEngineTestTarget.exe` pair and verifies safe pipe methods only.
 - `dist\KillEngine-portable\KillEngine.exe` stays alive during the portable launch smoke test.
 
 ## KillEngineTestTarget Manual Pass

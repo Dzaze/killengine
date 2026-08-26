@@ -7,6 +7,7 @@
 #   .\scripts\release-check.ps1 -IncludeLuaExamples        (optional, best-effort: never fails the gate if runtime/lua/ is absent)
 #   .\scripts\release-check.ps1 -IncludeRecentTargetedTests
 #   .\scripts\release-check.ps1 -OnlyRecentTargetedTests
+#   .\scripts\release-check.ps1 -OnlyAutomationPipeSafeMethods
 #
 # -IncludeLuaExamples runs scripts\test-lua-examples.ps1 WITHOUT -RequirePipe (pipe-backed
 # strictness is a separate, explicit command -- run it directly when you want that guarantee):
@@ -22,7 +23,9 @@ param(
     [switch]$RequireSigning,
     [switch]$IncludeLuaExamples,
     [switch]$IncludeRecentTargetedTests,
-    [switch]$OnlyRecentTargetedTests
+    [switch]$IncludeAutomationPipeSafeMethods,
+    [switch]$OnlyRecentTargetedTests,
+    [switch]$OnlyAutomationPipeSafeMethods
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,6 +109,22 @@ if ($OnlyRecentTargetedTests) {
     return
 }
 
+if ($OnlyAutomationPipeSafeMethods) {
+    Push-Location $repoRoot
+    try {
+        Invoke-Step "Automation pipe safe-methods battery" {
+            & (Join-Path $repoRoot "scripts\test-automation-pipe-safe-methods.ps1")
+        }
+
+        $duration = New-TimeSpan -Start $startedAt -End (Get-Date)
+        Write-Host ""
+        Write-Host ("Automation pipe safe-methods check passed in {0:mm\:ss}." -f $duration) -ForegroundColor Green
+    } finally {
+        Pop-Location
+    }
+    return
+}
+
 Push-Location $repoRoot
 try {
     if (-not $SkipUi) {
@@ -160,6 +179,12 @@ try {
         if ($IncludeRecentTargetedTests) {
             Invoke-Step "Recent targeted tests" {
                 & (Join-Path $repoRoot "scripts\test-recent-targeted.ps1")
+            }
+        }
+
+        if ($IncludeAutomationPipeSafeMethods) {
+            Invoke-Step "Automation pipe safe-methods battery" {
+                & (Join-Path $repoRoot "scripts\test-automation-pipe-safe-methods.ps1")
             }
         }
 
