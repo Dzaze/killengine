@@ -56,6 +56,13 @@ Un template Inno Setup est disponible dans `packaging/windows/KillEngine.iss`.
 .\scripts\release-check.ps1 -Package
 ```
 
+Validation rapide pour les sessions courantes :
+
+```powershell
+.\scripts\test-fast-qa.ps1
+.\scripts\release-check.ps1 -OnlyFastQa
+```
+
 La checklist manuelle V1 est disponible ici :
 
 - [`docs/V1_REGRESSION_CHECKLIST.md`](docs/V1_REGRESSION_CHECKLIST.md)

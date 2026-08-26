@@ -1477,3 +1477,8 @@ Prerequisites before Phase 12:
       - [x] **Quoi** : `AGENTS.md` ajoute dans le démarrage rapide les commandes `scripts/test-fast-qa.ps1`, `release-check.ps1 -OnlyFastQa`, et leurs variantes `-SkipToolRegistry` / `-FastQaSkipToolRegistry` pour les sessions où le registre/prompt Assistant est modifié en parallèle.
       - [x] **Pourquoi** : le propriétaire a demandé de donner du travail à Kline/GLM en précisant de lire les fichiers `.md`. Comme `AGENTS.md` est le premier fichier obligatoire pour tous les agents, les nouveaux raccourcis QA doivent y être visibles sans devoir fouiller PHASE 140-149.
       - [x] **Comment vérifié** : documentation uniquement, pas de build relancé. `git diff --check` OK sur `AGENTS.md` et `docs/PHASE_TRACKER.md`. Scan mojibake standard OK : seules les deux exceptions historiques connues de `docs/PHASE_TRACKER.md` ressortent.
+
+    - [x] PHASE 151 (26/08/2026) - Docs README : validation rapide visible côté humain
+      - [x] **Quoi** : `README.md` ajoute une courte section "Validation rapide pour les sessions courantes" avec `scripts/test-fast-qa.ps1` et `release-check.ps1 -OnlyFastQa`, sous la section "Validation release".
+      - [x] **Pourquoi** : `AGENTS.md` couvre les agents, mais le README reste le point d'entrée humain du dépôt. Les gates rapides PHASE 143-149 doivent être découvrables sans lire tout le tracker quand on veut juste une validation courte avant de rendre la main.
+      - [x] **Comment vérifié** : documentation uniquement, pas de build relancé. `git diff --check` OK sur `README.md` et `docs/PHASE_TRACKER.md`. Scan mojibake standard OK : seules les deux exceptions historiques connues de `docs/PHASE_TRACKER.md` ressortent.
