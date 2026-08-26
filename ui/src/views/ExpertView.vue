@@ -2468,7 +2468,6 @@ const canWriteFromPanel = computed(() => hasSelectedWriteTargets.value
 const writeButtonLabel = computed(() => hasSelectedWriteTargets.value
   ? `Écrire ${selectedCandidateAddresses.value.length}`
   : 'Écrire')
-const expertDense = computed(() => store.uiMode === 'expert')
 const expertScenarioPresets = computed(() => store.workflowPresets.filter((preset) => preset.id.startsWith('scenario-')))
 
 // P3 - Les 13 panneaux Expert sont regroupes en 4 etapes de workflow.
@@ -4398,7 +4397,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <InjectionPanel v-show="showStep('persist')" v-if="expertDense" />
+      <InjectionPanel v-show="showStep('persist')" />
 
       <section v-show="showStep('inspect')" class="panel pointer-chain-panel risk-read">
         <div class="panel-title">
@@ -4515,9 +4514,9 @@ onMounted(() => {
         </p>
       </section>
 
-      <GroupScanPanel v-show="showStep('find')" v-if="expertDense" :find-what-accesses-result="findWhatAccessesResult" />
-      <PointerChainWatchPanel v-show="showStep('inspect')" v-if="expertDense" />
-      <ActionLogPanel v-show="showStep('persist')" v-if="expertDense" />
+      <GroupScanPanel v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
+      <PointerChainWatchPanel v-show="showStep('inspect')" />
+      <ActionLogPanel v-show="showStep('persist')" />
     </template>
   </div>
 </template>

@@ -311,7 +311,6 @@ export interface UnknownGuideStep {
 export const useAppStore = defineStore('app', () => {
   // State
   const activeView = ref<AppView>('assistant')
-  const uiMode = ref<'beginner' | 'expert'>('beginner')
   const version = ref('...')
   const isConnected = ref(false)
   const showOnboarding = ref(false)
@@ -8006,7 +8005,6 @@ async function doEncryptedScan() {
   return {
     version,
     activeView,
-    uiMode,
     isConnected,
     showOnboarding,
     dismissOnboarding,
