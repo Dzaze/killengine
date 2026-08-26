@@ -2755,6 +2755,46 @@ function freezeCandidateCurrent(address: string, type: string) {
   void store.freezeCandidateCurrent(address, type)
 }
 
+// PHASE 157 : bouton direct pour analyzeFieldStability (PHASE 130), jusqu'ici
+// uniquement atteignable via le chat Assistant. Meme decision de risque que
+// le registre d'outils (ai/tool_registry.cpp) : lecture seule (jamais
+// d'ecriture), execute directement sans confirmRiskAction, comme pour le
+// chemin Assistant.
+const fieldStabilityByAddress = ref<Record<string, { busy: boolean, result?: Record<string, unknown>, error?: string }>>({})
+
+const fieldStabilityVerdictLabels: Record<string, string> = {
+  likely_derived_display: 'Probablement affiché/recalculé',
+  likely_event_driven: 'Probablement source événementielle',
+  no_writes_observed: 'Aucune écriture observée',
+  insufficient_data: 'Données insuffisantes',
+}
+
+async function analyzeCandidateStability(address: string, type: string) {
+  fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: true } }
+  try {
+    const controller = backend.getController()
+    if (!controller.analyzeFieldStability) {
+      fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: false, error: 'analyzeFieldStability non exposé par ce backend.' } }
+      return
+    }
+    const result = await controller.analyzeFieldStability(address, { size: findWhatWritesSizeForType(type) })
+    fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: false, result } }
+  } catch (e) {
+    fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: false, error: String(e) } }
+  }
+}
+
+function fieldStabilityLabel(address: string): string {
+  const entry = fieldStabilityByAddress.value[address]
+  if (!entry) return ''
+  if (entry.busy) return 'Analyse...'
+  if (entry.error) return `Erreur: ${entry.error}`
+  const result = entry.result
+  if (!result?.success) return String(result?.error || 'Échec')
+  const verdict = String(result.verdict || '')
+  return fieldStabilityVerdictLabels[verdict] || verdict
+}
+
 onMounted(() => {
   if (store.candidatePage) return
   void store.refreshCandidates()
@@ -4019,12 +4059,23 @@ onMounted(() => {
               <button class="btn btn-secondary compact" @click="freezeCandidateCurrent(match.address, match.type)">
                 Freeze actuel
               </button>
+              <button
+                class="btn btn-secondary compact"
+                :disabled="fieldStabilityByAddress[match.address]?.busy"
+                title="Observe brièvement (lecture seule) le rythme des écritures pour juger si ce champ est probablement affiché/recalculé ou une source événementielle — utile avant de figer/patcher."
+                @click="analyzeCandidateStability(match.address, match.type)"
+              >
+                Stabilité
+              </button>
               <button class="btn btn-secondary compact" @click="store.keepCandidate(match.address)">
                 Garder
               </button>
               <button class="btn btn-secondary compact" @click="store.ignoreCandidate(match.address)">
                 Ignorer
               </button>
+            </div>
+            <div v-if="fieldStabilityLabel(match.address)" class="candidate-stability-result">
+              {{ fieldStabilityLabel(match.address) }}
             </div>
           </div>
         </div>
@@ -6044,6 +6095,13 @@ onMounted(() => {
 .candidate-actions .btn {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.candidate-stability-result {
+  grid-column: 1 / -1;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding-left: 36px;
 }
 
 .candidate-très-probable {
