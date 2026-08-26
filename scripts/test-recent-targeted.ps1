@@ -37,7 +37,7 @@ try {
     Invoke-TestBinary `
         -Name "Recent targeted unit tests" `
         -ExePath $unitTests `
-        -Filter "AIToolRegistryTest.*:AIEngineContextualFallbackTest.TrainerFastPath*:DisplaySourceClassifier.*"
+        -Filter "AIToolRegistryTest.*:AIEngineContextualFallbackTest.TrainerFastPath*:AIEngineContextualFallbackTest.FieldStabilityFastPath*:DisplaySourceClassifier.*"
 
     if (-not $SkipIntegration) {
         Invoke-TestBinary `

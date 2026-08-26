@@ -57,7 +57,7 @@ Expected result:
 - Optional portable package contains only runtime executables and required Qt/WebEngine assets.
 - Optional portable package passes the embedded AI layout verifier.
 - Optional Lua examples check runs the bundled examples when `runtime\lua\` is present; warns and continues (does not fail the gate) when it is absent.
-- Optional recent targeted tests replay the Trainer fast-path, AI registry, DisplaySourceClassifier unit suite, and DisplayVsSourceTarget integration suite.
+- Optional recent targeted tests replay the Trainer fast-path, Field Stability fast-path, AI registry, DisplaySourceClassifier unit suite, and DisplayVsSourceTarget integration suite.
 - `dist\KillEngine-portable\KillEngine.exe` stays alive during the portable launch smoke test.
 
 ## KillEngineTestTarget Manual Pass
