@@ -216,6 +216,171 @@ FieldStabilityToolMatch matchFieldStabilityTool(const QString& query) {
         "elle ressemble à un champ affiché recalculé ou à une source événementielle."};
 }
 
+struct AutoReportToolMatch {
+    QString tool;
+    QString rationale;
+};
+
+// PHASE 140 : demande explicite d'un resume/bilan de l'auto-resolution
+// (getAutoResolveReport -- lecture seule, cout quasi nul, aucun argument
+// requis). Mots-cles volontairement assez specifiques (pas juste "rapport"
+// ou "resume" seuls) pour eviter de se declencher sur une phrase qui parle
+// d'autre chose.
+AutoReportToolMatch matchAutoReportTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsReport =
+        q.contains("rapport auto") || q.contains("rapport d'auto")
+        || q.contains("bilan auto-résolution") || q.contains("bilan auto-resolution")
+        || q.contains("résumé auto-résolution") || q.contains("resume auto-resolution")
+        || q.contains("stratégie recommandée") || q.contains("strategie recommandee")
+        || q.contains("auto report") || q.contains("auto-resolve report")
+        || q.contains("get auto report");
+    if (!wantsReport) {
+        return {};
+    }
+    return {"get_auto_report",
+        "Je résume le contexte, la stratégie recommandée et les événements récents (lecture seule)."};
+}
+
+struct UiSourcesToolMatch {
+    QString tool;
+    QVariantMap args;
+    QString rationale;
+};
+
+// PHASE 140 : suite naturelle de trace_ui_string (deja fast-pathe plus haut
+// dans processQuery/deterministicPlanWithContext) -- demande explicite
+// d'analyser les sources numeriques autour d'une string UI deja localisee.
+// Ne fournit que "value" (la valeur affichee actuelle) : le dispatch cote
+// ApplicationController::startSmartSearch reutilise m_pendingUiStringCandidates
+// (meme etat que trace_ui_string/AnswerTraceUiFilterPrompt) si aucune adresse
+// explicite n'est donnee, plutot que d'exiger une adresse dans la phrase --
+// une seule phrase NL fournit rarement une adresse ET une byteLength.
+UiSourcesToolMatch matchUiSourcesTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsSources =
+        q.contains("analyse les sources") || q.contains("analyser les sources")
+        || q.contains("analyse la source") || q.contains("sources numériques")
+        || q.contains("sources numeriques") || q.contains("analyze sources")
+        || q.contains("analyze the sources") || q.contains("numeric sources")
+        || q.contains("numeric source");
+    if (!wantsSources) {
+        return {};
+    }
+
+    QVariantMap args;
+    const QString value = firstDecimalOutsideHex(query);
+    if (!value.isEmpty()) {
+        args["value"] = value;
+    }
+    const QString address = firstHexAddressIn(query);
+    if (!address.isEmpty()) {
+        args["address"] = address;
+    }
+    return {"analyze_ui_sources", args,
+        "Je cherche les sources numériques probables près de la dernière string UI localisée (lecture seule)."};
+}
+
+struct AddressToolMatch {
+    QString tool;
+    QVariantMap args;
+    QString rationale;
+};
+
+// PHASE 140 : generate_aob/suggest_patch/disassemble_backward -- les 3 restants
+// du "workflow patch" reclasses lecture seule (tool_registry.cpp). Meme
+// mecanique que matchFieldStabilityTool : mot-cle + extraction d'adresse.
+AddressToolMatch matchGenerateAobTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsAob =
+        q.contains("signature aob") || q.contains("aob signature")
+        || q.contains("génère une signature") || q.contains("genere une signature")
+        || q.contains("generate aob") || q.contains("generate a signature")
+        || q.contains("generate signature");
+    if (!wantsAob) {
+        return {};
+    }
+    QVariantMap args;
+    const QString address = firstHexAddressIn(query);
+    if (!address.isEmpty()) {
+        args["address"] = address;
+    }
+    return {"generate_aob", args, "Je génère une signature AOB pour cette instruction (lecture seule)."};
+}
+
+AddressToolMatch matchSuggestPatchTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsSuggestion =
+        q.contains("suggère un patch") || q.contains("suggere un patch")
+        || q.contains("suggestion de patch") || q.contains("suggest a patch")
+        || q.contains("suggest patch") || q.contains("patch suggestions");
+    if (!wantsSuggestion) {
+        return {};
+    }
+    QVariantMap args;
+    const QString address = firstHexAddressIn(query);
+    if (!address.isEmpty()) {
+        args["address"] = address;
+    }
+    return {"suggest_patch", args,
+        "Je suggère des patchs de code possibles pour cette instruction, sans en appliquer aucun."};
+}
+
+AddressToolMatch matchDisassembleBackwardTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsBackward =
+        q.contains("désassemble en arrière") || q.contains("desassemble en arriere")
+        || q.contains("désassemblage arrière") || q.contains("desassemblage arriere")
+        || q.contains("disassemble backward") || q.contains("champs sources")
+        || q.contains("champ source de") || q.contains("source fields");
+    if (!wantsBackward) {
+        return {};
+    }
+    QVariantMap args;
+    const QString address = firstHexAddressIn(query);
+    if (!address.isEmpty()) {
+        args["address"] = address;
+    }
+    return {"disassemble_backward", args,
+        "Je désassemble en arrière depuis cette instruction pour repérer les champs sources candidats (lecture seule)."};
+}
+
+// PHASE 140 : find_what_writes/test_candidate_fields -- contrairement aux 3
+// ci-dessus, le dispatch cote ApplicationController::startSmartSearch ne les
+// execute JAMAIS directement (attache un debugger / ecrit une valeur test,
+// voir application_controller.cpp) : il redirige systematiquement vers l'UI
+// quels que soient les args. Le matching ici sert seulement a router vers le
+// bon message de redirection -- pas besoin d'une extraction d'adresse fiable.
+AddressToolMatch matchFindWhatWritesTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsCapture =
+        q.contains("capture ce qui écrit") || q.contains("capture ce qui ecrit")
+        || q.contains("qu'est-ce qui écrit") || q.contains("qu'est-ce qui ecrit")
+        || q.contains("qui écrit cette adresse") || q.contains("qui ecrit cette adresse")
+        || q.contains("find what writes") || q.contains("what writes to");
+    if (!wantsCapture) {
+        return {};
+    }
+    QVariantMap args;
+    const QString address = firstHexAddressIn(query);
+    if (!address.isEmpty()) {
+        args["address"] = address;
+    }
+    return {"find_what_writes", args, ""};
+}
+
+AddressToolMatch matchTestCandidateFieldsTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsTest =
+        q.contains("teste les champs candidats") || q.contains("test candidate fields")
+        || q.contains("teste automatiquement") || q.contains("test the candidate fields")
+        || q.contains("vérifie quel champ tient") || q.contains("verifie quel champ tient");
+    if (!wantsTest) {
+        return {};
+    }
+    return {"test_candidate_fields", {}, ""};
+}
+
 } // namespace
 
 AIEngine::AIEngine(QObject* parent) : QObject(parent) {}
@@ -444,6 +609,41 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
         if (const auto stabilityMatch = matchFieldStabilityTool(query); !stabilityMatch.tool.isEmpty()) {
             QVariantMap result = makeToolCall(stabilityMatch.tool, stabilityMatch.args, stabilityMatch.rationale);
             result["aiBackend"] = "deterministic_field_stability_fastpath";
+            return result;
+        }
+        if (const auto autoReportMatch = matchAutoReportTool(query); !autoReportMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(autoReportMatch.tool, {}, autoReportMatch.rationale);
+            result["aiBackend"] = "deterministic_auto_report_fastpath";
+            return result;
+        }
+        if (const auto uiSourcesMatch = matchUiSourcesTool(query); !uiSourcesMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(uiSourcesMatch.tool, uiSourcesMatch.args, uiSourcesMatch.rationale);
+            result["aiBackend"] = "deterministic_ui_sources_fastpath";
+            return result;
+        }
+        if (const auto aobMatch = matchGenerateAobTool(query); !aobMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(aobMatch.tool, aobMatch.args, aobMatch.rationale);
+            result["aiBackend"] = "deterministic_generate_aob_fastpath";
+            return result;
+        }
+        if (const auto suggestMatch = matchSuggestPatchTool(query); !suggestMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(suggestMatch.tool, suggestMatch.args, suggestMatch.rationale);
+            result["aiBackend"] = "deterministic_suggest_patch_fastpath";
+            return result;
+        }
+        if (const auto backwardMatch = matchDisassembleBackwardTool(query); !backwardMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(backwardMatch.tool, backwardMatch.args, backwardMatch.rationale);
+            result["aiBackend"] = "deterministic_disassemble_backward_fastpath";
+            return result;
+        }
+        if (const auto findWritesMatch = matchFindWhatWritesTool(query); !findWritesMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(findWritesMatch.tool, findWritesMatch.args, findWritesMatch.rationale);
+            result["aiBackend"] = "deterministic_find_what_writes_fastpath";
+            return result;
+        }
+        if (const auto testFieldsMatch = matchTestCandidateFieldsTool(query); !testFieldsMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(testFieldsMatch.tool, testFieldsMatch.args, testFieldsMatch.rationale);
+            result["aiBackend"] = "deterministic_test_candidate_fields_fastpath";
             return result;
         }
         if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
@@ -691,6 +891,27 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     }
     if (const auto stabilityMatch = matchFieldStabilityTool(query); !stabilityMatch.tool.isEmpty()) {
         return makeToolCall(stabilityMatch.tool, stabilityMatch.args, stabilityMatch.rationale);
+    }
+    if (const auto autoReportMatch = matchAutoReportTool(query); !autoReportMatch.tool.isEmpty()) {
+        return makeToolCall(autoReportMatch.tool, {}, autoReportMatch.rationale);
+    }
+    if (const auto uiSourcesMatch = matchUiSourcesTool(query); !uiSourcesMatch.tool.isEmpty()) {
+        return makeToolCall(uiSourcesMatch.tool, uiSourcesMatch.args, uiSourcesMatch.rationale);
+    }
+    if (const auto aobMatch = matchGenerateAobTool(query); !aobMatch.tool.isEmpty()) {
+        return makeToolCall(aobMatch.tool, aobMatch.args, aobMatch.rationale);
+    }
+    if (const auto suggestMatch = matchSuggestPatchTool(query); !suggestMatch.tool.isEmpty()) {
+        return makeToolCall(suggestMatch.tool, suggestMatch.args, suggestMatch.rationale);
+    }
+    if (const auto backwardMatch = matchDisassembleBackwardTool(query); !backwardMatch.tool.isEmpty()) {
+        return makeToolCall(backwardMatch.tool, backwardMatch.args, backwardMatch.rationale);
+    }
+    if (const auto findWritesMatch = matchFindWhatWritesTool(query); !findWritesMatch.tool.isEmpty()) {
+        return makeToolCall(findWritesMatch.tool, findWritesMatch.args, findWritesMatch.rationale);
+    }
+    if (const auto testFieldsMatch = matchTestCandidateFieldsTool(query); !testFieldsMatch.tool.isEmpty()) {
+        return makeToolCall(testFieldsMatch.tool, testFieldsMatch.args, testFieldsMatch.rationale);
     }
     if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
         return makeToolCall(offMemoryMatch.tool, {}, offMemoryMatch.rationale);

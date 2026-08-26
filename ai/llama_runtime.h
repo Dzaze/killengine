@@ -45,11 +45,23 @@ public:
     static QVariantMap extractToolCallJson(const QString& text, QString* error = nullptr);
     static QVariantMap extractIntentJson(const QString& text, QString* error = nullptr);
 
+    /// PHASE 140 : rendu public (etait prive) uniquement pour permettre un
+    /// test de non-regression qui verifie que la ligne "Schema obligatoire"
+    /// codee en dur (ai/llama_runtime.cpp) reste synchronisee avec
+    /// ToolRegistry::availableTools() -- cette ligne ne se genere PAS
+    /// automatiquement depuis le registre (contrairement au bloc "Outils
+    /// disponibles" plus bas dans le meme prompt), et un outil ajoute au
+    /// registre sans etre ajoute ici devient invisible pour le modele local
+    /// meme si son dispatch existe par ailleurs (bug reel trouve et corrige
+    /// en PHASE 140 : get_auto_report/disassemble_backward/
+    /// test_candidate_fields manquaient a cette ligne). Fonction pure
+    /// (aucun etat d'instance), donc sans risque a exposer.
+    static QString buildPrompt(const QString& query, const ToolRegistry& registry, const QVariantMap& context);
+
 private:
     /// Completion serveur persistant si dispo, sinon llama-cli one-shot.
     LlamaGenerationResult generate(const QString& prompt, int nPredict) const;
     static QString findExecutable();
-    static QString buildPrompt(const QString& query, const ToolRegistry& registry, const QVariantMap& context);
     static QString buildContextBlock(const QVariantMap& context);
     static QString buildHistoryBlock(const QVariantMap& context);
     static QString buildDynamicHints(const QVariantMap& context);

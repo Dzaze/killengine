@@ -12321,6 +12321,32 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         || queryLower.contains("real source") || queryLower.contains("field stability")
         || queryLower.contains("stabilité du champ") || queryLower.contains("stabilite du champ")
         || queryLower.contains("stabilité de cette adresse") || queryLower.contains("stabilite de cette adresse");
+    // PHASE 140 : meme piege, pour les 5 outils restants d'analyze_field_stability
+    // qui prennent une adresse (get_auto_report/analyze_ui_sources n'en ont pas
+    // besoin en pratique, pas concernes). Verifications volontairement plus
+    // grossieres que leurs matchXxxTool respectifs (ai/ai_engine.cpp) -- servent
+    // seulement a eviter que le pre-intent memoire les intercepte avant que
+    // processQuery() ait une chance de les router correctement.
+    const bool smartSearchAobOrPatchWorkflowQuery = queryLower.contains("signature aob") || queryLower.contains("aob signature")
+        || queryLower.contains("génère une signature") || queryLower.contains("genere une signature")
+        || queryLower.contains("generate aob") || queryLower.contains("suggère un patch")
+        || queryLower.contains("suggere un patch") || queryLower.contains("suggest patch")
+        || queryLower.contains("suggest a patch") || queryLower.contains("désassemble en arrière")
+        || queryLower.contains("desassemble en arriere") || queryLower.contains("disassemble backward")
+        || queryLower.contains("champs sources") || queryLower.contains("source fields");
+    const bool smartSearchFindWhatWritesOrTestFieldsQuery = queryLower.contains("capture ce qui écrit")
+        || queryLower.contains("capture ce qui ecrit") || queryLower.contains("qu'est-ce qui écrit")
+        || queryLower.contains("qu'est-ce qui ecrit") || queryLower.contains("find what writes")
+        || queryLower.contains("what writes to") || queryLower.contains("teste les champs candidats")
+        || queryLower.contains("test candidate fields") || queryLower.contains("teste automatiquement");
+    // PHASE 140 : consolide en un seul flag plutot que de continuer a "&&" une
+    // liste croissante sur les 8 points de bypass ci-dessous -- prochain outil
+    // a router : ajouter sa condition ici, pas un neuvieme "&& !smartSearchXQuery"
+    // sur chaque ligne.
+    const bool smartSearchBypassesMemoryPreIntent = smartSearchTrainerQuery
+        || smartSearchFieldStabilityQuery
+        || smartSearchAobOrPatchWorkflowQuery
+        || smartSearchFindWhatWritesOrTestFieldsQuery;
     const SmartSearchIntent intent = classifySmartSearchIntent(
         query,
         numbers,
@@ -12765,7 +12791,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return recovery;
     }
 
-    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery
+    if (!smartSearchBypassesMemoryPreIntent
         && (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
         || (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && !chatAddresses.isEmpty())
         || (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && !chatAddresses.isEmpty()))) {
@@ -12788,25 +12814,25 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return activation;
     }
 
-    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
+    if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
         auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
         stampIntent(&writeTargets);
         return writeTargets;
     }
 
-    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
+    if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
         auto freezeTargets = freezeChatMemoryTargetsFromQuery(query, numbers.first());
         stampIntent(&freezeTargets);
         return freezeTargets;
     }
 
-    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
+    if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
         auto rewriteTargets = rewriteLastAutoWriteTargets(numbers.first(), query);
         stampIntent(&rewriteTargets);
         return rewriteTargets;
     }
 
-    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::WriteProfileTargets && numbers.size() == 1) {
+    if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::WriteProfileTargets && numbers.size() == 1) {
         auto profileWrite = writeProfileTargetsFromQuery(query, numbers.first());
         if (profileWrite.value("tool").toString() == "profile_write") {
             stampIntent(&profileWrite);
@@ -12820,7 +12846,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["message"] = "D'accord, j'ai oublié le contexte actif. Donne-moi la nouvelle valeur à chercher.";
         result["workflowStatus"] = "idle";
         result["error"] = "";
-    } else if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
+    } else if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
         // FirstScanRunning = nouveau lot de candidats, sans rapport avec un
         // eventuel echec signale sur le lot precedent. Sans ce reset, un
         // ExactScan lance sans le mot-cle "nouvelle recherche" (donc sans
@@ -12838,7 +12864,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["rationale"] = intent.rationale;
         result["state"] = "FirstScanRunning";
         result["error"] = "";
-    } else if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
+    } else if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
         m_smartSearchLastObservedValue = numbers.first();
         QVariantMap args;
         args["mode"] = "exact";
@@ -12865,7 +12891,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["rationale"] = intent.rationale;
         result["state"] = "Refining";
         result["error"] = "";
-    } else if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
+    } else if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
         // Meme raisonnement que pour ExactScan ci-dessus : nouveau lot,
         // l'echelle de secours du lot precedent ne s'applique plus.
         resetFailureEscalationState();
@@ -13161,6 +13187,166 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         } else {
             result["message"] = actionResult.value("error").toString();
         }
+        stampIntent(&result);
+        return result;
+    } else if (tool == "get_auto_report") {
+        // PHASE 140 : lecture seule, cout quasi nul (agrege des donnees deja
+        // collectees) -- execute directement, meme categorie que
+        // analyze_field_stability ci-dessus.
+        const int maxEvents = std::clamp(args.value("maxEvents", 50).toInt(), 5, 200);
+        actionResult = getAutoResolveReport(maxEvents);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "auto_report_ready";
+            result["message"] = actionResult.value("summary").toString().isEmpty()
+                ? "Rapport d'auto-résolution généré."
+                : actionResult.value("summary").toString();
+        } else {
+            result["message"] = actionResult.value("error").toString();
+        }
+        stampIntent(&result);
+        return result;
+    } else if (tool == "analyze_ui_sources") {
+        // PHASE 140 : lecture seule (killcore::MemoryReader uniquement), suite
+        // naturelle de trace_ui_string. Reutilise m_pendingUiStringCandidates
+        // (meme etat que le pending trace_ui_filter) si aucune adresse
+        // explicite n'est fournie -- une phrase NL fournit rarement une
+        // adresse ET une byteLength en une fois.
+        const QString uiSourceValue = args.value("value").toString().trimmed();
+        if (uiSourceValue.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Il me faut la valeur actuellement affichée pour analyser les sources numériques.";
+            stampIntent(&result);
+            return result;
+        }
+
+        QVariantMap uiStringCandidate;
+        const QString explicitUiSourceAddress = args.value("address").toString().trimmed();
+        if (!explicitUiSourceAddress.isEmpty()) {
+            uiStringCandidate["address"] = explicitUiSourceAddress;
+            uiStringCandidate["byteLength"] = args.value("byteLength", 0);
+        } else if (!m_pendingUiStringCandidates.isEmpty()) {
+            uiStringCandidate = m_pendingUiStringCandidates.first().toMap();
+        } else {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Je n'ai pas de string UI récente à analyser — lance d'abord trace_ui_string, ou donne-moi directement une adresse.";
+            stampIntent(&result);
+            return result;
+        }
+
+        actionResult = analyzeUiStringSources(uiStringCandidate, uiSourceValue, {});
+        if (actionResult.value("success").toBool()) {
+            const int matches = actionResult.value("matchesReturned").toInt();
+            result["workflowStatus"] = "ui_sources_analyzed";
+            result["message"] = matches > 0
+                ? QString("Analyse des sources : %1 candidat(s) numérique(s) trouvé(s) près de la string.").arg(matches)
+                : "Analyse des sources : aucun candidat numérique trouvé près de cette string.";
+            if (!actionResult.value("candidates").isNull()) {
+                result["uiSourceCandidates"] = actionResult.value("candidates");
+            }
+        } else {
+            result["message"] = actionResult.value("error").toString();
+        }
+        stampIntent(&result);
+        return result;
+    } else if (tool == "generate_aob") {
+        // PHASE 140 : lecture seule (voir tool_registry.cpp) -- execute
+        // directement. Ne patche jamais rien, se contente de generer/qualifier
+        // une signature.
+        const QString aobAddress = args.value("address").toString().trimmed();
+        if (aobAddress.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Il me faut une adresse (0x...) pour générer une signature AOB.";
+            stampIntent(&result);
+            return result;
+        }
+        actionResult = generateAobSignature(aobAddress, {});
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "aob_signature_generated";
+            result["message"] = QString("Signature AOB générée pour %1 (qualité : %2) : %3")
+                .arg(aobAddress, actionResult.value("signatureRisk").toString(), actionResult.value("pattern").toString());
+        } else {
+            result["message"] = actionResult.value("error").toString();
+        }
+        stampIntent(&result);
+        return result;
+    } else if (tool == "suggest_patch") {
+        // PHASE 140 : lecture seule -- suggere des patchs sans jamais les
+        // appliquer (applyCodePatch reste un geste UI/pipe distinct, pas
+        // expose comme tool Assistant).
+        const QString suggestAddress = args.value("address").toString().trimmed();
+        if (suggestAddress.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Il me faut une adresse (0x...) pour suggérer des patchs de code (aucune application automatique).";
+            stampIntent(&result);
+            return result;
+        }
+        actionResult = suggestCodePatches(suggestAddress, {});
+        if (actionResult.value("success").toBool()) {
+            const int suggestionCount = actionResult.value("suggestions").toList().size();
+            result["workflowStatus"] = "code_patches_suggested";
+            result["message"] = suggestionCount > 0
+                ? QString("%1 suggestion(s) de patch pour %2 — aucune n'est appliquée, vérifie dans l'onglet AOB/Patch avant d'agir.")
+                      .arg(suggestionCount)
+                      .arg(suggestAddress)
+                : QString("Aucune suggestion de patch trouvée pour %1.").arg(suggestAddress);
+        } else {
+            result["message"] = actionResult.value("error").toString();
+        }
+        stampIntent(&result);
+        return result;
+    } else if (tool == "disassemble_backward") {
+        // PHASE 140 : lecture seule (Q_INVOKABLE ... const cote header).
+        const QString backwardAddress = args.value("address").toString().trimmed();
+        if (backwardAddress.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Il me faut une adresse (0x...) pour désassembler en arrière (lecture seule).";
+            stampIntent(&result);
+            return result;
+        }
+        actionResult = disassembleBackward(backwardAddress, {});
+        if (actionResult.value("success").toBool()) {
+            const int candidateCount = actionResult.value("candidateFields").toList().size();
+            result["workflowStatus"] = "disassembled_backward";
+            result["message"] = QString("Désassemblage en arrière de %1 : %2 champ(s) candidat(s) trouvé(s).")
+                .arg(backwardAddress)
+                .arg(candidateCount);
+        } else {
+            result["message"] = actionResult.value("error").toString();
+        }
+        stampIntent(&result);
+        return result;
+    } else if (tool == "find_what_writes") {
+        // PHASE 140 : jamais d'execution directe depuis le chat. La variante
+        // synchrone findWhatWrites() bloque le thread appelant jusqu'a
+        // timeoutMs en attendant une ecriture reelle, et suppose que
+        // l'utilisateur fait varier la valeur EN DIRECT dans le jeu pendant la
+        // fenetre (voir AGENTS.md "Find What Writes"). Un declenchement
+        // autonome depuis le chat attacherait un debugger a l'aveugle sans
+        // que personne ne varie la valeur -- capture vide au mieux, risque de
+        // crash sur une adresse "chaude" au pire (deja reproduit, PHASE 127).
+        // Redirige vers l'UI plutot que d'executer, meme patron que
+        // trainer_apply_request/trainer_restore_request.
+        const QString fwwAddress = args.value("address").toString().trimmed();
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = "Attache un debugger Win32 et nécessite de faire varier la valeur en direct dans le jeu pendant la capture — pas adapté à une exécution autonome depuis le chat.";
+        result["message"] = fwwAddress.isEmpty()
+            ? "Pour capturer ce qui écrit une adresse, ouvre l'onglet Expert (section Trace UI string), coche « Debugger autorisé », clique « Écrit par » sur la source concernée, puis fais varier la valeur dans le jeu pendant la fenêtre de capture."
+            : QString("Pour capturer ce qui écrit %1, ouvre l'onglet Expert (section Trace UI string), coche « Debugger autorisé », clique « Écrit par », puis fais varier la valeur dans le jeu pendant la fenêtre de capture.").arg(fwwAddress);
+        stampIntent(&result);
+        return result;
+    } else if (tool == "test_candidate_fields") {
+        // PHASE 140 : jamais d'execution directe depuis le chat. Ecrit une
+        // vraie valeur test sur jusqu'a 5 adresses candidates puis tente de
+        // restaurer (restauration non garantie en cas d'echec, voir
+        // testCandidateFieldsAsync ci-dessous), et tourne ~60s en tache de
+        // fond avec resultat livre par signal Qt (candidateFieldTestFinished)
+        // -- ne correspond pas au patron requete/reponse en un seul tour de
+        // startSmartSearch. Redirige vers l'UI, meme patron que find_what_writes.
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = "Écrit une vraie valeur test sur la cible (restauration non garantie) et tourne environ une minute en tâche de fond — pas adapté à une exécution autonome depuis le chat.";
+        result["message"] = "Pour tester automatiquement quels champs candidats tiennent réellement, ouvre l'onglet Expert, section champ affiché/source, après un désassemblage en arrière — le bouton « Tester automatiquement » lance ce test avec un suivi visuel de la progression.";
         stampIntent(&result);
         return result;
     } else if (tool == "write_value" || tool == "freeze_value") {

@@ -38,12 +38,27 @@ QVariantList toolDefinitions() {
         makeTool("prepare_write_checkpoint", "Prepare des candidats pour ecriture confirmee, sans ecrire.", {"value"}, "write", true),
         makeTool("write_value", "Écrit une valeur typée à une adresse apres confirmation explicite.", {"address", "valueType", "value"}, "write", true),
         makeTool("freeze_value", "Active ou désactive un freeze apres confirmation explicite.", {"address", "valueType", "value", "enabled"}, "write", true),
-        makeTool("find_what_writes", "Capture l'instruction qui ecrit une adresse apres confirmation explicite.", {"address", "size"}, "debug", true),
+        // PHASE 140 : requiredArgs vide -- ApplicationController::startSmartSearch
+        // ne fait plus jamais executer ce tool depuis le chat (redirige
+        // systematiquement vers l'UI, voir son dispatch), donc "address"/"size"
+        // ne sont plus vraiment requis a ce niveau : les exiger bloquait le
+        // validateur AVANT d'atteindre le message de redirection utile.
+        makeTool("find_what_writes", "Capture l'instruction qui ecrit une adresse. Depuis le chat, redirige vers l'UI (attache un debugger, necessite une variation live de la valeur) plutot que d'executer.", {}, "debug", true),
         makeTool("analyze_field_stability", "Observe passivement (aucune écriture) le rythme des écritures sur une adresse candidate pour juger si elle ressemble à un champ affiché recalculé à chaque tick (\"likely_derived_display\") ou à une source événementielle (\"likely_event_driven\"). Attache brièvement un debugger comme find_what_writes, mais n'écrit jamais rien — exécuté directement, sans confirmation RiskGate. Utile avant de figer/patcher une adresse trouvée par scan : un champ affiché ne tiendra probablement pas en écriture directe, chercher la source en amont plutôt (voir disassemble_backward).", {"address"}, "debug", false),
-        makeTool("generate_aob", "Genere une signature AOB depuis une instruction confirmee.", {"address"}, "patch", true),
-        makeTool("suggest_patch", "Suggere un patch code sans application automatique.", {"address"}, "patch", true),
-        makeTool("disassemble_backward", "Désassemble les instructions avant un RIP capturé pour repérer les champs sources d'un compteur animé.", {"address"}, "patch", true),
-        makeTool("test_candidate_fields", "Teste automatiquement lequel des champs candidats (issus de disassemble_backward) tient réellement : écrit une valeur test, attend, relit, classe holds/reverts, puis restaure. Remplace la lecture manuelle d'assembleur par une preuve empirique.", {"address", "watchedAddress"}, "write", true),
+        // PHASE 140 : les 3 tools ci-dessous restent categorie "patch" pour la
+        // taxonomie (etapes d'un workflow de patch), mais requiresConfirmation
+        // passe a false -- verifie explicitement (PHASE 140) qu'aucun des trois
+        // n'ecrit quoi que ce soit (lecture memoire seule + calcul), meme
+        // precedent que analyze_field_stability (PHASE 130/131, risk=debug mais
+        // requiresConfirmation=false car jamais d'ecriture). L'ecriture reelle
+        // reste derriere applyCodePatch (tool absent de ce registre cote chat --
+        // seul le pipe/UI l'expose), qui garde sa propre confirmation.
+        makeTool("generate_aob", "Genere une signature AOB depuis une instruction confirmee. Lecture seule (aucune ecriture), execute directement.", {"address"}, "patch", false),
+        makeTool("suggest_patch", "Suggere un patch code sans application automatique. Lecture seule, execute directement.", {"address"}, "patch", false),
+        makeTool("disassemble_backward", "Désassemble les instructions avant un RIP capturé pour repérer les champs sources d'un compteur animé. Lecture seule, execute directement.", {"address"}, "patch", false),
+        // PHASE 140 : requiredArgs vide, meme raison que find_what_writes
+        // ci-dessus -- redirige systematiquement vers l'UI depuis le chat.
+        makeTool("test_candidate_fields", "Teste automatiquement lequel des champs candidats (issus de disassemble_backward) tient réellement : écrit une valeur test, attend, relit, classe holds/reverts, puis restaure. Depuis le chat, redirige vers l'UI (écrit réellement, tourne ~1 minute en tâche de fond) plutôt que d'exécuter.", {}, "write", true),
         makeTool("kernel_write", "Écrit une valeur via le driver noyau (contourne les protections mémoire usermode). À utiliser seulement si l'utilisateur le demande explicitement (ex: \"écris via le kernel\") ou après échec d'une écriture usermode normale.", {"address", "valueType", "value"}, "injection", true),
         makeTool("speedhack_set", "Accélère, ralentit, ou remet à la normale la vitesse perçue par le processus attaché (hook des fonctions de temps). mode=\"set\" avec un facteur (ex: 2.0 = 2x plus vite, 0.5 = 2x plus lent, 0.0 = pause), ou mode=\"off\" pour désactiver et revenir à la normale.", {"factor", "mode"}, "injection", true),
         makeTool("block_process_network", "Coupe (ou rétablit, mode=\"off\") le réseau entrant/sortant du processus attaché via une règle pare-feu Windows dédiée. Utile pour isoler si une valeur mémoire instable vient d'une synchro serveur en arrière-plan plutôt que d'une réallocation purement locale, avant de conclure à une réallocation locale.", {"mode"}, "injection", true),

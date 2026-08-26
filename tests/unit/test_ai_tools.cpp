@@ -7,6 +7,7 @@
 #include "tool_validator.h"
 #include "tool_registry.h"
 
+#include <QSet>
 #include <QSettings>
 
 namespace {
@@ -98,11 +99,32 @@ TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
 TEST(AIToolRegistryTest, MarksRiskyToolsAsConfirmationRequired) {
     killai::ToolRegistry registry;
 
-    for (const QString& toolName : {"write_value", "freeze_value", "find_what_writes", "generate_aob", "suggest_patch", "trainer_apply_request", "trainer_restore_request"}) {
+    // PHASE 140 : generate_aob/suggest_patch retires de cette liste -- verifie
+    // n'ecrire jamais rien (voir ReclassifiesReadOnlyPatchWorkflowToolsAsNoConfirmation
+    // ci-dessous), reclasses requiresConfirmation=false. test_candidate_fields
+    // ajoute : ecrit reellement (probe + restauration), doit rester true.
+    for (const QString& toolName : {"write_value", "freeze_value", "find_what_writes", "test_candidate_fields", "trainer_apply_request", "trainer_restore_request"}) {
         const auto tool = registry.toolMetadata(toolName);
         ASSERT_FALSE(tool.isEmpty()) << toolName.toStdString();
         EXPECT_TRUE(tool.value("requiresConfirmation").toBool()) << toolName.toStdString();
         EXPECT_FALSE(tool.value("safe").toBool()) << toolName.toStdString();
+    }
+}
+
+TEST(AIToolRegistryTest, ReclassifiesReadOnlyPatchWorkflowToolsAsNoConfirmation) {
+    // PHASE 140 : generate_aob/suggest_patch/disassemble_backward verifies
+    // (core inspection avant edition) comme n'ecrivant jamais rien --
+    // lecture memoire seule + calcul, jamais de WriteProcessMemory. Reclasses
+    // requiresConfirmation=false, meme precedent que analyze_field_stability
+    // (PHASE 130). Restent categorie "patch" pour la taxonomie (etapes d'un
+    // workflow de patch), seul le flag de confirmation change.
+    killai::ToolRegistry registry;
+    for (const QString& toolName : {"generate_aob", "suggest_patch", "disassemble_backward"}) {
+        const auto tool = registry.toolMetadata(toolName);
+        ASSERT_FALSE(tool.isEmpty()) << toolName.toStdString();
+        EXPECT_EQ(tool.value("risk").toString().toStdString(), "patch") << toolName.toStdString();
+        EXPECT_FALSE(tool.value("requiresConfirmation").toBool()) << toolName.toStdString();
+        EXPECT_TRUE(tool.value("safe").toBool()) << toolName.toStdString();
     }
 }
 
@@ -238,6 +260,62 @@ TEST(LlamaRuntimeTest, ExtractsLastToolCallWhenPromptContainsJson) {
     EXPECT_EQ(call.value("tool").toString(), "exact_scan");
     EXPECT_EQ(call.value("args").toMap().value("value").toString(), "41250");
     EXPECT_EQ(call.value("args").toMap().value("valueType").toString(), "Int32");
+}
+
+// PHASE 140 : bug reel trouve en corrigeant l'ecart "outils annonces mais non
+// dispatches" (PHASE 139) -- la ligne "Schema obligatoire" dans
+// LlamaRuntime::buildPrompt (ai/llama_runtime.cpp) est codee en dur, PAS
+// generee depuis ToolRegistry::availableTools() (contrairement au bloc
+// "Outils disponibles" du meme prompt) : get_auto_report/disassemble_backward/
+// test_candidate_fields manquaient a cette ligne, donc invisibles pour le
+// modele local meme si leur dispatch existe. Ce test verifie que TOUS les
+// outils du registre apparaissent dans le segment "Schema obligatoire" du
+// prompt, pour empecher ce meme type de derive de revenir silencieusement.
+TEST(LlamaRuntimeTest, SchemaLineListsEveryRegisteredTool) {
+    killai::ToolRegistry registry;
+    const QString prompt = killai::LlamaRuntime::buildPrompt("test query", registry, {});
+
+    QString schemaLine;
+    for (const QString& line : prompt.split('\n')) {
+        if (line.contains("Schema obligatoire")) {
+            schemaLine = line;
+            break;
+        }
+    }
+    ASSERT_FALSE(schemaLine.isEmpty()) << "Ligne \"Schema obligatoire\" introuvable dans le prompt.";
+
+    // Exclus deliberement de cette assertion -- PAS le sujet de PHASE 140,
+    // trouve par accident en ecrivant ce test, documente comme trou connu
+    // separe plutot que "corrige" hors perimetre (docs/PHASE_TRACKER.md
+    // PHASE 140) :
+    //   - kernel_write/speedhack_set/block_process_network (risk=injection) :
+    //     leur propre description dit deja "a utiliser seulement si
+    //     l'utilisateur le demande explicitement" -- exclusion du libre choix
+    //     LLM probablement deliberee, pas un oubli.
+    //   - discover_save_files/inspect_local_settings/read_save_file_text/
+    //     patch_file_bytes/watch_save_file : dispatches dans startSmartSearch
+    //     (donc PAS le meme trou que les 7 de PHASE 139), mais absents de
+    //     cette ligne schema -- seuls discover_save_files/inspect_local_settings
+    //     ont un fast-path deterministe (matchOffMemoryTool) qui les rend
+    //     quand meme joignables en langage naturel ; les 3 autres partagent le
+    //     meme trou latent sans qu'aucun agent ne l'ait encore remarque avant
+    //     ce test.
+    static const QSet<QString> kKnownPreExistingGapNotThisPhase = {
+        "kernel_write", "speedhack_set", "block_process_network",
+        "discover_save_files", "inspect_local_settings",
+        "read_save_file_text", "patch_file_bytes", "watch_save_file",
+    };
+
+    for (const auto& item : registry.availableTools()) {
+        const QString toolName = item.toMap().value("name").toString();
+        ASSERT_FALSE(toolName.isEmpty());
+        if (kKnownPreExistingGapNotThisPhase.contains(toolName)) {
+            continue;
+        }
+        EXPECT_TRUE(schemaLine.contains(toolName))
+            << "Outil '" << toolName.toStdString() << "' enregistre dans ToolRegistry mais absent de la ligne "
+            << "\"Schema obligatoire\" -- le modele local ne peut jamais le choisir. " << schemaLine.toStdString();
+    }
 }
 
 TEST(ModelLocatorTest, ProvidesCandidateQwenPaths) {
@@ -641,6 +719,149 @@ TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathDoesNotCollideWithTra
     context["processAttached"] = true;
     const auto result = engine.processQuery("liste le trainer", context);
     EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_list_features");
+}
+
+// PHASE 140 : fast-paths pour 2 des 7 outils "annonces mais non dispatches"
+// trouves en PHASE 139 -- get_auto_report et analyze_ui_sources (les 5 autres
+// n'ont volontairement pas de fast-path deterministe, voir
+// docs/KILLENGINE_ASSISTANT_TOOLS_MAP.md pour le detail par outil).
+TEST(AIEngineContextualFallbackTest, AutoReportFastPathMatchesFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("donne-moi le rapport auto-résolution", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "get_auto_report");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_auto_report_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, AutoReportFastPathMatchesEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("show me the auto report", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "get_auto_report");
+}
+
+TEST(AIEngineContextualFallbackTest, AutoReportFastPathStillRequiresAttachedProcess) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = false;
+    const auto result = engine.processQuery("donne-moi le rapport auto-résolution", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+}
+
+TEST(AIEngineContextualFallbackTest, UiSourcesFastPathMatchesWithValueFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("analyse les sources numériques, c'est maintenant 60", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "analyze_ui_sources");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_ui_sources_fastpath");
+    EXPECT_EQ(result.value("args").toMap().value("value").toString().toStdString(), "60");
+}
+
+TEST(AIEngineContextualFallbackTest, UiSourcesFastPathMatchesWithValueEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("analyze sources, it's 60 now", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "analyze_ui_sources");
+    EXPECT_EQ(result.value("args").toMap().value("value").toString().toStdString(), "60");
+}
+
+TEST(AIEngineContextualFallbackTest, UiSourcesFastPathWithoutValueIsInvalidToolCall) {
+    // "value" est requiredArgs cote tool_registry.cpp -- meme comportement
+    // documente pour analyze_field_stability (PHASE 130) : le mot-cle matche,
+    // le validateur rejette a raison un tool_call sans la donnee necessaire.
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("analyse les sources numériques", context);
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "analyze_ui_sources");
+    EXPECT_EQ(result.value("status").toString().toStdString(), "invalid_tool_call");
+}
+
+// PHASE 140 : fast-paths pour les 5 outils restants d'analyze_field_stability
+// qui necessitent une adresse (generate_aob/suggest_patch/disassemble_backward
+// executent reellement ; find_what_writes/test_candidate_fields redirigent
+// toujours vers l'UI cote dispatch, requiredArgs volontairement vide).
+TEST(AIEngineContextualFallbackTest, GenerateAobFastPathMatchesWithAddress) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("génère une signature aob pour 0x1a2b3c4d", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "generate_aob");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_generate_aob_fastpath");
+    EXPECT_EQ(result.value("args").toMap().value("address").toString().toStdString(), "0x1a2b3c4d");
+}
+
+TEST(AIEngineContextualFallbackTest, SuggestPatchFastPathMatchesWithAddress) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("suggère un patch pour 0x1a2b3c4d", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "suggest_patch");
+    EXPECT_EQ(result.value("args").toMap().value("address").toString().toStdString(), "0x1a2b3c4d");
+}
+
+TEST(AIEngineContextualFallbackTest, DisassembleBackwardFastPathMatchesWithAddress) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("désassemble en arrière 0x1a2b3c4d", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "disassemble_backward");
+    EXPECT_EQ(result.value("args").toMap().value("address").toString().toStdString(), "0x1a2b3c4d");
+}
+
+TEST(AIEngineContextualFallbackTest, FindWhatWritesFastPathMatchesAndValidatesWithoutRequiredArgs) {
+    // requiredArgs vide (PHASE 140) : le tool_call doit rester valide meme
+    // sans "size", puisque le dispatch redirige toujours vers l'UI plutot
+    // que d'executer avec ces args.
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("capture ce qui écrit 0x1a2b3c4d", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "find_what_writes");
+    EXPECT_EQ(result.value("args").toMap().value("address").toString().toStdString(), "0x1a2b3c4d");
+}
+
+TEST(AIEngineContextualFallbackTest, TestCandidateFieldsFastPathMatchesWithoutRequiredArgs) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("teste les champs candidats", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "test_candidate_fields");
 }
 
 TEST(AIEngineContextualFallbackTest, InspectorModeFinishesChangedPagesDiffWithTwoValues) {
