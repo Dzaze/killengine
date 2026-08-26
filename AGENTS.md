@@ -28,6 +28,7 @@ Le dépôt contient une vingtaine de fichiers `.md`. Cette carte existe pour que
 | --- | --- | --- |
 | **`docs/PHASE_TRACKER.md`** ⭐ | Le vrai journal de bord : ce qui a été fait, comment, validé comment. Le point de rendez-vous entre agents (règle de coexistence #4, non négociable) | **Toujours** en début de session (voir où en est le projet, éviter de refaire un audit déjà fait) et **après chaque modification de code**, pas seulement en fin de session — même format détaillé que les entrées existantes (quoi/pourquoi/comment vérifié) |
 | **`docs/POWER_UP_ROADMAP.md`** | Backlog de fonctionnalités avancées (freeze breakpoint, injection, page guard, scripting...) avec statut par section | Avant de proposer "quoi faire ensuite" — section "Prochains gros chantiers" en fin de fichier tient la liste vérifiée. **Piège déjà arrivé** : les sections peuvent dériver (dire "à faire" alors que c'est livré) si personne ne les recroise avec le code — toujours revérifier dans le code avant de faire confiance à une case cochée, pas seulement lire le texte |
+| **`docs/KILLENGINE_ASSISTANT_TOOLS_MAP.md`** (PHASE 139) | Carte structurée des 28 outils `ai/tool_registry.cpp` : risque/confirmation/dispatché par `startSmartSearch`/pipe/Lua/test live — préparation explicite de PHASE 120 sans la coder | Avant de brancher un nouvel outil Assistant (vérifier le patron déjà établi) ou de travailler sur PHASE 120 (carte de base). Relire le registry avant de faire confiance à ce document si des outils ont pu être ajoutés depuis |
 
 ### 🧠 Réflexion / stratégie
 
