@@ -4249,6 +4249,17 @@ onMounted(() => {
         <p v-if="aobSignatureResult?.warning" class="hint">{{ aobSignatureResult.warning }}</p>
         <p v-if="aobSignatureResult?.error" class="error">{{ aobSignatureResult.error }}</p>
         <p v-if="aobResult?.error" class="error">{{ aobResult.error }}</p>
+        <div class="metrics patch-relay-status">
+          <span
+            class="quality-medium"
+            title="Fallback PHASE 122 : si le patch code direct échoue en ERROR_ACCESS_DENIED sur la bascule RWX, KillEngine tente le relais PowerShell borné aux patchs code."
+          >
+            Relais patch prêt
+          </span>
+          <span title="Le relais ne s'applique pas aux écritures mémoire DATA génériques.">
+            code uniquement
+          </span>
+        </div>
         <div class="controls code-patch-controls">
           <input
             v-model="codePatchAddress"
@@ -4335,7 +4346,7 @@ onMounted(() => {
           <span>Patch: {{ codePatchResult.success ? 'OK' : 'FAIL' }}</span>
           <span v-if="codePatchResult.bytesWritten">{{ formatNumber(codePatchResult.bytesWritten) }} o</span>
           <span v-if="codePatchResult.verified">vérifié</span>
-          <span v-if="codePatchResult.protectionChanged">VirtualProtectEx</span>
+          <span v-if="codePatchResult.protectionChanged" title="Bascule de protection directe ou fallback relais PowerShell selon le blocage runtime.">VirtualProtectEx/relais</span>
           <span v-if="codePatchResult.active">actif</span>
         </div>
         <p v-if="codePatchResult?.originalBytes" class="hint">Originaux: {{ codePatchResult.originalBytes }}</p>
@@ -5874,6 +5885,12 @@ onMounted(() => {
   margin-top: 9px;
   color: var(--text-dim);
   font-size: 12px;
+}
+
+.patch-relay-status span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
 }
 
 .warning {

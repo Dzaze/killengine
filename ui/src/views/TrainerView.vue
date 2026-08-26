@@ -74,7 +74,9 @@ function createFeature() {
   })
   if (created) {
     name.value = ''
+    action.value = 'write'
     address.value = ''
+    valueType.value = 'Int32'
     value.value = ''
     patchBytes.value = ''
     dependsOn.value = []
@@ -244,6 +246,9 @@ async function copyTrainerExport() {
         <input v-else v-model="patchBytes" class="input mono" placeholder="Bytes patch: 90 90" />
         <button class="btn" @click="fillFromSelection()">Depuis sélection</button>
         <button class="btn primary" :disabled="!address.trim()" @click="createFeature()">Créer</button>
+      </div>
+      <div v-if="action === 'patch'" class="patch-relay-note" title="Fallback PHASE 122 : utilisé seulement si le patch code direct échoue en ERROR_ACCESS_DENIED.">
+        Relais patch disponible
       </div>
       <div v-if="store.trainerFeatures.length > 0" class="depends-on-row">
         <span class="hint">Dépend de (optionnel, ex: "God Mode" dépend de "Infinite HP" + "Infinite Mana") :</span>
@@ -576,6 +581,16 @@ p,
   border-radius: 6px;
   color: var(--warning);
   padding: 6px 8px;
+}
+
+.patch-relay-note {
+  border: 1px solid rgba(224, 175, 104, 0.35);
+  border-radius: 999px;
+  color: var(--warning);
+  display: inline-flex;
+  font-size: 11px;
+  margin-top: 8px;
+  padding: 3px 8px;
 }
 
 .hotkey-chip {

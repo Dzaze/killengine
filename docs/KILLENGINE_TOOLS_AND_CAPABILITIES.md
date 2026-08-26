@@ -3,7 +3,7 @@
 
 # KillEngine - Outils Et Capacités
 
-Dernière mise à jour : 25/08/2026.
+Dernière mise à jour : 26/08/2026.
 
 Ce document sert d'inventaire rapide des outils, workflows et capacités disponibles ou préparés dans KillEngine. Pour l'état détaillé, les preuves de validation et les limites connues, voir `docs/PHASE_TRACKER.md`, `docs/POWER_UP_ROADMAP.md`, `docs/USER_GUIDE.md`, `docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md` et `docs/KILLENGINE_CLR_INSPECTOR_SPEC.md`.
 
@@ -143,6 +143,10 @@ Ce document sert d'inventaire rapide des outils, workflows et capacités disponi
 - Suggestion de patches.
 - Application de patch code.
 - Restauration de patch.
+- Fallback relais PowerShell pour les patchs de code quand `KillEngine.exe` est bloqué par un refus `VirtualProtectEx(RWX)`/`ERROR_ACCESS_DENIED` sur cette machine :
+  - limité aux patchs de code (`applyCodePatch`/`restoreCodePatch`) ;
+  - non utilisé pour les écritures mémoire DATA génériques ;
+  - testé en direct sur patch non-identité puis restauration.
 - Désassemblage arrière/en amont.
 - Score de qualité des signatures.
 - Indication trainer-safe.
@@ -213,7 +217,8 @@ Ce document sert d'inventaire rapide des outils, workflows et capacités disponi
   - write value ;
   - toggle overlay.
 - Ré-enregistrement des hotkeys persistées au démarrage.
-- Couvre features/toggles/apply/restore/export/hotkeys/overlay, mais pas un builder visuel complet façon produit fini (pas d'éditeur de dépendances entre entrées — voir `docs/POWER_UP_ROADMAP.md` section M, futur chantier).
+- Dépendances entre features (`dependsOn`) : activation des prérequis avant une feature, restauration des dépendants avant leur prérequis, refus des cycles, nettoyage des références mortes à la suppression.
+- Reste en dehors du périmètre actuel : édition des dépendances après création et persistance backend/profil dédiée des dépendances entre targets.
 
 ## IA Et Automation
 
@@ -246,7 +251,7 @@ Ce document sert d'inventaire rapide des outils, workflows et capacités disponi
 - Énumération de GC roots.
 - Survie aux GC compactants.
 - Tests end-to-end ClrMD.
-- Intégration UI principale différée d'après la spécification actuelle.
+- Intégration UI principale livrée : vue `CLR`, lecture d'objet, écriture de champs primitifs, locators par champ, profils CLR, envoi vers Trainer, écriture par chemin symbolique, transactions, setters réels bornés, rapport d'objet, désassemblage de méthode et inspection de collections courantes.
 
 ## Kernel
 

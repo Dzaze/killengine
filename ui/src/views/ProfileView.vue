@@ -970,6 +970,7 @@ onMounted(() => {
           <span>introuvable {{ trainerPatchSummary.missing }}</span>
           <span>invalide {{ trainerPatchSummary.invalid }}</span>
           <span>qualité faible {{ trainerPatchSummary.unsafeQuality }}</span>
+          <span title="Fallback PHASE 122 disponible pour apply/restore des patchs code si la voie directe échoue en ERROR_ACCESS_DENIED.">relais patch prêt</span>
         </div>
         <div v-for="patch in profilePatches" :key="patch.name" class="patch-row">
           <div class="patch-info">
