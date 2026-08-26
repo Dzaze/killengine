@@ -1,9 +1,11 @@
 # KillEngine recent targeted regression tests
 # Usage:
 #   .\scripts\test-recent-targeted.ps1
+#   .\scripts\test-recent-targeted.ps1 -List
 #   .\scripts\test-recent-targeted.ps1 -SkipIntegration
 
 param(
+    [switch]$List,
     [switch]$SkipIntegration
 )
 
@@ -12,6 +14,17 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $unitTests = Join-Path $repoRoot "build\bin\killengine_unit_tests.exe"
 $integrationTests = Join-Path $repoRoot "build\bin\killengine_integration_tests.exe"
+$recentUnitFilter = "AIToolRegistryTest.*:AIEngineContextualFallbackTest.TrainerFastPath*:AIEngineContextualFallbackTest.FieldStabilityFastPath*:DisplaySourceClassifier.*:AutoAssembler.*:ProfileStore.*"
+$recentIntegrationFilter = "DisplayVsSourceTargetTest.*"
+
+function Write-RecentFilters {
+    Write-Host "Recent targeted unit filter:" -ForegroundColor Cyan
+    Write-Host "  $recentUnitFilter"
+    if (-not $SkipIntegration) {
+        Write-Host "Recent targeted integration filter:" -ForegroundColor Cyan
+        Write-Host "  $recentIntegrationFilter"
+    }
+}
 
 function Invoke-TestBinary {
     param(
@@ -34,16 +47,21 @@ function Invoke-TestBinary {
 
 Push-Location $repoRoot
 try {
+    Write-RecentFilters
+    if ($List) {
+        return
+    }
+
     Invoke-TestBinary `
         -Name "Recent targeted unit tests" `
         -ExePath $unitTests `
-        -Filter "AIToolRegistryTest.*:AIEngineContextualFallbackTest.TrainerFastPath*:AIEngineContextualFallbackTest.FieldStabilityFastPath*:DisplaySourceClassifier.*"
+        -Filter $recentUnitFilter
 
     if (-not $SkipIntegration) {
         Invoke-TestBinary `
             -Name "Recent targeted integration tests" `
             -ExePath $integrationTests `
-            -Filter "DisplayVsSourceTargetTest.*"
+            -Filter $recentIntegrationFilter
     }
 } finally {
     Pop-Location
