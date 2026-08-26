@@ -160,17 +160,21 @@ set "PATH=$ninjaPath;%PATH%"
 cmake --build build --config Release
 "@
 
-$tempBat = Join-Path $env:TEMP "killengine_build.bat"
-Set-Content -Path $tempBat -Value $batchContent -Encoding ASCII
-& cmd /c $tempBat
-Remove-Item $tempBat -ErrorAction SilentlyContinue
+$tempBat = Join-Path $env:TEMP ("killengine_build_{0}_{1}.bat" -f $PID, [guid]::NewGuid().ToString("N"))
+Set-Content -LiteralPath $tempBat -Value $batchContent -Encoding ASCII
+try {
+    & cmd /c "`"$tempBat`""
+    $buildExitCode = $LASTEXITCODE
+} finally {
+    Remove-Item -LiteralPath $tempBat -ErrorAction SilentlyContinue
+}
 
-if ($LASTEXITCODE -eq 0) {
+if ($buildExitCode -eq 0) {
     $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
     Sync-AiRuntimeLayout -RepoRoot $repoRoot.Path -BuildBin (Join-Path $repoRoot.Path "build\bin")
     Write-Host "`nBuild successful!" -ForegroundColor Green
     Write-Host "Executable: build\bin\KillEngine.exe" -ForegroundColor Cyan
 } else {
     Write-Host "`nBuild FAILED!" -ForegroundColor Red
-    exit 1
+    exit $buildExitCode
 }

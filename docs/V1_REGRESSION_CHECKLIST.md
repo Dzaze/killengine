@@ -33,6 +33,7 @@ Optional Lua examples check, best-effort (never fails the gate if `runtime\lua\`
 Optional targeted replay for the most recent automated checks:
 
 ```powershell
+.\scripts\test-recent-targeted.ps1
 .\scripts\release-check.ps1 -IncludeRecentTargetedTests
 ```
 

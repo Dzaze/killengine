@@ -63,11 +63,14 @@ set "PATH=$ninjaPath;%PATH%"
 cmake -B build -G Ninja -DCMAKE_MAKE_PROGRAM="$ninjaExe" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$QT_PATH" -DKILLENGINE_BUILD_TESTS=ON
 "@
 
-$tempBat = Join-Path $env:TEMP "killengine_configure.bat"
-Set-Content -Path $tempBat -Value $batchContent -Encoding ASCII
-& cmd /c $tempBat
-$configureExitCode = $LASTEXITCODE
-Remove-Item $tempBat -ErrorAction SilentlyContinue
+$tempBat = Join-Path $env:TEMP ("killengine_configure_{0}_{1}.bat" -f $PID, [guid]::NewGuid().ToString("N"))
+Set-Content -LiteralPath $tempBat -Value $batchContent -Encoding ASCII
+try {
+    & cmd /c "`"$tempBat`""
+    $configureExitCode = $LASTEXITCODE
+} finally {
+    Remove-Item -LiteralPath $tempBat -ErrorAction SilentlyContinue
+}
 
 if ($configureExitCode -ne 0) {
     Write-Host "`nConfiguration FAILED!" -ForegroundColor Red

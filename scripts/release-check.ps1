@@ -140,19 +140,13 @@ try {
         }
 
         if ($IncludeRecentTargetedTests) {
-            Invoke-Step "Recent targeted unit tests" {
-                & $unitTests --gtest_filter=AIToolRegistryTest.*:AIEngineContextualFallbackTest.TrainerFastPath*:DisplaySourceClassifier.*
+            Invoke-Step "Recent targeted tests" {
+                & (Join-Path $repoRoot "scripts\test-recent-targeted.ps1")
             }
         }
 
         Invoke-Step "Integration tests" {
             & $integrationTests
-        }
-
-        if ($IncludeRecentTargetedTests) {
-            Invoke-Step "Recent targeted integration tests" {
-                & $integrationTests --gtest_filter=DisplayVsSourceTargetTest.*
-            }
         }
     }
 
