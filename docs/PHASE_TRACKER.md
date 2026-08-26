@@ -162,7 +162,7 @@ Prerequisites before Phase 12:
     - [x] aperçu mémoire visible avec état de lecture, adresse courante et erreurs lisibles
     - [x] bascule directe d'une région mémoire vers le Mode Expert avec adresse préremplie
     - [x] progression plus fine par régions/chunks pendant les scans longs
-  - [ ] Passe expert gameplay
+  - [x] Passe expert gameplay
     - [x] inspecteur mémoire enrichi : ASCII, décodages rapides, copie et scan autour
     - [x] Mode Expert prérempli depuis une région mémoire avec plage et filtres
     - [x] journal utilisateur des scans, écritures, freeze, rollback et navigation utile
@@ -178,7 +178,7 @@ Prerequisites before Phase 12:
     - [x] profils plus intelligents avec état de résolution/réparation visible
     - [x] sécurité anti-mauvaise écriture avant modification mémoire
     - [x] Assistant enrichi pour garder/ignorer/tester/chercher en type précis
-    - [x] mode débutant / mode expert pour adapter la densité de l'interface
+    - [x] ~~mode débutant / mode expert pour adapter la densité de l'interface~~ **retiré PHASE 153/155** : le propriétaire a jugé ce toggle redondant et source de confusion ("le mode expert est le mode ultime, pas besoin d'un 3ème") — la page Expert affiche maintenant systématiquement tout, sans sous-réglage de densité. Voir PHASE 153/154/155 plus bas pour le détail complet (le retrait touchait en réalité 3 mécanismes distincts, dont un gating RiskGate bien plus profond que ce simple toggle d'affichage).
   - [ ] Robustesse et validations
     - [x] tests d'intégration automatisés avec `KillEngineTestTarget.exe`
     - [x] scénario exact complet : scan exact -> next scan -> écriture -> vérification -> rollback
@@ -1516,6 +1516,7 @@ Prerequisites before Phase 12:
       - [x] **Effet de bord trouvé en testant, corrigé au passage** : l'édition de `NetworkView.vue`/`ScriptingView.vue`/`SpeedhackView.vue` a fait basculer ces 3 fichiers en LF pur (`scripts/check-line-endings.ps1` : 0 CRLF sur les 3) au lieu du CRLF du reste du dépôt — corrigé par normalisation ciblée avant commit (diff `git diff --stat` inchangé après coup, confirme qu'aucun contenu n'a été altéré par la conversion). `docs/U1_AUTO_RESOLVE_VALIDATION.md` référençait aussi `autoRiskMode: Safe` dans ses réglages recommandés (checklist manuelle jamais encore exécutée, statut "pas encore été exécutée") — ligne retirée pour ne pas laisser une instruction obsolète dans un document en attente.
       - [x] **Pourquoi** : demande explicite et répétée du propriétaire, clarifiée en plusieurs temps (capture d'écran du dropdown "Niveau Auto" à l'appui) : "je trouve dommage ce triple comportement... le mode expert est le mode ultime" puis "ça me dérange que les fonctionnalités soient rangées par mode, je veux que tout soit disponible directement".
       - [x] **Comment vérifié** : `npm --prefix ui run type-check` OK, `npm --prefix ui run build` OK. `.\scripts\build.ps1` OK (backend C++ modifié). `killengine_unit_tests.exe` complet : **230/230 OK**, aucune régression. Scan mojibake standard OK sur les 13 fichiers touchés (backend + frontend) : aucun hit. `scripts/check-line-endings.ps1` : les 13 fichiers sont CRLF pur après correction (voir effet de bord ci-dessus). Grep final sur `ui/src` et `apps/`/`ai/`/`core/` : zéro référence résiduelle à `autoRiskMode`/`settingAutoRiskMode`/`lastRiskBlockReason`/`riskModeBlocks*`/`enableTrainerMode`.
+      - [x] **Ménage tracker trouvé en relisant PHASE 13 pour chercher d'autres restes ouverts** : la sous-case "mode débutant / mode expert pour adapter la densité de l'interface" (section "Passe expert gameplay") était cochée `[x]` (faite) alors que cette fonctionnalité vient d'être retirée ici — corrigée en biffé + note de renvoi vers PHASE 153/155, pour qu'un futur agent ne la croie pas toujours présente. La case parente "Passe expert gameplay" peut maintenant être fermée honnêtement : tous ses sous-points sont soit faits soit explicitement retirés.
 
     - [x] PHASE 156 (26/08/2026) - Docs : audit i18n fr/en (Cline/GLM 5.2, terminé par Claude après épuisement de quota)
       - [x] **Quoi** : chantier confié à Cline en parallèle (`docs/PHASE_TRACKER.md`/`MEMORY.md` — voir [[parallel_codex_sessions]]) : auditer `ui/src/i18n/locales/fr.json`/`en.json` contre les clés `$t('...')` réellement utilisées dans `ui/src/**/*.vue`/`*.ts`. Travail effectué par Cline avant épuisement de quota (traçable dans son focus-chain local, pas dans ce tracker) : 81 clés littérales + 38 préfixes dynamiques audités, 0 clé manquante dans un sens ou l'autre, 25 clés orphelines candidates identifiées puis triées une par une (usages dynamiques interpolés vérifiés, pas supposés morts sur un simple grep littéral) — 14 réellement mortes supprimées de `fr.json`/`en.json` (BOM/CRLF préservés), 11 confirmées vivantes (motifs `help.step.*`/`help.label.*` construits dynamiquement) et documentées comme telles plutôt que supprimées à tort.
