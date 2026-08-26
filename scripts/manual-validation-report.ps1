@@ -47,6 +47,7 @@ $content = @"
 ## Automated Gate Snapshot
 
 - [ ] ``.\scripts\release-check.ps1 -SkipConfigure`` passed before manual pass
+- [ ] ``.\scripts\test-fast-qa.ps1`` passed
 - [ ] ``.\scripts\release-check.ps1 -OnlyRecentTargetedTests`` passed
 - [ ] ``.\scripts\release-check.ps1 -OnlyAutomationPipeSafeMethods`` passed
 - [ ] UI opened without blank screen
