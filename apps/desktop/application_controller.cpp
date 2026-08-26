@@ -13796,9 +13796,6 @@ QVariantMap ApplicationController::getSettings() const {
     result["smartSearchDebugEnabled"] = settings.value("diagnostics/smartSearchDebugEnabled", true).toBool();
     result["smartSearchDebugMaxEvents"] = boundedSettingInt(
         settings, "diagnostics/smartSearchDebugMaxEvents", 30, 5, 200);
-    const QString autoRiskMode = settings.value("ai/autoRiskMode", "Safe").toString();
-    result["autoRiskMode"] =
-        (autoRiskMode == "Expert" || autoRiskMode == "Trainer") ? autoRiskMode : QString("Safe");
     result["modelPath"] = settings.value("ai/modelPath", "").toString();
     result["modelEnabled"] = settings.value("ai/modelEnabled", true).toBool();
     result["modelThreads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
@@ -15757,10 +15754,6 @@ QVariantMap ApplicationController::saveSettings(const QVariantMap& incoming) {
     settings.setValue(
         "diagnostics/smartSearchDebugMaxEvents",
         std::clamp(incoming.value("smartSearchDebugMaxEvents", 30).toInt(), 5, 200));
-    const QString autoRiskMode = incoming.value("autoRiskMode", "Safe").toString();
-    settings.setValue(
-        "ai/autoRiskMode",
-        (autoRiskMode == "Expert" || autoRiskMode == "Trainer") ? autoRiskMode : QString("Safe"));
     settings.setValue("ai/modelPath", incoming.value("modelPath", "").toString().trimmed());
     settings.setValue("ai/modelEnabled", incoming.value("modelEnabled", true).toBool());
     settings.setValue(

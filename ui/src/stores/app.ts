@@ -276,7 +276,6 @@ export interface RiskDialogState {
   risk: NonNullable<InvestigationStep['risk']>
   title: string
   detail: string
-  mode: AppSettings['autoRiskMode']
   rememberKey?: 'speedhack'
   rememberChoice?: boolean
   rememberLabel?: string
@@ -400,13 +399,6 @@ export const useAppStore = defineStore('app', () => {
   const settingFastScan = ref(true)
   const settingSmartSearchDebugEnabled = ref(true)
   const settingSmartSearchDebugMaxEvents = ref(30)
-  const settingAutoRiskMode = ref<AppSettings['autoRiskMode']>('Safe')
-  // Raison du dernier blocage confirmRiskAction (mode Auto trop restrictif),
-  // distincte d'une vraie annulation utilisateur. Sans ça, les appelants qui
-  // batissent un message d'erreur apres un confirmRiskAction refuse ne
-  // peuvent pas distinguer les deux cas et affichent a tort "annule par
-  // l'utilisateur" alors que c'est le reglage Auto qui bloque.
-  const lastRiskBlockReason = ref('')
   // Action de l'echelle d'escalade (Assistant) dont le backend attend la
   // reponse en texte libre, quand cette action ne vit que cote frontend
   // (ex: encrypted_scan, qui boucle sur plusieurs modes via runAutoEncryptedScan
@@ -2287,7 +2279,6 @@ let nextWatchedChainId = 1
         language: appLanguage.value,
         defaultValueType: settingDefaultValueType.value,
         performanceMode: settingPerformanceMode.value,
-        autoRiskMode: settingAutoRiskMode.value,
         modelEnabled: settingModelEnabled.value,
         modelPath: settingModelPath.value,
         modelThreads: settingModelThreads.value,
@@ -2361,7 +2352,6 @@ let nextWatchedChainId = 1
       `Processus: ${processName.value || 'non attache'}`,
       `Workflow: ${workflowStatus.value}`,
       `Preset: ${lastWorkflowPresetId.value || 'aucun'}`,
-      `Mode Auto: ${settingAutoRiskMode.value}`,
       `IA locale: ${aiModelStatus.value?.ready ? 'llama.cpp' : 'indisponible'}`,
       '',
       '## Presets Disponibles',
@@ -2521,9 +2511,6 @@ let nextWatchedChainId = 1
       if (['Auto', 'Eco', 'Normal', 'Performance', 'Max'].includes(String(settings.performanceMode))) {
         settingPerformanceMode.value = settings.performanceMode as AppSettings['performanceMode']
       }
-      if (['Safe', 'Expert', 'Trainer'].includes(String(settings.autoRiskMode))) {
-        settingAutoRiskMode.value = settings.autoRiskMode as AppSettings['autoRiskMode']
-      }
       if (typeof settings.modelEnabled === 'boolean') settingModelEnabled.value = settings.modelEnabled
       if (typeof settings.modelPath === 'string') settingModelPath.value = settings.modelPath
       if (Number.isFinite(Number(settings.modelThreads))) settingModelThreads.value = Number(settings.modelThreads)
@@ -2632,7 +2619,6 @@ let nextWatchedChainId = 1
     if (!controller.logAiAudit) return
     void controller.logAiAudit(event, {
       ...payload,
-      autoRiskMode: settingAutoRiskMode.value,
       investigationId: activeInvestigation.value?.id ?? null,
       objective: activeInvestigation.value?.objective ?? searchQuery.value,
       timestamp: new Date().toISOString(),
@@ -2644,34 +2630,11 @@ let nextWatchedChainId = 1
     title: string,
     detail: string,
   ): Promise<boolean> {
-    lastRiskBlockReason.value = ''
-    const mode = settingAutoRiskMode.value
     const rememberKey = title === 'Activer le speedhack' ? 'speedhack' : undefined
     if (rememberKey && mutedRiskConfirmations.value[rememberKey]) {
       addActionLog('risk_gate', `Confirmation mémorisée: ${title}`, detail, 'info')
-      logAiAudit('risk_muted_accept', { risk, title, detail, mode, rememberKey })
+      logAiAudit('risk_muted_accept', { risk, title, detail, rememberKey })
       return true
-    }
-    const blocked =
-      (mode === 'Safe' && (risk === 'debug' || risk === 'patch' || risk === 'injection')) ||
-      (mode === 'Expert' && risk === 'injection')
-    if (blocked) {
-      const message =
-        risk === 'injection'
-          ? 'Passe le niveau Auto en Trainer dans Settings pour autoriser injection/hook.'
-          : 'Passe le niveau Auto en Expert ou Trainer dans Settings pour autoriser debug/patch.'
-      lastRiskBlockReason.value = `Bloqué par le mode Auto actuel (${mode}). ${message}`
-      addActionLog('risk_gate', `Bloqué par mode ${mode}: ${title}`, `${detail} ${message}`, 'warning')
-      logAiAudit('risk_blocked', { risk, title, detail, mode, reason: message })
-      addInvestigationStep({
-        title: `Risque bloqué: ${title}`,
-        detail: `${detail} ${message}`,
-        status: 'warning',
-        risk,
-        tool: 'RiskGate',
-        payload: { accepted: false, blocked: true, mode, title, detail },
-      })
-      return false
     }
     const accepted = await new Promise<boolean>((resolve) => {
       if (riskDialogResolver) {
@@ -2683,14 +2646,13 @@ let nextWatchedChainId = 1
         risk,
         title,
         detail,
-        mode,
         rememberKey,
         rememberChoice: false,
         rememberLabel: rememberKey === 'speedhack' ? 'Ne plus redemander pour le speedhack pendant cette session' : undefined,
       }
     })
     addActionLog('risk_gate', accepted ? `Confirmé: ${title}` : `Refusé: ${title}`, detail, accepted ? 'success' : 'warning')
-    logAiAudit(accepted ? 'risk_confirmed' : 'risk_refused', { risk, title, detail, mode })
+    logAiAudit(accepted ? 'risk_confirmed' : 'risk_refused', { risk, title, detail })
     addInvestigationStep({
       title: accepted ? `Risque confirmé: ${title}` : `Risque refusé: ${title}`,
       detail,
@@ -5358,7 +5320,6 @@ let nextWatchedChainId = 1
     settingFastScan.value = settings.fastScan !== false
     settingSmartSearchDebugEnabled.value = settings.smartSearchDebugEnabled !== false
     settingSmartSearchDebugMaxEvents.value = Number(settings.smartSearchDebugMaxEvents || 30)
-    settingAutoRiskMode.value = settings.autoRiskMode || 'Safe'
     settingModelPath.value = settings.modelPath || ''
     settingModelEnabled.value = settings.modelEnabled !== false
     settingModelThreads.value = Number(settings.modelThreads || 4)
@@ -5378,7 +5339,6 @@ let nextWatchedChainId = 1
       fastScan: settingFastScan.value,
       smartSearchDebugEnabled: settingSmartSearchDebugEnabled.value,
       smartSearchDebugMaxEvents: settingSmartSearchDebugMaxEvents.value,
-      autoRiskMode: settingAutoRiskMode.value,
       modelPath: settingModelPath.value,
       modelEnabled: settingModelEnabled.value,
       modelThreads: settingModelThreads.value,
@@ -8145,8 +8105,6 @@ async function doEncryptedScan() {
     settingFastScan,
     settingSmartSearchDebugEnabled,
     settingSmartSearchDebugMaxEvents,
-    settingAutoRiskMode,
-    lastRiskBlockReason,
     pendingAssistantAction,
     settingModelPath,
     settingModelEnabled,

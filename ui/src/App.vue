@@ -188,7 +188,6 @@ watch(
       <section class="risk-modal" role="dialog" aria-modal="true" aria-labelledby="risk-title">
         <div class="risk-head">
           <span class="risk-pill">{{ store.riskDialog.risk }}</span>
-          <span>Mode {{ store.riskDialog.mode }}</span>
         </div>
         <h2 id="risk-title">{{ store.riskDialog.title }}</h2>
         <p class="risk-detail">{{ store.riskDialog.detail }}</p>

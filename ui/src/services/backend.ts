@@ -1051,7 +1051,6 @@ export interface AppSettings {
   fastScan: boolean
   smartSearchDebugEnabled: boolean
   smartSearchDebugMaxEvents: number
-  autoRiskMode: 'Safe' | 'Expert' | 'Trainer'
   modelPath: string
   modelEnabled: boolean
   modelThreads: number
@@ -2292,7 +2291,6 @@ class BackendService {
           fastScan: true,
           smartSearchDebugEnabled: true,
           smartSearchDebugMaxEvents: 30,
-          autoRiskMode: 'Safe',
           modelPath: '',
           modelEnabled: true,
           modelThreads: 4,

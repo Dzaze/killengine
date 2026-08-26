@@ -27,7 +27,6 @@
 | `g_big_counter` / `g_uint_value` | bruit | change toutes les 500 ms | timer interne |
 
 ### Réglages KillEngine recommandés
-- Mode Auto (`autoRiskMode`) : **Safe**
 - Type par défaut : Auto (multi-type)
 - Performance : Auto
 

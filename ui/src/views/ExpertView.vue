@@ -2055,7 +2055,7 @@ async function runFindWhatWrites(address: string, options: Record<string, unknow
       hitCount: 0,
       hits: [],
       cancelled: true,
-      error: store.lastRiskBlockReason || 'Capture debugger annulée par l’utilisateur.',
+      error: 'Capture debugger annulée par l’utilisateur.',
     }
   }
   const controller = backend.getController()
@@ -2159,7 +2159,7 @@ async function runPageGuardWatch(address: string, options: Record<string, unknow
       hitCount: 0,
       hits: [],
       cancelled: true,
-      error: store.lastRiskBlockReason || 'Capture Page Guard annulée par l’utilisateur.',
+      error: 'Capture Page Guard annulée par l’utilisateur.',
     }
   }
   const controller = backend.getController()
@@ -2254,7 +2254,7 @@ async function runFindWhatAccesses(address: string, options: Record<string, unkn
       hitCount: 0,
       hits: [],
       cancelled: true,
-      error: store.lastRiskBlockReason || 'Capture debugger annulee par l utilisateur.',
+      error: 'Capture debugger annulee par l utilisateur.',
     }
   }
   const controller = backend.getController()

@@ -8,7 +8,6 @@ const store = useAppStore()
 const presets = [0.25, 0.5, 1, 2, 4, 10]
 
 const isActive = computed(() => store.speedhackStatus?.active === true)
-const riskModeBlocksSpeedhack = computed(() => store.settingAutoRiskMode !== 'Trainer')
 const statusLabel = computed(() => {
   if (!store.speedhackStatus) return 'Inconnu'
   if (store.speedhackStatus.installError) return 'Échec install'
@@ -40,11 +39,6 @@ function toggle() {
   }
 }
 
-function enableTrainerMode() {
-  store.settingAutoRiskMode = 'Trainer'
-  store.lastRiskBlockReason = ''
-}
-
 onMounted(() => {
   void store.refreshSpeedhackStatus()
 })
@@ -69,24 +63,9 @@ onMounted(() => {
       <section class="status-band">
         <span>Statut : <strong>{{ statusLabel }}</strong></span>
         <span>Facteur actif : <strong>{{ (store.speedhackStatus?.factor ?? 1).toFixed(2) }}x</strong></span>
-        <span>Mode Auto : <strong>{{ store.settingAutoRiskMode }}</strong></span>
         <span v-if="store.speedhackStatus?.installError" class="error">
           Aucune fonction de temps n'a pu être hookée dans cette cible.
         </span>
-      </section>
-
-      <section v-if="riskModeBlocksSpeedhack && !isActive" class="warning-band">
-        <div>
-          <strong>Injection bloquée par le mode Auto.</strong>
-          <span>Le speedhack injecte un composant dans la cible : passe en Trainer pour autoriser ce palier.</span>
-        </div>
-        <button class="btn btn-secondary compact" @click="enableTrainerMode">
-          Passer en Trainer
-        </button>
-      </section>
-
-      <section v-if="store.lastRiskBlockReason" class="warning-band muted">
-        {{ store.lastRiskBlockReason }}
       </section>
 
       <section class="panel">
@@ -130,7 +109,6 @@ onMounted(() => {
             class="btn"
             :class="isActive ? 'btn-secondary' : 'btn-primary'"
             :disabled="store.speedhackBusy"
-            :title="riskModeBlocksSpeedhack && !isActive ? 'Le mode Auto actuel bloque les injections. Passe en Trainer pour lancer le speedhack.' : ''"
             @click="toggle"
           >
             {{ isActive ? 'Désactiver' : 'Activer' }}
@@ -191,31 +169,6 @@ onMounted(() => {
 
 .status-band .error {
   color: var(--danger, #e5484d);
-}
-
-.warning-band {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border: 1px solid rgba(245, 158, 11, 0.45);
-  background: rgba(245, 158, 11, 0.12);
-  border-radius: 8px;
-  padding: 12px 14px;
-  margin-bottom: 14px;
-  color: var(--text-primary);
-}
-
-.warning-band div {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.warning-band span,
-.warning-band.muted {
-  color: var(--text-dim);
-  font-size: 12px;
 }
 
 .panel {

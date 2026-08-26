@@ -154,7 +154,6 @@ function featureWarning(feature: TrainerFeature): string {
   if (feature.action === 'clr_write' && (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName)) return 'Locator CLR incomplet.'
   const qualityWarning = featureQualityWarning(feature)
   if (qualityWarning) return qualityWarning
-  if (feature.action === 'freeze_breakpoint' && store.settingAutoRiskMode === 'Safe') return 'Mode Safe : passe en Expert ou Trainer pour activer un freeze breakpoint.'
   return ''
 }
 

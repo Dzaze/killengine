@@ -11,12 +11,10 @@ const statusLabel = computed(() => {
   return 'prêt'
 })
 
-const riskModeBlocksLua = computed(() => store.settingAutoRiskMode !== 'Trainer')
 const canRun = computed(() =>
   Boolean(store.luaScriptText.trim()) &&
   !store.luaScriptBusy &&
-  store.luaScriptingStatus?.available === true &&
-  !riskModeBlocksLua.value,
+  store.luaScriptingStatus?.available === true,
 )
 const canSave = computed(() => Boolean(store.luaScriptText.trim()) && Boolean(store.luaScriptSaveName.trim()))
 
@@ -40,7 +38,6 @@ onMounted(() => {
         <button
           class="btn btn-primary"
           :disabled="!canRun"
-          :title="riskModeBlocksLua ? 'Passe le mode Auto en Trainer dans Paramètres pour exécuter un script Lua.' : ''"
           @click="store.executeLuaScript()"
         >
           {{ store.luaScriptBusy ? 'Exécution...' : 'Exécuter' }}
@@ -78,10 +75,6 @@ onMounted(() => {
     <div v-if="store.luaScriptingStatus?.automationPipeOptIn === false" class="alert warning">
       Les appels <code>ke.call(...)</code> nécessitent KillEngine lancé avec <code>KILLENGINE_AUTOMATION_PIPE=1</code>.
     </div>
-    <div v-if="riskModeBlocksLua" class="alert warning">
-      Le mode Auto actuel bloque l'exécution Lua. Passe en mode Trainer dans Paramètres.
-    </div>
-
     <section class="editor-shell">
       <div class="editor-head">
         <h2>Script</h2>

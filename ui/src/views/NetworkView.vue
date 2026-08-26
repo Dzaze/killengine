@@ -5,17 +5,11 @@ import InfoDot from '@/components/expert/InfoDot.vue'
 
 const store = useAppStore()
 
-const riskModeBlocksNetworkBlock = computed(() => store.settingAutoRiskMode !== 'Trainer')
 const isNetworkBlocked = computed(() => store.networkBlockStatus?.blocked === true)
 const networkBlockStatusLabel = computed(() => {
   if (!store.networkBlockStatus) return 'Inconnu'
   return isNetworkBlocked.value ? 'Réseau coupé' : 'Réseau normal'
 })
-
-function enableTrainerMode() {
-  store.settingAutoRiskMode = 'Trainer'
-  store.lastRiskBlockReason = ''
-}
 
 function toggleNetworkBlock() {
   if (isNetworkBlocked.value) {
@@ -51,20 +45,6 @@ onMounted(() => {
         <span v-if="store.networkBlockStatus?.exePath">Cible : <strong>{{ store.networkBlockStatus.exePath }}</strong></span>
       </section>
 
-      <section v-if="riskModeBlocksNetworkBlock && !isNetworkBlocked" class="warning-band">
-        <div>
-          <strong>Blocage réseau bloqué par le mode Auto.</strong>
-          <span>Modifier le pare-feu Windows est traité comme une injection : passe en Trainer pour l'autoriser.</span>
-        </div>
-        <button class="btn btn-secondary compact" @click="enableTrainerMode">
-          Passer en Trainer
-        </button>
-      </section>
-
-      <section v-if="store.lastRiskBlockReason" class="warning-band muted">
-        {{ store.lastRiskBlockReason }}
-      </section>
-
       <section class="panel">
         <p class="hint intro">
           Coupe le trafic entrant/sortant de la cible (règle pare-feu Windows dédiée à son exécutable) — utile
@@ -77,7 +57,6 @@ onMounted(() => {
             class="btn"
             :class="isNetworkBlocked ? 'btn-secondary' : 'btn-primary'"
             :disabled="store.networkBlockBusy"
-            :title="riskModeBlocksNetworkBlock && !isNetworkBlocked ? 'Le mode Auto actuel bloque cette action. Passe en Trainer pour couper le réseau.' : ''"
             @click="toggleNetworkBlock"
           >
             {{ isNetworkBlocked ? 'Rétablir le réseau' : 'Couper le réseau' }}
@@ -134,31 +113,6 @@ onMounted(() => {
   padding: 14px;
   margin-bottom: 14px;
   color: var(--text-dim);
-}
-
-.warning-band {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border: 1px solid rgba(245, 158, 11, 0.45);
-  background: rgba(245, 158, 11, 0.12);
-  border-radius: 8px;
-  padding: 12px 14px;
-  margin-bottom: 14px;
-  color: var(--text-primary);
-}
-
-.warning-band div {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.warning-band span,
-.warning-band.muted {
-  color: var(--text-dim);
-  font-size: 12px;
 }
 
 .panel {

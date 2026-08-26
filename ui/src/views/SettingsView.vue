@@ -22,7 +22,6 @@ const strategyWins = computed(() => {
 })
 const valueTypes = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Float32', 'Float64']
 const performanceModes = ['Auto', 'Eco', 'Normal', 'Performance', 'Max']
-const autoRiskModes = ['Safe', 'Expert', 'Trainer']
 const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096, 8192]
 const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
 const workspaceExportText = ref('')
@@ -357,12 +356,6 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <label>
           <span>Threads modèle</span>
           <input v-model.number="store.settingModelThreads" class="input" type="number" min="1" max="32" step="1" />
-        </label>
-        <label>
-          <span>Niveau Auto</span>
-          <select v-model="store.settingAutoRiskMode" class="input select">
-            <option v-for="mode in autoRiskModes" :key="mode">{{ mode }}</option>
-          </select>
         </label>
       </div>
       <div class="model-status-grid">
