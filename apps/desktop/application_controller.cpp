@@ -12237,6 +12237,8 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     const QStringList chatAddresses = hexAddressesFromText(query);
     const QString explicitValueType = explicitValueTypeFromText(query);
     const QString defaultValueType = explicitValueType.isEmpty() ? QString("Int32") : explicitValueType;
+    const QString queryLower = query.toLower();
+    const bool smartSearchTrainerQuery = queryLower.contains("trainer") || queryLower.contains("cheat table");
     const SmartSearchIntent intent = classifySmartSearchIntent(
         query,
         numbers,
@@ -12681,9 +12683,10 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return recovery;
     }
 
-    if (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
+    if (!smartSearchTrainerQuery
+        && (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
         || (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && !chatAddresses.isEmpty())
-        || (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && !chatAddresses.isEmpty())) {
+        || (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && !chatAddresses.isEmpty()))) {
         auto activation = activateChatMemoryTargetsFromQuery(query);
         if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets
             && activation.value("success").toBool()
@@ -12703,25 +12706,25 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return activation;
     }
 
-    if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
+    if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
         auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
         stampIntent(&writeTargets);
         return writeTargets;
     }
 
-    if (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
+    if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
         auto freezeTargets = freezeChatMemoryTargetsFromQuery(query, numbers.first());
         stampIntent(&freezeTargets);
         return freezeTargets;
     }
 
-    if (intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
+    if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
         auto rewriteTargets = rewriteLastAutoWriteTargets(numbers.first(), query);
         stampIntent(&rewriteTargets);
         return rewriteTargets;
     }
 
-    if (intent.kind == SmartSearchIntentKind::WriteProfileTargets && numbers.size() == 1) {
+    if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::WriteProfileTargets && numbers.size() == 1) {
         auto profileWrite = writeProfileTargetsFromQuery(query, numbers.first());
         if (profileWrite.value("tool").toString() == "profile_write") {
             stampIntent(&profileWrite);
@@ -12735,7 +12738,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["message"] = "D'accord, j'ai oublié le contexte actif. Donne-moi la nouvelle valeur à chercher.";
         result["workflowStatus"] = "idle";
         result["error"] = "";
-    } else if (intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
+    } else if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
         // FirstScanRunning = nouveau lot de candidats, sans rapport avec un
         // eventuel echec signale sur le lot precedent. Sans ce reset, un
         // ExactScan lance sans le mot-cle "nouvelle recherche" (donc sans
@@ -12753,7 +12756,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["rationale"] = intent.rationale;
         result["state"] = "FirstScanRunning";
         result["error"] = "";
-    } else if (intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
+    } else if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
         m_smartSearchLastObservedValue = numbers.first();
         QVariantMap args;
         args["mode"] = "exact";
@@ -12780,7 +12783,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["rationale"] = intent.rationale;
         result["state"] = "Refining";
         result["error"] = "";
-    } else if (intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
+    } else if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
         // Meme raisonnement que pour ExactScan ci-dessus : nouveau lot,
         // l'echelle de secours du lot precedent ne s'applique plus.
         resetFailureEscalationState();
@@ -12980,6 +12983,78 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                 result["recoveryActions"] = recoveryActions;
             }
         }
+    } else if (tool == "trainer_list_features") {
+        actionResult = callVueStoreAction("getTrainerFeaturesSnapshot", {});
+        if (actionResult.value("success").toBool()) {
+            const QVariantList features = actionResult.value("result").toList();
+            result["workflowStatus"] = "trainer_features_listed";
+            result["message"] = features.isEmpty()
+                ? QString("Trainer : aucune feature locale pour le moment.")
+                : QString("Trainer : %1 feature(s) locale(s) trouvée(s). Tu peux en créer une nouvelle ou en gérer l'activation dans l'onglet Trainer.")
+                      .arg(features.size());
+        }
+    } else if (tool == "trainer_create_write") {
+        const QString trainerAddress = args.value("address").toString().trimmed();
+        const QString trainerValue = args.value("value").toString().trimmed();
+        const QString trainerValueType = args.value("valueType", "Int32").toString().trimmed();
+        if (trainerAddress.isEmpty() || trainerValue.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Pour créer une feature Trainer depuis le chat, donne une adresse 0x... et la valeur à écrire.";
+            stampIntent(&result);
+            return result;
+        }
+
+        QVariantMap feature;
+        feature["name"] = args.value("name", "Assistant Trainer write").toString();
+        feature["action"] = "write";
+        feature["locatorKind"] = "absolute";
+        feature["address"] = trainerAddress;
+        feature["valueType"] = trainerValueType.isEmpty() ? QString("Int32") : trainerValueType;
+        feature["value"] = trainerValue;
+
+        QVariantList storeArgs;
+        storeArgs.append(feature);
+        actionResult = callVueStoreAction("createTrainerFeature", storeArgs);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "trainer_feature_created";
+            result["message"] = QString("Trainer : feature write créée pour %1 (%2 = %3). Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.")
+                                  .arg(trainerAddress, feature.value("valueType").toString(), trainerValue);
+        }
+    } else if (tool == "trainer_delete_feature") {
+        const int trainerId = args.value("id").toInt();
+        if (trainerId <= 0) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Quelle feature Trainer veux-tu supprimer ? Donne son id, ou demande d'abord la liste du Trainer.";
+            stampIntent(&result);
+            return result;
+        }
+        actionResult = callVueStoreAction("deleteTrainerFeature", QVariantList{trainerId});
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "trainer_feature_deleted";
+            result["message"] = QString("Trainer : suppression demandée pour la feature #%1.").arg(trainerId);
+        }
+    } else if (tool == "trainer_apply_request" || tool == "trainer_restore_request") {
+        const bool restore = tool == "trainer_restore_request";
+        const bool all = args.value("all").toBool();
+        const QString trainerId = args.value("id").toString().trimmed();
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = "Les actions Trainer apply/restore ouvrent un vrai RiskGate côté UI. L'Assistant ne les déclenche pas en autonome pour éviter timeout ou attente modale invisible.";
+        if (all) {
+            result["message"] = restore
+                ? "Restauration de tout le Trainer demandée. Ouvre l'onglet Trainer et clique Restore all pour confirmer visuellement."
+                : "Activation de tout le Trainer demandée. Ouvre l'onglet Trainer et clique Apply all pour confirmer visuellement.";
+        } else if (!trainerId.isEmpty() && trainerId.toInt() > 0) {
+            result["message"] = restore
+                ? QString("Restauration de la feature Trainer #%1 demandée. Confirme-la dans l'onglet Trainer pour passer le RiskGate.").arg(trainerId)
+                : QString("Activation de la feature Trainer #%1 demandée. Confirme-la dans l'onglet Trainer pour passer le RiskGate.").arg(trainerId);
+        } else {
+            result["message"] = restore
+                ? "Restauration Trainer demandée. Demande d'abord la liste si tu ne connais pas l'id, puis confirme dans l'onglet Trainer."
+                : "Activation Trainer demandée. Demande d'abord la liste si tu ne connais pas l'id, puis confirme dans l'onglet Trainer.";
+        }
+        stampIntent(&result);
+        return result;
     } else if (tool == "write_value" || tool == "freeze_value") {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;

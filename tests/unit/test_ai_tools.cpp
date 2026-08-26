@@ -75,6 +75,9 @@ TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
     EXPECT_TRUE(registry.hasTool("read_window_text"));
     EXPECT_TRUE(registry.hasTool("start_changed_pages_diff"));
     EXPECT_TRUE(registry.hasTool("finish_changed_pages_diff"));
+    EXPECT_TRUE(registry.hasTool("trainer_list_features"));
+    EXPECT_TRUE(registry.hasTool("trainer_create_write"));
+    EXPECT_TRUE(registry.hasTool("trainer_delete_feature"));
 
     const auto autoResolve = registry.toolMetadata("auto_resolve");
     EXPECT_EQ(autoResolve.value("risk").toString(), "safe");
@@ -85,7 +88,7 @@ TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
 TEST(AIToolRegistryTest, MarksRiskyToolsAsConfirmationRequired) {
     killai::ToolRegistry registry;
 
-    for (const QString& toolName : {"write_value", "freeze_value", "find_what_writes", "generate_aob", "suggest_patch"}) {
+    for (const QString& toolName : {"write_value", "freeze_value", "find_what_writes", "generate_aob", "suggest_patch", "trainer_apply_request", "trainer_restore_request"}) {
         const auto tool = registry.toolMetadata(toolName);
         ASSERT_FALSE(tool.isEmpty()) << toolName.toStdString();
         EXPECT_TRUE(tool.value("requiresConfirmation").toBool()) << toolName.toStdString();
@@ -367,6 +370,141 @@ TEST(AIEngineContextualFallbackTest, OffMemoryFastPathStillRequiresAttachedProce
     QVariantMap context;
     context["processAttached"] = false;
     const auto result = engine.processQuery("inspecte LocalSettings settings.dat", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_TRUE(result.value("message").toString().contains("processus"));
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathListsFeaturesFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("liste le trainer", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_list_features");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_trainer_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathListsFeaturesEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("show trainer features", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_list_features");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_trainer_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathCreatesWriteFeatureFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("ajoute une feature trainer write 0x12345 a 900", context);
+    const auto args = result.value("args").toMap();
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_create_write");
+    EXPECT_EQ(args.value("address").toString().toStdString(), "0x12345");
+    EXPECT_EQ(args.value("value").toString().toStdString(), "900");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathCreatesWriteFeatureEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("create trainer write feature 0x1a2b3c4d to 100", context);
+    const auto args = result.value("args").toMap();
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_create_write");
+    EXPECT_EQ(args.value("address").toString().toStdString(), "0x1a2b3c4d");
+    EXPECT_EQ(args.value("value").toString().toStdString(), "100");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathDeletesFeatureFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("supprime la feature trainer 3", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_delete_feature");
+    EXPECT_EQ(result.value("args").toMap().value("id").toString().toStdString(), "3");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathDeletesFeatureEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("delete trainer feature 12", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_delete_feature");
+    EXPECT_EQ(result.value("args").toMap().value("id").toString().toStdString(), "12");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathApplyRequiresUiConfirmationFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("active tout le trainer", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_apply_request");
+    EXPECT_TRUE(result.value("args").toMap().value("all").toBool());
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathApplyRequiresUiConfirmationEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("apply trainer feature 7", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_apply_request");
+    EXPECT_EQ(result.value("args").toMap().value("id").toString().toStdString(), "7");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathRestoreRequiresUiConfirmationFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("restaure la feature trainer 4", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_restore_request");
+    EXPECT_EQ(result.value("args").toMap().value("id").toString().toStdString(), "4");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathRestoreRequiresUiConfirmationEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("restore all trainer features", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_restore_request");
+    EXPECT_TRUE(result.value("args").toMap().value("all").toBool());
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathStillRequiresAttachedProcess) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = false;
+    const auto result = engine.processQuery("liste le trainer", context);
     EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
     EXPECT_TRUE(result.value("message").toString().contains("processus"));
 }

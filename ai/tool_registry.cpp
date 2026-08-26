@@ -51,6 +51,11 @@ QVariantList toolDefinitions() {
         makeTool("read_save_file_text", "Lit le contenu (décodé en texte imprimable, borné en taille) d'un fichier de sauvegarde trouvé via discover_save_files. Sert à repérer le champ correspondant à la valeur affichée à l'écran (ex: un compteur nommé dans du JSON) sans avoir à scanner la mémoire.", {"path"}),
         makeTool("patch_file_bytes", "Edite en place une sequence d'octets dans un fichier de sauvegarde (trouve via discoverProcessSaveFiles), apres confirmation explicite. La sequence de remplacement doit faire exactement la meme longueur que celle recherchee, et ne doit apparaitre qu'une seule fois dans le fichier (sinon l'action est refusee pour eviter de modifier le mauvais champ).", {"path", "findHex", "replaceHex"}, "write", true),
         makeTool("watch_save_file", "Surveille un fichier de sauvegarde (trouvé via discover_save_files) et attend une écriture/suppression/renommage, via surveillance native du dossier (sans dépendance externe type Process Monitor). Bloquant jusqu'à timeoutMs (défaut 5000) ou jusqu'au premier changement détecté. Utile pour confirmer QUAND un fichier est réécrit par le jeu (ex: juste après une action utilisateur), avant de tenter une édition avec patch_file_bytes.", {"path"}),
+        makeTool("trainer_list_features", "Liste en lecture seule les features Trainer locales via le pont UI/Pinia.", {}),
+        makeTool("trainer_create_write", "Crée une feature Trainer simple de type write depuis une adresse explicite et une valeur. Ne l'active pas automatiquement.", {"address", "valueType", "value"}),
+        makeTool("trainer_delete_feature", "Supprime une feature Trainer locale par id explicite.", {"id"}),
+        makeTool("trainer_apply_request", "Prépare une demande d'activation Trainer mais ne clique pas le RiskGate UI. L'utilisateur doit confirmer dans l'onglet Trainer.", {}, "write", true),
+        makeTool("trainer_restore_request", "Prépare une demande de restauration/désactivation Trainer mais ne clique pas le RiskGate UI. L'utilisateur doit confirmer dans l'onglet Trainer.", {}, "write", true),
     };
 }
 

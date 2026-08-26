@@ -104,6 +104,80 @@ OffMemoryToolMatch matchOffMemoryTool(const QString& q) {
     return {};
 }
 
+struct TrainerToolMatch {
+    QString tool;
+    QVariantMap args;
+    QString rationale;
+};
+
+QString firstDecimalOutsideHex(QString text) {
+    text.replace(QRegularExpression(R"(0x[0-9a-fA-F]+)"), " ");
+    const QRegularExpression re(R"([-+]?\d+(?:[\.,]\d+)?)");
+    const auto match = re.match(text);
+    return match.hasMatch() ? match.captured(0).replace(',', '.') : QString();
+}
+
+QString firstHexAddressIn(const QString& text) {
+    const QRegularExpression re(R"(0x[0-9a-fA-F]+)");
+    const auto match = re.match(text);
+    return match.hasMatch() ? match.captured(0) : QString();
+}
+
+TrainerToolMatch matchTrainerTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsTrainer = q.contains("trainer") || q.contains("cheat table")
+        || q.contains("feature trainer") || q.contains("fonction trainer");
+    if (!wantsTrainer) {
+        return {};
+    }
+
+    const bool wantsApply = q.contains("apply") || q.contains("activer") || q.contains("active ")
+        || q.contains("lance") || q.contains("enabled");
+    const bool wantsRestore = q.contains("restore") || q.contains("restaur") || q.contains("désactiv")
+        || q.contains("desactiv") || q.contains("coupe");
+    const bool wantsDelete = q.contains("delete") || q.contains("remove") || q.contains("supprim")
+        || q.contains("efface");
+    const bool wantsCreate = q.contains("create") || q.contains("add ") || q.contains("ajoute")
+        || q.contains("crée") || q.contains("cree") || q.contains("sauve") || q.contains("sauvegarde");
+    const bool wantsList = q.contains("list") || q.contains("liste") || q.contains("affiche")
+        || q.contains("show") || q.contains("voir") || q.contains("snapshot") || q.contains("status");
+
+    if (wantsApply) {
+        return {"trainer_apply_request",
+            {{"id", firstDecimalOutsideHex(q)}, {"all", q.contains("all") || q.contains("tout")}},
+            "Activation Trainer demandee: je prepare une confirmation UI, sans appeler directement le RiskGate."};
+    }
+    if (wantsRestore) {
+        return {"trainer_restore_request",
+            {{"id", firstDecimalOutsideHex(q)}, {"all", q.contains("all") || q.contains("tout")}},
+            "Restauration Trainer demandee: je prepare une confirmation UI, sans appeler directement le RiskGate."};
+    }
+    if (wantsDelete) {
+        return {"trainer_delete_feature",
+            {{"id", firstDecimalOutsideHex(q)}},
+            "Suppression d'une feature Trainer demandee."};
+    }
+    if (wantsCreate) {
+        const QString address = firstHexAddressIn(query);
+        const QString value = firstDecimalOutsideHex(query);
+        QVariantMap args;
+        args["action"] = "write";
+        args["address"] = address;
+        args["value"] = value;
+        args["valueType"] = q.contains("float") ? QString("Float32") : QString("Int32");
+        args["name"] = "Assistant Trainer write";
+        return {"trainer_create_write", args,
+            "Creation d'une feature Trainer write demandee depuis une adresse et une valeur explicites."};
+    }
+    if (wantsList) {
+        return {"trainer_list_features", {},
+            "Je liste les features Trainer locales via le pont UI lecture seule."};
+    }
+
+    return {"trainer_list_features", {},
+        "Demande Trainer generale: je commence par lister l'etat actuel des features."};
+}
+
 } // namespace
 
 AIEngine::AIEngine(QObject* parent) : QObject(parent) {}
@@ -324,6 +398,11 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
     // ensureLlamaInitialized(). Ne s'applique que process attache (sinon on
     // laisse le chemin normal produire le message de clarification usuel).
     if (context.value("processAttached", true).toBool()) {
+        if (const auto trainerMatch = matchTrainerTool(query); !trainerMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(trainerMatch.tool, trainerMatch.args, trainerMatch.rationale);
+            result["aiBackend"] = "deterministic_trainer_fastpath";
+            return result;
+        }
         if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
             QVariantMap result = makeToolCall(offMemoryMatch.tool, {}, offMemoryMatch.rationale);
             result["aiBackend"] = "deterministic_offmemory_fastpath";
@@ -564,6 +643,9 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
 
     // PHASE 91/99 : demande explicite d'investigation "hors memoire" (voir
     // matchOffMemoryTool ci-dessus pour la liste de mots-cles).
+    if (const auto trainerMatch = matchTrainerTool(query); !trainerMatch.tool.isEmpty()) {
+        return makeToolCall(trainerMatch.tool, trainerMatch.args, trainerMatch.rationale);
+    }
     if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
         return makeToolCall(offMemoryMatch.tool, {}, offMemoryMatch.rationale);
     }
