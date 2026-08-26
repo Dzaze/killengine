@@ -5,6 +5,7 @@
 #   .\scripts\release-check.ps1 -Package -ExcludeModel
 #   .\scripts\release-check.ps1 -Package -RequireSigning   (official release: fail if KillEngine.exe ships unsigned)
 #   .\scripts\release-check.ps1 -IncludeLuaExamples        (optional, best-effort: never fails the gate if runtime/lua/ is absent)
+#   .\scripts\release-check.ps1 -IncludeRecentTargetedTests
 #
 # -IncludeLuaExamples runs scripts\test-lua-examples.ps1 WITHOUT -RequirePipe (pipe-backed
 # strictness is a separate, explicit command -- run it directly when you want that guarantee):
@@ -18,7 +19,8 @@ param(
     [switch]$Package,
     [switch]$ExcludeModel,
     [switch]$RequireSigning,
-    [switch]$IncludeLuaExamples
+    [switch]$IncludeLuaExamples,
+    [switch]$IncludeRecentTargetedTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -137,8 +139,20 @@ try {
             & $unitTests
         }
 
+        if ($IncludeRecentTargetedTests) {
+            Invoke-Step "Recent targeted unit tests" {
+                & $unitTests --gtest_filter=AIToolRegistryTest.*:AIEngineContextualFallbackTest.TrainerFastPath*:DisplaySourceClassifier.*
+            }
+        }
+
         Invoke-Step "Integration tests" {
             & $integrationTests
+        }
+
+        if ($IncludeRecentTargetedTests) {
+            Invoke-Step "Recent targeted integration tests" {
+                & $integrationTests --gtest_filter=DisplayVsSourceTargetTest.*
+            }
         }
     }
 

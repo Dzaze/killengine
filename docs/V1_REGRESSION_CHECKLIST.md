@@ -30,6 +30,12 @@ Optional Lua examples check, best-effort (never fails the gate if `runtime\lua\`
 .\scripts\release-check.ps1 -IncludeLuaExamples
 ```
 
+Optional targeted replay for the most recent automated checks:
+
+```powershell
+.\scripts\release-check.ps1 -IncludeRecentTargetedTests
+```
+
 For a strict pipe-backed check of the Lua examples (needs `KillEngine.exe` already running with `KILLENGINE_AUTOMATION_PIPE=1`), run this separately — `-RequirePipe` is intentionally not wired into `release-check.ps1`:
 
 ```powershell
@@ -50,6 +56,7 @@ Expected result:
 - Optional portable package contains only runtime executables and required Qt/WebEngine assets.
 - Optional portable package passes the embedded AI layout verifier.
 - Optional Lua examples check runs the bundled examples when `runtime\lua\` is present; warns and continues (does not fail the gate) when it is absent.
+- Optional recent targeted tests replay the Trainer fast-path, AI registry, DisplaySourceClassifier unit suite, and DisplayVsSourceTarget integration suite.
 - `dist\KillEngine-portable\KillEngine.exe` stays alive during the portable launch smoke test.
 
 ## KillEngineTestTarget Manual Pass
@@ -84,6 +91,22 @@ Expected result:
 4. Ask a natural rewrite such as `mets-les a 3000`.
 5. Say that the address did not work and confirm recovery actions are offered.
 6. Clear active addresses and start a new unrelated search.
+7. Ask `liste le trainer` and confirm the response uses the Trainer fast-path instead of loading the local model.
+8. Ask to create a Trainer write feature with an explicit address/value; confirm it is created but not applied.
+9. Ask to apply or restore Trainer features and confirm the Assistant asks for UI confirmation instead of applying directly.
+
+## Displayed vs Source Classifier Manual Pass
+
+Automated proxy, no human needed:
+
+```powershell
+.\build\bin\killengine_unit_tests.exe --gtest_filter=DisplaySourceClassifier.*
+.\build\bin\killengine_integration_tests.exe --gtest_filter=DisplayVsSourceTargetTest.*
+```
+
+1. On `KillEngineTestTarget.exe`, locate the displayed counter field exposed by the Displayed vs Source fixture and confirm it is classified as likely derived/display-only.
+2. Locate the source field and confirm the classifier reports no writes observed unless the target explicitly changes it.
+3. If this gets surfaced in Assistant/UI later, confirm the flow remains read-only and only advises the user before any write-capable action.
 
 ## Expert Mode Manual Pass
 

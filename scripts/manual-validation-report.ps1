@@ -159,6 +159,34 @@ Notes:
 
 ~~~
 
+## Assistant Trainer Fast-Path
+
+- [ ] ``startSmartSearch("liste le trainer")`` returns ``trainer_list_features`` without loading the local model
+- [ ] Creating a write feature from natural language requires an attached process and explicit address/value
+- [ ] The created Trainer feature is present but not auto-applied
+- [ ] Deleting by natural-language id removes only the requested feature
+- [ ] Apply/restore requests return ``requiresConfirmation`` and do not call ``applyTrainerFeature``/``restoreTrainerFeature`` directly
+
+Notes:
+
+~~~
+
+~~~
+
+## Displayed vs Source Classifier
+
+- [ ] ``DisplaySourceClassifier.*`` unit tests pass
+- [ ] ``DisplayVsSourceTargetTest.*`` integration tests pass on ``KillEngineTestTarget.exe``
+- [ ] Displayed field is reported as likely derived/display-only
+- [ ] Source field with no writes is reported honestly as no writes observed
+- [ ] Any future Assistant/UI entry remains read-only unless the user explicitly confirms a write elsewhere
+
+Notes:
+
+~~~
+
+~~~
+
 ## Debugger Prolonged Validation
 
 - [ ] Capture can be cancelled
