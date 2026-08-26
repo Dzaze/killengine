@@ -47,6 +47,8 @@ $content = @"
 ## Automated Gate Snapshot
 
 - [ ] ``.\scripts\release-check.ps1 -SkipConfigure`` passed before manual pass
+- [ ] ``.\scripts\release-check.ps1 -OnlyRecentTargetedTests`` passed
+- [ ] ``.\scripts\release-check.ps1 -OnlyAutomationPipeSafeMethods`` passed
 - [ ] UI opened without blank screen
 - [ ] Backend ping OK
 - [ ] Attach/detach does not crash
