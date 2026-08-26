@@ -519,6 +519,68 @@ TEST(AIEngineContextualFallbackTest, TrainerFastPathStillRequiresAttachedProcess
     EXPECT_TRUE(result.value("message").toString().contains("processus"));
 }
 
+// PHASE 137bis : durcissement demande par le propriétaire (liste de 7
+// chantiers, point 3) sur ce que Codex venait de livrer en PHASE 129 --
+// phrases ambiguës et champs requis manquants. `ToolValidator::validate`
+// (ai/tool_validator.cpp) ne vérifie que la PRESENCE de la clé dans args, pas
+// qu'elle soit non vide (`args.contains(required)`) -- donc matchTrainerTool
+// qui insère toujours "address"/"value"/"id" (même vides) fait passer la
+// validation ; c'est le dispatch C++ (application_controller.cpp, pas
+// unit-testable ici, voir AGENTS.md) qui renvoie ensuite needs_clarification
+// sur un champ vide. Ces tests documentent ce partage de responsabilité
+// explicitement, pour qu'un futur agent ne suppose pas que le fast-path lui-
+// même filtre les champs manquants.
+TEST(AIEngineContextualFallbackTest, TrainerFastPathCreateWithoutAddressOrValueStillProducesToolCall) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("ajoute une feature trainer", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_create_write");
+    const auto args = result.value("args").toMap();
+    EXPECT_TRUE(args.value("address").toString().isEmpty());
+    EXPECT_TRUE(args.value("value").toString().isEmpty());
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathDeleteWithoutIdStillProducesToolCall) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("supprime la feature trainer", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_delete_feature");
+    EXPECT_TRUE(result.value("args").toMap().value("id").toString().isEmpty());
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathAmbiguousApplyAndDeletePhraseAppliesWins) {
+    // Documente la precedence reelle du if-chain de matchTrainerTool
+    // (ai/ai_engine.cpp) : wantsApply est teste AVANT wantsDelete. Une phrase
+    // qui matche les deux mots-cles route donc vers apply, pas delete --
+    // comportement a connaitre avant de reordonner ce chain un jour.
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("active puis supprime la feature trainer 3", context);
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_apply_request");
+}
+
+TEST(AIEngineContextualFallbackTest, TrainerFastPathIsCaseInsensitive) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("SUPPRIME LA FEATURE TRAINER 5", context);
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_delete_feature");
+    EXPECT_EQ(result.value("args").toMap().value("id").toString().toStdString(), "5");
+}
+
 TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathMatchesDisplayedFieldFr) {
     ScopedModelDisabled guard;
     killai::AIEngine engine;
