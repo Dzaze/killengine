@@ -6,6 +6,7 @@
 #   .\scripts\release-check.ps1 -Package -RequireSigning   (official release: fail if KillEngine.exe ships unsigned)
 #   .\scripts\release-check.ps1 -IncludeLuaExamples        (optional, best-effort: never fails the gate if runtime/lua/ is absent)
 #   .\scripts\release-check.ps1 -IncludeRecentTargetedTests
+#   .\scripts\release-check.ps1 -OnlyRecentTargetedTests
 #
 # -IncludeLuaExamples runs scripts\test-lua-examples.ps1 WITHOUT -RequirePipe (pipe-backed
 # strictness is a separate, explicit command -- run it directly when you want that guarantee):
@@ -20,7 +21,8 @@ param(
     [switch]$ExcludeModel,
     [switch]$RequireSigning,
     [switch]$IncludeLuaExamples,
-    [switch]$IncludeRecentTargetedTests
+    [switch]$IncludeRecentTargetedTests,
+    [switch]$OnlyRecentTargetedTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -86,6 +88,22 @@ function Invoke-KillEngineLaunchSmoke {
             }
         }
     }
+}
+
+if ($OnlyRecentTargetedTests) {
+    Push-Location $repoRoot
+    try {
+        Invoke-Step "Recent targeted tests" {
+            & (Join-Path $repoRoot "scripts\test-recent-targeted.ps1")
+        }
+
+        $duration = New-TimeSpan -Start $startedAt -End (Get-Date)
+        Write-Host ""
+        Write-Host ("Recent targeted release check passed in {0:mm\:ss}." -f $duration) -ForegroundColor Green
+    } finally {
+        Pop-Location
+    }
+    return
 }
 
 Push-Location $repoRoot

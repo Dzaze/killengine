@@ -34,6 +34,7 @@ Optional targeted replay for the most recent automated checks:
 
 ```powershell
 .\scripts\test-recent-targeted.ps1
+.\scripts\release-check.ps1 -OnlyRecentTargetedTests
 .\scripts\release-check.ps1 -IncludeRecentTargetedTests
 ```
 
