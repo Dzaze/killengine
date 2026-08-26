@@ -12347,6 +12347,18 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         || smartSearchFieldStabilityQuery
         || smartSearchAobOrPatchWorkflowQuery
         || smartSearchFindWhatWritesOrTestFieldsQuery;
+    // PHASE 148 : meme liste de mots-cles que matchUiSourcesTool
+    // (ai/ai_engine.cpp), duplication grossiere volontaire -- meme convention
+    // que les flags smartSearchXxxQuery ci-dessus. Sert a un guard DIFFERENT
+    // (pas smartSearchBypassesMemoryPreIntent) : contourne specifiquement le
+    // bloc AnswerTraceUiFilterPrompt de startSmartSearch, pas le pre-intent
+    // ActivateMemoryTargets -- ces deux outils n'ont pas d'adresse a router
+    // via le meme mecanisme que les 5 outils ci-dessus.
+    const bool smartSearchExplicitUiSourcesQuery = queryLower.contains("analyse les sources")
+        || queryLower.contains("analyser les sources") || queryLower.contains("analyse la source")
+        || queryLower.contains("sources numériques") || queryLower.contains("sources numeriques")
+        || queryLower.contains("analyze sources") || queryLower.contains("analyze the sources")
+        || queryLower.contains("numeric sources") || queryLower.contains("numeric source");
     const SmartSearchIntent intent = classifySmartSearchIntent(
         query,
         numbers,
@@ -12639,7 +12651,21 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return recovery;
     }
 
-    if (intent.kind == SmartSearchIntentKind::AnswerTraceUiFilterPrompt) {
+    // PHASE 148 : une demande EXPLICITE d'analyse de sources ("analyse les
+    // sources numeriques...") ne doit pas etre traitee comme la reponse a la
+    // relance trace_ui_filter en attente, meme si m_pendingRecoveryAction ==
+    // "trace_ui_filter" est actif -- sinon "analyse les sources, c'est
+    // toujours 100" est avale par ce bloc (qui lance deja sa propre analyse
+    // de sources, mais via le pipeline filter->survivors, pas via l'outil
+    // analyze_ui_sources demande). Volontairement NE PAS toucher
+    // intent.kind ni m_pendingRecoveryAction ici : laisser tomber jusqu'au
+    // repli generique m_ai.processQuery() plus bas, qui route vers
+    // matchUiSourcesTool (ai/ai_engine.cpp) -- m_pendingUiStringCandidates
+    // reste peuple (ce bloc ne s'execute pas), donc analyze_ui_sources peut
+    // toujours s'en servir. Le flow existant "reponse simple = nouvelle
+    // valeur" n'est pas touche : ce guard ne matche que sur des mots-cles
+    // explicites, jamais sur une simple valeur numerique.
+    if (intent.kind == SmartSearchIntentKind::AnswerTraceUiFilterPrompt && !smartSearchExplicitUiSourcesQuery) {
         m_pendingRecoveryAction.clear();
         const QString filterValue = !numbers.isEmpty() ? numbers.first() : query.trimmed();
         m_smartSearchLastObservedValue = filterValue;
@@ -13471,14 +13497,29 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                 : "Fichier lu en entier. Cherche le champ correspondant à la valeur affichée dans le texte.";
         }
     } else if (tool == "patch_file_bytes") {
-        const QString path = args.value("path").toString();
-        const QString findHex = args.value("findHex").toString();
-        const QString replaceHex = args.value("replaceHex").toString();
-        actionResult = patchProcessSaveFileBytes(path, findHex, replaceHex);
-        if (actionResult.value("success").toBool()) {
-            result["workflowStatus"] = "save_file_bytes_patched";
-            result["message"] = "Patch fichier appliqué : une occurrence unique remplacée, taille du fichier inchangée.";
-        }
+        // PHASE 148 : bug trouve en auditant la ligne schema -- ce cas
+        // appelait patchProcessSaveFileBytes() directement malgre
+        // requiresConfirmation=true dans le registre (ai/tool_registry.cpp),
+        // un vrai contournement RiskGate pour une ecriture disque reelle.
+        // Corrige avec le meme patron que find_what_writes/test_candidate_fields
+        // (PHASE 146) : jamais d'execution directe depuis le chat, message
+        // de redirection uniquement -- pas de recoveryActions cliquable ici
+        // (contrairement a kernel_write/speedhack_set/block_process_network
+        // ci-dessus) car cette action n'a pas d'equivalent UI existant vers
+        // lequel pointer, et inventer un nouvel id de recoveryAction
+        // demanderait du cablage frontend hors perimetre de ce chantier.
+        const QString patchPath = args.value("path").toString().trimmed();
+        const QString patchFindHex = args.value("findHex").toString().trimmed();
+        const QString patchReplaceHex = args.value("replaceHex").toString().trimmed();
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = "Édite en place un fichier de sauvegarde réel sur disque — action non réversible automatiquement, pas d'exécution autonome depuis le chat.";
+        result["message"] = (patchPath.isEmpty() || patchFindHex.isEmpty() || patchReplaceHex.isEmpty())
+            ? "Édition de fichier de sauvegarde demandée, mais il manque le chemin exact et/ou les séquences hex find/replace. Utilise le pipe d'automatisation ou un script Lua avec patchFileBytes une fois la séquence exacte confirmée (read_save_file_text pour vérifier le contexte avant)."
+            : QString("Édition de fichier demandée sur %1 (remplace %2 par %3). Pas d'exécution autonome depuis le chat : utilise le pipe d'automatisation ou un script Lua pour l'appliquer une fois sûr de la séquence exacte.")
+                  .arg(patchPath, patchFindHex, patchReplaceHex);
+        stampIntent(&result);
+        return result;
     } else if (tool == "watch_save_file") {
         const QString path = args.value("path").toString();
         QVariantMap watchOptions;

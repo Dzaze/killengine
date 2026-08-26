@@ -458,7 +458,25 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         // choisir, meme une fois leur dispatch cote startSmartSearch branche.
         // Cette ligne ne se genere pas automatiquement depuis le registre :
         // verifier les deux restent synchronises si un outil est ajoute/retire.
-        "Schema obligatoire: {\"tool\":\"auto_resolve|get_auto_report|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|analyze_field_stability|generate_aob|suggest_patch|disassemble_backward|test_candidate_fields|trainer_list_features|trainer_create_write|trainer_delete_feature|trainer_apply_request|trainer_restore_request\",\"args\":{...}}\n"
+        //
+        // PHASE 148 : audit complet de ce qui manquait encore, decide outil
+        // par outil (voir docs/KILLENGINE_ASSISTANT_TOOLS_MAP.md pour le
+        // detail) :
+        //   - AJOUTES ici (lecture seule ou attente bornee courte, deja
+        //     dispatches cote startSmartSearch) : discover_save_files,
+        //     inspect_local_settings, read_save_file_text, watch_save_file.
+        //   - VOLONTAIREMENT EXCLUS (write/injection reel) : kernel_write,
+        //     speedhack_set, block_process_network, patch_file_bytes. Les 3
+        //     premiers restent joignables UNIQUEMENT sur mot-cle explicite
+        //     (ai/ai_engine.cpp, deterministicPlan/deterministicPlanWithContext)
+        //     -- jamais un choix libre du modele, leur propre description dit
+        //     deja "a utiliser seulement si l'utilisateur le demande
+        //     explicitement". patch_file_bytes redirige toujours vers l'UI/pipe
+        //     sans jamais executer depuis le chat (voir son dispatch,
+        //     apps/desktop/application_controller.cpp) -- pas encore de
+        //     fast-path explicite non plus, laisse hors schema par prudence
+        //     tant que ce chemin n'est pas davantage exerce.
+        "Schema obligatoire: {\"tool\":\"auto_resolve|get_auto_report|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|analyze_field_stability|generate_aob|suggest_patch|disassemble_backward|test_candidate_fields|discover_save_files|inspect_local_settings|read_save_file_text|watch_save_file|trainer_list_features|trainer_create_write|trainer_delete_feature|trainer_apply_request|trainer_restore_request\",\"args\":{...}}\n"
         "Posture Inspecteur:\n"
         "- Observe avant d'ecrire: une adresse n'est fiable que si elle suit plusieurs variations et si l'hypothese explique les echecs precedents.\n"
         "- Distingue source gameplay, copie d'affichage, buffer UI recycle, table de sequence et pointeur intermediaire.\n"
@@ -490,6 +508,9 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         "- Si l'utilisateur demande de desassembler en arriere pour trouver les champs sources d'une instruction connue (apres analyze_field_stability=likely_derived_display par exemple), choisis disassemble_backward avec args.address; lecture seule.\n"
         "- Si l'utilisateur demande explicitement de TESTER quels champs candidats tiennent reellement (ecriture test + restauration automatique, ~1 minute), choisis test_candidate_fields; depuis le chat cette action redirige toujours vers l'UI (ecrit reellement une valeur test sur la cible), jamais d'execution autonome.\n"
         "- Si l'utilisateur demande de capturer ce qui ecrit une adresse (find_what_writes), sache que depuis le chat cette action redirige toujours vers l'UI (attache un debugger, necessite de faire varier la valeur en direct), jamais d'execution autonome -- choisis quand meme find_what_writes avec args.address si demande explicitement, le dispatch gere la redirection.\n"
+        "- Si le scan memoire echoue de facon repetee (valeur instable/reallouee) sur une cible UWP, la valeur affichee vient peut-etre d'un fichier sur disque plutot que d'une adresse memoire stable : choisis discover_save_files (aucun argument) pour chercher les fichiers de sauvegarde, ou inspect_local_settings si un fichier de sauvegarde evident n'existe pas. Une fois un chemin connu (retourne par discover_save_files), choisis read_save_file_text avec args.path pour le lire, ou watch_save_file avec args.path pour confirmer QUAND il est reecrit.\n"
+        "- kernel_write/speedhack_set/block_process_network ne sont PAS dans le schema ci-dessus (choix volontairement exclu du modele) -- ne les choisis JAMAIS de toi-meme ; ce sont des fast-paths deterministes exclusivement sur mot-cle explicite de l'utilisateur (\"ecris via le kernel\", \"ralentis le jeu\", \"coupe le reseau\"), geres avant meme d'atteindre ce prompt.\n"
+        "- patch_file_bytes n'est pas non plus dans le schema : cette action ecrit reellement sur disque et ne doit jamais etre choisie par le modele local. Si l'utilisateur la demande explicitement, le fast-path/dispatch cote application_controller.cpp la redirige deja vers une confirmation manuelle (pipe/Lua), pas la peine de la generer ici.\n"
         "Exemples:\n"
         "Exemple: j'ai 41250 argent => {\"tool\":\"exact_scan\",\"args\":{\"value\":\"41250\",\"valueType\":\"Int32\"}}\n"
         "Exemple: trouve cette valeur et guide-moi => {\"tool\":\"auto_resolve\",\"args\":{\"query\":\"trouve cette valeur et guide-moi\"}}\n"
@@ -507,6 +528,7 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         "Exemple: donne-moi le rapport auto-resolution => {\"tool\":\"get_auto_report\",\"args\":{}}\n"
         "Exemple: analyse les sources numeriques, c'est maintenant 60 => {\"tool\":\"analyze_ui_sources\",\"args\":{\"value\":\"60\"}}\n"
         "Exemple: genere une signature AOB pour 0x1a2b3c4d => {\"tool\":\"generate_aob\",\"args\":{\"address\":\"0x1a2b3c4d\"}}\n"
+        "Exemple: le scan ne trouve rien, cherche un fichier de sauvegarde => {\"tool\":\"discover_save_files\",\"args\":{}}\n"
         "Outils disponibles:\n%1\n")
         .arg(tools.join('\n'))
         + (contextBlock.isEmpty() ? QString() : contextBlock + "\n")

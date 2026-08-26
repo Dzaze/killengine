@@ -284,38 +284,89 @@ TEST(LlamaRuntimeTest, SchemaLineListsEveryRegisteredTool) {
     }
     ASSERT_FALSE(schemaLine.isEmpty()) << "Ligne \"Schema obligatoire\" introuvable dans le prompt.";
 
-    // Exclus deliberement de cette assertion -- PAS le sujet de PHASE 140,
-    // trouve par accident en ecrivant ce test, documente comme trou connu
-    // separe plutot que "corrige" hors perimetre (docs/PHASE_TRACKER.md
-    // PHASE 140) :
+    // PHASE 148 : audit complet de ce qui manquait encore (voir
+    // docs/KILLENGINE_ASSISTANT_TOOLS_MAP.md pour le detail). Exclusion
+    // reduite a ce qui reste DELIBEREMENT hors du choix libre du modele :
     //   - kernel_write/speedhack_set/block_process_network (risk=injection) :
     //     leur propre description dit deja "a utiliser seulement si
-    //     l'utilisateur le demande explicitement" -- exclusion du libre choix
-    //     LLM probablement deliberee, pas un oubli.
-    //   - discover_save_files/inspect_local_settings/read_save_file_text/
-    //     patch_file_bytes/watch_save_file : dispatches dans startSmartSearch
-    //     (donc PAS le meme trou que les 7 de PHASE 139), mais absents de
-    //     cette ligne schema -- seuls discover_save_files/inspect_local_settings
-    //     ont un fast-path deterministe (matchOffMemoryTool) qui les rend
-    //     quand meme joignables en langage naturel ; les 3 autres partagent le
-    //     meme trou latent sans qu'aucun agent ne l'ait encore remarque avant
-    //     ce test.
-    static const QSet<QString> kKnownPreExistingGapNotThisPhase = {
-        "kernel_write", "speedhack_set", "block_process_network",
-        "discover_save_files", "inspect_local_settings",
-        "read_save_file_text", "patch_file_bytes", "watch_save_file",
+    //     l'utilisateur le demande explicitement" -- exclusion volontaire,
+    //     restent joignables via fast-path deterministe sur mot-cle explicite
+    //     uniquement (ai/ai_engine.cpp, deterministicPlan/
+    //     deterministicPlanWithContext), jamais un choix libre du LLM.
+    //   - patch_file_bytes : ecrit reellement sur disque, redirige toujours
+    //     vers l'UI/pipe cote dispatch (PHASE 148 -- corrige un bypass
+    //     RiskGate existant), pas encore de fast-path explicite non plus,
+    //     laisse hors schema par prudence tant que ce chemin n'est pas
+    //     davantage exerce.
+    // discover_save_files/inspect_local_settings/read_save_file_text/
+    // watch_save_file sont maintenant DANS le schema (PHASE 148) -- plus
+    // besoin de les exclure ici.
+    static const QSet<QString> kDeliberatelyExcludedFromModelSchema = {
+        "kernel_write", "speedhack_set", "block_process_network", "patch_file_bytes",
     };
 
     for (const auto& item : registry.availableTools()) {
         const QString toolName = item.toMap().value("name").toString();
         ASSERT_FALSE(toolName.isEmpty());
-        if (kKnownPreExistingGapNotThisPhase.contains(toolName)) {
+        if (kDeliberatelyExcludedFromModelSchema.contains(toolName)) {
             continue;
         }
         EXPECT_TRUE(schemaLine.contains(toolName))
             << "Outil '" << toolName.toStdString() << "' enregistre dans ToolRegistry mais absent de la ligne "
             << "\"Schema obligatoire\" -- le modele local ne peut jamais le choisir. " << schemaLine.toStdString();
     }
+}
+
+// PHASE 148 : symetrique du test ci-dessus -- verifie explicitement que les 4
+// outils write/injection reels restent HORS du schema (donc jamais un choix
+// libre du modele local), pour que ce choix delibere soit machine-verifie
+// plutot qu'une simple note de doc qu'un futur agent pourrait oublier en
+// ajoutant un outil au registre.
+TEST(LlamaRuntimeTest, SchemaLineExcludesRealWriteAndInjectionTools) {
+    killai::ToolRegistry registry;
+    const QString prompt = killai::LlamaRuntime::buildPrompt("test query", registry, {});
+
+    QString schemaLine;
+    for (const QString& line : prompt.split('\n')) {
+        if (line.contains("Schema obligatoire")) {
+            schemaLine = line;
+            break;
+        }
+    }
+    ASSERT_FALSE(schemaLine.isEmpty());
+
+    for (const QString& toolName : {"kernel_write", "speedhack_set", "block_process_network", "patch_file_bytes"}) {
+        EXPECT_FALSE(schemaLine.contains(toolName))
+            << toolName.toStdString() << " ne devrait jamais etre un choix libre du modele local (write/injection reel).";
+    }
+}
+
+// PHASE 148 : block_process_network gagne les memes fast-paths deterministes
+// que kernel_write/speedhack_set (jamais un choix libre du LLM, uniquement
+// sur mot-cle explicite -- voir ai_engine.cpp deterministicPlan/
+// deterministicPlanWithContext).
+TEST(AIEngineContextualFallbackTest, BlockNetworkFastPathMatchesExplicitCutRequestFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("coupe le réseau du jeu", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "block_process_network");
+    EXPECT_EQ(result.value("args").toMap().value("mode").toString().toStdString(), "on");
+}
+
+TEST(AIEngineContextualFallbackTest, BlockNetworkFastPathMatchesExplicitRestoreRequestEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("restore network for the target", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "block_process_network");
+    EXPECT_EQ(result.value("args").toMap().value("mode").toString().toStdString(), "off");
 }
 
 TEST(ModelLocatorTest, ProvidesCandidateQwenPaths) {

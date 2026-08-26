@@ -840,6 +840,30 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
         }
     }
 
+    // PHASE 148 : block_process_network -- meme raison que wantsKernel plus
+    // haut (n'utiliser que sur demande explicite, jamais choisi seul par le
+    // modele local -- absent de la ligne "Schema obligatoire" de
+    // llama_runtime.cpp, voir sa justification). Place avant les checks
+    // generiques ci-dessous pour la meme raison.
+    {
+        const bool wantsNetworkOff = q.contains("rétablis") || q.contains("retablis")
+            || q.contains("restore network") || q.contains("unblock network")
+            || ((q.contains("réseau") || q.contains("reseau") || q.contains("network"))
+                && (q.contains("rétabli") || q.contains("retabli") || q.contains("remets")));
+        const bool wantsNetworkOn = !wantsNetworkOff
+            && (q.contains("coupe le réseau") || q.contains("coupe le reseau")
+                || q.contains("bloque le réseau") || q.contains("bloque le reseau")
+                || q.contains("isole le réseau") || q.contains("isole le reseau")
+                || q.contains("block network") || q.contains("cut network")
+                || q.contains("block the network"));
+        if (wantsNetworkOff) {
+            return makeToolCall("block_process_network", {{"mode", "off"}}, "Rétablissement du réseau demandé.");
+        }
+        if (wantsNetworkOn) {
+            return makeToolCall("block_process_network", {{"mode", "on"}}, "Coupure réseau demandée par l'utilisateur.");
+        }
+    }
+
     if (q.contains("write") || q.contains("écri") || q.contains("mettre")) {
         return makeToolCall("write_value", {
             {"address", firstHexAddress(query)},
@@ -1002,6 +1026,25 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             if (parsedOk && parsed > 0.0) factor = parsed;
             return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", factor}},
                 wantsSlow ? "Ralentissement demande (speedhack)." : "Acceleration demandee (speedhack).");
+        }
+    }
+    // PHASE 148 : block_process_network, meme raison que wantsKernel plus haut.
+    {
+        const bool wantsNetworkOff = q.contains("rétablis") || q.contains("retablis")
+            || q.contains("restore network") || q.contains("unblock network")
+            || ((q.contains("réseau") || q.contains("reseau") || q.contains("network"))
+                && (q.contains("rétabli") || q.contains("retabli") || q.contains("remets")));
+        const bool wantsNetworkOn = !wantsNetworkOff
+            && (q.contains("coupe le réseau") || q.contains("coupe le reseau")
+                || q.contains("bloque le réseau") || q.contains("bloque le reseau")
+                || q.contains("isole le réseau") || q.contains("isole le reseau")
+                || q.contains("block network") || q.contains("cut network")
+                || q.contains("block the network"));
+        if (wantsNetworkOff) {
+            return makeToolCall("block_process_network", {{"mode", "off"}}, "Retablissement du reseau demande.");
+        }
+        if (wantsNetworkOn) {
+            return makeToolCall("block_process_network", {{"mode", "on"}}, "Coupure reseau demandee par l'utilisateur.");
         }
     }
     if ((q.contains("write") || q.contains("mettre")) && !value.isEmpty()) {

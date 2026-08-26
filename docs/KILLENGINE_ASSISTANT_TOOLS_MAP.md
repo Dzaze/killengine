@@ -3,7 +3,7 @@
 
 # KillEngine — Carte des outils Assistant
 
-Dernière mise à jour : 26/08/2026 (PHASE 140 — écart fermé, voir section suivante).
+Dernière mise à jour : 26/08/2026 (PHASE 148 — restes PHASE 146 fermés + audit complet de la ligne "Schema obligatoire", voir sections suivantes).
 
 **Pourquoi ce document existe** : préparation explicite de PHASE 120 (Assistant mode réflexion/enquête, volontairement repoussée en fin d'arsenal — voir `docs/PHASE_TRACKER.md`) sans coder PHASE 120 elle-même. `docs/POWER_UP_ROADMAP.md` dit noir sur blanc que ce futur mode "doit synthétiser tous les outils stabilisés... avec leurs usages, risques, limites" — cet inventaire structuré est ce socle, pas le mode lui-même.
 
@@ -35,9 +35,32 @@ Dernière mise à jour : 26/08/2026 (PHASE 140 — écart fermé, voir section s
 
 **Bug de schéma trouvé en écrivant le test de non-régression** : la ligne "Schema obligatoire" de `LlamaRuntime::buildPrompt` (`ai/llama_runtime.cpp`) est codée en dur et ne se génère PAS depuis `ToolRegistry::availableTools()` (contrairement au bloc "Outils disponibles" du même prompt) — `get_auto_report`/`disassemble_backward`/`test_candidate_fields` en étaient absents, donc invisibles pour le modèle local même une fois leur dispatch branché. Corrigé. Un test (`LlamaRuntimeTest.SchemaLineListsEveryRegisteredTool`) vérifie maintenant que tout outil du registre reste listé sur cette ligne, avec une liste d'exclusion explicite et commentée pour les outils délibérément tenus hors du choix libre du modèle.
 
-**Trouvaille annexe, hors périmètre de PHASE 140, documentée pas corrigée** : en écrivant ce même test, découvert que `kernel_write`/`speedhack_set`/`block_process_network` (risque `injection`, probablement délibéré — leur description dit déjà "à utiliser seulement si l'utilisateur le demande explicitement") et `discover_save_files`/`inspect_local_settings`/`read_save_file_text`/`patch_file_bytes`/`watch_save_file` sont **eux aussi** absents de cette ligne schéma. Les 2 premiers de ce dernier groupe restent joignables en langage naturel via leur propre fast-path (`matchOffMemoryTool`) ; les 3 autres (`read_save_file_text`/`patch_file_bytes`/`watch_save_file`) partagent le même trou latent que les 7 originaux — dispatchés dans `startSmartSearch` mais invisibles pour le modèle local, et sans fast-path déterministe. Pas traité ici : hors du périmètre "7 outils" confié pour cette phase.
+## PHASE 148 — restes PHASE 146 fermés
 
-**Limitation réelle trouvée en testant `analyze_ui_sources` en direct, pas corrigée (hors périmètre)** : son fast-path fonctionne correctement de façon isolée (vérifié live : `"analyse les sources numériques, c'est maintenant 60"` → `tool: analyze_ui_sources`, `args.value: "60"`), mais est **shadowé** juste après un `trace_ui_string` réel — `startSmartSearch` traite alors le message suivant comme la réponse au `m_pendingRecoveryAction == "trace_ui_filter"` en attente (mécanisme préexistant, PHASE 90) avant même d'atteindre `matchUiSourcesTool`. Résultat vérifié en direct : `trace_ui_string("100")` (45 correspondances trouvées) puis `"analyse les sources numériques, c'est maintenant 100"` → intercepté par `AnswerTraceUiFilterPrompt`, jamais par `analyze_ui_sources`. Corriger proprement demanderait de faire passer une vérification "l'utilisateur demande-t-il explicitement analyze_ui_sources ?" avant l'aiguillage vers le prompt en attente — un changement de priorité d'intent touchant un mécanisme conversationnel préexistant et déjà en production, jugé hors périmètre de "brancher/retirer/documenter ces 7 outils".
+Deux restes documentés-pas-corrigés en PHASE 146 ont été tranchés explicitement.
+
+### 1. Shadowing `analyze_ui_sources` — corrigé
+
+**Le bug** : une demande explicite ("analyse les sources numériques, c'est toujours 100") était interceptée par `m_pendingRecoveryAction == "trace_ui_filter"` (état laissé par un `trace_ui_string` réussi juste avant) avant même d'atteindre `matchUiSourcesTool`. Vérifié en direct : `trace_ui_string("100")` (45 correspondances) puis la demande explicite → `AnswerTraceUiFilterPrompt`, jamais `analyze_ui_sources`.
+
+**Le correctif** : nouveau flag `smartSearchExplicitUiSourcesQuery` (`apps/desktop/application_controller.cpp`, même liste de mots-clés que `matchUiSourcesTool`) qui **ne modifie ni `intent.kind` ni `m_pendingRecoveryAction`** — il ajoute juste une condition au bloc de traitement `if (intent.kind == AnswerTraceUiFilterPrompt ...)` pour le sauter quand la demande est explicite. Le message tombe alors jusqu'au repli générique `m_ai.processQuery()`, qui route vers `matchUiSourcesTool`. Important : `m_pendingUiStringCandidates` n'est jamais vidé dans ce cas (le bloc sauté est celui qui le vide normalement), donc `analyze_ui_sources` peut toujours s'en servir, **et** `m_pendingRecoveryAction` reste actif — une réponse simple *ultérieure* ("100" tout court) continue de router vers le pipeline `trace_ui_filter` existant, sans rien casser.
+
+**Pourquoi ce n'est pas un risque de régression** : le guard ne matche que sur des mots-clés explicites ("analyse les sources", "sources numériques", etc.), jamais sur une simple valeur numérique — donc le flow "réponse simple = nouvelle valeur" (déjà en production, PHASE 90) n'est structurellement pas affecté.
+
+### 2. Audit complet de la ligne "Schema obligatoire" — tranché outil par outil
+
+| Outil | Décision PHASE 148 | Raison |
+| --- | --- | --- |
+| `discover_save_files` | **Ajouté au schéma** | Lecture seule, déjà dispatché + fast-path (`matchOffMemoryTool`) — visible au modèle par cohérence avec les autres outils sûrs. |
+| `inspect_local_settings` | **Ajouté au schéma** | Idem. |
+| `read_save_file_text` | **Ajouté au schéma** | Lecture seule (fichier déjà trouvé via `discover_save_files`), pas de fast-path dédié (le chemin exact ne s'extrait pas fiablement d'une phrase) — reste joignable via le modèle local en plusieurs tours. |
+| `watch_save_file` | **Ajouté au schéma** | Attente bornée (`timeoutMs`, défaut 5s) sur un simple événement disque (`ReadDirectoryChangesW`) — pas de debugger, pas de risque de crash comparable à `find_what_writes`. |
+| `kernel_write` | **Confirmé exclu, délibéré** | `risk=injection`. Sa propre description dit déjà "à utiliser seulement si l'utilisateur le demande explicitement" — reste joignable **uniquement** via fast-path déterministe sur mot-clé explicite (déjà existant, `ai/ai_engine.cpp`), jamais un choix libre du modèle. |
+| `speedhack_set` | **Confirmé exclu, délibéré** | Idem — fast-path déterministe déjà existant. |
+| `block_process_network` | **Confirmé exclu, délibéré + fast-path ajouté** | Même catégorie que les deux ci-dessus, mais n'avait **aucun** chemin déterministe explicite avant PHASE 148 (le même trou que les 7 originaux, trouvé en auditant). Fast-path ajouté (`"coupe le réseau"`/`"rétablis le réseau"` FR, `"block network"`/`"restore network"` EN) aux deux mêmes points que `kernel_write`/`speedhack_set`. Reste hors schéma. |
+| `patch_file_bytes` | **Confirmé exclu + bug de sécurité corrigé** | **Vrai bug trouvé en auditant, pas dans le périmètre initial** : son dispatch (`apps/desktop/application_controller.cpp`) appelait `patchProcessSaveFileBytes(...)` **directement**, malgré `requiresConfirmation=true` dans le registre — un contournement RiskGate réel pour une écriture disque. Corrigé avec le même patron que `find_what_writes`/`test_candidate_fields` (PHASE 146) : redirection systématique, jamais d'exécution depuis le chat. Reste hors schéma par prudence (pas encore de fast-path explicite, chemin peu exercé). |
+
+**Tests** : `LlamaRuntimeTest.SchemaLineListsEveryRegisteredTool` (PHASE 146) mis à jour — la liste d'exclusion ne contient plus que les 4 outils write/injection délibérément exclus. Nouveau `LlamaRuntimeTest.SchemaLineExcludesRealWriteAndInjectionTools` vérifie explicitement (assertion positive, pas juste une exclusion passive) que ces 4 restent hors schéma. Nouveaux `AIEngineContextualFallbackTest.BlockNetworkFastPathMatches*` (FR coupure + EN rétablissement).
 
 ## Inventaire complet (28 outils)
 
@@ -80,21 +103,21 @@ Dernière mise à jour : 26/08/2026 (PHASE 140 — écart fermé, voir section s
 
 ### Injection / Kernel / Système
 
-| Outil | Risque | Confirmation | `startSmartSearch` | Pipe | Lua | Test live |
-| --- | --- | --- | --- | --- | --- | --- |
-| `kernel_write` | injection | **oui** | ✅ (recoveryAction cliquable) | ✅ | ✅ | `AGENTS.md` pont kernel |
-| `speedhack_set` | injection | **oui** (recoveryAction) | ✅ | ✅ | ✅ | — |
-| `block_process_network` | injection | **oui** | ✅ | ✅ | ✅ | PHASE 84, `docs/PHASE_TRACKER.md` |
+| Outil | Risque | Confirmation | `startSmartSearch` | Pipe | Lua | Schéma modèle | Test live |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `kernel_write` | injection | **oui** | ✅ (recoveryAction cliquable) | ✅ | ✅ | ❌ exclu (PHASE 148, décision explicite — voir audit ci-dessus) | `AGENTS.md` pont kernel |
+| `speedhack_set` | injection | **oui** (recoveryAction) | ✅ | ✅ | ✅ | ❌ exclu (PHASE 148, décision explicite) | — |
+| `block_process_network` | injection | **oui** | ✅ | ✅ | ✅ | ❌ exclu (PHASE 148, décision explicite) — fast-path déterministe ajouté PHASE 148 (`ai/ai_engine.cpp`, `wantsNetworkOff`/`wantsNetworkOn`), voir tests `BlockNetworkFastPathMatches*` | PHASE 84, `docs/PHASE_TRACKER.md`, PHASE 148 (fast-path live via pipe) |
 
 ### Hors mémoire / UWP / fichiers de sauvegarde
 
-| Outil | Risque | Confirmation | `startSmartSearch` | Pipe | Lua | Test live |
-| --- | --- | --- | --- | --- | --- | --- |
-| `discover_save_files` | safe | non | ✅ | ✅ | ✅ | PHASE 90/100, live FR+EN |
-| `inspect_local_settings` | safe | non | ✅ | ✅ | ✅ | PHASE 100/121, live sur vrai package UWP |
-| `read_save_file_text` | safe | non | ✅ | ✅ | ✅ | — |
-| `patch_file_bytes` | write | **oui** | ✅ | ✅ | ✅ | — |
-| `watch_save_file` | safe | non | ✅ | ✅ | ✅ | — |
+| Outil | Risque | Confirmation | `startSmartSearch` | Pipe | Lua | Schéma modèle | Test live |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `discover_save_files` | safe | non | ✅ | ✅ | ✅ | ✅ ajouté PHASE 148 | PHASE 90/100, live FR+EN |
+| `inspect_local_settings` | safe | non | ✅ | ✅ | ✅ | ✅ ajouté PHASE 148 | PHASE 100/121, live sur vrai package UWP |
+| `read_save_file_text` | safe | non | ✅ | ✅ | ✅ | ✅ ajouté PHASE 148 | — |
+| `patch_file_bytes` | write | **oui** | ✅ (bug corrigé PHASE 148 — exécutait directement malgré `requiresConfirmation=true` ; redirige maintenant sans exécuter) | ✅ | ✅ | ❌ exclu (PHASE 148, décision explicite — outil d'écriture, ne doit jamais être choisi librement par le modèle) | PHASE 148 (bug trouvé + corrigé en auditant, redirection vérifiée live) |
+| `watch_save_file` | safe | non | ✅ | ✅ | ✅ | ✅ ajouté PHASE 148 | — |
 
 ### Trainer (PHASE 119/121/129)
 
