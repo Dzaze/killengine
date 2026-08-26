@@ -37,6 +37,7 @@
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "scanner/display_value_tracker.h"
+#include "scanner/display_source_classifier.h"
 #include "scanner/memory_window_search.h"
 #include "scanner/encrypted_scan.h"
 #include "scanner/structure_analyzer.h"
@@ -6971,6 +6972,73 @@ QVariantMap ApplicationController::findWhatWrites(const QString& addressHex, con
     return result;
 }
 
+QVariantMap ApplicationController::analyzeFieldStability(const QString& addressHex, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["address"] = addressHex;
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int sizeBytes = std::clamp(options.value("size", 4).toInt(), 1, 8);
+    killcore::BreakpointSize breakpointSize = killcore::BreakpointSize::DWord;
+    if (sizeBytes <= 1) {
+        breakpointSize = killcore::BreakpointSize::Byte;
+    } else if (sizeBytes <= 2) {
+        breakpointSize = killcore::BreakpointSize::Word;
+    } else if (sizeBytes <= 4) {
+        breakpointSize = killcore::BreakpointSize::DWord;
+    } else {
+        breakpointSize = killcore::BreakpointSize::QWord;
+    }
+
+    const int captureWindowMs = std::clamp(options.value("captureWindowMs", 800).toInt(), 250, 15000);
+    const int maxHitsInt = std::clamp(options.value("maxHits", 12).toInt(), 1, 100);
+
+    KE_LOG_INFO() << "analyzeFieldStability(address=0x" << std::hex << address
+                  << ", pid=" << std::dec << m_pid
+                  << ", size=" << sizeBytes
+                  << ", captureWindowMs=" << captureWindowMs
+                  << ", maxHits=" << maxHitsInt << ")";
+
+    const auto classification = killcore::classifyFieldStabilityLive(
+        static_cast<uint32_t>(m_pid),
+        address,
+        breakpointSize,
+        captureWindowMs,
+        static_cast<size_t>(maxHitsInt));
+
+    QString verdictLabel;
+    switch (classification.verdict) {
+        case killcore::FieldStabilityVerdict::NoWritesObserved: verdictLabel = "no_writes_observed"; break;
+        case killcore::FieldStabilityVerdict::InsufficientData: verdictLabel = "insufficient_data"; break;
+        case killcore::FieldStabilityVerdict::LikelyDerivedDisplay: verdictLabel = "likely_derived_display"; break;
+        case killcore::FieldStabilityVerdict::LikelyEventDriven: verdictLabel = "likely_event_driven"; break;
+    }
+
+    result["success"] = true;
+    result["verdict"] = verdictLabel;
+    result["writeCount"] = static_cast<int>(classification.writeCount);
+    result["distinctInstructionCount"] = static_cast<int>(classification.distinctInstructionCount);
+    result["dominantInstructionPointer"] = classification.dominantInstructionPointer != 0
+        ? QString::number(classification.dominantInstructionPointer, 16).toUpper()
+        : QString();
+    result["dominantInstructionShare"] = classification.dominantInstructionShare;
+    result["meanIntervalMs"] = classification.meanIntervalMs;
+    result["intervalCoefficientOfVariation"] = classification.intervalCoefficientOfVariation;
+    result["rationale"] = classification.rationale;
+    result["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture (lecture seule, aucune écriture).";
+    return result;
+}
+
 QVariantMap ApplicationController::findWhatAccesses(const QString& addressHex, const QVariantMap& options) {
     QVariantMap result;
     result["success"] = false;
@@ -12239,6 +12307,20 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     const QString defaultValueType = explicitValueType.isEmpty() ? QString("Int32") : explicitValueType;
     const QString queryLower = query.toLower();
     const bool smartSearchTrainerQuery = queryLower.contains("trainer") || queryLower.contains("cheat table");
+    // PHASE 130 : meme piege que smartSearchTrainerQuery (PHASE 129) -- une
+    // question contenant une adresse 0x... ("est-ce que 0x1234 est un champ
+    // affiche...") etait interceptee trop tot par les pre-intents memoire
+    // (ActivateMemoryTargets) avant d'atteindre le fast-path analyze_field_stability
+    // (ai/ai_engine.cpp::matchFieldStabilityTool, meme liste de mots-cles).
+    const bool smartSearchFieldStabilityQuery = queryLower.contains("champ affiché") || queryLower.contains("champ affiche")
+        || queryLower.contains("valeur affichée") || queryLower.contains("valeur affichee")
+        || queryLower.contains("affichage dérivé") || queryLower.contains("affichage derive")
+        || queryLower.contains("vraie source") || queryLower.contains("source événementielle")
+        || queryLower.contains("source evenementielle") || queryLower.contains("displayed field")
+        || queryLower.contains("display field") || queryLower.contains("derived display")
+        || queryLower.contains("real source") || queryLower.contains("field stability")
+        || queryLower.contains("stabilité du champ") || queryLower.contains("stabilite du champ")
+        || queryLower.contains("stabilité de cette adresse") || queryLower.contains("stabilite de cette adresse");
     const SmartSearchIntent intent = classifySmartSearchIntent(
         query,
         numbers,
@@ -12683,7 +12765,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return recovery;
     }
 
-    if (!smartSearchTrainerQuery
+    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery
         && (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
         || (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && !chatAddresses.isEmpty())
         || (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && !chatAddresses.isEmpty()))) {
@@ -12706,25 +12788,25 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return activation;
     }
 
-    if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
+    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
         auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
         stampIntent(&writeTargets);
         return writeTargets;
     }
 
-    if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
+    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
         auto freezeTargets = freezeChatMemoryTargetsFromQuery(query, numbers.first());
         stampIntent(&freezeTargets);
         return freezeTargets;
     }
 
-    if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
+    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
         auto rewriteTargets = rewriteLastAutoWriteTargets(numbers.first(), query);
         stampIntent(&rewriteTargets);
         return rewriteTargets;
     }
 
-    if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::WriteProfileTargets && numbers.size() == 1) {
+    if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::WriteProfileTargets && numbers.size() == 1) {
         auto profileWrite = writeProfileTargetsFromQuery(query, numbers.first());
         if (profileWrite.value("tool").toString() == "profile_write") {
             stampIntent(&profileWrite);
@@ -12738,7 +12820,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["message"] = "D'accord, j'ai oublié le contexte actif. Donne-moi la nouvelle valeur à chercher.";
         result["workflowStatus"] = "idle";
         result["error"] = "";
-    } else if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
+    } else if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
         // FirstScanRunning = nouveau lot de candidats, sans rapport avec un
         // eventuel echec signale sur le lot precedent. Sans ce reset, un
         // ExactScan lance sans le mot-cle "nouvelle recherche" (donc sans
@@ -12756,7 +12838,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["rationale"] = intent.rationale;
         result["state"] = "FirstScanRunning";
         result["error"] = "";
-    } else if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
+    } else if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
         m_smartSearchLastObservedValue = numbers.first();
         QVariantMap args;
         args["mode"] = "exact";
@@ -12783,7 +12865,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["rationale"] = intent.rationale;
         result["state"] = "Refining";
         result["error"] = "";
-    } else if (!smartSearchTrainerQuery && intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
+    } else if (!smartSearchTrainerQuery && !smartSearchFieldStabilityQuery && intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
         // Meme raisonnement que pour ExactScan ci-dessus : nouveau lot,
         // l'echelle de secours du lot precedent ne s'applique plus.
         resetFailureEscalationState();
@@ -13052,6 +13134,32 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             result["message"] = restore
                 ? "Restauration Trainer demandée. Demande d'abord la liste si tu ne connais pas l'id, puis confirme dans l'onglet Trainer."
                 : "Activation Trainer demandée. Demande d'abord la liste si tu ne connais pas l'id, puis confirme dans l'onglet Trainer.";
+        }
+        stampIntent(&result);
+        return result;
+    } else if (tool == "analyze_field_stability") {
+        // PHASE 130 : jamais d'ecriture, s'execute directement (pas de
+        // requiresConfirmation) comme discover_save_files/inspect_local_settings --
+        // meme si ca attache brievement un debugger (comme find_what_writes,
+        // deja utilise sans RiskGate modal dans l'UI derriere une simple case
+        // a cocher "Debugger autorise").
+        const QString stabilityAddress = args.value("address").toString().trimmed();
+        if (stabilityAddress.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Il me faut une adresse (0x...) pour analyser si c'est un champ affiché ou une source.";
+            stampIntent(&result);
+            return result;
+        }
+        actionResult = analyzeFieldStability(stabilityAddress, {});
+        if (actionResult.value("success").toBool()) {
+            // Le rationale (core/scanner/display_source_classifier.cpp) est
+            // deja une phrase complete et actionnable -- pas besoin d'ajouter
+            // de conclusion redondante ici.
+            result["workflowStatus"] = "field_stability_analyzed";
+            result["message"] = QString("Analyse de %1 : %2")
+                .arg(stabilityAddress, actionResult.value("rationale").toString());
+        } else {
+            result["message"] = actionResult.value("error").toString();
         }
         stampIntent(&result);
         return result;

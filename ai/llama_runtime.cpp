@@ -451,7 +451,7 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
     return QString(
         "Tu es le planner local de KillEngine, en mode Inspecteur Codex: tu raisonnes comme un enqueteur prudent de recherche memoire.\n"
         "Reponds uniquement avec un objet JSON compact et rien d'autre. Ne raisonnes pas, pas de bloc <think>, pas d'explication: uniquement le JSON final.\n"
-        "Schema obligatoire: {\"tool\":\"auto_resolve|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|generate_aob|suggest_patch|trainer_list_features|trainer_create_write|trainer_delete_feature|trainer_apply_request|trainer_restore_request\",\"args\":{...}}\n"
+        "Schema obligatoire: {\"tool\":\"auto_resolve|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|analyze_field_stability|generate_aob|suggest_patch|trainer_list_features|trainer_create_write|trainer_delete_feature|trainer_apply_request|trainer_restore_request\",\"args\":{...}}\n"
         "Posture Inspecteur:\n"
         "- Observe avant d'ecrire: une adresse n'est fiable que si elle suit plusieurs variations et si l'hypothese explique les echecs precedents.\n"
         "- Distingue source gameplay, copie d'affichage, buffer UI recycle, table de sequence et pointeur intermediaire.\n"
@@ -476,6 +476,7 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         "- Si l'utilisateur ne connait pas la valeur (juste qu'elle augmente/diminue), choisis unknown_capture.\n"
         "- Si l'utilisateur signale que les dernieres adresses ne marchent pas, propose une alternative (ReportBadTargets implicite): multi_type, encrypted_scan, trace_ui_string ou unknown_capture.\n"
         "- Pour le Trainer en langage naturel: liste via trainer_list_features; cree seulement une feature write si adresse 0x... et valeur sont explicites; pour activer/restaurer, choisis trainer_apply_request/trainer_restore_request afin de demander confirmation UI, jamais une activation autonome.\n"
+        "- Si l'utilisateur demande si une adresse est un champ affiche/derive ou une vraie source (avant de figer/patcher), choisis analyze_field_stability avec args.address; c'est une observation passive (aucune ecriture), pas besoin d'une confirmation d'ecriture, mais ca attache un debugger comme find_what_writes.\n"
         "Exemples:\n"
         "Exemple: j'ai 41250 argent => {\"tool\":\"exact_scan\",\"args\":{\"value\":\"41250\",\"valueType\":\"Int32\"}}\n"
         "Exemple: trouve cette valeur et guide-moi => {\"tool\":\"auto_resolve\",\"args\":{\"query\":\"trouve cette valeur et guide-moi\"}}\n"
@@ -489,6 +490,7 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         "Exemple: je ne connais pas la valeur, elle augmente quand je gagne => {\"tool\":\"unknown_capture\",\"args\":{}}\n"
         "Exemple: liste le trainer => {\"tool\":\"trainer_list_features\",\"args\":{}}\n"
         "Exemple: ajoute une feature trainer write 0x1a2b3c4d a 100 => {\"tool\":\"trainer_create_write\",\"args\":{\"address\":\"0x1a2b3c4d\",\"valueType\":\"Int32\",\"value\":\"100\"}}\n"
+        "Exemple: est-ce que 0x1a2b3c4d est un champ affiche ou une vraie source ? => {\"tool\":\"analyze_field_stability\",\"args\":{\"address\":\"0x1a2b3c4d\"}}\n"
         "Outils disponibles:\n%1\n")
         .arg(tools.join('\n'))
         + (contextBlock.isEmpty() ? QString() : contextBlock + "\n")

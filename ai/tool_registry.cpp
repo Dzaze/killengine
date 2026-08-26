@@ -39,6 +39,7 @@ QVariantList toolDefinitions() {
         makeTool("write_value", "Écrit une valeur typée à une adresse apres confirmation explicite.", {"address", "valueType", "value"}, "write", true),
         makeTool("freeze_value", "Active ou désactive un freeze apres confirmation explicite.", {"address", "valueType", "value", "enabled"}, "write", true),
         makeTool("find_what_writes", "Capture l'instruction qui ecrit une adresse apres confirmation explicite.", {"address", "size"}, "debug", true),
+        makeTool("analyze_field_stability", "Observe passivement (aucune écriture) le rythme des écritures sur une adresse candidate pour juger si elle ressemble à un champ affiché recalculé à chaque tick (\"likely_derived_display\") ou à une source événementielle (\"likely_event_driven\"). Attache brièvement un debugger comme find_what_writes, mais n'écrit jamais rien — exécuté directement, sans confirmation RiskGate. Utile avant de figer/patcher une adresse trouvée par scan : un champ affiché ne tiendra probablement pas en écriture directe, chercher la source en amont plutôt (voir disassemble_backward).", {"address"}, "debug", false),
         makeTool("generate_aob", "Genere une signature AOB depuis une instruction confirmee.", {"address"}, "patch", true),
         makeTool("suggest_patch", "Suggere un patch code sans application automatique.", {"address"}, "patch", true),
         makeTool("disassemble_backward", "Désassemble les instructions avant un RIP capturé pour repérer les champs sources d'un compteur animé.", {"address"}, "patch", true),

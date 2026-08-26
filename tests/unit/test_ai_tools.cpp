@@ -78,11 +78,21 @@ TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
     EXPECT_TRUE(registry.hasTool("trainer_list_features"));
     EXPECT_TRUE(registry.hasTool("trainer_create_write"));
     EXPECT_TRUE(registry.hasTool("trainer_delete_feature"));
+    EXPECT_TRUE(registry.hasTool("analyze_field_stability"));
 
     const auto autoResolve = registry.toolMetadata("auto_resolve");
     EXPECT_EQ(autoResolve.value("risk").toString(), "safe");
     EXPECT_FALSE(autoResolve.value("requiresConfirmation").toBool());
     EXPECT_TRUE(autoResolve.value("requiredArgs").toStringList().contains("query"));
+
+    // PHASE 130 : n'ecrit jamais rien (juste une capture findWhatWrites
+    // passive) -- categorise "debug" pour la doc/taxonomie, mais s'execute
+    // directement comme discover_save_files, pas de RiskGate.
+    const auto fieldStability = registry.toolMetadata("analyze_field_stability");
+    EXPECT_EQ(fieldStability.value("risk").toString(), "debug");
+    EXPECT_FALSE(fieldStability.value("requiresConfirmation").toBool());
+    EXPECT_TRUE(fieldStability.value("safe").toBool());
+    EXPECT_TRUE(fieldStability.value("requiredArgs").toStringList().contains("address"));
 }
 
 TEST(AIToolRegistryTest, MarksRiskyToolsAsConfirmationRequired) {
@@ -507,6 +517,68 @@ TEST(AIEngineContextualFallbackTest, TrainerFastPathStillRequiresAttachedProcess
     const auto result = engine.processQuery("liste le trainer", context);
     EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
     EXPECT_TRUE(result.value("message").toString().contains("processus"));
+}
+
+TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathMatchesDisplayedFieldFr) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("est-ce que 0x1a2b3c4d est un champ affiché ou une vraie source ?", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "analyze_field_stability");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_field_stability_fastpath");
+    EXPECT_EQ(result.value("args").toMap().value("address").toString().toStdString(), "0x1a2b3c4d");
+}
+
+TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathMatchesDisplayedFieldEn) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("is 0x1a2b3c4d a displayed field or a real source?", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "analyze_field_stability");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_field_stability_fastpath");
+    EXPECT_EQ(result.value("args").toMap().value("address").toString().toStdString(), "0x1a2b3c4d");
+}
+
+TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathWithoutAddressIsInvalidToolCall) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    // Le mot-cle matche (donc le tool est bien identifie), mais "address" est
+    // un requiredArg cote tool_registry.cpp -- le validateur rejette a raison
+    // un appel sans adresse plutot que de laisser passer un tool_call vide.
+    const auto result = engine.processQuery("est-ce un champ affiché ou la vraie source ?", context);
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "analyze_field_stability");
+    EXPECT_EQ(result.value("status").toString().toStdString(), "invalid_tool_call");
+    EXPECT_FALSE(result.value("error").toString().isEmpty());
+}
+
+TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathStillRequiresAttachedProcess) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = false;
+    const auto result = engine.processQuery("is 0x1a2b3c4d a displayed field?", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_TRUE(result.value("message").toString().contains("processus"));
+}
+
+TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathDoesNotCollideWithTrainer) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("liste le trainer", context);
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_list_features");
 }
 
 TEST(AIEngineContextualFallbackTest, InspectorModeFinishesChangedPagesDiffWithTwoValues) {

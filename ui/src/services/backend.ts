@@ -1224,6 +1224,8 @@ export interface AiModelStatus {
 findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   findWhatAccessesFinished?: QWebChannelSignal<Record<string, unknown>>
   findWhatExecutes?(instructionAddressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  /** PHASE 130 : classifie une adresse candidate "probablement champ affiché recalculé" vs "probablement source événementielle" via une capture findWhatWrites passive. Lecture seule, aucune écriture. */
+  analyzeFieldStability?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   startInProcessExecuteWatchAsync?(instructionAddressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   readAttachedWindowText?(options: Record<string, unknown>): Promise<Record<string, unknown>>
   scanGroupScan?(entries: Array<{ offset: number, type: string, value: string }>, options: Record<string, unknown>): Promise<EncryptedScanResult>
@@ -2107,6 +2109,9 @@ class BackendService {
       },
       async findWhatExecutes(_instructionAddressHex: string, _options: Record<string, unknown>) {
         return { success: false, hitCount: 0, hits: [], error: 'Mock backend' }
+      },
+      async analyzeFieldStability(_addressHex: string, _options: Record<string, unknown>) {
+        return { success: false, verdict: 'no_writes_observed', writeCount: 0, rationale: '', error: 'Mock backend' }
       },
       async startInProcessExecuteWatchAsync(_instructionAddressHex: string, _options: Record<string, unknown>) {
         return { success: false, started: false, error: 'Mock backend' }

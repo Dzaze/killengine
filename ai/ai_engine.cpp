@@ -178,6 +178,44 @@ TrainerToolMatch matchTrainerTool(const QString& query) {
         "Demande Trainer generale: je commence par lister l'etat actuel des features."};
 }
 
+struct FieldStabilityToolMatch {
+    QString tool;
+    QVariantMap args;
+    QString rationale;
+};
+
+// PHASE 130 : reconnait une demande explicite de classification "champ
+// affiche vs champ source" pour une adresse candidate, avant de la figer/
+// patcher (core/scanner/display_source_classifier.*, expose via
+// ApplicationController::analyzeFieldStability). Observation passive
+// (findWhatWrites), aucune ecriture -- meme esprit que matchOffMemoryTool
+// ci-dessus pour la liste de mots-cles.
+FieldStabilityToolMatch matchFieldStabilityTool(const QString& query) {
+    const QString q = query.toLower();
+    const bool wantsStability =
+        q.contains("champ affiché") || q.contains("champ affiche")
+        || q.contains("valeur affichée") || q.contains("valeur affichee")
+        || q.contains("affichage dérivé") || q.contains("affichage derive")
+        || q.contains("vraie source") || q.contains("source événementielle")
+        || q.contains("source evenementielle") || q.contains("displayed field")
+        || q.contains("display field") || q.contains("derived display")
+        || q.contains("real source") || q.contains("field stability")
+        || q.contains("stabilité du champ") || q.contains("stabilite du champ")
+        || q.contains("stabilité de cette adresse") || q.contains("stabilite de cette adresse");
+    if (!wantsStability) {
+        return {};
+    }
+
+    const QString address = firstHexAddressIn(query);
+    QVariantMap args;
+    if (!address.isEmpty()) {
+        args["address"] = address;
+    }
+    return {"analyze_field_stability", args,
+        "J'observe passivement les écritures sur cette adresse (aucune écriture de ma part) pour juger si "
+        "elle ressemble à un champ affiché recalculé ou à une source événementielle."};
+}
+
 } // namespace
 
 AIEngine::AIEngine(QObject* parent) : QObject(parent) {}
@@ -401,6 +439,11 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
         if (const auto trainerMatch = matchTrainerTool(query); !trainerMatch.tool.isEmpty()) {
             QVariantMap result = makeToolCall(trainerMatch.tool, trainerMatch.args, trainerMatch.rationale);
             result["aiBackend"] = "deterministic_trainer_fastpath";
+            return result;
+        }
+        if (const auto stabilityMatch = matchFieldStabilityTool(query); !stabilityMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(stabilityMatch.tool, stabilityMatch.args, stabilityMatch.rationale);
+            result["aiBackend"] = "deterministic_field_stability_fastpath";
             return result;
         }
         if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
@@ -645,6 +688,9 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     // matchOffMemoryTool ci-dessus pour la liste de mots-cles).
     if (const auto trainerMatch = matchTrainerTool(query); !trainerMatch.tool.isEmpty()) {
         return makeToolCall(trainerMatch.tool, trainerMatch.args, trainerMatch.rationale);
+    }
+    if (const auto stabilityMatch = matchFieldStabilityTool(query); !stabilityMatch.tool.isEmpty()) {
+        return makeToolCall(stabilityMatch.tool, stabilityMatch.args, stabilityMatch.rationale);
     }
     if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
         return makeToolCall(offMemoryMatch.tool, {}, offMemoryMatch.rationale);

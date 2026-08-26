@@ -347,6 +347,13 @@ public:
     /// pointe vers une copie UI mais que la destination varie a chaque frame.
     Q_INVOKABLE QVariantMap findWhatExecutes(const QString& instructionAddressHex, const QVariantMap& options);
 
+    /// PHASE 130 : classifie une adresse candidate comme "probablement un champ
+    /// affiché recalculé" vs "probablement une source événementielle", à partir
+    /// d'une capture findWhatWrites passive (core/scanner/display_source_classifier.*).
+    /// Lecture seule -- aucune écriture n'est jamais faite sur la cible.
+    /// options keys : size (1/2/4/8), captureWindowMs (défaut 800), maxHits (défaut 12)
+    Q_INVOKABLE QVariantMap analyzeFieldStability(const QString& addressHex, const QVariantMap& options);
+
     /// Variante in-process/non DebugActiveProcess de findWhatExecutes. Utilise
     /// le composant injecte existant et expose les derniers registres captures
     /// par le VEH (couverture bornee aux threads armees par ce composant).
