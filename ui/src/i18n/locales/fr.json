@@ -1,11 +1,5 @@
 {
   "app": {
-    "title": "KillEngine",
-    "version": "Version",
-    "status": "Statut",
-    "connected": "Connecté",
-    "disconnected": "Déconnecté",
-    "ready": "Prêt",
     "attached": "Attaché"
   },
   "process": {
@@ -13,9 +7,6 @@
     "refresh": "Rafraîchir",
     "attach": "Attacher",
     "detach": "Détacher",
-    "name": "Nom",
-    "pid": "PID",
-    "arch": "Architecture",
     "modules": "Modules",
     "windowOnly": "Fenêtres seulement",
     "hasWindow": "fenêtre",
@@ -38,14 +29,11 @@
   },
   "search": {
     "title": "Que veux-tu trouver ?",
-    "placeholder": "Ex: Argent : 41250",
-    "button": "Rechercher",
-    "result": "Résultat"
+    "button": "Rechercher"
   },
   "scan": {
     "exact": "Scan exact",
     "value": "Valeur",
-    "button": "Scanner",
     "matches": "Résultats",
     "regions": "Régions",
     "stored": "Stockés",
@@ -72,7 +60,6 @@
   "unknown": {
     "title": "Valeur initiale inconnue",
     "capture": "Capturer",
-    "compare": "Comparer",
     "regions": "Régions",
     "bytes": "Octets"
   },
@@ -80,7 +67,6 @@
     "title": "Write / Freeze",
     "address": "Adresse",
     "value": "Valeur",
-    "write": "Écrire",
     "rollback": "Annuler",
     "freeze": "Figer",
     "stopFreeze": "Arrêter le freeze",

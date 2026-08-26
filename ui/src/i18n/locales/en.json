@@ -1,11 +1,5 @@
 {
   "app": {
-    "title": "KillEngine",
-    "version": "Version",
-    "status": "Status",
-    "connected": "Connected",
-    "disconnected": "Disconnected",
-    "ready": "Ready",
     "attached": "Attached"
   },
   "process": {
@@ -13,9 +7,6 @@
     "refresh": "Refresh",
     "attach": "Attach",
     "detach": "Detach",
-    "name": "Name",
-    "pid": "PID",
-    "arch": "Architecture",
     "modules": "Modules",
     "windowOnly": "Windows only",
     "hasWindow": "window",
@@ -38,14 +29,11 @@
   },
   "search": {
     "title": "What do you want to find?",
-    "placeholder": "e.g. Money: 41250",
-    "button": "Search",
-    "result": "Result"
+    "button": "Search"
   },
   "scan": {
     "exact": "Exact scan",
     "value": "Value",
-    "button": "Scan",
     "matches": "Matches",
     "regions": "Regions",
     "stored": "Stored",
@@ -72,7 +60,6 @@
   "unknown": {
     "title": "Unknown initial value",
     "capture": "Capture",
-    "compare": "Compare",
     "regions": "Regions",
     "bytes": "Bytes"
   },
@@ -80,7 +67,6 @@
     "title": "Write / Freeze",
     "address": "Address",
     "value": "Value",
-    "write": "Write",
     "rollback": "Rollback",
     "freeze": "Freeze",
     "stopFreeze": "Stop freeze",
