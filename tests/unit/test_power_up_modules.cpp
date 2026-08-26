@@ -156,6 +156,58 @@ TEST(AutoAssembler, StillRejectsMnemonicsTheParserDoesNotRecognizeYet) {
     EXPECT_FALSE(script.error.isEmpty());
 }
 
+TEST(AutoAssembler, RejectsEachArithmeticAndStackMnemonicCleanly) {
+    // Meme verification que StillRejectsMnemonicsTheParserDoesNotRecognizeYet,
+    // mais pour chaque mnemonique arithmetique/pile un par un (pas juste
+    // "add" comme representant) : demande explicite propriétaire, "verifier
+    // erreurs propres sur add/sub/cmp/push/pop non supportes" -- s'assurer
+    // qu'aucun d'eux ne passe silencieusement le parsing ou ne fait planter
+    // le compilateur faute de case dans le switch (AutoAsmInstructionType a
+    // bien une entree pour chacun, seul le token textuel n'est pas reconnu).
+    const QStringList unsupportedLines = {
+        "add [rax+8], 1",
+        "sub [rax+8], 1",
+        "cmp [rax+8], 1",
+        "push 1",
+        "pop [rax+8]",
+        "inc [rax+8]",
+        "dec [rax+8]",
+    };
+    for (const QString& line : unsupportedLines) {
+        const auto script = parseAutoAsmScript(line + "\n");
+        EXPECT_FALSE(script.success) << line.toStdString() << " a ete accepte par le parser a tort.";
+        EXPECT_EQ(script.errorLine, 1) << line.toStdString();
+        EXPECT_FALSE(script.error.isEmpty()) << line.toStdString();
+    }
+}
+
+TEST(AutoAssembler, AcceptsEverySupportedRuntimeMnemonic) {
+    // Symetrique du test ci-dessus : verifie explicitement chaque mnemonique
+    // que compileAutoAsmScript sait reellement encoder (doc du header
+    // auto_assembler.h : "nop, ret, int3, db/de/dd, jmp/call/je/jne vers
+    // adresse absolue ou label local, mov [registre64+/-deplacement], imm32"),
+    // pas seulement un sous-ensemble ad hoc deja couvert ailleurs.
+    const QStringList supportedLines = {
+        "nop",
+        "ret",
+        "int3",
+        "db 90",
+        "de 90",
+        "dd 0x11223344",
+        "jmp done\ndone:",
+        "call done\ndone:",
+        "je done\ndone:",
+        "jne done\ndone:",
+        "mov [rax+8], 1",
+    };
+    for (const QString& scriptText : supportedLines) {
+        const auto script = parseAutoAsmScript(scriptText + "\n");
+        ASSERT_TRUE(script.success) << scriptText.toStdString() << " : " << script.error.toStdString();
+        const auto compiled = compileAutoAsmScript(script, 0x1000);
+        EXPECT_TRUE(compiled.success) << scriptText.toStdString() << " : " << compiled.error.toStdString();
+    }
+}
+
 TEST(AutoAssembler, ParsesModuleRelativeBlockOpener) {
     const auto script = parseAutoAsmScript("\"game.exe\"+0x1000:\nnop\n");
 
