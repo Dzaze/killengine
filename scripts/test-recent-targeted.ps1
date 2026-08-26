@@ -18,6 +18,7 @@ $unitTests = Join-Path $repoRoot "build\bin\killengine_unit_tests.exe"
 $integrationTests = Join-Path $repoRoot "build\bin\killengine_integration_tests.exe"
 $recentUnitSuites = @(
     "AIToolRegistryTest.*",
+    "LlamaRuntimeTest.*",
     "AIEngineContextualFallbackTest.TrainerFastPath*",
     "AIEngineContextualFallbackTest.FieldStabilityFastPath*",
     "DisplaySourceClassifier.*",
@@ -25,7 +26,9 @@ $recentUnitSuites = @(
     "ProfileStore.*"
 )
 if ($SkipToolRegistry) {
-    $recentUnitSuites = $recentUnitSuites | Where-Object { $_ -ne "AIToolRegistryTest.*" }
+    $recentUnitSuites = $recentUnitSuites | Where-Object {
+        $_ -ne "AIToolRegistryTest.*" -and $_ -ne "LlamaRuntimeTest.*"
+    }
 }
 $recentUnitFilter = $recentUnitSuites -join ":"
 $recentIntegrationFilter = "DisplayVsSourceTargetTest.*"
@@ -34,7 +37,7 @@ function Write-RecentFilters {
     Write-Host "Recent targeted unit filter:" -ForegroundColor Cyan
     Write-Host "  $recentUnitFilter"
     if ($SkipToolRegistry) {
-        Write-Host "  (AIToolRegistryTest.* skipped by request)" -ForegroundColor Yellow
+        Write-Host "  (AIToolRegistryTest.* and LlamaRuntimeTest.* skipped by request)" -ForegroundColor Yellow
     }
     if (-not $SkipIntegration) {
         Write-Host "Recent targeted integration filter:" -ForegroundColor Cyan
