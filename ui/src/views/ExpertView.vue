@@ -39,17 +39,16 @@ import InjectionPanel from '@/components/expert/InjectionPanel.vue'
 import SaveFilesPanel from '@/components/expert/SaveFilesPanel.vue'
 import UnknownScanPanel from '@/components/expert/UnknownScanPanel.vue'
 import ExactScanPanel from '@/components/expert/ExactScanPanel.vue'
+import CandidatePanel from '@/components/expert/CandidatePanel.vue'
 import { useExpertWriteSelection } from '@/composables/useExpertWriteSelection'
 import { formatNumber, formatBytes } from '@/utils/format'
-import { valueTypeOptions } from '@/utils/valueTypes'
+import { valueTypeOptions, findWhatWritesSizeForType } from '@/utils/valueTypes'
 
 const store = useAppStore()
 const uiStringSourcesPanelRef = ref<HTMLElement | null>(null)
 const {
   selectedCandidateAddresses,
   writePanelRef,
-  currentPageCandidates,
-  displayedCandidates,
   writePlan,
   writeFailures,
   hasSelectedWriteTargets,
@@ -59,18 +58,7 @@ const {
   setSelectedWriteTargets,
   clearCandidateSelection,
   scrollToWritePanel,
-  useCandidateInAssistant,
-  isCandidateSelected,
-  toggleCandidateSelection,
-  toggleCurrentPageSelection,
-  useSelectedCandidatesInAssistant,
-  writeSelectedCandidates,
-  writeSelectedCandidatesAtomic,
-  writeSelectedCandidateKernel,
   writeFromPanel,
-  watchOrRefreshCandidate,
-  watchSelectedCandidates,
-  watchCurrentCandidatePage,
   watchedCandidate,
 } = useExpertWriteSelection()
 
@@ -1537,13 +1525,6 @@ function uiSourceTypeSize(type: string) {
   return 4
 }
 
-function findWhatWritesSizeForType(type: string) {
-  if (type.endsWith('8')) return 1
-  if (type.endsWith('16')) return 2
-  if (type.endsWith('64') || type === 'Float64') return 8
-  return 4
-}
-
 function findWhatWritesSizeForUiString(candidate: UiStringCandidate) {
   if (candidate.encoding === 'utf16') return 2
   return 1
@@ -2386,11 +2367,6 @@ function scrollToUiSources() {
   })
 }
 
-const candidatePageTotal = computed(() => {
-  if (!store.candidatePage) return 1
-  if (store.candidatePage.displaySuppressed) return 1
-  return Math.max(1, Math.ceil(store.candidatePage.totalCount / store.candidatePage.pageSize))
-})
 const structureProbeRows = computed(() => (structureProbeResult.value?.rows as StructureProbeRow[] | undefined) ?? [])
 const structureDiffRows = computed(() => {
   const aRows = structureCaptureA.value ?? []
@@ -2534,54 +2510,6 @@ function confidenceClass(confidence: number | undefined): string {
 
 function candidateCurrentValue(address: string): string {
   return watchedCandidate(address)?.value || '-'
-}
-
-function candidateReadError(address: string): string {
-  return watchedCandidate(address)?.error || ''
-}
-
-function freezeCandidateCurrent(address: string, type: string) {
-  void store.freezeCandidateCurrent(address, type)
-}
-
-// PHASE 157 : bouton direct pour analyzeFieldStability (PHASE 130), jusqu'ici
-// uniquement atteignable via le chat Assistant. Meme decision de risque que
-// le registre d'outils (ai/tool_registry.cpp) : lecture seule (jamais
-// d'ecriture), execute directement sans confirmRiskAction, comme pour le
-// chemin Assistant.
-const fieldStabilityByAddress = ref<Record<string, { busy: boolean, result?: Record<string, unknown>, error?: string }>>({})
-
-const fieldStabilityVerdictLabels: Record<string, string> = {
-  likely_derived_display: 'Probablement affiché/recalculé',
-  likely_event_driven: 'Probablement source événementielle',
-  no_writes_observed: 'Aucune écriture observée',
-  insufficient_data: 'Données insuffisantes',
-}
-
-async function analyzeCandidateStability(address: string, type: string) {
-  fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: true } }
-  try {
-    const controller = backend.getController()
-    if (!controller.analyzeFieldStability) {
-      fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: false, error: 'analyzeFieldStability non exposé par ce backend.' } }
-      return
-    }
-    const result = await controller.analyzeFieldStability(address, { size: findWhatWritesSizeForType(type) })
-    fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: false, result } }
-  } catch (e) {
-    fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: false, error: String(e) } }
-  }
-}
-
-function fieldStabilityLabel(address: string): string {
-  const entry = fieldStabilityByAddress.value[address]
-  if (!entry) return ''
-  if (entry.busy) return 'Analyse...'
-  if (entry.error) return `Erreur: ${entry.error}`
-  const result = entry.result
-  if (!result?.success) return String(result?.error || 'Échec')
-  const verdict = String(result.verdict || '')
-  return fieldStabilityVerdictLabels[verdict] || verdict
 }
 
 onMounted(() => {
@@ -3359,162 +3287,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <section v-show="showStep('inspect')" class="panel risk-read">
-        <div class="panel-title">
-          <div class="panel-heading">
-            <h2>Candidats</h2>
-            <InfoDot topic="candidates" />
-            <RiskBadge level="read" />
-          </div>
-          <span>{{ formatNumber(store.candidatePage?.totalCount) }} · {{ selectedCandidateAddresses.length }} sélectionné(s)</span>
-        </div>
-        <p class="panel-hint">{{ $t('help.candidates.when') }}</p>
-        <div class="candidate-toolbar">
-          <input
-            v-model="store.candidateFilter"
-            :placeholder="$t('scan.filterAddress')"
-            class="input"
-            @input="store.candidatePageIndex = 0; store.refreshCandidates()"
-          />
-          <button class="btn btn-secondary" :disabled="store.candidatePageIndex === 0" @click="store.previousCandidatePage()">
-            {{ $t('scan.previous') }}
-          </button>
-          <button
-            class="btn btn-secondary"
-            :disabled="!store.candidatePage || store.candidatePage.displaySuppressed || (store.candidatePageIndex + 1) * store.candidatePageSize >= store.candidatePage.totalCount"
-            @click="store.nextCandidatePage()"
-          >
-            {{ $t('scan.next') }}
-          </button>
-        </div>
-        <div class="selection-toolbar">
-          <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="toggleCurrentPageSelection()">
-            Sélection page
-          </button>
-          <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="clearCandidateSelection()">
-            Effacer
-          </button>
-          <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0" @click="useSelectedCandidatesInAssistant()">
-            Utiliser sélection
-          </button>
-          <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0 || !store.writeValue.trim()" @click="writeSelectedCandidates()">
-            {{ store.kernelMemoryModeActive ? 'Écrire via kernel' : 'Écrire sur sélection' }}
-          </button>
-          <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length < 2 || !store.writeValue.trim()" @click="writeSelectedCandidatesAtomic()">
-            Écrire ensemble (atomique)
-          </button>
-          <InfoDot topic="writeAtomic" align="right" />
-          <button
-            v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess && !store.kernelMemoryModeActive"
-            class="btn btn-secondary compact"
-            :title="`Contourne les protections mémoire usermode — pour une adresse qui refuse de tenir une écriture normale (ex: instabilité/compteur animé).`"
-            :disabled="selectedCandidateAddresses.length !== 1 || !store.writeValue.trim()"
-            @click="writeSelectedCandidateKernel()"
-          >
-            Écrire via kernel
-          </button>
-          <InfoDot topic="writeKernel" align="right" />
-          <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="watchCurrentCandidatePage()">
-            Watch page
-          </button>
-          <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="watchSelectedCandidates()">
-            Watch sélection
-          </button>
-        </div>
-        <div class="page-info">
-          {{ store.candidatePage ? store.candidatePage.pageIndex + 1 : 1 }} / {{ candidatePageTotal }}
-        </div>
-        <div v-if="store.candidatePage" class="metrics candidate-storage">
-          <span>{{ store.candidatePage.fileBacked ? 'Stockage fichier' : 'Stockage RAM' }}</span>
-          <span>Fichier: {{ formatBytes(store.candidatePage.candidateStoreBytes) }}</span>
-          <span>RAM estimée: {{ formatBytes(store.candidatePage.candidateStoreMemoryBytes) }}</span>
-        </div>
-        <div
-          v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess"
-          class="kernel-escalation-guide"
-        >
-          <strong>Kernel prêt</strong>
-          <span>Sélectionne 1 candidat, lis/écris via kernel, puis relis. Si la valeur revient, ce n’est probablement pas un blocage d’écriture : lance Écrit par puis Tester automatiquement.</span>
-        </div>
-        <div v-if="store.candidatePage?.displaySuppressed" class="candidate-suppressed">
-          {{ formatNumber(store.candidatePage.totalCount) }} candidats trouvés. Réduis avec un next scan ou filtre une adresse pour afficher une page.
-        </div>
-        <p v-if="store.nextScanResult?.stableGroupHint" class="hint stable-group-hint">
-          {{ store.nextScanResult.stableGroupHint }}
-        </p>
-        <div class="candidate-list">
-          <div
-            v-for="match in displayedCandidates"
-            :key="match.address"
-            class="candidate-row"
-            :class="[`candidate-${store.candidateVisualState(match).replace(' ', '-')}`]"
-          >
-            <label class="candidate-check">
-              <input
-                type="checkbox"
-                :checked="isCandidateSelected(match.address)"
-                @change="toggleCandidateSelection(match.address)"
-              />
-            </label>
-            <button class="address-btn" @click="store.selectCandidate(match.address, match.type)">
-              0x{{ match.address }}
-            </button>
-            <div class="candidate-meta">
-              <span class="candidate-type">{{ match.type }}</span>
-              <span
-                v-if="match.confidence !== undefined && match.confidence < 1"
-                class="confidence-badge"
-                :class="confidenceClass(match.confidence)"
-                :title="match.variantLabel"
-              >
-                {{ confidencePercent(match.confidence) }}%
-              </span>
-              <span v-if="match.variantLabel" class="variant-label">{{ match.variantLabel }}</span>
-              <span
-                v-if="match.writeVerified"
-                class="write-verified-badge"
-                title="Cette adresse a déjà reçu une écriture confirmée avec succès — contrairement à un candidat juste stable au scan, celui-ci a été prouvé écrivable."
-              >
-                ✓ écrit
-              </span>
-              <span class="visual-state">{{ store.candidateVisualState(match) }}</span>
-              <span v-if="store.watchedAddresses.some((item) => item.address === match.address)" class="live-dot">watch</span>
-            </div>
-            <div class="candidate-value" :class="{ error: candidateReadError(match.address) }" :title="candidateReadError(match.address) || match.lastValueHex">
-              <span>Valeur</span>
-              <strong>{{ candidateCurrentValue(match.address) }}</strong>
-            </div>
-            <div class="candidate-actions">
-              <button class="btn btn-secondary compact" @click="useCandidateInAssistant(match.address, match.type)">
-                Utiliser
-              </button>
-              <button class="btn btn-secondary compact" @click="watchOrRefreshCandidate(match.address, match.type)">
-                {{ watchedCandidate(match.address) ? 'Rafraîchir' : 'Watch' }}
-              </button>
-              <button class="btn btn-secondary compact" @click="freezeCandidateCurrent(match.address, match.type)">
-                Freeze actuel
-              </button>
-              <button
-                class="btn btn-secondary compact"
-                :disabled="fieldStabilityByAddress[match.address]?.busy"
-                title="Observe brièvement (lecture seule) le rythme des écritures pour juger si ce champ est probablement affiché/recalculé ou une source événementielle — utile avant de figer/patcher."
-                @click="analyzeCandidateStability(match.address, match.type)"
-              >
-                Stabilité
-              </button>
-              <button class="btn btn-secondary compact" @click="store.keepCandidate(match.address)">
-                Garder
-              </button>
-              <button class="btn btn-secondary compact" @click="store.ignoreCandidate(match.address)">
-                Ignorer
-              </button>
-            </div>
-            <div v-if="fieldStabilityLabel(match.address)" class="candidate-stability-result">
-              {{ fieldStabilityLabel(match.address) }}
-            </div>
-          </div>
-        </div>
-      </section>
+      <CandidatePanel v-show="showStep('inspect')" />
 
       <section v-show="showStep('act')" ref="writePanelRef" class="panel risk-write">
         <div class="panel-title">
