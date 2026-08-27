@@ -1705,6 +1705,12 @@ let nextWatchedChainId = 1
       value: String(input.value ?? writeValue.value ?? ''),
       patchBytes: input.patchBytes,
       aobPattern: input.aobPattern,
+      // PHASE 163 : oubli de PHASE 162 corrige -- sans cette ligne, un appel
+      // createTrainerFeature({locatorKind:'pointer_chain', pointerChain: {...}})
+      // (ex. depuis le nouveau chemin Assistant trainer_create_write) perdait
+      // silencieusement la chaine, laissant resolveTrainerFeatureAddress
+      // echouer avec "Chaine de pointeurs manquante."
+      pointerChain: input.pointerChain,
       clrTypeSubstring: input.clrTypeSubstring,
       clrIdentityField: input.clrIdentityField,
       clrIdentityValue: input.clrIdentityValue,
