@@ -119,6 +119,16 @@ export interface UserActionLogEntry {
   status: 'info' | 'success' | 'warning' | 'error'
 }
 
+export interface SessionEntry {
+  id: string
+  address: string
+  valueType: string
+  label: string
+  kind: 'freeze_polling' | 'freeze_breakpoint' | 'write'
+  enabled: boolean
+  createdAt: string
+}
+
 export interface InvestigationStep {
   id: number
   time: string
@@ -719,6 +729,7 @@ let nextWatchedChainId = 1
   const messageIdCounter = ref(0)
   const actionLog = ref<UserActionLogEntry[]>([])
   const actionLogIdCounter = ref(0)
+  const sessionEntries = ref<SessionEntry[]>([])
   const workflowStatus = ref<string>('idle')
   const targetValueGuided = ref<string>('')
   const candidateHistory = ref<number[]>([])
@@ -734,6 +745,7 @@ let nextWatchedChainId = 1
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
   // d'une reconnexion du signal (ex: rechargement dev).
   const freezeInstabilityNotified = new Set<string>()
+  const freezeInstabilityVersion = ref(0)
 
   // Getters
   const statusText = computed(() => {
@@ -744,6 +756,82 @@ let nextWatchedChainId = 1
 
   function nowTime(): string {
     return new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  function normalizeSessionAddress(address: string): string {
+    return address.trim().replace(/^0x/i, '').toUpperCase()
+  }
+
+  function sessionEntryId(address: string, valueType: string, kind: SessionEntry['kind']): string {
+    return `${kind}:${normalizeSessionAddress(address).toLowerCase()}:${valueType}`
+  }
+
+  function upsertSessionEntry(address: string, valueType: string, kind: SessionEntry['kind'], enabled = true) {
+    const normalized = normalizeSessionAddress(address)
+    if (!normalized) return
+    const id = sessionEntryId(normalized, valueType, kind)
+    const existing = sessionEntries.value.find((entry) => entry.id === id)
+    if (existing) {
+      existing.enabled = enabled
+      return
+    }
+    sessionEntries.value.unshift({
+      id,
+      address: normalized,
+      valueType,
+      label: '',
+      kind,
+      enabled,
+      createdAt: new Date().toISOString(),
+    })
+  }
+
+  function updateSessionEntryLabel(id: string, label: string) {
+    const entry = sessionEntries.value.find((candidate) => candidate.id === id)
+    if (entry) entry.label = label
+  }
+
+  function markSessionEntryEnabled(address: string, valueType: string, kind: SessionEntry['kind'], enabled: boolean) {
+    const entry = sessionEntries.value.find((candidate) => candidate.id === sessionEntryId(address, valueType, kind))
+    if (entry) entry.enabled = enabled
+  }
+
+  function clearSessionEntries() {
+    sessionEntries.value = []
+    freezeInstabilityNotified.clear()
+    freezeInstabilityVersion.value += 1
+  }
+
+  function hasFreezeInstability(address: string): boolean {
+    freezeInstabilityVersion.value
+    return freezeInstabilityNotified.has(normalizeSessionAddress(address).toLowerCase())
+  }
+
+  async function disableSessionEntry(id: string) {
+    const entry = sessionEntries.value.find((candidate) => candidate.id === id)
+    if (!entry || !entry.enabled) return
+    if (entry.kind === 'write') {
+      entry.enabled = false
+      return
+    }
+    try {
+      const result = await backend.getController().setFreezeValue(entry.address, entry.valueType, '', false)
+      if (result.success === true) {
+        entry.enabled = false
+        if (selectedCandidateAddress.value.replace(/^0x/i, '').toLowerCase() === entry.address.toLowerCase()) {
+          freezeEnabled.value = false
+          if (entry.kind === 'freeze_breakpoint') breakpointFreezeEnabled.value = false
+        }
+      }
+      addActionLog(
+        'freeze',
+        result.success === true ? 'Session freeze désactivé' : 'Session freeze échoué',
+        `0x${entry.address}. ${String(result.error ?? '')}`.trim(),
+        result.success === true ? 'success' : 'error',
+      )
+    } catch (e) {
+      addActionLog('freeze', 'Session freeze échoué', String(e), 'error')
+    }
   }
 
   function formatCount(value: number | undefined): string {
@@ -2813,7 +2901,10 @@ let nextWatchedChainId = 1
         ? await controller.setFreezeValue(address, type, value, true)
         : await writeMemoryValueByMode(address, type, value)
       writeResult.value = result as MemoryWriteResult
-      if (result.success === true) addAddressToWatch(address, type)
+      if (result.success === true) {
+        addAddressToWatch(address, type)
+        upsertSessionEntry(address, type, freeze ? 'freeze_polling' : 'write', freeze)
+      }
       addActionLog(
         'checkpoint',
         result.success === true ? `${title} OK` : `${title} échoué`,
@@ -3622,9 +3713,10 @@ let nextWatchedChainId = 1
         // l'utilisateur ait besoin de le remarquer et de le décrire.
         controller.freezeInstabilityDetected?.connect((info) => {
           const address = String(info.address ?? '')
-          const key = address.toLowerCase()
+          const key = normalizeSessionAddress(address).toLowerCase()
           if (freezeInstabilityNotified.has(key)) return
           freezeInstabilityNotified.add(key)
+          freezeInstabilityVersion.value += 1
           pushMessage(
             'assistant',
             String(info.message ?? `Le freeze sur 0x${address} ne tient pas.`) + ' ' + String(info.suggestion ?? ''),
@@ -4127,6 +4219,7 @@ let nextWatchedChainId = 1
 
   async function attach(pid: number, mode: 'standard' | 'kernel' = memoryAccessMode.value) {
     try {
+      clearSessionEntries()
       setMemoryAccessMode(mode)
       const ok = await backend.getController().attachProcess(pid)
       if (ok) {
@@ -5119,6 +5212,7 @@ let nextWatchedChainId = 1
     try {
       await backend.getController().detachProcess()
       isAttached.value = false
+      clearSessionEntries()
       processName.value = ''
       processModules.value = []
       memoryMap.value = null
@@ -7516,6 +7610,7 @@ async function doEncryptedScan() {
         .setFreezeValue(normalized, type, currentValue, true)
       if (writeResult.value.success) {
         freezeEnabled.value = true
+        upsertSessionEntry(normalized, type, 'freeze_polling', true)
         await refreshWatchedAddress(normalized)
       }
       addActionLog(
@@ -7546,6 +7641,7 @@ async function doEncryptedScan() {
       if (writeResult.value.success) {
         freezeEnabled.value = nextState
         addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
+        upsertSessionEntry(selectedCandidateAddress.value, exactScanType.value, 'freeze_polling', nextState)
       }
       addActionLog('freeze', nextState ? 'Freeze activé' : 'Freeze arrêté', `0x${selectedCandidateAddress.value} = ${writeValue.value}.`, writeResult.value.success ? 'success' : 'error')
     } catch (e) {
@@ -7586,6 +7682,7 @@ async function doEncryptedScan() {
       breakpointFreezeEnabled.value = writeResult.value.success === true
       if (breakpointFreezeEnabled.value) {
         addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
+        upsertSessionEntry(selectedCandidateAddress.value, exactScanType.value, 'freeze_breakpoint', true)
       }
       addActionLog(
         'freeze',
@@ -7622,6 +7719,8 @@ async function doEncryptedScan() {
         selectedCandidateAddress.value = address
         if (result.type) exactScanType.value = String(result.type)
         addAddressToWatch(address, String(result.type ?? exactScanType.value))
+        upsertSessionEntry(address, String(result.type ?? exactScanType.value), 'freeze_breakpoint', true)
+        markSessionEntryEnabled(address, String(result.type ?? exactScanType.value), 'freeze_polling', false)
       }
       addActionLog(
         'freeze',
@@ -8222,6 +8321,7 @@ async function doEncryptedScan() {
     watchLiveEnabled,
     watchedAddresses,
     watchLiveReadLimit,
+    sessionEntries,
     messages,
     actionLog,
     workflowStatus,
@@ -8408,6 +8508,9 @@ async function doEncryptedScan() {
     refreshWatchedAddress,
     refreshWatchedAddresses,
     setWatchLiveEnabled,
+    updateSessionEntryLabel,
+    disableSessionEntry,
+    hasFreezeInstability,
     keepCandidate,
     ignoreCandidate,
     candidateVisualState,
