@@ -38,6 +38,7 @@ import ActionLogPanel from '@/components/expert/ActionLogPanel.vue'
 import SessionPanel from '@/components/expert/SessionPanel.vue'
 import InjectionPanel from '@/components/expert/InjectionPanel.vue'
 import SaveFilesPanel from '@/components/expert/SaveFilesPanel.vue'
+import UnknownScanPanel from '@/components/expert/UnknownScanPanel.vue'
 import { formatNumber, formatRate, formatBytes } from '@/utils/format'
 import { valueTypeOptions } from '@/utils/valueTypes'
 
@@ -2560,18 +2561,6 @@ async function startNewScan() {
 
 const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0) > 0)
 const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau scan' : 'Premier scan')
-const unknownGuideReady = computed(() => Boolean(store.unknownSnapshotResult?.success) || hasCandidateContext.value)
-
-const unknownGuideActions = [
-  { mode: 'increased', label: 'ça augmente' },
-  { mode: 'decreased', label: 'ça diminue' },
-  { mode: 'unchanged', label: 'stable' },
-  { mode: 'changed', label: 'ça change' },
-] as const
-const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096] // -1 = Auto
-const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
-
-
 function encodedDisplayWriteValue(value: string, variantLabel?: string): string {
   const cleanValue = value.trim().replace(',', '.')
   if (!cleanValue) return '-'
@@ -3037,103 +3026,7 @@ onMounted(() => {
 
       <NextScanPanel v-show="showStep('find')" />
 
-      <section v-show="showStep('find')" class="panel risk-read">
-        <div class="panel-title">
-          <div class="panel-heading">
-            <h2>{{ $t('unknown.title') }}</h2>
-            <InfoDot topic="unknown" />
-            <RiskBadge level="read" />
-          </div>
-        </div>
-        <p class="panel-hint">{{ $t('help.unknown.when') }}</p>
-        <div class="controls unknown-controls">
-          <select v-model="store.unknownScanType" class="input select" :disabled="store.scanBusy">
-            <option value="Auto">Auto (multi-type)</option>
-            <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
-          </select>
-          <label class="checkbox-label compact-toggle">
-            <input v-model="store.unknownWritableOnly" type="checkbox" :disabled="store.scanBusy" />
-            <span>Writable only</span>
-          </label>
-          <label class="checkbox-label compact-toggle">
-            <input v-model="store.unknownCopyOnWriteOnly" type="checkbox" :disabled="store.scanBusy || !store.unknownWritableOnly" />
-            <span>Copy-on-write</span>
-          </label>
-          <label class="compact-select">
-            <span>Profondeur</span>
-            <select v-model.number="store.settingUnknownSnapshotMaxMb" class="input select" :disabled="store.scanBusy">
-              <option v-for="mb in unknownSnapshotPresets" :key="mb" :value="mb">{{ unknownDepthLabel(mb) }}</option>
-            </select>
-          </label>
-          <button class="btn btn-primary" :disabled="store.scanBusy" @click="store.captureUnknownSnapshot()">
-            <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
-            <span>{{ store.scanBusy ? 'Capture...' : $t('unknown.capture') }}</span>
-          </button>
-        </div>
-        <p class="hint unknown-guide-warning">
-          ⚠️ Avant de cliquer : as-tu bien fait l'action dans le jeu ? "Ça augmente/diminue/change" doit suivre un vrai changement, "stable" doit suivre l'absence de changement. Cliquer le mauvais bouton peut faire tomber tes candidats à 0 d'un coup — utilise "Restaurer réduction" (panneau Scan suivant, un peu plus haut) si ça arrive.
-        </p>
-        <div class="unknown-guide">
-          <button
-            v-for="action in unknownGuideActions"
-            :key="action.mode"
-            class="btn btn-secondary compact guide-btn"
-            type="button"
-            :class="{ active: store.unknownScanMode === action.mode }"
-            :disabled="store.scanBusy || !unknownGuideReady"
-            @click="store.runUnknownGuideStep(action.mode)"
-          >
-            {{ action.label }}
-          </button>
-        </div>
-        <div v-if="store.unknownSnapshotResult || store.unknownNextScanResult" class="metrics">
-          <span v-if="store.unknownSnapshotResult">{{ $t('unknown.regions') }}: {{ formatNumber(store.unknownSnapshotResult.regionsCaptured) }}</span>
-          <span v-if="store.unknownSnapshotResult">{{ $t('unknown.bytes') }}: {{ formatNumber(store.unknownSnapshotResult.bytesCaptured) }}</span>
-          <span v-if="store.unknownSnapshotResult?.captureLimitBytes">Limite: {{ formatBytes(store.unknownSnapshotResult.captureLimitBytes) }}</span>
-          <span v-if="store.unknownSnapshotResult?.captureLimitReached" class="warning-text">limite atteinte</span>
-          <span v-if="store.unknownSnapshotResult?.compressedBytes !== undefined">Compressé: {{ formatBytes(store.unknownSnapshotResult.compressedBytes) }}</span>
-          <span v-if="store.unknownSnapshotResult?.mappedStorage">Stockage fichier temporaire</span>
-          <span v-if="store.unknownSnapshotResult?.writableOnly">Writable only</span>
-          <span v-if="store.unknownSnapshotResult?.copyOnWriteOnly">Copy-on-write</span>
-          <span v-if="store.unknownNextScanResult">{{ $t('scan.matches') }}: {{ formatNumber(store.unknownNextScanResult.matchesFound) }}</span>
-          <span v-if="store.unknownNextScanResult">{{ $t('scan.stored') }}: {{ formatNumber(store.unknownNextScanResult.stored) }}</span>
-        </div>
-        <div v-if="store.unknownNextScanResult?.typePasses?.length" class="metrics">
-          <span v-for="pass in store.unknownNextScanResult.typePasses" :key="pass.type">
-            {{ pass.type }}: {{ formatNumber(pass.stored ?? pass.matchesFound ?? 0) }}
-          </span>
-        </div>
-        <div v-if="store.unknownSnapshotResult?.captureLimitReached" class="warning depth-warning">
-          <p>
-            <strong>Capture limitée</strong> : seulement {{ formatBytes(store.unknownSnapshotResult.bytesCaptured) }} capturés sur une limite de {{ formatBytes(store.unknownSnapshotResult.captureLimitBytes) }}.
-          </p>
-          <p v-if="(store.unknownSnapshotResult.relevantBytes ?? 0) > (store.unknownSnapshotResult.bytesCaptured ?? 0)">
-            Mémoire pertinente totale : {{ formatBytes(store.unknownSnapshotResult.relevantBytes) }}.
-            Tu ne couvres que {{ (((store.unknownSnapshotResult.bytesCaptured ?? 0) / (store.unknownSnapshotResult.relevantBytes ?? 1)) * 100).toFixed(1) }}% — la ressource est probablement dans les {{ (100 - (((store.unknownSnapshotResult.bytesCaptured ?? 0) / (store.unknownSnapshotResult.relevantBytes ?? 1)) * 100)).toFixed(0) }}% manquants.
-          </p>
-          <p v-if="(store.unknownSnapshotResult.suggestedDepthMb ?? 0) > 0">
-            <strong>Recommandation</strong> : passe la profondeur à <strong>{{ store.unknownSnapshotResult.suggestedDepthMb }} Mo</strong> (ou <strong>Auto</strong>) puis refais la capture.
-          </p>
-        </div>
-        <div v-else-if="store.unknownSnapshotResult?.autoDepthApplied && (store.unknownSnapshotResult.suggestedDepthMb ?? 0) > 0" class="hint depth-info">
-          Mode Auto : profondeur calculée à {{ store.unknownSnapshotResult.suggestedDepthMb }} Mo pour {{ formatBytes(store.unknownSnapshotResult.relevantBytes) }} de mémoire pertinente.
-        </div>
-        <div v-if="store.unknownGuideSteps.length > 0" class="unknown-timeline">
-          <div
-            v-for="step in store.unknownGuideSteps"
-            :key="step.id"
-            class="unknown-step"
-            :class="step.status"
-          >
-            <span>{{ step.time }}</span>
-            <strong>{{ step.label }}</strong>
-            <em>{{ step.detail }}</em>
-          </div>
-        </div>
-        <p class="hint">
-          Capture d'abord, fais varier la ressource, puis indique comment elle a bougé. Stable sert surtout après une première réduction.
-        </p>
-      </section>
+      <UnknownScanPanel v-show="showStep('find')" />
 
       <section v-show="showStep('find')" class="panel ui-string-panel risk-read">
         <div class="panel-title">
