@@ -6135,6 +6135,47 @@ let nextWatchedChainId = 1
 
     try {
       const result = await backend.getController().startSmartSearch(query)
+
+      // PHASE 169 : certains tools Trainer (trainer_list_features/
+      // trainer_create_write/trainer_delete_feature) ne peuvent plus finir
+      // leur travail cote C++ via callVueStoreAction() -- cet appel y
+      // rappelle runJavaScript() en reentrance sur CETTE MEME page pendant
+      // que ce startSmartSearch() est encore en vol, et le callback JS
+      // n'arrive jamais dans les 5s (confirme en direct, PHASE 168/169,
+      // docs/PHASE_TRACKER.md). Le C++ pose donc juste un marqueur
+      // `needsLocalStoreAction` + les donnees necessaires ; on termine
+      // l'action ici, directement dans le meme contexte JS que le store
+      // (aucun aller-retour requis), avant que le message ne soit affiche.
+      const pendingAction = result.needsLocalStoreAction as string | undefined
+      if (pendingAction === 'trainer_list_features') {
+        const features = getTrainerFeaturesSnapshot()
+        result.workflowStatus = 'trainer_features_listed'
+        result.message = features.length === 0
+          ? 'Trainer : aucune feature locale pour le moment.'
+          : `Trainer : ${features.length} feature(s) locale(s) trouvée(s). Tu peux en créer une nouvelle ou en gérer l'activation dans l'onglet Trainer.`
+      } else if (pendingAction === 'trainer_create_write') {
+        const pendingFeature = (result.pendingFeature ?? {}) as Partial<TrainerFeature>
+        const created = createTrainerFeature(pendingFeature)
+        const address = String(result.pendingAddress ?? pendingFeature.address ?? '')
+        const valueType = String(result.pendingValueType ?? pendingFeature.valueType ?? 'Int32')
+        const value = String(result.pendingValue ?? pendingFeature.value ?? '')
+        const locatorSummary = String(result.locatorSummary ?? '')
+        if (!created) {
+          result.workflowStatus = 'trainer_feature_create_failed'
+          result.message = "Trainer : je n'ai pas pu créer la feature (adresse manquante ou invalide)."
+        } else {
+          result.workflowStatus = 'trainer_feature_created'
+          result.message = created.locatorKind === 'absolute'
+            ? `Trainer : feature write créée pour ${address} (${valueType} = ${value}), mais aucun locator résilient trouvé — elle reste en adresse absolue brute et ne survivra probablement pas à un relaunch ou un changement de scène du process cible. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.`
+            : `Trainer : feature write créée pour ${address} (${valueType} = ${value}), ${locatorSummary}. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.`
+        }
+      } else if (pendingAction === 'trainer_delete_feature') {
+        const trainerId = Number(result.pendingTrainerId ?? 0)
+        deleteTrainerFeature(trainerId)
+        result.workflowStatus = 'trainer_feature_deleted'
+        result.message = `Trainer : suppression demandée pour la feature #${trainerId}.`
+      }
+
       searchResult.value = result.message ?? JSON.stringify(result, null, 2)
 
       // Synchronise les résultats déterministes
