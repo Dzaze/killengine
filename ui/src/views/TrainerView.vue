@@ -18,6 +18,9 @@ const searchFilter = ref('')
 const exportText = ref('')
 const exportStatus = ref('')
 const overlayHotkeyDraft = ref('')
+// PHASE 162 : id de la feature dont la generation de chaine de pointeurs est en cours
+// (scan lecture seule de quelques secondes) - un seul scan a la fois, comme trainerBusy.
+const pointerChainBusyId = ref<number | null>(null)
 
 function overlayHotkeyValue() {
   return overlayHotkeyDraft.value || store.trainerOverlayHotkey || ''
@@ -167,6 +170,31 @@ function hotkeyDraft(feature: TrainerFeature): string {
 
 async function saveHotkey(feature: TrainerFeature) {
   await store.registerTrainerFeatureHotkey(feature.id, hotkeyDraft(feature))
+}
+
+// PHASE 162 : declencheur UI de generateTrainerFeaturePointerChain (plomberie store deja
+// livree et testee via pipe). Les logs/erreurs sont deja geres par la fonction store
+// (addActionLog/addTrainerFeatureHistory) - ici on ne gere que l'etat "en cours" du bouton.
+async function generatePointerChain(feature: TrainerFeature) {
+  if (pointerChainBusyId.value !== null) return
+  pointerChainBusyId.value = feature.id
+  try {
+    await store.generateTrainerFeaturePointerChain(feature.id)
+  } finally {
+    pointerChainBusyId.value = null
+  }
+}
+
+function pointerChainButtonLabel(feature: TrainerFeature): string {
+  if (pointerChainBusyId.value === feature.id) return 'Scan en cours...'
+  return feature.locatorKind === 'pointer_chain' ? 'Re-générer chaîne' : 'Générer chaîne'
+}
+
+function pointerChainTitle(feature: TrainerFeature): string {
+  if (feature.locatorKind === 'absolute') {
+    return 'Adresse brute : génère une chaîne de pointeurs stable (base de module + offsets) pour que la feature survit aux réallocations mémoire (redémarrage du jeu, nouvelle partie). Scan lecture seule de quelques secondes.'
+  }
+  return 'Relance le scan pour actualiser la chaîne de pointeurs sauvegardée. Scan lecture seule de quelques secondes.'
 }
 
 function showTrainerExport() {
@@ -323,6 +351,13 @@ async function copyTrainerExport() {
           <span>{{ feature.action }} · {{ feature.valueType }} {{ feature.value || feature.patchBytes }}</span>
           <span v-if="feature.hotkey" class="hotkey-chip">{{ feature.hotkey }}</span>
           <span v-if="dependencyNames(feature)" class="depends-on-chip" :title="dependencyNames(feature)">Dépend de : {{ dependencyNames(feature) }}</span>
+          <span
+            v-if="feature.pointerChain"
+            class="pointer-chain-chip mono"
+            :title="`Locator pointer_chain : ${feature.pointerChain.module}+${feature.pointerChain.baseOffset} → [${feature.pointerChain.offsets.join(', ')}] (re-résolue à chaque activation)`"
+          >
+            {{ feature.pointerChain.module }}+{{ feature.pointerChain.baseOffset }} → [{{ feature.pointerChain.offsets.join(', ') }}]
+          </span>
           <span class="status" :class="statusClass(feature.status)">{{ feature.status }}</span>
           <span v-if="featureSignatureQuality(feature)" class="quality-chip" :class="featureQualityClass(feature)">
             AOB {{ featureSignatureQuality(feature)?.level }} · {{ featureSignatureQuality(feature)?.score }}/100
@@ -342,6 +377,13 @@ async function copyTrainerExport() {
           <button class="btn" :disabled="store.trainerBusy || feature.enabled || featureBlocked(feature)" @click="store.applyTrainerFeature(feature.id)">ON</button>
           <button class="btn" :disabled="store.trainerBusy || !feature.enabled" @click="store.restoreTrainerFeature(feature.id)">OFF</button>
           <button class="btn" :disabled="store.trainerBusy || featureBlocked(feature)" @click="store.saveTrainerFeatureToProfile(feature.id)">Sauver profil</button>
+          <button
+            v-if="feature.locatorKind !== 'clr_field'"
+            class="btn"
+            :disabled="store.trainerBusy || pointerChainBusyId !== null"
+            :title="pointerChainTitle(feature)"
+            @click="generatePointerChain(feature)"
+          >{{ pointerChainButtonLabel(feature) }}</button>
           <input
             :value="hotkeyDraft(feature)"
             class="input hotkey-input"
@@ -599,6 +641,18 @@ p,
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
   padding: 3px 8px;
+}
+
+.pointer-chain-chip {
+  overflow: hidden;
+  max-width: 380px;
+  border: 1px solid rgba(158, 206, 106, 0.35);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 3px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .depends-on-chip {
