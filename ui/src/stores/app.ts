@@ -2625,11 +2625,26 @@ let nextWatchedChainId = 1
     }).catch(() => {})
   }
 
+  let automationPipeDispatchDepth = 0
+
   async function confirmRiskAction(
     risk: NonNullable<InvestigationStep['risk']>,
     title: string,
     detail: string,
   ): Promise<boolean> {
+    if (automationPipeDispatchDepth > 0) {
+      addActionLog('risk_gate', `Pipe auto-confirmé: ${title}`, detail, 'success')
+      logAiAudit('risk_pipe_bypass', { risk, title, detail })
+      addInvestigationStep({
+        title: `Pipe auto-confirmé: ${title}`,
+        detail,
+        status: 'checkpoint',
+        risk,
+        tool: 'AutomationPipe',
+        payload: { accepted: true, title, detail, source: 'automation_pipe' },
+      })
+      return true
+    }
     const rememberKey = title === 'Activer le speedhack' ? 'speedhack' : undefined
     if (rememberKey && mutedRiskConfirmations.value[rememberKey]) {
       addActionLog('risk_gate', `Confirmation mémorisée: ${title}`, detail, 'info')
@@ -7942,6 +7957,15 @@ async function doEncryptedScan() {
     keepCandidate,
     ignoreCandidate,
     addAddressToWatch,
+    writeSelectedValue,
+    writeSelectedAddresses,
+    writeSelectedTargets,
+    writeSelectedAtomic,
+    rollbackLastWrite,
+    rollbackLastWriteBatch,
+    freezeCandidateCurrent,
+    toggleFreeze,
+    startBreakpointFreeze,
     createTrainerFeature,
     deleteTrainerFeature,
     applyTrainerFeature,
@@ -7957,7 +7981,20 @@ async function doEncryptedScan() {
         if (typeof fn !== 'function') {
           throw new Error(`Action non autorisée (bridge JS) : ${action}`)
         }
-        return fn(...(Array.isArray(args) ? args : []))
+        automationPipeDispatchDepth += 1
+        try {
+          const result = fn(...(Array.isArray(args) ? args : []))
+          if (result && typeof (result as Promise<unknown>).finally === 'function') {
+            return (result as Promise<unknown>).finally(() => {
+              automationPipeDispatchDepth = Math.max(0, automationPipeDispatchDepth - 1)
+            })
+          }
+          automationPipeDispatchDepth = Math.max(0, automationPipeDispatchDepth - 1)
+          return result
+        } catch (e) {
+          automationPipeDispatchDepth = Math.max(0, automationPipeDispatchDepth - 1)
+          throw e
+        }
       },
     }
   }

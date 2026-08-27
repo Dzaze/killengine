@@ -6057,6 +6057,15 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
     }
 
     const auto typesToRun = autoType ? compareTypes : QList<killcore::ValueType>{singleType};
+    // Chaque type recoit un budget egal plutot qu'un plafond global partage :
+    // sinon le premier type de la liste (Int32) peut a lui seul epuiser le
+    // plafond et empecher les types suivants (Float32, Int16, ...) d'etre
+    // testes du tout en mode Auto, ce qui fait disparaitre silencieusement
+    // la bonne adresse si elle n'est pas du premier type essaye.
+    const qsizetype perTypeCap = typesToRun.isEmpty()
+        ? kUnknownAutoMaxReturnedMatches
+        : std::max<qsizetype>(1, kUnknownAutoMaxReturnedMatches / typesToRun.size());
+    QStringList truncatedTypes;
     for (const auto type : typesToRun) {
         const auto scan = m_snapshot.compare(m_handle, type, scanMode);
         checkedBytes += scan.checkedBytes;
@@ -6069,33 +6078,40 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         }
 
         const auto typeCandidates = candidatesFromUnknownScan(m_handle, scan);
+        qsizetype addedForType = 0;
         for (const auto& candidate : typeCandidates) {
             const QString key = QString::number(candidate.address, 16) + "|" + killcore::valueTypeToString(candidate.type);
             if (seenCandidates.contains(key)) {
                 continue;
             }
-            seenCandidates.insert(key);
-            unknownCandidates.append(candidate);
-            if (unknownCandidates.size() >= kUnknownAutoMaxReturnedMatches) {
+            if (addedForType >= perTypeCap) {
                 partial = true;
-                compareError = QString("Trop de candidats unknown Auto (%1+). Raffine avec changed/increased/decreased ou reduis la plage.")
-                                   .arg(kUnknownAutoMaxReturnedMatches);
+                truncatedTypes.append(killcore::valueTypeToString(type));
                 break;
             }
+            seenCandidates.insert(key);
+            unknownCandidates.append(candidate);
+            ++addedForType;
         }
 
         typeSummaries.append(QVariantMap{
             {"type", killcore::valueTypeToString(type)},
             {"success", scan.success},
-            {"partial", scan.partial},
+            {"partial", scan.partial || addedForType >= perTypeCap},
             {"checkedBytes", static_cast<qulonglong>(scan.checkedBytes)},
             {"matchesFound", static_cast<qulonglong>(scan.matchesFound)},
-            {"stored", typeCandidates.size()},
+            {"stored", addedForType},
             {"error", scan.errorMessage},
         });
-        if (cancelled || unknownCandidates.size() >= kUnknownAutoMaxReturnedMatches) {
+        if (cancelled) {
             break;
         }
+    }
+    if (!truncatedTypes.isEmpty() && compareError.isEmpty()) {
+        compareError = QString("Limite de %1 candidats/type atteinte pour : %2. Tous les types ont ete testes ; "
+                                "raffine avec changed/increased/decreased pour reduire.")
+                            .arg(perTypeCap)
+                            .arg(truncatedTypes.join(", "));
     }
     emit scanProgress(90);
 
@@ -6231,6 +6247,14 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             const int totalTypes = std::max<int>(1, static_cast<int>(typesToRun.size()));
             int typeIndex = 0;
             int lastUnknownProgress = 0;
+            // Voir la version synchrone (unknownNextScan) pour le detail :
+            // un plafond global partage entre types ferait sortir la boucle
+            // des le premier type qui deborde (typiquement Int32), sans que
+            // les types suivants soient jamais testes en mode Auto.
+            const qsizetype perTypeCap = typesToRun.isEmpty()
+                ? kUnknownAutoMaxReturnedMatches
+                : std::max<qsizetype>(1, kUnknownAutoMaxReturnedMatches / typesToRun.size());
+            QStringList truncatedTypes;
             for (const auto type : typesToRun) {
                 killcore::ScanOptions compareOptions;
                 compareOptions.progressCallback = [self, typeIndex, totalTypes, &lastUnknownProgress](const killcore::ScanProgress& progress) {
@@ -6260,33 +6284,40 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
                 const auto typeCandidates = scan.success && !scan.cancelled
                     ? candidatesFromUnknownScan(workerHandle, scan)
                     : QList<killcore::Candidate>{};
+                qsizetype addedForType = 0;
                 for (const auto& candidate : typeCandidates) {
                     const QString key = QString::number(candidate.address, 16) + "|" + killcore::valueTypeToString(candidate.type);
                     if (seenCandidates.contains(key)) {
                         continue;
                     }
-                    seenCandidates.insert(key);
-                    unknownCandidates.append(candidate);
-                    if (unknownCandidates.size() >= kUnknownAutoMaxReturnedMatches) {
+                    if (addedForType >= perTypeCap) {
                         partial = true;
-                        compareError = QString("Trop de candidats unknown Auto (%1+). Raffine avec changed/increased/decreased ou reduis la plage.")
-                                           .arg(kUnknownAutoMaxReturnedMatches);
+                        truncatedTypes.append(killcore::valueTypeToString(type));
                         break;
                     }
+                    seenCandidates.insert(key);
+                    unknownCandidates.append(candidate);
+                    ++addedForType;
                 }
 
                 typeSummaries.append(QVariantMap{
                     {"type", killcore::valueTypeToString(type)},
                     {"success", scan.success},
-                    {"partial", scan.partial},
+                    {"partial", scan.partial || addedForType >= perTypeCap},
                     {"checkedBytes", static_cast<qulonglong>(scan.checkedBytes)},
                     {"matchesFound", static_cast<qulonglong>(scan.matchesFound)},
-                    {"stored", typeCandidates.size()},
+                    {"stored", addedForType},
                     {"error", scan.errorMessage},
                 });
-                if (cancelled || unknownCandidates.size() >= kUnknownAutoMaxReturnedMatches) {
+                if (cancelled) {
                     break;
                 }
+            }
+            if (!truncatedTypes.isEmpty() && compareError.isEmpty()) {
+                compareError = QString("Limite de %1 candidats/type atteinte pour : %2. Tous les types ont ete testes ; "
+                                        "raffine avec changed/increased/decreased pour reduire.")
+                                    .arg(perTypeCap)
+                                    .arg(truncatedTypes.join(", "));
             }
         } else {
             return;
@@ -6519,6 +6550,7 @@ QVariantMap ApplicationController::writeMemoryValuesAtomic(const QVariantList& t
     int suspendedThreadCount = 0;
     QVariantList writeResults;
     int written = 0;
+    const int batchStartIndex = m_writeHistory.size();
 
     {
         std::optional<killcore::ProcessThreadsSuspendGuard> suspendGuard;
@@ -6540,6 +6572,8 @@ QVariantMap ApplicationController::writeMemoryValuesAtomic(const QVariantList& t
             writeResult["error"] = write.errorMessage;
             if (write.success) {
                 ++written;
+                m_lastWriteAddress = pt.address;
+                m_lastWritePreviousValue = write.previousValue;
                 m_writeHistory.append({pt.address, write.previousValue, pt.bytes, pt.type, pt.valueText});
                 registerWriteWatch(pt.address, pt.type, pt.bytes); // H2, voir writeMemoryValue
             }
@@ -6555,6 +6589,10 @@ QVariantMap ApplicationController::writeMemoryValuesAtomic(const QVariantList& t
     result["written"] = written;
     result["total"] = targets.size();
     result["suspendedThreadCount"] = suspendedThreadCount;
+    if (written > 0) {
+        m_lastBatchStartIndex = batchStartIndex;
+        m_lastBatchEndIndex = m_writeHistory.size();
+    }
     if (!parseErrors.isEmpty()) {
         result["parseErrors"] = parseErrors;
     }
@@ -17899,6 +17937,15 @@ const QSet<QString>& allowedVueStoreActions() {
         QStringLiteral("keepCandidate"),
         QStringLiteral("ignoreCandidate"),
         QStringLiteral("addAddressToWatch"),
+        QStringLiteral("writeSelectedValue"),
+        QStringLiteral("writeSelectedAddresses"),
+        QStringLiteral("writeSelectedTargets"),
+        QStringLiteral("writeSelectedAtomic"),
+        QStringLiteral("rollbackLastWrite"),
+        QStringLiteral("rollbackLastWriteBatch"),
+        QStringLiteral("freezeCandidateCurrent"),
+        QStringLiteral("toggleFreeze"),
+        QStringLiteral("startBreakpointFreeze"),
         QStringLiteral("createTrainerFeature"),
         QStringLiteral("deleteTrainerFeature"),
         QStringLiteral("applyTrainerFeature"),
