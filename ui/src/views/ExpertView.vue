@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
-  type StableLocatorSuggestion,
   type UiStringCandidate,
   type UiStringInvestigationFinishResult,
   type UiStringInvestigationStartResult,
@@ -32,35 +31,23 @@ import ExactScanPanel from '@/components/expert/ExactScanPanel.vue'
 import CandidatePanel from '@/components/expert/CandidatePanel.vue'
 import PointerChainScanPanel from '@/components/expert/PointerChainScanPanel.vue'
 import AobSignaturePanel from '@/components/expert/AobSignaturePanel.vue'
+import WritePanel from '@/components/expert/WritePanel.vue'
 import { useExpertWriteSelection } from '@/composables/useExpertWriteSelection'
 import { useExpertPointerChain } from '@/composables/useExpertPointerChain'
 import { useExpertAobFlow } from '@/composables/useExpertAobFlow'
 import { formatNumber, formatBytes } from '@/utils/format'
-import { valueTypeOptions, findWhatWritesSizeForType } from '@/utils/valueTypes'
+import { findWhatWritesSizeForType } from '@/utils/valueTypes'
 
 const store = useAppStore()
-const uiStringSourcesPanelRef = ref<HTMLElement | null>(null)
 const {
   selectedCandidateAddresses,
-  writePanelRef,
-  writePlan,
-  writeFailures,
-  hasSelectedWriteTargets,
-  writeTargetLabel,
-  canWriteFromPanel,
-  writeButtonLabel,
   setSelectedWriteTargets,
   clearCandidateSelection,
   scrollToWritePanel,
-  writeFromPanel,
   watchedCandidate,
 } = useExpertWriteSelection()
 
-// Phase 14 — Pointer Chains : seuls pointerScanValueType/savePointerChain
-// restent necessaires ici, pour saveStableLocator() ci-dessous (le reste de
-// l'etat/des fonctions vit desormais uniquement dans PointerChainScanPanel.vue,
-// meme singleton partage via useExpertPointerChain()).
-const { pointerScanValueType, savePointerChain, resetPointerChainState } = useExpertPointerChain()
+const { resetPointerChainState } = useExpertPointerChain()
 const {
   aobPattern,
   aobResult,
@@ -88,41 +75,6 @@ const {
   saveTrainerPatchFromHit,
   resetAobFlowState,
 } = useExpertAobFlow()
-// Suggestion de chaîne de pointeurs après une écriture confirmée sur une seule
-// adresse : évite de repasser manuellement par le panneau Pointer Chains.
-const stableLocatorResult = ref<StableLocatorSuggestion | null>(null)
-const stableLocatorBusy = ref(false)
-const stableLocatorForAddress = ref('')
-
-// Tenue live du freeze BP : BreakpointFreezeManager collecte deja hits/
-// rewrites/errors, mais rien ne les affichait avant l'arret. Sondage leger
-// (1s) pendant que le freeze BP est actif, arrete des qu'il ne l'est plus.
-const breakpointFreezeStats = ref<Record<string, unknown> | null>(null)
-let breakpointFreezeStatsTimer: ReturnType<typeof setInterval> | null = null
-
-function stopBreakpointFreezeStatsPolling() {
-  if (breakpointFreezeStatsTimer !== null) {
-    clearInterval(breakpointFreezeStatsTimer)
-    breakpointFreezeStatsTimer = null
-  }
-}
-
-async function pollBreakpointFreezeStats() {
-  const controller = backend.getController()
-  if (!controller.getBreakpointFreezeStats) return
-  breakpointFreezeStats.value = await controller.getBreakpointFreezeStats()
-}
-
-watch(() => store.breakpointFreezeEnabled, (enabled) => {
-  stopBreakpointFreezeStatsPolling()
-  if (enabled) {
-    void pollBreakpointFreezeStats()
-    breakpointFreezeStatsTimer = setInterval(() => { void pollBreakpointFreezeStats() }, 1000)
-  } else {
-    breakpointFreezeStats.value = null
-  }
-})
-
 // Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
 const uiStringValue = ref('')
 const uiStringNextValue = ref('')
@@ -186,7 +138,6 @@ const uiStringSourceVariantFilter = ref('all')
 const uiStringSourceBatchSize = ref(10)
 const uiStringSourceBatchIndex = ref(0)
 const uiStringSourceBatchSizeOptions = [5, 10, 25, 50]
-const freezeIntervalPresets = [16, 33, 50, 100, 250, 500]
 const findWhatWritesTimeoutOptions = [3000, 5000, 7000, 10000, 15000]
 
 interface IntelligentCandidate {
@@ -240,7 +191,6 @@ onBeforeUnmount(() => {
     clearInterval(uiStringTextLiveTimer)
     uiStringTextLiveTimer = null
   }
-  stopBreakpointFreezeStatsPolling()
 })
 
 async function toggleUiStringLiveInvestigation() {
@@ -324,34 +274,6 @@ async function toggleUiStringLiveInvestigation() {
   } finally {
     setUiStringInvestigationActive(false)
     uiStringBusy.value = false
-  }
-}
-
-async function suggestStableLocator(addressHex: string) {
-  if (!addressHex.trim()) return
-  stableLocatorBusy.value = true
-  stableLocatorResult.value = null
-  stableLocatorForAddress.value = addressHex
-  try {
-    const controller = backend.getController()
-    if (controller.suggestStableLocatorForAddress) {
-      stableLocatorResult.value = await controller.suggestStableLocatorForAddress(addressHex, {})
-    } else {
-      stableLocatorResult.value = { success: false, chainCount: 0, error: 'Methode backend indisponible (mock mode).' }
-    }
-  } catch (e) {
-    stableLocatorResult.value = { success: false, chainCount: 0, error: String(e) }
-  } finally {
-    stableLocatorBusy.value = false
-  }
-}
-
-function saveStableLocator() {
-  if (stableLocatorResult.value?.bestChain) {
-    // savePointerChain() sauvegarde avec le type actuellement affiché dans le
-    // panneau Pointer Chains ; on l'aligne sur le type réellement écrit avant.
-    pointerScanValueType.value = store.exactScanType
-    void savePointerChain(stableLocatorResult.value.bestChain)
   }
 }
 
@@ -1618,12 +1540,6 @@ function useSelectedUiSourcesForWrite() {
   scrollToWritePanel()
 }
 
-function scrollToUiSources() {
-  void nextTick(() => {
-    uiStringSourcesPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
-}
-
 const structureProbeRows = computed(() => (structureProbeResult.value?.rows as StructureProbeRow[] | undefined) ?? [])
 const structureDiffRows = computed(() => {
   const aRows = structureCaptureA.value ?? []
@@ -1702,9 +1618,6 @@ async function startNewScan() {
   clearCandidateSelection()
 
   resetPointerChainState()
-
-  stableLocatorResult.value = null
-  stableLocatorForAddress.value = ''
 
   resetAobFlowState()
 
@@ -2438,7 +2351,7 @@ onMounted(() => {
             </button>
           </div>
         </div>
-        <div v-if="uiStringSourceCandidates.length > 0" ref="uiStringSourcesPanelRef" class="source-list">
+        <div v-if="uiStringSourceCandidates.length > 0" class="source-list">
           <div class="source-list-title">
             <strong>Sources numériques proches</strong>
             <span>{{ formatNumber(filteredUiStringSourceCandidates.length) }}/{{ formatNumber(uiStringSourceCandidates.length) }} source(s) · {{ formatNumber(selectedUiSourceAddresses.length) }} cochée(s)</span>
@@ -2529,162 +2442,7 @@ onMounted(() => {
 
       <CandidatePanel v-show="showStep('inspect')" />
 
-      <section v-show="showStep('act')" ref="writePanelRef" class="panel risk-write">
-        <div class="panel-title">
-          <div class="panel-heading">
-            <h2>{{ $t('write.title') }}</h2>
-            <InfoDot topic="write" />
-            <RiskBadge level="write" />
-          </div>
-          <div class="panel-title-actions">
-            <button
-              v-if="uiStringSourceCandidates.length > 0"
-              class="btn btn-secondary compact"
-              type="button"
-              @click="scrollToUiSources()"
-            >
-              Retour sources
-            </button>
-            <span v-if="store.writeResult">{{ store.writeResult.success ? 'OK' : 'FAIL' }}</span>
-          </div>
-        </div>
-        <p class="panel-hint">{{ $t('help.write.when') }}</p>
-        <div class="controls write-controls">
-          <div v-if="hasSelectedWriteTargets" class="input multi-target-summary" :title="selectedCandidateAddresses.map((address) => `0x${address}`).join(', ')">
-            <strong>{{ writeTargetLabel }}</strong>
-            <button class="inline-clear" type="button" @click="clearCandidateSelection()">manuel</button>
-          </div>
-          <input
-            v-else
-            v-model="store.selectedCandidateAddress"
-            class="input"
-            :placeholder="$t('write.address')"
-            @input="store.updateWriteSafetyWarning()"
-            @blur="store.updateWriteSafetyWarning()"
-          />
-          <select v-model="store.exactScanType" class="input select">
-            <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
-          </select>
-          <input v-model="store.writeValue" class="input" :placeholder="$t('write.value')" @keyup.enter="writeFromPanel()" />
-          <button class="btn btn-primary" :disabled="!canWriteFromPanel" @click="writeFromPanel()">
-            {{ writeButtonLabel }}
-          </button>
-          <button class="btn btn-secondary" @click="store.rollbackLastWrite()">
-            {{ $t('write.rollback') }}
-          </button>
-          <label class="freeze-interval-control">
-            <span>Freeze</span>
-            <select
-              v-model.number="store.freezeIntervalMs"
-              class="input select"
-              @change="store.setFreezeInterval(store.freezeIntervalMs)"
-            >
-              <option v-for="ms in freezeIntervalPresets" :key="ms" :value="ms">{{ ms }} ms</option>
-            </select>
-          </label>
-          <button class="btn" :class="store.freezeEnabled ? 'btn-secondary' : 'btn-primary'" :disabled="hasSelectedWriteTargets || (store.freezeEnabled ? !store.selectedCandidateAddress : !store.canWriteSelectedValue)" @click="store.toggleFreeze()">
-            {{ store.freezeEnabled ? $t('write.stopFreeze') : $t('write.freeze') }}
-          </button>
-          <button
-            class="btn btn-secondary"
-            :disabled="hasSelectedWriteTargets || store.breakpointFreezeEnabled || !store.canWriteSelectedValue"
-            title="Hardware breakpoint: intercepte les écritures et réécrit immédiatement la valeur."
-            @click="store.startBreakpointFreeze()"
-          >
-            Freeze BP
-          </button>
-          <InfoDot topic="freezeBp" align="right" />
-          <button
-            class="btn btn-secondary"
-            :disabled="!store.breakpointFreezeEnabled"
-            title="Arrêter le freeze par hardware breakpoint."
-            @click="store.stopBreakpointFreeze()"
-          >
-            Stop BP
-          </button>
-          <span v-if="store.breakpointFreezeEnabled && breakpointFreezeStats" class="bp-live-stats" :class="{ warning: breakpointFreezeStats.healthy === false }">
-            {{ formatNumber(Number(breakpointFreezeStats.hits ?? 0)) }} hits · {{ formatNumber(Number(breakpointFreezeStats.rewrites ?? 0)) }} corrigé(s)<template v-if="Number(breakpointFreezeStats.errors ?? 0) > 0"> · {{ formatNumber(Number(breakpointFreezeStats.errors ?? 0)) }} erreur(s)</template>
-          </span>
-        </div>
-        <div v-if="hasSelectedWriteTargets" class="write-plan">
-          <div class="write-plan-title">
-            <strong>Plan d'écriture</strong>
-            <span>{{ writePlan.length }} cible(s) · valeur affichée {{ store.writeValue.trim() || '-' }}</span>
-          </div>
-          <div class="write-plan-list">
-            <div v-for="target in writePlan.slice(0, 12)" :key="`${target.address}:${target.mode}`" class="write-plan-row">
-              <code>0x{{ target.address }}</code>
-              <span>{{ target.mode }}</span>
-              <strong>{{ target.encodedValue }}</strong>
-            </div>
-          </div>
-          <span v-if="writePlan.length > 12" class="muted">+ {{ writePlan.length - 12 }} autre(s) cible(s) avec le même calcul automatique.</span>
-        </div>
-        <div v-if="store.writeSafetyWarning" class="write-safety">
-          <p class="warning">{{ store.writeSafetyWarning }}</p>
-          <label class="safety-ack">
-            <input v-model="store.writeSafetyAcknowledged" type="checkbox" />
-            Je confirme cette écriture mémoire
-          </label>
-        </div>
-        <div v-if="store.writeResult || store.freezeIntervalResult" class="metrics">
-          <span v-if="store.writeResult">{{ store.writeResult.bytesWritten }} B</span>
-          <span v-if="store.writeResult?.written !== undefined">Écrites: {{ formatNumber(store.writeResult.written) }}/{{ formatNumber(store.writeResult.total) }}</span>
-          <span v-if="store.writeResult?.protectionChanged">VirtualProtectEx{{ store.writeResult.protectionChangedCount ? `: ${formatNumber(store.writeResult.protectionChangedCount)}` : '' }}</span>
-          <span v-if="store.writeResult?.verified">{{ $t('write.verified') }}</span>
-          <span v-if="store.writeResult?.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
-          <span v-if="store.writeResult?.mode === 'breakpoint'">BP: {{ store.breakpointFreezeEnabled ? 'on' : 'off' }}</span>
-          <span v-if="store.writeResult?.rewrites !== undefined">rewrites: {{ formatNumber(store.writeResult.rewrites) }}</span>
-          <span v-if="store.freezeIntervalResult">intervalle: {{ store.freezeIntervalMs }} ms</span>
-          <span v-if="store.writeResult?.suspendedThreadCount !== undefined" title="Threads du processus cible suspendues pendant l'écriture atomique">
-            threads suspendues: {{ formatNumber(store.writeResult.suspendedThreadCount) }}
-          </span>
-        </div>
-        <p v-if="store.writeResult?.error" class="error">{{ store.writeResult.error }}</p>
-        <p v-if="store.writeResult?.warning" class="hint warning-hint">{{ store.writeResult.warning }}</p>
-        <div
-          v-if="store.writeResult?.success && !hasSelectedWriteTargets && store.selectedCandidateAddress"
-          class="stable-locator"
-        >
-          <button
-            class="btn btn-secondary compact"
-            type="button"
-            :disabled="stableLocatorBusy"
-            @click="suggestStableLocator(store.selectedCandidateAddress)"
-          >
-            <span v-if="stableLocatorBusy" class="btn-spinner" aria-hidden="true"></span>
-            <span>{{ stableLocatorBusy ? 'Recherche...' : 'Stabiliser cette adresse' }}</span>
-          </button>
-          <InfoDot text="Cherche une chaîne de pointeurs stable (module + offsets) vers l'adresse qui vient d'être écrite, pour qu'elle survive à un redémarrage du processus cible. Lecture seule, bornée." />
-          <span v-if="stableLocatorResult && stableLocatorForAddress === store.selectedCandidateAddress" class="stable-locator-result">
-            <template v-if="stableLocatorResult.success && stableLocatorResult.bestChain">
-              <span class="hint">{{ stableLocatorResult.message }}</span>
-              <button class="btn btn-secondary compact" type="button" @click="saveStableLocator()">
-                Sauvegarder dans un profil
-              </button>
-            </template>
-            <template v-else-if="stableLocatorResult.success">
-              <span class="hint">{{ stableLocatorResult.message }}</span>
-            </template>
-            <template v-else>
-              <span class="hint">{{ stableLocatorResult.error || 'Recherche indisponible.' }}</span>
-            </template>
-          </span>
-        </div>
-        <div v-if="writeFailures.length" class="write-fail-list">
-          <div class="source-list-title">
-            <strong>Échecs d'écriture</strong>
-            <span>{{ formatNumber(writeFailures.length) }} fail(s)</span>
-          </div>
-          <div v-for="failure in writeFailures.slice(0, 16)" :key="`${failure.address}:${failure.type}:${failure.variantLabel}`" class="write-fail-row">
-            <code>0x{{ failure.address || '-' }}</code>
-            <span>{{ failure.variantLabel || failure.type || '-' }}</span>
-            <strong>{{ failure.encodedHex || '-' }}</strong>
-            <span>{{ failure.error || '-' }}</span>
-          </div>
-        </div>
-      </section>
-
+      <WritePanel v-show="showStep('act')" />
       <WatchLivePanel v-show="showStep('inspect')" />
 
       <AobSignaturePanel v-show="showStep('persist')" />
