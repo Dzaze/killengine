@@ -17953,6 +17953,7 @@ const QSet<QString>& allowedVueStoreActions() {
         QStringLiteral("applyAllTrainerFeatures"),
         QStringLiteral("restoreAllTrainerFeatures"),
         QStringLiteral("getTrainerFeaturesSnapshot"),
+        QStringLiteral("generateTrainerFeaturePointerChain"),
     };
     return kAllowed;
 }
