@@ -63,6 +63,14 @@ function removeSelectedFromGroup(group: SessionGroup) {
   store.removeSessionEntriesFromGroup(group.id, removed)
   clearSelection()
 }
+
+function promoteEntry(entry: SessionEntry) {
+  void store.promoteSessionEntryToTrainer(entry.id, entry.label || `Session 0x${entry.address}`)
+}
+
+function promoteGroup(group: SessionGroup) {
+  void store.promoteSessionGroupToTrainer(group.id, group.name || 'Groupe session')
+}
 </script>
 
 <template>
@@ -130,6 +138,14 @@ function removeSelectedFromGroup(group: SessionGroup) {
             <button class="btn compact btn-primary" type="button" @click="store.removeSessionGroup(group.id)">
               Supprimer
             </button>
+            <button
+              class="btn compact btn-secondary"
+              type="button"
+              :disabled="store.isSessionPromotionBusy(group.id)"
+              @click="promoteGroup(group)"
+            >
+              {{ store.isSessionPromotionBusy(group.id) ? 'Promotion...' : 'Promouvoir en Trainer' }}
+            </button>
           </div>
         </div>
       </div>
@@ -164,6 +180,14 @@ function removeSelectedFromGroup(group: SessionGroup) {
               @click="store.disableSessionEntry(entry.id)"
             >
               {{ entry.enabled ? 'Arrêter' : 'Arrêté' }}
+            </button>
+            <button
+              class="btn compact btn-secondary"
+              type="button"
+              :disabled="store.isSessionPromotionBusy(entry.id)"
+              @click="promoteEntry(entry)"
+            >
+              {{ store.isSessionPromotionBusy(entry.id) ? 'Promotion...' : 'Promouvoir en Trainer' }}
             </button>
           </div>
         </div>

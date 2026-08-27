@@ -56,6 +56,7 @@ import {
   type UnknownNextScanResult,
   type UnknownSnapshotResult,
   type AobPatternQuality,
+  type PointerChainInfo,
 } from '@/services/backend'
 import {
   resolveTrainerFeatureOrder,
@@ -135,6 +136,13 @@ export interface SessionGroup {
   memberIds: string[]
 }
 
+export interface SessionPromotionResult {
+  success: boolean
+  featureIds: number[]
+  message: string
+  warnings: string[]
+}
+
 export interface InvestigationStep {
   id: number
   time: string
@@ -167,12 +175,13 @@ export interface TrainerFeature {
   name: string
   processName: string
   action: 'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch' | 'clr_write'
-  locatorKind: 'absolute' | 'aob' | 'clr_field'
+  locatorKind: 'absolute' | 'aob' | 'pointer_chain' | 'clr_field'
   address: string
   valueType: string
   value: string
   patchBytes?: string
   aobPattern?: string
+  pointerChain?: PointerChainInfo
   clrTypeSubstring?: string
   clrIdentityField?: string
   clrIdentityValue?: string
@@ -738,6 +747,7 @@ let nextWatchedChainId = 1
   const sessionEntries = ref<SessionEntry[]>([])
   const sessionGroups = ref<SessionGroup[]>([])
   const sessionGroupIdCounter = ref(0)
+  const sessionPromotionBusyIds = ref<Set<string>>(new Set())
   const workflowStatus = ref<string>('idle')
   const targetValueGuided = ref<string>('')
   const candidateHistory = ref<number[]>([])
@@ -879,6 +889,181 @@ let nextWatchedChainId = 1
     if (!group) return
     for (const memberId of group.memberIds) {
       await disableSessionEntry(memberId)
+    }
+  }
+
+  function setSessionPromotionBusy(id: string, busy: boolean) {
+    const next = new Set(sessionPromotionBusyIds.value)
+    if (busy) next.add(id)
+    else next.delete(id)
+    sessionPromotionBusyIds.value = next
+  }
+
+  function isSessionPromotionBusy(id: string): boolean {
+    return sessionPromotionBusyIds.value.has(id)
+  }
+
+  function sessionTrainerAction(entry: SessionEntry): TrainerFeature['action'] {
+    if (entry.kind === 'freeze_breakpoint') return 'freeze_breakpoint'
+    if (entry.kind === 'freeze_polling') return 'freeze_polling'
+    return 'write'
+  }
+
+  async function sessionTrainerValue(entry: SessionEntry): Promise<string> {
+    const normalized = normalizeSessionAddress(entry.address)
+    let watched = watchedAddresses.value.find((item) => item.address.toLowerCase() === normalized.toLowerCase())
+    if (!watched) {
+      addAddressToWatch(normalized, entry.valueType)
+      watched = await refreshWatchedAddress(normalized) ?? undefined
+    } else if (!watched.value || watched.value === '-') {
+      watched = await refreshWatchedAddress(normalized) ?? watched
+    }
+    const value = String(watched?.value ?? '').trim()
+    return value && value !== '-' ? value : ''
+  }
+
+  async function resolveSessionTrainerLocator(entry: SessionEntry): Promise<{
+    featureInput: Partial<TrainerFeature>
+    label: string
+    warning: string
+  }> {
+    const controller = backend.getController()
+    const address = normalizeSessionAddress(entry.address)
+    if (controller.generateAobSignature && controller.scanAobPattern) {
+      try {
+        const signature = await controller.generateAobSignature(address, { beforeBytes: 0, length: 20 })
+        const quality = signature.signatureQuality
+        const pattern = String(signature.pattern ?? '').trim()
+        const fixedBytes = Number(quality?.fixedBytes ?? 0)
+        const score = Number(quality?.score ?? 0)
+        if (signature.success === true && pattern && fixedBytes >= 3 && score >= 35) {
+          const scan = await controller.scanAobPattern(pattern, {
+            executableOnly: false,
+            imageOnly: true,
+            maxResults: 2,
+          })
+          const matchCount = Array.isArray(scan.matches) ? scan.matches.length : Number(scan.matchesFound ?? 0)
+          if (scan.success === true && matchCount === 1) {
+            return {
+              featureInput: {
+                locatorKind: 'aob',
+                aobPattern: pattern,
+                signatureQuality: quality,
+                signatureScore: score,
+                signatureLevel: quality?.level,
+                signatureWarning: quality?.warning,
+                signatureFixedBytes: fixedBytes,
+                signatureWildcardBytes: quality?.wildcardBytes,
+                signatureUniqueFixedBytes: quality?.uniqueFixedBytes,
+                signatureFixedRatio: quality?.fixedRatio,
+                trainerSafe: quality?.trainerSafe,
+                signatureMatches: 1,
+              },
+              label: `AOB unique (${score}/100, ${fixedBytes} octets fixes)`,
+              warning: '',
+            }
+          }
+        }
+      } catch (e) {
+        addActionLog('trainer', 'Promotion Session : AOB ignoré', String(e), 'warning')
+      }
+    }
+
+    if (controller.scanPointerChains) {
+      try {
+        const pointerScan = await controller.scanPointerChains(address, {
+          maxDepth: 3,
+          maxResults: 5,
+          onlyModuleBase: true,
+        })
+        const bestChain = pointerScan.chains?.[0]
+        if (pointerScan.success === true && bestChain) {
+          return {
+            featureInput: {
+              locatorKind: 'pointer_chain',
+              pointerChain: bestChain,
+            },
+            label: `Pointer chain ${bestChain.module}+${bestChain.baseOffset}`,
+            warning: '',
+          }
+        }
+      } catch (e) {
+        addActionLog('trainer', 'Promotion Session : pointer chain ignorée', String(e), 'warning')
+      }
+    }
+
+    return {
+      featureInput: { locatorKind: 'absolute' },
+      label: 'Adresse absolue',
+      warning: 'Aucun locator AOB unique ni pointer chain stable trouvé : cette feature ne survivra probablement pas à un relaunch ou à un changement de scène.',
+    }
+  }
+
+  async function promoteSessionEntryToTrainer(entryId: string, name?: string): Promise<SessionPromotionResult> {
+    const entry = sessionEntries.value.find((candidate) => candidate.id === entryId)
+    if (!entry) return { success: false, featureIds: [], message: 'Entrée session introuvable.', warnings: [] }
+    setSessionPromotionBusy(entryId, true)
+    try {
+      const value = await sessionTrainerValue(entry)
+      if (!value) {
+        const message = `Valeur live illisible pour 0x${entry.address}.`
+        addActionLog('trainer', 'Promotion Session refusée', message, 'warning')
+        return { success: false, featureIds: [], message, warnings: [] }
+      }
+      const locator = await resolveSessionTrainerLocator(entry)
+      const feature = createTrainerFeature({
+        name: name?.trim() || entry.label.trim() || `Session 0x${entry.address}`,
+        action: sessionTrainerAction(entry),
+        address: entry.address,
+        valueType: entry.valueType,
+        value,
+        ...locator.featureInput,
+      })
+      if (!feature) {
+        return { success: false, featureIds: [], message: 'Création Trainer refusée.', warnings: locator.warning ? [locator.warning] : [] }
+      }
+      const detail = locator.warning
+        ? `${locator.label}. ${locator.warning}`
+        : `${locator.label}.`
+      addActionLog('trainer', `Session promue: ${feature.name}`, detail, locator.warning ? 'warning' : 'success')
+      return {
+        success: true,
+        featureIds: [feature.id],
+        message: `${feature.name} créée (${locator.label}).`,
+        warnings: locator.warning ? [locator.warning] : [],
+      }
+    } catch (e) {
+      const message = String(e)
+      addActionLog('trainer', 'Promotion Session échouée', message, 'error')
+      return { success: false, featureIds: [], message, warnings: [] }
+    } finally {
+      setSessionPromotionBusy(entryId, false)
+    }
+  }
+
+  async function promoteSessionGroupToTrainer(groupId: string, name?: string): Promise<SessionPromotionResult> {
+    const group = sessionGroups.value.find((candidate) => candidate.id === groupId)
+    if (!group) return { success: false, featureIds: [], message: 'Groupe session introuvable.', warnings: [] }
+    setSessionPromotionBusy(groupId, true)
+    const featureIds: number[] = []
+    const warnings: string[] = []
+    try {
+      for (const memberId of group.memberIds) {
+        const entry = sessionEntries.value.find((candidate) => candidate.id === memberId)
+        if (!entry) continue
+        const entryName = `${name?.trim() || group.name || 'Groupe session'} · ${entry.label.trim() || `0x${entry.address}`}`
+        const result = await promoteSessionEntryToTrainer(memberId, entryName)
+        featureIds.push(...result.featureIds)
+        warnings.push(...result.warnings)
+      }
+      const success = featureIds.length > 0
+      const message = success
+        ? `${featureIds.length} feature(s) Trainer créée(s) depuis ${group.name}.`
+        : `Aucune feature Trainer créée depuis ${group.name}.`
+      addActionLog('trainer', success ? 'Groupe Session promu' : 'Promotion groupe échouée', message, success ? (warnings.length ? 'warning' : 'success') : 'error')
+      return { success, featureIds, message, warnings }
+    } finally {
+      setSessionPromotionBusy(groupId, false)
     }
   }
 
@@ -1839,6 +2024,7 @@ let nextWatchedChainId = 1
       value: String(input.value ?? writeValue.value ?? ''),
       patchBytes: input.patchBytes,
       aobPattern: input.aobPattern,
+      pointerChain: input.pointerChain,
       clrTypeSubstring: input.clrTypeSubstring,
       clrIdentityField: input.clrIdentityField,
       clrIdentityValue: input.clrIdentityValue,
@@ -1865,6 +2051,8 @@ let nextWatchedChainId = 1
     }
     const locationText = feature.locatorKind === 'clr_field'
       ? `${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue}`
+      : feature.locatorKind === 'pointer_chain' && feature.pointerChain
+        ? `${feature.pointerChain.module}+${feature.pointerChain.baseOffset}`
       : `0x${feature.address}`
     addTrainerFeatureHistory(feature, 'created', 'success', `${feature.action} ${locationText}`)
     trainerFeatures.value.unshift(feature)
@@ -2384,6 +2572,9 @@ let nextWatchedChainId = 1
         `- Adresse: ${feature.address ? `0x${feature.address}` : '-'}`,
         feature.locatorKind === 'clr_field'
           ? `- CLR: ${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue}`
+          : '',
+        feature.locatorKind === 'pointer_chain' && feature.pointerChain
+          ? `- Pointer: ${feature.pointerChain.module}+${feature.pointerChain.baseOffset} ${feature.pointerChain.offsets?.join(' -> ') ?? ''}`
           : '',
         `- Type: ${feature.valueType}`,
         `- Valeur/patch: ${feature.value || feature.patchBytes || '-'}`,
@@ -8371,6 +8562,7 @@ async function doEncryptedScan() {
     watchLiveReadLimit,
     sessionEntries,
     sessionGroups,
+    sessionPromotionBusyIds,
     messages,
     actionLog,
     workflowStatus,
@@ -8565,6 +8757,9 @@ async function doEncryptedScan() {
     removeSessionGroup,
     removeSessionEntriesFromGroup,
     disableSessionGroup,
+    isSessionPromotionBusy,
+    promoteSessionEntryToTrainer,
+    promoteSessionGroupToTrainer,
     keepCandidate,
     ignoreCandidate,
     candidateVisualState,
