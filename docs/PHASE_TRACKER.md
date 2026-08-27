@@ -193,6 +193,7 @@ Prerequisites before Phase 12:
     - [x] checklist manuelle V1 documentée dans `docs/V1_REGRESSION_CHECKLIST.md`
     - [x] rapport manuel reproductible : `scripts/manual-validation-report.ps1` génère un compte rendu daté pour KillEngineTestTarget, cible générique et debugger prolongé
     - [ ] passe de régression manuelle V1 sur KillEngineTestTarget et une application tierce autorisée
+      - [x] **27/08/2026** : sections Assistant + Displayed vs Source Classifier closes (voir [[phase168_trainer_chat_crash_fix]] mémoire — crash trouvé et corrigé PHASE 168/169 pendant cette passe) ; Reliability Pass étape 2 ("pointer chain survives a restart") validée pour la première fois en direct sur `KillEngineTestTarget.exe` (écriture réelle -> `Stabiliser cette adresse` -> sauvegarde profil -> fermeture complète + relance des deux process -> `resolveProfileTarget` résout sans nouveau scan -> écriture confirmée sur le nouveau process). Détails complets : `docs/manual-validation-results/manual_validation_KillEngineTestTarget_20260827_204500.md` et `..._20260827_224900.md`, mémoire [[reliability_pass_pointer_chain_restart]]. Reste non couvert : Reliability Pass étapes 1/3/4, Authorized Third-Party Smoke Pass (nécessitent une vraie application tierce autorisée) — case laissée non cochée tant que ces derniers ne sont pas faits.
 - [x] PHASE 14 - Pointer Chains (jeux et applications modernes)
     - [x] PointerChain : structure + resolution multi-niveau
     - [x] PointerScanner : algorithme BFS pour trouver les chaines depuis une adresse cible
