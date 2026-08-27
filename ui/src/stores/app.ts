@@ -885,6 +885,30 @@ let nextWatchedChainId = 1
     if (group.memberIds.length < 2) removeSessionGroup(groupId)
   }
 
+  // PHASE 166 : createSessionGroup() ne peut que creer un nouveau groupe --
+  // aucun chemin n'existait pour ajouter/deplacer une entree vers un groupe
+  // deja existant (constat 27/08/2026), pourtant c'est exactement le geste de
+  // bissection qui a motive PHASE 165 (sortir une adresse du groupe "bruit"
+  // vers "confirme"). Reutilise removeSessionEntriesFromGroup() (donc son
+  // auto-dissolution sous 2 membres) plutot que de dupliquer cette logique.
+  function moveSessionEntryToGroup(entryId: string, targetGroupId: string) {
+    const targetGroup = sessionGroups.value.find((group) => group.id === targetGroupId)
+    if (!targetGroup) return
+    const validIds = new Set(sessionEntries.value.map((entry) => entry.id))
+    if (!validIds.has(entryId)) return
+
+    const sourceGroupIds = sessionGroups.value
+      .filter((group) => group.id !== targetGroupId && group.memberIds.includes(entryId))
+      .map((group) => group.id)
+    for (const sourceGroupId of sourceGroupIds) {
+      removeSessionEntriesFromGroup(sourceGroupId, [entryId])
+    }
+
+    if (!targetGroup.memberIds.includes(entryId)) {
+      targetGroup.memberIds = [...targetGroup.memberIds, entryId]
+    }
+  }
+
   async function disableSessionGroup(id: string) {
     const group = sessionGroups.value.find((candidate) => candidate.id === id)
     if (!group) return
@@ -8902,6 +8926,7 @@ async function doEncryptedScan() {
     updateSessionGroupName,
     removeSessionGroup,
     removeSessionEntriesFromGroup,
+    moveSessionEntryToGroup,
     disableSessionGroup,
     isSessionPromotionBusy,
     promoteSessionEntryToTrainer,

@@ -71,6 +71,33 @@ function promoteEntry(entry: SessionEntry) {
 function promoteGroup(group: SessionGroup) {
   void store.promoteSessionGroupToTrainer(group.id, group.name || 'Groupe session')
 }
+
+// PHASE 166 : deposer une entree (liste plate ou chip d'un autre groupe) sur
+// une carte de groupe la deplace dedans -- comble le manque confirme dans
+// docs/PHASE_TRACKER.md (aucun chemin n'existait pour ajouter/deplacer une
+// entree vers un groupe deja existant). dragOverGroupId ne sert qu'au
+// feedback visuel, la logique reelle vit dans moveSessionEntryToGroup().
+const dragOverGroupId = ref<string | null>(null)
+
+function handleEntryDragStart(event: DragEvent, entryId: string) {
+  event.dataTransfer?.setData('text/plain', entryId)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function handleGroupDragEnter(groupId: string) {
+  dragOverGroupId.value = groupId
+}
+
+function handleGroupDragLeave(groupId: string) {
+  if (dragOverGroupId.value === groupId) dragOverGroupId.value = null
+}
+
+function handleGroupDrop(event: DragEvent, groupId: string) {
+  dragOverGroupId.value = null
+  const entryId = event.dataTransfer?.getData('text/plain')
+  if (!entryId) return
+  store.moveSessionEntryToGroup(entryId, groupId)
+}
 </script>
 
 <template>
@@ -100,7 +127,16 @@ function promoteGroup(group: SessionGroup) {
       </div>
 
       <div v-if="groups.length > 0" class="session-groups">
-        <div v-for="group in groups" :key="group.id" class="session-group">
+        <div
+          v-for="group in groups"
+          :key="group.id"
+          class="session-group"
+          :class="{ 'drop-target': dragOverGroupId === group.id }"
+          @dragover.prevent
+          @dragenter.prevent="handleGroupDragEnter(group.id)"
+          @dragleave="handleGroupDragLeave(group.id)"
+          @drop.prevent="handleGroupDrop($event, group.id)"
+        >
           <div class="session-group-main">
             <input
               class="input session-group-name"
@@ -113,7 +149,15 @@ function promoteGroup(group: SessionGroup) {
           </div>
 
           <div class="session-group-members">
-            <span v-for="entry in groupEntries(group)" :key="entry.id" class="session-chip" :class="{ disabled: !entry.enabled }">
+            <span
+              v-for="entry in groupEntries(group)"
+              :key="entry.id"
+              class="session-chip"
+              :class="{ disabled: !entry.enabled }"
+              draggable="true"
+              title="Glisse vers un autre groupe pour la deplacer."
+              @dragstart="handleEntryDragStart($event, entry.id)"
+            >
               0x{{ entry.address }}
             </span>
           </div>
@@ -151,7 +195,14 @@ function promoteGroup(group: SessionGroup) {
       </div>
 
       <div class="session-list">
-        <div v-for="entry in entries" :key="entry.id" class="session-entry" :class="{ disabled: !entry.enabled, unstable: store.hasFreezeInstability(entry.address) }">
+        <div
+          v-for="entry in entries"
+          :key="entry.id"
+          class="session-entry"
+          :class="{ disabled: !entry.enabled, unstable: store.hasFreezeInstability(entry.address) }"
+          draggable="true"
+          @dragstart="handleEntryDragStart($event, entry.id)"
+        >
           <label class="session-select" :aria-label="`Sélectionner 0x${entry.address}`">
             <input type="checkbox" :checked="isSelected(entry.id)" @change="setSelected(entry.id, ($event.target as HTMLInputElement).checked)" />
           </label>
@@ -230,6 +281,12 @@ function promoteGroup(group: SessionGroup) {
   background: var(--bg-primary);
   color: var(--text-dim);
   font-size: 12px;
+  transition: border-color 0.1s ease, background-color 0.1s ease;
+}
+
+.session-group.drop-target {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-primary));
 }
 
 .session-group-main {
@@ -263,6 +320,7 @@ function promoteGroup(group: SessionGroup) {
   font-family: 'Cascadia Code', monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: grab;
 }
 
 .session-chip.disabled {
@@ -293,6 +351,7 @@ function promoteGroup(group: SessionGroup) {
   background: var(--bg-primary);
   color: var(--text-dim);
   font-size: 12px;
+  cursor: grab;
 }
 
 .session-entry.disabled {
