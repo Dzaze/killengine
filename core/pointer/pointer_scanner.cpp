@@ -61,8 +61,29 @@ QList<LevelHit> scanLevel(
     QList<LevelHit> results;
     if (targets.empty()) return results;
 
-    const auto regions = MemoryMap::snapshot(handle);
+    auto regions = MemoryMap::snapshot(handle);
     MemoryReader reader(handle);
+
+    // Bug trouve en investigant PHASE 162/163 (voir docs/PHASE_TRACKER.md) :
+    // les regions sont visitees dans l'ordre naturel de VirtualQueryEx (adresses
+    // croissantes), donc le tas (adresses generalement basses) est scanne AVANT
+    // l'image des modules (adresses generalement hautes). Avec onlyModuleBase=true,
+    // seul un hit dont le pointerLocation tombe dans un module compte -- mais le
+    // plafond maxLevelResults (ci-dessous) compte TOUT hit, y compris ceux situes
+    // dans le tas qui seront de toute facon rejetes plus loin. Sur un tas dense
+    // (ex: objet realloue plusieurs fois, cluster LFH), le nombre de correspondances
+    // fortuites dans le tas (a portee de maxOffset de la cible) peut a lui seul
+    // atteindre le plafond avant que le scan n'atteigne jamais la region module qui
+    // contient la vraie reponse -- reproduit et confirme en direct (0 chaine trouvee
+    // alors qu'une lecture directe montre que le pointeur existe bien). Corrige en
+    // priorisant les regions de type Image (modules charges) en premier quand
+    // onlyModuleBase est actif : les hits utiles sont alors trouves avant que le
+    // bruit du tas n'epuise le plafond.
+    if (options.onlyModuleBase) {
+        std::stable_partition(regions.begin(), regions.end(), [](const MemoryRegion& region) {
+            return region.type == MemoryType::Image;
+        });
+    }
 
     for (const auto& region : regions) {
         if (*cancelled) break;

@@ -303,6 +303,25 @@ public:
         // Alloue le player initial
         g_player = new Player();
         m_log->append(QString("Player alloué à: 0x%1").arg(reinterpret_cast<quintptr>(g_player), 0, 16));
+
+        // Variable d'environnement pour un harnais de test headless (pas de
+        // clic UI possible depuis un gtest) : reproduit sans interaction
+        // humaine le scenario "adresse heap reallouee au moins une fois"
+        // rencontre en PHASE 162/163 (voir docs/PHASE_TRACKER.md), pour
+        // distinguer un bug reel du scanner d'un artefact specifique a
+        // l'allocation initiale vs une allocation issue d'un cycle
+        // delete/new (low-fragmentation heap potentiellement different).
+        const auto autoReallocCount = QProcessEnvironment::systemEnvironment()
+            .value("KILLENGINE_TEST_TARGET_AUTO_REALLOC_PLAYER", "0").toInt();
+        for (int i = 0; i < autoReallocCount; ++i) {
+            delete g_player;
+            g_player = new Player();
+        }
+        if (autoReallocCount > 0) {
+            m_log->append(QString("Player realloue %1 fois (auto, headless) -> 0x%2")
+                .arg(autoReallocCount)
+                .arg(reinterpret_cast<quintptr>(g_player), 0, 16));
+        }
     }
 
     ~TestTargetWindow() override {
