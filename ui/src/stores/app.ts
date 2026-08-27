@@ -129,6 +129,12 @@ export interface SessionEntry {
   createdAt: string
 }
 
+export interface SessionGroup {
+  id: string
+  name: string
+  memberIds: string[]
+}
+
 export interface InvestigationStep {
   id: number
   time: string
@@ -730,6 +736,8 @@ let nextWatchedChainId = 1
   const actionLog = ref<UserActionLogEntry[]>([])
   const actionLogIdCounter = ref(0)
   const sessionEntries = ref<SessionEntry[]>([])
+  const sessionGroups = ref<SessionGroup[]>([])
+  const sessionGroupIdCounter = ref(0)
   const workflowStatus = ref<string>('idle')
   const targetValueGuided = ref<string>('')
   const candidateHistory = ref<number[]>([])
@@ -798,6 +806,7 @@ let nextWatchedChainId = 1
 
   function clearSessionEntries() {
     sessionEntries.value = []
+    sessionGroups.value = []
     freezeInstabilityNotified.clear()
     freezeInstabilityVersion.value += 1
   }
@@ -831,6 +840,45 @@ let nextWatchedChainId = 1
       )
     } catch (e) {
       addActionLog('freeze', 'Session freeze échoué', String(e), 'error')
+    }
+  }
+
+  function createSessionGroup(memberIds: string[], name?: string): string | null {
+    const validIds = new Set(sessionEntries.value.map((entry) => entry.id))
+    const uniqueMemberIds = Array.from(new Set(memberIds)).filter((id) => validIds.has(id))
+    if (uniqueMemberIds.length < 2) return null
+    sessionGroupIdCounter.value += 1
+    const id = `session-group-${sessionGroupIdCounter.value}`
+    sessionGroups.value.unshift({
+      id,
+      name: name?.trim() || `Groupe (${uniqueMemberIds.length} adresses)`,
+      memberIds: uniqueMemberIds,
+    })
+    return id
+  }
+
+  function updateSessionGroupName(id: string, name: string) {
+    const group = sessionGroups.value.find((candidate) => candidate.id === id)
+    if (group) group.name = name
+  }
+
+  function removeSessionGroup(id: string) {
+    sessionGroups.value = sessionGroups.value.filter((group) => group.id !== id)
+  }
+
+  function removeSessionEntriesFromGroup(groupId: string, memberIds: string[]) {
+    const group = sessionGroups.value.find((candidate) => candidate.id === groupId)
+    if (!group) return
+    const removed = new Set(memberIds)
+    group.memberIds = group.memberIds.filter((id) => !removed.has(id))
+    if (group.memberIds.length < 2) removeSessionGroup(groupId)
+  }
+
+  async function disableSessionGroup(id: string) {
+    const group = sessionGroups.value.find((candidate) => candidate.id === id)
+    if (!group) return
+    for (const memberId of group.memberIds) {
+      await disableSessionEntry(memberId)
     }
   }
 
@@ -8322,6 +8370,7 @@ async function doEncryptedScan() {
     watchedAddresses,
     watchLiveReadLimit,
     sessionEntries,
+    sessionGroups,
     messages,
     actionLog,
     workflowStatus,
@@ -8511,6 +8560,11 @@ async function doEncryptedScan() {
     updateSessionEntryLabel,
     disableSessionEntry,
     hasFreezeInstability,
+    createSessionGroup,
+    updateSessionGroupName,
+    removeSessionGroup,
+    removeSessionEntriesFromGroup,
+    disableSessionGroup,
     keepCandidate,
     ignoreCandidate,
     candidateVisualState,
