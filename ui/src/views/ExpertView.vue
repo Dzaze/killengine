@@ -35,6 +35,7 @@ import WatchLivePanel from '@/components/expert/WatchLivePanel.vue'
 import GroupScanPanel from '@/components/expert/GroupScanPanel.vue'
 import PointerChainWatchPanel from '@/components/expert/PointerChainWatchPanel.vue'
 import ActionLogPanel from '@/components/expert/ActionLogPanel.vue'
+import SessionPanel from '@/components/expert/SessionPanel.vue'
 import InjectionPanel from '@/components/expert/InjectionPanel.vue'
 import { formatNumber, formatRate, formatBytes } from '@/utils/format'
 import { valueTypeOptions } from '@/utils/valueTypes'
@@ -4566,6 +4567,7 @@ onMounted(() => {
 
       <GroupScanPanel v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
       <PointerChainWatchPanel v-show="showStep('inspect')" />
+      <SessionPanel v-show="showStep('persist')" />
       <ActionLogPanel v-show="showStep('persist')" />
     </template>
   </div>

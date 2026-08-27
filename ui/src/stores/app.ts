@@ -56,6 +56,7 @@ import {
   type UnknownNextScanResult,
   type UnknownSnapshotResult,
   type AobPatternQuality,
+  type PointerChainInfo,
 } from '@/services/backend'
 import {
   resolveTrainerFeatureOrder,
@@ -119,6 +120,29 @@ export interface UserActionLogEntry {
   status: 'info' | 'success' | 'warning' | 'error'
 }
 
+export interface SessionEntry {
+  id: string
+  address: string
+  valueType: string
+  label: string
+  kind: 'freeze_polling' | 'freeze_breakpoint' | 'write'
+  enabled: boolean
+  createdAt: string
+}
+
+export interface SessionGroup {
+  id: string
+  name: string
+  memberIds: string[]
+}
+
+export interface SessionPromotionResult {
+  success: boolean
+  featureIds: number[]
+  message: string
+  warnings: string[]
+}
+
 export interface InvestigationStep {
   id: number
   time: string
@@ -151,14 +175,14 @@ export interface TrainerFeature {
   name: string
   processName: string
   action: 'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch' | 'clr_write'
-  locatorKind: 'absolute' | 'aob' | 'clr_field' | 'pointer_chain'
+  locatorKind: 'absolute' | 'aob' | 'pointer_chain' | 'clr_field'
   address: string
   valueType: string
   value: string
   patchBytes?: string
   aobPattern?: string
   /** PHASE 162 : base statique + offsets, re-resolue a chaque activation via resolvePointerChain — utile pour une adresse dans un objet alloue dynamiquement (reallouee a chaque partie), contrairement a 'absolute'. Voir docs/PHASE_TRACKER.md PHASE 162. */
-  pointerChain?: { module: string, baseOffset: string, offsets: string[] }
+  pointerChain?: PointerChainInfo
   clrTypeSubstring?: string
   clrIdentityField?: string
   clrIdentityValue?: string
@@ -721,6 +745,10 @@ let nextWatchedChainId = 1
   const messageIdCounter = ref(0)
   const actionLog = ref<UserActionLogEntry[]>([])
   const actionLogIdCounter = ref(0)
+  const sessionEntries = ref<SessionEntry[]>([])
+  const sessionGroups = ref<SessionGroup[]>([])
+  const sessionGroupIdCounter = ref(0)
+  const sessionPromotionBusyIds = ref<Set<string>>(new Set())
   const workflowStatus = ref<string>('idle')
   const targetValueGuided = ref<string>('')
   const candidateHistory = ref<number[]>([])
@@ -736,6 +764,7 @@ let nextWatchedChainId = 1
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
   // d'une reconnexion du signal (ex: rechargement dev).
   const freezeInstabilityNotified = new Set<string>()
+  const freezeInstabilityVersion = ref(0)
 
   // Getters
   const statusText = computed(() => {
@@ -746,6 +775,297 @@ let nextWatchedChainId = 1
 
   function nowTime(): string {
     return new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  function normalizeSessionAddress(address: string): string {
+    return address.trim().replace(/^0x/i, '').toUpperCase()
+  }
+
+  function sessionEntryId(address: string, valueType: string, kind: SessionEntry['kind']): string {
+    return `${kind}:${normalizeSessionAddress(address).toLowerCase()}:${valueType}`
+  }
+
+  function upsertSessionEntry(address: string, valueType: string, kind: SessionEntry['kind'], enabled = true) {
+    const normalized = normalizeSessionAddress(address)
+    if (!normalized) return
+    const id = sessionEntryId(normalized, valueType, kind)
+    const existing = sessionEntries.value.find((entry) => entry.id === id)
+    if (existing) {
+      existing.enabled = enabled
+      return
+    }
+    sessionEntries.value.unshift({
+      id,
+      address: normalized,
+      valueType,
+      label: '',
+      kind,
+      enabled,
+      createdAt: new Date().toISOString(),
+    })
+  }
+
+  function updateSessionEntryLabel(id: string, label: string) {
+    const entry = sessionEntries.value.find((candidate) => candidate.id === id)
+    if (entry) entry.label = label
+  }
+
+  function markSessionEntryEnabled(address: string, valueType: string, kind: SessionEntry['kind'], enabled: boolean) {
+    const entry = sessionEntries.value.find((candidate) => candidate.id === sessionEntryId(address, valueType, kind))
+    if (entry) entry.enabled = enabled
+  }
+
+  function clearSessionEntries() {
+    sessionEntries.value = []
+    sessionGroups.value = []
+    freezeInstabilityNotified.clear()
+    freezeInstabilityVersion.value += 1
+  }
+
+  function hasFreezeInstability(address: string): boolean {
+    freezeInstabilityVersion.value
+    return freezeInstabilityNotified.has(normalizeSessionAddress(address).toLowerCase())
+  }
+
+  async function disableSessionEntry(id: string) {
+    const entry = sessionEntries.value.find((candidate) => candidate.id === id)
+    if (!entry || !entry.enabled) return
+    if (entry.kind === 'write') {
+      entry.enabled = false
+      return
+    }
+    try {
+      const result = await backend.getController().setFreezeValue(entry.address, entry.valueType, '', false)
+      if (result.success === true) {
+        entry.enabled = false
+        if (selectedCandidateAddress.value.replace(/^0x/i, '').toLowerCase() === entry.address.toLowerCase()) {
+          freezeEnabled.value = false
+          if (entry.kind === 'freeze_breakpoint') breakpointFreezeEnabled.value = false
+        }
+      }
+      addActionLog(
+        'freeze',
+        result.success === true ? 'Session freeze désactivé' : 'Session freeze échoué',
+        `0x${entry.address}. ${String(result.error ?? '')}`.trim(),
+        result.success === true ? 'success' : 'error',
+      )
+    } catch (e) {
+      addActionLog('freeze', 'Session freeze échoué', String(e), 'error')
+    }
+  }
+
+  function createSessionGroup(memberIds: string[], name?: string): string | null {
+    const validIds = new Set(sessionEntries.value.map((entry) => entry.id))
+    const uniqueMemberIds = Array.from(new Set(memberIds)).filter((id) => validIds.has(id))
+    if (uniqueMemberIds.length < 2) return null
+    sessionGroupIdCounter.value += 1
+    const id = `session-group-${sessionGroupIdCounter.value}`
+    sessionGroups.value.unshift({
+      id,
+      name: name?.trim() || `Groupe (${uniqueMemberIds.length} adresses)`,
+      memberIds: uniqueMemberIds,
+    })
+    return id
+  }
+
+  function updateSessionGroupName(id: string, name: string) {
+    const group = sessionGroups.value.find((candidate) => candidate.id === id)
+    if (group) group.name = name
+  }
+
+  function removeSessionGroup(id: string) {
+    sessionGroups.value = sessionGroups.value.filter((group) => group.id !== id)
+  }
+
+  function removeSessionEntriesFromGroup(groupId: string, memberIds: string[]) {
+    const group = sessionGroups.value.find((candidate) => candidate.id === groupId)
+    if (!group) return
+    const removed = new Set(memberIds)
+    group.memberIds = group.memberIds.filter((id) => !removed.has(id))
+    if (group.memberIds.length < 2) removeSessionGroup(groupId)
+  }
+
+  async function disableSessionGroup(id: string) {
+    const group = sessionGroups.value.find((candidate) => candidate.id === id)
+    if (!group) return
+    for (const memberId of group.memberIds) {
+      await disableSessionEntry(memberId)
+    }
+  }
+
+  function setSessionPromotionBusy(id: string, busy: boolean) {
+    const next = new Set(sessionPromotionBusyIds.value)
+    if (busy) next.add(id)
+    else next.delete(id)
+    sessionPromotionBusyIds.value = next
+  }
+
+  function isSessionPromotionBusy(id: string): boolean {
+    return sessionPromotionBusyIds.value.has(id)
+  }
+
+  function sessionTrainerAction(entry: SessionEntry): TrainerFeature['action'] {
+    if (entry.kind === 'freeze_breakpoint') return 'freeze_breakpoint'
+    if (entry.kind === 'freeze_polling') return 'freeze_polling'
+    return 'write'
+  }
+
+  async function sessionTrainerValue(entry: SessionEntry): Promise<string> {
+    const normalized = normalizeSessionAddress(entry.address)
+    let watched = watchedAddresses.value.find((item) => item.address.toLowerCase() === normalized.toLowerCase())
+    if (!watched) {
+      addAddressToWatch(normalized, entry.valueType)
+      watched = await refreshWatchedAddress(normalized) ?? undefined
+    } else if (!watched.value || watched.value === '-') {
+      watched = await refreshWatchedAddress(normalized) ?? watched
+    }
+    const value = String(watched?.value ?? '').trim()
+    return value && value !== '-' ? value : ''
+  }
+
+  async function resolveSessionTrainerLocator(entry: SessionEntry): Promise<{
+    featureInput: Partial<TrainerFeature>
+    label: string
+    warning: string
+  }> {
+    const controller = backend.getController()
+    const address = normalizeSessionAddress(entry.address)
+    if (controller.generateAobSignature && controller.scanAobPattern) {
+      try {
+        const signature = await controller.generateAobSignature(address, { beforeBytes: 0, length: 20 })
+        const quality = signature.signatureQuality
+        const pattern = String(signature.pattern ?? '').trim()
+        const fixedBytes = Number(quality?.fixedBytes ?? 0)
+        const score = Number(quality?.score ?? 0)
+        if (signature.success === true && pattern && fixedBytes >= 3 && score >= 35) {
+          const scan = await controller.scanAobPattern(pattern, {
+            executableOnly: false,
+            imageOnly: true,
+            maxResults: 2,
+          })
+          const matchCount = Array.isArray(scan.matches) ? scan.matches.length : Number(scan.matchesFound ?? 0)
+          if (scan.success === true && matchCount === 1) {
+            return {
+              featureInput: {
+                locatorKind: 'aob',
+                aobPattern: pattern,
+                signatureQuality: quality,
+                signatureScore: score,
+                signatureLevel: quality?.level,
+                signatureWarning: quality?.warning,
+                signatureFixedBytes: fixedBytes,
+                signatureWildcardBytes: quality?.wildcardBytes,
+                signatureUniqueFixedBytes: quality?.uniqueFixedBytes,
+                signatureFixedRatio: quality?.fixedRatio,
+                trainerSafe: quality?.trainerSafe,
+                signatureMatches: 1,
+              },
+              label: `AOB unique (${score}/100, ${fixedBytes} octets fixes)`,
+              warning: '',
+            }
+          }
+        }
+      } catch (e) {
+        addActionLog('trainer', 'Promotion Session : AOB ignoré', String(e), 'warning')
+      }
+    }
+
+    if (controller.scanPointerChains) {
+      try {
+        const pointerScan = await controller.scanPointerChains(address, {
+          maxDepth: 3,
+          maxResults: 5,
+          onlyModuleBase: true,
+        })
+        const bestChain = pointerScan.chains?.[0]
+        if (pointerScan.success === true && bestChain) {
+          return {
+            featureInput: {
+              locatorKind: 'pointer_chain',
+              pointerChain: bestChain,
+            },
+            label: `Pointer chain ${bestChain.module}+${bestChain.baseOffset}`,
+            warning: '',
+          }
+        }
+      } catch (e) {
+        addActionLog('trainer', 'Promotion Session : pointer chain ignorée', String(e), 'warning')
+      }
+    }
+
+    return {
+      featureInput: { locatorKind: 'absolute' },
+      label: 'Adresse absolue',
+      warning: 'Aucun locator AOB unique ni pointer chain stable trouvé : cette feature ne survivra probablement pas à un relaunch ou à un changement de scène.',
+    }
+  }
+
+  async function promoteSessionEntryToTrainer(entryId: string, name?: string): Promise<SessionPromotionResult> {
+    const entry = sessionEntries.value.find((candidate) => candidate.id === entryId)
+    if (!entry) return { success: false, featureIds: [], message: 'Entrée session introuvable.', warnings: [] }
+    setSessionPromotionBusy(entryId, true)
+    try {
+      const value = await sessionTrainerValue(entry)
+      if (!value) {
+        const message = `Valeur live illisible pour 0x${entry.address}.`
+        addActionLog('trainer', 'Promotion Session refusée', message, 'warning')
+        return { success: false, featureIds: [], message, warnings: [] }
+      }
+      const locator = await resolveSessionTrainerLocator(entry)
+      const feature = createTrainerFeature({
+        name: name?.trim() || entry.label.trim() || `Session 0x${entry.address}`,
+        action: sessionTrainerAction(entry),
+        address: entry.address,
+        valueType: entry.valueType,
+        value,
+        ...locator.featureInput,
+      })
+      if (!feature) {
+        return { success: false, featureIds: [], message: 'Création Trainer refusée.', warnings: locator.warning ? [locator.warning] : [] }
+      }
+      const detail = locator.warning
+        ? `${locator.label}. ${locator.warning}`
+        : `${locator.label}.`
+      addActionLog('trainer', `Session promue: ${feature.name}`, detail, locator.warning ? 'warning' : 'success')
+      return {
+        success: true,
+        featureIds: [feature.id],
+        message: `${feature.name} créée (${locator.label}).`,
+        warnings: locator.warning ? [locator.warning] : [],
+      }
+    } catch (e) {
+      const message = String(e)
+      addActionLog('trainer', 'Promotion Session échouée', message, 'error')
+      return { success: false, featureIds: [], message, warnings: [] }
+    } finally {
+      setSessionPromotionBusy(entryId, false)
+    }
+  }
+
+  async function promoteSessionGroupToTrainer(groupId: string, name?: string): Promise<SessionPromotionResult> {
+    const group = sessionGroups.value.find((candidate) => candidate.id === groupId)
+    if (!group) return { success: false, featureIds: [], message: 'Groupe session introuvable.', warnings: [] }
+    setSessionPromotionBusy(groupId, true)
+    const featureIds: number[] = []
+    const warnings: string[] = []
+    try {
+      for (const memberId of group.memberIds) {
+        const entry = sessionEntries.value.find((candidate) => candidate.id === memberId)
+        if (!entry) continue
+        const entryName = `${name?.trim() || group.name || 'Groupe session'} · ${entry.label.trim() || `0x${entry.address}`}`
+        const result = await promoteSessionEntryToTrainer(memberId, entryName)
+        featureIds.push(...result.featureIds)
+        warnings.push(...result.warnings)
+      }
+      const success = featureIds.length > 0
+      const message = success
+        ? `${featureIds.length} feature(s) Trainer créée(s) depuis ${group.name}.`
+        : `Aucune feature Trainer créée depuis ${group.name}.`
+      addActionLog('trainer', success ? 'Groupe Session promu' : 'Promotion groupe échouée', message, success ? (warnings.length ? 'warning' : 'success') : 'error')
+      return { success, featureIds, message, warnings }
+    } finally {
+      setSessionPromotionBusy(groupId, false)
+    }
   }
 
   function formatCount(value: number | undefined): string {
@@ -1737,6 +2057,8 @@ let nextWatchedChainId = 1
     }
     const locationText = feature.locatorKind === 'clr_field'
       ? `${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue}`
+      : feature.locatorKind === 'pointer_chain' && feature.pointerChain
+        ? `${feature.pointerChain.module}+${feature.pointerChain.baseOffset}`
       : `0x${feature.address}`
     addTrainerFeatureHistory(feature, 'created', 'success', `${feature.action} ${locationText}`)
     trainerFeatures.value.unshift(feature)
@@ -2354,6 +2676,9 @@ let nextWatchedChainId = 1
         feature.locatorKind === 'clr_field'
           ? `- CLR: ${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue}`
           : '',
+        feature.locatorKind === 'pointer_chain' && feature.pointerChain
+          ? `- Pointer: ${feature.pointerChain.module}+${feature.pointerChain.baseOffset} ${feature.pointerChain.offsets?.join(' -> ') ?? ''}`
+          : '',
         `- Type: ${feature.valueType}`,
         `- Valeur/patch: ${feature.value || feature.patchBytes || '-'}`,
         `- Dépend de: ${feature.dependsOn?.length ? feature.dependsOn.map((id) => trainerFeatures.value.find((item) => item.id === id)?.name ?? `#${id}`).join(', ') : '-'}`,
@@ -2918,7 +3243,10 @@ let nextWatchedChainId = 1
         ? await controller.setFreezeValue(address, type, value, true)
         : await writeMemoryValueByMode(address, type, value)
       writeResult.value = result as MemoryWriteResult
-      if (result.success === true) addAddressToWatch(address, type)
+      if (result.success === true) {
+        addAddressToWatch(address, type)
+        upsertSessionEntry(address, type, freeze ? 'freeze_polling' : 'write', freeze)
+      }
       addActionLog(
         'checkpoint',
         result.success === true ? `${title} OK` : `${title} échoué`,
@@ -3727,9 +4055,10 @@ let nextWatchedChainId = 1
         // l'utilisateur ait besoin de le remarquer et de le décrire.
         controller.freezeInstabilityDetected?.connect((info) => {
           const address = String(info.address ?? '')
-          const key = address.toLowerCase()
+          const key = normalizeSessionAddress(address).toLowerCase()
           if (freezeInstabilityNotified.has(key)) return
           freezeInstabilityNotified.add(key)
+          freezeInstabilityVersion.value += 1
           pushMessage(
             'assistant',
             String(info.message ?? `Le freeze sur 0x${address} ne tient pas.`) + ' ' + String(info.suggestion ?? ''),
@@ -4232,6 +4561,7 @@ let nextWatchedChainId = 1
 
   async function attach(pid: number, mode: 'standard' | 'kernel' = memoryAccessMode.value) {
     try {
+      clearSessionEntries()
       setMemoryAccessMode(mode)
       const ok = await backend.getController().attachProcess(pid)
       if (ok) {
@@ -5224,6 +5554,7 @@ let nextWatchedChainId = 1
     try {
       await backend.getController().detachProcess()
       isAttached.value = false
+      clearSessionEntries()
       processName.value = ''
       processModules.value = []
       memoryMap.value = null
@@ -7621,6 +7952,7 @@ async function doEncryptedScan() {
         .setFreezeValue(normalized, type, currentValue, true)
       if (writeResult.value.success) {
         freezeEnabled.value = true
+        upsertSessionEntry(normalized, type, 'freeze_polling', true)
         await refreshWatchedAddress(normalized)
       }
       addActionLog(
@@ -7651,6 +7983,7 @@ async function doEncryptedScan() {
       if (writeResult.value.success) {
         freezeEnabled.value = nextState
         addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
+        upsertSessionEntry(selectedCandidateAddress.value, exactScanType.value, 'freeze_polling', nextState)
       }
       addActionLog('freeze', nextState ? 'Freeze activé' : 'Freeze arrêté', `0x${selectedCandidateAddress.value} = ${writeValue.value}.`, writeResult.value.success ? 'success' : 'error')
     } catch (e) {
@@ -7691,6 +8024,7 @@ async function doEncryptedScan() {
       breakpointFreezeEnabled.value = writeResult.value.success === true
       if (breakpointFreezeEnabled.value) {
         addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
+        upsertSessionEntry(selectedCandidateAddress.value, exactScanType.value, 'freeze_breakpoint', true)
       }
       addActionLog(
         'freeze',
@@ -7727,6 +8061,8 @@ async function doEncryptedScan() {
         selectedCandidateAddress.value = address
         if (result.type) exactScanType.value = String(result.type)
         addAddressToWatch(address, String(result.type ?? exactScanType.value))
+        upsertSessionEntry(address, String(result.type ?? exactScanType.value), 'freeze_breakpoint', true)
+        markSessionEntryEnabled(address, String(result.type ?? exactScanType.value), 'freeze_polling', false)
       }
       addActionLog(
         'freeze',
@@ -8328,6 +8664,9 @@ async function doEncryptedScan() {
     watchLiveEnabled,
     watchedAddresses,
     watchLiveReadLimit,
+    sessionEntries,
+    sessionGroups,
+    sessionPromotionBusyIds,
     messages,
     actionLog,
     workflowStatus,
@@ -8515,6 +8854,17 @@ async function doEncryptedScan() {
     refreshWatchedAddress,
     refreshWatchedAddresses,
     setWatchLiveEnabled,
+    updateSessionEntryLabel,
+    disableSessionEntry,
+    hasFreezeInstability,
+    createSessionGroup,
+    updateSessionGroupName,
+    removeSessionGroup,
+    removeSessionEntriesFromGroup,
+    disableSessionGroup,
+    isSessionPromotionBusy,
+    promoteSessionEntryToTrainer,
+    promoteSessionGroupToTrainer,
     keepCandidate,
     ignoreCandidate,
     candidateVisualState,
