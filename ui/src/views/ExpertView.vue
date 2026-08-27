@@ -1,16 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
-  type AobScanResult,
-  type AobSignatureResult,
-  type BackwardDisassemblyResult,
-  type CandidateFieldTestResult,
-  type CodePatchResult,
-  type CodePatchSuggestion,
-  type CodePatchSuggestionResult,
-  type StableLocatorSuggestion,
   type UiStringCandidate,
   type UiStringInvestigationFinishResult,
   type UiStringInvestigationStartResult,
@@ -38,118 +30,51 @@ import UnknownScanPanel from '@/components/expert/UnknownScanPanel.vue'
 import ExactScanPanel from '@/components/expert/ExactScanPanel.vue'
 import CandidatePanel from '@/components/expert/CandidatePanel.vue'
 import PointerChainScanPanel from '@/components/expert/PointerChainScanPanel.vue'
+import AobSignaturePanel from '@/components/expert/AobSignaturePanel.vue'
+import WritePanel from '@/components/expert/WritePanel.vue'
 import { useExpertWriteSelection } from '@/composables/useExpertWriteSelection'
 import { useExpertPointerChain } from '@/composables/useExpertPointerChain'
-import { formatNumber, formatBytes, cleanTrainerName } from '@/utils/format'
-import { valueTypeOptions, findWhatWritesSizeForType } from '@/utils/valueTypes'
+import { useExpertAobFlow } from '@/composables/useExpertAobFlow'
+import { formatNumber, formatBytes } from '@/utils/format'
+import { findWhatWritesSizeForType } from '@/utils/valueTypes'
 
 const store = useAppStore()
-const uiStringSourcesPanelRef = ref<HTMLElement | null>(null)
 const {
   selectedCandidateAddresses,
-  writePanelRef,
-  writePlan,
-  writeFailures,
-  hasSelectedWriteTargets,
-  writeTargetLabel,
-  canWriteFromPanel,
-  writeButtonLabel,
   setSelectedWriteTargets,
   clearCandidateSelection,
   scrollToWritePanel,
-  writeFromPanel,
   watchedCandidate,
 } = useExpertWriteSelection()
 
-// Phase 14 — Pointer Chains : seuls pointerScanValueType/savePointerChain
-// restent necessaires ici, pour saveStableLocator() ci-dessous (le reste de
-// l'etat/des fonctions vit desormais uniquement dans PointerChainScanPanel.vue,
-// meme singleton partage via useExpertPointerChain()).
-const { pointerScanValueType, savePointerChain, resetPointerChainState } = useExpertPointerChain()
-
-// Suggestion de chaîne de pointeurs après une écriture confirmée sur une seule
-// adresse : évite de repasser manuellement par le panneau Pointer Chains.
-const stableLocatorResult = ref<StableLocatorSuggestion | null>(null)
-const stableLocatorBusy = ref(false)
-const stableLocatorForAddress = ref('')
-
-// Tenue live du freeze BP : BreakpointFreezeManager collecte deja hits/
-// rewrites/errors, mais rien ne les affichait avant l'arret. Sondage leger
-// (1s) pendant que le freeze BP est actif, arrete des qu'il ne l'est plus.
-const breakpointFreezeStats = ref<Record<string, unknown> | null>(null)
-let breakpointFreezeStatsTimer: ReturnType<typeof setInterval> | null = null
-
-function stopBreakpointFreezeStatsPolling() {
-  if (breakpointFreezeStatsTimer !== null) {
-    clearInterval(breakpointFreezeStatsTimer)
-    breakpointFreezeStatsTimer = null
-  }
-}
-
-async function pollBreakpointFreezeStats() {
-  const controller = backend.getController()
-  if (!controller.getBreakpointFreezeStats) return
-  breakpointFreezeStats.value = await controller.getBreakpointFreezeStats()
-}
-
-watch(() => store.breakpointFreezeEnabled, (enabled) => {
-  stopBreakpointFreezeStatsPolling()
-  if (enabled) {
-    void pollBreakpointFreezeStats()
-    breakpointFreezeStatsTimer = setInterval(() => { void pollBreakpointFreezeStats() }, 1000)
-  } else {
-    breakpointFreezeStats.value = null
-  }
-})
-
-// AOB signatures — base du futur trainer engine.
-const aobPattern = ref('')
-const aobExecutableOnly = ref(true)
-const aobImageOnly = ref(true)
-const aobMaxResults = ref(200)
-const aobBusy = ref(false)
-const aobResult = ref<AobScanResult | null>(null)
-const aobStabilizeBusy = ref(false)
-const aobStabilizeResult = ref<Record<string, unknown> | null>(null)
-const aobSignatureBusy = ref(false)
-const aobSignatureResult = ref<AobSignatureResult | null>(null)
-const disassembleBackwardBusy = ref(false)
-const disassembleBackwardResult = ref<BackwardDisassemblyResult | null>(null)
-const testCandidateFieldsBusy = ref(false)
-const testCandidateFieldsResult = ref<CandidateFieldTestResult | null>(null)
-// Message affiché quand generateAobSignatureFromHit() a délibérément SAUTÉ le
-// scan auto-enchaîné parce que le pattern stable est trop faible (level
-// "weak") pour être fiable — le pattern reste pré-rempli dans aobPattern, le
-// bouton "Scanner AOB" manuel reste disponible si l'utilisateur veut quand même.
-const aobAutoScanSkippedReason = ref('')
-const codePatchAddress = ref('')
-const codePatchBytes = ref('90 90')
-const codePatchBusy = ref(false)
-const codePatchResult = ref<CodePatchResult | null>(null)
-const codePatchSuggestBusy = ref(false)
-const codePatchSuggestionResult = ref<CodePatchSuggestionResult | null>(null)
-// Suggestion "Forcer une valeur" en attente de saisie (needsValueInput) et
-// valeur tapée par l'utilisateur pour elle — séparés de codePatchBytes tant
-// que la valeur n'a pas été appliquée, pour ne jamais écraser silencieusement
-// des bytes déjà choisis manuellement.
-const valueOverrideSuggestion = ref<CodePatchSuggestion | null>(null)
-const valueOverrideInput = ref('')
-const valueOverrideError = ref('')
-// "Forcer une valeur (hook)" : marche même quand la source de l'écriture est
-// un registre (donc sans immédiat à substituer par valueOverrideSuggestion
-// ci-dessus) — installe un trampoline + redirige le site via
-// forceWriteInstructionValue. hit gardé pour ré-afficher le RIP ciblé.
-const forceHookTargetHit = ref<Record<string, unknown> | null>(null)
-const forceHookValueInput = ref('')
-const forceHookBusy = ref(false)
-const forceHookResult = ref<Record<string, unknown> | null>(null)
-const codePatchProfileName = ref('')
-const codePatchProfilePatchName = ref('')
-const codePatchProfileDescription = ref('')
-const codePatchProfileBusy = ref(false)
-const codePatchProfileResult = ref<Record<string, unknown> | null>(null)
-const codePatchTrainerFlowBusy = ref(false)
-
+const { resetPointerChainState } = useExpertPointerChain()
+const {
+  aobPattern,
+  aobResult,
+  aobSignatureBusy,
+  disassembleBackwardBusy,
+  disassembleBackwardResult,
+  testCandidateFieldsBusy,
+  testCandidateFieldsResult,
+  codePatchSuggestionResult,
+  forceHookTargetHit,
+  forceHookValueInput,
+  forceHookBusy,
+  forceHookResult,
+  codePatchProfileBusy,
+  codePatchTrainerFlowBusy,
+  generateAobSignatureFromHit,
+  disassembleBackwardFromHit,
+  testCandidateFieldsFromHit,
+  findWhatWritesHitKey,
+  isSelectedFindWhatWritesHit,
+  previewFindWhatWritesHit,
+  copyFindWhatWritesRip,
+  selectForceHookTarget,
+  applyForceHookValue,
+  saveTrainerPatchFromHit,
+  resetAobFlowState,
+} = useExpertAobFlow()
 // Trace UI string — piste pour les valeurs affichees mais pas trouvees en numerique.
 const uiStringValue = ref('')
 const uiStringNextValue = ref('')
@@ -180,7 +105,6 @@ const structureCaptureB = ref<StructureProbeRow[] | null>(null)
 const structureCaptureAName = ref('')
 const structureCaptureBName = ref('')
 const structureTemplateName = ref('')
-const selectedFindWhatWritesRip = ref('')
 const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
@@ -214,7 +138,6 @@ const uiStringSourceVariantFilter = ref('all')
 const uiStringSourceBatchSize = ref(10)
 const uiStringSourceBatchIndex = ref(0)
 const uiStringSourceBatchSizeOptions = [5, 10, 25, 50]
-const freezeIntervalPresets = [16, 33, 50, 100, 250, 500]
 const findWhatWritesTimeoutOptions = [3000, 5000, 7000, 10000, 15000]
 
 interface IntelligentCandidate {
@@ -268,7 +191,6 @@ onBeforeUnmount(() => {
     clearInterval(uiStringTextLiveTimer)
     uiStringTextLiveTimer = null
   }
-  stopBreakpointFreezeStatsPolling()
 })
 
 async function toggleUiStringLiveInvestigation() {
@@ -352,641 +274,6 @@ async function toggleUiStringLiveInvestigation() {
   } finally {
     setUiStringInvestigationActive(false)
     uiStringBusy.value = false
-  }
-}
-
-async function suggestStableLocator(addressHex: string) {
-  if (!addressHex.trim()) return
-  stableLocatorBusy.value = true
-  stableLocatorResult.value = null
-  stableLocatorForAddress.value = addressHex
-  try {
-    const controller = backend.getController()
-    if (controller.suggestStableLocatorForAddress) {
-      stableLocatorResult.value = await controller.suggestStableLocatorForAddress(addressHex, {})
-    } else {
-      stableLocatorResult.value = { success: false, chainCount: 0, error: 'Methode backend indisponible (mock mode).' }
-    }
-  } catch (e) {
-    stableLocatorResult.value = { success: false, chainCount: 0, error: String(e) }
-  } finally {
-    stableLocatorBusy.value = false
-  }
-}
-
-function saveStableLocator() {
-  if (stableLocatorResult.value?.bestChain) {
-    // savePointerChain() sauvegarde avec le type actuellement affiché dans le
-    // panneau Pointer Chains ; on l'aligne sur le type réellement écrit avant.
-    pointerScanValueType.value = store.exactScanType
-    void savePointerChain(stableLocatorResult.value.bestChain)
-  }
-}
-
-async function scanAobSignature() {
-  const pattern = aobPattern.value.trim()
-  if (!pattern) return
-  aobBusy.value = true
-  aobResult.value = null
-  try {
-    const controller = backend.getController()
-    if (!controller.scanAobPattern) {
-      aobResult.value = { success: false, matches: [], error: 'Methode backend indisponible.' }
-      return
-    }
-    aobResult.value = await controller.scanAobPattern(pattern, {
-      executableOnly: aobExecutableOnly.value,
-      imageOnly: aobImageOnly.value,
-      maxResults: aobMaxResults.value,
-    })
-  } catch (e) {
-    aobResult.value = { success: false, matches: [], error: String(e) }
-  } finally {
-    aobBusy.value = false
-  }
-}
-
-async function scanAobPatternCandidate(pattern: string, maxResults = 1000): Promise<AobScanResult> {
-  const controller = backend.getController()
-  if (!controller.scanAobPattern) {
-    return { success: false, matches: [], error: 'Methode backend indisponible.' }
-  }
-  return controller.scanAobPattern(pattern, {
-    executableOnly: aobExecutableOnly.value,
-    imageOnly: aobImageOnly.value,
-    maxResults,
-  })
-}
-
-async function stabilizeSelectedAobSignature() {
-  const address = codePatchAddress.value.trim() || selectedFindWhatWritesRip.value.trim()
-  if (!address) return
-  aobStabilizeBusy.value = true
-  aobStabilizeResult.value = null
-  try {
-    const controller = backend.getController()
-    if (!controller.generateAobSignature) {
-      aobStabilizeResult.value = { success: false, error: 'Methode backend indisponible.' }
-      return
-    }
-
-    const tested: Array<Record<string, unknown>> = []
-    const patterns: string[] = []
-    const stablePattern = codePatchSuggestionResult.value?.stableAobPattern?.trim()
-    if (stablePattern) patterns.push(stablePattern)
-
-    for (const beforeBytes of [0, 4, 8, 12]) {
-      for (const length of [16, 24, 32, 48, 64]) {
-        const signature = await controller.generateAobSignature(address, { beforeBytes, length })
-        if (signature.success && signature.pattern && !patterns.includes(signature.pattern)) {
-          patterns.push(signature.pattern)
-        }
-      }
-    }
-
-    let best: { pattern: string, scan: AobScanResult } | null = null
-    for (const pattern of patterns) {
-      const scan = await scanAobPatternCandidate(pattern, 1000)
-      const matchesFound = Number(scan.matchesFound ?? scan.matches?.length ?? 0)
-      tested.push({
-        pattern,
-        matchesFound,
-        patternBytes: scan.patternBytes,
-        success: scan.success,
-        partial: scan.partial,
-        error: scan.error,
-      })
-      if (scan.success && matchesFound === 1) {
-        best = { pattern, scan }
-        break
-      }
-      if (scan.success && matchesFound > 0 && (!best || matchesFound < Number(best.scan.matchesFound ?? Number.MAX_SAFE_INTEGER))) {
-        best = { pattern, scan }
-      }
-    }
-
-    if (best) {
-      aobPattern.value = best.pattern
-      aobResult.value = best.scan
-    }
-    const matchesFound = Number(best?.scan.matchesFound ?? best?.scan.matches?.length ?? 0)
-    aobStabilizeResult.value = {
-      success: Boolean(best && matchesFound === 1),
-      pattern: best?.pattern ?? '',
-      matchesFound,
-      tested,
-      error: best && matchesFound !== 1
-        ? `Aucune signature unique. Meilleure piste: ${formatNumber(matchesFound)} match(es).`
-        : (!best ? 'Aucune signature exploitable générée.' : ''),
-    }
-  } catch (e) {
-    aobStabilizeResult.value = { success: false, error: String(e) }
-  } finally {
-    aobStabilizeBusy.value = false
-  }
-}
-
-async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
-  const rip = String(hit.instructionPointer ?? '').trim()
-  if (!rip) return
-  selectedFindWhatWritesRip.value = rip
-  aobSignatureBusy.value = true
-  aobSignatureResult.value = null
-  aobAutoScanSkippedReason.value = ''
-  codePatchSuggestBusy.value = true
-  codePatchSuggestionResult.value = null
-  valueOverrideSuggestion.value = null
-  valueOverrideInput.value = ''
-  valueOverrideError.value = ''
-  forceHookTargetHit.value = null
-  forceHookResult.value = null
-  codePatchAddress.value = rip
-  store.memoryPreviewAddress = rip
-  try {
-    const controller = backend.getController()
-    if (!controller.generateAobSignature) {
-      aobSignatureResult.value = { success: false, error: 'Methode backend indisponible.' }
-      return
-    }
-    const result = await controller.generateAobSignature(rip, {
-      beforeBytes: 0,
-      length: 24,
-    })
-    aobSignatureResult.value = result
-    let stablePatternIsWeak = false
-    if (controller.suggestCodePatches) {
-      const suggestionResult = await controller.suggestCodePatches(rip, { maxBytes: 16 })
-      codePatchSuggestionResult.value = suggestionResult
-      const firstSafe = suggestionResult.suggestions?.find((suggestion) => !suggestion.risky)
-      if (suggestionResult.success && firstSafe) {
-        codePatchBytes.value = firstSafe.bytesText
-      }
-      if (suggestionResult.success && suggestionResult.stableAobPattern) {
-        aobPattern.value = suggestionResult.stableAobPattern
-        // Le pattern "stable" vient du decodage d'UNE seule instruction : pour
-        // un mov [mem], reg typique, il ne reste souvent que 2-3 octets fixes
-        // (opcode + ModRM) une fois les offsets/registres wildcardes. Un scan
-        // executable+image avec un pattern aussi court remonte des centaines
-        // de matches sans rapport — pas une vraie signature. On ne lance pas
-        // le scan auto dans ce cas, on prévient l'utilisateur pourquoi.
-        stablePatternIsWeak = suggestionResult.signatureQuality?.level === 'weak'
-      }
-    } else {
-      codePatchSuggestionResult.value = { success: false, suggestions: [], error: 'Methode backend indisponible.' }
-    }
-    if (!aobPattern.value.trim() && result.success && result.pattern) {
-      aobPattern.value = result.pattern
-    }
-    if (aobPattern.value.trim()) {
-      if (stablePatternIsWeak) {
-        aobAutoScanSkippedReason.value =
-          "Signature trop faible pour lancer le scan automatiquement (peu d'octets fixes sur cette seule instruction — risque élevé de multi-match). " +
-          'Le pattern est pré-rempli ci-dessous : élargis-le (plus de contexte autour de l\'instruction) ou clique "Scanner AOB" si tu veux quand même essayer.'
-      } else {
-        await scanAobSignature()
-      }
-      void nextTick(() => {
-        document.querySelector('.aob-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      })
-    }
-  } catch (e) {
-    aobSignatureResult.value = { success: false, error: String(e) }
-    codePatchSuggestionResult.value = { success: false, suggestions: [], error: String(e) }
-  } finally {
-    aobSignatureBusy.value = false
-    codePatchSuggestBusy.value = false
-  }
-}
-
-async function disassembleBackwardFromHit(hit: Record<string, unknown>) {
-  const rip = String(hit.instructionPointer ?? '').trim()
-  if (!rip) return
-  disassembleBackwardBusy.value = true
-  disassembleBackwardResult.value = null
-  try {
-    const controller = backend.getController()
-    if (!controller.disassembleBackward) {
-      disassembleBackwardResult.value = { success: false, error: 'Methode backend indisponible.' }
-      return
-    }
-    disassembleBackwardResult.value = await controller.disassembleBackward(rip, {})
-  } catch (e) {
-    disassembleBackwardResult.value = { success: false, error: String(e) }
-  } finally {
-    disassembleBackwardBusy.value = false
-  }
-}
-
-// Teste automatiquement lequel des champs candidats tient réellement (écrit
-// une valeur test, attend, relit, restaure) — pas besoin d'avoir cliqué
-// "Désassembler en amont" d'abord, testCandidateFieldsAsync refait la
-// résolution des champs en interne à partir du RIP et de l'adresse écrite.
-async function testCandidateFieldsFromHit(hit: Record<string, unknown>) {
-  const rip = String(hit.instructionPointer ?? '').trim()
-  const watchedAddress = String(hit.address ?? '').trim()
-  if (!rip || !watchedAddress) return
-  testCandidateFieldsBusy.value = true
-  testCandidateFieldsResult.value = null
-  try {
-    testCandidateFieldsResult.value = await store.executeCandidateFieldTest(rip, watchedAddress)
-  } catch (e) {
-    testCandidateFieldsResult.value = { success: false, error: String(e) }
-  } finally {
-    testCandidateFieldsBusy.value = false
-  }
-}
-
-function findWhatWritesHitKey(hit: Record<string, unknown>) {
-  return `${hit.instructionPointer}:${hit.threadId}:${hit.address}`
-}
-
-function isSelectedFindWhatWritesHit(hit: Record<string, unknown>) {
-  return selectedFindWhatWritesRip.value !== '' && selectedFindWhatWritesRip.value === String(hit.instructionPointer ?? '').trim()
-}
-
-function previewFindWhatWritesHit(hit: Record<string, unknown>) {
-  const rip = String(hit.instructionPointer ?? '').trim()
-  if (!rip) return
-  selectedFindWhatWritesRip.value = rip
-  codePatchAddress.value = rip
-  store.memoryPreviewAddress = rip
-  void store.readMemoryPreview(rip, 128)
-  void nextTick(() => {
-    document.querySelector('.aob-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
-}
-
-async function copyFindWhatWritesRip(hit: Record<string, unknown>) {
-  const rip = String(hit.instructionPointer ?? '').trim()
-  if (!rip) return
-  selectedFindWhatWritesRip.value = rip
-  await navigator.clipboard?.writeText(`0x${rip}`)
-}
-
-function useAobMatchAddress(address: string) {
-  store.memoryPreviewAddress = address
-  codePatchAddress.value = address
-  void store.readMemoryPreview(address, 128)
-}
-
-function bookmarkAobMatch(match: Record<string, unknown>) {
-  const address = String(match.address ?? '').replace(/^0x/i, '').toUpperCase()
-  if (!address) return
-  store.addWorkspaceBookmark({
-    kind: 'aob',
-    label: `AOB 0x${address}`,
-    address,
-    type: 'Code',
-    note: `${String(match.module || match.memoryType || 'code')} ${match.moduleOffset ? `+0x${String(match.moduleOffset)}` : ''}`.trim(),
-    payload: {
-      aobPattern: aobPattern.value.trim(),
-      module: match.module,
-      moduleOffset: match.moduleOffset,
-      protection: match.protection,
-      executableOnly: aobExecutableOnly.value,
-      imageOnly: aobImageOnly.value,
-    },
-  })
-}
-
-function bookmarkCurrentCodePatch() {
-  const address = codePatchAddress.value.trim().replace(/^0x/i, '').toUpperCase()
-  if (!address) return
-  const suggestion = selectedPatchSuggestion()
-  const quality = currentAobQuality()
-  store.addWorkspaceBookmark({
-    kind: 'aob',
-    label: codePatchProfilePatchName.value.trim() || `Patch 0x${address}`,
-    address,
-    type: 'CodePatch',
-    value: codePatchBytes.value.trim(),
-    note: codePatchSuggestionResult.value?.disassembly || suggestion?.description || codePatchProfileDescription.value.trim(),
-    payload: {
-      patchBytes: codePatchBytes.value.trim(),
-      aobPattern: (codePatchSuggestionResult.value?.stableAobPattern || aobPattern.value).trim(),
-      originalBytes: codePatchResult.value?.originalBytes || codePatchSuggestionResult.value?.bytes || '',
-      disassembly: codePatchSuggestionResult.value?.disassembly || '',
-      riskLevel: suggestion?.riskLevel || '',
-      profileName: codePatchProfileName.value.trim(),
-      signatureQuality: quality,
-      signatureScore: quality?.score,
-      signatureLevel: quality?.level,
-      signatureWarning: quality?.warning,
-      signatureFixedBytes: quality?.fixedBytes,
-      signatureWildcardBytes: quality?.wildcardBytes,
-      signatureUniqueFixedBytes: quality?.uniqueFixedBytes,
-      signatureFixedRatio: quality?.fixedRatio,
-      trainerSafe: quality?.trainerSafe,
-      signatureMatches: Number(aobResult.value?.matchesFound ?? 0) || undefined,
-    },
-  })
-}
-
-async function selectAobPatchAddress(address: string) {
-  codePatchAddress.value = address
-  store.memoryPreviewAddress = address
-  await suggestSelectedCodePatches()
-}
-
-function useCodePatchSuggestion(suggestion: CodePatchSuggestion) {
-  if (suggestion.needsValueInput) {
-    valueOverrideSuggestion.value = suggestion
-    valueOverrideInput.value = ''
-    valueOverrideError.value = ''
-    return
-  }
-  valueOverrideSuggestion.value = null
-  codePatchBytes.value = suggestion.bytesText
-}
-
-function parseValueOverrideInput(text: string): bigint | null {
-  const trimmed = text.trim()
-  if (!trimmed) return null
-  try {
-    return BigInt(trimmed)
-  } catch {
-    return null
-  }
-}
-
-function applyValueOverrideSuggestion() {
-  const suggestion = valueOverrideSuggestion.value
-  valueOverrideError.value = ''
-  if (!suggestion || suggestion.valueOffset == null || !suggestion.valueSize) return
-  const originalHex = (codePatchSuggestionResult.value?.bytes || suggestion.bytesText).replace(/\s+/g, '')
-  const originalBytes = originalHex.match(/../g)?.map((byte) => parseInt(byte, 16)) ?? []
-  if (originalBytes.length < suggestion.valueOffset + suggestion.valueSize) {
-    valueOverrideError.value = "Bytes d'instruction insuffisants pour appliquer la valeur."
-    return
-  }
-  const parsed = parseValueOverrideInput(valueOverrideInput.value)
-  if (parsed === null) {
-    valueOverrideError.value = 'Valeur invalide (entier décimal ou 0x hexadécimal attendu).'
-    return
-  }
-  // Tronque a la largeur du champ immediat (modulo 2^(size*8), les BigInt
-  // negatifs se masquent en complement a deux) plutot que de rejeter
-  // silencieusement : le comportement est le meme qu'un patch manuel "je
-  // sais ce que je fais", avec un avertissement explicite si la valeur
-  // demandee ne rentrait pas telle quelle dans le champ.
-  const widthBits = BigInt(suggestion.valueSize * 8)
-  const mask = (1n << widthBits) - 1n
-  const truncated = parsed & mask
-  const minSigned = -(1n << (widthBits - 1n))
-  const maxUnsigned = (1n << widthBits) - 1n
-  if (parsed < minSigned || parsed > maxUnsigned) {
-    valueOverrideError.value = `Valeur hors plage pour un champ de ${suggestion.valueSize} octet(s) (tronquée à 0x${truncated.toString(16)}). Corrige la valeur si ce n'est pas voulu.`
-  }
-  const patched = [...originalBytes]
-  for (let i = 0; i < suggestion.valueSize; ++i) {
-    patched[suggestion.valueOffset + i] = Number((truncated >> BigInt(i * 8)) & 0xffn)
-  }
-  codePatchBytes.value = patched.map((byte) => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ')
-}
-
-function selectForceHookTarget(hit: Record<string, unknown>) {
-  forceHookTargetHit.value = hit
-  forceHookValueInput.value = ''
-  forceHookResult.value = null
-}
-
-async function applyForceHookValue() {
-  const hit = forceHookTargetHit.value
-  const suggestion = codePatchSuggestionResult.value
-  if (!hit || !suggestion?.memBaseRegister || !forceHookValueInput.value.trim()) return
-  forceHookBusy.value = true
-  forceHookResult.value = null
-  try {
-    const controller = backend.getController()
-    if (!controller.forceWriteInstructionValue) {
-      forceHookResult.value = { success: false, error: 'Méthode backend indisponible.' }
-      return
-    }
-    forceHookResult.value = await controller.forceWriteInstructionValue(
-      String(hit.instructionPointer ?? ''),
-      Number(suggestion.instructionLength ?? 0),
-      suggestion.memBaseRegister,
-      Number(suggestion.memDisplacement ?? 0),
-      store.exactScanType,
-      forceHookValueInput.value.trim(),
-    )
-  } catch (e) {
-    forceHookResult.value = { success: false, error: String(e) }
-  } finally {
-    forceHookBusy.value = false
-  }
-}
-
-function defaultTrainerProfileName() {
-  return cleanTrainerName(store.processName || 'Trainer', 'Trainer')
-}
-
-function defaultPatchNameFromHit(hit: Record<string, unknown>) {
-  const moduleName = cleanTrainerName(String(hit.module || aobSignatureResult.value?.module || 'Patch'), 'Patch')
-  const offset = String(hit.moduleOffset || aobSignatureResult.value?.moduleOffset || selectedFindWhatWritesRip.value || '0').toUpperCase()
-  return `${moduleName}_${offset}`
-}
-
-function selectedPatchSuggestion() {
-  const patchBytes = codePatchBytes.value.trim()
-  return codePatchSuggestionResult.value?.suggestions?.find((suggestion) => suggestion.bytesText === patchBytes)
-}
-
-function currentAobQuality() {
-  return codePatchSuggestionResult.value?.signatureQuality
-    || aobResult.value?.signatureQuality
-    || aobSignatureResult.value?.signatureQuality
-}
-
-function aobQualityBlocksTrainer() {
-  const quality = currentAobQuality()
-  if (!quality) return ''
-  const score = Number(quality.score ?? 0)
-  const fixedBytes = Number(quality.fixedBytes ?? 0)
-  if (fixedBytes < 3 || score < 35) {
-    return `Signature AOB trop faible (${score}/100, ${fixedBytes} octet(s) fixe(s)). Allonge la signature ou régénère une AOB plus stable.`
-  }
-  return ''
-}
-
-async function suggestSelectedCodePatches() {
-  const address = codePatchAddress.value.trim()
-  if (!address) return
-  codePatchSuggestBusy.value = true
-  codePatchSuggestionResult.value = null
-  valueOverrideSuggestion.value = null
-  valueOverrideInput.value = ''
-  valueOverrideError.value = ''
-  try {
-    const controller = backend.getController()
-    if (!controller.suggestCodePatches) {
-      codePatchSuggestionResult.value = { success: false, suggestions: [], error: 'Methode backend indisponible.' }
-      return
-    }
-    const result = await controller.suggestCodePatches(address, { maxBytes: 16 })
-    codePatchSuggestionResult.value = result
-    const firstSafe = result.suggestions?.find((suggestion) => !suggestion.risky)
-    if (result.success && firstSafe) {
-      codePatchBytes.value = firstSafe.bytesText
-    }
-    if (result.success && result.stableAobPattern) {
-      aobPattern.value = result.stableAobPattern
-    }
-  } catch (e) {
-    codePatchSuggestionResult.value = { success: false, suggestions: [], error: String(e) }
-  } finally {
-    codePatchSuggestBusy.value = false
-  }
-}
-
-async function applySelectedCodePatch() {
-  const address = codePatchAddress.value.trim()
-  const bytes = codePatchBytes.value.trim()
-  if (!address || !bytes) return
-  if (!await store.confirmRiskAction('patch', 'Patch code', `Adresse 0x${address.replace(/^0x/i, '')}, bytes ${bytes}.`)) return
-  codePatchBusy.value = true
-  codePatchResult.value = null
-  try {
-    const controller = backend.getController()
-    if (!controller.applyCodePatch) {
-      codePatchResult.value = { success: false, error: 'Methode backend indisponible.' }
-      return
-    }
-    codePatchResult.value = await controller.applyCodePatch(address, bytes, { verify: true })
-  } catch (e) {
-    codePatchResult.value = { success: false, error: String(e) }
-  } finally {
-    codePatchBusy.value = false
-  }
-}
-
-async function restoreSelectedCodePatch() {
-  const address = codePatchAddress.value.trim()
-  if (!address) return
-  codePatchBusy.value = true
-  codePatchResult.value = null
-  try {
-    const controller = backend.getController()
-    if (!controller.restoreCodePatch) {
-      codePatchResult.value = { success: false, error: 'Methode backend indisponible.' }
-      return
-    }
-    codePatchResult.value = await controller.restoreCodePatch(address)
-  } catch (e) {
-    codePatchResult.value = { success: false, error: String(e) }
-  } finally {
-    codePatchBusy.value = false
-  }
-}
-
-async function saveSelectedCodePatchProfile() {
-  const profileName = codePatchProfileName.value.trim()
-  const patchName = codePatchProfilePatchName.value.trim()
-  const address = codePatchAddress.value.trim()
-  const pattern = (codePatchSuggestionResult.value?.stableAobPattern || aobPattern.value).trim()
-  const patchBytes = codePatchBytes.value.trim()
-  if (!profileName || !patchName || !address || !pattern || !patchBytes) return
-  const qualityError = aobQualityBlocksTrainer()
-  if (qualityError) {
-    codePatchProfileResult.value = {
-      success: false,
-      profileName,
-      patchName,
-      error: qualityError,
-    }
-    return
-  }
-
-  codePatchProfileBusy.value = true
-  codePatchProfileResult.value = null
-  try {
-    const controller = backend.getController()
-    if (!controller.saveProfileCodePatch) {
-      codePatchProfileResult.value = { success: false, error: 'Methode backend indisponible.' }
-      return
-    }
-    codePatchProfileResult.value = await controller.saveProfileCodePatch(
-      profileName,
-      patchName,
-      address,
-      pattern,
-      patchBytes,
-      {
-        originalBytes: codePatchResult.value?.originalBytes || codePatchSuggestionResult.value?.bytes || '',
-        disassembly: codePatchSuggestionResult.value?.disassembly || '',
-        riskLevel: selectedPatchSuggestion()?.riskLevel || '',
-        description: codePatchProfileDescription.value.trim(),
-        signatureQuality: currentAobQuality(),
-      },
-    )
-  } catch (e) {
-    codePatchProfileResult.value = { success: false, error: String(e) }
-  } finally {
-    codePatchProfileBusy.value = false
-  }
-}
-
-async function saveTrainerPatchFromHit(hit: Record<string, unknown>) {
-  if (codePatchTrainerFlowBusy.value) return
-  codePatchTrainerFlowBusy.value = true
-  codePatchProfileResult.value = null
-  try {
-    await generateAobSignatureFromHit(hit)
-    if (Number(aobResult.value?.matchesFound ?? 0) !== 1) {
-      await stabilizeSelectedAobSignature()
-    }
-
-    const patchBytes = codePatchBytes.value.trim()
-    const pattern = (codePatchSuggestionResult.value?.stableAobPattern || aobPattern.value).trim()
-    if (!patchBytes || !pattern || !codePatchAddress.value.trim()) {
-      codePatchProfileResult.value = {
-        success: false,
-        error: 'Analyse incomplète : patch, adresse ou AOB stable manquant.',
-      }
-      return
-    }
-
-    if (!codePatchProfileName.value.trim()) {
-      codePatchProfileName.value = defaultTrainerProfileName()
-    }
-    if (!codePatchProfilePatchName.value.trim()) {
-      codePatchProfilePatchName.value = defaultPatchNameFromHit(hit)
-    }
-    if (!codePatchProfileDescription.value.trim()) {
-      const suggestion = selectedPatchSuggestion()
-      codePatchProfileDescription.value = [
-        codePatchSuggestionResult.value?.disassembly || 'Patch issu Find What Writes',
-        suggestion?.label ? `Suggestion: ${suggestion.label}` : '',
-        hit.address ? `Cible observée: 0x${hit.address}` : '',
-      ].filter(Boolean).join(' | ')
-    }
-
-    const matchesFound = Number(aobResult.value?.matchesFound ?? 0)
-    const qualityError = aobQualityBlocksTrainer()
-    if (qualityError) {
-      codePatchProfileResult.value = {
-        success: false,
-        profileName: codePatchProfileName.value.trim(),
-        patchName: codePatchProfilePatchName.value.trim(),
-        error: qualityError,
-      }
-      return
-    }
-    if (!aobResult.value?.success || matchesFound !== 1) {
-      codePatchProfileResult.value = {
-        success: false,
-        profileName: codePatchProfileName.value.trim(),
-        patchName: codePatchProfilePatchName.value.trim(),
-        error: matchesFound === 0
-          ? 'Signature AOB introuvable : ajuste le pattern avant de sauver le trainer.'
-          : `Signature AOB non unique (${formatNumber(matchesFound)} matches) : sauvegarde bloquée pour éviter un patch dangereux.`,
-      }
-      return
-    }
-
-    await saveSelectedCodePatchProfile()
-  } finally {
-    codePatchTrainerFlowBusy.value = false
   }
 }
 
@@ -2253,12 +1540,6 @@ function useSelectedUiSourcesForWrite() {
   scrollToWritePanel()
 }
 
-function scrollToUiSources() {
-  void nextTick(() => {
-    uiStringSourcesPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
-}
-
 const structureProbeRows = computed(() => (structureProbeResult.value?.rows as StructureProbeRow[] | undefined) ?? [])
 const structureDiffRows = computed(() => {
   const aRows = structureCaptureA.value ?? []
@@ -2338,21 +1619,7 @@ async function startNewScan() {
 
   resetPointerChainState()
 
-  stableLocatorResult.value = null
-  stableLocatorForAddress.value = ''
-
-  aobPattern.value = ''
-  aobResult.value = null
-  aobStabilizeResult.value = null
-  aobSignatureResult.value = null
-  codePatchAddress.value = ''
-  codePatchBytes.value = '90 90'
-  codePatchResult.value = null
-  codePatchSuggestionResult.value = null
-  codePatchProfileName.value = ''
-  codePatchProfilePatchName.value = ''
-  codePatchProfileDescription.value = ''
-  codePatchProfileResult.value = null
+  resetAobFlowState()
 
   uiStringValue.value = ''
   uiStringNextValue.value = ''
@@ -2371,10 +1638,7 @@ async function startNewScan() {
   uiStringSourceBatchIndex.value = 0
 
   findWhatWritesResult.value = null
-  forceHookTargetHit.value = null
-  forceHookResult.value = null
   findWhatWritesAcknowledged.value = false
-  selectedFindWhatWritesRip.value = ''
   findWhatAccessesResult.value = null
 
   structureProbeResult.value = null
@@ -3087,7 +2351,7 @@ onMounted(() => {
             </button>
           </div>
         </div>
-        <div v-if="uiStringSourceCandidates.length > 0" ref="uiStringSourcesPanelRef" class="source-list">
+        <div v-if="uiStringSourceCandidates.length > 0" class="source-list">
           <div class="source-list-title">
             <strong>Sources numériques proches</strong>
             <span>{{ formatNumber(filteredUiStringSourceCandidates.length) }}/{{ formatNumber(uiStringSourceCandidates.length) }} source(s) · {{ formatNumber(selectedUiSourceAddresses.length) }} cochée(s)</span>
@@ -3178,372 +2442,10 @@ onMounted(() => {
 
       <CandidatePanel v-show="showStep('inspect')" />
 
-      <section v-show="showStep('act')" ref="writePanelRef" class="panel risk-write">
-        <div class="panel-title">
-          <div class="panel-heading">
-            <h2>{{ $t('write.title') }}</h2>
-            <InfoDot topic="write" />
-            <RiskBadge level="write" />
-          </div>
-          <div class="panel-title-actions">
-            <button
-              v-if="uiStringSourceCandidates.length > 0"
-              class="btn btn-secondary compact"
-              type="button"
-              @click="scrollToUiSources()"
-            >
-              Retour sources
-            </button>
-            <span v-if="store.writeResult">{{ store.writeResult.success ? 'OK' : 'FAIL' }}</span>
-          </div>
-        </div>
-        <p class="panel-hint">{{ $t('help.write.when') }}</p>
-        <div class="controls write-controls">
-          <div v-if="hasSelectedWriteTargets" class="input multi-target-summary" :title="selectedCandidateAddresses.map((address) => `0x${address}`).join(', ')">
-            <strong>{{ writeTargetLabel }}</strong>
-            <button class="inline-clear" type="button" @click="clearCandidateSelection()">manuel</button>
-          </div>
-          <input
-            v-else
-            v-model="store.selectedCandidateAddress"
-            class="input"
-            :placeholder="$t('write.address')"
-            @input="store.updateWriteSafetyWarning()"
-            @blur="store.updateWriteSafetyWarning()"
-          />
-          <select v-model="store.exactScanType" class="input select">
-            <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
-          </select>
-          <input v-model="store.writeValue" class="input" :placeholder="$t('write.value')" @keyup.enter="writeFromPanel()" />
-          <button class="btn btn-primary" :disabled="!canWriteFromPanel" @click="writeFromPanel()">
-            {{ writeButtonLabel }}
-          </button>
-          <button class="btn btn-secondary" @click="store.rollbackLastWrite()">
-            {{ $t('write.rollback') }}
-          </button>
-          <label class="freeze-interval-control">
-            <span>Freeze</span>
-            <select
-              v-model.number="store.freezeIntervalMs"
-              class="input select"
-              @change="store.setFreezeInterval(store.freezeIntervalMs)"
-            >
-              <option v-for="ms in freezeIntervalPresets" :key="ms" :value="ms">{{ ms }} ms</option>
-            </select>
-          </label>
-          <button class="btn" :class="store.freezeEnabled ? 'btn-secondary' : 'btn-primary'" :disabled="hasSelectedWriteTargets || (store.freezeEnabled ? !store.selectedCandidateAddress : !store.canWriteSelectedValue)" @click="store.toggleFreeze()">
-            {{ store.freezeEnabled ? $t('write.stopFreeze') : $t('write.freeze') }}
-          </button>
-          <button
-            class="btn btn-secondary"
-            :disabled="hasSelectedWriteTargets || store.breakpointFreezeEnabled || !store.canWriteSelectedValue"
-            title="Hardware breakpoint: intercepte les écritures et réécrit immédiatement la valeur."
-            @click="store.startBreakpointFreeze()"
-          >
-            Freeze BP
-          </button>
-          <InfoDot topic="freezeBp" align="right" />
-          <button
-            class="btn btn-secondary"
-            :disabled="!store.breakpointFreezeEnabled"
-            title="Arrêter le freeze par hardware breakpoint."
-            @click="store.stopBreakpointFreeze()"
-          >
-            Stop BP
-          </button>
-          <span v-if="store.breakpointFreezeEnabled && breakpointFreezeStats" class="bp-live-stats" :class="{ warning: breakpointFreezeStats.healthy === false }">
-            {{ formatNumber(Number(breakpointFreezeStats.hits ?? 0)) }} hits · {{ formatNumber(Number(breakpointFreezeStats.rewrites ?? 0)) }} corrigé(s)<template v-if="Number(breakpointFreezeStats.errors ?? 0) > 0"> · {{ formatNumber(Number(breakpointFreezeStats.errors ?? 0)) }} erreur(s)</template>
-          </span>
-        </div>
-        <div v-if="hasSelectedWriteTargets" class="write-plan">
-          <div class="write-plan-title">
-            <strong>Plan d'écriture</strong>
-            <span>{{ writePlan.length }} cible(s) · valeur affichée {{ store.writeValue.trim() || '-' }}</span>
-          </div>
-          <div class="write-plan-list">
-            <div v-for="target in writePlan.slice(0, 12)" :key="`${target.address}:${target.mode}`" class="write-plan-row">
-              <code>0x{{ target.address }}</code>
-              <span>{{ target.mode }}</span>
-              <strong>{{ target.encodedValue }}</strong>
-            </div>
-          </div>
-          <span v-if="writePlan.length > 12" class="muted">+ {{ writePlan.length - 12 }} autre(s) cible(s) avec le même calcul automatique.</span>
-        </div>
-        <div v-if="store.writeSafetyWarning" class="write-safety">
-          <p class="warning">{{ store.writeSafetyWarning }}</p>
-          <label class="safety-ack">
-            <input v-model="store.writeSafetyAcknowledged" type="checkbox" />
-            Je confirme cette écriture mémoire
-          </label>
-        </div>
-        <div v-if="store.writeResult || store.freezeIntervalResult" class="metrics">
-          <span v-if="store.writeResult">{{ store.writeResult.bytesWritten }} B</span>
-          <span v-if="store.writeResult?.written !== undefined">Écrites: {{ formatNumber(store.writeResult.written) }}/{{ formatNumber(store.writeResult.total) }}</span>
-          <span v-if="store.writeResult?.protectionChanged">VirtualProtectEx{{ store.writeResult.protectionChangedCount ? `: ${formatNumber(store.writeResult.protectionChangedCount)}` : '' }}</span>
-          <span v-if="store.writeResult?.verified">{{ $t('write.verified') }}</span>
-          <span v-if="store.writeResult?.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
-          <span v-if="store.writeResult?.mode === 'breakpoint'">BP: {{ store.breakpointFreezeEnabled ? 'on' : 'off' }}</span>
-          <span v-if="store.writeResult?.rewrites !== undefined">rewrites: {{ formatNumber(store.writeResult.rewrites) }}</span>
-          <span v-if="store.freezeIntervalResult">intervalle: {{ store.freezeIntervalMs }} ms</span>
-          <span v-if="store.writeResult?.suspendedThreadCount !== undefined" title="Threads du processus cible suspendues pendant l'écriture atomique">
-            threads suspendues: {{ formatNumber(store.writeResult.suspendedThreadCount) }}
-          </span>
-        </div>
-        <p v-if="store.writeResult?.error" class="error">{{ store.writeResult.error }}</p>
-        <p v-if="store.writeResult?.warning" class="hint warning-hint">{{ store.writeResult.warning }}</p>
-        <div
-          v-if="store.writeResult?.success && !hasSelectedWriteTargets && store.selectedCandidateAddress"
-          class="stable-locator"
-        >
-          <button
-            class="btn btn-secondary compact"
-            type="button"
-            :disabled="stableLocatorBusy"
-            @click="suggestStableLocator(store.selectedCandidateAddress)"
-          >
-            <span v-if="stableLocatorBusy" class="btn-spinner" aria-hidden="true"></span>
-            <span>{{ stableLocatorBusy ? 'Recherche...' : 'Stabiliser cette adresse' }}</span>
-          </button>
-          <InfoDot text="Cherche une chaîne de pointeurs stable (module + offsets) vers l'adresse qui vient d'être écrite, pour qu'elle survive à un redémarrage du processus cible. Lecture seule, bornée." />
-          <span v-if="stableLocatorResult && stableLocatorForAddress === store.selectedCandidateAddress" class="stable-locator-result">
-            <template v-if="stableLocatorResult.success && stableLocatorResult.bestChain">
-              <span class="hint">{{ stableLocatorResult.message }}</span>
-              <button class="btn btn-secondary compact" type="button" @click="saveStableLocator()">
-                Sauvegarder dans un profil
-              </button>
-            </template>
-            <template v-else-if="stableLocatorResult.success">
-              <span class="hint">{{ stableLocatorResult.message }}</span>
-            </template>
-            <template v-else>
-              <span class="hint">{{ stableLocatorResult.error || 'Recherche indisponible.' }}</span>
-            </template>
-          </span>
-        </div>
-        <div v-if="writeFailures.length" class="write-fail-list">
-          <div class="source-list-title">
-            <strong>Échecs d'écriture</strong>
-            <span>{{ formatNumber(writeFailures.length) }} fail(s)</span>
-          </div>
-          <div v-for="failure in writeFailures.slice(0, 16)" :key="`${failure.address}:${failure.type}:${failure.variantLabel}`" class="write-fail-row">
-            <code>0x{{ failure.address || '-' }}</code>
-            <span>{{ failure.variantLabel || failure.type || '-' }}</span>
-            <strong>{{ failure.encodedHex || '-' }}</strong>
-            <span>{{ failure.error || '-' }}</span>
-          </div>
-        </div>
-      </section>
-
+      <WritePanel v-show="showStep('act')" />
       <WatchLivePanel v-show="showStep('inspect')" />
 
-      <section v-show="showStep('persist')" class="panel aob-panel risk-code">
-        <div class="panel-title">
-          <div class="panel-heading">
-            <h2>AOB signatures</h2>
-            <InfoDot topic="aob" />
-            <RiskBadge level="code" />
-          </div>
-          <span v-if="aobResult">{{ formatNumber(aobResult.matchesFound) }} match(es)</span>
-        </div>
-        <p class="panel-hint">{{ $t('help.aob.when') }}</p>
-        <div class="controls aob-controls">
-          <input
-            v-model="aobPattern"
-            class="input"
-            placeholder="Pattern: 48 8B ?? ?? 89"
-            :disabled="aobBusy"
-            @keyup.enter="scanAobSignature()"
-          />
-          <input v-model.number="aobMaxResults" class="input" type="number" min="1" max="10000" />
-          <button class="btn btn-primary" :disabled="aobBusy || !aobPattern.trim()" @click="scanAobSignature()">
-            <span v-if="aobBusy" class="btn-spinner" aria-hidden="true"></span>
-            Scanner AOB
-          </button>
-        </div>
-        <div class="expert-flags aob-flags">
-          <label class="checkbox-label">
-            <input v-model="aobExecutableOnly" type="checkbox" :disabled="aobBusy" />
-            Code exécutable
-          </label>
-          <label class="checkbox-label">
-            <input v-model="aobImageOnly" type="checkbox" :disabled="aobBusy" />
-            Module image
-          </label>
-        </div>
-        <div v-if="aobResult" class="metrics">
-          <span>Régions: {{ formatNumber(aobResult.regionsScanned) }}</span>
-          <span>Lu: {{ formatBytes(aobResult.bytesScanned) }}</span>
-          <span v-if="aobResult.patternBytes">Pattern: {{ formatNumber(aobResult.patternBytes) }} o</span>
-          <span v-if="aobResult.signatureQuality" :class="`quality-${aobResult.signatureQuality.level}`">
-            Qualité: {{ aobResult.signatureQuality.level }} · {{ aobResult.signatureQuality.score }}/100
-          </span>
-          <span v-if="aobResult.signatureQuality">
-            Fixes: {{ formatNumber(aobResult.signatureQuality.fixedBytes) }} / Wildcards: {{ formatNumber(aobResult.signatureQuality.wildcardBytes) }}
-          </span>
-          <span v-if="aobResult.partial" class="warning-text">résultats limités</span>
-        </div>
-        <div v-if="aobSignatureResult" class="metrics">
-          <span>Signature: {{ aobSignatureResult.success ? 'OK' : 'FAIL' }}</span>
-          <span v-if="aobSignatureResult.module">{{ aobSignatureResult.module }} +0x{{ aobSignatureResult.moduleOffset }}</span>
-          <span v-if="aobSignatureResult.patternBytes">{{ formatNumber(aobSignatureResult.patternBytes) }} o</span>
-          <span v-if="aobSignatureResult.signatureQuality" :class="`quality-${aobSignatureResult.signatureQuality.level}`">
-            Qualité: {{ aobSignatureResult.signatureQuality.level }} · {{ aobSignatureResult.signatureQuality.score }}/100
-          </span>
-        </div>
-        <p v-if="aobAutoScanSkippedReason" class="warning-text">{{ aobAutoScanSkippedReason }}</p>
-        <p v-if="aobResult?.signatureWarning" class="hint">{{ aobResult.signatureWarning }}</p>
-        <p v-if="aobSignatureResult?.warning" class="hint">{{ aobSignatureResult.warning }}</p>
-        <p v-if="aobSignatureResult?.error" class="error">{{ aobSignatureResult.error }}</p>
-        <p v-if="aobResult?.error" class="error">{{ aobResult.error }}</p>
-        <div class="metrics patch-relay-status">
-          <span
-            class="quality-medium"
-            title="Fallback PHASE 122 : si le patch code direct échoue en ERROR_ACCESS_DENIED sur la bascule RWX, KillEngine tente le relais PowerShell borné aux patchs code."
-          >
-            Relais patch prêt
-          </span>
-          <span title="Le relais ne s'applique pas aux écritures mémoire DATA génériques.">
-            code uniquement
-          </span>
-        </div>
-        <div class="controls code-patch-controls">
-          <input
-            v-model="codePatchAddress"
-            class="input"
-            placeholder="Adresse patch (0x...)"
-            :disabled="codePatchBusy"
-          />
-          <input
-            v-model="codePatchBytes"
-            class="input"
-            placeholder="Bytes exacts: 90 90"
-            :disabled="codePatchBusy"
-            @keyup.enter="applySelectedCodePatch()"
-          />
-          <button class="btn btn-primary" :disabled="codePatchBusy || !codePatchAddress.trim() || !codePatchBytes.trim()" @click="applySelectedCodePatch()">
-            <span v-if="codePatchBusy" class="btn-spinner" aria-hidden="true"></span>
-            Appliquer
-          </button>
-          <button class="btn btn-primary" :disabled="codePatchSuggestBusy || !codePatchAddress.trim()" @click="suggestSelectedCodePatches()">
-            <span v-if="codePatchSuggestBusy" class="btn-spinner" aria-hidden="true"></span>
-            Analyser
-          </button>
-          <button class="btn btn-secondary" :disabled="aobStabilizeBusy || !codePatchAddress.trim()" @click="stabilizeSelectedAobSignature()">
-            <span v-if="aobStabilizeBusy" class="btn-spinner" aria-hidden="true"></span>
-            Stabiliser AOB
-          </button>
-          <button class="btn btn-secondary" :disabled="codePatchBusy || !codePatchAddress.trim()" @click="restoreSelectedCodePatch()">
-            Restaurer
-          </button>
-          <button class="btn btn-secondary" :disabled="!codePatchAddress.trim()" @click="bookmarkCurrentCodePatch()">
-            Bookmark
-          </button>
-        </div>
-        <div v-if="aobStabilizeResult" class="metrics">
-          <span>Auto AOB: {{ aobStabilizeResult.success ? 'unique' : 'à ajuster' }}</span>
-          <span v-if="aobStabilizeResult.matchesFound !== undefined">{{ formatNumber(Number(aobStabilizeResult.matchesFound)) }} match(es)</span>
-          <span v-if="Array.isArray(aobStabilizeResult.tested)">{{ formatNumber(aobStabilizeResult.tested.length) }} pattern(s)</span>
-        </div>
-        <p v-if="aobStabilizeResult?.error" class="error">{{ aobStabilizeResult.error }}</p>
-        <div v-if="codePatchSuggestionResult" class="metrics">
-          <span>Instruction: {{ codePatchSuggestionResult.success ? 'OK' : 'FAIL' }}</span>
-          <span v-if="codePatchSuggestionResult.instructionLength">{{ formatNumber(codePatchSuggestionResult.instructionLength) }} o</span>
-          <span v-if="codePatchSuggestionResult.mnemonicHint">{{ codePatchSuggestionResult.mnemonicHint }}</span>
-          <span v-if="codePatchSuggestionResult.category">{{ codePatchSuggestionResult.category }}</span>
-          <span v-if="codePatchSuggestionResult.decoder">{{ codePatchSuggestionResult.decoder }}</span>
-          <span v-if="codePatchSuggestionResult.signatureQuality" :class="`quality-${codePatchSuggestionResult.signatureQuality.level}`">
-            AOB {{ codePatchSuggestionResult.signatureQuality.level }} · {{ codePatchSuggestionResult.signatureQuality.score }}/100
-          </span>
-        </div>
-        <p v-if="codePatchSuggestionResult?.disassembly" class="hint">{{ codePatchSuggestionResult.disassembly }}</p>
-        <p v-if="codePatchSuggestionResult?.stableAobPattern" class="hint">AOB stable: {{ codePatchSuggestionResult.stableAobPattern }}</p>
-        <p v-if="codePatchSuggestionResult?.bytes" class="hint">Instruction: {{ codePatchSuggestionResult.bytes }}</p>
-        <p v-if="codePatchSuggestionResult?.warning" class="hint">{{ codePatchSuggestionResult.warning }}</p>
-        <div v-if="codePatchSuggestionResult?.suggestions?.length" class="patch-suggestion-list">
-          <button
-            v-for="suggestion in codePatchSuggestionResult.suggestions"
-            :key="suggestion.label"
-            class="btn compact"
-            :class="suggestion.riskLevel === 'low' ? 'btn-primary' : 'btn-secondary'"
-            type="button"
-            :title="suggestion.description"
-            @click="useCodePatchSuggestion(suggestion)"
-          >
-            {{ suggestion.label }}{{ suggestion.riskLevel ? ` · ${suggestion.riskLevel}` : '' }}
-          </button>
-        </div>
-        <div v-if="valueOverrideSuggestion" class="controls value-override-controls">
-          <span class="hint">
-            {{ valueOverrideSuggestion.description }} ({{ valueOverrideSuggestion.valueSize }} octet(s), à l'offset {{ valueOverrideSuggestion.valueOffset }} de l'instruction).
-          </span>
-          <input
-            v-model="valueOverrideInput"
-            class="input"
-            placeholder="Valeur : 999 ou 0x3E7"
-            @keyup.enter="applyValueOverrideSuggestion()"
-          />
-          <button class="btn btn-primary compact" type="button" :disabled="!valueOverrideInput.trim()" @click="applyValueOverrideSuggestion()">
-            Appliquer valeur
-          </button>
-        </div>
-        <p v-if="valueOverrideError" class="warning-text">{{ valueOverrideError }}</p>
-        <p v-if="codePatchSuggestionResult?.error" class="error">{{ codePatchSuggestionResult.error }}</p>
-        <div v-if="codePatchResult" class="metrics">
-          <span>Patch: {{ codePatchResult.success ? 'OK' : 'FAIL' }}</span>
-          <span v-if="codePatchResult.bytesWritten">{{ formatNumber(codePatchResult.bytesWritten) }} o</span>
-          <span v-if="codePatchResult.verified">vérifié</span>
-          <span v-if="codePatchResult.protectionChanged" title="Bascule de protection directe ou fallback relais PowerShell selon le blocage runtime.">VirtualProtectEx/relais</span>
-          <span v-if="codePatchResult.active">actif</span>
-        </div>
-        <p v-if="codePatchResult?.originalBytes" class="hint">Originaux: {{ codePatchResult.originalBytes }}</p>
-        <p v-if="codePatchResult?.restoredBytes" class="hint">Restaurés: {{ codePatchResult.restoredBytes }}</p>
-        <p v-if="codePatchResult?.error" class="error">{{ codePatchResult.error }}</p>
-        <div class="controls code-patch-profile-controls">
-          <input
-            v-model="codePatchProfileName"
-            class="input"
-            placeholder="Profil trainer"
-            :disabled="codePatchProfileBusy"
-          />
-          <input
-            v-model="codePatchProfilePatchName"
-            class="input"
-            placeholder="Nom patch"
-            :disabled="codePatchProfileBusy"
-          />
-          <input
-            v-model="codePatchProfileDescription"
-            class="input"
-            placeholder="Description"
-            :disabled="codePatchProfileBusy"
-          />
-          <button
-            class="btn btn-primary"
-            :disabled="codePatchProfileBusy || !codePatchProfileName.trim() || !codePatchProfilePatchName.trim() || !codePatchAddress.trim() || !codePatchBytes.trim()"
-            @click="saveSelectedCodePatchProfile()"
-          >
-            <span v-if="codePatchProfileBusy" class="btn-spinner" aria-hidden="true"></span>
-            Sauver trainer
-          </button>
-        </div>
-        <div v-if="codePatchProfileResult" class="metrics">
-          <span>Profil: {{ codePatchProfileResult.success ? 'OK' : 'FAIL' }}</span>
-          <span v-if="codePatchProfileResult.profileName">{{ codePatchProfileResult.profileName }}</span>
-          <span v-if="codePatchProfileResult.patchName">{{ codePatchProfileResult.patchName }}</span>
-        </div>
-        <p v-if="codePatchProfileResult?.error" class="error">{{ codePatchProfileResult.error }}</p>
-        <div v-if="aobResult?.matches?.length" class="aob-list">
-          <div v-for="match in aobResult.matches.slice(0, 80)" :key="match.address" class="aob-row">
-            <code>0x{{ match.address }}</code>
-            <span>{{ match.module || match.memoryType || '-' }}</span>
-            <span>{{ match.moduleOffset ? `+0x${match.moduleOffset}` : match.protection || '-' }}</span>
-            <button class="btn btn-secondary compact" type="button" @click="useAobMatchAddress(match.address)">Lire</button>
-            <button class="btn btn-primary compact" type="button" @click="selectAobPatchAddress(match.address)">Patch</button>
-            <button class="btn btn-secondary compact" type="button" @click="bookmarkAobMatch(match)">Note</button>
-          </div>
-        </div>
-      </section>
-
+      <AobSignaturePanel v-show="showStep('persist')" />
       <InjectionPanel v-show="showStep('persist')" />
 
       <PointerChainScanPanel v-show="showStep('inspect')" />
