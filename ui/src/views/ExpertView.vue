@@ -10,7 +10,6 @@ import {
   type CodePatchResult,
   type CodePatchSuggestion,
   type CodePatchSuggestionResult,
-  type MemoryWriteTarget,
   type PointerChainInfo,
   type PointerChainResolveResult,
   type PointerScanResult,
@@ -40,14 +39,40 @@ import InjectionPanel from '@/components/expert/InjectionPanel.vue'
 import SaveFilesPanel from '@/components/expert/SaveFilesPanel.vue'
 import UnknownScanPanel from '@/components/expert/UnknownScanPanel.vue'
 import ExactScanPanel from '@/components/expert/ExactScanPanel.vue'
+import { useExpertWriteSelection } from '@/composables/useExpertWriteSelection'
 import { formatNumber, formatBytes } from '@/utils/format'
 import { valueTypeOptions } from '@/utils/valueTypes'
 
 const store = useAppStore()
-const selectedCandidateAddresses = ref<string[]>([])
-const selectedWriteTargetOverrides = ref<Record<string, MemoryWriteTarget>>({})
 const uiStringSourcesPanelRef = ref<HTMLElement | null>(null)
-const writePanelRef = ref<HTMLElement | null>(null)
+const {
+  selectedCandidateAddresses,
+  writePanelRef,
+  currentPageCandidates,
+  displayedCandidates,
+  writePlan,
+  writeFailures,
+  hasSelectedWriteTargets,
+  writeTargetLabel,
+  canWriteFromPanel,
+  writeButtonLabel,
+  setSelectedWriteTargets,
+  clearCandidateSelection,
+  scrollToWritePanel,
+  useCandidateInAssistant,
+  isCandidateSelected,
+  toggleCandidateSelection,
+  toggleCurrentPageSelection,
+  useSelectedCandidatesInAssistant,
+  writeSelectedCandidates,
+  writeSelectedCandidatesAtomic,
+  writeSelectedCandidateKernel,
+  writeFromPanel,
+  watchOrRefreshCandidate,
+  watchSelectedCandidates,
+  watchCurrentCandidatePage,
+  watchedCandidate,
+} = useExpertWriteSelection()
 
 // Phase 14 — Pointer Chains
 const pointerScanAddress = ref('')
@@ -1960,15 +1985,11 @@ async function trackUiStringSources() {
 function useUiSourceCandidate(candidate: UiStringSourceCandidate) {
   store.selectCandidate(candidate.address, candidate.type)
   store.writeValue = uiStringValue.value || store.exactScanValue
-  selectedCandidateAddresses.value = [candidate.address]
-  selectedWriteTargetOverrides.value = {
-    [candidate.address]: {
-      address: candidate.address,
-      type: candidate.type,
-      variantLabel: candidate.variantLabel,
-    },
-  }
-  syncSelectedWriteType()
+  setSelectedWriteTargets([{
+    address: candidate.address,
+    type: candidate.type,
+    variantLabel: candidate.variantLabel,
+  }])
   scrollToWritePanel()
 }
 
@@ -2345,15 +2366,11 @@ function useSelectedUiSourcesForWrite() {
   const selected = new Set(selectedUiSourceAddresses.value)
   const chosen = chooseNonOverlappingSources(uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate))))
   if (chosen.length === 0) return
-  selectedCandidateAddresses.value = chosen.map((candidate) => candidate.address)
-  selectedWriteTargetOverrides.value = Object.fromEntries(chosen.map((candidate) => [
-    candidate.address,
-    {
-      address: candidate.address,
-      type: candidate.type,
-      variantLabel: candidate.variantLabel,
-    },
-  ]))
+  setSelectedWriteTargets(chosen.map((candidate) => ({
+    address: candidate.address,
+    type: candidate.type,
+    variantLabel: candidate.variantLabel,
+  })))
   const types = Array.from(new Set(chosen.map((candidate) => candidate.type)))
   if (types.length === 1) {
     store.exactScanType = types[0]
@@ -2361,12 +2378,6 @@ function useSelectedUiSourcesForWrite() {
   store.selectedCandidateAddress = chosen[0].address
   store.writeValue = uiStringValue.value || store.exactScanValue
   scrollToWritePanel()
-}
-
-function scrollToWritePanel() {
-  void nextTick(() => {
-    writePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
 }
 
 function scrollToUiSources() {
@@ -2380,35 +2391,6 @@ const candidatePageTotal = computed(() => {
   if (store.candidatePage.displaySuppressed) return 1
   return Math.max(1, Math.ceil(store.candidatePage.totalCount / store.candidatePage.pageSize))
 })
-const currentPageCandidates = computed(() => store.candidatePage?.candidates ?? [])
-const displayedCandidates = computed(() => currentPageCandidates.value.filter(
-  (candidate) => !store.ignoredCandidateAddresses.includes(candidate.address),
-))
-const selectedCandidateRecords = computed(() => selectedCandidateAddresses.value
-  .map((address) => currentPageCandidates.value.find((candidate) => candidate.address === address))
-  .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate)))
-const selectedWriteTargets = computed<MemoryWriteTarget[]>(() => selectedCandidateAddresses.value.map((address) => {
-  const override = selectedWriteTargetOverrides.value[address]
-  if (override) return override
-  const record = currentPageCandidates.value.find((candidate) => candidate.address === address)
-  return {
-    address,
-    type: String(record?.type ?? store.exactScanType),
-    variantLabel: record?.variantLabel,
-  }
-}))
-const selectedWriteHasVariants = computed(() => selectedWriteTargets.value.some((target) => Boolean(target.variantLabel)))
-const writePlan = computed(() => selectedWriteTargets.value.map((target) => {
-  const displayValue = store.writeValue.trim()
-  const encodedValue = encodedDisplayWriteValue(displayValue, target.variantLabel)
-  return {
-    ...target,
-    displayValue,
-    encodedValue,
-    mode: target.variantLabel || target.type,
-  }
-}))
-const writeFailures = computed(() => (store.writeResult?.results ?? []).filter((result) => !result.success))
 const structureProbeRows = computed(() => (structureProbeResult.value?.rows as StructureProbeRow[] | undefined) ?? [])
 const structureDiffRows = computed(() => {
   const aRows = structureCaptureA.value ?? []
@@ -2431,27 +2413,6 @@ const structureDiffRows = computed(() => {
     .filter((row) => row.changed || Math.abs(row.offset) <= 32)
     .slice(0, 160)
 })
-const selectedCandidateTypes = computed(() => Array.from(new Set(
-  selectedWriteTargets.value.map((target) => String(target.variantLabel || target.type)),
-)))
-const selectedWriteType = computed(() => selectedCandidateTypes.value.length === 1
-  ? selectedWriteTargets.value[0]?.type ?? store.exactScanType
-  : store.exactScanType)
-const hasSelectedWriteTargets = computed(() => selectedCandidateAddresses.value.length > 0)
-const writeTargetLabel = computed(() => {
-  if (!hasSelectedWriteTargets.value) return ''
-  const knownCount = selectedCandidateRecords.value.length
-  const typeNote = selectedCandidateTypes.value.length === 1
-    ? selectedCandidateTypes.value[0]
-    : (selectedWriteHasVariants.value ? 'auto source' : 'type choisi')
-  return `${selectedCandidateAddresses.value.length} adresse(s) sélectionnée(s) · ${typeNote}${knownCount < selectedCandidateAddresses.value.length ? ' · certaines hors page' : ''}`
-})
-const canWriteFromPanel = computed(() => hasSelectedWriteTargets.value
-  ? Boolean(store.writeValue.trim())
-  : store.canWriteSelectedValue)
-const writeButtonLabel = computed(() => hasSelectedWriteTargets.value
-  ? `Écrire ${selectedCandidateAddresses.value.length}`
-  : 'Écrire')
 const expertScenarioPresets = computed(() => store.workflowPresets.filter((preset) => preset.id.startsWith('scenario-')))
 
 // P3 - Les 13 panneaux Expert sont regroupes en 4 etapes de workflow.
@@ -2505,8 +2466,7 @@ async function startNewScan() {
     setUiStringTextLiveEnabled(false)
   }
 
-  selectedCandidateAddresses.value = []
-  selectedWriteTargetOverrides.value = {}
+  clearCandidateSelection()
 
   pointerScanAddress.value = ''
   pointerScanResult.value = null
@@ -2560,18 +2520,6 @@ async function startNewScan() {
   structureTemplateName.value = ''
 }
 
-function encodedDisplayWriteValue(value: string, variantLabel?: string): string {
-  const cleanValue = value.trim().replace(',', '.')
-  if (!cleanValue) return '-'
-  const multiplier = variantLabel?.match(/\bx\s*(\d+(?:\.\d+)?)\b/i)
-  if (!multiplier) return cleanValue
-  const numeric = Number(cleanValue)
-  const scale = Number(multiplier[1])
-  if (!Number.isFinite(numeric) || !Number.isFinite(scale)) return cleanValue
-  const encoded = numeric * scale
-  return Number.isInteger(encoded) ? String(encoded) : String(encoded)
-}
-
 function confidencePercent(confidence: number | undefined): number {
   if (confidence === undefined || confidence === null) return 100
   return Math.round(confidence * 100)
@@ -2582,136 +2530,6 @@ function confidenceClass(confidence: number | undefined): string {
   if (pct >= 80) return 'conf-high'
   if (pct >= 50) return 'conf-medium'
   return 'conf-low'
-}
-
-function useCandidateInAssistant(address: string, type: string) {
-  store.selectCandidate(address, type)
-  store.searchQuery = `j'utilise la mémoire 0x${address}`
-  void store.doSearch()
-}
-
-function isCandidateSelected(address: string) {
-  return selectedCandidateAddresses.value.includes(address)
-}
-
-function toggleCandidateSelection(address: string) {
-  if (isCandidateSelected(address)) {
-    selectedCandidateAddresses.value = selectedCandidateAddresses.value.filter((item) => item !== address)
-    const { [address]: _removed, ...rest } = selectedWriteTargetOverrides.value
-    selectedWriteTargetOverrides.value = rest
-    syncSelectedWriteType()
-    return
-  }
-  selectedCandidateAddresses.value = [...selectedCandidateAddresses.value, address]
-  const { [address]: _removed, ...rest } = selectedWriteTargetOverrides.value
-  selectedWriteTargetOverrides.value = rest
-  syncSelectedWriteType()
-}
-
-function toggleCurrentPageSelection() {
-  const pageAddresses = currentPageCandidates.value.map((candidate) => candidate.address)
-  const allPageSelected = pageAddresses.length > 0
-    && pageAddresses.every((address) => selectedCandidateAddresses.value.includes(address))
-  if (allPageSelected) {
-    selectedCandidateAddresses.value = selectedCandidateAddresses.value.filter((address) => !pageAddresses.includes(address))
-    selectedWriteTargetOverrides.value = Object.fromEntries(
-      Object.entries(selectedWriteTargetOverrides.value).filter(([address]) => !pageAddresses.includes(address)),
-    )
-    syncSelectedWriteType()
-    return
-  }
-  selectedCandidateAddresses.value = Array.from(new Set([...selectedCandidateAddresses.value, ...pageAddresses]))
-  selectedWriteTargetOverrides.value = Object.fromEntries(
-    Object.entries(selectedWriteTargetOverrides.value).filter(([address]) => !pageAddresses.includes(address)),
-  )
-  syncSelectedWriteType()
-}
-
-function clearCandidateSelection() {
-  selectedCandidateAddresses.value = []
-  selectedWriteTargetOverrides.value = {}
-}
-
-function syncSelectedWriteType() {
-  const selected = currentPageCandidates.value.filter((candidate) => selectedCandidateAddresses.value.includes(candidate.address))
-  const types = Array.from(new Set(selected.map((candidate) => String(candidate.type))))
-  if (types.length === 1) {
-    store.exactScanType = types[0]
-  }
-  if (selected.length > 0) {
-    store.selectedCandidateAddress = selected[0].address
-  }
-}
-
-function useSelectedCandidatesInAssistant() {
-  if (selectedCandidateAddresses.value.length === 0) return
-  const addresses = selectedCandidateAddresses.value.map((address) => `0x${address}`).join(' ')
-  store.searchQuery = `j'utilise ces mémoires ${addresses}`
-  void store.doSearch()
-}
-
-function writeSelectedCandidates() {
-  if (selectedCandidateAddresses.value.length === 0 || !store.writeValue.trim()) return
-  if (selectedWriteHasVariants.value) {
-    void store.writeSelectedTargets(selectedWriteTargets.value, store.writeValue)
-    return
-  }
-  void store.writeSelectedAddresses(selectedCandidateAddresses.value, selectedWriteType.value, store.writeValue)
-}
-
-function writeSelectedCandidatesAtomic() {
-  if (selectedCandidateAddresses.value.length === 0 || !store.writeValue.trim()) return
-  void store.writeSelectedAtomic(selectedCandidateAddresses.value, selectedWriteType.value, store.writeValue)
-}
-
-// Écriture d'escalade : contourne les protections mémoire usermode via le
-// driver noyau. Un seul candidat à la fois (jamais de bulk) — c'est une
-// escalade ciblée quand l'écriture normale ne tient pas, pas une alternative
-// systématique à "Écrire sur sélection".
-async function writeSelectedCandidateKernel() {
-  const address = selectedCandidateAddresses.value[0]
-  if (!address || !store.writeValue.trim()) return
-  await store.executeCheckpointKernelWrite({ address, value: store.writeValue, type: selectedWriteType.value })
-}
-
-function writeFromPanel() {
-  if (hasSelectedWriteTargets.value) {
-    writeSelectedCandidates()
-    return
-  }
-  void store.writeSelectedValue()
-}
-
-function watchOrRefreshCandidate(address: string, type: string) {
-  const watched = watchedCandidate(address)
-  if (watched) {
-    void store.refreshWatchedAddress(address)
-    return
-  }
-  store.addAddressToWatch(address, type)
-  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
-}
-
-function watchSelectedCandidates() {
-  if (selectedCandidateAddresses.value.length === 0) return
-  store.addAddressesToWatch(selectedWriteTargets.value.map((target) => ({
-    address: target.address,
-    type: target.type,
-  })))
-  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
-}
-
-function watchCurrentCandidatePage() {
-  if (currentPageCandidates.value.length === 0) return
-  store.addAddressesToWatch(currentPageCandidates.value.map((candidate) => ({
-    address: candidate.address,
-    type: String(candidate.type),
-  })))
-  if (!store.watchLiveEnabled) store.setWatchLiveEnabled(true)
-}
-
-function watchedCandidate(address: string) {
-  return store.watchedAddresses.find((item) => item.address === address)
 }
 
 function candidateCurrentValue(address: string): string {
