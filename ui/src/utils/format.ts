@@ -17,3 +17,14 @@ export function formatBytes(value: number | undefined): string {
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} Ko`
   return `${formatNumber(bytes)} o`
 }
+
+// Nom de profil/cible Trainer nettoyé (extension retirée, caractères non
+// alphanumériques remplacés) — partagé entre ExpertView.vue et les panneaux
+// extraits (AOB, pointer chains) qui suggèrent tous deux un nom par défaut.
+export function cleanTrainerName(value: string, fallback: string): string {
+  const cleaned = value
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+  return cleaned || fallback
+}

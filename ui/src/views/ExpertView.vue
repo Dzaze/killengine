@@ -10,9 +10,6 @@ import {
   type CodePatchResult,
   type CodePatchSuggestion,
   type CodePatchSuggestionResult,
-  type PointerChainInfo,
-  type PointerChainResolveResult,
-  type PointerScanResult,
   type StableLocatorSuggestion,
   type UiStringCandidate,
   type UiStringInvestigationFinishResult,
@@ -40,8 +37,10 @@ import SaveFilesPanel from '@/components/expert/SaveFilesPanel.vue'
 import UnknownScanPanel from '@/components/expert/UnknownScanPanel.vue'
 import ExactScanPanel from '@/components/expert/ExactScanPanel.vue'
 import CandidatePanel from '@/components/expert/CandidatePanel.vue'
+import PointerChainScanPanel from '@/components/expert/PointerChainScanPanel.vue'
 import { useExpertWriteSelection } from '@/composables/useExpertWriteSelection'
-import { formatNumber, formatBytes } from '@/utils/format'
+import { useExpertPointerChain } from '@/composables/useExpertPointerChain'
+import { formatNumber, formatBytes, cleanTrainerName } from '@/utils/format'
 import { valueTypeOptions, findWhatWritesSizeForType } from '@/utils/valueTypes'
 
 const store = useAppStore()
@@ -62,15 +61,11 @@ const {
   watchedCandidate,
 } = useExpertWriteSelection()
 
-// Phase 14 — Pointer Chains
-const pointerScanAddress = ref('')
-const pointerScanValueType = ref('Int32')
-const pointerScanMaxDepth = ref(3)
-const pointerScanMaxOffset = ref(0x1000)
-const pointerScanResult = ref<PointerScanResult | null>(null)
-const pointerScanBusy = ref(false)
-const pointerResolveResult = ref<PointerChainResolveResult | null>(null)
-const selectedPointerChainIndex = ref<number>(-1)
+// Phase 14 — Pointer Chains : seuls pointerScanValueType/savePointerChain
+// restent necessaires ici, pour saveStableLocator() ci-dessous (le reste de
+// l'etat/des fonctions vit desormais uniquement dans PointerChainScanPanel.vue,
+// meme singleton partage via useExpertPointerChain()).
+const { pointerScanValueType, savePointerChain, resetPointerChainState } = useExpertPointerChain()
 
 // Suggestion de chaîne de pointeurs après une écriture confirmée sur une seule
 // adresse : évite de repasser manuellement par le panneau Pointer Chains.
@@ -360,84 +355,6 @@ async function toggleUiStringLiveInvestigation() {
   }
 }
 
-async function runPointerScan() {
-  if (!pointerScanAddress.value.trim()) return
-  pointerScanBusy.value = true
-  pointerScanResult.value = null
-  pointerResolveResult.value = null
-  try {
-    const controller = backend.getController()
-    if (controller.scanPointerChains) {
-      const result = await controller.scanPointerChains(pointerScanAddress.value, {
-        maxDepth: pointerScanMaxDepth.value,
-        maxOffset: pointerScanMaxOffset.value,
-        maxResults: 100,
-        onlyModuleBase: true,
-      })
-      pointerScanResult.value = result
-    } else {
-      pointerScanResult.value = { success: false, error: 'Methode backend indisponible (mock mode).' }
-    }
-  } catch (e) {
-    pointerScanResult.value = { success: false, error: String(e) }
-  } finally {
-    pointerScanBusy.value = false
-  }
-}
-
-async function testPointerChain(chain: PointerChainInfo) {
-  try {
-    const controller = backend.getController()
-    if (controller.resolvePointerChain) {
-      pointerResolveResult.value = await controller.resolvePointerChain(chain)
-    }
-  } catch (e) {
-    pointerResolveResult.value = { success: false, error: String(e) }
-  }
-}
-
-function usePointerChainAsCandidate(chain: PointerChainInfo) {
-  // Place la chaîne comme adresse candidate pour écriture (test immédiat).
-  void testPointerChain(chain).then(() => {
-    if (pointerResolveResult.value?.success && pointerResolveResult.value.finalAddress) {
-      store.selectedCandidateAddress = pointerResolveResult.value.finalAddress
-      store.exactScanType = pointerScanValueType.value
-    }
-  })
-}
-
-async function savePointerChain(chain: PointerChainInfo) {
-  const profileName = window.prompt('Nom du profil :', cleanTrainerName(store.processName || 'Jeu cible', 'Jeu cible'))
-  if (!profileName) return
-  const targetName = window.prompt('Nom de la cible :', 'Ressource')
-  if (!targetName) return
-  try {
-    const controller = backend.getController()
-    if (controller.savePointerChainProfileTarget) {
-      const result = await controller.savePointerChainProfileTarget(
-        profileName,
-        targetName,
-        chain,
-        pointerScanValueType.value,
-        'Chaine de pointeurs auto-detectee',
-      )
-      if (!result.success) {
-        window.alert('Erreur sauvegarde profil : ' + (result.error ?? 'inconnue'))
-      }
-    }
-  } catch (e) {
-    window.alert('Erreur : ' + String(e))
-  }
-}
-
-async function watchPointerChain(chain: PointerChainInfo) {
-  await store.addWatchedPointerChain(
-    { module: chain.module, baseOffset: chain.baseOffset, offsets: chain.offsets },
-    pointerScanValueType.value,
-    chain.label || `Chaine 0x${pointerScanAddress.value}`,
-  )
-}
-
 async function suggestStableLocator(addressHex: string) {
   if (!addressHex.trim()) return
   stableLocatorBusy.value = true
@@ -464,23 +381,6 @@ function saveStableLocator() {
     pointerScanValueType.value = store.exactScanType
     void savePointerChain(stableLocatorResult.value.bestChain)
   }
-}
-
-function bookmarkPointerChain(chain: PointerChainInfo) {
-  store.addWorkspaceBookmark({
-    kind: 'pointer',
-    label: chain.label || `Pointer chain ${chain.depth}`,
-    address: pointerScanAddress.value,
-    type: pointerScanValueType.value,
-    note: `profondeur ${chain.depth}`,
-    payload: {
-      chain,
-      targetAddress: pointerScanAddress.value,
-      maxDepth: pointerScanMaxDepth.value,
-      maxOffset: pointerScanMaxOffset.value,
-      resolved: pointerResolveResult.value?.success ? pointerResolveResult.value.finalAddress : undefined,
-    },
-  })
 }
 
 async function scanAobSignature() {
@@ -875,14 +775,6 @@ async function applyForceHookValue() {
   } finally {
     forceHookBusy.value = false
   }
-}
-
-function cleanTrainerName(value: string, fallback: string) {
-  const cleaned = value
-    .replace(/\.[^.]+$/, '')
-    .replace(/[^a-z0-9_-]+/gi, '_')
-    .replace(/^_+|_+$/g, '')
-  return cleaned || fallback
 }
 
 function defaultTrainerProfileName() {
@@ -2444,10 +2336,7 @@ async function startNewScan() {
 
   clearCandidateSelection()
 
-  pointerScanAddress.value = ''
-  pointerScanResult.value = null
-  pointerResolveResult.value = null
-  selectedPointerChainIndex.value = -1
+  resetPointerChainState()
 
   stableLocatorResult.value = null
   stableLocatorForAddress.value = ''
@@ -3657,120 +3546,7 @@ onMounted(() => {
 
       <InjectionPanel v-show="showStep('persist')" />
 
-      <section v-show="showStep('inspect')" class="panel pointer-chain-panel risk-read">
-        <div class="panel-title">
-          <div class="panel-heading">
-            <h2>Pointer Chains <span class="hint-inline">(jeux modernes / applications dynamiques)</span></h2>
-            <InfoDot topic="pointerChains" />
-            <RiskBadge level="read" />
-          </div>
-          <span v-if="pointerScanResult">{{ formatNumber(pointerScanResult.chainCount) }} chaine(s)</span>
-        </div>
-        <p class="panel-hint">{{ $t('help.pointerChains.when') }}</p>
-        <p class="hint">
-          Pour les jeux modernes et applications avec allocations dynamiques, les ressources changent souvent d'adresse.
-          Trouve d'abord l'adresse avec un scan normal, puis utilise le scanner de pointeurs pour
-          decouvrir une chaine stable qui survivra aux redemarrages.
-        </p>
-        <div class="controls pointer-chain-controls">
-          <input
-            v-model="pointerScanAddress"
-            class="input"
-            placeholder="Adresse cible (0x...)"
-            :disabled="store.scanBusy || !store.isAttached"
-          />
-          <select v-model="pointerScanValueType" class="input select">
-            <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
-          </select>
-          <input
-            v-model.number="pointerScanMaxDepth"
-            type="number"
-            min="1"
-            max="5"
-            class="input"
-            placeholder="Profondeur"
-            title="Nombre de niveaux de dereferencement"
-          />
-          <input
-            v-model.number="pointerScanMaxOffset"
-            type="number"
-            min="0"
-            step="16"
-            class="input"
-            placeholder="Offset max"
-            title="Offset maximum entre pointeur et cible"
-          />
-          <button
-            class="btn btn-primary"
-            :disabled="!pointerScanAddress.trim() || store.scanBusy || !store.isAttached"
-            @click="runPointerScan()"
-          >
-            <span v-if="pointerScanBusy" class="btn-spinner" aria-hidden="true"></span>
-            <span>{{ pointerScanBusy ? 'Scan...' : 'Scanner les pointeurs' }}</span>
-          </button>
-        </div>
-        <div v-if="pointerScanResult" class="metrics">
-          <span>Chaines: {{ formatNumber(pointerScanResult.chainCount) }}</span>
-          <span>Pointeurs scannes: {{ formatNumber(pointerScanResult.pointersScanned) }}</span>
-          <span>Bytes: {{ formatBytes(pointerScanResult.bytesScanned) }}</span>
-          <span v-if="pointerScanResult.elapsedMs">Temps: {{ formatNumber(pointerScanResult.elapsedMs) }} ms</span>
-          <span v-if="pointerScanResult.partial">Resultat partiel</span>
-        </div>
-        <div v-if="pointerScanResult?.chains?.length" class="pointer-chain-list">
-          <div
-            v-for="(chain, index) in pointerScanResult.chains.slice(0, 20)"
-            :key="index"
-            class="pointer-chain-row"
-            :class="{ selected: selectedPointerChainIndex === index }"
-          >
-            <label class="candidate-check">
-              <input
-                type="radio"
-                :value="index"
-                v-model.number="selectedPointerChainIndex"
-              />
-            </label>
-            <div class="pointer-chain-info">
-              <strong>{{ chain.label }}</strong>
-              <span class="chain-depth">profondeur {{ chain.depth }}</span>
-            </div>
-            <div class="pointer-chain-actions">
-              <button class="btn btn-secondary compact" @click="testPointerChain(chain)">
-                Tester
-              </button>
-              <button
-                class="btn btn-secondary compact"
-                @click="usePointerChainAsCandidate(chain)"
-              >
-                Utiliser
-              </button>
-              <button
-                class="btn btn-primary compact"
-                @click="savePointerChain(chain)"
-              >
-                Sauver profil
-              </button>
-              <button
-                class="btn btn-secondary compact"
-                @click="bookmarkPointerChain(chain)"
-              >
-                Note
-              </button>
-              <button
-                class="btn btn-secondary compact"
-                title="Surveille cette chaine en live (adresse re-resolue a chaque cycle) dans le panneau Watch chaines de pointeurs."
-                @click="watchPointerChain(chain)"
-              >
-                Watch
-              </button>
-            </div>
-          </div>
-        </div>
-        <p v-if="pointerScanResult?.error" class="error">{{ pointerScanResult.error }}</p>
-        <p v-if="pointerResolveResult" class="hint">
-          Resolution : {{ pointerResolveResult.success ? 'OK 0x' + pointerResolveResult.finalAddress : 'ECHEC ' + pointerResolveResult.error }}
-        </p>
-      </section>
+      <PointerChainScanPanel v-show="showStep('inspect')" />
 
       <GroupScanPanel v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
       <PointerChainWatchPanel v-show="showStep('inspect')" />
