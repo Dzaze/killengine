@@ -13156,15 +13156,18 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             }
         }
     } else if (tool == "trainer_list_features") {
-        actionResult = callVueStoreAction("getTrainerFeaturesSnapshot", {});
-        if (actionResult.value("success").toBool()) {
-            const QVariantList features = actionResult.value("result").toList();
-            result["workflowStatus"] = "trainer_features_listed";
-            result["message"] = features.isEmpty()
-                ? QString("Trainer : aucune feature locale pour le moment.")
-                : QString("Trainer : %1 feature(s) locale(s) trouvée(s). Tu peux en créer une nouvelle ou en gérer l'activation dans l'onglet Trainer.")
-                      .arg(features.size());
-        }
+        // PHASE 169 : callVueStoreAction() ici serait un appel a
+        // runJavaScript() REENTRANT depuis l'interieur meme du Q_INVOKABLE
+        // (startSmartSearch) que le JS de cette page est en train d'attendre
+        // -- confirme en direct (PHASE 168/169, docs/PHASE_TRACKER.md) : le
+        // callback JS n'arrive jamais dans les 5s, l'outil echoue a 100% par
+        // timeout. getTrainerFeaturesSnapshot() est une lecture pure, deja
+        // disponible directement dans le meme contexte JS que l'appelant --
+        // on delegue donc la lecture + le message a ui/src/stores/app.ts
+        // (sendMessage, juste apres le retour de startSmartSearch()) au lieu
+        // de faire un aller-retour C++ inutile.
+        result["needsLocalStoreAction"] = "trainer_list_features";
+        result["actionStatus"] = "pending_local_action";
     } else if (tool == "trainer_create_write") {
         const QString trainerAddress = args.value("address").toString().trimmed();
         const QString trainerValue = args.value("value").toString().trimmed();
@@ -13229,17 +13232,20 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         }
         feature["locatorKind"] = locatorKind;
 
-        QVariantList storeArgs;
-        storeArgs.append(feature);
-        actionResult = callVueStoreAction("createTrainerFeature", storeArgs);
-        if (actionResult.value("success").toBool()) {
-            result["workflowStatus"] = "trainer_feature_created";
-            result["message"] = locatorKind == "absolute"
-                ? QString("Trainer : feature write créée pour %1 (%2 = %3), mais aucun locator résilient trouvé — elle reste en adresse absolue brute et ne survivra probablement pas à un relaunch ou un changement de scène du process cible. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.")
-                      .arg(trainerAddress, feature.value("valueType").toString(), trainerValue)
-                : QString("Trainer : feature write créée pour %1 (%2 = %3), %4. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.")
-                      .arg(trainerAddress, feature.value("valueType").toString(), trainerValue, locatorSummary);
-        }
+        // PHASE 169 : la resolution de locator ci-dessus (generateAobSignature/
+        // scanAobPattern/scanPointerChains) reste un appel C++ direct, aucun
+        // probleme de reentrance -- seule la creation effective de la feature
+        // (createTrainerFeature) passait par callVueStoreAction() et heurtait
+        // le meme timeout systematique que trainer_list_features ci-dessus.
+        // Meme delegation : le JS cree la feature localement et construit le
+        // message de succes avec les memes donnees (locatorKind/locatorSummary).
+        result["needsLocalStoreAction"] = "trainer_create_write";
+        result["actionStatus"] = "pending_local_action";
+        result["pendingFeature"] = feature;
+        result["locatorSummary"] = locatorSummary;
+        result["pendingAddress"] = trainerAddress;
+        result["pendingValueType"] = feature.value("valueType");
+        result["pendingValue"] = trainerValue;
     } else if (tool == "trainer_delete_feature") {
         const int trainerId = args.value("id").toInt();
         if (trainerId <= 0) {
@@ -13248,11 +13254,10 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             stampIntent(&result);
             return result;
         }
-        actionResult = callVueStoreAction("deleteTrainerFeature", QVariantList{trainerId});
-        if (actionResult.value("success").toBool()) {
-            result["workflowStatus"] = "trainer_feature_deleted";
-            result["message"] = QString("Trainer : suppression demandée pour la feature #%1.").arg(trainerId);
-        }
+        // PHASE 169 : meme raison que trainer_list_features ci-dessus.
+        result["needsLocalStoreAction"] = "trainer_delete_feature";
+        result["actionStatus"] = "pending_local_action";
+        result["pendingTrainerId"] = trainerId;
     } else if (tool == "trainer_apply_request" || tool == "trainer_restore_request") {
         const bool restore = tool == "trainer_restore_request";
         const bool all = args.value("all").toBool();
