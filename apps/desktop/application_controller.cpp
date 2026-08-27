@@ -18046,26 +18046,45 @@ QVariantMap ApplicationController::callVueStoreAction(const QString& action, con
         "})()"
     ).arg(QString::fromUtf8(callArgsJson));
 
-    QVariant jsResult;
-    bool finished = false;
+    // Etat partage sur le tas (pas de capture par reference sur des
+    // variables locales) : runJavaScript() peut invoquer son callback bien
+    // apres l'expiration du timeout ci-dessous si la reponse IPC du
+    // renderer est en retard (observe en direct : le callback pour
+    // getTrainerFeaturesSnapshot pouvait arriver ~5s+ apres l'appel). Si la
+    // fonction avait deja retourne (timeout ecoule), l'ancienne capture
+    // [&] ecrivait alors dans une pile deja depilee/reutilisee par un appel
+    // suivant -> corruption memoire, crash SIGSEGV reproduit sur "liste le
+    // trainer" (PHASE 168). QPointer detecte automatiquement la destruction
+    // de la QEventLoop locale, donc le callback tardif devient un no-op sur.
+    struct JsCallState {
+        QVariant jsResult;
+        bool finished = false;
+        QPointer<QEventLoop> loop;
+    };
+    auto state = std::make_shared<JsCallState>();
+
     QEventLoop loop;
+    state->loop = &loop;
     QTimer timeoutTimer;
     timeoutTimer.setSingleShot(true);
     QObject::connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
-    m_webEnginePage->runJavaScript(script, [&](const QVariant& value) {
-        jsResult = value;
-        finished = true;
-        loop.quit();
+    m_webEnginePage->runJavaScript(script, [state](const QVariant& value) {
+        state->jsResult = value;
+        state->finished = true;
+        if (state->loop) {
+            state->loop->quit();
+        }
     });
     timeoutTimer.start(5000);
     loop.exec();
+    state->loop = nullptr;
 
-    if (!finished) {
+    if (!state->finished) {
         result["error"] = "Timeout (5s) en attendant la reponse JS -- la page a-t-elle bien fini de charger le store ?";
         return result;
     }
 
-    const QVariantMap jsMap = jsResult.toMap();
+    const QVariantMap jsMap = state->jsResult.toMap();
     const bool jsSuccess = jsMap.value("success", false).toBool();
     result["success"] = jsSuccess;
     if (jsSuccess) {
