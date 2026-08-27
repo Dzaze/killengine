@@ -66,6 +66,7 @@ add_executable(killengine_integration_tests
     integration/test_breakpoint_arbiter_runtime.cpp
     integration/test_debug_detach_reproducer.cpp
     integration/test_display_vs_source_target.cpp
+    integration/test_pointer_scanner_runtime.cpp
 )
 target_link_libraries(killengine_integration_tests PRIVATE
     killcore

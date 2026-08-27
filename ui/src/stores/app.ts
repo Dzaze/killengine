@@ -151,12 +151,14 @@ export interface TrainerFeature {
   name: string
   processName: string
   action: 'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch' | 'clr_write'
-  locatorKind: 'absolute' | 'aob' | 'clr_field'
+  locatorKind: 'absolute' | 'aob' | 'clr_field' | 'pointer_chain'
   address: string
   valueType: string
   value: string
   patchBytes?: string
   aobPattern?: string
+  /** PHASE 162 : base statique + offsets, re-resolue a chaque activation via resolvePointerChain — utile pour une adresse dans un objet alloue dynamiquement (reallouee a chaque partie), contrairement a 'absolute'. Voir docs/PHASE_TRACKER.md PHASE 162. */
+  pointerChain?: { module: string, baseOffset: string, offsets: string[] }
   clrTypeSubstring?: string
   clrIdentityField?: string
   clrIdentityValue?: string
@@ -1703,6 +1705,12 @@ let nextWatchedChainId = 1
       value: String(input.value ?? writeValue.value ?? ''),
       patchBytes: input.patchBytes,
       aobPattern: input.aobPattern,
+      // PHASE 163 : oubli de PHASE 162 corrige -- sans cette ligne, un appel
+      // createTrainerFeature({locatorKind:'pointer_chain', pointerChain: {...}})
+      // (ex. depuis le nouveau chemin Assistant trainer_create_write) perdait
+      // silencieusement la chaine, laissant resolveTrainerFeatureAddress
+      // echouer avec "Chaine de pointeurs manquante."
+      pointerChain: input.pointerChain,
       clrTypeSubstring: input.clrTypeSubstring,
       clrIdentityField: input.clrIdentityField,
       clrIdentityValue: input.clrIdentityValue,
@@ -1805,9 +1813,18 @@ let nextWatchedChainId = 1
     }
   }
 
+  // PHASE 160 : ce garde-fou couvrait seulement 'patch' a l'origine ; generalise a
+  // toute feature avec locatorKind 'aob' (freeze_polling/freeze_breakpoint/write inclus),
+  // car resolveTrainerFeatureAddress ci-dessous re-resout desormais l'AOB pour ces actions
+  // aussi, pas seulement pour patch.
   function trainerFeaturePatchBlockReason(feature: TrainerFeature): string {
-    if (feature.action !== 'patch') return ''
-    if (!feature.patchBytes?.trim()) return 'Patch incomplet : bytes manquants.'
+    if (feature.action === 'patch' && !feature.patchBytes?.trim()) return 'Patch incomplet : bytes manquants.'
+    if (feature.locatorKind === 'pointer_chain') {
+      if (!feature.pointerChain || feature.pointerChain.offsets.length === 0) {
+        return 'Chaîne de pointeurs manquante : génère-la avant d\'activer.'
+      }
+      return ''
+    }
     if (feature.locatorKind !== 'aob') return ''
     if (!feature.aobPattern?.trim()) return 'AOB manquant : sauvegarde une signature stable avant activation.'
     const quality = trainerFeatureSignatureQuality(feature)
@@ -1820,16 +1837,51 @@ let nextWatchedChainId = 1
     return ''
   }
 
-  async function resolveTrainerPatchAddress(feature: TrainerFeature): Promise<{ address: string, error: string }> {
-    if (feature.action !== 'patch' || feature.locatorKind !== 'aob' || !feature.aobPattern?.trim()) {
+  // PHASE 160 : renommee depuis resolveTrainerPatchAddress — re-resout desormais l'adresse
+  // AOB pour n'importe quelle action Trainer (write/freeze_polling/freeze_breakpoint/patch),
+  // pas seulement patch. Avant ce correctif, freeze_polling/freeze_breakpoint utilisaient
+  // feature.address tel quel sans jamais re-scanner, donc un locator 'aob' ne servait a rien
+  // pour ces actions (voir docs/PHASE_TRACKER.md PHASE 160).
+  // PHASE 162 : resolution pointer chain — reutilise resolvePointerChain deja expose et
+  // deja utilise par le panneau lecture-seule "Pointer Chain Watch" (addWatchedPointerChain).
+  // Contrairement a l'AOB (signe du code/data statique), c'est la bonne technique pour une
+  // adresse logee dans un objet alloue dynamiquement : une base stable (module + offset) est
+  // retraversee via la chaine d'offsets a chaque activation, donc resiliente a la reallocation
+  // d'une partie a l'autre (voir docs/PHASE_TRACKER.md PHASE 162, memoire vampire_survivors_health_freeze).
+  async function resolveTrainerFeaturePointerChain(feature: TrainerFeature): Promise<{ address: string, error: string }> {
+    if (!feature.pointerChain || feature.pointerChain.offsets.length === 0) {
+      return { address: '', error: 'Chaîne de pointeurs manquante.' }
+    }
+    const controller = backend.getController()
+    if (!controller.resolvePointerChain) {
+      return { address: '', error: 'Résolution pointer chain non exposée par ce backend.' }
+    }
+    const resolve = await controller.resolvePointerChain(feature.pointerChain)
+    if (!resolve.success || !resolve.finalAddress) {
+      return { address: '', error: resolve.error || 'Résolution de la chaîne de pointeurs impossible.' }
+    }
+    return { address: String(resolve.finalAddress).replace(/^0x/i, '').toUpperCase(), error: '' }
+  }
+
+  async function resolveTrainerFeatureAddress(feature: TrainerFeature): Promise<{ address: string, error: string }> {
+    if (feature.locatorKind === 'pointer_chain') {
+      return resolveTrainerFeaturePointerChain(feature)
+    }
+    if (feature.locatorKind !== 'aob' || !feature.aobPattern?.trim()) {
       return { address: feature.address, error: '' }
     }
     const controller = backend.getController()
     if (!controller.scanAobPattern) {
       return { address: '', error: 'Scan AOB non expose par ce backend.' }
     }
+    // PHASE 160 : executableOnly reste vrai pour 'patch' (cible forcement du code),
+    // mais doit etre desactive pour write/freeze_polling/freeze_breakpoint — une donnee
+    // (ex. un global statique comme g_health) vit en .data/.bss, pas dans une page
+    // executable, et serait sinon filtree a tort par scanAobPattern (voir region.executable
+    // dans ApplicationController). imageOnly reste vrai dans tous les cas : le locator AOB
+    // suppose une adresse statique dans l'image du module, executable ou non.
     const scan = await controller.scanAobPattern(feature.aobPattern, {
-      executableOnly: true,
+      executableOnly: feature.action === 'patch',
       imageOnly: true,
       maxResults: 2,
     })
@@ -1867,10 +1919,28 @@ let nextWatchedChainId = 1
       addActionLog('trainer', `Feature bloquée: ${feature.name}`, blocked, 'warning')
       return false
     }
+    // PHASE 160 : re-resoudre l'adresse AVANT confirmRiskAction (pas seulement pour 'patch'
+    // comme avant), pour que le dialogue de confirmation montre l'adresse reellement ciblee
+    // et que freeze_polling/freeze_breakpoint/write beneficient aussi d'un locator 'aob' a jour.
+    // clr_write garde sa propre resolution (findClrObjectsByFieldValue), non touchee ici.
+    let resolvedAddress = feature.address
+    if (feature.action !== 'clr_write') {
+      const resolved = await resolveTrainerFeatureAddress(feature)
+      if (resolved.error) {
+        feature.status = 'error'
+        feature.lastError = resolved.error
+        feature.updatedAt = new Date().toISOString()
+        addTrainerFeatureHistory(feature, 'apply_blocked', 'error', resolved.error)
+        addActionLog('trainer', `Feature bloquée: ${feature.name}`, resolved.error, 'error')
+        return false
+      }
+      resolvedAddress = resolved.address
+      feature.address = resolvedAddress
+    }
     const trainerRisk = feature.action === 'patch' ? 'patch' : (feature.action === 'write' && kernelMemoryModeActive.value ? 'injection' : 'write')
     const riskDetail = feature.locatorKind === 'clr_field'
       ? `${feature.action} ${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue} -> ${feature.value}`
-      : `${feature.action} 0x${feature.address} ${feature.valueType} ${feature.value || feature.patchBytes || ''}${feature.action === 'write' && kernelMemoryModeActive.value ? ' via driver kernel' : ''}`
+      : `${feature.action} 0x${resolvedAddress} ${feature.valueType} ${feature.value || feature.patchBytes || ''}${feature.action === 'write' && kernelMemoryModeActive.value ? ' via driver kernel' : ''}`
     if (!await confirmRiskAction(trainerRisk, `Activer feature Trainer: ${feature.name}`, riskDetail)) return false
 
     try {
@@ -1895,18 +1965,18 @@ let nextWatchedChainId = 1
           }
         }
       } else if (feature.action === 'write') {
-        const result = await writeMemoryValueByMode(feature.address, feature.valueType, feature.value)
+        const result = await writeMemoryValueByMode(resolvedAddress, feature.valueType, feature.value)
         ok = result.success === true
         error = result.error ?? ''
       } else if (feature.action === 'freeze_polling') {
-        const result = await controller.setFreezeValue(feature.address, feature.valueType, feature.value, true)
+        const result = await controller.setFreezeValue(resolvedAddress, feature.valueType, feature.value, true)
         ok = result.success === true
         error = result.error ?? ''
       } else if (feature.action === 'freeze_breakpoint') {
         if (!controller.freezeWithBreakpoint) {
           error = 'Freeze BP non expose par ce backend.'
         } else {
-          const result = await controller.freezeWithBreakpoint(feature.address, feature.valueType, feature.value, { mode: 'rewrite' })
+          const result = await controller.freezeWithBreakpoint(resolvedAddress, feature.valueType, feature.value, { mode: 'rewrite' })
           ok = result.success === true
           error = result.error ?? ''
         }
@@ -1914,16 +1984,9 @@ let nextWatchedChainId = 1
         if (!controller.applyCodePatch) {
           error = 'Patch code non expose par ce backend.'
         } else {
-          const resolved = await resolveTrainerPatchAddress(feature)
-          if (resolved.error) {
-            ok = false
-            error = resolved.error
-          } else {
-            feature.address = resolved.address
-            const result = await controller.applyCodePatch(resolved.address, feature.patchBytes ?? '', { verify: true })
-            ok = result.success === true
-            error = result.error ?? ''
-          }
+          const result = await controller.applyCodePatch(resolvedAddress, feature.patchBytes ?? '', { verify: true })
+          ok = result.success === true
+          error = result.error ?? ''
         }
       }
       feature.enabled = ok && isToggleableTrainerAction(feature.action)
@@ -1944,6 +2007,48 @@ let nextWatchedChainId = 1
       addActionLog('trainer', `Feature échouée: ${feature.name}`, String(e), 'error')
       return false
     }
+  }
+
+  // PHASE 162 : genere une chaine de pointeurs pour une TrainerFeature a partir de son
+  // adresse actuelle (typiquement une adresse absolue confirmee par scan, ex. le cas
+  // Vampire Survivors ou l'adresse se realloue a chaque partie — voir memoire
+  // vampire_survivors_health_freeze). Reutilise scanPointerChains, deja expose cote backend
+  // et deja utilise par le panneau lecture-seule Pointer Chain Watch (addWatchedPointerChain).
+  // Plomberie store uniquement ici : pas de declencheur UI ajoute ce tour-ci (TrainerView.vue/
+  // ExpertView.vue sont hors perimetre pour eviter toute collision avec les chantiers PHASE 161/164
+  // en cours en parallele) — a cabler dans une passe UI ulterieure une fois ces fichiers libres.
+  async function generateTrainerFeaturePointerChain(id: number, options?: { maxDepth?: number, maxResults?: number }): Promise<boolean> {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    if (!feature) return false
+    const controller = backend.getController()
+    if (!controller.scanPointerChains) {
+      addActionLog('trainer', `Chaîne de pointeurs indisponible: ${feature.name}`, 'scanPointerChains non exposé par ce backend.', 'warning')
+      return false
+    }
+    // memes defaults que le panneau Pointer Chain Watch (ExpertView.vue) : sans
+    // onlyModuleBase, scanPointerChains fouille tout l'espace memoire du process
+    // (tous les tas, pas seulement les modules statiques) pour trouver des pointeurs
+    // candidats — beaucoup plus lent, et contraire au but recherche ici (une base
+    // STATIQUE). Verifie en direct (KillEngineTestTarget.exe, PHASE 162) : sans ce
+    // flag, un scan a depth=5 depassait largement les 5s d'attente JS du pipe
+    // d'automatisation ; avec onlyModuleBase + depth=3, resolution quasi instantanee.
+    const scan = await controller.scanPointerChains(feature.address, {
+      maxDepth: options?.maxDepth ?? 3,
+      maxResults: options?.maxResults ?? 5,
+      onlyModuleBase: true,
+    })
+    if (!scan.success || !scan.chains || scan.chains.length === 0) {
+      addActionLog('trainer', `Chaîne de pointeurs introuvable: ${feature.name}`, scan.error || 'Aucune chaîne stable trouvée pour cette adresse.', 'warning')
+      return false
+    }
+    const best = scan.chains[0]
+    feature.pointerChain = { module: best.module, baseOffset: best.baseOffset, offsets: best.offsets }
+    feature.locatorKind = 'pointer_chain'
+    feature.updatedAt = new Date().toISOString()
+    addTrainerFeatureHistory(feature, 'pointer_chain_generated', 'success', `${best.module}+${best.baseOffset} → [${best.offsets.join(', ')}]`)
+    addActionLog('trainer', `Chaîne de pointeurs générée: ${feature.name}`, `${best.module}+${best.baseOffset} → [${best.offsets.join(', ')}] (${scan.chains.length} candidate(s))`, 'success')
+    saveTrainerFeatures()
+    return true
   }
 
   async function applyTrainerFeature(id: number) {
@@ -7973,6 +8078,7 @@ async function doEncryptedScan() {
     applyAllTrainerFeatures,
     restoreAllTrainerFeatures,
     getTrainerFeaturesSnapshot,
+    generateTrainerFeaturePointerChain,
   }
   if (typeof window !== 'undefined') {
     window.__killengineAutomationBridge = {
@@ -8319,6 +8425,7 @@ async function doEncryptedScan() {
     createTrainerFeature,
     createTrainerClrFieldFeature,
     createTrainerFeatureFromCheckpoint,
+    generateTrainerFeaturePointerChain,
     applyTrainerFeature,
     restoreTrainerFeature,
     applyAllTrainerFeatures,

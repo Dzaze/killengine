@@ -13179,18 +13179,66 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         QVariantMap feature;
         feature["name"] = args.value("name", "Assistant Trainer write").toString();
         feature["action"] = "write";
-        feature["locatorKind"] = "absolute";
         feature["address"] = trainerAddress;
         feature["valueType"] = trainerValueType.isEmpty() ? QString("Int32") : trainerValueType;
         feature["value"] = trainerValue;
+
+        // PHASE 163 : chercher un locator resilient plutot que de figer
+        // aveuglement en 'absolute' -- une adresse absolue promue en Trainer
+        // sans locator resilient ne survit generalement pas a un relaunch/
+        // changement de scene du process cible (retour d'experience Vampire
+        // Survivors, voir docs/PHASE_TRACKER.md PHASE 160/162/163 et memoire
+        // feedback_freeze_proposal_uses_trainer). On essaie dans l'ordre :
+        // 1) AOB (adresse dans l'image statique du module -- code ou donnee
+        //    statique, PAS un objet alloue dynamiquement) ;
+        // 2) pointer chain (adresse dans un objet alloue dynamiquement,
+        //    atteignable depuis une base statique -- cas heap le plus courant,
+        //    reutilise scanPointerChains deja existant) ;
+        // 3) sinon 'absolute', mais avec un avertissement honnete plutot que
+        //    de laisser croire a une persistance qui n'existe pas.
+        QString locatorKind = "absolute";
+        QString locatorSummary;
+        {
+            const auto signature = generateAobSignature(trainerAddress, QVariantMap{{"beforeBytes", 0}, {"length", 20}});
+            if (signature.value("success").toBool() && !signature.value("codeReadProtected").toBool()) {
+                const QString pattern = signature.value("pattern").toString();
+                const auto quality = signature.value("signatureQuality").toMap();
+                const int fixedBytes = quality.value("fixedBytes").toInt();
+                const int score = quality.value("score").toInt();
+                if (!pattern.isEmpty() && fixedBytes >= 3 && score >= 35) {
+                    // executableOnly=false : une donnee (.data/.bss) n'est jamais
+                    // executable -- meme correctif que PHASE 160 (voir plus haut
+                    // dans ce fichier, resolveTrainerFeatureAddress cote frontend).
+                    const auto scan = scanAobPattern(pattern, QVariantMap{{"executableOnly", false}, {"imageOnly", true}, {"maxResults", 2}});
+                    if (scan.value("success").toBool() && scan.value("matchesFound").toInt() == 1) {
+                        locatorKind = "aob";
+                        feature["aobPattern"] = pattern;
+                        locatorSummary = "verrouillée sur une signature AOB stable (résiste à un relaunch tant que le code/la donnée statique ne change pas de version)";
+                    }
+                }
+            }
+        }
+        if (locatorKind == "absolute") {
+            const auto pointerScan = scanPointerChains(trainerAddress, QVariantMap{{"maxDepth", 3}, {"maxResults", 5}, {"onlyModuleBase", true}});
+            const QVariantList chains = pointerScan.value("chains").toList();
+            if (pointerScan.value("success").toBool() && !chains.isEmpty()) {
+                locatorKind = "pointer_chain";
+                feature["pointerChain"] = chains.first();
+                locatorSummary = "ancrée via une chaîne de pointeurs (résiste à une réallocation de l'objet en mémoire, ex. nouvelle partie)";
+            }
+        }
+        feature["locatorKind"] = locatorKind;
 
         QVariantList storeArgs;
         storeArgs.append(feature);
         actionResult = callVueStoreAction("createTrainerFeature", storeArgs);
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "trainer_feature_created";
-            result["message"] = QString("Trainer : feature write créée pour %1 (%2 = %3). Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.")
-                                  .arg(trainerAddress, feature.value("valueType").toString(), trainerValue);
+            result["message"] = locatorKind == "absolute"
+                ? QString("Trainer : feature write créée pour %1 (%2 = %3), mais aucun locator résilient trouvé — elle reste en adresse absolue brute et ne survivra probablement pas à un relaunch ou un changement de scène du process cible. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.")
+                      .arg(trainerAddress, feature.value("valueType").toString(), trainerValue)
+                : QString("Trainer : feature write créée pour %1 (%2 = %3), %4. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.")
+                      .arg(trainerAddress, feature.value("valueType").toString(), trainerValue, locatorSummary);
         }
     } else if (tool == "trainer_delete_feature") {
         const int trainerId = args.value("id").toInt();
@@ -17953,6 +18001,7 @@ const QSet<QString>& allowedVueStoreActions() {
         QStringLiteral("applyAllTrainerFeatures"),
         QStringLiteral("restoreAllTrainerFeatures"),
         QStringLiteral("getTrainerFeaturesSnapshot"),
+        QStringLiteral("generateTrainerFeaturePointerChain"),
     };
     return kAllowed;
 }
