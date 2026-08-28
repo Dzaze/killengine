@@ -16462,6 +16462,11 @@ QVariantMap ApplicationController::loadProfile(const QString& profileName) {
         targetEntry["type"] = killcore::valueTypeToString(target.type);
         targetEntry["locator"] = target.locator.toString();
         targetEntry["description"] = target.description;
+        QVariantList dependencies;
+        for (const auto& dependency : target.dependsOn) {
+            dependencies.append(dependency);
+        }
+        targetEntry["dependsOn"] = dependencies;
         switch (target.locator.kind) {
             case killcore::LocatorKind::Absolute:
                 targetEntry["locatorKind"] = "absolute";
@@ -16635,6 +16640,7 @@ QVariantMap ApplicationController::comparePointerMapAcrossRestart(const QString&
             case killcore::LocatorKind::ModuleOffset: return "module_offset";
             case killcore::LocatorKind::Absolute:     return "absolute";
             case killcore::LocatorKind::PointerChain: return "pointer_chain";
+            case killcore::LocatorKind::ClrField:     return "clr_field";
         }
         return "unknown";
     };
@@ -16670,6 +16676,142 @@ QVariantMap ApplicationController::comparePointerMapAcrossRestart(const QString&
     result["invalidCount"] = invalidCount;
     result["unsupportedCount"] = unsupportedCount;
     result["error"] = "";
+    return result;
+}
+
+QVariantMap ApplicationController::exportPointerMap(const QString& profileName) {
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString cleanProfileName = profileName.trimmed();
+    if (cleanProfileName.isEmpty()) {
+        result["error"] = "Nom de profil requis.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    const QJsonObject pointerMap = killcore::ProfileStore::exportPointerMap(profile);
+    const QJsonDocument doc(pointerMap);
+    result["success"] = true;
+    result["profileName"] = cleanProfileName;
+    result["targetCount"] = pointerMap.value("targetCount").toInt();
+    result["json"] = QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
+    return result;
+}
+
+QVariantMap ApplicationController::importPointerMap(
+    const QString& profileName,
+    const QString& pointerMapJson,
+    const QVariantMap& options) {
+
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString cleanProfileName = profileName.trimmed();
+    if (cleanProfileName.isEmpty()) {
+        result["error"] = "Nom de profil requis.";
+        return result;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(pointerMapJson.trimmed().toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        result["error"] = "JSON pointer map invalide : " + parseError.errorString();
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    const bool profileExists = killcore::ProfileStore::load(path, &profile);
+    if (!profileExists) {
+        const QJsonObject root = doc.object();
+        profile.gameName = cleanProfileName;
+        profile.executableName = root.value("sourceExecutableName").toString(m_processName);
+        profile.executableHash = root.value("sourceExecutableHash").toString();
+    }
+
+    const bool replaceExisting = options.value("replaceExisting", false).toBool();
+    const auto importResult = killcore::ProfileStore::mergePointerMap(&profile, doc.object(), replaceExisting);
+    if (!killcore::ProfileStore::save(profile, path)) {
+        result["error"] = "Impossible de sauvegarder le profil.";
+        return result;
+    }
+
+    QVariantList messages;
+    for (const auto& message : importResult.messages) {
+        messages.append(message);
+    }
+    result["success"] = true;
+    result["profileName"] = cleanProfileName;
+    result["isNewProfile"] = !profileExists;
+    result["imported"] = importResult.imported;
+    result["replaced"] = importResult.replaced;
+    result["skipped"] = importResult.skipped;
+    result["messages"] = messages;
+    result["targetCount"] = profile.targets.size();
+    return result;
+}
+
+QVariantMap ApplicationController::setProfileTargetDependencies(
+    const QString& profileName,
+    const QString& targetName,
+    const QVariantList& dependencyNames) {
+
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString cleanProfileName = profileName.trimmed();
+    const QString cleanTargetName = targetName.trimmed();
+    if (cleanProfileName.isEmpty() || cleanTargetName.isEmpty()) {
+        result["error"] = "Profil et cible requis.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    QStringList cleanDependencies;
+    for (const auto& item : dependencyNames) {
+        const QString dependency = item.toString().trimmed();
+        if (!dependency.isEmpty()
+            && dependency.compare(cleanTargetName, Qt::CaseInsensitive) != 0
+            && !cleanDependencies.contains(dependency)) {
+            cleanDependencies.append(dependency);
+        }
+    }
+
+    for (auto& target : profile.targets) {
+        if (target.name.compare(cleanTargetName, Qt::CaseInsensitive) == 0) {
+            target.dependsOn = cleanDependencies;
+            if (!killcore::ProfileStore::save(profile, path)) {
+                result["error"] = "Impossible de sauvegarder le profil.";
+                return result;
+            }
+
+            result["success"] = true;
+            result["profileName"] = cleanProfileName;
+            result["targetName"] = target.name;
+            QVariantList dependencies;
+            for (const auto& dependency : cleanDependencies) {
+                dependencies.append(dependency);
+            }
+            result["dependsOn"] = dependencies;
+            result["dependencyCount"] = cleanDependencies.size();
+            return result;
+        }
+    }
+
+    result["error"] = "Cible introuvable dans le profil.";
     return result;
 }
 

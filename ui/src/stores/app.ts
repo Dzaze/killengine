@@ -2559,6 +2559,17 @@ let nextWatchedChainId = 1
             signatureMatches: feature.signatureMatches,
           },
         )
+      } else if (feature.locatorKind === 'pointer_chain' && feature.pointerChain) {
+        if (!controller.savePointerChainProfileTarget) {
+          throw new Error('Sauvegarde pointer chain non exposee par ce backend.')
+        }
+        result = await controller.savePointerChainProfileTarget(
+          profileName,
+          feature.name,
+          feature.pointerChain,
+          feature.valueType,
+          `Trainer ${feature.action} = ${feature.value}`,
+        )
       } else {
         result = await controller.saveProfileTarget(
           profileName,
@@ -2567,6 +2578,25 @@ let nextWatchedChainId = 1
           feature.valueType,
           `Trainer ${feature.action} = ${feature.value}`,
         )
+      }
+      if (result.success !== false && feature.action !== 'patch') {
+        const dependencyNames = (feature.dependsOn ?? [])
+          .map((dependencyId) => trainerFeatures.value.find((item) => item.id === dependencyId)?.name?.trim() ?? '')
+          .filter((dependencyName, index, all) => dependencyName.length > 0 && all.indexOf(dependencyName) === index)
+        if (!controller.setProfileTargetDependencies) {
+          if (dependencyNames.length > 0) {
+            throw new Error('Persistance des dépendances Trainer non exposee par ce backend.')
+          }
+        } else {
+          const dependencyResult = await controller.setProfileTargetDependencies(profileName, feature.name, dependencyNames)
+          if (dependencyResult.success === false) {
+            result = {
+              ...result,
+              success: false,
+              error: `Cible sauvegardee, dependances non sauvegardees : ${String(dependencyResult.error ?? 'erreur inconnue')}`,
+            }
+          }
+        }
       }
       feature.updatedAt = new Date().toISOString()
       feature.lastError = result.success === false ? String(result.error ?? 'Sauvegarde profil echouee.') : ''

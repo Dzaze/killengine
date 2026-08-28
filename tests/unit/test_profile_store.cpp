@@ -16,6 +16,8 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -53,6 +55,7 @@ Profile buildFullProfile() {
     pointerChainTarget.locator.pointerChain.module = "KillEngineTestTarget.exe";
     pointerChainTarget.locator.pointerChain.baseOffset = 0x12345;
     pointerChainTarget.locator.pointerChain.offsets = {0x10, 0x28, 0x8};
+    pointerChainTarget.dependsOn = {"Money", "ManagedHealth"};
     profile.targets.append(pointerChainTarget);
 
     ProfileTarget clrFieldTarget;
@@ -146,6 +149,7 @@ TEST(ProfileStore, RoundTripsFullProfileExactly) {
         EXPECT_EQ(b.locator.clrField.identityField, a.locator.clrField.identityField) << i;
         EXPECT_EQ(b.locator.clrField.identityValue, a.locator.clrField.identityValue) << i;
         EXPECT_EQ(b.locator.clrField.targetField, a.locator.clrField.targetField) << i;
+        EXPECT_EQ(b.dependsOn, a.dependsOn) << i;
     }
 
     ASSERT_EQ(loaded.patches.size(), original.patches.size());
@@ -243,6 +247,63 @@ TEST(ProfileStore, LoadsOldProfileMissingNewerFieldsAsEmptyNotCrash) {
     EXPECT_TRUE(loaded.patches.isEmpty());
     EXPECT_TRUE(loaded.autoAsmScripts.isEmpty());
     EXPECT_TRUE(loaded.luaScripts.isEmpty());
+    EXPECT_TRUE(loaded.targets[0].dependsOn.isEmpty());
+}
+
+TEST(ProfileStore, ExportPointerMapIncludesOnlyPointerChainsWithMetadata) {
+    const Profile profile = buildFullProfile();
+
+    const QJsonObject pointerMap = ProfileStore::exportPointerMap(profile);
+
+    EXPECT_EQ(pointerMap.value("format").toString(), QStringLiteral("killengine.pointer_map"));
+    EXPECT_EQ(pointerMap.value("formatVersion").toInt(), 1);
+    EXPECT_EQ(pointerMap.value("sourceGameName").toString(), profile.gameName);
+    const QJsonArray targets = pointerMap.value("targets").toArray();
+    ASSERT_EQ(targets.size(), 1);
+
+    const QJsonObject target = targets[0].toObject();
+    EXPECT_EQ(target.value("name").toString(), QStringLiteral("PlayerHealth"));
+    EXPECT_EQ(target.value("locator").toObject().value("kind").toString(), QStringLiteral("pointer_chain"));
+    const QJsonArray dependencies = target.value("dependsOn").toArray();
+    ASSERT_EQ(dependencies.size(), 2);
+    EXPECT_EQ(dependencies[0].toString(), QStringLiteral("Money"));
+    EXPECT_EQ(dependencies[1].toString(), QStringLiteral("ManagedHealth"));
+}
+
+TEST(ProfileStore, MergePointerMapSkipsDuplicatesUnlessReplaceRequested) {
+    const Profile source = buildFullProfile();
+    const QJsonObject pointerMap = ProfileStore::exportPointerMap(source);
+
+    Profile destination;
+    destination.gameName = "Destination";
+    destination.executableName = "dest.exe";
+
+    auto firstImport = ProfileStore::mergePointerMap(&destination, pointerMap, false);
+    EXPECT_EQ(firstImport.imported, 1);
+    EXPECT_EQ(firstImport.replaced, 0);
+    EXPECT_EQ(firstImport.skipped, 0);
+    ASSERT_EQ(destination.targets.size(), 1);
+    EXPECT_EQ(destination.targets[0].name, QStringLiteral("PlayerHealth"));
+    EXPECT_EQ(destination.targets[0].dependsOn, QStringList({QStringLiteral("Money"), QStringLiteral("ManagedHealth")}));
+
+    auto duplicateImport = ProfileStore::mergePointerMap(&destination, pointerMap, false);
+    EXPECT_EQ(duplicateImport.imported, 0);
+    EXPECT_EQ(duplicateImport.skipped, 1);
+    ASSERT_EQ(destination.targets.size(), 1);
+
+    QJsonObject replacementMap = pointerMap;
+    QJsonArray targets = replacementMap.value("targets").toArray();
+    QJsonObject replacementTarget = targets[0].toObject();
+    replacementTarget["description"] = "Replacement";
+    targets[0] = replacementTarget;
+    replacementMap["targets"] = targets;
+
+    auto replacementImport = ProfileStore::mergePointerMap(&destination, replacementMap, true);
+    EXPECT_EQ(replacementImport.imported, 1);
+    EXPECT_EQ(replacementImport.replaced, 1);
+    EXPECT_EQ(replacementImport.skipped, 0);
+    ASSERT_EQ(destination.targets.size(), 1);
+    EXPECT_EQ(destination.targets[0].description, QStringLiteral("Replacement"));
 }
 
 TEST(ProfileStore, LoadFailsCleanlyOnMalformedJson) {

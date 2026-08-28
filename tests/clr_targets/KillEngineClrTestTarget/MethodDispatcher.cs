@@ -91,6 +91,11 @@ public sealed class MethodDispatcher
                 waypointX = player.Waypoint.X,
                 waypointY = player.Waypoint.Y,
                 waypointChangeCount = player.WaypointChangeCount,
+                // Chantier "struct-dans-struct-dans-tableau en ecriture" :
+                // oracle independant de ClrMD pour Zones[0].Origin.X/Y.
+                zone0OriginX = player.Inventory.Zones[0].Origin.X,
+                zone0OriginY = player.Inventory.Zones[0].Origin.Y,
+                zone0Radius = player.Inventory.Zones[0].Radius,
             },
         };
     }

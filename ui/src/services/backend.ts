@@ -1418,6 +1418,12 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   resolveProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   /** Roadmap section L — Pointer maps : résout toutes les cibles du profil d'un coup (diagnostic groupé après redémarrage). */
   comparePointerMapAcrossRestart?(profileName: string): Promise<Record<string, unknown>>
+  /** Exporte les cibles pointer_chain d'un profil en JSON partageable. */
+  exportPointerMap?(profileName: string): Promise<Record<string, unknown>>
+  /** Importe/fusionne une pointer map JSON dans un profil existant ou nouveau. */
+  importPointerMap?(profileName: string, pointerMapJson: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  /** Persiste les dépendances Trainer dans la cible de profil native. */
+  setProfileTargetDependencies?(profileName: string, targetName: string, dependencyNames: string[]): Promise<Record<string, unknown>>
   activateProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   saveProfileCodePatch?(
     profileName: string,
@@ -2527,6 +2533,15 @@ class BackendService {
         return { success: false, error: 'Mock backend' }
       },
       async comparePointerMapAcrossRestart(_profileName: string) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async exportPointerMap(_profileName: string) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async importPointerMap(_profileName: string, _pointerMapJson: string, _options: Record<string, unknown>) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async setProfileTargetDependencies(_profileName: string, _targetName: string, _dependencyNames: string[]) {
         return { success: false, error: 'Mock backend' }
       },
       async activateProfileTarget() {

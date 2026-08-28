@@ -855,6 +855,23 @@ public:
     /// status, address, previousAddress}], validCount, invalidCount}.
     Q_INVOKABLE QVariantMap comparePointerMapAcrossRestart(const QString& profileName);
 
+    /// Exporte les cibles pointer_chain d'un profil en JSON partageable.
+    Q_INVOKABLE QVariantMap exportPointerMap(const QString& profileName);
+
+    /// Importe/fusionne une pointer map JSON dans un profil existant ou nouveau.
+    /// options keys: replaceExisting (défaut false).
+    Q_INVOKABLE QVariantMap importPointerMap(
+        const QString& profileName,
+        const QString& pointerMapJson,
+        const QVariantMap& options);
+
+    /// Met à jour les dépendances Trainer persistées dans une cible de profil.
+    /// dependencyNames contient des noms de cibles, pas des ids frontend locaux.
+    Q_INVOKABLE QVariantMap setProfileTargetDependencies(
+        const QString& profileName,
+        const QString& targetName,
+        const QVariantList& dependencyNames);
+
     /// Active une cible de profil pour l'utiliser directement depuis l'Assistant.
     Q_INVOKABLE QVariantMap activateProfileTarget(const QString& profileName, const QString& targetName);
 

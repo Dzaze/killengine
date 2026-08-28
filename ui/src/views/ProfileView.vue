@@ -21,6 +21,7 @@ interface ProfileTargetEntry {
   locator: string
   description: string
   locatorKind?: string
+  dependsOn?: string[]
   clrTypeSubstring?: string
   clrIdentityField?: string
   clrIdentityValue?: string
@@ -370,6 +371,11 @@ function targetResolutionClass(target: ProfileTargetEntry): string {
 // pour éviter de revalider chaque chaîne une par une.
 const pointerMapCompareResult = ref<Record<string, unknown> | null>(null)
 const pointerMapCompareBusy = ref(false)
+const pointerMapExportText = ref('')
+const pointerMapImportText = ref('')
+const pointerMapTransferResult = ref<Record<string, unknown> | null>(null)
+const pointerMapTransferBusy = ref(false)
+const pointerMapReplaceExisting = ref(false)
 const pointerMapResults = computed(
   () => (pointerMapCompareResult.value?.results as Array<Record<string, unknown>>) ?? [],
 )
@@ -388,6 +394,48 @@ async function comparePointerMap() {
     pointerMapCompareResult.value = { success: false, error: String(e) }
   } finally {
     pointerMapCompareBusy.value = false
+  }
+}
+
+async function exportPointerMap() {
+  if (!selectedProfile.value) return
+  pointerMapTransferBusy.value = true
+  try {
+    const controller = backend.getController()
+    if (!controller.exportPointerMap) {
+      pointerMapTransferResult.value = { success: false, error: 'Export pointer map non exposé par ce backend.' }
+      return
+    }
+    const result = await controller.exportPointerMap(selectedProfile.value)
+    pointerMapTransferResult.value = result
+    pointerMapExportText.value = result.success ? String(result.json ?? '') : ''
+  } catch (e) {
+    pointerMapTransferResult.value = { success: false, error: String(e) }
+  } finally {
+    pointerMapTransferBusy.value = false
+  }
+}
+
+async function importPointerMap() {
+  if (!selectedProfile.value || !pointerMapImportText.value.trim()) return
+  pointerMapTransferBusy.value = true
+  try {
+    const controller = backend.getController()
+    if (!controller.importPointerMap) {
+      pointerMapTransferResult.value = { success: false, error: 'Import pointer map non exposé par ce backend.' }
+      return
+    }
+    const result = await controller.importPointerMap(selectedProfile.value, pointerMapImportText.value, {
+      replaceExisting: pointerMapReplaceExisting.value,
+    })
+    pointerMapTransferResult.value = result
+    if (result.success) {
+      await selectProfile(selectedProfile.value)
+    }
+  } catch (e) {
+    pointerMapTransferResult.value = { success: false, error: String(e) }
+  } finally {
+    pointerMapTransferBusy.value = false
   }
 }
 
@@ -916,12 +964,13 @@ onMounted(() => {
               </button>
             </div>
             <div v-if="t.description" class="target-desc">{{ t.description }}</div>
+            <div v-if="t.dependsOn?.length" class="target-desc">Dépend de : {{ t.dependsOn.join(', ') }}</div>
           </div>
         </div>
       </div>
 
       <!-- Roadmap section L — Pointer maps : diagnostic groupé après redémarrage -->
-      <div v-if="profileTargets.length > 0" class="targets-list pointer-map-box">
+      <div v-if="selectedProfile" class="targets-list pointer-map-box">
         <div class="targets-header">
           <h3>Vérifier après redémarrage</h3>
           <button class="btn btn-secondary btn-sm" :disabled="pointerMapCompareBusy" @click="comparePointerMap()">
@@ -958,6 +1007,47 @@ onMounted(() => {
             </div>
           </div>
         </template>
+        <div class="pointer-map-transfer">
+          <div class="transfer-actions">
+            <button class="btn btn-secondary btn-sm" :disabled="pointerMapTransferBusy" @click="exportPointerMap()">
+              {{ pointerMapTransferBusy ? 'Export...' : 'Exporter JSON' }}
+            </button>
+            <label class="replace-toggle">
+              <input v-model="pointerMapReplaceExisting" type="checkbox" />
+              Remplacer les doublons
+            </label>
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="pointerMapTransferBusy || !pointerMapImportText.trim()"
+              @click="importPointerMap()"
+            >
+              Importer
+            </button>
+          </div>
+          <textarea
+            v-model="pointerMapExportText"
+            class="pointer-map-textarea"
+            readonly
+            placeholder="Export JSON des chaînes de pointeurs du profil"
+          ></textarea>
+          <textarea
+            v-model="pointerMapImportText"
+            class="pointer-map-textarea"
+            placeholder="Coller une pointer map JSON à fusionner dans ce profil"
+          ></textarea>
+          <p v-if="pointerMapTransferResult" :class="pointerMapTransferResult.success ? 'hint' : 'error'">
+            <template v-if="pointerMapTransferResult.success">
+              {{ pointerMapTransferResult.imported ?? pointerMapTransferResult.targetCount ?? 0 }} importée(s)
+              <template v-if="Number(pointerMapTransferResult.replaced ?? 0) > 0">
+                · {{ pointerMapTransferResult.replaced }} remplacée(s)
+              </template>
+              <template v-if="Number(pointerMapTransferResult.skipped ?? 0) > 0">
+                · {{ pointerMapTransferResult.skipped }} ignorée(s)
+              </template>
+            </template>
+            <template v-else>{{ pointerMapTransferResult.error }}</template>
+          </p>
+        </div>
       </div>
 
       <div v-if="profilePatches.length > 0" class="patches-list">
@@ -1424,6 +1514,41 @@ onMounted(() => {
 
 .pointer-map-box {
   margin-top: 12px;
+}
+
+.pointer-map-transfer {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.transfer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.replace-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.pointer-map-textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 12px;
+  resize: vertical;
+  outline: none;
 }
 
 .target-write-input {

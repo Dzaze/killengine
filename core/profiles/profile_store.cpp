@@ -12,6 +12,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+
 namespace killcore {
 
 namespace {
@@ -110,6 +112,17 @@ QJsonObject targetToJson(const ProfileTarget& target) {
     if (!target.description.isEmpty()) {
         json["description"] = target.description;
     }
+    if (!target.dependsOn.isEmpty()) {
+        QJsonArray dependsOnArray;
+        for (const auto& dependency : target.dependsOn) {
+            if (!dependency.trimmed().isEmpty()) {
+                dependsOnArray.append(dependency.trimmed());
+            }
+        }
+        if (!dependsOnArray.isEmpty()) {
+            json["dependsOn"] = dependsOnArray;
+        }
+    }
     return json;
 }
 
@@ -198,6 +211,15 @@ ProfileTarget targetFromJson(const QJsonObject& json) {
     parseValueType(json.value("type").toString("Int32"), &target.type);
     target.locator = locatorFromJson(json.value("locator").toObject());
     target.description = json.value("description").toString();
+    const QJsonArray dependsOnArray = json.value("dependsOn").toArray();
+    for (const auto& item : dependsOnArray) {
+        const QString dependency = item.isString()
+            ? item.toString().trimmed()
+            : QString::number(item.toInt()).trimmed();
+        if (!dependency.isEmpty() && !target.dependsOn.contains(dependency)) {
+            target.dependsOn.append(dependency);
+        }
+    }
     return target;
 }
 
@@ -373,6 +395,72 @@ bool ProfileStore::remove(const QString& profileName) {
     const QString path = profilePath(profileName);
     QFile file(path);
     return file.remove();
+}
+
+QJsonObject ProfileStore::exportPointerMap(const Profile& profile) {
+    QJsonArray targetsArray;
+    for (const auto& target : profile.targets) {
+        if (target.locator.kind == LocatorKind::PointerChain) {
+            targetsArray.append(targetToJson(target));
+        }
+    }
+
+    QJsonObject root;
+    root["format"] = "killengine.pointer_map";
+    root["formatVersion"] = 1;
+    root["sourceGameName"] = profile.gameName;
+    root["sourceExecutableName"] = profile.executableName;
+    root["sourceExecutableHash"] = profile.executableHash;
+    root["targetCount"] = targetsArray.size();
+    root["targets"] = targetsArray;
+    return root;
+}
+
+ProfileStore::PointerMapImportResult ProfileStore::mergePointerMap(
+    Profile* profile,
+    const QJsonObject& pointerMap,
+    bool replaceExisting) {
+
+    PointerMapImportResult result;
+    if (!profile) {
+        result.messages.append("Profil de destination nul.");
+        return result;
+    }
+
+    const QJsonArray targetsArray = pointerMap.value("targets").toArray();
+    for (const auto& item : targetsArray) {
+        const ProfileTarget incoming = targetFromJson(item.toObject());
+        if (incoming.name.trimmed().isEmpty()) {
+            ++result.skipped;
+            result.messages.append("Cible ignoree : nom vide.");
+            continue;
+        }
+        if (incoming.locator.kind != LocatorKind::PointerChain || !incoming.locator.pointerChain.isValid()) {
+            ++result.skipped;
+            result.messages.append(QString("Cible ignoree : %1 n'est pas une chaine de pointeurs valide.").arg(incoming.name));
+            continue;
+        }
+
+        auto existingIt = std::find_if(profile->targets.begin(), profile->targets.end(), [&](const ProfileTarget& target) {
+            return target.name.compare(incoming.name, Qt::CaseInsensitive) == 0;
+        });
+        if (existingIt != profile->targets.end()) {
+            if (!replaceExisting) {
+                ++result.skipped;
+                result.messages.append(QString("Cible ignoree : %1 existe deja.").arg(incoming.name));
+                continue;
+            }
+            *existingIt = incoming;
+            ++result.replaced;
+            ++result.imported;
+            continue;
+        }
+
+        profile->targets.append(incoming);
+        ++result.imported;
+    }
+
+    return result;
 }
 
 } // namespace killcore

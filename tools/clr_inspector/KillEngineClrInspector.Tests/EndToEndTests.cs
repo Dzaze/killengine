@@ -1286,6 +1286,56 @@ public sealed class EndToEndTests
     }
 
     [Fact]
+    public async Task WritePrimitivePath_UpdatesFieldNestedTwoStructLevelsInsideArrayElement()
+    {
+        // Chantier "struct-dans-struct-dans-tableau en ecriture" (docs/
+        // POWER_UP_ROADMAP.md, "Extensions futures non bloquantes") : un
+        // niveau de plus que WritePrimitivePath_UpdatesStructArrayElementFieldDirectly
+        // ci-dessus (Waypoints[i].X, un seul niveau de struct sous l'element
+        // de tableau). Ici Inventory.Zones (Zone[]) et Zone contient lui-meme
+        // un struct Coordinates (Origin) -- Zones[0].Origin.X est donc a DEUX
+        // niveaux de struct sous l'element de tableau (tableau -> Zone ->
+        // Coordinates -> X). Le commentaire d'IsIndexedFieldPrimitiveArray/
+        // IsIndexedFieldStructArray (ClrSession.cs) notait que la composition
+        // generique PathNode/ResolvePathSegment devrait deja gerer ce cas
+        // sans changement de code, juste jamais verifie explicitement -- ce
+        // test le confirme (ou l'infirme) en conditions ClrMD reelles.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+
+        var write = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Inventory.Zones[0].Origin.X"), JsonValue.Create("999")));
+        Assert.True(write!["verified"]!.GetValue<bool>());
+        Assert.Equal(999, write["value"]!.GetValue<int>());
+
+        // Relecture ClrMD independante -- confirme que seul Origin.X a
+        // change : Origin.Y et Radius (poses dans BuildGraph) restent
+        // intacts, et Zones[1] n'est pas affecte.
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var zoneItems = Field(inventoryObj!["fields"]!, "Zones")!["collection"]!["items"]!.AsArray();
+        var zone0Origin = Field(zoneItems[0]!["fields"]!, "Origin")!["fields"]!;
+        Assert.Equal(999, zone0Origin["X"]!.GetValue<int>());
+        Assert.Equal(200, zone0Origin["Y"]!.GetValue<int>());
+        Assert.Equal(5, Field(zoneItems[0]!["fields"]!, "Radius")!.GetValue<int>());
+        var zone1Origin = Field(zoneItems[1]!["fields"]!, "Origin")!["fields"]!;
+        Assert.Equal(300, zone1Origin["X"]!.GetValue<int>());
+        Assert.Equal(400, zone1Origin["Y"]!.GetValue<int>());
+
+        // Oracle independant de ClrMD : pipe de controle de la cible.
+        var status = await PipeClient.CallAsync(TargetPipe, "getStatus");
+        Assert.Equal(999, status!["player"]!["zone0OriginX"]!.GetValue<int>());
+        Assert.Equal(200, status["player"]!["zone0OriginY"]!.GetValue<int>());
+        Assert.Equal(5, status["player"]!["zone0Radius"]!.GetValue<int>());
+    }
+
+    [Fact]
     public async Task PathWriteViaLocator_RefindsObjectAfterCompactingGcAndWritesNewAddress()
     {
         // PHASE 59 -- chantier "mutation par chemin symbolique auto-

@@ -4,7 +4,9 @@
 #include "scanner/scan_types.h"
 
 #include <QString>
+#include <QStringList>
 #include <QList>
+#include <QJsonObject>
 #include <cstdint>
 
 namespace killcore {
@@ -17,6 +19,7 @@ struct ProfileTarget {
     ValueType type{ValueType::Int32};
     Locator   locator;
     QString   description;    // optionnel
+    QStringList dependsOn;    // noms d'autres cibles du profil à activer avant celle-ci
 };
 
 struct ProfileCodePatch {
@@ -88,6 +91,13 @@ struct Profile {
  */
 class ProfileStore {
 public:
+    struct PointerMapImportResult {
+        int imported{0};
+        int replaced{0};
+        int skipped{0};
+        QStringList messages;
+    };
+
     /// Retourne le dossier de stockage des profils.
     static QString profilesDir();
 
@@ -108,6 +118,12 @@ public:
 
     /// Supprime un profil.
     static bool remove(const QString& profileName);
+
+    /// Exporte les cibles pointer_chain d'un profil en JSON partageable.
+    static QJsonObject exportPointerMap(const Profile& profile);
+
+    /// Fusionne une pointer map exportée dans un profil existant ou nouveau.
+    static PointerMapImportResult mergePointerMap(Profile* profile, const QJsonObject& pointerMap, bool replaceExisting);
 };
 
 } // namespace killcore

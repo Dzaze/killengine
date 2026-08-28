@@ -70,6 +70,15 @@ public sealed class Inventory
     // d'introduire un nouveau type dedie.
     public Coordinates[] Waypoints = new Coordinates[3];
 
+    // Chantier "struct-dans-struct-dans-tableau en ecriture" (docs/
+    // POWER_UP_ROADMAP.md, "Extensions futures non bloquantes") : Zone
+    // reutilise le meme struct imbrique que PlayerStats.HomeZone (Zone
+    // contient lui-meme Coordinates), mais ici comme ELEMENT d'un tableau --
+    // Zones[i].Origin.X est donc un champ primitif a DEUX niveaux de struct
+    // sous l'element de tableau (tableau -> Zone -> Coordinates -> X),
+    // un niveau de plus que Waypoints[i].X ci-dessus.
+    public Zone[] Zones = new Zone[2];
+
     // Chantier 2 (docs/KILLENGINE_CLR_INSPECTOR_SPEC.md, "LinkedList<T> et
     // SortedDictionary<K,V>/SortedSet<T> dans le deballage") : layout interne
     // verifie par attache ClrMD reelle avant d'ecrire le code de deballage,
@@ -410,6 +419,9 @@ public static class TestRoot
         inventory.Waypoints[0] = new Coordinates { X = 1, Y = 1 };
         inventory.Waypoints[1] = new Coordinates { X = 2, Y = 2 };
         inventory.Waypoints[2] = new Coordinates { X = 3, Y = 3 };
+
+        inventory.Zones[0] = new Zone { Origin = new Coordinates { X = 100, Y = 200 }, Radius = 5 };
+        inventory.Zones[1] = new Zone { Origin = new Coordinates { X = 300, Y = 400 }, Radius = 10 };
 
         // Chantier 2 (LinkedList<T>/SortedDictionary<K,V>/SortedSet<T>) :
         // sequence deliberement en DESORDRE d'allocation pour prouver que
