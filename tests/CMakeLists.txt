@@ -12,6 +12,7 @@ add_executable(killengine_unit_tests
     unit/test_logger.cpp
     unit/test_candidate_store.cpp
     unit/test_ai_tools.cpp
+    unit/test_query_text_utils.cpp
     unit/test_ai_adaptive.cpp
     unit/test_auto_resolver.cpp
     unit/test_snapshot_codec.cpp
