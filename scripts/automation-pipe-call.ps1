@@ -67,7 +67,10 @@ try {
     $writer.WriteLine($requestJson)
     $responseLine = $reader.ReadLine()
     if ($OutFile) {
-        Set-Content -Path $OutFile -Value $responseLine -Encoding utf8NoBOM -NoNewline
+        # Set-Content -Encoding utf8NoBOM n'existe qu'a partir de PowerShell 7 ;
+        # cette methode .NET evite l'ecart de comportement entre powershell.exe
+        # (5.1) et pwsh (7+) tout en ecrivant sans BOM dans les deux cas.
+        [System.IO.File]::WriteAllText($OutFile, $responseLine, (New-Object System.Text.UTF8Encoding($false)))
         Write-Output "OK -> $OutFile ($($responseLine.Length) caracteres)"
     } else {
         Write-Output $responseLine
