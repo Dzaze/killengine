@@ -3,7 +3,7 @@
 
 # KillEngine - Outils Et Capacités
 
-Dernière mise à jour : 26/08/2026.
+Dernière mise à jour : 28/08/2026.
 
 Ce document sert d'inventaire rapide des outils, workflows et capacités disponibles ou préparés dans KillEngine. Pour l'état détaillé, les preuves de validation et les limites connues, voir `docs/PHASE_TRACKER.md`, `docs/POWER_UP_ROADMAP.md`, `docs/USER_GUIDE.md`, `docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md` et `docs/KILLENGINE_CLR_INSPECTOR_SPEC.md`.
 
@@ -200,6 +200,12 @@ Ce document sert d'inventaire rapide des outils, workflows et capacités disponi
 - Patches sauvegardés.
 - Scripts auto-asm sauvegardés.
 - Réutilisation des profils par l'Assistant.
+- Diagnostic groupé des pointer chains après redémarrage.
+- Export/import JSON de pointer map partageable entre profils ou machines.
+- Pont Ghidra :
+  - export JSON `killengine.ghidra_artifacts` depuis un profil ;
+  - script Python Ghidra généré pour labels, bookmarks et commentaires ;
+  - import JSON/CSV de symboles Ghidra par `module+offset` ou `address + imageBase`.
 
 ## Trainer
 
@@ -218,7 +224,8 @@ Ce document sert d'inventaire rapide des outils, workflows et capacités disponi
   - toggle overlay.
 - Ré-enregistrement des hotkeys persistées au démarrage.
 - Dépendances entre features (`dependsOn`) : activation des prérequis avant une feature, restauration des dépendants avant leur prérequis, refus des cycles, nettoyage des références mortes à la suppression.
-- Reste en dehors du périmètre actuel : édition des dépendances après création et persistance backend/profil dédiée des dépendances entre targets.
+- Édition des dépendances après création.
+- Persistance native des dépendances dans les profils `.keprofile`.
 
 ## IA Et Automation
 

@@ -425,6 +425,20 @@
       "cost": "Modifie activement le processus cible (code injecté, instructions réécrites). Nécessite une confirmation explicite à chaque action, pas encore de feature Trainer persistante.",
       "example": "Après avoir capturé l'instruction qui écrit une valeur (Écrit par), installe un hook dessus pour forcer la valeur à chaque appel plutôt que de la réécrire en boucle depuis l'extérieur."
     },
+    "inlineHook": {
+      "title": "Inline hook (adresse à adresse)",
+      "what": "Redirige l'exécution à une adresse précise vers une autre adresse mémoire (ton propre code déjà injecté), via un trampoline qui permet de revenir au code d'origine ensuite. Contrairement à un patch AOB, l'instruction interceptée n'est jamais réécrite en dur — le détour se retire proprement avec « Retirer hook ».",
+      "when": "Quand tu connais déjà l'adresse exacte à intercepter (trouvée via « Écrit par » ou « Désassembler en amont ») et que tu veux y brancher du code personnalisé plutôt que réécrire une valeur en boucle depuis l'extérieur.",
+      "cost": "Modifie activement les instructions à l'adresse cible et alloue un trampoline en mémoire. Nécessite de connaître à la fois l'adresse cible ET l'adresse d'un code hook déjà injecté — pas un raccourci automatique pour une valeur simple (voir « Forcer valeur (hook) » sur une capture Écrit par pour ce cas précis).",
+      "example": "Après avoir capturé via Écrit par l'instruction qui écrit la vie, renseigne son adresse comme cible et l'adresse de ta fonction hook déjà injectée, puis clique Installer hook — chaque appel passe désormais par ton code avant de reprendre normalement."
+    },
+    "apiHook": {
+      "title": "Interception de fonctions (MinHook)",
+      "what": "Pose un inline hook MinHook sur une fonction nommée d'un module chargé (ex: kernel32.dll!Sleep), sans connaître son adresse au préalable — KillEngine la résout par nom. Deux modes : Compter (la fonction d'origine s'exécute normalement, seul le nombre d'appels est enregistré) ou Forcer retour (la fonction ne s'exécute jamais, une valeur de retour fixe est renvoyée à la place).",
+      "when": "Pour confirmer qu'une fonction est vraiment appelée avant de patcher dessus (mode Compter), ou pour simuler une condition précise sans toucher au code du programme (mode Forcer retour, ex: forcer un retour « accès refusé » pour tester une gestion d'erreur).",
+      "cost": "Injecte un composant dans le processus cible et modifie son exécution en direct. Le mode Forcer retour ne fonctionne que pour des fonctions dont le retour est un entier/pointeur/bool simple — pas pour des types plus complexes (struct par valeur, etc.).",
+      "example": "Renseigne kernel32.dll et Sleep en mode Compter, puis clique Intercepter : chaque appel à Sleep() dans le programme est désormais compté sans rien changer à son comportement — utile pour confirmer qu'une fonction suspectée cause bien un ralentissement avant d'aller plus loin."
+    },
     "clrGuide": {
       "title": "Parcours guidé CLR",
       "what": "Repère où tu en es dans le flux Inspecteur CLR : processus attaché, session CLR active, objets listés, objet sélectionné pour agir.",

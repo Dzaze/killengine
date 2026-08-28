@@ -48,7 +48,7 @@ onMounted(() => {
     </div>
 
     <div class="injection-block">
-      <h3>Inline hook</h3>
+      <h3>Inline hook <InfoDot topic="inlineHook" /></h3>
       <div class="symbol-resolve-row">
         <input v-model="store.symbolModuleName" class="input" placeholder="Module (ex. kernel32.dll)" :disabled="store.injectionBusy" />
         <input v-model="store.symbolFunctionName" class="input" placeholder="Fonction (ex. CreateFileW)" :disabled="store.injectionBusy" @keyup.enter="store.resolveSymbol()" />
@@ -88,7 +88,7 @@ onMounted(() => {
     </div>
 
     <div class="injection-block api-hook-block">
-      <h3>Interception de fonctions (MinHook)</h3>
+      <h3>Interception de fonctions (MinHook) <InfoDot topic="apiHook" /></h3>
       <p class="hint">
         Injecte un composant qui pose un inline hook MinHook sur module!fonction dans le processus cible.
         Mode Compter : interception passive (compteur d appels, l original reste appelé) pour confirmer qu une fonction

@@ -130,6 +130,7 @@ Choisis ensuite le type d'action :
 - `ON` / `OFF` par feature, ou `Apply all` / `Restore all` pour tout basculer.
 - Une **hotkey** peut être associée à chaque feature : elle fonctionne même quand KillEngine est en arrière-plan.
 - Le statut de chaque feature est visible : `idle`, `active`, `error`, `ambiguous`.
+- Le champ `Dépendances` d'une feature existante permet d'ajouter ou retirer ses prérequis après création. KillEngine refuse les cycles, par exemple A dépend de B et B dépend de A.
 - `Sauver profil` rend la feature persistante entre deux sessions.
 - `Exporter JSON` / `Exporter MD` produisent un trainer partageable.
 
@@ -159,6 +160,18 @@ passe le score à 100000
 ```
 
 Un profil peut contenir plusieurs cibles. Si une adresse ne se résout plus, relance une recherche : le jeu a probablement changé de module, de session ou de structure mémoire.
+
+### Pointer map et pont Ghidra
+
+Dans `Profils`, `Exporter pointer map` produit un JSON partageable des chaînes de pointeurs du profil. Tu peux l'importer dans un autre profil ou sur une autre machine pour récupérer les locators stables sans refaire toute la recherche.
+
+Le bloc `Pont Ghidra` sert à passer de KillEngine vers une analyse statique externe :
+
+1. `Exporter artefacts` produit un JSON contenant les cibles, patchs, offsets, AOB et notes du profil.
+2. Le script Python généré peut être lancé dans Ghidra pour poser des labels, bookmarks et commentaires à partir de ces artefacts.
+3. L'import inverse accepte un JSON ou CSV de symboles Ghidra (`module,offset,name,comment`, ou `address` avec `imageBase`) pour enrichir les notes KillEngine.
+
+KillEngine ne pilote pas Ghidra directement : le pont est volontairement un format d'échange simple et vérifiable.
 
 ## Mode Expert
 

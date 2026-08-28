@@ -425,6 +425,20 @@
       "cost": "Actively modifies the target process (injected code, rewritten instructions). Requires explicit confirmation for every action, no persistent Trainer feature yet.",
       "example": "After capturing the instruction that writes a value (Written by), install a hook on it to force the value on every call instead of rewriting it in a loop from the outside."
     },
+    "inlineHook": {
+      "title": "Inline hook (address to address)",
+      "what": "Redirects execution at a precise address to another memory address (your own already-injected code), via a trampoline that lets it return to the original code afterward. Unlike an AOB patch, the intercepted instruction is never rewritten in place — the redirect is cleanly removed with \"Remove hook\".",
+      "when": "When you already know the exact address to intercept (found via \"Written by\" or \"Disassemble backward\") and want to branch to custom code instead of rewriting a value in a loop from the outside.",
+      "cost": "Actively modifies the instructions at the target address and allocates a trampoline in memory. Requires knowing both the target address AND the address of already-injected hook code — not an automatic shortcut for a simple value (see \"Force value (hook)\" on a Written by capture for that specific case).",
+      "example": "After capturing the instruction that writes health via Written by, enter its address as the target and the address of your already-injected hook function, then click Install hook — every call now runs through your code before resuming normally."
+    },
+    "apiHook": {
+      "title": "Function interception (MinHook)",
+      "what": "Places a MinHook inline hook on a named function in a loaded module (e.g. kernel32.dll!Sleep) without knowing its address beforehand — KillEngine resolves it by name. Two modes: Count (the original function runs normally, only the call count is recorded) or Force return (the function never runs, a fixed return value is sent back instead).",
+      "when": "To confirm a function is really being called before patching it (Count mode), or to simulate a specific condition without touching the program's code (Force return mode, e.g. forcing an \"access denied\" return to test error handling).",
+      "cost": "Injects a component into the target process and changes its execution live. Force return mode only works for functions whose return value is a simple integer/pointer/bool — not more complex types (struct by value, etc.).",
+      "example": "Enter kernel32.dll and Sleep in Count mode, then click Intercept: every call to Sleep() in the program is now counted without changing its behavior — useful to confirm a suspected function is really causing a slowdown before going further."
+    },
     "clrGuide": {
       "title": "CLR guided flow",
       "what": "Shows where you are in the CLR Inspector flow: process attached, CLR session active, objects listed, object selected to act on.",
