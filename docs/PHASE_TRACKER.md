@@ -46,8 +46,8 @@ Le propriétaire a posé la même question à 4 agents indépendants (Claude, Co
 
 ## Chantiers ouverts / validations restantes
 
-- [ ] PHASE 13 - Robustesse et validations restantes
-  - [ ] Passe de régression manuelle V1 sur KillEngineTestTarget et une application tierce autorisée.
+- [x] PHASE 13 - Robustesse et validations restantes (close le 28/08/2026, PHASE 200)
+  - [x] Passe de régression manuelle V1 sur KillEngineTestTarget validée en direct le 28/08/2026 (PHASE 200) : les 10 étapes du "KillEngineTestTarget Manual Pass" (`docs/V1_REGRESSION_CHECKLIST.md`) rejouées sur `KillEngineTestTarget.exe` (scan exact/narrowing/write/rollback, unknown capture, profil save/reload/activate/write/rollback, journal utilisateur). A révélé et corrigé un vrai manque : l'activation de cible de profil (`activateProfileTarget`) n'écrivait jamais dans le journal utilisateur (`store.addActionLog` non exporté par le store, jamais appelé par `ProfileView.vue::activateTarget`) — corrigé, reconstruit, revérifié en direct via l'UI réelle (pilotée via CDP) : nouvelle entrée `kind:"profile"` confirmée dans le journal.
   - [x] Sections Assistant + Displayed vs Source Classifier closes le 27/08/2026.
   - [x] Reliability Pass étape 2 validée en direct le 27/08/2026 : pointer chain survit à un redémarrage complet sur `KillEngineTestTarget.exe`.
   - [x] Reliability Pass étape 1 validée en direct le 28/08/2026 (PHASE 185) : Freeze BP tient sous charge réelle (49 hits/49 rewrites) sur le tutoriel Cheat Engine (`Tutorial-x86_64.exe`), application tierce contrôlée choisie après échec sur Vampire Survivors (bruit temps réel trop chaotique pour le diff scan) et exclusion volontaire de Solitaire (compte propriétaire réel).
@@ -97,6 +97,7 @@ Le propriétaire a posé la même question à 4 agents indépendants (Claude, Co
 - [x] PHASE 196 (28/08/2026, Claude) - UX : `InfoDot` dédiés pour Inline hook et Interception MinHook dans Expert, détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 197 (28/08/2026, Codex) - Documentation technique : code map profils/Ghidra/Trainer, détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 199 (28/08/2026, Claude) - Authorized Third-Party Smoke Pass validée en direct sur le tutoriel Cheat Engine (scan/refine/write/rollback/freeze), détail dans `docs/PHASE_TRACKER_HISTORY.md`.
+- [x] PHASE 200 (28/08/2026, Claude) - PHASE 13 close : passe de régression manuelle V1 complète sur `KillEngineTestTarget.exe` + bug réel trouvé et corrigé (activation de profil non loguée dans le journal utilisateur), détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 
 ## Journal actif
 

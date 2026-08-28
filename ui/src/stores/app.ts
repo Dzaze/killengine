@@ -8800,6 +8800,7 @@ async function doEncryptedScan() {
     sessionPromotionBusyIds,
     messages,
     actionLog,
+    addActionLog,
     workflowStatus,
     targetValueGuided,
     candidateHistory,

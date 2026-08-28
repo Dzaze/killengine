@@ -334,11 +334,15 @@ async function activateTarget(targetName: string) {
     resolveResult.value = result
     if (result.success) {
       statusMessage.value = `✓ "${targetName}" activé pour l'Assistant à l'adresse 0x${result.address}`
+      store.addActionLog('profile', `Cible activée: ${targetName}`, `Profil "${selectedProfile.value}", adresse 0x${result.address}.`, 'success')
     } else {
-      statusMessage.value = '✗ ' + (result.error ?? 'Activation impossible.')
+      const detail = result.error ? String(result.error) : 'Activation impossible.'
+      statusMessage.value = '✗ ' + detail
+      store.addActionLog('profile', `Activation refusée: ${targetName}`, detail, 'warning')
     }
   } catch (e) {
     statusMessage.value = '✗ Erreur : ' + String(e)
+    store.addActionLog('profile', `Activation échouée: ${targetName}`, String(e), 'error')
   }
 }
 
