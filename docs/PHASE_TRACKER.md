@@ -15,6 +15,28 @@ Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
 - PHASE 120-A : ouverte puis livrée en deux parties le 28/08/2026 (`docs/INVESTIGATION_PLAYBOOK.md` + câblage backend lecture seule). PHASE 120-B/C/D restent hors scope et nécessitent un nouvel accord explicite du propriétaire.
 - Prochain focus récurrent : finir la passe de régression manuelle V1 sur une application tierce autorisée et les validations debugger restantes avant release candidate.
 
+## 🔎 Arsenal — ce qu'il manque (audit croisé 4 agents, 28/08/2026)
+
+Le propriétaire a posé la même question à 4 agents indépendants (Claude, Codex, Cline/GLM 5.2, un 4ᵉ agent) : *"a-t-on tout l'arsenal nécessaire ?"* Convergence totale : **oui pour les capacités, non pour la validation terrain.** Aucun des 4 n'a trouvé de vraie capacité manquante. Détail des seuls écarts trouvés :
+
+**Exclusions volontaires (décision produit déjà prise — ne pas reconstruire) :**
+- DMA hardware (carte PCIe dédiée) — matériel non disponible ; chantier possible si acquis un jour.
+- Lua embarqué in-process (vs shell-out actuel) — différé tant que rien ne prouve un vrai besoin.
+- Remplacer Ghidra/IDA (désassembleur/décompilateur statique complet) — `docs/ULTIMATE_PRODUCT_GUIDELINE.md` fixe explicitement : ne pas reconstruire Ghidra, devenir un pont vers lui.
+
+**Confort non bloquant, déjà documenté dans `docs/POWER_UP_ROADMAP.md`, jamais commencé :**
+- Pont export/import d'artefacts vers Ghidra (AOB, offsets, notes, symboles) — 0% construit (grep vide sur `core/`/`apps/desktop/`), alors que le guideline en fait une intention explicite. Piste concrète si une future investigation retombe sur un cas "PHASE 90" (cause invisible sans reverse du binaire — voir `docs/PHASE_TRACKER_HISTORY.md`).
+- Persistance backend/profil des dépendances Trainer (`dependsOn`, roadmap section M) — vit seulement dans le store frontend/localStorage aujourd'hui.
+- Export/import d'une map de pointeurs en texte partageable (roadmap section L) — `comparePointerMapAcrossRestart` fait le diagnostic groupé après restart mais ne sérialise rien.
+- Quelques extensions CLR pointues (struct-dans-struct-dans-tableau en écriture, setters à paramètre `struct`, `ConcurrentDictionary`) — non bloquantes, à reprendre seulement si un besoin réel se présente.
+
+**Validation terrain restante (l'outil existe et est testé sur `KillEngineTestTarget.exe` — ce n'est pas un manque d'outil) :** voir cases `[ ]` de la section "Chantiers ouverts" juste en dessous (Authorized Third-Party Smoke Pass, PHASE 14/17 sur application tierce moderne).
+
+**Décision produit en attente (pas un manque — ton choix) :**
+- PHASE 120-B/C/D : Assistant au-delà du mode lecture seule — prérequis arsenal jugés satisfaits par les 4 agents, mais démarrage exclusivement sur feu vert explicite (règle non négociable, voir section PHASE 120-B/C/D plus bas).
+
+**Conclusion :** la suite logique n'est plus "ajouter des outils" mais (a) finir la validation terrain ci-dessous, puis (b) selon ton choix, ouvrir PHASE 120-B/C/D.
+
 ## Règle d'utilisation
 
 - Ajouter les nouvelles phases ici, en bas de fichier, avec quoi/pourquoi/comment vérifié.
@@ -65,6 +87,7 @@ Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
 - [x] PHASE 183 (28/08/2026, Codex) - Câblage backend lecture seule du playbook PHASE 120-A, tests 247/247 OK.
 - [x] PHASE 185 (28/08/2026, Claude) - Reliability Pass étape 1 (Freeze BP sous charge réelle) validée + bug `setFreezeValue`/breakpoint corrigé, détail ci-dessous.
 - [x] PHASE 186 (28/08/2026, Claude) - Reliability Pass étapes 3/4 (AOB persiste au redémarrage, chaîne de fallback pire cas) validées sur `KillEngineTestTarget.exe`, détail ci-dessous.
+- [x] PHASE 187 (28/08/2026) - Audit croisé 4 agents sur la complétude de l'arsenal ; section dédiée ajoutée en haut du tracker, détail ci-dessous.
 
 ## Journal actif
 
@@ -85,3 +108,8 @@ Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
   - [x] **Pourquoi** : dernier lot de validations manuelles restant dans `docs/PHASE_TRACKER.md` avant la passe de régression tierce complète ; ces deux étapes ne nécessitaient pas de jugement humain temps réel (contrairement à l'étape 1), donc éligibles à un traitement autonome suite au feu vert général du propriétaire.
   - [x] **Comment vérifié** : entièrement en direct via le pipe d'automatisation + UI Automation Windows (`System.Windows.Automation`, `InvokePattern.Invoke()` sur les boutons "Damage (-10)"/"Increase Hidden") pour simuler les interactions utilisateur sans supervision humaine. Aucune modification de code cette fois (contrairement à PHASE 185) — seulement du pilotage/validation via les APIs déjà exposées.
   - [x] **Reste ouvert** : Authorized Third-Party Smoke Pass (nécessite une vraie appli tierce et probablement un rythme humain, non traité cette session) ; la chaîne de fallback n'a pas été observée en conditions réelles jusqu'à Trace UI string/Unknown capture dans un seul run continu (le scan chiffré a "réussi" avant d'y arriver) — le maillon Unknown capture reste validé séparément, pas dans le même run automatique.
+
+- [x] PHASE 187 (28/08/2026) - Audit croisé 4 agents sur la complétude de l'arsenal
+  - [x] **Quoi** : le propriétaire a posé indépendamment à Claude, Codex, Cline (GLM 5.2) et un 4ᵉ agent la même question ("a-t-on tout l'arsenal nécessaire, pas besoin d'autre chose ?"). Claude a vérifié dans le code/les docs plutôt que de répondre depuis la mémoire seule (`docs/POWER_UP_ROADMAP.md`, `docs/ULTIMATE_PRODUCT_GUIDELINE.md`, `docs/PHASE_TRACKER_HISTORY.md`) avant de répondre et avant de valider les points soulevés par les autres agents. Convergence totale des 4 réponses. Nouvelle section "🔎 Arsenal — ce qu'il manque" ajoutée en haut de ce fichier (juste après État courant) pour garder ce résultat visible sans avoir à rechercher dans 4 conversations séparées.
+  - [x] **Pourquoi** : demande explicite du propriétaire de mettre en surbrillance dans le tracker actif ce qu'il manque réellement, après avoir recoupé les réponses des 4 agents.
+  - [x] **Comment vérifié** : deux affirmations spécifiques de Cline et du 4ᵉ agent ont été vérifiées avant d'être acceptées (pas prises pour argent comptant) : (1) le blocage PHASE 90 (Solitaire Bulles, cause hors de portée sans reverse du binaire) confirmé réel dans `docs/PHASE_TRACKER_HISTORY.md`, mais nuancé — `docs/ULTIMATE_PRODUCT_GUIDELINE.md` exclut explicitement de reconstruire Ghidra, donc ce n'est pas un manque à combler mais un pont export/import jamais commencé (grep vide) ; (2) persistance backend des dépendances Trainer et export/import de map de pointeurs confirmés comme déjà documentés (non nouveaux) dans les sections M et L de `docs/POWER_UP_ROADMAP.md`. Mémoire dédiée mise à jour (`project_phase120_deferred_to_end`) avec le détail complet des 4 recoupements.
