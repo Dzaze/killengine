@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, type WorkspaceBookmark } from '@/stores/app'
 import AssistantToolsPanel from '@/components/settings/AssistantToolsPanel.vue'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 const { locale } = useI18n()
@@ -212,6 +213,12 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         Rafraîchir
       </button>
     </div>
+
+    <PanelIntro
+      what="Les paramètres de KillEngine : langue, comportements par défaut, outils de diagnostic."
+      purpose="Ajuster l'app à tes préférences et vérifier l'état des composants (helpers, connexions) sans passer par un fichier de config."
+      how="Modifie un réglage dans la section correspondante ; les changements s'appliquent immédiatement."
+    />
 
     <section class="panel">
       <div class="panel-title">

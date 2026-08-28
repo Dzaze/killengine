@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useAppStore, type TrainerFeature } from '@/stores/app'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 const name = ref('')
@@ -231,6 +232,13 @@ async function copyTrainerExport() {
         <button class="btn" :disabled="store.trainerFeatures.length === 0" @click="showTrainerMarkdownExport()">Exporter MD</button>
       </div>
     </header>
+
+    <PanelIntro
+      what="Les features Trainer : des raccourcis persistants pour activer/désactiver un freeze ou une écriture d'un coup."
+      purpose="Transformer une trouvaille en bouton réutilisable (façon WeMod/Cheat Engine), au lieu de refaire la recherche à chaque partie."
+      how="Crée une feature depuis l'Assistant ou Expert, puis active/désactive-la ici (ou via l'overlay et les raccourcis clavier) sans repasser par une recherche."
+    />
+
     <p v-if="store.trainerOverlayStatus" class="hotkey-status">{{ store.trainerOverlayStatus }}</p>
     <div class="overlay-hotkey-row">
       <span class="hint">Hotkey pour afficher/masquer l'overlay sans alt-tab :</span>

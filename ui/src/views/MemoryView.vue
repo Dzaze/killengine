@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 const filter = ref<'all' | 'committed' | 'readable' | 'writable' | 'executable'>('all')
@@ -205,6 +206,12 @@ onMounted(() => {
         {{ $t('memory.refresh') }}
       </button>
     </div>
+
+    <PanelIntro
+      what="La carte mémoire brute du processus attaché (régions, permissions, modules)."
+      purpose="Explorer manuellement où se trouvent le code, les données et le tas, pour un usage avancé ou de diagnostic."
+      how="Attache un processus puis clique Rafraîchir pour charger la carte mémoire actuelle."
+    />
 
     <div v-if="!store.isAttached" class="empty-state">
       <p>{{ $t('memory.attachFirst') }}</p>

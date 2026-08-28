@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useAppStore, type WorkflowPreset } from '@/stores/app'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 const chatInput = ref('')
@@ -645,6 +646,12 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         </button>
       </div>
     </div>
+
+    <PanelIntro
+      what="Le chat principal pour trouver et modifier des valeurs en mémoire sans connaître les termes techniques."
+      purpose="Décrire ce que tu cherches en langage naturel (une valeur affichée, un freeze, un trainer...) et laisser KillEngine choisir le bon outil."
+      how="Attache un processus, puis écris ta demande dans le champ de recherche en bas — une valeur affichée à l'écran suffit pour démarrer un scan."
+    />
 
     <div class="assistant-status-strip" :class="{ 'is-working': store.isSearching }">
       <div class="top-search-status">

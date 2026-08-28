@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 
@@ -53,6 +54,12 @@ onMounted(() => {
       </div>
       <InfoDot topic="speedhack" align="right" />
     </div>
+
+    <PanelIntro
+      what="Le speedhack : accélère ou ralentit artificiellement la perception du temps par le processus attaché."
+      purpose="Passer un chargement plus vite, ralentir un ennemi trop rapide — sans toucher à la mémoire du jeu."
+      how="Attache un processus, choisis un facteur de vitesse et applique-le."
+    />
 
     <div v-if="!store.isAttached" class="empty-state">
       <p>Attache d'abord un processus autorisé pour accélérer ou ralentir le temps qu'il perçoit.</p>

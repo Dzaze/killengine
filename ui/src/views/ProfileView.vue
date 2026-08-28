@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
 import type { ClrFieldInfo } from '@/services/backend'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 
@@ -748,6 +749,12 @@ onMounted(() => {
       <h1>Profils</h1>
       <button class="btn btn-secondary" @click="refreshProfiles">↻ Rafraîchir</button>
     </div>
+
+    <PanelIntro
+      what="Les profils sauvegardés par jeu : adresses, patchs et scripts prêts à réutiliser."
+      purpose="Réactiver en un clic des cibles déjà trouvées lors d'une session précédente, sans refaire toute une recherche."
+      how="Choisis ou crée un profil, sauvegarde une adresse trouvée dans l'Assistant, puis réutilise-la (Vérifier, Utiliser, Écrire) à la prochaine session."
+    />
 
     <div v-if="!store.isAttached" class="warn-box">
       <p>⚠ Attache un processus pour utiliser les profils.</p>

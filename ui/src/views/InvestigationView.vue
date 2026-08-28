@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 const exportText = ref('')
@@ -285,6 +286,12 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
         <button class="btn danger" :disabled="!run" @click="store.clearInvestigation()">Effacer</button>
       </div>
     </header>
+
+    <PanelIntro
+      what="Le journal détaillé d'une session d'enquête menée par l'Assistant : hypothèses testées, étapes, résultats."
+      purpose="Comprendre après coup ce que l'IA a essayé et pourquoi, exporter un rapport, ou reprendre une enquête interrompue."
+      how="Se remplit automatiquement pendant une recherche guidée par l'Assistant ; utilise Markdown/JSON pour exporter, ou Archiver/Effacer pour clôturer."
+    />
 
     <section v-if="run" class="summary">
       <div>

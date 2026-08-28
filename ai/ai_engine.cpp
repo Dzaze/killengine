@@ -1,12 +1,12 @@
 #include "ai_engine.h"
 #include "intent_contract.h"
+#include "query_text_utils.h"
 #include "logging/logger.h"
 
 #include <QCoreApplication>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSettings>
-#include <QSet>
 #include <QVariantList>
 
 namespace killai {
@@ -111,45 +111,9 @@ struct TrainerToolMatch {
     QString rationale;
 };
 
-QString firstDecimalOutsideHex(QString text) {
-    text.replace(QRegularExpression(R"(0x[0-9a-fA-F]+)"), " ");
-    const QRegularExpression re(R"([-+]?\d+(?:[\.,]\d+)?)");
-    const auto match = re.match(text);
-    return match.hasMatch() ? match.captured(0).replace(',', '.') : QString();
-}
-
-QString firstHexAddressIn(const QString& text) {
-    const QRegularExpression re(R"(0x[0-9a-fA-F]+)");
-    const auto match = re.match(text);
-    return match.hasMatch() ? match.captured(0) : QString();
-}
-
-bool looksLikePureSocialQuery(const QString& query) {
-    if (!firstHexAddressIn(query).isEmpty() || !firstDecimalOutsideHex(query).isEmpty()) {
-        return false;
-    }
-
-    QString q = query.toLower().trimmed();
-    q.replace(QRegularExpression(R"([!?.;,:\-_/\\()\[\]{}"'`]+)"), " ");
-    q = q.simplified();
-    if (q.isEmpty()) {
-        return false;
-    }
-
-    static const QSet<QString> kSocialOnlyPhrases = {
-        "salut", "bonjour", "bonsoir", "coucou", "hello", "hi", "hey", "yo",
-        "merci", "merci beaucoup", "thanks", "thank you", "ok merci",
-        "salut merci", "bonjour merci", "salut mon pote", "merci mon pote",
-        "ca va", "ça va"
-    };
-    return kSocialOnlyPhrases.contains(q);
-}
-
 TrainerToolMatch matchTrainerTool(const QString& query) {
     const QString q = query.toLower();
-    const bool wantsTrainer = q.contains("trainer") || q.contains("cheat table")
-        || q.contains("feature trainer") || q.contains("fonction trainer");
-    if (!wantsTrainer) {
+    if (!wantsTrainerQuery(query)) {
         return {};
     }
 
@@ -213,18 +177,7 @@ struct FieldStabilityToolMatch {
 // (findWhatWrites), aucune ecriture -- meme esprit que matchOffMemoryTool
 // ci-dessus pour la liste de mots-cles.
 FieldStabilityToolMatch matchFieldStabilityTool(const QString& query) {
-    const QString q = query.toLower();
-    const bool wantsStability =
-        q.contains("champ affiché") || q.contains("champ affiche")
-        || q.contains("valeur affichée") || q.contains("valeur affichee")
-        || q.contains("affichage dérivé") || q.contains("affichage derive")
-        || q.contains("vraie source") || q.contains("source événementielle")
-        || q.contains("source evenementielle") || q.contains("displayed field")
-        || q.contains("display field") || q.contains("derived display")
-        || q.contains("real source") || q.contains("field stability")
-        || q.contains("stabilité du champ") || q.contains("stabilite du champ")
-        || q.contains("stabilité de cette adresse") || q.contains("stabilite de cette adresse");
-    if (!wantsStability) {
+    if (!wantsFieldStabilityQuery(query)) {
         return {};
     }
 
@@ -279,14 +232,7 @@ struct UiSourcesToolMatch {
 // explicite n'est donnee, plutot que d'exiger une adresse dans la phrase --
 // une seule phrase NL fournit rarement une adresse ET une byteLength.
 UiSourcesToolMatch matchUiSourcesTool(const QString& query) {
-    const QString q = query.toLower();
-    const bool wantsSources =
-        q.contains("analyse les sources") || q.contains("analyser les sources")
-        || q.contains("analyse la source") || q.contains("sources numériques")
-        || q.contains("sources numeriques") || q.contains("analyze sources")
-        || q.contains("analyze the sources") || q.contains("numeric sources")
-        || q.contains("numeric source");
-    if (!wantsSources) {
+    if (!wantsUiSourcesQuery(query)) {
         return {};
     }
 
@@ -313,13 +259,7 @@ struct AddressToolMatch {
 // du "workflow patch" reclasses lecture seule (tool_registry.cpp). Meme
 // mecanique que matchFieldStabilityTool : mot-cle + extraction d'adresse.
 AddressToolMatch matchGenerateAobTool(const QString& query) {
-    const QString q = query.toLower();
-    const bool wantsAob =
-        q.contains("signature aob") || q.contains("aob signature")
-        || q.contains("génère une signature") || q.contains("genere une signature")
-        || q.contains("generate aob") || q.contains("generate a signature")
-        || q.contains("generate signature");
-    if (!wantsAob) {
+    if (!wantsGenerateAobQuery(query)) {
         return {};
     }
     QVariantMap args;
@@ -331,12 +271,7 @@ AddressToolMatch matchGenerateAobTool(const QString& query) {
 }
 
 AddressToolMatch matchSuggestPatchTool(const QString& query) {
-    const QString q = query.toLower();
-    const bool wantsSuggestion =
-        q.contains("suggère un patch") || q.contains("suggere un patch")
-        || q.contains("suggestion de patch") || q.contains("suggest a patch")
-        || q.contains("suggest patch") || q.contains("patch suggestions");
-    if (!wantsSuggestion) {
+    if (!wantsSuggestPatchQuery(query)) {
         return {};
     }
     QVariantMap args;
@@ -349,13 +284,7 @@ AddressToolMatch matchSuggestPatchTool(const QString& query) {
 }
 
 AddressToolMatch matchDisassembleBackwardTool(const QString& query) {
-    const QString q = query.toLower();
-    const bool wantsBackward =
-        q.contains("désassemble en arrière") || q.contains("desassemble en arriere")
-        || q.contains("désassemblage arrière") || q.contains("desassemblage arriere")
-        || q.contains("disassemble backward") || q.contains("champs sources")
-        || q.contains("champ source de") || q.contains("source fields");
-    if (!wantsBackward) {
+    if (!wantsDisassembleBackwardQuery(query)) {
         return {};
     }
     QVariantMap args;
@@ -374,13 +303,7 @@ AddressToolMatch matchDisassembleBackwardTool(const QString& query) {
 // quels que soient les args. Le matching ici sert seulement a router vers le
 // bon message de redirection -- pas besoin d'une extraction d'adresse fiable.
 AddressToolMatch matchFindWhatWritesTool(const QString& query) {
-    const QString q = query.toLower();
-    const bool wantsCapture =
-        q.contains("capture ce qui écrit") || q.contains("capture ce qui ecrit")
-        || q.contains("qu'est-ce qui écrit") || q.contains("qu'est-ce qui ecrit")
-        || q.contains("qui écrit cette adresse") || q.contains("qui ecrit cette adresse")
-        || q.contains("find what writes") || q.contains("what writes to");
-    if (!wantsCapture) {
+    if (!wantsFindWhatWritesQuery(query)) {
         return {};
     }
     QVariantMap args;
@@ -392,12 +315,7 @@ AddressToolMatch matchFindWhatWritesTool(const QString& query) {
 }
 
 AddressToolMatch matchTestCandidateFieldsTool(const QString& query) {
-    const QString q = query.toLower();
-    const bool wantsTest =
-        q.contains("teste les champs candidats") || q.contains("test candidate fields")
-        || q.contains("teste automatiquement") || q.contains("test the candidate fields")
-        || q.contains("vérifie quel champ tient") || q.contains("verifie quel champ tient");
-    if (!wantsTest) {
+    if (!wantsTestCandidateFieldsQuery(query)) {
         return {};
     }
     return {"test_candidate_fields", {}, ""};

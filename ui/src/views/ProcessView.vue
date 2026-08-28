@@ -2,6 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 import type { ProcessInfo } from '@/services/backend'
 
 const store = useAppStore()
@@ -60,6 +61,12 @@ onMounted(async () => {
         {{ $t('process.refresh') }}
       </button>
     </div>
+
+    <PanelIntro
+      what="La liste des processus Windows en cours d'exécution."
+      purpose="Choisir et attacher le programme que tu veux inspecter ou modifier — indispensable avant toute autre action dans KillEngine."
+      how="Cherche le processus dans la liste (ou rafraîchis-la), clique dessus puis sur Attacher."
+    />
 
     <!-- Attached status -->
     <div v-if="store.isAttached" class="attached-banner">

@@ -15,6 +15,7 @@ import {
 } from '@/services/backend'
 
 import InfoDot from '@/components/expert/InfoDot.vue'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 import RiskBadge from '@/components/expert/RiskBadge.vue'
 import type { RiskLevel } from '@/components/expert/risk'
 import RegionPanel from '@/components/expert/RegionPanel.vue'
@@ -1687,6 +1688,12 @@ onMounted(() => {
         </button>
       </div>
     </div>
+
+    <PanelIntro
+      what="Le mode Expert : l'ensemble des outils avancés de KillEngine (scan, AOB, pointeurs, breakpoints, patch...) réunis dans un seul panneau."
+      purpose="Piloter manuellement chaque étape d'une recherche ou d'une modification mémoire, pour un contrôle total au-delà de ce que l'Assistant automatise."
+      how="Attache un processus, puis choisis le scénario ou l'outil correspondant à ce que tu veux faire (scan, écriture, freeze, signature AOB...) — chaque section a ses propres contrôles et son InfoDot d'aide."
+    />
 
     <div v-if="!store.isAttached" class="empty-state">
       <p>Attache un processus pour utiliser les outils expert.</p>

@@ -14,6 +14,7 @@
 #endif
 
 #include "auto_resolver.h"
+#include "query_text_utils.h"
 #include "model_locator.h"
 #include "candidates/candidate_store.h"
 #include "crash_handler.h"
@@ -1434,27 +1435,6 @@ bool looksLikeFreezeRequest(const QString& query) {
         || q.contains("garde à")
         || q.contains("maintien")
         || q.contains("maintenir");
-}
-
-bool looksLikePureSocialSmartSearchQuery(const QString& query, const QStringList& numbers, const QStringList& addresses) {
-    if (!numbers.isEmpty() || !addresses.isEmpty()) {
-        return false;
-    }
-
-    QString q = query.toLower().trimmed();
-    q.replace(QRegularExpression(R"([!?.;,:\-_/\\()\[\]{}"'`]+)"), " ");
-    q = q.simplified();
-    if (q.isEmpty()) {
-        return false;
-    }
-
-    static const QSet<QString> kSocialOnlyPhrases = {
-        "salut", "bonjour", "bonsoir", "coucou", "hello", "hi", "hey", "yo",
-        "merci", "merci beaucoup", "thanks", "thank you", "ok merci",
-        "salut merci", "bonjour merci", "salut mon pote", "merci mon pote",
-        "ca va", "ça va"
-    };
-    return kSocialOnlyPhrases.contains(q);
 }
 
 SmartSearchIntent classifySmartSearchIntent(
@@ -12364,40 +12344,21 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     const QStringList chatAddresses = hexAddressesFromText(query);
     const QString explicitValueType = explicitValueTypeFromText(query);
     const QString defaultValueType = explicitValueType.isEmpty() ? QString("Int32") : explicitValueType;
-    const QString queryLower = query.toLower();
-    const bool smartSearchTrainerQuery = queryLower.contains("trainer") || queryLower.contains("cheat table");
+    const bool smartSearchTrainerQuery = killai::wantsTrainerQuery(query);
     // PHASE 130 : meme piege que smartSearchTrainerQuery (PHASE 129) -- une
     // question contenant une adresse 0x... ("est-ce que 0x1234 est un champ
     // affiche...") etait interceptee trop tot par les pre-intents memoire
     // (ActivateMemoryTargets) avant d'atteindre le fast-path analyze_field_stability
     // (ai/ai_engine.cpp::matchFieldStabilityTool, meme liste de mots-cles).
-    const bool smartSearchFieldStabilityQuery = queryLower.contains("champ affiché") || queryLower.contains("champ affiche")
-        || queryLower.contains("valeur affichée") || queryLower.contains("valeur affichee")
-        || queryLower.contains("affichage dérivé") || queryLower.contains("affichage derive")
-        || queryLower.contains("vraie source") || queryLower.contains("source événementielle")
-        || queryLower.contains("source evenementielle") || queryLower.contains("displayed field")
-        || queryLower.contains("display field") || queryLower.contains("derived display")
-        || queryLower.contains("real source") || queryLower.contains("field stability")
-        || queryLower.contains("stabilité du champ") || queryLower.contains("stabilite du champ")
-        || queryLower.contains("stabilité de cette adresse") || queryLower.contains("stabilite de cette adresse");
+    const bool smartSearchFieldStabilityQuery = killai::wantsFieldStabilityQuery(query);
     // PHASE 140 : meme piege, pour les 5 outils restants d'analyze_field_stability
     // qui prennent une adresse (get_auto_report/analyze_ui_sources n'en ont pas
     // besoin en pratique, pas concernes). Verifications volontairement plus
     // grossieres que leurs matchXxxTool respectifs (ai/ai_engine.cpp) -- servent
     // seulement a eviter que le pre-intent memoire les intercepte avant que
     // processQuery() ait une chance de les router correctement.
-    const bool smartSearchAobOrPatchWorkflowQuery = queryLower.contains("signature aob") || queryLower.contains("aob signature")
-        || queryLower.contains("génère une signature") || queryLower.contains("genere une signature")
-        || queryLower.contains("generate aob") || queryLower.contains("suggère un patch")
-        || queryLower.contains("suggere un patch") || queryLower.contains("suggest patch")
-        || queryLower.contains("suggest a patch") || queryLower.contains("désassemble en arrière")
-        || queryLower.contains("desassemble en arriere") || queryLower.contains("disassemble backward")
-        || queryLower.contains("champs sources") || queryLower.contains("source fields");
-    const bool smartSearchFindWhatWritesOrTestFieldsQuery = queryLower.contains("capture ce qui écrit")
-        || queryLower.contains("capture ce qui ecrit") || queryLower.contains("qu'est-ce qui écrit")
-        || queryLower.contains("qu'est-ce qui ecrit") || queryLower.contains("find what writes")
-        || queryLower.contains("what writes to") || queryLower.contains("teste les champs candidats")
-        || queryLower.contains("test candidate fields") || queryLower.contains("teste automatiquement");
+    const bool smartSearchAobOrPatchWorkflowQuery = killai::wantsAobOrPatchWorkflowQuery(query);
+    const bool smartSearchFindWhatWritesOrTestFieldsQuery = killai::wantsFindWhatWritesOrTestFieldsQuery(query);
     // PHASE 140 : consolide en un seul flag plutot que de continuer a "&&" une
     // liste croissante sur les 8 points de bypass ci-dessous -- prochain outil
     // a router : ajouter sa condition ici, pas un neuvieme "&& !smartSearchXQuery"
@@ -12413,11 +12374,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     // bloc AnswerTraceUiFilterPrompt de startSmartSearch, pas le pre-intent
     // ActivateMemoryTargets -- ces deux outils n'ont pas d'adresse a router
     // via le meme mecanisme que les 5 outils ci-dessus.
-    const bool smartSearchExplicitUiSourcesQuery = queryLower.contains("analyse les sources")
-        || queryLower.contains("analyser les sources") || queryLower.contains("analyse la source")
-        || queryLower.contains("sources numériques") || queryLower.contains("sources numeriques")
-        || queryLower.contains("analyze sources") || queryLower.contains("analyze the sources")
-        || queryLower.contains("numeric sources") || queryLower.contains("numeric source");
+    const bool smartSearchExplicitUiSourcesQuery = killai::wantsUiSourcesQuery(query);
     const SmartSearchIntent intent = classifySmartSearchIntent(
         query,
         numbers,
@@ -12458,7 +12415,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         (*payload)["intentRationale"] = intent.rationale;
     };
 
-    if (looksLikePureSocialSmartSearchQuery(query, numbers, chatAddresses)) {
+    if (killai::looksLikePureSocialQuery(query, numbers, chatAddresses)) {
         QVariantMap social;
         social["success"] = true;
         social["query"] = query;

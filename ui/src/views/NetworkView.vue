@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 
@@ -33,6 +34,12 @@ onMounted(() => {
       </div>
       <InfoDot topic="network" align="right" />
     </div>
+
+    <PanelIntro
+      what="Le blocage réseau ciblé : coupe le trafic entrant/sortant du processus attaché via une règle pare-feu dédiée."
+      purpose="Vérifier si une valeur mémoire instable vient d'une synchro serveur en arrière-plan plutôt que d'un recalcul purement local."
+      how="Attache un processus, puis active/désactive le blocage réseau et observe si la valeur se stabilise."
+    />
 
     <div v-if="!store.isAttached" class="empty-state">
       <p>Attache d'abord un processus autorisé pour couper ou rétablir son accès réseau.</p>

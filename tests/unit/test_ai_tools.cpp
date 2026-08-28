@@ -4,6 +4,7 @@
 #include "intent_contract.h"
 #include "llama_runtime.h"
 #include "model_locator.h"
+#include "query_text_utils.h"
 #include "tool_validator.h"
 #include "tool_registry.h"
 
@@ -573,6 +574,19 @@ TEST(AIEngineContextualFallbackTest, TrainerFastPathListsFeaturesEn) {
     EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
     EXPECT_EQ(result.value("tool").toString().toStdString(), "trainer_list_features");
     EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_trainer_fastpath");
+}
+
+TEST(QueryTextUtilsTest, SharedTrainerPredicateCoversSmartSearchBypassPhrases) {
+    EXPECT_TRUE(killai::wantsTrainerQuery("liste le trainer"));
+    EXPECT_TRUE(killai::wantsTrainerQuery("ouvre la cheat table"));
+    EXPECT_TRUE(killai::wantsTrainerQuery("ajoute une fonction trainer"));
+    EXPECT_FALSE(killai::wantsTrainerQuery("cherche 41250"));
+}
+
+TEST(QueryTextUtilsTest, SharedSocialPredicateCanReusePreExtractedTokens) {
+    EXPECT_TRUE(killai::looksLikePureSocialQuery("salut !!", {}, {}));
+    EXPECT_FALSE(killai::looksLikePureSocialQuery("salut cherche 41250", {"41250"}, {}));
+    EXPECT_FALSE(killai::looksLikePureSocialQuery("merci 0x12345", {}, {"0x12345"}));
 }
 
 TEST(AIEngineContextualFallbackTest, TrainerFastPathCreatesWriteFeatureFr) {
