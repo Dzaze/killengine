@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 import type { ClrFieldInfo, ClrPathWriteOperation } from '@/services/backend'
 
 const store = useAppStore()
@@ -364,6 +365,12 @@ onMounted(() => {
         </button>
       </div>
     </div>
+
+    <PanelIntro
+      what="Un explorateur spécialisé pour les jeux et logiciels .NET : il lit les objets gérés par le moteur CLR plutôt que la mémoire brute."
+      purpose="Trouver et modifier facilement les vraies données du jeu (joueur, vie, inventaire...) quand la cible est un programme .NET — sans deviner d'adresses."
+      how="Attache un processus .NET, clique Attacher CLR, liste les Objets avec un filtre de type (ex. Player), puis Lis un objet pour voir et modifier ses champs."
+    />
 
     <div v-if="!store.isAttached" class="empty-state">
       <strong>Aucune cible active</strong>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 
@@ -47,6 +48,12 @@ onMounted(() => {
         </button>
       </div>
     </div>
+
+    <PanelIntro
+      what="Un éditeur de scripts Lua — un petit langage de programmation simple, exécuté en dehors de l'interface."
+      purpose="Automatiser des actions répétitives (attacher, scanner, écrire, vérifier) en une seule commande au lieu de cliquer partout à chaque fois."
+      how="Écris ou charge un script puis clique Exécuter ; le résultat s'affiche en bas dans stdout/stderr. Les appels ke.call(...) pilotent KillEngine et demandent KillEngine lancé avec KILLENGINE_AUTOMATION_PIPE=1."
+    />
 
     <section class="status-band">
       <div>
