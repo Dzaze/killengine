@@ -52,7 +52,7 @@ Le propriétaire a posé la même question à 4 agents indépendants (Claude, Co
   - [x] Reliability Pass étape 2 validée en direct le 27/08/2026 : pointer chain survit à un redémarrage complet sur `KillEngineTestTarget.exe`.
   - [x] Reliability Pass étape 1 validée en direct le 28/08/2026 (PHASE 185) : Freeze BP tient sous charge réelle (49 hits/49 rewrites) sur le tutoriel Cheat Engine (`Tutorial-x86_64.exe`), application tierce contrôlée choisie après échec sur Vampire Survivors (bruit temps réel trop chaotique pour le diff scan) et exclusion volontaire de Solitaire (compte propriétaire réel).
   - [x] Reliability Pass étapes 3/4 validées en direct le 28/08/2026 (PHASE 186) sur `KillEngineTestTarget.exe` : patch AOB (NOP sur l'écriture `g_health`) survit à un redémarrage complet via profil (`saveProfileCodePatch`/`applyProfileCodePatch`, re-résolution AOB, comportement confirmé sous 3 clics réels) ; chaîne de fallback pire cas confirmée sans abandon (`startAutoResolve` enchaîne automatiquement scan exact vide → scan chiffré XOR) et le maillon Unknown capture résout seul `g_hidden_score` (valeur invisible dans l'UI, jamais affichée), confirmé par relecture directe après plusieurs clics.
-  - [ ] Authorized Third-Party Smoke Pass restant.
+  - [x] Authorized Third-Party Smoke Pass validée en direct le 28/08/2026 (PHASE 199) sur le tutoriel Cheat Engine (`Tutorial-x86_64.exe`) : scan exact Int32 sur Health (100 → convergence à 1 candidat après clic réel + scan `decreased` puis `exact`), écriture limitée au seul candidat convergé, rollback confirmé restaure la valeur pré-écriture (pas la valeur courante du jeu), freeze polling confirmé tenir au repos par lecture mémoire directe (flicker sous clics rapides attendu et documenté, pas un bug), désactivation du freeze confirmée par reprise de la décroissance libre.
 
 - [ ] PHASE 14 - Pointer Chains : validation manuelle sur application moderne tierce autorisée encore ouverte.
 
@@ -96,6 +96,7 @@ Le propriétaire a posé la même question à 4 agents indépendants (Claude, Co
 - [x] PHASE 195 (28/08/2026, Codex) - Documentation utilisateur : pont Ghidra, pointer map, dépendances Trainer, détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 196 (28/08/2026, Claude) - UX : `InfoDot` dédiés pour Inline hook et Interception MinHook dans Expert, détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 197 (28/08/2026, Codex) - Documentation technique : code map profils/Ghidra/Trainer, détail dans `docs/PHASE_TRACKER_HISTORY.md`.
+- [x] PHASE 199 (28/08/2026, Claude) - Authorized Third-Party Smoke Pass validée en direct sur le tutoriel Cheat Engine (scan/refine/write/rollback/freeze), détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 
 ## Journal actif
 
