@@ -9744,9 +9744,24 @@ QVariantMap ApplicationController::setFreezeValue(const QString& addressHex, con
     }
 
     if (!enabled) {
+        bool wasHardwareBreakpoint = false;
+        for (const auto& entry : m_freeze.entries()) {
+            if (entry.address == address && entry.mode == killcore::FreezeMode::HardwareBreakpoint) {
+                wasHardwareBreakpoint = true;
+                break;
+            }
+        }
         m_freeze.remove(address);
         if (!m_freeze.hasMode(killcore::FreezeMode::Polling)) {
             m_freezeTimer.stop();
+        }
+        if (wasHardwareBreakpoint) {
+            // setFreezeValue(..., false) est aussi le point d'entree utilise pour
+            // desactiver un freeze pose via freezeWithBreakpoint (meme registre
+            // m_freeze) : sans ce resync, l'entree disparait de m_freeze mais le
+            // hardware breakpoint reste arme et continue de reecrire la valeur
+            // gelee a chaque ecriture, malgre un success:true trompeur ici.
+            restartBreakpointFreezeFromRegistry(killcore::BreakpointFreezeMode::RewriteValue);
         }
         result["success"] = true;
         result["enabled"] = false;
