@@ -1336,6 +1336,76 @@ public sealed class EndToEndTests
     }
 
     [Fact]
+    public async Task WritePrimitivePath_UpdatesWholeStructArrayElementWithNestedNonPrimitiveField()
+    {
+        // Chantier "struct-dans-tableau-de-structs en ecriture ENTIERE" : le
+        // meme format "Champ=Valeur" que WritePrimitivePath_UpdatesWholeStructArrayElementByIndex
+        // ci-dessus, mais sur Inventory.Zones (Zone[]) dont l'element (Zone)
+        // contient lui-meme un struct imbrique (Origin: Coordinates) --
+        // l'ancienne implementation rejetait ce cas ("champ non primitif").
+        // Format retenu pour les champs imbriques : cles a plat en points
+        // ("Origin.X=..,Origin.Y=..,Radius=..").
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+
+        var write = await PipeClient.CallAsync(
+            InspectorPipe,
+            "writePrimitivePath",
+            new JsonArray(
+                JsonValue.Create(playerAddress),
+                JsonValue.Create("Inventory.Zones[1]"),
+                JsonValue.Create("Origin.X=111,Origin.Y=222,Radius=15")));
+        Assert.True(write!["verified"]!.GetValue<bool>());
+
+        // Relecture ClrMD independante -- confirme les TROIS champs feuilles
+        // ecrits, et que Zones[0] (ecrit par le test precedent) est intact.
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var zoneItems = Field(inventoryObj!["fields"]!, "Zones")!["collection"]!["items"]!.AsArray();
+        var zone1Origin = Field(zoneItems[1]!["fields"]!, "Origin")!["fields"]!;
+        Assert.Equal(111, zone1Origin["X"]!.GetValue<int>());
+        Assert.Equal(222, zone1Origin["Y"]!.GetValue<int>());
+        Assert.Equal(15, Field(zoneItems[1]!["fields"]!, "Radius")!.GetValue<int>());
+        // Zones[0] n'est pas la cible de CE test, mais partage le meme fixture
+        // que WritePrimitivePath_UpdatesFieldNestedTwoStructLevelsInsideArrayElement
+        // (qui ecrit Origin.X=999) -- xUnit ne garantit pas d'ordre d'execution
+        // entre les deux (meme prudence que ReadObject_UnpacksNestedStructInsideStructRecursively
+        // plus haut pour Stats.Rank) : seule la valeur ORIGINALE (200/5, jamais
+        // ecrite par aucun test) est verifiee a une valeur fixe.
+        var zone0Origin = Field(zoneItems[0]!["fields"]!, "Origin")!["fields"]!;
+        Assert.True(zone0Origin["X"]!.GetValue<int>() is 100 or 999);
+        Assert.Equal(200, zone0Origin["Y"]!.GetValue<int>());
+        Assert.Equal(5, Field(zoneItems[0]!["fields"]!, "Radius")!.GetValue<int>());
+
+        // Garde-fou 1 : champ feuille manquant -- rejet propre.
+        var missingFieldEx = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await PipeClient.CallAsync(
+                InspectorPipe,
+                "writePrimitivePath",
+                new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Inventory.Zones[0]"), JsonValue.Create("Origin.X=1")));
+        });
+        Assert.Contains("manquant", missingFieldEx.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Garde-fou 2 : champ feuille inconnu -- rejet propre.
+        var unknownFieldEx = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await PipeClient.CallAsync(
+                InspectorPipe,
+                "writePrimitivePath",
+                new JsonArray(
+                    JsonValue.Create(playerAddress),
+                    JsonValue.Create("Inventory.Zones[0]"),
+                    JsonValue.Create("Origin.X=1,Origin.Y=2,Radius=3,Origin.Z=4")));
+        });
+        Assert.Contains("inconnu", unknownFieldEx.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PathWriteViaLocator_RefindsObjectAfterCompactingGcAndWritesNewAddress()
     {
         // PHASE 59 -- chantier "mutation par chemin symbolique auto-

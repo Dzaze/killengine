@@ -2736,6 +2736,67 @@ public sealed class ClrSession : IDisposable
     /// element) reste explicitement hors scope de cette methode -- rejet
     /// propre plutot qu'une ecriture partielle/incorrecte.
     /// </summary>
+    // Chantier "struct-dans-tableau-de-structs en ecriture ENTIERE" (docs/
+    // POWER_UP_ROADMAP.md, "Extensions futures non bloquantes") : au depart
+    // WriteIndexedStructValue exigeait que TOUS les champs du struct soient
+    // primitifs (un seul niveau) -- un struct contenant lui-meme un struct
+    // imbrique (ex: Zone { Coordinates Origin; int Radius; }) etait rejete.
+    // Etendu pour deballer recursivement les champs struct imbriques jusqu'a
+    // MaxValueTypeDepth (meme borne que le deballage en LECTURE,
+    // ReadValueTypeFieldValue) -- une reference (objet/string) a l'interieur
+    // reste explicitement hors scope (pas de chemin d'ecriture symbolique
+    // pour un struct entier contenant une reference, contrairement au champ
+    // isole via writePrimitivePath). Format de saisie retenu : cles A PLAT
+    // avec chemin en points ("Origin.X=100,Origin.Y=200,Radius=5"), coherent
+    // avec la syntaxe deja utilisee pour les chemins de champ (Stats.HomeZone.Origin.X).
+    private readonly record struct StructLeaf(string DottedName, IReadOnlyList<ClrInstanceField> FieldChain, ulong Address);
+
+    private static void CollectWritableStructLeaves(
+        ClrType structType,
+        ulong structAddress,
+        string prefix,
+        IReadOnlyList<ClrInstanceField> chain,
+        int depth,
+        List<StructLeaf> leaves)
+    {
+        foreach (ClrInstanceField field in structType.Fields)
+        {
+            string name = prefix.Length == 0 ? field.Name! : $"{prefix}.{field.Name}";
+            var nextChain = new List<ClrInstanceField>(chain) { field };
+            ulong fieldAddress = field.GetAddress(structAddress, interior: true);
+
+            if (IsWritablePrimitive(field.ElementType))
+            {
+                leaves.Add(new StructLeaf(name, nextChain, fieldAddress));
+            }
+            else if (field.Type?.IsValueType == true)
+            {
+                if (depth >= MaxValueTypeDepth)
+                {
+                    throw new ClrSessionException(
+                        $"Ecriture d'element struct ENTIER : profondeur maximale de struct imbriquee ({MaxValueTypeDepth}) atteinte pour {name}.");
+                }
+                CollectWritableStructLeaves(field.Type, fieldAddress, name, nextChain, depth + 1, leaves);
+            }
+            else
+            {
+                throw new ClrSessionException(
+                    $"Ecriture d'element struct ENTIER : champ {name} n'est ni primitif ni struct imbrique (reference/collection) -- " +
+                    "non supporte par cette ecriture (extension separee, hors scope).");
+            }
+        }
+    }
+
+    private static object ReadStructLeafValue(ClrValueType root, IReadOnlyList<ClrInstanceField> chain)
+    {
+        ClrValueType current = root;
+        for (int i = 0; i < chain.Count - 1; i++)
+        {
+            current = current.ReadValueTypeField(chain[i]);
+        }
+        return ReadValueTypePrimitive(current, chain[^1]);
+    }
+
     private object WriteIndexedStructValue(PathNode owner, PathSegment segment, string valueText, string path)
     {
         int attachedPid = _attachedPid ?? throw new ClrSessionException("Aucun PID attache pour l'ecriture d'element de tableau CLR.");
@@ -2757,56 +2818,51 @@ public sealed class ClrSession : IDisposable
             throw new ClrSessionException($"Element {segment.FieldName}[{index}] n'est pas un struct.");
         }
 
-        List<ClrInstanceField> instanceFields = componentType.Fields.ToList();
-        Dictionary<string, string> assignments = ParseStructFieldAssignments(valueText);
-
-        List<string> missing = instanceFields.Select(f => f.Name!).Where(name => !assignments.ContainsKey(name)).ToList();
-        if (missing.Count > 0)
-        {
-            throw new ClrSessionException(
-                $"Ecriture de {segment.FieldName}[{index}] : champ(s) manquant(s) {string.Join(", ", missing)} -- " +
-                "l'ecriture d'un element struct ENTIER exige tous ses champs (format \"Champ1=Valeur1,Champ2=Valeur2\").");
-        }
-        List<string> unknown = assignments.Keys.Where(name => instanceFields.All(f => f.Name != name)).ToList();
-        if (unknown.Count > 0)
-        {
-            throw new ClrSessionException($"Ecriture de {segment.FieldName}[{index}] : champ(s) inconnu(s) {string.Join(", ", unknown)}.");
-        }
-        List<string> nonPrimitive = instanceFields.Where(f => !IsWritablePrimitive(f.ElementType)).Select(f => f.Name!).ToList();
-        if (nonPrimitive.Count > 0)
-        {
-            throw new ClrSessionException(
-                $"Ecriture de {segment.FieldName}[{index}] : champ(s) non primitif(s) {string.Join(", ", nonPrimitive)} -- " +
-                "un struct contenant un struct imbrique ou une reference ne peut pas etre ecrit ENTIER par ce chemin (extension separee, hors scope).");
-        }
-
         ulong elementAddress = arrayObject.Type!.GetArrayElementAddress(arrayObject.Address, index);
         if (elementAddress == 0)
         {
             throw new ClrSessionException($"Adresse de l'element {segment.FieldName}[{index}] introuvable.");
         }
 
-        var writtenFields = new List<object>();
-        foreach (ClrInstanceField field in instanceFields)
+        var leaves = new List<StructLeaf>();
+        CollectWritableStructLeaves(componentType, elementAddress, string.Empty, Array.Empty<ClrInstanceField>(), 0, leaves);
+
+        Dictionary<string, string> assignments = ParseStructFieldAssignments(valueText);
+
+        List<string> missing = leaves.Select(l => l.DottedName).Where(name => !assignments.ContainsKey(name)).ToList();
+        if (missing.Count > 0)
         {
-            ulong fieldAddress = field.GetAddress(elementAddress, interior: true);
-            if (fieldAddress == 0)
+            throw new ClrSessionException(
+                $"Ecriture de {segment.FieldName}[{index}] : champ(s) manquant(s) {string.Join(", ", missing)} -- " +
+                "l'ecriture d'un element struct ENTIER exige tous ses champs feuilles (format \"Champ1=Valeur1,Sous.Champ2=Valeur2\").");
+        }
+        List<string> unknown = assignments.Keys.Where(name => leaves.All(l => l.DottedName != name)).ToList();
+        if (unknown.Count > 0)
+        {
+            throw new ClrSessionException($"Ecriture de {segment.FieldName}[{index}] : champ(s) inconnu(s) {string.Join(", ", unknown)}.");
+        }
+
+        var writtenFields = new List<object>();
+        foreach (StructLeaf leaf in leaves)
+        {
+            if (leaf.Address == 0)
             {
-                throw new ClrSessionException($"Adresse effective du champ {field.Name} introuvable dans {segment.FieldName}[{index}].");
+                throw new ClrSessionException($"Adresse effective du champ {leaf.DottedName} introuvable dans {segment.FieldName}[{index}].");
             }
-            byte[] bytes = EncodePrimitive(field.ElementType, assignments[field.Name!]);
-            WriteRawBytes(attachedPid, fieldAddress, bytes, $"champ struct CLR {segment.FieldName}[{index}].{field.Name}");
-            writtenFields.Add(new { name = field.Name, address = ToHex(fieldAddress), bytesWritten = bytes.Length });
+            ClrElementType elementType = leaf.FieldChain[^1].ElementType;
+            byte[] bytes = EncodePrimitive(elementType, assignments[leaf.DottedName]);
+            WriteRawBytes(attachedPid, leaf.Address, bytes, $"champ struct CLR {segment.FieldName}[{index}].{leaf.DottedName}");
+            writtenFields.Add(new { name = leaf.DottedName, address = ToHex(leaf.Address), bytesWritten = bytes.Length });
         }
 
         ClrValueType readBack = arrayObject.AsArray().GetStructValue(index);
         var values = new Dictionary<string, object?>();
         bool verified = true;
-        foreach (ClrInstanceField field in instanceFields)
+        foreach (StructLeaf leaf in leaves)
         {
-            object value = ReadValueTypePrimitive(readBack, field);
-            values[field.Name!] = value;
-            if (!PrimitiveMatches(field.ElementType, assignments[field.Name!], value))
+            object value = ReadStructLeafValue(readBack, leaf.FieldChain);
+            values[leaf.DottedName] = value;
+            if (!PrimitiveMatches(leaf.FieldChain[^1].ElementType, assignments[leaf.DottedName], value))
             {
                 verified = false;
             }
