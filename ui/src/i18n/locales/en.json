@@ -87,7 +87,138 @@
     "investigation": "Investigation",
     "trainer": "Trainer",
     "speedhack": "Speedhack",
-    "network": "Network"
+    "network": "Network",
+    "lexicon": "Glossary"
+  },
+  "lexicon": {
+    "searchPlaceholder": "Search a term...",
+    "empty": "No term matches this search.",
+    "terms": {
+      "adresse": {
+        "term": "Address (memory)",
+        "definition": "A precise location in a process's memory, written in hexadecimal (e.g. 0x7FF6FB1300E4). That's where a value lives at a given moment — it can change every time the program restarts."
+      },
+      "aob": {
+        "term": "AOB (byte signature)",
+        "definition": "A distinctive sequence of bytes found in the program's code, used as a stable landmark to relocate a specific spot even after a restart — unlike a raw memory address, which changes every launch."
+      },
+      "aslr": {
+        "term": "ASLR",
+        "definition": "A Windows security mechanism that randomly relocates a program's modules in memory on every launch. That's why an absolute address found yesterday no longer works today, and why AOB signatures or pointer chains are used instead."
+      },
+      "breakpoint": {
+        "term": "Breakpoint",
+        "definition": "A deliberate pause in the program's execution at a specific point in the code, used to observe or intercept a memory write at the exact moment it happens."
+      },
+      "clr": {
+        "term": "CLR (.NET)",
+        "definition": "The .NET (C#) runtime engine. KillEngine's CLR Inspector walks the program's live objects (the \"managed heap\") directly instead of guessing addresses, which is more reliable for games/apps written in C#."
+      },
+      "dll": {
+        "term": "DLL",
+        "definition": "A shared code library file that Windows loads into a program. Injection means making an extra DLL (e.g. the CLR helper) load inside the target process."
+      },
+      "edr": {
+        "term": "EDR",
+        "definition": "Security software (e.g. Microsoft Defender for Endpoint) that monitors and can block actions considered suspicious, such as writing into another program's executable code. Some AOB patches can be rejected because of an EDR, independent of any KillEngine bug."
+      },
+      "freeze": {
+        "term": "Freeze",
+        "definition": "Repeatedly rewriting a value (or intercepting every write attempt) to keep it from changing even if the program tries to modify it — for example to keep health or ammo constant."
+      },
+      "heap": {
+        "term": "Heap",
+        "definition": "The memory area where a program dynamically creates its objects while running (as opposed to code or fixed data). An address in the heap often changes when the object is recreated (new game, scene change), which is why pointer chains are useful."
+      },
+      "hex": {
+        "term": "Hexadecimal (hex)",
+        "definition": "A way of writing numbers in base 16 (digits 0-9 then A-F), used for every memory address. An address like 0x1A4 is not a game value, it's a location."
+      },
+      "injection": {
+        "term": "Injection",
+        "definition": "Making code (usually a DLL) load inside another already-running process, in order to inspect or influence it from within."
+      },
+      "kernel": {
+        "term": "Kernel / driver",
+        "definition": "The core of the operating system, with higher privileges than normal programs. KillEngine can use a kernel driver for operations Windows normally refuses to a regular program."
+      },
+      "locator": {
+        "term": "Locator",
+        "definition": "The method a Trainer feature uses to relocate an address: absolute (the raw address, doesn't survive a restart), AOB (code signature, survives), or pointer chain (module + offsets path, survives and handles heap objects)."
+      },
+      "lua": {
+        "term": "Lua",
+        "definition": "A simple scripting language used in the Lua tab to automate actions in KillEngine (via ke.call(...)) without recompiling the program — useful for repeating a sequence of actions or writing a small custom tool."
+      },
+      "module": {
+        "term": "Module",
+        "definition": "An executable file or DLL loaded in memory by a process. A \"module + offset\" address (e.g. SC2.exe+0x4A1B2) stays stable across launches, unlike an absolute address."
+      },
+      "offset": {
+        "term": "Offset",
+        "definition": "A fixed distance, in bytes, between a stable landmark (a module, or an object field) and the actual target. Used in pointer chains and \"module + offset\" addresses."
+      },
+      "pageguard": {
+        "term": "Page Guard",
+        "definition": "A technique that traps a memory page to get notified as soon as a program tries to read or write it, without going through a classic breakpoint."
+      },
+      "pipe": {
+        "term": "Pipe",
+        "definition": "A communication channel between two programs on the same machine. KillEngine exposes an automation pipe that lets an external script (PowerShell, Lua) drive the application without going through UI clicks."
+      },
+      "pointerchain": {
+        "term": "Pointer / pointer chain",
+        "definition": "A pointer is an address that itself contains another address. A pointer chain starts from a stable module and walks several successive offsets to relocate a heap object, even after it was recreated at a different address."
+      },
+      "processus": {
+        "term": "Process",
+        "definition": "A running instance of a program on Windows (e.g. Solitaire.exe). KillEngine must be \"attached\" to a process before it can read or modify its memory."
+      },
+      "riskgate": {
+        "term": "RiskGate",
+        "definition": "KillEngine's confirmation guard rail: before any action that actually changes something (write, patch, freeze...), a dialog asks for explicit confirmation."
+      },
+      "scan": {
+        "term": "Scan",
+        "definition": "A search across the whole process memory to find addresses holding a given value (exact scan) or varying in a certain way (increased, decreased, unknown value). This is the basis of every value search in KillEngine."
+      },
+      "signature": {
+        "term": "Signature",
+        "definition": "See AOB — a byte pattern used to reliably relocate a specific spot in the code, instead of a raw address."
+      },
+      "speedhack": {
+        "term": "Speedhack",
+        "definition": "A feature that artificially speeds up or slows down how a program perceives time passing, without touching its memory (e.g. to speed up a loading screen or slow down a too-fast enemy)."
+      },
+      "stack": {
+        "term": "Stack",
+        "definition": "A temporary memory area a program uses for its current function calls. Different from the heap, which holds dynamically created objects."
+      },
+      "thread": {
+        "term": "Thread",
+        "definition": "An independent execution line inside the same process. A program can have several threads active at once, which matters for techniques like breakpoints or freezing."
+      },
+      "trainer": {
+        "term": "Trainer",
+        "definition": "The tab that turns a found address or action into a reusable feature (freeze, write) that can be toggled with one click or a keyboard shortcut, without redoing a whole search."
+      },
+      "typevaleur": {
+        "term": "Value type (Int32, Float...)",
+        "definition": "The format a value is stored in memory as: whole number (Int32, Int64...), decimal number (Float32/Float64), text (String), or raw byte sequence (Array of Bytes). Picking the right type matters for a scan or write to work."
+      },
+      "uwp": {
+        "term": "UWP",
+        "definition": "Universal Windows Platform — a type of Windows app (often installed via the Microsoft Store) with its own storage rules (LocalSettings, sandboxed folders) different from a classic program."
+      },
+      "writeprocessmemory": {
+        "term": "WriteProcessMemory",
+        "definition": "The low-level Windows function that writes bytes into another process's memory. This is the final mechanism behind most of KillEngine's writes and patches."
+      },
+      "xor": {
+        "term": "XOR",
+        "definition": "A simple logical operation sometimes used by programs to slightly mask a value in memory (e.g. storing value XOR key instead of the raw value) to throw off a direct scan. A value \"XOR-obfuscated\" won't be found by a plain exact scan on the displayed number."
+      }
+    }
   },
   "help": {
     "label": {

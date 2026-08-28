@@ -87,7 +87,138 @@
     "investigation": "Investigation",
     "trainer": "Trainer",
     "speedhack": "Speedhack",
-    "network": "Réseau"
+    "network": "Réseau",
+    "lexicon": "Lexique"
+  },
+  "lexicon": {
+    "searchPlaceholder": "Chercher un terme...",
+    "empty": "Aucun terme ne correspond à cette recherche.",
+    "terms": {
+      "adresse": {
+        "term": "Adresse (mémoire)",
+        "definition": "Emplacement précis dans la mémoire d'un processus, écrit en hexadécimal (ex: 0x7FF6FB1300E4). C'est là que se trouve une valeur à un instant donné — elle peut changer à chaque relancement du programme."
+      },
+      "aob": {
+        "term": "AOB (signature d'octets)",
+        "definition": "Une suite d'octets caractéristique trouvée dans le code du programme, utilisée comme repère stable pour retrouver un endroit précis même après un redémarrage — contrairement à une adresse mémoire brute, qui change à chaque lancement."
+      },
+      "aslr": {
+        "term": "ASLR",
+        "definition": "Mécanisme de sécurité Windows qui replace aléatoirement les modules d'un programme en mémoire à chaque lancement. C'est la raison pour laquelle une adresse absolue trouvée hier ne fonctionne plus aujourd'hui, et pourquoi on utilise des signatures AOB ou des chaînes de pointeurs à la place."
+      },
+      "breakpoint": {
+        "term": "Breakpoint (point d'arrêt)",
+        "definition": "Un arrêt volontaire de l'exécution du programme à un endroit précis du code, utilisé pour observer ou intercepter une écriture mémoire au moment exact où elle se produit."
+      },
+      "clr": {
+        "term": "CLR (.NET)",
+        "definition": "Le moteur d'exécution des programmes .NET (C#). L'Inspecteur CLR de KillEngine explore directement les objets vivants du programme (le \"tas managé\") plutôt que de deviner des adresses, ce qui est plus fiable pour les jeux/applications écrits en C#."
+      },
+      "dll": {
+        "term": "DLL",
+        "definition": "Un fichier de bibliothèque de code partagé que Windows charge dans un programme. Une injection consiste à faire charger une DLL supplémentaire (ex: le helper CLR) à l'intérieur du processus ciblé."
+      },
+      "edr": {
+        "term": "EDR",
+        "definition": "Un logiciel de sécurité (ex: Microsoft Defender for Endpoint) qui surveille et peut bloquer des actions jugées suspectes, comme écrire dans le code exécutable d'un autre programme. Certains patchs AOB peuvent être refusés à cause d'un EDR, indépendamment d'un bug de KillEngine."
+      },
+      "freeze": {
+        "term": "Freeze (geler une valeur)",
+        "definition": "Réécrire une valeur en boucle (ou intercepter chaque tentative d'écriture) pour l'empêcher de changer, même si le programme essaie de la modifier — par exemple pour garder une vie ou des munitions constantes."
+      },
+      "heap": {
+        "term": "Heap (tas)",
+        "definition": "La zone de mémoire où un programme crée dynamiquement ses objets pendant qu'il tourne (par opposition au code ou aux données fixes). Une adresse dans le tas change souvent quand l'objet est recréé (nouvelle partie, changement de scène), d'où l'intérêt d'une chaîne de pointeurs."
+      },
+      "hex": {
+        "term": "Hexadécimal (hex)",
+        "definition": "Une façon d'écrire les nombres en base 16 (chiffres 0-9 puis A-F), utilisée pour toutes les adresses mémoire. Une adresse comme 0x1A4 n'est pas une valeur de jeu, c'est un emplacement."
+      },
+      "injection": {
+        "term": "Injection",
+        "definition": "Faire charger du code (généralement une DLL) à l'intérieur d'un autre processus déjà lancé, pour pouvoir l'inspecter ou l'influencer de l'intérieur."
+      },
+      "kernel": {
+        "term": "Kernel (noyau) / pilote",
+        "definition": "Le cœur du système d'exploitation, avec des droits plus élevés que les programmes normaux. KillEngine peut utiliser un pilote noyau pour des opérations que Windows refuse normalement à un programme classique."
+      },
+      "locator": {
+        "term": "Locator (localisateur)",
+        "definition": "La méthode utilisée par une feature Trainer pour retrouver une adresse : absolue (l'adresse brute, ne survit pas à un redémarrage), AOB (signature de code, survit), ou chaîne de pointeurs (chemin module + décalages, survit et gère les objets du tas)."
+      },
+      "lua": {
+        "term": "Lua",
+        "definition": "Un langage de script simple utilisé dans l'onglet Lua pour automatiser des actions dans KillEngine (via ke.call(...)) sans recompiler le programme — utile pour répéter une séquence d'actions ou écrire un petit outil sur mesure."
+      },
+      "module": {
+        "term": "Module",
+        "definition": "Un fichier exécutable ou une DLL chargée en mémoire par un processus. Une adresse \"module + décalage\" (ex: SC2.exe+0x4A1B2) reste stable d'un lancement à l'autre, contrairement à une adresse absolue."
+      },
+      "offset": {
+        "term": "Offset (décalage)",
+        "definition": "Une distance fixe, en octets, entre un point de repère stable (un module, ou un champ d'objet) et l'endroit réellement visé. Utilisé dans les chaînes de pointeurs et les adresses \"module + offset\"."
+      },
+      "pageguard": {
+        "term": "Page Guard",
+        "definition": "Une technique qui pose un piège sur une page mémoire pour être averti dès qu'un programme essaie d'y lire ou d'y écrire, sans passer par un breakpoint classique."
+      },
+      "pipe": {
+        "term": "Pipe (tube de communication)",
+        "definition": "Un canal de communication entre deux programmes sur la même machine. KillEngine expose un pipe d'automatisation qui permet de piloter l'application depuis un script externe (PowerShell, Lua) sans passer par les clics de l'interface."
+      },
+      "pointerchain": {
+        "term": "Pointeur / chaîne de pointeurs",
+        "definition": "Un pointeur est une adresse qui contient elle-même une autre adresse. Une chaîne de pointeurs part d'un module stable et retraverse plusieurs décalages successifs pour retrouver un objet du tas, même après qu'il ait été recréé à une adresse différente."
+      },
+      "processus": {
+        "term": "Processus",
+        "definition": "Une instance d'un programme en cours d'exécution sur Windows (ex: Solitaire.exe). KillEngine doit être \"attaché\" à un processus avant de pouvoir lire ou modifier sa mémoire."
+      },
+      "riskgate": {
+        "term": "RiskGate",
+        "definition": "Le garde-fou de confirmation de KillEngine : avant toute action qui modifie réellement quelque chose (écriture, patch, freeze...), une boîte de dialogue demande une confirmation explicite."
+      },
+      "scan": {
+        "term": "Scan",
+        "definition": "Une recherche dans toute la mémoire du processus pour trouver les adresses qui contiennent une valeur donnée (scan exact) ou qui varient d'une certaine façon (augmente, diminue, valeur inconnue). C'est la base de toute recherche de valeur dans KillEngine."
+      },
+      "signature": {
+        "term": "Signature",
+        "definition": "Voir AOB — un motif d'octets utilisé pour retrouver un endroit précis dans le code de façon stable, plutôt qu'une adresse brute."
+      },
+      "speedhack": {
+        "term": "Speedhack",
+        "definition": "Une fonctionnalité qui accélère ou ralentit artificiellement la vitesse perçue du temps par un programme, sans toucher à sa mémoire (ex: pour accélérer un chargement ou ralentir un ennemi trop rapide)."
+      },
+      "stack": {
+        "term": "Stack (pile)",
+        "definition": "Une zone de mémoire temporaire utilisée par un programme pour ses appels de fonction en cours. Différente du tas (heap), qui sert aux objets créés dynamiquement."
+      },
+      "thread": {
+        "term": "Thread (fil d'exécution)",
+        "definition": "Une ligne d'exécution indépendante à l'intérieur d'un même processus. Un programme peut avoir plusieurs threads actifs en même temps, ce qui compte pour certaines techniques comme le breakpoint ou le freeze."
+      },
+      "trainer": {
+        "term": "Trainer",
+        "definition": "L'onglet qui transforme une adresse ou une action trouvée en feature réutilisable (freeze, écriture) que l'on peut activer/désactiver d'un clic ou d'un raccourci clavier, sans repasser par toute une recherche."
+      },
+      "typevaleur": {
+        "term": "Type de valeur (Int32, Float...)",
+        "definition": "Le format dans lequel une valeur est stockée en mémoire : nombre entier (Int32, Int64...), nombre à virgule (Float32/Float64), texte (String) ou suite d'octets brute (Array of Bytes). Il faut choisir le bon type pour qu'un scan ou une écriture fonctionne."
+      },
+      "uwp": {
+        "term": "UWP",
+        "definition": "Universal Windows Platform — un type d'application Windows (souvent installée via le Microsoft Store) avec ses propres règles de stockage (LocalSettings, dossiers isolés) différentes d'un programme classique."
+      },
+      "writeprocessmemory": {
+        "term": "WriteProcessMemory",
+        "definition": "La fonction Windows de bas niveau qui permet d'écrire des octets dans la mémoire d'un autre processus. C'est le mécanisme final derrière la plupart des écritures et patchs de KillEngine."
+      },
+      "xor": {
+        "term": "XOR",
+        "definition": "Une opération logique simple parfois utilisée par les programmes pour masquer légèrement une valeur en mémoire (ex: stocker valeur XOR clé au lieu de la valeur brute) afin de gêner un scan direct. Une valeur \"obfusquée en XOR\" ne se trouve pas par un scan exact classique sur la valeur affichée."
+      }
+    }
   },
   "help": {
     "label": {

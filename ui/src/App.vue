@@ -6,6 +6,7 @@ import AssistantView from '@/views/AssistantView.vue'
 import ClrInspectorView from '@/views/ClrInspectorView.vue'
 import ExpertView from '@/views/ExpertView.vue'
 import InvestigationView from '@/views/InvestigationView.vue'
+import LexiconView from '@/views/LexiconView.vue'
 import MemoryView from '@/views/MemoryView.vue'
 import NetworkView from '@/views/NetworkView.vue'
 import ProfileView from '@/views/ProfileView.vue'
@@ -29,6 +30,7 @@ const currentView = computed(() => {
   if (store.activeView === 'profiles') return ProfileView
   if (store.activeView === 'trainer') return TrainerView
   if (store.activeView === 'expert') return ExpertView
+  if (store.activeView === 'lexicon') return LexiconView
   if (store.activeView === 'settings') return SettingsView
   return AssistantView
 })
@@ -131,6 +133,13 @@ watch(
           @click="store.activeView = 'expert'"
         >
           {{ $t('nav.expert') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'lexicon' }"
+          @click="store.activeView = 'lexicon'"
+        >
+          {{ $t('nav.lexicon') }}
         </button>
         <button
           class="nav-item"

@@ -283,7 +283,7 @@ export interface RuntimeActionPlan {
   actions: RuntimeActionPlanItem[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
 
 export interface WorkflowPreset {
   id: string
