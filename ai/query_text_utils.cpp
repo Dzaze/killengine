@@ -125,4 +125,73 @@ bool wantsFindWhatWritesOrTestFieldsQuery(const QString& query) {
     return wantsFindWhatWritesQuery(query) || wantsTestCandidateFieldsQuery(query);
 }
 
+QString investigationPlaybookTopic(const QString& query) {
+    const QString q = query.toLower();
+    const bool hasDecimal = !firstDecimalOutsideHex(query).isEmpty();
+    const bool hasAddress = !firstHexAddressIn(query).isEmpty();
+    const bool directReadOnlyTool =
+        wantsTrainerQuery(query)
+        || wantsFieldStabilityQuery(query)
+        || wantsUiSourcesQuery(query)
+        || wantsGenerateAobQuery(query)
+        || wantsSuggestPatchQuery(query)
+        || wantsDisassembleBackwardQuery(query)
+        || wantsFindWhatWritesQuery(query)
+        || wantsTestCandidateFieldsQuery(query);
+
+    if (!hasDecimal
+        && (q.contains("valeur simple") || q.contains("simple value")
+            || ((q.contains("comment") || q.contains("quoi faire") || q.contains("par ou commencer"))
+                && (q.contains("chercher") || q.contains("scan"))))) {
+        return "simple_visible_value";
+    }
+
+    if (!hasDecimal
+        && (q.contains("ne trouve pas") || q.contains("trouve pas") || q.contains("introuvable")
+            || q.contains("not found") || q.contains("cannot find") || q.contains("can't find"))
+        && (q.contains("valeur affich") || q.contains("displayed value") || q.contains("valeur a l'ecran")
+            || q.contains("valeur à l'écran"))) {
+        return "displayed_value_not_found";
+    }
+
+    if ((q.contains("freeze") || q.contains("gel") || q.contains("fige"))
+        && (q.contains("clignote") || q.contains("ne tient pas") || q.contains("tient pas")
+            || q.contains("flicker") || q.contains("does not hold") || q.contains("doesn't hold"))) {
+        return "freeze_flickers";
+    }
+
+    if ((q.contains("adresse") || q.contains("address") || hasAddress)
+        && (q.contains("redémarrage") || q.contains("redemarrage") || q.contains("relance")
+            || q.contains("restart") || q.contains("relaunch") || q.contains("survit pas")
+            || q.contains("ne survit pas") || q.contains("does not survive") || q.contains("doesn't survive"))) {
+        return "unstable_address";
+    }
+
+    if (!directReadOnlyTool
+        && (q.contains("patcher") || q.contains("patch le code") || q.contains("modifier le code")
+            || q.contains("nop") || q.contains("forcer un saut") || q.contains("force jump"))) {
+        return "code_patch_request";
+    }
+
+    if (!wantsFindWhatWritesQuery(query)
+        && (q.contains("qui écrit") || q.contains("qui ecrit") || q.contains("what writes")
+            || q.contains("origine de l'écriture") || q.contains("origine de l'ecriture"))) {
+        return "what_writes_value";
+    }
+
+    if (!directReadOnlyTool
+        && (q.contains("fichier de sauvegarde") || q.contains("save file") || q.contains("localsettings")
+            || q.contains("local settings") || q.contains("registre uwp"))
+        && (q.contains("valeur") || q.contains("value") || q.contains("peut etre")
+            || q.contains("peut-être") || q.contains("vit dans"))) {
+        return "save_file_or_uwp";
+    }
+
+    return {};
+}
+
+bool wantsInvestigationPlaybookQuery(const QString& query) {
+    return !investigationPlaybookTopic(query).isEmpty();
+}
+
 } // namespace killai

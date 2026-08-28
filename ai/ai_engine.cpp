@@ -105,6 +105,125 @@ OffMemoryToolMatch matchOffMemoryTool(const QString& q) {
     return {};
 }
 
+QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
+    struct Entry {
+        const char* title;
+        const char* hypotheses;
+        const char* tool;
+        const char* prerequisites;
+        const char* risk;
+        const char* nextAction;
+        const char* fallback;
+    };
+
+    Entry entry{
+        "Enquête guidée",
+        "Symptôme reconnu, mais il manque encore une cible actionnable.",
+        "Consulter le playbook d'enquête.",
+        "Décrire la valeur, l'adresse ou le contexte observé.",
+        "Aucun : cette réponse est strictement lecture seule.",
+        "Suivre le plan proposé avant toute action à risque.",
+        "Donner une valeur, une adresse ou une observation plus précise."
+    };
+
+    if (topic == "simple_visible_value") {
+        entry = {
+            "Valeur numérique simple visible",
+            "La valeur est peut-être stockée telle quelle en mémoire, sans obfuscation ni recalcul d'affichage.",
+            "Commencer par exact_scan, puis réduire avec next_scan quand la valeur change.",
+            "Processus attaché et valeur actuellement visible à l'écran.",
+            "Aucun pour le scan : lecture seule. Seule une écriture ou un freeze ultérieur demandera confirmation.",
+            "Donne la valeur affichée actuelle, puis fais-la changer pour réduire les candidats.",
+            "Si le scan exact ne converge pas, passer au chemin valeur affichée introuvable / Trace UI string."
+        };
+    } else if (topic == "displayed_value_not_found") {
+        entry = {
+            "Valeur affichée introuvable",
+            "La valeur peut être une string UI, une copie d'affichage, ou une représentation transformée.",
+            "Utiliser Trace UI string, puis analyser les sources numériques autour des strings suivies.",
+            "Valeur visible à l'écran sous forme de texte lisible.",
+            "Aucun pour Trace UI string / analyse des sources : lecture seule.",
+            "Confirme la valeur affichée exacte, puis observe son évolution avant toute écriture.",
+            "Si aucune source fiable n'apparaît, escalader vers 'qui écrit cette valeur' avec confirmation debugger."
+        };
+    } else if (topic == "unstable_address") {
+        entry = {
+            "Adresse instable au redémarrage",
+            "L'adresse absolue est probablement invalidée par l'ASLR ou par une réallocation d'objet.",
+            "Transformer la trouvaille en locator Trainer : AOB pour du code, pointer chain pour une donnée.",
+            "Adresse déjà validée comme correcte dans la session actuelle.",
+            "Aucun pour générer/chercher un locator ; ne pas promettre de stabilité si seul absolute fonctionne.",
+            "Stabilise l'adresse via AOB ou pointer chain avant d'en faire une feature Trainer durable.",
+            "Si rien n'est unique/stable, garder absolute en indiquant clairement que ça ne survivra probablement pas."
+        };
+    } else if (topic == "freeze_flickers") {
+        entry = {
+            "Freeze qui clignote",
+            "La cible peut réécrire plus vite que le polling, ou l'adresse peut être un champ affiché dérivé.",
+            "Analyser la stabilité du champ avant d'envisager un freeze breakpoint matériel.",
+            "Adresse candidate déjà identifiée.",
+            "Analyse de stabilité : lecture seule. Freeze BP : debugger, confirmation RiskGate obligatoire.",
+            "Vérifie d'abord si l'adresse est une vraie source ou seulement un affichage recalculé.",
+            "Si c'est un affichage dérivé, chercher l'origine de l'écriture plutôt que freezer cette copie."
+        };
+    } else if (topic == "code_patch_request") {
+        entry = {
+            "Patch de code demandé",
+            "L'objectif touche probablement une instruction machine plutôt qu'une simple donnée.",
+            "Générer une AOB, suggérer un patch, puis désassembler le contexte si nécessaire.",
+            "Adresse de code valide, idéalement issue d'un hit 'Écrit par'.",
+            "Élevé pour l'application réelle : patch=confirmation humaine, jamais auto-exécuté depuis le chat.",
+            "Vérifie l'unicité de la signature et applique seulement depuis Expert/Trainer après confirmation.",
+            "Si la signature est ambiguë ou bloquée par l'environnement, revenir à un write/freeze moins invasif."
+        };
+    } else if (topic == "what_writes_value") {
+        entry = {
+            "Comprendre qui écrit une valeur",
+            "Plusieurs sites de code peuvent écrire la même adresse ; il faut identifier la vraie source gameplay.",
+            "Utiliser 'Écrit par' / find_what_writes depuis l'UI Expert, avec confirmation.",
+            "Adresse stable déjà connue, pas un slot trop chaud ou générique.",
+            "Debugger : peut perturber la cible, confirmation obligatoire.",
+            "Prépare l'adresse, lance la capture confirmée, puis interagis avec le jeu pendant la fenêtre.",
+            "Si aucun hit n'apparaît, élargir la fenêtre ou revérifier que l'adresse est bien stable."
+        };
+    } else if (topic == "save_file_or_uwp") {
+        entry = {
+            "Valeur dans sauvegarde ou LocalSettings",
+            "La valeur peut vivre sur disque ou dans une ruche UWP plutôt qu'en RAM exploitable.",
+            "Découvrir les fichiers de sauvegarde, lire le texte, inspecter LocalSettings, puis comparer avant/après.",
+            "Jeu avec fichier de sauvegarde identifiable ou processus UWP attaché.",
+            "Lecture seule pour inspection. Toute écriture disque reste hors PHASE 120-A et demande action explicite.",
+            "Compare un état avant/après une action utilisateur pour isoler le champ modifié.",
+            "Si une source plus autoritaire réécrit le fichier, il faudra un protocole d'enquête plus large hors 120-A."
+        };
+    }
+
+    QVariantMap result;
+    result["status"] = "needs_clarification";
+    result["actionStatus"] = "not_executed";
+    result["message"] = QString(
+        "D'après `docs/INVESTIGATION_PLAYBOOK.md`, je traiterais ça comme : %1\n\n"
+        "Hypothèses : %2\n"
+        "Outil conseillé : %3\n"
+        "Prérequis : %4\n"
+        "Risque : %5\n"
+        "Prochaine action humaine : %6\n"
+        "Fallback : %7\n\n"
+        "Je n'exécute rien depuis ce chemin PHASE 120-A : pas de tool_call, pas de pipe/Lua, pas de contournement RiskGate.")
+        .arg(QString::fromUtf8(entry.title),
+             QString::fromUtf8(entry.hypotheses),
+             QString::fromUtf8(entry.tool),
+             QString::fromUtf8(entry.prerequisites),
+             QString::fromUtf8(entry.risk),
+             QString::fromUtf8(entry.nextAction),
+             QString::fromUtf8(entry.fallback));
+    result["investigationTopic"] = topic;
+    result["source"] = "docs/INVESTIGATION_PLAYBOOK.md";
+    result["state"] = "Idle";
+    result["aiBackend"] = "deterministic_investigation_playbook";
+    return result;
+}
+
 struct TrainerToolMatch {
     QString tool;
     QVariantMap args;
@@ -548,6 +667,12 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
             "un freeze, un trainer, un script Lua, ou une investigation plus guidée.";
         result["state"] = m_stateMachine.currentStateName();
         result["aiBackend"] = "deterministic_social_guard";
+        return result;
+    }
+
+    if (const QString topic = investigationPlaybookTopic(query); !topic.isEmpty()) {
+        QVariantMap result = makeInvestigationPlaybookResponse(topic);
+        result["state"] = m_stateMachine.currentStateName();
         return result;
     }
 

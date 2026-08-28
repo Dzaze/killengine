@@ -428,6 +428,56 @@ TEST(AIEngineContextualFallbackTest, GreetingWithConcreteValueStillPlansScan) {
     EXPECT_EQ(result.value("tool").toString().toStdString(), "exact_scan");
 }
 
+TEST(AIEngineContextualFallbackTest, InvestigationPlaybookBroadDisplayedValueIsReadOnlyPlan) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+
+    const auto result = engine.processQuery("je ne trouve pas la valeur affichée", context);
+
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_EQ(result.value("actionStatus").toString().toStdString(), "not_executed");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_investigation_playbook");
+    EXPECT_EQ(result.value("investigationTopic").toString().toStdString(), "displayed_value_not_found");
+    EXPECT_FALSE(result.contains("tool"));
+    EXPECT_TRUE(result.value("message").toString().contains("docs/INVESTIGATION_PLAYBOOK.md"));
+    EXPECT_TRUE(result.value("message").toString().contains("pas de tool_call"));
+}
+
+TEST(AIEngineContextualFallbackTest, InvestigationPlaybookFreezeFlickerNeverCreatesExecutableAction) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+
+    const auto result = engine.processQuery("le freeze clignote sur 0x1a2b3c4d et ne tient pas", context);
+
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_EQ(result.value("actionStatus").toString().toStdString(), "not_executed");
+    EXPECT_EQ(result.value("investigationTopic").toString().toStdString(), "freeze_flickers");
+    EXPECT_FALSE(result.contains("tool"));
+    EXPECT_FALSE(result.value("message").toString().contains("j'exécute"));
+}
+
+TEST(AIEngineContextualFallbackTest, InvestigationPlaybookDoesNotHijackConcreteExistingTools) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+
+    const auto trace = engine.processQuery("la valeur 60 est affichee mais introuvable", context);
+    EXPECT_EQ(trace.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(trace.value("tool").toString().toStdString(), "trace_ui_string");
+
+    const auto findWrites = engine.processQuery("capture ce qui écrit 0x1a2b3c4d", context);
+    EXPECT_EQ(findWrites.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(findWrites.value("tool").toString().toStdString(), "find_what_writes");
+}
+
 TEST(AIEngineContextualFallbackTest, RefinesWithNextScanWhenScanActive) {
     ScopedModelDisabled guard;
     killai::AIEngine engine;

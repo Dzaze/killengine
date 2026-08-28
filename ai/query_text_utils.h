@@ -26,4 +26,7 @@ bool wantsTestCandidateFieldsQuery(const QString& query);
 bool wantsAobOrPatchWorkflowQuery(const QString& query);
 bool wantsFindWhatWritesOrTestFieldsQuery(const QString& query);
 
+QString investigationPlaybookTopic(const QString& query);
+bool wantsInvestigationPlaybookQuery(const QString& query);
+
 } // namespace killai

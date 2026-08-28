@@ -64,3 +64,20 @@ TEST(QueryTextUtilsStandaloneTest, DebugWorkflowAggregatesFindWritesAndCandidate
     EXPECT_TRUE(killai::wantsFindWhatWritesOrTestFieldsQuery("verifie quel champ tient"));
     EXPECT_FALSE(killai::wantsFindWhatWritesOrTestFieldsQuery("affiche les processus"));
 }
+
+TEST(QueryTextUtilsStandaloneTest, InvestigationPlaybookMatchesOnlyBroadReadOnlySymptoms) {
+    EXPECT_EQ(killai::investigationPlaybookTopic("je ne trouve pas la valeur affichée").toStdString(),
+        "displayed_value_not_found");
+    EXPECT_EQ(killai::investigationPlaybookTopic("le freeze clignote et ne tient pas").toStdString(),
+        "freeze_flickers");
+    EXPECT_EQ(killai::investigationPlaybookTopic("cette adresse ne survit pas au redemarrage").toStdString(),
+        "unstable_address");
+    EXPECT_EQ(killai::investigationPlaybookTopic("je veux patcher le code proprement").toStdString(),
+        "code_patch_request");
+    EXPECT_EQ(killai::investigationPlaybookTopic("qui écrit cette valeur ?").toStdString(),
+        "what_writes_value");
+
+    EXPECT_TRUE(killai::investigationPlaybookTopic("la valeur 60 est affichee mais introuvable").isEmpty());
+    EXPECT_TRUE(killai::investigationPlaybookTopic("capture ce qui ecrit 0x1234").isEmpty());
+    EXPECT_TRUE(killai::investigationPlaybookTopic("suggere un patch pour 0x1234").isEmpty());
+}
