@@ -172,6 +172,8 @@ Fichiers a ouvrir en premier pour ce sujet :
 | Resolution pointer chain | Expert, Profile | `backend.ts`: `resolvePointerChain` | `resolvePointerChain` | `PointerChain`, `MemoryReader` | tests PointerChain |
 | Suggest stable locator | Assistant/Expert apres ecriture | `backend.ts`: `suggestStableLocatorForAddress` | `suggestStableLocatorForAddress` | `PointerScanner`, profile locators | tracker |
 | Profils `.keprofile` | `ui/src/views/ProfileView.vue`, Trainer | `app.ts`: profile actions | `saveProfileTarget`, `listProfiles`, `loadProfile`, `resolveProfileTarget`, etc. | `core/profiles/profile_store.*`, `locator.*` | `tests/unit` suite `PointerChain` profile round trips |
+| Pointer map partageable | Profile | `backend.ts`: `exportPointerMap`, `importPointerMap` | memes noms | `ProfileStore::exportPointerMap`, `ProfileStore::mergePointerMap` | `tests/unit/test_profile_store.cpp` |
+| Pont Ghidra | Profile | `backend.ts`: `exportGhidraArtifacts`, `importGhidraSymbols` | memes noms | `core/profiles/ghidra_bridge.*`, `profile_store.*` | `tests/unit/test_ghidra_bridge.cpp` |
 | Patches/scripts dans profils | Profile, Trainer | `app.ts`: profile patch/autoasm actions | `saveProfileCodePatch`, `applyProfileCodePatch`, `saveProfileAutoAsmScript`, etc. | `profile_store.*`, `profile_patch_state.*`, AOB/Patch core | `tests/unit` suite `ProfilePatchState` |
 
 ## Trainer, Hotkeys, Overlay
@@ -179,6 +181,7 @@ Fichiers a ouvrir en premier pour ce sujet :
 | Outil / Workflow | UI | Store / Bridge TS | Bridge C++ | Core / Helper | Tests / Docs |
 | --- | --- | --- | --- | --- | --- |
 | Features Trainer locales | `ui/src/views/TrainerView.vue` si present, `ProfileView.vue`, Expert | `app.ts`: `trainerFeatures`, apply/restore/export | profils + write/patch methods | `ProfileStore`, `AOB`, `MemoryWriter` | `docs/USER_GUIDE.md` |
+| Dépendances Trainer | Trainer, Profile | `app.ts`: `updateTrainerFeatureDependencies`, `saveTrainerFeatureToProfile`; `backend.ts`: `setProfileTargetDependencies` | `setProfileTargetDependencies`, `loadProfile` | `ProfileTarget::dependsOn` dans `.keprofile` | `tests/unit/test_profile_store.cpp` |
 | Hotkeys globales | Trainer/Settings | `app.ts`: hotkey actions; `backend.ts`: `registerGlobalHotkey` | `registerGlobalHotkey`, `unregisterGlobalHotkey`, signal `globalHotkeyTriggered` | native event filter dans desktop | `tests/unit` suite `GlobalHotkey` |
 | Overlay Trainer | Trainer | `app.ts`: overlay actions; `backend.ts`: `setTrainerOverlayVisible`, `updateTrainerOverlay` | memes noms | Qt overlay widgets dans controller | tracker |
 
