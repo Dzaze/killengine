@@ -27,6 +27,7 @@ add_executable(killengine_unit_tests
     unit/test_file_watch.cpp
     unit/test_display_source_classifier.cpp
     unit/test_profile_store.cpp
+    unit/test_ghidra_bridge.cpp
 )
 
 target_link_libraries(killengine_unit_tests PRIVATE

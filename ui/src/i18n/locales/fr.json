@@ -134,6 +134,10 @@
         "term": "Hexadécimal (hex)",
         "definition": "Une façon d'écrire les nombres en base 16 (chiffres 0-9 puis A-F), utilisée pour toutes les adresses mémoire. Une adresse comme 0x1A4 n'est pas une valeur de jeu, c'est un emplacement."
       },
+      "hooking": {
+        "term": "Hooking (crochetage)",
+        "definition": "Détourner l'exécution d'une fonction existante du programme pour qu'elle passe d'abord par du code ajouté par KillEngine (ex: pour compter des appels ou modifier un comportement), avant de reprendre normalement — contrairement à un patch, la fonction d'origine n'est pas remplacée, juste interceptée au passage."
+      },
       "injection": {
         "term": "Injection",
         "definition": "Faire charger du code (généralement une DLL) à l'intérieur d'un autre processus déjà lancé, pour pouvoir l'inspecter ou l'influencer de l'intérieur."

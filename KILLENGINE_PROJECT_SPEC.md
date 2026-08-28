@@ -1813,6 +1813,8 @@ Profil :
 }
 ```
 
+Les profils peuvent aussi servir de pont d'analyse statique : export d'artefacts KillEngine vers Ghidra (AOB, modules, offsets, notes, patchs) et réimport de symboles/notes Ghidra par `module+offset`, sans dépendre d'une installation Ghidra locale.
+
 ---
 
 # 48. Module-relative address

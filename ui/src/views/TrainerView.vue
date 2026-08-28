@@ -94,6 +94,16 @@ function dependencyNames(feature: TrainerFeature): string {
     .join(', ')
 }
 
+function dependencyCandidates(feature: TrainerFeature): TrainerFeature[] {
+  return store.trainerFeatures.filter((item) => item.id !== feature.id)
+}
+
+function updateFeatureDependencies(feature: TrainerFeature, event: Event) {
+  const options = Array.from((event.target as HTMLSelectElement).selectedOptions)
+  const ids = options.map((option) => Number(option.value)).filter((id) => Number.isFinite(id))
+  store.updateTrainerFeatureDependencies(feature.id, ids)
+}
+
 function createFromCheckpoint(item: Record<string, unknown>) {
   const feature = store.createTrainerFeatureFromCheckpoint(item)
   if (feature) store.activeView = 'trainer'
@@ -380,6 +390,19 @@ async function copyTrainerExport() {
               {{ item.action }} · {{ item.detail || item.status }}
             </span>
           </div>
+          <label v-if="dependencyCandidates(feature).length > 0" class="feature-dependencies-editor">
+            <span>Dépendances</span>
+            <select
+              class="input depends-on-select"
+              multiple
+              :value="feature.dependsOn ?? []"
+              @change="updateFeatureDependencies(feature, $event)"
+            >
+              <option v-for="candidate in dependencyCandidates(feature)" :key="candidate.id" :value="candidate.id">
+                {{ candidate.name }}
+              </option>
+            </select>
+          </label>
         </div>
         <div class="feature-actions">
           <button class="btn" :disabled="store.trainerBusy || feature.enabled || featureBlocked(feature)" @click="store.applyTrainerFeature(feature.id)">ON</button>
@@ -572,6 +595,14 @@ p,
 .feature-main {
   align-items: flex-start;
   min-width: 0;
+}
+
+.feature-dependencies-editor {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .status {

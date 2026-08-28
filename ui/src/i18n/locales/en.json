@@ -134,6 +134,10 @@
         "term": "Hexadecimal (hex)",
         "definition": "A way of writing numbers in base 16 (digits 0-9 then A-F), used for every memory address. An address like 0x1A4 is not a game value, it's a location."
       },
+      "hooking": {
+        "term": "Hooking",
+        "definition": "Redirecting an existing function in the program so it first runs through code added by KillEngine (e.g. to count calls or change behavior), then resumes normally — unlike a patch, the original function isn't replaced, just intercepted along the way."
+      },
       "injection": {
         "term": "Injection",
         "definition": "Making code (usually a DLL) load inside another already-running process, in order to inspect or influence it from within."

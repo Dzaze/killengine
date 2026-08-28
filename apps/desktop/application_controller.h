@@ -872,6 +872,12 @@ public:
         const QString& targetName,
         const QVariantList& dependencyNames);
 
+    /// Exporte les artefacts runtime du profil vers Ghidra : JSON + script Python Ghidra.
+    Q_INVOKABLE QVariantMap exportGhidraArtifacts(const QString& profileName);
+
+    /// Importe des symboles Ghidra JSON/CSV et enrichit les cibles/patchs du profil.
+    Q_INVOKABLE QVariantMap importGhidraSymbols(const QString& profileName, const QString& symbolsText);
+
     /// Active une cible de profil pour l'utiliser directement depuis l'Assistant.
     Q_INVOKABLE QVariantMap activateProfileTarget(const QString& profileName, const QString& targetName);
 

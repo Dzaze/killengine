@@ -39,6 +39,8 @@ Profile buildFullProfile() {
     moduleOffsetTarget.locator.offset = 0x3F2A0;
     moduleOffsetTarget.locator.lastAddress = 0x7FF612345678ULL;
     moduleOffsetTarget.description = "Money counter";
+    moduleOffsetTarget.ghidraSymbol = "PlayerMoney";
+    moduleOffsetTarget.ghidraNote = "Imported symbol";
     profile.targets.append(moduleOffsetTarget);
 
     ProfileTarget absoluteTarget;
@@ -78,6 +80,8 @@ Profile buildFullProfile() {
     fullPatch.disassembly = "sub rsp, 28";
     fullPatch.riskLevel = "medium";
     fullPatch.description = "NOPs the ammo decrement";
+    fullPatch.ghidraSymbol = "ApplyAmmoCost";
+    fullPatch.ghidraNote = "Named in Ghidra";
     fullPatch.signatureScore = 87;
     fullPatch.signatureLevel = "good";
     fullPatch.signatureWarning = "";
@@ -150,6 +154,8 @@ TEST(ProfileStore, RoundTripsFullProfileExactly) {
         EXPECT_EQ(b.locator.clrField.identityValue, a.locator.clrField.identityValue) << i;
         EXPECT_EQ(b.locator.clrField.targetField, a.locator.clrField.targetField) << i;
         EXPECT_EQ(b.dependsOn, a.dependsOn) << i;
+        EXPECT_EQ(b.ghidraSymbol, a.ghidraSymbol) << i;
+        EXPECT_EQ(b.ghidraNote, a.ghidraNote) << i;
     }
 
     ASSERT_EQ(loaded.patches.size(), original.patches.size());
@@ -164,6 +170,8 @@ TEST(ProfileStore, RoundTripsFullProfileExactly) {
     EXPECT_EQ(loadedFullPatch.disassembly, origFullPatch.disassembly);
     EXPECT_EQ(loadedFullPatch.riskLevel, origFullPatch.riskLevel);
     EXPECT_EQ(loadedFullPatch.description, origFullPatch.description);
+    EXPECT_EQ(loadedFullPatch.ghidraSymbol, origFullPatch.ghidraSymbol);
+    EXPECT_EQ(loadedFullPatch.ghidraNote, origFullPatch.ghidraNote);
     EXPECT_EQ(loadedFullPatch.signatureScore, origFullPatch.signatureScore);
     EXPECT_EQ(loadedFullPatch.signatureLevel, origFullPatch.signatureLevel);
     EXPECT_EQ(loadedFullPatch.signatureFixedBytes, origFullPatch.signatureFixedBytes);

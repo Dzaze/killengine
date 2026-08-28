@@ -2688,6 +2688,42 @@ let nextWatchedChainId = 1
     void refreshTrainerOverlay()
   }
 
+  function updateTrainerFeatureDependencies(id: number, dependencyIds: number[]) {
+    const feature = trainerFeatures.value.find((item) => item.id === id)
+    if (!feature) {
+      return { success: false, error: 'Feature introuvable.' }
+    }
+    const cleanDependencies = dependencyIds
+      .filter((dependencyId) => Number.isFinite(dependencyId) && dependencyId !== id)
+      .filter((dependencyId, index, all) => all.indexOf(dependencyId) === index)
+    const existingIds = new Set(trainerFeatures.value.map((item) => item.id))
+    const missing = cleanDependencies.filter((dependencyId) => !existingIds.has(dependencyId))
+    if (missing.length > 0) {
+      return { success: false, error: `Dépendance introuvable : ${missing.join(', ')}.` }
+    }
+
+    const candidateFeatures = trainerFeatures.value.map((item) => (
+      item.id === id
+        ? { ...item, dependsOn: cleanDependencies.length > 0 ? cleanDependencies : undefined }
+        : item
+    ))
+    const orderCheck = resolveTrainerFeatureOrder(candidateFeatures, candidateFeatures.map((item) => item.id))
+    if (!orderCheck.success) {
+      addActionLog('trainer', `Dépendances refusées: ${feature.name}`, orderCheck.error ?? 'Cycle détecté.', 'warning')
+      return { success: false, error: orderCheck.error ?? 'Cycle de dépendances détecté.' }
+    }
+
+    feature.dependsOn = cleanDependencies.length > 0 ? cleanDependencies : undefined
+    feature.updatedAt = new Date().toISOString()
+    const detail = cleanDependencies.length > 0
+      ? cleanDependencies.map((dependencyId) => trainerFeatures.value.find((item) => item.id === dependencyId)?.name ?? `#${dependencyId}`).join(', ')
+      : 'aucune dépendance'
+    addTrainerFeatureHistory(feature, 'dependencies_update', 'info', detail)
+    saveTrainerFeatures()
+    void refreshTrainerOverlay()
+    return { success: true, dependsOn: cleanDependencies }
+  }
+
   function clearTrainerFeatures() {
     trainerFeatures.value = []
     saveTrainerFeatures()
@@ -8865,6 +8901,7 @@ async function doEncryptedScan() {
     applyAllTrainerFeatures,
     restoreAllTrainerFeatures,
     deleteTrainerFeature,
+    updateTrainerFeatureDependencies,
     saveTrainerFeatureToProfile,
     clearTrainerFeatures,
     exportTrainerFeaturesJson,

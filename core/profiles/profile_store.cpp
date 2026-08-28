@@ -112,6 +112,12 @@ QJsonObject targetToJson(const ProfileTarget& target) {
     if (!target.description.isEmpty()) {
         json["description"] = target.description;
     }
+    if (!target.ghidraSymbol.isEmpty()) {
+        json["ghidraSymbol"] = target.ghidraSymbol;
+    }
+    if (!target.ghidraNote.isEmpty()) {
+        json["ghidraNote"] = target.ghidraNote;
+    }
     if (!target.dependsOn.isEmpty()) {
         QJsonArray dependsOnArray;
         for (const auto& dependency : target.dependsOn) {
@@ -144,6 +150,12 @@ QJsonObject patchToJson(const ProfileCodePatch& patch) {
     }
     if (!patch.description.isEmpty()) {
         json["description"] = patch.description;
+    }
+    if (!patch.ghidraSymbol.isEmpty()) {
+        json["ghidraSymbol"] = patch.ghidraSymbol;
+    }
+    if (!patch.ghidraNote.isEmpty()) {
+        json["ghidraNote"] = patch.ghidraNote;
     }
     if (patch.signatureScore > 0 || !patch.signatureLevel.isEmpty()) {
         QJsonObject quality;
@@ -211,6 +223,8 @@ ProfileTarget targetFromJson(const QJsonObject& json) {
     parseValueType(json.value("type").toString("Int32"), &target.type);
     target.locator = locatorFromJson(json.value("locator").toObject());
     target.description = json.value("description").toString();
+    target.ghidraSymbol = json.value("ghidraSymbol").toString();
+    target.ghidraNote = json.value("ghidraNote").toString();
     const QJsonArray dependsOnArray = json.value("dependsOn").toArray();
     for (const auto& item : dependsOnArray) {
         const QString dependency = item.isString()
@@ -234,6 +248,8 @@ ProfileCodePatch patchFromJson(const QJsonObject& json) {
     patch.disassembly = json.value("disassembly").toString();
     patch.riskLevel = json.value("riskLevel").toString();
     patch.description = json.value("description").toString();
+    patch.ghidraSymbol = json.value("ghidraSymbol").toString();
+    patch.ghidraNote = json.value("ghidraNote").toString();
     const QJsonObject quality = json.value("signatureQuality").toObject();
     patch.signatureScore = quality.value("score").toInt();
     patch.signatureLevel = quality.value("level").toString();

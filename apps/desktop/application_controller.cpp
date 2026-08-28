@@ -19,6 +19,7 @@
 #include "candidates/candidate_store.h"
 #include "crash_handler.h"
 #include "debug/hardware_breakpoint.h"
+#include "profiles/ghidra_bridge.h"
 #include "logging/logger.h"
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
@@ -16462,6 +16463,8 @@ QVariantMap ApplicationController::loadProfile(const QString& profileName) {
         targetEntry["type"] = killcore::valueTypeToString(target.type);
         targetEntry["locator"] = target.locator.toString();
         targetEntry["description"] = target.description;
+        targetEntry["ghidraSymbol"] = target.ghidraSymbol;
+        targetEntry["ghidraNote"] = target.ghidraNote;
         QVariantList dependencies;
         for (const auto& dependency : target.dependsOn) {
             dependencies.append(dependency);
@@ -16502,6 +16505,8 @@ QVariantMap ApplicationController::loadProfile(const QString& profileName) {
         patchEntry["disassembly"] = patch.disassembly;
         patchEntry["riskLevel"] = patch.riskLevel;
         patchEntry["description"] = patch.description;
+        patchEntry["ghidraSymbol"] = patch.ghidraSymbol;
+        patchEntry["ghidraNote"] = patch.ghidraNote;
         patchEntry["signatureScore"] = patch.signatureScore;
         patchEntry["signatureLevel"] = patch.signatureLevel;
         patchEntry["signatureWarning"] = patch.signatureWarning;
@@ -16815,6 +16820,79 @@ QVariantMap ApplicationController::setProfileTargetDependencies(
     return result;
 }
 
+QVariantMap ApplicationController::exportGhidraArtifacts(const QString& profileName) {
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString cleanProfileName = profileName.trimmed();
+    if (cleanProfileName.isEmpty()) {
+        result["error"] = "Nom de profil requis.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    const QJsonObject exportJson = killcore::exportGhidraArtifacts(profile);
+    result["success"] = true;
+    result["profileName"] = cleanProfileName;
+    result["artifactCount"] = exportJson.value("artifactCount").toInt();
+    result["json"] = QString::fromUtf8(QJsonDocument(exportJson).toJson(QJsonDocument::Indented));
+    result["pythonScript"] = killcore::generateGhidraImportScript(exportJson);
+    return result;
+}
+
+QVariantMap ApplicationController::importGhidraSymbols(const QString& profileName, const QString& symbolsText) {
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString cleanProfileName = profileName.trimmed();
+    if (cleanProfileName.isEmpty()) {
+        result["error"] = "Nom de profil requis.";
+        return result;
+    }
+    if (symbolsText.trimmed().isEmpty()) {
+        result["error"] = "Export Ghidra vide.";
+        return result;
+    }
+
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        result["error"] = "Profil introuvable.";
+        return result;
+    }
+
+    killcore::GhidraSymbolImportResult importResult;
+    QString error;
+    if (!killcore::importGhidraSymbols(&profile, symbolsText.toUtf8(), &importResult, &error)) {
+        result["error"] = error;
+        return result;
+    }
+
+    if (!killcore::ProfileStore::save(profile, path)) {
+        result["error"] = "Impossible de sauvegarder le profil.";
+        return result;
+    }
+
+    QVariantList messages;
+    for (const auto& message : importResult.messages) {
+        messages.append(message);
+    }
+    result["success"] = true;
+    result["profileName"] = cleanProfileName;
+    result["symbolsRead"] = importResult.symbolsRead;
+    result["targetsUpdated"] = importResult.targetsUpdated;
+    result["patchesUpdated"] = importResult.patchesUpdated;
+    result["unmatched"] = importResult.unmatched;
+    result["messages"] = messages;
+    return result;
+}
+
 QVariantMap ApplicationController::activateProfileTarget(const QString& profileName, const QString& targetName) {
     QVariantMap result;
     result["success"] = false;
@@ -17084,6 +17162,8 @@ QVariantMap ApplicationController::saveProfileCodePatch(
     bool replaced = false;
     for (auto& existing : profile.patches) {
         if (existing.name == patch.name) {
+            patch.ghidraSymbol = existing.ghidraSymbol;
+            patch.ghidraNote = existing.ghidraNote;
             existing = patch;
             replaced = true;
             break;

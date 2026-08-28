@@ -75,6 +75,8 @@ add_library(killcore STATIC
 
     # Profiles (stubs Phase 0)
     profiles/profile_store.cpp
+    profiles/ghidra_bridge.h
+    profiles/ghidra_bridge.cpp
     profiles/locator.cpp
 
     # Pointer chains (Phase 14 — jeux modernes / applications dynamiques)

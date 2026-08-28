@@ -1424,6 +1424,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   importPointerMap?(profileName: string, pointerMapJson: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   /** Persiste les dépendances Trainer dans la cible de profil native. */
   setProfileTargetDependencies?(profileName: string, targetName: string, dependencyNames: string[]): Promise<Record<string, unknown>>
+  /** Exporte les artefacts du profil vers Ghidra : JSON + script Python Ghidra. */
+  exportGhidraArtifacts?(profileName: string): Promise<Record<string, unknown>>
+  /** Importe des symboles Ghidra JSON/CSV et enrichit les cibles/patchs du profil. */
+  importGhidraSymbols?(profileName: string, symbolsText: string): Promise<Record<string, unknown>>
   activateProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   saveProfileCodePatch?(
     profileName: string,
@@ -2542,6 +2546,12 @@ class BackendService {
         return { success: false, error: 'Mock backend' }
       },
       async setProfileTargetDependencies(_profileName: string, _targetName: string, _dependencyNames: string[]) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async exportGhidraArtifacts(_profileName: string) {
+        return { success: false, error: 'Mock backend' }
+      },
+      async importGhidraSymbols(_profileName: string, _symbolsText: string) {
         return { success: false, error: 'Mock backend' }
       },
       async activateProfileTarget() {

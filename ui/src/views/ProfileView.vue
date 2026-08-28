@@ -22,6 +22,8 @@ interface ProfileTargetEntry {
   description: string
   locatorKind?: string
   dependsOn?: string[]
+  ghidraSymbol?: string
+  ghidraNote?: string
   clrTypeSubstring?: string
   clrIdentityField?: string
   clrIdentityValue?: string
@@ -38,6 +40,8 @@ interface ProfilePatchEntry {
   disassembly?: string
   riskLevel?: string
   description?: string
+  ghidraSymbol?: string
+  ghidraNote?: string
   signatureScore?: number
   signatureLevel?: string
   signatureWarning?: string
@@ -376,6 +380,11 @@ const pointerMapImportText = ref('')
 const pointerMapTransferResult = ref<Record<string, unknown> | null>(null)
 const pointerMapTransferBusy = ref(false)
 const pointerMapReplaceExisting = ref(false)
+const ghidraExportJson = ref('')
+const ghidraExportScript = ref('')
+const ghidraImportText = ref('')
+const ghidraBridgeResult = ref<Record<string, unknown> | null>(null)
+const ghidraBridgeBusy = ref(false)
 const pointerMapResults = computed(
   () => (pointerMapCompareResult.value?.results as Array<Record<string, unknown>>) ?? [],
 )
@@ -394,6 +403,47 @@ async function comparePointerMap() {
     pointerMapCompareResult.value = { success: false, error: String(e) }
   } finally {
     pointerMapCompareBusy.value = false
+  }
+}
+
+async function exportGhidraBridge() {
+  if (!selectedProfile.value) return
+  ghidraBridgeBusy.value = true
+  try {
+    const controller = backend.getController()
+    if (!controller.exportGhidraArtifacts) {
+      ghidraBridgeResult.value = { success: false, error: 'Export Ghidra non exposé par ce backend.' }
+      return
+    }
+    const result = await controller.exportGhidraArtifacts(selectedProfile.value)
+    ghidraBridgeResult.value = result
+    ghidraExportJson.value = result.success ? String(result.json ?? '') : ''
+    ghidraExportScript.value = result.success ? String(result.pythonScript ?? '') : ''
+  } catch (e) {
+    ghidraBridgeResult.value = { success: false, error: String(e) }
+  } finally {
+    ghidraBridgeBusy.value = false
+  }
+}
+
+async function importGhidraSymbols() {
+  if (!selectedProfile.value || !ghidraImportText.value.trim()) return
+  ghidraBridgeBusy.value = true
+  try {
+    const controller = backend.getController()
+    if (!controller.importGhidraSymbols) {
+      ghidraBridgeResult.value = { success: false, error: 'Import Ghidra non exposé par ce backend.' }
+      return
+    }
+    const result = await controller.importGhidraSymbols(selectedProfile.value, ghidraImportText.value)
+    ghidraBridgeResult.value = result
+    if (result.success) {
+      await selectProfile(selectedProfile.value)
+    }
+  } catch (e) {
+    ghidraBridgeResult.value = { success: false, error: String(e) }
+  } finally {
+    ghidraBridgeBusy.value = false
   }
 }
 
@@ -965,6 +1015,9 @@ onMounted(() => {
             </div>
             <div v-if="t.description" class="target-desc">{{ t.description }}</div>
             <div v-if="t.dependsOn?.length" class="target-desc">Dépend de : {{ t.dependsOn.join(', ') }}</div>
+            <div v-if="t.ghidraSymbol || t.ghidraNote" class="target-desc">
+              Ghidra : {{ t.ghidraSymbol || 'symbole non nommé' }}{{ t.ghidraNote ? ` · ${t.ghidraNote}` : '' }}
+            </div>
           </div>
         </div>
       </div>
@@ -1050,6 +1103,62 @@ onMounted(() => {
         </div>
       </div>
 
+      <div v-if="selectedProfile" class="targets-list ghidra-bridge-box">
+        <div class="targets-header">
+          <h3>Pont Ghidra</h3>
+          <button class="btn btn-secondary btn-sm" :disabled="ghidraBridgeBusy" @click="exportGhidraBridge()">
+            {{ ghidraBridgeBusy ? 'Export...' : 'Exporter artefacts' }}
+          </button>
+        </div>
+        <p class="hint">
+          Exporte les offsets, AOB et notes du profil vers Ghidra, puis importe des symboles Ghidra au format JSON
+          <span class="mono">symbols[]</span> ou CSV <span class="mono">module,offset,name,comment</span>.
+        </p>
+        <div class="ghidra-grid">
+          <textarea
+            v-model="ghidraExportJson"
+            class="pointer-map-textarea"
+            readonly
+            placeholder="JSON KillEngine -> Ghidra"
+          ></textarea>
+          <textarea
+            v-model="ghidraExportScript"
+            class="pointer-map-textarea"
+            readonly
+            placeholder="Script Python Ghidra généré"
+          ></textarea>
+          <textarea
+            v-model="ghidraImportText"
+            class="pointer-map-textarea ghidra-import-text"
+            placeholder="Coller ici un export Ghidra JSON/CSV : module,offset,name,comment"
+          ></textarea>
+        </div>
+        <div class="transfer-actions">
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="ghidraBridgeBusy || !ghidraImportText.trim()"
+            @click="importGhidraSymbols()"
+          >
+            Importer symboles
+          </button>
+          <span v-if="ghidraBridgeResult" :class="ghidraBridgeResult.success ? 'hint' : 'error'">
+            <template v-if="ghidraBridgeResult.success">
+              {{ ghidraBridgeResult.artifactCount ?? ghidraBridgeResult.symbolsRead ?? 0 }} lu(s)
+              <template v-if="Number(ghidraBridgeResult.targetsUpdated ?? 0) > 0">
+                · {{ ghidraBridgeResult.targetsUpdated }} cible(s)
+              </template>
+              <template v-if="Number(ghidraBridgeResult.patchesUpdated ?? 0) > 0">
+                · {{ ghidraBridgeResult.patchesUpdated }} patch(s)
+              </template>
+              <template v-if="Number(ghidraBridgeResult.unmatched ?? 0) > 0">
+                · {{ ghidraBridgeResult.unmatched }} sans correspondance
+              </template>
+            </template>
+            <template v-else>{{ ghidraBridgeResult.error }}</template>
+          </span>
+        </div>
+      </div>
+
       <div v-if="profilePatches.length > 0" class="patches-list">
         <div class="targets-header">
           <h3>Patchs trainer ({{ profilePatches.length }})</h3>
@@ -1086,6 +1195,7 @@ onMounted(() => {
             </span>
             <span class="target-resolution" :class="patchStateClass(patch)">{{ patchStateLabel(patch) }}</span>
             <span v-if="patch.module" class="target-locator">{{ patch.module }} +0x{{ patch.moduleOffset }}</span>
+            <span v-if="patch.ghidraSymbol" class="patch-risk">Ghidra {{ patch.ghidraSymbol }}</span>
           </div>
           <div class="target-actions">
             <label class="patch-toggle" :class="{ active: patchCanRestore(patch), disabled: trainerBusy || (!patchCanApply(patch) && !patchCanRestore(patch)) }">
@@ -1516,6 +1626,22 @@ onMounted(() => {
   margin-top: 12px;
 }
 
+.ghidra-bridge-box {
+  margin-top: 12px;
+}
+
+.ghidra-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ghidra-import-text {
+  grid-column: 1 / -1;
+  min-height: 74px;
+}
+
 .pointer-map-transfer {
   display: grid;
   gap: 8px;
@@ -1636,5 +1762,11 @@ onMounted(() => {
   border-radius: 8px;
   font-size: 13px;
   color: var(--text-primary);
+}
+
+@media (max-width: 820px) {
+  .ghidra-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

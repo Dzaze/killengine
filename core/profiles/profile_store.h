@@ -20,6 +20,8 @@ struct ProfileTarget {
     Locator   locator;
     QString   description;    // optionnel
     QStringList dependsOn;    // noms d'autres cibles du profil à activer avant celle-ci
+    QString   ghidraSymbol;   // nom importé depuis Ghidra, sans renommer la cible KillEngine
+    QString   ghidraNote;
 };
 
 struct ProfileCodePatch {
@@ -32,6 +34,8 @@ struct ProfileCodePatch {
     QString disassembly;
     QString riskLevel;
     QString description;
+    QString ghidraSymbol;
+    QString ghidraNote;
     int signatureScore{0};
     QString signatureLevel;
     QString signatureWarning;
