@@ -6,6 +6,7 @@
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QSet>
 #include <QVariantList>
 
 namespace killai {
@@ -121,6 +122,27 @@ QString firstHexAddressIn(const QString& text) {
     const QRegularExpression re(R"(0x[0-9a-fA-F]+)");
     const auto match = re.match(text);
     return match.hasMatch() ? match.captured(0) : QString();
+}
+
+bool looksLikePureSocialQuery(const QString& query) {
+    if (!firstHexAddressIn(query).isEmpty() || !firstDecimalOutsideHex(query).isEmpty()) {
+        return false;
+    }
+
+    QString q = query.toLower().trimmed();
+    q.replace(QRegularExpression(R"([!?.;,:\-_/\\()\[\]{}"'`]+)"), " ");
+    q = q.simplified();
+    if (q.isEmpty()) {
+        return false;
+    }
+
+    static const QSet<QString> kSocialOnlyPhrases = {
+        "salut", "bonjour", "bonsoir", "coucou", "hello", "hi", "hey", "yo",
+        "merci", "merci beaucoup", "thanks", "thank you", "ok merci",
+        "salut merci", "bonjour merci", "salut mon pote", "merci mon pote",
+        "ca va", "ça va"
+    };
+    return kSocialOnlyPhrases.contains(q);
 }
 
 TrainerToolMatch matchTrainerTool(const QString& query) {
@@ -600,6 +622,17 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
     // deterministicPlanWithContext. Court-circuite ce retard, avant meme
     // ensureLlamaInitialized(). Ne s'applique que process attache (sinon on
     // laisse le chemin normal produire le message de clarification usuel).
+    if (looksLikePureSocialQuery(query)) {
+        QVariantMap result;
+        result["status"] = "needs_clarification";
+        result["message"] =
+            "Salut ! Dis-moi ce que tu veux chercher ou comprendre : une valeur affichée, une adresse, "
+            "un freeze, un trainer, un script Lua, ou une investigation plus guidée.";
+        result["state"] = m_stateMachine.currentStateName();
+        result["aiBackend"] = "deterministic_social_guard";
+        return result;
+    }
+
     if (context.value("processAttached", true).toBool()) {
         if (const auto trainerMatch = matchTrainerTool(query); !trainerMatch.tool.isEmpty()) {
             QVariantMap result = makeToolCall(trainerMatch.tool, trainerMatch.args, trainerMatch.rationale);

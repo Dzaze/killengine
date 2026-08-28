@@ -1436,6 +1436,27 @@ bool looksLikeFreezeRequest(const QString& query) {
         || q.contains("maintenir");
 }
 
+bool looksLikePureSocialSmartSearchQuery(const QString& query, const QStringList& numbers, const QStringList& addresses) {
+    if (!numbers.isEmpty() || !addresses.isEmpty()) {
+        return false;
+    }
+
+    QString q = query.toLower().trimmed();
+    q.replace(QRegularExpression(R"([!?.;,:\-_/\\()\[\]{}"'`]+)"), " ");
+    q = q.simplified();
+    if (q.isEmpty()) {
+        return false;
+    }
+
+    static const QSet<QString> kSocialOnlyPhrases = {
+        "salut", "bonjour", "bonsoir", "coucou", "hello", "hi", "hey", "yo",
+        "merci", "merci beaucoup", "thanks", "thank you", "ok merci",
+        "salut merci", "bonjour merci", "salut mon pote", "merci mon pote",
+        "ca va", "ça va"
+    };
+    return kSocialOnlyPhrases.contains(q);
+}
+
 SmartSearchIntent classifySmartSearchIntent(
     const QString& query,
     const QStringList& numbers,
@@ -12436,6 +12457,23 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         (*payload)["intent"] = smartSearchIntentKindToString(intent.kind);
         (*payload)["intentRationale"] = intent.rationale;
     };
+
+    if (looksLikePureSocialSmartSearchQuery(query, numbers, chatAddresses)) {
+        QVariantMap social;
+        social["success"] = true;
+        social["query"] = query;
+        social["aiReady"] = m_ai.isReady();
+        social["status"] = "needs_clarification";
+        social["actionStatus"] = "not_executed";
+        social["workflowStatus"] = "idle";
+        social["message"] =
+            "Salut ! Dis-moi ce que tu veux chercher ou comprendre : une valeur affichée, une adresse, "
+            "un freeze, un trainer, un script Lua, ou une investigation plus guidée.";
+        social["debugFile"] = smartSearchDebugFilePath();
+        stampIntent(&social);
+        appendSmartSearchDebug("smart_search_social_guard", social);
+        return social;
+    }
 
     const bool shouldClearSearchContext = intent.resetContext
         && (intent.kind == SmartSearchIntentKind::ResetContext

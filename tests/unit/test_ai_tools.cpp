@@ -389,6 +389,44 @@ TEST(AIEngineContextualFallbackTest, AsksToAttachProcessWhenDetached) {
     EXPECT_TRUE(result.value("message").toString().contains("processus"));
 }
 
+TEST(AIEngineContextualFallbackTest, PureGreetingDoesNotAskForSearchValue) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = false;
+    const auto result = engine.processQuery("salut", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_social_guard");
+    EXPECT_TRUE(result.value("message").toString().contains("Salut"));
+    EXPECT_FALSE(result.value("message").toString().contains("valeur affichée (ex:"));
+    EXPECT_FALSE(result.value("message").toString().contains("processus"));
+}
+
+TEST(AIEngineContextualFallbackTest, PureThanksDoesNotAskForSearchValue) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("merci mon pote !", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_social_guard");
+    EXPECT_TRUE(result.value("message").toString().contains("chercher"));
+}
+
+TEST(AIEngineContextualFallbackTest, GreetingWithConcreteValueStillPlansScan) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    context["scanActive"] = false;
+    const auto result = engine.processQuery("salut cherche 41250", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "exact_scan");
+}
+
 TEST(AIEngineContextualFallbackTest, RefinesWithNextScanWhenScanActive) {
     ScopedModelDisabled guard;
     killai::AIEngine engine;
