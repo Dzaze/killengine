@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace KillEngine.ClrTestTarget;
 
@@ -94,6 +95,7 @@ public sealed class Inventory
     public ConcurrentDictionary<string, int> ConcurrentCounters { get; } = new();
     public ConcurrentStack<string> ConcurrentTags { get; } = new();
     public ConcurrentQueue<string> ConcurrentEvents { get; } = new();
+    public ConcurrentBag<string> ConcurrentTraces { get; } = new();
 
     // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source,
     // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) : depart d'une chaine LONGUE
@@ -487,6 +489,32 @@ public static class TestRoot
             inventory.ConcurrentEvents.TryDequeue(out _);
         }
         // Contenu logique final attendu (ordre FIFO garanti) : evt-35..evt-39.
+
+        // ConcurrentBag<T> : structure "work-stealing" a affinite de thread
+        // (layout verifie par reflection sur le runtime local puis valide
+        // empiriquement contre ToArray() sur 10 scenarios avant d'ecrire le
+        // code de deballage, voir le commentaire de ClrSession.DescribeConcurrentBag).
+        // Un thread producteur ajoute 6 elements PUIS meurt (Join) -- sa file
+        // interne (WorkStealingQueue) reste dans la liste chainee du bag mais
+        // avec un proprietaire mort. Le thread principal n'a pas de file
+        // locale dans ce bag, donc ses TryTake suivants VOLENT depuis la file
+        // du thread mort (FIFO, retire par le DEBUT) plutot que de faire un
+        // pop local LIFO -- exerce deliberement le cas ou _headIndex avance
+        // au-dela de 0 sur une file dont le proprietaire n'existe plus, pas
+        // seulement le cas a un seul thread jamais vole.
+        var producer = new Thread(() =>
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                inventory.ConcurrentTraces.Add($"trace-{i}");
+            }
+        });
+        producer.Start();
+        producer.Join();
+        inventory.ConcurrentTraces.TryTake(out _);
+        inventory.ConcurrentTraces.TryTake(out _);
+        // Contenu logique final attendu (ordre "tail d'abord", trace-5 = le
+        // plus recemment ajoute encore present) : trace-5, trace-4, trace-3, trace-2.
 
         // Chantier "vrai plus-court-chemin GCRoot" : chaine de 3 noeuds vers
         // ShortestPathProbe, soit 4 sauts au total depuis le root

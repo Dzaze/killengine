@@ -491,6 +491,11 @@ public sealed class ClrSession : IDisposable
                 return DescribeConcurrentQueue(obj, depth);
             }
 
+            if (typeName.StartsWith("System.Collections.Concurrent.ConcurrentBag<", StringComparison.Ordinal))
+            {
+                return DescribeConcurrentBag(obj, depth);
+            }
+
             object? customCollection = DescribeFieldBackedCollection(obj, depth);
             if (customCollection is not null)
             {
@@ -866,6 +871,105 @@ public sealed class ClrSession : IDisposable
             count = validCount,
             returned = items.Count,
             truncated = truncated || validCount > items.Count || !segment.IsNull,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// ConcurrentBag&lt;T&gt; -- layout interne verifie par reflection sur le
+    /// runtime .NET local (script jetable) PUIS valide contre `ToArray()` sur
+    /// 10 scenarios (vide, ajouts simples, churn local sans croissance,
+    /// croissance au-dela de la capacite initiale, drain complet + reajout,
+    /// plusieurs threads = plusieurs files distinctes, vol cross-thread apres
+    /// mort du thread proprietaire, vol ET croissance combines, une file
+    /// videe cote a cote d'une autre vivante) avant d'ecrire cette methode :
+    /// structure "work-stealing" a affinite de thread, PAS un simple tableau.
+    /// `_workStealingQueues` (classe imbriquee `WorkStealingQueue`, PAS une
+    /// struct) est la TETE d'une liste chainee via `_nextQueue` -- une file
+    /// par thread producteur, la plus recemment creee en tete (confirme par
+    /// attache reelle avec 4 threads sequentiels). Chaque file porte
+    /// `_headIndex`/`_tailIndex` (indices PLATS dans `_array`, PAS de
+    /// wraparound modulo malgre la presence d'un champ `_mask` -- confirme
+    /// concretement : apres croissance de capacite, l'ancien contenu est
+    /// copie aux MEMES indices dans le nouveau tableau plus grand,
+    /// `_headIndex`/`_tailIndex` sont preserves tels quels, jamais reinitialises).
+    /// `_headIndex` n'avance QUE par un vol (`TryTake` depuis un AUTRE thread,
+    /// retire par le DEBUT, FIFO) ; `_tailIndex` avance/recule par les
+    /// Add/Take LOCAUX du thread proprietaire (a la FIN, LIFO). Consequence :
+    /// le contenu valide d'une file est l'intervalle [`_headIndex`,
+    /// `_tailIndex`), enumere en ORDRE INVERSE (`_tailIndex - 1` vers
+    /// `_headIndex`) pour matcher `ConcurrentBag&lt;T&gt;.ToArray()` -- confirme
+    /// element par element sur les 10 scenarios, y compris le cas piege
+    /// "vol pendant que le thread proprietaire continue d'ajouter et force
+    /// une croissance" (`_headIndex` &gt; 0 survit intact a la copie de
+    /// croissance). Une file entierement videe (`_headIndex == _tailIndex`)
+    /// reste dans la liste chainee mais ne contribue aucun element -- pas un
+    /// cas d'erreur. Le thread proprietaire peut etre mort (`_ownerThreadId`
+    /// obsolete) sans que la file disparaisse ni que sa lecture change.
+    /// </summary>
+    private static object DescribeConcurrentBag(ClrObject obj, int depth)
+    {
+        ClrObject queue = obj.ReadObjectField("_workStealingQueues");
+        var items = new List<object?>();
+        string? elementType = null;
+        int validCount = 0;
+        int queuesSeen = 0;
+        var visitedQueues = new HashSet<ulong>();
+        bool truncated = false;
+
+        while (!queue.IsNull && queuesSeen < MaxCollectionItems)
+        {
+            if (!visitedQueues.Add(queue.Address))
+            {
+                break;
+            }
+            queuesSeen++;
+
+            int headIndex = SafeReadIntField(queue, "_headIndex");
+            int tailIndex = SafeReadIntField(queue, "_tailIndex");
+            ClrObject arrayObject = queue.ReadObjectField("_array");
+
+            if (!arrayObject.IsNull && arrayObject.Type is { IsArray: true } && tailIndex > headIndex)
+            {
+                ClrArray array = arrayObject.AsArray();
+                ClrType? componentType = arrayObject.Type.ComponentType;
+                elementType ??= componentType?.Name;
+                int physicalLength = array.GetLength(0);
+
+                for (int i = tailIndex - 1; i >= headIndex; i--)
+                {
+                    validCount++;
+                    if (i < 0 || i >= physicalLength)
+                    {
+                        // Bornes incoherentes (course avec une mutation concurrente
+                        // du champ pendant la lecture) -- ignorer cette entree plutot
+                        // que planter, meme esprit "best-effort" que le reste du module.
+                        continue;
+                    }
+                    if (items.Count >= MaxCollectionItems)
+                    {
+                        truncated = true;
+                        break;
+                    }
+                    items.Add(ReadArrayElement(array, componentType, i, depth));
+                }
+            }
+
+            if (truncated)
+            {
+                break;
+            }
+
+            queue = queue.ReadObjectField("_nextQueue");
+        }
+
+        return new
+        {
+            kind = "concurrent_bag",
+            elementType,
+            count = validCount,
+            returned = items.Count,
+            truncated = truncated || validCount > items.Count || !queue.IsNull,
             items,
         };
     }

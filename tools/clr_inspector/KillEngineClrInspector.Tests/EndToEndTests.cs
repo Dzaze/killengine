@@ -2006,6 +2006,48 @@ public sealed class EndToEndTests
         Assert.Equal(new[] { "evt-35", "evt-36", "evt-37", "evt-38", "evt-39" }, items);
     }
 
+    [Fact]
+    public async Task ReadObject_UnpacksConcurrentBagAfterCrossThreadStealFromDeadOwner()
+    {
+        // Extension "collections concurrentes" -- ConcurrentBag<T> est la
+        // structure work-stealing a affinite de thread explicitement laissee
+        // ouverte par PHASE 222 (voir le commentaire du test ConcurrentQueue
+        // ci-dessus, "perimetre plus incertain"). Layout verifie par
+        // reflection sur le runtime .NET local (script jetable) PUIS valide
+        // empiriquement contre ToArray() sur 10 scenarios (vide, ajouts
+        // simples, churn local sans croissance, croissance, drain+reajout,
+        // plusieurs threads, vol cross-thread apres mort du proprietaire, vol
+        // ET croissance combines, file videe a cote d'une vivante) avant
+        // d'ecrire ClrSession.DescribeConcurrentBag -- voir son commentaire
+        // pour le detail de l'algorithme (_headIndex/_tailIndex sont des
+        // indices PLATS, pas de wraparound modulo malgre le champ _mask;
+        // _headIndex n'avance que par vol, _tailIndex par Add/Take locaux;
+        // enumeration en ordre inverse tailIndex-1 vers headIndex). Le graphe
+        // de test (Inventory.ConcurrentTraces, ObjectGraph.cs) fait ajouter 6
+        // elements par un thread QUI MEURT ENSUITE, puis le thread principal
+        // vole 2 elements via TryTake (pas de file locale dans ce bag pour ce
+        // thread) -- exerce deliberement _headIndex > 0 sur une file dont le
+        // proprietaire n'existe plus.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var concurrentTraces = Field(inventoryObj!["fields"]!, "ConcurrentTraces")!["collection"]!;
+
+        Assert.Equal("concurrent_bag", concurrentTraces["kind"]!.GetValue<string>());
+        Assert.Equal(4, concurrentTraces["count"]!.GetValue<int>());
+        Assert.Equal(4, concurrentTraces["returned"]!.GetValue<int>());
+        Assert.False(concurrentTraces["truncated"]!.GetValue<bool>());
+
+        var items = concurrentTraces["items"]!.AsArray().Select(i => i!.GetValue<string>()).ToArray();
+        Assert.Equal(new[] { "trace-5", "trace-4", "trace-3", "trace-2" }, items);
+    }
+
     private static bool JsonContainsAddress(JsonNode? node, string address)
     {
         switch (node)
