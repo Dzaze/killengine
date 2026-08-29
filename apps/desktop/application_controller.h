@@ -43,6 +43,7 @@ class DebugFeatureManager;
 class FreezeHotkeyOverlayManager;
 class KernelDriverManager;
 class SaveFileInvestigator;
+class ScanningCoreManager;
 class UiStringInvestigator;
 class WriteFreezeCoreManager;
 
@@ -56,6 +57,7 @@ class WriteFreezeCoreManager;
  */
 class ApplicationController : public QObject {
     Q_OBJECT
+    friend class ScanningCoreManager;
 
     // Propriétés exposées à QML/JS
     Q_PROPERTY(QString version READ version CONSTANT)
@@ -1156,6 +1158,7 @@ private:
     std::unique_ptr<FreezeHotkeyOverlayManager> m_freezeHotkeyOverlayManager;
     std::unique_ptr<KernelDriverManager> m_kernelDriverManager;
     std::unique_ptr<SaveFileInvestigator> m_saveFileInvestigator;
+    std::unique_ptr<ScanningCoreManager> m_scanningCoreManager;
     std::unique_ptr<WriteFreezeCoreManager> m_writeFreezeCoreManager;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
     // detachProcess() pour que la regle pare-feu reste retirable meme apres

@@ -7,6 +7,7 @@ qt_add_executable(KillEngine
     application_controller.cpp
     auto_write_state_access.cpp
     scan_state_access.cpp
+    scanning_core_manager.cpp
     write_freeze_core_manager.cpp
     clr_inspector_bridge.cpp
     code_patch_manager.cpp

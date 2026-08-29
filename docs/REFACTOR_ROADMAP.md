@@ -44,7 +44,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | [x] C5 | Freeze-value / hotkeys globaux / overlay Trainer — extrait le 29/08/2026 vers `apps/desktop/freeze_hotkey_overlay_manager.*` | ~407 (L9738–10145) | **Bas** — objets de session déjà `unique_ptr` | — |
 | [x] C6 | Code patching (AOB/patch/restore/hooks/AutoAssembler) — extrait le 29/08/2026 vers `apps/desktop/code_patch_manager.*` | ~1133 (L8605–9738) | **Bas** | C7 (debug cancellation), C10 (persistance profil) |
 | [x] C7 | Breakpoints matériels / find-what-writes / page-guard / speedhack / API-hook — extrait le 29/08/2026 vers `apps/desktop/debug_feature_manager.*` | ~1494 (L6946–8440) | **Bas-moyen** | C6 |
-| C8 | Scanning core (exact/unknown/AOB/group) | ~2032 (L4380–6412) | **Moyen** — trio `m_candidates`/`m_previousCandidates`/`m_snapshot` lu par C9-C11 | C9, C10, C11 |
+| [x] C8 | Scanning core (exact/unknown/AOB/group) — extrait le 30/08/2026 vers `apps/desktop/scanning_core_manager.*` | ~2032 à l'origine | **Bas-moyen** — consomme `ScanStateAccess` (PHASE 223) au lieu du trio brut | C9 (clos), C10, C11 |
 | [x] C9 | Write/freeze/rollback core — extrait le 30/08/2026 vers `apps/desktop/write_freeze_core_manager.*` | ~534 à l'origine, cluster relocalisé après PHASE 221/223 | **Bas-moyen** — les chemins write/rollback/watch consomment `AutoWriteStateAccess`; les écritures auto/chat/profils restent dans C12/C13/C10 | C10, C12, C13 |
 | C10 | Profils / pointer chains / Ghidra bridge / persistance Lua | ~2005 (L16325–18330) | **Moyen** — lit l'état de C6 et C9 pour persister | C6, C9 |
 | C11 | Automation pipe / settings / diagnostics | dispersé (L13992–16325, L18330–18614) | **Bas** — mais le logger de télémétrie est appelé partout depuis C12/C13, garder en fonctions libres | C12, C13 |
@@ -54,7 +54,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | C13 | `startAutoResolve` + escalade d'échec | ~475 (L11890–12365) | **Haut** | C12, C14 |
 | C14 | `startSmartSearch` (dispatch chat/IA) | **~1627 lignes, une seule fonction** (L12365–13992) | **Haut — le pire du fichier** | C12, C13, C8, C10 |
 
-**Ordre recommandé :** C1-C7 en premier (indépendants, zéro risque de collision entre agents) → C8/C10 ensuite (nécessitent l'interface d'accès partagée décrite plus haut ; C9 est clos depuis PHASE 226) → C12/C13/C14 en dernier, comme un seul chantier groupé ("dispatch IA/chat") vu leur imbrication mutuelle — ne pas les répartir entre agents différents, ils se marchent dessus.
+**Ordre recommandé :** C1-C7 en premier (indépendants, zéro risque de collision entre agents) → C10 ensuite (nécessite l'interface d'accès partagée décrite plus haut ; C8 est clos depuis PHASE 228, C9 depuis PHASE 226) → C12/C13/C14 en dernier, comme un seul chantier groupé ("dispatch IA/chat") vu leur imbrication mutuelle — ne pas les répartir entre agents différents, ils se marchent dessus.
 
 **Clôture première vague backend bas-couplage (29/08/2026)** : toute la première vague côté `ApplicationController` est close (`C1`, `C2`, `C3`, `C4`, `C5`, `C6`, `C7`). Les prochains candidats backend (`C8+`) demandent une interface d'accès partagée ou un couplage plus fort, donc ne sont plus des petits chantiers indépendants.
 
