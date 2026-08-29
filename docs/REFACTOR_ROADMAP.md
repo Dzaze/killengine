@@ -20,8 +20,12 @@ Aucun des deux n'a de "mauvaise architecture" au sens strict — c'est de la cro
 
 Avant de pouvoir extraire quoi que ce soit ailleurs, quelques éléments transversaux doivent devenir des interfaces stables — sinon toute extraction force soit une dépendance circulaire, soit une copie de logique.
 
-**Côté `ui/src/stores/app.ts`** :
-- `addActionLog` (extrait 29/08/2026 → `stores/actionLog.ts`, candidat S5), `addInvestigationStep` (extrait 29/08/2026 → `stores/investigation.ts`, candidat S6), `confirmRiskAction` (L3161, **39 sites d'appel, pas encore extrait**) — trois fonctions appelées depuis quasiment tous les autres domaines. `confirmRiskAction` reste la seule fondation non extraite : en attendant, le patron validé sur S1 (candidat CLR) fonctionne en pratique pour les candidats qui en dépendent — garder le gate (validation + appel confirmRiskAction) dans `app.ts`, déléguer seulement le travail réel (résultat + logging) au nouveau store. Pas besoin d'attendre l'extraction complète de `confirmRiskAction` pour avancer sur S7-S11.
+**Côté `ui/src/stores/app.ts` — TOUTES les fondations partagées sont désormais extraites (29/08/2026)** :
+- `addActionLog` → `stores/actionLog.ts` (candidat S5).
+- `addInvestigationStep` → `stores/investigation.ts` (candidat S6).
+- `confirmRiskAction`/`resolveRiskDialog`/`riskDialog`/`mutedRiskConfirmations`/`automationPipeDispatchDepth` → `stores/riskGate.ts` (dernière fondation, 39 sites d'appel externes — aucun n'a eu besoin de changer, `app.ts` garde un wrapper `confirmRiskAction` de même signature qui délègue). Contrairement à S1/S2/S4, cette extraction n'a pas pu garder le gate dans `app.ts` (une seule fonction à branches multiples) : `logAiAudit` (seul besoin transversal restant) est injecté en callback optionnel plutôt qu'importé, pour que `riskGate.ts` reste une feuille sans dépendance vers `app.ts`.
+
+Plus aucun blocage architectural pour S7-S12 : la fondation est complète, seule la taille/complexité de chaque candidat reste à traiter.
 
 **Côté `apps/desktop/application_controller.cpp`** :
 - `m_candidates`/`m_previousCandidates`/`m_snapshot` (trio d'état de scan) et `m_lastAutoWriteTargets`/`m_writeHistory` sont lus/écrits directement (pas via accesseur) par au moins 5 clusters différents (scan, write/freeze, chat/dispatch, auto-resolve, profils). Avant d'extraire ces clusters en classes séparées, poser une petite interface d'accès (`ScanStateAccess`, `AutoWriteStateAccess`) que `ApplicationController` garde, mais que les futures classes extraites consomment au lieu de manipuler les membres bruts.
@@ -61,7 +65,8 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | [x] S4 | Driver kernel (`kernelDriverStatus`, read/write) — extrait le 29/08/2026 vers `ui/src/stores/kernelDriver.ts` (`memoryAccessMode`/dispatch usermode-vs-kernel restés dans `app.ts`, pas spécifiques à ce candidat) | ~130 | **Bas** | — |
 | [x] S5 | Action log (`addActionLog`) — extrait le 29/08/2026 vers `ui/src/stores/actionLog.ts` | ~75 + 282 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
 | [x] S6 | Investigation timeline (`activeInvestigation`, `addInvestigationStep`) — extrait le 29/08/2026 vers `ui/src/stores/investigation.ts` | ~300 + 35 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
-| S7 | Write/Freeze/Checkpoint (`executeCheckpoint*`, `confirmRiskAction`) | ~1300 | **Haut** — `confirmRiskAction` a 39 sites d'appel externes | S6, S8, S9 |
+| [x] RiskGate | `confirmRiskAction`/`resolveRiskDialog`/`riskDialog`/`mutedRiskConfirmations`/`automationPipeDispatchDepth` — extrait le 29/08/2026 vers `ui/src/stores/riskGate.ts` (dernière fondation partagée) | ~140 + 39 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
+| S7 | Write/Freeze/Checkpoint (`executeCheckpoint*`) | ~1300 | **Haut** | S8, S9 |
 | S8 | Trainer features | ~900 | **Moyen-haut** — précédent partiel (`trainerDependencies.ts`, logique pure sans état) | S1 (CLR), S9 |
 | S9 | Profils / Workspace (bookmarks, templates, import/export) | ~1500 | **Haut** — bidirectionnel avec S7/S8 | S7, S8 |
 | S10 | Chat / Smart Search | ~700 | **Haut** | S6, S7 |

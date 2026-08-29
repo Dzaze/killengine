@@ -14,7 +14,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - PHASE 14A/14B, PHASE 17, PHASE 120-A/B/C/D, audit Arsenal 4 agents (PHASE 187 et ses corrections), la clarification `chat_memory_write`/`chat_memory_freeze`, PHASE 205 (branchement InvestigationView.vue) et PHASE 206 (Mode Automation, toggle + doc `docs/AUTOMATION_API.md`) : toutes closes et archivées en détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 - Dépôt git consolidé le 29/08/2026 : `main` remis à jour (fast-forward) sur l'unique branche de travail active, branches mortes supprimées.
 - Aucune capacité manquante identifiée dans l'arsenal (convergence 4 agents indépendants).
-- Refactor C1/C2/C6/C7 (Codex, côté C++) et S1-S6 (Claude, côté store — TOUS les candidats store à faible couplage) clos le 29/08/2026 — extraction progressive sans chevauchement de fichiers entre agents : détail archivé dans `docs/PHASE_TRACKER_HISTORY.md`, roadmap cochée dans `docs/REFACTOR_ROADMAP.md`. C7 est archivé en PHASE 215 (PHASE 213/214 ayant été prises entre-temps par Claude). Reste côté store : S7-S12, couplage moyen/haut, `confirmRiskAction` reste la seule fondation non extraite (patron de contournement validé sur S1-S4 : gate dans `app.ts`, travail délégué au store).
+- Refactor C1/C2/C6/C7 (Codex, en cours sur C3/C4/C5) et S1-S6 + `confirmRiskAction` (Claude — TOUTES les fondations partagées côté store sont désormais extraites) clos le 29/08/2026 — extraction progressive sans chevauchement de fichiers entre agents : détail archivé dans `docs/PHASE_TRACKER_HISTORY.md`, roadmap cochée dans `docs/REFACTOR_ROADMAP.md`. Plus aucun blocage architectural côté store pour S7-S12 (`riskGate.ts`, PHASE 216) ; côté C++, reste `ScanStateAccess`/`AutoWriteStateAccess` avant C8-C11.
 - Plus aucun chantier ouvert au 29/08/2026 - voir "Chantiers ouverts" ci-dessous.
 
 ## Règle d'utilisation
@@ -43,3 +43,4 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - [x] PHASE 214 - Refactor S3/S4 extraits et archivés dans `docs/PHASE_TRACKER_HISTORY.md`. Tous les candidats store à faible couplage (S1-S6) sont désormais clos.
 - [x] PHASE 212 - Refactor C6 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 215 - Refactor C7 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
+- [x] PHASE 216 - Refactor RiskGate (`confirmRiskAction`) extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`. Dernière fondation partagée côté store close.
