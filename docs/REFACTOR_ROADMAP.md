@@ -71,7 +71,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | S9 | Profils / Workspace (bookmarks, templates, import/export) | ~1500 | **Haut** — bidirectionnel avec S7/S8 | S7, S8 |
 | S10 | Chat / Smart Search | ~700 | **Haut** | S6, S7 |
 | S11 | Scanning / Candidates | ~1200 | **Moyen** | S7 |
-| S12 | Settings | ~110 refs dispersés | **Bas en interne, mais lu par tous les autres domaines** — extraction = re-câblage de nombreux sites de lecture, pas un problème de logique | — |
+| [x] S12 | Settings — extrait le 29/08/2026 vers `ui/src/stores/settings.ts` (`storeToRefs` pour garder les ~20 refs sous le même nom dans `app.ts`, donc les sites de lecture externes n'ont pas eu besoin de changer ; les 2 effets de bord vers d'autres domaines — sync `exactScanType`/`unknownScanType`, appel `refreshDiagnostics` — injectés en callbacks optionnels) | ~110 refs dispersés | **Bas en interne, mais lu par tous les autres domaines** — extraction = re-câblage de nombreux sites de lecture, pas un problème de logique | — |
 
 **Ordre recommandé :** S1-S4 en premier (indépendants). S5 et S6 ensuite, **chacun par un seul agent** (ce sont des dépendances partagées, pas des domaines isolés — un split en cours de route par deux agents différents créerait des conflits de merge quasi garantis). S7/S8/S9/S10 en dernier, une fois S5/S6 stabilisés en modules séparés.
 

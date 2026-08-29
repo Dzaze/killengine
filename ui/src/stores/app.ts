@@ -3,7 +3,6 @@ import { ref, computed, nextTick, watch } from 'vue'
 import {
   backend,
   type AppSettings,
-  type AiModelStatus,
   type AtomicWriteTarget,
   type AutoResolveReportResult,
   type CandidateFieldTestResult,
@@ -55,6 +54,7 @@ import { useSpeedhackStore } from './speedhack'
 import { useAutomationPipeStore } from './automationPipe'
 import { useKernelDriverStore } from './kernelDriver'
 import { useRiskGateStore, type RiskDialogState } from './riskGate'
+import { useSettingsStore } from './settings'
 
 export type { RiskDialogState }
 
@@ -371,32 +371,35 @@ export const useAppStore = defineStore('app', () => {
   // Sequence ordonnee (ordre + doublons conserves) des dernieres ecritures
   // confirmees, persistee par executable — roadmap I, replay inter-session.
   const writeHistorySequence = ref<Array<Record<string, unknown>>>([])
-  const settingsLoaded = ref(false)
-  const settingsSaving = ref(false)
-  const settingsStatus = ref('')
-  const appLanguage = ref<'fr' | 'en'>('fr')
-  const settingDefaultValueType = ref('Int32')
-  const settingScanMaxResults = ref(1000000)
-  const settingScanChunkSizeMb = ref(0)
-  const settingPerformanceMode = ref<AppSettings['performanceMode']>('Auto')
-  const settingScanMaxWorkerThreads = ref(0)
-  const settingScanMaxInFlightMb = ref(0)
-  const settingCandidateFileBackedThreshold = ref(250000)
-  const settingUnknownSnapshotMaxMb = ref(128)
-  const settingFastScan = ref(true)
-  const settingSmartSearchDebugEnabled = ref(true)
-  const settingSmartSearchDebugMaxEvents = ref(30)
   // Action de l'echelle d'escalade (Assistant) dont le backend attend la
   // reponse en texte libre, quand cette action ne vit que cote frontend
   // (ex: encrypted_scan, qui boucle sur plusieurs modes via runAutoEncryptedScan
   // et n'a pas d'equivalent backend unique a appeler directement).
   const pendingAssistantAction = ref('')
-  const settingModelPath = ref('')
-  const settingModelEnabled = ref(true)
-  const settingModelThreads = ref(4)
-  const aiModelStatus = ref<AiModelStatus | null>(null)
-  const aiModelStatusLoading = ref(false)
-  const aiModelStatusError = ref('')
+  const settingsStore = useSettingsStore()
+  const {
+    settingsLoaded,
+    settingsSaving,
+    settingsStatus,
+    appLanguage,
+    settingDefaultValueType,
+    settingScanMaxResults,
+    settingScanChunkSizeMb,
+    settingPerformanceMode,
+    settingScanMaxWorkerThreads,
+    settingScanMaxInFlightMb,
+    settingCandidateFileBackedThreshold,
+    settingUnknownSnapshotMaxMb,
+    settingFastScan,
+    settingSmartSearchDebugEnabled,
+    settingSmartSearchDebugMaxEvents,
+    settingModelPath,
+    settingModelEnabled,
+    settingModelThreads,
+    aiModelStatus,
+    aiModelStatusLoading,
+    aiModelStatusError,
+  } = storeToRefs(settingsStore)
   // Store Driver kernel extrait (candidat S4, docs/REFACTOR_ROADMAP.md, 29/08/2026).
   const kernelDriverStore = useKernelDriverStore()
   const {
@@ -4987,111 +4990,25 @@ let nextWatchedChainId = 1
     }
   }
 
-  function applySettings(settings: AppSettings) {
-    appLanguage.value = settings.language === 'en' ? 'en' : 'fr'
-    settingDefaultValueType.value = settings.defaultValueType || 'Int32'
+  function syncScanDefaultsFromSettings() {
     exactScanType.value = settingDefaultValueType.value
     unknownScanType.value = 'Auto'
-    settingScanMaxResults.value = Number(settings.scanMaxResults || 1000000)
-    settingScanChunkSizeMb.value = Number(settings.scanChunkSizeMb ?? 0)
-    settingPerformanceMode.value = settings.performanceMode || 'Auto'
-    settingScanMaxWorkerThreads.value = Number(settings.scanMaxWorkerThreads ?? 0)
-    settingScanMaxInFlightMb.value = Number(settings.scanMaxInFlightMb ?? 0)
-    settingCandidateFileBackedThreshold.value = Number(settings.candidateFileBackedThreshold || 250000)
-    settingUnknownSnapshotMaxMb.value = Number(settings.unknownSnapshotMaxMb || 128)
-    settingFastScan.value = settings.fastScan !== false
-    settingSmartSearchDebugEnabled.value = settings.smartSearchDebugEnabled !== false
-    settingSmartSearchDebugMaxEvents.value = Number(settings.smartSearchDebugMaxEvents || 30)
-    settingModelPath.value = settings.modelPath || ''
-    settingModelEnabled.value = settings.modelEnabled !== false
-    settingModelThreads.value = Number(settings.modelThreads || 4)
-  }
-
-  function currentSettings(): AppSettings {
-    return {
-      language: appLanguage.value,
-      defaultValueType: settingDefaultValueType.value,
-      scanMaxResults: settingScanMaxResults.value,
-      scanChunkSizeMb: settingScanChunkSizeMb.value,
-      performanceMode: settingPerformanceMode.value,
-      scanMaxWorkerThreads: settingScanMaxWorkerThreads.value,
-      scanMaxInFlightMb: settingScanMaxInFlightMb.value,
-      candidateFileBackedThreshold: settingCandidateFileBackedThreshold.value,
-      unknownSnapshotMaxMb: settingUnknownSnapshotMaxMb.value,
-      fastScan: settingFastScan.value,
-      smartSearchDebugEnabled: settingSmartSearchDebugEnabled.value,
-      smartSearchDebugMaxEvents: settingSmartSearchDebugMaxEvents.value,
-      modelPath: settingModelPath.value,
-      modelEnabled: settingModelEnabled.value,
-      modelThreads: settingModelThreads.value,
-    }
   }
 
   async function loadSettings() {
-    try {
-      const settings = await backend.getController().getSettings()
-      applySettings(settings)
-      settingsLoaded.value = true
-      settingsStatus.value = ''
-      await refreshAiModelStatus()
-      return settings
-    } catch (e) {
-      settingsStatus.value = 'Impossible de charger les paramètres : ' + String(e)
-      return null
-    }
+    return settingsStore.loadSettings(syncScanDefaultsFromSettings)
   }
 
   async function refreshAiModelStatus() {
-    aiModelStatusLoading.value = true
-    aiModelStatusError.value = ''
-    try {
-      const controller = backend.getController()
-      if (!controller.getAiModelStatus) {
-        aiModelStatus.value = null
-        aiModelStatusError.value = 'Statut IA non exposé par ce backend.'
-        return null
-      }
-      const status = await controller.getAiModelStatus()
-      aiModelStatus.value = status
-      aiModelStatusError.value = status.success === false ? String(status.error ?? status.message ?? 'Statut IA indisponible.') : ''
-      return status
-    } catch (e) {
-      aiModelStatus.value = null
-      aiModelStatusError.value = String(e)
-      return null
-    } finally {
-      aiModelStatusLoading.value = false
-    }
+    return settingsStore.refreshAiModelStatus()
   }
 
   async function browseForModel() {
-    const controller = backend.getController()
-    if (!controller.browseForModelFile) {
-      aiModelStatusError.value = 'Sélecteur de fichier non exposé par ce backend.'
-      return
-    }
-    const result = await controller.browseForModelFile()
-    if (result.success === true && typeof result.path === 'string') {
-      settingModelPath.value = result.path
-    }
+    return settingsStore.browseForModel()
   }
 
   async function saveSettings() {
-    settingsSaving.value = true
-    try {
-      const saved = await backend.getController().saveSettings(currentSettings())
-      applySettings(saved)
-      settingsLoaded.value = true
-      settingsStatus.value = 'Paramètres sauvegardés.'
-      await refreshDiagnostics()
-      await refreshAiModelStatus()
-      return saved
-    } catch (e) {
-      settingsStatus.value = 'Sauvegarde impossible : ' + String(e)
-      return null
-    } finally {
-      settingsSaving.value = false
-    }
+    return settingsStore.saveSettings(syncScanDefaultsFromSettings, refreshDiagnostics)
   }
 
   async function refreshActiveChatMemoryTargets() {

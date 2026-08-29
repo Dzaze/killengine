@@ -45,3 +45,4 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - [x] PHASE 215 - Refactor C7 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 216 - Refactor RiskGate (`confirmRiskAction`) extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`. Dernière fondation partagée côté store close.
 - [x] PHASE 217 - Refactor C3/C4/C5 extraits et archivés dans `docs/PHASE_TRACKER_HISTORY.md`. Toute la première vague backend C1-C7 est désormais close.
+- [x] PHASE 218 - Refactor S12 (Settings) extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`. Travail solo (Codex a atteint sa limite quotidienne).
