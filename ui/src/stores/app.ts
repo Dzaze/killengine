@@ -12,9 +12,6 @@ import {
   type EncryptedScanResult,
   type ChatMemoryTargetsResult,
   type ExactScanResult,
-  type KernelDriverStatus,
-  type KernelMemoryReadResult,
-  type KernelMemoryWriteResult,
   type LuaScriptRunResult,
   type LuaScriptingStatus,
   type LogTailResult,
@@ -55,6 +52,8 @@ import { useInvestigationStore, type InvestigationRun, type InvestigationStep } 
 import { useActionLogStore, type UserActionLogEntry } from './actionLog'
 import { useClrInspectorStore } from './clrInspector'
 import { useSpeedhackStore } from './speedhack'
+import { useAutomationPipeStore } from './automationPipe'
+import { useKernelDriverStore } from './kernelDriver'
 
 export type { InvestigationRun, InvestigationStep }
 export type { UserActionLogEntry }
@@ -405,14 +404,18 @@ export const useAppStore = defineStore('app', () => {
   const aiModelStatus = ref<AiModelStatus | null>(null)
   const aiModelStatusLoading = ref(false)
   const aiModelStatusError = ref('')
-  const kernelDriverStatus = ref<KernelDriverStatus | null>(null)
-  const kernelDriverStatusLoading = ref(false)
-  const kernelDriverStartLoading = ref(false)
-  const kernelDriverStatusError = ref('')
-  const kernelMemoryReadResult = ref<KernelMemoryReadResult | null>(null)
-  const kernelMemoryReadBusy = ref(false)
-  const kernelMemoryWriteResult = ref<KernelMemoryWriteResult | null>(null)
-  const kernelMemoryWriteBusy = ref(false)
+  // Store Driver kernel extrait (candidat S4, docs/REFACTOR_ROADMAP.md, 29/08/2026).
+  const kernelDriverStore = useKernelDriverStore()
+  const {
+    kernelDriverStatus,
+    kernelDriverStatusLoading,
+    kernelDriverStartLoading,
+    kernelDriverStatusError,
+    kernelMemoryReadResult,
+    kernelMemoryReadBusy,
+    kernelMemoryWriteResult,
+    kernelMemoryWriteBusy,
+  } = storeToRefs(kernelDriverStore)
   const kernelMemoryReady = computed(() => kernelDriverStatus.value?.capabilities.processMemoryAccess === true)
   const kernelMemoryModeActive = computed(() => memoryAccessMode.value === 'kernel')
   // Store CLR Inspector extrait (candidat S1, docs/REFACTOR_ROADMAP.md, 29/08/2026) --
@@ -3280,24 +3283,19 @@ let nextWatchedChainId = 1
     }
   }
 
-  const automationPipeStatus = ref<Record<string, unknown> | null>(null)
+  // Store Automation Pipe status extrait (candidat S3, docs/REFACTOR_ROADMAP.md,
+  // 29/08/2026). Mode Automation (29/08/2026) : contournement RiskGate
+  // volontaire pour un pilotage scripté/agent externe (pipe local + Lua
+  // ke.call), pensé pour un utilisateur avancé qui sait ce qu'il active. Un
+  // seul accord explicite via confirmRiskAction à l'activation (gate gardé
+  // ICI, pas encore extrait) ; désactiver ne nécessite aucune confirmation.
+  const automationPipeStore = useAutomationPipeStore()
+  const { automationPipeStatus } = storeToRefs(automationPipeStore)
 
   async function refreshAutomationPipeStatus() {
-    const controller = backend.getController()
-    if (!controller.getAutomationPipeStatus) return
-    try {
-      automationPipeStatus.value = await controller.getAutomationPipeStatus()
-    } catch (e) {
-      console.error('[KillEngine] Failed to refresh automation pipe status:', e)
-    }
+    return automationPipeStore.refreshAutomationPipeStatus()
   }
 
-  // Mode Automation (29/08/2026) : contournement RiskGate volontaire pour un
-  // pilotage scripté/agent externe (pipe local + Lua ke.call), pensé pour un
-  // utilisateur avancé qui sait ce qu'il active. Un seul accord explicite via
-  // confirmRiskAction à l'activation (pas à chaque appel ensuite, le pipe
-  // lui-même n'a jamais de confirmation par action — voir automation_pipe_server.h) ;
-  // désactiver ne nécessite aucune confirmation.
   async function enableAutomationMode() {
     const accepted = await confirmRiskAction(
       'injection',
@@ -3305,37 +3303,11 @@ let nextWatchedChainId = 1
       "Autorise le pipe d'automatisation local (utilisé par le scripting Lua ke.call(...) et par tout agent/outil externe sur cette machine) à exécuter des lectures/écritures mémoire SANS confirmation par action, tant que le mode reste actif.",
     )
     if (!accepted) return null
-    const controller = backend.getController()
-    if (!controller.enableAutomationMode) {
-      addActionLog('automation', 'Mode Automation indisponible', 'Backend non exposé.', 'warning')
-      return null
-    }
-    try {
-      const result = await controller.enableAutomationMode()
-      automationPipeStatus.value = result
-      addActionLog('automation', result.success === true ? 'Mode Automation activé' : 'Activation échouée', String(result.error ?? ''), result.success === true ? 'success' : 'error')
-      return result
-    } catch (e) {
-      addActionLog('automation', 'Activation échouée', String(e), 'error')
-      return null
-    }
+    return automationPipeStore.enableAutomationMode()
   }
 
   async function disableAutomationMode() {
-    const controller = backend.getController()
-    if (!controller.disableAutomationMode) {
-      addActionLog('automation', 'Mode Automation indisponible', 'Backend non exposé.', 'warning')
-      return null
-    }
-    try {
-      const result = await controller.disableAutomationMode()
-      automationPipeStatus.value = result
-      addActionLog('automation', 'Mode Automation désactivé', '', 'success')
-      return result
-    } catch (e) {
-      addActionLog('automation', 'Désactivation échouée', String(e), 'error')
-      return null
-    }
+    return automationPipeStore.disableAutomationMode()
   }
 
   async function executeCheckpointFindWhatWrites(checkpoint: Record<string, unknown>) {
@@ -4028,107 +4000,42 @@ let nextWatchedChainId = 1
   }
 
   async function refreshKernelDriverStatus() {
-    kernelDriverStatusLoading.value = true
-    kernelDriverStatusError.value = ''
-    try {
-      const controller = backend.getController()
-      if (!controller.probeKernelDriver) {
-        kernelDriverStatus.value = null
-        kernelDriverStatusError.value = 'Probe driver noyau non exposé par ce backend.'
-        return
-      }
-      kernelDriverStatus.value = await controller.probeKernelDriver()
-    } catch (e) {
-      kernelDriverStatus.value = null
-      kernelDriverStatusError.value = String(e)
-    } finally {
-      kernelDriverStatusLoading.value = false
-    }
+    return kernelDriverStore.refreshKernelDriverStatus()
   }
 
   async function startKernelDriver() {
-    kernelDriverStartLoading.value = true
-    kernelDriverStatusError.value = ''
-    try {
-      const controller = backend.getController()
-      if (!controller.startKernelDriver) {
-        kernelDriverStatusError.value = 'Démarrage driver noyau non exposé par ce backend.'
-        return
-      }
-      kernelDriverStatus.value = await controller.startKernelDriver()
-      addActionLog(
-        'kernel_driver',
-        kernelDriverStatus.value.success ? 'Driver kernel démarré' : 'Driver kernel indisponible',
-        kernelDriverStatus.value.message || kernelDriverStatus.value.error || '',
-        kernelDriverStatus.value.success ? 'success' : 'warning',
-      )
+    const result = await kernelDriverStore.startKernelDriver()
+    if (result) {
       logAiAudit('kernel_driver_start', {
-        success: kernelDriverStatus.value.success,
-        status: kernelDriverStatus.value.status,
-        started: kernelDriverStatus.value.started === true,
-        alreadyRunning: kernelDriverStatus.value.alreadyRunning === true,
+        success: result.success,
+        status: result.status,
+        started: result.started === true,
+        alreadyRunning: result.alreadyRunning === true,
       })
-    } catch (e) {
-      kernelDriverStatusError.value = String(e)
-    } finally {
-      kernelDriverStartLoading.value = false
     }
+    return result
   }
 
   async function readMemoryKernel(addressHex: string, size: number) {
-    kernelMemoryReadBusy.value = true
-    try {
-      const controller = backend.getController()
-      if (!controller.readMemoryKernel) {
-        kernelMemoryReadResult.value = { success: false, error: 'Lecture kernel non exposée par ce backend.' }
-        return
-      }
-      kernelMemoryReadResult.value = await controller.readMemoryKernel(addressHex, size)
-      addActionLog(
-        'kernel_read',
-        kernelMemoryReadResult.value.success ? `Lecture kernel 0x${addressHex}` : `Lecture kernel échouée 0x${addressHex}`,
-        kernelMemoryReadResult.value.success
-          ? `${kernelMemoryReadResult.value.bytesRead} octet(s) lus via le driver noyau.`
-          : (kernelMemoryReadResult.value.error ?? ''),
-        kernelMemoryReadResult.value.success ? 'success' : 'error',
-      )
-      logAiAudit('kernel_memory_read', { address: addressHex, size, success: kernelMemoryReadResult.value.success })
-    } catch (e) {
-      kernelMemoryReadResult.value = { success: false, error: String(e) }
-    } finally {
-      kernelMemoryReadBusy.value = false
+    const result = await kernelDriverStore.readMemoryKernel(addressHex, size)
+    if (result) {
+      logAiAudit('kernel_memory_read', { address: addressHex, size, success: result.success })
     }
+    return result
   }
 
+  // Contourne les protections mémoire usermode normales (VirtualProtect,
+  // PAGE_GUARD) en écrivant directement depuis le ring 0 -- traité comme
+  // une injection, le palier de risque le plus strict déjà utilisé dans
+  // ce store (voir confirmRiskAction), pas comme un simple 'write'. Gate
+  // gardé ICI avant de déléguer à kernelDriverStore.
   async function writeMemoryKernel(addressHex: string, hexBytes: string) {
-    // Contourne les protections mémoire usermode normales (VirtualProtect,
-    // PAGE_GUARD) en écrivant directement depuis le ring 0 -- traité comme
-    // une injection, le palier de risque le plus strict déjà utilisé dans
-    // ce store (voir confirmRiskAction), pas comme un simple 'write'.
     if (!await confirmRiskAction('injection', 'Écriture mémoire via driver noyau', `0x${addressHex} = ${hexBytes.trim()} (contourne les protections mémoire usermode).`)) return
-
-    kernelMemoryWriteBusy.value = true
-    try {
-      const controller = backend.getController()
-      if (!controller.writeMemoryKernel) {
-        kernelMemoryWriteResult.value = { success: false, error: 'Écriture kernel non exposée par ce backend.' }
-        return
-      }
-      kernelMemoryWriteResult.value = await controller.writeMemoryKernel(addressHex, hexBytes)
-      addActionLog(
-        'kernel_write',
-        kernelMemoryWriteResult.value.success ? `Écriture kernel 0x${addressHex}` : `Écriture kernel échouée 0x${addressHex}`,
-        kernelMemoryWriteResult.value.success
-          ? `${kernelMemoryWriteResult.value.bytesWritten} octet(s) écrits via le driver noyau.`
-          : (kernelMemoryWriteResult.value.error ?? ''),
-        kernelMemoryWriteResult.value.success ? 'success' : 'error',
-      )
-      logAiAudit('kernel_memory_write', { address: addressHex, bytes: hexBytes, success: kernelMemoryWriteResult.value.success })
-    } catch (e) {
-      kernelMemoryWriteResult.value = { success: false, error: String(e) }
-    } finally {
-      kernelMemoryWriteBusy.value = false
+    const result = await kernelDriverStore.writeMemoryKernel(addressHex, hexBytes)
+    if (result) {
+      logAiAudit('kernel_memory_write', { address: addressHex, bytes: hexBytes, success: result.success })
     }
+    return result
   }
 
   function setMemoryAccessMode(mode: 'standard' | 'kernel') {
