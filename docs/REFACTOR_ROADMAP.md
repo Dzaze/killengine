@@ -37,7 +37,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | C3 | Driver kernel (`probe/startKernelDriver`, read/write kernel) | ~288 (L15451–15739) | **Bas** | — |
 | C4 | UWP / save-file investigation | ~291 (L2069–2360) | **Bas** | — |
 | C5 | Freeze-value / hotkeys globaux / overlay Trainer | ~407 (L9738–10145) | **Bas** — objets de session déjà `unique_ptr` | — |
-| C6 | Code patching (AOB/patch/restore/hooks/AutoAssembler) | ~1133 (L8605–9738) | **Bas** | C7 (debug cancellation), C10 (persistance profil) |
+| [x] C6 | Code patching (AOB/patch/restore/hooks/AutoAssembler) — extrait le 29/08/2026 vers `apps/desktop/code_patch_manager.*` | ~1133 (L8605–9738) | **Bas** | C7 (debug cancellation), C10 (persistance profil) |
 | C7 | Breakpoints matériels / find-what-writes / page-guard / speedhack / API-hook | ~1494 (L6946–8440) | **Bas-moyen** | C6 |
 | C8 | Scanning core (exact/unknown/AOB/group) | ~2032 (L4380–6412) | **Moyen** — trio `m_candidates`/`m_previousCandidates`/`m_snapshot` lu par C9-C11 | C9, C10, C11 |
 | C9 | Write/freeze/rollback core | ~534 (L6412–6946) | **Moyen** — `m_lastAutoWriteTargets`/`m_writeHistory` partagés | C8, C10, C11 |

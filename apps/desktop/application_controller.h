@@ -41,6 +41,7 @@ namespace killengine {
 
 class AutomationPipeServer;
 class ClrInspectorBridge;
+class CodePatchManager;
 class UiStringInvestigator;
 
 /**
@@ -1187,25 +1188,13 @@ private:
         QString clrFieldName;
     };
 
-    struct ActiveCodePatch {
-        uint64_t address{0};
-        QByteArray originalBytes;
-        QByteArray patchBytes;
-    };
-
-    struct ActiveFunctionHook {
-        uint64_t targetAddress{0};
-        uint64_t hookFunctionAddress{0};
-        uint64_t trampolineAddress{0};
-        QByteArray originalBytes;
-    };
-
     bool                    m_attached{false};
     QString                 m_processName;
     int                     m_pid{0};
     killcore::ProcessHandle m_handle;
     std::unique_ptr<UiStringInvestigator> m_uiStringInvestigator;
     std::unique_ptr<ClrInspectorBridge> m_clrInspectorBridge;
+    std::unique_ptr<CodePatchManager> m_codePatchManager;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
     // detachProcess() pour que la regle pare-feu reste retirable meme apres
     // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
@@ -1231,9 +1220,6 @@ private:
     QList<WriteRecord>       m_writeHistory;
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
     QList<AutoWriteTarget>   m_chatMemoryTargets;
-    QHash<uint64_t, ActiveCodePatch> m_activeCodePatches;
-    QHash<uint64_t, ActiveFunctionHook> m_activeFunctionHooks;
-    std::optional<killcore::AutoAsmResult> m_lastAutoAsmResult;
     QList<ActiveProfileTarget> m_activeProfileTargets;
     QStringList              m_autoWriteValueHistory;
     int                      m_lastBatchStartIndex{-1};
