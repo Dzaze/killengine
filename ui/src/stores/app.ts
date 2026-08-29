@@ -65,8 +65,10 @@ import {
   isToggleableTrainerAction,
 } from './trainerDependencies'
 import { useInvestigationStore, type InvestigationRun, type InvestigationStep } from './investigation'
+import { useActionLogStore, type UserActionLogEntry } from './actionLog'
 
 export type { InvestigationRun, InvestigationStep }
+export type { UserActionLogEntry }
 
 export interface ChatMessage {
   id: number
@@ -112,15 +114,6 @@ export interface InvestigationReport {
     hits?: Array<Record<string, unknown>>
   }
   aob?: Record<string, unknown>
-}
-
-export interface UserActionLogEntry {
-  id: number
-  time: string
-  kind: string
-  title: string
-  detail: string
-  status: 'info' | 'success' | 'warning' | 'error'
 }
 
 export interface SessionEntry {
@@ -733,8 +726,11 @@ let nextWatchedChainId = 1
   // Chat / guided workflow state
   const messages = ref<ChatMessage[]>([])
   const messageIdCounter = ref(0)
-  const actionLog = ref<UserActionLogEntry[]>([])
-  const actionLogIdCounter = ref(0)
+  // Store Action Log extrait (candidat S5, docs/REFACTOR_ROADMAP.md, 29/08/2026) --
+  // meme patron que investigationStore : refs directement mutables, fonctions
+  // ci-dessous en wrappers minces qui gardent les memes noms/signatures.
+  const actionLogStore = useActionLogStore()
+  const { actionLog, actionLogIdCounter } = storeToRefs(actionLogStore)
   const sessionEntries = ref<SessionEntry[]>([])
   const sessionGroups = ref<SessionGroup[]>([])
   const sessionGroupIdCounter = ref(0)
@@ -1134,73 +1130,27 @@ let nextWatchedChainId = 1
     detail = '',
     status: UserActionLogEntry['status'] = 'info',
   ) {
-    actionLogIdCounter.value += 1
-    actionLog.value.unshift({
-      id: actionLogIdCounter.value,
-      time: nowTime(),
-      kind,
-      title,
-      detail,
-      status,
-    })
-    actionLog.value = actionLog.value.slice(0, 80)
-    saveActionLog()
+    actionLogStore.addActionLog(kind, title, detail, status)
   }
 
-  const actionLogStorageKey = 'killengine.action_log.v1'
-
   function saveActionLog() {
-    try {
-      window.localStorage.setItem(actionLogStorageKey, JSON.stringify({
-        entries: actionLog.value.slice(0, 200),
-        id: actionLogIdCounter.value,
-      }))
-    } catch {
-      // Best-effort audit: runtime actions must continue even if local storage is full.
-    }
+    actionLogStore.saveActionLog()
   }
 
   function loadActionLog() {
-    try {
-      const raw = window.localStorage.getItem(actionLogStorageKey)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as { entries?: UserActionLogEntry[], id?: number }
-      actionLog.value = Array.isArray(parsed.entries) ? parsed.entries.slice(0, 200) : []
-      actionLogIdCounter.value = Number(parsed.id ?? actionLog.value.reduce((max, entry) => Math.max(max, Number(entry.id) || 0), 0))
-    } catch {
-      actionLog.value = []
-      actionLogIdCounter.value = 0
-    }
+    actionLogStore.loadActionLog()
   }
 
   function clearActionLog() {
-    actionLog.value = []
-    actionLogIdCounter.value = 0
-    saveActionLog()
+    actionLogStore.clearActionLog()
   }
 
   function exportActionLogJson(): string {
-    return JSON.stringify({
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      processName: processName.value,
-      entries: actionLog.value,
-    }, null, 2)
+    return actionLogStore.exportActionLogJson(processName.value)
   }
 
   function exportActionLogMarkdown(): string {
-    const lines = [
-      '# KillEngine Audit Log',
-      '',
-      `Export: ${new Date().toISOString()}`,
-      `Processus: ${processName.value || 'non attache'}`,
-      `Entrées: ${actionLog.value.length}`,
-      '',
-      ...actionLog.value.slice(0, 200).map((entry) =>
-        `- ${entry.time} [${entry.status}] ${entry.kind} - ${entry.title}${entry.detail ? `: ${entry.detail}` : ''}`,
-      ),
-    ]
-    return lines.join('\n')
+    return actionLogStore.exportActionLogMarkdown(processName.value)
   }
 
   function saveInvestigations() {
