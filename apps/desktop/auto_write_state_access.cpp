@@ -30,6 +30,10 @@ void AutoWriteStateAccess::removeWriteHistoryAt(int index) {
     m_writeHistory.removeAt(index);
 }
 
+void AutoWriteStateAccess::clearWriteHistory() {
+    m_writeHistory.clear();
+}
+
 bool AutoWriteStateAccess::hasLastTargets() const {
     return !m_lastTargets.isEmpty();
 }

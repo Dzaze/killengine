@@ -41,6 +41,7 @@ public:
     const WriteRecord& writeHistoryAt(int index) const;
     void appendWriteRecord(const WriteRecord& record);
     void removeWriteHistoryAt(int index);
+    void clearWriteHistory();
 
     bool hasLastTargets() const;
     int lastTargetCount() const;

@@ -23,7 +23,6 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
-#include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QPointer>
@@ -45,6 +44,7 @@ class FreezeHotkeyOverlayManager;
 class KernelDriverManager;
 class SaveFileInvestigator;
 class UiStringInvestigator;
+class WriteFreezeCoreManager;
 
 /**
  * @brief Contrôleur applicatif exposé au frontend Vue via QWebChannel.
@@ -1092,7 +1092,7 @@ signals:
     /// aussi bien par un write manuel Expert que par tous les auto-write du
     /// chat Assistant) est repartie toute seule dans la fenêtre d'observation
     /// qui suit — signe que quelque chose recalcule/réécrit cette adresse.
-    /// Détecté automatiquement (voir applyWriteWatchTick()) au lieu d'attendre
+    /// Détecté automatiquement par WriteFreezeCoreManager au lieu d'attendre
     /// que l'utilisateur le remarque et clique "Écrit par" à la main.
     void writeDidNotHold(const QVariantMap& info);
 
@@ -1106,8 +1106,6 @@ signals:
     void errorOccurred(const QString& message);
 
 private:
-    void applyWriteWatchTick();
-    void registerWriteWatch(uint64_t address, killcore::ValueType type, const QByteArray& expectedBytes);
     bool rememberCandidatesForUndo(QString* error = nullptr);
     void clearCandidateUndo();
     void clearCandidateValueHistory();
@@ -1134,21 +1132,6 @@ private:
     ScanStateAccess scanState() const;
     AutoWriteStateAccess autoWriteState();
 
-    // Surveillance courte apres une ecriture confirmee : combien de sondages
-    // (applyWriteWatchTick) il reste avant d'arreter d'observer cette adresse
-    // faute de reversion detectee (watch "reussie", rien a signaler).
-    struct WriteWatchEntry {
-        uint64_t address{0};
-        killcore::ValueType type{killcore::ValueType::Int32};
-        QByteArray expectedBytes;
-        int ticksRemaining{0};
-        // Mismatches consecutifs (reset a 0 des qu'un sondage matche a
-        // nouveau) : exige plusieurs sondages d'affilee avant de conclure a
-        // une vraie reversion, pour ne pas declencher sur un simple aleas de
-        // lecture (meme principe que FreezeEntry::consecutiveDriftTicks).
-        int consecutiveMismatches{0};
-    };
-
     struct ActiveProfileTarget {
         QString profileName;
         QString targetName;
@@ -1173,6 +1156,7 @@ private:
     std::unique_ptr<FreezeHotkeyOverlayManager> m_freezeHotkeyOverlayManager;
     std::unique_ptr<KernelDriverManager> m_kernelDriverManager;
     std::unique_ptr<SaveFileInvestigator> m_saveFileInvestigator;
+    std::unique_ptr<WriteFreezeCoreManager> m_writeFreezeCoreManager;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
     // detachProcess() pour que la regle pare-feu reste retirable meme apres
     // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
@@ -1182,13 +1166,6 @@ private:
     killcore::CandidateStore m_previousCandidates;
     QHash<uint64_t, QVariantList> m_candidateValueHistory;
     killcore::SnapshotStore  m_snapshot;
-    // Sondage independant du freeze (interval bien plus lent, pas de
-    // reecriture) : surveille juste que la valeur confirmee ecrite par
-    // writeMemoryValueConfirmed n'est pas repartie toute seule peu apres.
-    QTimer                   m_writeWatchTimer;
-    QList<WriteWatchEntry>   m_writeWatchEntries;
-    uint64_t                 m_lastWriteAddress{0};
-    QByteArray               m_lastWritePreviousValue;
     QList<WriteRecord>       m_writeHistory;
     QList<AutoWriteTarget>   m_lastAutoWriteTargets;
     QList<AutoWriteTarget>   m_chatMemoryTargets;

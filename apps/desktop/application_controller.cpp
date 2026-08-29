@@ -21,6 +21,7 @@
 #include "freeze_hotkey_overlay_manager.h"
 #include "kernel_driver_manager.h"
 #include "save_file_investigator.h"
+#include "write_freeze_core_manager.h"
 #include "query_text_utils.h"
 #include "model_locator.h"
 #include "display_string_investigator.h"
@@ -1884,8 +1885,29 @@ ApplicationController::ApplicationController(QObject* parent)
         [this](const QVariantMap& result) {
             emit inProcessBreakpointWatchFinished(result);
         });
-    m_writeWatchTimer.setInterval(1500);
-    connect(&m_writeWatchTimer, &QTimer::timeout, this, &ApplicationController::applyWriteWatchTick);
+    m_writeFreezeCoreManager = std::make_unique<WriteFreezeCoreManager>(
+        m_handle,
+        [this]() {
+            return autoWriteState();
+        },
+        [this]() {
+            return m_attached;
+        },
+        [this]() {
+            return m_pid;
+        },
+        [this](const QString& event, const QVariantMap& payload) {
+            appendScanTelemetry(event, payload);
+        },
+        [this](uint64_t address, killcore::ValueType type, const QString& valueText) {
+            persistWriteHistorySequenceEntry(address, type, valueText);
+        },
+        [this](const QVariantMap& info) {
+            emit writeDidNotHold(info);
+        },
+        m_lastBatchStartIndex,
+        m_lastBatchEndIndex,
+        this);
     m_ai.init();
     KE_LOG_INFO() << "ApplicationController initialized";
 }
@@ -2089,8 +2111,7 @@ bool ApplicationController::attachProcess(int pid) {
     clearCandidateUndo();
     clearCandidateValueHistory();
     scanState().clearSnapshot();
-    m_lastAutoWriteTargets.clear();
-    m_chatMemoryTargets.clear();
+    m_writeFreezeCoreManager->clearSessionState();
     m_codePatchManager->clearSessionState();
     m_activeProfileTargets.clear();
     m_autoWriteValueHistory.clear();
@@ -2129,17 +2150,9 @@ void ApplicationController::detachProcess() {
     clearCandidateValueHistory();
     scanState().clearSnapshot();
     m_freezeHotkeyOverlayManager->clearFreezeState();
-    m_writeWatchTimer.stop();
-    m_writeWatchEntries.clear();
-    m_lastWriteAddress = 0;
-    m_lastWritePreviousValue.clear();
-    m_writeHistory.clear();
-    m_lastAutoWriteTargets.clear();
-    m_chatMemoryTargets.clear();
+    m_writeFreezeCoreManager->clearSessionState();
     m_activeProfileTargets.clear();
     m_autoWriteValueHistory.clear();
-    m_lastBatchStartIndex = -1;
-    m_lastBatchEndIndex = -1;
 
     emit attachmentChanged();
 }
@@ -4542,55 +4555,7 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
 }
 
 QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, const QString& valueType, const QString& value) {
-    QVariantMap result;
-    result["success"] = false;
-
-    uint64_t address = 0;
-    if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
-        return result;
-    }
-
-    killcore::ValueType type;
-    if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
-        return result;
-    }
-
-    killcore::ScanValue scanValue;
-    QString parseError;
-    if (!killcore::parseScanValue(value, type, &scanValue, &parseError)) {
-        result["error"] = parseError;
-        return result;
-    }
-
-    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
-    if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
-        return result;
-    }
-
-    killcore::MemoryWriter writer(writeHandle);
-    const auto write = writer.write(address, killcore::scanValueToBytes(scanValue), true);
-    if (write.success) {
-        m_lastWriteAddress = address;
-        m_lastWritePreviousValue = write.previousValue;
-        autoWriteState().appendWriteRecord({address, write.previousValue, killcore::scanValueToBytes(scanValue), type, value});
-        // H2 (docs/STRATEGY_ROOM.md, session Solitaire du 19/08/2026) : le
-        // mecanisme de detection "l'ecriture est repartie toute seule"
-        // (registerWriteWatch/writeDidNotHold) existait deja mais ne
-        // couvrait que writeMemoryValueConfirmed — pas ce chemin d'ecriture
-        // "simple", pourtant celui utilise par le connecteur d'automatisation
-        // et par defaut cote Expert. Meme choke point desormais des deux cotes.
-        registerWriteWatch(address, type, killcore::scanValueToBytes(scanValue));
-    }
-
-    result["success"] = write.success;
-    result["verified"] = write.verified;
-    result["protectionChanged"] = write.protectionChanged;
-    result["bytesWritten"] = static_cast<int>(write.bytesWritten);
-    result["error"] = write.errorMessage;
-    return result;
+    return m_writeFreezeCoreManager->writeMemoryValue(addressHex, valueType, value);
 }
 
 // H3 (docs/STRATEGY_ROOM.md, session Solitaire du 19/08/2026) : certaines
@@ -4603,292 +4568,11 @@ QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, c
 // suffisant dans le cas reel qui a motive cette fonction (voir
 // docs/PHASE_TRACKER.md PHASE 26).
 QVariantMap ApplicationController::writeMemoryValuesAtomic(const QVariantList& targets, const QVariantMap& options) {
-    QVariantMap result;
-    result["success"] = false;
-
-    if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-    if (targets.isEmpty()) {
-        result["error"] = "Aucune cible à écrire.";
-        return result;
-    }
-    constexpr int kMaxAtomicTargets = 32;
-    if (targets.size() > kMaxAtomicTargets) {
-        result["error"] = QString("Trop de cibles pour une écriture groupée (%1 maximum).").arg(kMaxAtomicTargets);
-        return result;
-    }
-
-    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
-    if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
-        return result;
-    }
-
-    // Parse et valide tout AVANT de suspendre les threads : la fenêtre
-    // suspendue doit être la plus courte possible (juste les
-    // WriteProcessMemory), la validation/le parsing n'a pas besoin d'un
-    // process figé et peut échouer sans qu'on ait rien suspendu pour rien.
-    struct ParsedTarget {
-        uint64_t address{0};
-        killcore::ValueType type{killcore::ValueType::Int32};
-        QByteArray bytes;
-        QString addressHex;
-        QString typeName;
-        QString valueText;
-    };
-    QList<ParsedTarget> parsed;
-    QVariantList parseErrors;
-    for (const auto& item : targets) {
-        const QVariantMap target = item.toMap();
-        const QString addressHex = target.value("address").toString();
-        const QString typeName = target.value("type").toString();
-        const QString valueText = target.value("value").toString();
-
-        uint64_t address = 0;
-        killcore::ValueType type = killcore::ValueType::Int32;
-        killcore::ScanValue scanValue;
-        QString parseError;
-        if (!parseHexAddress(addressHex, &address)) {
-            parseError = "Adresse invalide.";
-        } else if (!killcore::parseValueType(typeName, &type)) {
-            parseError = "Type invalide.";
-        } else if (!killcore::parseScanValue(valueText, type, &scanValue, &parseError) && parseError.isEmpty()) {
-            parseError = "Valeur invalide.";
-        }
-        if (!parseError.isEmpty()) {
-            QVariantMap errEntry;
-            errEntry["address"] = addressHex;
-            errEntry["error"] = parseError;
-            parseErrors.append(errEntry);
-            continue;
-        }
-
-        ParsedTarget pt;
-        pt.address = address;
-        pt.type = type;
-        pt.bytes = killcore::scanValueToBytes(scanValue);
-        pt.addressHex = addressHex;
-        pt.typeName = typeName;
-        pt.valueText = valueText;
-        parsed.append(pt);
-    }
-
-    if (parsed.isEmpty()) {
-        result["error"] = "Aucune cible valide à écrire.";
-        result["parseErrors"] = parseErrors;
-        return result;
-    }
-
-    const bool suspendThreads = options.value("suspendThreads", true).toBool();
-    int suspendedThreadCount = 0;
-    QVariantList writeResults;
-    int written = 0;
-    auto writeState = autoWriteState();
-    const int batchStartIndex = writeState.writeHistorySize();
-
-    {
-        std::optional<killcore::ProcessThreadsSuspendGuard> suspendGuard;
-        if (suspendThreads) {
-            suspendGuard.emplace(static_cast<uint32_t>(m_pid));
-            suspendedThreadCount = suspendGuard->suspendedCount();
-        }
-
-        killcore::MemoryWriter writer(writeHandle);
-        for (const auto& pt : parsed) {
-            const auto write = writer.write(pt.address, pt.bytes, true);
-            QVariantMap writeResult;
-            writeResult["address"] = pt.addressHex;
-            writeResult["type"] = pt.typeName;
-            writeResult["success"] = write.success;
-            writeResult["verified"] = write.verified;
-            writeResult["protectionChanged"] = write.protectionChanged;
-            writeResult["bytesWritten"] = static_cast<int>(write.bytesWritten);
-            writeResult["error"] = write.errorMessage;
-            if (write.success) {
-                ++written;
-                m_lastWriteAddress = pt.address;
-                m_lastWritePreviousValue = write.previousValue;
-                writeState.appendWriteRecord({pt.address, write.previousValue, pt.bytes, pt.type, pt.valueText});
-                registerWriteWatch(pt.address, pt.type, pt.bytes); // H2, voir writeMemoryValue
-            }
-            writeResults.append(writeResult);
-        }
-        // suspendGuard sort de portée ici -> reprend toutes les threads suspendues
-        // avant de construire le reste du resultat (pas de travail superflu
-        // pendant que la cible est figee).
-    }
-
-    result["success"] = written > 0 && written == parsed.size();
-    result["results"] = writeResults;
-    result["written"] = written;
-    result["total"] = targets.size();
-    result["suspendedThreadCount"] = suspendedThreadCount;
-    if (written > 0) {
-        m_lastBatchStartIndex = batchStartIndex;
-        m_lastBatchEndIndex = writeState.writeHistorySize();
-    }
-    if (!parseErrors.isEmpty()) {
-        result["parseErrors"] = parseErrors;
-    }
-    appendScanTelemetry("write_atomic_multi", result);
-    return result;
+    return m_writeFreezeCoreManager->writeMemoryValuesAtomic(targets, options);
 }
 
 QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantList& targets, const QString& value) {
-    QVariantMap result;
-    QVariantList writeResults;
-    result["success"] = false;
-    result["results"] = writeResults;
-    result["written"] = 0;
-    result["total"] = targets.size();
-    QElapsedTimer timer;
-    timer.start();
-
-    const QString rawValue = value.trimmed();
-    if (targets.isEmpty()) {
-        result["error"] = "Aucune cible à écrire.";
-        appendScanTelemetry("ui_string_sources_write", {
-            {"success", false},
-            {"error", result.value("error")},
-            {"displayValue", value},
-            {"targetCount", targets.size()},
-        });
-        return result;
-    }
-    if (rawValue.isEmpty()) {
-        result["error"] = "Valeur vide.";
-        appendScanTelemetry("ui_string_sources_write", {
-            {"success", false},
-            {"error", result.value("error")},
-            {"displayValue", value},
-            {"targetCount", targets.size()},
-        });
-        return result;
-    }
-
-    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
-    if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
-        appendScanTelemetry("ui_string_sources_write", {
-            {"success", false},
-            {"error", result.value("error")},
-            {"displayValue", rawValue},
-            {"targetCount", targets.size()},
-        });
-        return result;
-    }
-
-    killcore::MemoryWriter writer(writeHandle);
-    bool allWritesOk = true;
-    int written = 0;
-    auto writeState = autoWriteState();
-    m_lastBatchStartIndex = writeState.writeHistorySize();
-
-    for (const auto& item : targets) {
-        const QVariantMap target = item.toMap();
-        QVariantMap writeResult;
-        writeResult["success"] = false;
-        writeResult["verified"] = false;
-        writeResult["bytesWritten"] = 0;
-
-        const QString addressHex = target.value("address").toString();
-        const QString typeName = target.value("type").toString();
-        const QString variantLabel = target.value("variantLabel").toString();
-        writeResult["address"] = addressHex;
-        writeResult["type"] = typeName;
-        writeResult["variantLabel"] = variantLabel;
-        writeResult["displayValue"] = rawValue;
-
-        uint64_t address = 0;
-        if (!parseHexAddress(addressHex, &address)) {
-            writeResult["error"] = "Adresse invalide.";
-            allWritesOk = false;
-            writeResults.append(writeResult);
-            continue;
-        }
-
-        killcore::ValueType type;
-        if (!killcore::parseValueType(typeName, &type)) {
-            writeResult["error"] = "Type invalide.";
-            allWritesOk = false;
-            writeResults.append(writeResult);
-            continue;
-        }
-
-        QString parseError;
-        const QByteArray targetBytes = killcore::targetBytesForTypeAndVariant(rawValue, type, variantLabel, &parseError);
-        if (targetBytes.isEmpty()) {
-            writeResult["error"] = parseError.isEmpty() ? QString("Valeur incompatible avec cette variante.") : parseError;
-            allWritesOk = false;
-            writeResults.append(writeResult);
-            continue;
-        }
-
-        const auto write = writer.write(address, targetBytes, true);
-        writeResult["success"] = write.success;
-        writeResult["verified"] = write.verified;
-        writeResult["protectionChanged"] = write.protectionChanged;
-        writeResult["bytesWritten"] = static_cast<int>(write.bytesWritten);
-        writeResult["error"] = write.errorMessage;
-        writeResult["encodedHex"] = QString::fromLatin1(targetBytes.toHex(' ').toUpper());
-
-        if (write.success) {
-            ++written;
-            m_lastWriteAddress = address;
-            m_lastWritePreviousValue = write.previousValue;
-            writeState.appendWriteRecord({address, write.previousValue, targetBytes, type, rawValue});
-        } else {
-            allWritesOk = false;
-        }
-        writeResults.append(writeResult);
-    }
-
-    m_lastBatchEndIndex = writeState.writeHistorySize();
-    const int protectionChangedCount = static_cast<int>(std::count_if(writeResults.begin(), writeResults.end(), [](const QVariant& item) {
-        return item.toMap().value("protectionChanged").toBool();
-    }));
-    result["success"] = allWritesOk && written > 0;
-    result["verified"] = result.value("success").toBool();
-    result["protectionChanged"] = protectionChangedCount > 0;
-    result["protectionChangedCount"] = protectionChangedCount;
-    result["bytesWritten"] = 0;
-    result["written"] = written;
-    result["total"] = targets.size();
-    result["results"] = writeResults;
-    result["error"] = allWritesOk
-        ? QString()
-        : QString("Écriture partielle: %1/%2 réussie(s).").arg(written).arg(targets.size());
-    QVariantList samples;
-    for (int i = 0; i < std::min<int>(writeResults.size(), 16); ++i) {
-        const QVariantMap write = writeResults.at(i).toMap();
-        samples.append(QVariantMap{
-            {"address", write.value("address")},
-            {"type", write.value("type")},
-            {"variantLabel", write.value("variantLabel")},
-            {"success", write.value("success")},
-            {"verified", write.value("verified")},
-            {"protectionChanged", write.value("protectionChanged")},
-            {"bytesWritten", write.value("bytesWritten")},
-            {"encodedHex", write.value("encodedHex")},
-            {"error", write.value("error")},
-        });
-    }
-    appendScanTelemetry("ui_string_sources_write", {
-        {"success", result.value("success")},
-        {"verified", result.value("verified")},
-        {"protectionChangedCount", protectionChangedCount},
-        {"displayValue", rawValue},
-        {"targetCount", targets.size()},
-        {"written", written},
-        {"failed", targets.size() - written},
-        {"error", result.value("error")},
-        {"sampleCount", samples.size()},
-        {"samples", samples},
-        {"elapsedMs", static_cast<int>(timer.elapsed())},
-    });
-    return result;
+    return m_writeFreezeCoreManager->writeMemoryValuesWithVariants(targets, value);
 }
 
 QVariantMap ApplicationController::writeMemoryValueConfirmed(
@@ -4896,186 +4580,15 @@ QVariantMap ApplicationController::writeMemoryValueConfirmed(
     const QString& valueType,
     const QString& value,
     bool persistHistory) {
-    QVariantMap result;
-    result["success"] = false;
-    result["verified"] = false;
-    result["confirmationMode"] = true;
-    result["temporaryVerified"] = false;
-    result["restoredBeforeFinal"] = false;
-    result["finalVerified"] = false;
-
-    uint64_t address = 0;
-    if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
-        return result;
-    }
-
-    killcore::ValueType type;
-    if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
-        return result;
-    }
-
-    killcore::ScanValue scanValue;
-    QString parseError;
-    if (!killcore::parseScanValue(value, type, &scanValue, &parseError)) {
-        result["error"] = parseError;
-        return result;
-    }
-
-    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
-    if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
-        return result;
-    }
-
-    killcore::MemoryWriter writer(writeHandle);
-    const QByteArray targetBytes = killcore::scanValueToBytes(scanValue);
-    const auto temporaryWrite = writer.write(address, targetBytes, true);
-    result["temporaryVerified"] = temporaryWrite.success && temporaryWrite.verified;
-    result["temporaryProtectionChanged"] = temporaryWrite.protectionChanged;
-    result["bytesWritten"] = static_cast<int>(temporaryWrite.bytesWritten);
-
-    if (!temporaryWrite.success || !temporaryWrite.verified) {
-        result["error"] = temporaryWrite.errorMessage.isEmpty()
-            ? "La confirmation temporaire de l'adresse a échoué."
-            : temporaryWrite.errorMessage;
-        return result;
-    }
-
-    const QByteArray previousValue = temporaryWrite.previousValue;
-    if (previousValue.size() == targetBytes.size()) {
-        const auto restore = writer.write(address, previousValue, true);
-        result["restoredBeforeFinal"] = restore.success && restore.verified;
-        result["restoreProtectionChanged"] = restore.protectionChanged;
-        if (!restore.success || !restore.verified) {
-            result["error"] = restore.errorMessage.isEmpty()
-                ? "La restauration après confirmation temporaire a échoué."
-                : restore.errorMessage;
-            return result;
-        }
-    } else {
-        result["error"] = "Impossible de restaurer l'ancienne valeur après confirmation.";
-        return result;
-    }
-
-    const auto finalWrite = writer.write(address, targetBytes, true);
-    result["finalVerified"] = finalWrite.success && finalWrite.verified;
-    result["success"] = finalWrite.success && finalWrite.verified;
-    result["verified"] = finalWrite.verified;
-    result["protectionChanged"] = finalWrite.protectionChanged;
-    result["bytesWritten"] = static_cast<int>(finalWrite.bytesWritten);
-    result["error"] = finalWrite.errorMessage;
-
-    if (result.value("success").toBool()) {
-        m_lastWriteAddress = address;
-        m_lastWritePreviousValue = previousValue;
-        autoWriteState().appendWriteRecord({address, previousValue, targetBytes, type, value});
-        // Seul point d'appel de toutes les ecritures confirmees (manuelles ET
-        // tous les auto-write du chat Assistant, qui appellent tous cette
-        // meme fonction par cible) : surveiller ici couvre tout, sans avoir a
-        // instrumenter chaque appelant separement.
-        registerWriteWatch(address, type, targetBytes);
-        // Meme choke point pour la persistance replay inter-session (roadmap I,
-        // "Historique d'ecritures avec replay") : m_writeHistory ci-dessus ne
-        // survit pas a la fermeture de KillEngine, cette entree si.
-        // persistHistory=false pendant un replay (voir replayWriteHistorySequence)
-        // pour ne pas re-logger a l'infini la sequence qu'on est en train de rejouer.
-        if (persistHistory) {
-            persistWriteHistorySequenceEntry(address, type, value);
-        }
-    }
-
-    return result;
+    return m_writeFreezeCoreManager->writeMemoryValueConfirmed(addressHex, valueType, value, persistHistory);
 }
 
 QVariantMap ApplicationController::rollbackLastWriteBatch() {
-    QVariantMap result;
-    result["success"] = false;
-
-    if (m_lastBatchStartIndex < 0
-        || m_lastBatchEndIndex <= m_lastBatchStartIndex
-        || m_lastBatchStartIndex >= autoWriteState().writeHistorySize()) {
-        result["error"] = "Aucun batch d'écritures automatiques à restaurer.";
-        return result;
-    }
-
-    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
-    if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
-        return result;
-    }
-
-    killcore::MemoryWriter writer(writeHandle);
-    int rolled = 0;
-    QVariantList restoredWrites;
-    auto writeState = autoWriteState();
-    const int batchEnd = std::min(m_lastBatchEndIndex, writeState.writeHistorySize());
-    for (int i = batchEnd - 1; i >= m_lastBatchStartIndex; --i) {
-        const auto& rec = writeState.writeHistoryAt(i);
-        const auto write = writer.write(rec.address, rec.previousValue, true);
-        if (write.success) {
-            ++rolled;
-        }
-        QVariantMap restored;
-        restored["address"] = QString::number(rec.address, 16);
-        restored["type"] = killcore::valueTypeToString(rec.type);
-        restored["from"] = rec.valueText;
-        restored["to"] = bytesToDouble(rec.previousValue, rec.type);
-        restored["success"] = write.success;
-        restored["verified"] = write.verified;
-        restored["protectionChanged"] = write.protectionChanged;
-        restoredWrites.append(restored);
-    }
-
-    const int total = batchEnd - m_lastBatchStartIndex;
-    for (int i = batchEnd - 1; i >= m_lastBatchStartIndex; --i) {
-        writeState.removeWriteHistoryAt(i);
-    }
-    m_lastBatchStartIndex = -1;
-    m_lastBatchEndIndex = -1;
-    writeState.clearLastTargets();
-    if (writeState.writeHistoryEmpty()) {
-        m_lastWriteAddress = 0;
-        m_lastWritePreviousValue.clear();
-    }
-
-    result["success"] = (rolled == total);
-    result["rolledBack"] = rolled;
-    result["total"] = total;
-    result["restoredWrites"] = restoredWrites;
-    result["error"] = (rolled == total) ? QString() : QString("Seulement %1/%2 restaurées.").arg(rolled).arg(total);
-    return result;
+    return m_writeFreezeCoreManager->rollbackLastWriteBatch();
 }
 
 QVariantMap ApplicationController::rollbackLastWrite() {
-    QVariantMap result;
-    result["success"] = false;
-
-    if (m_lastWriteAddress == 0 || m_lastWritePreviousValue.isEmpty()) {
-        result["error"] = "Aucune écriture à restaurer.";
-        return result;
-    }
-
-    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
-    if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
-        return result;
-    }
-
-    killcore::MemoryWriter writer(writeHandle);
-    const auto write = writer.write(m_lastWriteAddress, m_lastWritePreviousValue, true);
-
-    result["success"] = write.success;
-    result["verified"] = write.verified;
-    result["protectionChanged"] = write.protectionChanged;
-    result["bytesWritten"] = static_cast<int>(write.bytesWritten);
-    result["error"] = write.errorMessage;
-    if (write.success) {
-        m_lastWriteAddress = 0;
-        m_lastWritePreviousValue.clear();
-    }
-    return result;
+    return m_writeFreezeCoreManager->rollbackLastWrite();
 }
 
 QVariantMap ApplicationController::findWhatWrites(const QString& addressHex, const QVariantMap& options) {
@@ -5761,10 +5274,9 @@ QVariantMap ApplicationController::disassembleBackward(const QString& addressHex
 
 
 // Cadence et garde-fous du sondage "tient/repart" ci-dessous : mêmes valeurs que
-// applyWriteWatchTick()/m_writeWatchTimer (1.5s/tick, ~12s, 2 mismatches consecutifs
-// pour confirmer une reversion), mais etat et logique dedies — m_activeDebugCancellation
-// et registerWriteWatch() restent reserves a leurs usages existants (attach debugger,
-// et surveillance passive des ecritures normales), voir commentaire sur
+// WriteFreezeCoreManager (1.5s/tick, ~12s, 2 mismatches consecutifs pour confirmer
+// une reversion), mais etat et logique dedies — m_activeDebugCancellation reste
+// reserve a l'attach debugger, voir commentaire sur
 // m_activeCandidateFieldTestCancellation dans le header.
 constexpr int kCandidateTestTicks = 8;
 constexpr int kCandidateTestIntervalMs = 1500;
@@ -6191,109 +5703,6 @@ QVariantMap ApplicationController::setTrainerOverlayVisible(bool visible, const 
 QVariantMap ApplicationController::updateTrainerOverlay(const QVariantMap& state) {
     return m_freezeHotkeyOverlayManager->updateTrainerOverlay(state);
 }
-
-// Nombre de sondages (1.5s d'intervalle, cf. m_writeWatchTimer.setInterval)
-// pendant lesquels une adresse fraichement ecrite est surveillee avant
-// d'abandonner faute de reversion detectee — ~12s, assez pour attraper un
-// jeu qui recalcule/reecrit au tick suivant sans laisser tourner le sondage
-// indefiniment sur une adresse qui a fini par tenir.
-constexpr int kWriteWatchTicks = 8;
-// Nombre d'adresses surveillees en parallele au maximum : au-dela, les plus
-// anciennes sont abandonnees plutot que de laisser la liste grossir sans
-// borne si l'utilisateur ecrit en rafale (ex: boucle d'ecriture batch).
-constexpr int kWriteWatchMaxEntries = 20;
-// Sondages consecutifs en desaccord avant de conclure a une vraie reversion
-// (et pas un aleas de lecture isole, ex: lu pile pendant une autre ecriture
-// concurrente ailleurs dans le processus) — meme principe que le seuil de
-// FreezeManager (kFreezePollDriftThreshold), en plus bas car un faux negatif
-// ici coute juste un delai de quelques secondes, pas une detection ratee.
-constexpr int kWriteWatchConfirmMismatches = 2;
-
-void ApplicationController::registerWriteWatch(uint64_t address, killcore::ValueType type, const QByteArray& expectedBytes) {
-    if (expectedBytes.isEmpty()) {
-        return;
-    }
-    // Une adresse deja surveillee est reecrite : on repart sur une fenetre
-    // d'observation fraiche plutot que de laisser cohabiter deux entrees
-    // pour la meme adresse (la precedente valeur attendue n'a plus de sens).
-    for (int i = m_writeWatchEntries.size() - 1; i >= 0; --i) {
-        if (m_writeWatchEntries.at(i).address == address) {
-            m_writeWatchEntries.removeAt(i);
-        }
-    }
-    while (m_writeWatchEntries.size() >= kWriteWatchMaxEntries) {
-        m_writeWatchEntries.removeFirst();
-    }
-    WriteWatchEntry entry;
-    entry.address = address;
-    entry.type = type;
-    entry.expectedBytes = expectedBytes;
-    entry.ticksRemaining = kWriteWatchTicks;
-    m_writeWatchEntries.append(entry);
-    if (!m_writeWatchTimer.isActive()) {
-        m_writeWatchTimer.start();
-    }
-}
-
-// Sondage independant du freeze (cf. commentaire de m_writeWatchTimer) :
-// declenche automatiquement le chemin "Ecrit par" existant (recoveryAction
-// find_what_writes_targets, deja cable cote AssistantView.vue) des qu'une
-// valeur ecrite par writeMemoryValueConfirmed repart toute seule, au lieu
-// d'attendre que l'utilisateur le remarque et clique le bouton a la main —
-// le chainage aval (Ecrit par -> AOB -> patch) existe deja, seul le
-// declenchement en amont manquait (docs/POWER_UP_ROADMAP.md section H.1).
-void ApplicationController::applyWriteWatchTick() {
-    if (m_writeWatchEntries.isEmpty() || m_pid <= 0 || !m_handle.isValid()) {
-        m_writeWatchTimer.stop();
-        return;
-    }
-
-    killcore::MemoryReader reader(m_handle);
-    for (int i = m_writeWatchEntries.size() - 1; i >= 0; --i) {
-        auto& entry = m_writeWatchEntries[i];
-        const auto read = reader.read(entry.address, static_cast<size_t>(entry.expectedBytes.size()));
-        const bool matches = (read.success || read.partial)
-            && read.bytesRead == static_cast<size_t>(entry.expectedBytes.size())
-            && read.data == entry.expectedBytes;
-
-        if (!matches) {
-            ++entry.consecutiveMismatches;
-        } else {
-            entry.consecutiveMismatches = 0;
-        }
-
-        if (entry.consecutiveMismatches >= kWriteWatchConfirmMismatches) {
-            const QString addressHex = QString::number(entry.address, 16).toUpper();
-            QVariantMap info;
-            info["address"] = addressHex;
-            info["type"] = killcore::valueTypeToString(entry.type);
-            info["message"] = QString(
-                "La valeur écrite à 0x%1 a déjà changé toute seule, quelques secondes après l'écriture — quelque "
-                "chose la recalcule ou la réécrit depuis une source que tu n'as pas encore trouvée. Une simple "
-                "écriture directe ne suffira pas ici.")
-                .arg(addressHex);
-            info["suggestion"] = "Capture l'instruction qui écrit dessus pour trouver la vraie source, ou pose un freeze si tu veux juste bloquer cette valeur.";
-
-            appendScanTelemetry("write_did_not_hold", info);
-            emit writeDidNotHold(info);
-            m_writeWatchEntries.removeAt(i);
-            continue;
-        }
-
-        if (--entry.ticksRemaining <= 0) {
-            // Soit tenu pendant toute la fenetre d'observation, soit un seul
-            // mismatch jamais confirme par un second : dans les deux cas rien
-            // d'assez sur a signaler, on arrete de surveiller cette adresse.
-            m_writeWatchEntries.removeAt(i);
-        }
-    }
-
-    if (m_writeWatchEntries.isEmpty()) {
-        m_writeWatchTimer.stop();
-    }
-}
-
-
 
 QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& value, const QString& query) {
     QVariantMap result;
@@ -10430,7 +9839,7 @@ QVariantMap ApplicationController::writeMemoryValueKernel(const QString& address
         // ecriture kernel qui ne tient pas est justement le signal le plus
         // fort qu'il s'agit d'un compteur anime (cf. disassembleBackward),
         // pas d'une simple protection usermode contournable.
-        registerWriteWatch(address, type, data);
+        m_writeFreezeCoreManager->watchSuccessfulWrite(address, type, data);
         KE_LOG_INFO() << "writeMemoryValueKernel: pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString()
                       << " bytesWritten=" << data.size();
     } else {
