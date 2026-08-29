@@ -6,6 +6,7 @@
 Source of truth produit : `KILLENGINE_PROJECT_SPEC.md`
 Historique détaillé : `docs/PHASE_TRACKER_HISTORY.md`
 Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
+Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 
 ## État courant
 
@@ -24,7 +25,10 @@ Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
 
 ## Chantiers ouverts / validations restantes
 
-Aucun au 29/08/2026.
+- [ ] Chantier permanent - Refactorisation incrémentale d'`application_controller.cpp`/`app.ts`
+  - Voir `docs/REFACTOR_ROADMAP.md` pour la liste des candidats d'extraction (chacun délimité pour être pris par un seul agent, sans chevauchement avec les autres).
+  - **Ne jamais bloquer une phase produit pour ce chantier** : extraire seulement quand une phase future touche déjà la zone concernée pour une autre raison. Ne pas ouvrir de session dédiée uniquement pour ça sauf demande explicite du propriétaire.
+  - Ordre : candidats à couplage bas d'abord (indépendants), puis les fondations partagées (`addActionLog`/`addInvestigationStep`/`confirmRiskAction` côté store, interface d'accès scan/write côté C++), le dispatch chat/IA (`startSmartSearch` et son cluster) en tout dernier et jamais réparti entre deux agents en parallèle.
 
 ## Journal actif
 
