@@ -27,8 +27,9 @@ Avant de pouvoir extraire quoi que ce soit ailleurs, quelques éléments transve
 
 Plus aucun blocage architectural pour S7-S12 : la fondation est complète, seule la taille/complexité de chaque candidat reste à traiter.
 
-**Côté `apps/desktop/application_controller.cpp`** :
-- `m_candidates`/`m_previousCandidates`/`m_snapshot` (trio d'état de scan) et `m_lastAutoWriteTargets`/`m_writeHistory` sont lus/écrits directement (pas via accesseur) par au moins 5 clusters différents (scan, write/freeze, chat/dispatch, auto-resolve, profils). Avant d'extraire ces clusters en classes séparées, poser une petite interface d'accès (`ScanStateAccess`, `AutoWriteStateAccess`) que `ApplicationController` garde, mais que les futures classes extraites consomment au lieu de manipuler les membres bruts.
+**Côté `apps/desktop/application_controller.cpp` — fondations partagées posées (30/08/2026)** :
+- `AutoWriteStateAccess` (PHASE 221) isole l'accès à `m_writeHistory`, `m_lastAutoWriteTargets` et `m_chatMemoryTargets` pour préparer C9/C10/C11.
+- `ScanStateAccess` (PHASE 223) isole l'accès à `m_candidates`, `m_previousCandidates` et `m_snapshot` pour préparer C8 et débloquer C11b. Les membres restent possédés par `ApplicationController`, mais les chemins C8 principaux, le dispatch chat/IA, auto-resolve et `saveSettings` passent par la façade au lieu de manipuler directement le trio.
 
 ## Candidats d'extraction — `application_controller.cpp`
 
@@ -48,7 +49,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | C10 | Profils / pointer chains / Ghidra bridge / persistance Lua | ~2005 (L16325–18330) | **Moyen** — lit l'état de C6 et C9 pour persister | C6, C9 |
 | C11 | Automation pipe / settings / diagnostics | dispersé (L13992–16325, L18330–18614) | **Bas** — mais le logger de télémétrie est appelé partout depuis C12/C13, garder en fonctions libres | C12, C13 |
 | [x] C11a | └ Cycle de vie du pipe d'automatisation (`enable/disableAutomationMode`, `getAutomationPipeStatus`, `ensureAutomationPipeStartedIfConfigured`) — extrait le 29/08/2026 vers `apps/desktop/automation_pipe_manager.*` | ~66 | **Bas — réellement isolé** | — |
-| C11b | └ Reste de C11 : `getSettings`/`saveSettings`/`getAiModelStatus`/`browseForModelFile` + chemins diagnostics (`getLogFilePath`/`getSmartSearchDebugFilePath`/`getScanTelemetryFilePath`/`getSmartSearchDebugEvents`) | dispersé | **Plus entremêlé que prévu** — `saveSettings` écrit directement `m_candidates`/`m_previousCandidates` (attend `ScanStateAccess`, cf. Blocages) et `getSettings`/`saveSettings` dépendent de fonctions libres `boundedSettingInt`/`unknownSnapshotMaxMbFromSettings`/`candidateFileBackedThresholdFromSettings` partagées avec `scanOptionsFromSettings` (scan core, C8) — pas juste des lecteurs QSettings autonomes | C8 (via ces fonctions libres) |
+| C11b | └ Reste de C11 : `getSettings`/`saveSettings`/`getAiModelStatus`/`browseForModelFile` + chemins diagnostics (`getLogFilePath`/`getSmartSearchDebugFilePath`/`getScanTelemetryFilePath`/`getSmartSearchDebugEvents`) | dispersé | **Moyen** — le blocage direct `saveSettings` → `m_candidates`/`m_previousCandidates` est levé par `ScanStateAccess` (PHASE 223), mais `getSettings`/`saveSettings` dépendent encore de fonctions libres `boundedSettingInt`/`unknownSnapshotMaxMbFromSettings`/`candidateFileBackedThresholdFromSettings` partagées avec `scanOptionsFromSettings` (scan core, C8) | C8 (via ces fonctions libres) |
 | C12 | Chat-memory write/freeze glue (`activateChatMemoryTargetsFromQuery`...) | ~478 (L10354–10832) | **Haut** | C13, C14, C8, C9 |
 | C13 | `startAutoResolve` + escalade d'échec | ~475 (L11890–12365) | **Haut** | C12, C14 |
 | C14 | `startSmartSearch` (dispatch chat/IA) | **~1627 lignes, une seule fonction** (L12365–13992) | **Haut — le pire du fichier** | C12, C13, C8, C10 |

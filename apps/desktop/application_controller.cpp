@@ -1781,8 +1781,7 @@ BOOL CALLBACK enumWindowTextProc(HWND hwnd, LPARAM lParam) {
 ApplicationController::ApplicationController(QObject* parent)
     : QObject(parent) {
     const size_t candidateThreshold = candidateFileBackedThresholdFromSettings();
-    m_candidates.setFileBackedThreshold(candidateThreshold);
-    m_previousCandidates.setFileBackedThreshold(candidateThreshold);
+    scanState().setFileBackedThreshold(candidateThreshold);
     m_uiStringInvestigator = std::make_unique<UiStringInvestigator>(
         m_handle,
         [this](const QString& event, const QVariantMap& payload) {
@@ -1895,6 +1894,14 @@ ApplicationController::~ApplicationController() {
     m_clrInspectorBridge.reset();
     m_debugFeatureManager.reset();
     KE_LOG_INFO() << "ApplicationController destroyed";
+}
+
+ScanStateAccess ApplicationController::scanState() {
+    return ScanStateAccess(m_candidates, m_previousCandidates, m_snapshot);
+}
+
+ScanStateAccess ApplicationController::scanState() const {
+    return const_cast<ApplicationController*>(this)->scanState();
 }
 
 AutoWriteStateAccess ApplicationController::autoWriteState() {
@@ -2078,10 +2085,10 @@ bool ApplicationController::attachProcess(int pid) {
     m_pid = pid;
     m_attached = true;
     m_processName = m_handle.executableName();
-    m_candidates.clear();
+    scanState().clearCandidates();
     clearCandidateUndo();
     clearCandidateValueHistory();
-    m_snapshot.clear();
+    scanState().clearSnapshot();
     m_lastAutoWriteTargets.clear();
     m_chatMemoryTargets.clear();
     m_codePatchManager->clearSessionState();
@@ -2117,10 +2124,10 @@ void ApplicationController::detachProcess() {
     m_pid = 0;
     m_attached = false;
     m_processName.clear();
-    m_candidates.clear();
+    scanState().clearCandidates();
     clearCandidateUndo();
     clearCandidateValueHistory();
-    m_snapshot.clear();
+    scanState().clearSnapshot();
     m_freezeHotkeyOverlayManager->clearFreezeState();
     m_writeWatchTimer.stop();
     m_writeWatchEntries.clear();
@@ -2138,18 +2145,21 @@ void ApplicationController::detachProcess() {
 }
 
 bool ApplicationController::rememberCandidatesForUndo(QString* error) {
-    if (m_candidates.isEmpty()) {
+    auto state = scanState();
+    auto& candidates = state.candidates();
+    auto& previousCandidates = state.previousCandidates();
+    if (candidates.isEmpty()) {
         clearCandidateUndo();
         return true;
     }
 
-    m_previousCandidates = m_candidates.clone(error);
-    m_hasPreviousCandidates = m_previousCandidates.size() > 0;
+    previousCandidates = candidates.clone(error);
+    m_hasPreviousCandidates = previousCandidates.size() > 0;
     return m_hasPreviousCandidates;
 }
 
 void ApplicationController::clearCandidateUndo() {
-    m_previousCandidates.clear();
+    scanState().clearPreviousCandidates();
     m_hasPreviousCandidates = false;
 }
 
@@ -2517,7 +2527,8 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
     emit scanProgress(90);
     clearCandidateUndo();
     clearCandidateValueHistory();
-    m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
+    auto& candidates = scanState().candidates();
+    candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
     for (qsizetype i = 0; i < previewCount; ++i) {
@@ -2537,7 +2548,7 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
     result["matchesReturned"] = matches.size();
     result["error"] = scan.errorMessage;
     result["matches"] = matches;
-    result["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+    result["candidateStoreSize"] = static_cast<qulonglong>(candidates.size());
     result["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
     result["bytesPerSecond"] = ratePerSecond(scan.bytesScanned, elapsedMs);
     result["matchesPerSecond"] = ratePerSecond(scan.matchesFound, elapsedMs);
@@ -2565,7 +2576,7 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
         {"matchesPerSecond", result.value("matchesPerSecond")},
         {"error", result.value("error")},
     });
-    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanStatsUpdated(static_cast<int>(candidates.size()));
     emit scanProgress(100);
     return result;
 }
@@ -2620,6 +2631,7 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
     emit scanProgress(90);
     clearCandidateUndo();
     clearCandidateValueHistory();
+    auto& candidateStore = scanState().candidates();
     const auto variantBytes = variantBytesByKey(valueVariants);
     QList<killcore::Candidate> candidates;
     candidates.reserve(scan.matches.size());
@@ -2638,7 +2650,7 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
         candidate.variantLabel = match.variantLabel;
         candidates.append(candidate);
     }
-    m_candidates.replaceCandidates(candidates);
+    candidateStore.replaceCandidates(candidates);
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
     for (qsizetype i = 0; i < previewCount; ++i) {
@@ -2660,7 +2672,7 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
     result["matchesReturned"] = matches.size();
     result["error"] = scan.errorMessage;
     result["matches"] = matches;
-    result["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+    result["candidateStoreSize"] = static_cast<qulonglong>(candidateStore.size());
     result["variantCount"] = variants.size();
     result["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
     result["bytesPerSecond"] = ratePerSecond(scan.bytesScanned, elapsedMs);
@@ -2695,7 +2707,7 @@ QVariantMap ApplicationController::startExactScanMultiType(const QString& value,
         {"matchesPerSecond", result.value("matchesPerSecond")},
         {"error", result.value("error")},
     });
-    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanStatsUpdated(static_cast<int>(candidateStore.size()));
     emit scanProgress(100);
     return result;
 }
@@ -2787,7 +2799,8 @@ QVariantMap ApplicationController::startExactScanExpert(
     emit scanProgress(90);
     clearCandidateUndo();
     clearCandidateValueHistory();
-    m_candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
+    auto& candidates = scanState().candidates();
+    candidates.replaceFromScan(scan, killcore::scanValueToBytes(scanValue));
 
     const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
     for (qsizetype i = 0; i < previewCount; ++i) {
@@ -2807,7 +2820,7 @@ QVariantMap ApplicationController::startExactScanExpert(
     result["matchesReturned"] = matches.size();
     result["error"] = scan.errorMessage;
     result["matches"] = matches;
-    result["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+    result["candidateStoreSize"] = static_cast<qulonglong>(candidates.size());
     result["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
     result["bytesPerSecond"] = ratePerSecond(scan.bytesScanned, elapsedMs);
     result["matchesPerSecond"] = ratePerSecond(scan.matchesFound, elapsedMs);
@@ -2846,7 +2859,7 @@ QVariantMap ApplicationController::startExactScanExpert(
         {"matchesPerSecond", result.value("matchesPerSecond")},
         {"error", result.value("error")},
     });
-    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanStatsUpdated(static_cast<int>(candidates.size()));
     emit scanProgress(100);
     return result;
 }
@@ -3166,8 +3179,9 @@ QVariantMap ApplicationController::startExactScanAsync(
             if (!scan.cancelled) {
                 self->clearCandidateUndo();
                 self->clearCandidateValueHistory();
-                self->m_candidates.replaceFromScan(scan, scannedBytes);
+                self->scanState().candidates().replaceFromScan(scan, scannedBytes);
             }
+            const auto& candidates = self->scanState().candidates();
 
             const qsizetype previewCount = std::min<qsizetype>(scan.matches.size(), 50);
             for (qsizetype i = 0; i < previewCount; ++i) {
@@ -3188,13 +3202,13 @@ QVariantMap ApplicationController::startExactScanAsync(
             finished["matchesReturned"] = finishedMatches.size();
             finished["error"] = scan.errorMessage;
             finished["matches"] = finishedMatches;
-            finished["candidateStoreSize"] = static_cast<qulonglong>(self->m_candidates.size());
+            finished["candidateStoreSize"] = static_cast<qulonglong>(candidates.size());
             finished["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
             finished["bytesPerSecond"] = ratePerSecond(scan.bytesScanned, elapsedMs);
             finished["matchesPerSecond"] = ratePerSecond(scan.matchesFound, elapsedMs);
-            finished["candidateStoreFileBacked"] = self->m_candidates.isFileBacked();
-            finished["candidateStoreBytes"] = static_cast<qulonglong>(self->m_candidates.storageBytes());
-            finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(self->m_candidates.estimatedMemoryBytes());
+            finished["candidateStoreFileBacked"] = candidates.isFileBacked();
+            finished["candidateStoreBytes"] = static_cast<qulonglong>(candidates.storageBytes());
+            finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidates.estimatedMemoryBytes());
             self->appendSmartSearchDebug("exact_scan_async", {
                 {"requestId", requestId},
                 {"value", value},
@@ -3241,7 +3255,7 @@ QVariantMap ApplicationController::startExactScanAsync(
             });
             self->m_scanInProgress = false;
             self->m_activeScanCancellation.reset();
-            emit self->scanStatsUpdated(static_cast<int>(self->m_candidates.size()));
+            emit self->scanStatsUpdated(static_cast<int>(candidates.size()));
             emit self->scanProgress(100);
             emit self->scanFinished(finished);
         }, Qt::QueuedConnection);
@@ -3280,7 +3294,8 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
         result["error"] = "Aucun processus attaché.";
         return result;
     }
-    if (m_candidates.isEmpty()) {
+    auto& candidates = scanState().candidates();
+    if (candidates.isEmpty()) {
         result["error"] = "Aucun candidat à filtrer. Lance d'abord un scan exact.";
         return result;
     }
@@ -3292,14 +3307,14 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
     }
 
     killcore::Candidate firstCandidate;
-    if (!m_candidates.firstCandidate(&firstCandidate)) {
+    if (!candidates.firstCandidate(&firstCandidate)) {
         result["error"] = "Impossible de lire le premier candidat.";
         return result;
     }
 
-    const auto candidateSnapshot = m_candidates.streamSnapshot();
+    const auto candidateSnapshot = candidates.streamSnapshot();
     const auto firstCandidateType = firstCandidate.type;
-    const auto candidateThreshold = m_candidates.fileBackedThreshold();
+    const auto candidateThreshold = candidates.fileBackedThreshold();
     double targetNumber = 0.0;
     if (scanMode == killcore::NextScanMode::Exact && value.trimmed().isEmpty()) {
         result["error"] = "Valeur requise pour un next scan exact.";
@@ -3515,13 +3530,14 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
                     finishError = undoError.isEmpty() ? "Impossible de préparer l'annulation du next scan." : undoError;
                 } else {
                     if (streamOutput) {
-                        self->m_candidates = std::move(survivors);
+                        self->scanState().candidates() = std::move(survivors);
                     } else {
-                        self->m_candidates.replaceCandidates(memorySurvivors);
+                        self->scanState().candidates().replaceCandidates(memorySurvivors);
                     }
                     self->recordCandidateObservations(valueHistoryUpdates);
                 }
             }
+            const auto& candidates = self->scanState().candidates();
             // H1 : streamOutput (file-backed) implique deja un nombre de
             // survivants bien au-dela du seuil "petit groupe" — seul le cas
             // memorySurvivors est pertinent ici, cf. detectStableCandidateGroup.
@@ -3539,19 +3555,19 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
             finished["cancelled"] = cancelled;
             finished["checked"] = static_cast<qulonglong>(checked);
             finished["unreadable"] = static_cast<qulonglong>(unreadable);
-            finished["remaining"] = static_cast<qulonglong>(cancelled ? candidateSnapshot.totalCount : self->m_candidates.size());
+            finished["remaining"] = static_cast<qulonglong>(cancelled ? candidateSnapshot.totalCount : candidates.size());
             finished["error"] = finishError;
             finished["debugBeforeCount"] = static_cast<qulonglong>(candidateSnapshot.totalCount);
             finished["debugMode"] = mode;
             finished["debugValue"] = value;
             finished["streamInput"] = streamInput;
             finished["streamOutput"] = streamOutput;
-            finished["fileBacked"] = self->m_candidates.isFileBacked();
-            finished["candidateStorePath"] = self->m_candidates.backingFilePath();
+            finished["fileBacked"] = candidates.isFileBacked();
+            finished["candidateStorePath"] = candidates.backingFilePath();
             finished["elapsedMs"] = static_cast<qulonglong>(elapsedMs);
             finished["candidatesPerSecond"] = ratePerSecond(checked, elapsedMs);
-            finished["candidateStoreBytes"] = static_cast<qulonglong>(self->m_candidates.storageBytes());
-            finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(self->m_candidates.estimatedMemoryBytes());
+            finished["candidateStoreBytes"] = static_cast<qulonglong>(candidates.storageBytes());
+            finished["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidates.estimatedMemoryBytes());
             if (finished.value("remaining").toULongLong() == 0 && !cancelled) {
                 finished["diagnostic"] = noCandidateDiagnosticMessage(finished, "next_scan");
             }
@@ -3604,7 +3620,7 @@ QVariantMap ApplicationController::nextScanAsync(const QString& mode, const QStr
 
             self->m_scanInProgress = false;
             self->m_activeScanCancellation.reset();
-            emit self->scanStatsUpdated(static_cast<int>(self->m_candidates.size()));
+            emit self->scanStatsUpdated(static_cast<int>(candidates.size()));
             emit self->scanProgress(100);
             emit self->scanFinished(finished);
         }, Qt::QueuedConnection);
@@ -3626,7 +3642,8 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         return result;
     }
 
-    if (m_candidates.isEmpty()) {
+    auto& candidates = scanState().candidates();
+    if (candidates.isEmpty()) {
         result["error"] = "Aucun candidat à filtrer. Lance d'abord un scan exact.";
         return result;
     }
@@ -3638,7 +3655,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
     }
 
     double targetNumber = 0.0;
-    const auto firstCandidateType = m_candidates.candidates().first().type;
+    const auto firstCandidateType = candidates.candidates().first().type;
 
     if (scanMode == killcore::NextScanMode::Exact && value.trimmed().isEmpty()) {
         result["error"] = "Valeur requise pour un next scan exact.";
@@ -3685,15 +3702,15 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
     emit scanProgress(0);
     killcore::MemoryReader reader(m_handle);
     QList<killcore::Candidate> survivors;
-    survivors.reserve(m_candidates.candidates().size());
+    survivors.reserve(candidates.candidates().size());
 
-    const size_t beforeCount = m_candidates.size();
+    const size_t beforeCount = candidates.size();
     size_t checked = 0;
     size_t unreadable = 0;
     QVariantList debugSamples;
     QVariantList valueHistoryUpdates;
 
-    for (const auto& candidate : m_candidates.candidates()) {
+    for (const auto& candidate : candidates.candidates()) {
         const size_t bytesToRead = killcore::valueTypeSize(candidate.type);
         const auto read = reader.read(candidate.address, bytesToRead);
         ++checked;
@@ -3780,19 +3797,19 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         emit scanProgress(100);
         return result;
     }
-    m_candidates.replaceCandidates(survivors);
+    candidates.replaceCandidates(survivors);
     recordCandidateObservations(valueHistoryUpdates);
     detectStableCandidateGroup(scanMode, survivors, &result);
 
     result["success"] = true;
     result["checked"] = static_cast<qulonglong>(checked);
     result["unreadable"] = static_cast<qulonglong>(unreadable);
-    result["remaining"] = static_cast<qulonglong>(m_candidates.size());
+    result["remaining"] = static_cast<qulonglong>(candidates.size());
     result["error"] = "";
     result["debugBeforeCount"] = static_cast<qulonglong>(beforeCount);
     result["debugMode"] = mode;
     result["debugValue"] = value;
-    if (m_candidates.size() == 0) {
+    if (candidates.size() == 0) {
         result["diagnostic"] = noCandidateDiagnosticMessage(result, "next_scan");
     }
     appendSmartSearchDebug("next_scan", {
@@ -3806,7 +3823,7 @@ QVariantMap ApplicationController::nextScan(const QString& mode, const QString& 
         {"valueHistoryUpdateCount", valueHistoryUpdates.size()},
         {"samples", debugSamples},
     });
-    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanStatsUpdated(static_cast<int>(candidates.size()));
     emit scanProgress(100);
     return result;
 }
@@ -3815,29 +3832,32 @@ QVariantMap ApplicationController::undoCandidateScan() {
     QVariantMap result;
     result["success"] = false;
     result["restored"] = false;
-    result["count"] = static_cast<qulonglong>(m_candidates.size());
+    auto state = scanState();
+    auto& candidates = state.candidates();
+    auto& previousCandidates = state.previousCandidates();
+    result["count"] = static_cast<qulonglong>(candidates.size());
 
     if (m_scanInProgress) {
         result["error"] = "Impossible de restaurer pendant un scan actif.";
         return result;
     }
 
-    if (!m_hasPreviousCandidates || m_previousCandidates.isEmpty()) {
+    if (!m_hasPreviousCandidates || previousCandidates.isEmpty()) {
         result["error"] = "Aucune réduction précédente à restaurer.";
         return result;
     }
 
-    m_candidates = std::move(m_previousCandidates);
+    candidates = std::move(previousCandidates);
     m_hasPreviousCandidates = false;
 
     result["success"] = true;
     result["restored"] = true;
-    result["count"] = static_cast<qulonglong>(m_candidates.size());
+    result["count"] = static_cast<qulonglong>(candidates.size());
     clearCandidateValueHistory();
-    result["fileBacked"] = m_candidates.isFileBacked();
-    result["candidateStorePath"] = m_candidates.backingFilePath();
-    result["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
-    result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
+    result["fileBacked"] = candidates.isFileBacked();
+    result["candidateStorePath"] = candidates.backingFilePath();
+    result["candidateStoreBytes"] = static_cast<qulonglong>(candidates.storageBytes());
+    result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidates.estimatedMemoryBytes());
     result["error"] = "";
 
     appendSmartSearchDebug("undo_candidate_scan", {
@@ -3847,7 +3867,7 @@ QVariantMap ApplicationController::undoCandidateScan() {
         {"candidateStoreBytes", result.value("candidateStoreBytes")},
         {"candidateStoreMemoryBytes", result.value("candidateStoreMemoryBytes")},
     });
-    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanStatsUpdated(static_cast<int>(candidates.size()));
     emit scanProgress(100);
     return result;
 }
@@ -3859,23 +3879,24 @@ QVariantMap ApplicationController::getCandidates(int pageIndex, int pageSize, co
     const int boundedPageIndex = std::max(0, pageIndex);
     const int boundedPageSize = std::clamp(pageSize, 1, 500);
     const bool hasAddressFilter = !addressFilter.trimmed().isEmpty();
-    const bool displaySuppressed = !hasAddressFilter && m_candidates.size() > kCandidateDisplayLimit;
+    const auto& candidateStore = scanState().candidates();
+    const bool displaySuppressed = !hasAddressFilter && candidateStore.size() > kCandidateDisplayLimit;
 
     if (displaySuppressed) {
         result["pageIndex"] = boundedPageIndex;
         result["pageSize"] = boundedPageSize;
-        result["totalCount"] = static_cast<qulonglong>(m_candidates.size());
+        result["totalCount"] = static_cast<qulonglong>(candidateStore.size());
         result["displaySuppressed"] = true;
         result["displayLimit"] = static_cast<qulonglong>(kCandidateDisplayLimit);
-        result["fileBacked"] = m_candidates.isFileBacked();
-        result["candidateStorePath"] = m_candidates.backingFilePath();
-        result["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
-        result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
+        result["fileBacked"] = candidateStore.isFileBacked();
+        result["candidateStorePath"] = candidateStore.backingFilePath();
+        result["candidateStoreBytes"] = static_cast<qulonglong>(candidateStore.storageBytes());
+        result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidateStore.estimatedMemoryBytes());
         result["candidates"] = candidates;
         return result;
     }
 
-    const auto page = m_candidates.page(
+    const auto page = candidateStore.page(
         static_cast<size_t>(boundedPageIndex),
         static_cast<size_t>(boundedPageSize),
         addressFilter);
@@ -3898,10 +3919,10 @@ QVariantMap ApplicationController::getCandidates(int pageIndex, int pageSize, co
     result["totalCount"] = static_cast<qulonglong>(page.totalCount);
     result["displaySuppressed"] = false;
     result["displayLimit"] = static_cast<qulonglong>(kCandidateDisplayLimit);
-    result["fileBacked"] = m_candidates.isFileBacked();
-    result["candidateStorePath"] = m_candidates.backingFilePath();
-    result["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
-    result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
+    result["fileBacked"] = candidateStore.isFileBacked();
+    result["candidateStorePath"] = candidateStore.backingFilePath();
+    result["candidateStoreBytes"] = static_cast<qulonglong>(candidateStore.storageBytes());
+    result["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidateStore.estimatedMemoryBytes());
     result["candidates"] = candidates;
     return result;
 }
@@ -3919,7 +3940,8 @@ QVariantMap ApplicationController::captureUnknownSnapshotWithOptions(const QVari
         return result;
     }
 
-    m_candidates.clear();
+    auto state = scanState();
+    state.clearCandidates();
     clearCandidateUndo();
     clearCandidateValueHistory();
     m_smartSearchActive = false;
@@ -3933,7 +3955,7 @@ QVariantMap ApplicationController::captureUnknownSnapshotWithOptions(const QVari
     uint64_t relevantBytes = 0;
     const size_t maxSnapshotBytes = resolveUnknownSnapshotMaxBytes(
         expertOptions, m_handle, options, &suggestedDepthMb, &relevantBytes);
-    const auto snapshot = m_snapshot.capture(m_handle, maxSnapshotBytes, nullptr, options);
+    const auto snapshot = state.snapshot().capture(m_handle, maxSnapshotBytes, nullptr, options);
     emit scanProgress(100);
     result["success"] = snapshot.success;
     result["partial"] = snapshot.partial;
@@ -3973,7 +3995,7 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsyncWithOptions(const 
         return result;
     }
 
-    m_candidates.clear();
+    scanState().clearCandidates();
     clearCandidateUndo();
     clearCandidateValueHistory();
     m_smartSearchActive = false;
@@ -4035,7 +4057,7 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsyncWithOptions(const 
             }
 
             if (snapshot.success && !snapshot.cancelled) {
-                self->m_snapshot = std::move(snapshotStore);
+                self->scanState().snapshot() = std::move(snapshotStore);
             }
 
             QVariantMap finished;
@@ -4122,7 +4144,10 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         result["error"] = "Mode invalide.";
         return result;
     }
-    if (!m_candidates.isEmpty()) {
+    auto state = scanState();
+    auto& candidates = state.candidates();
+    auto& snapshotStore = state.snapshot();
+    if (!candidates.isEmpty()) {
         QVariantMap refined = nextScan(mode, "");
         refined["kind"] = "unknown_refine";
         refined["refinedFromCandidates"] = true;
@@ -4132,7 +4157,7 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         return refined;
     }
 
-    if (m_snapshot.isEmpty()) {
+    if (snapshotStore.isEmpty()) {
         result["error"] = "Aucun snapshot unknown capturé.";
         return result;
     }
@@ -4172,7 +4197,7 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
         : std::max<qsizetype>(1, kUnknownAutoMaxReturnedMatches / typesToRun.size());
     QStringList truncatedTypes;
     for (const auto type : typesToRun) {
-        const auto scan = m_snapshot.compare(m_handle, type, scanMode);
+        const auto scan = snapshotStore.compare(m_handle, type, scanMode);
         checkedBytes += scan.checkedBytes;
         matchesFound += scan.matchesFound;
         partial = partial || scan.partial;
@@ -4221,26 +4246,26 @@ QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QS
     emit scanProgress(90);
 
     QString undoError;
-    if (!m_candidates.isEmpty() && !rememberCandidatesForUndo(&undoError)) {
+    if (!candidates.isEmpty() && !rememberCandidatesForUndo(&undoError)) {
         result["error"] = undoError.isEmpty() ? "Impossible de préparer l'annulation de la comparaison." : undoError;
         emit scanProgress(100);
         return result;
     }
-    m_candidates.replaceCandidates(unknownCandidates);
+    candidates.replaceCandidates(unknownCandidates);
 
     result["success"] = compareSuccess;
     result["partial"] = partial;
     result["cancelled"] = cancelled;
     result["checkedBytes"] = static_cast<qulonglong>(checkedBytes);
     result["matchesFound"] = static_cast<qulonglong>(matchesFound);
-    result["stored"] = static_cast<qulonglong>(m_candidates.size());
+    result["stored"] = static_cast<qulonglong>(candidates.size());
     result["valueType"] = autoType ? QString("Auto") : valueType;
     result["typePasses"] = typeSummaries;
     result["error"] = compareError;
-    if (m_candidates.size() == 0 && compareSuccess) {
+    if (candidates.size() == 0 && compareSuccess) {
         result["diagnostic"] = noCandidateDiagnosticMessage(result, "unknown_compare");
     }
-    emit scanStatsUpdated(static_cast<int>(m_candidates.size()));
+    emit scanStatsUpdated(static_cast<int>(candidates.size()));
     emit scanProgress(100);
     return result;
 }
@@ -4264,15 +4289,18 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
         result["error"] = "Mode invalide.";
         return result;
     }
-    if (!m_candidates.isEmpty()) {
-        const size_t refineCandidateCount = m_candidates.size();
+    auto state = scanState();
+    auto& candidates = state.candidates();
+    auto& snapshotStore = state.snapshot();
+    if (!candidates.isEmpty()) {
+        const size_t refineCandidateCount = candidates.size();
         appendScanTelemetry("unknown_refine_async_start", {
             {"mode", mode},
             {"valueType", valueType},
             {"candidateCount", static_cast<qulonglong>(refineCandidateCount)},
-            {"fileBacked", m_candidates.isFileBacked()},
-            {"candidateStoreBytes", static_cast<qulonglong>(m_candidates.storageBytes())},
-            {"candidateStoreMemoryBytes", static_cast<qulonglong>(m_candidates.estimatedMemoryBytes())},
+            {"fileBacked", candidates.isFileBacked()},
+            {"candidateStoreBytes", static_cast<qulonglong>(candidates.storageBytes())},
+            {"candidateStoreMemoryBytes", static_cast<qulonglong>(candidates.estimatedMemoryBytes())},
         });
         if (refineCandidateCount <= 20000) {
             QElapsedTimer timer;
@@ -4304,7 +4332,7 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
         return refined;
     }
 
-    if (m_snapshot.isEmpty()) {
+    if (snapshotStore.isEmpty()) {
         result["error"] = "Aucun snapshot unknown capturé.";
         return result;
     }
@@ -4375,7 +4403,7 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
                     lastUnknownProgress = percent;
                     emitQueuedScanProgress(self, percent);
                 };
-                const auto scan = self->m_snapshot.compare(workerHandle, type, scanMode, cancellation.get(), compareOptions);
+                const auto scan = self->scanState().snapshot().compare(workerHandle, type, scanMode, cancellation.get(), compareOptions);
                 ++typeIndex;
                 checkedBytes += scan.checkedBytes;
                 matchesFound += scan.matchesFound;
@@ -4441,15 +4469,17 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             QString finishError = compareError;
             if (!cancelled) {
                 QString undoError;
-                if (!self->m_candidates.isEmpty() && !self->rememberCandidatesForUndo(&undoError)) {
+                auto& candidates = self->scanState().candidates();
+                if (!candidates.isEmpty() && !self->rememberCandidatesForUndo(&undoError)) {
                     finishSuccess = false;
                     finishError = undoError.isEmpty()
                         ? "Impossible de préparer l'annulation de la comparaison."
                         : undoError;
                 } else {
-                    self->m_candidates.replaceCandidates(unknownCandidates);
+                    candidates.replaceCandidates(unknownCandidates);
                 }
             }
+            const auto& candidates = self->scanState().candidates();
 
             QVariantMap finished;
             finished["requestId"] = requestId;
@@ -4459,11 +4489,11 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
             finished["cancelled"] = cancelled;
             finished["checkedBytes"] = static_cast<qulonglong>(checkedBytes);
             finished["matchesFound"] = static_cast<qulonglong>(matchesFound);
-            finished["stored"] = static_cast<qulonglong>(self->m_candidates.size());
+            finished["stored"] = static_cast<qulonglong>(candidates.size());
             finished["valueType"] = autoType ? QString("Auto") : valueType;
             finished["typePasses"] = typeSummaries;
             finished["error"] = finishError;
-            if (self->m_candidates.size() == 0 && finishSuccess) {
+            if (candidates.size() == 0 && finishSuccess) {
                 finished["diagnostic"] = noCandidateDiagnosticMessage(finished, "unknown_compare");
             }
 
@@ -4498,7 +4528,7 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
 
             self->m_scanInProgress = false;
             self->m_activeScanCancellation.reset();
-            emit self->scanStatsUpdated(static_cast<int>(self->m_candidates.size()));
+            emit self->scanStatsUpdated(static_cast<int>(candidates.size()));
             emit self->scanProgress(100);
             emit self->scanFinished(finished);
         }, Qt::QueuedConnection);
@@ -6617,15 +6647,16 @@ QVariantMap ApplicationController::clearActiveChatMemoryTargets() {
 
 QVariantMap ApplicationController::clearScanContext() {
     QVariantMap result;
-    const auto candidateCount = static_cast<qulonglong>(m_candidates.size());
+    auto state = scanState();
+    const auto candidateCount = static_cast<qulonglong>(state.candidates().size());
     const bool hadUndo = m_hasPreviousCandidates;
-    const bool hadSnapshot = !m_snapshot.isEmpty();
+    const bool hadSnapshot = !state.snapshot().isEmpty();
     const bool wasSmartSearchActive = m_smartSearchActive;
 
-    m_candidates.clear();
+    state.clearCandidates();
     clearCandidateUndo();
     clearCandidateValueHistory();
-    m_snapshot.clear();
+    state.clearSnapshot();
     m_smartSearchActive = false;
     m_smartSearchInitialValue.clear();
     m_smartSearchTargetValue.clear();
@@ -6656,14 +6687,18 @@ void ApplicationController::acknowledgePendingSmartSearchRecovery() {
 
 QVariantMap ApplicationController::getTemporaryStorageStatus() const {
     const auto orphan = scanKillengineTemporaryFiles();
-    const qulonglong candidateBytes = static_cast<qulonglong>(m_candidates.storageBytes());
+    auto state = scanState();
+    const auto& candidates = state.candidates();
+    const auto& previousCandidates = state.previousCandidates();
+    const auto& snapshot = state.snapshot();
+    const qulonglong candidateBytes = static_cast<qulonglong>(candidates.storageBytes());
     const qulonglong undoBytes = m_hasPreviousCandidates
-        ? static_cast<qulonglong>(m_previousCandidates.storageBytes())
+        ? static_cast<qulonglong>(previousCandidates.storageBytes())
         : 0;
-    const qulonglong snapshotBytes = static_cast<qulonglong>(m_snapshot.compressedBytesCaptured());
-    const bool hasCandidateFile = m_candidates.isFileBacked();
-    const bool hasUndoFile = m_hasPreviousCandidates && m_previousCandidates.isFileBacked();
-    const bool hasSnapshotFile = m_snapshot.usesMappedStorage();
+    const qulonglong snapshotBytes = static_cast<qulonglong>(snapshot.compressedBytesCaptured());
+    const bool hasCandidateFile = candidates.isFileBacked();
+    const bool hasUndoFile = m_hasPreviousCandidates && previousCandidates.isFileBacked();
+    const bool hasSnapshotFile = snapshot.usesMappedStorage();
     const qulonglong activeBytes = candidateBytes + undoBytes + snapshotBytes;
 
     QVariantMap result;
@@ -6693,14 +6728,15 @@ QVariantMap ApplicationController::clearTemporaryStorage() {
     }
 
     const auto before = getTemporaryStorageStatus();
-    const qulonglong clearedCandidates = static_cast<qulonglong>(m_candidates.size());
+    auto state = scanState();
+    const qulonglong clearedCandidates = static_cast<qulonglong>(state.candidates().size());
     const bool hadUndo = m_hasPreviousCandidates;
-    const bool hadSnapshot = !m_snapshot.isEmpty();
+    const bool hadSnapshot = !state.snapshot().isEmpty();
 
-    m_candidates.clear();
+    state.clearCandidates();
     clearCandidateUndo();
     clearCandidateValueHistory();
-    m_snapshot.clear();
+    state.clearSnapshot();
     m_smartSearchActive = false;
     m_smartSearchInitialValue.clear();
     m_smartSearchTargetValue.clear();
@@ -6783,7 +6819,7 @@ QVariantMap ApplicationController::getSmartSearchContext() const {
     result["initialValue"] = m_smartSearchInitialValue;
     result["targetValue"] = m_smartSearchTargetValue;
     result["valueType"] = m_smartSearchValueType;
-    result["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
+    result["candidateCount"] = static_cast<qulonglong>(scanState().candidates().size());
     result["hasUndoReduction"] = m_hasPreviousCandidates;
     result["chatTargets"] = chatTargets;
     result["profileTargets"] = profileTargets;
@@ -6797,7 +6833,7 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
     result["success"] = true;
     result["attached"] = m_handle.isValid();
     result["processName"] = processName();
-    result["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
+    result["candidateCount"] = static_cast<qulonglong>(scanState().candidates().size());
     result["workflow"] = m_smartSearchActive ? QString("guided_scan") : QString("idle");
     result["initialValue"] = m_smartSearchInitialValue;
     result["targetValue"] = m_smartSearchTargetValue;
@@ -6935,14 +6971,16 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
     guardrails.append(QVariantMap{{"id", "no_auto_debug"}, {"label", "Aucun debugger/hardware breakpoint sans confirmation"}, {"risk", "debug"}});
     guardrails.append(QVariantMap{{"id", "no_auto_patch"}, {"label", "Aucun patch/injection sans confirmation"}, {"risk", "patch"}});
 
+    const auto& candidates = scanState().candidates();
+
     if (!m_handle.isValid()) {
         recommendations.append(QVariantMap{{"id", "attach_process"}, {"label", "Attacher un processus"}, {"safe", true}, {"reason", "Aucun processus actif."}});
     } else if (!m_chatMemoryTargets.isEmpty() || !m_activeProfileTargets.isEmpty()) {
         recommendations.append(QVariantMap{{"id", "guarded_write"}, {"label", "Proposer une écriture confirmée"}, {"safe", false}, {"reason", "Des cibles mémoire sont déjà actives."}});
         recommendations.append(QVariantMap{{"id", "guarded_freeze"}, {"label", "Proposer un freeze confirmé"}, {"safe", false}, {"reason", "Des cibles mémoire sont déjà actives."}});
-    } else if (m_smartSearchActive && !m_candidates.isEmpty()) {
+    } else if (m_smartSearchActive && !candidates.isEmpty()) {
         recommendations.append(QVariantMap{{"id", "reduce_with_new_value"}, {"label", "Réduire avec la nouvelle valeur observée"}, {"safe", true}, {"reason", "Une recherche guidée contient encore des candidats."}});
-        if (m_candidates.size() <= kAutoWriteCandidateLimit) {
+        if (candidates.size() <= kAutoWriteCandidateLimit) {
             recommendations.append(QVariantMap{{"id", "review_top_candidates"}, {"label", "Préparer un test d'écriture confirmé"}, {"safe", false}, {"reason", "Le nombre de candidats est assez bas."}});
         }
     } else {
@@ -7009,7 +7047,7 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
     };
 
     int exactScore = m_handle.isValid() ? 55 : 0;
-    int reduceScore = (m_smartSearchActive && !m_candidates.isEmpty()) ? 95 : 0;
+    int reduceScore = (m_smartSearchActive && !candidates.isEmpty()) ? 95 : 0;
     int unknownScore = m_handle.isValid() ? 45 : 0;
     int encryptedScore = m_handle.isValid() ? 35 : 0;
     int traceUiScore = m_handle.isValid() ? 30 : 0;
@@ -7033,7 +7071,7 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
     if (eventCounts.value("ui_string_scan").toInt() > 0 || eventCounts.value("ui_string_sources_analyze").toInt() > 0) {
         traceUiScore += 25;
     }
-    if (m_candidates.size() > 50000) {
+    if (candidates.size() > 50000) {
         unknownScore += 10;
         traceUiScore += 10;
     }
@@ -7088,16 +7126,16 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
             false,
             "write",
             "Des cibles mémoire sont déjà actives; la prochaine action utile est un test confirmé, pas une nouvelle recherche.");
-    } else if (m_smartSearchActive && !m_candidates.isEmpty()) {
-        const int confidence = m_candidates.size() <= kAutoWriteCandidateLimit ? 90 : 82;
+    } else if (m_smartSearchActive && !candidates.isEmpty()) {
+        const int confidence = candidates.size() <= kAutoWriteCandidateLimit ? 90 : 82;
         nextBestAction = proactiveAction(
-            m_candidates.size() <= kAutoWriteCandidateLimit ? "review_top_candidates" : "reduce_with_new_value",
-            m_candidates.size() <= kAutoWriteCandidateLimit ? "Préparer test d'écriture confirmé" : "Réduire avec nouvelle valeur",
-            m_candidates.size() <= kAutoWriteCandidateLimit ? "prepare_guarded_write" : "next_scan",
+            candidates.size() <= kAutoWriteCandidateLimit ? "review_top_candidates" : "reduce_with_new_value",
+            candidates.size() <= kAutoWriteCandidateLimit ? "Préparer test d'écriture confirmé" : "Réduire avec nouvelle valeur",
+            candidates.size() <= kAutoWriteCandidateLimit ? "prepare_guarded_write" : "next_scan",
             confidence,
-            m_candidates.size() > kAutoWriteCandidateLimit,
-            m_candidates.size() <= kAutoWriteCandidateLimit ? "write" : "safe",
-            m_candidates.size() <= kAutoWriteCandidateLimit
+            candidates.size() > kAutoWriteCandidateLimit,
+            candidates.size() <= kAutoWriteCandidateLimit ? "write" : "safe",
+            candidates.size() <= kAutoWriteCandidateLimit
                 ? "Le nombre de candidats est assez bas; il faut passer par une confirmation avant écriture/freeze."
                 : "Une recherche est déjà active; refaire varier la valeur donnera la réduction la plus rentable.");
     } else {
@@ -7143,7 +7181,7 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
     result["recommendations"] = recommendations;
     result["guardrails"] = guardrails;
     result["summary"] = QString("%1 candidat(s), %2 cible(s) active(s), %3 événement(s) récent(s).")
-        .arg(m_candidates.size())
+        .arg(candidates.size())
         .arg(m_chatMemoryTargets.size() + m_activeProfileTargets.size())
         .arg(recentEvents.size());
     return result;
@@ -7905,7 +7943,8 @@ QVariantMap ApplicationController::startAutoResolve(const QString& query, const 
         return result;
     }
 
-    if (m_smartSearchActive && !m_candidates.isEmpty()) {
+    const auto& candidates = scanState().candidates();
+    if (m_smartSearchActive && !candidates.isEmpty()) {
         QVariantMap reduction = nextScan("exact", numbers.first());
         appendSafeStep(
             "next_scan",
@@ -8007,7 +8046,7 @@ QVariantMap ApplicationController::startAutoResolve(const QString& query, const 
             const QString writeValue = !m_smartSearchTargetValue.isEmpty()
                 ? m_smartSearchTargetValue
                 : (numbers.size() > 1 ? numbers.at(1) : numbers.first());
-            const QVariantList suggestions = suggestedWritesForCandidates(m_candidates, writeValue, kAutoWriteCandidateLimit);
+            const QVariantList suggestions = suggestedWritesForCandidates(candidates, writeValue, kAutoWriteCandidateLimit);
             actions.append(QVariantMap{{"id", "confirm_test_write"}, {"label", "Tester l'écriture sur les candidats"}, {"safe", false}, {"requiresConfirmation", true}});
             actions.append(QVariantMap{{"id", "confirm_breakpoint_freeze"}, {"label", "Préparer freeze BP confirmé"}, {"safe", false}, {"requiresConfirmation", true}});
             result["requiresConfirmation"] = true;
@@ -8124,7 +8163,7 @@ QVariantMap ApplicationController::startAutoResolve(const QString& query, const 
             }
         } else {
             const QString writeValue = numbers.size() > 1 ? numbers.at(1) : numbers.first();
-            const QVariantList suggestions = suggestedWritesForCandidates(m_candidates, writeValue, kAutoWriteCandidateLimit);
+            const QVariantList suggestions = suggestedWritesForCandidates(candidates, writeValue, kAutoWriteCandidateLimit);
             if (candidateCount <= kAutoWriteCandidateLimit) {
                 result["requiresConfirmation"] = true;
                 result["confirmationReason"] = "Petit nombre de candidats : confirme avant tout test d'écriture ou freeze.";
@@ -8177,7 +8216,7 @@ QVariantMap ApplicationController::buildFailureEscalationRecovery(const QString&
     recovery["workflowStatus"] = "auto_write_problem";
     recovery["targetValue"] = m_smartSearchTargetValue;
     recovery["activeTargetCount"] = m_lastAutoWriteTargets.size();
-    recovery["candidateStoreSize"] = static_cast<qulonglong>(m_candidates.size());
+    recovery["candidateStoreSize"] = static_cast<qulonglong>(scanState().candidates().size());
     recovery["failureEscalationLevel"] = m_failureEscalationLevel;
 
     // Le message de signalement d'echec contient parfois la valeur
@@ -8272,7 +8311,7 @@ QVariantMap ApplicationController::buildFailureEscalationRecovery(const QString&
     actions.append(QVariantMap{{"id", "rollback_batch"}, {"label", "Rollback dernier lot"}});
     actions.append(QVariantMap{{"id", "clear_targets"}, {"label", "Oublier ces adresses"}});
     actions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
-    if (!m_candidates.isEmpty()) {
+    if (!scanState().candidates().isEmpty()) {
         actions.append(QVariantMap{{"id", "continue_candidates"}, {"label", "Continuer avec les autres candidats"}});
     }
     recovery["recoveryActions"] = actions;
@@ -8330,13 +8369,14 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     // ActivateMemoryTargets -- ces deux outils n'ont pas d'adresse a router
     // via le meme mecanisme que les 5 outils ci-dessus.
     const bool smartSearchExplicitUiSourcesQuery = killai::wantsUiSourcesQuery(query);
+    auto& candidates = scanState().candidates();
     const SmartSearchIntent intent = classifySmartSearchIntent(
         query,
         numbers,
         chatAddresses,
         !m_chatMemoryTargets.isEmpty(),
         !m_lastAutoWriteTargets.isEmpty(),
-        !m_candidates.isEmpty(),
+        !candidates.isEmpty(),
         m_smartSearchActive,
         m_pendingRecoveryAction == "trace_ui_string",
         m_pendingRecoveryAction == "trace_ui_filter",
@@ -8357,7 +8397,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         {"intent", smartSearchIntentKindToString(intent.kind)},
         {"intentRationale", intent.rationale},
         {"smartSearchActive", m_smartSearchActive},
-        {"candidateCount", static_cast<qulonglong>(m_candidates.size())},
+        {"candidateCount", static_cast<qulonglong>(candidates.size())},
         {"initialValue", m_smartSearchInitialValue},
         {"targetValue", m_smartSearchTargetValue},
         {"valueType", m_smartSearchValueType},
@@ -8392,13 +8432,13 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
             || intent.kind == SmartSearchIntentKind::ExactScan
             || intent.kind == SmartSearchIntentKind::GuidedScan);
     if (shouldClearSearchContext) {
-        const bool hadCandidates = !m_candidates.isEmpty();
+        const bool hadCandidates = !candidates.isEmpty();
         const int chatCount = m_chatMemoryTargets.size();
         const int profileCount = m_activeProfileTargets.size();
         m_smartSearchActive = false;
         m_smartSearchInitialValue.clear();
         m_smartSearchTargetValue.clear();
-        m_candidates.clear();
+        scanState().clearCandidates();
         clearCandidateUndo();
         clearCandidateValueHistory();
         m_lastAutoWriteTargets.clear();
@@ -8967,11 +9007,11 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         aiContext["processAttached"] = m_handle.isValid();
         aiContext["processName"] = processName();
         aiContext["scanActive"] = m_smartSearchActive;
-        aiContext["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
+        aiContext["candidateCount"] = static_cast<qulonglong>(candidates.size());
         aiContext["initialValue"] = m_smartSearchInitialValue;
         aiContext["targetValue"] = m_smartSearchTargetValue;
         aiContext["activeTargetCount"] = static_cast<qulonglong>(m_chatMemoryTargets.size());
-        aiContext["unknownSnapshotActive"] = !m_snapshot.isEmpty();
+        aiContext["unknownSnapshotActive"] = !scanState().snapshot().isEmpty();
         aiContext["freezeCount"] = static_cast<qulonglong>(m_freezeHotkeyOverlayManager->freezeManager().entries().size());
         aiContext["valueType"] = m_smartSearchValueType;
         m_smartSearchBusy = true;
@@ -9054,7 +9094,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
     } else if (tool == "prepare_write_checkpoint") {
         // Checkpoint safe: prepare les suggestions d'ecriture sans ecrire.
         const QString checkpointValue = args.value("value", m_smartSearchTargetValue).toString();
-        auto suggestions = suggestedWritesForCandidates(m_candidates, checkpointValue, kAutoWriteCandidateLimit);
+        auto suggestions = suggestedWritesForCandidates(candidates, checkpointValue, kAutoWriteCandidateLimit);
         enrichSuggestedWritesWithHistory(&suggestions);
         actionResult["success"] = !suggestions.isEmpty();
         actionResult["suggestedWrites"] = suggestions;
@@ -9749,7 +9789,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
                 .arg(remaining);
         } else if (withinAutoWriteRange && !m_smartSearchTargetValue.isEmpty()) {
             auto suggestions = suggestedWritesForCandidates(
-                m_candidates,
+                candidates,
                 m_smartSearchTargetValue,
                 kAutoWriteCandidateLimit);
             enrichSuggestedWritesWithHistory(&suggestions);
@@ -10649,9 +10689,7 @@ QVariantMap ApplicationController::saveSettings(const QVariantMap& incoming) {
         "ai/modelThreads",
         std::clamp(incoming.value("modelThreads", 4).toInt(), 1, 32));
     settings.sync();
-    const size_t candidateThreshold = candidateFileBackedThresholdFromSettings();
-    m_candidates.setFileBackedThreshold(candidateThreshold);
-    m_previousCandidates.setFileBackedThreshold(candidateThreshold);
+    scanState().setFileBackedThreshold(candidateFileBackedThresholdFromSettings());
 
     QVariantMap result = getSettings();
     result["success"] = true;
@@ -10813,11 +10851,12 @@ QVariantMap ApplicationController::exportDiagnostics() {
     manifest["pid"] = m_pid;
     manifest["processName"] = m_processName;
     manifest["attached"] = m_attached;
-    manifest["candidateCount"] = static_cast<qulonglong>(m_candidates.size());
-    manifest["candidateStoreFileBacked"] = m_candidates.isFileBacked();
-    manifest["candidateStorePath"] = m_candidates.backingFilePath();
-    manifest["candidateStoreBytes"] = static_cast<qulonglong>(m_candidates.storageBytes());
-    manifest["candidateStoreMemoryBytes"] = static_cast<qulonglong>(m_candidates.estimatedMemoryBytes());
+    const auto& candidateStore = scanState().candidates();
+    manifest["candidateCount"] = static_cast<qulonglong>(candidateStore.size());
+    manifest["candidateStoreFileBacked"] = candidateStore.isFileBacked();
+    manifest["candidateStorePath"] = candidateStore.backingFilePath();
+    manifest["candidateStoreBytes"] = static_cast<qulonglong>(candidateStore.storageBytes());
+    manifest["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidateStore.estimatedMemoryBytes());
     manifest["logFilePath"] = getLogFilePath();
     manifest["smartSearchDebugFilePath"] = smartSearchDebugFilePath();
     manifest["scanTelemetryFilePath"] = scanTelemetryFilePath();

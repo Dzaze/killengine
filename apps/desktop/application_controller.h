@@ -14,6 +14,7 @@
 #include "process/process_handle.h"
 #include "profiles/profile_store.h"
 #include "scripting/auto_assembler.h"
+#include "scan_state_access.h"
 #include "snapshot/snapshot_store.h"
 
 #include <QObject>
@@ -1129,6 +1130,8 @@ private:
     QString scanTelemetryFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;
     void appendScanTelemetry(const QString& event, const QVariantMap& payload) const;
+    ScanStateAccess scanState();
+    ScanStateAccess scanState() const;
     AutoWriteStateAccess autoWriteState();
 
     // Surveillance courte apres une ecriture confirmee : combien de sondages
