@@ -1947,3 +1947,29 @@ Les résumés actifs PHASE 170-200 et l'entrée détaillée PHASE 198 provenaien
     - Bug cosmétique trouvé et corrigé au passage sur 7 libellés de `recoveryActions` (dont des préexistants : `kernel_write`, `speedhack_apply`, `network_block_apply`, `trainer_apply/restore_confirm`) : le texte backend incluait déjà "Confirmer : ..." alors que le frontend (`recoveryActionLabel`, `AssistantView.vue`) préfixe déjà automatiquement "Confirmer: " sur toute action `requiresConfirmation:true` — provoquait un doublon visible ("Confirmer: Confirmer : écrire 500"), repéré par le propriétaire sur une capture d'écran. Tous les libellés nettoyés pour ne garder qu'une occurrence.
   - [x] **Pourquoi** : demande explicite du propriétaire pour un outil "premium" — cohérence du modèle de confirmation à travers l'app plutôt qu'un point d'entrée qui y échappe silencieusement, tout en respectant sa décision de ne pas casser l'UX de confiance déjà établie du mode Auto. L'itération vers 1 seul clic répond à un retour direct en conditions réelles, pas une supposition a priori.
   - [x] **Comment vérifié** : `npx vue-tsc --noEmit` vert, `npm run build` (ui/) vert, `scripts/build.ps1` vert à chaque itération (fermeture de `KillEngine.exe`/cible de test avant chaque rebuild). 259/259 tests unitaires verts, aucune régression, à chaque étape. Vérification live via le pipe d'automatisation sur `KillEngineTestTarget.exe` : reproduction exacte du scénario qui écrivait silencieusement (`0x7ff7b20d10e0` puis `mettre 500`) — confirmé `requires_confirmation`+`recoveryActions` au lieu d'une exécution directe, pour les deux formes (adresse+valeur en un seul message → `chat_memory_write_confirm` ; adresse puis valeur séparément → `rewrite_last_auto_write_confirm`, cohérent avec le tag chat-origin). Vérification UI réelle par le propriétaire en 2 temps : (1) version avec double confirmation (bouton chat + modal RiskGate) testée, jugée trop lourde, capture d'écran à l'appui ; (2) version finale (1 clic) retestée sur le même scénario exact — carte chat avec avertissement + bouton unique, clic → exécution directe confirmée par le propriétaire sur la cible réelle ("est cela a bien fonctioné sur la cible"), aucune fenêtre popup superflue. Mode Auto (UI guidée) non retesté explicitement dans cette dernière itération mais code non touché (aucun des 4 sites `.append({address, type})` non-chat modifié) — zéro risque de régression par construction.
+
+## Transfert - Clôture finale de l'audit Arsenal 4 agents + nettoyage tracker actif (29/08/2026)
+
+- [x] Nettoyage (29/08/2026, Claude) - Migration de la section "🔎 Arsenal — ce qu'il manque" vers l'historique, demande explicite du propriétaire
+  - [x] **Quoi** : la section "Arsenal" du tracker actif (audit croisé 4 agents du 28/08/2026, PHASE 187) avait accumulé au fil des sessions suivantes (PHASE 189/190/192/193/202) des corrections en texte barré au fur et à mesure que chaque écart trouvé était comblé. Au 29/08/2026, tous les écarts listés sont clos - il ne reste plus aucune case ouverte dans cette section. Texte final archivé tel quel ci-dessous avant suppression du tracker actif :
+
+    > Le propriétaire a posé la même question à 4 agents indépendants (Claude, Codex, Cline/GLM 5.2, un 4ᵉ agent) : *"a-t-on tout l'arsenal nécessaire ?"* Convergence totale : **oui pour les capacités, non pour la validation terrain.** Aucun des 4 n'a trouvé de vraie capacité manquante. Détail des seuls écarts trouvés :
+    >
+    > **Exclusions volontaires (décision produit déjà prise — ne pas reconstruire) :**
+    > - DMA hardware (carte PCIe dédiée) — matériel non disponible ; chantier possible si acquis un jour.
+    > - Lua embarqué in-process (vs shell-out actuel) — différé tant que rien ne prouve un vrai besoin.
+    > - Remplacer Ghidra/IDA (désassembleur/décompilateur statique complet) — `docs/ULTIMATE_PRODUCT_GUIDELINE.md` fixe explicitement : ne pas reconstruire Ghidra, devenir un pont vers lui.
+    >
+    > **Confort non bloquant, tous livrés :**
+    > - Pont export/import d'artefacts vers Ghidra (AOB, offsets, notes, symboles) — livré PHASE 193 (`core/profiles/ghidra_bridge.*`, export JSON + script Python Ghidra + import symboles JSON/CSV).
+    > - Persistance backend/profil des dépendances Trainer (`dependsOn`) — livré PHASE 190 (`ProfileTarget::dependsOn`, `setProfileTargetDependencies`, sauvegarde par noms stables).
+    > - Export/import d'une map de pointeurs en texte partageable — livré PHASE 190 (`ProfileStore::exportPointerMap`/`mergePointerMap`, UI Profil).
+    > - Extensions CLR pointues (struct-dans-struct-dans-tableau en écriture, setters à paramètre `struct`, `ConcurrentDictionary`, `ConcurrentStack<T>`) — quasi toutes livrées (PHASE 189/192/202). Reste réellement non couvert et non bloquant : setters à paramètre `struct` de 9+ octets/champ non primitif, collections concurrentes segmentées/work-stealing (`ConcurrentQueue`, `ConcurrentBag`, etc.).
+    >
+    > **Validation terrain :** close (PHASE 14A/14B/17, 29/08/2026).
+    >
+    > **Décision produit :** close (PHASE 120-A/B/C/D, 29/08/2026) - `InvestigationView.vue` reste la seule décision produit encore en attente.
+    >
+    > **Conclusion :** plus aucun écart d'arsenal ouvert au 29/08/2026.
+  - [x] **Pourquoi** : demande explicite du propriétaire de nettoyer `docs/PHASE_TRACKER.md` (migration vers l'historique + tracker actif rendu propre), après la consolidation du dépôt git (fast-forward `main`, suppression des branches mortes) le même jour.
+  - [x] **Comment vérifié** : relecture du tracker actif après migration - plus aucune section entièrement close n'y figure en détail, seuls des renvois courts vers cet historique restent. Documentation Markdown uniquement, aucun build requis.
