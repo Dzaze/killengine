@@ -2294,18 +2294,25 @@ public sealed class ClrSession : IDisposable
         // "KillEngine.ClrTestTarget.Coordinates" -- struct -- et
         // "System.String"), avec IsValueType fiable dans les deux cas.
         bool parameterIsReferenceType = false;
-        // PHASE 76 : un parametre struct est desormais accepte dans UN cas
-        // precis -- taille totale exactement 1/2/4/8 octets ET tous ses
-        // champs d'instance primitifs -- car la convention d'appel x64
-        // Windows passe alors le struct PAR VALEUR dans un unique registre
-        // (RDX), exactement le meme mecanisme deja cable pour un parametre
-        // primitif (buildCallInstanceMethodShellcode cote natif n'a besoin
-        // d'aucun changement : seul l'immediate RDX differe). Un struct plus
-        // grand ou contenant un champ non primitif (nested struct/reference)
-        // passerait par un pointeur cache vers une copie -- ce second cas
-        // reste hors scope, garde-fou explicite plus bas.
+        // PHASE 76 : un parametre struct est accepte quand TOUS ses champs
+        // d'instance sont primitifs. Deux mecanismes d'appel selon la taille
+        // totale (convention x64 Windows) :
+        // - 1/2/4/8 octets -> PAR VALEUR dans un unique registre (RDX),
+        //   `parameterStructPassedByRef: false` -- mecanisme d'origine PHASE 76.
+        // - toute autre taille (PHASE 227) -> PAR POINTEUR CACHE vers une
+        //   copie fournie par l'appelant, `parameterStructPassedByRef: true`
+        //   -- cote natif, `buildCallInstanceMethodShellcode` ecrit alors les
+        //   octets du struct A LA SUITE du code dans le MEME buffer injecte
+        //   et charge RDX via un `LEA RDX, [RIP+disp32]` plutot qu'un
+        //   immediate, pas besoin de connaitre l'adresse allouee a l'avance
+        //   (verifie bout-en-bout par injection shellcode reelle, pas
+        //   suppose depuis la doc Microsoft seule -- voir
+        //   ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithLargeStructParameter).
+        // Un champ non primitif (nested struct/reference) reste hors scope
+        // dans les deux cas -- garde-fou explicite plus bas.
         List<object>? parameterStructFields = null;
         int parameterStructSize = 0;
+        bool parameterStructPassedByRef = false;
         if (parameterType is not null && !SupportedInstanceMethodParameterTypes.Contains(parameterType))
         {
             ClrType? resolvedParameterType = runtime.Heap.GetTypeByName(parameterType);
@@ -2328,15 +2335,15 @@ public sealed class ClrSession : IDisposable
                         "Seul un struct dont TOUS les champs sont primitifs est supporte.");
                 }
                 int totalSize = fields.Count == 0 ? 0 : fields.Max(f => f.Offset + f.Size);
-                if (totalSize is not (1 or 2 or 4 or 8))
+                const int maxStructParameterSize = 512; // borne defensive, pas une limite ABI reelle
+                if (totalSize <= 0 || totalSize > maxStructParameterSize)
                 {
                     throw new ClrSessionException(
                         $"Type de parametre struct non supporte : {obj.Type.Name}.{resolvedName}({parameterType}) fait " +
-                        $"{totalSize} octet(s) -- seule une taille de 1/2/4/8 octets (passage PAR REGISTRE selon la " +
-                        "convention x64 Windows) est geree ; un struct plus grand passe par un pointeur cache vers " +
-                        "une copie, hors scope de ce chantier.");
+                        $"{totalSize} octet(s) -- hors bornes gerees (1 a {maxStructParameterSize} octets).");
                 }
                 parameterStructSize = totalSize;
+                parameterStructPassedByRef = totalSize is not (1 or 2 or 4 or 8);
                 parameterStructFields = fields
                     .Select(f => (object)new { name = f.Name, elementType = f.ElementType.ToString(), offset = f.Offset, size = f.Size })
                     .ToList();
@@ -2369,6 +2376,7 @@ public sealed class ClrSession : IDisposable
             parameterIsReferenceType,
             parameterIsStruct = parameterStructFields is not null,
             parameterStructSize,
+            parameterStructPassedByRef,
             parameterStructFields,
             isStatic,
         };

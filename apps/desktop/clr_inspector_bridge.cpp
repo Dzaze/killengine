@@ -535,6 +535,13 @@ void appendImm64(QByteArray* out, uint64_t value) {
     }
 }
 
+void appendImm32(QByteArray* out, int32_t value) {
+    const uint32_t bits = static_cast<uint32_t>(value);
+    for (int i = 0; i < 4; ++i) {
+        out->append(static_cast<char>((bits >> (8 * i)) & 0xFF));
+    }
+}
+
 // Shellcode x64 fixe pour appeler un setter d'instance CLR reellement JITte :
 // pose "this" en RCX (+ la valeur en RDX si le setter attend un parametre)
 // puis "call" l'adresse native deja resolue par le helper ClrMD. Design fige,
@@ -549,7 +556,26 @@ void appendImm64(QByteArray* out, uint64_t value) {
 // RDX -> XMM1 via "movq xmm1, rdx" (66 48 0F 6E CA). RDX porte alors une
 // valeur non pertinente pour l'appelee (registre caller-saved, sans risque)
 // -- seul XMM1 est lu par le JIT pour un parametre float/double.
-QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasParam, uint64_t paramImmediate, uint64_t nativeCodeAddress, bool paramIsFloat = false) {
+//
+// PHASE 227 -- parametre STRUCT DE 9+ OCTETS ("structByRefBytes" non vide) :
+// la convention d'appel x64 Windows passe alors le struct PAR POINTEUR CACHE
+// vers une copie fournie par l'appelant (aucune variante "paire de
+// registres" sur cette ABI, contrairement a System V/Linux) -- RDX doit donc
+// porter une ADRESSE, pas les octets eux-memes. On ecrit les octets du
+// struct A LA SUITE de ce shellcode, DANS LE MEME buffer injecte par
+// killcore::injectShellcode (qui alloue une seule region pour tout le
+// contenu passe), et on charge RDX via un LEA RIP-RELATIF plutot qu'un
+// immediate -- evite d'avoir a connaitre l'adresse choisie par
+// VirtualAllocEx a l'avance (elle n'est connue qu'apres l'allocation, alors
+// que ce shellcode est construit avant). Le displacement est un simple ecart
+// d'octets DANS NOTRE PROPRE buffer (position des octets struct moins
+// position juste apres l'instruction LEA), donc entierement connu a la
+// construction, comme le reste de ce shellcode "fixe". Verifie bout-en-bout
+// par injection reelle (pas suppose depuis la doc ABI seule) -- voir
+// ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithLargeStructParameter.
+QByteArray buildCallInstanceMethodShellcode(
+    uint64_t objectAddress, bool hasParam, uint64_t paramImmediate, uint64_t nativeCodeAddress,
+    bool paramIsFloat = false, const QByteArray& structByRefBytes = QByteArray()) {
     QByteArray code;
     code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0x83));
     code.append(static_cast<char>(0xEC)); code.append(static_cast<char>(0x28));   // sub rsp, 0x28
@@ -557,14 +583,22 @@ QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasPara
     code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xB9));   // mov rcx, <objectAddress>
     appendImm64(&code, objectAddress);
 
+    int leaDisplacementPatchOffset = -1;
     if (hasParam) {
-        code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xBA)); // mov rdx, <valeur / bit pattern IEEE754>
-        appendImm64(&code, paramImmediate);
+        if (!structByRefBytes.isEmpty()) {
+            code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0x8D));
+            code.append(static_cast<char>(0x15));                                 // lea rdx, [rip+disp32]
+            leaDisplacementPatchOffset = code.size();
+            appendImm32(&code, 0); // patch une fois la position des octets struct connue, plus bas
+        } else {
+            code.append(static_cast<char>(0x48)); code.append(static_cast<char>(0xBA)); // mov rdx, <valeur / bit pattern IEEE754>
+            appendImm64(&code, paramImmediate);
 
-        if (paramIsFloat) {
-            code.append(static_cast<char>(0x66)); code.append(static_cast<char>(0x48));
-            code.append(static_cast<char>(0x0F)); code.append(static_cast<char>(0x6E));
-            code.append(static_cast<char>(0xCA));                                  // movq xmm1, rdx
+            if (paramIsFloat) {
+                code.append(static_cast<char>(0x66)); code.append(static_cast<char>(0x48));
+                code.append(static_cast<char>(0x0F)); code.append(static_cast<char>(0x6E));
+                code.append(static_cast<char>(0xCA));                                  // movq xmm1, rdx
+            }
         }
     }
 
@@ -578,6 +612,14 @@ QByteArray buildCallInstanceMethodShellcode(uint64_t objectAddress, bool hasPara
 
     code.append(static_cast<char>(0x33)); code.append(static_cast<char>(0xC0));   // xor eax, eax
     code.append(static_cast<char>(0xC3));                                        // ret
+
+    if (leaDisplacementPatchOffset >= 0) {
+        const int structDataOffset = code.size(); // les octets struct suivent immediatement le "ret"
+        const int32_t disp32 = static_cast<int32_t>(structDataOffset - (leaDisplacementPatchOffset + 4));
+        std::memcpy(code.data() + leaDisplacementPatchOffset, &disp32, sizeof(disp32));
+        code.append(structByRefBytes);
+    }
+
     return code;
 }
 
@@ -695,18 +737,21 @@ bool clrElementTypeNameToKillcoreToken(const QString& elementTypeName, QString* 
     return true;
 }
 
-// PHASE 76 : construit l'immediate RDX pour un parametre STRUCT dont
-// ClrSession.ResolveInstanceMethodAddress a deja valide le perimetre cote
-// helper (taille totale 1/2/4/8 octets, tous les champs primitifs) --
-// "structFields" porte le layout (nom/elementType/offset/size) de chaque
-// champ. Reutilise le format de saisie deja retenu pour l'ecriture d'un
-// element struct de tableau ENTIER (ClrSession.WriteIndexedStructValue) :
-// "Champ1=Valeur1,Champ2=Valeur2", tous les champs requis -- composition des
-// octets aux bons offsets dans un buffer de 8 octets, EXACTEMENT le meme
-// registre RDX que pour un parametre primitif (aucun changement necessaire a
-// buildCallInstanceMethodShellcode).
-bool encodeStructParameterImmediate(
-    const QVariantList& structFields, const QString& valueText, uint64_t* outImmediate, QString* error) {
+// PHASE 76 (registre, <=8 octets) / PHASE 227 (pointeur cache, >8 octets) :
+// construit les octets bruts d'un parametre STRUCT dont ClrSession.
+// ResolveInstanceMethodAddress a deja valide le perimetre cote helper (tous
+// les champs primitifs) -- "structFields" porte le layout (nom/elementType/
+// offset/size) de chaque champ, "bufferSize" la taille totale deja calculee
+// cote helper (parameterStructSize). Reutilise le format de saisie deja
+// retenu pour l'ecriture d'un element struct de tableau ENTIER (ClrSession.
+// WriteIndexedStructValue) : "Champ1=Valeur1,Champ2=Valeur2", tous les champs
+// requis -- composition des octets aux bons offsets. L'appelant choisit quoi
+// faire du resultat selon parameterStructPassedByRef : copier dans
+// l'immediate RDX (<=8 octets, mecanisme d'origine PHASE 76) ou l'ecrire tel
+// quel a la suite du shellcode et charger RDX via LEA RIP-relatif (PHASE 227,
+// voir buildCallInstanceMethodShellcode).
+bool encodeStructParameterBytes(
+    const QVariantList& structFields, const QString& valueText, int bufferSize, QByteArray* outBytes, QString* error) {
     QHash<QString, QString> assignments;
     const QStringList parts = valueText.split(QLatin1Char(','), Qt::SkipEmptyParts);
     for (const QString& part : parts) {
@@ -744,7 +789,11 @@ bool encodeStructParameterImmediate(
         return false;
     }
 
-    uint8_t buffer[8] = {0};
+    if (bufferSize <= 0 || bufferSize > 512) {
+        if (error) *error = QStringLiteral("Parametre struct : taille de buffer invalide (%1).").arg(bufferSize);
+        return false;
+    }
+    QByteArray buffer(bufferSize, '\0');
     QStringList missing;
     for (const QVariant& fieldVariant : structFields) {
         const QVariantMap field = fieldVariant.toMap();
@@ -771,12 +820,12 @@ bool encodeStructParameterImmediate(
 
         const int offset = field.value("offset").toInt();
         const int fieldSize = field.value("size").toInt();
-        if (offset < 0 || fieldSize <= 0 || offset + fieldSize > static_cast<int>(sizeof(buffer))) {
+        if (offset < 0 || fieldSize <= 0 || fieldSize > 8 || offset + fieldSize > buffer.size()) {
             if (error) *error = QStringLiteral("Champ struct %1 : offset/taille invalide (%2/%3).").arg(fieldName).arg(offset).arg(fieldSize);
             return false;
         }
         for (int i = 0; i < fieldSize; ++i) {
-            buffer[offset + i] = static_cast<uint8_t>((fieldImmediate >> (8 * i)) & 0xFF);
+            buffer[offset + i] = static_cast<char>((fieldImmediate >> (8 * i)) & 0xFF);
         }
     }
 
@@ -787,9 +836,7 @@ bool encodeStructParameterImmediate(
         return false;
     }
 
-    uint64_t immediate = 0;
-    std::memcpy(&immediate, buffer, sizeof(buffer));
-    *outImmediate = immediate;
+    *outBytes = buffer;
     return true;
 }
 
@@ -848,11 +895,16 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
     // ci-dessous -- voir encodeStructParameterImmediate.
     const bool parameterIsStruct = resolved.value("parameterIsStruct").toBool();
     const QVariantList parameterStructFields = resolved.value("parameterStructFields").toList();
+    const int parameterStructSize = resolved.value("parameterStructSize").toInt();
+    // PHASE 227 : struct de plus de 8 octets -> passage par pointeur cache
+    // (voir buildCallInstanceMethodShellcode) plutot que par registre.
+    const bool parameterStructPassedByRef = resolved.value("parameterStructPassedByRef").toBool();
     result["methodName"] = resolvedMethodName;
     result["nativeCodeAddress"] = nativeCodeAddressHex;
     result["parameterType"] = parameterTypeName;
     result["parameterIsReferenceType"] = parameterIsReferenceType;
     result["parameterIsStruct"] = parameterIsStruct;
+    result["parameterStructPassedByRef"] = parameterStructPassedByRef;
 
     uint64_t objectAddress = 0;
     uint64_t nativeCodeAddress = 0;
@@ -871,6 +923,10 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
     // le choix RDX (entiers/bool) vs XMM1 (flottants) dans le shellcode ;
     // voir buildCallInstanceMethodShellcode.
     bool paramIsFloat = false;
+    // PHASE 227 : non vide seulement pour un struct >8 octets -- les octets
+    // sont alors ecrits a la suite du shellcode et RDX charge un pointeur
+    // RIP-relatif vers eux, voir buildCallInstanceMethodShellcode.
+    QByteArray structByRefBytes;
     if (hasParam) {
         if (valueText.trimmed().isEmpty()) {
             result["error"] = QStringLiteral("Ce setter attend un parametre (%1) mais aucune valeur n'a ete fournie.").arg(parameterTypeName);
@@ -934,12 +990,14 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
 
             paramImmediate = paramObjectAddress;
         } else if (parameterIsStruct) {
-            // PHASE 76 : valueText porte "Champ1=Valeur1,Champ2=Valeur2"
-            // (meme format que ClrSession.WriteIndexedStructValue), valide
-            // et encode par encodeStructParameterImmediate a partir du
-            // layout resolu par le helper -- RDX porte alors directement les
-            // octets bruts du struct, meme mecanisme que buildCallInstanceMethodShellcode
-            // pour un parametre primitif entier.
+            // PHASE 76 (registre) / PHASE 227 (pointeur cache) : valueText
+            // porte "Champ1=Valeur1,Champ2=Valeur2" (meme format que
+            // ClrSession.WriteIndexedStructValue), valide et encode par
+            // encodeStructParameterBytes a partir du layout resolu par le
+            // helper. Si le struct tient dans un registre (<=8 octets),
+            // les octets sont copies dans l'immediate RDX comme avant PHASE
+            // 227 ; sinon ils restent dans structByRefBytes, ecrits a la
+            // suite du shellcode (voir buildCallInstanceMethodShellcode).
             if (!valueType.trimmed().isEmpty()) {
                 static const QSet<QString> acceptedStructValueTypeTokens = {
                     QStringLiteral("struct"), QStringLiteral("valuetype"),
@@ -952,10 +1010,18 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
                 }
             }
 
+            QByteArray structBytes;
             QString parseError;
-            if (!encodeStructParameterImmediate(parameterStructFields, valueText, &paramImmediate, &parseError)) {
+            if (!encodeStructParameterBytes(parameterStructFields, valueText, parameterStructSize, &structBytes, &parseError)) {
                 result["error"] = parseError;
                 return result;
+            }
+            if (parameterStructPassedByRef) {
+                structByRefBytes = structBytes;
+            } else {
+                paramImmediate = 0;
+                std::memcpy(&paramImmediate, structBytes.constData(),
+                            std::min<size_t>(static_cast<size_t>(structBytes.size()), sizeof(paramImmediate)));
             }
         } else {
             QString killcoreToken;
@@ -994,7 +1060,7 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
     // conditions reelles le 25/08/2026 : VirtualAllocEx renvoyait
     // systematiquement error=5 sur m_handle ReadOnly, jamais visible des
     // tests .NET (NativeSetterInvoker ouvre son propre handle hors KillEngine).
-    const QByteArray shellcode = buildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress, paramIsFloat);
+    const QByteArray shellcode = buildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress, paramIsFloat, structByRefBytes);
     killcore::ProcessHandle injectionHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::AllAccess);
     if (!injectionHandle.isValid()) {
         result["error"] = QStringLiteral("Impossible d'ouvrir le processus avec les droits necessaires a l'injection (PROCESS_VM_OPERATION/PROCESS_VM_WRITE).");

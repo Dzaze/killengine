@@ -962,6 +962,130 @@ public sealed class EndToEndTests
     }
 
     [Fact]
+    public async Task ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithLargeStructParameter_PassesHiddenPointerAndProducesSideEffect()
+    {
+        // Extension "setters a parametre struct de 9+ octets" (docs/
+        // POWER_UP_ROADMAP.md, dernier point du chantier "setters a
+        // parametre struct" PHASE 76) : Player.set_Territory prend un
+        // parametre STRUCT (Region, 12 octets -- 3 x Int32, delibere ni
+        // puissance de 2 ni multiple de 8) trop grand pour tenir dans RDX
+        // seul. La convention d'appel x64 Windows le passe alors PAR
+        // POINTEUR CACHE vers une copie fournie par l'appelant -- AUCUNE
+        // variante "paire de registres" sur cette ABI (contrairement a
+        // System V/Linux), confirme ici par l'execution reelle plutot que
+        // suppose depuis la doc Microsoft seule. NativeSetterInvoker ecrit
+        // les octets du struct A LA SUITE du shellcode dans le meme buffer
+        // injecte et charge RDX via un LEA RIP-relatif -- EXACTEMENT le
+        // mecanisme que ClrInspectorBridge::buildCallInstanceMethodShellcode
+        // reproduit cote natif. Preuve que le VRAI setter tourne (pas une
+        // ecriture memoire brute) : clamp sur les TROIS champs et un
+        // compteur de changements SEPARE, meme discipline que Waypoint.
+        string targetDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tests", "clr_targets", "KillEngineClrTestTarget"), "KillEngineClrTestTarget.dll");
+        string inspectorDll = BuiltAssemblyLocator.FindDll(
+            Path.Combine("tools", "clr_inspector", "KillEngineClrInspector"), "KillEngineClrInspector.dll");
+
+        const string isolatedTargetPipe = "KillEngineClrTestTargetPipe_TerritorySetterTest";
+        const string isolatedInspectorPipe = "KillEngineClrInspectorPipe_TerritorySetterTest";
+
+        await using var isolatedTarget = await ManagedProcessFixture.StartAsync(
+            targetDll, isolatedTargetPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_TEST_TARGET_PIPE_NAME"] = isolatedTargetPipe });
+        await using var isolatedInspector = await ManagedProcessFixture.StartAsync(
+            inspectorDll, isolatedInspectorPipe, TimeSpan.FromSeconds(20),
+            new Dictionary<string, string> { ["KILLENGINE_CLR_INSPECTOR_PIPE_NAME"] = isolatedInspectorPipe });
+
+        await PipeClient.CallAsync(isolatedInspectorPipe, "attach", new JsonArray(JsonValue.Create(isolatedTarget.Pid)));
+
+        var found = await PipeClient.CallAsync(
+            isolatedInspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(found!.AsArray())!["address"]!.GetValue<string>();
+        ulong objectAddress = ParseHex(playerAddress);
+
+        // 1) Resolution reelle -- verifie que le struct de 12 octets est
+        // reconnu et decrit avec parameterStructPassedByRef=true (le
+        // discriminant que ClrInspectorBridge::callClrInstanceMethod utilise
+        // pour choisir le mecanisme pointeur plutot que registre).
+        var resolved = await PipeClient.CallAsync(
+            isolatedInspectorPipe,
+            "resolveInstanceMethodAddress",
+            new JsonArray(JsonValue.Create(playerAddress), JsonValue.Create("Territory")));
+        Assert.True(resolved!["success"]!.GetValue<bool>());
+        Assert.Equal("set_Territory", resolved["methodName"]!.GetValue<string>());
+        Assert.Contains("Region", resolved["parameterType"]!.GetValue<string>());
+        Assert.True(resolved["parameterIsStruct"]!.GetValue<bool>());
+        Assert.False(resolved["parameterIsReferenceType"]!.GetValue<bool>());
+        Assert.Equal(12, resolved["parameterStructSize"]!.GetValue<int>());
+        Assert.True(resolved["parameterStructPassedByRef"]!.GetValue<bool>());
+        var fields = resolved["parameterStructFields"]!.AsArray()
+            .ToDictionary(f => f!["name"]!.GetValue<string>(), f => f);
+        Assert.Equal(0, fields["X"]!["offset"]!.GetValue<int>());
+        Assert.Equal(4, fields["Y"]!["offset"]!.GetValue<int>());
+        Assert.Equal(8, fields["Width"]!["offset"]!.GetValue<int>());
+        ulong nativeCodeAddress = ParseHex(resolved["nativeCodeAddress"]!.GetValue<string>());
+        Assert.NotEqual(0UL, nativeCodeAddress);
+
+        // 2) Compose les 12 octets bruts a la main depuis les offsets
+        // resolus -- exactement ce que ClrInspectorBridge::
+        // encodeStructParameterBytes doit produire cote natif.
+        static byte[] PackStructBytes(IReadOnlyDictionary<string, JsonNode?> offsets, int totalSize, params (string Name, int Value)[] values)
+        {
+            byte[] buffer = new byte[totalSize];
+            foreach (var (name, value) in values)
+            {
+                int offset = offsets[name]!["offset"]!.GetValue<int>();
+                BitConverter.GetBytes(value).CopyTo(buffer, offset);
+            }
+            return buffer;
+        }
+
+        byte[] structBytes = PackStructBytes(fields!, 12, ("X", 55), ("Y", 66), ("Width", 77));
+
+        var statusBefore = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        int changeCountBefore = statusBefore!["player"]!["territoryChangeCount"]!.GetValue<int>();
+
+        bool completed = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate: 0, nativeCodeAddress,
+            structByRefBytes: structBytes);
+        Assert.True(completed, "Le thread distant n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres l'appel shellcode du setter struct >8 octets.");
+
+        var statusAfter = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal(55, statusAfter!["player"]!["territoryX"]!.GetValue<int>());
+        Assert.Equal(66, statusAfter["player"]!["territoryY"]!.GetValue<int>());
+        Assert.Equal(77, statusAfter["player"]!["territoryWidth"]!.GetValue<int>());
+        Assert.Equal(changeCountBefore + 1, statusAfter["player"]!["territoryChangeCount"]!.GetValue<int>());
+
+        // 3) Deuxieme appel avec des valeurs HORS BORNES sur les TROIS
+        // champs -- doit etre clampe (X/Y -> [0,1000], Width -> [1,500]),
+        // preuve que le VRAI setter tourne (une ecriture memoire brute du
+        // champ backing accepterait 5000/-10/900 tels quels). Confirme aussi
+        // que le buffer struct temporaire (adresse choisie dynamiquement par
+        // VirtualAllocEx a CHAQUE appel) fonctionne de facon repetable, pas
+        // juste au premier essai.
+        byte[] outOfRangeBytes = PackStructBytes(fields!, 12, ("X", 5000), ("Y", -10), ("Width", 900));
+        bool completedClamp = NativeSetterInvoker.InvokeInstanceMethod(
+            isolatedTarget.Pid, objectAddress, hasParam: true, paramImmediate: 0, nativeCodeAddress,
+            structByRefBytes: outOfRangeBytes);
+        Assert.True(completedClamp, "Le thread distant (appel hors bornes) n'a pas termine dans le delai imparti.");
+        Assert.False(isolatedTarget.Process.HasExited, "La cible a plante apres le deuxieme appel shellcode du setter struct >8 octets.");
+
+        var statusAfterClamp = await PipeClient.CallAsync(isolatedTargetPipe, "getStatus");
+        Assert.Equal(1000, statusAfterClamp!["player"]!["territoryX"]!.GetValue<int>());
+        Assert.Equal(0, statusAfterClamp["player"]!["territoryY"]!.GetValue<int>());
+        Assert.Equal(500, statusAfterClamp["player"]!["territoryWidth"]!.GetValue<int>());
+        Assert.Equal(changeCountBefore + 2, statusAfterClamp["player"]!["territoryChangeCount"]!.GetValue<int>());
+
+        // Cross-verification independante de l'oracle cote cible : relecture
+        // ClrMD directe du champ backing.
+        var objAfterClampTerritory = await PipeClient.CallAsync(isolatedInspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        var territoryBackingField = objAfterClampTerritory!["fields"]!["_territory"]!["fields"]!;
+        Assert.Equal(1000, territoryBackingField["X"]!.GetValue<int>());
+        Assert.Equal(0, territoryBackingField["Y"]!.GetValue<int>());
+        Assert.Equal(500, territoryBackingField["Width"]!.GetValue<int>());
+    }
+
+    [Fact]
     public async Task ResolveInstanceMethodAddress_ThenRealShellcodeCall_WithDoubleParameter_LoadsXmm1AndProducesSideEffect()
     {
         // PHASE 59 -- chantier "setters float/double" : Player.set_Vigor

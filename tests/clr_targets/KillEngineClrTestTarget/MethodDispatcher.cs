@@ -91,6 +91,14 @@ public sealed class MethodDispatcher
                 waypointX = player.Waypoint.X,
                 waypointY = player.Waypoint.Y,
                 waypointChangeCount = player.WaypointChangeCount,
+                // Extension "setters a parametre struct de 9+ octets" :
+                // oracle independant de ClrMD pour verifier que le VRAI
+                // setter set_Territory a tourne (clamp + compteur separe),
+                // pas juste une ecriture brute du champ backing.
+                territoryX = player.Territory.X,
+                territoryY = player.Territory.Y,
+                territoryWidth = player.Territory.Width,
+                territoryChangeCount = player.TerritoryChangeCount,
                 // Chantier "struct-dans-struct-dans-tableau en ecriture" :
                 // oracle independant de ClrMD pour Zones[0].Origin.X/Y.
                 zone0OriginX = player.Inventory.Zones[0].Origin.X,

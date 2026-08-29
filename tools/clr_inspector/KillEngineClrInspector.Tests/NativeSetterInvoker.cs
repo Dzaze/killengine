@@ -41,21 +41,44 @@ internal static class NativeSetterInvoker
     /// puis on le copie vers XMM1 via "movq xmm1, rdx" (66 48 0F 6E CA),
     /// EXACTEMENT le meme encodage que
     /// ApplicationController::buildCallInstanceMethodShellcode cote natif.
+    /// PHASE 227 -- <paramref name="structByRefBytes"/> non vide (struct de
+    /// plus de 8 octets) : RDX doit porter un POINTEUR vers une copie du
+    /// struct plutot que la valeur elle-meme (convention x64 Windows, aucune
+    /// variante "paire de registres" sur cette ABI). Les octets sont ecrits
+    /// A LA SUITE de ce shellcode, dans le MEME buffer qui sera injecte par
+    /// VirtualAllocEx/WriteProcessMemory ci-dessous, et charges via un LEA
+    /// RIP-RELATIF (48 8D 15 disp32) -- le displacement est un simple ecart
+    /// de positions DANS NOTRE PROPRE buffer (connu a la construction),
+    /// aucun besoin de connaitre l'adresse choisie par VirtualAllocEx a
+    /// l'avance. EXACTEMENT le meme mecanisme que
+    /// ClrInspectorBridge::buildCallInstanceMethodShellcode cote natif.
     /// </summary>
-    public static byte[] BuildCallInstanceMethodShellcode(ulong objectAddress, bool hasParam, ulong paramImmediate, ulong nativeCodeAddress, bool paramIsFloat = false)
+    public static byte[] BuildCallInstanceMethodShellcode(ulong objectAddress, bool hasParam, ulong paramImmediate, ulong nativeCodeAddress, bool paramIsFloat = false, byte[]? structByRefBytes = null)
     {
-        using var ms = new MemoryStream(48);
+        using var ms = new MemoryStream(48 + (structByRefBytes?.Length ?? 0));
         void Bytes(params byte[] b) => ms.Write(b, 0, b.Length);
         void Imm64(ulong v) => ms.Write(BitConverter.GetBytes(v), 0, 8);
+        void Imm32(int v) => ms.Write(BitConverter.GetBytes(v), 0, 4);
 
         Bytes(0x48, 0x83, 0xEC, 0x28);       // sub rsp, 0x28
         Bytes(0x48, 0xB9); Imm64(objectAddress); // mov rcx, <objectAddress>
+
+        long leaDisplacementPatchOffset = -1;
         if (hasParam)
         {
-            Bytes(0x48, 0xBA); Imm64(paramImmediate); // mov rdx, <valeur / bit pattern IEEE754>
-            if (paramIsFloat)
+            if (structByRefBytes is { Length: > 0 })
             {
-                Bytes(0x66, 0x48, 0x0F, 0x6E, 0xCA); // movq xmm1, rdx
+                Bytes(0x48, 0x8D, 0x15);           // lea rdx, [rip+disp32]
+                leaDisplacementPatchOffset = ms.Position;
+                Imm32(0);                          // patche plus bas, une fois la position des octets struct connue
+            }
+            else
+            {
+                Bytes(0x48, 0xBA); Imm64(paramImmediate); // mov rdx, <valeur / bit pattern IEEE754>
+                if (paramIsFloat)
+                {
+                    Bytes(0x66, 0x48, 0x0F, 0x6E, 0xCA); // movq xmm1, rdx
+                }
             }
         }
         Bytes(0x48, 0xB8); Imm64(nativeCodeAddress);  // mov rax, <nativeCodeAddress>
@@ -63,6 +86,18 @@ internal static class NativeSetterInvoker
         Bytes(0x48, 0x83, 0xC4, 0x28);        // add rsp, 0x28
         Bytes(0x33, 0xC0);                    // xor eax, eax
         Bytes(0xC3);                          // ret
+
+        if (leaDisplacementPatchOffset >= 0)
+        {
+            long structDataOffset = ms.Position; // les octets struct suivent immediatement le "ret"
+            int disp32 = checked((int)(structDataOffset - (leaDisplacementPatchOffset + 4)));
+            long savedPosition = ms.Position;
+            ms.Position = leaDisplacementPatchOffset;
+            ms.Write(BitConverter.GetBytes(disp32), 0, 4);
+            ms.Position = savedPosition;
+            ms.Write(structByRefBytes!, 0, structByRefBytes!.Length);
+        }
+
         return ms.ToArray();
     }
 
@@ -73,9 +108,9 @@ internal static class NativeSetterInvoker
     /// au lieu d'attendre indefiniment (meme discipline que
     /// ApplicationController::callClrInstanceMethod).
     /// </summary>
-    public static bool InvokeInstanceMethod(int pid, ulong objectAddress, bool hasParam, ulong paramImmediate, ulong nativeCodeAddress, int timeoutMs = 3000, bool paramIsFloat = false)
+    public static bool InvokeInstanceMethod(int pid, ulong objectAddress, bool hasParam, ulong paramImmediate, ulong nativeCodeAddress, int timeoutMs = 3000, bool paramIsFloat = false, byte[]? structByRefBytes = null)
     {
-        byte[] shellcode = BuildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress, paramIsFloat);
+        byte[] shellcode = BuildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress, paramIsFloat, structByRefBytes);
 
         IntPtr hProcess = OpenProcess(ProcessAllAccess, false, pid);
         if (hProcess == IntPtr.Zero)

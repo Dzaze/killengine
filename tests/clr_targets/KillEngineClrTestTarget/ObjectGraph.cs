@@ -40,6 +40,20 @@ public struct Zone
     public int Radius;
 }
 
+// Dedie a l'extension "setters a parametre struct de 9+ octets" (docs/
+// POWER_UP_ROADMAP.md, seul point restant du chantier PHASE 76). 12 octets
+// (3 x int32) delibere : ni une puissance de 2 ni un multiple de 8 -- prouve
+// que le mecanisme par pointeur cache marche pour une taille arbitraire, pas
+// seulement 16 (qui pourrait laisser croire a tort a un decoupage en 2
+// registres). Tous les champs primitifs, meme contrainte que le cas 1/2/4/8
+// octets deja couvert -- un champ non primitif reste hors scope.
+public struct Region
+{
+    public int X;
+    public int Y;
+    public int Width;
+}
+
 public struct PlayerStats
 {
     public int Rank;
@@ -275,6 +289,31 @@ public sealed class Player
     }
 
     public int WaypointChangeCount => _waypointChangeCount;
+
+    // ------------------------------------------------------------------
+    // Propriete a parametre STRUCT DE 9+ OCTETS -- extension du chantier
+    // ci-dessus (Waypoint couvre le cas registre 1/2/4/8 octets). Region
+    // (12 octets) est trop grande pour RDX seul : la convention d'appel x64
+    // Windows la passe PAR POINTEUR CACHE vers une copie fournie par
+    // l'appelant. Meme discipline de preuve : clamp + compteur separe.
+    // ------------------------------------------------------------------
+    private Region _territory;
+    private int _territoryChangeCount;
+
+    public Region Territory
+    {
+        get => _territory;
+        set
+        {
+            int clampedX = value.X < 0 ? 0 : (value.X > 1000 ? 1000 : value.X);
+            int clampedY = value.Y < 0 ? 0 : (value.Y > 1000 ? 1000 : value.Y);
+            int clampedWidth = value.Width < 1 ? 1 : (value.Width > 500 ? 500 : value.Width);
+            _territory = new Region { X = clampedX, Y = clampedY, Width = clampedWidth };
+            _territoryChangeCount++;
+        }
+    }
+
+    public int TerritoryChangeCount => _territoryChangeCount;
 
     // Tableau de primitifs (int[]) accessible depuis Player -- dedie au
     // chantier "ecriture directe par index dans un tableau primitif"
@@ -572,6 +611,9 @@ public static class TestRoot
         // Warmup du setter a parametre STRUCT (set_Waypoint), meme raison --
         // chantier "setters a parametre struct".
         player.Waypoint = new Coordinates { X = 1, Y = 1 };
+
+        // Warmup du setter a parametre STRUCT DE 9+ OCTETS (set_Territory).
+        player.Territory = new Region { X = 1, Y = 1, Width = 1 };
 
         return player;
     }
