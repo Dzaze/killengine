@@ -32,7 +32,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 
 | # | Candidat | Lignes approx. | Couplage | Entangled avec |
 | --- | --- | --- | --- | --- |
-| C1 | UI-string investigation / diff pages (`scanUiStrings`, `trackUiStringSources`...) | ~1673 (L2707–4380) | **Bas** — quasi `const`, état minimal | — |
+| [x] C1 | UI-string investigation / diff pages (`scanUiStrings`, `trackUiStringSources`...) — extrait le 29/08/2026 vers `apps/desktop/display_string_investigator.*` | ~1673 (L2707–4380) | **Bas** — quasi `const`, état minimal | — |
 | C2 | CLR/.NET inspector bridge (RPC vers process externe) | ~1108 (L14343–15451) | **Bas** — sous-système déjà séparé | — |
 | C3 | Driver kernel (`probe/startKernelDriver`, read/write kernel) | ~288 (L15451–15739) | **Bas** | — |
 | C4 | UWP / save-file investigation | ~291 (L2069–2360) | **Bas** | — |

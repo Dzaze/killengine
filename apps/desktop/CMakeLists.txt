@@ -5,6 +5,7 @@
 qt_add_executable(KillEngine
     main.cpp
     application_controller.cpp
+    display_string_investigator.cpp
     automation_pipe_server.cpp
     crash_handler.cpp
 )

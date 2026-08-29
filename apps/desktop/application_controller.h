@@ -40,6 +40,7 @@ class QWidget;
 namespace killengine {
 
 class AutomationPipeServer;
+class UiStringInvestigator;
 
 /**
  * @brief Contrôleur applicatif exposé au frontend Vue via QWebChannel.
@@ -1206,6 +1207,7 @@ private:
     QString                 m_processName;
     int                     m_pid{0};
     killcore::ProcessHandle m_handle;
+    std::unique_ptr<UiStringInvestigator> m_uiStringInvestigator;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
     // detachProcess() pour que la regle pare-feu reste retirable meme apres
     // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
@@ -1234,7 +1236,6 @@ private:
     QHash<uint64_t, ActiveCodePatch> m_activeCodePatches;
     QHash<uint64_t, ActiveFunctionHook> m_activeFunctionHooks;
     std::optional<killcore::AutoAsmResult> m_lastAutoAsmResult;
-    qint64                   m_uiInvestigationStartedMs{0};
     QList<ActiveProfileTarget> m_activeProfileTargets;
     QStringList              m_autoWriteValueHistory;
     int                      m_lastBatchStartIndex{-1};
