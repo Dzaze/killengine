@@ -54,7 +54,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | # | Candidat | Lignes approx. | Couplage | Entangled avec |
 | --- | --- | --- | --- | --- |
 | [x] S1 | CLR Inspector (`clr*` refs + fonctions) — extrait le 29/08/2026 vers `ui/src/stores/clrInspector.ts` (en réalité couplage moyen : 7 fonctions dépendent de `confirmRiskAction`, non extrait — gate gardé dans `app.ts`, résultat délégué au store) | ~600 | **Bas** | — |
-| S2 | Speedhack / API hooking / blocage réseau | ~200 | **Bas** | — |
+| [x] S2 | Speedhack / API hooking / blocage réseau — extrait le 29/08/2026 vers `ui/src/stores/speedhack.ts` | ~200 | **Bas** | — |
 | S3 | Automation pipe status | ~60 | **Bas** | — |
 | S4 | Driver kernel (`kernelDriverStatus`, read/write) | ~130 | **Bas** — `memoryAccessMode` partagé avec S6 | S6 |
 | [x] S5 | Action log (`addActionLog`) — extrait le 29/08/2026 vers `ui/src/stores/actionLog.ts` | ~75 + 282 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
