@@ -486,6 +486,11 @@ public sealed class ClrSession : IDisposable
                 return DescribeConcurrentStack(obj, depth);
             }
 
+            if (typeName.StartsWith("System.Collections.Concurrent.ConcurrentQueue<", StringComparison.Ordinal))
+            {
+                return DescribeConcurrentQueue(obj, depth);
+            }
+
             object? customCollection = DescribeFieldBackedCollection(obj, depth);
             if (customCollection is not null)
             {
@@ -760,6 +765,107 @@ public sealed class ClrSession : IDisposable
             count = nodesSeen,
             returned = items.Count,
             truncated = nodesSeen > items.Count || !node.IsNull,
+            items,
+        };
+    }
+
+    /// <summary>
+    /// ConcurrentQueue&lt;T&gt; -- layout interne verifie par reflection sur le
+    /// runtime .NET local (script jetable) PUIS valide contre `ToArray()` sur
+    /// 8 scenarios (vide, sequentiel, dequeue partiel, multi-segment,
+    /// wrap-around post-dequeue+reenqueue, drain complet + refill, frontiere
+    /// de segment traversee par un dequeue partiel) avant d'ecrire cette
+    /// methode : `_head`/`_tail` (classe `ConcurrentQueueSegment&lt;T&gt;`),
+    /// chainee via `_nextSegment` (simple, jamais circulaire). Chaque segment
+    /// porte un buffer prive `_slots` (`Slot[]`, struct `Item`+`SequenceNumber`,
+    /// PAS un simple tableau de `T` -- c'est l'algorithme MPMC borne classique
+    /// de Vyukov) et `_slotsMask` (= capacite - 1, capacite toujours une
+    /// puissance de 2). `_headAndTail` (struct `PaddedHeadAndTail`, champs
+    /// `Head`/`Tail` en `int`) donne la plage de POSITIONS LOGIQUES (pas
+    /// d'index de tableau) encore actives dans ce segment : pour une position
+    /// `pos` dans `[Head, Tail)`, l'index physique est `pos &amp; _slotsMask`, et
+    /// le slot est reellement peuple SEULEMENT si `slot.SequenceNumber == pos + 1`
+    /// (invariant Vyukov -- un slot fraichement alloue vaut son propre index,
+    /// jamais `index + 1`, ce qui distingue "jamais ecrit" de "ecrit"). Lire
+    /// en dehors de cette regle donnerait un item perime ou pas encore publie
+    /// -- piege reel confirme par la validation empirique, pas suppose.
+    /// </summary>
+    private static object DescribeConcurrentQueue(ClrObject obj, int depth)
+    {
+        ClrObject segment = obj.ReadObjectField("_head");
+        var items = new List<object?>();
+        string? elementType = null;
+        int validCount = 0;
+        int positionsScanned = 0;
+        int segmentsSeen = 0;
+        var visitedSegments = new HashSet<ulong>();
+        bool truncated = false;
+
+        while (!segment.IsNull && segmentsSeen < MaxCollectionItems)
+        {
+            if (!visitedSegments.Add(segment.Address))
+            {
+                break;
+            }
+            segmentsSeen++;
+
+            ClrObject slotsObj = segment.ReadObjectField("_slots");
+            int slotsMask = SafeReadIntField(segment, "_slotsMask");
+            ClrValueType headAndTail = segment.ReadValueTypeField("_headAndTail");
+            if (!TryReadValueTypeIntField(headAndTail, "Head", out int head) ||
+                !TryReadValueTypeIntField(headAndTail, "Tail", out int tail))
+            {
+                segment = segment.ReadObjectField("_nextSegment");
+                continue;
+            }
+
+            if (!slotsObj.IsNull && slotsObj.Type is { IsArray: true })
+            {
+                ClrArray slotsArray = slotsObj.AsArray();
+                for (int pos = head; pos != tail && positionsScanned <= MaxCollectionItems; pos = unchecked(pos + 1))
+                {
+                    positionsScanned++;
+                    int idx = pos & slotsMask;
+                    ClrValueType slot = slotsArray.GetStructValue(idx);
+                    if (!TryReadValueTypeIntField(slot, "SequenceNumber", out int sequenceNumber))
+                    {
+                        continue;
+                    }
+                    if (sequenceNumber != unchecked(pos + 1))
+                    {
+                        // Position pas (ou plus) reellement peuplee -- course
+                        // benigne avec un enqueue/dequeue concurrent, ou fin
+                        // de segment gele (`_frozenForEnqueues`) : ignorer,
+                        // pas une erreur.
+                        continue;
+                    }
+
+                    validCount++;
+                    if (items.Count < MaxCollectionItems)
+                    {
+                        ClrInstanceField? itemField = slot.Type?.GetFieldByName("Item");
+                        elementType ??= itemField?.Type?.Name;
+                        items.Add(itemField is null ? null : ReadValueTypeFieldValue(slot, itemField, depth));
+                    }
+                }
+
+                if (positionsScanned > MaxCollectionItems)
+                {
+                    truncated = true;
+                    break;
+                }
+            }
+
+            segment = segment.ReadObjectField("_nextSegment");
+        }
+
+        return new
+        {
+            kind = "concurrent_queue",
+            elementType,
+            count = validCount,
+            returned = items.Count,
+            truncated = truncated || validCount > items.Count || !segment.IsNull,
             items,
         };
     }

@@ -93,6 +93,7 @@ public sealed class Inventory
     // methodologie que HashSet<T>/Queue<T>/Stack<T>/LinkedList<T> ci-dessus.
     public ConcurrentDictionary<string, int> ConcurrentCounters { get; } = new();
     public ConcurrentStack<string> ConcurrentTags { get; } = new();
+    public ConcurrentQueue<string> ConcurrentEvents { get; } = new();
 
     // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source,
     // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) : depart d'une chaine LONGUE
@@ -470,6 +471,22 @@ public static class TestRoot
         inventory.ConcurrentTags.Push("middle");
         inventory.ConcurrentTags.Push("top");
         // Ordre logique attendu : top, middle, bottom.
+
+        // ConcurrentQueue<T> : capacite initiale de segment = 32 (verifie par
+        // reflection sur le runtime local avant d'ecrire le code de
+        // deballage), donc 40 Enqueue force un deuxieme segment ; dequeue de
+        // 35 elements epuise completement le premier segment ET mange une
+        // partie du second -- exerce deliberement la traversee de frontiere
+        // de segment, pas seulement le cas a un seul segment.
+        for (int i = 0; i < 40; i++)
+        {
+            inventory.ConcurrentEvents.Enqueue($"evt-{i}");
+        }
+        for (int i = 0; i < 35; i++)
+        {
+            inventory.ConcurrentEvents.TryDequeue(out _);
+        }
+        // Contenu logique final attendu (ordre FIFO garanti) : evt-35..evt-39.
 
         // Chantier "vrai plus-court-chemin GCRoot" : chaine de 3 noeuds vers
         // ShortestPathProbe, soit 4 sauts au total depuis le root

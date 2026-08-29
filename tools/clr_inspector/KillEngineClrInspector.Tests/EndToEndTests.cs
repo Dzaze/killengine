@@ -1970,6 +1970,42 @@ public sealed class EndToEndTests
         Assert.DoesNotContain("temp-to-pop", items);
     }
 
+    [Fact]
+    public async Task ReadObject_UnpacksConcurrentQueueAcrossSegmentBoundaryInFifoOrder()
+    {
+        // Extension "collections concurrentes" laissee ouverte par le test
+        // ConcurrentStack ci-dessus ("chantier plus risque des structures
+        // segmentees") -- layout de ConcurrentQueue<T> verifie par reflection
+        // sur le runtime .NET local (script jetable) PUIS valide contre
+        // ToArray() sur 8 scenarios (vide, sequentiel, dequeue partiel,
+        // multi-segment, wrap-around, drain+refill, frontiere de segment)
+        // avant d'ecrire ClrSession.DescribeConcurrentQueue -- voir le
+        // commentaire de cette methode pour le detail de l'algorithme MPMC
+        // borne (Slot.SequenceNumber == pos + 1). Le graphe de test
+        // (Inventory.ConcurrentEvents, ObjectGraph.cs) enqueue 40 elements
+        // (capacite initiale de segment = 32, donc un deuxieme segment est
+        // force) puis en dequeue 35 -- exerce deliberement la traversee de
+        // frontiere de segment, pas seulement le cas a un seul segment.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var concurrentEvents = Field(inventoryObj!["fields"]!, "ConcurrentEvents")!["collection"]!;
+
+        Assert.Equal("concurrent_queue", concurrentEvents["kind"]!.GetValue<string>());
+        Assert.Equal(5, concurrentEvents["count"]!.GetValue<int>());
+        Assert.Equal(5, concurrentEvents["returned"]!.GetValue<int>());
+        Assert.False(concurrentEvents["truncated"]!.GetValue<bool>());
+
+        var items = concurrentEvents["items"]!.AsArray().Select(i => i!.GetValue<string>()).ToArray();
+        Assert.Equal(new[] { "evt-35", "evt-36", "evt-37", "evt-38", "evt-39" }, items);
+    }
+
     private static bool JsonContainsAddress(JsonNode? node, string address)
     {
         switch (node)
