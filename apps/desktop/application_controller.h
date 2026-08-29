@@ -6,12 +6,9 @@
 #include "debug/inprocess_breakpoint.h"
 #include "debug/page_guard.h"
 #include "debug/speedhack.h"
-#include "freeze/freeze_manager.h"
 #include "inject/api_hook.h"
 #include "inject/dll_injector.h"
 #include "inject/function_hook.h"
-#include "input/global_hotkey.h"
-#include "kernel/kernel_driver_bridge.h"
 #include "memory/memory_reader.h"
 #include "process/process_handle.h"
 #include "profiles/profile_store.h"
@@ -32,10 +29,8 @@
 #include <memory>
 #include <optional>
 
-class QLabel;
 class QProcess;
 class QWebEnginePage;
-class QWidget;
 
 namespace killengine {
 
@@ -43,6 +38,9 @@ class AutomationPipeServer;
 class ClrInspectorBridge;
 class CodePatchManager;
 class DebugFeatureManager;
+class FreezeHotkeyOverlayManager;
+class KernelDriverManager;
+class SaveFileInvestigator;
 class UiStringInvestigator;
 
 /**
@@ -1102,7 +1100,6 @@ signals:
     void errorOccurred(const QString& message);
 
 private:
-    void applyFreezeTick();
     void applyWriteWatchTick();
     void registerWriteWatch(uint64_t address, killcore::ValueType type, const QByteArray& expectedBytes);
     bool rememberCandidatesForUndo(QString* error = nullptr);
@@ -1183,6 +1180,9 @@ private:
     std::unique_ptr<ClrInspectorBridge> m_clrInspectorBridge;
     std::unique_ptr<CodePatchManager> m_codePatchManager;
     std::unique_ptr<DebugFeatureManager> m_debugFeatureManager;
+    std::unique_ptr<FreezeHotkeyOverlayManager> m_freezeHotkeyOverlayManager;
+    std::unique_ptr<KernelDriverManager> m_kernelDriverManager;
+    std::unique_ptr<SaveFileInvestigator> m_saveFileInvestigator;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
     // detachProcess() pour que la regle pare-feu reste retirable meme apres
     // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
@@ -1192,16 +1192,11 @@ private:
     killcore::CandidateStore m_previousCandidates;
     QHash<uint64_t, QVariantList> m_candidateValueHistory;
     killcore::SnapshotStore  m_snapshot;
-    killcore::FreezeManager  m_freeze;
-    std::unique_ptr<killcore::GlobalHotkeyManager> m_hotkeys;
-    QTimer                   m_freezeTimer;
     // Sondage independant du freeze (interval bien plus lent, pas de
     // reecriture) : surveille juste que la valeur confirmee ecrite par
     // writeMemoryValueConfirmed n'est pas repartie toute seule peu apres.
     QTimer                   m_writeWatchTimer;
     QList<WriteWatchEntry>   m_writeWatchEntries;
-    QPointer<QWidget>        m_trainerOverlay;
-    QPointer<QLabel>         m_trainerOverlayLabel;
     uint64_t                 m_lastWriteAddress{0};
     QByteArray               m_lastWritePreviousValue;
     QList<WriteRecord>       m_writeHistory;
@@ -1227,10 +1222,6 @@ private:
     // avec attach debugger (celle-ci ne fait que lire/ecrire de la memoire).
     bool                     m_candidateFieldTestInProgress{false};
     std::shared_ptr<killcore::CancellationToken> m_activeCandidateFieldTestCancellation;
-    // PHASE 93 — surveillance fichier (watchSaveFileForChanges) : etat dedie,
-    // independant des cancellations de debug/scan ci-dessus.
-    bool                     m_saveFileWatchInProgress{false};
-    std::shared_ptr<killcore::CancellationToken> m_activeSaveFileWatchCancellation;
     // Scripting Lua externe (executeLuaScriptAsync) : etat dedie, independant
     // des autres cancellations ci-dessus. Le token ne fait qu'armer le kill()
     // du QProcess lua.exe depuis le thread worker qui le possede -- pas de

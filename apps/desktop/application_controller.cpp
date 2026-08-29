@@ -18,6 +18,9 @@
 #include "clr_inspector_bridge.h"
 #include "code_patch_manager.h"
 #include "debug_feature_manager.h"
+#include "freeze_hotkey_overlay_manager.h"
+#include "kernel_driver_manager.h"
+#include "save_file_investigator.h"
 #include "query_text_utils.h"
 #include "model_locator.h"
 #include "display_string_investigator.h"
@@ -29,9 +32,8 @@
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
+#include "kernel/kernel_driver_bridge.h"
 #include "process/export_resolver.h"
-#include "process/file_watch.h"
-#include "process/package_storage.h"
 #include "process/process_enumerator.h"
 #include "process/process_handle.h"
 #include "process/process_suspend.h"
@@ -66,15 +68,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QLabel>
 #include <QMetaObject>
 #include <QPointer>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
-#include <QVBoxLayout>
 #include <QWebEnginePage>
-#include <QWidget>
 #include <QSettings>
 #include <QSet>
 #include <QStandardPaths>
@@ -1823,9 +1822,44 @@ ApplicationController::ApplicationController(QObject* parent)
         [this]() {
             return m_pid;
         });
+    m_freezeHotkeyOverlayManager = std::make_unique<FreezeHotkeyOverlayManager>(
+        m_handle,
+        [this](const QString& event, const QVariantMap& payload) {
+            appendScanTelemetry(event, payload);
+        },
+        [this]() {
+            return m_pid;
+        },
+        [this](uint64_t address) {
+            return hasAddressBeenWriteVerified(address);
+        },
+        [this](killcore::BreakpointFreezeMode mode, QString* error) {
+            return m_debugFeatureManager->restartBreakpointFreezeFromRegistry(mode, error);
+        },
+        [this](const QVariantMap& event) {
+            emit globalHotkeyTriggered(event);
+        },
+        [this](const QVariantMap& info) {
+            emit freezeInstabilityDetected(info);
+        },
+        this);
+    m_kernelDriverManager = std::make_unique<KernelDriverManager>(
+        m_handle,
+        [this](const QString& event, const QVariantMap& payload) {
+            appendScanTelemetry(event, payload);
+        });
+    m_saveFileInvestigator = std::make_unique<SaveFileInvestigator>(
+        m_handle,
+        [this]() {
+            return m_nextDebugRequestId++;
+        },
+        [this](const QVariantMap& result) {
+            emit saveFileWatchFinished(result);
+        },
+        this);
     m_debugFeatureManager = std::make_unique<DebugFeatureManager>(
         m_handle,
-        m_freeze,
+        m_freezeHotkeyOverlayManager->freezeManager(),
         [this](const QString& event, const QVariantMap& payload) {
             appendScanTelemetry(event, payload);
         },
@@ -1850,27 +1884,8 @@ ApplicationController::ApplicationController(QObject* parent)
         [this](const QVariantMap& result) {
             emit inProcessBreakpointWatchFinished(result);
         });
-    m_freezeTimer.setInterval(100);
-    connect(&m_freezeTimer, &QTimer::timeout, this, &ApplicationController::applyFreezeTick);
     m_writeWatchTimer.setInterval(1500);
     connect(&m_writeWatchTimer, &QTimer::timeout, this, &ApplicationController::applyWriteWatchTick);
-    m_hotkeys = std::make_unique<killcore::GlobalHotkeyManager>();
-    connect(m_hotkeys.get(), &killcore::GlobalHotkeyManager::hotkeyTriggered, this, [this](int id, const killcore::HotkeyAction& action) {
-        QVariantMap event;
-        event["id"] = id;
-        event["targetId"] = action.targetId;
-        event["label"] = action.label;
-        event["payload"] = action.payload;
-        switch (action.type) {
-            case killcore::HotkeyActionType::ToggleFreeze: event["type"] = "toggle_freeze"; break;
-            case killcore::HotkeyActionType::TogglePatch: event["type"] = "toggle_patch"; break;
-            case killcore::HotkeyActionType::WriteValue: event["type"] = "write_value"; break;
-            case killcore::HotkeyActionType::ToggleOverlay: event["type"] = "toggle_overlay"; break;
-            case killcore::HotkeyActionType::Custom: event["type"] = "custom"; break;
-        }
-        appendScanTelemetry("global_hotkey_triggered", event);
-        emit globalHotkeyTriggered(event);
-    });
     m_ai.init();
     KE_LOG_INFO() << "ApplicationController initialized";
 }
@@ -2013,294 +2028,31 @@ QVariantMap ApplicationController::listModuleExports(const QString& moduleName, 
 }
 
 QVariantMap ApplicationController::discoverProcessSaveFiles(int maxResults) const {
-    QVariantMap result;
-    result["success"] = false;
-    QVariantList filesList;
-    result["files"] = filesList;
-
-    if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-
-    QString familyName;
-    QString error;
-    if (!killcore::resolvePackageFamilyName(m_handle, &familyName, &error)) {
-        result["error"] = error.isEmpty() ? "Résolution du package échouée." : error;
-        return result;
-    }
-    result["familyName"] = familyName;
-
-    QVector<killcore::PackageSaveFileEntry> files;
-    if (!killcore::listPackageSaveFiles(familyName, maxResults, /*excludeNoise=*/true, &files, &error)) {
-        result["error"] = error.isEmpty() ? "Listage des fichiers échoué." : error;
-        return result;
-    }
-
-    for (const auto& entry : files) {
-        QVariantMap fileMap;
-        fileMap["path"] = entry.path;
-        fileMap["sizeBytes"] = entry.sizeBytes;
-        fileMap["lastWriteTime"] = entry.lastWriteTimeIso;
-        filesList.append(fileMap);
-    }
-
-    result["success"] = true;
-    result["files"] = filesList;
-    result["count"] = filesList.size();
-    result["error"] = "";
-    return result;
+    return m_saveFileInvestigator->discoverProcessSaveFiles(maxResults);
 }
 
 QVariantMap ApplicationController::inspectProcessLocalSettings(int maxValues) const {
-    QVariantMap result;
-    result["success"] = false;
-    QVariantList valuesList;
-    result["values"] = valuesList;
-
-    if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-
-    QString familyName;
-    QString error;
-    if (!killcore::resolvePackageFamilyName(m_handle, &familyName, &error)) {
-        result["error"] = error.isEmpty() ? "Résolution du package échouée." : error;
-        return result;
-    }
-    result["familyName"] = familyName;
-
-    QVector<killcore::PackageLocalSettingsEntry> values;
-    QString settingsPath;
-    if (!killcore::inspectPackageLocalSettings(familyName, maxValues, &values, &settingsPath, &error)) {
-        result["settingsPath"] = settingsPath;
-        result["error"] = error.isEmpty() ? "Inspection LocalSettings échouée." : error;
-        return result;
-    }
-
-    for (const auto& entry : values) {
-        QVariantMap valueMap;
-        valueMap["keyPath"] = entry.keyPath;
-        valueMap["name"] = entry.name;
-        valueMap["type"] = entry.type;
-        valueMap["preview"] = entry.preview;
-        valueMap["dataSizeBytes"] = entry.dataSizeBytes;
-        valuesList.append(valueMap);
-    }
-
-    result["success"] = true;
-    result["settingsPath"] = settingsPath;
-    result["values"] = valuesList;
-    result["count"] = valuesList.size();
-    result["error"] = "";
-    return result;
+    return m_saveFileInvestigator->inspectProcessLocalSettings(maxValues);
 }
 
 QVariantMap ApplicationController::readProcessSaveFileText(const QString& path, int maxBytes) const {
-    QVariantMap result;
-    result["success"] = false;
-    result["path"] = path;
-
-    if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-
-    // Garde-fou : ce n'est pas une primitive de lecture de fichier arbitraire
-    // sur le disque, seulement des fichiers de sauvegarde/état sous le
-    // dossier package UWP de l'utilisateur courant.
-    const QString normalized = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()).toLower();
-    const QString allowedRoot = QDir::toNativeSeparators(
-        QDir(qEnvironmentVariable("LOCALAPPDATA")).filePath("Packages")).toLower();
-    if (allowedRoot.isEmpty() || !normalized.startsWith(allowedRoot)) {
-        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
-        return result;
-    }
-
-    QString text;
-    bool truncated = false;
-    QString error;
-    if (!killcore::readPackageSaveFileText(path, maxBytes, &text, &truncated, &error)) {
-        result["error"] = error.isEmpty() ? "Lecture du fichier échouée." : error;
-        return result;
-    }
-
-    result["success"] = true;
-    result["text"] = text;
-    result["truncated"] = truncated;
-    result["error"] = "";
-    return result;
+    return m_saveFileInvestigator->readProcessSaveFileText(path, maxBytes);
 }
-
-namespace {
-// Meme garde-fou que readProcessSaveFileText ci-dessus -- duplique plutot que
-// factorise pour ne pas toucher a une fonction qu'une autre session edite en
-// parallele (PHASE 93, chantier "surveillance fichier").
-bool isPathUnderPackagesRoot(const QString& path) {
-    const QString normalized = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()).toLower();
-    const QString allowedRoot = QDir::toNativeSeparators(
-        QDir(qEnvironmentVariable("LOCALAPPDATA")).filePath("Packages")).toLower();
-    return !allowedRoot.isEmpty() && normalized.startsWith(allowedRoot);
-}
-} // namespace
 
 QVariantMap ApplicationController::watchSaveFileForChanges(const QString& path, const QVariantMap& options) {
-    QVariantMap result;
-    result["success"] = false;
-    result["path"] = path;
-
-    if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-    if (!isPathUnderPackagesRoot(path)) {
-        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
-        return result;
-    }
-    if (m_saveFileWatchInProgress) {
-        result["error"] = "Une surveillance de fichier est déjà en cours.";
-        return result;
-    }
-
-    const int timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 60000);
-
-    m_saveFileWatchInProgress = true;
-    auto cancellation = std::make_shared<killcore::CancellationToken>();
-    m_activeSaveFileWatchCancellation = cancellation;
-
-    killcore::FileWatchOutcome outcome;
-    QString error;
-    const bool started = killcore::watchFileForChanges(path, timeoutMs, cancellation.get(), &outcome, &error);
-
-    m_saveFileWatchInProgress = false;
-    m_activeSaveFileWatchCancellation.reset();
-
-    if (!started) {
-        result["error"] = error.isEmpty() ? "Surveillance du fichier échouée." : error;
-        return result;
-    }
-
-    result["success"] = true;
-    result["changed"] = outcome.changed;
-    result["changeType"] = outcome.changeType;
-    result["cancelled"] = outcome.cancelled;
-    result["error"] = outcome.changed
-        ? ""
-        : (outcome.cancelled ? "Surveillance annulée." : "Aucun changement détecté avant le timeout.");
-    return result;
+    return m_saveFileInvestigator->watchSaveFileForChanges(path, options);
 }
 
 QVariantMap ApplicationController::startSaveFileWatchAsync(const QString& path, const QVariantMap& options) {
-    QVariantMap result;
-    result["success"] = false;
-    result["started"] = false;
-    result["path"] = path;
-
-    if (m_saveFileWatchInProgress) {
-        result["error"] = "Une surveillance de fichier est déjà en cours.";
-        return result;
-    }
-    if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-    if (!isPathUnderPackagesRoot(path)) {
-        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
-        return result;
-    }
-
-    const int timeoutMs = std::clamp(options.value("timeoutMs", 5000).toInt(), 250, 60000);
-    const int requestId = m_nextDebugRequestId++;
-    const QString requestedPath = path;
-    const QPointer<ApplicationController> self(this);
-    auto cancellation = std::make_shared<killcore::CancellationToken>();
-
-    m_saveFileWatchInProgress = true;
-    m_activeSaveFileWatchCancellation = cancellation;
-
-    KE_LOG_INFO() << "startSaveFileWatchAsync(path=" << requestedPath.toStdString()
-                  << ", timeoutMs=" << timeoutMs
-                  << ", requestId=" << requestId << ")";
-
-    std::thread([self, requestId, requestedPath, timeoutMs, cancellation]() {
-        killcore::FileWatchOutcome outcome;
-        QString error;
-        const bool started = killcore::watchFileForChanges(requestedPath, timeoutMs, cancellation.get(), &outcome, &error);
-
-        if (!self) {
-            return;
-        }
-
-        QMetaObject::invokeMethod(self.data(), [self, requestId, requestedPath, started, outcome, error]() {
-            if (!self) {
-                return;
-            }
-
-            QVariantMap finished;
-            finished["requestId"] = requestId;
-            finished["kind"] = "save_file_watch";
-            finished["success"] = started;
-            finished["path"] = requestedPath;
-            finished["changed"] = outcome.changed;
-            finished["changeType"] = outcome.changeType;
-            finished["cancelled"] = outcome.cancelled;
-            finished["error"] = !started
-                ? (error.isEmpty() ? "Surveillance du fichier échouée." : error)
-                : (outcome.changed
-                       ? ""
-                       : (outcome.cancelled ? "Surveillance annulée." : "Aucun changement détecté avant le timeout."));
-
-            self->m_saveFileWatchInProgress = false;
-            self->m_activeSaveFileWatchCancellation.reset();
-            emit self->saveFileWatchFinished(finished);
-        }, Qt::QueuedConnection);
-    }).detach();
-
-    result["success"] = true;
-    result["started"] = true;
-    result["requestId"] = requestId;
-    result["error"] = "";
-    return result;
+    return m_saveFileInvestigator->startSaveFileWatchAsync(path, options);
 }
 
 QVariantMap ApplicationController::cancelSaveFileWatch() {
-    QVariantMap result;
-    result["success"] = false;
-    if (!m_saveFileWatchInProgress || !m_activeSaveFileWatchCancellation) {
-        result["error"] = "Aucune surveillance de fichier active à annuler.";
-        return result;
-    }
-
-    m_activeSaveFileWatchCancellation->cancel();
-    result["success"] = true;
-    result["error"] = "";
-    return result;
+    return m_saveFileInvestigator->cancelSaveFileWatch();
 }
 
 QVariantMap ApplicationController::patchProcessSaveFileBytes(const QString& path, const QString& findHex, const QString& replaceHex) {
-    QVariantMap result;
-    result["success"] = false;
-    result["path"] = path;
-    result["occurrencesFound"] = 0;
-
-    if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-
-    QString error;
-    int occurrencesFound = 0;
-    if (!killcore::patchPackageSaveFileBytes(path, findHex, replaceHex, &error, &occurrencesFound)) {
-        result["occurrencesFound"] = occurrencesFound;
-        result["error"] = error.isEmpty() ? "Patch du fichier échoué." : error;
-        return result;
-    }
-
-    result["success"] = true;
-    result["occurrencesFound"] = 1;
-    result["error"] = "";
-    return result;
+    return m_saveFileInvestigator->patchProcessSaveFileBytes(path, findHex, replaceHex);
 }
 
 bool ApplicationController::attachProcess(int pid) {
@@ -2364,8 +2116,7 @@ void ApplicationController::detachProcess() {
     clearCandidateUndo();
     clearCandidateValueHistory();
     m_snapshot.clear();
-    m_freeze.clear();
-    m_freezeTimer.stop();
+    m_freezeHotkeyOverlayManager->clearFreezeState();
     m_writeWatchTimer.stop();
     m_writeWatchEntries.clear();
     m_lastWriteAddress = 0;
@@ -6356,69 +6107,7 @@ QVariantMap ApplicationController::forceWriteInstructionValue(
 }
 
 QVariantMap ApplicationController::setFreezeValue(const QString& addressHex, const QString& valueType, const QString& value, bool enabled) {
-    QVariantMap result;
-    result["success"] = false;
-
-    uint64_t address = 0;
-    if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
-        return result;
-    }
-
-    if (!enabled) {
-        bool wasHardwareBreakpoint = false;
-        for (const auto& entry : m_freeze.entries()) {
-            if (entry.address == address && entry.mode == killcore::FreezeMode::HardwareBreakpoint) {
-                wasHardwareBreakpoint = true;
-                break;
-            }
-        }
-        m_freeze.remove(address);
-        if (!m_freeze.hasMode(killcore::FreezeMode::Polling)) {
-            m_freezeTimer.stop();
-        }
-        if (wasHardwareBreakpoint) {
-            // setFreezeValue(..., false) est aussi le point d'entree utilise pour
-            // desactiver un freeze pose via freezeWithBreakpoint (meme registre
-            // m_freeze) : sans ce resync, l'entree disparait de m_freeze mais le
-            // hardware breakpoint reste arme et continue de reecrire la valeur
-            // gelee a chaque ecriture, malgre un success:true trompeur ici.
-            m_debugFeatureManager->restartBreakpointFreezeFromRegistry(killcore::BreakpointFreezeMode::RewriteValue);
-        }
-        result["success"] = true;
-        result["enabled"] = false;
-        return result;
-    }
-
-    killcore::ValueType type;
-    if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
-        return result;
-    }
-
-    killcore::ScanValue scanValue;
-    QString parseError;
-    if (!killcore::parseScanValue(value, type, &scanValue, &parseError)) {
-        result["error"] = parseError;
-        return result;
-    }
-
-    if (!hasAddressBeenWriteVerified(address)) {
-        result["warning"] = "Cette adresse n'a jamais été écrite avec succès avant ce freeze — "
-                             "si c'est un candidat frais (jamais testé par une écriture simple), "
-                             "certaines cibles réagissent mal à une réécriture continue non vérifiée "
-                             "(jusqu'au crash observé sur une cible réelle). Teste une écriture simple "
-                             "et vérifie visuellement avant de figer, si possible.";
-    }
-
-    m_freeze.setEntry(address, type, killcore::scanValueToBytes(scanValue), killcore::FreezeMode::Polling);
-    if (!m_freezeTimer.isActive()) {
-        m_freezeTimer.start();
-    }
-
-    result["success"] = true;
-    result["enabled"] = true;
-    return result;
+    return m_freezeHotkeyOverlayManager->setFreezeValue(addressHex, valueType, value, enabled);
 }
 
 QVariantMap ApplicationController::freezeWithBreakpoint(const QString& addressHex, const QString& valueType, const QString& value, const QVariantMap& options) {
@@ -6438,237 +6127,31 @@ QVariantMap ApplicationController::getBreakpointFreezeStats() const {
 }
 
 QVariantMap ApplicationController::setFreezeInterval(int intervalMs) {
-    QVariantMap result;
-
-    // Bornes raisonnables : 10 ms (très agressif, pour cibles qui réécrivent vite)
-    // à 2000 ms (économique). En dehors de ces bornes, on remet le défaut (100 ms).
-    const int clamped = (intervalMs <= 0) ? 100 : std::clamp(intervalMs, 10, 2000);
-
-    m_freezeTimer.setInterval(clamped);
-
-    // Si le timer est déjà actif (freeze en cours), on le redémarre avec le nouvel intervalle.
-    const bool wasActive = m_freezeTimer.isActive();
-    if (wasActive) {
-        m_freezeTimer.stop();
-        m_freezeTimer.start();
-    }
-
-    result["success"] = true;
-    result["intervalMs"] = clamped;
-    result["wasActive"] = wasActive;
-    return result;
+    return m_freezeHotkeyOverlayManager->setFreezeInterval(intervalMs);
 }
 
 QVariantMap ApplicationController::registerGlobalHotkey(const QString& comboText, const QVariantMap& actionMap) {
-    QVariantMap result;
-    result["success"] = false;
-    result["combo"] = comboText;
-
-    if (!m_hotkeys) {
-        result["error"] = "Gestionnaire de hotkeys indisponible.";
-        return result;
-    }
-
-    const killcore::HotkeyCombo combo = killcore::HotkeyCombo::fromString(comboText);
-    if (combo.keyCode == 0) {
-        result["error"] = "Combinaison invalide. Exemple: Ctrl+Alt+F1.";
-        return result;
-    }
-
-    const QString typeText = actionMap.value("type", "custom").toString().toLower();
-    killcore::HotkeyAction action;
-    action.type = killcore::HotkeyActionType::Custom;
-    if (typeText == "toggle_freeze") {
-        action.type = killcore::HotkeyActionType::ToggleFreeze;
-    } else if (typeText == "toggle_patch") {
-        action.type = killcore::HotkeyActionType::TogglePatch;
-    } else if (typeText == "write_value") {
-        action.type = killcore::HotkeyActionType::WriteValue;
-    } else if (typeText == "toggle_overlay") {
-        action.type = killcore::HotkeyActionType::ToggleOverlay;
-    }
-    action.targetId = actionMap.value("targetId").toString();
-    action.label = actionMap.value("label", combo.toString()).toString();
-    action.payload = actionMap.value("payload");
-
-    const int id = m_hotkeys->registerHotkey(combo, action);
-    if (id < 0) {
-        result["error"] = "RegisterHotKey a échoué. La combinaison est peut-être déjà utilisée.";
-        return result;
-    }
-
-    result["success"] = true;
-    result["id"] = id;
-    result["combo"] = combo.toString();
-    result["type"] = typeText;
-    result["targetId"] = action.targetId;
-    appendScanTelemetry("global_hotkey_registered", result);
-    return result;
+    return m_freezeHotkeyOverlayManager->registerGlobalHotkey(comboText, actionMap);
 }
 
 QVariantMap ApplicationController::unregisterGlobalHotkey(int id) {
-    QVariantMap result;
-    result["success"] = m_hotkeys && m_hotkeys->unregisterHotkey(id);
-    result["id"] = id;
-    if (!result.value("success").toBool()) {
-        result["error"] = "Hotkey introuvable.";
-    }
-    appendScanTelemetry("global_hotkey_unregistered", result);
-    return result;
+    return m_freezeHotkeyOverlayManager->unregisterGlobalHotkey(id);
 }
 
 QVariantMap ApplicationController::getGlobalHotkeys() const {
-    QVariantMap result;
-    QVariantList hotkeys;
-    if (m_hotkeys) {
-        const auto entries = m_hotkeys->registeredHotkeys();
-        for (int i = 0; i < entries.size(); ++i) {
-            const auto& entry = entries[i];
-            QVariantMap item;
-            item["index"] = i;
-            item["combo"] = entry.first.toString();
-            item["targetId"] = entry.second.targetId;
-            item["label"] = entry.second.label;
-            item["payload"] = entry.second.payload;
-            hotkeys.append(item);
-        }
-    }
-    result["success"] = true;
-    result["hotkeys"] = hotkeys;
-    return result;
+    return m_freezeHotkeyOverlayManager->getGlobalHotkeys();
 }
 
 QVariantMap ApplicationController::clearGlobalHotkeys() {
-    QVariantMap result;
-    if (m_hotkeys) {
-        m_hotkeys->unregisterAll();
-    }
-    result["success"] = true;
-    appendScanTelemetry("global_hotkeys_cleared", result);
-    return result;
+    return m_freezeHotkeyOverlayManager->clearGlobalHotkeys();
 }
 
 QVariantMap ApplicationController::setTrainerOverlayVisible(bool visible, const QVariantMap& options) {
-    QVariantMap result;
-    result["success"] = true;
-    result["visible"] = visible;
-
-    if (visible) {
-        if (!m_trainerOverlay) {
-            auto* overlay = new QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
-            overlay->setAttribute(Qt::WA_DeleteOnClose, false);
-            overlay->setWindowTitle("KillEngine Trainer Overlay");
-            overlay->setStyleSheet(
-                "QWidget { background: rgba(22, 23, 31, 222); border: 1px solid rgba(122,162,247,110); border-radius: 8px; }"
-                "QLabel { color: #c0caf5; font-family: 'Segoe UI'; font-size: 12px; }");
-            auto* layout = new QVBoxLayout(overlay);
-            layout->setContentsMargins(12, 10, 12, 10);
-            auto* label = new QLabel("KillEngine Trainer\nAucune feature active.", overlay);
-            label->setTextFormat(Qt::PlainText);
-            label->setWordWrap(true);
-            layout->addWidget(label);
-            m_trainerOverlay = overlay;
-            m_trainerOverlayLabel = label;
-        }
-        const int x = options.value("x", 24).toInt();
-        const int y = options.value("y", 24).toInt();
-        const int width = std::clamp(options.value("width", 320).toInt(), 180, 640);
-        const int height = std::clamp(options.value("height", 140).toInt(), 80, 480);
-        m_trainerOverlay->setGeometry(x, y, width, height);
-        m_trainerOverlay->show();
-        m_trainerOverlay->raise();
-    } else if (m_trainerOverlay) {
-        m_trainerOverlay->hide();
-    }
-
-    appendScanTelemetry("trainer_overlay_visible", result);
-    return result;
+    return m_freezeHotkeyOverlayManager->setTrainerOverlayVisible(visible, options);
 }
 
 QVariantMap ApplicationController::updateTrainerOverlay(const QVariantMap& state) {
-    QVariantMap result;
-    result["success"] = false;
-    if (!m_trainerOverlay || !m_trainerOverlayLabel) {
-        result["error"] = "Overlay Trainer non initialisé.";
-        return result;
-    }
-
-    const QString title = state.value("title", "KillEngine Trainer").toString();
-    const QVariantList features = state.value("features").toList();
-    QStringList lines;
-    lines << title;
-    for (const QVariant& item : features.mid(0, 10)) {
-        const QVariantMap feature = item.toMap();
-        const QString enabled = feature.value("enabled").toBool() ? "ON " : "OFF";
-        lines << QString("%1  %2  %3")
-            .arg(enabled, feature.value("name").toString(), feature.value("status").toString());
-    }
-    if (features.isEmpty()) {
-        lines << "Aucune feature Trainer.";
-    }
-    m_trainerOverlayLabel->setText(lines.join('\n'));
-    result["success"] = true;
-    result["lineCount"] = lines.size();
-    return result;
-}
-
-void ApplicationController::applyFreezeTick() {
-    if (m_freeze.isEmpty() || m_pid <= 0) {
-        m_freezeTimer.stop();
-        return;
-    }
-
-    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
-    if (!writeHandle.isValid()) {
-        return;
-    }
-
-    killcore::MemoryWriter writer(writeHandle);
-    killcore::MemoryReader reader(writeHandle);
-    for (const auto& entry : m_freeze.entries()) {
-        if (!entry.enabled || entry.mode != killcore::FreezeMode::Polling) {
-            continue;
-        }
-
-        // Fiabilite (Phase 18) : lire AVANT de reecrire detecte, sans que
-        // l'utilisateur ait besoin de le signaler, qu'une cible reecrit plus
-        // vite que ce freeze ne peut suivre (le classique "freeze qui
-        // clignote"). La reecriture a lieu dans tous les cas juste apres.
-        const auto read = reader.read(entry.address, static_cast<size_t>(entry.value.size()));
-        const bool matched = (read.success || read.partial)
-            && read.bytesRead == static_cast<size_t>(entry.value.size())
-            && read.data == entry.value;
-
-        const bool crossedThreshold = m_freeze.recordPollTick(entry.address, matched);
-
-        writer.write(entry.address, entry.value, false);
-
-        if (crossedThreshold) {
-            const QString addressHex = QString::number(entry.address, 16).toUpper();
-            const double holdRatePercent = entry.totalTicks > 0
-                ? 100.0 * static_cast<double>(entry.totalTicks - entry.totalDriftTicks) / static_cast<double>(entry.totalTicks)
-                : 0.0;
-
-            QVariantMap info;
-            info["address"] = addressHex;
-            info["type"] = killcore::valueTypeToString(entry.type);
-            info["mode"] = "polling";
-            info["consecutiveDriftTicks"] = entry.consecutiveDriftTicks;
-            info["totalDriftTicks"] = entry.totalDriftTicks;
-            info["totalTicks"] = entry.totalTicks;
-            info["holdRatePercent"] = holdRatePercent;
-            info["message"] = QString(
-                "Le freeze sur 0x%1 ne tient pas : la valeur repart avant chaque réécriture depuis %2 ticks d'affilée "
-                "(tenue mesurée %3%). La cible réécrit probablement plus vite que l'intervalle de polling actuel.")
-                .arg(addressHex)
-                .arg(entry.consecutiveDriftTicks)
-                .arg(QString::number(holdRatePercent, 'f', 0));
-            info["suggestion"] = "Passe en Freeze BP (bloque l'écriture à la source) ou lance Écrit par pour trouver l'instruction qui réécrit.";
-
-            appendScanTelemetry("freeze_poll_instability", info);
-            emit freezeInstabilityDetected(info);
-        }
-    }
+    return m_freezeHotkeyOverlayManager->updateTrainerOverlay(state);
 }
 
 // Nombre de sondages (1.5s d'intervalle, cf. m_writeWatchTimer.setInterval)
@@ -9478,7 +8961,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         aiContext["targetValue"] = m_smartSearchTargetValue;
         aiContext["activeTargetCount"] = static_cast<qulonglong>(m_chatMemoryTargets.size());
         aiContext["unknownSnapshotActive"] = !m_snapshot.isEmpty();
-        aiContext["freezeCount"] = static_cast<qulonglong>(m_freeze.entries().size());
+        aiContext["freezeCount"] = static_cast<qulonglong>(m_freezeHotkeyOverlayManager->freezeManager().entries().size());
         aiContext["valueType"] = m_smartSearchValueType;
         m_smartSearchBusy = true;
         result = m_ai.processQuery(query, aiContext);
@@ -10839,236 +10322,19 @@ QVariantMap ApplicationController::disassembleClrMethod(const QString& objectAdd
     return m_clrInspectorBridge->disassembleClrMethod(objectAddressHex, methodName, instructionCount);
 }
 QVariantMap ApplicationController::probeKernelDriver() const {
-    const killcore::KernelDriverBridge bridge;
-    const auto probe = bridge.probe();
-
-    QVariantMap capabilities;
-    capabilities["protocolVersion"] = static_cast<int>(probe.capabilities.protocolVersion);
-    capabilities["healthProbe"] = probe.capabilities.healthProbe;
-    capabilities["processMemoryAccess"] = probe.capabilities.processMemoryAccess;
-    capabilities["privilegedInstrumentation"] = probe.capabilities.privilegedInstrumentation;
-
-    QVariantMap result;
-    result["success"] = probe.status == killcore::KernelDriverProbeStatus::Connected;
-    result["status"] = killcore::KernelDriverBridge::statusToString(probe.status);
-    result["devicePath"] = probe.devicePath;
-    result["message"] = probe.message;
-    result["capabilities"] = capabilities;
-
-    KE_LOG_INFO() << "probeKernelDriver: status=" << result.value("status").toString().toStdString()
-                  << " message=" << probe.message.toStdString();
-    return result;
+    return m_kernelDriverManager->probeKernelDriver();
 }
 
 QVariantMap ApplicationController::startKernelDriver() const {
-    QVariantMap result;
-    result["success"] = false;
-    result["serviceName"] = QStringLiteral("KillEngineKernel");
-    result["started"] = false;
-    result["alreadyRunning"] = false;
-
-#ifndef Q_OS_WIN
-    result["status"] = QStringLiteral("unavailable");
-    result["devicePath"] = QString::fromWCharArray(killcore::KernelDriverBridge::kDefaultDevicePath);
-    result["message"] = QStringLiteral("Démarrage du driver disponible uniquement sur Windows.");
-    appendScanTelemetry("kernel_driver_start", result);
-    return result;
-#else
-    auto addEmptyCapabilities = [&result]() {
-        QVariantMap capabilities;
-        capabilities["protocolVersion"] = static_cast<int>(killcore::KernelDriverBridge::kProtocolVersion);
-        capabilities["healthProbe"] = false;
-        capabilities["processMemoryAccess"] = false;
-        capabilities["privilegedInstrumentation"] = false;
-        result["capabilities"] = capabilities;
-    };
-
-    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (!scm) {
-        const DWORD error = GetLastError();
-        result["status"] = error == ERROR_ACCESS_DENIED ? QStringLiteral("access_denied") : QStringLiteral("error");
-        result["devicePath"] = QString::fromWCharArray(killcore::KernelDriverBridge::kDefaultDevicePath);
-        result["message"] = QStringLiteral("Impossible d'ouvrir le Service Control Manager: %1").arg(windowsErrorMessage(error));
-        result["error"] = result["message"];
-        addEmptyCapabilities();
-        appendScanTelemetry("kernel_driver_start", result);
-        return result;
-    }
-
-    SC_HANDLE service = OpenServiceW(scm, L"KillEngineKernel", SERVICE_START | SERVICE_QUERY_STATUS);
-    if (!service) {
-        const DWORD error = GetLastError();
-        result["status"] = error == ERROR_SERVICE_DOES_NOT_EXIST ? QStringLiteral("unavailable")
-                            : (error == ERROR_ACCESS_DENIED ? QStringLiteral("access_denied") : QStringLiteral("error"));
-        result["devicePath"] = QString::fromWCharArray(killcore::KernelDriverBridge::kDefaultDevicePath);
-        result["message"] = error == ERROR_SERVICE_DOES_NOT_EXIST
-            ? QStringLiteral("Service KillEngineKernel introuvable. Installe d'abord le driver depuis un terminal administrateur.")
-            : QStringLiteral("Impossible d'ouvrir le service KillEngineKernel: %1").arg(windowsErrorMessage(error));
-        result["error"] = result["message"];
-        addEmptyCapabilities();
-        CloseServiceHandle(scm);
-        appendScanTelemetry("kernel_driver_start", result);
-        return result;
-    }
-
-    SERVICE_STATUS_PROCESS status{};
-    DWORD bytesNeeded = 0;
-    if (QueryServiceStatusEx(service,
-                             SC_STATUS_PROCESS_INFO,
-                             reinterpret_cast<LPBYTE>(&status),
-                             sizeof(status),
-                             &bytesNeeded) &&
-        status.dwCurrentState == SERVICE_RUNNING) {
-        result["alreadyRunning"] = true;
-    } else if (!StartServiceW(service, 0, nullptr)) {
-        const DWORD error = GetLastError();
-        if (error == ERROR_SERVICE_ALREADY_RUNNING) {
-            result["alreadyRunning"] = true;
-        } else {
-            result["status"] = error == ERROR_ACCESS_DENIED ? QStringLiteral("access_denied") : QStringLiteral("error");
-            result["devicePath"] = QString::fromWCharArray(killcore::KernelDriverBridge::kDefaultDevicePath);
-            result["message"] = QStringLiteral("Démarrage du service KillEngineKernel échoué: %1").arg(windowsErrorMessage(error));
-            result["error"] = result["message"];
-            addEmptyCapabilities();
-            CloseServiceHandle(service);
-            CloseServiceHandle(scm);
-            appendScanTelemetry("kernel_driver_start", result);
-            return result;
-        }
-    } else {
-        result["started"] = true;
-    }
-
-    for (int attempt = 0; attempt < 30; ++attempt) {
-        if (QueryServiceStatusEx(service,
-                                 SC_STATUS_PROCESS_INFO,
-                                 reinterpret_cast<LPBYTE>(&status),
-                                 sizeof(status),
-                                 &bytesNeeded) &&
-            status.dwCurrentState == SERVICE_RUNNING) {
-            break;
-        }
-        Sleep(100);
-    }
-
-    result["serviceState"] = static_cast<int>(status.dwCurrentState);
-    CloseServiceHandle(service);
-    CloseServiceHandle(scm);
-
-    const QVariantMap probe = probeKernelDriver();
-    const bool serviceStarted = result.value("started").toBool();
-    const bool serviceAlreadyRunning = result.value("alreadyRunning").toBool();
-    const int serviceState = result.value("serviceState").toInt();
-    for (auto it = probe.cbegin(); it != probe.cend(); ++it) {
-        result[it.key()] = it.value();
-    }
-    result["serviceName"] = QStringLiteral("KillEngineKernel");
-    result["started"] = serviceStarted;
-    result["alreadyRunning"] = serviceAlreadyRunning;
-    result["serviceState"] = serviceState;
-    if (result.value("success").toBool()) {
-        result["message"] = serviceStarted
-            ? QStringLiteral("Driver KillEngineKernel démarré et connecté.")
-            : QStringLiteral("Driver KillEngineKernel déjà démarré et connecté.");
-    } else if (!result.contains("error")) {
-        result["error"] = result.value("message");
-    }
-
-    KE_LOG_INFO() << "startKernelDriver: status=" << result.value("status").toString().toStdString()
-                  << " started=" << result.value("started").toBool()
-                  << " alreadyRunning=" << result.value("alreadyRunning").toBool();
-    appendScanTelemetry("kernel_driver_start", result);
-    return result;
-#endif
+    return m_kernelDriverManager->startKernelDriver();
 }
 
 QVariantMap ApplicationController::readMemoryKernel(const QString& addressHex, int size) const {
-    QVariantMap result;
-    result["success"] = false;
-
-    if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-
-    bool ok = false;
-    QString normalized = addressHex.trimmed();
-    if (normalized.startsWith("0x", Qt::CaseInsensitive)) {
-        normalized = normalized.mid(2);
-    }
-    const uint64_t address = normalized.toULongLong(&ok, 16);
-    if (!ok || address == 0) {
-        result["error"] = "Adresse invalide.";
-        return result;
-    }
-
-    const int boundedSize = std::clamp(size, 1, 4096);
-
-#ifdef Q_OS_WIN
-    const killcore::KernelDriverBridge bridge;
-    const auto targetPid = reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(m_handle.pid()));
-    const QByteArray data = bridge.readMemory(targetPid, address, static_cast<size_t>(boundedSize));
-    if (data.isEmpty()) {
-        result["error"] = "Lecture kernel échouée (driver non chargé/non connecté, adresse invalide côté cible, ou accès refusé).";
-        KE_LOG_WARN() << "readMemoryKernel: échec pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString();
-        return result;
-    }
-    result["success"] = true;
-    result["bytesRead"] = data.size();
-    result["hex"] = QString::fromLatin1(data.toHex(' ').toUpper());
-    KE_LOG_INFO() << "readMemoryKernel: pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString()
-                  << " bytesRead=" << data.size();
-#else
-    result["error"] = "Fonctionnalité Windows uniquement.";
-#endif
-    return result;
+    return m_kernelDriverManager->readMemoryKernel(addressHex, size);
 }
 
 QVariantMap ApplicationController::writeMemoryKernel(const QString& addressHex, const QString& hexBytes) {
-    QVariantMap result;
-    result["success"] = false;
-
-    if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
-    }
-
-    bool ok = false;
-    QString normalized = addressHex.trimmed();
-    if (normalized.startsWith("0x", Qt::CaseInsensitive)) {
-        normalized = normalized.mid(2);
-    }
-    const uint64_t address = normalized.toULongLong(&ok, 16);
-    if (!ok || address == 0) {
-        result["error"] = "Adresse invalide.";
-        return result;
-    }
-
-    QString hexOnly = hexBytes;
-    hexOnly.remove(' ');
-    const QByteArray data = QByteArray::fromHex(hexOnly.toLatin1());
-    if (data.isEmpty()) {
-        result["error"] = "Octets invalides (format hexadécimal attendu, ex: \"90 90 90\").";
-        return result;
-    }
-
-#ifdef Q_OS_WIN
-    const killcore::KernelDriverBridge bridge;
-    const auto targetPid = reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(m_handle.pid()));
-    const bool written = bridge.writeMemory(targetPid, address, data);
-    result["success"] = written;
-    if (written) {
-        result["bytesWritten"] = data.size();
-        KE_LOG_INFO() << "writeMemoryKernel: pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString()
-                      << " bytesWritten=" << data.size();
-    } else {
-        result["error"] = "Écriture kernel échouée (driver non chargé/non connecté, adresse invalide côté cible, ou accès refusé).";
-        KE_LOG_WARN() << "writeMemoryKernel: échec pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString();
-    }
-#else
-    result["error"] = "Fonctionnalité Windows uniquement.";
-#endif
-    return result;
+    return m_kernelDriverManager->writeMemoryKernel(addressHex, hexBytes);
 }
 
 QVariantMap ApplicationController::writeMemoryValueKernel(const QString& addressHex, const QString& valueType, const QString& value) {
