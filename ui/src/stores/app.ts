@@ -34,9 +34,6 @@ import {
   type SaveFileWatchResult,
   type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
-  type SpeedhackStatus,
-  type ProcessNetworkBlockStatus,
-  type ApiHookStatus,
   type TemporaryStorageStatus,
   type UndoCandidateScanResult,
   type UiStringCandidate,
@@ -57,6 +54,7 @@ import {
 import { useInvestigationStore, type InvestigationRun, type InvestigationStep } from './investigation'
 import { useActionLogStore, type UserActionLogEntry } from './actionLog'
 import { useClrInspectorStore } from './clrInspector'
+import { useSpeedhackStore } from './speedhack'
 
 export type { InvestigationRun, InvestigationStep }
 export type { UserActionLogEntry }
@@ -438,26 +436,25 @@ export const useAppStore = defineStore('app', () => {
     clrDisassembleResult,
     clrObjectReportResult,
   } = storeToRefs(clrInspectorStore)
-  // Roadmap section J — Speedhack : accélère/ralentit le temps perçu par la
-  // cible attachée. `speedhackFactor` est l'état local du slider (curseur
-  // en cours de manipulation) tandis que `speedhackStatus.factor` reflète la
-  // dernière valeur confirmée côté backend.
-  const speedhackStatus = ref<SpeedhackStatus | null>(null)
-  const speedhackBusy = ref(false)
-  const speedhackFactor = ref(1.0)
-  // Coupe le réseau du processus attaché (règle pare-feu dédiée à son
-  // exécutable) — utile pour isoler une synchro serveur en arrière-plan comme
-  // cause d'une valeur mémoire instable, avant de conclure à une réallocation
-  // purement locale (voir docs/STRATEGY_ROOM.md, 24/08/2026, cas Solitaire).
-  const networkBlockStatus = ref<ProcessNetworkBlockStatus | null>(null)
-  const networkBlockBusy = ref(false)
-  // Roadmap section B - interception de fonctions (hook MinHook injecte).
-  const apiHookStatus = ref<ApiHookStatus | null>(null)
-  const apiHookBusy = ref(false)
-  const apiHookModuleName = ref('kernel32.dll')
-  const apiHookFunctionName = ref('Sleep')
-  const apiHookMode = ref(0)
-  const apiHookForcedReturn = ref(0)
+  // Store Speedhack/API-hook/blocage réseau extrait (candidat S2,
+  // docs/REFACTOR_ROADMAP.md, 29/08/2026) -- même patron que
+  // clrInspectorStore : `speedhackFactor` reste l'état local du slider
+  // (curseur en cours de manipulation) tandis que `speedhackStatus.factor`
+  // reflète la dernière valeur confirmée côté backend.
+  const speedhackStore = useSpeedhackStore()
+  const {
+    speedhackStatus,
+    speedhackBusy,
+    speedhackFactor,
+    networkBlockStatus,
+    networkBlockBusy,
+    apiHookStatus,
+    apiHookBusy,
+    apiHookModuleName,
+    apiHookFunctionName,
+    apiHookMode,
+    apiHookForcedReturn,
+  } = storeToRefs(speedhackStore)
   const luaScriptingStatus = ref<LuaScriptingStatus | null>(null)
   const luaScriptText = ref([
     'local ke = require("killengine")',
@@ -3556,200 +3553,61 @@ let nextWatchedChainId = 1
   // un dialogue à chaque cran, même logique que le preset d'intervalle
   // freeze existant (setFreezeInterval).
   async function refreshSpeedhackStatus() {
-    const controller = backend.getController()
-    if (!controller.getSpeedhackStatus) return null
-    try {
-      const status = await controller.getSpeedhackStatus()
-      speedhackStatus.value = status
-      if (status.active) speedhackFactor.value = status.factor
-      return status
-    } catch (e) {
-      addActionLog('speedhack', 'Statut speedhack indisponible', String(e), 'warning')
-      return null
-    }
+    return speedhackStore.refreshSpeedhackStatus()
   }
 
-  // Roadmap section B - interception de fonctions. start() garde le
-  // confirmRiskAction injection (meme garde que le speedhack).
+  // Roadmap section B - interception de fonctions. Gate confirmRiskAction
+  // ICI (pas encore extrait de app.ts) avant de déléguer à speedhackStore.
   async function startApiHook() {
-    const controller = backend.getController()
-    if (!controller.startApiHook) {
-      addActionLog('injection', 'Interception indisponible', 'Backend non exposé.', 'warning')
-      return null
-    }
     if (!await confirmRiskAction('injection', 'Intercepter '+apiHookModuleName.value+'!'+apiHookFunctionName.value, `Injecte un composant MinHook dans le processus cible pour intercepter les appels à ${apiHookModuleName.value}!${apiHookFunctionName.value}.`)) return null
-    apiHookBusy.value = true
-    try {
-      const result = await controller.startApiHook(apiHookModuleName.value, apiHookFunctionName.value, apiHookMode.value, apiHookForcedReturn.value)
-      apiHookStatus.value = result
-      if (result.success) {
-        addActionLog('injection', 'Interception active', `${apiHookModuleName.value}!${apiHookFunctionName.value}, mode ${apiHookMode.value === 1 ? 'forcer retour' : 'compter'}.`, 'success')
-      } else {
-        addActionLog('injection', 'Interception échouée', result.error || 'raison inconnue', 'error')
-      }
-      return result
-    } catch (e) {
-      addActionLog('injection', 'Interception échouée', String(e), 'error')
-      return null
-    } finally {
-      apiHookBusy.value = false
-    }
+    return speedhackStore.startApiHook()
   }
 
   async function stopApiHook() {
-    const controller = backend.getController()
-    if (!controller.stopApiHook) return null
-    try {
-      const result = await controller.stopApiHook()
-      apiHookStatus.value = result
-      addActionLog('injection', 'Interception retirée', result.finalCallCount !== undefined ? `${result.finalCallCount} appel(s) intercepté(s) au total.` : 'Hook retiré.', 'success')
-      return result
-    } catch (e) {
-      addActionLog('injection', 'Retrait de l interception échoué', String(e), 'error')
-      return null
-    }
+    return speedhackStore.stopApiHook()
   }
 
   async function refreshApiHookStatus() {
-    const controller = backend.getController()
-    if (!controller.getApiHookStatus) return null
-    try {
-      apiHookStatus.value = await controller.getApiHookStatus()
-      return apiHookStatus.value
-    } catch {
-      return null
-    }
+    return speedhackStore.refreshApiHookStatus()
   }
 
   async function startSpeedhack(factor: number) {
     if (!await confirmRiskAction('injection', 'Activer le speedhack', `Injecte un composant dans le processus cible pour modifier la vitesse perçue du temps (facteur ${factor}x).`)) return null
-    const controller = backend.getController()
-    if (!controller.startSpeedhack) {
-      addActionLog('speedhack', 'Speedhack indisponible', 'Backend non exposé.', 'warning')
-      return null
-    }
-    speedhackBusy.value = true
-    try {
-      const result = await controller.startSpeedhack(factor)
-      speedhackStatus.value = result
-      if (result.success) {
-        speedhackFactor.value = factor
-        addActionLog('speedhack', 'Speedhack activé', `Facteur ${factor}x.`, 'success')
-      } else {
-        addActionLog('speedhack', 'Speedhack échoué', result.error || 'raison inconnue', 'error')
-      }
-      logAiAudit('speedhack_start_executed', { factor, success: result.success === true })
-      return result
-    } catch (e) {
-      addActionLog('speedhack', 'Speedhack échoué', String(e), 'error')
-      return null
-    } finally {
-      speedhackBusy.value = false
-    }
+    const result = await speedhackStore.startSpeedhack(factor)
+    logAiAudit('speedhack_start_executed', { factor, success: result?.success === true })
+    return result
   }
 
   async function setSpeedhackFactor(factor: number) {
-    const controller = backend.getController()
-    if (!controller.setSpeedhackFactor) return null
-    try {
-      const result = await controller.setSpeedhackFactor(factor)
-      speedhackStatus.value = {
-        ...(speedhackStatus.value ?? { success: true, active: true, factor }),
-        ...result,
-        active: result.active ?? speedhackStatus.value?.active ?? true,
-        factor: result.factor ?? factor,
-      }
-      if (result.success) speedhackFactor.value = factor
-      return result
-    } catch (e) {
-      addActionLog('speedhack', 'Réglage du facteur échoué', String(e), 'error')
-      return null
-    }
+    return speedhackStore.setSpeedhackFactor(factor)
   }
 
   async function stopSpeedhack() {
-    const controller = backend.getController()
-    if (!controller.stopSpeedhack) return null
-    try {
-      const result = await controller.stopSpeedhack()
-      speedhackStatus.value = result
-      speedhackFactor.value = 1.0
-      addActionLog('speedhack', 'Speedhack désactivé', 'Vitesse remise à la normale.', 'success')
-      logAiAudit('speedhack_stop_executed', {})
-      return result
-    } catch (e) {
-      addActionLog('speedhack', 'Arrêt du speedhack échoué', String(e), 'error')
-      return null
-    }
+    const result = await speedhackStore.stopSpeedhack()
+    logAiAudit('speedhack_stop_executed', {})
+    return result
   }
 
   // Coupe/rétablit le réseau du processus attaché (règle pare-feu Windows
   // dédiée à son exécutable, invite UAC). Même palier de risque que le
   // speedhack ('injection') : c'est une modification système, pas une
-  // simple lecture/écriture mémoire.
+  // simple lecture/écriture mémoire. Gate confirmRiskAction ICI avant de
+  // déléguer à speedhackStore.
   async function blockProcessNetwork() {
     if (!await confirmRiskAction('injection', 'Couper le réseau du processus', `Ajoute une règle pare-feu Windows bloquant tout le trafic entrant/sortant de ${processName.value || 'ce processus'} (invite UAC requise).`)) return null
-    const controller = backend.getController()
-    if (!controller.blockProcessNetwork) {
-      addActionLog('network_block', 'Blocage réseau indisponible', 'Backend non exposé.', 'warning')
-      return null
-    }
-    networkBlockBusy.value = true
-    try {
-      const result = await controller.blockProcessNetwork()
-      networkBlockStatus.value = { ...result, blocked: result.success ? true : networkBlockStatus.value?.blocked ?? false }
-      if (result.success) {
-        addActionLog('network_block', 'Réseau coupé', `${result.exePath ?? processName.value} isolé du réseau.`, 'success')
-      } else if (result.cancelled) {
-        addActionLog('network_block', 'Blocage réseau annulé', 'Invite UAC refusée.', 'warning')
-      } else {
-        addActionLog('network_block', 'Blocage réseau échoué', result.error || 'raison inconnue', 'error')
-      }
-      logAiAudit('network_block_executed', { success: result.success === true })
-      return result
-    } catch (e) {
-      addActionLog('network_block', 'Blocage réseau échoué', String(e), 'error')
-      return null
-    } finally {
-      networkBlockBusy.value = false
-    }
+    const result = await speedhackStore.blockProcessNetwork(processName.value)
+    logAiAudit('network_block_executed', { success: result?.success === true })
+    return result
   }
 
   async function unblockProcessNetwork() {
-    const controller = backend.getController()
-    if (!controller.unblockProcessNetwork) return null
-    networkBlockBusy.value = true
-    try {
-      const result = await controller.unblockProcessNetwork()
-      if (result.success) {
-        networkBlockStatus.value = { ...result, blocked: false }
-        addActionLog('network_block', 'Réseau rétabli', 'Règle pare-feu retirée.', 'success')
-      } else if (result.cancelled) {
-        addActionLog('network_block', 'Rétablissement réseau annulé', 'Invite UAC refusée.', 'warning')
-      } else {
-        addActionLog('network_block', 'Rétablissement réseau échoué', result.error || 'raison inconnue', 'error')
-      }
-      logAiAudit('network_unblock_executed', { success: result.success === true })
-      return result
-    } catch (e) {
-      addActionLog('network_block', 'Rétablissement réseau échoué', String(e), 'error')
-      return null
-    } finally {
-      networkBlockBusy.value = false
-    }
+    const result = await speedhackStore.unblockProcessNetwork()
+    logAiAudit('network_unblock_executed', { success: result?.success === true })
+    return result
   }
 
   async function refreshProcessNetworkBlockStatus() {
-    const controller = backend.getController()
-    if (!controller.getProcessNetworkBlockStatus) return null
-    try {
-      const status = await controller.getProcessNetworkBlockStatus()
-      networkBlockStatus.value = status
-      return status
-    } catch (e) {
-      addActionLog('network_block', 'Statut réseau indisponible', String(e), 'warning')
-      return null
-    }
+    return speedhackStore.refreshProcessNetworkBlockStatus()
   }
 
   async function prepareCheckpointAob(checkpoint: Record<string, unknown>) {
