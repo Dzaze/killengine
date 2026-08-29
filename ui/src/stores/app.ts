@@ -3445,6 +3445,14 @@ let nextWatchedChainId = 1
     try {
       const result = await controller.confirmChatMemoryWrite(value)
       addActionLog('checkpoint', result.success === true ? 'Écriture chat OK' : 'Écriture chat échouée', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      addInvestigationStep({
+        title: result.success === true ? 'Écriture chat exécutée' : 'Écriture chat échouée',
+        detail: String(result.message ?? result.error ?? `valeur = ${value}`),
+        status: result.success === true ? 'success' : 'error',
+        tool: 'confirmChatMemoryWrite',
+        risk: 'write',
+        payload: result as unknown as Record<string, unknown>,
+      })
       return result
     } catch (e) {
       addActionLog('checkpoint', 'Écriture chat échouée', String(e), 'error')
@@ -3461,6 +3469,14 @@ let nextWatchedChainId = 1
     try {
       const result = await controller.confirmChatMemoryFreeze(value)
       addActionLog('checkpoint', result.success === true ? 'Freeze chat OK' : 'Freeze chat échoué', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      addInvestigationStep({
+        title: result.success === true ? 'Freeze chat exécuté' : 'Freeze chat échoué',
+        detail: String(result.message ?? result.error ?? `valeur = ${value}`),
+        status: result.success === true ? 'success' : 'error',
+        tool: 'confirmChatMemoryFreeze',
+        risk: 'write',
+        payload: result as unknown as Record<string, unknown>,
+      })
       return result
     } catch (e) {
       addActionLog('checkpoint', 'Freeze chat échoué', String(e), 'error')
@@ -3477,6 +3493,14 @@ let nextWatchedChainId = 1
     try {
       const result = await controller.confirmRewriteLastAutoWrite(value)
       addActionLog('checkpoint', result.success === true ? 'Réécriture chat OK' : 'Réécriture chat échouée', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      addInvestigationStep({
+        title: result.success === true ? 'Réécriture chat exécutée' : 'Réécriture chat échouée',
+        detail: String(result.message ?? result.error ?? `valeur = ${value}`),
+        status: result.success === true ? 'success' : 'error',
+        tool: 'confirmRewriteLastAutoWrite',
+        risk: 'write',
+        payload: result as unknown as Record<string, unknown>,
+      })
       return result
     } catch (e) {
       addActionLog('checkpoint', 'Réécriture chat échouée', String(e), 'error')
