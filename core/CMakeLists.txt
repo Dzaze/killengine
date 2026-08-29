@@ -216,6 +216,10 @@ endif()
 # killcore/Qt). Voir core/debug/speedhack_handler/speedhack_handler.cpp.
 # Lie winmm (timeGetTime) : bibliotheque systeme minimale, pas une dependance
 # applicative — n'introduit aucun risque de chargement dans la cible.
+# Lie aussi minhook (PHASE 14B, 29/08/2026) : le patch IAT seul ne couvre pas
+# les appels resolus dynamiquement (P/Invoke JIT .NET notamment, voir
+# commentaire de tete de speedhack_handler.cpp) — meme moteur de hook inline
+# que KillEngineApiHookHandler ci-dessous.
 # ---------------------------------------------------------------------------
 add_library(KillEngineSpeedhackHandler SHARED
     debug/speedhack_ipc.h
@@ -226,7 +230,7 @@ target_include_directories(KillEngineSpeedhackHandler PRIVATE ${CMAKE_CURRENT_SO
 set_target_properties(KillEngineSpeedhackHandler PROPERTIES OUTPUT_NAME "KillEngineSpeedhackHandler")
 if(WIN32)
     target_compile_definitions(KillEngineSpeedhackHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
-    target_link_libraries(KillEngineSpeedhackHandler PRIVATE winmm)
+    target_link_libraries(KillEngineSpeedhackHandler PRIVATE winmm minhook)
 endif()
 
 # ---------------------------------------------------------------------------

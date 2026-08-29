@@ -10464,7 +10464,7 @@ QVariantMap ApplicationController::activateChatMemoryTargetsFromQuery(const QStr
             continue;
         }
 
-        const AutoWriteTarget target{address, killcore::ValueType::Int32};
+        const AutoWriteTarget target{address, killcore::ValueType::Int32, /*chatOrigin=*/true};
         m_chatMemoryTargets.append(target);
         m_lastAutoWriteTargets.append(target);
 
@@ -10636,6 +10636,27 @@ QVariantMap ApplicationController::freezeChatMemoryTargetsFromQuery(const QStrin
 
     appendSmartSearchDebug("chat_memory_freeze", result);
     return result;
+}
+
+// RiskGate chat (29/08/2026) : points d'entree publics, appeles UNIQUEMENT
+// apres un clic explicite sur le recoveryAction renvoye par startSmartSearch
+// (le clic EST la confirmation, pas de second modal confirmRiskAction --
+// retire a la demande du proprietaire, juge redondant avec la carte chat qui
+// affiche deja l'avertissement + le libelle exact de l'action). N'ajoutent
+// aucune logique d'ecriture : appellent directement les fonctions privees
+// existantes, qui n'ont pas change. Query vide car ces fonctions ne
+// re-parsent pas d'adresse depuis la query -- elles utilisent
+// m_chatMemoryTargets/m_lastAutoWriteTargets deja peuples cote serveur.
+QVariantMap ApplicationController::confirmChatMemoryWrite(const QString& value) {
+    return writeChatMemoryTargetsFromQuery(QString(), value);
+}
+
+QVariantMap ApplicationController::confirmChatMemoryFreeze(const QString& value) {
+    return freezeChatMemoryTargetsFromQuery(QString(), value);
+}
+
+QVariantMap ApplicationController::confirmRewriteLastAutoWrite(const QString& value) {
+    return rewriteLastAutoWriteTargets(value, QString());
 }
 
 QVariantMap ApplicationController::getActiveChatMemoryTargets() const {
@@ -12866,6 +12887,40 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         return recovery;
     }
 
+    // RiskGate chat (29/08/2026) : ecrire/figer depuis une adresse tapee dans
+    // le chat executait reellement la memoire sans jamais passer par
+    // confirmRiskAction (constate en direct pendant PHASE 120-D). Corrige en
+    // renvoyant desormais une confirmation + recoveryActions (meme patron que
+    // write_value/kernel_write plus haut) au lieu d'appeler
+    // writeChatMemoryTargetsFromQuery/freezeChatMemoryTargetsFromQuery
+    // directement -- ces deux fonctions n'ont pas change, seul ce point
+    // d'entree est desormais gate. Un seul recoveryAction regardless du
+    // nombre d'adresses : elles restent server-side dans m_chatMemoryTargets,
+    // aucune serialisation necessaire.
+    const auto makeChatMemoryConfirmation = [&](const QString& actionId, const QString& value,
+                                                 const QString& verbInfinitive, const QString& actionRequestedLabel,
+                                                 const QString& confirmationReason) {
+        QVariantMap confirmResult;
+        confirmResult["query"] = query;
+        confirmResult["aiReady"] = m_ai.isReady();
+        confirmResult["actionStatus"] = "requires_confirmation";
+        confirmResult["requiresConfirmation"] = true;
+        confirmResult["confirmationReason"] = confirmationReason;
+        confirmResult["message"] = QString("%1 : %2 sur %3 adresse(s). Confirme pour appliquer.")
+            .arg(actionRequestedLabel, value)
+            .arg(m_chatMemoryTargets.size());
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{
+            {"id", actionId},
+            {"label", QString("%1 %2").arg(verbInfinitive, value)},
+            {"value", value},
+            {"requiresConfirmation", true},
+        });
+        confirmResult["recoveryActions"] = recoveryActions;
+        stampIntent(&confirmResult);
+        return confirmResult;
+    };
+
     if (!smartSearchBypassesMemoryPreIntent
         && (intent.kind == SmartSearchIntentKind::ActivateMemoryTargets
         || (intent.kind == SmartSearchIntentKind::WriteMemoryTargets && !chatAddresses.isEmpty())
@@ -12874,34 +12929,42 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets
             && activation.value("success").toBool()
             && numbers.size() == 1) {
-            auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
-            stampIntent(&writeTargets);
-            return writeTargets;
+            return makeChatMemoryConfirmation("chat_memory_write_confirm", numbers.first(), "écrire", "Écriture demandée",
+                "Cette action modifie la mémoire de la cible attachée.");
         }
         if (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets
             && activation.value("success").toBool()
             && numbers.size() == 1) {
-            auto freezeTargets = freezeChatMemoryTargetsFromQuery(query, numbers.first());
-            stampIntent(&freezeTargets);
-            return freezeTargets;
+            return makeChatMemoryConfirmation("chat_memory_freeze_confirm", numbers.first(), "figer", "Freeze demandé",
+                "Fige cette/ces adresse(s) en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite.");
         }
         stampIntent(&activation);
         return activation;
     }
 
     if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
-        auto writeTargets = writeChatMemoryTargetsFromQuery(query, numbers.first());
-        stampIntent(&writeTargets);
-        return writeTargets;
+        return makeChatMemoryConfirmation("chat_memory_write_confirm", numbers.first(), "écrire", "Écriture demandée",
+            "Cette action modifie la mémoire de la cible attachée.");
     }
 
     if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
-        auto freezeTargets = freezeChatMemoryTargetsFromQuery(query, numbers.first());
-        stampIntent(&freezeTargets);
-        return freezeTargets;
+        return makeChatMemoryConfirmation("chat_memory_freeze_confirm", numbers.first(), "figer", "Freeze demandé",
+            "Fige cette/ces adresse(s) en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite.");
     }
 
     if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
+        // Gate uniquement si TOUTES les cibles viennent du chat -- sinon
+        // (mode Auto/UI-string-trace/profil, chatOrigin=false) comportement
+        // inchange : jamais de regression sur l'UX de confiance deja
+        // etablie du mode Auto (voir AutoWriteTarget::chatOrigin,
+        // application_controller.h).
+        const bool allChatOrigin = !m_lastAutoWriteTargets.isEmpty()
+            && std::all_of(m_lastAutoWriteTargets.begin(), m_lastAutoWriteTargets.end(),
+                           [](const AutoWriteTarget& t) { return t.chatOrigin; });
+        if (allChatOrigin) {
+            return makeChatMemoryConfirmation("rewrite_last_auto_write_confirm", numbers.first(), "remettre", "Réécriture demandée",
+                "Réécrit la dernière valeur sur les adresses actives (issues du chat).");
+        }
         auto rewriteTargets = rewriteLastAutoWriteTargets(numbers.first(), query);
         stampIntent(&rewriteTargets);
         return rewriteTargets;
@@ -13270,25 +13333,46 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         result["actionStatus"] = "pending_local_action";
         result["pendingTrainerId"] = trainerId;
     } else if (tool == "trainer_apply_request" || tool == "trainer_restore_request") {
+        // PHASE 120-D (29/08/2026) : la raison d'origine (PHASE 121/129,
+        // "eviter timeout ou attente modale invisible") est perimee -- elle
+        // date d'avant le patron recoveryActions de PHASE 148, qui resout deja
+        // ce risque par construction : le modal confirmRiskAction() ne s'ouvre
+        // JAMAIS "en autonome", seulement sur un clic explicite de l'utilisateur
+        // sur le bouton recoveryAction. Meme patron que kernel_write/write_value
+        // ci-dessus, reutilise les fonctions store deja confirmees par RiskGate
+        // (applyTrainerFeature/restoreTrainerFeature, ordre de dependances
+        // deja gere en interne).
         const bool restore = tool == "trainer_restore_request";
         const bool all = args.value("all").toBool();
         const QString trainerId = args.value("id").toString().trimmed();
+        if (!all && (trainerId.isEmpty() || trainerId.toInt() <= 0)) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Demande d'abord la liste du Trainer si tu ne connais pas l'id de la feature à "
+                + QString(restore ? "restaurer" : "activer") + ".";
+            stampIntent(&result);
+            return result;
+        }
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Les actions Trainer apply/restore ouvrent un vrai RiskGate côté UI. L'Assistant ne les déclenche pas en autonome pour éviter timeout ou attente modale invisible.";
-        if (all) {
-            result["message"] = restore
-                ? "Restauration de tout le Trainer demandée. Ouvre l'onglet Trainer et clique Restore all pour confirmer visuellement."
-                : "Activation de tout le Trainer demandée. Ouvre l'onglet Trainer et clique Apply all pour confirmer visuellement.";
-        } else if (!trainerId.isEmpty() && trainerId.toInt() > 0) {
-            result["message"] = restore
-                ? QString("Restauration de la feature Trainer #%1 demandée. Confirme-la dans l'onglet Trainer pour passer le RiskGate.").arg(trainerId)
-                : QString("Activation de la feature Trainer #%1 demandée. Confirme-la dans l'onglet Trainer pour passer le RiskGate.").arg(trainerId);
-        } else {
-            result["message"] = restore
-                ? "Restauration Trainer demandée. Demande d'abord la liste si tu ne connais pas l'id, puis confirme dans l'onglet Trainer."
-                : "Activation Trainer demandée. Demande d'abord la liste si tu ne connais pas l'id, puis confirme dans l'onglet Trainer.";
-        }
+        result["confirmationReason"] = restore
+            ? "Restaure la feature Trainer à sa valeur d'origine (désactivation)."
+            : "Active la feature Trainer : écrit/fige sa valeur configurée en mémoire.";
+        result["message"] = all
+            ? (restore ? "Restauration de tout le Trainer demandée. Confirme pour restaurer toutes les features actives."
+                       : "Activation de tout le Trainer demandée. Confirme pour appliquer toutes les features.")
+            : (restore ? QString("Restauration de la feature Trainer #%1 demandée. Confirme pour restaurer.").arg(trainerId)
+                       : QString("Activation de la feature Trainer #%1 demandée. Confirme pour appliquer.").arg(trainerId));
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{
+            {"id", restore ? "trainer_restore_confirm" : "trainer_apply_confirm"},
+            {"label", all
+                ? QString(restore ? "Tout restaurer" : "Tout activer")
+                : QString(restore ? "Restaurer #%1" : "Activer #%1").arg(trainerId)},
+            {"id_target", trainerId},
+            {"all", all},
+            {"requiresConfirmation", true},
+        });
+        result["recoveryActions"] = recoveryActions;
         stampIntent(&result);
         return result;
     } else if (tool == "analyze_field_stability") {
@@ -13478,9 +13562,44 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         stampIntent(&result);
         return result;
     } else if (tool == "write_value" || tool == "freeze_value") {
+        // PHASE 120-D (29/08/2026) : meme patron que kernel_write/speedhack_set/
+        // block_process_network juste en dessous -- aucune raison technique ne
+        // justifiait que ces deux tools, les plus basiques (simple ecriture/
+        // freeze), restent un cul-de-sac texte sans recoveryActions alors que
+        // des actions plus sensibles (ecriture kernel, injection speedhack)
+        // avaient deja ce patron depuis PHASE 148. Ecart d'implementation
+        // corrige, pas une nouvelle capacite : le clic reste obligatoire, le
+        // vrai modal confirmRiskAction() cote frontend est inchange.
+        const bool isFreeze = (tool == "freeze_value");
+        const QString writeAddress = args.value("address").toString().trimmed();
+        const QString writeValue = args.value("value").toString().trimmed();
+        const QString writeValueType = args.value("valueType", "Int32").toString();
+        if (writeAddress.isEmpty() || writeValue.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = isFreeze
+                ? "Il me faut l'adresse (0x...) et la valeur à figer pour préparer le freeze."
+                : "Il me faut l'adresse (0x...) et la valeur pour préparer l'écriture.";
+            stampIntent(&result);
+            return result;
+        }
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Cette action modifie la mémoire. Utilise l'onglet Mémoire pour confirmer manuellement.";
+        result["confirmationReason"] = isFreeze
+            ? "Fige cette adresse en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite."
+            : "Cette action modifie la mémoire de la cible attachée.";
+        result["message"] = isFreeze
+            ? QString("Freeze demandé : %1 (%2) à 0x%3. Confirme pour figer la valeur.").arg(writeValue, writeValueType, writeAddress)
+            : QString("Écriture demandée : %1 (%2) à 0x%3. Confirme pour appliquer.").arg(writeValue, writeValueType, writeAddress);
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{
+            {"id", isFreeze ? "freeze_value_confirm" : "write_value_confirm"},
+            {"label", isFreeze ? QString("Figer %1").arg(writeValue) : QString("Écrire %1").arg(writeValue)},
+            {"address", writeAddress},
+            {"value", writeValue},
+            {"valueType", writeValueType},
+            {"requiresConfirmation", true},
+        });
+        result["recoveryActions"] = recoveryActions;
         stampIntent(&result);
         return result;
     } else if (tool == "kernel_write") {
@@ -13507,7 +13626,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", "kernel_write_targets"},
-            {"label", QString("Confirmer : écrire %1 via kernel").arg(kernelValue)},
+            {"label", QString("Écrire %1 via kernel").arg(kernelValue)},
             {"address", kernelAddress},
             {"value", kernelValue},
             {"valueType", kernelValueType},
@@ -13537,7 +13656,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", "speedhack_apply"},
-            {"label", isOff ? "Confirmer : désactiver le speedhack" : QString("Confirmer : appliquer %1x").arg(factor)},
+            {"label", isOff ? "Désactiver le speedhack" : QString("Appliquer %1x").arg(factor)},
             {"factor", factor},
             {"mode", isOff ? "off" : "set"},
             {"requiresConfirmation", true},
@@ -13564,7 +13683,7 @@ QVariantMap ApplicationController::startSmartSearch(const QString& query) {
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", "network_block_apply"},
-            {"label", isOff ? "Confirmer : rétablir le réseau" : "Confirmer : couper le réseau"},
+            {"label", isOff ? "Rétablir le réseau" : "Couper le réseau"},
             {"mode", isOff ? "off" : "on"},
             {"requiresConfirmation", true},
         });

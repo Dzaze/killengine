@@ -1281,6 +1281,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   setTrainerOverlayVisible?(visible: boolean, options: Record<string, unknown>): Promise<Record<string, unknown>>
   updateTrainerOverlay?(state: Record<string, unknown>): Promise<Record<string, unknown>>
   startSmartSearch(query: string): Promise<SmartSearchResult>
+  /** RiskGate chat (PHASE, 29/08/2026) : exécute réellement l'écriture/freeze/réécriture sur les adresses mémoire actives dans le chat (m_chatMemoryTargets côté backend) — appelé UNIQUEMENT après confirmRiskAction, jamais directement depuis startSmartSearch qui renvoie désormais une confirmation. */
+  confirmChatMemoryWrite?(value: string): Promise<Record<string, unknown>>
+  confirmChatMemoryFreeze?(value: string): Promise<Record<string, unknown>>
+  confirmRewriteLastAutoWrite?(value: string): Promise<Record<string, unknown>>
   startAutoResolve?(query: string, options: Record<string, unknown>): Promise<SmartSearchResult>
   getAutoResolveReport?(maxEvents: number): Promise<AutoResolveReportResult>
   clearAutoResolveMemory?(allProcesses: boolean): Promise<Record<string, unknown>>
@@ -2452,6 +2456,15 @@ class BackendService {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async writeMemoryValueKernel(_addressHex: string, _valueType: string, _value: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async confirmChatMemoryWrite(_value: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async confirmChatMemoryFreeze(_value: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async confirmRewriteLastAutoWrite(_value: string) {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async getLogFilePath() {

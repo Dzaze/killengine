@@ -105,6 +105,49 @@ OffMemoryToolMatch matchOffMemoryTool(const QString& q) {
     return {};
 }
 
+/// PHASE 120-B (29/08/2026) : redirections de navigation SANS risque propre
+/// (aucun tool_call, aucune ecriture) associees a chaque sujet du playbook --
+/// le risque reel reste entierement dans les outils vers lesquels on redirige
+/// une fois la vue ouverte, toujours gates par confirmRiskAction comme avant.
+/// Reutilise des ids deja geres par AssistantView.vue::runRecoveryAction
+/// (open_expert/open_pointer_scan/trace_ui_string) plutot que des ids qui
+/// exigent une adresse deja capturee (find_what_writes_targets,
+/// escalate_freeze_bp...) -- cette reponse est generique par symptome, elle
+/// n'a jamais d'adresse precise en contexte.
+///
+/// `expertStep` (optionnel, uniquement pour open_expert) : filtre la vue
+/// Expert sur l'etape existante correspondante (find/inspect/act/persist,
+/// ExpertView.vue::activeStep) au lieu de la laisser sur 'all' -- resout le
+/// probleme concret constate le 29/08/2026 (clic sur "Ouvrir Expert pour
+/// lancer Ecrit par" n'amenait qu'a la vue de depart, l'utilisateur devait
+/// chercher/scroller). Consomme via un champ store dedie (pendingExpertStep),
+/// jamais applique a une visite manuelle d'Expert -- voir commentaire
+/// ExpertView.vue::activeStep sur le choix delibere de ne jamais forcer un
+/// changement d'onglet en dehors d'un clic explicite comme celui-ci.
+QVariantList recoveryActionsForTopic(const QString& topic) {
+    QVariantList actions;
+    if (topic == "simple_visible_value") {
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert pour lancer le scan"}, {"expertStep", "find"}});
+    } else if (topic == "displayed_value_not_found") {
+        actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Lancer Trace UI string"}});
+    } else if (topic == "unstable_address") {
+        actions.append(QVariantMap{{"id", "open_pointer_scan"}, {"label", "Ouvrir Expert, section Pointeurs"}});
+    } else if (topic == "freeze_flickers") {
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert pour analyser la stabilité du champ"}, {"expertStep", "inspect"}});
+    } else if (topic == "code_patch_request") {
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert pour générer l'AOB"}, {"expertStep", "persist"}});
+    } else if (topic == "what_writes_value") {
+        actions.append(QVariantMap{
+            {"id", "open_expert"}, {"label", "Ouvrir Expert pour lancer Écrit par"},
+            {"expertStep", "find"}, {"expertAnchor", "expert-anchor-find-what-writes"}});
+    } else if (topic == "save_file_or_uwp") {
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert, section fichiers de sauvegarde"}, {"expertStep", "inspect"}});
+    } else if (topic == "managed_runtime_pointer_chain") {
+        actions.append(QVariantMap{{"id", "open_clr_inspector"}, {"label", "Ouvrir CLR Inspector"}});
+    }
+    return actions;
+}
+
 QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
     struct Entry {
         const char* title;
@@ -162,7 +205,7 @@ QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
             "La cible peut réécrire plus vite que le polling, ou l'adresse peut être un champ affiché dérivé.",
             "Analyser la stabilité du champ avant d'envisager un freeze breakpoint matériel.",
             "Adresse candidate déjà identifiée.",
-            "Analyse de stabilité : lecture seule. Freeze BP : debugger, confirmation RiskGate obligatoire.",
+            "Analyse de stabilité : lecture seule. Freeze BP : debugger, confirmation obligatoire.",
             "Vérifie d'abord si l'adresse est une vraie source ou seulement un affichage recalculé.",
             "Si c'est un affichage dérivé, chercher l'origine de l'écriture plutôt que freezer cette copie."
         };
@@ -170,10 +213,15 @@ QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
         entry = {
             "Patch de code demandé",
             "L'objectif touche probablement une instruction machine plutôt qu'une simple donnée.",
-            "Générer une AOB, suggérer un patch, puis désassembler le contexte si nécessaire.",
-            "Adresse de code valide, idéalement issue d'un hit 'Écrit par'.",
+            "Si l'adresse vient d'un hit 'Écrit par' : désassembler en arrière D'ABORD (le RIP capturé pointe sur "
+            "l'instruction suivante, pas l'écriture elle-même — sémantique standard d'un breakpoint matériel), "
+            "PUIS générer une AOB sur la vraie instruction trouvée, puis suggérer un patch.",
+            "Adresse de code valide. Si elle vient d'un hit 'Écrit par' : c'est le RIP capturé, pas encore l'adresse "
+            "réelle de l'instruction à patcher — désassembler en arrière d'abord pour la retrouver.",
             "Élevé pour l'application réelle : patch=confirmation humaine, jamais auto-exécuté depuis le chat.",
-            "Vérifie l'unicité de la signature et applique seulement depuis Expert/Trainer après confirmation.",
+            "Ne jamais générer d'AOB directement sur un RIP brut issu d'un hit 'Écrit par' : localise d'abord la "
+            "vraie instruction d'écriture, vérifie l'unicité de la signature, puis applique seulement depuis "
+            "Expert/Trainer après confirmation.",
             "Si la signature est ambiguë ou bloquée par l'environnement, revenir à un write/freeze moins invasif."
         };
     } else if (topic == "what_writes_value") {
@@ -181,9 +229,12 @@ QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
             "Comprendre qui écrit une valeur",
             "Plusieurs sites de code peuvent écrire la même adresse ; il faut identifier la vraie source gameplay.",
             "Utiliser 'Écrit par' / find_what_writes depuis l'UI Expert, avec confirmation.",
-            "Adresse stable déjà connue, pas un slot trop chaud ou générique.",
+            "Adresse stable déjà connue, pas un slot trop chaud ou générique. Si tu n'as pas encore d'adresse : "
+            "fais d'abord un scan classique (donne-moi la valeur affichée à l'écran) pour en trouver une et la "
+            "sélectionner comme candidat — 'Écrit par' ne peut rien capturer sans ça.",
             "Debugger : peut perturber la cible, confirmation obligatoire.",
-            "Prépare l'adresse, lance la capture confirmée, puis interagis avec le jeu pendant la fenêtre.",
+            "Si tu as déjà une adresse : prépare-la, lance la capture confirmée, puis interagis avec le jeu pendant "
+            "la fenêtre. Sinon : commence par le scan décrit ci-dessus, reviens ensuite avec l'adresse trouvée.",
             "Si aucun hit n'apparaît, élargir la fenêtre ou revérifier que l'adresse est bien stable."
         };
     } else if (topic == "save_file_or_uwp") {
@@ -192,9 +243,27 @@ QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
             "La valeur peut vivre sur disque ou dans une ruche UWP plutôt qu'en RAM exploitable.",
             "Découvrir les fichiers de sauvegarde, lire le texte, inspecter LocalSettings, puis comparer avant/après.",
             "Jeu avec fichier de sauvegarde identifiable ou processus UWP attaché.",
-            "Lecture seule pour inspection. Toute écriture disque reste hors PHASE 120-A et demande action explicite.",
+            "Lecture seule pour inspection. Toute écriture disque nécessite une action explicite séparée.",
             "Compare un état avant/après une action utilisateur pour isoler le champ modifié.",
             "Si une source plus autoritaire réécrit le fichier, il faudra un protocole d'enquête plus large hors 120-A."
+        };
+    } else if (topic == "managed_runtime_pointer_chain") {
+        entry = {
+            "Cible sur runtime managé (.NET/Mono) — scan de pointeurs natif aveugle",
+            "Le processus charge coreclr.dll/clrjit.dll (ou mono*.dll) : les données de gameplay vivent sur un tas géré "
+            "par le GC, pas dans les sections .data/.bss d'un module PE natif. Un scanPointerChains, même borné serré, "
+            "ne trouvera structurellement aucune chaîne depuis un module natif — signe distinctif : réponse rapide "
+            "mais chainCount:0, quel que soit le module d'ancrage essayé.",
+            "Basculer sur le CLR Inspector : attachClrInspector, puis chercher l'objet par type/valeur de champ "
+            "(findClrObjectsByType/findClrObjectsByFieldValue) et descendre la hiérarchie des champs (readClrObject) "
+            "jusqu'au champ primitif, plutôt que de deviner une adresse brute.",
+            "Cible confirmée managée (getProcessModules montre coreclr.dll/clrjit.dll ou mono*.dll) ; CLR Inspector attaché au bon PID.",
+            "Aucun pour attachClrInspector/findClrObjectsBy*/readClrObject : lecture seule. writeClrPrimitivePath demande une confirmation comme toute écriture classique.",
+            "Ne pas répéter scanPointerChains avec des bornes toujours plus larges sur ce type de cible : un résultat "
+            "vide et rapide est déjà le signal qu'il faut changer d'outil. Si le type de premier niveau n'a pas le "
+            "champ attendu, chercher un mot-clé de domaine plus large (le studio range parfois la donnée sur un objet conteneur).",
+            "Si aucun mot-clé de domaine ne donne de type candidat, élargir avec des synonymes techniques du genre de "
+            "jeu concerné."
         };
     }
 
@@ -202,14 +271,14 @@ QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
     result["status"] = "needs_clarification";
     result["actionStatus"] = "not_executed";
     result["message"] = QString(
-        "D'après `docs/INVESTIGATION_PLAYBOOK.md`, je traiterais ça comme : %1\n\n"
+        "D'après ma méthode d'enquête intégrée, je traiterais ça comme : %1\n\n"
         "Hypothèses : %2\n"
         "Outil conseillé : %3\n"
         "Prérequis : %4\n"
         "Risque : %5\n"
         "Prochaine action humaine : %6\n"
         "Fallback : %7\n\n"
-        "Je n'exécute rien depuis ce chemin PHASE 120-A : pas de tool_call, pas de pipe/Lua, pas de contournement RiskGate.")
+        "Je n'exécute rien automatiquement depuis cette réponse : pas d'action lancée toute seule, pas de contournement de la confirmation.")
         .arg(QString::fromUtf8(entry.title),
              QString::fromUtf8(entry.hypotheses),
              QString::fromUtf8(entry.tool),
@@ -221,6 +290,10 @@ QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
     result["source"] = "docs/INVESTIGATION_PLAYBOOK.md";
     result["state"] = "Idle";
     result["aiBackend"] = "deterministic_investigation_playbook";
+    const QVariantList recoveryActions = recoveryActionsForTopic(topic);
+    if (!recoveryActions.isEmpty()) {
+        result["recoveryActions"] = recoveryActions;
+    }
     return result;
 }
 
@@ -671,6 +744,42 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
     }
 
     if (const QString topic = investigationPlaybookTopic(query); !topic.isEmpty()) {
+        // PHASE 120-C (29/08/2026, accord propriétaire explicite) : sur un
+        // sous-ensemble prudent de sujets où l'outil recommandé est déjà un
+        // tool_call lecture seule approuvé SANS confirmation
+        // (analyze_field_stability/discover_save_files, voir leurs
+        // commentaires PHASE 130/140), enchaîner directement si le fast-path
+        // dédié trouve aussi assez d'info dans le même message -- sinon (pas
+        // d'adresse, mots-clés insuffisants) revenir à la simple citation
+        // comme avant. "code_patch_request" délibérément absent de cette
+        // liste : son propre matcher de sujet exige `!directReadOnlyTool`,
+        // qui inclut `wantsGenerateAobQuery` -- structurellement, ce sujet ne
+        // matche JAMAIS en même temps que le fast-path generate_aob
+        // correspondant, un enchaînement ici serait du code mort par
+        // construction (constaté en écrivant ce correctif). Explicitement
+        // exclu de tout enchaînement, sans exception : "what_writes_value"
+        // (attache un debugger, jamais autonome, PHASE 140) et tous les
+        // autres sujets (pas d'argument fiable extractible sans élargir la
+        // surface d'outils de l'Assistant au-delà de son registre actuel,
+        // docs/KILLENGINE_ASSISTANT_TOOLS_MAP.md).
+        if (topic == "freeze_flickers") {
+            if (const auto stabilityMatch = matchFieldStabilityTool(query); !stabilityMatch.tool.isEmpty()) {
+                QVariantMap result = makeToolCall(stabilityMatch.tool, stabilityMatch.args,
+                    "D'après le playbook d'enquête (freeze qui clignote) : " + stabilityMatch.rationale);
+                result["aiBackend"] = "deterministic_investigation_playbook_autochain";
+                result["investigationTopic"] = topic;
+                return result;
+            }
+        } else if (topic == "save_file_or_uwp") {
+            if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
+                QVariantMap result = makeToolCall(offMemoryMatch.tool, {},
+                    "D'après le playbook d'enquête (valeur en sauvegarde/UWP) : " + offMemoryMatch.rationale);
+                result["aiBackend"] = "deterministic_investigation_playbook_autochain";
+                result["investigationTopic"] = topic;
+                return result;
+            }
+        }
+
         QVariantMap result = makeInvestigationPlaybookResponse(topic);
         result["state"] = m_stateMachine.currentStateName();
         return result;

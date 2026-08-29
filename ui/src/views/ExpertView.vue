@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
@@ -1670,6 +1670,27 @@ onMounted(() => {
   if (store.candidatePage) return
   void store.refreshCandidates()
 })
+
+// PHASE 120-B : consomme une demande d'etape venant d'un bouton de
+// recommandation chat (recoveryActions -> open_expert/open_pointer_scan avec
+// expertStep) -- une seule fois, puis remis a null pour ne jamais affecter
+// une visite manuelle ulterieure d'Expert. Si une ancre precise est fournie
+// en plus (une section est loin dans une longue etape, ex. "Ecrit par"),
+// scrolle dessus apres que le changement d'etape ait mis a jour le DOM
+// (nextTick) -- sans ca, l'element vise peut ne pas encore etre repositionne.
+onMounted(() => {
+  if (store.pendingExpertStep) {
+    activeStep.value = store.pendingExpertStep
+    store.pendingExpertStep = null
+  }
+  if (store.pendingExpertAnchor) {
+    const anchorId = store.pendingExpertAnchor
+    store.pendingExpertAnchor = null
+    void nextTick(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+})
 </script>
 
 <template>
@@ -1940,7 +1961,7 @@ onMounted(() => {
             </select>
           </label>
         </div>
-        <p class="debugger-guard">
+        <p id="expert-anchor-find-what-writes" class="debugger-guard">
           <strong>Écrit par</strong> attache le debugger Windows au processus pendant la capture. À utiliser sur une cible de test ou solo, puis fais varier la valeur pendant la fenêtre choisie.
           Dès qu'une instruction est capturée, la signature AOB et les suggestions de patch se génèrent automatiquement ci-dessous (lecture seule) — sauvegarder en Trainer ou patcher reste toujours un clic manuel séparé.
         </p>

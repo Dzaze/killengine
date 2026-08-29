@@ -268,6 +268,14 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     store.activeView = 'process'
     store.pushMessage('assistant', 'Va dans Process, attache une application autorisée, puis reviens ici : je reprendrai le plan.')
   } else if (actionId === 'open_expert') {
+    const expertStep = typeof action === 'string' ? '' : String(action.expertStep ?? '')
+    if (expertStep === 'find' || expertStep === 'inspect' || expertStep === 'act' || expertStep === 'persist') {
+      store.pendingExpertStep = expertStep
+    }
+    const expertAnchor = typeof action === 'string' ? '' : String(action.expertAnchor ?? '')
+    if (expertAnchor) {
+      store.pendingExpertAnchor = expertAnchor
+    }
     store.activeView = 'expert'
     store.pushMessage('assistant', 'Expert ouvert. Je garde le contexte Assistant pour continuer la chaîne dès que tu valides une piste.')
   } else if (actionId === 'confirm_test_write' || actionId === 'guarded_write' || actionId === 'review_top_candidates') {
@@ -457,6 +465,89 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
         },
       )
     }
+  } else if (actionId === 'write_value_confirm' || actionId === 'freeze_value_confirm') {
+    // PHASE 120-D : meme patron que kernel_write_targets ci-dessus, reutilise
+    // executeCheckpointWrite (deja gate par confirmRiskAction) plutot que
+    // d'inventer une nouvelle logique d'ecriture.
+    const isFreeze = actionId === 'freeze_value_confirm'
+    const address = typeof action === 'string' ? '' : String(action.address ?? '')
+    const value = typeof action === 'string' ? '' : String(action.value ?? '')
+    const valueType = typeof action === 'string' ? 'Int32' : String(action.valueType ?? 'Int32')
+    if (!address || !value) {
+      store.pushMessage('assistant', isFreeze ? "Adresse ou valeur manquante pour le freeze." : "Adresse ou valeur manquante pour l'écriture.", { isError: true })
+    } else {
+      const result = await store.executeCheckpointWrite({ address, type: valueType, value }, isFreeze)
+      if (result === null) {
+        store.pushMessage('assistant', isFreeze ? "Freeze refusé à la confirmation ou adresse/valeur invalide." : "Écriture refusée à la confirmation ou adresse/valeur invalide.", { isError: true })
+      } else {
+        store.pushMessage(
+          'assistant',
+          result.success
+            ? (isFreeze ? `Figé ${value} (${valueType}) à 0x${address}.` : `Écrit ${value} (${valueType}) à 0x${address}.`)
+            : `${isFreeze ? 'Freeze échoué' : 'Écriture échouée'} : ${result.error ?? 'raison inconnue'}.`,
+          { isError: !result.success },
+        )
+      }
+    }
+  } else if (actionId === 'chat_memory_write_confirm' || actionId === 'chat_memory_freeze_confirm' || actionId === 'rewrite_last_auto_write_confirm') {
+    // RiskGate chat (29/08/2026) : avant ce correctif, taper une adresse puis
+    // une valeur dans le chat ecrivait/figeait reellement la memoire sans
+    // AUCUNE interaction utilisateur (constate en direct pendant PHASE 120-D).
+    // Le clic sur ce recoveryAction EST la confirmation (pas de second modal
+    // confirmRiskAction, retire a la demande du proprietaire -- juge redondant
+    // avec cette carte qui affiche deja l'avertissement de risque et le
+    // libelle exact de l'action juste avant le bouton). Les adresses cibles
+    // restent server-side (m_chatMemoryTargets), un seul recoveryAction
+    // suffit quel que soit leur nombre.
+    const value = typeof action === 'string' ? '' : String(action.value ?? '')
+    if (!value) {
+      store.pushMessage('assistant', "Valeur manquante.", { isError: true })
+    } else {
+      const result = actionId === 'chat_memory_write_confirm'
+        ? await store.confirmChatMemoryWrite(value)
+        : actionId === 'chat_memory_freeze_confirm'
+          ? await store.confirmChatMemoryFreeze(value)
+          : await store.confirmRewriteLastAutoWrite(value)
+      if (result === null) {
+        store.pushMessage('assistant', "Action refusée à la confirmation ou indisponible.", { isError: true })
+      } else {
+        store.pushMessage(
+          'assistant',
+          String(result.message ?? (result.success ? 'Fait.' : 'Échoué.')),
+          { isError: result.success !== true },
+        )
+      }
+    }
+  } else if (actionId === 'trainer_apply_confirm' || actionId === 'trainer_restore_confirm') {
+    // PHASE 120-D : reutilise applyTrainerFeature/restoreTrainerFeature (et
+    // leurs variantes "all"), qui gerent deja l'ordre des dependances et la
+    // confirmation RiskGate en interne (doApplyTrainerFeature/
+    // doRestoreTrainerFeature) -- zero nouvelle logique d'execution.
+    const restore = actionId === 'trainer_restore_confirm'
+    const all = typeof action === 'string' ? false : action.all === true
+    const idTarget = typeof action === 'string' ? '' : String(action.id_target ?? '')
+    if (all) {
+      if (restore) await store.restoreAllTrainerFeatures()
+      else await store.applyAllTrainerFeatures()
+      store.pushMessage('assistant', restore ? 'Restauration de toutes les features Trainer actives terminée.' : 'Activation de toutes les features Trainer terminée.')
+    } else {
+      const id = Number(idTarget)
+      if (!id || id <= 0) {
+        store.pushMessage('assistant', "Id de feature Trainer invalide.", { isError: true })
+      } else {
+        if (restore) await store.restoreTrainerFeature(id)
+        else await store.applyTrainerFeature(id)
+        const feature = store.trainerFeatures.find((f) => f.id === id)
+        const ok = restore ? feature?.enabled === false : feature?.enabled === true
+        store.pushMessage(
+          'assistant',
+          ok
+            ? `Feature Trainer #${id} ${restore ? 'restaurée' : 'activée'}.`
+            : `Feature Trainer #${id} : ${feature?.lastError || 'pas de changement (refusé à la confirmation ou déjà dans cet état).'}`,
+          { isError: !ok },
+        )
+      }
+    }
   } else if (actionId === 'open_network') {
     store.activeView = 'network'
     store.pushMessage('assistant', "Réseau ouvert : coupe ou rétablis l'accès réseau de la cible depuis là.")
@@ -464,8 +555,12 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     store.activeView = 'speedhack'
     store.pushMessage('assistant', "Speedhack ouvert : le slider et les presets sont là, réglables en direct.")
   } else if (actionId === 'open_pointer_scan') {
+    store.pendingExpertStep = 'inspect'
     store.activeView = 'expert'
     store.pushMessage('assistant', "Expert ouvert, section Pointeurs : lance un scan de pointeur stable vers la dernière adresse. Ça permet de la retrouver même si elle change d'une partie à l'autre.")
+  } else if (actionId === 'open_clr_inspector') {
+    store.activeView = 'clr'
+    store.pushMessage('assistant', "CLR Inspector ouvert : cherche l'objet par type ou par valeur de champ plutôt que par adresse brute — c'est l'équivalent d'une chaîne de pointeurs pour ce genre de cible.")
   }
   await scrollToBottom()
 }

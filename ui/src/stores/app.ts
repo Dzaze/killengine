@@ -336,6 +336,17 @@ export interface UnknownGuideStep {
 export const useAppStore = defineStore('app', () => {
   // State
   const activeView = ref<AppView>('assistant')
+  // PHASE 120-B : etape Expert demandee par un bouton de recommandation
+  // chat (recoveryActions), consommee une seule fois par ExpertView au
+  // montage puis remise a null -- ne change jamais activeStep pour une
+  // visite normale/manuelle d'Expert (design existant delibere : un
+  // changement d'onglet subi est pire qu'un onglet a cliquer).
+  const pendingExpertStep = ref<'find' | 'inspect' | 'act' | 'persist' | null>(null)
+  // PHASE 120-B : id DOM optionnel a scroller au montage d'Expert, en plus du
+  // filtre d'etape ci-dessus -- necessaire quand la bonne section est loin
+  // dans une longue etape (ex. "Ecrit par" est au milieu d'un long panneau
+  // "find"), meme regle de consommation unique que pendingExpertStep.
+  const pendingExpertAnchor = ref<string | null>(null)
   const version = ref('...')
   const isConnected = ref(false)
   const showOnboarding = ref(false)
@@ -3407,6 +3418,68 @@ let nextWatchedChainId = 1
       return result
     } catch (e) {
       addActionLog('checkpoint', 'Écriture kernel échouée', String(e), 'error')
+      return null
+    }
+  }
+
+  // RiskGate chat (29/08/2026) : appelées uniquement APRÈS un clic explicite
+  // sur le recoveryAction chat_memory_write_confirm/chat_memory_freeze_confirm/
+  // rewrite_last_auto_write_confirm renvoyé par startSmartSearch. Avant ce
+  // correctif, ces écritures s'exécutaient sans AUCUNE interaction (backend
+  // direct) — constaté en direct pendant PHASE 120-D. Version initiale
+  // ajoutait un second modal confirmRiskAction() après le clic du bouton
+  // chat, mais retirée à la demande explicite du propriétaire (testé en
+  // direct, jugé redondant : la carte chat affiche déjà l'avertissement de
+  // risque et le libellé exact de l'action, l'utilisateur a déjà tapé
+  // l'adresse ET la valeur explicitement avant d'arriver ici) -- le clic sur
+  // le bouton du chat EST la confirmation, pas de second popup. Ne PAS
+  // reproduire ce sans-modal ailleurs (write_value_confirm/freeze_value_confirm
+  // partagent executeCheckpointWrite avec l'UI Investigation, kernel_write/
+  // speedhack_set/trainer_apply_confirm restent volontairement à 2 clics).
+  async function confirmChatMemoryWrite(value: string) {
+    const controller = backend.getController()
+    if (!controller.confirmChatMemoryWrite) {
+      addActionLog('checkpoint', 'Écriture chat indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const result = await controller.confirmChatMemoryWrite(value)
+      addActionLog('checkpoint', result.success === true ? 'Écriture chat OK' : 'Écriture chat échouée', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', 'Écriture chat échouée', String(e), 'error')
+      return null
+    }
+  }
+
+  async function confirmChatMemoryFreeze(value: string) {
+    const controller = backend.getController()
+    if (!controller.confirmChatMemoryFreeze) {
+      addActionLog('checkpoint', 'Freeze chat indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const result = await controller.confirmChatMemoryFreeze(value)
+      addActionLog('checkpoint', result.success === true ? 'Freeze chat OK' : 'Freeze chat échoué', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', 'Freeze chat échoué', String(e), 'error')
+      return null
+    }
+  }
+
+  async function confirmRewriteLastAutoWrite(value: string) {
+    const controller = backend.getController()
+    if (!controller.confirmRewriteLastAutoWrite) {
+      addActionLog('checkpoint', 'Réécriture chat indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const result = await controller.confirmRewriteLastAutoWrite(value)
+      addActionLog('checkpoint', result.success === true ? 'Réécriture chat OK' : 'Réécriture chat échouée', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      return result
+    } catch (e) {
+      addActionLog('checkpoint', 'Réécriture chat échouée', String(e), 'error')
       return null
     }
   }
@@ -8575,6 +8648,8 @@ async function doEncryptedScan() {
   return {
     version,
     activeView,
+    pendingExpertStep,
+    pendingExpertAnchor,
     isConnected,
     showOnboarding,
     dismissOnboarding,
@@ -8891,6 +8966,9 @@ async function doEncryptedScan() {
     stopApiHook,
     refreshApiHookStatus,
     executeCheckpointKernelWrite,
+    confirmChatMemoryWrite,
+    confirmChatMemoryFreeze,
+    confirmRewriteLastAutoWrite,
     prepareCheckpointAob,
     executeCheckpointForceValue,
     createTrainerFeature,

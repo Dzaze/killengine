@@ -470,6 +470,12 @@ public:
 
     /// Génère une signature AOB exacte à partir des octets autour d'une adresse d'instruction.
     /// options keys: beforeBytes, length.
+    /// ATTENTION (constaté en direct le 29/08/2026, docs/INVESTIGATION_PLAYBOOK.md symptôme 5) : ne jamais appeler
+    /// ceci directement sur le `instructionPointer` brut d'un hit findWhatWrites -- un breakpoint matériel piège
+    /// APRÈS l'exécution de l'instruction, donc ce RIP pointe sur l'instruction SUIVANTE (souvent un `ret`, un saut,
+    /// ou une instruction sans rapport avec l'écriture), pas sur l'écriture elle-même. Toujours appeler
+    /// disassembleBackward() sur ce RIP d'abord pour localiser la vraie instruction (catégorie "memory-write" dans
+    /// le résultat), puis générer l'AOB sur CETTE adresse.
     Q_INVOKABLE QVariantMap generateAobSignature(const QString& addressHex, const QVariantMap& options);
 
     /// Applique un patch de bytes exacts à une adresse code, en gardant les bytes originaux pour restauration.
@@ -566,6 +572,25 @@ public:
     /// Lance une recherche intelligente (Smart Search).
     /// Phase 0: stub qui logge la requête.
     Q_INVOKABLE QVariantMap startSmartSearch(const QString& query);
+
+    /// Ecriture RiskGate chat (29/08/2026) : points d'entree publics, appeles
+    /// uniquement APRES un clic explicite sur le recoveryAction correspondant
+    /// renvoye par startSmartSearch quand l'intention WriteMemoryTargets/
+    /// FreezeMemoryTargets/RewriteLastTargets est 100% originaire du chat
+    /// (AutoWriteTarget::chatOrigin) -- avant, ces ecritures s'executaient
+    /// sans AUCUNE interaction utilisateur (bug reel constate en direct
+    /// pendant PHASE 120-D). Le clic sur le bouton du chat EST la
+    /// confirmation (frontend n'ouvre plus de second modal confirmRiskAction
+    /// ici, retire a la demande explicite du proprietaire -- juge redondant
+    /// avec la carte chat qui affiche deja l'avertissement de risque, et
+    /// l'utilisateur a deja tape l'adresse ET la valeur explicitement avant
+    /// d'arriver ici). N'ajoutent aucune logique d'ecriture : appellent
+    /// directement les fonctions privees deja existantes
+    /// (writeChatMemoryTargetsFromQuery/freezeChatMemoryTargetsFromQuery/
+    /// rewriteLastAutoWriteTargets), qui elles n'ont jamais change.
+    Q_INVOKABLE QVariantMap confirmChatMemoryWrite(const QString& value);
+    Q_INVOKABLE QVariantMap confirmChatMemoryFreeze(const QString& value);
+    Q_INVOKABLE QVariantMap confirmRewriteLastAutoWrite(const QString& value);
 
     /// Lance une auto-résolution prudente : plan IA + premières actions sûres seulement.
     Q_INVOKABLE QVariantMap startAutoResolve(const QString& query, const QVariantMap& options);
@@ -1099,6 +1124,12 @@ private:
     struct AutoWriteTarget {
         uint64_t address{0};
         killcore::ValueType type{killcore::ValueType::Int32};
+        // Ecriture RiskGate (29/08/2026) : distingue une cible venant d'une
+        // adresse tapee explicitement dans le chat (a gater derriere une
+        // confirmation reelle) d'une cible issue du mode Auto/UI-string-trace/
+        // profil (comportement de confiance deja etabli, ne jamais gater --
+        // voir commentaire de rewriteLastAutoWriteTargets()).
+        bool chatOrigin{false};
     };
 
     // Surveillance courte apres une ecriture confirmee : combien de sondages

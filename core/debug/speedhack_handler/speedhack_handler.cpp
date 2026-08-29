@@ -26,6 +26,30 @@
 // Remarque sur l'absence de recursion : cette DLL APPELLE les vraies fonctions
 // temps par son propre IAT intact. On exclut explicitement toutes les copies du
 // handler speedhack pour ne jamais patcher nos propres imports.
+//
+// PHASE 14B (29/08/2026) : le patch IAT seul ne couvre pas un appel resolu
+// dynamiquement (GetProcAddress + pointeur stocke a la main) — limite deja
+// documentee ci-dessus ET dans api_hook.h. Constate en conditions reelles sur
+// une cible .NET/CoreCLR (Stardew Valley, PHASE 14A) : le JIT .NET resout
+// CHAQUE P/Invoke exactement de cette facon (jamais via l'IAT statique d'un
+// module chargeable), donc AUCUN appel de code managed ne passait par le patch
+// IAT — hooksInstalledMask non nul (l'hote natif/CoreCLR importe ces fonctions
+// nativement pour son propre usage) mais sans aucun effet sur l'horloge de jeu
+// reellement lue par le code managed. Correctif : en plus du patch IAT
+// (inchange, toujours utile/gratuit sur cible native), on pose desormais un
+// inline hook MinHook (meme moteur que KillEngineApiHookHandler.dll, voir
+// core/inject/api_hook_handler/api_hook_handler.cpp) directement sur le corps
+// des 6 fonctions reelles dans kernel32.dll/KERNELBASE.dll/winmm.dll. Un hook
+// pose sur le corps de la fonction intercepte TOUT appelant qui atteint cette
+// adresse, quelle que soit la facon dont il l'a obtenue (IAT statique,
+// GetProcAddress, P/Invoke JIT) — les detours restent les memes fonctions que
+// pour le patch IAT (partage du meme ClockState par fonction, une seule
+// application de scaleClockDelta par appel reel), mais elles lisent desormais
+// la "vraie" valeur via le trampoline retourne par MH_CreateHook plutot que
+// via un appel direct a l'import statique — sinon, une fois le hook pose, cet
+// appel direct serait lui-meme redirige vers notre propre detour (le patch
+// IAT et le hook MinHook visent la MEME fonction reelle) et provoquerait soit
+// une recursion infinie, soit un double scaling du facteur.
 
 #include "../speedhack_ipc.h"
 #include "../speedhack_clock.h"
@@ -33,6 +57,8 @@
 #include <windows.h>
 #include <mmsystem.h>
 #include <tlhelp32.h>
+
+#include "MinHook.h"
 
 #pragma comment(lib, "winmm.lib")
 
@@ -57,6 +83,25 @@ ClockState g_gtc64State;
 ClockState g_tgtState;
 ClockState g_fileTimeState;
 ClockState g_preciseFileTimeState;
+
+// Pointeurs "vraie fonction" utilises par les detours pour lire la valeur
+// reelle avant scaling. Initialises a l'adresse resolue brute AVANT la pose
+// du hook MinHook (comportement identique a un appel direct tant qu'aucun
+// hook n'est installe), puis ecrases par MH_CreateHook via son parametre
+// ppOriginal si le hook s'installe avec succes (le trampoline contourne le
+// hook — indispensable, voir remarque de tete de fichier PHASE 14B).
+using QpcFn = BOOL(WINAPI*)(LARGE_INTEGER*);
+using GtcFn = DWORD(WINAPI*)();
+using Gtc64Fn = ULONGLONG(WINAPI*)();
+using TgtFn = DWORD(WINAPI*)();
+using FileTimeFn = void(WINAPI*)(LPFILETIME);
+
+QpcFn g_qpcReal = nullptr;
+GtcFn g_gtcReal = nullptr;
+Gtc64Fn g_gtc64Real = nullptr;
+TgtFn g_tgtReal = nullptr;
+FileTimeFn g_fileTimeReal = nullptr;
+FileTimeFn g_preciseFileTimeReal = nullptr;
 
 // Spinlock leger : les appels sont courts (quelques instructions) et
 // frequents, une CRITICAL_SECTION serait une charge disproportionnee par
@@ -87,7 +132,7 @@ int64_t ApplyScaling(ClockState& state, int64_t real) {
 
 BOOL WINAPI DetourQueryPerformanceCounter(LARGE_INTEGER* counter) {
     LARGE_INTEGER real;
-    const BOOL ok = QueryPerformanceCounter(&real);
+    const BOOL ok = g_qpcReal ? g_qpcReal(&real) : QueryPerformanceCounter(&real);
     if (counter) {
         counter->QuadPart = ok ? ApplyScaling(g_qpcState, real.QuadPart) : 0;
     }
@@ -95,20 +140,27 @@ BOOL WINAPI DetourQueryPerformanceCounter(LARGE_INTEGER* counter) {
 }
 
 DWORD WINAPI DetourGetTickCount() {
-    return static_cast<DWORD>(ApplyScaling(g_gtcState, static_cast<int64_t>(GetTickCount())));
+    const int64_t real = static_cast<int64_t>(g_gtcReal ? g_gtcReal() : GetTickCount());
+    return static_cast<DWORD>(ApplyScaling(g_gtcState, real));
 }
 
 ULONGLONG WINAPI DetourGetTickCount64() {
-    return static_cast<ULONGLONG>(ApplyScaling(g_gtc64State, static_cast<int64_t>(GetTickCount64())));
+    const int64_t real = static_cast<int64_t>(g_gtc64Real ? g_gtc64Real() : GetTickCount64());
+    return static_cast<ULONGLONG>(ApplyScaling(g_gtc64State, real));
 }
 
 DWORD WINAPI DetourTimeGetTime() {
-    return static_cast<DWORD>(ApplyScaling(g_tgtState, static_cast<int64_t>(timeGetTime())));
+    const int64_t real = static_cast<int64_t>(g_tgtReal ? g_tgtReal() : timeGetTime());
+    return static_cast<DWORD>(ApplyScaling(g_tgtState, real));
 }
 
 void WINAPI DetourGetSystemTimeAsFileTime(LPFILETIME fileTime) {
     FILETIME real{};
-    GetSystemTimeAsFileTime(&real);
+    if (g_fileTimeReal) {
+        g_fileTimeReal(&real);
+    } else {
+        GetSystemTimeAsFileTime(&real);
+    }
     if (!fileTime) return;
 
     ULARGE_INTEGER value{};
@@ -121,7 +173,11 @@ void WINAPI DetourGetSystemTimeAsFileTime(LPFILETIME fileTime) {
 
 void WINAPI DetourGetSystemTimePreciseAsFileTime(LPFILETIME fileTime) {
     FILETIME real{};
-    GetSystemTimePreciseAsFileTime(&real);
+    if (g_preciseFileTimeReal) {
+        g_preciseFileTimeReal(&real);
+    } else {
+        GetSystemTimePreciseAsFileTime(&real);
+    }
     if (!fileTime) return;
 
     ULARGE_INTEGER value{};
@@ -342,6 +398,64 @@ void PatchLoadedModules(HookTarget* targets, int targetCount, HMODULE mainModule
     CloseHandle(snapshot);
 }
 
+// Pose un hook MinHook sur le corps reel de chaque fonction ciblee, en plus du
+// patch IAT (voir remarque PHASE 14B en tete de fichier) : couvre les appels
+// resolus dynamiquement (GetProcAddress, P/Invoke JIT .NET) que le patch IAT
+// seul ne voit jamais. Independant et sans risque de double-scaling : les
+// detours partagent les memes fonctions/etats que le patch IAT, mais lisent
+// desormais la valeur reelle via un pointeur de trampoline plutot qu'un appel
+// direct a l'import statique.
+void InstallInlineHooks(HookTarget* targets, int targetCount) {
+    MH_Initialize(); // MH_ERROR_ALREADY_INITIALIZED si deja fait ailleurs dans ce process : non fatal, on continue.
+
+    void* const trampolineSlots[6] = {
+        &g_qpcReal, &g_gtcReal, &g_gtc64Real, &g_tgtReal, &g_fileTimeReal, &g_preciseFileTimeReal,
+    };
+
+    void* alreadyHooked[6] = {};
+    int alreadyHookedCount = 0;
+
+    for (int t = 0; t < targetCount && t < 6; ++t) {
+        void* real = nullptr;
+        for (void* candidate : targets[t].realAddresses) {
+            if (candidate) {
+                real = candidate;
+                break;
+            }
+        }
+        if (!real) continue;
+
+        // Pre-remplit le pointeur "vraie fonction" avec l'adresse brute : tant
+        // qu'aucun hook n'est pose (ou si la pose echoue plus bas), l'appeler
+        // produit exactement le meme resultat qu'un appel direct a l'import
+        // statique — jamais de pointeur nul cote detour une fois cette passe
+        // terminee.
+        *reinterpret_cast<void**>(trampolineSlots[t]) = real;
+
+        bool duplicate = false;
+        for (int i = 0; i < alreadyHookedCount; ++i) {
+            if (alreadyHooked[i] == real) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) continue; // kernel32 forwarde souvent vers KERNELBASE : meme adresse reelle, un seul hook necessaire.
+
+        if (MH_CreateHook(real, targets[t].detour, reinterpret_cast<void**>(trampolineSlots[t])) != MH_OK) {
+            continue;
+        }
+        if (MH_EnableHook(real) != MH_OK) {
+            MH_RemoveHook(real);
+            continue;
+        }
+
+        if (alreadyHookedCount < 6) {
+            alreadyHooked[alreadyHookedCount++] = real;
+        }
+        InterlockedOr(&g_state->hooksInstalledMask, static_cast<LONG>(targets[t].maskBit));
+    }
+}
+
 DWORD WINAPI InstallThread(LPVOID) {
     wchar_t name[64];
     killcore::buildSpeedhackMappingName(GetCurrentProcessId(), name, 64);
@@ -379,6 +493,7 @@ DWORD WINAPI InstallThread(LPVOID) {
          killcore::kSpeedhackHookGetSystemTimePreciseAsFileTime},
     };
     ResolveTargetAddresses(targets, 6);
+    InstallInlineHooks(targets, 6);
 
     HMODULE mainModule = GetModuleHandleW(nullptr);
     wchar_t mainModulePath[MAX_PATH]{};

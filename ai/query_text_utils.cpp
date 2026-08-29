@@ -187,6 +187,22 @@ QString investigationPlaybookTopic(const QString& query) {
         return "save_file_or_uwp";
     }
 
+    // PHASE 120-B : sujet ajoute suite a la validation terrain PHASE 14A/14B
+    // (docs/PHASE_TRACKER_HISTORY.md, 29/08/2026) -- combine explicitement un
+    // terme de runtime manage ET un contexte chaine de pointeurs/scan pour ne
+    // pas capturer toute mention anodine de ".net" hors de ce sujet precis.
+    const bool mentionsManagedRuntime =
+        q.contains("mono") || q.contains("coreclr") || q.contains(".net") || q.contains("dotnet")
+        || q.contains("manage") || q.contains("managed") || q.contains("runtime manage")
+        || q.contains("clr inspector");
+    const bool mentionsPointerChainContext =
+        q.contains("pointer chain") || q.contains("chaine de pointeur") || q.contains("chaine de pointeurs")
+        || q.contains("scanpointerchains") || q.contains("chaincount") || q.contains("chaîne de pointeur")
+        || q.contains("chaîne de pointeurs");
+    if (mentionsManagedRuntime && mentionsPointerChainContext) {
+        return "managed_runtime_pointer_chain";
+    }
+
     return {};
 }
 

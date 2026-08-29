@@ -81,3 +81,17 @@ TEST(QueryTextUtilsStandaloneTest, InvestigationPlaybookMatchesOnlyBroadReadOnly
     EXPECT_TRUE(killai::investigationPlaybookTopic("capture ce qui ecrit 0x1234").isEmpty());
     EXPECT_TRUE(killai::investigationPlaybookTopic("suggere un patch pour 0x1234").isEmpty());
 }
+
+TEST(QueryTextUtilsStandaloneTest, InvestigationPlaybookMatchesManagedRuntimePointerChainSymptom) {
+    EXPECT_EQ(killai::investigationPlaybookTopic("le jeu tourne sur .net et le scan de pointeurs ne trouve rien, chainCount reste a 0").toStdString(),
+        "managed_runtime_pointer_chain");
+    EXPECT_EQ(killai::investigationPlaybookTopic("coreclr est charge et scanPointerChains ne renvoie aucune chaine de pointeurs").toStdString(),
+        "managed_runtime_pointer_chain");
+    EXPECT_EQ(killai::investigationPlaybookTopic("cible mono, aucune pointer chain trouvee vers l'adresse").toStdString(),
+        "managed_runtime_pointer_chain");
+
+    // Une simple mention de ".net"/"managed" seule, sans contexte chaine de
+    // pointeurs, ne doit pas declencher ce sujet -- reste trop peu specifique.
+    EXPECT_TRUE(killai::investigationPlaybookTopic("le jeu tourne sur .net, la valeur est peut-etre chiffree").isEmpty());
+    EXPECT_TRUE(killai::investigationPlaybookTopic("le processus est managed, la valeur est-elle stockee normalement ?").isEmpty());
+}

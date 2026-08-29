@@ -12,8 +12,10 @@ Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
 - Phase 11 prototype : complète et revalidée via Assistant/profils.
 - Phase 12 / polishing V1 : complète.
 - Phase 13 : baseline améliorations et passe de régression V1 clôturées le 28/08/2026 (PHASE 200).
-- PHASE 120-A : ouverte puis livrée en deux parties le 28/08/2026 (`docs/INVESTIGATION_PLAYBOOK.md` + câblage backend lecture seule). PHASE 120-B/C/D restent hors scope et nécessitent un nouvel accord explicite du propriétaire.
-- Prochain focus récurrent : validations restantes PHASE 14 (pointer chains sur application moderne tierce autorisée) et PHASE 17 (debugger expérimental) avant généralisation/release candidate.
+- PHASE 14A/14B, PHASE 17 et PHASE 120-A/B/C/D : clôturées et archivées dans `docs/PHASE_TRACKER_HISTORY.md`.
+- PHASE 202/203/204 : tâches accomplies transférées dans `docs/PHASE_TRACKER_HISTORY.md`.
+- `chat_memory_write`/`chat_memory_freeze`/`rewrite_last_auto_write` (chat-origin) : gatés derrière une confirmation explicite le 29/08/2026, archivé dans `docs/PHASE_TRACKER_HISTORY.md` — mode Auto (UI) volontairement inchangé.
+- Prochain focus récurrent : aucun chantier de validation terrain, phase 120 ou décision produit RiskGate restant dans "Chantiers ouverts". Reste seulement le branchement éventuel de `InvestigationView.vue`.
 
 ## 🔎 Arsenal — ce qu'il manque (audit croisé 4 agents, 28/08/2026)
 
@@ -30,12 +32,12 @@ Le propriétaire a posé la même question à 4 agents indépendants (Claude, Co
 - ~~Export/import d'une map de pointeurs en texte partageable.~~ **Correction PHASE 190 : livré** (`ProfileStore::exportPointerMap`/`mergePointerMap`, UI Profil).
 - ~~Quelques extensions CLR pointues (struct-dans-struct-dans-tableau en écriture, setters à paramètre `struct`, `ConcurrentDictionary`)~~ **Correction (PHASE 189/192/202) : quasi toutes closes.** Ce point était basé sur un `docs/POWER_UP_ROADMAP.md` déjà périmé au moment de l'audit PHASE 187 — `ConcurrentDictionary`, l'écriture struct-dans-struct-dans-tableau et l'écriture d'un élément struct de tableau ENTIER avec struct imbriqué sont livrées ; `ConcurrentStack<T>` est couvert depuis PHASE 202. Reste réellement non couvert et non bloquant : setters à paramètre `struct` de 9+ octets/champ non primitif, collections concurrentes segmentées/work-stealing (`ConcurrentQueue`, `ConcurrentBag`, etc.).
 
-**Validation terrain restante (l'outil existe et est testé sur `KillEngineTestTarget.exe` — ce n'est pas un manque d'outil) :** voir cases `[ ]` de la section "Chantiers ouverts" juste en dessous (PHASE 14/17 sur application tierce moderne).
+**Validation terrain :** PHASE 14A/14B et PHASE 17 clôturées le 29/08/2026 (archivées dans `docs/PHASE_TRACKER_HISTORY.md`) — plus de case `[ ]` de validation terrain ouverte dans la section "Chantiers ouverts" juste en dessous au moment de cette mise à jour.
 
 **Décision produit en attente (pas un manque — ton choix) :**
-- PHASE 120-B/C/D : Assistant au-delà du mode lecture seule — prérequis arsenal jugés satisfaits par les 4 agents, mais démarrage exclusivement sur feu vert explicite (règle non négociable, voir section PHASE 120-B/C/D plus bas).
+- ~~PHASE 120-B/C/D : Assistant au-delà du mode lecture seule — prérequis arsenal jugés satisfaits par les 4 agents, mais démarrage exclusivement sur feu vert explicite.~~ **Clôturée le 29/08/2026** : B, C et D ont chacune reçu l'accord propriétaire requis, sont livrées et archivées dans `docs/PHASE_TRACKER_HISTORY.md`. Restent seulement deux décisions séparées : branchement éventuel de `InvestigationView.vue` et clarification produit sur `chat_memory_write`/`chat_memory_freeze` sans RiskGate.
 
-**Conclusion :** la suite logique n'est plus "ajouter des outils" mais (a) finir la validation terrain ci-dessous, puis (b) selon ton choix, ouvrir PHASE 120-B/C/D.
+**Conclusion :** la suite logique n'est plus "ajouter des outils" ni "ouvrir PHASE 120" : la série PHASE 120-A/B/C/D est close. Les seuls points encore visibles ici sont des décisions produit séparées.
 
 ## Règle d'utilisation
 
@@ -46,32 +48,15 @@ Le propriétaire a posé la même question à 4 agents indépendants (Claude, Co
 
 ## Chantiers ouverts / validations restantes
 
-- [ ] PHASE 14 - Pointer Chains : validation manuelle sur application moderne tierce autorisée encore ouverte.
+- [ ] Décision séparée - Branchement UI `InvestigationView.vue` au système d'enquête avancée
+  - [ ] À planifier seulement après feu vert produit explicite ; ce point n'empêche pas de considérer PHASE 120-B/C/D comme close.
 
-- [ ] PHASE 17 - Find What Writes / debugger expérimental
-  - [x] Module hardware breakpoint, backend, UI Expert, async worker, annulation et garde-fous UX v1 livrés.
-  - [ ] Validation manuelle debugger sur application tierce autorisée.
-  - [ ] Validation manuelle prolongée avant généralisation.
-
-- [ ] PHASE 120-B/C/D - Assistant enquête avancée
-  - [x] PHASE 120-A : copilote d'enquête lecture seule livré (`docs/INVESTIGATION_PLAYBOOK.md`, `AIEngine::processQuery`, tests 247/247 au 28/08/2026).
-  - [ ] PHASE 120-B : recommandations structurées avec boutons d'action confirmés, accord propriétaire requis.
-  - [ ] PHASE 120-C : enchaînements semi-automatiques read-only, accord propriétaire requis.
-  - [ ] PHASE 120-D : escalade debug/patch/write/freeze complète, accord propriétaire requis.
-  - [ ] Branchement UI `InvestigationView.vue` à planifier seulement après décision produit explicite.
+- [x] Décision séparée - `chat_memory_write`/`chat_memory_freeze` sans RiskGate **clôturée le 29/08/2026**, détail complet archivé dans `docs/PHASE_TRACKER_HISTORY.md`. Résumé : le propriétaire a tranché — corriger le point d'entrée chat spécifiquement (`writeChatMemoryTargetsFromQuery`/`freezeChatMemoryTargetsFromQuery`/`rewriteLastAutoWriteTargets` quand 100% chat-origin via nouveau tag `AutoWriteTarget::chatOrigin`), sans toucher au mode Auto (UI guidée) qui reste inchangé par design. Version initiale ajoutait un vrai modal `confirmRiskAction` après le clic du bouton chat, retirée à la demande du propriétaire (testé en direct, jugé redondant vu que la carte chat affiche déjà l'avertissement + le libellé exact) — le clic sur le bouton du chat est désormais la seule et unique confirmation. Validé en direct par le propriétaire sur `KillEngineTestTarget.exe` : plus d'écriture silencieuse, exécution confirmée après un seul clic.
 
 ## Phases récentes résumées
 
-Les tâches accomplies PHASE 170-200 ont été migrées vers `docs/PHASE_TRACKER_HISTORY.md` lors de la PHASE 201. Garder ici seulement les chantiers ouverts, les décisions produit encore actives et le journal de la session courante.
+Les tâches accomplies PHASE 170-204 ont été migrées vers `docs/PHASE_TRACKER_HISTORY.md`. Garder ici seulement les chantiers ouverts, les décisions produit encore actives et le journal de la session courante.
 
 ## Journal actif
 
-- [x] PHASE 201 (29/08/2026, Codex) - Documentation : migration des tâches accomplies restantes vers l'historique
-  - [x] **Quoi** : remplacement de la longue section active "Phases récentes résumées" par un renvoi court vers `docs/PHASE_TRACKER_HISTORY.md`, transfert de l'entrée détaillée PHASE 198 dans l'historique, puis retrait de PHASE 13 des chantiers ouverts après remarque du propriétaire.
-  - [x] **Pourquoi** : demande propriétaire explicite de migrer les tâches accomplies du tracker actif vers l'historique pour garder `docs/PHASE_TRACKER.md` lisible et centré sur les chantiers ouverts.
-  - [x] **Comment vérifié** : `rg` confirme que les phases accomplies PHASE 13 et PHASE 170-200 restent présentes dans `docs/PHASE_TRACKER_HISTORY.md`; relecture ciblée du tracker actif. Build non requis, documentation Markdown uniquement.
-
-- [x] PHASE 202 (29/08/2026, Codex) - CLR : déballage `ConcurrentStack<T>` en lecture
-  - [x] **Quoi** : `tools/clr_inspector/KillEngineClrInspector/ClrSession.cs` reconnaît maintenant `System.Collections.Concurrent.ConcurrentStack<T>` dans `DescribeCollection` et déballe la chaîne `_head` → `_next` en ordre LIFO via `DescribeConcurrentStack`. `tests/clr_targets/KillEngineClrTestTarget/ObjectGraph.cs` ajoute `Inventory.ConcurrentTags` avec un scénario Push/Pop contrôlé. `tools/clr_inspector/KillEngineClrInspector.Tests/EndToEndTests.cs` ajoute le test `ReadObject_UnpacksConcurrentStackInLifoOrder`. Specs CLR mises à jour.
-  - [x] **Pourquoi** : feu vert propriétaire pour reprendre les conforts non bloquants listés dans le tracker ; choix de `ConcurrentStack<T>` parce que son layout `_head`/`_next` est lisible passivement avec un risque beaucoup plus faible que les structures segmentées/work-stealing (`ConcurrentQueue`, `ConcurrentBag`).
-  - [x] **Comment vérifié** : première tentative `.\scripts\build-clr-inspector.ps1 -Test` bloquée par deux helpers `KillEngineClrInspector.exe` existants qui verrouillaient le binaire ; processus identifiés puis fermés. Relance ensuite réussie : build helper + cible CLR OK, tests xUnit **37/37 verts**. Build C++ `.\scripts\build.ps1` OK ; unitaires C++ `.\build\bin\killengine_unit_tests.exe` **256/256 verts**.
+Aucune phase accomplie détaillée ne reste dans le journal actif après la migration PHASE 204. Ajouter ici seulement le prochain chantier en cours ; archiver les chantiers clos dans `docs/PHASE_TRACKER_HISTORY.md`.

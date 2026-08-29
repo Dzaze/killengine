@@ -63,6 +63,22 @@ constexpr int32_t kCounterStepPerTick = 10;
 static int64_t   g_big_counter = 1000000LL;
 static uint32_t  g_uint_value  = 999;
 
+// PHASE 120-D (29/08/2026) — cible de patch dédiée. Constat avant ouverture de
+// cette phase : write/freeze/debug ont un historique de validation réel sur
+// cette cible (PHASE 185/186/200), mais aucun scénario ne permettait de
+// prouver bout-en-bout un vrai cycle patch (générer une AOB → l'appliquer
+// réellement → observer l'effet → restaurer) — un manque réel avant de
+// laisser l'Assistant escalader jusqu'au patch. __declspec(noinline) empêche
+// le compilateur de fusionner cet incrément avec le code du bouton appelant,
+// ce qui rendrait la signature AOB dépendante du contexte d'appel plutôt que
+// stable et réutilisable comme un vrai site de code isolé.
+static int32_t g_patchTestCounter = 0;
+constexpr int32_t kPatchTestIncrement = 7;
+
+__declspec(noinline) static void incrementPatchTestCounter() {
+    g_patchTestCounter += kPatchTestIncrement;
+}
+
 // Phase 71 — Adresses dynamiques (heap)
 struct Player {
     int32_t  health{100};
@@ -241,6 +257,23 @@ public:
 
         mainLayout->addWidget(unknownGroup);
 
+        // --- Section cible de patch dédiée (PHASE 120-D) ---
+        auto* patchTestGroup = new QGroupBox("Patch Test — cible de patch dédiée (PHASE 120-D)");
+        auto* patchTestLayout = new QGridLayout(patchTestGroup);
+
+        m_patchTestCounterLabel = new QLabel("0");
+        patchTestLayout->addWidget(new QLabel("Patch Test Counter (Int32):"), 0, 0);
+        patchTestLayout->addWidget(m_patchTestCounterLabel, 0, 1);
+
+        auto* patchTestBtn = new QPushButton("Patch Test (+7)");
+        patchTestLayout->addWidget(patchTestBtn, 1, 0, 1, 2);
+        connect(patchTestBtn, &QPushButton::clicked, this, [this]() {
+            incrementPatchTestCounter();
+            updateLabels();
+        });
+
+        mainLayout->addWidget(patchTestGroup);
+
         // --- Section champ affiché vs champ source ---
         auto* counterGroup = new QGroupBox("Displayed vs Source (candidat heuristique)");
         auto* counterLayout = new QGridLayout(counterGroup);
@@ -351,6 +384,8 @@ private:
 
         m_counterSourceLabel->setText(QString::number(g_counterSource));
         m_counterDisplayedLabel->setText(QString::number(g_counterDisplayed));
+
+        m_patchTestCounterLabel->setText(QString::number(g_patchTestCounter));
     }
 
     QLabel*     m_healthLabel{nullptr};
@@ -361,6 +396,7 @@ private:
     QLabel*     m_playerMoneyLabel{nullptr};
     QLabel*     m_counterSourceLabel{nullptr};
     QLabel*     m_counterDisplayedLabel{nullptr};
+    QLabel*     m_patchTestCounterLabel{nullptr};
     QSpinBox*   m_moneySpin{nullptr};
     QTextEdit*  m_log{nullptr};
     QTimer*     m_noiseTimer{nullptr};
@@ -456,13 +492,14 @@ int main(int argc, char* argv[]) {
             // C'est exactement ce qu'une chaine de pointeurs doit resoudre : [module+offset]
             // -> pointeur -> +champ. Sert au manual pass "pointer chain survit a un restart"
             // (docs/V1_REGRESSION_CHECKLIST.md, Reliability Pass) sans deviner l'adresse par scan.
-            const QString line = QString("pid=%1\ng_health=0x%2\ng_counterSource=0x%3\ng_counterCurrent=0x%4\ng_counterDisplayed=0x%5\ng_player_ptr_static=0x%6\n")
+            const QString line = QString("pid=%1\ng_health=0x%2\ng_counterSource=0x%3\ng_counterCurrent=0x%4\ng_counterDisplayed=0x%5\ng_player_ptr_static=0x%6\ng_patchTestCounter=0x%7\n")
                 .arg(QApplication::applicationPid())
                 .arg(reinterpret_cast<quintptr>(&g_health), 0, 16)
                 .arg(reinterpret_cast<quintptr>(&g_counterSource), 0, 16)
                 .arg(reinterpret_cast<quintptr>(&g_counterCurrent), 0, 16)
                 .arg(reinterpret_cast<quintptr>(&g_counterDisplayed), 0, 16)
-                .arg(reinterpret_cast<quintptr>(&g_player), 0, 16);
+                .arg(reinterpret_cast<quintptr>(&g_player), 0, 16)
+                .arg(reinterpret_cast<quintptr>(&g_patchTestCounter), 0, 16);
             marker.write(line.toUtf8());
             marker.close();
         }

@@ -442,8 +442,15 @@ TEST(AIEngineContextualFallbackTest, InvestigationPlaybookBroadDisplayedValueIsR
     EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_investigation_playbook");
     EXPECT_EQ(result.value("investigationTopic").toString().toStdString(), "displayed_value_not_found");
     EXPECT_FALSE(result.contains("tool"));
-    EXPECT_TRUE(result.value("message").toString().contains("docs/INVESTIGATION_PLAYBOOK.md"));
-    EXPECT_TRUE(result.value("message").toString().contains("pas de tool_call"));
+    EXPECT_EQ(result.value("source").toString().toStdString(), "docs/INVESTIGATION_PLAYBOOK.md");
+    EXPECT_TRUE(result.value("message").toString().contains("n'exécute rien automatiquement"));
+    // PHASE 120-B (29/08/2026) : le texte affiche a l'utilisateur ne doit plus
+    // reference de terminologie interne au depot (numeros de PHASE, chemins de
+    // fichiers docs/) -- constate en direct par le proprietaire dans le chat
+    // reel, corrige la meme session.
+    EXPECT_FALSE(result.value("message").toString().contains("PHASE 120"));
+    EXPECT_FALSE(result.value("message").toString().contains("docs/"));
+    EXPECT_FALSE(result.value("message").toString().contains("RiskGate"));
 }
 
 TEST(AIEngineContextualFallbackTest, InvestigationPlaybookFreezeFlickerNeverCreatesExecutableAction) {
@@ -460,6 +467,88 @@ TEST(AIEngineContextualFallbackTest, InvestigationPlaybookFreezeFlickerNeverCrea
     EXPECT_EQ(result.value("investigationTopic").toString().toStdString(), "freeze_flickers");
     EXPECT_FALSE(result.contains("tool"));
     EXPECT_FALSE(result.value("message").toString().contains("j'exécute"));
+}
+
+TEST(AIEngineContextualFallbackTest, InvestigationPlaybookAutoChainsFieldStabilityWhenBothMatch) {
+    // PHASE 120-C (29/08/2026, accord propriétaire explicite) : quand le
+    // message combine le symptôme playbook ET les mots-clés du fast-path
+    // analyze_field_stability déjà approuvé sans confirmation, enchaîner
+    // directement plutôt que renvoyer la simple citation.
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+
+    const auto result = engine.processQuery(
+        "le freeze clignote sur 0x1a2b3c4d, teste la stabilité du champ", context);
+
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "analyze_field_stability");
+    EXPECT_EQ(result.value("investigationTopic").toString().toStdString(), "freeze_flickers");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_investigation_playbook_autochain");
+    EXPECT_EQ(result.value("args").toMap().value("address").toString().toStdString(), "0x1a2b3c4d");
+}
+
+TEST(AIEngineContextualFallbackTest, InvestigationPlaybookAutoChainsSaveFileDiscoveryWhenBothMatch) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+
+    const auto result = engine.processQuery("cette valeur vit peut-être dans un fichier de sauvegarde", context);
+
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "discover_save_files");
+    EXPECT_EQ(result.value("investigationTopic").toString().toStdString(), "save_file_or_uwp");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_investigation_playbook_autochain");
+}
+
+TEST(AIEngineContextualFallbackTest, InvestigationPlaybookNeverAutoChainsWhatWritesOrCodePatch) {
+    // "what_writes_value" attache un debugger (jamais autonome, PHASE 140) ;
+    // "code_patch_request" ne peut structurellement jamais co-matcher son
+    // propre fast-path generate_aob (son matcher exige !directReadOnlyTool,
+    // qui inclut wantsGenerateAobQuery) -- les deux doivent toujours rester
+    // de simples citations, jamais un tool_call, quel que soit le contenu du
+    // message.
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+
+    const auto whatWrites = engine.processQuery("qui écrit cette valeur sur 0x1a2b3c4d ?", context);
+    EXPECT_EQ(whatWrites.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_EQ(whatWrites.value("investigationTopic").toString().toStdString(), "what_writes_value");
+
+    const auto codePatch = engine.processQuery(
+        "je veux patcher le code proprement, génère une signature AOB pour 0x1a2b3c4d", context);
+    EXPECT_EQ(codePatch.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(codePatch.value("tool").toString().toStdString(), "generate_aob");
+    EXPECT_FALSE(codePatch.contains("investigationTopic"));
+}
+
+TEST(AIEngineContextualFallbackTest, InvestigationPlaybookRecoveryActionsAreSafeNavigationOnly) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+
+    const auto freeze = engine.processQuery("le freeze clignote sur 0x1a2b3c4d et ne tient pas", context);
+    ASSERT_TRUE(freeze.contains("recoveryActions"));
+    const auto freezeActions = freeze.value("recoveryActions").toList();
+    ASSERT_EQ(freezeActions.size(), 1);
+    EXPECT_EQ(freezeActions.at(0).toMap().value("id").toString().toStdString(), "open_expert");
+
+    const auto managed = engine.processQuery(
+        "coreclr est charge et scanPointerChains ne renvoie aucune chaine de pointeurs", context);
+    EXPECT_EQ(managed.value("investigationTopic").toString().toStdString(), "managed_runtime_pointer_chain");
+    ASSERT_TRUE(managed.contains("recoveryActions"));
+    const auto managedActions = managed.value("recoveryActions").toList();
+    ASSERT_EQ(managedActions.size(), 1);
+    EXPECT_EQ(managedActions.at(0).toMap().value("id").toString().toStdString(), "open_clr_inspector");
 }
 
 TEST(AIEngineContextualFallbackTest, InvestigationPlaybookDoesNotHijackConcreteExistingTools) {
