@@ -21,7 +21,7 @@ Aucun des deux n'a de "mauvaise architecture" au sens strict — c'est de la cro
 Avant de pouvoir extraire quoi que ce soit ailleurs, quelques éléments transversaux doivent devenir des interfaces stables — sinon toute extraction force soit une dépendance circulaire, soit une copie de logique.
 
 **Côté `ui/src/stores/app.ts`** :
-- `addActionLog` (L1152, **282 sites d'appel**), `addInvestigationStep` (L1288, **35 sites**), `confirmRiskAction` (L3161, **39 sites**) — trois fonctions appelées depuis quasiment tous les autres domaines. Elles doivent devenir un store/composable "fondation" séparé (ex. `stores/actionLog.ts`, `stores/investigation.ts`, `stores/riskGate.ts`) **avant** de découper Scan, Trainer, Chat ou Workspace — tous en dépendent directement.
+- `addActionLog` (extrait 29/08/2026 → `stores/actionLog.ts`, candidat S5), `addInvestigationStep` (extrait 29/08/2026 → `stores/investigation.ts`, candidat S6), `confirmRiskAction` (L3161, **39 sites d'appel, pas encore extrait**) — trois fonctions appelées depuis quasiment tous les autres domaines. `confirmRiskAction` reste la seule fondation non extraite : en attendant, le patron validé sur S1 (candidat CLR) fonctionne en pratique pour les candidats qui en dépendent — garder le gate (validation + appel confirmRiskAction) dans `app.ts`, déléguer seulement le travail réel (résultat + logging) au nouveau store. Pas besoin d'attendre l'extraction complète de `confirmRiskAction` pour avancer sur S7-S11.
 
 **Côté `apps/desktop/application_controller.cpp`** :
 - `m_candidates`/`m_previousCandidates`/`m_snapshot` (trio d'état de scan) et `m_lastAutoWriteTargets`/`m_writeHistory` sont lus/écrits directement (pas via accesseur) par au moins 5 clusters différents (scan, write/freeze, chat/dispatch, auto-resolve, profils). Avant d'extraire ces clusters en classes séparées, poser une petite interface d'accès (`ScanStateAccess`, `AutoWriteStateAccess`) que `ApplicationController` garde, mais que les futures classes extraites consomment au lieu de manipuler les membres bruts.
@@ -53,7 +53,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 
 | # | Candidat | Lignes approx. | Couplage | Entangled avec |
 | --- | --- | --- | --- | --- |
-| S1 | CLR Inspector (`clr*` refs + fonctions) | ~600 | **Bas** | — |
+| [x] S1 | CLR Inspector (`clr*` refs + fonctions) — extrait le 29/08/2026 vers `ui/src/stores/clrInspector.ts` (en réalité couplage moyen : 7 fonctions dépendent de `confirmRiskAction`, non extrait — gate gardé dans `app.ts`, résultat délégué au store) | ~600 | **Bas** | — |
 | S2 | Speedhack / API hooking / blocage réseau | ~200 | **Bas** | — |
 | S3 | Automation pipe status | ~60 | **Bas** | — |
 | S4 | Driver kernel (`kernelDriverStatus`, read/write) | ~130 | **Bas** — `memoryAccessMode` partagé avec S6 | S6 |

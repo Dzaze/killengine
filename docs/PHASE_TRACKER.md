@@ -14,7 +14,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - PHASE 14A/14B, PHASE 17, PHASE 120-A/B/C/D, audit Arsenal 4 agents (PHASE 187 et ses corrections), la clarification `chat_memory_write`/`chat_memory_freeze`, PHASE 205 (branchement InvestigationView.vue) et PHASE 206 (Mode Automation, toggle + doc `docs/AUTOMATION_API.md`) : toutes closes et archivées en détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 - Dépôt git consolidé le 29/08/2026 : `main` remis à jour (fast-forward) sur l'unique branche de travail active, branches mortes supprimées.
 - Aucune capacité manquante identifiée dans l'arsenal (convergence 4 agents indépendants).
-- Refactor C1 (`scanUiStrings` / investigation UI-string / diff pages, Codex), C2 (pont CLR/ClrMD, Codex), S6 (store Investigation, Claude) et S5 (store Action Log, Claude) clos le 29/08/2026, chacun en parallèle sans chevauchement de fichiers : détail archivé dans `docs/PHASE_TRACKER_HISTORY.md`, roadmap cochée dans `docs/REFACTOR_ROADMAP.md`.
+- Refactor C1/C2 (Codex, côté C++) et S6/S5/S1 (Claude, côté store) clos le 29/08/2026 — deux tours en parallèle sans chevauchement de fichiers, puis S1 en solo pendant que Codex se reposait : détail archivé dans `docs/PHASE_TRACKER_HISTORY.md`, roadmap cochée dans `docs/REFACTOR_ROADMAP.md`. `confirmRiskAction` reste la seule fondation non extraite ; patron validé sur S1 pour avancer quand même (gate dans `app.ts`, travail délégué au store).
 - Plus aucun chantier ouvert au 29/08/2026 - voir "Chantiers ouverts" ci-dessous.
 
 ## Règle d'utilisation
@@ -38,3 +38,4 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - [x] PHASE 208 - Refactor S6 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 209 - Refactor C2 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 210 - Refactor S5 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
+- [x] PHASE 211 - Refactor S1 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
