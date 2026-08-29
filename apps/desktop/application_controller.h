@@ -42,6 +42,7 @@ namespace killengine {
 class AutomationPipeServer;
 class ClrInspectorBridge;
 class CodePatchManager;
+class DebugFeatureManager;
 class UiStringInvestigator;
 
 /**
@@ -1104,13 +1105,6 @@ private:
     void applyFreezeTick();
     void applyWriteWatchTick();
     void registerWriteWatch(uint64_t address, killcore::ValueType type, const QByteArray& expectedBytes);
-    bool restartBreakpointFreezeFromRegistry(killcore::BreakpointFreezeMode mode, QString* error = nullptr);
-    QVariantMap activateBreakpointFreezeFor(
-        uint64_t address,
-        killcore::ValueType type,
-        const QByteArray& frozenBytes,
-        killcore::BreakpointFreezeMode mode,
-        const QString& modeText);
     bool rememberCandidatesForUndo(QString* error = nullptr);
     void clearCandidateUndo();
     void clearCandidateValueHistory();
@@ -1121,13 +1115,6 @@ private:
     QVariantMap writeMemoryValueConfirmed(const QString& addressHex, const QString& valueType, const QString& value, bool persistHistory = true);
     void persistWriteHistorySequenceEntry(uint64_t address, killcore::ValueType type, const QString& valueText);
     bool hasAddressBeenWriteVerified(uint64_t address) const;
-    /// Arrete au mieux les sessions de breakpoint in-process encore actives
-    /// et force l'arbitre (killcore::HwBreakpointArbiter) a Idle pour
-    /// l'ancienne cible (m_pid avant reassignation) -- appele au debut de
-    /// attachProcess() et detachProcess(). Best-effort et non bloquant
-    /// longtemps meme si la cible a deja disparu : stop() a son propre
-    /// desarmement borne a 2s (voir core/debug/inprocess_breakpoint.cpp).
-    void resetHardwareBreakpointStateForPreviousTarget();
     void detectStableCandidateGroup(killcore::NextScanMode mode, const QList<killcore::Candidate>& survivors, QVariantMap* result);
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
     QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);
@@ -1195,6 +1182,7 @@ private:
     std::unique_ptr<UiStringInvestigator> m_uiStringInvestigator;
     std::unique_ptr<ClrInspectorBridge> m_clrInspectorBridge;
     std::unique_ptr<CodePatchManager> m_codePatchManager;
+    std::unique_ptr<DebugFeatureManager> m_debugFeatureManager;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
     // detachProcess() pour que la regle pare-feu reste retirable meme apres
     // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
@@ -1205,7 +1193,6 @@ private:
     QHash<uint64_t, QVariantList> m_candidateValueHistory;
     killcore::SnapshotStore  m_snapshot;
     killcore::FreezeManager  m_freeze;
-    std::unique_ptr<killcore::BreakpointFreezeManager> m_breakpointFreeze;
     std::unique_ptr<killcore::GlobalHotkeyManager> m_hotkeys;
     QTimer                   m_freezeTimer;
     // Sondage independant du freeze (interval bien plus lent, pas de
@@ -1233,17 +1220,7 @@ private:
     bool                     m_hasPreviousCandidates{false};
     int                      m_nextScanRequestId{1};
     int                      m_nextDebugRequestId{1};
-    bool                     m_findWhatWritesInProgress{false};
-    bool                     m_findWhatAccessesInProgress{false};
-    bool                     m_pageGuardWatchInProgress{false};
-    std::shared_ptr<killcore::PageGuardSession> m_activePageGuardSession;
-    bool                     m_inProcessBreakpointWatchInProgress{false};
-    std::shared_ptr<killcore::InProcessBreakpointSession> m_activeInProcessBreakpointSession;
-    std::shared_ptr<killcore::InProcessBreakpointSession> m_inProcessBreakpointFreezeSession;
-    std::unique_ptr<killcore::SpeedhackSession> m_speedhackSession;
-    std::unique_ptr<killcore::ApiHookSession> m_apiHookSession;
     std::unique_ptr<AutomationPipeServer> m_automationPipeServer;
-    std::shared_ptr<killcore::CancellationToken> m_activeDebugCancellation;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     // Test automatique des champs candidats (voir testCandidateFieldsAsync) : etat
     // dedie, distinct de m_activeDebugCancellation qui est reserve aux operations

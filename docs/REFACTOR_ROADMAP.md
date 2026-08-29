@@ -38,7 +38,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | C4 | UWP / save-file investigation | ~291 (L2069–2360) | **Bas** | — |
 | C5 | Freeze-value / hotkeys globaux / overlay Trainer | ~407 (L9738–10145) | **Bas** — objets de session déjà `unique_ptr` | — |
 | [x] C6 | Code patching (AOB/patch/restore/hooks/AutoAssembler) — extrait le 29/08/2026 vers `apps/desktop/code_patch_manager.*` | ~1133 (L8605–9738) | **Bas** | C7 (debug cancellation), C10 (persistance profil) |
-| C7 | Breakpoints matériels / find-what-writes / page-guard / speedhack / API-hook | ~1494 (L6946–8440) | **Bas-moyen** | C6 |
+| [x] C7 | Breakpoints matériels / find-what-writes / page-guard / speedhack / API-hook — extrait le 29/08/2026 vers `apps/desktop/debug_feature_manager.*` | ~1494 (L6946–8440) | **Bas-moyen** | C6 |
 | C8 | Scanning core (exact/unknown/AOB/group) | ~2032 (L4380–6412) | **Moyen** — trio `m_candidates`/`m_previousCandidates`/`m_snapshot` lu par C9-C11 | C9, C10, C11 |
 | C9 | Write/freeze/rollback core | ~534 (L6412–6946) | **Moyen** — `m_lastAutoWriteTargets`/`m_writeHistory` partagés | C8, C10, C11 |
 | C10 | Profils / pointer chains / Ghidra bridge / persistance Lua | ~2005 (L16325–18330) | **Moyen** — lit l'état de C6 et C9 pour persister | C6, C9 |
@@ -48,6 +48,8 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | C14 | `startSmartSearch` (dispatch chat/IA) | **~1627 lignes, une seule fonction** (L12365–13992) | **Haut — le pire du fichier** | C12, C13, C8, C10 |
 
 **Ordre recommandé :** C1-C7 en premier (indépendants, zéro risque de collision entre agents) → C8/C9/C10 ensuite (nécessitent l'interface d'accès partagée décrite plus haut) → C12/C13/C14 en dernier, comme un seul chantier groupé ("dispatch IA/chat") vu leur imbrication mutuelle — ne pas les répartir entre agents différents, ils se marchent dessus.
+
+**Clôture première vague Codex (29/08/2026)** : les extractions backend demandées en première vague sont closes (`C1`, `C2`, `C6`, `C7`). Les candidats `C3`/`C4`/`C5` restent listés séparément comme petits chantiers bas-couplage non encore pris.
 
 ## Candidats d'extraction — `ui/src/stores/app.ts`
 
