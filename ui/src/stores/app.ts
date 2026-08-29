@@ -6,7 +6,6 @@ import {
   type AtomicWriteTarget,
   type AutoResolveReportResult,
   type CandidateFieldTestResult,
-  type CandidatePage,
   type ClrPathWriteOperation,
   type EncryptedScanResult,
   type ChatMemoryTargetsResult,
@@ -31,7 +30,6 @@ import {
   type SmartSearchContextResult,
   type SmartSearchDebugEventsResult,
   type TemporaryStorageStatus,
-  type UndoCandidateScanResult,
   type UiStringCandidate,
   type UiStringSourceCandidate,
   type UiStringSourceResult,
@@ -55,6 +53,7 @@ import { useAutomationPipeStore } from './automationPipe'
 import { useKernelDriverStore } from './kernelDriver'
 import { useRiskGateStore, type RiskDialogState } from './riskGate'
 import { useSettingsStore } from './settings'
+import { useScanningStore } from './scanning'
 import {
   useWorkspaceItemsStore,
   type StructureTemplateField,
@@ -243,17 +242,6 @@ export interface WatchedAddress {
   changed: boolean
   error: string
   updatedAt: string
-}
-
-export interface UnknownGuideStep {
-  id: number
-  time: string
-  mode: string
-  label: string
-  beforeCount: number
-  afterCount: number
-  status: 'capture' | 'compare' | 'refine' | 'error'
-  detail: string
 }
 
 export const useAppStore = defineStore('app', () => {
@@ -584,23 +572,61 @@ export const useAppStore = defineStore('app', () => {
   const { riskDialog } = storeToRefs(riskGateStore)
   const searchQuery = ref('')
   const searchResult = ref('')
-  const exactScanValue = ref('')
-  const exactScanType = ref('Int32')
-  const exactScanResult = ref<ExactScanResult | null>(null)
-  const encryptedScanResult = ref<EncryptedScanResult | null>(null)
-// ---- Scan groupe (P1) : N valeurs avec offsets fixes connus ----
-interface GroupScanEntryInput {
-  offset: number
-  type: string
-  value: string
-}
-const groupScanEntries = ref<Array<{ offset: string, type: string, value: string }>>([
-  { offset: '0', type: 'Int32', value: '' },
-  { offset: '4', type: 'Int32', value: '' },
-])
-const groupScanResult = ref<EncryptedScanResult | null>(null)
-const groupScanBusy = ref(false)
-const groupScanMaxDistance = ref(64)
+  // Store Scanning/Candidates extrait (candidat S11a, docs/REFACTOR_ROADMAP.md,
+  // PHASE 223, 30/08/2026) -- refs directement mutables via storeToRefs, memes
+  // noms qu'avant. Les fonctions qui traversent vers d'autres domaines
+  // (write/freeze, chat/IA) restent ci-dessous et continuent de lire/ecrire
+  // ces memes refs partagees sans changement.
+  const scanningStore = useScanningStore()
+  const {
+    exactScanValue,
+    exactScanType,
+    exactScanResult,
+    encryptedScanResult,
+    encryptedScanMode,
+    encryptedScanKey,
+    encryptedScanKeySearchBits,
+    groupScanEntries,
+    groupScanResult,
+    groupScanBusy,
+    groupScanMaxDistance,
+    expertModeEnabled,
+    expertStartAddress,
+    expertStopAddress,
+    expertAlignment,
+    expertWritableOnly,
+    expertExecutableOnly,
+    expertCopyOnWriteOnly,
+    expertRegionSize,
+    expertRegionProtection,
+    expertRegionState,
+    expertRegionType,
+    candidatePage,
+    candidatePageIndex,
+    candidatePageSize,
+    candidateFilter,
+    nextScanMode,
+    nextScanValue,
+    nextScanResult,
+    undoCandidateScanResult,
+    unknownScanMode,
+    unknownScanType,
+    unknownWritableOnly,
+    unknownCopyOnWriteOnly,
+    unknownSnapshotResult,
+    unknownNextScanResult,
+    unknownGuideSteps,
+    autoUnknownAwaitingObservation,
+    selectedCandidateAddress,
+    candidateHistory,
+    scanBusy,
+    scanStatusText,
+    scanProgressPercent,
+  } = storeToRefs(scanningStore)
+  // addAddressToWatch (function declaration, donc hissee) est definie plus
+  // bas dans ce meme setup() -- l'appeler ici fonctionne des l'initialisation
+  // du store, avant tout premier scan.
+  scanningStore.configureCandidateWatchNotifier(addAddressToWatch)
 
 // ---- Watch pointer chain (P1) : suit une chaine de pointeurs en live ----
 interface WatchedPointerChain {
@@ -620,40 +646,6 @@ let nextWatchedChainId = 1
   const autoUiStringScanResult = ref<UiStringScanResult | null>(null)
   const autoUiStringSourceResult = ref<UiStringSourceResult | null>(null)
   const autoUiStringSources = ref<UiStringSourceCandidate[]>([])
-  const encryptedScanMode = ref<'xor' | 'add' | 'sub' | 'not'>('xor')
-  const encryptedScanKey = ref('0')
-  const encryptedScanKeySearchBits = ref(0)
-
-  // Mode Expert (Phase 12)
-  const expertModeEnabled = ref(false)
-  const expertStartAddress = ref('')
-  const expertStopAddress = ref('')
-  const expertAlignment = ref(0)
-  const expertWritableOnly = ref(false)
-  const expertExecutableOnly = ref(false)
-  const expertCopyOnWriteOnly = ref(false)
-  const expertRegionSize = ref(0)
-  const expertRegionProtection = ref('')
-  const expertRegionState = ref('')
-  const expertRegionType = ref('')
-  const candidatePage = ref<CandidatePage | null>(null)
-  const candidatePageIndex = ref(0)
-  const candidatePageSize = ref(100)
-  const candidateFilter = ref('')
-  const nextScanMode = ref('exact')
-  const nextScanValue = ref('')
-  const nextScanResult = ref<NextScanResult | null>(null)
-  const undoCandidateScanResult = ref<UndoCandidateScanResult | null>(null)
-  const unknownScanMode = ref('changed')
-  const unknownScanType = ref('Auto')
-  const unknownWritableOnly = ref(true)
-  const unknownCopyOnWriteOnly = ref(false)
-  const unknownSnapshotResult = ref<UnknownSnapshotResult | null>(null)
-  const unknownNextScanResult = ref<UnknownNextScanResult | null>(null)
-  const unknownGuideSteps = ref<UnknownGuideStep[]>([])
-  const autoUnknownAwaitingObservation = ref(false)
-  const unknownGuideStepIdCounter = ref(0)
-  const selectedCandidateAddress = ref('')
   const writeValue = ref('')
   const writeResult = ref<MemoryWriteResult | null>(null)
   const writeSafetyWarning = ref('')
@@ -711,11 +703,7 @@ let nextWatchedChainId = 1
   const sessionPromotionBusyIds = ref<Set<string>>(new Set())
   const workflowStatus = ref<string>('idle')
   const targetValueGuided = ref<string>('')
-  const candidateHistory = ref<number[]>([])
   const isSearching = ref(false)
-  const scanBusy = ref(false)
-  const scanStatusText = ref('')
-  const scanProgressPercent = ref(0)
   let backendScanSignalsConnected = false
   let backendHotkeySignalConnected = false
   let backendFreezeInstabilitySignalConnected = false
@@ -1050,28 +1038,6 @@ let nextWatchedChainId = 1
     } finally {
       setSessionPromotionBusy(groupId, false)
     }
-  }
-
-  function formatCount(value: number | undefined): string {
-    return new Intl.NumberFormat('fr-FR').format(value ?? 0)
-  }
-
-  function unknownModeLabel(mode: string): string {
-    if (mode === 'increased') return 'ça augmente'
-    if (mode === 'decreased') return 'ça diminue'
-    if (mode === 'unchanged') return 'stable'
-    if (mode === 'changed') return 'ça change'
-    return mode
-  }
-
-  function pushUnknownGuideStep(step: Omit<UnknownGuideStep, 'id' | 'time'>) {
-    unknownGuideStepIdCounter.value += 1
-    unknownGuideSteps.value.unshift({
-      id: unknownGuideStepIdCounter.value,
-      time: nowTime(),
-      ...step,
-    })
-    unknownGuideSteps.value = unknownGuideSteps.value.slice(0, 12)
   }
 
   function firstNumberFromText(text: string): number | null {
@@ -3582,8 +3548,7 @@ let nextWatchedChainId = 1
   }
 
   function setScanProgress(percent: number) {
-    if (!Number.isFinite(percent)) return
-    scanProgressPercent.value = Math.max(0, Math.min(100, Math.round(percent)))
+    scanningStore.setScanProgress(percent)
   }
 
   function pushMessage(
@@ -4860,8 +4825,7 @@ let nextWatchedChainId = 1
   }
 
   function syncScanDefaultsFromSettings() {
-    exactScanType.value = settingDefaultValueType.value
-    unknownScanType.value = 'Auto'
+    scanningStore.syncScanDefaultsFromSettings()
   }
 
   async function loadSettings() {
@@ -5586,172 +5550,27 @@ let nextWatchedChainId = 1
   }
 
   function extractCandidateCount(result: Record<string, unknown>): number | undefined {
-    if (typeof result.candidateStoreSize === 'number') return result.candidateStoreSize
-    const ar = result.actionResult as Record<string, unknown> | undefined
-    if (ar) {
-      if (typeof ar.remaining === 'number') return ar.remaining
-      if (typeof ar.candidateStoreSize === 'number') return ar.candidateStoreSize
-      if (typeof ar.stored === 'number') return ar.stored
-    }
-    return undefined
+    return scanningStore.extractCandidateCount(result)
   }
 
   async function doExactScan() {
-    if (!exactScanValue.value.trim() || scanBusy.value) return
-
-    // Le mode Auto (multi-type) est crucial pour les cibles modernes : il cherche
-    // Int/UInt, Float et variantes fixed-point en une fois.
-    const isAutoType = exactScanType.value.toLowerCase() === 'auto'
-
-    // Si le Mode Expert est activé et qu'au moins un filtre est défini, on utilise l'API expert.
-    const hasExpertFilter =
-      expertModeEnabled.value
-      && (expertStartAddress.value.trim()
-        || expertStopAddress.value.trim()
-        || expertAlignment.value > 0
-        || expertWritableOnly.value
-        || expertExecutableOnly.value
-        || expertCopyOnWriteOnly.value)
-    try {
-      scanBusy.value = true
-      setScanProgress(0)
-      scanStatusText.value = isAutoType ? 'Scan multi-type en cours...' : 'Scan exact en cours...'
-      addActionLog('scan', `Scan ${isAutoType ? 'multi-type' : 'exact'} ${exactScanValue.value}`, `${exactScanType.value}${hasExpertFilter ? ' · filtres expert actifs' : ''}.`, 'info')
-
-      if (isAutoType) {
-        const controller = backend.getController()
-        if (controller.startExactScanMultiType) {
-          exactScanResult.value = await controller.startExactScanMultiType(
-            exactScanValue.value,
-            exactScanType.value,
-          )
-        } else {
-          // Fallback : si le backend n'expose pas le scan multi-type, on utilise le scan simple.
-          exactScanResult.value = await backend.startExactScanAsync(
-            exactScanValue.value,
-            'Int32',
-            {},
-          )
-        }
-      } else {
-        exactScanResult.value = await backend.startExactScanAsync(
-          exactScanValue.value,
-          exactScanType.value,
-          hasExpertFilter
-            ? {
-                startAddress: expertStartAddress.value.trim() || undefined,
-                stopAddress: expertStopAddress.value.trim() || undefined,
-                alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
-                writableOnly: expertWritableOnly.value,
-                executableOnly: expertExecutableOnly.value,
-                copyOnWriteOnly: expertCopyOnWriteOnly.value,
-              }
-            : {},
-        )
-      }
-      setScanProgress(Math.max(scanProgressPercent.value, 95))
-      candidatePageIndex.value = 0
-      scanStatusText.value = 'Chargement des candidats...'
-      await refreshCandidates()
-      setScanProgress(100)
-      scanStatusText.value = exactScanResult.value.cancelled ? 'Scan annulé.' : 'Scan terminé.'
-      addActionLog(
-        'scan',
-        exactScanResult.value.cancelled ? 'Scan exact annulé' : 'Scan exact terminé',
-        `${exactScanResult.value.candidateStoreSize} candidat(s), ${exactScanResult.value.regionsScanned} région(s).`,
-        exactScanResult.value.success ? 'success' : 'warning',
-      )
-    } catch (e) {
-      exactScanResult.value = {
-        success: false,
-        partial: false,
-        cancelled: false,
-        regionsScanned: 0,
-        bytesScanned: 0,
-        matchesFound: 0,
-        matchesReturned: 0,
-        error: String(e),
-        matches: [],
-        candidateStoreSize: 0,
-      }
-      scanStatusText.value = 'Scan échoué.'
-      addActionLog('scan', 'Scan exact échoué', String(e), 'error')
-    } finally {
-      scanBusy.value = false
-    }
+    return scanningStore.doExactScan()
   }
 
   async function doGroupScan() {
-    if (scanBusy.value) return
-    const controller = backend.getController()
-    if (!controller.scanGroupScan) {
-      groupScanResult.value = {
-        success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
-        matchesFound: 0, matchesReturned: 0,
-        error: 'Scan groupe non exposé par ce backend.', matches: [],
-      }
-      addActionLog('scan', 'Scan groupe indisponible', groupScanResult.value.error, 'warning')
-      return
-    }
-    const entries = groupScanEntries.value
-      .filter((entry) => entry.value.trim() !== '' && entry.offset.trim() !== '')
-      .map((entry): GroupScanEntryInput => ({ offset: Number(entry.offset), type: entry.type, value: entry.value.trim() }))
-    if (entries.length < 2) {
-      groupScanResult.value = {
-        success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
-        matchesFound: 0, matchesReturned: 0,
-        error: 'Renseigne au moins 2 valeurs avec leurs offsets.', matches: [],
-      }
-      return
-    }
-
-    try {
-      scanBusy.value = true
-      groupScanBusy.value = true
-      setScanProgress(0)
-      scanStatusText.value = 'Scan groupe en cours...'
-      addActionLog('scan', `Scan groupe (${entries.length} valeurs)`, entries.map((e) => `+${e.offset}:${e.value}`).join(' '), 'info')
-      groupScanResult.value = await controller.scanGroupScan(entries, {
-        maxDistance: groupScanMaxDistance.value,
-        maxResults: 1000,
-        startAddress: expertStartAddress.value.trim() || undefined,
-        stopAddress: expertStopAddress.value.trim() || undefined,
-        alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
-        writableOnly: true,
-      })
-      setScanProgress(1)
-      if (groupScanResult.value.success) {
-        addActionLog('scan', 'Scan groupe terminé', `${groupScanResult.value.matchesFound} structure(s) trouvée(s).`, 'success')
-      } else {
-        addActionLog('scan', 'Scan groupe échoué', groupScanResult.value.error, 'error')
-      }
-    } catch (e) {
-      groupScanResult.value = {
-        success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
-        matchesFound: 0, matchesReturned: 0, error: String(e), matches: [],
-      }
-      addActionLog('scan', 'Scan groupe échoué', String(e), 'error')
-    } finally {
-      scanBusy.value = false
-      groupScanBusy.value = false
-      scanStatusText.value = ''
-    }
+    return scanningStore.doGroupScan()
   }
 
   function addGroupScanEntry() {
-    const last = groupScanEntries.value[groupScanEntries.value.length - 1]
-    const lastOffset = last ? Number(last.offset || '0') : 0
-    groupScanEntries.value.push({ offset: String(lastOffset + 4), type: last?.type ?? 'Int32', value: '' })
+    scanningStore.addGroupScanEntry()
   }
 
   function removeGroupScanEntry(index: number) {
-    if (groupScanEntries.value.length <= 2) return
-    groupScanEntries.value.splice(index, 1)
+    scanningStore.removeGroupScanEntry(index)
   }
 
   function clearGroupScanEntries() {
-    groupScanEntries.value = [{ offset: '0', type: 'Int32', value: '' }, { offset: '4', type: 'Int32', value: '' }]
-    groupScanResult.value = null
+    scanningStore.clearGroupScanEntries()
   }
 
   // ---- Watch pointer chain ----
@@ -5851,166 +5670,20 @@ let nextWatchedChainId = 1
     )
   }
 
-async function doEncryptedScan() {
-    if (!exactScanValue.value.trim() || scanBusy.value) return
-
-    const controller = backend.getController()
-    if (!controller.scanEncryptedValue) {
-      encryptedScanResult.value = {
-        success: false,
-        partial: false,
-        regionsScanned: 0,
-        bytesScanned: 0,
-        matchesFound: 0,
-        matchesReturned: 0,
-        error: 'Scan chiffré non exposé par ce backend.',
-        matches: [],
-      }
-      addActionLog('scan', 'Scan chiffré indisponible', encryptedScanResult.value.error, 'warning')
-      return
-    }
-
-    try {
-      scanBusy.value = true
-      setScanProgress(0)
-      scanStatusText.value = 'Scan chiffré en cours...'
-      addActionLog('scan', `Scan chiffré ${encryptedScanMode.value.toUpperCase()} ${exactScanValue.value}`, `${exactScanType.value}.`, 'info')
-      encryptedScanResult.value = await controller.scanEncryptedValue(
-        exactScanValue.value,
-        exactScanType.value === 'Auto' ? 'Int32' : exactScanType.value,
-        {
-          mode: encryptedScanMode.value,
-          key: encryptedScanKey.value,
-          keySearchBits: encryptedScanKeySearchBits.value,
-          startAddress: expertStartAddress.value.trim() || undefined,
-          stopAddress: expertStopAddress.value.trim() || undefined,
-          alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
-          writableOnly: true,
-          executableOnly: expertExecutableOnly.value,
-          copyOnWriteOnly: expertCopyOnWriteOnly.value,
-          maxResults: 1000,
-        },
-      )
-      setScanProgress(100)
-      scanStatusText.value = encryptedScanResult.value.success ? 'Scan chiffré terminé.' : 'Scan chiffré échoué.'
-      addActionLog(
-        'scan',
-        encryptedScanResult.value.success ? 'Scan chiffré terminé' : 'Scan chiffré échoué',
-        `${encryptedScanResult.value.matchesFound} match(es), ${encryptedScanResult.value.regionsScanned} région(s).`,
-        encryptedScanResult.value.success ? 'success' : 'warning',
-      )
-    } catch (e) {
-      encryptedScanResult.value = {
-        success: false,
-        partial: false,
-        regionsScanned: 0,
-        bytesScanned: 0,
-        matchesFound: 0,
-        matchesReturned: 0,
-        error: String(e),
-        matches: [],
-      }
-      scanStatusText.value = 'Scan chiffré échoué.'
-      addActionLog('scan', 'Scan chiffré échoué', String(e), 'error')
-    } finally {
-      scanBusy.value = false
-    }
+  async function doEncryptedScan() {
+    return scanningStore.doEncryptedScan()
   }
 
   async function refreshCandidates() {
-    try {
-      candidatePage.value = await backend
-        .getController()
-        .getCandidates(candidatePageIndex.value, candidatePageSize.value, candidateFilter.value)
-      if (
-        candidatePage.value
-        && !candidatePage.value.displaySuppressed
-        && candidatePage.value.totalCount > 0
-        && candidatePage.value.totalCount <= 20
-      ) {
-        for (const candidate of candidatePage.value.candidates) {
-          addAddressToWatch(candidate.address, candidate.type)
-        }
-      }
-    } catch (e) {
-      console.error('[KillEngine] Failed to get candidates:', e)
-      candidatePage.value = null
-    }
+    return scanningStore.refreshCandidates(addAddressToWatch)
   }
 
   async function doNextScan() {
-    if (scanBusy.value) return
-    if ((candidatePage.value?.totalCount ?? 0) <= 0) {
-      scanStatusText.value = 'Aucun candidat à réduire. Lance d’abord un premier scan.'
-      nextScanResult.value = {
-        success: false,
-        checked: 0,
-        unreadable: 0,
-        remaining: 0,
-        error: scanStatusText.value,
-      }
-      addActionLog('scan', 'Next scan refusé', scanStatusText.value, 'warning')
-      return
-    }
-    try {
-      scanBusy.value = true
-      setScanProgress(0)
-      scanStatusText.value = 'Réduction des candidats...'
-      addActionLog('scan', `Next scan ${nextScanMode.value}`, nextScanValue.value ? `Valeur ${nextScanValue.value}.` : 'Sans valeur explicite.', 'info')
-      nextScanResult.value = await backend.startNextScanAsync(nextScanMode.value, nextScanValue.value)
-      setScanProgress(Math.max(scanProgressPercent.value, 95))
-      candidatePageIndex.value = 0
-      scanStatusText.value = 'Actualisation des candidats...'
-      await refreshCandidates()
-      setScanProgress(100)
-      scanStatusText.value = nextScanResult.value.cancelled ? 'Scan annulé.' : 'Next scan terminé.'
-      addActionLog(
-        'scan',
-        nextScanResult.value.cancelled ? 'Next scan annulé' : 'Next scan terminé',
-        `${nextScanResult.value.remaining} candidat(s) restant(s).`,
-        nextScanResult.value.success ? 'success' : 'warning',
-      )
-    } catch (e) {
-      nextScanResult.value = {
-        success: false,
-        cancelled: false,
-        checked: 0,
-        unreadable: 0,
-        remaining: 0,
-        error: String(e),
-      }
-      scanStatusText.value = 'Next scan échoué.'
-      addActionLog('scan', 'Next scan échoué', String(e), 'error')
-    } finally {
-      scanBusy.value = false
-    }
+    return scanningStore.doNextScan()
   }
 
   async function undoCandidateScan() {
-    if (scanBusy.value) return null
-    try {
-      undoCandidateScanResult.value = await backend.getController().undoCandidateScan()
-      if (undoCandidateScanResult.value.success) {
-        candidatePageIndex.value = 0
-        await refreshCandidates()
-        scanStatusText.value = `Réduction restaurée : ${undoCandidateScanResult.value.count} candidat(s).`
-        addActionLog('rollback', 'Réduction restaurée', `${undoCandidateScanResult.value.count} candidat(s).`, 'success')
-      } else {
-        scanStatusText.value = undoCandidateScanResult.value.error || 'Aucune réduction à restaurer.'
-        addActionLog('rollback', 'Réduction non restaurée', scanStatusText.value, 'warning')
-      }
-      return undoCandidateScanResult.value
-    } catch (e) {
-      undoCandidateScanResult.value = {
-        success: false,
-        restored: false,
-        count: candidatePage.value?.totalCount ?? 0,
-        error: String(e),
-      }
-      scanStatusText.value = 'Restauration impossible.'
-      addActionLog('rollback', 'Restauration impossible', String(e), 'error')
-      return undoCandidateScanResult.value
-    }
+    return scanningStore.undoCandidateScan()
   }
 
   async function runAutoEncryptedScan(value: string) {
@@ -6230,182 +5903,23 @@ async function doEncryptedScan() {
   }
 
   async function cancelActiveScan() {
-    if (!scanBusy.value) return
-    scanStatusText.value = 'Annulation demandée...'
-    try {
-      const result = await backend.cancelActiveScan()
-      if (result.success !== true && result.error) {
-        scanStatusText.value = String(result.error)
-      }
-    } catch (e) {
-      scanStatusText.value = 'Annulation impossible : ' + String(e)
-    }
+    return scanningStore.cancelActiveScan()
   }
 
   async function captureUnknownSnapshot() {
-    if (scanBusy.value) return
-    try {
-      scanBusy.value = true
-      scanProgressPercent.value = 15
-      scanStatusText.value = 'Capture unknown en cours...'
-      addActionLog('scan', 'Capture unknown', `${unknownScanType.value}.`, 'info')
-      unknownSnapshotResult.value = await backend.captureUnknownSnapshotAsync({
-        writableOnly: unknownWritableOnly.value,
-        copyOnWriteOnly: unknownWritableOnly.value && unknownCopyOnWriteOnly.value,
-        unknownSnapshotMaxMb: settingUnknownSnapshotMaxMb.value,
-      })
-      scanProgressPercent.value = 100
-      scanStatusText.value = unknownSnapshotResult.value.cancelled ? 'Scan annulé.' : 'Snapshot capturé.'
-      candidatePage.value = null
-      candidatePageIndex.value = 0
-      nextScanResult.value = null
-      unknownNextScanResult.value = null
-      unknownScanMode.value = 'changed'
-      unknownGuideSteps.value = []
-      autoUnknownAwaitingObservation.value = unknownSnapshotResult.value.success === true
-      pushUnknownGuideStep({
-        mode: 'capture',
-        label: 'capture',
-        beforeCount: 0,
-        afterCount: 0,
-        status: unknownSnapshotResult.value.success ? 'capture' : 'error',
-        detail: unknownSnapshotResult.value.success
-          ? `${unknownSnapshotResult.value.regionsCaptured} région(s), ${unknownSnapshotResult.value.bytesCaptured} octet(s) / limite ${unknownSnapshotResult.value.captureLimitBytes ?? 0}.${unknownSnapshotResult.value.captureLimitReached ? ' Limite atteinte.' : ''}${unknownSnapshotResult.value.writableOnly ? ' Writable only.' : ''}`
-          : unknownSnapshotResult.value.error || 'Capture refusée.',
-      })
-      addActionLog('scan', 'Snapshot unknown capturé', `${unknownSnapshotResult.value.regionsCaptured} région(s).`, 'success')
-    } catch (e) {
-      unknownSnapshotResult.value = {
-        success: false,
-        partial: false,
-        cancelled: false,
-        regionsCaptured: 0,
-        regionsSkipped: 0,
-        bytesCaptured: 0,
-        error: String(e),
-      }
-      scanStatusText.value = 'Capture unknown échouée.'
-      pushUnknownGuideStep({
-        mode: 'capture',
-        label: 'capture',
-        beforeCount: 0,
-        afterCount: 0,
-        status: 'error',
-        detail: String(e),
-      })
-      addActionLog('scan', 'Capture unknown échouée', String(e), 'error')
-    } finally {
-      scanBusy.value = false
-    }
+    return scanningStore.captureUnknownSnapshot()
   }
 
   async function doUnknownNextScan() {
-    if (scanBusy.value) return
-    if (!unknownSnapshotResult.value?.success) {
-      scanStatusText.value = 'Capture d’abord une image unknown avant de comparer.'
-      unknownNextScanResult.value = {
-        success: false,
-        partial: false,
-        cancelled: false,
-        checkedBytes: 0,
-        matchesFound: 0,
-        stored: 0,
-        error: scanStatusText.value,
-      }
-      addActionLog('scan', 'Comparaison unknown refusée', scanStatusText.value, 'warning')
-      return
-    }
-    try {
-      scanBusy.value = true
-      scanProgressPercent.value = 15
-      const candidateCount = candidatePage.value?.totalCount ?? 0
-      const isRefine = candidateCount > 0
-      scanStatusText.value = isRefine
-        ? `Raffinage unknown ${unknownScanMode.value}...`
-        : 'Comparaison unknown en cours...'
-      addActionLog(
-        'scan',
-        isRefine ? `Raffinage unknown ${unknownScanMode.value}` : `Comparaison unknown ${unknownScanMode.value}`,
-        isRefine ? `${candidateCount} candidat(s).` : unknownScanType.value,
-        'info',
-      )
-      unknownNextScanResult.value = await backend.unknownNextScanAsync(unknownScanMode.value, unknownScanType.value)
-      scanProgressPercent.value = 85
-      candidatePageIndex.value = 0
-      scanStatusText.value = 'Actualisation des candidats...'
-      await refreshCandidates()
-      scanProgressPercent.value = 100
-      scanStatusText.value = unknownNextScanResult.value.cancelled ? 'Scan annulé.' : 'Comparaison unknown terminée.'
-      addActionLog('scan', 'Comparaison unknown terminée', `${unknownNextScanResult.value.stored} candidat(s).`, 'success')
-    } catch (e) {
-      unknownNextScanResult.value = {
-        success: false,
-        partial: false,
-        cancelled: false,
-        checkedBytes: 0,
-        matchesFound: 0,
-        stored: 0,
-        error: String(e),
-      }
-      scanStatusText.value = 'Comparaison unknown échouée.'
-      addActionLog('scan', 'Comparaison unknown échouée', String(e), 'error')
-    } finally {
-      scanBusy.value = false
-    }
+    return scanningStore.doUnknownNextScan()
   }
 
   function selectCandidate(address: string, type: string) {
-    selectedCandidateAddress.value = address
-    exactScanType.value = type
-    addAddressToWatch(address, type)
-    addActionLog('select', `Adresse sélectionnée 0x${address}`, `Type ${type}.`, 'info')
+    scanningStore.selectCandidate(address, type)
   }
 
   async function runUnknownGuideStep(mode: 'increased' | 'decreased' | 'unchanged' | 'changed') {
-    if (scanBusy.value) return
-    if (!unknownSnapshotResult.value?.success && (candidatePage.value?.totalCount ?? 0) <= 0) {
-      scanStatusText.value = 'Capture d’abord une valeur unknown.'
-      addActionLog('scan', 'Unknown guidé refusé', scanStatusText.value, 'warning')
-      pushUnknownGuideStep({
-        mode,
-        label: unknownModeLabel(mode),
-        beforeCount: 0,
-        afterCount: 0,
-        status: 'error',
-        detail: scanStatusText.value,
-      })
-      return
-    }
-
-    const beforeCount = candidatePage.value?.totalCount ?? 0
-    unknownScanMode.value = mode
-    await doUnknownNextScan()
-
-    const afterCount = candidatePage.value?.totalCount
-      ?? unknownNextScanResult.value?.stored
-      ?? nextScanResult.value?.remaining
-      ?? 0
-    const usedRefine = beforeCount > 0
-    const error = unknownNextScanResult.value?.error
-    const cancelled = unknownNextScanResult.value?.cancelled
-    const status: UnknownGuideStep['status'] = error || cancelled ? 'error' : usedRefine ? 'refine' : 'compare'
-    const detail = error
-      ? String(error)
-      : cancelled
-        ? 'Opération annulée.'
-        : usedRefine
-          ? `${beforeCount} -> ${afterCount} candidat(s).`
-          : `${formatCount(unknownNextScanResult.value?.matchesFound)} trouvé(s), ${afterCount} stocké(s).`
-
-    pushUnknownGuideStep({
-      mode,
-      label: unknownModeLabel(mode),
-      beforeCount,
-      afterCount,
-      status,
-      detail,
-    })
-    autoUnknownAwaitingObservation.value = status !== 'error' && afterCount > 25
+    return scanningStore.runUnknownGuideStep(mode)
   }
 
   async function runAutoUnknownObservation(observation: string, thinkingMessageId?: number) {
@@ -7430,17 +6944,11 @@ async function doEncryptedScan() {
   }
 
   async function nextCandidatePage() {
-    if (!candidatePage.value) return
-    const nextStart = (candidatePageIndex.value + 1) * candidatePageSize.value
-    if (nextStart >= candidatePage.value.totalCount) return
-    candidatePageIndex.value += 1
-    await refreshCandidates()
+    return scanningStore.nextCandidatePage()
   }
 
   async function previousCandidatePage() {
-    if (candidatePageIndex.value === 0) return
-    candidatePageIndex.value -= 1
-    await refreshCandidates()
+    return scanningStore.previousCandidatePage()
   }
 
   // PHASE 119 -- pont pipe d'automatisation -> couche Vue/Pinia (voir
