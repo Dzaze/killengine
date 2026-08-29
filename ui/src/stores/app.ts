@@ -54,6 +54,9 @@ import { useClrInspectorStore } from './clrInspector'
 import { useSpeedhackStore } from './speedhack'
 import { useAutomationPipeStore } from './automationPipe'
 import { useKernelDriverStore } from './kernelDriver'
+import { useRiskGateStore, type RiskDialogState } from './riskGate'
+
+export type { RiskDialogState }
 
 export type { InvestigationRun, InvestigationStep }
 export type { UserActionLogEntry }
@@ -252,16 +255,6 @@ export interface WorkflowPreset {
   valueType?: string
   risk: 'safe' | 'write' | 'debug' | 'patch' | 'injection'
   nextStep: string
-}
-
-export interface RiskDialogState {
-  open: boolean
-  risk: NonNullable<InvestigationStep['risk']>
-  title: string
-  detail: string
-  rememberKey?: 'speedhack'
-  rememberChoice?: boolean
-  rememberLabel?: string
 }
 
 export interface MemoryPreviewDecodedValue {
@@ -604,9 +597,12 @@ export const useAppStore = defineStore('app', () => {
   const workspaceBookmarkIdCounter = ref(0)
   const workspaceProjects = ref<WorkspaceProject[]>([])
   const workspaceProjectIdCounter = ref(0)
-  const riskDialog = ref<RiskDialogState | null>(null)
-  let riskDialogResolver: ((accepted: boolean) => void) | null = null
-  const mutedRiskConfirmations = ref<Record<string, boolean>>({})
+  // Store RiskGate extrait (dernière fondation partagée, docs/REFACTOR_ROADMAP.md,
+  // 29/08/2026) -- confirmRiskAction() ci-dessous délègue au store en
+  // injectant logAiAudit en callback (le store ne connaît pas
+  // activeInvestigation/searchQuery directement).
+  const riskGateStore = useRiskGateStore()
+  const { riskDialog } = storeToRefs(riskGateStore)
   const searchQuery = ref('')
   const searchResult = ref('')
   const exactScanValue = ref('')
@@ -2931,74 +2927,16 @@ let nextWatchedChainId = 1
     }).catch(() => {})
   }
 
-  let automationPipeDispatchDepth = 0
-
   async function confirmRiskAction(
     risk: NonNullable<InvestigationStep['risk']>,
     title: string,
     detail: string,
   ): Promise<boolean> {
-    if (automationPipeDispatchDepth > 0) {
-      addActionLog('risk_gate', `Pipe auto-confirmé: ${title}`, detail, 'success')
-      logAiAudit('risk_pipe_bypass', { risk, title, detail })
-      addInvestigationStep({
-        title: `Pipe auto-confirmé: ${title}`,
-        detail,
-        status: 'checkpoint',
-        risk,
-        tool: 'AutomationPipe',
-        payload: { accepted: true, title, detail, source: 'automation_pipe' },
-      })
-      return true
-    }
-    const rememberKey = title === 'Activer le speedhack' ? 'speedhack' : undefined
-    if (rememberKey && mutedRiskConfirmations.value[rememberKey]) {
-      addActionLog('risk_gate', `Confirmation mémorisée: ${title}`, detail, 'info')
-      logAiAudit('risk_muted_accept', { risk, title, detail, rememberKey })
-      return true
-    }
-    const accepted = await new Promise<boolean>((resolve) => {
-      if (riskDialogResolver) {
-        riskDialogResolver(false)
-      }
-      riskDialogResolver = resolve
-      riskDialog.value = {
-        open: true,
-        risk,
-        title,
-        detail,
-        rememberKey,
-        rememberChoice: false,
-        rememberLabel: rememberKey === 'speedhack' ? 'Ne plus redemander pour le speedhack pendant cette session' : undefined,
-      }
-    })
-    addActionLog('risk_gate', accepted ? `Confirmé: ${title}` : `Refusé: ${title}`, detail, accepted ? 'success' : 'warning')
-    logAiAudit(accepted ? 'risk_confirmed' : 'risk_refused', { risk, title, detail })
-    addInvestigationStep({
-      title: accepted ? `Risque confirmé: ${title}` : `Risque refusé: ${title}`,
-      detail,
-      status: accepted ? 'checkpoint' : 'warning',
-      risk,
-      tool: 'RiskGate',
-      payload: { accepted, title, detail },
-    })
-    return accepted
+    return riskGateStore.confirmRiskAction(risk, title, detail, logAiAudit)
   }
 
   function resolveRiskDialog(accepted: boolean) {
-    const dialog = riskDialog.value
-    if (accepted && dialog?.rememberKey && dialog.rememberChoice) {
-      mutedRiskConfirmations.value = {
-        ...mutedRiskConfirmations.value,
-        [dialog.rememberKey]: true,
-      }
-    }
-    const resolver = riskDialogResolver
-    riskDialogResolver = null
-    riskDialog.value = null
-    if (resolver) {
-      resolver(accepted)
-    }
+    return riskGateStore.resolveRiskDialog(accepted)
   }
 
   function checkpointAddress(checkpoint: Record<string, unknown>): string {
@@ -7757,18 +7695,18 @@ async function doEncryptedScan() {
         if (typeof fn !== 'function') {
           throw new Error(`Action non autorisée (bridge JS) : ${action}`)
         }
-        automationPipeDispatchDepth += 1
+        riskGateStore.automationPipeDispatchDepth += 1
         try {
           const result = fn(...(Array.isArray(args) ? args : []))
           if (result && typeof (result as Promise<unknown>).finally === 'function') {
             return (result as Promise<unknown>).finally(() => {
-              automationPipeDispatchDepth = Math.max(0, automationPipeDispatchDepth - 1)
+              riskGateStore.automationPipeDispatchDepth = Math.max(0, riskGateStore.automationPipeDispatchDepth - 1)
             })
           }
-          automationPipeDispatchDepth = Math.max(0, automationPipeDispatchDepth - 1)
+          riskGateStore.automationPipeDispatchDepth = Math.max(0, riskGateStore.automationPipeDispatchDepth - 1)
           return result
         } catch (e) {
-          automationPipeDispatchDepth = Math.max(0, automationPipeDispatchDepth - 1)
+          riskGateStore.automationPipeDispatchDepth = Math.max(0, riskGateStore.automationPipeDispatchDepth - 1)
           throw e
         }
       },
