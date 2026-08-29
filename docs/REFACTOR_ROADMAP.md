@@ -71,6 +71,8 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | S7 | Write/Freeze/Checkpoint (`executeCheckpoint*`) | ~1300 | **Haut** | S8, S9 |
 | S8 | Trainer features | ~900 | **Moyen-haut** — précédent partiel (`trainerDependencies.ts`, logique pure sans état) | S1 (CLR), S9 |
 | S9 | Profils / Workspace (bookmarks, templates, import/export) | ~1500 | **Haut** — bidirectionnel avec S7/S8 | S7, S8 |
+| [x] S9a | └ CRUD pur templates de structure + bookmarks workspace (save/load/add/update/delete/clear) — extrait le 29/08/2026 vers `ui/src/stores/workspaceItems.ts` | ~250 | **Bas — réellement isolé** (seul `processName` traverse, en paramètre explicite) | — |
+| S9b | └ Reste de S9 : profils, pointer chains, projets workspace, import/export JSON complet | ~1250 | **Haut** — bidirectionnel avec S7/S8, pas encore débloqué | S7, S8 |
 | S10 | Chat / Smart Search | ~700 | **Haut** | S6, S7 |
 | S11 | Scanning / Candidates | ~1200 | **Moyen** | S7 |
 | [x] S12 | Settings — extrait le 29/08/2026 vers `ui/src/stores/settings.ts` (`storeToRefs` pour garder les ~20 refs sous le même nom dans `app.ts`, donc les sites de lecture externes n'ont pas eu besoin de changer ; les 2 effets de bord vers d'autres domaines — sync `exactScanType`/`unknownScanType`, appel `refreshDiagnostics` — injectés en callbacks optionnels) | ~110 refs dispersés | **Bas en interne, mais lu par tous les autres domaines** — extraction = re-câblage de nombreux sites de lecture, pas un problème de logique | — |

@@ -55,6 +55,14 @@ import { useAutomationPipeStore } from './automationPipe'
 import { useKernelDriverStore } from './kernelDriver'
 import { useRiskGateStore, type RiskDialogState } from './riskGate'
 import { useSettingsStore } from './settings'
+import {
+  useWorkspaceItemsStore,
+  type StructureTemplateField,
+  type StructureTemplate,
+  type WorkspaceBookmark,
+} from './workspaceItems'
+
+export type { StructureTemplateField, StructureTemplate, WorkspaceBookmark }
 
 export type { RiskDialogState }
 
@@ -170,41 +178,6 @@ export interface TrainerFeature {
     status: 'success' | 'warning' | 'error' | 'info'
     detail: string
   }>
-  createdAt: string
-  updatedAt: string
-}
-
-export interface StructureTemplateField {
-  offset: number
-  type: string
-  label: string
-  note: string
-  sampleValue: string
-  rawHex?: string
-}
-
-export interface StructureTemplate {
-  id: number
-  name: string
-  processName: string
-  baseAddress: string
-  size: number
-  fieldCount: number
-  fields: StructureTemplateField[]
-  createdAt: string
-  updatedAt: string
-}
-
-export interface WorkspaceBookmark {
-  id: number
-  kind: 'address' | 'structure_field' | 'aob' | 'pointer' | 'note'
-  label: string
-  processName: string
-  address?: string
-  type?: string
-  value?: string
-  note: string
-  payload?: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }
@@ -594,10 +567,13 @@ export const useAppStore = defineStore('app', () => {
   // des hotkeys par feature deja existantes (freeze/patch/write toggle).
   const trainerOverlayHotkey = ref('')
   const trainerOverlayHotkeyId = ref<number | undefined>(undefined)
-  const structureTemplates = ref<StructureTemplate[]>([])
-  const structureTemplateIdCounter = ref(0)
-  const workspaceBookmarks = ref<WorkspaceBookmark[]>([])
-  const workspaceBookmarkIdCounter = ref(0)
+  const workspaceItemsStore = useWorkspaceItemsStore()
+  const {
+    structureTemplates,
+    structureTemplateIdCounter,
+    workspaceBookmarks,
+    workspaceBookmarkIdCounter,
+  } = storeToRefs(workspaceItemsStore)
   const workspaceProjects = ref<WorkspaceProject[]>([])
   const workspaceProjectIdCounter = ref(0)
   // Store RiskGate extrait (dernière fondation partagée, docs/REFACTOR_ROADMAP.md,
@@ -1290,8 +1266,6 @@ let nextWatchedChainId = 1
 
   const trainerStorageKey = 'killengine.trainer.features.v1'
   const overlayHotkeyStorageKey = 'killengine.trainer.overlayHotkey.v1'
-  const structureTemplateStorageKey = 'killengine.structure.templates.v1'
-  const workspaceBookmarkStorageKey = 'killengine.workspace.bookmarks.v1'
   const workspaceProjectStorageKey = 'killengine.workspace.projects.v1'
 
   function saveTrainerFeatures() {
@@ -1334,27 +1308,11 @@ let nextWatchedChainId = 1
   }
 
   function saveStructureTemplates() {
-    try {
-      window.localStorage.setItem(structureTemplateStorageKey, JSON.stringify({
-        templates: structureTemplates.value,
-        id: structureTemplateIdCounter.value,
-      }))
-    } catch {
-      // Best-effort persistence.
-    }
+    workspaceItemsStore.saveStructureTemplates()
   }
 
   function loadStructureTemplates() {
-    try {
-      const raw = window.localStorage.getItem(structureTemplateStorageKey)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as { templates?: StructureTemplate[], id?: number }
-      structureTemplates.value = Array.isArray(parsed.templates) ? parsed.templates.slice(0, 100) : []
-      structureTemplateIdCounter.value = Number(parsed.id ?? 0)
-    } catch {
-      structureTemplates.value = []
-      structureTemplateIdCounter.value = 0
-    }
+    workspaceItemsStore.loadStructureTemplates()
   }
 
   function saveStructureTemplate(input: {
@@ -1363,113 +1321,31 @@ let nextWatchedChainId = 1
     size: number
     fields: StructureTemplateField[]
   }) {
-    const fields = input.fields
-      .filter((field) => Number.isFinite(field.offset) && field.type.trim())
-      .slice(0, 256)
-    if (fields.length === 0) {
-      addActionLog('structure', 'Template refusé', 'Aucun champ typé exploitable.', 'warning')
-      return null
-    }
-
-    structureTemplateIdCounter.value += 1
-    const now = new Date().toISOString()
-    const template: StructureTemplate = {
-      id: structureTemplateIdCounter.value,
-      name: String(input.name ?? `Structure 0x${input.baseAddress}`).trim() || `Structure 0x${input.baseAddress}`,
-      processName: processName.value,
-      baseAddress: input.baseAddress.replace(/^0x/i, '').toUpperCase(),
-      size: Math.max(0, Math.round(input.size)),
-      fieldCount: fields.length,
-      fields,
-      createdAt: now,
-      updatedAt: now,
-    }
-    structureTemplates.value.unshift(template)
-    structureTemplates.value = structureTemplates.value.slice(0, 100)
-    saveStructureTemplates()
-    addActionLog('structure', `Template sauvegardé: ${template.name}`, `${template.fieldCount} champ(s).`, 'success')
-    return template
+    return workspaceItemsStore.saveStructureTemplate(input, processName.value)
   }
 
   function deleteStructureTemplate(id: number) {
-    const before = structureTemplates.value.length
-    structureTemplates.value = structureTemplates.value.filter((item) => item.id !== id)
-    if (structureTemplates.value.length !== before) {
-      saveStructureTemplates()
-      addActionLog('structure', 'Template supprimé', `id=${id}`, 'warning')
-    }
+    workspaceItemsStore.deleteStructureTemplate(id)
   }
 
   function clearStructureTemplates() {
-    structureTemplates.value = []
-    saveStructureTemplates()
-    addActionLog('structure', 'Templates vidés', 'Tous les templates locaux ont été supprimés.', 'warning')
+    workspaceItemsStore.clearStructureTemplates()
   }
 
   function saveWorkspaceBookmarks() {
-    try {
-      window.localStorage.setItem(workspaceBookmarkStorageKey, JSON.stringify({
-        bookmarks: workspaceBookmarks.value,
-        id: workspaceBookmarkIdCounter.value,
-      }))
-    } catch {
-      // Best-effort persistence.
-    }
+    workspaceItemsStore.saveWorkspaceBookmarks()
   }
 
   function loadWorkspaceBookmarks() {
-    try {
-      const raw = window.localStorage.getItem(workspaceBookmarkStorageKey)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as { bookmarks?: WorkspaceBookmark[], id?: number }
-      workspaceBookmarks.value = Array.isArray(parsed.bookmarks) ? parsed.bookmarks.slice(0, 500) : []
-      workspaceBookmarkIdCounter.value = Number(parsed.id ?? 0)
-    } catch {
-      workspaceBookmarks.value = []
-      workspaceBookmarkIdCounter.value = 0
-    }
+    workspaceItemsStore.loadWorkspaceBookmarks()
   }
 
   function addWorkspaceBookmark(input: Partial<WorkspaceBookmark>) {
-    workspaceBookmarkIdCounter.value += 1
-    const now = new Date().toISOString()
-    const bookmark: WorkspaceBookmark = {
-      id: workspaceBookmarkIdCounter.value,
-      kind: input.kind ?? 'address',
-      label: String(input.label ?? input.address ?? 'Bookmark').trim() || 'Bookmark',
-      processName: String(input.processName ?? processName.value),
-      address: input.address ? String(input.address).replace(/^0x/i, '').toUpperCase() : undefined,
-      type: input.type ? String(input.type) : undefined,
-      value: input.value ? String(input.value) : undefined,
-      note: String(input.note ?? ''),
-      payload: input.payload,
-      createdAt: now,
-      updatedAt: now,
-    }
-    workspaceBookmarks.value.unshift(bookmark)
-    workspaceBookmarks.value = workspaceBookmarks.value.slice(0, 500)
-    saveWorkspaceBookmarks()
-    addActionLog('workspace', `Bookmark ajouté: ${bookmark.label}`, bookmark.address ? `0x${bookmark.address}` : bookmark.note, 'success')
-    return bookmark
+    return workspaceItemsStore.addWorkspaceBookmark(input, processName.value)
   }
 
   function updateWorkspaceBookmark(id: number, input: Partial<WorkspaceBookmark>) {
-    const bookmark = workspaceBookmarks.value.find((item) => item.id === id)
-    if (!bookmark) return null
-    bookmark.kind = input.kind ?? bookmark.kind
-    bookmark.label = input.label !== undefined ? String(input.label).trim() || bookmark.label : bookmark.label
-    bookmark.processName = input.processName !== undefined ? String(input.processName) : bookmark.processName
-    bookmark.address = input.address !== undefined
-      ? String(input.address).replace(/^0x/i, '').trim().toUpperCase() || undefined
-      : bookmark.address
-    bookmark.type = input.type !== undefined ? String(input.type).trim() || undefined : bookmark.type
-    bookmark.value = input.value !== undefined ? String(input.value).trim() || undefined : bookmark.value
-    bookmark.note = input.note !== undefined ? String(input.note) : bookmark.note
-    bookmark.payload = input.payload !== undefined ? input.payload : bookmark.payload
-    bookmark.updatedAt = new Date().toISOString()
-    saveWorkspaceBookmarks()
-    addActionLog('workspace', `Bookmark modifié: ${bookmark.label}`, bookmark.address ? `0x${bookmark.address}` : bookmark.note, 'success')
-    return bookmark
+    return workspaceItemsStore.updateWorkspaceBookmark(id, input)
   }
 
   function useWorkspaceBookmarkAsWriteTarget(id: number) {
@@ -1595,18 +1471,11 @@ let nextWatchedChainId = 1
   }
 
   function deleteWorkspaceBookmark(id: number) {
-    const before = workspaceBookmarks.value.length
-    workspaceBookmarks.value = workspaceBookmarks.value.filter((item) => item.id !== id)
-    if (workspaceBookmarks.value.length !== before) {
-      saveWorkspaceBookmarks()
-      addActionLog('workspace', 'Bookmark supprimé', `id=${id}`, 'warning')
-    }
+    workspaceItemsStore.deleteWorkspaceBookmark(id)
   }
 
   function clearWorkspaceBookmarks() {
-    workspaceBookmarks.value = []
-    saveWorkspaceBookmarks()
-    addActionLog('workspace', 'Bookmarks vidés', 'Tous les bookmarks locaux ont été supprimés.', 'warning')
+    workspaceItemsStore.clearWorkspaceBookmarks()
   }
 
   function saveWorkspaceProjects() {

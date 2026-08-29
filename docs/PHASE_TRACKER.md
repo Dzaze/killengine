@@ -47,3 +47,4 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - [x] PHASE 217 - Refactor C3/C4/C5 extraits et archivés dans `docs/PHASE_TRACKER_HISTORY.md`. Toute la première vague backend C1-C7 est désormais close.
 - [x] PHASE 218 - Refactor S12 (Settings) extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`. Travail solo (Codex a atteint sa limite quotidienne).
 - [x] PHASE 219 - Refactor C11a (cycle de vie pipe d'automatisation) extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`. C11 complet scindé en C11a (fait) / C11b (reste, plus entremêlé que prévu — attend C8/ScanStateAccess).
+- [x] PHASE 220 - Refactor S9a (CRUD templates de structure + bookmarks workspace) extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`. S9 complet scindé en S9a (fait) / S9b (reste, haut couplage avec S7/S8).
