@@ -58,7 +58,7 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | S3 | Automation pipe status | ~60 | **Bas** | — |
 | S4 | Driver kernel (`kernelDriverStatus`, read/write) | ~130 | **Bas** — `memoryAccessMode` partagé avec S6 | S6 |
 | S5 | Action log (`addActionLog`) | ~75 + 282 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
-| S6 | Investigation timeline (`activeInvestigation`, `addInvestigationStep`) | ~300 + 35 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
+| [x] S6 | Investigation timeline (`activeInvestigation`, `addInvestigationStep`) — extrait le 29/08/2026 vers `ui/src/stores/investigation.ts` | ~300 + 35 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
 | S7 | Write/Freeze/Checkpoint (`executeCheckpoint*`, `confirmRiskAction`) | ~1300 | **Haut** — `confirmRiskAction` a 39 sites d'appel externes | S6, S8, S9 |
 | S8 | Trainer features | ~900 | **Moyen-haut** — précédent partiel (`trainerDependencies.ts`, logique pure sans état) | S1 (CLR), S9 |
 | S9 | Profils / Workspace (bookmarks, templates, import/export) | ~1500 | **Haut** — bidirectionnel avec S7/S8 | S7, S8 |
