@@ -14,6 +14,7 @@
 #endif
 
 #include "auto_resolver.h"
+#include "automation_pipe_server.h"
 #include "query_text_utils.h"
 #include "model_locator.h"
 #include "candidates/candidate_store.h"
@@ -17857,7 +17858,11 @@ QVariantMap ApplicationController::getLuaScriptingStatus() const {
     result["helperPath"] = helperPath;
     result["helperDirectory"] = helperFile.exists() ? helperFile.absolutePath() : QString();
     result["pipeName"] = QStringLiteral("KillEngineAutomationPipe");
-    result["automationPipeOptIn"] = qEnvironmentVariableIsSet("KILLENGINE_AUTOMATION_PIPE");
+    // PHASE Automation (29/08/2026) : reflete l'etat REEL du pipe (variable
+    // d'environnement dev OU mode Automation persistant active depuis
+    // Settings), pas seulement l'ancien chemin env var -- sinon ce bandeau
+    // resterait affiche a tort apres activation via le toggle.
+    result["automationPipeOptIn"] = m_automationPipeServer != nullptr;
     result["message"] = luaPath.isEmpty()
         ? QStringLiteral("Aucun interpréteur Lua trouvé dans runtime/lua, lua, le dossier de l'application ou le PATH.")
         : QStringLiteral("Lua externe prêt. Les appels KillEngine passent par le pipe d'automatisation local.");
@@ -18447,6 +18452,74 @@ QVariantMap ApplicationController::callVueStoreAction(const QString& action, con
         result["result"] = jsMap.value("result");
     } else {
         result["error"] = jsMap.value("error", "Erreur JS inconnue (reponse non reconnue).").toString();
+    }
+    return result;
+}
+
+void ApplicationController::ensureAutomationPipeStartedIfConfigured() {
+    if (m_automationPipeServer) {
+        return;
+    }
+    const bool envEnabled =
+        QProcessEnvironment::systemEnvironment().value("KILLENGINE_AUTOMATION_PIPE") == "1";
+    QSettings settings;
+    const bool persistedEnabled = settings.value("automation/pipeEnabled", false).toBool();
+    if (!envEnabled && !persistedEnabled) {
+        return;
+    }
+    // parent=nullptr : l'unique_ptr est le seul proprietaire (pas de parentage
+    // Qt en plus), pour que enableAutomationMode()/disableAutomationMode()
+    // puissent detruire/recreer l'instance en direct sans double-liberation.
+    m_automationPipeServer = std::make_unique<AutomationPipeServer>(this, nullptr);
+    if (!m_automationPipeServer->start()) {
+        KE_LOG_WARN() << "AutomationPipeServer: demarrage echoue, KillEngine continue sans le connecteur.";
+        m_automationPipeServer.reset();
+    }
+}
+
+QVariantMap ApplicationController::enableAutomationMode() {
+    QSettings settings;
+    settings.setValue("automation/pipeEnabled", true);
+    settings.sync();
+    ensureAutomationPipeStartedIfConfigured();
+
+    QVariantMap result = getAutomationPipeStatus();
+    result["success"] = m_automationPipeServer != nullptr;
+    if (!m_automationPipeServer) {
+        result["error"] = "Demarrage du pipe d'automatisation echoue (voir les logs KillEngine).";
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::disableAutomationMode() {
+    QSettings settings;
+    settings.setValue("automation/pipeEnabled", false);
+    settings.sync();
+    if (m_automationPipeServer) {
+        m_automationPipeServer->stop();
+        m_automationPipeServer.reset();
+    }
+    QVariantMap result = getAutomationPipeStatus();
+    result["success"] = true;
+    return result;
+}
+
+QVariantMap ApplicationController::getAutomationPipeStatus() {
+    QSettings settings;
+    QVariantMap result;
+    result["enabled"] = settings.value("automation/pipeEnabled", false).toBool()
+        || QProcessEnvironment::systemEnvironment().value("KILLENGINE_AUTOMATION_PIPE") == "1";
+    if (m_automationPipeServer) {
+        const QVariantMap pipeStatus = m_automationPipeServer->status();
+        for (auto it = pipeStatus.constBegin(); it != pipeStatus.constEnd(); ++it) {
+            result[it.key()] = it.value();
+        }
+    } else {
+        result["running"] = false;
+        result["pipeName"] = AutomationPipeServer::pipeName();
+        result["callCount"] = 0;
+        result["lastMethod"] = QString();
+        result["lastCallAt"] = QString();
     }
     return result;
 }

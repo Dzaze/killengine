@@ -80,7 +80,8 @@ onMounted(() => {
       {{ store.luaScriptingStatus?.error || store.luaScriptingStatus?.message }}
     </div>
     <div v-if="store.luaScriptingStatus?.automationPipeOptIn === false" class="alert warning">
-      Les appels <code>ke.call(...)</code> nécessitent KillEngine lancé avec <code>KILLENGINE_AUTOMATION_PIPE=1</code>.
+      Les appels <code>ke.call(...)</code> nécessitent le pipe d'automatisation actif : active "Mode Automation" dans
+      Paramètres, ou lance KillEngine avec <code>KILLENGINE_AUTOMATION_PIPE=1</code>.
     </div>
     <section class="editor-shell">
       <div class="editor-head">

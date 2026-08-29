@@ -10,7 +10,7 @@ Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
 ## État courant
 
 - Phase 11 prototype, Phase 12 / polishing V1, Phase 13 (régression V1) : complètes et closes.
-- PHASE 14A/14B, PHASE 17, PHASE 120-A/B/C/D, audit Arsenal 4 agents (PHASE 187 et ses corrections), la clarification `chat_memory_write`/`chat_memory_freeze`, et PHASE 205 (branchement InvestigationView.vue) : toutes closes et archivées en détail dans `docs/PHASE_TRACKER_HISTORY.md`.
+- PHASE 14A/14B, PHASE 17, PHASE 120-A/B/C/D, audit Arsenal 4 agents (PHASE 187 et ses corrections), la clarification `chat_memory_write`/`chat_memory_freeze`, PHASE 205 (branchement InvestigationView.vue) et PHASE 206 (Mode Automation, toggle + doc `docs/AUTOMATION_API.md`) : toutes closes et archivées en détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 - Dépôt git consolidé le 29/08/2026 : `main` remis à jour (fast-forward) sur l'unique branche de travail active, branches mortes supprimées.
 - Aucune capacité manquante identifiée dans l'arsenal (convergence 4 agents indépendants).
 - Plus aucun chantier ouvert au 29/08/2026 - voir "Chantiers ouverts" ci-dessous.

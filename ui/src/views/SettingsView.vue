@@ -100,6 +100,7 @@ async function refreshAll() {
   await store.doPing()
   await store.loadSettings()
   await store.refreshKernelDriverStatus()
+  await store.refreshAutomationPipeStatus()
   await store.refreshDiagnostics()
 }
 
@@ -934,6 +935,57 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         Lecture/écriture mémoire via le driver noyau indisponibles : le driver doit être connecté avec la capacité
         "Accès mémoire kernel" active (voir ci-dessus, "Tester le driver").
       </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Mode Automation (avancé)</h2>
+        <span>{{ store.automationPipeStatus?.running ? 'Actif' : 'Inactif' }}</span>
+      </div>
+      <p class="hint">
+        Ouvre le pipe d'automatisation local de KillEngine (utilisé par le scripting Lua <code>ke.call(...)</code> et
+        par tout outil/agent externe sur cette machine) sans avoir à lancer KillEngine avec la variable
+        d'environnement <code>KILLENGINE_AUTOMATION_PIPE=1</code>. Réservé aux utilisateurs avancés : une fois actif,
+        les actions déclenchées via ce pipe s'exécutent immédiatement, sans confirmation par action — voir
+        <code>docs/AUTOMATION_API.md</code> pour le protocole complet et un exemple de branchement d'un agent IA.
+      </p>
+      <div class="panel-actions">
+        <button
+          v-if="!store.automationPipeStatus?.running"
+          class="btn btn-secondary compact"
+          @click="store.enableAutomationMode()"
+        >
+          Activer le mode Automation
+        </button>
+        <button
+          v-else
+          class="btn btn-secondary compact"
+          @click="store.disableAutomationMode()"
+        >
+          Désactiver le mode Automation
+        </button>
+        <button class="btn btn-secondary compact" @click="store.refreshAutomationPipeStatus()">
+          Rafraîchir le statut
+        </button>
+      </div>
+      <div v-if="store.automationPipeStatus" class="settings-grid compact-grid">
+        <div>
+          <strong>Pipe</strong>
+          <span>{{ store.automationPipeStatus.pipeName }}</span>
+        </div>
+        <div>
+          <strong>Appels reçus</strong>
+          <span>{{ store.automationPipeStatus.callCount ?? 0 }}</span>
+        </div>
+        <div>
+          <strong>Dernier appel</strong>
+          <span>{{ store.automationPipeStatus.lastMethod || '—' }}</span>
+        </div>
+        <div>
+          <strong>À</strong>
+          <span>{{ store.automationPipeStatus.lastCallAt || '—' }}</span>
+        </div>
+      </div>
     </section>
 
     <section class="panel">

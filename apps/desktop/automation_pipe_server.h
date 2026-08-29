@@ -1,10 +1,12 @@
 #pragma once
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QHash>
 #include <QLocalServer>
 #include <QObject>
 #include <QString>
+#include <QVariantMap>
 
 class QLocalSocket;
 
@@ -56,6 +58,16 @@ public:
     /// déjà pris par une autre instance de KillEngine.
     bool start();
 
+    /// Arrête l'écoute (ferme le QLocalServer) sans détruire l'instance --
+    /// permet une désactivation en direct depuis le mode Automation (Settings)
+    /// sans redémarrer KillEngine.
+    void stop();
+
+    /// Statut exposé au mode Automation (Settings) : nom du pipe, écoute
+    /// active, et compteur d'activité (dernier appel/méthode) pour que
+    /// l'utilisateur voie que le pipe sert réellement, pas juste "activé".
+    QVariantMap status() const;
+
 private slots:
     void onNewConnection();
     void onReadyRead();
@@ -68,6 +80,9 @@ private:
     ApplicationController* m_controller;
     QLocalServer m_server;
     QHash<QLocalSocket*, QByteArray> m_buffers;
+    int m_callCount = 0;
+    QString m_lastMethod;
+    QDateTime m_lastCallAt;
 };
 
 } // namespace killengine

@@ -39,6 +39,8 @@ class QWidget;
 
 namespace killengine {
 
+class AutomationPipeServer;
+
 /**
  * @brief Contrôleur applicatif exposé au frontend Vue via QWebChannel.
  *
@@ -1032,6 +1034,33 @@ public:
     /// callback Qt asynchrone. Retourne {success, action, result, error}.
     Q_INVOKABLE QVariantMap callVueStoreAction(const QString& action, const QVariantList& args);
 
+    /// Mode Automation (Settings) : active le pipe d'automatisation local de
+    /// façon persistante (QSettings "automation/pipeEnabled"), en plus du
+    /// chemin dev existant (variable d'environnement KILLENGINE_AUTOMATION_PIPE=1,
+    /// inchangé). Ne change PAS le comportement du pipe lui-même (bypass
+    /// RiskGate par conception, voir automation_pipe_server.h) -- remplace
+    /// seulement la façon de l'activer, pour que ce soit un vrai toggle
+    /// produit plutôt qu'une variable d'environnement cachée. Démarre le
+    /// pipe immédiatement si pas déjà actif.
+    Q_INVOKABLE QVariantMap enableAutomationMode();
+
+    /// Symétrique de enableAutomationMode() : dépersiste le réglage et ferme
+    /// le pipe s'il tourne. Pas de confirmation nécessaire côté frontend --
+    /// désactiver un accès n'est jamais une action à risque.
+    Q_INVOKABLE QVariantMap disableAutomationMode();
+
+    /// Statut affiché dans le panneau Settings "Mode Automation" : actif,
+    /// nom du pipe, et compteur d'activité (voir AutomationPipeServer::status()).
+    Q_INVOKABLE QVariantMap getAutomationPipeStatus();
+
+    /// Démarre AutomationPipeServer si KILLENGINE_AUTOMATION_PIPE=1 (chemin dev
+    /// existant) OU si QSettings "automation/pipeEnabled" est vrai (mode
+    /// Automation persistant). Appelée une fois au démarrage depuis main.cpp
+    /// (remplace l'ancien bloc inline) ET depuis enableAutomationMode() pour
+    /// le cas où le toggle est activé en cours de session. Pas un Q_INVOKABLE :
+    /// appelée en C++ direct depuis main.cpp, pas depuis le frontend.
+    void ensureAutomationPipeStartedIfConfigured();
+
 signals:
     void attachmentChanged();
     void scanStarted();
@@ -1228,6 +1257,7 @@ private:
     std::shared_ptr<killcore::InProcessBreakpointSession> m_inProcessBreakpointFreezeSession;
     std::unique_ptr<killcore::SpeedhackSession> m_speedhackSession;
     std::unique_ptr<killcore::ApiHookSession> m_apiHookSession;
+    std::unique_ptr<AutomationPipeServer> m_automationPipeServer;
     std::shared_ptr<killcore::CancellationToken> m_activeDebugCancellation;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     // Test automatique des champs candidats (voir testCandidateFieldsAsync) : etat

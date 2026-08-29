@@ -75,6 +75,12 @@ Le guide V1 est disponible ici :
 
 Il couvre l'attachement au processus, l'Assistant, les profils, le Mode Expert, les paramètres, les diagnostics et les principaux cas de dépannage.
 
+## Automation API
+
+Pour piloter KillEngine par script ou par un agent IA externe (pipe JSON-RPC local, scripting Lua, branchement d'un agent) :
+
+- [`docs/AUTOMATION_API.md`](docs/AUTOMATION_API.md)
+
 ## Build détaillé
 
 ### UI (Vue 3 + TypeScript)

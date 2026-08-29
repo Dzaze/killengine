@@ -141,6 +141,23 @@ bool AutomationPipeServer::start() {
     return true;
 }
 
+void AutomationPipeServer::stop() {
+    if (m_server.isListening()) {
+        m_server.close();
+        KE_LOG_INFO() << "AutomationPipeServer: écoute arrêtée (mode Automation désactivé).";
+    }
+}
+
+QVariantMap AutomationPipeServer::status() const {
+    QVariantMap result;
+    result["pipeName"] = pipeName();
+    result["running"] = m_server.isListening();
+    result["callCount"] = m_callCount;
+    result["lastMethod"] = m_lastMethod;
+    result["lastCallAt"] = m_lastCallAt.isValid() ? m_lastCallAt.toString(Qt::ISODateWithMs) : QString();
+    return result;
+}
+
 void AutomationPipeServer::onNewConnection() {
     while (QLocalSocket* socket = m_server.nextPendingConnection()) {
         m_buffers.insert(socket, QByteArray());
@@ -235,6 +252,13 @@ void AutomationPipeServer::handleLine(QLocalSocket* socket, const QByteArray& li
         auditPayload["error"] = error;
     }
     m_controller->logAiAudit(QStringLiteral("automation_pipe_call"), auditPayload);
+
+    // Compteur d'activité exposé par status() -- rend le mode Automation
+    // (Settings) visible ("N appels, dernier: X") au lieu d'un pipe qui semble
+    // silencieux une fois activé.
+    m_callCount += 1;
+    m_lastMethod = method;
+    m_lastCallAt = QDateTime::currentDateTimeUtc();
 
     writeResponse(socket, QJsonDocument(response).toJson(QJsonDocument::Compact));
 }

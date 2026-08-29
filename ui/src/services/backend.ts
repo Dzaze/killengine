@@ -1285,6 +1285,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   confirmChatMemoryWrite?(value: string): Promise<Record<string, unknown>>
   confirmChatMemoryFreeze?(value: string): Promise<Record<string, unknown>>
   confirmRewriteLastAutoWrite?(value: string): Promise<Record<string, unknown>>
+  /** Mode Automation (29/08/2026) : active/désactive le pipe d'automatisation local de façon persistante (Settings), en plus de la variable d'environnement dev existante. */
+  enableAutomationMode?(): Promise<Record<string, unknown>>
+  disableAutomationMode?(): Promise<Record<string, unknown>>
+  getAutomationPipeStatus?(): Promise<Record<string, unknown>>
   startAutoResolve?(query: string, options: Record<string, unknown>): Promise<SmartSearchResult>
   getAutoResolveReport?(maxEvents: number): Promise<AutoResolveReportResult>
   clearAutoResolveMemory?(allProcesses: boolean): Promise<Record<string, unknown>>
@@ -2466,6 +2470,15 @@ class BackendService {
       },
       async confirmRewriteLastAutoWrite(_value: string) {
         return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async enableAutomationMode() {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async disableAutomationMode() {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async getAutomationPipeStatus() {
+        return { enabled: false, running: false, pipeName: 'KillEngineAutomationPipe', callCount: 0, lastMethod: '', lastCallAt: '' }
       },
       async getLogFilePath() {
         return 'mock://no-log-file'

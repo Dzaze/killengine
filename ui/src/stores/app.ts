@@ -3508,6 +3508,64 @@ let nextWatchedChainId = 1
     }
   }
 
+  const automationPipeStatus = ref<Record<string, unknown> | null>(null)
+
+  async function refreshAutomationPipeStatus() {
+    const controller = backend.getController()
+    if (!controller.getAutomationPipeStatus) return
+    try {
+      automationPipeStatus.value = await controller.getAutomationPipeStatus()
+    } catch (e) {
+      console.error('[KillEngine] Failed to refresh automation pipe status:', e)
+    }
+  }
+
+  // Mode Automation (29/08/2026) : contournement RiskGate volontaire pour un
+  // pilotage scripté/agent externe (pipe local + Lua ke.call), pensé pour un
+  // utilisateur avancé qui sait ce qu'il active. Un seul accord explicite via
+  // confirmRiskAction à l'activation (pas à chaque appel ensuite, le pipe
+  // lui-même n'a jamais de confirmation par action — voir automation_pipe_server.h) ;
+  // désactiver ne nécessite aucune confirmation.
+  async function enableAutomationMode() {
+    const accepted = await confirmRiskAction(
+      'injection',
+      'Activer le mode Automation',
+      "Autorise le pipe d'automatisation local (utilisé par le scripting Lua ke.call(...) et par tout agent/outil externe sur cette machine) à exécuter des lectures/écritures mémoire SANS confirmation par action, tant que le mode reste actif.",
+    )
+    if (!accepted) return null
+    const controller = backend.getController()
+    if (!controller.enableAutomationMode) {
+      addActionLog('automation', 'Mode Automation indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const result = await controller.enableAutomationMode()
+      automationPipeStatus.value = result
+      addActionLog('automation', result.success === true ? 'Mode Automation activé' : 'Activation échouée', String(result.error ?? ''), result.success === true ? 'success' : 'error')
+      return result
+    } catch (e) {
+      addActionLog('automation', 'Activation échouée', String(e), 'error')
+      return null
+    }
+  }
+
+  async function disableAutomationMode() {
+    const controller = backend.getController()
+    if (!controller.disableAutomationMode) {
+      addActionLog('automation', 'Mode Automation indisponible', 'Backend non exposé.', 'warning')
+      return null
+    }
+    try {
+      const result = await controller.disableAutomationMode()
+      automationPipeStatus.value = result
+      addActionLog('automation', 'Mode Automation désactivé', '', 'success')
+      return result
+    } catch (e) {
+      addActionLog('automation', 'Désactivation échouée', String(e), 'error')
+      return null
+    }
+  }
+
   async function executeCheckpointFindWhatWrites(checkpoint: Record<string, unknown>) {
     const address = checkpointAddress(checkpoint)
     const type = checkpointType(checkpoint)
@@ -8993,6 +9051,10 @@ async function doEncryptedScan() {
     confirmChatMemoryWrite,
     confirmChatMemoryFreeze,
     confirmRewriteLastAutoWrite,
+    automationPipeStatus,
+    refreshAutomationPipeStatus,
+    enableAutomationMode,
+    disableAutomationMode,
     prepareCheckpointAob,
     executeCheckpointForceValue,
     createTrainerFeature,
