@@ -19,6 +19,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 
 ## Règle d'utilisation
 
+- **Règle de branche KillEngine (décision propriétaire, 29/08/2026)** : travailler et committer directement sur `main`. Ne pas créer de branche `agent/...` dans ce dépôt, même si `AGENTS.md` mentionne encore l'ancienne règle multi-branches ; la consolidation du dépôt a volontairement ramené le flux multi-agents à une seule branche pour éviter qu'un autre agent commette par erreur hors de `main`.
 - Ajouter les nouvelles phases ici, en bas de fichier, avec quoi/pourquoi/comment vérifié.
 - Ne pas remettre tout l'historique dans ce fichier : dès qu'une phase est close, transférer le détail complet vers `docs/PHASE_TRACKER_HISTORY.md` et ne garder ici qu'un renvoi court.
 - Ne jamais supprimer d'historique sans transfert explicite.
