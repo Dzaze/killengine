@@ -55,8 +55,8 @@ Priorité **basse** = peut être pris indépendamment dès maintenant, aucun che
 | --- | --- | --- | --- | --- |
 | [x] S1 | CLR Inspector (`clr*` refs + fonctions) — extrait le 29/08/2026 vers `ui/src/stores/clrInspector.ts` (en réalité couplage moyen : 7 fonctions dépendent de `confirmRiskAction`, non extrait — gate gardé dans `app.ts`, résultat délégué au store) | ~600 | **Bas** | — |
 | [x] S2 | Speedhack / API hooking / blocage réseau — extrait le 29/08/2026 vers `ui/src/stores/speedhack.ts` | ~200 | **Bas** | — |
-| S3 | Automation pipe status | ~60 | **Bas** | — |
-| S4 | Driver kernel (`kernelDriverStatus`, read/write) | ~130 | **Bas** — `memoryAccessMode` partagé avec S6 | S6 |
+| [x] S3 | Automation pipe status — extrait le 29/08/2026 vers `ui/src/stores/automationPipe.ts` | ~60 | **Bas** | — |
+| [x] S4 | Driver kernel (`kernelDriverStatus`, read/write) — extrait le 29/08/2026 vers `ui/src/stores/kernelDriver.ts` (`memoryAccessMode`/dispatch usermode-vs-kernel restés dans `app.ts`, pas spécifiques à ce candidat) | ~130 | **Bas** | — |
 | [x] S5 | Action log (`addActionLog`) — extrait le 29/08/2026 vers `ui/src/stores/actionLog.ts` | ~75 + 282 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
 | [x] S6 | Investigation timeline (`activeInvestigation`, `addInvestigationStep`) — extrait le 29/08/2026 vers `ui/src/stores/investigation.ts` | ~300 + 35 sites d'appel | **Fondation partagée — à faire tôt, seul** | quasi tous |
 | S7 | Write/Freeze/Checkpoint (`executeCheckpoint*`, `confirmRiskAction`) | ~1300 | **Haut** — `confirmRiskAction` a 39 sites d'appel externes | S6, S8, S9 |

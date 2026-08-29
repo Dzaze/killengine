@@ -14,7 +14,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - PHASE 14A/14B, PHASE 17, PHASE 120-A/B/C/D, audit Arsenal 4 agents (PHASE 187 et ses corrections), la clarification `chat_memory_write`/`chat_memory_freeze`, PHASE 205 (branchement InvestigationView.vue) et PHASE 206 (Mode Automation, toggle + doc `docs/AUTOMATION_API.md`) : toutes closes et archivées en détail dans `docs/PHASE_TRACKER_HISTORY.md`.
 - Dépôt git consolidé le 29/08/2026 : `main` remis à jour (fast-forward) sur l'unique branche de travail active, branches mortes supprimées.
 - Aucune capacité manquante identifiée dans l'arsenal (convergence 4 agents indépendants).
-- Refactor C1/C2/C6 (Codex, côté C++) et S6/S5/S1/S2 (Claude, côté store) clos le 29/08/2026 — extraction progressive sans chevauchement de fichiers entre agents : détail archivé dans `docs/PHASE_TRACKER_HISTORY.md`, roadmap cochée dans `docs/REFACTOR_ROADMAP.md`. Codex travaille sur C7 (dernier candidat indépendant côté C++). `confirmRiskAction` reste la seule fondation non extraite ; patron validé sur S1/S2 pour avancer quand même (gate dans `app.ts`, travail délégué au store).
+- Refactor C1/C2/C6 (Codex, côté C++) et S1-S6 (Claude, côté store — TOUS les candidats store à faible couplage) clos le 29/08/2026 — extraction progressive sans chevauchement de fichiers entre agents : détail archivé dans `docs/PHASE_TRACKER_HISTORY.md`, roadmap cochée dans `docs/REFACTOR_ROADMAP.md`. Codex travaille sur C7 (dernier candidat indépendant côté C++). Reste côté store : S7-S12, couplage moyen/haut, `confirmRiskAction` reste la seule fondation non extraite (patron de contournement validé sur S1-S4 : gate dans `app.ts`, travail délégué au store).
 - Plus aucun chantier ouvert au 29/08/2026 - voir "Chantiers ouverts" ci-dessous.
 
 ## Règle d'utilisation
@@ -40,4 +40,5 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - [x] PHASE 210 - Refactor S5 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 211 - Refactor S1 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
 - [x] PHASE 213 - Refactor S2 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
+- [x] PHASE 214 - Refactor S3/S4 extraits et archivés dans `docs/PHASE_TRACKER_HISTORY.md`. Tous les candidats store à faible couplage (S1-S6) sont désormais clos.
 - [x] PHASE 212 - Refactor C6 extrait et archivé dans `docs/PHASE_TRACKER_HISTORY.md`.
