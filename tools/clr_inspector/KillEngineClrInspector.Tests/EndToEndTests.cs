@@ -1941,6 +1941,35 @@ public sealed class EndToEndTests
         Assert.DoesNotContain("stale", entries.Keys);
     }
 
+    [Fact]
+    public async Task ReadObject_UnpacksConcurrentStackInLifoOrder()
+    {
+        // Extension non bloquante du chantier "collections concurrentes" :
+        // ConcurrentStack<T> a un layout nettement plus simple que
+        // ConcurrentQueue<T>/ConcurrentBag<T> (_head -> Node._next), donc on
+        // le couvre sans ouvrir le chantier plus risqué des structures
+        // segmentées/work-stealing.
+        await PipeClient.CallAsync(InspectorPipe, "attach", new JsonArray(JsonValue.Create(_fixture.Target.Pid)));
+
+        var foundPlayer = await PipeClient.CallAsync(
+            InspectorPipe, "findObjectsByType", new JsonArray(JsonValue.Create("KillEngine.ClrTestTarget.Player")));
+        string playerAddress = Assert.Single(foundPlayer!.AsArray())!["address"]!.GetValue<string>();
+        var playerObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(playerAddress)));
+        string inventoryAddress = Field(playerObj!["fields"]!, "Inventory")!["address"]!.GetValue<string>();
+
+        var inventoryObj = await PipeClient.CallAsync(InspectorPipe, "readObject", new JsonArray(JsonValue.Create(inventoryAddress)));
+        var concurrentTags = Field(inventoryObj!["fields"]!, "ConcurrentTags")!["collection"]!;
+
+        Assert.Equal("concurrent_stack", concurrentTags["kind"]!.GetValue<string>());
+        Assert.Equal(3, concurrentTags["count"]!.GetValue<int>());
+        Assert.Equal(3, concurrentTags["returned"]!.GetValue<int>());
+        Assert.False(concurrentTags["truncated"]!.GetValue<bool>());
+
+        var items = concurrentTags["items"]!.AsArray().Select(i => i!.GetValue<string>()).ToArray();
+        Assert.Equal(new[] { "top", "middle", "bottom" }, items);
+        Assert.DoesNotContain("temp-to-pop", items);
+    }
+
     private static bool JsonContainsAddress(JsonNode? node, string address)
     {
         switch (node)

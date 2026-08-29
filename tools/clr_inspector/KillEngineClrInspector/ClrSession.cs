@@ -481,6 +481,11 @@ public sealed class ClrSession : IDisposable
                 return DescribeConcurrentDictionary(obj, depth);
             }
 
+            if (typeName.StartsWith("System.Collections.Concurrent.ConcurrentStack<", StringComparison.Ordinal))
+            {
+                return DescribeConcurrentStack(obj, depth);
+            }
+
             object? customCollection = DescribeFieldBackedCollection(obj, depth);
             if (customCollection is not null)
             {
@@ -710,6 +715,52 @@ public sealed class ClrSession : IDisposable
             returned = entries.Count,
             truncated = count > entries.Count,
             entries,
+        };
+    }
+
+    /// <summary>
+    /// ConcurrentStack&lt;T&gt; -- layout interne verifie par reflection sur le
+    /// runtime .NET local avant implementation : champ `_head` pointant vers
+    /// une classe `Node`, puis chaine simplement liee `_value`/`_next`.
+    /// Contrairement a ConcurrentDictionary<T>, il n'y a pas de compteur
+    /// interne fiable expose par champ prive : on compte donc les noeuds
+    /// parcourus dans la borne de lecture, avec un slot de plus pour signaler
+    /// proprement une troncature.
+    /// </summary>
+    private static object DescribeConcurrentStack(ClrObject obj, int depth)
+    {
+        ClrObject node = obj.ReadObjectField("_head");
+        var items = new List<object?>();
+        string? elementType = null;
+        int nodesSeen = 0;
+        var visited = new HashSet<ulong>();
+
+        while (!node.IsNull && nodesSeen <= MaxCollectionItems)
+        {
+            if (!visited.Add(node.Address))
+            {
+                break;
+            }
+
+            nodesSeen++;
+            if (items.Count < MaxCollectionItems)
+            {
+                ClrInstanceField? valueField = node.Type?.GetFieldByName("_value");
+                elementType ??= valueField?.Type?.Name;
+                items.Add(valueField is null ? null : ReadFieldValue(node, valueField, depth));
+            }
+
+            node = node.ReadObjectField("_next");
+        }
+
+        return new
+        {
+            kind = "concurrent_stack",
+            elementType,
+            count = nodesSeen,
+            returned = items.Count,
+            truncated = nodesSeen > items.Count || !node.IsNull,
+            items,
         };
     }
 

@@ -92,6 +92,7 @@ public sealed class Inventory
     // par attache ClrMD reelle avant d'ecrire le code de deballage, meme
     // methodologie que HashSet<T>/Queue<T>/Stack<T>/LinkedList<T> ci-dessus.
     public ConcurrentDictionary<string, int> ConcurrentCounters { get; } = new();
+    public ConcurrentStack<string> ConcurrentTags { get; } = new();
 
     // Chantier "vrai plus-court-chemin GCRoot" (BFS multi-source,
     // docs/KILLENGINE_CLR_INSPECTOR_SPEC.md) : depart d'une chaine LONGUE
@@ -459,6 +460,16 @@ public static class TestRoot
         inventory.ConcurrentCounters.TryRemove("stale", out _);
         // Contenu logique final attendu (ordre non garanti par la structure
         // elle-meme) : hits=41, misses=7.
+
+        // ConcurrentStack<T> : Push/Pop delibere pour verifier que le
+        // deballage suit la chaine _head -> _next en ordre logique "sommet
+        // d'abord", sans rapporter l'element retire.
+        inventory.ConcurrentTags.Push("bottom");
+        inventory.ConcurrentTags.Push("temp-to-pop");
+        inventory.ConcurrentTags.TryPop(out _);
+        inventory.ConcurrentTags.Push("middle");
+        inventory.ConcurrentTags.Push("top");
+        // Ordre logique attendu : top, middle, bottom.
 
         // Chantier "vrai plus-court-chemin GCRoot" : chaine de 3 noeuds vers
         // ShortestPathProbe, soit 4 sauts au total depuis le root
