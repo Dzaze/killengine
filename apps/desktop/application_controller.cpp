@@ -14,7 +14,7 @@
 #endif
 
 #include "auto_resolver.h"
-#include "automation_pipe_server.h"
+#include "automation_pipe_manager.h"
 #include "clr_inspector_bridge.h"
 #include "code_patch_manager.h"
 #include "debug_feature_manager.h"
@@ -1843,6 +1843,7 @@ ApplicationController::ApplicationController(QObject* parent)
             emit freezeInstabilityDetected(info);
         },
         this);
+    m_automationPipeManager = std::make_unique<AutomationPipeManager>(this);
     m_kernelDriverManager = std::make_unique<KernelDriverManager>(
         m_handle,
         [this](const QString& event, const QVariantMap& payload) {
@@ -12518,7 +12519,7 @@ QVariantMap ApplicationController::getLuaScriptingStatus() const {
     // d'environnement dev OU mode Automation persistant active depuis
     // Settings), pas seulement l'ancien chemin env var -- sinon ce bandeau
     // resterait affiche a tort apres activation via le toggle.
-    result["automationPipeOptIn"] = m_automationPipeServer != nullptr;
+    result["automationPipeOptIn"] = m_automationPipeManager->isRunning();
     result["message"] = luaPath.isEmpty()
         ? QStringLiteral("Aucun interpréteur Lua trouvé dans runtime/lua, lua, le dossier de l'application ou le PATH.")
         : QStringLiteral("Lua externe prêt. Les appels KillEngine passent par le pipe d'automatisation local.");
@@ -13113,71 +13114,19 @@ QVariantMap ApplicationController::callVueStoreAction(const QString& action, con
 }
 
 void ApplicationController::ensureAutomationPipeStartedIfConfigured() {
-    if (m_automationPipeServer) {
-        return;
-    }
-    const bool envEnabled =
-        QProcessEnvironment::systemEnvironment().value("KILLENGINE_AUTOMATION_PIPE") == "1";
-    QSettings settings;
-    const bool persistedEnabled = settings.value("automation/pipeEnabled", false).toBool();
-    if (!envEnabled && !persistedEnabled) {
-        return;
-    }
-    // parent=nullptr : l'unique_ptr est le seul proprietaire (pas de parentage
-    // Qt en plus), pour que enableAutomationMode()/disableAutomationMode()
-    // puissent detruire/recreer l'instance en direct sans double-liberation.
-    m_automationPipeServer = std::make_unique<AutomationPipeServer>(this, nullptr);
-    if (!m_automationPipeServer->start()) {
-        KE_LOG_WARN() << "AutomationPipeServer: demarrage echoue, KillEngine continue sans le connecteur.";
-        m_automationPipeServer.reset();
-    }
+    m_automationPipeManager->ensureStartedIfConfigured();
 }
 
 QVariantMap ApplicationController::enableAutomationMode() {
-    QSettings settings;
-    settings.setValue("automation/pipeEnabled", true);
-    settings.sync();
-    ensureAutomationPipeStartedIfConfigured();
-
-    QVariantMap result = getAutomationPipeStatus();
-    result["success"] = m_automationPipeServer != nullptr;
-    if (!m_automationPipeServer) {
-        result["error"] = "Demarrage du pipe d'automatisation echoue (voir les logs KillEngine).";
-    }
-    return result;
+    return m_automationPipeManager->enableAutomationMode();
 }
 
 QVariantMap ApplicationController::disableAutomationMode() {
-    QSettings settings;
-    settings.setValue("automation/pipeEnabled", false);
-    settings.sync();
-    if (m_automationPipeServer) {
-        m_automationPipeServer->stop();
-        m_automationPipeServer.reset();
-    }
-    QVariantMap result = getAutomationPipeStatus();
-    result["success"] = true;
-    return result;
+    return m_automationPipeManager->disableAutomationMode();
 }
 
 QVariantMap ApplicationController::getAutomationPipeStatus() {
-    QSettings settings;
-    QVariantMap result;
-    result["enabled"] = settings.value("automation/pipeEnabled", false).toBool()
-        || QProcessEnvironment::systemEnvironment().value("KILLENGINE_AUTOMATION_PIPE") == "1";
-    if (m_automationPipeServer) {
-        const QVariantMap pipeStatus = m_automationPipeServer->status();
-        for (auto it = pipeStatus.constBegin(); it != pipeStatus.constEnd(); ++it) {
-            result[it.key()] = it.value();
-        }
-    } else {
-        result["running"] = false;
-        result["pipeName"] = AutomationPipeServer::pipeName();
-        result["callCount"] = 0;
-        result["lastMethod"] = QString();
-        result["lastCallAt"] = QString();
-    }
-    return result;
+    return m_automationPipeManager->getAutomationPipeStatus();
 }
 
 QVariantMap ApplicationController::savePointerChainProfileTarget(

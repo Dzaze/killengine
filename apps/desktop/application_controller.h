@@ -35,6 +35,7 @@ class QWebEnginePage;
 namespace killengine {
 
 class AutomationPipeServer;
+class AutomationPipeManager;
 class ClrInspectorBridge;
 class CodePatchManager;
 class DebugFeatureManager;
@@ -1061,6 +1062,9 @@ public:
     /// (remplace l'ancien bloc inline) ET depuis enableAutomationMode() pour
     /// le cas où le toggle est activé en cours de session. Pas un Q_INVOKABLE :
     /// appelée en C++ direct depuis main.cpp, pas depuis le frontend.
+    /// Délègue à AutomationPipeManager (candidat C11, docs/REFACTOR_ROADMAP.md,
+    /// extrait le 29/08/2026) -- ces 4 méthodes restent ici comme façades
+    /// minces, le cycle de vie réel vit dans apps/desktop/automation_pipe_manager.*.
     void ensureAutomationPipeStartedIfConfigured();
 
 signals:
@@ -1215,7 +1219,7 @@ private:
     bool                     m_hasPreviousCandidates{false};
     int                      m_nextScanRequestId{1};
     int                      m_nextDebugRequestId{1};
-    std::unique_ptr<AutomationPipeServer> m_automationPipeServer;
+    std::unique_ptr<AutomationPipeManager> m_automationPipeManager;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     // Test automatique des champs candidats (voir testCandidateFieldsAsync) : etat
     // dedie, distinct de m_activeDebugCancellation qui est reserve aux operations

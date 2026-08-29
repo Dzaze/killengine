@@ -13,6 +13,7 @@ qt_add_executable(KillEngine
     kernel_driver_manager.cpp
     save_file_investigator.cpp
     automation_pipe_server.cpp
+    automation_pipe_manager.cpp
     crash_handler.cpp
 )
 
