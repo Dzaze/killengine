@@ -40,6 +40,7 @@ class QWidget;
 namespace killengine {
 
 class AutomationPipeServer;
+class ClrInspectorBridge;
 class UiStringInvestigator;
 
 /**
@@ -1138,10 +1139,6 @@ private:
     QString scanTelemetryFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;
     void appendScanTelemetry(const QString& event, const QVariantMap& payload) const;
-    QString clrInspectorPipeName() const;
-    QString findClrInspectorExecutable() const;
-    bool ensureClrInspectorStarted(QString* error = nullptr);
-    QVariantMap callClrInspectorRpc(const QString& method, const QVariantList& params, int timeoutMs = 5000);
 
     struct WriteRecord {
         uint64_t   address{0};
@@ -1208,6 +1205,7 @@ private:
     int                     m_pid{0};
     killcore::ProcessHandle m_handle;
     std::unique_ptr<UiStringInvestigator> m_uiStringInvestigator;
+    std::unique_ptr<ClrInspectorBridge> m_clrInspectorBridge;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
     // detachProcess() pour que la regle pare-feu reste retirable meme apres
     // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
@@ -1276,8 +1274,6 @@ private:
     // manipulation cross-thread du QProcess lui-meme.
     bool                     m_luaScriptInProgress{false};
     std::shared_ptr<killcore::CancellationToken> m_activeLuaScriptCancellation;
-    std::unique_ptr<QProcess>    m_clrInspectorProcess;
-    int                          m_clrInspectorRequestId{1};
     killai::AIEngine         m_ai;
     bool                     m_smartSearchActive{false};
     QString                  m_smartSearchInitialValue;
