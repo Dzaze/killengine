@@ -1897,6 +1897,10 @@ ApplicationController::~ApplicationController() {
     KE_LOG_INFO() << "ApplicationController destroyed";
 }
 
+AutoWriteStateAccess ApplicationController::autoWriteState() {
+    return AutoWriteStateAccess(m_writeHistory, m_lastAutoWriteTargets, m_chatMemoryTargets);
+}
+
 // ---------------------------------------------------------------------------
 // Propriétés
 // ---------------------------------------------------------------------------
@@ -4541,7 +4545,7 @@ QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, c
     if (write.success) {
         m_lastWriteAddress = address;
         m_lastWritePreviousValue = write.previousValue;
-        m_writeHistory.append({address, write.previousValue, killcore::scanValueToBytes(scanValue), type, value});
+        autoWriteState().appendWriteRecord({address, write.previousValue, killcore::scanValueToBytes(scanValue), type, value});
         // H2 (docs/STRATEGY_ROOM.md, session Solitaire du 19/08/2026) : le
         // mecanisme de detection "l'ecriture est repartie toute seule"
         // (registerWriteWatch/writeDidNotHold) existait deja mais ne
@@ -4651,7 +4655,8 @@ QVariantMap ApplicationController::writeMemoryValuesAtomic(const QVariantList& t
     int suspendedThreadCount = 0;
     QVariantList writeResults;
     int written = 0;
-    const int batchStartIndex = m_writeHistory.size();
+    auto writeState = autoWriteState();
+    const int batchStartIndex = writeState.writeHistorySize();
 
     {
         std::optional<killcore::ProcessThreadsSuspendGuard> suspendGuard;
@@ -4675,7 +4680,7 @@ QVariantMap ApplicationController::writeMemoryValuesAtomic(const QVariantList& t
                 ++written;
                 m_lastWriteAddress = pt.address;
                 m_lastWritePreviousValue = write.previousValue;
-                m_writeHistory.append({pt.address, write.previousValue, pt.bytes, pt.type, pt.valueText});
+                writeState.appendWriteRecord({pt.address, write.previousValue, pt.bytes, pt.type, pt.valueText});
                 registerWriteWatch(pt.address, pt.type, pt.bytes); // H2, voir writeMemoryValue
             }
             writeResults.append(writeResult);
@@ -4692,7 +4697,7 @@ QVariantMap ApplicationController::writeMemoryValuesAtomic(const QVariantList& t
     result["suspendedThreadCount"] = suspendedThreadCount;
     if (written > 0) {
         m_lastBatchStartIndex = batchStartIndex;
-        m_lastBatchEndIndex = m_writeHistory.size();
+        m_lastBatchEndIndex = writeState.writeHistorySize();
     }
     if (!parseErrors.isEmpty()) {
         result["parseErrors"] = parseErrors;
@@ -4748,7 +4753,8 @@ QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantL
     killcore::MemoryWriter writer(writeHandle);
     bool allWritesOk = true;
     int written = 0;
-    m_lastBatchStartIndex = m_writeHistory.size();
+    auto writeState = autoWriteState();
+    m_lastBatchStartIndex = writeState.writeHistorySize();
 
     for (const auto& item : targets) {
         const QVariantMap target = item.toMap();
@@ -4802,14 +4808,14 @@ QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantL
             ++written;
             m_lastWriteAddress = address;
             m_lastWritePreviousValue = write.previousValue;
-            m_writeHistory.append({address, write.previousValue, targetBytes, type, rawValue});
+            writeState.appendWriteRecord({address, write.previousValue, targetBytes, type, rawValue});
         } else {
             allWritesOk = false;
         }
         writeResults.append(writeResult);
     }
 
-    m_lastBatchEndIndex = m_writeHistory.size();
+    m_lastBatchEndIndex = writeState.writeHistorySize();
     const int protectionChangedCount = static_cast<int>(std::count_if(writeResults.begin(), writeResults.end(), [](const QVariant& item) {
         return item.toMap().value("protectionChanged").toBool();
     }));
@@ -4934,7 +4940,7 @@ QVariantMap ApplicationController::writeMemoryValueConfirmed(
     if (result.value("success").toBool()) {
         m_lastWriteAddress = address;
         m_lastWritePreviousValue = previousValue;
-        m_writeHistory.append({address, previousValue, targetBytes, type, value});
+        autoWriteState().appendWriteRecord({address, previousValue, targetBytes, type, value});
         // Seul point d'appel de toutes les ecritures confirmees (manuelles ET
         // tous les auto-write du chat Assistant, qui appellent tous cette
         // meme fonction par cible) : surveiller ici couvre tout, sans avoir a
@@ -4959,7 +4965,7 @@ QVariantMap ApplicationController::rollbackLastWriteBatch() {
 
     if (m_lastBatchStartIndex < 0
         || m_lastBatchEndIndex <= m_lastBatchStartIndex
-        || m_lastBatchStartIndex >= m_writeHistory.size()) {
+        || m_lastBatchStartIndex >= autoWriteState().writeHistorySize()) {
         result["error"] = "Aucun batch d'écritures automatiques à restaurer.";
         return result;
     }
@@ -4973,9 +4979,10 @@ QVariantMap ApplicationController::rollbackLastWriteBatch() {
     killcore::MemoryWriter writer(writeHandle);
     int rolled = 0;
     QVariantList restoredWrites;
-    const int batchEnd = std::min(m_lastBatchEndIndex, static_cast<int>(m_writeHistory.size()));
+    auto writeState = autoWriteState();
+    const int batchEnd = std::min(m_lastBatchEndIndex, writeState.writeHistorySize());
     for (int i = batchEnd - 1; i >= m_lastBatchStartIndex; --i) {
-        const auto& rec = m_writeHistory.at(i);
+        const auto& rec = writeState.writeHistoryAt(i);
         const auto write = writer.write(rec.address, rec.previousValue, true);
         if (write.success) {
             ++rolled;
@@ -4993,12 +5000,12 @@ QVariantMap ApplicationController::rollbackLastWriteBatch() {
 
     const int total = batchEnd - m_lastBatchStartIndex;
     for (int i = batchEnd - 1; i >= m_lastBatchStartIndex; --i) {
-        m_writeHistory.removeAt(i);
+        writeState.removeWriteHistoryAt(i);
     }
     m_lastBatchStartIndex = -1;
     m_lastBatchEndIndex = -1;
-    m_lastAutoWriteTargets.clear();
-    if (m_writeHistory.isEmpty()) {
+    writeState.clearLastTargets();
+    if (writeState.writeHistoryEmpty()) {
         m_lastWriteAddress = 0;
         m_lastWritePreviousValue.clear();
     }
@@ -6274,9 +6281,10 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
     bool allWritesOk = true;
     const QString previousTargetValue = m_smartSearchTargetValue;
     m_smartSearchTargetValue = value;
-    m_lastBatchStartIndex = m_writeHistory.size();
+    auto writeState = autoWriteState();
+    m_lastBatchStartIndex = writeState.writeHistorySize();
 
-    for (const auto& target : m_lastAutoWriteTargets) {
+    for (const auto& target : writeState.lastTargets()) {
         QVariantMap suggestion;
         suggestion["address"] = QString::number(target.address, 16);
         suggestion["type"] = killcore::valueTypeToString(target.type);
@@ -6301,21 +6309,21 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
         writeResults.append(writeResult);
     }
 
-    m_lastBatchEndIndex = m_writeHistory.size();
+    m_lastBatchEndIndex = writeState.writeHistorySize();
     if (m_lastBatchEndIndex == m_lastBatchStartIndex) {
         m_lastBatchStartIndex = -1;
         m_lastBatchEndIndex = -1;
     }
-    if (allWritesOk && !m_lastAutoWriteTargets.isEmpty()) {
+    if (allWritesOk && writeState.hasLastTargets()) {
         m_smartSearchActive = false;
-        m_chatMemoryTargets = m_lastAutoWriteTargets;
+        writeState.replaceChatTargetsWithLastTargets();
         resetFailureEscalationState();
         appendDistinctText(&m_autoWriteValueHistory, value, 12);
     }
 
     QVariantMap actionResult;
     actionResult["success"] = allWritesOk;
-    actionResult["remaining"] = static_cast<qulonglong>(m_lastAutoWriteTargets.size());
+    actionResult["remaining"] = static_cast<qulonglong>(writeState.lastTargetCount());
     actionResult["error"] = allWritesOk ? QString() : QString("Au moins une réécriture a échoué.");
 
     result["actionResult"] = actionResult;
@@ -6324,13 +6332,13 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
     result["autoWriteResults"] = writeResults;
     result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
     result["autoWriteCount"] = writeResults.size();
-    result["activeTargetCount"] = m_chatMemoryTargets.size();
+    result["activeTargetCount"] = writeState.chatTargetCount();
     result["previousTargetValue"] = previousTargetValue;
     result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
     result["rollbackNote"] = "Tu peux annuler cette réécriture via le bouton rollback batch dans l'assistant.";
     result["message"] = allWritesOk
         ? QString("J'ai repris les %1 dernière(s) adresse(s) auto-écrite(s) et j'ai mis %2 dessus. Je garde ces adresses actives pour les prochaines modifications.")
-              .arg(m_lastAutoWriteTargets.size())
+              .arg(writeState.lastTargetCount())
               .arg(value)
         : QString("J'ai repris les dernières adresses auto-écrites, mais au moins une réécriture vers %1 a échoué.")
               .arg(value);
@@ -6348,8 +6356,9 @@ QVariantMap ApplicationController::activateChatMemoryTargetsFromQuery(const QStr
     result["actionStatus"] = "not_executed";
     result["workflowStatus"] = "memory_targets_ready";
 
-    m_chatMemoryTargets.clear();
-    m_lastAutoWriteTargets.clear();
+    auto writeState = autoWriteState();
+    writeState.clearChatTargets();
+    writeState.clearLastTargets();
     m_autoWriteValueHistory.clear();
     m_smartSearchActive = false;
     m_smartSearchInitialValue.clear();
@@ -6362,7 +6371,7 @@ QVariantMap ApplicationController::activateChatMemoryTargetsFromQuery(const QStr
         }
 
         bool alreadyAdded = false;
-        for (const auto& target : m_chatMemoryTargets) {
+        for (const auto& target : writeState.chatTargets()) {
             if (target.address == address) {
                 alreadyAdded = true;
                 break;
@@ -6373,8 +6382,8 @@ QVariantMap ApplicationController::activateChatMemoryTargetsFromQuery(const QStr
         }
 
         const AutoWriteTarget target{address, killcore::ValueType::Int32, /*chatOrigin=*/true};
-        m_chatMemoryTargets.append(target);
-        m_lastAutoWriteTargets.append(target);
+        writeState.appendChatTarget(target);
+        writeState.appendLastTarget(target);
 
         QVariantMap suggestion;
         suggestion["source"] = "chat_address";
@@ -6383,13 +6392,13 @@ QVariantMap ApplicationController::activateChatMemoryTargetsFromQuery(const QStr
         suggestions.append(suggestion);
     }
 
-    result["success"] = !m_chatMemoryTargets.isEmpty();
-    result["targetCount"] = m_chatMemoryTargets.size();
+    result["success"] = writeState.hasChatTargets();
+    result["targetCount"] = writeState.chatTargetCount();
     result["suggestedWrites"] = suggestions;
-    result["message"] = m_chatMemoryTargets.isEmpty()
+    result["message"] = !writeState.hasChatTargets()
         ? QString("Je n'ai pas reconnu d'adresse mémoire valide dans ton message.")
         : QString("J'ai sélectionné %1 adresse(s) mémoire depuis ton message. Donne-moi maintenant la valeur à écrire dessus.")
-              .arg(m_chatMemoryTargets.size());
+              .arg(writeState.chatTargetCount());
     appendSmartSearchDebug("chat_memory_targets_activated", result);
     return result;
 }
@@ -6410,10 +6419,11 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
     bool allWritesOk = true;
     const QString previousTargetValue = m_smartSearchTargetValue;
     m_smartSearchTargetValue = value;
-    m_lastBatchStartIndex = m_writeHistory.size();
-    m_lastAutoWriteTargets.clear();
+    auto writeState = autoWriteState();
+    m_lastBatchStartIndex = writeState.writeHistorySize();
+    writeState.clearLastTargets();
 
-    for (const auto& target : m_chatMemoryTargets) {
+    for (const auto& target : writeState.chatTargets()) {
         QVariantMap suggestion;
         suggestion["source"] = "chat_address";
         suggestion["address"] = QString::number(target.address, 16);
@@ -6440,19 +6450,19 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
         writeResults.append(writeResult);
 
         if (writeResult.value("success").toBool()) {
-            m_lastAutoWriteTargets.append(target);
+            writeState.appendLastTarget(target);
         }
     }
 
-    m_lastBatchEndIndex = m_writeHistory.size();
+    m_lastBatchEndIndex = writeState.writeHistorySize();
     if (m_lastBatchEndIndex == m_lastBatchStartIndex) {
         m_lastBatchStartIndex = -1;
         m_lastBatchEndIndex = -1;
-        m_lastAutoWriteTargets.clear();
+        writeState.clearLastTargets();
     }
-    if (allWritesOk && !m_lastAutoWriteTargets.isEmpty()) {
+    if (allWritesOk && writeState.hasLastTargets()) {
         m_smartSearchActive = false;
-        m_chatMemoryTargets = m_lastAutoWriteTargets;
+        writeState.replaceChatTargetsWithLastTargets();
         resetFailureEscalationState();
         if (m_autoWriteValueHistory.isEmpty() && !previousTargetValue.isEmpty()) {
             appendDistinctText(&m_autoWriteValueHistory, previousTargetValue, 12);
@@ -6462,7 +6472,7 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
 
     QVariantMap actionResult;
     actionResult["success"] = allWritesOk;
-    actionResult["remaining"] = static_cast<qulonglong>(m_chatMemoryTargets.size());
+    actionResult["remaining"] = static_cast<qulonglong>(writeState.chatTargetCount());
     actionResult["error"] = allWritesOk ? QString() : QString("Au moins une écriture sur adresse donnée a échoué.");
 
     result["success"] = allWritesOk;
@@ -6472,14 +6482,14 @@ QVariantMap ApplicationController::writeChatMemoryTargetsFromQuery(const QString
     result["autoWriteResults"] = writeResults;
     result["autoWriteResult"] = writeResults.isEmpty() ? QVariantMap{} : writeResults.last().toMap();
     result["autoWriteCount"] = writeResults.size();
-    result["activeTargetCount"] = m_chatMemoryTargets.size();
+    result["activeTargetCount"] = writeState.chatTargetCount();
     result["previousTargetValue"] = previousTargetValue;
     result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
     result["rollbackNote"] = "Tu peux annuler cette écriture via le bouton rollback batch dans l'assistant.";
     result["message"] = allWritesOk
         ? QString("J'ai écrit %1 sur %2 adresse(s) mémoire sélectionnée(s) dans la conversation. Je garde ces adresses actives pour les prochaines modifications.")
               .arg(value)
-              .arg(m_chatMemoryTargets.size())
+              .arg(writeState.chatTargetCount())
         : QString("J'ai essayé d'écrire %1 sur les adresses mémoire sélectionnées, mais au moins une écriture a échoué.")
               .arg(value);
     appendSmartSearchDebug("chat_memory_write", result);

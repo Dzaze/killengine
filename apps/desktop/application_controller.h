@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ai_engine.h"
+#include "auto_write_state_access.h"
 #include "candidates/candidate_store.h"
 #include "debug/breakpoint_freeze.h"
 #include "debug/inprocess_breakpoint.h"
@@ -1128,25 +1129,7 @@ private:
     QString scanTelemetryFilePath() const;
     void appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const;
     void appendScanTelemetry(const QString& event, const QVariantMap& payload) const;
-
-    struct WriteRecord {
-        uint64_t   address{0};
-        QByteArray previousValue;
-        QByteArray writtenValue;
-        killcore::ValueType type{killcore::ValueType::Int32};
-        QString valueText;
-    };
-
-    struct AutoWriteTarget {
-        uint64_t address{0};
-        killcore::ValueType type{killcore::ValueType::Int32};
-        // Ecriture RiskGate (29/08/2026) : distingue une cible venant d'une
-        // adresse tapee explicitement dans le chat (a gater derriere une
-        // confirmation reelle) d'une cible issue du mode Auto/UI-string-trace/
-        // profil (comportement de confiance deja etabli, ne jamais gater --
-        // voir commentaire de rewriteLastAutoWriteTargets()).
-        bool chatOrigin{false};
-    };
+    AutoWriteStateAccess autoWriteState();
 
     // Surveillance courte apres une ecriture confirmee : combien de sondages
     // (applyWriteWatchTick) il reste avant d'arreter d'observer cette adresse
