@@ -546,6 +546,22 @@ Réponse : `{ success: true, clearedCandidates, hadUndoReduction, hadUnknownSnap
 ### `acknowledgePendingSmartSearchRecovery()`
 `void` (pas de retour) — nettoie un état interne côté serveur.
 
+## Carnet d'hypothèses (PHASE 120-E/F)
+
+Fichier source : `apps/desktop/investigation_notebook_manager.cpp` (classe `InvestigationNotebookManager`, délègue à `killai::InvestigationNotebook`, `ai/investigation_notebook.cpp`). Moteur de pondération déterministe, indépendant de tout état process/mémoire — aucune génération d'hypothèse ni de "prochaine expérience" ici, ça reste le rôle du modèle local (PHASE 120-G, pas encore livré). Chaque hypothèse : `{ id, description, confidenceScore, status, evidenceLog }` — `status` vaut `"active"`/`"confirmed"`/`"refuted"` ; score borné `[0,100]`, `+20` sur confirmation, `-30` sur contradiction, verrouillé une fois `confirmed`/`refuted`.
+
+### `addInvestigationHypothesis(description, baselineScore=50)`
+Réponse : `{ success: true, hypothesis: {id, description, confidenceScore, status: "active", evidenceLog: []} }` ou `{ success: false, error: "Description vide." }` si `description` est vide/blanc.
+
+### `recordInvestigationTestResult(hypothesisId, confirmed, evidenceNote)`
+Réponse : `{ success: true, hypothesis: {...} }` (score/status mis à jour, `evidenceNote` ajouté à `evidenceLog`) ou `{ success: false, error }` — `error` vaut `"Hypothese introuvable."` (id inconnu) ou `"Hypothese deja dans un etat terminal (confirmee ou refutee)."` (hypothèse verrouillée, aucune mise à jour rétroactive).
+
+### `getInvestigationNotebookSynthesis()`
+Réponse : `{ success: true, confirmed: [...], active: [...], refuted: [...] }` — chaque liste contient des hypothèses complètes (`{id, description, confidenceScore, status, evidenceLog}`), triées par `confidenceScore` décroissant.
+
+### `resetInvestigationNotebook()`
+Réponse : `{ success: true }` — vide le carnet et réinitialise le compteur d'id (`H1` repart de zéro).
+
 ### `getSmartSearchContext()`
 Réponse : `{ success: true, active, workflow, initialValue, targetValue, valueType, candidateCount, hasUndoReduction, chatTargets: [{address, type}], profileTargets: [{profile, target, group, address, type, locatorKind, clrTypeSubstring?, clrIdentityField?, clrIdentityValue?, clrFieldName?}], lastAutoWriteCount, writeHistory }`
 
