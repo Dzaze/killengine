@@ -15,7 +15,6 @@ add_library(killai STATIC
     tool_registry.cpp
     tool_validator.cpp
     state_machine.cpp
-    evidence_summary.cpp
     auto_resolver.cpp
     investigation_notebook.cpp
 )

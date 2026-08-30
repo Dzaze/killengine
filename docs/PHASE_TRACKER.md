@@ -67,6 +67,11 @@ Aucune. Les deux résidus produit/QA/doc relevés en PHASE 236 sont clos (delta 
 
 ## Journal actif
 
+- [x] PHASE 246 (Claude, 30/08/2026) - Nettoyage : suppression de la classe morte `EvidenceSummary`, trouvée pendant l'attente de la partie frontend Codex (PHASE 120-F).
+  - Diagnostic : `ai/evidence_summary.h/.cpp` définissait une classe `EvidenceSummary` (héritant `QObject`, méthode `summarize()` retournant systématiquement `{}`) jamais instanciée nulle part dans le dépôt — confirmé par `grep -rn "EvidenceSummary"` sur tout le code source (uniquement son propre fichier + l'entrée `CMakeLists.txt` + les fichiers moc auto-générés). `git log --follow` montre qu'elle date du commit initial du projet ("Initial KillEngine project"), jamais retouchée depuis — scaffolding Phase 0 abandonné.
+  - Correctif : suppression de `ai/evidence_summary.h` et `.cpp`, retrait de l'entrée correspondante dans `ai/CMakeLists.txt`. `StateMachine` (trouvée dans la même recherche) n'est PAS morte — activement utilisée dans `ai/ai_engine.cpp` (`m_stateMachine.setState/currentStateName`), non touchée.
+  - Comment vérifié : `.\scripts\build.ps1` OK, `killengine_unit_tests.exe` **273/273 OK**, aucune régression. Scan mojibake standard propre. Fichiers uniquement dans `ai/` — vérifié `git status` avant de committer pour ne pas toucher au travail en cours de Codex sur `ui/src/**` (PHASE 120-F frontend, non commité au moment de cette entrée).
+
 - [x] PHASE 241 (Claude, 30/08/2026) - Mise à jour de `docs/KILLENGINE_CODE_MAP.md`, demande explicite du propriétaire.
   - Diagnostic : le doc (dernière mise à jour 24/08/2026) décrivait encore `application_controller.cpp` et `app.ts` comme deux fichiers monolithiques portant toute la logique — périmé depuis le refactor C1-C14/S1-S12 clos les 29-30/08/2026.
   - Correctif : réécriture complète. "Fichiers Centraux À Connaître" éclaté en deux tables (Backend `apps/desktop/*_manager.{h,cpp}`/`*_bridge.*`/`*_investigator.*` ~15 fichiers, Frontend `ui/src/stores/*.ts` ~12 stores avec leur numéro S). Chaque table outil/workflow (Processus, Mémoire, Scans, Écriture/Freeze, Trace UI String, Debug, AOB/Patch, Injection, Kernel, Pointer/Profils, Trainer, IA/Assistant, CLR, Scripting, Diagnostic) repointée vers le manager backend et le store frontend réels.
