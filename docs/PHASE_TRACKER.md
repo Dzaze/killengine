@@ -29,6 +29,26 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 
 Aucune. Les deux résidus produit/QA/doc relevés en PHASE 236 sont clos (delta d'offset Structure Analyzer en PHASE 239, échappements `\uXXXX` Lua en PHASE 240 — détails dans `docs/PHASE_TRACKER_HISTORY.md`, archive complémentaire PHASES 238-240).
 
+## Chantier en attente d'accord explicite : PHASE 120 "carnet d'hypothèses" (jamais démarré)
+
+**Ne pas démarrer ce chantier sans que le propriétaire le nomme explicitement**, même si tout le reste du backlog est fermé — règle posée le 27/08/2026, jamais levée (voir `docs/PHASE_TRACKER_HISTORY.md` ligne ~1320). Un agent qui trouve ce backlog vide ne doit pas en déduire qu'il faut lancer ceci automatiquement.
+
+**Confusion fréquente à éviter** : "PHASE 120" a été utilisé pour deux choses différentes, et seule la première est faite.
+
+1. **Fait (120-A/B/C/D + PHASE 205, 28-29/08/2026, closes)** : un copilote qui **cite** la bonne marche à suivre. L'Assistant reconnaît un symptôme décrit en langage naturel et récite une fiche préparée à l'avance (`docs/INVESTIGATION_PLAYBOOK.md`) — outil recommandé, prérequis, risques — avec des boutons d'action cliquables, et pour 2 sujets simples enchaîne automatiquement l'outil lecture seule correspondant. C'est un aiguillage intelligent vers les outils déjà existants (scan, freeze, Trace UI string, AOB/patch, CLR, etc.) — **aucun nouvel outil créé**, juste un mode d'emploi vivant dessus. `InvestigationView.vue` affiche par ailleurs une timeline des actions réellement effectuées (journal d'exécution), pas un raisonnement.
+
+2. **Jamais fait** : le vrai "mode enquête" du brief d'origine (détail complet dans `docs/PHASE_TRACKER_HISTORY.md`, lignes ~1312-1321) — un système qui, pendant toute une investigation :
+   - garde **plusieurs hypothèses concurrentes en mémoire simultanément**, chacune avec un poids de confiance (pas une seule hypothèse à la fois, pas juste un aiguillage statique) ;
+   - propose **un test à la fois**, avec ses préconditions explicites avant de le lancer ;
+   - après chaque résultat, **met à jour les poids** (renforce/affaiblit/écarte des hypothèses) au lieu de s'accrocher à la première piste ;
+   - maintient une synthèse lisible en continu : **"ce qu'on sait" / "ce qu'on ne sait pas encore" / "prochaine expérience à tenter"**.
+
+   Motivation d'origine : le cas Bulles Solitaire (`docs/STRATEGY_ROOM.md`) où la première hypothèse ("checksum dans le fichier `.sgi`") était fausse et a fait perdre du temps avant de trouver la vraie cause (override du cache WebView) — un carnet qui garde cette hypothèse "à confirmer" à côté d'autres pistes concurrentes, au lieu de s'y accrocher seule, aurait pu basculer plus vite.
+
+**Non-objectifs explicites du brief d'origine, à respecter si ce chantier démarre un jour** : jamais de destruction automatique sans sauvegarde/quarantaine ; toujours séparer clairement observation / inférence / hypothèse dans l'affichage ; confirmer avant de toucher à de vraies données (pas de bypass du RiskGate) ; rester strictement dans le périmètre des cibles autorisées par le propriétaire ; ne pas généraliser depuis un seul cas réel sans une cible de test synthétique dédiée pour couvrir les cas limites.
+
+**Validation future prévue si lancé** : au moins 2 scénarios reproductibles sur `KillEngineTestTarget` (ex. champ affiché vs champ source, fichier de sauvegarde écrasé par un cache) prouvant que l'Assistant enquête plus vite qu'un déroulé manuel — jamais construits, jamais joués.
+
 ## Journal actif
 
 - [x] PHASE 241 (Claude, 30/08/2026) - Mise à jour de `docs/KILLENGINE_CODE_MAP.md`, demande explicite du propriétaire.
