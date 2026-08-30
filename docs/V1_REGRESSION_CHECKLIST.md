@@ -50,6 +50,12 @@ For a strict pipe-backed check of the Lua examples (needs `KillEngine.exe` alrea
 .\scripts\test-lua-examples.ps1 -RequirePipe
 ```
 
+For a targeted smoke test of the profile cluster (save/load/resolve/compare/delete via the automation pipe, `apps/desktop/profile_manager.h/.cpp`) — launches its own `KillEngineTestTarget.exe`/`KillEngine.exe` pair, also intentionally not wired into `release-check.ps1` (see `docs/AUTOMATION_API.md`):
+
+```powershell
+.\scripts\test-automation-pipe-profile-methods.ps1
+```
+
 Expected result:
 
 - UI type-check passes.

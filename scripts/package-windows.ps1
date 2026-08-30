@@ -119,6 +119,7 @@ Copy-ItemIfExists -Path (Join-Path $repoRoot "KILLENGINE_PROJECT_SPEC.md") -Dest
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\PHASE_TRACKER.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\USER_GUIDE.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\V1_REGRESSION_CHECKLIST.md") -Destination $packageRoot
+Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\AUTOMATION_API.md") -Destination $packageRoot
 
 $llamaCli = Find-FirstExistingFile -Paths @(
     (Join-Path $repoRoot "third_party\llama.cpp\llama-cli.exe"),
@@ -262,6 +263,7 @@ Notes:
   - A custom model path is only an advanced override.
   - Logs and profiles are stored under the Windows local app data folder.
   - Read USER_GUIDE.md for the V1 user workflow.
+  - Read AUTOMATION_API.md to script KillEngine via the local JSON-RPC pipe (Lua scripting, or your own agent/tool).
   - If the app does not start from a development checkout, run scripts\diagnose-launch.ps1.
 "@
 
@@ -295,7 +297,8 @@ $requiredRuntimeItems = @(
     "scripts\automation-pipe-call.ps1",
     "scripts\lua_examples\README.md",
     "USER_GUIDE.md",
-    "V1_REGRESSION_CHECKLIST.md"
+    "V1_REGRESSION_CHECKLIST.md",
+    "AUTOMATION_API.md"
 )
 
 if (-not $SkipClrInspector) {

@@ -57,6 +57,31 @@ Depuis PowerShell, `scripts/automation-pipe-call.ps1` fait l'aller-retour pour t
 
 Cette liste est indicative — toute méthode `Q_INVOKABLE` de `ApplicationController` (`apps/desktop/application_controller.h`) est appelable de la même façon.
 
+### Gestion des profils (`.keprofile`, module `apps/desktop/profile_manager.h/.cpp`, PHASE 231)
+
+Cluster vérifié en direct via le pipe (`scripts/test-automation-pipe-profile-methods.ps1`, voir plus bas) — formes de réponse copiées depuis le code réel, pas devinées :
+
+| Méthode | Params | Champs clés de la réponse |
+| --- | --- | --- |
+| `saveProfileTarget(profileName, targetName, addressHex, valueType, description)` | 5 strings | `success`, `targetName`, `locator`, `locatorKind` (`"module_offset"` ou `"absolute"`), `module`, `offset`, `targetCount` |
+| `loadProfile(profileName)` | 1 string | `success`, `gameName`, `executableName`, `targets` (liste : `name`/`type`/`locator`/`locatorKind`/`description`/`dependsOn`), `targetCount`, `patches`, `patchCount`, `autoAsmScripts`, `luaScripts` |
+| `resolveProfileTarget(profileName, targetName)` | 2 strings | `success`, `address` (hex **sans** `0x`), `type`, `locator`, `locatorKind` — si `locatorKind == "clr_field"` : `clrTypeSubstring`/`clrIdentityField`/`clrIdentityValue`/`clrFieldName` en plus |
+| `comparePointerMapAcrossRestart(profileName)` | 1 string | `success`, `validCount`, `invalidCount`, `unsupportedCount`, **`results`** (liste : `targetName`/`locatorKind`/`previousAddress`/`address`/`status` `"valid"` ou `"invalid"`) — **pas** `entries`, piège déjà fait une fois (PHASE 231) |
+| `deleteProfile(profileName)` | 1 string | booléen brut, pas un objet |
+| `listProfiles()` | aucun | liste de profils (pas un objet englobant) |
+
+### Où trouver la forme exacte d'une réponse pas listée ici
+
+`application_controller.h` donne la signature (types des **paramètres**), mais **pas** la forme du `QVariantMap` retourné — ça a déjà fait perdre du temps à un agent qui devinait (PHASE 231/232). Le réflexe qui marche à tous les coups et ne devient jamais obsolète :
+
+```powershell
+# Cherche directement la construction de la réponse dans le manager concerné.
+# Ex. pour une méthode de profil : apps/desktop/profile_manager.cpp
+Select-String -Path apps\desktop\profile_manager.cpp -Pattern 'result\["\w+"\]\s*='
+```
+
+Si la méthode n'a pas encore été extraite dans un `*_manager.cpp` dédié (voir `docs/REFACTOR_ROADMAP.md` pour la liste), elle vit encore dans `apps/desktop/application_controller.cpp` — même recherche, même fichier. Ne jamais documenter les ~200 méthodes `Q_INVOKABLE` une par une ici : ça deviendrait faux au premier refactor non répercuté (voir le piège déjà vécu sur `docs/POWER_UP_ROADMAP.md`) — seule cette méthode de recherche reste toujours vraie.
+
 ## Depuis un script Lua
 
 Le wrapper `scripts/killengine.lua` encapsule le protocole :
@@ -98,6 +123,17 @@ $ws.SendAsync([ArraySegment[byte]]::new($bytes), 'Text', $true, [Threading.Cance
 ```
 
 Ni le pipe ni le CDP ne sont spécifiques à KillEngine — ce sont des primitives génériques (named pipe JSON-RPC, Chrome DevTools Protocol) que n'importe quel agent avec accès shell sait déjà utiliser une fois qu'il connaît le protocole ci-dessus.
+
+## Vérifier que le pipe fonctionne (avant de scripter dessus)
+
+Deux batteries jetables existent déjà, contre un vrai couple `KillEngineTestTarget.exe` + `KillEngine.exe` (`KILLENGINE_AUTOMATION_PIPE=1`) — les lancer d'abord évite de perdre du temps à deviner si un problème vient du pipe ou de son propre script :
+
+```powershell
+.\scripts\test-automation-pipe-safe-methods.ps1     # 12 méthodes lecture seule (ping, attach, readMemoryPreview...)
+.\scripts\test-automation-pipe-profile-methods.ps1  # cycle profil complet : save -> load -> resolve -> compare -> delete
+```
+
+Les deux nettoient leurs deux processus dans un bloc `finally` même en cas d'échec. Elles servent aussi de référence exécutable pour la forme exacte des réponses (voir tableau ci-dessus).
 
 ## Limites volontaires
 
