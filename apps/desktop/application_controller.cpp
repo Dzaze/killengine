@@ -2536,6 +2536,78 @@ QVariantMap ApplicationController::analyzeStructureMemory(const QString& address
     return result;
 }
 
+QVariantMap ApplicationController::inferStructureInstanceDelta(
+    const QString& baseAddressAHex,
+    const QString& fieldAddressAHex,
+    const QString& baseAddressBHex,
+    const QString& fieldAddressBHex,
+    const QVariantMap& optionsMap) const {
+
+    auto hexAddress = [](uint64_t address) {
+        return QStringLiteral("%1").arg(address, 0, 16).toUpper();
+    };
+
+    QVariantMap result;
+    result["success"] = false;
+    result["candidates"] = QVariantList{};
+
+    uint64_t baseA = 0;
+    uint64_t fieldA = 0;
+    uint64_t baseB = 0;
+    uint64_t fieldB = 0;
+    if (!parseHexAddress(baseAddressAHex, &baseA) ||
+        !parseHexAddress(fieldAddressAHex, &fieldA) ||
+        !parseHexAddress(baseAddressBHex, &baseB) ||
+        !parseHexAddress(fieldAddressBHex, &fieldB)) {
+        result["error"] = QStringLiteral("Adresses invalides.");
+        return result;
+    }
+
+    killcore::StructureInstanceDeltaOptions options;
+    options.beforeCount = std::clamp(optionsMap.value("beforeCount", 2).toInt(), 0, 16);
+    options.afterCount = std::clamp(optionsMap.value("afterCount", 4).toInt(), 0, 16);
+
+    const auto inference = killcore::inferStructureInstanceDelta(baseA, fieldA, baseB, fieldB, options);
+    result["success"] = inference.success;
+    result["error"] = inference.error;
+    result["warning"] = inference.warning;
+    result["compatibleLayout"] = inference.compatibleLayout;
+    result["baseAddressA"] = hexAddress(inference.baseAddressA);
+    result["baseAddressB"] = hexAddress(inference.baseAddressB);
+    result["fieldAddressA"] = hexAddress(inference.fieldAddressA);
+    result["fieldAddressB"] = hexAddress(inference.fieldAddressB);
+    result["fieldOffsetA"] = static_cast<qlonglong>(inference.fieldOffsetA);
+    result["fieldOffsetB"] = static_cast<qlonglong>(inference.fieldOffsetB);
+    result["fieldOffsetDelta"] = static_cast<qlonglong>(inference.fieldOffsetDelta);
+    result["instanceDelta"] = static_cast<qlonglong>(inference.instanceDelta);
+    result["fieldAddressDelta"] = static_cast<qlonglong>(inference.fieldAddressDelta);
+
+    QVariantList candidates;
+    for (const auto& candidate : inference.candidates) {
+        QVariantMap item;
+        item["relativeIndex"] = candidate.relativeIndex;
+        item["baseAddress"] = hexAddress(candidate.baseAddress);
+        item["fieldAddress"] = hexAddress(candidate.fieldAddress);
+        item["inputInstance"] = candidate.inputInstance;
+        candidates.append(item);
+    }
+    result["candidates"] = candidates;
+    result["candidateCount"] = candidates.size();
+
+    appendScanTelemetry("structure_instance_delta", {
+        {"success", result.value("success")},
+        {"compatibleLayout", result.value("compatibleLayout")},
+        {"baseAddressA", result.value("baseAddressA")},
+        {"baseAddressB", result.value("baseAddressB")},
+        {"fieldOffsetA", result.value("fieldOffsetA")},
+        {"fieldOffsetB", result.value("fieldOffsetB")},
+        {"instanceDelta", result.value("instanceDelta")},
+        {"candidateCount", result.value("candidateCount")},
+    });
+
+    return result;
+}
+
 QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVariantMap& optionsMap) const {
     return m_uiStringInvestigator->scanUiStrings(value, optionsMap);
 }

@@ -81,6 +81,46 @@ StructureTemplate deduceTemplate(
     const StructureAnalysisResult& instance2,
     const QString& name = QString());
 
+/// Instance probable de la meme structure, extrapolee depuis l'espacement A/B.
+struct StructureInstanceCandidate {
+    int relativeIndex{0};       ///< 0 = instance A, 1 = instance B
+    uint64_t baseAddress{0};
+    uint64_t fieldAddress{0};
+    bool inputInstance{false};
+};
+
+/// Options de deduction d'espacement entre deux instances.
+struct StructureInstanceDeltaOptions {
+    int beforeCount{2};         ///< Nombre d'instances probables avant A
+    int afterCount{4};          ///< Nombre d'instances probables apres A
+};
+
+/// Resultat de deduction d'espacement entre deux instances de meme layout.
+struct StructureInstanceDeltaResult {
+    bool success{false};
+    QString error;
+    QString warning;
+    bool compatibleLayout{false};
+    uint64_t baseAddressA{0};
+    uint64_t baseAddressB{0};
+    uint64_t fieldAddressA{0};
+    uint64_t fieldAddressB{0};
+    int64_t fieldOffsetA{0};
+    int64_t fieldOffsetB{0};
+    int64_t fieldOffsetDelta{0};
+    int64_t instanceDelta{0};
+    int64_t fieldAddressDelta{0};
+    QList<StructureInstanceCandidate> candidates;
+};
+
+/// Deduit le stride entre deux instances depuis deux bases et un champ homologue.
+StructureInstanceDeltaResult inferStructureInstanceDelta(
+    uint64_t baseAddressA,
+    uint64_t fieldAddressA,
+    uint64_t baseAddressB,
+    uint64_t fieldAddressB,
+    const StructureInstanceDeltaOptions& options = {});
+
 /// Convertit un FieldType en chaîne lisible.
 QString fieldTypeToString(FieldType type);
 

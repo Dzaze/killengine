@@ -475,3 +475,50 @@ TEST(StructureAnalyzer, DiffMarksChangedFieldsWithRealFieldSizes) {
     ASSERT_NE(it, diff.fields.cend());
     EXPECT_TRUE(it->changed);
 }
+
+TEST(StructureAnalyzer, InfersInstanceDeltaFromMatchingFields) {
+    killcore::StructureInstanceDeltaOptions options;
+    options.beforeCount = 1;
+    options.afterCount = 3;
+
+    const auto result = inferStructureInstanceDelta(
+        0x1000,
+        0x1018,
+        0x1200,
+        0x1218,
+        options);
+
+    ASSERT_TRUE(result.success) << result.error.toStdString();
+    EXPECT_TRUE(result.compatibleLayout);
+    EXPECT_EQ(result.fieldOffsetA, 0x18);
+    EXPECT_EQ(result.fieldOffsetB, 0x18);
+    EXPECT_EQ(result.fieldOffsetDelta, 0);
+    EXPECT_EQ(result.instanceDelta, 0x200);
+    EXPECT_EQ(result.fieldAddressDelta, 0x200);
+    ASSERT_EQ(result.candidates.size(), 5);
+    EXPECT_EQ(result.candidates.front().relativeIndex, -1);
+    EXPECT_EQ(result.candidates.front().baseAddress, 0x0E00);
+    EXPECT_EQ(result.candidates.front().fieldAddress, 0x0E18);
+    EXPECT_EQ(result.candidates[1].relativeIndex, 0);
+    EXPECT_TRUE(result.candidates[1].inputInstance);
+    EXPECT_EQ(result.candidates[2].relativeIndex, 1);
+    EXPECT_TRUE(result.candidates[2].inputInstance);
+    EXPECT_EQ(result.candidates.back().baseAddress, 0x1600);
+    EXPECT_EQ(result.candidates.back().fieldAddress, 0x1618);
+}
+
+TEST(StructureAnalyzer, ReportsMismatchedFieldOffsetsWithoutPredictions) {
+    const auto result = inferStructureInstanceDelta(
+        0x3000,
+        0x3020,
+        0x3400,
+        0x3428);
+
+    ASSERT_TRUE(result.success) << result.error.toStdString();
+    EXPECT_FALSE(result.compatibleLayout);
+    EXPECT_EQ(result.fieldOffsetA, 0x20);
+    EXPECT_EQ(result.fieldOffsetB, 0x28);
+    EXPECT_EQ(result.fieldOffsetDelta, 8);
+    EXPECT_TRUE(result.warning.contains("Offsets"));
+    EXPECT_TRUE(result.candidates.isEmpty());
+}

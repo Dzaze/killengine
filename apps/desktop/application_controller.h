@@ -181,6 +181,14 @@ public:
     /// Analyse une fenêtre mémoire en champs typés exploitables par la vue Structure.
     Q_INVOKABLE QVariantMap analyzeStructureMemory(const QString& addressHex, int size) const;
 
+    /// Déduit l'espacement entre deux instances depuis un champ homologue.
+    Q_INVOKABLE QVariantMap inferStructureInstanceDelta(
+        const QString& baseAddressAHex,
+        const QString& fieldAddressAHex,
+        const QString& baseAddressBHex,
+        const QString& fieldAddressBHex,
+        const QVariantMap& options) const;
+
     /// Cherche une valeur affichée sous forme de texte (ASCII / UTF-16LE) dans la mémoire.
     Q_INVOKABLE QVariantMap scanUiStrings(const QString& value, const QVariantMap& options) const;
 

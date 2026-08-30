@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace killcore {
 
@@ -170,6 +171,29 @@ void addTypedField(QList<StructureField>& fields, const QByteArray& data, int of
     }
 }
 
+int boundedCandidateCount(int value) {
+    return std::clamp(value, 0, 16);
+}
+
+int64_t signedDelta(uint64_t to, uint64_t from) {
+    return static_cast<int64_t>(to) - static_cast<int64_t>(from);
+}
+
+bool addSignedOffset(uint64_t base, int64_t offset, uint64_t* out) {
+    if (!out) return false;
+    if (offset >= 0) {
+        const auto positive = static_cast<uint64_t>(offset);
+        if (base > std::numeric_limits<uint64_t>::max() - positive) return false;
+        *out = base + positive;
+        return true;
+    }
+
+    const auto negative = static_cast<uint64_t>(-offset);
+    if (base < negative) return false;
+    *out = base - negative;
+    return true;
+}
+
 } // namespace
 
 StructureAnalysisResult analyzeStructure(
@@ -244,6 +268,70 @@ StructureTemplate deduceTemplate(
     tmpl.fields = instance1.fields;
 
     return tmpl;
+}
+
+StructureInstanceDeltaResult inferStructureInstanceDelta(
+    uint64_t baseAddressA,
+    uint64_t fieldAddressA,
+    uint64_t baseAddressB,
+    uint64_t fieldAddressB,
+    const StructureInstanceDeltaOptions& options) {
+
+    StructureInstanceDeltaResult result;
+    result.baseAddressA = baseAddressA;
+    result.baseAddressB = baseAddressB;
+    result.fieldAddressA = fieldAddressA;
+    result.fieldAddressB = fieldAddressB;
+
+    if (baseAddressA == 0 || baseAddressB == 0 || fieldAddressA == 0 || fieldAddressB == 0) {
+        result.error = QStringLiteral("Adresses invalides.");
+        return result;
+    }
+    if (fieldAddressA < baseAddressA || fieldAddressB < baseAddressB) {
+        result.error = QStringLiteral("Le champ correspondant doit etre dans la fenetre de son instance.");
+        return result;
+    }
+
+    result.fieldOffsetA = signedDelta(fieldAddressA, baseAddressA);
+    result.fieldOffsetB = signedDelta(fieldAddressB, baseAddressB);
+    result.fieldOffsetDelta = result.fieldOffsetB - result.fieldOffsetA;
+    result.instanceDelta = signedDelta(baseAddressB, baseAddressA);
+    result.fieldAddressDelta = signedDelta(fieldAddressB, fieldAddressA);
+    result.compatibleLayout = (result.fieldOffsetDelta == 0);
+
+    if (result.instanceDelta == 0) {
+        result.error = QStringLiteral("Les deux bases pointent la meme instance.");
+        return result;
+    }
+
+    result.success = true;
+    if (!result.compatibleLayout) {
+        result.warning = QStringLiteral("Offsets de champ differents: layout probablement incompatible.");
+        return result;
+    }
+
+    const int before = boundedCandidateCount(options.beforeCount);
+    const int after = boundedCandidateCount(options.afterCount);
+    for (int relativeIndex = -before; relativeIndex <= after; ++relativeIndex) {
+        const int64_t baseOffset = result.instanceDelta * static_cast<int64_t>(relativeIndex);
+        uint64_t candidateBase = 0;
+        uint64_t candidateField = 0;
+        if (!addSignedOffset(baseAddressA, baseOffset, &candidateBase)) {
+            continue;
+        }
+        if (candidateBase == 0 || !addSignedOffset(candidateBase, result.fieldOffsetA, &candidateField)) {
+            continue;
+        }
+
+        StructureInstanceCandidate candidate;
+        candidate.relativeIndex = relativeIndex;
+        candidate.baseAddress = candidateBase;
+        candidate.fieldAddress = candidateField;
+        candidate.inputInstance = (relativeIndex == 0 || relativeIndex == 1);
+        result.candidates.append(candidate);
+    }
+
+    return result;
 }
 
 QString fieldTypeToString(FieldType type) {

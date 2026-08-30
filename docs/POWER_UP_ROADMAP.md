@@ -97,7 +97,7 @@ EncryptedScanOptions {
 
 ## D. Analyseur de structures (Memory Dissect)
 
-**État réel au 19/08/2026 :** livré pour 1-3. `core/scanner/structure_analyzer.{h,cpp}` — dissect view (champs typés décodés depuis une fenêtre mémoire) et diff automatique (`StructureAnalyzer.DiffMarksChangedFieldsWithRealFieldSizes`, testé). Point 4 (template de structure réutilisable) livré aussi mais pas dans `ProfileStore` comme suggéré ci-dessous : stocké séparément en `localStorage` frontend (`structureTemplateStorageKey`, `ExpertView.vue`/`app.ts`), pas persisté côté backend/`.keprofile`. Le point 3 (déduction du delta d'offset entre deux instances de la même entité) n'a pas d'automatisation dédiée — l'utilisateur compare les deux dissections manuellement.
+**État réel au 30/08/2026 :** livré pour 1-4. `core/scanner/structure_analyzer.{h,cpp}` — dissect view (champs typés décodés depuis une fenêtre mémoire), diff automatique (`StructureAnalyzer.DiffMarksChangedFieldsWithRealFieldSizes`, testé) et déduction automatique d'espacement entre deux instances (`inferStructureInstanceDelta`, testé + exposé via pipe). Point 4 (template de structure réutilisable) livré aussi mais pas dans `ProfileStore` comme suggéré ci-dessous : stocké séparément en `localStorage` frontend (`structureTemplateStorageKey`, `ExpertView.vue`/`app.ts`), pas persisté côté backend/`.keprofile`.
 
 **Problème :** Quand on trouve la valeur HP d'une unité, ses voisins (Mana, Position X/Y, Owner) sont à côté, mais l'utilisateur doit deviner les offsets.
 
@@ -106,7 +106,7 @@ EncryptedScanOptions {
 **Ce qu'il faut ajouter :** `core/scanner/structure_analyzer.h/.cpp`
 1. **Dissect view** : depuis une adresse, lire une fenêtre (ex: 256 octets) et décoder tous les champs typés (Int8/16/32/64, Float32/64, pointer, ASCII).
 2. **Diff automatique** : capturer la fenêtre, faire varier une valeur dans le jeu, recomparer → les offsets modifiés sont surlignés.
-3. **Déduction de structure** : si l'utilisateur trouve HP pour le joueur 1 et joueur 2, calculer le delta d'offset → réutiliser pour scanner tous les joueurs.
+3. [x] **Déduction de structure** : si l'utilisateur trouve HP pour le joueur 1 et joueur 2, calculer le delta d'offset → réutiliser pour scanner tous les joueurs.
 4. **Template de structure réutilisable** : sauvegarder dans le profil (`ProfileStore`) un "layout" avec offsets nommés.
 
 **Effort :** Moyen. **Impact :** Très utile pour les jeux avec entités (RPG, RTS, MOBA).

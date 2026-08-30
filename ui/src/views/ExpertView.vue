@@ -105,7 +105,13 @@ const structureCaptureA = ref<StructureProbeRow[] | null>(null)
 const structureCaptureB = ref<StructureProbeRow[] | null>(null)
 const structureCaptureAName = ref('')
 const structureCaptureBName = ref('')
+const structureCaptureABase = ref('')
+const structureCaptureAField = ref('')
+const structureCaptureBBase = ref('')
+const structureCaptureBField = ref('')
 const structureTemplateName = ref('')
+const structureDeltaResult = ref<Record<string, unknown> | null>(null)
+const structureDeltaBusy = ref(false)
 const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
 const selectedUiStringAddresses = ref<string[]>([])
@@ -430,8 +436,8 @@ function displayedNumericValue() {
   return Number.isFinite(value) ? value : null
 }
 
-async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) {
-  const address = addressNumber(candidate.address)
+async function analyzeStructureAroundAddress(sourceAddress: string) {
+  const address = addressNumber(sourceAddress)
   if (!Number.isFinite(address)) return
   const base = Math.max(0, address - 128)
   const targetValue = displayedNumericValue()
@@ -474,7 +480,7 @@ async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) 
       structureProbeResult.value = {
         success: true,
         base: String(result.baseAddress ?? base.toString(16).toUpperCase()),
-        address: candidate.address,
+        address: sourceAddress,
         rows,
         rowCount: rows.length,
         fieldCount: result.fieldCount,
@@ -513,7 +519,7 @@ async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) 
     structureProbeResult.value = {
       success: true,
       base: base.toString(16).toUpperCase(),
-      address: candidate.address,
+      address: sourceAddress,
       rows,
       rowCount: rows.length,
     }
@@ -561,14 +567,21 @@ function cloneStructureRows() {
 function captureStructure(slot: 'A' | 'B') {
   const rows = cloneStructureRows()
   if (rows.length === 0) return
+  const baseAddress = String(structureProbeResult.value?.base ?? '').replace(/^0x/i, '').toUpperCase()
+  const fieldAddress = String(structureProbeResult.value?.address ?? '').replace(/^0x/i, '').toUpperCase()
   const label = `0x${String(structureProbeResult.value?.address ?? structureProbeResult.value?.base ?? '')} · ${new Date().toLocaleTimeString('fr-FR')}`
   if (slot === 'A') {
     structureCaptureA.value = rows
     structureCaptureAName.value = label
+    structureCaptureABase.value = baseAddress
+    structureCaptureAField.value = fieldAddress
   } else {
     structureCaptureB.value = rows
     structureCaptureBName.value = label
+    structureCaptureBBase.value = baseAddress
+    structureCaptureBField.value = fieldAddress
   }
+  structureDeltaResult.value = null
 }
 
 function saveCurrentStructureTemplate() {
@@ -593,6 +606,37 @@ function saveCurrentStructureTemplate() {
   if (template) {
     structureTemplateName.value = ''
     store.activeView = 'settings'
+  }
+}
+
+async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) {
+  await analyzeStructureAroundAddress(candidate.address)
+}
+
+async function inferStructureDelta() {
+  const controller = backend.getController()
+  if (!controller.inferStructureInstanceDelta) {
+    structureDeltaResult.value = { success: false, error: 'Backend indisponible.' }
+    return
+  }
+  if (!structureCaptureABase.value || !structureCaptureAField.value || !structureCaptureBBase.value || !structureCaptureBField.value) {
+    structureDeltaResult.value = { success: false, error: 'Capture A/B incomplete.' }
+    return
+  }
+
+  structureDeltaBusy.value = true
+  try {
+    structureDeltaResult.value = await controller.inferStructureInstanceDelta(
+      structureCaptureABase.value,
+      structureCaptureAField.value,
+      structureCaptureBBase.value,
+      structureCaptureBField.value,
+      { beforeCount: 2, afterCount: 6 },
+    )
+  } catch (e) {
+    structureDeltaResult.value = { success: false, error: String(e), candidates: [] }
+  } finally {
+    structureDeltaBusy.value = false
   }
 }
 
@@ -1563,7 +1607,18 @@ const structureDiffRows = computed(() => {
     .filter((row) => row.changed || Math.abs(row.offset) <= 32)
     .slice(0, 160)
 })
+const structureDeltaCandidates = computed(() => {
+  const candidates = structureDeltaResult.value?.candidates
+  return Array.isArray(candidates) ? candidates as Array<Record<string, unknown>> : []
+})
 const expertScenarioPresets = computed(() => store.workflowPresets.filter((preset) => preset.id.startsWith('scenario-')))
+
+function formatSignedDelta(value: unknown) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '-'
+  const sign = numeric >= 0 ? '+' : '-'
+  return `${sign}0x${Math.abs(Math.trunc(numeric)).toString(16).toUpperCase()}`
+}
 
 // P3 - Les 13 panneaux Expert sont regroupes en 4 etapes de workflow.
 // L'ordre relatif des panneaux dans le template correspond deja aux etapes,
@@ -1647,7 +1702,12 @@ async function startNewScan() {
   structureCaptureB.value = null
   structureCaptureAName.value = ''
   structureCaptureBName.value = ''
+  structureCaptureABase.value = ''
+  structureCaptureAField.value = ''
+  structureCaptureBBase.value = ''
+  structureCaptureBField.value = ''
   structureTemplateName.value = ''
+  structureDeltaResult.value = null
 }
 
 function confidencePercent(confidence: number | undefined): number {
@@ -2328,10 +2388,46 @@ onMounted(() => {
             <button class="btn btn-primary compact" type="button" :disabled="structureProbeRows.length === 0" @click="saveCurrentStructureTemplate()">
               Sauver template
             </button>
+            <button
+              class="btn btn-secondary compact"
+              type="button"
+              :disabled="structureDeltaBusy || !structureCaptureA || !structureCaptureB"
+              @click="inferStructureDelta()"
+            >
+              Delta instances
+            </button>
             <span v-if="structureCaptureAName">A: {{ structureCaptureAName }}</span>
             <span v-if="structureCaptureBName">B: {{ structureCaptureBName }}</span>
           </div>
           <p v-if="structureProbeResult.error" class="error">{{ structureProbeResult.error }}</p>
+          <div v-if="structureDeltaResult" class="structure-delta">
+            <div class="source-list-title">
+              <strong>Espacement instances</strong>
+              <span v-if="structureDeltaResult.success">
+                stride {{ formatSignedDelta(structureDeltaResult.instanceDelta) }} · champ +0x{{ Number(structureDeltaResult.fieldOffsetA ?? 0).toString(16).toUpperCase() }}
+              </span>
+            </div>
+            <p v-if="structureDeltaResult.error" class="error">{{ structureDeltaResult.error }}</p>
+            <p v-else-if="structureDeltaResult.warning" class="error">{{ structureDeltaResult.warning }}</p>
+            <div
+              v-for="candidate in structureDeltaCandidates"
+              :key="`delta:${candidate.relativeIndex}`"
+              class="structure-row structure-delta-row"
+              :class="{ marked: candidate.inputInstance }"
+            >
+              <span>#{{ candidate.relativeIndex }}</span>
+              <code>base 0x{{ candidate.baseAddress }}</code>
+              <code>champ 0x{{ candidate.fieldAddress }}</code>
+              <span>{{ candidate.inputInstance ? 'capture' : 'probable' }}</span>
+              <button
+                class="btn btn-secondary compact"
+                type="button"
+                @click="analyzeStructureAroundAddress(String(candidate.fieldAddress ?? ''))"
+              >
+                Struct
+              </button>
+            </div>
+          </div>
           <div v-if="structureDiffRows.length > 0" class="structure-diff">
             <div class="source-list-title">
               <strong>Diff A/B</strong>
@@ -3344,6 +3440,18 @@ onMounted(() => {
   gap: 4px;
   padding-bottom: 6px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.structure-delta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.structure-delta-row {
+  grid-template-columns: 52px minmax(130px, 1fr) minmax(130px, 1fr) 74px minmax(58px, auto);
 }
 
 .structure-row.marked {

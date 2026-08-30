@@ -1202,6 +1202,13 @@ export interface AiModelStatus {
   rollbackLastWriteBatch(): Promise<Record<string, unknown>>
   setFreezeValue(addressHex: string, valueType: string, value: string, enabled: boolean): Promise<MemoryWriteResult>
   analyzeStructureMemory?(addressHex: string, size: number): Promise<Record<string, unknown>>
+  inferStructureInstanceDelta?(
+    baseAddressAHex: string,
+    fieldAddressAHex: string,
+    baseAddressBHex: string,
+    fieldAddressBHex: string,
+    options: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>
   freezeWithBreakpoint?(addressHex: string, valueType: string, value: string, options: Record<string, unknown>): Promise<MemoryWriteResult>
   stopBreakpointFreeze?(): Promise<MemoryWriteResult>
   /** Stats live du freeze BP actif (hits/rewrites/errors) sans attendre l'arrêt. */
@@ -1945,6 +1952,19 @@ class BackendService {
           success: false,
           error: 'Mock backend',
           fields: [],
+        }
+      },
+      async inferStructureInstanceDelta(
+        _baseAddressAHex: string,
+        _fieldAddressAHex: string,
+        _baseAddressBHex: string,
+        _fieldAddressBHex: string,
+        _options: Record<string, unknown>,
+      ) {
+        return {
+          success: false,
+          error: 'Mock backend',
+          candidates: [],
         }
       },
       async startExactScan(_value: string, _valueType: string) {
