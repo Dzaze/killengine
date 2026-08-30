@@ -49,6 +49,8 @@ Aucune. Les deux résidus produit/QA/doc relevés en PHASE 236 sont clos (delta 
 
 **Validation future prévue si lancé** : au moins 2 scénarios reproductibles sur `KillEngineTestTarget` (ex. champ affiché vs champ source, fichier de sauvegarde écrasé par un cache) prouvant que l'Assistant enquête plus vite qu'un déroulé manuel — jamais construits, jamais joués.
 
+**Décision de conception tranchée avec le propriétaire (30/08/2026, avant tout démarrage)** : le modèle local (Llama/Qwen) propose et explique, le code pondère. Le LLM génère les hypothèses en langage naturel et suggère le test suivant (c'est là qu'il apporte de la valeur) ; la mise à jour du poids de confiance après chaque résultat reste une **règle déterministe simple** (un test qui confirme la prédiction d'une hypothèse monte son score d'un montant fixe, un test qui la contredit le descend ou la fait passer sous un seuil d'élimination), jamais un score demandé au modèle. Raison : un petit modèle embarqué n'est pas fiable pour produire une confiance numérique cohérente d'un tour à l'autre (dérive sans logique stable, impossible à tester/déboguer) ; une règle déterministe se couvre par un vrai test unitaire et se comporte identiquement à chaque run — cohérent avec le principe déjà appliqué partout ailleurs dans KillEngine (RiskGate jamais contournable par l'IA, fallback déterministe quand le modèle est indisponible, cf. mode "Inspecteur Codex" PHASE 83, playbook 120-A) : **l'IA propose, le code décide**. Si ce chantier démarre un jour, cette répartition modèle/code est la base de conception à suivre, pas à re-décider.
+
 ## Journal actif
 
 - [x] PHASE 241 (Claude, 30/08/2026) - Mise à jour de `docs/KILLENGINE_CODE_MAP.md`, demande explicite du propriétaire.
