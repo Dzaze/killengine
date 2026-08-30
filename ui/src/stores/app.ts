@@ -2,7 +2,6 @@ import { defineStore, storeToRefs } from 'pinia'
 import { ref, computed, nextTick } from 'vue'
 import {
   backend,
-  type AppSettings,
   type AutoResolveReportResult,
   type CandidateFieldTestResult,
   type ClrPathWriteOperation,
@@ -45,6 +44,7 @@ import { useSettingsStore } from './settings'
 import { useScanningStore } from './scanning'
 import { useWriteFreezeStore, type RuntimeActionPlan, type RuntimeActionPlanItem } from './writeFreeze'
 import { useTrainerStore, type TrainerFeature } from './trainer'
+import { useWorkspaceSessionStore, type WorkspaceProject, type WatchedPointerChain } from './workspaceSession'
 import {
   useWorkspaceItemsStore,
   type StructureTemplateField,
@@ -60,6 +60,7 @@ export type { InvestigationRun, InvestigationStep }
 export type { UserActionLogEntry }
 export type { RuntimeActionPlan, RuntimeActionPlanItem }
 export type { TrainerFeature }
+export type { WorkspaceProject, WatchedPointerChain }
 
 export interface ChatMessage {
   id: number
@@ -128,20 +129,6 @@ export interface SessionPromotionResult {
   featureIds: number[]
   message: string
   warnings: string[]
-}
-
-export interface WorkspaceProject {
-  id: number
-  name: string
-  processName: string
-  snapshotJson: string
-  investigationCount: number
-  trainerFeatureCount: number
-  structureTemplateCount: number
-  bookmarkCount: number
-  auditCount?: number
-  createdAt: string
-  updatedAt: string
 }
 
 export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
@@ -470,7 +457,7 @@ export const useAppStore = defineStore('app', () => {
   // memes noms/signatures qu'avant partout ou c'est appele (35+ sites internes +
   // InvestigationView/SettingsView/TrainerView.vue).
   const investigationStore = useInvestigationStore()
-  const { activeInvestigation, investigationArchive, investigationStepIdCounter, investigationRunIdCounter } = storeToRefs(investigationStore)
+  const { activeInvestigation, investigationArchive } = storeToRefs(investigationStore)
   // Store Trainer Features extrait (candidat S8, docs/REFACTOR_ROADMAP.md,
   // PHASE 230, 30/08/2026) -- meme patron que writeFreeze.ts (S7, PHASE 229) :
   // refs mutables via storeToRefs, wrappers minces, dependances transversales
@@ -480,7 +467,6 @@ export const useAppStore = defineStore('app', () => {
   const trainerStore = useTrainerStore()
   const {
     trainerFeatures,
-    trainerFeatureIdCounter,
     trainerBusy,
     trainerHotkeyStatus,
     trainerOverlayVisible,
@@ -489,7 +475,6 @@ export const useAppStore = defineStore('app', () => {
     trainerOverlayHotkeyId,
   } = storeToRefs(trainerStore)
   const {
-    saveTrainerFeatures,
     loadTrainerFeatures,
     loadOverlayHotkey,
     createTrainerFeature,
@@ -526,12 +511,8 @@ export const useAppStore = defineStore('app', () => {
   const workspaceItemsStore = useWorkspaceItemsStore()
   const {
     structureTemplates,
-    structureTemplateIdCounter,
     workspaceBookmarks,
-    workspaceBookmarkIdCounter,
   } = storeToRefs(workspaceItemsStore)
-  const workspaceProjects = ref<WorkspaceProject[]>([])
-  const workspaceProjectIdCounter = ref(0)
   // Store RiskGate extrait (dernière fondation partagée, docs/REFACTOR_ROADMAP.md,
   // 29/08/2026) -- confirmRiskAction() ci-dessous délègue au store en
   // injectant logAiAudit en callback (le store ne connaît pas
@@ -596,21 +577,6 @@ export const useAppStore = defineStore('app', () => {
   // du store, avant tout premier scan.
   scanningStore.configureCandidateWatchNotifier(addAddressToWatch)
 
-// ---- Watch pointer chain (P1) : suit une chaine de pointeurs en live ----
-interface WatchedPointerChain {
-  id: number
-  label: string
-  chain: { module: string, baseOffset: string, offsets: string[] }
-  type: string
-  finalAddress: string
-  value: string
-  previousValue: string
-  changed: boolean
-  error: string
-  updatedAt: string
-}
-const watchedPointerChains = ref<WatchedPointerChain[]>([])
-let nextWatchedChainId = 1
   const autoUiStringScanResult = ref<UiStringScanResult | null>(null)
   const autoUiStringSourceResult = ref<UiStringSourceResult | null>(null)
   const autoUiStringSources = ref<UiStringSourceCandidate[]>([])
@@ -678,10 +644,6 @@ let nextWatchedChainId = 1
   const watchedAddresses = ref<WatchedAddress[]>([])
   const watchLiveReadLimit = 200
   let watchLiveTimer: ReturnType<typeof setInterval> | null = null
-  // Watch expressions (roadmap I) : re-evaluation live des chaines de pointeurs
-  // watchees, distinct du timer watchLiveTimer ci-dessus (adresses fixes).
-  const watchedPointerChainsLiveEnabled = ref(false)
-  let watchedPointerChainsLiveTimer: ReturnType<typeof setInterval> | null = null
 
   // Phase 20 — outils Expert manuels d'injection/hooking/auto-assembler,
   // gardés par confirmRiskAction('injection', ...) (mode Auto = Trainer requis,
@@ -713,7 +675,7 @@ let nextWatchedChainId = 1
   // meme patron que investigationStore : refs directement mutables, fonctions
   // ci-dessous en wrappers minces qui gardent les memes noms/signatures.
   const actionLogStore = useActionLogStore()
-  const { actionLog, actionLogIdCounter } = storeToRefs(actionLogStore)
+  const { actionLog } = storeToRefs(actionLogStore)
   const sessionEntries = ref<SessionEntry[]>([])
   const sessionGroups = ref<SessionGroup[]>([])
   const sessionGroupIdCounter = ref(0)
@@ -730,6 +692,50 @@ let nextWatchedChainId = 1
   // d'une reconnexion du signal (ex: rechargement dev).
   const freezeInstabilityNotified = new Set<string>()
   const freezeInstabilityVersion = ref(0)
+
+  // Store Workspace Session extrait (candidat S9b, docs/REFACTOR_ROADMAP.md,
+  // PHASE 234, 30/08/2026) -- meme patron storeToRefs/configureXxxContext que
+  // writeFreeze.ts/trainer.ts. Voir l'en-tete de workspaceSession.ts pour le
+  // detail du couplage (projets workspace, export/import JSON+Markdown,
+  // Pointer Chain Watch).
+  const workspaceSessionStore = useWorkspaceSessionStore()
+  const {
+    workspaceProjects,
+    watchedPointerChains,
+    watchedPointerChainsLiveEnabled,
+  } = storeToRefs(workspaceSessionStore)
+  const {
+    loadWorkspaceProjects,
+    exportWorkspaceJson,
+    exportWorkspaceMarkdown,
+    previewWorkspaceImport,
+    importWorkspaceJson,
+    saveCurrentWorkspaceProject,
+    loadWorkspaceProject,
+    deleteWorkspaceProject,
+    clearWorkspaceProjects,
+    addWatchedPointerChain,
+    refreshWatchedPointerChain,
+    refreshWatchedPointerChains,
+    removeWatchedPointerChain,
+    clearWatchedPointerChains,
+    setWatchedPointerChainsLiveEnabled,
+  } = workspaceSessionStore
+  workspaceSessionStore.configureWorkspaceSessionContext({
+    version,
+    processName,
+    isAttached,
+    workflowStatus,
+    lastWorkflowPresetId,
+    workflowPresets,
+    autoResolveReport,
+    logFilePath,
+    smartSearchDebugFilePath,
+    scanTelemetryFilePath,
+    readMemoryPreviewByMode,
+    valueTypeReadSize,
+    decodeTypedPreviewValue,
+  })
 
   // Getters
   const statusText = computed(() => {
@@ -1090,10 +1096,6 @@ let nextWatchedChainId = 1
     actionLogStore.addActionLog(kind, title, detail, status)
   }
 
-  function saveActionLog() {
-    actionLogStore.saveActionLog()
-  }
-
   function loadActionLog() {
     actionLogStore.loadActionLog()
   }
@@ -1247,12 +1249,6 @@ let nextWatchedChainId = 1
     return lines.join('\n')
   }
 
-  const workspaceProjectStorageKey = 'killengine.workspace.projects.v1'
-
-  function saveStructureTemplates() {
-    workspaceItemsStore.saveStructureTemplates()
-  }
-
   function loadStructureTemplates() {
     workspaceItemsStore.loadStructureTemplates()
   }
@@ -1272,10 +1268,6 @@ let nextWatchedChainId = 1
 
   function clearStructureTemplates() {
     workspaceItemsStore.clearStructureTemplates()
-  }
-
-  function saveWorkspaceBookmarks() {
-    workspaceItemsStore.saveWorkspaceBookmarks()
   }
 
   function loadWorkspaceBookmarks() {
@@ -1374,368 +1366,6 @@ let nextWatchedChainId = 1
 
   function clearWorkspaceBookmarks() {
     workspaceItemsStore.clearWorkspaceBookmarks()
-  }
-
-  function saveWorkspaceProjects() {
-    try {
-      window.localStorage.setItem(workspaceProjectStorageKey, JSON.stringify({
-        projects: workspaceProjects.value,
-        id: workspaceProjectIdCounter.value,
-      }))
-    } catch {
-      // Best-effort persistence.
-    }
-  }
-
-  function loadWorkspaceProjects() {
-    try {
-      const raw = window.localStorage.getItem(workspaceProjectStorageKey)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as { projects?: WorkspaceProject[], id?: number }
-      workspaceProjects.value = Array.isArray(parsed.projects) ? parsed.projects.slice(0, 50) : []
-      workspaceProjectIdCounter.value = Number(parsed.id ?? 0)
-    } catch {
-      workspaceProjects.value = []
-      workspaceProjectIdCounter.value = 0
-    }
-  }
-
-  function exportWorkspaceJson(): string {
-    return JSON.stringify({
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      app: {
-        version: version.value,
-        processName: processName.value,
-        attached: isAttached.value,
-        workflowStatus: workflowStatus.value,
-      },
-      settings: {
-        language: appLanguage.value,
-        defaultValueType: settingDefaultValueType.value,
-        performanceMode: settingPerformanceMode.value,
-        modelEnabled: settingModelEnabled.value,
-        modelPath: settingModelPath.value,
-        modelThreads: settingModelThreads.value,
-        scanMaxResults: settingScanMaxResults.value,
-        unknownSnapshotMaxMb: settingUnknownSnapshotMaxMb.value,
-      },
-      workflowPresets: {
-        lastPresetId: lastWorkflowPresetId.value,
-        available: workflowPresets.value.map((preset) => ({
-          id: preset.id,
-          title: preset.title,
-          mode: preset.mode,
-          risk: preset.risk,
-          nextStep: preset.nextStep,
-        })),
-      },
-      investigation: {
-        active: activeInvestigation.value,
-        archive: investigationArchive.value,
-      },
-      trainer: {
-        features: trainerFeatures.value,
-      },
-      structures: {
-        templates: structureTemplates.value,
-      },
-      bookmarks: {
-        items: workspaceBookmarks.value,
-      },
-      audit: {
-        entries: actionLog.value.slice(0, 200),
-      },
-      autoResolve: {
-        report: autoResolveReport.value,
-      },
-      aiModel: {
-        status: aiModelStatus.value,
-      },
-      diagnostics: {
-        logFilePath: logFilePath.value,
-        smartSearchDebugFilePath: smartSearchDebugFilePath.value,
-        scanTelemetryFilePath: scanTelemetryFilePath.value,
-      },
-    }, null, 2)
-  }
-
-  function workspaceBookmarkMarkdownLine(bookmark: WorkspaceBookmark): string {
-    const payload = bookmark.payload ?? {}
-    const details = [
-      bookmark.address ? `0x${bookmark.address}` : '',
-      bookmark.type ? `type ${bookmark.type}` : '',
-      bookmark.value !== undefined ? `valeur ${bookmark.value}` : '',
-      payload.confidenceLabel ? String(payload.confidenceLabel) : '',
-      Number(payload.confidenceScore ?? 0) > 0 ? `score ${String(payload.confidenceScore)}/100` : '',
-      payload.requiresConfirmation === true ? 'confirmation requise' : '',
-      payload.aobPattern ? `AOB ${String(payload.aobPattern).slice(0, 80)}` : '',
-      payload.patchBytes ? `patch ${String(payload.patchBytes).slice(0, 40)}` : '',
-      payload.signatureLevel ? `qualite ${String(payload.signatureLevel)}${payload.signatureScore ? ` ${String(payload.signatureScore)}/100` : ''}` : '',
-      payload.signatureMatches !== undefined ? `${String(payload.signatureMatches)} match(es)` : '',
-    ].filter(Boolean)
-    return `- ${bookmark.kind} ${bookmark.label}${details.length > 0 ? ` - ${details.join(' · ')}` : ''}${bookmark.note ? ` - ${bookmark.note}` : ''}`
-  }
-
-  function exportWorkspaceMarkdown(): string {
-    const report = autoResolveReport.value
-    const lines = [
-      '# KillEngine Workspace',
-      '',
-      `Export: ${new Date().toISOString()}`,
-      `Version: ${version.value}`,
-      `Processus: ${processName.value || 'non attache'}`,
-      `Workflow: ${workflowStatus.value}`,
-      `Preset: ${lastWorkflowPresetId.value || 'aucun'}`,
-      `IA locale: ${aiModelStatus.value?.ready ? 'llama.cpp' : 'indisponible'}`,
-      '',
-      '## Presets Disponibles',
-      '',
-      ...workflowPresets.value.map((preset) => `- ${preset.title}: ${preset.mode} / ${preset.risk} - ${preset.nextStep}`),
-      '',
-      '## Investigation',
-      '',
-      `Active: ${activeInvestigation.value ? activeInvestigation.value.objective : 'aucune'}`,
-      `Etapes actives: ${activeInvestigation.value?.steps.length ?? 0}`,
-      `Archives: ${investigationArchive.value.length}`,
-      '',
-      '## Trainer',
-      '',
-      `Features: ${trainerFeatures.value.length}`,
-      ...trainerFeatures.value.slice(0, 12).map((feature) => `- ${feature.name}: ${feature.action} 0x${feature.address} (${feature.status})`),
-      '',
-      '## Structures',
-      '',
-      `Templates: ${structureTemplates.value.length}`,
-      ...structureTemplates.value.slice(0, 12).map((template) => `- ${template.name}: ${template.fieldCount} champ(s), base 0x${template.baseAddress}`),
-      ...structureTemplates.value.slice(0, 5).flatMap((template) => [
-        '',
-        `### ${template.name}`,
-        ...template.fields.slice(0, 20).map((field) =>
-          `- ${field.offset >= 0 ? '+' : ''}${field.offset} ${field.type} ${field.label || '-'} = ${field.sampleValue || '-'}${field.note ? ` (${field.note})` : ''}`,
-        ),
-      ]),
-      '',
-      '## Bookmarks',
-      '',
-      `Bookmarks: ${workspaceBookmarks.value.length}`,
-      ...workspaceBookmarks.value.slice(0, 20).map((bookmark) => workspaceBookmarkMarkdownLine(bookmark)),
-      '',
-      '## Audit',
-      '',
-      `Entrées: ${actionLog.value.length}`,
-      ...actionLog.value.slice(0, 30).map((entry) => `- ${entry.time} [${entry.status}] ${entry.kind} - ${entry.title}${entry.detail ? `: ${entry.detail}` : ''}`),
-      '',
-      '## Rapport Auto',
-      '',
-      report
-        ? `Strategie: ${String(report.preferredStrategy?.label ?? 'non determinee')}`
-        : 'Aucun rapport Auto charge.',
-      report?.summary ? `Résumé: ${report.summary}` : '',
-      '',
-      '## Diagnostics',
-      '',
-      `Log: ${logFilePath.value || '-'}`,
-      `Smart Search JSONL: ${smartSearchDebugFilePath.value || '-'}`,
-      `Telemetry JSONL: ${scanTelemetryFilePath.value || '-'}`,
-      '',
-    ].filter((line) => line !== '')
-    return lines.join('\n')
-  }
-
-  function previewWorkspaceImport(raw: string) {
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>
-      const investigation = parsed.investigation as Record<string, unknown> | undefined
-      const trainer = parsed.trainer as Record<string, unknown> | undefined
-      const structures = parsed.structures as Record<string, unknown> | undefined
-      const bookmarksRoot = parsed.bookmarks as Record<string, unknown> | undefined
-      const auditRoot = parsed.audit as Record<string, unknown> | undefined
-      const settings = parsed.settings as Record<string, unknown> | undefined
-      const presetsRoot = parsed.workflowPresets as Record<string, unknown> | undefined
-      const active = investigation?.active && typeof investigation.active === 'object' ? 1 : 0
-      const archive = Array.isArray(investigation?.archive) ? investigation.archive.length : 0
-      const features = Array.isArray(trainer?.features) ? trainer.features.length : 0
-      const templates = Array.isArray(structures?.templates) ? structures.templates.length : 0
-      const bookmarks = Array.isArray(bookmarksRoot?.items) ? bookmarksRoot.items.length : 0
-      const audit = Array.isArray(auditRoot?.entries) ? auditRoot.entries.length : 0
-      const presetId = String(presetsRoot?.lastPresetId ?? '')
-      return {
-        success: true,
-        version: Number(parsed.version ?? 0),
-        exportedAt: String(parsed.exportedAt ?? ''),
-        activeInvestigation: active,
-        archiveCount: archive,
-        trainerFeatureCount: features,
-        structureTemplateCount: templates,
-        bookmarkCount: bookmarks,
-        auditCount: audit,
-        lastPresetId: presetId,
-        hasSettings: Boolean(settings),
-      }
-    } catch (e) {
-      return {
-        success: false,
-        error: String(e),
-      }
-    }
-  }
-
-  function importWorkspaceJson(raw: string) {
-    const preview = previewWorkspaceImport(raw)
-    if (preview.success !== true) return preview
-
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const investigation = parsed.investigation as Record<string, unknown> | undefined
-    const trainer = parsed.trainer as Record<string, unknown> | undefined
-    const structures = parsed.structures as Record<string, unknown> | undefined
-    const bookmarksRoot = parsed.bookmarks as Record<string, unknown> | undefined
-    const auditRoot = parsed.audit as Record<string, unknown> | undefined
-    const settings = parsed.settings as Record<string, unknown> | undefined
-    const presetsRoot = parsed.workflowPresets as Record<string, unknown> | undefined
-
-    if (investigation) {
-      activeInvestigation.value =
-        investigation.active && typeof investigation.active === 'object'
-          ? investigation.active as InvestigationRun
-          : null
-      investigationArchive.value = Array.isArray(investigation.archive)
-        ? (investigation.archive as InvestigationRun[]).slice(0, 20)
-        : []
-      investigationStepIdCounter.value = Math.max(
-        investigationStepIdCounter.value,
-        activeInvestigation.value?.steps.reduce((max, step) => Math.max(max, Number(step.id) || 0), 0) ?? 0,
-        ...investigationArchive.value.map((run) => run.steps.reduce((max, step) => Math.max(max, Number(step.id) || 0), 0)),
-      )
-      investigationRunIdCounter.value = Math.max(
-        investigationRunIdCounter.value,
-        Number(activeInvestigation.value?.id ?? 0),
-        ...investigationArchive.value.map((run) => Number(run.id) || 0),
-      )
-      saveInvestigations()
-    }
-
-    if (trainer && Array.isArray(trainer.features)) {
-      trainerFeatures.value = (trainer.features as TrainerFeature[]).slice(0, 200)
-      trainerFeatureIdCounter.value = Math.max(0, ...trainerFeatures.value.map((feature) => Number(feature.id) || 0))
-      saveTrainerFeatures()
-      void refreshTrainerOverlay()
-    }
-
-    if (structures && Array.isArray(structures.templates)) {
-      structureTemplates.value = (structures.templates as StructureTemplate[]).slice(0, 100)
-      structureTemplateIdCounter.value = Math.max(0, ...structureTemplates.value.map((template) => Number(template.id) || 0))
-      saveStructureTemplates()
-    }
-
-    if (bookmarksRoot && Array.isArray(bookmarksRoot.items)) {
-      workspaceBookmarks.value = (bookmarksRoot.items as WorkspaceBookmark[]).slice(0, 500)
-      workspaceBookmarkIdCounter.value = Math.max(0, ...workspaceBookmarks.value.map((bookmark) => Number(bookmark.id) || 0))
-      saveWorkspaceBookmarks()
-    }
-
-    if (auditRoot && Array.isArray(auditRoot.entries)) {
-      actionLog.value = (auditRoot.entries as UserActionLogEntry[]).slice(0, 200)
-      actionLogIdCounter.value = Math.max(0, ...actionLog.value.map((entry) => Number(entry.id) || 0))
-      saveActionLog()
-    }
-
-    if (settings) {
-      if (settings.language === 'fr' || settings.language === 'en') appLanguage.value = settings.language
-      if (typeof settings.defaultValueType === 'string') settingDefaultValueType.value = settings.defaultValueType
-      if (['Auto', 'Eco', 'Normal', 'Performance', 'Max'].includes(String(settings.performanceMode))) {
-        settingPerformanceMode.value = settings.performanceMode as AppSettings['performanceMode']
-      }
-      if (typeof settings.modelEnabled === 'boolean') settingModelEnabled.value = settings.modelEnabled
-      if (typeof settings.modelPath === 'string') settingModelPath.value = settings.modelPath
-      if (Number.isFinite(Number(settings.modelThreads))) settingModelThreads.value = Number(settings.modelThreads)
-      if (Number.isFinite(Number(settings.scanMaxResults))) settingScanMaxResults.value = Number(settings.scanMaxResults)
-      if (Number.isFinite(Number(settings.unknownSnapshotMaxMb))) settingUnknownSnapshotMaxMb.value = Number(settings.unknownSnapshotMaxMb)
-    }
-
-    const presetId = String(presetsRoot?.lastPresetId ?? '')
-    if (presetId && workflowPresets.value.some((preset) => preset.id === presetId)) {
-      lastWorkflowPresetId.value = presetId
-    }
-
-    addActionLog(
-      'workspace',
-      'Workspace importé',
-      `${preview.trainerFeatureCount} feature(s), ${preview.structureTemplateCount} template(s), ${preview.bookmarkCount} bookmark(s), ${preview.archiveCount} archive(s), ${preview.auditCount ?? 0} audit(s).`,
-      'success',
-    )
-    addInvestigationStep({
-      title: 'Workspace importé',
-      detail: `${preview.trainerFeatureCount} feature(s), ${preview.structureTemplateCount} template(s), ${preview.bookmarkCount} bookmark(s), ${preview.archiveCount} archive(s), ${preview.auditCount ?? 0} audit(s), settings=${preview.hasSettings ? 'oui' : 'non'}, preset=${String(preview.lastPresetId || '-')}.`,
-      status: 'success',
-      tool: 'importWorkspaceJson',
-      risk: 'safe',
-      payload: preview,
-    })
-    return {
-      ...preview,
-      imported: true,
-    }
-  }
-
-  function saveCurrentWorkspaceProject(name?: string) {
-    workspaceProjectIdCounter.value += 1
-    const now = new Date().toISOString()
-    const fallbackName = processName.value
-      ? `${processName.value.replace(/\.[^.]+$/, '')} workspace`
-      : 'KillEngine workspace'
-    const snapshotJson = exportWorkspaceJson()
-    const project: WorkspaceProject = {
-      id: workspaceProjectIdCounter.value,
-      name: String(name ?? fallbackName).trim() || fallbackName,
-      processName: processName.value,
-      snapshotJson,
-      investigationCount: (activeInvestigation.value ? 1 : 0) + investigationArchive.value.length,
-      trainerFeatureCount: trainerFeatures.value.length,
-      structureTemplateCount: structureTemplates.value.length,
-      bookmarkCount: workspaceBookmarks.value.length,
-      auditCount: actionLog.value.length,
-      createdAt: now,
-      updatedAt: now,
-    }
-    workspaceProjects.value.unshift(project)
-    workspaceProjects.value = workspaceProjects.value.slice(0, 50)
-    saveWorkspaceProjects()
-    addActionLog('workspace', `Projet sauvegardé: ${project.name}`, `${project.trainerFeatureCount} feature(s), ${project.structureTemplateCount} template(s).`, 'success')
-    return project
-  }
-
-  function loadWorkspaceProject(id: number) {
-    const project = workspaceProjects.value.find((item) => item.id === id)
-    if (!project) return { success: false, error: 'Projet introuvable.' }
-    const result = importWorkspaceJson(project.snapshotJson)
-    if (result.success === true) {
-      addActionLog('workspace', `Projet chargé: ${project.name}`, project.processName || '-', 'success')
-      addInvestigationStep({
-        title: 'Projet workspace chargé',
-        detail: `${project.name} · ${project.trainerFeatureCount} feature(s), ${project.structureTemplateCount} template(s), ${project.bookmarkCount} bookmark(s), ${project.auditCount ?? 0} audit(s).`,
-        status: 'success',
-        tool: 'loadWorkspaceProject',
-        risk: 'safe',
-        payload: { projectId: project.id, projectName: project.name },
-      })
-    }
-    return result
-  }
-
-  function deleteWorkspaceProject(id: number) {
-    const before = workspaceProjects.value.length
-    workspaceProjects.value = workspaceProjects.value.filter((item) => item.id !== id)
-    if (workspaceProjects.value.length !== before) {
-      saveWorkspaceProjects()
-      addActionLog('workspace', 'Projet supprimé', `id=${id}`, 'warning')
-    }
-  }
-
-  function clearWorkspaceProjects() {
-    workspaceProjects.value = []
-    saveWorkspaceProjects()
-    addActionLog('workspace', 'Projets vidés', 'Tous les projets locaux ont été supprimés.', 'warning')
   }
 
   async function clearAutoResolveMemory(allProcesses = false) {
@@ -4328,103 +3958,6 @@ let nextWatchedChainId = 1
 
   function clearGroupScanEntries() {
     scanningStore.clearGroupScanEntries()
-  }
-
-  // ---- Watch pointer chain ----
-  async function addWatchedPointerChain(chain: { module: string, baseOffset: string, offsets: string[] }, type = 'Int32', label = '') {
-    const controller = backend.getController()
-    if (!controller.resolvePointerChain) return null
-    try {
-      const resolve = await controller.resolvePointerChain(chain)
-      if (!resolve.success || !resolve.finalAddress) {
-        addActionLog('watch', 'Chaîne non résolue', resolve.error ?? 'Résolution impossible.', 'warning')
-        return null
-      }
-      const normalized = resolve.finalAddress.replace(/^0x/i, '')
-      const entry: WatchedPointerChain = {
-        id: nextWatchedChainId++,
-        label: label || `Chaîne #${nextWatchedChainId - 1}`,
-        chain: { ...chain },
-        type,
-        finalAddress: normalized,
-        value: '',
-        previousValue: '',
-        changed: false,
-        error: '',
-        updatedAt: new Date().toLocaleTimeString(),
-      }
-      watchedPointerChains.value.push(entry)
-      await refreshWatchedPointerChain(entry.id)
-      return entry
-    } catch (e) {
-      addActionLog('watch', 'Erreur ajout chaîne', String(e), 'error')
-      return null
-    }
-  }
-
-  async function refreshWatchedPointerChain(id: number): Promise<WatchedPointerChain | null> {
-    const entry = watchedPointerChains.value.find((item) => item.id === id)
-    if (!entry) return null
-    const controller = backend.getController()
-    let updated = entry
-    try {
-      if (controller.resolvePointerChain) {
-        const resolve = await controller.resolvePointerChain(entry.chain)
-        if (resolve.success && resolve.finalAddress) {
-          entry.finalAddress = resolve.finalAddress.replace(/^0x/i, '')
-        } else if (!resolve.success) {
-          entry.error = resolve.error ?? 'Résolution impossible.'
-        }
-      }
-      const preview = await readMemoryPreviewByMode(entry.finalAddress, valueTypeReadSize(entry.type))
-      const value = decodeTypedPreviewValue(preview, entry.type)
-      updated = {
-        ...entry,
-        previousValue: entry.value,
-        value,
-        changed: entry.value !== '' && value !== entry.value,
-        error: preview.success ? '' : preview.error,
-        updatedAt: new Date().toLocaleTimeString(),
-      }
-    } catch (e) {
-      updated = { ...entry, error: String(e), updatedAt: new Date().toLocaleTimeString() }
-    }
-    watchedPointerChains.value = watchedPointerChains.value.map((item) => (item.id === id ? updated : item))
-    return updated
-  }
-
-  async function refreshWatchedPointerChains() {
-    for (const entry of watchedPointerChains.value.slice(0, 20)) {
-      await refreshWatchedPointerChain(entry.id)
-    }
-  }
-
-  function removeWatchedPointerChain(id: number) {
-    watchedPointerChains.value = watchedPointerChains.value.filter((item) => item.id !== id)
-  }
-
-  function clearWatchedPointerChains() {
-    watchedPointerChains.value = []
-  }
-
-  function setWatchedPointerChainsLiveEnabled(enabled: boolean) {
-    watchedPointerChainsLiveEnabled.value = enabled
-    if (watchedPointerChainsLiveTimer) {
-      clearInterval(watchedPointerChainsLiveTimer)
-      watchedPointerChainsLiveTimer = null
-    }
-    if (enabled) {
-      void refreshWatchedPointerChains()
-      watchedPointerChainsLiveTimer = setInterval(() => {
-        void refreshWatchedPointerChains()
-      }, 1000)
-    }
-    addActionLog(
-      'watch',
-      enabled ? 'Watch expressions live activé' : 'Watch expressions live arrêté',
-      `${watchedPointerChains.value.length} chaîne(s).`,
-      enabled ? 'success' : 'info',
-    )
   }
 
   async function doEncryptedScan() {
