@@ -63,6 +63,7 @@ Lecture rapide :
 | `investigation.ts` (S6, fondation) | Timeline Investigation (`activeInvestigation`, `addInvestigationStep`), appele par ~tous les autres domaines. |
 | `riskGate.ts` (fondation) | `confirmRiskAction` — seul mecanisme de confirmation avant une action a risque, dans toute l'app. |
 | `trainerDependencies.ts` | Logique pure (resolution d'ordre/cycles de dependances Trainer), pas d'etat — consomme par `trainer.ts`. |
+| `investigationNotebook.ts` (PHASE 120-F) | Carnet d'hypotheses : synthese confirmed/active/refuted, notes de preuve par hypothese, wrappers vers les 4 methodes backend. Independant de `investigation.ts` (timeline) — pas le meme systeme. |
 | `tests/unit/`, `tests/integration/`, `tools/clr_inspector/KillEngineClrInspector.Tests/` | Tests C++/core/IA, tests runtime avec processus cible natif, tests end-to-end ClrMD/.NET — inchanges par ce refactor. |
 
 ## Processus, Attache, Modules
@@ -253,7 +254,7 @@ Bridge C++ delegue a `apps/desktop/smart_search_manager.cpp` — le cluster le p
 | Tool registry IA | pas UI directe | `backend.ts`: tool calls result | `startSmartSearch` dispatch | `ai/tool_registry.*`, `tool_validator.*` | `tests/unit` `AIToolRegistryTest` |
 | Llama/Qwen local | Settings model panel | `settings.ts`: `aiModelStatus`, `refreshAiModelStatus` | `getAiModelStatus`, `browseForModelFile` → `settings_diagnostics_manager.cpp` ; `saveSettings` idem | `ai/llama_runtime.*`, `llama_server.*`, `model_locator.*`, `model/*` | `model/README.md` |
 | Automation pipe | scripts | `automationPipe.ts`: statut ; `scripts/automation-pipe-call.ps1` | toutes methodes `Q_INVOKABLE` par reflexion ; cycle de vie via `automation_pipe_manager.cpp` | `apps/desktop/automation_pipe_server.h/.cpp` | `docs/AUTOMATION_API.md`, `scripts/test-automation-pipe-*.ps1` |
-| Carnet d'hypotheses (PHASE 120-E/F, en cours) | `InvestigationView.vue` (en cours, Codex) | `investigationNotebook.ts` (en cours, Codex) | `addInvestigationHypothesis`, `recordInvestigationTestResult`, `getInvestigationNotebookSynthesis`, `resetInvestigationNotebook` → `investigation_notebook_manager.cpp` | `ai/investigation_notebook.h/.cpp` (`killai::InvestigationNotebook`, moteur de ponderation deterministe, sans generation d'hypothese ni de "prochaine experience" — role reserve au modele local, PHASE 120-G non livree) | `tests/unit/test_investigation_notebook.cpp`, `docs/AUTOMATION_API_REFERENCE.md` section "Carnet d'hypotheses", `docs/PHASE_TRACKER.md` PHASE 120-E/F |
+| Carnet d'hypotheses (PHASE 120-E/F) | `InvestigationView.vue` (nouvelle section, distincte de la timeline existante) | `investigationNotebook.ts` : `addHypothesis`, `recordTestResult`, `refreshNotebook`, `resetNotebook` | `addInvestigationHypothesis`, `recordInvestigationTestResult`, `getInvestigationNotebookSynthesis`, `resetInvestigationNotebook` → `investigation_notebook_manager.cpp` | `ai/investigation_notebook.h/.cpp` (`killai::InvestigationNotebook`, moteur de ponderation deterministe, sans generation d'hypothese ni de "prochaine experience" — role reserve au modele local, PHASE 120-G non livree) | `tests/unit/test_investigation_notebook.cpp`, `docs/AUTOMATION_API_REFERENCE.md` section "Carnet d'hypotheses", `docs/PHASE_TRACKER.md` PHASE 120-E/F, `diagnostics/phase120f-investigation-notebook.png` |
 
 ## CLR / .NET / ClrMD
 
