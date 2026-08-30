@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { useInvestigationNotebookStore, type InvestigationHypothesis } from '@/stores/investigationNotebook'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const notebook = useInvestigationNotebookStore()
 const exportText = ref('')
 const statusFilter = ref('all')
 const riskFilter = ref('all')
@@ -17,6 +19,11 @@ const hypotheses = computed(() => run.value?.hypotheses ?? [])
 const checkpoints = computed(() => run.value?.checkpoints ?? [])
 const reportRecommendations = computed(() => autoReport.value?.recommendations ?? [])
 const reportGuardrails = computed(() => autoReport.value?.guardrails ?? [])
+const notebookSections = computed(() => [
+  { id: 'confirmed', title: 'Confirmées', items: notebook.confirmed },
+  { id: 'active', title: 'Actives', items: notebook.active },
+  { id: 'refuted', title: 'Réfutées', items: notebook.refuted },
+])
 const sortedCheckpoints = computed(() => [...checkpoints.value].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)))
 const bestNextAction = computed(() => {
   const action = autoReport.value?.nextBestAction
@@ -119,6 +126,24 @@ function checkpointRiskLabel(item: Record<string, unknown>): string {
   return item.requiresConfirmation === true ? 'confirmation requise' : 'safe'
 }
 
+function confidenceClass(score: number): string {
+  if (score >= 90) return 'confirmed'
+  if (score < 10) return 'refuted'
+  if (score >= 70) return 'strong'
+  if (score <= 30) return 'weak'
+  return 'active'
+}
+
+function statusText(status: string): string {
+  if (status === 'confirmed') return 'confirmée'
+  if (status === 'refuted') return 'réfutée'
+  return 'active'
+}
+
+function evidencePreview(item: InvestigationHypothesis): string {
+  return item.evidenceLog.length > 0 ? item.evidenceLog[item.evidenceLog.length - 1] : ''
+}
+
 function checkpointAddress(item: Record<string, unknown>): string {
   return String(item.address ?? item.instructionPointer ?? '').trim()
 }
@@ -196,6 +221,7 @@ onMounted(() => {
   if (run.value) {
     void store.refreshAutoResolveReport()
   }
+  void notebook.refreshNotebook()
 })
 
 // Relie le rapport IA (deja calcule cote backend, rien de nouveau a produire)
@@ -292,6 +318,74 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
       purpose="Comprendre après coup ce que l'IA a essayé et pourquoi, exporter un rapport, ou reprendre une enquête interrompue."
       how="Se remplit automatiquement pendant une recherche guidée par l'Assistant ; utilise Markdown/JSON pour exporter, ou Archiver/Effacer pour clôturer."
     />
+
+    <PanelIntro
+      what="Un carnet manuel qui garde plusieurs hypothèses concurrentes avec un score de confiance."
+      purpose="Comparer les pistes pendant une enquête sans s'accrocher trop longtemps à la première idée plausible."
+      how="Ajoute une hypothèse, note chaque preuve, puis confirme ou contredis le résultat du test observé."
+    />
+
+    <section class="panel notebook-panel">
+      <div class="section-head">
+        <h2>Carnet d'hypothèses</h2>
+        <span>{{ notebook.totalCount }} hypothèse(s)</span>
+      </div>
+      <form class="notebook-form" @submit.prevent="notebook.addHypothesis()">
+        <input
+          v-model="notebook.hypothesisDraft"
+          class="filter-input"
+          placeholder="Ex: la valeur affichée est une copie recalculée"
+          :disabled="notebook.busy"
+        />
+        <label>
+          <span>Score départ</span>
+          <input
+            v-model.number="notebook.baselineScore"
+            class="filter-input score-input"
+            type="number"
+            min="0"
+            max="100"
+            :disabled="notebook.busy"
+          />
+        </label>
+        <button class="btn primary" type="submit" :disabled="notebook.busy || !notebook.hypothesisDraft.trim()">Ajouter</button>
+        <button class="btn" type="button" :disabled="notebook.busy || notebook.totalCount === 0" @click="notebook.resetNotebook()">Nouveau carnet</button>
+      </form>
+      <p v-if="notebook.error" class="error">{{ notebook.error }}</p>
+      <div class="notebook-grid">
+        <section v-for="section in notebookSections" :key="section.id" class="notebook-column">
+          <div class="notebook-column-head">
+            <h3>{{ section.title }}</h3>
+            <span>{{ section.items.length }}</span>
+          </div>
+          <article v-for="item in section.items" :key="item.id" class="hypothesis-card" :class="confidenceClass(item.confidenceScore)">
+            <div class="hypothesis-head">
+              <strong>{{ item.description }}</strong>
+              <span>{{ statusText(item.status) }}</span>
+            </div>
+            <div class="confidence-meter" :class="confidenceClass(item.confidenceScore)">
+              <span :style="{ width: `${item.confidenceScore}%` }"></span>
+            </div>
+            <div class="meta">
+              <span>{{ item.id }}</span>
+              <span>{{ item.confidenceScore }}/100</span>
+            </div>
+            <p v-if="evidencePreview(item)" class="evidence-preview">{{ evidencePreview(item) }}</p>
+            <div v-if="item.status === 'active'" class="evidence-actions">
+              <input
+                v-model="notebook.evidenceNotes[item.id]"
+                class="filter-input"
+                placeholder="Note de preuve observée"
+                :disabled="notebook.busy"
+              />
+              <button class="btn mini" type="button" :disabled="notebook.busy" @click="notebook.recordTestResult(item.id, true)">Confirme</button>
+              <button class="btn mini" type="button" :disabled="notebook.busy" @click="notebook.recordTestResult(item.id, false)">Contredit</button>
+            </div>
+          </article>
+          <p v-if="section.items.length === 0" class="muted">Aucune hypothèse.</p>
+        </section>
+      </div>
+    </section>
 
     <section v-if="run" class="summary">
       <div>
@@ -546,6 +640,10 @@ p {
   gap: 8px;
 }
 
+:deep(.panel-intro) {
+  margin-top: 14px;
+}
+
 .section-head span {
   color: var(--text-dim);
   font-family: 'Cascadia Code', monospace;
@@ -715,6 +813,131 @@ p {
 .panel,
 .empty {
   padding: 12px;
+}
+
+.notebook-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.notebook-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(110px, 0.18fr) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.notebook-form label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.score-input {
+  max-width: 120px;
+}
+
+.notebook-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.notebook-column {
+  min-width: 0;
+}
+
+.notebook-column-head,
+.hypothesis-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notebook-column-head span,
+.hypothesis-head span {
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 11px;
+}
+
+.hypothesis-card {
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  padding: 10px;
+}
+
+.hypothesis-card.confirmed {
+  border-color: rgba(158, 206, 106, 0.38);
+}
+
+.hypothesis-card.refuted {
+  border-color: rgba(247, 118, 142, 0.36);
+}
+
+.hypothesis-card.strong {
+  border-color: rgba(122, 162, 247, 0.34);
+}
+
+.hypothesis-card.weak {
+  border-color: rgba(224, 175, 104, 0.34);
+}
+
+.hypothesis-head strong {
+  min-width: 0;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.confidence-meter {
+  overflow: hidden;
+  height: 7px;
+  margin-top: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.confidence-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.confidence-meter.confirmed span {
+  background: var(--success);
+}
+
+.confidence-meter.refuted span {
+  background: var(--error);
+}
+
+.confidence-meter.strong span {
+  background: rgb(122, 162, 247);
+}
+
+.confidence-meter.weak span {
+  background: var(--warning);
+}
+
+.evidence-preview {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.evidence-actions {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
+  gap: 6px;
+  margin-top: 9px;
 }
 
 .timeline {
@@ -889,8 +1112,15 @@ p {
   .grid,
   .filters,
   .report-grid,
-  .report-lists {
+  .report-lists,
+  .notebook-form,
+  .notebook-grid,
+  .evidence-actions {
     grid-template-columns: 1fr;
+  }
+
+  .score-input {
+    max-width: none;
   }
 }
 

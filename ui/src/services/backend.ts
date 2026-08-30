@@ -1209,6 +1209,10 @@ export interface AiModelStatus {
     fieldAddressBHex: string,
     options: Record<string, unknown>,
   ): Promise<Record<string, unknown>>
+  addInvestigationHypothesis?(description: string, baselineScore?: number): Promise<Record<string, unknown>>
+  recordInvestigationTestResult?(hypothesisId: string, confirmed: boolean, evidenceNote: string): Promise<Record<string, unknown>>
+  getInvestigationNotebookSynthesis?(): Promise<Record<string, unknown>>
+  resetInvestigationNotebook?(): Promise<Record<string, unknown>>
   freezeWithBreakpoint?(addressHex: string, valueType: string, value: string, options: Record<string, unknown>): Promise<MemoryWriteResult>
   stopBreakpointFreeze?(): Promise<MemoryWriteResult>
   /** Stats live du freeze BP actif (hits/rewrites/errors) sans attendre l'arrêt. */
@@ -1965,6 +1969,31 @@ class BackendService {
           success: false,
           error: 'Mock backend',
           candidates: [],
+        }
+      },
+      async addInvestigationHypothesis(_description: string, _baselineScore = 50) {
+        return {
+          success: false,
+          error: 'Mock backend',
+        }
+      },
+      async recordInvestigationTestResult(_hypothesisId: string, _confirmed: boolean, _evidenceNote: string) {
+        return {
+          success: false,
+          error: 'Mock backend',
+        }
+      },
+      async getInvestigationNotebookSynthesis() {
+        return {
+          success: true,
+          confirmed: [],
+          active: [],
+          refuted: [],
+        }
+      },
+      async resetInvestigationNotebook() {
+        return {
+          success: true,
         }
       },
       async startExactScan(_value: string, _valueType: string) {
