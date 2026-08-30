@@ -3323,6 +3323,74 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
                       .arg(hitCount)
                 : QString("Mode Inspecteur : aucune piste numérique directe dans les pages modifiées. On garde l'hypothèse copie UI/buffer et on évite l'écriture directe.");
         }
+    } else if (tool == "start_changed_pages_session") {
+        QVariantMap sessionOptions = args;
+        if (!sessionOptions.contains("maxBytesMb")) sessionOptions["maxBytesMb"] = 64;
+        if (!sessionOptions.contains("blockSize")) sessionOptions["blockSize"] = 64 * 1024;
+        if (!sessionOptions.contains("privateOnly")) sessionOptions["privateOnly"] = true;
+        if (!sessionOptions.contains("writableOnly")) sessionOptions["writableOnly"] = true;
+        actionResult = m_controller.startChangedPagesSession(sessionOptions);
+        if (actionResult.value("success").toBool()) {
+            result["workflowStatus"] = "changed_pages_session_started";
+            result["message"] = QString("Session multi-round démarrée (%1 blocs, %2 Mo max). Fais varier la valeur affichée, puis donne-moi l'ancienne et la nouvelle valeur pour chaque round. Après 2-3 rounds, je te donnerai les adresses les plus stables.")
+                                  .arg(actionResult.value("blocksCaptured").toInt())
+                                  .arg(sessionOptions.value("maxBytesMb").toInt());
+        }
+    } else if (tool == "apply_changed_pages_round") {
+        QVariantMap roundOptions = args;
+        roundOptions.remove("previousValue");
+        roundOptions.remove("currentValue");
+        actionResult = m_controller.applyChangedPagesRound(
+            args.value("previousValue").toString(),
+            args.value("currentValue").toString(),
+            roundOptions);
+        if (actionResult.value("success").toBool()) {
+            const int hitsFound = actionResult.value("hitsFound").toInt();
+            const int confirmed = actionResult.value("entriesConfirmedAtLeast2").toInt();
+            const int rounds = actionResult.value("roundsApplied").toInt();
+            result["workflowStatus"] = confirmed > 0 ? "consensus_candidates_found" : "round_applied";
+            result["message"] = confirmed > 0
+                ? QString("Round %1 : %2 hit(s), %3 adresse(s) confirmée(s) sur au moins 2 rounds. Les adresses stables sont candidates pour Page Guard ou write.")
+                      .arg(rounds).arg(hitsFound).arg(confirmed)
+                : QString("Round %1 : %2 hit(s) trouvés, aucune adresse encore confirmée sur 2+ rounds. Continue à faire varier la valeur.")
+                      .arg(rounds).arg(hitsFound);
+            if (!actionResult.value("topEntries").isNull()) {
+                result["topEntries"] = actionResult.value("topEntries");
+            }
+        }
+    } else if (tool == "get_changed_pages_consensus") {
+        QVariantMap consensusOptions = args;
+        actionResult = m_controller.getChangedPagesConsensus(consensusOptions);
+        if (actionResult.value("success").toBool()) {
+            const int confirmed = actionResult.value("entriesConfirmed").toInt();
+            const int total = actionResult.value("entriesTotal").toInt();
+            const int eliminated = actionResult.value("entriesEliminated").toInt();
+            const int rounds = actionResult.value("roundsApplied").toInt();
+            result["workflowStatus"] = confirmed > 0 ? "consensus_candidates_found" : "no_candidate";
+            result["message"] = confirmed > 0
+                ? QString("Consensus : %1 adresse(s) confirmée(s) sur %2 total (%3 éliminées, %4 rounds). Les adresses stables sont candidates pour Page Guard ou write.")
+                      .arg(confirmed).arg(total).arg(eliminated).arg(rounds)
+                : QString("Consensus : aucune adresse confirmée sur %1 total (%2 éliminées, %3 rounds). Continue à faire varier la valeur.")
+                      .arg(total).arg(eliminated).arg(rounds);
+            if (!actionResult.value("confirmedEntries").isNull()) {
+                result["confirmedEntries"] = actionResult.value("confirmedEntries");
+            }
+            if (!actionResult.value("topEntries").isNull()) {
+                result["topEntries"] = actionResult.value("topEntries");
+            }
+        }
+    } else if (tool == "stop_changed_pages_session") {
+        actionResult = m_controller.stopChangedPagesSession();
+        if (actionResult.value("success").toBool()) {
+            const int confirmed = actionResult.value("entriesConfirmed").toInt();
+            const int rounds = actionResult.value("roundsApplied").toInt();
+            result["workflowStatus"] = "changed_pages_session_stopped";
+            result["message"] = QString("Session multi-round arrêtée. %1 round(s) effectués, %2 adresse(s) confirmée(s).")
+                                  .arg(rounds).arg(confirmed);
+            if (!actionResult.value("confirmedEntriesList").isNull()) {
+                result["confirmedEntries"] = actionResult.value("confirmedEntriesList");
+            }
+        }
     } else if (tool == "trace_ui_string") {
         QVariantMap traceOptions;
         traceOptions["ascii"] = true;

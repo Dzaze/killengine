@@ -242,6 +242,21 @@ public:
         const QString& currentValue,
         const QVariantMap& options);
 
+    /// PHASE 250 (SC2 solarite) : session changed-pages multi-rounds avec
+    /// consensus déterministe. Les blocs capturés roulent d'un round à
+    /// l'autre (baseline roll-forward), chaque transition affichée
+    /// (140 -> 135 -> 130...) alimente un accumulateur qui élimine les
+    /// adresses contredites/stales et classe celles qui suivent chaque
+    /// transition — l'intersection multi-rounds isole la source gameplay
+    /// des copies UI volatiles. Voir display_string_investigator.h.
+    Q_INVOKABLE QVariantMap startChangedPagesSession(const QVariantMap& options);
+    Q_INVOKABLE QVariantMap applyChangedPagesRound(
+        const QString& previousValue,
+        const QString& currentValue,
+        const QVariantMap& options);
+    Q_INVOKABLE QVariantMap getChangedPagesConsensus(const QVariantMap& options) const;
+    Q_INVOKABLE QVariantMap stopChangedPagesSession();
+
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
 
@@ -428,6 +443,10 @@ public:
 
     /// Demande l'arrêt de la capture Page Guard en cours.
     Q_INVOKABLE QVariantMap cancelPageGuardWatch();
+
+    /// Valide la stabilité d'une page mémoire avant d'armer un Page Guard.
+    /// Lit la page N fois avec un intervalle configurable et retourne si la page est stable.
+    Q_INVOKABLE QVariantMap validatePageStability(const QString& addressHex, const QVariantMap& options);
 
     /// Variante plus précise de startPageGuardWatchAsync : hardware breakpoint (DR0, adresse
     /// exacte plutôt que la page de 4 Ko) posé depuis un composant injecté dans la cible — voir

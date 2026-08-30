@@ -513,6 +513,35 @@ export interface UiStringInvestigationFinishResult {
   changes: UiStringInvestigationChange[]
 }
 
+export interface ChangedPagesConsensusEntry {
+  address: string
+  type: string
+  variantLabel?: string
+  roundsSeen: number
+  roundsConfirmed: number
+  staleRounds: number
+  contradictionRounds: number
+  score?: number
+  lastValueNumber?: number
+  confirmed?: boolean
+}
+
+export interface ChangedPagesConsensusResult {
+  success: boolean
+  sessionActive?: boolean
+  roundsApplied?: number
+  entriesTotal?: number
+  entriesEliminated?: number
+  entriesConfirmed?: number
+  minConfirmed?: number
+  topEntries?: ChangedPagesConsensusEntry[]
+  confirmedEntries?: ChangedPagesConsensusEntry[]
+  blocksRemaining?: number
+  sessionElapsedMs?: number
+  sinceLastRoundMs?: number
+  error?: string
+}
+
 export interface ExactScanMatch {
   address: string
   type: string
@@ -1164,6 +1193,10 @@ export interface AiModelStatus {
   finishUiStringInvestigation?(options: Record<string, unknown>): Promise<UiStringInvestigationFinishResult>
   startChangedPagesDiff?(options: Record<string, unknown>): Promise<Record<string, unknown>>
   finishChangedPagesDiff?(previousValue: string, currentValue: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  startChangedPagesSession?(options: Record<string, unknown>): Promise<ChangedPagesConsensusResult>
+  applyChangedPagesRound?(previousValue: string, currentValue: string, options: Record<string, unknown>): Promise<ChangedPagesConsensusResult>
+  getChangedPagesConsensus?(options: Record<string, unknown>): Promise<ChangedPagesConsensusResult>
+  stopChangedPagesSession?(): Promise<ChangedPagesConsensusResult>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
   startExactScanExpert(
     value: string,
@@ -1232,6 +1265,8 @@ export interface AiModelStatus {
   startPageGuardWatchAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   cancelPageGuardWatch?(): Promise<Record<string, unknown>>
   pageGuardWatchFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** Valide la stabilité d'une page mémoire avant d'armer un Page Guard. */
+  validatePageStability?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
 findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   findWhatAccessesFinished?: QWebChannelSignal<Record<string, unknown>>
   findWhatExecutes?(instructionAddressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
@@ -2165,6 +2200,18 @@ class BackendService {
       async finishChangedPagesDiff(_previousValue: string, _currentValue: string, _options: Record<string, unknown>) {
         return { success: false, hits: [], hitsFound: 0, error: 'Mock backend' }
       },
+      async startChangedPagesSession(_options: Record<string, unknown>) {
+        return { success: false, blocksCaptured: 0, bytesCaptured: 0, error: 'Mock backend' }
+      },
+      async applyChangedPagesRound(_previousValue: string, _currentValue: string, _options: Record<string, unknown>) {
+        return { success: false, hits: [], hitsFound: 0, error: 'Mock backend' }
+      },
+      async getChangedPagesConsensus(_options: Record<string, unknown>) {
+        return { success: false, sessionActive: false, error: 'Mock backend' }
+      },
+      async stopChangedPagesSession() {
+        return { success: false, error: 'Mock backend' }
+      },
       async rollbackLastWrite() {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend' }
       },
@@ -2203,6 +2250,9 @@ class BackendService {
       },
       async analyzeFieldStability(_addressHex: string, _options: Record<string, unknown>) {
         return { success: false, verdict: 'no_writes_observed', writeCount: 0, rationale: '', error: 'Mock backend' }
+      },
+      async validatePageStability(_addressHex: string, _options: Record<string, unknown>) {
+        return { success: false, stable: false, readCount: 0, unreadable: 0, changeCount: 0, reason: 'Mock backend', error: 'Mock backend' }
       },
       async startInProcessExecuteWatchAsync(_instructionAddressHex: string, _options: Record<string, unknown>) {
         return { success: false, started: false, error: 'Mock backend' }

@@ -1507,6 +1507,11 @@ QVariantMap UiStringInvestigator::startChangedPagesDiff(const QVariantMap& optio
         std::clamp(options.value("maxBytesMb", 64).toInt(), 8, 256)) * 1024ull * 1024ull;
     const int blockSize = std::clamp(options.value("blockSize", 64 * 1024).toInt(), 4096, 1024 * 1024);
     const bool privateOnly = options.value("privateOnly", true).toBool();
+    // PHASE 250 (validation live 30/08/2026) : privateOnly exclut de fait le
+    // .data des executables (MEM_IMAGE RW) -- precisement ou vivent les
+    // sources gameplay (g_health du test target, solarite de SC2_x64.exe).
+    // includeImage=true elargit a "Private OU Image", toujours sans MEM_MAPPED.
+    const bool includeImage = options.value("includeImage", false).toBool();
     const bool writableOnly = options.value("writableOnly", true).toBool();
 
     auto& blocks = m_changedPagesDiffBlocks;
@@ -1530,7 +1535,9 @@ QVariantMap UiStringInvestigator::startChangedPagesDiff(const QVariantMap& optio
         if (writableOnly && !region.writable) {
             continue;
         }
-        if (privateOnly && region.type != killcore::MemoryType::Private) {
+        if (privateOnly
+            && region.type != killcore::MemoryType::Private
+            && !(includeImage && region.type == killcore::MemoryType::Image)) {
             continue;
         }
         ++regionsScanned;
@@ -1575,6 +1582,7 @@ QVariantMap UiStringInvestigator::startChangedPagesDiff(const QVariantMap& optio
     result["maxBytes"] = static_cast<qulonglong>(maxBytes);
     result["blockSize"] = blockSize;
     result["privateOnly"] = privateOnly;
+    result["includeImage"] = includeImage;
     result["writableOnly"] = writableOnly;
     result["error"] = blocks.isEmpty() ? "Aucun bloc private/RW lisible capturé." : QString();
     m_appendScanTelemetry("changed_pages_diff_start", result);
@@ -1610,8 +1618,45 @@ QVariantMap UiStringInvestigator::finishChangedPagesDiff(
 
     const int maxHits = std::clamp(options.value("maxHits", 300).toInt(), 1, 2000);
     const int maxDistanceToChange = std::clamp(options.value("maxDistanceToChange", 256).toInt(), 0, 4096);
-    const auto previousVariants = killcore::generateScanVariants(prev, killcore::ValueType::Int32, false);
-    const auto currentVariants = killcore::generateScanVariants(cur, killcore::ValueType::Int32, false);
+
+    ChangedPagesDiffStats stats;
+    hits = diffChangedPagesBlocks(blocks, prev, cur, maxHits, maxDistanceToChange, /*rollForward=*/false, &stats);
+
+    const int capturedBlocks = blocks.size();
+    blocks.clear();
+
+    result["success"] = true;
+    result["previousValue"] = prev;
+    result["currentValue"] = cur;
+    result["hits"] = hits;
+    result["hitsFound"] = hits.size();
+    result["capturedBlocks"] = capturedBlocks;
+    result["blocksChecked"] = stats.blocksChecked;
+    result["blocksChanged"] = stats.blocksChanged;
+    result["bytesChecked"] = static_cast<qulonglong>(stats.bytesChecked);
+    result["changedBytes"] = static_cast<qulonglong>(stats.changedBytes);
+    result["unreadable"] = stats.unreadable;
+    result["partial"] = hits.size() >= maxHits;
+    result["error"] = "";
+    m_appendScanTelemetry("changed_pages_diff_finish", result);
+    return result;
+}
+
+QVariantList UiStringInvestigator::diffChangedPagesBlocks(
+    QList<ChangedPagesDiffBlockState>& blocks,
+    const QString& previousValue,
+    const QString& currentValue,
+    int maxHits,
+    int maxDistanceToChange,
+    bool rollForward,
+    ChangedPagesDiffStats* stats) const {
+    QVariantList hits;
+    if (stats) {
+        *stats = ChangedPagesDiffStats{};
+    }
+
+    const auto previousVariants = killcore::generateScanVariants(previousValue, killcore::ValueType::Int32, false);
+    const auto currentVariants = killcore::generateScanVariants(currentValue, killcore::ValueType::Int32, false);
     QHash<QString, QByteArray> previousByKey;
     for (const auto& variant : previousVariants) {
         previousByKey.insert(variantKey(variant.value.type, variant.label), killcore::scanValueToBytes(variant.value));
@@ -1630,33 +1675,58 @@ QVariantMap UiStringInvestigator::finishChangedPagesDiff(
     };
 
     killcore::MemoryReader reader(m_handle);
-    int blocksChecked = 0;
-    int blocksChanged = 0;
-    int unreadable = 0;
-    uint64_t bytesChecked = 0;
-    uint64_t changedBytes = 0;
     QSet<QString> seen;
+    QList<ChangedPagesDiffBlockState> rolled;
+    if (rollForward) {
+        rolled.reserve(blocks.size());
+    }
 
     for (const auto& block : blocks) {
         if (hits.size() >= maxHits) {
-            break;
+            // En mode session, les blocs non relus gardent leur baseline :
+            // ils seront diffables au round suivant au lieu d'être perdus.
+            if (rollForward) {
+                rolled.append(block);
+            }
+            continue;
         }
-        ++blocksChecked;
+        if (stats) {
+            ++stats->blocksChecked;
+        }
         const auto read = reader.read(block.base, static_cast<size_t>(block.before.size()));
         if (!read.success && !read.partial) {
-            ++unreadable;
+            if (stats) {
+                ++stats->unreadable;
+                ++stats->blocksDropped;
+            }
+            // Bloc devenu illisible (page décommitée/recyclée — l'erreur 299
+            // classique sur SC2) : en mode session on le retire, il ne
+            // rediffra jamais de façon fiable.
             continue;
         }
         if (read.bytesRead == 0) {
-            ++unreadable;
+            if (stats) {
+                ++stats->unreadable;
+                ++stats->blocksDropped;
+            }
             continue;
         }
         const QByteArray after = read.data.left(static_cast<qsizetype>(read.bytesRead));
-        bytesChecked += read.bytesRead;
+        if (stats) {
+            stats->bytesChecked += read.bytesRead;
+        }
+        if (rollForward) {
+            ChangedPagesDiffBlockState rolledBlock = block;
+            rolledBlock.before = after;
+            rolledBlock.hash = uiInvestigationHash(after);
+            rolled.append(rolledBlock);
+        }
         if (uiInvestigationHash(after) == block.hash) {
             continue;
         }
-        ++blocksChanged;
+        if (stats) {
+            ++stats->blocksChanged;
+        }
 
         QList<QPair<qsizetype, qsizetype>> ranges;
         const qsizetype comparable = std::min(block.before.size(), after.size());
@@ -1671,7 +1741,9 @@ QVariantMap UiStringInvestigator::finishChangedPagesDiff(
                 ++i;
             }
             ranges.append({start, i});
-            changedBytes += static_cast<uint64_t>(i - start);
+            if (stats) {
+                stats->changedBytes += static_cast<uint64_t>(i - start);
+            }
         }
 
         for (const auto& variant : currentVariants) {
@@ -1710,8 +1782,8 @@ QVariantMap UiStringInvestigator::finishChangedPagesDiff(
                 hit["address"] = uiStringAddress(address);
                 hit["type"] = killcore::valueTypeToString(variant.value.type);
                 hit["variantLabel"] = variant.label;
-                hit["previousValue"] = prev;
-                hit["currentValue"] = cur;
+                hit["previousValue"] = previousValue;
+                hit["currentValue"] = currentValue;
                 hit["lastValueHex"] = QString::fromLatin1(currentBytes.toHex(' ').toUpper());
                 hit["lastValueNumber"] = bytesToDouble(currentBytes, variant.value.type);
                 hit["previousAtSameOffset"] = sameOffsetOldValue;
@@ -1726,25 +1798,263 @@ QVariantMap UiStringInvestigator::finishChangedPagesDiff(
         }
     }
 
-    const int capturedBlocks = blocks.size();
-    blocks.clear();
+    if (rollForward) {
+        blocks = rolled;
+    }
+    return hits;
+}
 
+QVariantMap UiStringInvestigator::startChangedPagesSession(const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    // La capture initiale réutilise exactement la même logique que le diff
+    // one-shot (mêmes bornes, mêmes filtres private/RW).
+    // PHASE 250 : si l'appelant ne dit rien, on inclut les regions Image RW
+    // en plus de Private -- les sources gameplay vivent typiquement dans le
+    // .data de l'executable (MEM_IMAGE RW), le defaut one-shot les exclut et
+    // rendrait la session aveugle aux adresses qu'elle cherche (constate en
+    // direct : round 2 voyait 0 bloc change alors que g_health venait de
+    // passer 135 -> 130).
+    QVariantMap captureOptions = options;
+    if (!captureOptions.contains("includeImage")) {
+        captureOptions.insert("includeImage", true);
+    }
+    const QVariantMap captureResult = startChangedPagesDiff(captureOptions);
+    if (!captureResult.value("success").toBool()) {
+        result["error"] = captureResult.value("error").toString();
+        m_appendScanTelemetry("changed_pages_session_start", {
+            {"success", false},
+            {"error", result.value("error")},
+        });
+        return result;
+    }
+
+    m_changedPagesConsensus.reset();
+    m_changedPagesSessionActive = true;
+    m_changedPagesSessionStartedMs = QDateTime::currentMSecsSinceEpoch();
+    m_changedPagesSessionLastRoundMs = m_changedPagesSessionStartedMs;
+
+    result["success"] = true;
+    result["blocksCaptured"] = captureResult.value("blocksCaptured");
+    result["bytesCaptured"] = captureResult.value("bytesCaptured");
+    result["regionsScanned"] = captureResult.value("regionsScanned");
+    result["unreadable"] = captureResult.value("unreadable");
+    result["partial"] = captureResult.value("partial");
+    result["roundsApplied"] = 0;
+    result["error"] = "";
+    m_appendScanTelemetry("changed_pages_session_start", {
+        {"success", true},
+        {"blocksCaptured", result.value("blocksCaptured")},
+        {"bytesCaptured", result.value("bytesCaptured")},
+        {"regionsScanned", result.value("regionsScanned")},
+        {"unreadable", result.value("unreadable")},
+        {"partial", result.value("partial")},
+    });
+    return result;
+}
+
+QVariantMap UiStringInvestigator::applyChangedPagesRound(
+    const QString& previousValue,
+    const QString& currentValue,
+    const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (!m_changedPagesSessionActive) {
+        result["error"] = "Aucune session changed-pages active.";
+        return result;
+    }
+
+    const QString prev = previousValue.trimmed();
+    const QString cur = currentValue.trimmed();
+    if (prev.isEmpty() || cur.isEmpty()) {
+        result["error"] = "Valeurs précédente/actuelle requises.";
+        return result;
+    }
+    if (m_changedPagesDiffBlocks.isEmpty()) {
+        result["error"] = "Aucun bloc restant dans la session (pages devenues illisibles ou capture consommée). Relance startChangedPagesSession.";
+        return result;
+    }
+
+    const int maxHits = std::clamp(options.value("maxHits", 300).toInt(), 1, 2000);
+    const int maxDistanceToChange = std::clamp(options.value("maxDistanceToChange", 256).toInt(), 0, 4096);
+    const int probeCount = std::clamp(options.value("probeCount", 25).toInt(), 0, 200);
+
+    ChangedPagesDiffStats stats;
+    QVariantList hits = diffChangedPagesBlocks(
+        m_changedPagesDiffBlocks, prev, cur, maxHits, maxDistanceToChange, /*rollForward=*/true, &stats);
+
+    // 1. Accumule les hits de ce round dans le consensus.
+    m_changedPagesConsensus.applyRound(hits);
+
+    // 2. Sonde immédiatement les meilleures adresses actives : celles qui ont
+    //    réellement la nouvelle valeur MAINTENANT sont confirmées, les autres
+    //    contredites (ou marquées stale si illisibles). C'est ce probe qui
+    //    distingue "a suivi la transition" de "contient la valeur par hasard
+    //    dans une copie morte".
+    int probesConfirmed = 0;
+    int probesContradicted = 0;
+    int probesStale = 0;
+    if (probeCount > 0) {
+        killcore::MemoryReader reader(m_handle);
+        const QVariantList checkpoints = m_changedPagesConsensus.checkpoints(probeCount);
+        for (const auto& checkpointVariant : checkpoints) {
+            const QVariantMap checkpoint = checkpointVariant.toMap();
+            uint64_t address = 0;
+            if (!parseHexAddress(checkpoint.value("address").toString(), &address)) {
+                continue;
+            }
+            killcore::ValueType type = killcore::ValueType::Int32;
+            if (!killcore::parseValueType(checkpoint.value("type").toString(), &type)) {
+                continue;
+            }
+            const QString variantLabel = checkpoint.value("variantLabel").toString();
+            QString targetError;
+            const QByteArray expected = killcore::targetBytesForTypeAndVariant(cur, type, variantLabel, &targetError);
+            if (expected.isEmpty()) {
+                continue;
+            }
+            const auto read = reader.read(address, killcore::valueTypeSize(type));
+            QVariantMap probe;
+            probe["address"] = checkpoint.value("address");
+            probe["type"] = checkpoint.value("type");
+            probe["variantLabel"] = variantLabel;
+            if (!(read.success || read.partial) || read.bytesRead < killcore::valueTypeSize(type)) {
+                probe["status"] = "stale";
+                ++probesStale;
+            } else if (bytesEqual(read.data, expected, type)) {
+                probe["status"] = "confirmed";
+                probe["lastValueHex"] = QString::fromLatin1(read.data.left(static_cast<qsizetype>(killcore::valueTypeSize(type))).toHex(' ').toUpper());
+                probe["lastValueNumber"] = bytesToDouble(read.data, type);
+                ++probesConfirmed;
+            } else {
+                probe["status"] = "contradicted";
+                ++probesContradicted;
+            }
+            m_changedPagesConsensus.applyProbeResult(probe);
+        }
+    }
+
+    m_changedPagesSessionLastRoundMs = QDateTime::currentMSecsSinceEpoch();
+
+    const int confirmedTotal = m_changedPagesConsensus.confirmedEntries(2);
     result["success"] = true;
     result["previousValue"] = prev;
     result["currentValue"] = cur;
     result["hits"] = hits;
     result["hitsFound"] = hits.size();
-    result["capturedBlocks"] = capturedBlocks;
-    result["blocksChecked"] = blocksChecked;
-    result["blocksChanged"] = blocksChanged;
-    result["bytesChecked"] = static_cast<qulonglong>(bytesChecked);
-    result["changedBytes"] = static_cast<qulonglong>(changedBytes);
-    result["unreadable"] = unreadable;
+    result["blocksChecked"] = stats.blocksChecked;
+    result["blocksChanged"] = stats.blocksChanged;
+    result["blocksDropped"] = stats.blocksDropped;
+    result["bytesChecked"] = static_cast<qulonglong>(stats.bytesChecked);
+    result["changedBytes"] = static_cast<qulonglong>(stats.changedBytes);
+    result["unreadable"] = stats.unreadable;
+    result["blocksRemaining"] = m_changedPagesDiffBlocks.size();
     result["partial"] = hits.size() >= maxHits;
+    result["roundsApplied"] = m_changedPagesConsensus.roundsApplied();
+    result["probesConfirmed"] = probesConfirmed;
+    result["probesContradicted"] = probesContradicted;
+    result["probesStale"] = probesStale;
+    result["entriesTotal"] = m_changedPagesConsensus.totalEntries();
+    result["entriesEliminated"] = m_changedPagesConsensus.eliminatedCount();
+    result["entriesConfirmedAtLeast2"] = confirmedTotal;
+    result["topEntries"] = m_changedPagesConsensus.rankedEntries(10);
     result["error"] = "";
-    m_appendScanTelemetry("changed_pages_diff_finish", result);
+    m_appendScanTelemetry("changed_pages_round", {
+        {"success", true},
+        {"previousValue", prev},
+        {"currentValue", cur},
+        {"hitsFound", hits.size()},
+        {"blocksChecked", stats.blocksChecked},
+        {"blocksChanged", stats.blocksChanged},
+        {"blocksDropped", stats.blocksDropped},
+        {"unreadable", stats.unreadable},
+        {"blocksRemaining", result.value("blocksRemaining")},
+        {"probeCount", probeCount},
+        {"probesConfirmed", probesConfirmed},
+        {"probesContradicted", probesContradicted},
+        {"probesStale", probesStale},
+        {"entriesTotal", result.value("entriesTotal")},
+        {"entriesEliminated", result.value("entriesEliminated")},
+        {"entriesConfirmedAtLeast2", confirmedTotal},
+        {"roundsApplied", result.value("roundsApplied")},
+    });
     return result;
 }
 
+QVariantMap UiStringInvestigator::getChangedPagesConsensus(const QVariantMap& options) const {
+    QVariantMap result;
+    result["success"] = true;
+
+    const int maxResults = std::clamp(options.value("maxResults", 50).toInt(), 1, 500);
+    const int minConfirmed = std::clamp(options.value("minConfirmed", 2).toInt(), 1, 100);
+
+    const QVariantList ranked = m_changedPagesConsensus.rankedEntries(maxResults);
+    // Ne garde que les entrées ayant au moins minConfirmed confirmations de
+    // probe — c'est le signal actionnable (adresses à watcher), pas la brute.
+    QVariantList confirmed;
+    for (const auto& item : ranked) {
+        const QVariantMap entry = item.toMap();
+        if (entry.value("roundsConfirmed").toInt() >= minConfirmed) {
+            confirmed.append(entry);
+        }
+    }
+
+    result["sessionActive"] = m_changedPagesSessionActive;
+    result["roundsApplied"] = m_changedPagesConsensus.roundsApplied();
+    result["entriesTotal"] = m_changedPagesConsensus.totalEntries();
+    result["entriesEliminated"] = m_changedPagesConsensus.eliminatedCount();
+    result["entriesConfirmed"] = confirmed.size();
+    result["minConfirmed"] = minConfirmed;
+    result["topEntries"] = ranked;
+    result["confirmedEntries"] = confirmed;
+    result["blocksRemaining"] = m_changedPagesDiffBlocks.size();
+    if (m_changedPagesSessionActive) {
+        result["sessionElapsedMs"] = static_cast<qlonglong>(
+            QDateTime::currentMSecsSinceEpoch() - m_changedPagesSessionStartedMs);
+        result["sinceLastRoundMs"] = static_cast<qlonglong>(
+            QDateTime::currentMSecsSinceEpoch() - m_changedPagesSessionLastRoundMs);
+    }
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap UiStringInvestigator::stopChangedPagesSession() {
+    QVariantMap result;
+    result["success"] = true;
+    result["sessionActive"] = false;
+    result["roundsApplied"] = m_changedPagesConsensus.roundsApplied();
+    result["entriesTotal"] = m_changedPagesConsensus.totalEntries();
+    result["entriesEliminated"] = m_changedPagesConsensus.eliminatedCount();
+    result["entriesConfirmed"] = m_changedPagesConsensus.confirmedEntries(2);
+
+    const QVariantMap lastConsensus = getChangedPagesConsensus(QVariantMap{});
+    result["confirmedEntriesList"] = lastConsensus.value("confirmedEntries");
+
+    m_changedPagesDiffBlocks.clear();
+    m_changedPagesConsensus.reset();
+    m_changedPagesSessionActive = false;
+    m_changedPagesSessionStartedMs = 0;
+    m_changedPagesSessionLastRoundMs = 0;
+    result["error"] = "";
+    m_appendScanTelemetry("changed_pages_session_stop", {
+        {"success", true},
+        {"roundsApplied", result.value("roundsApplied")},
+        {"entriesTotal", result.value("entriesTotal")},
+        {"entriesEliminated", result.value("entriesEliminated")},
+        {"entriesConfirmed", result.value("entriesConfirmed")},
+    });
+    return result;
+}
 
 } // namespace killengine

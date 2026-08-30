@@ -18,6 +18,7 @@
 #include <QMetaObject>
 #include <QPointer>
 #include <QStringList>
+#include <QThread>
 #include <QVariantList>
 
 #include <algorithm>
@@ -1671,6 +1672,72 @@ bool DebugFeatureManager::restartBreakpointFreezeFromRegistry(killcore::Breakpoi
     }
 
     return true;
+}
+
+QVariantMap DebugFeatureManager::validatePageStability(const QString& addressHex, const QVariantMap& options) const {
+    QVariantMap result;
+    result["success"] = false;
+    result["stable"] = false;
+
+    if (!m_isAttached() || m_pid() <= 0 || !m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    uint64_t address = 0;
+    if (!parseHexAddress(addressHex, &address)) {
+        result["error"] = "Adresse invalide.";
+        return result;
+    }
+
+    const int readCount = std::clamp(options.value("readCount", 3).toInt(), 2, 10);
+    const int intervalMs = std::clamp(options.value("intervalMs", 100).toInt(), 50, 2000);
+    const int pageSize = std::clamp(options.value("pageSize", 4096).toInt(), 1, 65536);
+
+    killcore::MemoryReader reader(m_handle);
+    QList<QByteArray> snapshots;
+    int unreadable = 0;
+
+    for (int i = 0; i < readCount; ++i) {
+        if (i > 0) {
+            QThread::msleep(intervalMs);
+        }
+        const auto read = reader.read(address, static_cast<size_t>(pageSize));
+        if (!read.success && !read.partial) {
+            ++unreadable;
+            snapshots.append(QByteArray());
+        } else {
+            snapshots.append(read.data.left(static_cast<qsizetype>(read.bytesRead)));
+        }
+    }
+
+    if (unreadable > 0) {
+        result["stable"] = false;
+        result["readCount"] = readCount;
+        result["unreadable"] = unreadable;
+        result["changeCount"] = 0;
+        result["reason"] = QString("Page illisible lors de %1/%2 lectures.").arg(unreadable).arg(readCount);
+        result["success"] = true;
+        return result;
+    }
+
+    int changeCount = 0;
+    for (int i = 1; i < snapshots.size(); ++i) {
+        if (snapshots[i] != snapshots[0]) {
+            ++changeCount;
+        }
+    }
+
+    const bool stable = (changeCount == 0);
+    result["success"] = true;
+    result["stable"] = stable;
+    result["readCount"] = readCount;
+    result["unreadable"] = 0;
+    result["changeCount"] = changeCount;
+    result["reason"] = stable
+        ? QString("Page stable sur %1 lectures (aucune variation détectée).").arg(readCount)
+        : QString("Page instable : %1 variation(s) sur %2 lectures.").arg(changeCount).arg(readCount);
+    return result;
 }
 
 } // namespace killengine

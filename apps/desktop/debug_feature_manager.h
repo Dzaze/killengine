@@ -82,6 +82,7 @@ public:
     QVariantMap getApiHookStatus() const;
     QVariantMap getSpeedhackStatus() const;
     QVariantMap disassembleBackward(const QString& addressHex, const QVariantMap& options) const;
+    QVariantMap validatePageStability(const QString& addressHex, const QVariantMap& options) const;
 
 private:
     QVariantMap activateBreakpointFreezeFor(

@@ -402,11 +402,39 @@ function ke.restore_code_patch(address_hex)
   return ke.call_table("restoreCodePatch", { tostring(address_hex) })
 end
 
+-- PHASE 250 (SC2 solarite) : session changed-pages multi-rounds. Le diff
+-- one-shot (startChangedPagesDiff/finishChangedPagesDiff) est consomme en un
+-- seul round et repart d'une capture fraiche a chaque fois ; la session
+-- garde les blocs capturés d'un round a l'autre (baseline roll-forward),
+-- accumule un consensus par intersection des transitions, et sonde les
+-- meilleures adresses apres chaque transition pour eliminer les copies UI
+-- volatiles. Patron type pour suivre 140 -> 135 -> 130 :
+--   ke.changed_pages_session_start()
+--   ke.changed_pages_round("140", "135")   -- apres la 1re transition
+--   ke.changed_pages_round("135", "130")   -- apres la 2e
+--   ke.changed_pages_consensus()           -- adresses confirmees >= 2 rounds
+--   ke.changed_pages_session_stop()
+function ke.changed_pages_session_start(options)
+  return ke.call_table("startChangedPagesSession", { options or {} })
+end
+
+function ke.changed_pages_round(previous_value, current_value, options)
+  return ke.call_table("applyChangedPagesRound", { tostring(previous_value), tostring(current_value), options or {} })
+end
+
+function ke.changed_pages_consensus(options)
+  return ke.call_table("getChangedPagesConsensus", { options or {} })
+end
+
+function ke.changed_pages_session_stop()
+  return ke.call_table("stopChangedPagesSession", {})
+end
+
 -- Variantes table des wrappers ci-dessus, via ke.call_table : retournent
 -- directement la table Lua decodee (candidats, resultat de scan...) au lieu
 -- du JSON brut, pour manipuler la reponse sans reparser a la main.
 function ke.scan_exact_table(value, value_type)
-  return ke.call_table("startExactScan", { tostring(value), value_type or "Int32" })
+  return ke.call("startExactScan", { tostring(value), value_type or "Int32" })
 end
 
 function ke.next_scan_table(mode, value)

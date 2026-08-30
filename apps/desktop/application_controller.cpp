@@ -2664,6 +2664,25 @@ QVariantMap ApplicationController::finishChangedPagesDiff(
     return m_uiStringInvestigator->finishChangedPagesDiff(previousValue, currentValue, options);
 }
 
+QVariantMap ApplicationController::startChangedPagesSession(const QVariantMap& options) {
+    return m_uiStringInvestigator->startChangedPagesSession(options);
+}
+
+QVariantMap ApplicationController::applyChangedPagesRound(
+    const QString& previousValue,
+    const QString& currentValue,
+    const QVariantMap& options) {
+    return m_uiStringInvestigator->applyChangedPagesRound(previousValue, currentValue, options);
+}
+
+QVariantMap ApplicationController::getChangedPagesConsensus(const QVariantMap& options) const {
+    return m_uiStringInvestigator->getChangedPagesConsensus(options);
+}
+
+QVariantMap ApplicationController::stopChangedPagesSession() {
+    return m_uiStringInvestigator->stopChangedPagesSession();
+}
+
 QVariantMap ApplicationController::startExactScan(const QString& value, const QString& valueType) {
     return m_scanningCoreManager->startExactScan(value, valueType);
 }
@@ -3082,6 +3101,10 @@ QVariantMap ApplicationController::cancelFindWhatWrites() {
 
 QVariantMap ApplicationController::startPageGuardWatchAsync(const QString& addressHex, const QVariantMap& options) {
     return m_debugFeatureManager->startPageGuardWatchAsync(addressHex, options);
+}
+
+QVariantMap ApplicationController::validatePageStability(const QString& addressHex, const QVariantMap& options) {
+    return m_debugFeatureManager->validatePageStability(addressHex, options);
 }
 
 QVariantMap ApplicationController::cancelPageGuardWatch() {

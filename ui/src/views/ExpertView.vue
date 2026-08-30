@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
+  type ChangedPagesConsensusResult,
   type UiStringCandidate,
   type UiStringInvestigationFinishResult,
   type UiStringInvestigationStartResult,
@@ -100,6 +101,15 @@ const findWhatWritesTimeoutMs = ref(7000)
 // potentiellement fusionnés).
 const pageGuardResult = ref<Record<string, unknown> | null>(null)
 const pageGuardBusy = ref(false)
+// PHASE 250 : Consensus multi-round pour Changed Pages Diff
+const changedPagesSessionActive = ref(false)
+const changedPagesSessionBusy = ref(false)
+const changedPagesConsensusResult = ref<ChangedPagesConsensusResult | null>(null)
+const changedPagesRoundPreviousValue = ref('')
+const changedPagesRoundCurrentValue = ref('')
+const changedPagesRoundBusy = ref(false)
+const changedPagesStabilityResult = ref<Record<string, unknown> | null>(null)
+const changedPagesStabilityBusy = ref(false)
 const structureProbeResult = ref<Record<string, unknown> | null>(null)
 const structureCaptureA = ref<StructureProbeRow[] | null>(null)
 const structureCaptureB = ref<StructureProbeRow[] | null>(null)
@@ -1454,6 +1464,92 @@ async function cancelPageGuardWatchCapture() {
   }
 }
 
+// ---- PHASE 250 : Consensus multi-round pour Changed Pages Diff ----
+async function startChangedPagesSession() {
+  const controller = backend.getController()
+  if (!controller.startChangedPagesSession) {
+    changedPagesConsensusResult.value = { success: false, error: 'Consensus multi-round indisponible côté backend.' }
+    return
+  }
+  changedPagesSessionBusy.value = true
+  try {
+    const result = await controller.startChangedPagesSession({})
+    changedPagesSessionActive.value = result.success === true
+    changedPagesConsensusResult.value = result
+  } catch (e) {
+    changedPagesConsensusResult.value = { success: false, error: String(e) }
+  } finally {
+    changedPagesSessionBusy.value = false
+  }
+}
+
+async function applyChangedPagesRound() {
+  const controller = backend.getController()
+  if (!controller.applyChangedPagesRound) {
+    changedPagesConsensusResult.value = { success: false, error: 'Round multi-round indisponible côté backend.' }
+    return
+  }
+  changedPagesRoundBusy.value = true
+  try {
+    const result = await controller.applyChangedPagesRound(
+      changedPagesRoundPreviousValue.value,
+      changedPagesRoundCurrentValue.value,
+      {}
+    )
+    changedPagesConsensusResult.value = result
+  } catch (e) {
+    changedPagesConsensusResult.value = { success: false, error: String(e) }
+  } finally {
+    changedPagesRoundBusy.value = false
+  }
+}
+
+async function getChangedPagesConsensus() {
+  const controller = backend.getController()
+  if (!controller.getChangedPagesConsensus) {
+    changedPagesConsensusResult.value = { success: false, error: 'Consensus indisponible côté backend.' }
+    return
+  }
+  try {
+    const result = await controller.getChangedPagesConsensus({})
+    changedPagesConsensusResult.value = result
+  } catch (e) {
+    changedPagesConsensusResult.value = { success: false, error: String(e) }
+  }
+}
+
+async function stopChangedPagesSession() {
+  const controller = backend.getController()
+  if (!controller.stopChangedPagesSession) {
+    changedPagesConsensusResult.value = { success: false, error: 'Arrêt session indisponible côté backend.' }
+    return
+  }
+  try {
+    const result = await controller.stopChangedPagesSession()
+    changedPagesConsensusResult.value = result
+    changedPagesSessionActive.value = false
+  } catch (e) {
+    changedPagesConsensusResult.value = { success: false, error: String(e) }
+  }
+}
+
+async function validatePageStability(addressHex: string) {
+  const controller = backend.getController()
+  if (!controller.validatePageStability) {
+    changedPagesStabilityResult.value = { success: false, error: 'Validation stabilité indisponible côté backend.' }
+    return
+  }
+  changedPagesStabilityBusy.value = true
+  try {
+    const result = await controller.validatePageStability(addressHex, { readCount: 5, intervalMs: 200, pageSize: 4096 })
+    changedPagesStabilityResult.value = result
+  } catch (e) {
+    changedPagesStabilityResult.value = { success: false, error: String(e) }
+  } finally {
+    changedPagesStabilityBusy.value = false
+  }
+}
+
 // ---- Find What Accesses (P1) : instructions qui LISSENT l'adresse ----
 const findWhatAccessesResult = ref<Record<string, unknown> | null>(null)
 const findWhatAccessesBusy = ref(false)
@@ -2261,6 +2357,84 @@ onMounted(() => {
             >
               Trainer
             </button>
+          </div>
+        </div>
+        <!-- PHASE 250 : Consensus multi-round pour Changed Pages Diff -->
+        <div v-if="changedPagesSessionActive || changedPagesSessionBusy || changedPagesConsensusResult" class="find-writes-panel">
+          <div class="source-list-title">
+            <strong>Consensus multi-round (Changed Pages)</strong>
+            <span v-if="changedPagesConsensusResult?.roundsApplied">{{ changedPagesConsensusResult.roundsApplied }} round(s)</span>
+            <span v-if="changedPagesConsensusResult?.entriesConfirmed">{{ changedPagesConsensusResult.entriesConfirmed }} confirmé(s)</span>
+            <button
+              v-if="changedPagesSessionActive"
+              class="btn btn-secondary compact"
+              type="button"
+              :disabled="changedPagesSessionBusy"
+              @click="stopChangedPagesSession()"
+            >
+              Arrêter session
+            </button>
+          </div>
+          <p class="hint">Session multi-round : capture plusieurs snapshots de pages modifiées, accumule les hits, et classe les adresses par stabilité. Utile quand les pages deviennent illisibles entre deux captures (SC2, jeux AAA).</p>
+          <p v-if="changedPagesSessionBusy" class="hint">Session en cours...</p>
+          <p v-if="changedPagesConsensusResult?.error" class="error">{{ changedPagesConsensusResult.error }}</p>
+          <div class="controls" style="margin-bottom: 8px;">
+            <button class="btn btn-primary compact" type="button" :disabled="changedPagesSessionBusy || changedPagesSessionActive" @click="startChangedPagesSession()">
+              Démarrer session
+            </button>
+            <button class="btn btn-primary compact" type="button" :disabled="changedPagesRoundBusy || !changedPagesSessionActive" @click="applyChangedPagesRound()">
+              Appliquer round
+            </button>
+            <button class="btn btn-secondary compact" type="button" :disabled="!changedPagesSessionActive" @click="getChangedPagesConsensus()">
+              Consensus
+            </button>
+          </div>
+          <div class="controls" style="margin-bottom: 8px;">
+            <input
+              v-model="changedPagesRoundPreviousValue"
+              class="input"
+              placeholder="Valeur avant (ex: 140)"
+              :disabled="changedPagesRoundBusy || !changedPagesSessionActive"
+            />
+            <input
+              v-model="changedPagesRoundCurrentValue"
+              class="input"
+              placeholder="Valeur après (ex: 135)"
+              :disabled="changedPagesRoundBusy || !changedPagesSessionActive"
+            />
+          </div>
+          <div v-if="changedPagesConsensusResult?.confirmedEntries?.length" class="consensus-entries">
+            <div class="source-list-title">
+              <strong>Entrées classées</strong>
+              <span>{{ changedPagesConsensusResult.confirmedEntries.length }} adresse(s)</span>
+            </div>
+            <div
+              v-for="(entry, index) in changedPagesConsensusResult.confirmedEntries.slice(0, 30)"
+              :key="`${entry.address}-${index}`"
+              class="find-writes-row"
+              :class="{ selected: entry.confirmed }"
+            >
+              <code>0x{{ entry.address }}</code>
+              <span>{{ entry.type || '-' }}</span>
+              <span>{{ entry.variantLabel || '-' }}</span>
+              <span>vu {{ entry.roundsSeen }}x</span>
+              <span>confirmé {{ entry.roundsConfirmed }}x</span>
+              <span v-if="entry.staleRounds > 0" class="warning-text">stale {{ entry.staleRounds }}x</span>
+              <span v-if="entry.contradictionRounds > 0" class="error">contradiction {{ entry.contradictionRounds }}x</span>
+              <span>score {{ entry.score?.toFixed(2) }}</span>
+              <span v-if="entry.lastValueNumber !== undefined">val: {{ entry.lastValueNumber }}</span>
+              <button class="btn btn-secondary compact" type="button" @click="validatePageStability(entry.address)">
+                Stabilité
+              </button>
+            </div>
+          </div>
+          <div v-if="changedPagesStabilityResult" class="stability-result" style="margin-top: 8px;">
+            <p :class="changedPagesStabilityResult.stable ? 'hint' : 'error'">
+              {{ changedPagesStabilityResult.reason || 'Résultat stabilité inconnu.' }}
+            </p>
+            <p v-if="changedPagesStabilityResult.readCount" class="hint">
+              {{ changedPagesStabilityResult.readCount }} lecture(s), {{ changedPagesStabilityResult.changeCount }} variation(s), {{ changedPagesStabilityResult.unreadable }} illisible(s).
+            </p>
           </div>
         </div>
         <div v-if="disassembleBackwardResult || disassembleBackwardBusy" class="find-writes-panel">
