@@ -19,6 +19,7 @@
 #include "code_patch_manager.h"
 #include "debug_feature_manager.h"
 #include "freeze_hotkey_overlay_manager.h"
+#include "investigation_notebook_manager.h"
 #include "kernel_driver_manager.h"
 #include "profile_manager.h"
 #include "save_file_investigator.h"
@@ -1852,6 +1853,7 @@ ApplicationController::ApplicationController(QObject* parent)
         },
         this);
     m_automationPipeManager = std::make_unique<AutomationPipeManager>(this);
+    m_investigationNotebookManager = std::make_unique<InvestigationNotebookManager>();
     m_kernelDriverManager = std::make_unique<KernelDriverManager>(
         m_handle,
         [this](const QString& event, const QVariantMap& payload) {
@@ -3853,6 +3855,22 @@ QVariantMap ApplicationController::getAutoResolveReport(int maxEvents) const {
 
 QVariantMap ApplicationController::clearAutoResolveMemory(bool allProcesses) {
     return m_smartSearchManager->clearAutoResolveMemory(allProcesses);
+}
+
+QVariantMap ApplicationController::addInvestigationHypothesis(const QString& description, int baselineScore) {
+    return m_investigationNotebookManager->addHypothesis(description, baselineScore);
+}
+
+QVariantMap ApplicationController::recordInvestigationTestResult(const QString& hypothesisId, bool confirmed, const QString& evidenceNote) {
+    return m_investigationNotebookManager->recordTestResult(hypothesisId, confirmed, evidenceNote);
+}
+
+QVariantMap ApplicationController::getInvestigationNotebookSynthesis() const {
+    return m_investigationNotebookManager->getSynthesis();
+}
+
+QVariantMap ApplicationController::resetInvestigationNotebook() {
+    return m_investigationNotebookManager->resetNotebook();
 }
 
 QVariantMap ApplicationController::logAiAudit(const QString& event, const QVariantMap& payload) {

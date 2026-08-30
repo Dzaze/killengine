@@ -41,6 +41,7 @@ class ClrInspectorBridge;
 class CodePatchManager;
 class DebugFeatureManager;
 class FreezeHotkeyOverlayManager;
+class InvestigationNotebookManager;
 class KernelDriverManager;
 class ProfileManager;
 class SaveFileInvestigator;
@@ -624,6 +625,13 @@ public:
     /// Vide la mémoire locale d'auto-résolution (QSettings) pour le processus courant ou tous les processus.
     Q_INVOKABLE QVariantMap clearAutoResolveMemory(bool allProcesses);
 
+    /// Carnet d'hypothèses (PHASE 120-E/F) : moteur de pondération déterministe,
+    /// aucune génération d'hypothèse ni de "prochaine expérience" ici (PHASE 120-G).
+    Q_INVOKABLE QVariantMap addInvestigationHypothesis(const QString& description, int baselineScore = 50);
+    Q_INVOKABLE QVariantMap recordInvestigationTestResult(const QString& hypothesisId, bool confirmed, const QString& evidenceNote);
+    Q_INVOKABLE QVariantMap getInvestigationNotebookSynthesis() const;
+    Q_INVOKABLE QVariantMap resetInvestigationNotebook();
+
     /// Ajoute un événement d'audit IA dans la télémétrie locale.
     Q_INVOKABLE QVariantMap logAiAudit(const QString& event, const QVariantMap& payload);
 
@@ -1170,6 +1178,7 @@ private:
     std::unique_ptr<CodePatchManager> m_codePatchManager;
     std::unique_ptr<DebugFeatureManager> m_debugFeatureManager;
     std::unique_ptr<FreezeHotkeyOverlayManager> m_freezeHotkeyOverlayManager;
+    std::unique_ptr<InvestigationNotebookManager> m_investigationNotebookManager;
     std::unique_ptr<KernelDriverManager> m_kernelDriverManager;
     std::unique_ptr<SaveFileInvestigator> m_saveFileInvestigator;
     std::unique_ptr<ScanningCoreManager> m_scanningCoreManager;

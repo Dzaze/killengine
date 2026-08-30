@@ -22,6 +22,7 @@ qt_add_executable(KillEngine
     automation_pipe_server.cpp
     automation_pipe_manager.cpp
     crash_handler.cpp
+    investigation_notebook_manager.cpp
 )
 
 if(WIN32)
