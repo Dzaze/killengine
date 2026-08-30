@@ -50,11 +50,41 @@ local function json_encode(value)
   error("JSON unsupported type: " .. value_type)
 end
 
+-- Encode un codepoint Unicode en UTF-8 brut (octets Lua), sans dependre de la
+-- bibliotheque standard `utf8` (Lua 5.3+ seulement) pour rester compatible
+-- LuaJIT (base sur Lua 5.1, pas de `utf8` integre) -- voir package-windows.ps1
+-- qui accepte lua.exe/lua54.exe/lua5.4.exe/luajit.exe comme runtime bundle.
+local function utf8_encode(codepoint)
+  if codepoint < 0x80 then
+    return string.char(codepoint)
+  elseif codepoint < 0x800 then
+    return string.char(
+      0xC0 + math.floor(codepoint / 0x40),
+      0x80 + (codepoint % 0x40)
+    )
+  elseif codepoint < 0x10000 then
+    return string.char(
+      0xE0 + math.floor(codepoint / 0x1000),
+      0x80 + (math.floor(codepoint / 0x40) % 0x40),
+      0x80 + (codepoint % 0x40)
+    )
+  else
+    return string.char(
+      0xF0 + math.floor(codepoint / 0x40000),
+      0x80 + (math.floor(codepoint / 0x1000) % 0x40),
+      0x80 + (math.floor(codepoint / 0x40) % 0x40),
+      0x80 + (codepoint % 0x40)
+    )
+  end
+end
+
 -- Parseur JSON minimal (objets, tableaux, strings, nombres, bool, null),
 -- suffisant pour decoder les reponses JSON-RPC du pipe d'automatisation sans
--- dependance externe non packagee. Pas un parseur JSON generique complet
--- (pas de \uXXXX), mais couvre tout ce que le pipe/ApplicationController
--- produisent reellement (voir automation_pipe_server.cpp).
+-- dependance externe non packagee. Couvre les echappements \uXXXX (y compris
+-- les paires de substituts UTF-16 pour les codepoints hors du plan de base,
+-- ex. emojis) depuis PHASE 240 -- avant cette phase, un \uXXXX tombait dans
+-- le "else" generique ci-dessous et gardait la lettre brute ("u") au lieu du
+-- caractere reel, silencieusement faux plutot qu'en erreur.
 local function json_decode(text)
   local pos = 1
   local len = #text
@@ -82,16 +112,40 @@ local function json_decode(text)
         return table.concat(out)
       elseif c == "\\" then
         local nextc = text:sub(pos + 1, pos + 1)
-        if nextc == "n" then out[#out + 1] = "\n"
-        elseif nextc == "t" then out[#out + 1] = "\t"
-        elseif nextc == "r" then out[#out + 1] = "\r"
-        elseif nextc == "b" then out[#out + 1] = "\b"
-        elseif nextc == "f" then out[#out + 1] = "\f"
-        elseif nextc == '"' then out[#out + 1] = '"'
-        elseif nextc == "\\" then out[#out + 1] = "\\"
-        elseif nextc == "/" then out[#out + 1] = "/"
-        else out[#out + 1] = nextc end
-        pos = pos + 2
+        if nextc == "u" then
+          local hex = text:sub(pos + 2, pos + 5)
+          if not hex:match("^%x%x%x%x$") then
+            error("JSON decode: invalid \\u escape at position " .. pos)
+          end
+          local codepoint = tonumber(hex, 16)
+          pos = pos + 6 -- consumed \ u X X X X
+          -- Paire de substituts UTF-16 (\uD800-\uDBFF suivi de \uDC00-\uDFFF) :
+          -- recompose en un seul codepoint hors du plan de base (ex. emojis)
+          -- avant d'encoder, sinon chaque moitie serait encodee separement en
+          -- UTF-8 invalide.
+          if codepoint >= 0xD800 and codepoint <= 0xDBFF and text:sub(pos, pos + 1) == "\\u" then
+            local lowHex = text:sub(pos + 2, pos + 5)
+            if lowHex:match("^%x%x%x%x$") then
+              local low = tonumber(lowHex, 16)
+              if low >= 0xDC00 and low <= 0xDFFF then
+                codepoint = 0x10000 + (codepoint - 0xD800) * 0x400 + (low - 0xDC00)
+                pos = pos + 6
+              end
+            end
+          end
+          out[#out + 1] = utf8_encode(codepoint)
+        else
+          if nextc == "n" then out[#out + 1] = "\n"
+          elseif nextc == "t" then out[#out + 1] = "\t"
+          elseif nextc == "r" then out[#out + 1] = "\r"
+          elseif nextc == "b" then out[#out + 1] = "\b"
+          elseif nextc == "f" then out[#out + 1] = "\f"
+          elseif nextc == '"' then out[#out + 1] = '"'
+          elseif nextc == "\\" then out[#out + 1] = "\\"
+          elseif nextc == "/" then out[#out + 1] = "/"
+          else out[#out + 1] = nextc end
+          pos = pos + 2
+        end
       else
         out[#out + 1] = c
         pos = pos + 1
