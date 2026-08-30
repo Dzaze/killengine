@@ -546,9 +546,9 @@ Réponse : `{ success: true, clearedCandidates, hadUndoReduction, hadUnknownSnap
 ### `acknowledgePendingSmartSearchRecovery()`
 `void` (pas de retour) — nettoie un état interne côté serveur.
 
-## Carnet d'hypothèses (PHASE 120-E/F)
+## Carnet d'hypothèses (PHASE 120-E/F/G)
 
-Fichier source : `apps/desktop/investigation_notebook_manager.cpp` (classe `InvestigationNotebookManager`, délègue à `killai::InvestigationNotebook`, `ai/investigation_notebook.cpp`). Moteur de pondération déterministe, indépendant de tout état process/mémoire — aucune génération d'hypothèse ni de "prochaine expérience" ici, ça reste le rôle du modèle local (PHASE 120-G, pas encore livré). Chaque hypothèse : `{ id, description, confidenceScore, status, evidenceLog }` — `status` vaut `"active"`/`"confirmed"`/`"refuted"` ; score borné `[0,100]`, `+20` sur confirmation, `-30` sur contradiction, verrouillé une fois `confirmed`/`refuted`.
+Fichier source : `apps/desktop/investigation_notebook_manager.cpp` (classe `InvestigationNotebookManager`, délègue à `killai::InvestigationNotebook`, `ai/investigation_notebook.cpp`). Moteur de pondération déterministe, indépendant de tout état process/mémoire. Chaque hypothèse : `{ id, description, confidenceScore, status, evidenceLog }` — `status` vaut `"active"`/`"confirmed"`/`"refuted"` ; score borné `[0,100]`, `+20` sur confirmation, `-30` sur contradiction, verrouillé une fois `confirmed`/`refuted`.
 
 ### `addInvestigationHypothesis(description, baselineScore=50)`
 Réponse : `{ success: true, hypothesis: {id, description, confidenceScore, status: "active", evidenceLog: []} }` ou `{ success: false, error: "Description vide." }` si `description` est vide/blanc.
@@ -561,6 +561,11 @@ Réponse : `{ success: true, confirmed: [...], active: [...], refuted: [...] }` 
 
 ### `resetInvestigationNotebook()`
 Réponse : `{ success: true }` — vide le carnet et réinitialise le compteur d'id (`H1` repart de zéro).
+
+### `proposeInvestigationNotebookPlan(symptom, options)`
+Fichier source : `apps/desktop/application_controller.cpp` délègue à `AIEngine::proposeInvestigationNotebookPlan` (`ai/ai_engine.cpp`) qui utilise `ai/investigation_notebook_planner.cpp` pour construire le prompt, parser/normaliser la sortie modèle, et retomber sur un plan déterministe (`makeFallbackInvestigationNotebookPlan`) si le modèle est désactivé/indisponible. **Le modèle ne fournit jamais de score** (interdit explicitement dans le prompt et de toute façon non lu par `normalizeInvestigationNotebookPlan`) — `options.baselineScore` (défaut 50, fourni par l'UI, pas par le LLM) est ce qui alimente réellement `addInvestigationHypothesis` pour chaque hypothèse proposée.
+`options` : `{ baselineScore?, useModel?, resetFirst? }` — `resetFirst: true` vide le carnet avant d'ajouter les nouvelles hypothèses.
+Réponse : `{ success, source ("model"|"deterministic_fallback"|"..._empty"), modelUsed, hypotheses: [string] (avant ajout), nextTest: {title, tool, risk: "safe"|"debug"|"confirmation", preconditions: [string], expectedIfTrue, expectedIfFalse, rationale}, summary, addedHypotheses: [{id, description, confidenceScore, status, evidenceLog}], confirmed, active, refuted }` (les 3 dernières = synthèse complète du carnet après ajout, mêmes clés que `getInvestigationNotebookSynthesis`).
 
 ### `getSmartSearchContext()`
 Réponse : `{ success: true, active, workflow, initialValue, targetValue, valueType, candidateCount, hasUndoReduction, chatTargets: [{address, type}], profileTargets: [{profile, target, group, address, type, locatorKind, clrTypeSubstring?, clrIdentityField?, clrIdentityValue?, clrFieldName?}], lastAutoWriteCount, writeHistory }`
