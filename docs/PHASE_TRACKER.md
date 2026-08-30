@@ -31,6 +31,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
   - Voir `docs/REFACTOR_ROADMAP.md` pour la liste des candidats d'extraction (chacun délimité pour être pris par un seul agent, sans chevauchement avec les autres).
   - **Ne jamais bloquer une phase produit pour ce chantier** : extraire seulement quand une phase future touche déjà la zone concernée pour une autre raison. Ne pas ouvrir de session dédiée uniquement pour ça sauf demande explicite du propriétaire.
   - Ordre : candidats à couplage bas d'abord (indépendants), puis les fondations partagées (`addActionLog`/`addInvestigationStep`/`confirmRiskAction` côté store, interface d'accès scan/write côté C++), le dispatch chat/IA (`startSmartSearch` et son cluster) en tout dernier et jamais réparti entre deux agents en parallèle.
+- [ ] Une fois ce chantier de refacto ENTIÈREMENT clos (backend : C12/C13/C14 ; frontend : S9b/S10) — décision explicite du propriétaire, PHASE 233 (30/08/2026) : faire un inventaire exhaustif de la forme de réponse (`QVariantMap`) de **toutes** les méthodes `Q_INVOKABLE` dans `docs/AUTOMATION_API.md` (ou un doc dédié référencé depuis lui). Volontairement **pas fait avant** : le faire pendant que la surface bouge encore ferait périmer la doc au fil du refactor (même piège que `docs/POWER_UP_ROADMAP.md`). D'ici là, la convention de recherche (`Select-String -Pattern 'result\["\w+"\]\s*='` sur le `.cpp` du manager concerné) reste le seul moyen fiable de connaître une forme de réponse — voir `docs/AUTOMATION_API.md`.
 
 ## Journal actif
 
