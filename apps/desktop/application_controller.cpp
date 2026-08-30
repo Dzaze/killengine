@@ -23,6 +23,7 @@
 #include "profile_manager.h"
 #include "save_file_investigator.h"
 #include "scanning_core_manager.h"
+#include "settings_diagnostics_manager.h"
 #include "write_freeze_core_manager.h"
 #include "query_text_utils.h"
 #include "model_locator.h"
@@ -1786,6 +1787,7 @@ ApplicationController::ApplicationController(QObject* parent)
     const size_t candidateThreshold = candidateFileBackedThresholdFromSettings();
     scanState().setFileBackedThreshold(candidateThreshold);
     m_scanningCoreManager = std::make_unique<ScanningCoreManager>(*this, this);
+    m_settingsDiagnosticsManager = std::make_unique<SettingsDiagnosticsManager>(*this);
     m_uiStringInvestigator = std::make_unique<UiStringInvestigator>(
         m_handle,
         [this](const QString& event, const QVariantMap& payload) {
@@ -3948,102 +3950,12 @@ void ApplicationController::acknowledgePendingSmartSearchRecovery() {
 }
 
 QVariantMap ApplicationController::getTemporaryStorageStatus() const {
-    const auto orphan = scanKillengineTemporaryFiles();
-    auto state = scanState();
-    const auto& candidates = state.candidates();
-    const auto& previousCandidates = state.previousCandidates();
-    const auto& snapshot = state.snapshot();
-    const qulonglong candidateBytes = static_cast<qulonglong>(candidates.storageBytes());
-    const qulonglong undoBytes = m_hasPreviousCandidates
-        ? static_cast<qulonglong>(previousCandidates.storageBytes())
-        : 0;
-    const qulonglong snapshotBytes = static_cast<qulonglong>(snapshot.compressedBytesCaptured());
-    const bool hasCandidateFile = candidates.isFileBacked();
-    const bool hasUndoFile = m_hasPreviousCandidates && previousCandidates.isFileBacked();
-    const bool hasSnapshotFile = snapshot.usesMappedStorage();
-    const qulonglong activeBytes = candidateBytes + undoBytes + snapshotBytes;
-
-    QVariantMap result;
-    result["success"] = true;
-    result["tempPath"] = orphan.value("tempPath");
-    result["activeBytes"] = activeBytes;
-    result["activeFileCount"] = static_cast<int>(hasCandidateFile) + static_cast<int>(hasUndoFile) + static_cast<int>(hasSnapshotFile);
-    result["candidateBytes"] = candidateBytes;
-    result["candidateFileBacked"] = hasCandidateFile;
-    result["undoBytes"] = undoBytes;
-    result["undoFileBacked"] = hasUndoFile;
-    result["snapshotBytes"] = snapshotBytes;
-    result["snapshotFileBacked"] = hasSnapshotFile;
-    result["orphanBytes"] = orphan.value("bytes").toULongLong();
-    result["orphanFileCount"] = orphan.value("count").toInt();
-    result["orphanFiles"] = orphan.value("files").toList();
-    result["totalBytes"] = activeBytes + result.value("orphanBytes").toULongLong();
-    return result;
+    return m_settingsDiagnosticsManager->getTemporaryStorageStatus();
 }
 
 QVariantMap ApplicationController::clearTemporaryStorage() {
-    QVariantMap result;
-    if (m_activeScanCancellation) {
-        result["success"] = false;
-        result["error"] = "Un scan est actif : annule ou attends la fin avant de nettoyer le temporaire.";
-        return result;
-    }
-
-    const auto before = getTemporaryStorageStatus();
-    auto state = scanState();
-    const qulonglong clearedCandidates = static_cast<qulonglong>(state.candidates().size());
-    const bool hadUndo = m_hasPreviousCandidates;
-    const bool hadSnapshot = !state.snapshot().isEmpty();
-
-    state.clearCandidates();
-    clearCandidateUndo();
-    clearCandidateValueHistory();
-    state.clearSnapshot();
-    m_smartSearchActive = false;
-    m_smartSearchInitialValue.clear();
-    m_smartSearchTargetValue.clear();
-
-    QDir dir(QDir::tempPath());
-    QVariantList removedFiles;
-    QVariantList failedFiles;
-    qulonglong removedBytes = 0;
-    for (const auto& name : killengineTemporaryFileNames()) {
-        const QString path = dir.absoluteFilePath(name);
-        const QFileInfo info(path);
-        const qulonglong bytes = static_cast<qulonglong>(std::max<qint64>(0, info.size()));
-        if (QFile::remove(path)) {
-            QVariantMap file;
-            file["path"] = path;
-            file["bytes"] = bytes;
-            removedFiles.append(file);
-            removedBytes += bytes;
-        } else if (info.exists()) {
-            failedFiles.append(path);
-        }
-    }
-
-    result["success"] = failedFiles.isEmpty();
-    result["tempPath"] = dir.absolutePath();
-    result["beforeBytes"] = before.value("totalBytes").toULongLong();
-    result["closedActiveBytes"] = before.value("activeBytes").toULongLong();
-    result["removedBytes"] = removedBytes;
-    result["removedFileCount"] = removedFiles.size();
-    result["removedFiles"] = removedFiles;
-    result["failedFiles"] = failedFiles;
-    result["clearedCandidates"] = clearedCandidates;
-    result["hadUndoReduction"] = hadUndo;
-    result["hadUnknownSnapshot"] = hadSnapshot;
-    result["message"] = failedFiles.isEmpty()
-        ? QString("Stockage temporaire nettoyé : %1 fichier(s), %2 octet(s) supprimé(s).")
-              .arg(removedFiles.size())
-              .arg(removedBytes)
-        : QString("Nettoyage partiel : %1 fichier(s) supprimé(s), %2 fichier(s) verrouillé(s).")
-              .arg(removedFiles.size())
-              .arg(failedFiles.size());
-    appendSmartSearchDebug("temporary_storage_cleared", result);
-    return result;
+    return m_settingsDiagnosticsManager->clearTemporaryStorage();
 }
-
 QVariantMap ApplicationController::getSmartSearchContext() const {
     QVariantMap result;
     QVariantList chatTargets;
@@ -7217,32 +7129,8 @@ QString ApplicationController::ping(const QString& message) {
 }
 
 QVariantMap ApplicationController::getSettings() const {
-    QSettings settings;
-    QVariantMap result;
-    result["language"] = settings.value("ui/language", "fr").toString();
-    result["defaultValueType"] = settings.value("scan/defaultValueType", "Int32").toString();
-    result["scanMaxResults"] = boundedSettingInt(
-        settings, "scan/maxResults", kDefaultScanMaxResults, 1000, 10000000);
-    result["scanChunkSizeMb"] = boundedSettingInt(
-        settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 0, 64);
-    result["performanceMode"] = settings.value("scan/performanceMode", "Auto").toString();
-    result["scanMaxWorkerThreads"] = boundedSettingInt(
-        settings, "scan/maxWorkerThreads", kDefaultScanMaxWorkerThreads, 0, 128);
-    result["scanMaxInFlightMb"] = boundedSettingInt(
-        settings, "scan/maxInFlightMb", kDefaultScanMaxInFlightMb, 0, 32768);
-    result["candidateFileBackedThreshold"] = boundedSettingInt(
-        settings, "scan/candidateFileBackedThreshold", kDefaultCandidateFileThreshold, 1, 5000000);
-    result["unknownSnapshotMaxMb"] = unknownSnapshotMaxMbFromSettings();
-    result["fastScan"] = settings.value("scan/fastScan", true).toBool();
-    result["smartSearchDebugEnabled"] = settings.value("diagnostics/smartSearchDebugEnabled", true).toBool();
-    result["smartSearchDebugMaxEvents"] = boundedSettingInt(
-        settings, "diagnostics/smartSearchDebugMaxEvents", 30, 5, 200);
-    result["modelPath"] = settings.value("ai/modelPath", "").toString();
-    result["modelEnabled"] = settings.value("ai/modelEnabled", true).toBool();
-    result["modelThreads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
-    return result;
+    return m_settingsDiagnosticsManager->getSettings();
 }
-
 bool ApplicationController::hasSeenOnboarding() const {
     return QSettings().value("ui/hasSeenOnboarding", false).toBool();
 }
@@ -7706,586 +7594,60 @@ QVariantMap ApplicationController::writeMemoryValueKernel(const QString& address
 }
 
 QVariantMap ApplicationController::getAiModelStatus() const {
-    QSettings settings;
-    QVariantMap result;
-    QVariantList modelCandidates;
-    QVariantList executableCandidates;
-    QVariantList embeddedAgents;
-    QVariantList embeddedModelFolders;
-
-    const QString configuredModel = settings.value("ai/modelPath", "").toString().trimmed();
-    const bool modelEnabled = settings.value("ai/modelEnabled", true).toBool();
-    const QString envModel = QProcessEnvironment::systemEnvironment().value("KILLENGINE_QWEN_GGUF").trimmed();
-    const QString envExe = QProcessEnvironment::systemEnvironment().value("KILLENGINE_LLAMA_CLI").trimmed();
-    const auto model = killai::ModelLocator::findQwenGguf();
-
-    for (const auto& path : killai::ModelLocator::candidateModelPaths()) {
-        QFileInfo file(path);
-        QVariantMap item;
-        item["path"] = path;
-        item["exists"] = file.exists() && file.isFile();
-        item["isGguf"] = file.suffix().compare("gguf", Qt::CaseInsensitive) == 0;
-        item["source"] = path == configuredModel
-            ? QString("settings")
-            : (path == envModel ? QString("KILLENGINE_QWEN_GGUF") : QString("candidate"));
-        if (file.exists()) {
-            item["absolutePath"] = file.absoluteFilePath();
-            item["sizeBytes"] = static_cast<qlonglong>(file.size());
-        }
-        modelCandidates.append(item);
-    }
-
-    QString executablePath;
-    const QDir appDir(QCoreApplication::applicationDirPath());
-    const QStringList exeCandidates = {
-        envExe,
-        appDir.filePath("llama-cli.exe"),
-        appDir.filePath("llama.cpp/llama-cli.exe"),
-        appDir.filePath("../../third_party/llama.cpp/llama-cli.exe"),
-        appDir.filePath("../../third_party/llama.cpp/build/bin/Release/llama-cli.exe"),
-        appDir.filePath("../../third_party/llama.cpp/build/bin/llama-cli.exe"),
-        QDir::current().filePath("third_party/llama.cpp/llama-cli.exe"),
-        QDir::current().filePath("third_party/llama.cpp/build/bin/Release/llama-cli.exe"),
-        QDir::current().filePath("third_party/llama.cpp/build/bin/llama-cli.exe"),
-    };
-    QSet<QString> seenExeCandidates;
-    for (const auto& candidate : exeCandidates) {
-        const QString trimmed = candidate.trimmed();
-        if (trimmed.isEmpty() || seenExeCandidates.contains(trimmed)) {
-            continue;
-        }
-        seenExeCandidates.insert(trimmed);
-        QFileInfo file(trimmed);
-        const bool exists = file.exists() && file.isFile();
-        if (executablePath.isEmpty() && exists) {
-            executablePath = file.absoluteFilePath();
-        }
-        QVariantMap item;
-        item["path"] = trimmed;
-        item["exists"] = exists;
-        item["source"] = trimmed == envExe ? QString("KILLENGINE_LLAMA_CLI") : QString("candidate");
-        if (exists) {
-            item["absolutePath"] = file.absoluteFilePath();
-            item["sizeBytes"] = static_cast<qlonglong>(file.size());
-        }
-        executableCandidates.append(item);
-    }
-
-    const QStringList modelRootCandidates = {
-        appDir.filePath("model"),
-        appDir.filePath("../../model"),
-        QDir::current().filePath("model"),
-    };
-    QSet<QString> seenModelRoots;
-    for (const auto& rootCandidate : modelRootCandidates) {
-        QFileInfo rootInfo(rootCandidate);
-        if (!rootInfo.exists() || !rootInfo.isDir()) {
-            continue;
-        }
-        const QString rootPath = rootInfo.canonicalFilePath().isEmpty()
-            ? rootInfo.absoluteFilePath()
-            : rootInfo.canonicalFilePath();
-        if (seenModelRoots.contains(rootPath)) {
-            continue;
-        }
-        seenModelRoots.insert(rootPath);
-
-        const QDir rootDir(rootPath);
-        const auto subdirs = rootDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-        for (const auto& subdirInfo : subdirs) {
-            const QDir subdir(subdirInfo.absoluteFilePath());
-            const auto ggufFiles = subdir.entryInfoList(QStringList{"*.gguf"}, QDir::Files, QDir::Name);
-
-            QVariantMap modelFolder;
-            modelFolder["id"] = subdirInfo.fileName();
-            modelFolder["path"] = subdirInfo.absoluteFilePath();
-            modelFolder["hasGguf"] = !ggufFiles.isEmpty();
-            modelFolder["ggufCount"] = ggufFiles.size();
-            if (!ggufFiles.isEmpty()) {
-                modelFolder["primaryModelPath"] = ggufFiles.first().absoluteFilePath();
-                modelFolder["primaryModelSizeBytes"] = static_cast<qlonglong>(ggufFiles.first().size());
-            }
-            embeddedModelFolders.append(modelFolder);
-
-            const QFileInfo manifestInfo(subdir.filePath("MODEL_MANIFEST.json"));
-            if (!manifestInfo.exists() || !manifestInfo.isFile()) {
-                continue;
-            }
-
-            QVariantMap agent;
-            agent["id"] = subdirInfo.fileName();
-            agent["displayName"] = subdirInfo.fileName();
-            agent["role"] = QString("agent");
-            agent["provider"] = QString("llama.cpp");
-            agent["manifestPath"] = manifestInfo.absoluteFilePath();
-            agent["valid"] = false;
-            agent["modelFound"] = false;
-
-            QFile manifestFile(manifestInfo.absoluteFilePath());
-            if (!manifestFile.open(QIODevice::ReadOnly)) {
-                agent["error"] = QString("Manifest illisible.");
-                embeddedAgents.append(agent);
-                continue;
-            }
-
-            const QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
-            if (!doc.isObject()) {
-                agent["error"] = QString("Manifest JSON invalide.");
-                embeddedAgents.append(agent);
-                continue;
-            }
-
-            const QJsonObject object = doc.object();
-            agent["valid"] = true;
-            agent["id"] = object.value("id").toString(subdirInfo.fileName());
-            agent["displayName"] = object.value("displayName").toString(agent.value("id").toString());
-            agent["role"] = object.value("role").toString("agent");
-            agent["provider"] = object.value("provider").toString("llama.cpp");
-            agent["required"] = object.value("required").toBool(true);
-
-            const QString manifestModelPath = object.value("modelPath").toString().trimmed();
-            const QFileInfo manifestModelInfo(manifestModelPath.isEmpty()
-                ? QString()
-                : subdir.filePath(manifestModelPath));
-            agent["modelPath"] = manifestModelInfo.absoluteFilePath();
-            agent["modelFound"] = manifestModelInfo.exists() && manifestModelInfo.isFile();
-            if (manifestModelInfo.exists()) {
-                agent["modelSizeBytes"] = static_cast<qlonglong>(manifestModelInfo.size());
-            }
-            embeddedAgents.append(agent);
-        }
-    }
-
-    result["success"] = true;
-    result["enabled"] = modelEnabled;
-    result["backend"] = modelEnabled && model.found && !executablePath.isEmpty() ? QString("llama.cpp") : QString("deterministic");
-    result["ready"] = modelEnabled && model.found && !executablePath.isEmpty();
-    result["available"] = model.found && !executablePath.isEmpty();
-    result["configuredModelPath"] = configuredModel;
-    result["envModelPath"] = envModel;
-    result["envExecutablePath"] = envExe;
-    result["modelFound"] = model.found;
-    result["modelPath"] = model.path;
-    result["modelSource"] = model.source;
-    result["modelError"] = model.errorMessage;
-    result["executableFound"] = !executablePath.isEmpty();
-    result["executablePath"] = executablePath;
-    result["modelCandidates"] = modelCandidates;
-    result["executableCandidates"] = executableCandidates;
-    result["embeddedAgents"] = embeddedAgents;
-    result["embeddedAgentCount"] = embeddedAgents.size();
-    result["embeddedModelFolders"] = embeddedModelFolders;
-    result["threads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
-    result["message"] = result.value("ready").toBool()
-        ? QString("IA embarquée prête.")
-        : QString("IA embarquée indisponible: modèle ou runtime manquant.");
-    return result;
+    return m_settingsDiagnosticsManager->getAiModelStatus();
 }
 
 QVariantMap ApplicationController::browseForModelFile() {
-    QVariantMap result;
-    result["success"] = false;
-
-    const QString path = QFileDialog::getOpenFileName(
-        nullptr,
-        "Choisir un modèle GGUF",
-        QString(),
-        "Modèles GGUF (*.gguf);;Tous les fichiers (*.*)");
-
-    if (path.isEmpty()) {
-        result["cancelled"] = true;
-        return result;
-    }
-
-    result["success"] = true;
-    result["path"] = path;
-    return result;
+    return m_settingsDiagnosticsManager->browseForModelFile();
 }
 
-QVariantMap ApplicationController::saveSettings(const QVariantMap& incoming) {
-    QSettings settings;
-
-    const QString language = incoming.value("language", "fr").toString() == "en" ? "en" : "fr";
-    const QString valueType = incoming.value("defaultValueType", "Int32").toString();
-    killcore::ValueType parsedType;
-
-    settings.setValue("ui/language", language);
-    settings.setValue(
-        "scan/defaultValueType",
-        killcore::parseValueType(valueType, &parsedType) ? valueType : "Int32");
-    settings.setValue(
-        "scan/maxResults",
-        std::clamp(incoming.value("scanMaxResults", kDefaultScanMaxResults).toInt(), 1000, 10000000));
-    settings.setValue(
-        "scan/chunkSizeMb",
-        std::clamp(incoming.value("scanChunkSizeMb", kDefaultScanChunkSizeMb).toInt(), 0, 64));
-    const QByteArray performanceModeName = incoming.value("performanceMode", "Auto").toString().toLatin1();
-    settings.setValue(
-        "scan/performanceMode",
-        killcore::performanceModeToString(killcore::parsePerformanceMode(
-            performanceModeName.constData(),
-            killcore::PerformanceMode::Auto)));
-    settings.setValue(
-        "scan/maxWorkerThreads",
-        std::clamp(incoming.value("scanMaxWorkerThreads", kDefaultScanMaxWorkerThreads).toInt(), 0, 128));
-    settings.setValue(
-        "scan/maxInFlightMb",
-        std::clamp(incoming.value("scanMaxInFlightMb", kDefaultScanMaxInFlightMb).toInt(), 0, 32768));
-    settings.setValue(
-        "scan/candidateFileBackedThreshold",
-        std::clamp(incoming.value("candidateFileBackedThreshold", kDefaultCandidateFileThreshold).toInt(), 1, 5000000));
-    const int unknownSnapshotMaxMb = incoming.value("unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb).toInt();
-    settings.setValue(
-        "scan/unknownSnapshotMaxMb",
-        unknownSnapshotMaxMb == -1 ? -1 : std::clamp(unknownSnapshotMaxMb, 128, 32768));
-    settings.setValue("scan/fastScan", incoming.value("fastScan", true).toBool());
-    settings.setValue(
-        "diagnostics/smartSearchDebugEnabled",
-        incoming.value("smartSearchDebugEnabled", true).toBool());
-    settings.setValue(
-        "diagnostics/smartSearchDebugMaxEvents",
-        std::clamp(incoming.value("smartSearchDebugMaxEvents", 30).toInt(), 5, 200));
-    settings.setValue("ai/modelPath", incoming.value("modelPath", "").toString().trimmed());
-    settings.setValue("ai/modelEnabled", incoming.value("modelEnabled", true).toBool());
-    settings.setValue(
-        "ai/modelThreads",
-        std::clamp(incoming.value("modelThreads", 4).toInt(), 1, 32));
-    settings.sync();
-    scanState().setFileBackedThreshold(candidateFileBackedThresholdFromSettings());
-
-    QVariantMap result = getSettings();
-    result["success"] = true;
-    return result;
+QVariantMap ApplicationController::saveSettings(const QVariantMap& settings) {
+    return m_settingsDiagnosticsManager->saveSettings(settings);
 }
 
 QString ApplicationController::getLogFilePath() const {
-    return killcore::Logger::instance().logFilePath();
+    return m_settingsDiagnosticsManager->getLogFilePath();
 }
 
 QString ApplicationController::getSmartSearchDebugFilePath() const {
-    return smartSearchDebugFilePath();
+    return m_settingsDiagnosticsManager->getSmartSearchDebugFilePath();
 }
 
 QString ApplicationController::getScanTelemetryFilePath() const {
-    return scanTelemetryFilePath();
+    return m_settingsDiagnosticsManager->getScanTelemetryFilePath();
 }
 
 QVariantMap ApplicationController::getSmartSearchDebugEvents(int maxEvents) const {
-    QVariantMap result;
-    QVariantList events;
-    result["success"] = false;
-    result["path"] = smartSearchDebugFilePath();
-    result["events"] = events;
-
-    QSettings settings;
-    if (maxEvents <= 0) {
-        maxEvents = boundedSettingInt(settings, "diagnostics/smartSearchDebugMaxEvents", 30, 5, 200);
-    }
-    maxEvents = std::clamp(maxEvents, 1, 200);
-
-    QFile file(smartSearchDebugFilePath());
-    if (!file.exists()) {
-        result["success"] = true;
-        result["error"] = "";
-        return result;
-    }
-
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        result["error"] = "Impossible de lire le fichier debug Smart Search.";
-        return result;
-    }
-
-    constexpr qint64 kMaxTailBytes = 1024 * 1024;
-    if (file.size() > kMaxTailBytes) {
-        file.seek(file.size() - kMaxTailBytes);
-        file.readLine();
-    }
-
-    QList<QByteArray> lines;
-    while (!file.atEnd()) {
-        const QByteArray line = file.readLine().trimmed();
-        if (line.isEmpty()) {
-            continue;
-        }
-        lines.append(line);
-        if (lines.size() > maxEvents) {
-            lines.removeFirst();
-        }
-    }
-
-    for (const auto& line : lines) {
-        QJsonParseError parseError;
-        const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
-        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-            QVariantMap parseEntry;
-            parseEntry["event"] = "parse_error";
-            parseEntry["raw"] = QString::fromUtf8(line);
-            parseEntry["error"] = parseError.errorString();
-            events.append(parseEntry);
-            continue;
-        }
-        events.append(doc.object().toVariantMap());
-    }
-
-    result["success"] = true;
-    result["error"] = "";
-    result["events"] = events;
-    return result;
+    return m_settingsDiagnosticsManager->getSmartSearchDebugEvents(maxEvents);
 }
 
 QVariantMap ApplicationController::clearSmartSearchDebugEvents() {
-    QVariantMap result;
-    result["success"] = false;
-    result["path"] = smartSearchDebugFilePath();
-
-    QFile file(smartSearchDebugFilePath());
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        result["error"] = "Impossible de vider le fichier debug Smart Search.";
-        return result;
-    }
-
-    result["success"] = true;
-    result["error"] = "";
-    return result;
+    return m_settingsDiagnosticsManager->clearSmartSearchDebugEvents();
 }
 
 QVariantMap ApplicationController::getLogTail(int maxLines) const {
-    QVariantMap result;
-    QVariantList lines;
-    result["success"] = false;
-    result["path"] = getLogFilePath();
-    result["lines"] = lines;
-
-    maxLines = std::clamp(maxLines, 1, 1000);
-
-    QFile file(getLogFilePath());
-    if (!file.exists()) {
-        result["success"] = true;
-        result["error"] = "";
-        return result;
-    }
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        result["error"] = "Impossible de lire le fichier log.";
-        return result;
-    }
-
-    constexpr qint64 kMaxTailBytes = 2 * 1024 * 1024;
-    if (file.size() > kMaxTailBytes) {
-        file.seek(file.size() - kMaxTailBytes);
-        file.readLine();
-    }
-
-    QList<QByteArray> tail;
-    while (!file.atEnd()) {
-        const QByteArray line = file.readLine().trimmed();
-        if (line.isEmpty()) {
-            continue;
-        }
-        tail.append(line);
-        if (tail.size() > maxLines) {
-            tail.removeFirst();
-        }
-    }
-
-    for (const auto& line : tail) {
-        lines.append(QString::fromUtf8(line));
-    }
-
-    result["success"] = true;
-    result["error"] = "";
-    result["lines"] = lines;
-    return result;
+    return m_settingsDiagnosticsManager->getLogTail(maxLines);
 }
 
 QVariantMap ApplicationController::exportDiagnostics() {
-    QVariantMap result;
-    result["success"] = false;
-
-    const QString exportDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation).isEmpty()
-        ? QDir::currentPath()
-        : QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
-    const QString exportPath = QDir(exportDir).filePath("KillEngine-diagnostics-" + timestamp + ".kezdiag");
-
-    QVariantMap manifest;
-    manifest["createdAt"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-    manifest["version"] = getVersion();
-    manifest["pid"] = m_pid;
-    manifest["processName"] = m_processName;
-    manifest["attached"] = m_attached;
-    const auto& candidateStore = scanState().candidates();
-    manifest["candidateCount"] = static_cast<qulonglong>(candidateStore.size());
-    manifest["candidateStoreFileBacked"] = candidateStore.isFileBacked();
-    manifest["candidateStorePath"] = candidateStore.backingFilePath();
-    manifest["candidateStoreBytes"] = static_cast<qulonglong>(candidateStore.storageBytes());
-    manifest["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidateStore.estimatedMemoryBytes());
-    manifest["logFilePath"] = getLogFilePath();
-    manifest["smartSearchDebugFilePath"] = smartSearchDebugFilePath();
-    manifest["scanTelemetryFilePath"] = scanTelemetryFilePath();
-    manifest["crashDirectory"] = CrashHandler::crashDirectory();
-    manifest["settings"] = getSettings();
-
-    QDir crashDir(CrashHandler::crashDirectory());
-    const auto crashFiles = crashDir.entryInfoList(QStringList{"*.crash.txt"}, QDir::Files, QDir::Time);
-    // Les .dmp (minidump binaire, WinDbg/Visual Studio) ne rentrent pas dans
-    // ce bundle texte compressé comme les .crash.txt embarqués plus bas —
-    // juste listés dans le manifeste pour que la personne qui traite le
-    // diagnostic sache qu'ils existent et où les récupérer séparément
-    // (chaque .crash.txt référence aussi son .dmp pairé via "minidump=").
-    const auto dumpFiles = crashDir.entryInfoList(QStringList{"*.dmp"}, QDir::Files, QDir::Time);
-    QStringList recentDumpPaths;
-    for (qsizetype i = 0; i < std::min<qsizetype>(dumpFiles.size(), 5); ++i) {
-        recentDumpPaths.append(dumpFiles.at(i).absoluteFilePath());
-    }
-    manifest["recentMinidumps"] = recentDumpPaths;
-
-    QByteArray payload;
-    auto appendSection = [&payload](const QString& name, const QByteArray& data) {
-        payload.append("\n===== ");
-        payload.append(name.toUtf8());
-        payload.append(" =====\n");
-        payload.append(data);
-        if (!payload.endsWith('\n')) {
-            payload.append('\n');
-        }
-    };
-
-    appendSection("manifest.json", QJsonDocument(QJsonObject::fromVariantMap(manifest)).toJson(QJsonDocument::Indented));
-
-    QFile logFile(getLogFilePath());
-    if (logFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        appendSection(QFileInfo(logFile).fileName(), logFile.readAll());
-    }
-
-    QFile debugFile(smartSearchDebugFilePath());
-    if (debugFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        appendSection(QFileInfo(debugFile).fileName(), debugFile.readAll());
-    }
-
-    QFile scanTelemetryFile(scanTelemetryFilePath());
-    if (scanTelemetryFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        appendSection(QFileInfo(scanTelemetryFile).fileName(), scanTelemetryFile.readAll());
-    }
-
-    const qsizetype crashFileCount = std::min<qsizetype>(crashFiles.size(), 5);
-    for (qsizetype i = 0; i < crashFileCount; ++i) {
-        QFile crashFile(crashFiles.at(i).absoluteFilePath());
-        if (crashFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            appendSection("crashes/" + crashFiles.at(i).fileName(), crashFile.readAll());
-        }
-    }
-
-    QFile out(exportPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        result["error"] = "Impossible de créer le fichier diagnostic.";
-        result["path"] = exportPath;
-        return result;
-    }
-    out.write(qCompress(payload, 9));
-    out.close();
-
-    result["success"] = true;
-    result["path"] = exportPath;
-    result["bytesWritten"] = static_cast<qulonglong>(QFileInfo(exportPath).size());
-    result["error"] = "";
-
-    // Ouvre l'explorateur Windows sur le dossier contenant l'export.
-    // L'échec de l'ouverture ne doit pas invalider l'export.
-    const QString folderPath = QFileInfo(exportPath).absolutePath();
-    const bool folderOpened = QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
-    result["folderOpened"] = folderOpened;
-    if (!folderOpened) {
-        result["openFolderError"] = "Le dossier de l'export n'a pas pu être ouvert automatiquement. Chemin : " + folderPath;
-    } else {
-        result["openFolderError"] = "";
-    }
-
-    return result;
+    return m_settingsDiagnosticsManager->exportDiagnostics();
 }
 
 QString ApplicationController::smartSearchDebugFilePath() const {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    if (dir.isEmpty()) {
-        dir = QDir::currentPath();
-    }
-    dir += "/logs";
-    QDir().mkpath(dir);
-    return dir + "/smart_search_debug.jsonl";
+    return m_settingsDiagnosticsManager->smartSearchDebugFilePath();
 }
 
 QString ApplicationController::scanTelemetryFilePath() const {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    if (dir.isEmpty()) {
-        dir = QDir::currentPath();
-    }
-    dir += "/logs";
-    QDir().mkpath(dir);
-    return dir + "/scan_telemetry.jsonl";
+    return m_settingsDiagnosticsManager->scanTelemetryFilePath();
 }
 
 void ApplicationController::appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const {
-    QSettings settings;
-    if (!settings.value("diagnostics/smartSearchDebugEnabled", true).toBool()) {
-        return;
-    }
-
-    QVariantMap entry = payload;
-    entry["event"] = event;
-    entry["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-    entry["pid"] = m_pid;
-    entry["processName"] = m_processName;
-
-    const QString path = smartSearchDebugFilePath();
-    QFileInfo debugInfo(path);
-    if (debugInfo.exists() && debugInfo.size() > 8 * 1024 * 1024) {
-        QFile::remove(path + ".old");
-        QFile::rename(path, path + ".old");
-    }
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        KE_LOG_WARN() << "Unable to open Smart Search debug file: "
-                      << path.toStdString();
-        return;
-    }
-
-    file.write(QJsonDocument(QJsonObject::fromVariantMap(entry)).toJson(QJsonDocument::Compact));
-    file.write("\n");
+    m_settingsDiagnosticsManager->appendSmartSearchDebug(event, payload);
 }
 
 void ApplicationController::appendScanTelemetry(const QString& event, const QVariantMap& payload) const {
-    QSettings settings;
-
-    QVariantMap entry = payload;
-    entry["event"] = event;
-    entry["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-    entry["pid"] = m_pid;
-    entry["processName"] = m_processName;
-    entry["performanceMode"] = settings.value("scan/performanceMode", "Auto").toString();
-    entry["scanChunkSizeMb"] = boundedSettingInt(settings, "scan/chunkSizeMb", kDefaultScanChunkSizeMb, 0, 64);
-    entry["scanMaxWorkerThreads"] = boundedSettingInt(settings, "scan/maxWorkerThreads", kDefaultScanMaxWorkerThreads, 0, 128);
-    entry["scanMaxInFlightMb"] = boundedSettingInt(settings, "scan/maxInFlightMb", kDefaultScanMaxInFlightMb, 0, 32768);
-    entry["scanMaxResults"] = boundedSettingInt(settings, "scan/maxResults", kDefaultScanMaxResults, 1000, 10000000);
-    entry["fastScan"] = settings.value("scan/fastScan", true).toBool();
-
-    const QString path = scanTelemetryFilePath();
-    QFileInfo telemetryInfo(path);
-    if (telemetryInfo.exists() && telemetryInfo.size() > 16 * 1024 * 1024) {
-        QFile::remove(path + ".old");
-        QFile::rename(path, path + ".old");
-    }
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        KE_LOG_WARN() << "Unable to open scan telemetry file: "
-                      << path.toStdString();
-        return;
-    }
-
-    file.write(QJsonDocument(QJsonObject::fromVariantMap(entry)).toJson(QJsonDocument::Compact));
-    file.write("\n");
+    m_settingsDiagnosticsManager->appendScanTelemetry(event, payload);
 }
-
 // ---------------------------------------------------------------------------
 // Phase 11 — Profils
 // ---------------------------------------------------------------------------
