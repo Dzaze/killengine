@@ -70,9 +70,13 @@ Cluster vérifié en direct via le pipe (`scripts/test-automation-pipe-profile-m
 | `deleteProfile(profileName)` | 1 string | booléen brut, pas un objet |
 | `listProfiles()` | aucun | liste de profils (pas un objet englobant) |
 
-### Où trouver la forme exacte d'une réponse pas listée ici
+### Référence exhaustive de toutes les méthodes
 
-`application_controller.h` donne la signature (types des **paramètres**), mais **pas** la forme du `QVariantMap` retourné — ça a déjà fait perdre du temps à un agent qui devinait (PHASE 231/232). Le réflexe qui marche à tous les coups et ne devient jamais obsolète :
+`docs/AUTOMATION_API_REFERENCE.md` (PHASE 238, 30/08/2026) inventorie la forme de réponse des ~200 méthodes `Q_INVOKABLE` restantes, groupées par domaine (scan, write/freeze, trainer, CLR, patch/AOB, debug, settings/diagnostics, workspace/pointer chains, Lua, chat/IA, injection, save-file, kernel, réseau/speedhack). Fait une fois le refactor entièrement clos (backend C1-C14, frontend S1-S12), condition explicitement posée en PHASE 233 pour ne pas documenter une surface encore en mouvement. **Reste un instantané figé à sa date de génération** — une méthode modifiée après coup (un chantier en cours au moment de la génération, ex. `inferStructureInstanceDelta`, est marqué comme tel dans le doc) doit être revérifiée avec la méthode ci-dessous plutôt que de faire aveuglément confiance à l'instantané.
+
+### Où trouver la forme exacte d'une réponse pas (ou plus) à jour
+
+`application_controller.h` donne la signature (types des **paramètres**), mais **pas** la forme du `QVariantMap` retourné — ça a déjà fait perdre du temps à un agent qui devinait (PHASE 231/232). Le réflexe qui marche à tous les coups et ne devient jamais obsolète, à utiliser pour toute méthode ajoutée/modifiée après la génération de `docs/AUTOMATION_API_REFERENCE.md` :
 
 ```powershell
 # Cherche directement la construction de la réponse dans le manager concerné.
@@ -80,7 +84,7 @@ Cluster vérifié en direct via le pipe (`scripts/test-automation-pipe-profile-m
 Select-String -Path apps\desktop\profile_manager.cpp -Pattern 'result\["\w+"\]\s*='
 ```
 
-Si la méthode n'a pas encore été extraite dans un `*_manager.cpp` dédié (voir `docs/REFACTOR_ROADMAP.md` pour la liste), elle vit encore dans `apps/desktop/application_controller.cpp` — même recherche, même fichier. Ne jamais documenter les ~200 méthodes `Q_INVOKABLE` une par une ici : ça deviendrait faux au premier refactor non répercuté (voir le piège déjà vécu sur `docs/POWER_UP_ROADMAP.md`) — seule cette méthode de recherche reste toujours vraie.
+Si la méthode n'a pas encore été extraite dans un `*_manager.cpp` dédié (voir `docs/REFACTOR_ROADMAP.md` pour la liste), elle vit encore dans `apps/desktop/application_controller.cpp` — même recherche, même fichier.
 
 ## Depuis un script Lua
 
