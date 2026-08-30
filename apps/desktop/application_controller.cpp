@@ -3869,6 +3869,38 @@ QVariantMap ApplicationController::getInvestigationNotebookSynthesis() const {
     return m_investigationNotebookManager->getSynthesis();
 }
 
+QVariantMap ApplicationController::proposeInvestigationNotebookPlan(const QString& symptom, const QVariantMap& options) {
+    QVariantMap plan = m_ai.proposeInvestigationNotebookPlan(symptom, options);
+    if (plan.value("success").toBool() != true) {
+        return plan;
+    }
+
+    if (options.value("resetFirst", false).toBool()) {
+        m_investigationNotebookManager->resetNotebook();
+    }
+
+    const int baselineScore = options.value("baselineScore", 50).toInt();
+    QVariantList added;
+    const QVariantList hypotheses = plan.value("hypotheses").toList();
+    for (const QVariant& item : hypotheses) {
+        const QString description = item.toString().trimmed();
+        if (description.isEmpty()) {
+            continue;
+        }
+        const QVariantMap addedResult = m_investigationNotebookManager->addHypothesis(description, baselineScore);
+        if (addedResult.value("success").toBool()) {
+            added.append(addedResult.value("hypothesis"));
+        }
+    }
+
+    QVariantMap synthesis = m_investigationNotebookManager->getSynthesis();
+    plan["addedHypotheses"] = added;
+    plan["confirmed"] = synthesis.value("confirmed");
+    plan["active"] = synthesis.value("active");
+    plan["refuted"] = synthesis.value("refuted");
+    return plan;
+}
+
 QVariantMap ApplicationController::resetInvestigationNotebook() {
     return m_investigationNotebookManager->resetNotebook();
 }

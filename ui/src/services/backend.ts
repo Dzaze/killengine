@@ -1212,6 +1212,7 @@ export interface AiModelStatus {
   addInvestigationHypothesis?(description: string, baselineScore?: number): Promise<Record<string, unknown>>
   recordInvestigationTestResult?(hypothesisId: string, confirmed: boolean, evidenceNote: string): Promise<Record<string, unknown>>
   getInvestigationNotebookSynthesis?(): Promise<Record<string, unknown>>
+  proposeInvestigationNotebookPlan?(symptom: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   resetInvestigationNotebook?(): Promise<Record<string, unknown>>
   freezeWithBreakpoint?(addressHex: string, valueType: string, value: string, options: Record<string, unknown>): Promise<MemoryWriteResult>
   stopBreakpointFreeze?(): Promise<MemoryWriteResult>
@@ -1989,6 +1990,30 @@ class BackendService {
           confirmed: [],
           active: [],
           refuted: [],
+        }
+      },
+      async proposeInvestigationNotebookPlan(_symptom: string, _options: Record<string, unknown>) {
+        return {
+          success: true,
+          modelUsed: false,
+          source: 'mock',
+          hypotheses: [
+            'La valeur affichée est une copie UI recalculée depuis une source interne.',
+            'La vraie source numérique existe ailleurs en mémoire.',
+          ],
+          addedHypotheses: [],
+          confirmed: [],
+          active: [],
+          refuted: [],
+          nextTest: {
+            title: 'Tracer la valeur affichée',
+            tool: 'scan_ui_strings',
+            risk: 'safe',
+            preconditions: ['Processus cible attaché'],
+            expectedIfTrue: 'Une chaîne ou une source numérique suit la valeur.',
+            expectedIfFalse: 'Basculer vers Unknown initial value.',
+            rationale: 'Mock backend.',
+          },
         }
       },
       async resetInvestigationNotebook() {

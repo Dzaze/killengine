@@ -41,6 +41,10 @@ public:
     /// Interprète une requête utilisateur en intention structurée validée.
     QVariantMap processIntent(const QString& query);
 
+    /// PHASE 120-G : le modèle local propose les hypothèses et le prochain test,
+    /// le code conserve seul la pondération numérique.
+    QVariantMap proposeInvestigationNotebookPlan(const QString& symptom, const QVariantMap& context = {});
+
     /// Enregistre le résultat d'une action issue d'un tool call precedent.
     /// L'historique (query + outil + outcome) alimente les prompts suivants
     /// pour que le modele propose une alternative adaptee apres un echec.

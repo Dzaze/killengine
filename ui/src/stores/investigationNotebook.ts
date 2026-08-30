@@ -1,8 +1,8 @@
 /**
  * KillEngine - store du carnet d'hypotheses PHASE 120-F.
  *
- * Interface manuelle uniquement : le backend garde le moteur deterministe de
- * ponderation, ce store ne fait que synchroniser la synthese et l'etat UI.
+ * Le backend garde le moteur deterministe de ponderation ; le modele local
+ * propose seulement des hypotheses et un prochain test.
  */
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -17,6 +17,16 @@ export interface InvestigationHypothesis {
   confidenceScore: number
   status: InvestigationHypothesisStatus
   evidenceLog: string[]
+}
+
+export interface InvestigationNextTest {
+  title: string
+  tool: string
+  risk: string
+  preconditions: string[]
+  expectedIfTrue: string
+  expectedIfFalse: string
+  rationale: string
 }
 
 function asHypothesis(value: unknown): InvestigationHypothesis | null {
@@ -41,14 +51,34 @@ function asHypothesisList(value: unknown): InvestigationHypothesis[] {
   return value.map(asHypothesis).filter((item): item is InvestigationHypothesis => item !== null)
 }
 
+function asNextTest(value: unknown): InvestigationNextTest | null {
+  if (!value || typeof value !== 'object') return null
+  const item = value as Record<string, unknown>
+  const title = String(item.title ?? '').trim()
+  if (!title) return null
+  return {
+    title,
+    tool: String(item.tool ?? '').trim(),
+    risk: String(item.risk ?? 'safe').trim(),
+    preconditions: Array.isArray(item.preconditions) ? item.preconditions.map((entry) => String(entry)) : [],
+    expectedIfTrue: String(item.expectedIfTrue ?? '').trim(),
+    expectedIfFalse: String(item.expectedIfFalse ?? '').trim(),
+    rationale: String(item.rationale ?? '').trim(),
+  }
+}
+
 export const useInvestigationNotebookStore = defineStore('investigationNotebook', () => {
   const actionLogStore = useActionLogStore()
 
   const hypothesisDraft = ref('')
+  const symptomDraft = ref('')
   const baselineScore = ref(50)
   const confirmed = ref<InvestigationHypothesis[]>([])
   const active = ref<InvestigationHypothesis[]>([])
   const refuted = ref<InvestigationHypothesis[]>([])
+  const suggestedNextTest = ref<InvestigationNextTest | null>(null)
+  const lastPlanSource = ref('')
+  const generationBusy = ref(false)
   const evidenceNotes = ref<Record<string, string>>({})
   const busy = ref(false)
   const error = ref('')
@@ -122,6 +152,52 @@ export const useInvestigationNotebookStore = defineStore('investigationNotebook'
     }
   }
 
+  async function proposePlanFromSymptom() {
+    const symptom = symptomDraft.value.trim()
+    if (!symptom) {
+      error.value = 'Symptome vide.'
+      return null
+    }
+
+    const controller = backend.getController()
+    if (!controller.proposeInvestigationNotebookPlan) {
+      error.value = 'Generation du carnet indisponible dans ce backend.'
+      return null
+    }
+
+    generationBusy.value = true
+    busy.value = true
+    error.value = ''
+    try {
+      const result = await controller.proposeInvestigationNotebookPlan(symptom, {
+        baselineScore: baselineScore.value,
+        useModel: true,
+      })
+      lastResult.value = result
+      if (result.success === true) {
+        applySynthesis(result)
+        suggestedNextTest.value = asNextTest(result.nextTest)
+        lastPlanSource.value = String(result.source ?? result.aiBackend ?? '')
+        const addedCount = Array.isArray(result.addedHypotheses) ? result.addedHypotheses.length : 0
+        actionLogStore.addActionLog(
+          'investigation',
+          'Plan carnet propose',
+          `${addedCount} hypothese(s), prochain test: ${suggestedNextTest.value?.title ?? 'non defini'}`,
+          'success',
+        )
+      } else {
+        error.value = String(result.error ?? 'Generation refusee.')
+      }
+      return result
+    } catch (e) {
+      error.value = String(e)
+      return null
+    } finally {
+      generationBusy.value = false
+      busy.value = false
+    }
+  }
+
   async function recordTestResult(hypothesisId: string, confirmedResult: boolean) {
     const controller = backend.getController()
     if (!controller.recordInvestigationTestResult) {
@@ -173,6 +249,8 @@ export const useInvestigationNotebookStore = defineStore('investigationNotebook'
         active.value = []
         refuted.value = []
         evidenceNotes.value = {}
+        suggestedNextTest.value = null
+        lastPlanSource.value = ''
         actionLogStore.addActionLog('investigation', 'Nouveau carnet', 'Hypotheses remises a zero.', 'warning')
       } else {
         error.value = String(result.error ?? 'Reset refuse.')
@@ -188,10 +266,14 @@ export const useInvestigationNotebookStore = defineStore('investigationNotebook'
 
   return {
     hypothesisDraft,
+    symptomDraft,
     baselineScore,
     confirmed,
     active,
     refuted,
+    suggestedNextTest,
+    lastPlanSource,
+    generationBusy,
     evidenceNotes,
     busy,
     error,
@@ -199,6 +281,7 @@ export const useInvestigationNotebookStore = defineStore('investigationNotebook'
     totalCount,
     refreshNotebook,
     addHypothesis,
+    proposePlanFromSymptom,
     recordTestResult,
     resetNotebook,
   }

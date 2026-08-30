@@ -1,5 +1,6 @@
 #include "llama_runtime.h"
 
+#include "investigation_notebook_planner.h"
 #include "llama_server.h"
 #include "logging/logger.h"
 
@@ -205,6 +206,19 @@ LlamaGenerationResult LlamaRuntime::planIntent(const QString& query) const {
         return result;
     }
     auto generated = generate(buildIntentPrompt(query), 256);
+    if (generated.success) {
+        generated.output = stripThinkingBlocks(generated.output);
+    }
+    return generated;
+}
+
+LlamaGenerationResult LlamaRuntime::planInvestigationNotebook(const QString& symptom, const QVariantMap& context) const {
+    LlamaGenerationResult result;
+    if (!m_info.available) {
+        result.errorMessage = m_info.errorMessage;
+        return result;
+    }
+    auto generated = generate(buildInvestigationNotebookPlanPrompt(symptom, context), 512);
     if (generated.success) {
         generated.output = stripThinkingBlocks(generated.output);
     }

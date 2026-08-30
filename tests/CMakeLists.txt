@@ -29,6 +29,7 @@ add_executable(killengine_unit_tests
     unit/test_profile_store.cpp
     unit/test_ghidra_bridge.cpp
     unit/test_investigation_notebook.cpp
+    unit/test_investigation_notebook_planner.cpp
 )
 
 target_link_libraries(killengine_unit_tests PRIVATE

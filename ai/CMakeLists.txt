@@ -17,6 +17,7 @@ add_library(killai STATIC
     state_machine.cpp
     auto_resolver.cpp
     investigation_notebook.cpp
+    investigation_notebook_planner.cpp
 )
 
 target_include_directories(killai PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

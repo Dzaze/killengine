@@ -630,6 +630,7 @@ public:
     Q_INVOKABLE QVariantMap addInvestigationHypothesis(const QString& description, int baselineScore = 50);
     Q_INVOKABLE QVariantMap recordInvestigationTestResult(const QString& hypothesisId, bool confirmed, const QString& evidenceNote);
     Q_INVOKABLE QVariantMap getInvestigationNotebookSynthesis() const;
+    Q_INVOKABLE QVariantMap proposeInvestigationNotebookPlan(const QString& symptom, const QVariantMap& options);
     Q_INVOKABLE QVariantMap resetInvestigationNotebook();
 
     /// Ajoute un événement d'audit IA dans la télémétrie locale.

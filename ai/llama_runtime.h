@@ -41,6 +41,7 @@ public:
         const ToolRegistry& registry,
         const QVariantMap& context = {}) const;
     LlamaGenerationResult planIntent(const QString& query) const;
+    LlamaGenerationResult planInvestigationNotebook(const QString& symptom, const QVariantMap& context = {}) const;
 
     static QVariantMap extractToolCallJson(const QString& text, QString* error = nullptr);
     static QVariantMap extractIntentJson(const QString& text, QString* error = nullptr);

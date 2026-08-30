@@ -1,4 +1,5 @@
 #include "ai_engine.h"
+#include "investigation_notebook_planner.h"
 #include "intent_contract.h"
 #include "query_text_utils.h"
 #include "logging/logger.h"
@@ -712,6 +713,61 @@ QVariantMap AIEngine::processIntent(const QString& query) {
 
 QVariantMap AIEngine::processQuery(const QString& query) {
     return processQuery(query, {});
+}
+
+QVariantMap AIEngine::proposeInvestigationNotebookPlan(const QString& symptom, const QVariantMap& context) {
+    const QString trimmed = symptom.trimmed();
+    if (!m_ready) {
+        QVariantMap result;
+        result["success"] = false;
+        result["error"] = "AIEngine is not initialized.";
+        result["source"] = "not_ready";
+        result["modelUsed"] = false;
+        return result;
+    }
+    if (trimmed.isEmpty()) {
+        QVariantMap result;
+        result["success"] = false;
+        result["error"] = "Symptome vide.";
+        result["source"] = "validation";
+        result["modelUsed"] = false;
+        return result;
+    }
+
+    if (context.value("useModel", true).toBool() && ensureLlamaInitialized()) {
+        auto generated = m_llama.planInvestigationNotebook(trimmed, context);
+        QString error;
+        QVariantMap parsed = generated.success ? extractInvestigationNotebookPlanJson(generated.output, &error) : QVariantMap{};
+
+        if (generated.success && parsed.isEmpty()) {
+            KE_LOG_INFO() << "AIEngine retrying investigation notebook plan after invalid JSON: " << error.toStdString();
+            QVariantMap retryContext = context;
+            retryContext["formatReminder"] = "Réponds uniquement par l'objet JSON du schéma, sans score numérique.";
+            generated = m_llama.planInvestigationNotebook(trimmed, retryContext);
+            if (generated.success) {
+                parsed = extractInvestigationNotebookPlanJson(generated.output, &error);
+            }
+        }
+
+        if (!parsed.isEmpty()) {
+            QVariantMap plan = normalizeInvestigationNotebookPlan(
+                parsed,
+                trimmed,
+                generated.backend.isEmpty() ? QString("llama.cpp") : generated.backend);
+            plan["aiBackend"] = plan.value("source");
+            return plan;
+        }
+
+        KE_LOG_INFO() << "AIEngine model investigation plan rejected: "
+                      << (generated.success ? error : generated.errorMessage).toStdString();
+    }
+
+    QVariantMap fallback = makeFallbackInvestigationNotebookPlan(trimmed);
+    if (m_llama.info().available == false && !m_llama.info().errorMessage.isEmpty()) {
+        fallback["aiBackendNote"] = m_llama.info().errorMessage;
+    }
+    fallback["aiBackend"] = fallback.value("source");
+    return fallback;
 }
 
 QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& context) {

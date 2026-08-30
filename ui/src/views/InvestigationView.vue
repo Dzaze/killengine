@@ -320,9 +320,9 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
     />
 
     <PanelIntro
-      what="Un carnet manuel qui garde plusieurs hypothèses concurrentes avec un score de confiance."
+      what="Un carnet qui garde plusieurs hypothèses concurrentes avec un score de confiance."
       purpose="Comparer les pistes pendant une enquête sans s'accrocher trop longtemps à la première idée plausible."
-      how="Ajoute une hypothèse, note chaque preuve, puis confirme ou contredis le résultat du test observé."
+      how="Décris un symptôme pour générer des pistes, ou ajoute une hypothèse à la main ; note chaque preuve, puis confirme ou contredis le résultat observé."
     />
 
     <section class="panel notebook-panel">
@@ -330,6 +330,42 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
         <h2>Carnet d'hypothèses</h2>
         <span>{{ notebook.totalCount }} hypothèse(s)</span>
       </div>
+      <form class="notebook-plan-form" @submit.prevent="notebook.proposePlanFromSymptom()">
+        <input
+          v-model="notebook.symptomDraft"
+          class="filter-input"
+          placeholder="Symptôme observé : valeur affichée introuvable, freeze qui clignote..."
+          :disabled="notebook.generationBusy"
+        />
+        <button class="btn primary" type="submit" :disabled="notebook.generationBusy || !notebook.symptomDraft.trim()">
+          Proposer pistes
+        </button>
+      </form>
+      <article v-if="notebook.suggestedNextTest" class="next-test-card">
+        <div class="hypothesis-head">
+          <strong>{{ notebook.suggestedNextTest.title }}</strong>
+          <span>{{ notebook.suggestedNextTest.risk }}</span>
+        </div>
+        <p v-if="notebook.suggestedNextTest.rationale">{{ notebook.suggestedNextTest.rationale }}</p>
+        <div class="meta">
+          <span>{{ notebook.suggestedNextTest.tool || 'observation' }}</span>
+          <span v-if="notebook.lastPlanSource">{{ notebook.lastPlanSource }}</span>
+        </div>
+        <div class="next-test-grid">
+          <div>
+            <h3>Préconditions</h3>
+            <p v-for="item in notebook.suggestedNextTest.preconditions" :key="item">{{ item }}</p>
+          </div>
+          <div>
+            <h3>Si confirmé</h3>
+            <p>{{ notebook.suggestedNextTest.expectedIfTrue || '-' }}</p>
+          </div>
+          <div>
+            <h3>Si contredit</h3>
+            <p>{{ notebook.suggestedNextTest.expectedIfFalse || '-' }}</p>
+          </div>
+        </div>
+      </article>
       <form class="notebook-form" @submit.prevent="notebook.addHypothesis()">
         <input
           v-model="notebook.hypothesisDraft"
@@ -829,6 +865,13 @@ p {
   align-items: end;
 }
 
+.notebook-plan-form {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .notebook-form label {
   display: flex;
   min-width: 0;
@@ -873,6 +916,36 @@ p {
   border-radius: 8px;
   background: var(--bg-primary);
   padding: 10px;
+}
+
+.next-test-card {
+  border: 1px solid rgba(122, 162, 247, 0.28);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  padding: 10px;
+}
+
+.next-test-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.next-test-grid div {
+  min-width: 0;
+}
+
+.next-test-grid h3 {
+  margin: 0 0 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.next-test-grid p {
+  margin: 4px 0 0;
+  font-size: 12px;
 }
 
 .hypothesis-card.confirmed {
@@ -1113,8 +1186,10 @@ p {
   .filters,
   .report-grid,
   .report-lists,
+  .notebook-plan-form,
   .notebook-form,
   .notebook-grid,
+  .next-test-grid,
   .evidence-actions {
     grid-template-columns: 1fr;
   }
