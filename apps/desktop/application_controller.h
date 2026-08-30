@@ -46,6 +46,7 @@ class ProfileManager;
 class SaveFileInvestigator;
 class ScanningCoreManager;
 class SettingsDiagnosticsManager;
+class SmartSearchManager;
 class UiStringInvestigator;
 class WriteFreezeCoreManager;
 
@@ -62,6 +63,7 @@ class ApplicationController : public QObject {
     friend class ScanningCoreManager;
     friend class ProfileManager;
     friend class SettingsDiagnosticsManager;
+    friend class SmartSearchManager;
 
     // Propriétés exposées à QML/JS
     Q_PROPERTY(QString version READ version CONSTANT)
@@ -1164,6 +1166,7 @@ private:
     std::unique_ptr<SaveFileInvestigator> m_saveFileInvestigator;
     std::unique_ptr<ScanningCoreManager> m_scanningCoreManager;
     std::unique_ptr<SettingsDiagnosticsManager> m_settingsDiagnosticsManager;
+    std::unique_ptr<SmartSearchManager> m_smartSearchManager;
     std::unique_ptr<WriteFreezeCoreManager> m_writeFreezeCoreManager;
     std::unique_ptr<ProfileManager> m_profileManager;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
