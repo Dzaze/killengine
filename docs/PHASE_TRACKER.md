@@ -31,4 +31,7 @@ Aucune. Les deux résidus produit/QA/doc relevés en PHASE 236 sont clos (delta 
 
 ## Journal actif
 
-Aucune phase active en cours. Les phases closes (jusqu'à PHASE 240 incluse) sont archivées dans `docs/PHASE_TRACKER_HISTORY.md`.
+- [ ] PHASE 241 - EN COURS (Claude, 30/08/2026) - Mise à jour de `docs/KILLENGINE_CODE_MAP.md`, demande explicite du propriétaire.
+  - Diagnostic : ce doc (carte outil → fichiers UI/store/backend/core/tests, dernière mise à jour 24/08/2026) décrit encore `apps/desktop/application_controller.cpp` et `ui/src/stores/app.ts` comme deux fichiers monolithiques qui portent toute la logique. Périmé depuis le refactor C1-C14 (backend, ~15 fichiers `apps/desktop/*_manager.{h,cpp}`/`*_bridge.*`/`*_investigator.*`) et S1-S12 (frontend, ~12 stores dédiés sous `ui/src/stores/`) clos les 29-30/08/2026.
+  - Portée prévue : réviser "Fichiers Centraux À Connaître" et chaque table outil/workflow pour pointer vers le manager backend et le store frontend réels (`ApplicationController` garde les signatures `Q_INVOKABLE` mais délègue), sans changer le format ni la couverture fonctionnelle du document.
+  - Fichiers concernés : uniquement `docs/KILLENGINE_CODE_MAP.md` (lecture seule sur le reste du dépôt pour vérifier chaque mapping). Aucun chevauchement avec un autre agent.
