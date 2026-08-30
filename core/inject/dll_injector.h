@@ -17,6 +17,13 @@ struct InjectionResult {
     uint64_t moduleBase{0};          ///< Base de la DLL injectée (si applicable)
 };
 
+struct InjectDllOptions {
+    /// Charge une copie au nom unique même si la DLL originale est déjà
+    /// lisible. Utile pour les handlers dont DllMain doit se rejouer à
+    /// chaque capture dans un même PID.
+    bool forceUniqueLoad{false};
+};
+
 /**
  * @brief Injecte une DLL dans un processus distant via CreateRemoteThread + LoadLibraryW.
  *
@@ -31,6 +38,7 @@ struct InjectionResult {
  * @return InjectionResult
  */
 InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath);
+InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, const InjectDllOptions& options);
 
 /**
  * @brief Exécute du shellcode dans un processus distant (sans DLL sur disque).

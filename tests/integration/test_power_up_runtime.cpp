@@ -558,6 +558,42 @@ TEST(PowerUpRuntimeTest, PageGuardCapturesRemoteStressRewrite) {
     EXPECT_TRUE(target.started()) << "Test target crashed during PAGE_GUARD capture — injected VEH destabilized it";
 }
 
+TEST(PowerUpRuntimeTest, PageGuardCanRunTwiceInSamePid) {
+    const QString handlerPath = QDir(QCoreApplication::applicationDirPath()).filePath("KillEnginePageGuardHandler.dll");
+    ASSERT_TRUE(QFile::exists(handlerPath)) << "KillEnginePageGuardHandler.dll not found next to test binary — build issue";
+
+    TestTargetProcess target(/*stressRewrite=*/true);
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start";
+
+    const auto address = readTestTargetHealthAddress(target.pid());
+    ASSERT_TRUE(address.has_value()) << "Could not read g_health address from test target marker file";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::AllAccess);
+    ASSERT_TRUE(handle.isValid()) << "Could not open test target with AllAccess (required for DLL injection)";
+
+    killcore::PageGuardConfig config;
+    config.address = *address;
+    config.size = sizeof(int32_t);
+    config.captureWrites = true;
+    config.captureReads = false;
+    config.timeoutMs = 2500;
+    config.maxHits = 3;
+    config.injectedHandlerPath = handlerPath;
+
+    killcore::PageGuardSession first;
+    const auto firstResult = first.monitor(handle, config);
+    ASSERT_TRUE(firstResult.success) << "First PageGuard monitor failed: " << firstResult.error.toStdString();
+    ASSERT_FALSE(firstResult.hits.isEmpty()) << "First PageGuard monitor captured no hit";
+
+    killcore::PageGuardSession second;
+    const auto secondResult = second.monitor(handle, config);
+    EXPECT_TRUE(secondResult.success) << "Second PageGuard monitor failed: " << secondResult.error.toStdString();
+    EXPECT_FALSE(secondResult.hits.isEmpty()) << "Second PageGuard monitor captured no hit; "
+                                                "the handler was likely reused without DllMain reinstalling it";
+
+    EXPECT_TRUE(target.started()) << "Test target crashed during repeated PAGE_GUARD capture";
+}
+
 // Roadmap section B - interception de fonctions par composant injecte MinHook.
 // Preuve reelle out-of-process : injection de KillEngineApiHookHandler.dll dans
 // KillEngineTestTarget.exe, pose d'un hook MinHook sur kernel32.dll!Sleep, et

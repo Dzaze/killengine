@@ -282,7 +282,9 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
     state->captureWrites = config.captureWrites ? 1u : 0u;
     state->captureReads = config.captureReads ? 1u : 0u;
 
-    const auto injected = killcore::injectDll(process, config.injectedHandlerPath);
+    killcore::InjectDllOptions injectOptions;
+    injectOptions.forceUniqueLoad = true;
+    const auto injected = killcore::injectDll(process, config.injectedHandlerPath, injectOptions);
     if (!injected.success) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);

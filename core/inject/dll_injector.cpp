@@ -122,6 +122,10 @@ uint64_t getRemoteProcAddress(const QString& moduleName, const QString& function
 }
 
 InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath) {
+    return injectDll(process, dllPath, {});
+}
+
+InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, const InjectDllOptions& options) {
     InjectionResult result;
 
 #ifdef Q_OS_WIN
@@ -213,12 +217,28 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath) 
     };
 
     QString loadedPath = dllPath;
-    result = loadDllPath(dllPath);
-    if (!result.success && result.error == QStringLiteral("LoadLibraryW returned NULL in remote process")) {
+    if (options.forceUniqueLoad) {
+        QString copiedPath;
+        QString copyError;
+        if (!prepareAppContainerReadableDllCopy(dllPath, process.pid(), &copiedPath, &copyError)) {
+            result.error = QStringLiteral("Copie DLL unique impossible: %1").arg(copyError);
+            KE_LOG_WARN() << "DllInjector: unique copy failed for " << dllPath.toStdString()
+                          << " into PID " << process.pid() << ": " << result.error.toStdString();
+            return result;
+        }
+        loadedPath = copiedPath;
+        KE_LOG_INFO() << "DllInjector: forcing unique DLL load via " << copiedPath.toStdString()
+                      << " into PID " << process.pid();
+    }
+
+    result = loadDllPath(loadedPath);
+    if (!options.forceUniqueLoad
+        && !result.success
+        && result.error == QStringLiteral("LoadLibraryW returned NULL in remote process")) {
         QString copiedPath;
         QString copyError;
         if (prepareAppContainerReadableDllCopy(dllPath, process.pid(), &copiedPath, &copyError)) {
-            KE_LOG_WARN() << "DllInjector: LoadLibraryW returned NULL for " << dllPath.toStdString()
+            KE_LOG_WARN() << "DllInjector: LoadLibraryW returned NULL for " << loadedPath.toStdString()
                           << ", retrying with AppContainer-readable copy " << copiedPath.toStdString();
             loadedPath = copiedPath;
             result = loadDllPath(copiedPath);
