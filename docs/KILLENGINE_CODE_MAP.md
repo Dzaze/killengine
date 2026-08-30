@@ -37,6 +37,7 @@ Lecture rapide :
 | `settings_diagnostics_manager.h/.cpp` | `getSettings`/`saveSettings`, statut modele IA, chemins logs/debug/telemetrie, `getLogTail`, `exportDiagnostics`, stockage temporaire. |
 | `smart_search_manager.h/.cpp` | Dispatch chat/IA (`startSmartSearch`), `startAutoResolve`, confirmations chat-memory, contexte Smart Search, rapport/memoire Auto Resolve, historique d'ecritures rejouable. |
 | `automation_pipe_manager.h/.cpp` | Cycle de vie du mode Automation (`enable/disableAutomationMode`, `getAutomationPipeStatus`). |
+| `investigation_notebook_manager.h/.cpp` (PHASE 120-E/F) | Carnet d'hypotheses : `addInvestigationHypothesis`, `recordInvestigationTestResult`, `getInvestigationNotebookSynthesis`, `resetInvestigationNotebook`. Delegue a `killai::InvestigationNotebook` (`ai/investigation_notebook.h/.cpp`) — moteur de ponderation deterministe pur, seul manager sans reference `ApplicationController&` (aucun etat process/memoire requis). |
 | `auto_write_state_access.h/.cpp`, `scan_state_access.h/.cpp` | Facades d'acces internes (pas des "outils" au sens de cette carte) qui centralisent l'acces a `m_writeHistory`/`m_lastAutoWriteTargets` et `m_candidates`/`m_previousCandidates`/`m_snapshot` — consommees par plusieurs managers ci-dessus, jamais appelees directement depuis Vue. |
 | `core/` | Moteurs deterministes : scanner, memoire, debug, patch, injection, profils, kernel bridge — inchange par ce refactor. |
 | `ai/` | Planner IA local, tool registry, fallback deterministe, auto-resolver — inchange par ce refactor. |
@@ -252,6 +253,7 @@ Bridge C++ delegue a `apps/desktop/smart_search_manager.cpp` — le cluster le p
 | Tool registry IA | pas UI directe | `backend.ts`: tool calls result | `startSmartSearch` dispatch | `ai/tool_registry.*`, `tool_validator.*` | `tests/unit` `AIToolRegistryTest` |
 | Llama/Qwen local | Settings model panel | `settings.ts`: `aiModelStatus`, `refreshAiModelStatus` | `getAiModelStatus`, `browseForModelFile` → `settings_diagnostics_manager.cpp` ; `saveSettings` idem | `ai/llama_runtime.*`, `llama_server.*`, `model_locator.*`, `model/*` | `model/README.md` |
 | Automation pipe | scripts | `automationPipe.ts`: statut ; `scripts/automation-pipe-call.ps1` | toutes methodes `Q_INVOKABLE` par reflexion ; cycle de vie via `automation_pipe_manager.cpp` | `apps/desktop/automation_pipe_server.h/.cpp` | `docs/AUTOMATION_API.md`, `scripts/test-automation-pipe-*.ps1` |
+| Carnet d'hypotheses (PHASE 120-E/F, en cours) | `InvestigationView.vue` (en cours, Codex) | `investigationNotebook.ts` (en cours, Codex) | `addInvestigationHypothesis`, `recordInvestigationTestResult`, `getInvestigationNotebookSynthesis`, `resetInvestigationNotebook` → `investigation_notebook_manager.cpp` | `ai/investigation_notebook.h/.cpp` (`killai::InvestigationNotebook`, moteur de ponderation deterministe, sans generation d'hypothese ni de "prochaine experience" — role reserve au modele local, PHASE 120-G non livree) | `tests/unit/test_investigation_notebook.cpp`, `docs/AUTOMATION_API_REFERENCE.md` section "Carnet d'hypotheses", `docs/PHASE_TRACKER.md` PHASE 120-E/F |
 
 ## CLR / .NET / ClrMD
 
