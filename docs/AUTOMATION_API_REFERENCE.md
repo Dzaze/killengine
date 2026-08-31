@@ -714,6 +714,27 @@ Réponse : `{ success, module, names: [string], count, error }`
 
 ---
 
+## Mode discret / Stealth (PHASE 253+)
+
+Fichier source : `apps/desktop/application_controller.cpp`.
+
+### `applyStealthMode(profile)`
+Active le mode discret avec le profil spécifié. Profils supportés : `"sc2"` (tous les modules), `"default"` (anti-debug seul), `"minimal"` (masquage processus seul).
+
+Réponse : `{ success, modulesActivated, modules: {antiDebug, processMask, dllMask}, error?, warnings? }`
+
+### `restoreStealthMode()`
+Désactive le mode discret et restaure l'état original des modules activés.
+
+Réponse : `{ success, restored, warnings? }`
+
+### `getStealthModeStatus()`
+Retourne l'état courant du mode discret.
+
+Réponse : `{ active, profile, modules: {antiDebug, processMask, dllMask} }`
+
+---
+
 ## Résumé du périmètre couvert
 
 Toutes les méthodes `Q_INVOKABLE` listées dans `apps/desktop/application_controller.h` au 30/08/2026 sont couvertes ci-dessus, sauf les cas explicitement marqués "non résolu" (contenu de `result` opaque provenant du helper .NET CLR externe, ou branches internes du moteur IA local `ai/ai_engine.cpp`). Aucune clé de réponse listée dans ce document n'a été inventée : chacune correspond à une affectation `result["clé"] = ...` (ou équivalent QVariantMap) lue directement dans le `.cpp` cité en regard.
