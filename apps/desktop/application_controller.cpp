@@ -5065,7 +5065,7 @@ QVariantMap ApplicationController::restoreStealthMode() {
     return result;
 }
 
-QVariantMap ApplicationController::getStealthModeStatus() const {
+QVariantMap ApplicationController::getStealthStatus() const {
     QVariantMap result;
     result["active"] = m_stealthActive;
     result["profile"] = m_stealthProfile;

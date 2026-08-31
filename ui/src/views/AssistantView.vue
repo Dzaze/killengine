@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useAppStore, type WorkflowPreset } from '@/stores/app'
+import { backend } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 const chatInput = ref('')
 const chatScroll = ref<HTMLElement | null>(null)
 
-// Indicateur de réflexion dynamique — messages qui changent pendant le traitement
-const thinkingMessages = [
+// Indicateur de réflexion dynamique — messages qui changent pendant le traitement.
+// Deux jeux de phrases : un pour les requêtes qui ressemblent à un scan concret
+// (contiennent un nombre ou une adresse — ce sont les seules que le classifieur
+// C++ route vers ActivateMemoryTargets/ExactScan/GuidedScan/... côté
+// smart_search_manager.cpp::classifySmartSearchIntent), un autre plus neutre
+// pour le texte libre qui tombe dans l'intent Unknown et part côté raisonnement
+// IA (ai/ai_engine.cpp) — annoncer "Recherche en mémoire..." pour un message
+// comme "il va falloir trouver les xp dans les dll" était trompeur.
+const concreteThinkingMessages = [
   'Je vais rechercher ça en mémoire...',
   'Analyse de ta requête...',
   'Recherche en mémoire...',
@@ -16,17 +24,31 @@ const thinkingMessages = [
   'Filtrage des faux positifs...',
   'Optimisation des résultats...',
 ]
+const genericThinkingMessages = [
+  'Je réfléchis...',
+  'Analyse de ta requête...',
+  'Je regarde ce que je peux faire...',
+]
 const thinkingIndex = ref(0)
-const thinkingText = ref(thinkingMessages[0])
+const activeThinkingMessages = ref(concreteThinkingMessages)
+const thinkingText = ref(activeThinkingMessages.value[0])
 let thinkingTimer: ReturnType<typeof setInterval> | null = null
+let lastSentQuery = ''
+
+function queryLooksLikeConcreteScan(text: string): boolean {
+  return /\d/.test(text) || /0x[0-9a-f]+/i.test(text)
+}
 
 watch(() => store.isSearching, (searching) => {
   if (searching) {
+    activeThinkingMessages.value = queryLooksLikeConcreteScan(lastSentQuery)
+      ? concreteThinkingMessages
+      : genericThinkingMessages
     thinkingIndex.value = 0
-    thinkingText.value = thinkingMessages[0]
+    thinkingText.value = activeThinkingMessages.value[0]
     thinkingTimer = setInterval(() => {
-      thinkingIndex.value = (thinkingIndex.value + 1) % thinkingMessages.length
-      thinkingText.value = thinkingMessages[thinkingIndex.value]
+      thinkingIndex.value = (thinkingIndex.value + 1) % activeThinkingMessages.value.length
+      thinkingText.value = activeThinkingMessages.value[thinkingIndex.value]
     }, 1500)
   } else if (thinkingTimer) {
     clearInterval(thinkingTimer)
@@ -119,6 +141,7 @@ async function sendMessage() {
   const value = chatInput.value.trim()
   if (!value) return
   chatInput.value = ''
+  lastSentQuery = value
   store.searchQuery = value
   await store.doSearch()
   await scrollToBottom()
@@ -128,12 +151,14 @@ async function sendAutoResolve() {
   const value = chatInput.value.trim()
   if (!value) return
   chatInput.value = ''
+  lastSentQuery = value
   store.searchQuery = value
   await store.doAutoResolve()
   await scrollToBottom()
 }
 
 async function sendExample(text: string) {
+  lastSentQuery = text
   store.searchQuery = text
   await store.doSearch()
   await scrollToBottom()
@@ -255,6 +280,32 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     } else {
       store.activeView = 'expert'
       store.pushMessage('assistant', 'Donne-moi la valeur affichée à l’écran, puis je lancerai Trace UI string.')
+    }
+  } else if (actionId === 'start_changed_pages_diff' || actionId === 'start_changed_pages_session') {
+    await store.acknowledgePendingSmartSearchRecovery()
+    const controller = backend.getController()
+    const start = actionId === 'start_changed_pages_session'
+      ? controller.startChangedPagesSession
+      : controller.startChangedPagesDiff
+    if (!start) {
+      store.activeView = 'expert'
+      store.pushMessage('assistant', 'Changed Pages non exposé par ce backend.', { isError: true })
+    } else {
+      const result = await start({
+        maxBytesMb: 64,
+        blockSize: 64 * 1024,
+        privateOnly: true,
+        writableOnly: true,
+      })
+      const payload = result as Record<string, unknown>
+      const blocks = Number(payload.blocksCaptured ?? 0)
+      store.pushMessage(
+        'assistant',
+        payload.success
+          ? `Changed Pages démarré (${blocks} bloc(s), 64 Mo max). Fais varier la valeur affichée, puis donne-moi l'ancienne et la nouvelle valeur.`
+          : `Changed Pages n'a pas pu démarrer : ${String(payload.error ?? 'raison inconnue')}.`,
+        { isError: payload.success !== true },
+      )
     }
   } else if (actionId === 'review_encrypted_hits') {
     store.activeView = 'expert'

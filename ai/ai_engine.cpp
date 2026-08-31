@@ -67,6 +67,19 @@ bool describesUiCopyOrBuffer(const QString& q) {
         || q.contains("pas ecrit sur place") || q.contains("pas écrit sur place");
 }
 
+bool wantsChangedPages(const QString& q) {
+    return q.contains("changed pages")
+        || q.contains("diff pages")
+        || q.contains("pages modifiees")
+        || q.contains("pages modifiées")
+        || q.contains("pages qui changent")
+        || q.contains("pages changées")
+        || q.contains("pages changees")
+        || q.contains("comparaison de pages")
+        || q.contains("compare les pages")
+        || q.contains("comparer les pages");
+}
+
 bool wantsModuleSourcePivot(const QString& q) {
     const bool mentionsModule = q.contains("dll") || q.contains("module") || q.contains("modules")
         || q.contains("code du jeu") || q.contains("game code");
@@ -86,6 +99,18 @@ bool wantsProcessModuleListing(const QString& q) {
         || q.contains("list") || q.contains("show");
     const bool mentionsModule = q.contains("dll") || q.contains("module") || q.contains("modules");
     return mentionsModule && asksList;
+}
+
+bool wantsModuleExplorationWithoutValue(const QString& q) {
+    const bool mentionsModule = q.contains("dll") || q.contains("module") || q.contains("modules");
+    const bool asksDiscovery = q.contains("trouve") || q.contains("trouver")
+        || q.contains("cherche") || q.contains("chercher") || q.contains("localise")
+        || q.contains("localiser") || q.contains("falloir") || q.contains("find");
+    const bool mentionsTarget = q.contains("xp") || q.contains("experience") || q.contains("expérience")
+        || q.contains("score") || q.contains("niveau") || q.contains("level")
+        || q.contains("argent") || q.contains("money") || q.contains("minerai")
+        || q.contains("mineral") || q.contains("ressource");
+    return mentionsModule && asksDiscovery && mentionsTarget;
 }
 
 struct AddressToolMatch {
@@ -970,6 +995,12 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
             result["aiBackend"] = "deterministic_module_scan_fastpath";
             return result;
         }
+        if (wantsModuleExplorationWithoutValue(q) && decimalNumbersFromQuery(query).isEmpty()) {
+            QVariantMap result = makeToolCall("list_process_modules", {},
+                "Tu demandes une cible de gameplay dans les DLL/modules sans valeur affichée exploitable : je liste d'abord les modules chargés, puis il faudra donner l'XP visible ou passer par Trace UI string/Changed Pages.");
+            result["aiBackend"] = "deterministic_module_listing_fastpath";
+            return result;
+        }
         if (context.value("scanActive", false).toBool() && wantsModuleSourcePivot(q)) {
             QVariantMap result = makeToolCall("list_process_modules", {},
                 "Je liste les modules/DLL charges pour identifier le module applicatif avant de poursuivre vers AOB/desassemblage ou Trace UI string/Changed Pages.");
@@ -1289,6 +1320,25 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         return result;
     }
 
+    // Demande de conseil sur une valeur affichee, mais sans valeur concrete : a verifier
+    // avant le Mode Inspecteur (wantsChangedPages ci-dessous) sinon une phrase qui cite
+    // "Changed Pages" comme option parmi d'autres serait interceptee comme une commande.
+    if (q.contains("valeur affich") && value.isEmpty()
+        && (q.contains("comment") || q.contains("conseil") || q.contains("trouve")
+            || q.contains("chercher") || q.contains("trace ui") || q.contains("changed pages"))) {
+        QVariantMap result;
+        result["status"] = "needs_clarification";
+        result["actionStatus"] = "not_executed";
+        result["message"] = "Pour une valeur affichée, il me faut d'abord le nombre exact visible à l'écran. "
+                            "Ensuite je peux chercher le texte affiché (Trace UI string) ou capturer les pages modifiées avant/après une variation (Changed Pages), sans écrire ni freezer.";
+        result["state"] = m_stateMachine.currentStateName();
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}});
+        recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}});
+        result["recoveryActions"] = recoveryActions;
+        return result;
+    }
+
     // PHASE 91/99 : demande explicite d'investigation "hors memoire" (voir
     // matchOffMemoryTool ci-dessus pour la liste de mots-cles).
     if (const auto trainerMatch = matchTrainerTool(query); !trainerMatch.tool.isEmpty()) {
@@ -1299,6 +1349,10 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     }
     if (const auto moduleScanMatch = matchModuleExactScanTool(query); !moduleScanMatch.tool.isEmpty()) {
         return makeToolCall(moduleScanMatch.tool, moduleScanMatch.args, moduleScanMatch.rationale);
+    }
+    if (wantsModuleExplorationWithoutValue(q) && numbers.isEmpty()) {
+        return makeToolCall("list_process_modules", {},
+            "Tu demandes une cible de gameplay dans les DLL/modules sans valeur affichée exploitable : je liste d'abord les modules chargés, puis il faudra donner l'XP visible ou passer par Trace UI string/Changed Pages.");
     }
     if (const auto autoReportMatch = matchAutoReportTool(query); !autoReportMatch.tool.isEmpty()) {
         return makeToolCall(autoReportMatch.tool, {}, autoReportMatch.rationale);
@@ -1326,7 +1380,7 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     }
 
     // Mode Inspecteur: obtenir une preuve nouvelle avant toute ecriture.
-    if (inspectorOrUiCopy || q.contains("diff pages") || q.contains("pages modifiees") || q.contains("pages modifiées")) {
+    if (inspectorOrUiCopy || wantsChangedPages(q)) {
         if (numbers.size() >= 2 && (q.contains("compare") || q.contains("compar") || q.contains("maintenant")
             || q.contains("avant") || q.contains("apres") || q.contains("après"))) {
             return makeToolCall("finish_changed_pages_diff", {
@@ -1435,6 +1489,31 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             return makeToolCall("block_process_network", {{"mode", "on"}}, "Coupure reseau demandee par l'utilisateur.");
         }
     }
+    // PHASE 271 : Mode discret / Stealth mode - fast-paths explicites
+    {
+        const bool wantsStealthOff = q.contains("désactive le mode discret") || q.contains("desactive le mode discret")
+            || q.contains("restaure le mode normal") || q.contains("retire le mode discret")
+            || q.contains("restore stealth") || q.contains("disable stealth")
+            || ((q.contains("désactiv") || q.contains("desactiv") || q.contains("restore") || q.contains("retire"))
+                && (q.contains("mode discret") || q.contains("stealth")));
+        const bool wantsStealthOn = !wantsStealthOff
+            && (q.contains("active le mode discret") || q.contains("active le mode discret")
+                || q.contains("masque killengine") || q.contains("masque le processus")
+                || q.contains("jeu détecte") || q.contains("jeu detecte")
+                || q.contains("anti-détection") || q.contains("anti-detection")
+                || q.contains("enable stealth") || q.contains("apply stealth")
+                || ((q.contains("active") || q.contains("enable"))
+                    && (q.contains("mode discret") || q.contains("stealth"))));
+        if (wantsStealthOff) {
+            return makeToolCall("restore_stealth_mode", {}, "Désactivation du mode discret demandée.");
+        }
+        if (wantsStealthOn) {
+            QString profile = "default";
+            if (q.contains("sc2") || q.contains("starcraft")) profile = "sc2";
+            else if (q.contains("minimal")) profile = "minimal";
+            return makeToolCall("apply_stealth_mode", {{"profile", profile}}, "Activation du mode discret demandée.");
+        }
+    }
     if ((q.contains("write") || q.contains("mettre")) && !value.isEmpty()) {
         return makeToolCall("write_value", {
             {"address", firstHexAddress(query)},
@@ -1504,24 +1583,6 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         }
         m_stateMachine.setState(AIState::FirstScanRunning);
         return makeToolCall("exact_scan", {{"value", value}, {"valueType", inferValueType(query)}}, "Premier scan exact depuis une valeur detectee.");
-    }
-
-    // Demande de conseil sur une valeur affichee, mais sans valeur concrete :
-    // ne pas lancer auto_resolve qui echouerait aussitot faute de nombre.
-    if (q.contains("valeur affich") && value.isEmpty()
-        && (q.contains("comment") || q.contains("conseil") || q.contains("trouve")
-            || q.contains("chercher") || q.contains("trace ui") || q.contains("changed pages"))) {
-        QVariantMap result;
-        result["status"] = "needs_clarification";
-        result["actionStatus"] = "not_executed";
-        result["message"] = "Pour une valeur affichée, il me faut d'abord le nombre exact visible à l'écran. "
-                            "Ensuite je peux chercher le texte affiché (Trace UI string) ou capturer les pages modifiées avant/après une variation (Changed Pages), sans écrire ni freezer.";
-        result["state"] = m_stateMachine.currentStateName();
-        QVariantList recoveryActions;
-        recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}});
-        recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}});
-        result["recoveryActions"] = recoveryActions;
-        return result;
     }
 
     // Aucune valeur: objectifs complets ou guidance plutot que message brut.

@@ -229,6 +229,9 @@ QVariantMap SettingsDiagnosticsManager::getSettings() const {
     result["modelPath"] = settings.value("ai/modelPath", "").toString();
     result["modelEnabled"] = settings.value("ai/modelEnabled", true).toBool();
     result["modelThreads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
+    // PHASE 271 : Mode discret automatique
+    result["stealthAutoEnable"] = settings.value("stealth/autoEnable", false).toBool();
+    result["stealthDefaultProfile"] = settings.value("stealth/defaultProfile", "default").toString();
     return result;
 }
 
@@ -478,6 +481,11 @@ QVariantMap SettingsDiagnosticsManager::saveSettings(const QVariantMap& incoming
     settings.setValue(
         "ai/modelThreads",
         std::clamp(incoming.value("modelThreads", 4).toInt(), 1, 32));
+    // PHASE 271 : Mode discret automatique
+    settings.setValue("stealth/autoEnable", incoming.value("stealthAutoEnable", false).toBool());
+    const QString stealthProfile = incoming.value("stealthDefaultProfile", "default").toString();
+    settings.setValue("stealth/defaultProfile",
+        (stealthProfile == "sc2" || stealthProfile == "minimal") ? stealthProfile : "default");
     settings.sync();
     m_controller.scanState().setFileBackedThreshold(candidateFileBackedThresholdFromSettings());
 

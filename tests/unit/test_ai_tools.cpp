@@ -304,8 +304,12 @@ TEST(LlamaRuntimeTest, SchemaLineListsEveryRegisteredTool) {
     // discover_save_files/inspect_local_settings/read_save_file_text/
     // watch_save_file sont maintenant DANS le schema (PHASE 148) -- plus
     // besoin de les exclure ici.
+    // PHASE 271 : tous les outils exposes au LLM sans restriction.
+    // La liste d'exclusion est videe pour permettre a l'Assistant d'acceder
+    // a toutes les capacites, y compris kernel_write, speedhack_set,
+    // block_process_network, patch_file_bytes, apply_stealth_mode, restore_stealth_mode.
     static const QSet<QString> kDeliberatelyExcludedFromModelSchema = {
-        "kernel_write", "speedhack_set", "block_process_network", "patch_file_bytes",
+        // Aucun outil exclu - tous les outils sont accessibles au LLM
     };
 
     for (const auto& item : registry.availableTools()) {
@@ -320,12 +324,12 @@ TEST(LlamaRuntimeTest, SchemaLineListsEveryRegisteredTool) {
     }
 }
 
-// PHASE 148 : symetrique du test ci-dessus -- verifie explicitement que les 4
-// outils write/injection reels restent HORS du schema (donc jamais un choix
-// libre du modele local), pour que ce choix delibere soit machine-verifie
-// plutot qu'une simple note de doc qu'un futur agent pourrait oublier en
-// ajoutant un outil au registre.
-TEST(LlamaRuntimeTest, SchemaLineExcludesRealWriteAndInjectionTools) {
+// PHASE 271 : tous les outils sont maintenant exposes au LLM sans restriction.
+// Ce test verifie que les outils precedemment exclus (kernel_write,
+// speedhack_set, block_process_network, patch_file_bytes, apply_stealth_mode,
+// restore_stealth_mode) sont bien presents dans le schema pour que l'Assistant
+// puisse y acceder librement.
+TEST(LlamaRuntimeTest, SchemaLineIncludesAllTools) {
     killai::ToolRegistry registry;
     const QString prompt = killai::LlamaRuntime::buildPrompt("test query", registry, {});
 
@@ -338,9 +342,11 @@ TEST(LlamaRuntimeTest, SchemaLineExcludesRealWriteAndInjectionTools) {
     }
     ASSERT_FALSE(schemaLine.isEmpty());
 
-    for (const QString& toolName : {"kernel_write", "speedhack_set", "block_process_network", "patch_file_bytes"}) {
-        EXPECT_FALSE(schemaLine.contains(toolName))
-            << toolName.toStdString() << " ne devrait jamais etre un choix libre du modele local (write/injection reel).";
+    // Tous les outils, y compris ceux a risque, sont maintenant accessibles
+    for (const QString& toolName : {"kernel_write", "speedhack_set", "block_process_network", "patch_file_bytes",
+                                     "apply_stealth_mode", "restore_stealth_mode"}) {
+        EXPECT_TRUE(schemaLine.contains(toolName))
+            << toolName.toStdString() << " doit etre present dans le schema pour etre accessible a l'Assistant.";
     }
 }
 
@@ -618,6 +624,17 @@ TEST(AIEngineContextualFallbackTest, InspectorModeStartsChangedPagesDiff) {
     EXPECT_EQ(result.value("tool").toString().toStdString(), "start_changed_pages_diff");
 }
 
+TEST(AIEngineContextualFallbackTest, LiteralChangedPagesStartsChangedPagesDiff) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery("Changed Pages : l'XP est maintenant a 490, prepare la comparaison", context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "start_changed_pages_diff");
+}
+
 TEST(AIEngineContextualFallbackTest, ModuleSourcePivotDoesNotConsumeIncreasedAsNextScan) {
     ScopedModelDisabled guard;
     killai::AIEngine engine;
@@ -632,6 +649,22 @@ TEST(AIEngineContextualFallbackTest, ModuleSourcePivotDoesNotConsumeIncreasedAsN
     EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
     EXPECT_EQ(result.value("tool").toString().toStdString(), "list_process_modules");
     EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_module_listing_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, ModuleXpDiscoveryWithoutValueListsModulesInsteadOfAutoResolve) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    context["scanActive"] = false;
+
+    const auto result = engine.processQuery("il vas falloir trouver les xp dans les dll", context);
+
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "list_process_modules");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_module_listing_fastpath");
+    EXPECT_TRUE(result.value("rationale").toString().contains("valeur affichée"));
 }
 
 TEST(AIEngineContextualFallbackTest, NamedModuleValueRoutesToModuleBoundedScan) {

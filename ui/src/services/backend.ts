@@ -1361,7 +1361,7 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   getAutomationPipeStatus?(): Promise<Record<string, unknown>>
   applyStealthMode?(profile: string): Promise<StealthModeResult>
   restoreStealthMode?(): Promise<StealthModeResult>
-  getStealthModeStatus?(): Promise<StealthModeStatus>
+  getStealthStatus?(): Promise<StealthModeStatus>
   startAutoResolve?(query: string, options: Record<string, unknown>): Promise<SmartSearchResult>
   getAutoResolveReport?(maxEvents: number): Promise<AutoResolveReportResult>
   clearAutoResolveMemory?(allProcesses: boolean): Promise<Record<string, unknown>>

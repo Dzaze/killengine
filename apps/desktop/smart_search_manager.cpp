@@ -278,6 +278,130 @@ QString moduleNameFromText(const QString& text) {
     return {};
 }
 
+bool wantsModuleExploration(const QString& text) {
+    const QString q = text.toLower();
+    const bool mentionsModule = q.contains("dll") || q.contains("module") || q.contains("modules");
+    const bool rejectsModuleScan = q.contains("ne relance pas de scan module")
+        || q.contains("ne lance pas de scan module")
+        || q.contains("pas de scan module")
+        || q.contains("sans scan module")
+        || q.contains("no module scan")
+        || q.contains("do not scan module");
+    const bool asksDiscovery = q.contains("trouve") || q.contains("trouver")
+        || q.contains("cherche") || q.contains("chercher") || q.contains("travaille")
+        || q.contains("travailler") || q.contains("localise") || q.contains("localiser")
+        || q.contains("falloir") || q.contains("find");
+    const bool mentionsTarget = q.contains("xp") || q.contains("experience") || q.contains("expérience")
+        || q.contains("score") || q.contains("niveau") || q.contains("level")
+        || q.contains("argent") || q.contains("money") || q.contains("minerai")
+        || q.contains("mineral") || q.contains("ressource");
+    if (rejectsModuleScan && !q.contains("liste les modules") && !q.contains("list modules")) {
+        return false;
+    }
+    return mentionsModule && asksDiscovery && mentionsTarget;
+}
+
+bool wantsExplicitTraceUiString(const QString& text) {
+    const QString q = text.toLower();
+    const bool traceWords = q.contains("trace ui")
+        || q.contains("ui string")
+        || q.contains("string ui")
+        || q.contains("trace le texte")
+        || q.contains("tracer le texte")
+        || q.contains("texte affich")
+        || q.contains("valeur affich")
+        || (q.contains("affich") && (q.contains("string") || q.contains("texte") || q.contains("source")));
+    const bool negated = q.contains("ne trace pas")
+        || q.contains("pas trace ui")
+        || q.contains("sans trace ui")
+        || q.contains("do not trace");
+    return traceWords && !negated;
+}
+
+bool wantsExplicitChangedPages(const QString& text) {
+    const QString q = text.toLower();
+    const bool changedPagesWords = q.contains("changed pages")
+        || q.contains("diff pages")
+        || q.contains("pages modifiees")
+        || q.contains("pages modifiées")
+        || q.contains("pages qui changent")
+        || q.contains("pages changées")
+        || q.contains("pages changees")
+        || q.contains("comparaison de pages")
+        || q.contains("compare les pages")
+        || q.contains("comparer les pages");
+    const bool negated = q.contains("ne fais pas changed pages")
+        || q.contains("pas changed pages")
+        || q.contains("sans changed pages")
+        || q.contains("do not use changed pages");
+    return changedPagesWords && !negated;
+}
+
+bool wantsCandidateRefinement(const QString& text) {
+    const QString q = text.toLower();
+    return q.contains("reduis") || q.contains("réduis")
+        || q.contains("reduire") || q.contains("réduire")
+        || q.contains("reduit") || q.contains("réduit")
+        || q.contains("affine") || q.contains("affiner")
+        || q.contains("filtre") || q.contains("filtrer")
+        || q.contains("nouvelle valeur");
+}
+
+QString observedRefinementValueFromText(const QString& text, const QStringList& numbers) {
+    static const QRegularExpression explicitObservedRe(
+        QStringLiteral("(?:xp|score|niveau|level|affich\\w*|maintenant)[^0-9+-]{0,40}([-+]?\\d+(?:[.,]\\d+)?)"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match = explicitObservedRe.match(text);
+    if (match.hasMatch()) {
+        return match.captured(1).replace(',', '.');
+    }
+    return numbers.size() == 1 ? numbers.first() : QString();
+}
+
+QStringList lastTwoObservedValues(const QStringList& numbers) {
+    QStringList values;
+    if (numbers.size() >= 2) {
+        values << numbers.at(numbers.size() - 2) << numbers.at(numbers.size() - 1);
+    }
+    return values;
+}
+
+bool isLikelyRuntimeModule(const QString& lower) {
+    return lower.contains("vcruntime")
+        || lower.contains("msvcp")
+        || lower.contains("vccorlib")
+        || lower.contains("concrt")
+        || lower.contains("telemetry")
+        || lower.contains("ucrtbase")
+        || lower.contains("api-ms-win")
+        || lower.contains("ext-ms-win")
+        || lower.contains("kernelbase")
+        || lower.contains("kernel32")
+        || lower.contains("ntdll")
+        || lower.contains("qt6")
+        || lower.contains("d3d")
+        || lower.contains("dxgi");
+}
+
+int moduleGameplayRelevanceScore(const QVariantMap& module) {
+    const QString name = module.value("name").toString();
+    const QString path = module.value("path").toString();
+    const QString lower = (name + " " + path).toLower();
+    if (isLikelyRuntimeModule(lower)) {
+        return 0;
+    }
+
+    int score = 0;
+    if (lower.contains("microsoftsolitaire") || lower.contains("solitaire.exe")) score += 120;
+    if (lower.contains("solitaire")) score += 80;
+    if (lower.contains("webview")) score += 55;
+    if (lower.contains("windowsapps")) score += 30;
+    if (lower.contains("microsoft.ui.xaml")) score += 20;
+    if (lower.contains("mrt100")) score += 15;
+    if (lower.contains("sharedlibrary")) score += 8;
+    return score;
+}
+
 QString normalizedProfileText(QString value) {
     return value.toLower().trimmed();
 }
@@ -2569,7 +2693,11 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
     const bool smartSearchFindWhatWritesOrTestFieldsQuery = killai::wantsFindWhatWritesOrTestFieldsQuery(query);
     const bool smartSearchModuleScanQuery = !moduleNameFromText(query).isEmpty()
         && (query.contains("dll", Qt::CaseInsensitive) || query.contains("module", Qt::CaseInsensitive)
-            || query.contains("utilise", Qt::CaseInsensitive) || query.contains("use ", Qt::CaseInsensitive));
+            || query.contains("utilise", Qt::CaseInsensitive) || query.contains("use ", Qt::CaseInsensitive)
+            || query.contains(".exe", Qt::CaseInsensitive));
+    const bool smartSearchExplicitTraceUiStringQuery = wantsExplicitTraceUiString(query);
+    const bool smartSearchExplicitChangedPagesQuery = wantsExplicitChangedPages(query);
+    const bool smartSearchModuleExplorationQuery = wantsModuleExploration(query);
     // PHASE 140 : consolide en un seul flag plutot que de continuer a "&&" une
     // liste croissante sur les 8 points de bypass ci-dessous -- prochain outil
     // a router : ajouter sa condition ici, pas un neuvieme "&& !smartSearchXQuery"
@@ -2578,7 +2706,10 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         || smartSearchFieldStabilityQuery
         || smartSearchAobOrPatchWorkflowQuery
         || smartSearchFindWhatWritesOrTestFieldsQuery
-        || smartSearchModuleScanQuery;
+        || smartSearchModuleScanQuery
+        || smartSearchExplicitTraceUiStringQuery
+        || smartSearchExplicitChangedPagesQuery
+        || smartSearchModuleExplorationQuery;
     // PHASE 148 : meme liste de mots-cles que matchUiSourcesTool
     // (ai/ai_engine.cpp), duplication grossiere volontaire -- meme convention
     // que les flags smartSearchXxxQuery ci-dessus. Sert a un guard DIFFERENT
@@ -2588,6 +2719,11 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
     // via le meme mecanisme que les 5 outils ci-dessus.
     const bool smartSearchExplicitUiSourcesQuery = killai::wantsUiSourcesQuery(query);
     auto& candidates = m_controller.scanState().candidates();
+    const QString explicitRefinementValue = observedRefinementValueFromText(query, numbers);
+    const bool smartSearchExplicitRefinementQuery = m_controller.m_smartSearchActive
+        && !candidates.isEmpty()
+        && wantsCandidateRefinement(query)
+        && !explicitRefinementValue.isEmpty();
     const SmartSearchIntent intent = classifySmartSearchIntent(
         query,
         numbers,
@@ -2627,6 +2763,69 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         (*payload)["intent"] = smartSearchIntentKindToString(intent.kind);
         (*payload)["intentRationale"] = intent.rationale;
     };
+
+    if (smartSearchExplicitChangedPagesQuery) {
+        m_controller.m_pendingRecoveryAction.clear();
+        m_controller.m_pendingUiStringCandidates.clear();
+
+        QVariantMap changed;
+        QVariantMap args;
+        QVariantMap actionResult;
+        const QStringList observed = lastTwoObservedValues(numbers);
+        changed["query"] = query;
+        changed["aiReady"] = m_controller.m_ai.isReady();
+        changed["status"] = "tool_call";
+        changed["state"] = m_controller.m_smartSearchActive ? QString("Refining") : QString("Idle");
+        changed["rationale"] = observed.size() >= 2
+            ? QString("La phrase demande explicitement Changed Pages avec deux valeurs : je compare les pages modifiées sur les deux dernières valeurs observées.")
+            : QString("La phrase demande explicitement Changed Pages : je capture un snapshot lecture seule avant la prochaine variation.");
+        changed["error"] = "";
+        if (observed.size() >= 2) {
+            args["previousValue"] = observed.at(0);
+            args["currentValue"] = observed.at(1);
+            changed["tool"] = "finish_changed_pages_diff";
+            m_controller.m_smartSearchInitialValue = observed.at(0);
+            m_controller.m_smartSearchLastObservedValue = observed.at(1);
+            QVariantMap diffOptions;
+            actionResult = m_controller.finishChangedPagesDiff(observed.at(0), observed.at(1), diffOptions);
+            changed["workflowStatus"] = actionResult.value("success").toBool()
+                ? (actionResult.value("hitCount", actionResult.value("hits").toList().size()).toInt() > 0 ? "diff_hits_found" : "no_candidate")
+                : "action_failed";
+            changed["message"] = actionResult.value("success").toBool()
+                ? QString("Mode Inspecteur : comparaison Changed Pages %1 → %2 effectuée. %3 piste(s) trouvée(s) dans les pages réellement modifiées.")
+                      .arg(observed.at(0), observed.at(1))
+                      .arg(actionResult.value("hitCount", actionResult.value("hits").toList().size()).toInt())
+                : QString("Changed Pages : comparaison impossible pour l'instant (%1). Lance d'abord Changed Pages avant la prochaine variation, puis redonne l'ancienne et la nouvelle valeur.")
+                      .arg(actionResult.value("error").toString());
+        } else {
+            if (!numbers.isEmpty()) {
+                m_controller.m_smartSearchInitialValue = numbers.last();
+                m_controller.m_smartSearchLastObservedValue = numbers.last();
+                changed["initialValue"] = numbers.last();
+            }
+            changed["tool"] = "start_changed_pages_diff";
+            QVariantMap diffOptions;
+            diffOptions["maxBytesMb"] = 64;
+            diffOptions["blockSize"] = 64 * 1024;
+            diffOptions["privateOnly"] = true;
+            diffOptions["writableOnly"] = true;
+            actionResult = m_controller.startChangedPagesDiff(diffOptions);
+            changed["workflowStatus"] = actionResult.value("success").toBool() ? "awaiting_observed_variation" : "action_failed";
+            changed["message"] = actionResult.value("success").toBool()
+                ? QString("Mode Inspecteur : snapshot Changed Pages capturé (%1 blocs, 64 Mo max). Fais varier l'XP, puis donne-moi l'ancienne et la nouvelle valeur.")
+                      .arg(actionResult.value("blocksCaptured").toInt())
+                : QString("Changed Pages : snapshot impossible (%1).").arg(actionResult.value("error").toString());
+        }
+        changed["args"] = args;
+        changed["actionResult"] = actionResult;
+        changed["actionStatus"] = actionResult.value("success").toBool() ? "executed" : "failed";
+        if (!actionResult.value("hits").isNull()) {
+            changed["changedPageHits"] = actionResult.value("hits");
+        }
+        stampIntent(&changed);
+        m_controller.appendSmartSearchDebug("smart_search_explicit_changed_pages", changed);
+        return changed;
+    }
 
     if (killai::looksLikePureSocialQuery(query, numbers, chatAddresses)) {
         QVariantMap social;
@@ -3178,6 +3377,17 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["rationale"] = intent.rationale;
         result["state"] = "FirstScanRunning";
         result["error"] = "";
+    } else if (smartSearchExplicitRefinementQuery) {
+        m_controller.m_smartSearchLastObservedValue = explicitRefinementValue;
+        QVariantMap args;
+        args["mode"] = "exact";
+        args["value"] = explicitRefinementValue;
+        result["status"] = "tool_call";
+        result["tool"] = "next_scan";
+        result["args"] = args;
+        result["rationale"] = "Recherche active : la phrase demande explicitement de réduire les candidats avec une nouvelle valeur observée, même si elle mentionne un module ou d'autres nombres de contexte.";
+        result["state"] = "Refining";
+        result["error"] = "";
     } else if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
         m_controller.m_smartSearchLastObservedValue = numbers.first();
         QVariantMap args;
@@ -3188,6 +3398,17 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["args"] = args;
         result["rationale"] = intent.rationale;
         result["state"] = "Refining";
+        result["error"] = "";
+    } else if (smartSearchExplicitTraceUiStringQuery && !numbers.isEmpty()) {
+        const QString traceValue = numbers.first();
+        m_controller.m_smartSearchLastObservedValue = traceValue;
+        QVariantMap args;
+        args["value"] = traceValue;
+        result["status"] = "tool_call";
+        result["tool"] = "trace_ui_string";
+        result["args"] = args;
+        result["rationale"] = "La phrase demande explicitement Trace UI string : je cherche le texte affiché au lieu de relancer un scan module ou global.";
+        result["state"] = m_controller.m_smartSearchActive ? QString("Refining") : QString("Idle");
         result["error"] = "";
     } else if (intent.kind == SmartSearchIntentKind::AnswerWriteTargetPrompt) {
         m_controller.m_pendingRecoveryAction.clear();
@@ -3204,6 +3425,22 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["args"] = args;
         result["rationale"] = intent.rationale;
         result["state"] = "Refining";
+        result["error"] = "";
+    } else if (smartSearchModuleExplorationQuery && moduleNameFromText(query).isEmpty()) {
+        resetFailureEscalationState();
+        if (!numbers.isEmpty()) {
+            m_controller.m_smartSearchInitialValue = numbers.first();
+            m_controller.m_smartSearchLastObservedValue = numbers.first();
+        }
+        if (numbers.size() >= 2) {
+            m_controller.m_smartSearchTargetValue = numbers.at(1);
+        }
+        QVariantMap args;
+        result["status"] = "tool_call";
+        result["tool"] = "list_process_modules";
+        result["args"] = args;
+        result["rationale"] = "La requête cible les XP/score/niveau dans les DLL/modules sans nom de module précis : je liste d'abord les modules chargés au lieu de lancer un scan global.";
+        result["state"] = m_controller.m_smartSearchActive ? QString("Refining") : QString("Idle");
         result["error"] = "";
     } else if (!smartSearchBypassesMemoryPreIntent
         && intent.kind == SmartSearchIntentKind::GuidedScan
@@ -3348,21 +3585,42 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             actionResult["moduleBase"] = QString::number(matchedModule.baseAddress, 16);
             actionResult["moduleEnd"] = QString::number(matchedModule.baseAddress + matchedModule.size, 16);
             actionResult["moduleSize"] = static_cast<qulonglong>(matchedModule.size);
-            result["workflowStatus"] = actionResult.value("matchesFound").toULongLong() > 0
+            const qulonglong moduleCandidateCount = actionResult.value("matchesFound").toULongLong();
+            result["workflowStatus"] = moduleCandidateCount > 0
                 ? "module_scan_found"
                 : "no_candidate";
-            result["message"] = QString("Scan module %1 : %2 candidat(s) pour %3 dans [%4..%5].")
-                .arg(matchedModule.name)
-                .arg(actionResult.value("matchesFound").toULongLong())
-                .arg(scanValue)
-                .arg(actionResult.value("moduleBase").toString())
-                .arg(actionResult.value("moduleEnd").toString());
             if (!args.value("targetValue").toString().isEmpty()) {
                 m_controller.m_smartSearchTargetValue = args.value("targetValue").toString();
             }
             m_controller.m_smartSearchActive = true;
             m_controller.m_smartSearchInitialValue = scanValue;
+            m_controller.m_smartSearchLastObservedValue = scanValue;
             m_controller.m_smartSearchValueType = scanType;
+            QVariantList recoveryActions;
+            if (moduleCandidateCount > 0) {
+                result["message"] = QString(
+                    "Scan module %1 : %2 candidat(s) pour %3 dans [%4..%5]. Fais changer l'XP dans le jeu, puis tape la nouvelle valeur affichée pour réduire ces candidats. Exemple : maintenant l'XP affichée est 1120.")
+                    .arg(matchedModule.name)
+                    .arg(moduleCandidateCount)
+                    .arg(scanValue)
+                    .arg(actionResult.value("moduleBase").toString())
+                    .arg(actionResult.value("moduleEnd").toString());
+                recoveryActions.append(QVariantMap{{"id", "reduce_again"}, {"label", "Réduire avec nouvelle XP"}, {"safe", true}});
+                recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}, {"value", scanValue}, {"safe", true}});
+                recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}, {"safe", true}});
+            } else {
+                result["message"] = QString(
+                    "Scan module %1 : aucun candidat pour %2 dans [%3..%4]. On évite de repartir en global : essaie Trace UI string avec %2 ou Changed Pages avant/après une variation d'XP.")
+                    .arg(matchedModule.name)
+                    .arg(scanValue)
+                    .arg(actionResult.value("moduleBase").toString())
+                    .arg(actionResult.value("moduleEnd").toString());
+                recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}, {"value", scanValue}, {"safe", true}});
+                recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}, {"safe", true}});
+                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Unknown"}, {"safe", true}});
+            }
+            result["candidateCount"] = moduleCandidateCount;
+            result["recoveryActions"] = recoveryActions;
         }
     } else if (tool == "exact_scan_multi_type") {
         actionResult = m_controller.startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
@@ -3437,24 +3695,26 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QVariantList modules = m_controller.getProcessModules(static_cast<int>(m_controller.m_pid));
         QVariantList highlights;
         QStringList highlightNames;
+        QList<QPair<int, QVariantMap>> scoredHighlights;
         for (const QVariant& item : modules) {
             const QVariantMap module = item.toMap();
-            const QString name = module.value("name").toString();
-            const QString path = module.value("path").toString();
-            const QString lower = (name + " " + path).toLower();
-            const bool relevant = lower.contains("solitaire")
-                || lower.contains("webview")
-                || lower.contains("windowsapps")
-                || lower.contains("microsoft.ui.xaml")
-                || lower.contains("mrt100")
-                || lower.contains("sharedlibrary");
-            if (!relevant) {
+            const int score = moduleGameplayRelevanceScore(module);
+            if (score <= 0) {
                 continue;
             }
-            highlights.append(module);
-            if (highlightNames.size() < 6) {
-                highlightNames.append(name);
+            scoredHighlights.append({score, module});
+        }
+        std::stable_sort(scoredHighlights.begin(), scoredHighlights.end(),
+            [](const auto& lhs, const auto& rhs) {
+                return lhs.first > rhs.first;
+            });
+        constexpr int kMaxDisplayedModuleHighlights = 8;
+        for (const auto& item : scoredHighlights) {
+            if (highlights.size() >= kMaxDisplayedModuleHighlights) {
+                break;
             }
+            highlights.append(item.second);
+            highlightNames.append(item.second.value("name").toString());
         }
 
         actionResult["success"] = true;
@@ -3468,10 +3728,17 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["message"] = highlightNames.isEmpty()
             ? QString("Modules/DLL : %1 module(s) chargés. Aucun module applicatif évident repéré automatiquement ; trie par chemin et privilégie les modules non système avant AOB/désassemblage.")
                   .arg(modules.size())
-            : QString("Modules/DLL : %1 module(s) chargés, %2 piste(s) applicative(s) repérée(s) : %3. Priorité : module Solitaire/WebView, puis Trace UI string ou Changed Pages pour relier l'affichage XP à la source.")
+            : QString("Modules/DLL : %1 module(s) chargés. Pistes priorisées : %2. Les runtimes C++/telemetry sont ignorés dans cette sélection. Prochaine étape : si un module métier ressort, lance un scan module ciblé avec la valeur affichée ; sinon Trace UI string ou Changed Pages pour relier l'affichage XP à la source.")
                   .arg(modules.size())
-                  .arg(highlights.size())
                   .arg(highlightNames.join(", "));
+        QVariantList recoveryActions;
+        const QString traceValue = !m_controller.m_smartSearchLastObservedValue.isEmpty()
+            ? m_controller.m_smartSearchLastObservedValue
+            : m_controller.m_smartSearchInitialValue;
+        recoveryActions.append(QVariantMap{{"id", "open_expert"}, {"label", "Inspecter les modules"}, {"expertStep", "inspect"}});
+        recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}, {"value", traceValue}, {"safe", true}});
+        recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}, {"safe", true}});
+        result["recoveryActions"] = recoveryActions;
     } else if (tool == "start_changed_pages_diff") {
         QVariantMap diffOptions = args;
         if (!diffOptions.contains("maxBytesMb")) diffOptions["maxBytesMb"] = 64;

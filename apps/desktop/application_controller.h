@@ -1113,7 +1113,7 @@ public:
     Q_INVOKABLE QVariantMap restoreStealthMode();
 
     /// Retourne l'état actuel du mode de protection unifié.
-    Q_INVOKABLE QVariantMap getStealthModeStatus() const;
+    Q_INVOKABLE QVariantMap getStealthStatus() const;
 
     /// Démarre AutomationPipeServer si KILLENGINE_AUTOMATION_PIPE=1 (chemin dev
     /// existant) OU si QSettings "automation/pipeEnabled" est vrai (mode
