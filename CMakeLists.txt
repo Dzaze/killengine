@@ -40,6 +40,7 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
     WebEngineWidgets
     WebChannel
     Network
+    WebSockets
 )
 
 # Ensure Qt tools are found

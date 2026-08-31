@@ -1,4 +1,4 @@
-# =============================================================================
+l# =============================================================================
 # KillCore — Moteur déterministe C++20 (mémoire, scanner, candidats)
 # =============================================================================
 
@@ -162,6 +162,14 @@ add_library(killcore STATIC
     # Phase 20 — Hotkeys globales
     input/global_hotkey.h
     input/global_hotkey.cpp
+
+    # WebView2 CDP Inspector
+    webview2/cdp_client.h
+    webview2/cdp_client.cpp
+    webview2/webview2_inspector.h
+    webview2/webview2_inspector.cpp
+    webview2/cdp_proxy_dll.h
+    webview2/cdp_proxy_dll.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -169,6 +177,8 @@ target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(killcore PUBLIC
     killcore_logging
     Qt6::Core
+    Qt6::Network
+    Qt6::WebSockets
     nlohmann_json::nlohmann_json
     lz4_static
     # Windows libraries
