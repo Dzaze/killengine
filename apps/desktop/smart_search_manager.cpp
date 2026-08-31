@@ -261,6 +261,23 @@ QString explicitValueTypeFromText(const QString& text) {
     return {};
 }
 
+QString moduleNameFromText(const QString& text) {
+    const QRegularExpression explicitModuleRe(R"(([A-Za-z0-9_.-]+\.(?:dll|exe)))", QRegularExpression::CaseInsensitiveOption);
+    const auto match = explicitModuleRe.match(text);
+    if (match.hasMatch()) {
+        return match.captured(1);
+    }
+
+    const QString q = text.toLower();
+    if (q.contains("webview")) {
+        return "WebView";
+    }
+    if (q.contains("solitaire")) {
+        return "Solitaire";
+    }
+    return {};
+}
+
 QString normalizedProfileText(QString value) {
     return value.toLower().trimmed();
 }
@@ -2550,6 +2567,9 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
     // processQuery() ait une chance de les router correctement.
     const bool smartSearchAobOrPatchWorkflowQuery = killai::wantsAobOrPatchWorkflowQuery(query);
     const bool smartSearchFindWhatWritesOrTestFieldsQuery = killai::wantsFindWhatWritesOrTestFieldsQuery(query);
+    const bool smartSearchModuleScanQuery = !moduleNameFromText(query).isEmpty()
+        && (query.contains("dll", Qt::CaseInsensitive) || query.contains("module", Qt::CaseInsensitive)
+            || query.contains("utilise", Qt::CaseInsensitive) || query.contains("use ", Qt::CaseInsensitive));
     // PHASE 140 : consolide en un seul flag plutot que de continuer a "&&" une
     // liste croissante sur les 8 points de bypass ci-dessous -- prochain outil
     // a router : ajouter sa condition ici, pas un neuvieme "&& !smartSearchXQuery"
@@ -2557,7 +2577,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
     const bool smartSearchBypassesMemoryPreIntent = smartSearchTrainerQuery
         || smartSearchFieldStabilityQuery
         || smartSearchAobOrPatchWorkflowQuery
-        || smartSearchFindWhatWritesOrTestFieldsQuery;
+        || smartSearchFindWhatWritesOrTestFieldsQuery
+        || smartSearchModuleScanQuery;
     // PHASE 148 : meme liste de mots-cles que matchUiSourcesTool
     // (ai/ai_engine.cpp), duplication grossiere volontaire -- meme convention
     // que les flags smartSearchXxxQuery ci-dessus. Sert a un guard DIFFERENT
@@ -3284,6 +3305,65 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
 
     if (tool == "exact_scan") {
         actionResult = m_controller.startExactScan(args.value("value").toString(), args.value("valueType").toString());
+    } else if (tool == "exact_scan_module") {
+        const QString requestedModule = args.value("module").toString().trimmed();
+        const QString scanValue = args.value("value").toString().trimmed();
+        const QString scanType = args.value("valueType", explicitValueType.isEmpty() ? QString("Int32") : defaultValueType).toString();
+        const auto modules = killcore::ProcessEnumerator::enumerateModules(static_cast<uint32_t>(m_controller.m_pid));
+        killcore::ProcessModuleInfo matchedModule;
+        bool foundModule = false;
+        for (const auto& module : modules) {
+            if (module.name.compare(requestedModule, Qt::CaseInsensitive) == 0) {
+                matchedModule = module;
+                foundModule = true;
+                break;
+            }
+            if (!foundModule && module.name.contains(requestedModule, Qt::CaseInsensitive)) {
+                matchedModule = module;
+                foundModule = true;
+            }
+        }
+
+        if (!foundModule) {
+            actionResult["success"] = false;
+            actionResult["error"] = QString("Module '%1' introuvable dans le processus attaché. Liste d'abord les modules/DLL.").arg(requestedModule);
+            actionResult["module"] = requestedModule;
+            result["workflowStatus"] = "module_not_found";
+            result["message"] = actionResult.value("error").toString();
+        } else if (scanValue.isEmpty()) {
+            actionResult["success"] = false;
+            actionResult["error"] = "Il me faut une valeur à scanner dans ce module.";
+            result["actionStatus"] = "needs_clarification";
+            result["workflowStatus"] = "missing_value";
+            result["message"] = actionResult.value("error").toString();
+        } else {
+            QVariantMap expertOptions;
+            expertOptions["startAddress"] = QString::number(matchedModule.baseAddress, 16);
+            expertOptions["stopAddress"] = QString::number(matchedModule.baseAddress + matchedModule.size, 16);
+            expertOptions["writableOnly"] = false;
+            expertOptions["executableOnly"] = false;
+            expertOptions["copyOnWriteOnly"] = false;
+            actionResult = m_controller.startExactScanExpert(scanValue, scanType, expertOptions);
+            actionResult["module"] = matchedModule.name;
+            actionResult["moduleBase"] = QString::number(matchedModule.baseAddress, 16);
+            actionResult["moduleEnd"] = QString::number(matchedModule.baseAddress + matchedModule.size, 16);
+            actionResult["moduleSize"] = static_cast<qulonglong>(matchedModule.size);
+            result["workflowStatus"] = actionResult.value("matchesFound").toULongLong() > 0
+                ? "module_scan_found"
+                : "no_candidate";
+            result["message"] = QString("Scan module %1 : %2 candidat(s) pour %3 dans [%4..%5].")
+                .arg(matchedModule.name)
+                .arg(actionResult.value("matchesFound").toULongLong())
+                .arg(scanValue)
+                .arg(actionResult.value("moduleBase").toString())
+                .arg(actionResult.value("moduleEnd").toString());
+            if (!args.value("targetValue").toString().isEmpty()) {
+                m_controller.m_smartSearchTargetValue = args.value("targetValue").toString();
+            }
+            m_controller.m_smartSearchActive = true;
+            m_controller.m_smartSearchInitialValue = scanValue;
+            m_controller.m_smartSearchValueType = scanType;
+        }
     } else if (tool == "exact_scan_multi_type") {
         actionResult = m_controller.startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
     } else if (tool == "next_scan") {

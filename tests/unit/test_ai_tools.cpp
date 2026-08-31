@@ -73,6 +73,7 @@ TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
 
     EXPECT_TRUE(registry.hasTool("auto_resolve"));
     EXPECT_TRUE(registry.hasTool("encrypted_scan"));
+    EXPECT_TRUE(registry.hasTool("exact_scan_module"));
     EXPECT_TRUE(registry.hasTool("trace_ui_string"));
     EXPECT_TRUE(registry.hasTool("read_window_text"));
     EXPECT_TRUE(registry.hasTool("list_process_modules"));
@@ -631,6 +632,26 @@ TEST(AIEngineContextualFallbackTest, ModuleSourcePivotDoesNotConsumeIncreasedAsN
     EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
     EXPECT_EQ(result.value("tool").toString().toStdString(), "list_process_modules");
     EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_module_listing_fastpath");
+}
+
+TEST(AIEngineContextualFallbackTest, NamedModuleValueRoutesToModuleBoundedScan) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    context["scanActive"] = true;
+    context["candidateCount"] = static_cast<qulonglong>(21533);
+    const auto result = engine.processQuery(
+        "Ok maintenant utilise Microsoft.MicrosoftSolitaireCollection.dll pour continuer la recherche de la vraie source XP 215 vers 9000.",
+        context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "exact_scan_module");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_module_scan_fastpath");
+    const auto args = result.value("args").toMap();
+    EXPECT_EQ(args.value("module").toString().toStdString(), "Microsoft.MicrosoftSolitaireCollection.dll");
+    EXPECT_EQ(args.value("value").toString().toStdString(), "215");
+    EXPECT_EQ(args.value("targetValue").toString().toStdString(), "9000");
 }
 
 // PHASE 99 : demande explicite d'investigation "hors memoire" (LocalSettings,

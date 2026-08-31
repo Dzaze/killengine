@@ -25,6 +25,7 @@ QVariantList toolDefinitions() {
         makeTool("auto_resolve", "Planifie et execute une mini-boucle safe bornee: scan/reduction/fallbacks, puis checkpoint.", {"query"}),
         makeTool("get_auto_report", "Resume contexte, telemetry, nextBestAction, garde-fous et strategies.", {}),
         makeTool("exact_scan", "Scan exact sur le processus attaché.", {"value", "valueType"}),
+        makeTool("exact_scan_module", "Scan exact borne a un module/DLL charge precis, via start/stop address du module. Lecture seule.", {"module", "value", "valueType"}),
         makeTool("exact_scan_multi_type", "Scan exact multi-type quand la representation memoire est inconnue.", {"value"}),
         makeTool("next_scan", "Réduit les candidats existants.", {"mode"}),
         makeTool("encrypted_scan", "Scan chiffre borne XOR/Add/Sub/NOT sur valeur entiere affichee.", {"value", "valueType"}),
@@ -73,6 +74,10 @@ QVariantList toolDefinitions() {
         makeTool("trainer_delete_feature", "Supprime une feature Trainer locale par id explicite.", {"id"}),
         makeTool("trainer_apply_request", "Prépare une demande d'activation Trainer mais ne clique pas le RiskGate UI. L'utilisateur doit confirmer dans l'onglet Trainer.", {}, "write", true),
         makeTool("trainer_restore_request", "Prépare une demande de restauration/désactivation Trainer mais ne clique pas le RiskGate UI. L'utilisateur doit confirmer dans l'onglet Trainer.", {}, "write", true),
+        // PHASE 256 : Mode discret / Stealth mode
+        makeTool("apply_stealth_mode", "Active le mode discret pour masquer KillEngine du processus cible. Profils : 'sc2' (tous les modules anti-détection), 'default' (anti-debug seul), 'minimal' (masquage processus seul). À utiliser quand l'utilisateur mentionne un jeu qui détecte les outils mémoire.", {"profile"}, "injection", true),
+        makeTool("restore_stealth_mode", "Désactive le mode discret et restaure l'état original des modules activés.", {}, "injection", true),
+        makeTool("get_stealth_status", "Retourne l'état courant du mode discret (actif ou non, profil utilisé, modules activés). Lecture seule, exécute directement.", {}, "safe", false),
     };
 }
 

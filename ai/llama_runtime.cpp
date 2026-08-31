@@ -490,7 +490,7 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         //     apps/desktop/application_controller.cpp) -- pas encore de
         //     fast-path explicite non plus, laisse hors schema par prudence
         //     tant que ce chemin n'est pas davantage exerce.
-        "Schema obligatoire: {\"tool\":\"auto_resolve|get_auto_report|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|list_process_modules|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|analyze_field_stability|generate_aob|suggest_patch|disassemble_backward|test_candidate_fields|discover_save_files|inspect_local_settings|read_save_file_text|watch_save_file|trainer_list_features|trainer_create_write|trainer_delete_feature|trainer_apply_request|trainer_restore_request\",\"args\":{...}}\n"
+        "Schema obligatoire: {\"tool\":\"auto_resolve|get_auto_report|exact_scan|exact_scan_module|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|list_process_modules|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|analyze_field_stability|generate_aob|suggest_patch|disassemble_backward|test_candidate_fields|discover_save_files|inspect_local_settings|read_save_file_text|watch_save_file|trainer_list_features|trainer_create_write|trainer_delete_feature|trainer_apply_request|trainer_restore_request\",\"args\":{...}}\n"
         "Posture Inspecteur:\n"
         "- Observe avant d'ecrire: une adresse n'est fiable que si elle suit plusieurs variations et si l'hypothese explique les echecs precedents.\n"
         "- Distingue source gameplay, copie d'affichage, buffer UI recycle, table de sequence et pointeur intermediaire.\n"
@@ -503,6 +503,7 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         "- Si l'utilisateur demande le mode inspecteur, une enquete prudente, ou veut comprendre avant d'ecrire, choisis start_changed_pages_diff si aucune capture diff n'est active; choisis finish_changed_pages_diff si l'utilisateur donne valeur precedente et valeur actuelle.\n"
         "- Si la requete contient une valeur numerique actuelle sans adresse, utilise exact_scan (ou exact_scan_multi_type si le type est incertain).\n"
         "- Pour exact_scan, args doit contenir value en string et valueType.\n"
+        "- Si l'utilisateur nomme un module/DLL concret et une valeur, choisis exact_scan_module avec args.module, args.value et args.valueType; cela borne le scan a ce module charge.\n"
         "- Si aucun type explicite n'est donne, valueType vaut Int32.\n"
         "- Si exact_scan echoue ou si la representation est incertaine, les alternatives safe sont exact_scan_multi_type, encrypted_scan, trace_ui_string et unknown_capture.\n"
         "- Si Trace UI string trouve des copies instables, buffers recycles, ou que l'adresse de string n'est pas ecrite sur place, choisis start_changed_pages_diff avant la prochaine variation, puis finish_changed_pages_diff apres la variation.\n"

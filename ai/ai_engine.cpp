@@ -88,6 +88,85 @@ bool wantsProcessModuleListing(const QString& q) {
     return mentionsModule && asksList;
 }
 
+struct AddressToolMatch {
+    QString tool;
+    QVariantMap args;
+    QString rationale;
+};
+
+QString moduleNameFromQuery(const QString& query) {
+    const QRegularExpression explicitModuleRe(R"(([A-Za-z0-9_.-]+\.(?:dll|exe)))", QRegularExpression::CaseInsensitiveOption);
+    const auto match = explicitModuleRe.match(query);
+    if (match.hasMatch()) {
+        return match.captured(1);
+    }
+
+    const QString q = query.toLower();
+    if (q.contains("webview")) {
+        return "WebView";
+    }
+    if (q.contains("solitaire")) {
+        return "Solitaire";
+    }
+    return {};
+}
+
+QStringList decimalNumbersFromQuery(const QString& query) {
+    QString text = query;
+    const QRegularExpression hexRe(R"(\b0x[0-9a-fA-F]{5,16}\b)");
+    text.replace(hexRe, " ");
+    QStringList numbers;
+    const QRegularExpression numberRe(R"([-+]?\d+(?:[\.,]\d+)?)");
+    auto it = numberRe.globalMatch(text);
+    while (it.hasNext()) {
+        numbers.append(it.next().captured(0).replace(',', '.'));
+    }
+    return numbers;
+}
+
+QString inferredValueTypeFromQuery(const QString& query) {
+    const QString q = query.toLower();
+    if (q.contains("uint8") || q.contains("u8") || q.contains("byte")) return "UInt8";
+    if (q.contains("int8") || q.contains("i8")) return "Int8";
+    if (q.contains("uint16") || q.contains("u16")) return "UInt16";
+    if (q.contains("int16") || q.contains("i16") || q.contains("short")) return "Int16";
+    if (q.contains("uint32") || q.contains("u32")) return "UInt32";
+    if (q.contains("uint64") || q.contains("u64")) return "UInt64";
+    if (q.contains("float64") || q.contains("double")) return "Float64";
+    if (q.contains("float32") || q.contains("float")) return "Float32";
+    if (q.contains("int64") || q.contains("long")) return "Int64";
+    return "Int32";
+}
+
+AddressToolMatch matchModuleExactScanTool(const QString& query) {
+    const QString module = moduleNameFromQuery(query);
+    if (module.isEmpty()) {
+        return {};
+    }
+
+    const QStringList numbers = decimalNumbersFromQuery(query);
+    if (numbers.isEmpty()) {
+        return {};
+    }
+
+    const QString q = query.toLower();
+    const bool wantsModuleBoundedSearch = q.contains("dll") || q.contains("module")
+        || q.contains("utilise") || q.contains("use ") || q.contains("dans ");
+    if (!wantsModuleBoundedSearch) {
+        return {};
+    }
+
+    QVariantMap args;
+    args["module"] = module;
+    args["value"] = numbers.first();
+    args["valueType"] = inferredValueTypeFromQuery(query);
+    if (numbers.size() >= 2) {
+        args["targetValue"] = numbers.at(1);
+    }
+    return {"exact_scan_module", args,
+        "Je limite le scan exact au module/DLL indiqué au lieu de scanner tout le processus."};
+}
+
 QVariantMap makeModuleSourcePivotResponse(const QString& stateName) {
     QVariantMap result;
     result["status"] = "needs_clarification";
@@ -492,12 +571,6 @@ UiSourcesToolMatch matchUiSourcesTool(const QString& query) {
         "Je cherche les sources numériques probables près de la dernière string UI localisée (lecture seule)."};
 }
 
-struct AddressToolMatch {
-    QString tool;
-    QVariantMap args;
-    QString rationale;
-};
-
 // PHASE 140 : generate_aob/suggest_patch/disassemble_backward -- les 3 restants
 // du "workflow patch" reclasses lecture seule (tool_registry.cpp). Meme
 // mecanique que matchFieldStabilityTool : mot-cle + extraction d'adresse.
@@ -892,6 +965,11 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
     }
 
     if (context.value("processAttached", true).toBool()) {
+        if (const auto moduleScanMatch = matchModuleExactScanTool(query); !moduleScanMatch.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(moduleScanMatch.tool, moduleScanMatch.args, moduleScanMatch.rationale);
+            result["aiBackend"] = "deterministic_module_scan_fastpath";
+            return result;
+        }
         if (context.value("scanActive", false).toBool() && wantsModuleSourcePivot(q)) {
             QVariantMap result = makeToolCall("list_process_modules", {},
                 "Je liste les modules/DLL charges pour identifier le module applicatif avant de poursuivre vers AOB/desassemblage ou Trace UI string/Changed Pages.");
@@ -1218,6 +1296,9 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     }
     if (const auto stabilityMatch = matchFieldStabilityTool(query); !stabilityMatch.tool.isEmpty()) {
         return makeToolCall(stabilityMatch.tool, stabilityMatch.args, stabilityMatch.rationale);
+    }
+    if (const auto moduleScanMatch = matchModuleExactScanTool(query); !moduleScanMatch.tool.isEmpty()) {
+        return makeToolCall(moduleScanMatch.tool, moduleScanMatch.args, moduleScanMatch.rationale);
     }
     if (const auto autoReportMatch = matchAutoReportTool(query); !autoReportMatch.tool.isEmpty()) {
         return makeToolCall(autoReportMatch.tool, {}, autoReportMatch.rationale);
