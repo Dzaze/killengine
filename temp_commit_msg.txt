@@ -1,0 +1,8 @@
+feat(scanner): session changed-pages multi-rounds avec consensus deterministe (PHASE 250, SC2 solarite)
+
+- killcore::ChangedPagesConsensus : logique pure testee (9 tests unitaires)
+- UiStringInvestigator: startChangedPagesSession/applyChangedPagesRound/getChangedPagesConsensus/stopChangedPagesSession
+- Baseline roll-forward entre rounds, probes immediats, elimination contradicted/stale
+- Bug fix: privateOnly excluant le .data MEM_IMAGE -> option includeImage (defaut session)
+- Branchement ApplicationController Q_INVOKABLE + backend.ts + wrappers Lua
+- Validation live pipe sur KillEngineTestTarget: g_health confirme a 2 rounds, 16 faux positifs exclus

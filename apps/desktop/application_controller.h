@@ -3,15 +3,18 @@
 #include "ai_engine.h"
 #include "auto_write_state_access.h"
 #include "candidates/candidate_store.h"
+#include "debug/anti_debug.h"
 #include "debug/breakpoint_freeze.h"
 #include "debug/inprocess_breakpoint.h"
 #include "debug/page_guard.h"
 #include "debug/speedhack.h"
 #include "inject/api_hook.h"
 #include "inject/dll_injector.h"
+#include "inject/dll_mask.h"
 #include "inject/function_hook.h"
 #include "memory/memory_reader.h"
 #include "process/process_handle.h"
+#include "process/process_mask.h"
 #include "profiles/profile_store.h"
 #include "scripting/auto_assembler.h"
 #include "scan_state_access.h"
@@ -1102,6 +1105,16 @@ public:
     /// nom du pipe, et compteur d'activité (voir AutomationPipeServer::status()).
     Q_INVOKABLE QVariantMap getAutomationPipeStatus();
 
+    /// Active un mode de protection unifié (anti-debug, masquage processus, masquage DLL).
+    /// profile: "sc2" (tout actif), "default" (anti-debug seul), "minimal" (masquage processus seul).
+    Q_INVOKABLE QVariantMap applyStealthMode(const QString& profile);
+
+    /// Désactive le mode de protection unifié et restaure l'état original.
+    Q_INVOKABLE QVariantMap restoreStealthMode();
+
+    /// Retourne l'état actuel du mode de protection unifié.
+    Q_INVOKABLE QVariantMap getStealthModeStatus() const;
+
     /// Démarre AutomationPipeServer si KILLENGINE_AUTOMATION_PIPE=1 (chemin dev
     /// existant) OU si QSettings "automation/pipeEnabled" est vrai (mode
     /// Automation persistant). Appelée une fois au démarrage depuis main.cpp
@@ -1233,6 +1246,12 @@ private:
     int                      m_nextDebugRequestId{1};
     std::unique_ptr<AutomationPipeManager> m_automationPipeManager;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
+    // Stealth mode state
+    killcore::AntiDebugSession m_antiDebugSession;
+    QString m_stealthProfile;
+    bool m_stealthActive{false};
+    bool m_stealthProcessMaskActive{false};
+    bool m_stealthDllMaskActive{false};
     // Test automatique des champs candidats (voir testCandidateFieldsAsync) : etat
     // dedie, distinct de m_activeDebugCancellation qui est reserve aux operations
     // avec attach debugger (celle-ci ne fait que lire/ecrire de la memoire).

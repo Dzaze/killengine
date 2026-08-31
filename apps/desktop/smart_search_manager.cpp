@@ -136,6 +136,11 @@ QString autoResolverGameKey(QString processName) {
     return processName.left(80);
 }
 
+bool isStarCraftLikeProcessName(const QString& processName) {
+    const QString normalized = processName.toLower();
+    return normalized.contains("sc2") || normalized.contains("starcraft");
+}
+
 bool parseHexAddress(const QString& addressHex, uint64_t* address) {
     if (!address) {
         return false;
@@ -432,6 +437,19 @@ bool looksLikeGoodTargetReport(const QString& query) {
 
 bool looksLikeFreezeRequest(const QString& query) {
     const QString q = query.toLower();
+    const bool negated = q.contains("sans freeze") || q.contains("sans freezer")
+        || q.contains("sans geler") || q.contains("sans figer")
+        || q.contains("ni freeze") || q.contains("ni freezer")
+        || q.contains("ni geler") || q.contains("ni figer")
+        || q.contains("pas de freeze") || q.contains("pas freeze")
+        || q.contains("ne freeze pas") || q.contains("ne pas freeze")
+        || q.contains("ne pas freezer") || q.contains("without freeze")
+        || q.contains("without freezing") || q.contains("no freeze")
+        || q.contains("do not freeze") || q.contains("don't freeze");
+    if (negated) {
+        return false;
+    }
+
     return q.contains("freeze")
         || q.contains("freezer")
         || q.contains("fige")
@@ -1341,7 +1359,7 @@ QVariantMap SmartSearchManager::getAutoResolveReport(int maxEvents) const {
     int traceUiScore = m_controller.m_handle.isValid() ? 30 : 0;
 
     const QString processLower = m_controller.processName().toLower();
-    if (processLower.contains("sc2") || processLower.contains("starcraft")) {
+    if (isStarCraftLikeProcessName(processLower)) {
         traceUiScore += 25;
         encryptedScore += 10;
     }
@@ -2523,7 +2541,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
     // affiche...") etait interceptee trop tot par les pre-intents memoire
     // (ActivateMemoryTargets) avant d'atteindre le fast-path analyze_field_stability
     // (ai/ai_engine.cpp::matchFieldStabilityTool, meme liste de mots-cles).
-    const bool smartSearchFieldStabilityQuery = killai::wantsFieldStabilityQuery(query);
+    const bool smartSearchFieldStabilityQuery = killai::wantsFieldStabilityQuery(query) && !chatAddresses.isEmpty();
     // PHASE 140 : meme piege, pour les 5 outils restants d'analyze_field_stability
     // qui prennent une adresse (get_auto_report/analyze_ui_sources n'en ont pas
     // besoin en pratique, pas concernes). Verifications volontairement plus
@@ -3166,6 +3184,47 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["rationale"] = intent.rationale;
         result["state"] = "Refining";
         result["error"] = "";
+    } else if (!smartSearchBypassesMemoryPreIntent
+        && intent.kind == SmartSearchIntentKind::GuidedScan
+        && numbers.size() >= 2
+        && isStarCraftLikeProcessName(m_controller.processName())) {
+        resetFailureEscalationState();
+        m_controller.m_smartSearchActive = false;
+        m_controller.m_smartSearchTargetValue.clear();
+        m_controller.m_smartSearchInitialValue = numbers.at(0);
+        result["success"] = true;
+        result["status"] = "needs_guided_observation";
+        result["actionStatus"] = "not_executed";
+        result["workflowStatus"] = "sc2_guided_observation_required";
+        result["rationale"] = intent.rationale;
+        result["initialValue"] = numbers.at(0);
+        result["requestedTargetValue"] = numbers.at(1);
+        result["message"] = QString(
+            "Pour %1, je ne lance pas un scan exact multi-type automatique depuis le chat : cette cible produit beaucoup "
+            "de copies UI et l'appel peut bloquer l'interface. On reste en lecture seule : démarre une session Changed "
+            "Pages multi-round à %2, ou cherche d'abord le texte affiché %2, puis fais varier la valeur et donne-moi les "
+            "transitions observées.")
+            .arg(m_controller.processName().isEmpty() ? QString("cette cible") : m_controller.processName())
+            .arg(numbers.at(0));
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{
+            {"id", "start_changed_pages_session"},
+            {"label", "Changed Pages multi-round"},
+            {"value", numbers.at(0)},
+            {"safe", true},
+        });
+        recoveryActions.append(QVariantMap{
+            {"id", "trace_ui_string"},
+            {"label", "Trace UI string"},
+            {"value", numbers.at(0)},
+            {"safe", true},
+        });
+        recoveryActions.append(QVariantMap{
+            {"id", "try_unknown_changed"},
+            {"label", "Unknown initial value"},
+            {"safe", true},
+        });
+        result["recoveryActions"] = recoveryActions;
     } else if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::GuidedScan && numbers.size() >= 2) {
         // Meme raisonnement que pour ExactScan ci-dessus : nouveau lot,
         // l'echelle de secours du lot precedent ne s'applique plus.
@@ -3294,6 +3353,45 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             result["message"] = QString("Inspection fenêtre : %1 fenêtre(s) lue(s). On peut s'en servir pour synchroniser la prochaine variation avant de comparer la mémoire.")
                                   .arg(actionResult.value("windowCount").toInt());
         }
+    } else if (tool == "list_process_modules") {
+        const QVariantList modules = m_controller.getProcessModules(static_cast<int>(m_controller.m_pid));
+        QVariantList highlights;
+        QStringList highlightNames;
+        for (const QVariant& item : modules) {
+            const QVariantMap module = item.toMap();
+            const QString name = module.value("name").toString();
+            const QString path = module.value("path").toString();
+            const QString lower = (name + " " + path).toLower();
+            const bool relevant = lower.contains("solitaire")
+                || lower.contains("webview")
+                || lower.contains("windowsapps")
+                || lower.contains("microsoft.ui.xaml")
+                || lower.contains("mrt100")
+                || lower.contains("sharedlibrary");
+            if (!relevant) {
+                continue;
+            }
+            highlights.append(module);
+            if (highlightNames.size() < 6) {
+                highlightNames.append(name);
+            }
+        }
+
+        actionResult["success"] = true;
+        actionResult["modules"] = modules;
+        actionResult["moduleCount"] = modules.size();
+        actionResult["highlights"] = highlights;
+        actionResult["highlightCount"] = highlights.size();
+        result["modules"] = modules;
+        result["moduleHighlights"] = highlights;
+        result["workflowStatus"] = "process_modules_listed";
+        result["message"] = highlightNames.isEmpty()
+            ? QString("Modules/DLL : %1 module(s) chargés. Aucun module applicatif évident repéré automatiquement ; trie par chemin et privilégie les modules non système avant AOB/désassemblage.")
+                  .arg(modules.size())
+            : QString("Modules/DLL : %1 module(s) chargés, %2 piste(s) applicative(s) repérée(s) : %3. Priorité : module Solitaire/WebView, puis Trace UI string ou Changed Pages pour relier l'affichage XP à la source.")
+                  .arg(modules.size())
+                  .arg(highlights.size())
+                  .arg(highlightNames.join(", "));
     } else if (tool == "start_changed_pages_diff") {
         QVariantMap diffOptions = args;
         if (!diffOptions.contains("maxBytesMb")) diffOptions["maxBytesMb"] = 64;

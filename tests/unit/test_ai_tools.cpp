@@ -75,6 +75,7 @@ TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
     EXPECT_TRUE(registry.hasTool("encrypted_scan"));
     EXPECT_TRUE(registry.hasTool("trace_ui_string"));
     EXPECT_TRUE(registry.hasTool("read_window_text"));
+    EXPECT_TRUE(registry.hasTool("list_process_modules"));
     EXPECT_TRUE(registry.hasTool("start_changed_pages_diff"));
     EXPECT_TRUE(registry.hasTool("finish_changed_pages_diff"));
     EXPECT_TRUE(registry.hasTool("trainer_list_features"));
@@ -616,6 +617,22 @@ TEST(AIEngineContextualFallbackTest, InspectorModeStartsChangedPagesDiff) {
     EXPECT_EQ(result.value("tool").toString().toStdString(), "start_changed_pages_diff");
 }
 
+TEST(AIEngineContextualFallbackTest, ModuleSourcePivotDoesNotConsumeIncreasedAsNextScan) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    context["scanActive"] = true;
+    context["candidateCount"] = static_cast<qulonglong>(1596);
+    const auto result = engine.processQuery(
+        "Sur Bubble Solitaire XP, exact et increased ne convergent pas. Je pense qu il faut chercher dans les DLL/modules et retrouver la vraie source XP plutot qu une copie affichee.",
+        context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "tool_call");
+    EXPECT_EQ(result.value("tool").toString().toStdString(), "list_process_modules");
+    EXPECT_EQ(result.value("aiBackend").toString().toStdString(), "deterministic_module_listing_fastpath");
+}
+
 // PHASE 99 : demande explicite d'investigation "hors memoire" (LocalSettings,
 // fichier de sauvegarde, watch fichier) doit resoudre l'outil deterministe
 // SANS passer par le modele local -- aiBackend le prouve directement, plutot
@@ -927,19 +944,36 @@ TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathMatchesDisplayedField
     EXPECT_EQ(result.value("args").toMap().value("address").toString().toStdString(), "0x1a2b3c4d");
 }
 
-TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathWithoutAddressIsInvalidToolCall) {
+TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathWithoutAddressDoesNotCallTool) {
     ScopedModelDisabled guard;
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;
     context["processAttached"] = true;
-    // Le mot-cle matche (donc le tool est bien identifie), mais "address" est
-    // un requiredArg cote tool_registry.cpp -- le validateur rejette a raison
-    // un appel sans adresse plutot que de laisser passer un tool_call vide.
+    // Sans adresse 0x..., "valeur affichee/champ affiche" doit rester une
+    // guidance, pas un appel analyze_field_stability invalide.
     const auto result = engine.processQuery("est-ce un champ affiché ou la vraie source ?", context);
-    EXPECT_EQ(result.value("tool").toString().toStdString(), "analyze_field_stability");
-    EXPECT_EQ(result.value("status").toString().toStdString(), "invalid_tool_call");
-    EXPECT_FALSE(result.value("error").toString().isEmpty());
+    EXPECT_NE(result.value("tool").toString().toStdString(), "analyze_field_stability");
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_TRUE(result.value("error").toString().isEmpty());
+}
+
+TEST(AIEngineContextualFallbackTest, NegatedFreezeDoesNotRouteToFreezeTool) {
+    ScopedModelDisabled guard;
+    killai::AIEngine engine;
+    ASSERT_TRUE(engine.init());
+    QVariantMap context;
+    context["processAttached"] = true;
+    const auto result = engine.processQuery(
+        "Je teste Solitaire : conseille-moi comment trouver une valeur affichee sans ecrire ni freeze, en privilegient Trace UI string ou Changed Pages.",
+        context);
+    EXPECT_EQ(result.value("status").toString().toStdString(), "needs_clarification");
+    EXPECT_EQ(result.value("actionStatus").toString().toStdString(), "not_executed");
+    EXPECT_NE(result.value("tool").toString().toStdString(), "freeze_value");
+    EXPECT_NE(result.value("tool").toString().toStdString(), "analyze_field_stability");
+    EXPECT_NE(result.value("status").toString().toStdString(), "invalid_tool_call");
+    EXPECT_TRUE(result.value("message").toString().contains("Trace UI string"));
+    EXPECT_TRUE(result.value("message").toString().contains("Changed Pages"));
 }
 
 TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathStillRequiresAttachedProcess) {

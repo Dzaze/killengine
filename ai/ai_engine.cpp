@@ -42,6 +42,18 @@ bool describesStable(const QString& q) {
         || q.contains("unchanged") || q.contains("bouge pas");
 }
 
+bool hasNegatedFreezeInstruction(const QString& q) {
+    return q.contains("sans freeze") || q.contains("sans freezer")
+        || q.contains("sans geler") || q.contains("sans figer")
+        || q.contains("ni freeze") || q.contains("ni freezer")
+        || q.contains("ni geler") || q.contains("ni figer")
+        || q.contains("pas de freeze") || q.contains("pas freeze")
+        || q.contains("ne freeze pas") || q.contains("ne pas freeze")
+        || q.contains("ne pas freezer") || q.contains("without freeze")
+        || q.contains("without freezing") || q.contains("no freeze")
+        || q.contains("do not freeze") || q.contains("don't freeze");
+}
+
 bool wantsInspectorMode(const QString& q) {
     return q.contains("inspecteur") || q.contains("inspector") || q.contains("codex")
         || q.contains("enquete") || q.contains("enquête") || q.contains("raisonne")
@@ -53,6 +65,42 @@ bool describesUiCopyOrBuffer(const QString& q) {
         || q.contains("string instable") || q.contains("texte instable")
         || q.contains("affichage decouple") || q.contains("affichage découpl")
         || q.contains("pas ecrit sur place") || q.contains("pas écrit sur place");
+}
+
+bool wantsModuleSourcePivot(const QString& q) {
+    const bool mentionsModule = q.contains("dll") || q.contains("module") || q.contains("modules")
+        || q.contains("code du jeu") || q.contains("game code");
+    const bool mentionsSource = q.contains("vraie source") || q.contains("source xp")
+        || q.contains("source gameplay") || q.contains("copie affiche") || q.contains("copie affichée")
+        || q.contains("pas juste une copie") || q.contains("not just a copy");
+    const bool saysScanFailed = q.contains("ne converge pas") || q.contains("ne convergent pas")
+        || q.contains("converge pas") || q.contains("marche pas") || q.contains("marchera pas")
+        || q.contains("ne va pas marcher") || q.contains("won't work") || q.contains("does not converge")
+        || q.contains("doesn't converge");
+    return mentionsModule && (mentionsSource || saysScanFailed);
+}
+
+bool wantsProcessModuleListing(const QString& q) {
+    const bool asksList = q.contains("liste") || q.contains("lister") || q.contains("enumere")
+        || q.contains("énumère") || q.contains("montre") || q.contains("affiche")
+        || q.contains("list") || q.contains("show");
+    const bool mentionsModule = q.contains("dll") || q.contains("module") || q.contains("modules");
+    return mentionsModule && asksList;
+}
+
+QVariantMap makeModuleSourcePivotResponse(const QString& stateName) {
+    QVariantMap result;
+    result["status"] = "needs_clarification";
+    result["actionStatus"] = "not_executed";
+    result["message"] = "D'accord, on arrête de réduire en exact/increased : tu demandes un pivot vers les DLL/modules et la vraie source XP. "
+                        "Liste d'abord les modules du processus, repère le module applicatif Solitaire/WebView pertinent, puis utilise AOB/désassemblage ou Trace UI string/Changed Pages pour relier l'affichage XP à la source.";
+    result["state"] = stateName;
+    QVariantList recoveryActions;
+    recoveryActions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert"}, {"expertStep", "inspect"}});
+    recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}});
+    recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}});
+    result["recoveryActions"] = recoveryActions;
+    return result;
 }
 
 QString variationMode(const QString& q, const QString& fallback = "changed") {
@@ -375,10 +423,12 @@ FieldStabilityToolMatch matchFieldStabilityTool(const QString& query) {
     }
 
     const QString address = firstHexAddressIn(query);
-    QVariantMap args;
-    if (!address.isEmpty()) {
-        args["address"] = address;
+    if (address.isEmpty()) {
+        return {};
     }
+
+    QVariantMap args;
+    args["address"] = address;
     return {"analyze_field_stability", args,
         "J'observe passivement les écritures sur cette adresse (aucune écriture de ma part) pour juger si "
         "elle ressemble à un champ affiché recalculé ou à une source événementielle."};
@@ -842,6 +892,18 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
     }
 
     if (context.value("processAttached", true).toBool()) {
+        if (context.value("scanActive", false).toBool() && wantsModuleSourcePivot(q)) {
+            QVariantMap result = makeToolCall("list_process_modules", {},
+                "Je liste les modules/DLL charges pour identifier le module applicatif avant de poursuivre vers AOB/desassemblage ou Trace UI string/Changed Pages.");
+            result["aiBackend"] = "deterministic_module_listing_fastpath";
+            return result;
+        }
+        if (wantsProcessModuleListing(q)) {
+            QVariantMap result = makeToolCall("list_process_modules", {},
+                "Je liste les modules/DLL charges par le processus attache (lecture seule).");
+            result["aiBackend"] = "deterministic_module_listing_fastpath";
+            return result;
+        }
         if (const auto trainerMatch = matchTrainerTool(query); !trainerMatch.tool.isEmpty()) {
             QVariantMap result = makeToolCall(trainerMatch.tool, trainerMatch.args, trainerMatch.rationale);
             result["aiBackend"] = "deterministic_trainer_fastpath";
@@ -1032,7 +1094,7 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
         return makeToolCall("next_scan", {{"mode", mode}, {"value", firstNumber(query)}}, "Réduction des candidats.");
     }
 
-    if (q.contains("freeze") || q.contains("geler")) {
+    if ((q.contains("freeze") || q.contains("geler")) && !hasNegatedFreezeInstruction(q)) {
         return makeToolCall("freeze_value", {
             {"address", firstHexAddress(query)},
             {"valueType", inferValueType(query)},
@@ -1206,6 +1268,10 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             "Mode Inspecteur: je capture un snapshot lecture seule avant la prochaine variation.");
     }
 
+    if (scanActive && wantsModuleSourcePivot(q)) {
+        return makeModuleSourcePivotResponse(m_stateMachine.currentStateName());
+    }
+
     // Recherche active + nouvelle valeur observee => reduction plutot que nouveau scan.
     if (scanActive && !value.isEmpty()) {
         m_stateMachine.setState(AIState::Refining);
@@ -1227,7 +1293,7 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     }
 
     // Intentions speciales valorisees avant le scan brut.
-    if (q.contains("freeze") || q.contains("geler")) {
+    if ((q.contains("freeze") || q.contains("geler")) && !hasNegatedFreezeInstruction(q)) {
         return makeToolCall("freeze_value", {
             {"address", firstHexAddress(query)},
             {"valueType", inferValueType(query)},
@@ -1357,6 +1423,24 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         }
         m_stateMachine.setState(AIState::FirstScanRunning);
         return makeToolCall("exact_scan", {{"value", value}, {"valueType", inferValueType(query)}}, "Premier scan exact depuis une valeur detectee.");
+    }
+
+    // Demande de conseil sur une valeur affichee, mais sans valeur concrete :
+    // ne pas lancer auto_resolve qui echouerait aussitot faute de nombre.
+    if (q.contains("valeur affich") && value.isEmpty()
+        && (q.contains("comment") || q.contains("conseil") || q.contains("trouve")
+            || q.contains("chercher") || q.contains("trace ui") || q.contains("changed pages"))) {
+        QVariantMap result;
+        result["status"] = "needs_clarification";
+        result["actionStatus"] = "not_executed";
+        result["message"] = "Pour une valeur affichée, il me faut d'abord le nombre exact visible à l'écran. "
+                            "Ensuite je peux chercher le texte affiché (Trace UI string) ou capturer les pages modifiées avant/après une variation (Changed Pages), sans écrire ni freezer.";
+        result["state"] = m_stateMachine.currentStateName();
+        QVariantList recoveryActions;
+        recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}});
+        recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}});
+        result["recoveryActions"] = recoveryActions;
+        return result;
     }
 
     // Aucune valeur: objectifs complets ou guidance plutot que message brut.

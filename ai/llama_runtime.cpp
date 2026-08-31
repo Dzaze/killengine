@@ -490,7 +490,7 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         //     apps/desktop/application_controller.cpp) -- pas encore de
         //     fast-path explicite non plus, laisse hors schema par prudence
         //     tant que ce chemin n'est pas davantage exerce.
-        "Schema obligatoire: {\"tool\":\"auto_resolve|get_auto_report|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|analyze_field_stability|generate_aob|suggest_patch|disassemble_backward|test_candidate_fields|discover_save_files|inspect_local_settings|read_save_file_text|watch_save_file|trainer_list_features|trainer_create_write|trainer_delete_feature|trainer_apply_request|trainer_restore_request\",\"args\":{...}}\n"
+        "Schema obligatoire: {\"tool\":\"auto_resolve|get_auto_report|exact_scan|exact_scan_multi_type|next_scan|encrypted_scan|trace_ui_string|analyze_ui_sources|read_window_text|list_process_modules|start_changed_pages_diff|finish_changed_pages_diff|unknown_capture|unknown_compare|prepare_write_checkpoint|write_value|freeze_value|find_what_writes|analyze_field_stability|generate_aob|suggest_patch|disassemble_backward|test_candidate_fields|discover_save_files|inspect_local_settings|read_save_file_text|watch_save_file|trainer_list_features|trainer_create_write|trainer_delete_feature|trainer_apply_request|trainer_restore_request\",\"args\":{...}}\n"
         "Posture Inspecteur:\n"
         "- Observe avant d'ecrire: une adresse n'est fiable que si elle suit plusieurs variations et si l'hypothese explique les echecs precedents.\n"
         "- Distingue source gameplay, copie d'affichage, buffer UI recycle, table de sequence et pointeur intermediaire.\n"
@@ -507,6 +507,7 @@ QString LlamaRuntime::buildPrompt(const QString& query, const ToolRegistry& regi
         "- Si exact_scan echoue ou si la representation est incertaine, les alternatives safe sont exact_scan_multi_type, encrypted_scan, trace_ui_string et unknown_capture.\n"
         "- Si Trace UI string trouve des copies instables, buffers recycles, ou que l'adresse de string n'est pas ecrite sur place, choisis start_changed_pages_diff avant la prochaine variation, puis finish_changed_pages_diff apres la variation.\n"
         "- Si la cible est une app UWP/Store ou que la synchronisation utilisateur est floue, choisis read_window_text avant de lancer une observation memoire.\n"
+        "- Si l'utilisateur demande les DLL/modules, ou dit que exact/increased/decreased ne convergent pas et qu'il faut chercher dans les DLL/modules, choisis list_process_modules; lecture seule, aucun argument.\n"
         "- Si une recherche guidee est deja active et que l'utilisateur donne une nouvelle valeur observee, choisis next_scan avec mode=exact.\n"
         "- Si une recherche est active et que l'utilisateur decrit une variation sans valeur (augmente/diminue/change), choisis next_scan avec mode=increased|decreased|changed.\n"
         "- Si aucun processus n'est attache, ne choisis aucun outil de scan; auto_resolve avec args.query reste acceptable pour planifier.\n"

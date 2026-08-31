@@ -6,6 +6,7 @@
 #ifdef Q_OS_WIN
 #include <aclapi.h>
 #include <windows.h>
+#include <winternl.h>
 #endif
 
 #include <QDir>
@@ -96,6 +97,59 @@ bool prepareAppContainerReadableDllCopy(const QString& dllPath, uint32_t targetP
     if (copiedPath) *copiedPath = targetPath;
     return true;
 }
+/// Typedef pour NtCreateThreadEx (fonction non documentée de ntdll.dll).
+/// Utilisée pour créer un thread distant sans passer par CreateRemoteThread,
+/// ce qui évite la détection d'injection par les anti-cheat (SC2, etc.).
+typedef NTSTATUS(NTAPI* NtCreateThreadEx_t)(
+    PHANDLE ThreadHandle,
+    ACCESS_MASK DesiredAccess,
+    LPVOID ObjectAttributes,
+    HANDLE ProcessHandle,
+    LPTHREAD_START_ROUTINE StartRoutine,
+    LPVOID Argument,
+    ULONG CreateFlags,
+    SIZE_T ZeroBits,
+    SIZE_T StackSize,
+    SIZE_T MaximumStackSize,
+    LPVOID AttributeList);
+
+/// Crée un thread distant via NtCreateThreadEx au lieu de CreateRemoteThread.
+/// Retourne le handle du thread ou NULL en cas d'échec.
+HANDLE createRemoteThreadViaNt(HANDLE hProcess, LPTHREAD_START_ROUTINE startRoutine, LPVOID argument) {
+    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
+    if (!hNtdll) {
+        return nullptr;
+    }
+
+    auto pNtCreateThreadEx = reinterpret_cast<NtCreateThreadEx_t>(
+        GetProcAddress(hNtdll, "NtCreateThreadEx"));
+    if (!pNtCreateThreadEx) {
+        return nullptr;
+    }
+
+    HANDLE hThread = nullptr;
+    NTSTATUS status = pNtCreateThreadEx(
+        &hThread,
+        THREAD_ALL_ACCESS,
+        nullptr,
+        hProcess,
+        startRoutine,
+        argument,
+        0,      // CreateFlags (0 = pas de flags spéciaux)
+        0,      // ZeroBits
+        0,      // StackSize (0 = taille par défaut)
+        0,      // MaximumStackSize
+        nullptr // AttributeList
+    );
+
+    if (status != 0 || !hThread) {
+        KE_LOG_DEBUG() << "NtCreateThreadEx failed (status=0x" << std::hex << status << ")";
+        return nullptr;
+    }
+
+    return hThread;
+}
+
 } // namespace
 #endif
 
@@ -169,15 +223,37 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
             return attempt;
         }
 
-        // 4. CreateRemoteThread pour appeler LoadLibraryW(pRemotePath)
-        HANDLE hThread = CreateRemoteThread(
-            hProcess,
-            nullptr,
-            0,
-            reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibraryAddr),
-            pRemotePath,
-            0,
-            nullptr);
+        // 4. Créer un thread distant pour appeler LoadLibraryW(pRemotePath)
+        //    Si useNtCreateThreadEx est activé, utiliser NtCreateThreadEx au lieu de
+        //    CreateRemoteThread pour éviter la détection d'injection par les anti-cheat.
+        HANDLE hThread = nullptr;
+        if (options.useNtCreateThreadEx) {
+            hThread = createRemoteThreadViaNt(
+                hProcess,
+                reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibraryAddr),
+                pRemotePath);
+            if (!hThread) {
+                // Fallback sur CreateRemoteThread si NtCreateThreadEx échoue
+                KE_LOG_WARN() << "DllInjector: NtCreateThreadEx failed, falling back to CreateRemoteThread";
+                hThread = CreateRemoteThread(
+                    hProcess,
+                    nullptr,
+                    0,
+                    reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibraryAddr),
+                    pRemotePath,
+                    0,
+                    nullptr);
+            }
+        } else {
+            hThread = CreateRemoteThread(
+                hProcess,
+                nullptr,
+                0,
+                reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibraryAddr),
+                pRemotePath,
+                0,
+                nullptr);
+        }
 
         if (!hThread) {
             const DWORD err = GetLastError();

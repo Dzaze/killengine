@@ -31,6 +31,7 @@ QVariantList toolDefinitions() {
         makeTool("trace_ui_string", "Cherche la valeur affichee en ASCII/UTF-16 puis prepare analyse source.", {"value"}),
         makeTool("analyze_ui_sources", "Analyse les sources numeriques proches des strings UI confirmees.", {"value"}),
         makeTool("read_window_text", "Observe les titres/textes de fenetres lies au processus attache pour synchroniser une investigation UI.", {}),
+        makeTool("list_process_modules", "Liste les DLL/modules charges par le processus attache pour reperer le module applicatif pertinent avant AOB/desassemblage. Lecture seule.", {}),
         makeTool("start_changed_pages_diff", "Capture un snapshot borne des pages privees/writable avant une variation affichee; lecture seule.", {}),
         makeTool("finish_changed_pages_diff", "Compare le snapshot de pages apres variation et cherche les encodages numeriques modifies.", {"previousValue", "currentValue"}),
         makeTool("unknown_capture", "Capture un snapshot unknown initial borne.", {}),

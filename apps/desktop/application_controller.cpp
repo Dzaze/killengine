@@ -1368,6 +1368,19 @@ bool looksLikeGoodTargetReport(const QString& query) {
 
 bool looksLikeFreezeRequest(const QString& query) {
     const QString q = query.toLower();
+    const bool negated = q.contains("sans freeze") || q.contains("sans freezer")
+        || q.contains("sans geler") || q.contains("sans figer")
+        || q.contains("ni freeze") || q.contains("ni freezer")
+        || q.contains("ni geler") || q.contains("ni figer")
+        || q.contains("pas de freeze") || q.contains("pas freeze")
+        || q.contains("ne freeze pas") || q.contains("ne pas freeze")
+        || q.contains("ne pas freezer") || q.contains("without freeze")
+        || q.contains("without freezing") || q.contains("no freeze")
+        || q.contains("do not freeze") || q.contains("don't freeze");
+    if (negated) {
+        return false;
+    }
+
     return q.contains("freeze")
         || q.contains("freezer")
         || q.contains("fige")
@@ -4930,6 +4943,138 @@ QVariantMap ApplicationController::savePointerChainProfileTarget(
     const QString& valueType,
     const QString& description) {
     return m_profileManager->savePointerChainProfileTarget(profileName, targetName, chain, valueType, description);
+}
+
+QVariantMap ApplicationController::applyStealthMode(const QString& profile) {
+    QVariantMap result;
+    if (!m_attached) {
+        result["success"] = false;
+        result["error"] = "Not attached to a process";
+        return result;
+    }
+    if (m_stealthActive) {
+        result["success"] = false;
+        result["error"] = "Stealth mode already active (profile: " + m_stealthProfile + ")";
+        return result;
+    }
+
+    bool antiDebug = false;
+    bool processMask = false;
+    bool dllMask = false;
+
+    if (profile == "sc2") {
+        antiDebug = true;
+        processMask = true;
+        dllMask = true;
+    } else if (profile == "default") {
+        antiDebug = true;
+    } else if (profile == "minimal") {
+        processMask = true;
+    } else {
+        result["success"] = false;
+        result["error"] = "Unknown profile: " + profile + ". Supported: sc2, default, minimal";
+        return result;
+    }
+
+    QStringList errors;
+    int modulesActivated = 0;
+
+    if (antiDebug) {
+        auto antiResult = m_antiDebugSession.start(m_handle);
+        if (antiResult.success) {
+            modulesActivated++;
+        } else {
+            errors << "AntiDebug: " + antiResult.error;
+        }
+    }
+
+    if (processMask) {
+        auto maskResult = killcore::ProcessMask::maskCurrentProcess("svchost.exe");
+        if (maskResult.success) {
+            modulesActivated++;
+            m_stealthProcessMaskActive = true;
+        } else {
+            errors << "ProcessMask: " + maskResult.error;
+        }
+    }
+
+    if (dllMask) {
+        auto dllResult = killcore::DllMask::maskDll(static_cast<uint32_t>(m_pid), "KillEnginePageGuardHandler.dll");
+        if (dllResult.success) {
+            modulesActivated++;
+            m_stealthDllMaskActive = true;
+        } else {
+            errors << "DllMask: " + dllResult.error;
+        }
+    }
+
+    m_stealthActive = m_antiDebugSession.isActive() || m_stealthProcessMaskActive || m_stealthDllMaskActive;
+    m_stealthProfile = m_stealthActive ? profile : QString();
+
+    result["success"] = m_stealthActive;
+    result["profile"] = m_stealthProfile;
+    result["modulesActivated"] = modulesActivated;
+    result["modules"] = QVariantMap{
+        {"antiDebug", m_antiDebugSession.isActive()},
+        {"processMask", m_stealthProcessMaskActive},
+        {"dllMask", m_stealthDllMaskActive}
+    };
+    if (!m_stealthActive) {
+        result["error"] = "No stealth modules activated";
+    }
+    if (!errors.isEmpty()) {
+        result["warnings"] = errors;
+    }
+
+    return result;
+}
+
+QVariantMap ApplicationController::restoreStealthMode() {
+    QVariantMap result;
+    if (!m_stealthActive) {
+        result["success"] = false;
+        result["error"] = "Stealth mode is not active";
+        return result;
+    }
+
+    m_antiDebugSession.stop();
+    QStringList warnings;
+    if (m_stealthProcessMaskActive) {
+        auto restoreResult = killcore::ProcessMask::restoreOriginalName();
+        if (!restoreResult.success) {
+            warnings << restoreResult.error;
+        }
+    }
+    if (m_stealthDllMaskActive) {
+        auto restoreResult = killcore::DllMask::restoreDll(static_cast<uint32_t>(m_pid), "KillEnginePageGuardHandler.dll");
+        if (!restoreResult.success) {
+            warnings << restoreResult.error;
+        }
+    }
+    m_stealthActive = false;
+    m_stealthProfile.clear();
+    m_stealthProcessMaskActive = false;
+    m_stealthDllMaskActive = false;
+
+    result["success"] = true;
+    result["restored"] = true;
+    if (!warnings.isEmpty()) {
+        result["warnings"] = warnings;
+    }
+
+    return result;
+}
+
+QVariantMap ApplicationController::getStealthModeStatus() const {
+    QVariantMap result;
+    result["active"] = m_stealthActive;
+    result["profile"] = m_stealthProfile;
+    result["modules"] = QVariantMap{
+        {"antiDebug", m_antiDebugSession.isActive()},
+        {"processMask", m_stealthProcessMaskActive},
+        {"dllMask", m_stealthDllMaskActive}
+    };
+    return result;
 }
 
 } // namespace killengine

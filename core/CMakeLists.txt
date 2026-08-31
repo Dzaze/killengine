@@ -22,6 +22,8 @@ add_library(killcore STATIC
     process/process_handle.cpp
     process/architecture.cpp
     process/process_suspend.cpp
+    process/process_mask.h
+    process/process_mask.cpp
 
     # Roadmap section I — Résolution de symbole par nom (table d'export PE lue
     # à distance, pour hooker/breaker une fonction connue sans passer par Find
@@ -127,6 +129,10 @@ add_library(killcore STATIC
     debug/breakpoint_arbiter.h
     debug/breakpoint_arbiter.cpp
 
+    # Phase 252 — Anti-anti-debug (contourner les mécanismes anti-debug de SC2)
+    debug/anti_debug.h
+    debug/anti_debug.cpp
+
     # Phase 19 — Scan de valeurs chiffrées/obfusquées
     scanner/encrypted_scan.h
     scanner/encrypted_scan.cpp
@@ -140,6 +146,8 @@ add_library(killcore STATIC
     inject/dll_injector.cpp
     inject/function_hook.h
     inject/function_hook.cpp
+    inject/dll_mask.h
+    inject/dll_mask.cpp
 
     # Phase 20 — Auto-assembler
     # Roadmap section B - interception de fonctions (KillEngineApiHookHandler.dll,

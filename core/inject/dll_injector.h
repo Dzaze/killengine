@@ -22,6 +22,12 @@ struct InjectDllOptions {
     /// lisible. Utile pour les handlers dont DllMain doit se rejouer à
     /// chaque capture dans un même PID.
     bool forceUniqueLoad{false};
+
+    /// Utiliser NtCreateThreadEx au lieu de CreateRemoteThread pour éviter
+    /// la détection d'injection par les anti-cheat (SC2, etc.).
+    /// NtCreateThreadEx est une fonction non documentée de ntdll.dll qui
+    /// crée un thread distant sans passer par CreateRemoteThread.
+    bool useNtCreateThreadEx{false};
 };
 
 /**

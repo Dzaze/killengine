@@ -1155,6 +1155,29 @@ export interface AiModelStatus {
     error?: string
   }
 
+  export interface StealthModeResult {
+    success: boolean
+    profile?: string
+    modulesActivated?: number
+    modules?: {
+      antiDebug: boolean
+      processMask: boolean
+      dllMask: boolean
+    }
+    error?: string
+    warnings?: string[]
+  }
+
+  export interface StealthModeStatus {
+    active: boolean
+    profile: string
+    modules: {
+      antiDebug: boolean
+      processMask: boolean
+      dllMask: boolean
+    }
+  }
+
   export interface BackendController {
   getVersion(): Promise<string>
   getProcesses(): Promise<ProcessInfo[]>
@@ -1336,6 +1359,9 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   enableAutomationMode?(): Promise<Record<string, unknown>>
   disableAutomationMode?(): Promise<Record<string, unknown>>
   getAutomationPipeStatus?(): Promise<Record<string, unknown>>
+  applyStealthMode?(profile: string): Promise<StealthModeResult>
+  restoreStealthMode?(): Promise<StealthModeResult>
+  getStealthModeStatus?(): Promise<StealthModeStatus>
   startAutoResolve?(query: string, options: Record<string, unknown>): Promise<SmartSearchResult>
   getAutoResolveReport?(maxEvents: number): Promise<AutoResolveReportResult>
   clearAutoResolveMemory?(allProcesses: boolean): Promise<Record<string, unknown>>
@@ -1534,6 +1560,12 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ): Promise<Record<string, unknown>>
   /** Après une écriture confirmée : cherche une chaîne de pointeurs stable vers cette adresse. Lecture seule, bornée, à appeler explicitement (jamais automatiquement après chaque écriture). */
   suggestStableLocatorForAddress?(addressHex: string, options: PointerScanOptions): Promise<StableLocatorSuggestion>
+  /** Active un mode de fonctionnement avancé (profil : "sc2", "default", "minimal"). */
+  applyStealthMode?(profile: string): Promise<StealthModeResult>
+  /** Désactive le mode de fonctionnement avancé et restaure l'état initial. */
+  restoreStealthMode?(): Promise<StealthModeResult>
+  /** Retourne l'état courant du mode de fonctionnement avancé. */
+  getStealthModeStatus?(): Promise<StealthModeStatus>
 }
 
 class BackendService {
@@ -2755,6 +2787,29 @@ class BackendService {
       },
       async deleteProfileLuaScript() {
         return { success: false, error: 'Mock backend' }
+      },
+      async applyStealthMode(_profile: string) {
+        return {
+          success: false,
+          error: 'Mock backend',
+          modulesActivated: 0,
+          modules: { antiDebug: false, processMask: false, dllMask: false },
+        }
+      },
+      async restoreStealthMode() {
+        return {
+          success: false,
+          error: 'Mock backend',
+          modulesActivated: 0,
+          modules: { antiDebug: false, processMask: false, dllMask: false },
+        }
+      },
+      async getStealthModeStatus() {
+        return {
+          active: false,
+          profile: '',
+          modules: { antiDebug: false, processMask: false, dllMask: false },
+        }
       },
     }
   }
