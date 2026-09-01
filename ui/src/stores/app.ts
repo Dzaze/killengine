@@ -16,6 +16,7 @@ import {
   type ProcessLocalSettingsResult,
   type ProcessSaveFileDiscoveryResult,
   type ProcessSaveFileInfo,
+  type SaveFileSnapshotDiffResult,
   type ProcessSaveFileTextResult,
   type SaveFilePatchResult,
   type SaveFileWatchResult,
@@ -121,6 +122,14 @@ export const useAppStore = defineStore('app', () => {
   const selectedSaveFilePath = ref('')
   const saveFilesBusy = ref(false)
   const saveFileTextBusy = ref(false)
+  // UWP-STATE-1 : snapshot avant/après pour isoler quel fichier change quand
+  // une valeur affichée change (ex: gagner de l'XP), cf.
+  // docs/UWP_STATE_INSPECTOR_SPEC.md. Réutilise discoverProcessSaveFiles
+  // (déjà existant, PHASE 90/91) deux fois plutôt que de le refaire.
+  const saveFileSnapshotBefore = ref<ProcessSaveFileInfo[]>([])
+  const saveFileSnapshotAfter = ref<ProcessSaveFileInfo[]>([])
+  const saveFileSnapshotDiff = ref<SaveFileSnapshotDiffResult | null>(null)
+  const saveFileSnapshotBusy = ref(false)
   const localSettingsResult = ref<ProcessLocalSettingsResult | null>(null)
   const localSettingsBusy = ref(false)
   const saveFileWatchResult = ref<SaveFileWatchResult | null>(null)
@@ -2441,6 +2450,66 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function takeSaveFileSnapshotBefore(maxResults = 200) {
+    saveFileSnapshotBusy.value = true
+    try {
+      const result = await backend.getController().discoverProcessSaveFiles(maxResults)
+      saveFileSnapshotBefore.value = result.success ? (result.files ?? []) : []
+      saveFileSnapshotDiff.value = null
+      addActionLog(
+        'save_files',
+        'Snapshot "avant" pris',
+        `${saveFileSnapshotBefore.value.length} fichier(s)${result.familyName ? ` · ${result.familyName}` : ''}.`,
+        result.success ? 'success' : 'warning',
+      )
+      return result
+    } finally {
+      saveFileSnapshotBusy.value = false
+    }
+  }
+
+  async function takeSaveFileSnapshotAfter(maxResults = 200) {
+    saveFileSnapshotBusy.value = true
+    try {
+      const result = await backend.getController().discoverProcessSaveFiles(maxResults)
+      saveFileSnapshotAfter.value = result.success ? (result.files ?? []) : []
+      saveFileSnapshotDiff.value = null
+      addActionLog(
+        'save_files',
+        'Snapshot "après" pris',
+        `${saveFileSnapshotAfter.value.length} fichier(s)${result.familyName ? ` · ${result.familyName}` : ''}.`,
+        result.success ? 'success' : 'warning',
+      )
+      return result
+    } finally {
+      saveFileSnapshotBusy.value = false
+    }
+  }
+
+  async function compareSaveFileSnapshots() {
+    saveFileSnapshotBusy.value = true
+    try {
+      const controller = backend.getController()
+      const result = await controller.compareProcessSaveFileSnapshots?.(
+        saveFileSnapshotBefore.value,
+        saveFileSnapshotAfter.value,
+      )
+      const finalResult: SaveFileSnapshotDiffResult = result ?? { success: false, error: 'Méthode non disponible' }
+      saveFileSnapshotDiff.value = finalResult
+      addActionLog(
+        'save_files',
+        finalResult.success ? 'Comparaison des snapshots terminée' : 'Comparaison échouée',
+        finalResult.success
+          ? `${finalResult.addedCount ?? 0} ajouté(s), ${finalResult.removedCount ?? 0} supprimé(s), ${finalResult.modifiedCount ?? 0} modifié(s).`
+          : (finalResult.error ?? 'Erreur inconnue.'),
+        finalResult.success ? 'success' : 'warning',
+      )
+      return finalResult
+    } finally {
+      saveFileSnapshotBusy.value = false
+    }
+  }
+
   async function readSaveFileText(path: string, maxBytes = 65536) {
     const trimmedPath = path.trim()
     if (!trimmedPath) {
@@ -3597,6 +3666,10 @@ export const useAppStore = defineStore('app', () => {
     selectedSaveFilePath,
     saveFilesBusy,
     saveFileTextBusy,
+    saveFileSnapshotBefore,
+    saveFileSnapshotAfter,
+    saveFileSnapshotDiff,
+    saveFileSnapshotBusy,
     localSettingsResult,
     localSettingsBusy,
     saveFileWatchResult,
@@ -3750,6 +3823,9 @@ export const useAppStore = defineStore('app', () => {
     refreshProcesses,
     refreshProcessModules,
     discoverSaveFiles,
+    takeSaveFileSnapshotBefore,
+    takeSaveFileSnapshotAfter,
+    compareSaveFileSnapshots,
     readSaveFileText,
     inspectLocalSettings,
     watchSelectedSaveFile,

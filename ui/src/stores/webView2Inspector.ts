@@ -5,7 +5,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { backend, type WebView2InspectorStatus, type WebView2CdpTarget, type WebView2EvaluateResult, type WebView2FindResult } from '@/services/backend'
+import { backend, type WebView2InspectorStatus, type WebView2CdpTarget, type WebView2EvaluateResult, type WebView2FindResult, type WebView2GlobalScopeResult } from '@/services/backend'
 
 export interface WebView2InspectorState {
   isConnecting: boolean
@@ -32,6 +32,8 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   const findResults = ref<WebView2FindResult[]>([])
   const isEvaluating = ref(false)
   const isFinding = ref(false)
+  const globalScopeResult = ref<WebView2GlobalScopeResult | null>(null)
+  const isProbingGlobalScope = ref(false)
 
   // Getters
   const selectedTarget = computed(() => {
@@ -200,6 +202,33 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
     }
   }
 
+  async function probeGlobalScope(): Promise<WebView2GlobalScopeResult | null> {
+    const controller = backend.getController()
+    if (!controller?.probeWebView2GlobalScope) {
+      error.value = 'Méthode probeWebView2GlobalScope non disponible'
+      return null
+    }
+
+    isProbingGlobalScope.value = true
+    error.value = null
+
+    try {
+      const result = await controller.probeWebView2GlobalScope()
+      globalScopeResult.value = result
+      if (!result.success) {
+        error.value = result.error || 'Échec du sondage du scope global'
+        await refreshStatus()
+      }
+      return result
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      error.value = msg
+      return null
+    } finally {
+      isProbingGlobalScope.value = false
+    }
+  }
+
   async function findDisplayedValues(value: string, options?: Record<string, unknown>): Promise<WebView2FindResult[]> {
     const controller = backend.getController()
     if (!controller?.findWebView2DisplayedValues) {
@@ -282,6 +311,8 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
     findResults.value = []
     isEvaluating.value = false
     isFinding.value = false
+    globalScopeResult.value = null
+    isProbingGlobalScope.value = false
   }
 
   return {
@@ -296,6 +327,8 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
     findResults,
     isEvaluating,
     isFinding,
+    globalScopeResult,
+    isProbingGlobalScope,
     // Getters
     selectedTarget,
     canConnect,
@@ -309,6 +342,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
     evaluateJavaScript,
     findDisplayedValues,
     findDisplayedText,
+    probeGlobalScope,
     selectTarget,
     clearError,
     clearResults,

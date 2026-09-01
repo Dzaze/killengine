@@ -621,6 +621,13 @@ WebView2ToolMatch matchWebView2Tool(const QString& query, const QVariantMap& con
             "Je prepare la connexion a une target WebView2/CDP ; cette action passe par le RiskGate."};
     }
 
+    if (q.contains("sonde") || q.contains("sonder") || q.contains("reconnaissance")
+        || q.contains("globales") || q.contains("quelles fonctions") || q.contains("quelles variables")
+        || q.contains("qu'est-ce qui est disponible") || q.contains("quoi evaluer") || q.contains("quoi évaluer")) {
+        return {"probeWebView2GlobalScope", {},
+            "Je sonde le scope JS global de la target connectee pour voir ce qui est disponible avant de deviner du JS a l'aveugle."};
+    }
+
     const QString expression = javascriptExpressionFromQuery(query);
     if (!expression.isEmpty()) {
         return {"evaluateWebView2JavaScript", {{"expression", expression}},

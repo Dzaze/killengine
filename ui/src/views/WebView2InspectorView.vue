@@ -76,6 +76,15 @@ async function handleEvaluate() {
   }
 }
 
+async function handleProbeGlobalScope() {
+  const result = await store.probeGlobalScope()
+  if (result?.success) {
+    appStore.addActionLog('webview2', t('webview2.probe.success'), '', 'success')
+  } else {
+    appStore.addActionLog('webview2', store.error || t('webview2.probe.error'), '', 'error')
+  }
+}
+
 async function handleFindValues() {
   if (!findValueInput.value.trim()) return
   await store.findDisplayedValues(findValueInput.value)
@@ -191,6 +200,59 @@ function handleReset() {
             :checked="store.selectedTargetId === target.id"
             @click.stop="store.selectTarget(target.id)"
           >
+        </div>
+      </div>
+    </div>
+
+    <!-- Reconnaissance du scope global -->
+    <div
+      v-if="store.isConnected"
+      class="section"
+    >
+      <h3>{{ $t('webview2.probe.title') }}</h3>
+      <p class="hint">{{ $t('webview2.probe.hint') }}</p>
+      <div class="controls-row">
+        <button
+          class="btn btn-secondary"
+          :disabled="store.isProbingGlobalScope"
+          @click="handleProbeGlobalScope"
+        >
+          {{ store.isProbingGlobalScope ? $t('webview2.probe.running') : $t('webview2.probe.run') }}
+        </button>
+      </div>
+      <div v-if="store.globalScopeResult" class="result-panel">
+        <template v-if="store.globalScopeResult.success">
+          <p class="hint">
+            {{ $t('webview2.probe.summary', {
+              count: store.globalScopeResult.customGlobalsCount ?? 0,
+              total: store.globalScopeResult.totalGlobalsSeen ?? 0,
+              mode: store.globalScopeResult.baselineMode === 'dynamic_about_blank'
+                ? $t('webview2.probe.modeDynamic')
+                : $t('webview2.probe.modeStatic'),
+            }) }}
+          </p>
+          <div class="results-list">
+            <div
+              v-for="(entry, index) in store.globalScopeResult.customGlobals"
+              :key="index"
+              class="result-item"
+            >
+              <div class="result-header">
+                <span class="result-selector">{{ entry.name }}</span>
+                <span v-if="entry.type" class="result-tag">{{ entry.type }}</span>
+              </div>
+            </div>
+          </div>
+          <p v-if="store.globalScopeResult.media" class="hint">
+            {{ $t('webview2.probe.media', {
+              video: store.globalScopeResult.media.video ?? 0,
+              audio: store.globalScopeResult.media.audio ?? 0,
+              iframes: store.globalScopeResult.media.iframes?.length ?? 0,
+            }) }}
+          </p>
+        </template>
+        <div v-else class="result-error">
+          {{ store.globalScopeResult.error || $t('webview2.probe.error') }}
         </div>
       </div>
     </div>

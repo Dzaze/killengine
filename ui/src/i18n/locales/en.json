@@ -144,6 +144,18 @@
       "searching": "Searching…",
       "search": "Search",
       "results": "{count} result(s)"
+    },
+    "probe": {
+      "title": "JS context reconnaissance",
+      "hint": "Lists variables/functions added by the page (as opposed to native Chromium noise), so you know what to evaluate without guessing blindly.",
+      "running": "Probing…",
+      "run": "Probe context",
+      "summary": "{count} page-specific global(s) out of {total} total ({mode}).",
+      "modeDynamic": "dynamic about:blank baseline",
+      "modeStatic": "static fallback list",
+      "media": "Media elements: {video} video(s), {audio} audio(s), {iframes} iframe(s).",
+      "error": "JS context probe failed.",
+      "success": "JS context probe finished."
     }
   },
   "lexicon": {

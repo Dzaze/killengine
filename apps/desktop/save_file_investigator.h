@@ -27,6 +27,7 @@ public:
         QObject* parent = nullptr);
 
     QVariantMap discoverProcessSaveFiles(int maxResults) const;
+    QVariantMap compareSaveFileSnapshots(const QVariantList& before, const QVariantList& after) const;
     QVariantMap inspectProcessLocalSettings(int maxValues) const;
     QVariantMap readProcessSaveFileText(const QString& path, int maxBytes) const;
     QVariantMap patchProcessSaveFileBytes(const QString& path, const QString& findHex, const QString& replaceHex);

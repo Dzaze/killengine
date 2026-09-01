@@ -115,6 +115,21 @@ public:
      */
     QVariant callFunction(const QString& functionCode);
 
+    /**
+     * @brief Sonde le scope global (window) de la page connectée : liste ses
+     *        propriétés propres (nom + type/subtype/className CDP) via
+     *        Runtime.evaluate("window", returnByValue=false) + Runtime.getProperties,
+     *        et compte les éléments <video>/<audio>/<iframe> présents dans le
+     *        document. Ne fait aucun filtrage bruit/signal lui-même (les
+     *        globales natives Chromium sont incluses) — c'est à l'appelant de
+     *        comparer avec une baseline (ex: une page about:blank) s'il veut
+     *        isoler les globales ajoutées par la page. Voir WEBVIEW-F,
+     *        docs/PHASE_TRACKER.md.
+     * @return {success, globals: [{name, type, subtype, className}], media:
+     *         {video, audio, iframes: [src]}, error}
+     */
+    QJsonObject probeGlobalScope();
+
     // =======================================================================
     // Inspection des ressources de jeu
     // =======================================================================

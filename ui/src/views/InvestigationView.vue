@@ -618,6 +618,81 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
       <pre>{{ exportText }}</pre>
     </section>
 
+    <section class="panel">
+      <div class="export-head">
+        <h2>État UWP (snapshot avant/après)</h2>
+        <span>{{ store.saveFileSnapshotBefore.length }} avant · {{ store.saveFileSnapshotAfter.length }} après</span>
+      </div>
+      <p class="muted">
+        Compare les fichiers de sauvegarde UWP du processus attaché avant/après une action (ex: gagner de l'XP)
+        pour identifier quel fichier change, sans avoir à deviner une adresse mémoire. Prends un snapshot
+        "avant", fais l'action dans le jeu, prends un snapshot "après", puis compare.
+      </p>
+      <div class="topbar">
+        <button
+          class="btn"
+          :disabled="store.saveFileSnapshotBusy || !store.isAttached"
+          @click="store.takeSaveFileSnapshotBefore()"
+        >
+          Snapshot avant
+        </button>
+        <button
+          class="btn"
+          :disabled="store.saveFileSnapshotBusy || !store.isAttached"
+          @click="store.takeSaveFileSnapshotAfter()"
+        >
+          Snapshot après
+        </button>
+        <button
+          class="btn"
+          :disabled="store.saveFileSnapshotBusy || store.saveFileSnapshotBefore.length === 0 || store.saveFileSnapshotAfter.length === 0"
+          @click="store.compareSaveFileSnapshots()"
+        >
+          Comparer
+        </button>
+      </div>
+      <template v-if="store.saveFileSnapshotDiff">
+        <template v-if="store.saveFileSnapshotDiff.success">
+          <p class="muted">
+            {{ store.saveFileSnapshotDiff.addedCount ?? 0 }} ajouté(s) ·
+            {{ store.saveFileSnapshotDiff.removedCount ?? 0 }} supprimé(s) ·
+            {{ store.saveFileSnapshotDiff.modifiedCount ?? 0 }} modifié(s) ·
+            {{ store.saveFileSnapshotDiff.unchangedCount ?? 0 }} inchangé(s)
+          </p>
+          <article
+            v-for="entry in store.saveFileSnapshotDiff.modified"
+            :key="entry.path"
+            class="archive-row"
+          >
+            <div>
+              <strong>{{ entry.path }}</strong>
+              <span>
+                {{ entry.sizeBytesBefore }} → {{ entry.sizeBytesAfter }} octets
+                ({{ (entry.sizeDeltaBytes ?? 0) >= 0 ? '+' : '' }}{{ entry.sizeDeltaBytes }})
+              </span>
+            </div>
+          </article>
+          <article
+            v-for="entry in store.saveFileSnapshotDiff.added"
+            :key="entry.path"
+            class="archive-row"
+          >
+            <div>
+              <strong>{{ entry.path }}</strong>
+              <span>Nouveau fichier · {{ entry.sizeBytes }} octets</span>
+            </div>
+          </article>
+          <p
+            v-if="(store.saveFileSnapshotDiff.modified?.length ?? 0) === 0 && (store.saveFileSnapshotDiff.added?.length ?? 0) === 0"
+            class="muted"
+          >
+            Aucun fichier modifié ou ajouté entre les deux snapshots.
+          </p>
+        </template>
+        <p v-else class="muted">{{ store.saveFileSnapshotDiff.error }}</p>
+      </template>
+    </section>
+
     <section class="panel archive">
       <div class="export-head">
         <h2>Archives</h2>

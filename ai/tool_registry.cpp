@@ -89,6 +89,9 @@ QVariantList toolDefinitions() {
         makeTool("evaluateWebView2JavaScript", "Evalue une expression JavaScript arbitraire dans la target WebView2 connectee. Peut lire ou modifier l'etat JS selon le code fourni : confirmation RiskGate obligatoire.", {"expression"}, "script", true),
         makeTool("findWebView2DisplayedValues", "Cherche une valeur numerique affichee dans le DOM de la target WebView2 connectee via une expression JS controlee.", {"value"}, "debug", false),
         makeTool("findWebView2DisplayedText", "Cherche un texte affiche dans le DOM de la target WebView2 connectee via une expression JS controlee.", {"text"}, "debug", false),
+        // WEBVIEW-F : reconnaissance automatique du contexte JS a la connexion,
+        // pour eviter de deviner du JS a l'aveugle (Object.keys(window), etc.).
+        makeTool("probeWebView2GlobalScope", "Sonde le scope global JS (window) de la target WebView2 connectee et isole les variables/fonctions ajoutees par la page (SDK, etat de jeu) du bruit natif Chromium, via une baseline dynamique (about:blank) quand possible. Donne aussi un apercu structure (nombre de <video>/<audio>, srcs des <iframe>). A utiliser juste apres connectWebView2Inspector plutot que de deviner du JS a l'aveugle. Lecture seule.", {}, "safe", false),
     };
 }
 

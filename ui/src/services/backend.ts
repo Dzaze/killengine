@@ -34,6 +34,27 @@ export interface ProcessSaveFileDiscoveryResult {
   error?: string
 }
 
+export interface SaveFileSnapshotDiffEntry {
+  path: string
+  sizeBytesBefore?: number
+  sizeBytesAfter?: number
+  sizeDeltaBytes?: number
+  lastWriteTimeBefore?: string
+  lastWriteTimeAfter?: string
+}
+
+export interface SaveFileSnapshotDiffResult {
+  success: boolean
+  added?: ProcessSaveFileInfo[]
+  removed?: ProcessSaveFileInfo[]
+  modified?: SaveFileSnapshotDiffEntry[]
+  addedCount?: number
+  removedCount?: number
+  modifiedCount?: number
+  unchangedCount?: number
+  error?: string
+}
+
 export interface ProcessSaveFileTextResult {
   success: boolean
   path?: string
@@ -208,6 +229,23 @@ export interface WebView2FindResponse {
   matches?: WebView2FindResult[]
   count?: number
   totalMatches?: number
+  error?: string
+}
+
+export interface WebView2GlobalEntry {
+  name: string
+  type?: string
+  subtype?: string
+  className?: string
+}
+
+export interface WebView2GlobalScopeResult {
+  success: boolean
+  customGlobals?: WebView2GlobalEntry[]
+  customGlobalsCount?: number
+  totalGlobalsSeen?: number
+  baselineMode?: string
+  media?: { video?: number; audio?: number; iframes?: string[] }
   error?: string
 }
 
@@ -1266,6 +1304,8 @@ export interface AiModelStatus {
   getProcesses(): Promise<ProcessInfo[]>
   getProcessModules(pid: number): Promise<ProcessModuleInfo[]>
   discoverProcessSaveFiles(maxResults: number): Promise<ProcessSaveFileDiscoveryResult>
+  /** Compare deux snapshots (obtenus via discoverProcessSaveFiles) et classe les fichiers ajoutés/supprimés/modifiés. Comparaison pure, aucun accès disque. */
+  compareProcessSaveFileSnapshots?(before: ProcessSaveFileInfo[], after: ProcessSaveFileInfo[]): Promise<SaveFileSnapshotDiffResult>
   inspectProcessLocalSettings(maxValues: number): Promise<ProcessLocalSettingsResult>
   readProcessSaveFileText(path: string, maxBytes: number): Promise<ProcessSaveFileTextResult>
   /** Surveille un fichier de sauvegarde (bloquant) — voir startSaveFileWatchAsync pour la version non bloquante utilisée par l'UI. */
@@ -1476,6 +1516,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   evaluateWebView2JavaScript?(script: string, options?: Record<string, unknown>): Promise<WebView2EvaluateResult>
   findWebView2DisplayedValues?(value: string, options?: Record<string, unknown>): Promise<WebView2FindResponse>
   findWebView2DisplayedText?(text: string, options?: Record<string, unknown>): Promise<WebView2FindResponse>
+  /** Sonde le scope global JS (window) de la target connectée et isole les globales ajoutées par la page du bruit natif Chromium (baseline dynamique about:blank quand possible). */
+  probeWebView2GlobalScope?(): Promise<WebView2GlobalScopeResult>
   /** Active/désactive WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333 (HKCU\Environment) pour TOUS les hôtes WebView2 du user courant. Poser derrière RiskGate — jamais silencieux. */
   enableWebView2CdpDebugFlag?(): Promise<WebView2DebugFlagResult>
   disableWebView2CdpDebugFlag?(): Promise<WebView2DebugFlagResult>
@@ -2070,6 +2112,9 @@ class BackendService {
       async discoverProcessSaveFiles(_maxResults: number) {
         return { success: false, files: [], error: 'Mock backend' }
       },
+      async compareProcessSaveFileSnapshots(_before: ProcessSaveFileInfo[], _after: ProcessSaveFileInfo[]) {
+        return { success: false, added: [], removed: [], modified: [], error: 'Mock backend' }
+      },
       async inspectProcessLocalSettings(_maxValues: number) {
         return { success: false, values: [], error: 'Mock backend' }
       },
@@ -2659,6 +2704,13 @@ class BackendService {
           success: false,
           error: 'Indisponible dans le mock.',
           matches: [],
+        }
+      },
+      async probeWebView2GlobalScope() {
+        return {
+          success: false,
+          error: 'Indisponible dans le mock.',
+          customGlobals: [],
         }
       },
       async enableWebView2CdpDebugFlag() {

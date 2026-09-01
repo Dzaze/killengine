@@ -131,6 +131,16 @@ public:
     /// Retourne {success, familyName, files: [{path, sizeBytes, lastWriteTime}], error}.
     Q_INVOKABLE QVariantMap discoverProcessSaveFiles(int maxResults) const;
 
+    /// UWP-STATE-1 — Compare deux snapshots obtenus via discoverProcessSaveFiles
+    /// (typiquement un avant/après une action utilisateur comme gagner de
+    /// l'XP) et classe les fichiers en ajoutés/supprimés/modifiés (taille et
+    /// date de dernière écriture), sans aucun accès disque supplémentaire —
+    /// comparaison pure sur les listes déjà obtenues. Voir
+    /// docs/UWP_STATE_INSPECTOR_SPEC.md. Retourne
+    /// {success, added, removed, modified, addedCount, removedCount,
+    /// modifiedCount, unchangedCount, error}.
+    Q_INVOKABLE QVariantMap compareProcessSaveFileSnapshots(const QVariantList& before, const QVariantList& after) const;
+
     /// PHASE 96 — Inspecte en lecture seule la ruche UWP
     /// %LOCALAPPDATA%\Packages\<familyName>\Settings\settings.dat du processus
     /// attaché. Retourne des valeurs bornées {keyPath, name, type, preview}.
@@ -826,6 +836,20 @@ public:
     Q_INVOKABLE QVariantMap evaluateWebView2JavaScript(const QString& expression, const QVariantMap& options);
     Q_INVOKABLE QVariantMap findWebView2DisplayedValues(const QString& value, const QVariantMap& options);
     Q_INVOKABLE QVariantMap findWebView2DisplayedText(const QString& text, const QVariantMap& options);
+
+    /// WEBVIEW-F — Sonde le scope global JS de la target WebView2 connectee
+    /// (killcore::WebView2Inspector::probeGlobalScope()) et isole les
+    /// globales *ajoutees par la page* (variables de jeu, SDK publicitaires)
+    /// des globales natives Chromium. Baseline dynamique par defaut : ouvre
+    /// une connexion CDP jetable et independante (pas m_webView2Inspector,
+    /// qui reste sur la target de l'utilisateur pendant tout le sondage) vers
+    /// une target about:blank du meme host pour connaitre les globales
+    /// natives de cette version precise de Chromium ; repli sur une petite
+    /// liste statique si aucune target about:blank n'est disponible. Ajoute
+    /// aussi un aperçu structure (compte <video>/<audio>, srcs <iframe>).
+    /// Lecture seule. Retourne {success, customGlobals, totalGlobalsSeen,
+    /// baselineMode, media, target, error}.
+    Q_INVOKABLE QVariantMap probeWebView2GlobalScope();
 
     /// Active/désactive la variable d'environnement utilisateur
     /// WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333 (via

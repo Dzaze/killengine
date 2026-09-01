@@ -78,9 +78,12 @@ public:
     /**
      * @brief Récupère les propriétés d'un objet distant.
      * @param objectId ID de l'objet (RemoteObject.objectId)
+     * @param ownProperties Si true (défaut), ne remonte que les propriétés propres de
+     *        l'objet, sans remonter la chaîne de prototypes (utile pour éviter des
+     *        centaines de méthodes héritées lors du sondage d'un objet global type window).
      * @return Propriétés de l'objet
      */
-    QJsonObject getObjectProperties(const QString& objectId);
+    QJsonObject getObjectProperties(const QString& objectId, bool ownProperties = true);
 
     /**
      * @brief Déconnecte le client.

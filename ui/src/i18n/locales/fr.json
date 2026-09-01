@@ -144,6 +144,18 @@
       "searching": "Recherche…",
       "search": "Chercher",
       "results": "{count} résultat(s)"
+    },
+    "probe": {
+      "title": "Reconnaissance du contexte JS",
+      "hint": "Liste les variables/fonctions ajoutées par la page (par opposition au bruit natif Chromium), pour savoir quoi évaluer sans deviner à l'aveugle.",
+      "running": "Sondage…",
+      "run": "Sonder le contexte",
+      "summary": "{count} globale(s) spécifique(s) à la page sur {total} au total ({mode}).",
+      "modeDynamic": "baseline dynamique about:blank",
+      "modeStatic": "liste statique de repli",
+      "media": "Éléments média : {video} vidéo(s), {audio} audio(s), {iframes} iframe(s).",
+      "error": "Échec du sondage du contexte JS.",
+      "success": "Sondage du contexte JS terminé."
     }
   },
   "lexicon": {

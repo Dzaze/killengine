@@ -257,6 +257,60 @@ QVariant WebView2Inspector::callFunction(const QString& functionCode)
     return remoteObjectToVariant(evaluationResultObject(result));
 }
 
+QJsonObject WebView2Inspector::probeGlobalScope()
+{
+    QJsonObject result;
+    if (!isConnected()) {
+        result[QStringLiteral("error")] = QStringLiteral("Non connecte.");
+        return result;
+    }
+
+    // returnByValue=false : on veut le RemoteObject de window (avec son
+    // objectId), pas une tentative de serialisation JSON de l'objet global
+    // entier (echouerait / serait enorme).
+    const QJsonObject windowEval = m_client->evaluateJavaScript(QStringLiteral("window"), false);
+    const QJsonObject windowRemote = evaluationResultObject(windowEval);
+    const QString objectId = windowRemote.value(QStringLiteral("objectId")).toString();
+    if (objectId.isEmpty()) {
+        result[QStringLiteral("error")] = QStringLiteral("Impossible d'obtenir l'objectId de window.");
+        return result;
+    }
+
+    const QJsonObject propsResponse = m_client->getObjectProperties(objectId, /*ownProperties=*/true);
+    const QJsonArray props = propsResponse.value(QStringLiteral("result")).toObject()
+        .value(QStringLiteral("result")).toArray();
+
+    QJsonArray globals;
+    for (const QJsonValue& propVal : props) {
+        const QJsonObject prop = propVal.toObject();
+        const QString name = prop.value(QStringLiteral("name")).toString();
+        if (name.isEmpty()) {
+            continue;
+        }
+        const QJsonObject value = prop.value(QStringLiteral("value")).toObject();
+        QJsonObject entry;
+        entry[QStringLiteral("name")] = name;
+        entry[QStringLiteral("type")] = value.value(QStringLiteral("type")).toString();
+        entry[QStringLiteral("subtype")] = value.value(QStringLiteral("subtype")).toString();
+        entry[QStringLiteral("className")] = value.value(QStringLiteral("className")).toString();
+        globals.append(entry);
+    }
+    result[QStringLiteral("globals")] = globals;
+
+    const QJsonObject mediaEval = m_client->evaluateJavaScript(
+        QStringLiteral(
+            "JSON.stringify({video: document.querySelectorAll('video').length, "
+            "audio: document.querySelectorAll('audio').length, "
+            "iframes: Array.from(document.querySelectorAll('iframe')).map(f => f.src)})"),
+        true);
+    const QVariant mediaJson = remoteObjectToVariant(evaluationResultObject(mediaEval));
+    const QJsonDocument mediaDoc = QJsonDocument::fromJson(mediaJson.toString().toUtf8());
+    result[QStringLiteral("media")] = mediaDoc.isObject() ? mediaDoc.object() : QJsonObject();
+
+    result[QStringLiteral("success")] = true;
+    return result;
+}
+
 QJsonArray WebView2Inspector::findDisplayedValues(int value)
 {
     return findDisplayedText(QString::number(value));

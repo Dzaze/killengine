@@ -2295,6 +2295,10 @@ QVariantMap ApplicationController::discoverProcessSaveFiles(int maxResults) cons
     return m_saveFileInvestigator->discoverProcessSaveFiles(maxResults);
 }
 
+QVariantMap ApplicationController::compareProcessSaveFileSnapshots(const QVariantList& before, const QVariantList& after) const {
+    return m_saveFileInvestigator->compareSaveFileSnapshots(before, after);
+}
+
 QVariantMap ApplicationController::inspectProcessLocalSettings(int maxValues) const {
     return m_saveFileInvestigator->inspectProcessLocalSettings(maxValues);
 }
@@ -4859,6 +4863,129 @@ QVariantMap ApplicationController::installWebView2DeveloperModeCapability() {
 #else
     result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
 #endif
+    return result;
+}
+
+namespace {
+// Repli statique si aucune target about:blank n'est disponible sur le host
+// pour calculer une baseline dynamique -- liste courte des globales window
+// les plus communes a un moteur Chromium (pas exhaustive, juste assez pour
+// filtrer le bruit le plus flagrant). Prefer toujours la baseline dynamique
+// quand possible (voir probeWebView2GlobalScope).
+const QSet<QString>& webView2StaticGlobalsExclusion() {
+    static const QSet<QString> kExclusion = {
+        QStringLiteral("window"), QStringLiteral("self"), QStringLiteral("document"),
+        QStringLiteral("name"), QStringLiteral("location"), QStringLiteral("history"),
+        QStringLiteral("navigator"), QStringLiteral("screen"), QStringLiteral("customElements"),
+        QStringLiteral("navigation"), QStringLiteral("locationbar"), QStringLiteral("menubar"),
+        QStringLiteral("personalbar"), QStringLiteral("scrollbars"), QStringLiteral("statusbar"),
+        QStringLiteral("toolbar"), QStringLiteral("status"), QStringLiteral("closed"),
+        QStringLiteral("frames"), QStringLiteral("length"), QStringLiteral("top"),
+        QStringLiteral("opener"), QStringLiteral("parent"), QStringLiteral("frameElement"),
+        QStringLiteral("origin"), QStringLiteral("external"), QStringLiteral("innerWidth"),
+        QStringLiteral("innerHeight"), QStringLiteral("scrollX"), QStringLiteral("scrollY"),
+        QStringLiteral("pageXOffset"), QStringLiteral("pageYOffset"), QStringLiteral("visualViewport"),
+        QStringLiteral("screenX"), QStringLiteral("screenY"), QStringLiteral("outerWidth"),
+        QStringLiteral("outerHeight"), QStringLiteral("devicePixelRatio"), QStringLiteral("event"),
+        QStringLiteral("clientInformation"), QStringLiteral("screenLeft"), QStringLiteral("screenTop"),
+        QStringLiteral("styleMedia"), QStringLiteral("crypto"), QStringLiteral("indexedDB"),
+        QStringLiteral("fetch"), QStringLiteral("caches"), QStringLiteral("performance"),
+        QStringLiteral("localStorage"), QStringLiteral("sessionStorage"), QStringLiteral("chrome"),
+        QStringLiteral("console"), QStringLiteral("alert"), QStringLiteral("confirm"),
+        QStringLiteral("prompt"), QStringLiteral("open"), QStringLiteral("close"),
+        QStringLiteral("focus"), QStringLiteral("blur"), QStringLiteral("print"),
+        QStringLiteral("setTimeout"), QStringLiteral("clearTimeout"), QStringLiteral("setInterval"),
+        QStringLiteral("clearInterval"), QStringLiteral("requestAnimationFrame"),
+        QStringLiteral("cancelAnimationFrame"), QStringLiteral("getComputedStyle"),
+        QStringLiteral("matchMedia"), QStringLiteral("getSelection"), QStringLiteral("postMessage"),
+        QStringLiteral("addEventListener"), QStringLiteral("removeEventListener"),
+        QStringLiteral("dispatchEvent"), QStringLiteral("btoa"), QStringLiteral("atob"),
+        QStringLiteral("structuredClone"), QStringLiteral("queueMicrotask"), QStringLiteral("webkitURL"),
+        QStringLiteral("onload"), QStringLiteral("onerror"), QStringLiteral("onunload"),
+        QStringLiteral("onbeforeunload"), QStringLiteral("onresize"), QStringLiteral("onscroll"),
+    };
+    return kExclusion;
+}
+} // namespace
+
+QVariantMap ApplicationController::probeWebView2GlobalScope() {
+    QVariantMap result = webView2ResultEnvelope(QStringLiteral("debug"), false);
+    if (!m_webView2Inspector || !m_webView2Inspector->isConnected()) {
+        result[QStringLiteral("error")] = QStringLiteral("Aucune target WebView2 CDP connectee.");
+        return result;
+    }
+
+    const QJsonObject pageScope = m_webView2Inspector->probeGlobalScope();
+    if (!pageScope.value(QStringLiteral("success")).toBool()) {
+        result[QStringLiteral("error")] = pageScope.value(QStringLiteral("error")).toString(
+            QStringLiteral("Sondage du scope global echoue."));
+        return result;
+    }
+
+    // Baseline dynamique : chercher une target about:blank sur le meme host
+    // pour connaitre les globales natives de cette version precise de
+    // Chromium, via une connexion CDP jetable independante de
+    // m_webView2Inspector (qui reste sur la target de l'utilisateur pendant
+    // tout le sondage -- decision d'architecture WEBVIEW-F issue de
+    // docs/SALON.md, voir docs/PHASE_TRACKER.md).
+    QSet<QString> baselineNames;
+    bool baselineUsed = false;
+    const QString currentWsUrl = m_webView2ActiveTarget.value(QStringLiteral("webSocketDebuggerUrl")).toString();
+    const QJsonArray pages = killcore::WebView2Inspector::listAvailablePages(m_webView2Endpoint);
+    QVariantMap blankFilterOptions;
+    blankFilterOptions[QStringLiteral("pageTargetsOnly")] = true;
+    blankFilterOptions[QStringLiteral("allowAboutBlank")] = true;
+    const QJsonArray blankCandidates = filterWebView2Targets(pages, m_webView2BrowserProcessId, blankFilterOptions);
+
+    QString baselineWsUrl;
+    for (const QJsonValue& candidate : blankCandidates) {
+        const QJsonObject candidateObj = candidate.toObject();
+        const QString url = candidateObj.value(QStringLiteral("url")).toString();
+        const QString wsUrl = candidateObj.value(QStringLiteral("webSocketDebuggerUrl")).toString();
+        if (url.startsWith(QStringLiteral("about:"), Qt::CaseInsensitive) && wsUrl != currentWsUrl && !wsUrl.isEmpty()) {
+            baselineWsUrl = wsUrl;
+            break;
+        }
+    }
+
+    if (!baselineWsUrl.isEmpty()) {
+        auto baselineInspector = std::make_unique<killcore::WebView2Inspector>();
+        if (baselineInspector->connectToWebSocket(baselineWsUrl)) {
+            const QJsonObject baselineScope = baselineInspector->probeGlobalScope();
+            if (baselineScope.value(QStringLiteral("success")).toBool()) {
+                for (const QJsonValue& g : baselineScope.value(QStringLiteral("globals")).toArray()) {
+                    baselineNames.insert(g.toObject().value(QStringLiteral("name")).toString());
+                }
+                baselineUsed = true;
+            }
+            baselineInspector->disconnect();
+        }
+        // baselineInspector detruit ici (fin de scope) : n'affecte jamais la
+        // connexion m_webView2Inspector de l'utilisateur.
+    }
+
+    if (!baselineUsed) {
+        baselineNames = webView2StaticGlobalsExclusion();
+    }
+
+    QJsonArray customGlobals;
+    const QJsonArray allGlobals = pageScope.value(QStringLiteral("globals")).toArray();
+    for (const QJsonValue& g : allGlobals) {
+        const QJsonObject entry = g.toObject();
+        if (!baselineNames.contains(entry.value(QStringLiteral("name")).toString())) {
+            customGlobals.append(entry);
+        }
+    }
+
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("customGlobals")] = webView2TargetsToVariantList(customGlobals);
+    result[QStringLiteral("customGlobalsCount")] = customGlobals.size();
+    result[QStringLiteral("totalGlobalsSeen")] = allGlobals.size();
+    result[QStringLiteral("baselineMode")] = baselineUsed
+        ? QStringLiteral("dynamic_about_blank")
+        : QStringLiteral("static_fallback");
+    result[QStringLiteral("media")] = pageScope.value(QStringLiteral("media")).toObject().toVariantMap();
+    result[QStringLiteral("target")] = m_webView2ActiveTarget;
     return result;
 }
 

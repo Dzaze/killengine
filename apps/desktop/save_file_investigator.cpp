@@ -7,8 +7,10 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QMetaObject>
 #include <QPointer>
+#include <QSet>
 #include <QVariantList>
 
 #include <algorithm>
@@ -71,6 +73,80 @@ QVariantMap SaveFileInvestigator::discoverProcessSaveFiles(int maxResults) const
     result["success"] = true;
     result["files"] = filesList;
     result["count"] = filesList.size();
+    result["error"] = "";
+    return result;
+}
+
+QVariantMap SaveFileInvestigator::compareSaveFileSnapshots(const QVariantList& before, const QVariantList& after) const {
+    // Comparaison pure (pas d'acces disque ici) : les deux snapshots viennent
+    // de deux appels a discoverProcessSaveFiles (avant/apres une action
+    // utilisateur), voir docs/UWP_STATE_INSPECTOR_SPEC.md. La detection de
+    // changement se fait sur (taille, date de derniere ecriture) plutot qu'un
+    // hash de contenu : suffisant pour reperer QUEL fichier a change sans
+    // relire chaque fichier, et coherent avec les entrees deja retournees par
+    // listPackageSaveFiles (path/sizeBytes/lastWriteTime, pas de hash).
+    QVariantMap result;
+    result["success"] = true;
+
+    QHash<QString, QVariantMap> beforeByPath;
+    for (const QVariant& entry : before) {
+        const QVariantMap map = entry.toMap();
+        const QString path = map.value("path").toString();
+        if (!path.isEmpty()) {
+            beforeByPath.insert(path, map);
+        }
+    }
+
+    QSet<QString> seenAfterPaths;
+    QVariantList added;
+    QVariantList modified;
+    int unchangedCount = 0;
+
+    for (const QVariant& entry : after) {
+        const QVariantMap afterMap = entry.toMap();
+        const QString path = afterMap.value("path").toString();
+        if (path.isEmpty()) {
+            continue;
+        }
+        seenAfterPaths.insert(path);
+
+        const auto it = beforeByPath.constFind(path);
+        if (it == beforeByPath.constEnd()) {
+            added.append(afterMap);
+            continue;
+        }
+
+        const QVariantMap& beforeMap = it.value();
+        const bool sizeChanged = beforeMap.value("sizeBytes").toLongLong() != afterMap.value("sizeBytes").toLongLong();
+        const bool timeChanged = beforeMap.value("lastWriteTime").toString() != afterMap.value("lastWriteTime").toString();
+        if (sizeChanged || timeChanged) {
+            QVariantMap diffEntry;
+            diffEntry["path"] = path;
+            diffEntry["sizeBytesBefore"] = beforeMap.value("sizeBytes");
+            diffEntry["sizeBytesAfter"] = afterMap.value("sizeBytes");
+            diffEntry["sizeDeltaBytes"] = afterMap.value("sizeBytes").toLongLong() - beforeMap.value("sizeBytes").toLongLong();
+            diffEntry["lastWriteTimeBefore"] = beforeMap.value("lastWriteTime");
+            diffEntry["lastWriteTimeAfter"] = afterMap.value("lastWriteTime");
+            modified.append(diffEntry);
+        } else {
+            ++unchangedCount;
+        }
+    }
+
+    QVariantList removed;
+    for (auto it = beforeByPath.constBegin(); it != beforeByPath.constEnd(); ++it) {
+        if (!seenAfterPaths.contains(it.key())) {
+            removed.append(it.value());
+        }
+    }
+
+    result["added"] = added;
+    result["removed"] = removed;
+    result["modified"] = modified;
+    result["addedCount"] = added.size();
+    result["removedCount"] = removed.size();
+    result["modifiedCount"] = modified.size();
+    result["unchangedCount"] = unchangedCount;
     result["error"] = "";
     return result;
 }

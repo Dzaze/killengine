@@ -135,10 +135,11 @@ QJsonObject CdpClient::evaluateJavaScript(const QString& expression, bool return
     return sendCommandSync(QStringLiteral("Runtime.evaluate"), params);
 }
 
-QJsonObject CdpClient::getObjectProperties(const QString& objectId)
+QJsonObject CdpClient::getObjectProperties(const QString& objectId, bool ownProperties)
 {
     QJsonObject params;
     params[QStringLiteral("objectId")] = objectId;
+    params[QStringLiteral("ownProperties")] = ownProperties;
 
     return sendCommandSync(QStringLiteral("Runtime.getProperties"), params);
 }
