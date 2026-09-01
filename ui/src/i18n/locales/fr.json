@@ -90,6 +90,62 @@
     "network": "Réseau",
     "lexicon": "Lexique"
   },
+  "webview2": {
+    "error": {
+      "notAttached": "Attache un processus avant de te connecter à sa target WebView2.",
+      "connectFailed": "Échec de la connexion à la target WebView2.",
+      "disconnectFailed": "Échec de la déconnexion de l'inspecteur WebView2.",
+      "evaluateFailed": "Échec de l'évaluation JavaScript."
+    },
+    "risk": {
+      "connectTitle": "Connecter l'inspecteur WebView2",
+      "connectMessage": "Ouvre une connexion CDP (Chrome DevTools Protocol) vers un process externe pour lire son état JavaScript/DOM. Lecture par défaut, mais toute évaluation JS ultérieure peut aussi modifier cet état.",
+      "evaluateTitle": "Évaluer du JavaScript arbitraire",
+      "evaluateMessage": "Exécute le code JavaScript fourni dans la page connectée — peut lire ou modifier l'état de la target selon le code exécuté."
+    },
+    "success": {
+      "connected": "Inspecteur WebView2 connecté.",
+      "disconnected": "Inspecteur WebView2 déconnecté.",
+      "evaluated": "Évaluation JavaScript terminée."
+    },
+    "status": {
+      "title": "Statut de connexion",
+      "connected": "Connecté",
+      "disconnected": "Déconnecté"
+    },
+    "actions": {
+      "listTargets": "Lister les targets",
+      "connecting": "Connexion…",
+      "connect": "Connecter",
+      "disconnect": "Déconnecter",
+      "reset": "Réinitialiser"
+    },
+    "warning": {
+      "notAttached": "Attache un processus pour lister ses targets CDP WebView2 (voir la vue Processus)."
+    },
+    "targets": {
+      "title": "Targets CDP disponibles"
+    },
+    "evaluate": {
+      "title": "Évaluer du JavaScript",
+      "placeholder": "Ex: document.title",
+      "running": "Évaluation…",
+      "run": "Évaluer",
+      "result": "Résultat",
+      "noResult": "Pas de valeur retournée (undefined).",
+      "error": "Échec de l'évaluation."
+    },
+    "find": {
+      "title": "Chercher dans le DOM",
+      "byValue": "Par valeur numérique affichée",
+      "valuePlaceholder": "Ex: 140",
+      "byText": "Par texte affiché",
+      "textPlaceholder": "Ex: Score",
+      "searching": "Recherche…",
+      "search": "Chercher",
+      "results": "{count} résultat(s)"
+    }
+  },
   "lexicon": {
     "searchPlaceholder": "Chercher un terme...",
     "empty": "Aucun terme ne correspond à cette recherche.",

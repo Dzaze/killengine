@@ -30,7 +30,9 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 
 ## Validations restantes
 
-Aucune.
+- **Aucune pour WEBVIEW-A à WEBVIEW-E** : la chaîne WebView2/CDP est validée en live jusqu'à la lecture/écriture JS sur une vraie target Solitaire (`document.title` lu puis modifié), avec build et 291 tests OK selon les entrées détaillées ci-dessous.
+- **Coordination WEBVIEW-C** : les outils Assistant WebView2 (`ai/tool_registry.cpp`, `ai/ai_engine.cpp`, `ai/llama_runtime.cpp`) sont déjà terminés dans le commit local `48c613e` (`feat(webview2): outils Assistant, panneau dedie et parametres CDP (WEBVIEW-C/E)`). Ne pas relancer ce chantier ; aucun fichier `ai/*` n'est en attente dans le worktree au moment de cette note.
+- **Chantiers restants identifiés** : WEBVIEW-F est planifié, pas commencé — reconnaissance automatique du contexte JS à la connexion (`Runtime.getProperties`, baseline dynamique `about:blank`, aperçu DOM/media). La piste Solitaire XP bascule vers un chantier planifié **UWP State / Save File Radar** : diff de fichiers `LocalState` avant/après action, puis recherche de valeur uniquement dans les fichiers réellement modifiés.
 
 ## Journal actif
 
@@ -136,4 +138,99 @@ Sous-phases mises à jour en conséquence (remplace l'ancien découpage WEBVIEW-
 **Exigence produit du 01/09/2026 — implémentée (01/09/2026, Claude)** : diagnostic guidé "Préparer l'inspection WebView2" pour les cibles UWP/Store. Côté C++ : `ApplicationController::getWebView2SystemPrepStatus` (lecture seule : `HKLM\...\AppModelUnlock` pour Developer Mode, `Get-WindowsCapability -Online -Name Tools.DeveloperMode.Core~~~~0.0.1.0` via PowerShell pour l'état de la capability) et `installWebView2DeveloperModeCapability` (`Add-WindowsCapability` élevé via `ShellExecuteExW`/`runas`, même mécanisme que `requestWindowsDefenderExclusion()` — invite UAC visible, jamais silencieux — mais **sans** attendre la fin du process contrairement à cette dernière : l'installation peut prendre plusieurs minutes et rester silencieuse côté DISM, constaté en session live le 01/09/2026, donc bloquer l'appel Q_INVOKABLE aurait gelé l'UI). Côté UI : nouveau panneau "Préparer l'inspection WebView2 (apps Store/UWP)" dans `SettingsView.vue` avec bouton diagnostic (aucune confirmation, lecture seule) et bouton d'installation derrière `confirmRiskAction('debug', ...)` expliquant pourquoi (prérequis Portail d'appareil) et précisant explicitement que ça ne débloque PAS le CDP TCP direct des apps Store (restriction AppContainer séparée, cf. WEBVIEW-A point 7).
 - **Comment vérifié en live** : `getWebView2SystemPrepStatus` appelé via le pipe sur la machine réelle (déjà préparée lors du chantier WDP) → `{developerModeEnabled:true, allowAllTrustedApps:true, capabilityQueried:true, capabilityState:"Installed", capabilityInstalled:true, success:true}`, cohérent avec l'état machine connu. `installWebView2DeveloperModeCapability` **non testé en live** (capability déjà installée sur cette machine, un nouveau test aurait déclenché une invite UAC inutile) — confiance basée sur la réutilisation exacte du mécanisme `ShellExecuteExW`/`runas` déjà validé en live pour `requestWindowsDefenderExclusion()`/`blockProcessNetwork()`.
 
+**WEBVIEW-E — bug fonctionnel "Échec de la liste des targets" trouvé en usage réel et corrigé (01/09/2026, Claude)** : après le commit `48c613e`, le propriétaire a ouvert le panneau réellement (`KillEngine.exe` attaché à `Solitaire.exe`) et remonté deux problèmes visibles :
+1. **Toutes les clés i18n de la vue s'affichaient brutes** (`webview2.status.title`, `webview2.actions.connect`, etc. au lieu du texte traduit) : `WebView2InspectorView.vue` utilise 36 appels `$t('webview2....')`, mais la section `webview2.*` n'existait dans aucune locale (`fr.json`/`en.json`) — seule `lexicon.terms.webview2` (le glossaire, sans rapport) avait été ajoutée. Corrigé : section complète `webview2.{status,actions,warning,targets,evaluate,find,error,risk,success}` ajoutée dans les deux langues.
+2. **"Échec de la liste des targets" au clic** : `webView2Inspector.ts` appelait `controller.listWebView2CdpTargets()` et `controller.connectWebView2Inspector(target)` avec le mauvais nombre/type d'arguments — la vraie signature C++ est `listWebView2CdpTargets(int browserProcessId, const QVariantMap& options)` (2 arguments requis, le store n'en passait aucun) et `connectWebView2Inspector(int browserProcessId, const QVariantMap& options)` (le store passait l'**id de target CDP (string)** directement en premier argument, là où le backend attend un `browserProcessId` **entier** — le filtrage par target précis passe par `options.targetId`, jamais vérifié car masqué par le premier bug d'arguments). De plus `allowAboutBlank` vaut `false` par défaut côté backend, et **toutes** les targets de Solitaire sont `about:blank` (préchargement de pub, cf. point 12) : sans le passer à `true` explicitement, la liste aurait été vide même une fois les arguments corrigés.
+- **Comment vérifié en live** : `KillEngine.exe` relancé avec `KILLENGINE_AUTOMATION_PIPE=1`, `Solitaire.exe` réel (PID 26248) toujours attaché. `listWebView2CdpTargets(0, {allowAboutBlank:true})` → `success:true, count:3`, 3 targets réelles retournées (WebViews `about:blank` de Solitaire PID WebView2 5304 via fallback WDP). `connectWebView2Inspector(0, {targetId:"<id de la 1re target>", allowAboutBlank:true})` → `connected:true` sur la bonne target. `getWebView2InspectorStatus()` confirme `connected:true` avec le bon `target`. `disconnectWebView2Inspector()` → `connected:false`. Round-trip complet liste→connexion→statut→déconnexion validé de bout en bout sur une vraie cible. `npm run build` → 0 erreur, `.\scripts\build.ps1` → `Build successful!`, `killengine_unit_tests.exe` → 291/291.
+- **Leçon** : ce bug (arguments manquants sur un appel Q_INVOKABLE via QWebChannel) ne cassait ni TypeScript ni le build — seul un usage réel dans l'app (pas juste un test de compilation ou un appel pipe avec les bons arguments) l'a révélé. Renforce [[feedback_verify_dont_trust_agent_build_claims]] : même après plusieurs passes de vérification de contrat champ-par-champ, tester le vrai chemin d'appel (nombre ET type des arguments, pas seulement les noms de champs de retour) reste nécessaire.
+
+**WEBVIEW-E — bug de sélection de target trouvé en usage réel (01/09/2026, Claude)** : après le fix i18n/arguments ci-dessus, le propriétaire a testé à nouveau (screenshots à l'appui : labels bien traduits, 3 targets réelles listées dont 2 pubs "Ad") et remonté deux symptômes qui se sont révélés être **le même bug** : (1) cliquer sur une target les sélectionne toutes en même temps, impossible de désélectionner ; (2) cliquer "Connecter" (après confirmation RiskGate) affiche un message sans suite exploitable, comme si l'outil manquait de fonctionnalités.
+- **Cause** : l'interface `WebView2CdpTarget` (`backend.ts`) déclarait un champ `targetId`, mais le vrai backend renvoie le champ sous le nom `id` (confirmé par les réponses JSON réelles capturées plus haut). `target.targetId` valait donc `undefined` pour **toutes** les targets. Après le premier clic, `selectedTargetId` devenait `undefined` — valeur qui correspond alors à `target.targetId` (`undefined`) sur **toutes** les lignes simultanément (`undefined === undefined`), d'où la sélection totale sans possibilité de désélectionner. Et `connect()` sans target valide déclenchait systématiquement l'erreur silencieuse "Aucun target sélectionné" — les sections "Évaluer du JavaScript"/"Chercher dans le DOM" (gardées par `v-if="store.isConnected"`) n'apparaissaient donc jamais : ce n'est pas qu'il manquait des fonctionnalités, c'est que la connexion n'avait jamais réussi une seule fois.
+- **Corrigé** : renommage `targetId` → `id` dans `WebView2CdpTarget` (`backend.ts`) et tous ses usages (`webView2Inspector.ts`, `WebView2InspectorView.vue`) ; ajout d'un attribut `name="webview2-target"` sur les radios (groupement natif HTML, défense en profondeur en plus de la réactivité Vue). `options.targetId` (la clé envoyée au backend pour filtrer, distincte du champ `id` de l'objet target) n'était pas concerné et reste inchangé.
+- **Comment vérifié** : `npm run build` → 0 erreur. L'app charge `ui/dist/index.html` directement (`apps/desktop/main.cpp`, pas de copie séparée) : un simple relancement de `KillEngine.exe` suffit pour voir le correctif, pas besoin de rebuild C++. **Non re-testé en live par Claude** : ce bug vit entièrement côté JS/Vue (comparaison sur un champ jamais transmis par le backend), donc invisible au pipe d'automatisation qui appelle directement les méthodes C++ avec des arguments explicites (déjà validé au point précédent) — seul un nouveau test manuel dans l'app confirmera visuellement la sélection unique et la suite (évaluation JS/recherche DOM) après connexion.
+- **Leçon** : 3e round de bugs de contrat trouvés uniquement par l'usage réel (après les 4 bugs de build, puis les 5 bugs de champs de retour, puis celui-ci sur un champ d'objet dans un tableau) — aucun n'était détectable par TypeScript ni par un test de compilation. Renforce encore [[feedback_verify_dont_trust_agent_build_claims]] : certains bugs de contrat (nom de champ sur un objet imbriqué dans une liste, pas juste sur la réponse top-level) n'apparaissent qu'en cliquant réellement dans l'UI.
+
+**WEBVIEW-E — désynchronisation d'état connecté/déconnecté trouvée en usage réel (01/09/2026, Claude)** : après le fix de sélection ci-dessus (confirmé visuellement par le propriétaire : une seule target sélectionnée à la fois, plus plusieurs simultanées), une évaluation JS (`document.title`) sur la target "Ad" a renvoyé "Aucune target WebView2 connectée" côté backend, alors que le bouton Évaluer était actif (donc `store.isConnected` valait `true` côté frontend). État désynchronisé entre le frontend (croit être connecté) et le backend (sait qu'il ne l'est plus).
+- **Hypothèse principale** : Solitaire détruit/recrée en continu ses WebViews de pub (déjà observé au point 12 — 2 des 4 targets avaient changé d'ID en quelques minutes lors d'un sondage précédent). Si la target CDP connectée est détruite après un `connectWebView2Inspector` réussi mais avant l'appel `evaluateWebView2JavaScript`, le WebSocket CDP se ferme côté `killcore::WebView2Inspector`/`CdpClient`, mais rien côté frontend ne rafraîchissait `isConnected` — le badge restait bloqué sur "Connecté" indéfiniment jusqu'à un rafraîchissement manuel.
+- **Corrigé** : `evaluateJavaScript()`, `findDisplayedValues()`, `findDisplayedText()` (`webView2Inspector.ts`) appellent maintenant `refreshStatus()` après tout échec, pour resynchroniser `isConnected` sur l'état réel du backend plutôt que de laisser un badge périmé donner l'impression que l'outil est cassé. Correctif générique (ne dépend pas de la cause exacte de la déconnexion — churn de target, timeout réseau, etc.).
+- **Comment vérifié** : `npm run build` → 0 erreur. **Non re-testé en live** : nécessite de reproduire une déconnexion CDP réelle en cours de session, difficile à provoquer de façon fiable à la demande (dépend du timing du rotation de pub côté Solitaire). Le propriétaire est invité à retester (connexion suivie immédiatement d'une évaluation, avec un minimum de délai) pour confirmer si le problème initial était bien un churn de target (résolu par le refresh) ou une cause plus profonde.
+- **Point ouvert non résolu** : même en cas de succès du refresh, l'expérience reste que la target choisie a pu disparaître entre-temps — pas de vraie solution à la racine (Solitaire recycle ses pubs trop vite pour une investigation manuelle sur ces targets spécifiques). Confirme une fois de plus que ces targets ne sont pas exploitables pour l'objectif XP Solitaire ; l'outil reste valide pour des cibles WebView2 qui exposent un contenu stable (Electron/CEF, apps avec de vraies pages).
+
+**WEBVIEW-E — validation finale lecture+écriture par le propriétaire (01/09/2026)** : après le fix de resynchronisation ci-dessus, le propriétaire a validé manuellement la chaîne complète sur la target "Ad" de Solitaire : lecture (`document.title` → `"Ad"`), écriture (`document.title = "Test KillEngine"` puis relecture → confirmé changé), et un test d'exploration (`document.querySelectorAll('video')` → `count:0, rates:[]`, résultat exact et fiable indiquant que la vidéo VAST est dans une iframe imbriquée non couverte par ce contexte, pas une erreur de l'outil). **Conclusion : la chaîne CDP KillEngine (connexion, lecture, écriture, retour de résultat structuré) est validée de bout en bout sur une vraie cible réelle, par un humain, pas seulement par le pipe d'automatisation.** Chantier WebView2/CDP (WEBVIEW-A à E + les deux exigences produit) considéré fonctionnellement complet.
+
+### Chantier planifié — WEBVIEW-F : reconnaissance automatique du contexte JS à la connexion
+
+Proposé le 01/09/2026 (propriétaire), suite à la validation ci-dessus : pendant l'exploration manuelle, retrouver un élément (`<video>`) ou une variable JS d'intérêt demandait de deviner/taper du JS à l'aveugle (`Object.keys(window)`, `document.querySelectorAll(...)`). Objectif : un outil qui liste automatiquement ce qui est présent dans le contexte JS dès la connexion, plutôt que de laisser l'utilisateur deviner quoi évaluer.
+
+**Décision de design (propriétaire, "je veux du solide")** : implémentation robuste via l'API CDP native (`Runtime.getProperties`, déjà utilisée par `CdpClient::getObjectProperties`), pas un script `eval` bricolé côté JS qui serait plus fragile et moins riche en métadonnées (types, etc.).
+
+**Conception envisagée** :
+1. Nouvelle méthode core (`killcore::WebView2Inspector`) : évaluer `window` avec `returnByValue=false` pour obtenir un `objectId` CDP (`Runtime.evaluate`), puis appeler `Runtime.getProperties` dessus (propriétés propres, non-indexées) pour lister les clés globales avec leur type CDP (`type`/`subtype`/`className`).
+2. Filtrage bruit/signal : le nombre de propriétés `window` natives d'un moteur Chromium est important (~300+) et il faut isoler les globales *ajoutées par la page* (variables de jeu, SDK publicitaires, etc.) de celles du navigateur. Deux approches possibles, à trancher avant de coder :
+   - **Liste statique d'exclusion** : plus simple, mais à maintenir à la main et désynchronisable d'une version Chromium/WebView2 à l'autre.
+   - **Baseline dynamique** : sonder une page `about:blank` du même host CDP (il y en a presque toujours une disponible dans la liste des targets, cf. observations Solitaire) pour obtenir la liste des globales "natives" de cette version précise de Chromium, puis ne remonter que la différence. Plus robuste, s'auto-adapte à toute version du moteur, mais un aller-retour CDP de plus.
+   - **Recommandation** : partir sur la baseline dynamique (plus solide, cohérent avec "je veux du solide") avec repli sur une petite liste statique si aucune target `about:blank` n'est disponible sur le host.
+3. Détection d'éléments média/structure : requêtes complémentaires légères (`document.querySelectorAll('video').length`, `'audio'`, `'iframe'` avec leurs `src`) pour donner un aperçu de la structure de page en plus des globales JS.
+4. Nouvelle méthode Q_INVOKABLE `ApplicationController::probeWebView2GlobalScope()` (même patron RiskGate `debug`/lecture seule que `listWebView2CdpTargets`), nouvelle section UI "Reconnaissance" dans `WebView2InspectorView.vue` avec bouton manuel (pas automatique à chaque connexion, pour ne pas ajouter de trafic CDP systématique — cohérent avec le compromis discuté : coût réseau/bruit à chaque connexion vs commodité).
+
+**Fichiers prévus** : `core/webview2/webview2_inspector.h/.cpp` (nouvelle méthode core), `apps/desktop/application_controller.h/.cpp` (nouveau Q_INVOKABLE), `ai/tool_registry.cpp`+`ai/ai_engine.cpp` (nouvel outil LLM, risque `safe`/lecture seule), `ui/src/services/backend.ts` + `ui/src/stores/webView2Inspector.ts` + `ui/src/views/WebView2InspectorView.vue` (UI).
+
+**Statut** : planifié, pas commencé. Pas d'agent assigné.
+
+**Décision architecture ajoutée depuis `docs/SALON.md` (01/09/2026, Claude + Codex)** : la baseline dynamique `about:blank` ne doit pas réutiliser l'unique session active `m_webView2Inspector` de `ApplicationController`, sinon `probeWebView2GlobalScope()` déconnecterait la target utilisateur pour sonder le blank, puis tenterait de se reconnecter dans un contexte où les targets WebView2 peuvent disparaître rapidement (churn déjà observé sur les pubs Solitaire). WEBVIEW-F doit donc ouvrir une connexion jetable indépendante pour la baseline : soit une instance temporaire `killcore::WebView2Inspector`, soit un `CdpClient` séparé au niveau core. Point à respecter avant tout codage de WEBVIEW-F.
+
+### Chantier planifié — UWP State / Save File Radar
+
+Proposé le 01/09/2026 dans `docs/SALON.md`, suite à l'échec utile de Solitaire XP côté mémoire native et CDP gameplay. Objectif : ajouter à KillEngine une couche d'investigation disque pour les apps UWP/MSIX et les jeux qui stockent la vraie source dans `LocalState`/sauvegardes plutôt que dans une adresse mémoire simple.
+
+**Pourquoi** : sur Solitaire, les scans mémoire exacts/float/unknown n'ont pas donné une adresse fiable, et CDP expose surtout les WebViews de pub, pas le plateau ni l'XP. La piste la plus forte devient donc le stockage local (`LocalState`, `.sgi`, `settings.dat`, fichiers binaires ou JSON éventuels), avec comparaison avant/après gain XP.
+
+**Découpage proposé** :
+1. **UWP State Watcher** : découvrir quels fichiers changent autour d'une action utilisateur (snapshot récursif, taille, mtime, hash, timeline).
+2. **Save File Value Radar** : chercher les valeurs dans les fichiers modifiés seulement, avec variantes disque (`Int32/Float` little-endian, UTF-16/ASCII, JSON number, varint, base64, compression connue si signature détectée).
+3. **Safe Patch Planner** : ne proposer une écriture disque qu'après compréhension minimale du format (checksum, structure, sauvegarde/restauration, rollback), jamais de patch aveugle dans `.sgi`/`settings.dat`.
+
+**Prototype minimal recommandé** : snapshot `LocalState` avant action, déclencher un gain XP, snapshot après action, trier les fichiers par mtime proche + delta taille/hash, puis lancer le radar de valeur uniquement sur ces fichiers. Si aucun fichier local ne bouge, basculer sur une corrélation réseau/offline au lieu de continuer à scanner en aveugle.
+
+**Techno v1/v2** : v1 sans nouvelle dépendance lourde (`QDir`/`QFileInfo`, hash SHA1/SHA256 existant ou Qt) ; v2 possible avec `ReadDirectoryChangesW` ou USN Journal pour capter les modifications en temps réel.
+
+**Statut** : planifié. Cline a annoncé dans `docs/SALON.md` une lane docs-only pour rédiger `docs/UWP_STATE_INSPECTOR_SPEC.md` avant tout code.
+
 Règle de collision : chaque sous-phase ne touche que sa propre liste de fichiers ci-dessus ; toute extension hors périmètre se coordonne avant modification (même règle que [[parallel_split_phase188_codex_pointer_map_deps]]).
+
+---
+
+### Chantier planifié — UWP-STATE-1 : Spec Inspecteur UWP State
+
+**2026-09-01 (Cline, Kimi K2.5)** : Préparation du mini-spec pour l'inspection du stockage fichier UWP (piste Solitaire XP).
+
+**Quoi** : Création de `docs/UWP_STATE_INSPECTOR_SPEC.md` — spécification complète d'un nouvel outil pour identifier quel fichier UWP change quand une valeur affichée (XP, score) change.
+
+**Pourquoi** : Investigation terrain Solitaire XP a montré que la vraie source de données n'est ni en mémoire classique (scan Int32/Float32 vides), ni dans les WebView2/CDP (targets génériques sans gameplay). La piste la plus prometteuse est le stockage fichier UWP (`LocalState`, `LocalSettings`), mais il n'existait aucun outil pour lister/capturer/comparer ces fichiers.
+
+**Solution proposée** :
+- Découverte automatique des chemins `LocalState`, `RoamingState`, `TempState`, `Settings` d'un process UWP attaché
+- Snapshots avant/après action utilisateur (timestamps, tailles, hash SHA1)
+- Diff visuel (fichiers ajoutés, supprimés, modifiés avec delta)
+- Technologie : Qt uniquement (`QDir`, `QFileInfo`, `QCryptographicHash`), pas de dépendance externe
+
+**Architecture** : `UwpStateInspector` (core) → `ApplicationController` (Q_INVOKABLE) → `UwpStatePanel` (Vue)
+
+**Fichiers créés** : `docs/UWP_STATE_INSPECTOR_SPEC.md` (nouveau, 250+ lignes)
+
+**Fichiers prévus pour implémentation** (pas encore créés) :
+- `core/uwp/uwp_state_inspector.h/.cpp`
+- `ui/src/components/investigation/UwpStatePanel.vue`
+- `tests/unit/test_uwp_state_inspector.cpp`
+- Modifications : `core/CMakeLists.txt`, `apps/desktop/application_controller.h/.cpp`, `ui/src/services/backend.ts`, `ui/src/views/InvestigationView.vue`
+
+**Validation proposée** : Test live sur Solitaire — snapshot LocalState, jouer une partie, gagner XP, snapshot, comparer, vérifier qu'au moins un fichier a changé.
+
+**Statut** : Spec prêt, en attente de décision propriétaire (GO / WAIT / MODIFY). Aucun code C++/Vue/TS avant validation du spec.
+
+**Priorité** : Implémente l'idée #2 (Inspecteur UWP State) avant #3 (Save File Value Radar) comme recommandé par Claude — on doit d'abord savoir QUEL fichier change avant de chercher la valeur dedans.
+
+**Décision demandée au propriétaire** :
+- (A) GO → commencer l'implémentation backend
+- (B) WAIT → attendre que WEBVIEW-F soit stabilisé/committé d'abord
+- (C) MODIFY → retours sur le spec avant codage

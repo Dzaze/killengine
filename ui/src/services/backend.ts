@@ -153,7 +153,7 @@ export interface KernelMemoryWriteResult {
 }
 
 export interface WebView2CdpTarget {
-  targetId: string
+  id: string
   title?: string
   url?: string
   type?: string
@@ -1470,8 +1470,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   requestWindowsDefenderExclusion?(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>
   /** Inspecteur WebView2/CDP pour inspection de contenu web embarqué. */
   getWebView2InspectorStatus?(): Promise<WebView2InspectorStatus>
-  listWebView2CdpTargets?(): Promise<WebView2TargetsResponse>
-  connectWebView2Inspector?(targetId?: string): Promise<WebView2InspectorStatus>
+  listWebView2CdpTargets?(browserProcessId: number, options?: Record<string, unknown>): Promise<WebView2TargetsResponse>
+  connectWebView2Inspector?(browserProcessId: number, options?: Record<string, unknown>): Promise<WebView2InspectorStatus>
   disconnectWebView2Inspector?(): Promise<WebView2InspectorStatus>
   evaluateWebView2JavaScript?(script: string, options?: Record<string, unknown>): Promise<WebView2EvaluateResult>
   findWebView2DisplayedValues?(value: string, options?: Record<string, unknown>): Promise<WebView2FindResponse>
@@ -2620,14 +2620,14 @@ class BackendService {
           error: '',
         }
       },
-      async listWebView2CdpTargets() {
+      async listWebView2CdpTargets(_browserProcessId?: number, _options?: Record<string, unknown>) {
         return {
           success: true,
           error: '',
           targets: [],
         }
       },
-      async connectWebView2Inspector(_targetId?: string) {
+      async connectWebView2Inspector(_browserProcessId?: number, _options?: Record<string, unknown>) {
         return {
           success: true,
           connected: false,

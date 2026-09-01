@@ -165,13 +165,13 @@ function handleReset() {
       <div class="targets-list">
         <div
           v-for="target in store.targets"
-          :key="target.targetId"
+          :key="target.id"
           class="target-item"
-          :class="{ selected: store.selectedTargetId === target.targetId }"
-          @click="store.selectTarget(target.targetId)"
+          :class="{ selected: store.selectedTargetId === target.id }"
+          @click="store.selectTarget(target.id)"
         >
           <div class="target-info">
-            <span class="target-id">{{ target.targetId }}</span>
+            <span class="target-id">{{ target.id }}</span>
             <span
               v-if="target.title"
               class="target-title"
@@ -187,8 +187,9 @@ function handleReset() {
           </div>
           <input
             type="radio"
-            :checked="store.selectedTargetId === target.targetId"
-            @click.stop="store.selectTarget(target.targetId)"
+            name="webview2-target"
+            :checked="store.selectedTargetId === target.id"
+            @click.stop="store.selectTarget(target.id)"
           >
         </div>
       </div>

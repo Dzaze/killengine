@@ -90,6 +90,62 @@
     "network": "Network",
     "lexicon": "Glossary"
   },
+  "webview2": {
+    "error": {
+      "notAttached": "Attach a process before connecting to its WebView2 target.",
+      "connectFailed": "Failed to connect to the WebView2 target.",
+      "disconnectFailed": "Failed to disconnect the WebView2 inspector.",
+      "evaluateFailed": "JavaScript evaluation failed."
+    },
+    "risk": {
+      "connectTitle": "Connect the WebView2 inspector",
+      "connectMessage": "Opens a CDP (Chrome DevTools Protocol) connection to an external process to read its JavaScript/DOM state. Read-only by default, but any later JS evaluation can also modify that state.",
+      "evaluateTitle": "Evaluate arbitrary JavaScript",
+      "evaluateMessage": "Runs the given JavaScript code in the connected page — can read or modify the target's state depending on the code executed."
+    },
+    "success": {
+      "connected": "WebView2 inspector connected.",
+      "disconnected": "WebView2 inspector disconnected.",
+      "evaluated": "JavaScript evaluation finished."
+    },
+    "status": {
+      "title": "Connection status",
+      "connected": "Connected",
+      "disconnected": "Disconnected"
+    },
+    "actions": {
+      "listTargets": "List targets",
+      "connecting": "Connecting…",
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "reset": "Reset"
+    },
+    "warning": {
+      "notAttached": "Attach a process to list its WebView2 CDP targets (see the Process view)."
+    },
+    "targets": {
+      "title": "Available CDP targets"
+    },
+    "evaluate": {
+      "title": "Evaluate JavaScript",
+      "placeholder": "Ex: document.title",
+      "running": "Evaluating…",
+      "run": "Evaluate",
+      "result": "Result",
+      "noResult": "No value returned (undefined).",
+      "error": "Evaluation failed."
+    },
+    "find": {
+      "title": "Search the DOM",
+      "byValue": "By displayed numeric value",
+      "valuePlaceholder": "Ex: 140",
+      "byText": "By displayed text",
+      "textPlaceholder": "Ex: Score",
+      "searching": "Searching…",
+      "search": "Search",
+      "results": "{count} result(s)"
+    }
+  },
   "lexicon": {
     "searchPlaceholder": "Search a term...",
     "empty": "No term matches this search.",

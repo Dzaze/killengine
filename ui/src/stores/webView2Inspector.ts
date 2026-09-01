@@ -35,7 +35,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
 
   // Getters
   const selectedTarget = computed(() => {
-    return targets.value.find(t => t.targetId === selectedTargetId.value) || null
+    return targets.value.find(t => t.id === selectedTargetId.value) || null
   })
 
   const canConnect = computed(() => {
@@ -76,7 +76,12 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
     }
 
     try {
-      const result = await controller.listWebView2CdpTargets()
+      // browserProcessId=0 : toutes les targets visibles, quel que soit le
+      // process hote. allowAboutBlank=true : beaucoup d'apps hybrides (ex.
+      // Solitaire) n'exposent que des WebViews about:blank (slots de pub
+      // precharges) - les cacher par defaut donnerait une liste vide sans
+      // explication plutot que de laisser l'utilisateur voir/choisir.
+      const result = await controller.listWebView2CdpTargets(0, { allowAboutBlank: true })
       if (result.success && result.targets) {
         targets.value = result.targets
         return result.targets
@@ -108,7 +113,12 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
     error.value = null
 
     try {
-      const result = await controller.connectWebView2Inspector(target)
+      // browserProcessId=0 (pas de filtre process) ; le vrai filtre de target
+      // se fait cote backend via options.targetId (pas un browserProcessId :
+      // target est l'id CDP de la page, ex. "2BBE383D..."), avec le meme
+      // allowAboutBlank que listTargets() pour rester coherent avec ce que
+      // l'utilisateur a vu/selectionne dans la liste.
+      const result = await controller.connectWebView2Inspector(0, { targetId: target, allowAboutBlank: true })
       if (result.success) {
         isConnected.value = true
         selectedTargetId.value = target
@@ -169,10 +179,16 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
     error.value = null
 
     try {
-      const result = await controller.evaluateWebView2JavaScript(code)
+      const result = await controller.evaluateWebView2JavaScript(code, {})
       evaluateResult.value = result
       if (!result.success) {
         error.value = result.error || 'Échec de l\'évaluation'
+        // La connexion CDP peut avoir ete coupee depuis (ex: la target
+        // WebView2 a ete detruite/recreee par l'app cible entre la connexion
+        // et cet appel) sans que le frontend en soit informe - resynchronise
+        // isConnected sur l'etat reel du backend plutot que de laisser un
+        // badge "Connecte" perime qui laisse croire que l'outil est casse.
+        await refreshStatus()
       }
       return result
     } catch (e) {
@@ -201,6 +217,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
         return result.matches
       } else {
         error.value = result.error || 'Échec de la recherche'
+        await refreshStatus()
         return []
       }
     } catch (e) {
@@ -229,6 +246,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
         return result.matches
       } else {
         error.value = result.error || 'Échec de la recherche'
+        await refreshStatus()
         return []
       }
     } catch (e) {
