@@ -36,6 +36,10 @@
 class QProcess;
 class QWebEnginePage;
 
+namespace killcore {
+class WebView2Inspector;
+}
+
 namespace killengine {
 
 class AutomationPipeServer;
@@ -809,6 +813,20 @@ public:
     /// x64 existant, ne le reimplemente pas. Lecture seule, aucune injection.
     Q_INVOKABLE QVariantMap disassembleClrMethod(const QString& objectAddressHex, const QString& methodName, int instructionCount);
 
+    /// Inspection WebView2/JS via CDP. Ces methodes exposent seulement une
+    /// facade QWebChannel autour de killcore::WebView2Inspector : discovery
+    /// direct/WDP, connexion a une target par PID, lectures DOM et evaluation
+    /// JS. Les retours portent risk/requiresConfirmation pour que le RiskGate
+    /// frontend confirme explicitement les actions sensibles (connexion a un
+    /// process externe, JS arbitraire).
+    Q_INVOKABLE QVariantMap getWebView2InspectorStatus() const;
+    Q_INVOKABLE QVariantMap listWebView2CdpTargets(int browserProcessId, const QVariantMap& options) const;
+    Q_INVOKABLE QVariantMap connectWebView2Inspector(int browserProcessId, const QVariantMap& options);
+    Q_INVOKABLE QVariantMap disconnectWebView2Inspector();
+    Q_INVOKABLE QVariantMap evaluateWebView2JavaScript(const QString& expression, const QVariantMap& options);
+    Q_INVOKABLE QVariantMap findWebView2DisplayedValues(const QString& value, const QVariantMap& options);
+    Q_INVOKABLE QVariantMap findWebView2DisplayedText(const QString& text, const QVariantMap& options);
+
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
     Q_INVOKABLE QVariantMap probeKernelDriver() const;
 
@@ -1208,6 +1226,7 @@ private:
     killcore::ProcessHandle m_handle;
     std::unique_ptr<UiStringInvestigator> m_uiStringInvestigator;
     std::unique_ptr<ClrInspectorBridge> m_clrInspectorBridge;
+    std::unique_ptr<killcore::WebView2Inspector> m_webView2Inspector;
     std::unique_ptr<CodePatchManager> m_codePatchManager;
     std::unique_ptr<DebugFeatureManager> m_debugFeatureManager;
     std::unique_ptr<FreezeHotkeyOverlayManager> m_freezeHotkeyOverlayManager;
@@ -1224,6 +1243,9 @@ private:
     // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
     QString                 m_networkBlockRuleToken;
     QString                 m_networkBlockExePath;
+    QVariantMap             m_webView2ActiveTarget;
+    QString                 m_webView2Endpoint;
+    int                     m_webView2BrowserProcessId{0};
     killcore::CandidateStore m_candidates;
     killcore::CandidateStore m_previousCandidates;
     QHash<uint64_t, QVariantList> m_candidateValueHistory;

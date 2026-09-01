@@ -58,6 +58,7 @@
 #include "scanner/structure_analyzer.h"
 #include "scanner/value_variants.h"
 #include "snapshot/snapshot_store.h"
+#include "webview2/webview2_inspector.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -117,6 +118,126 @@ constexpr size_t kCandidateDisplayLimit = 250000;
 constexpr qsizetype kUnknownAutoMaxReturnedMatches = 250000;
 constexpr int kCandidateHistoryMaxAddresses = 10000;
 constexpr int kCandidateHistoryMaxEntriesPerAddress = 12;
+
+QString defaultWebView2CdpEndpoint(const QVariantMap& options) {
+    const QString explicitHttpUrl = options.value(QStringLiteral("httpUrl")).toString().trimmed();
+    if (!explicitHttpUrl.isEmpty()) {
+        return explicitHttpUrl;
+    }
+    const int directPort = options.value(QStringLiteral("directPort"), 9333).toInt();
+    if (directPort > 0) {
+        return QStringLiteral("http://127.0.0.1:%1/json").arg(directPort);
+    }
+    return QStringLiteral("http://127.0.0.1:50080/msedge");
+}
+
+QVariantMap webView2ResultEnvelope(const QString& risk, bool requiresConfirmation) {
+    QVariantMap result;
+    result[QStringLiteral("success")] = false;
+    result[QStringLiteral("risk")] = risk;
+    result[QStringLiteral("requiresConfirmation")] = requiresConfirmation;
+    result[QStringLiteral("capability")] = QStringLiteral("webview2_cdp");
+    return result;
+}
+
+QString webView2SetupHint() {
+    return QStringLiteral(
+        "Aucune target CDP WebView2 disponible. Pour une app desktop/Electron/CEF, verifier le port direct "
+        "(ex: --remote-debugging-port=9333 puis /json). Pour une app UWP/Store, installer "
+        "Tools.DeveloperMode.Core, activer le Portail d'appareil, installer Remote Tools for Microsoft Edge, "
+        "relancer la cible avec msEdgeDevToolsWdpRemoteDebugging, puis utiliser http://127.0.0.1:50080/msedge.");
+}
+
+int jsonValueToInt(const QJsonValue& value) {
+    if (value.isDouble()) {
+        return value.toInt();
+    }
+    bool ok = false;
+    const int parsed = value.toString().toInt(&ok);
+    return ok ? parsed : 0;
+}
+
+bool webView2TargetMatchesPid(const QJsonObject& target, int browserProcessId) {
+    if (browserProcessId <= 0) {
+        return true;
+    }
+    const int wdpBrowserPid = jsonValueToInt(target.value(QStringLiteral("wdpBrowserProcessId")));
+    const int browserPid = jsonValueToInt(target.value(QStringLiteral("browserProcessId")));
+    const int processId = jsonValueToInt(target.value(QStringLiteral("processId")));
+    const int pid = jsonValueToInt(target.value(QStringLiteral("pid")));
+    if (wdpBrowserPid == 0 && browserPid == 0 && processId == 0 && pid == 0) {
+        return true;
+    }
+    return wdpBrowserPid == browserProcessId
+        || browserPid == browserProcessId
+        || processId == browserProcessId
+        || pid == browserProcessId;
+}
+
+bool webView2TargetMatchesTextFilters(const QJsonObject& target, const QVariantMap& options) {
+    const QString targetId = options.value(QStringLiteral("targetId"), options.value(QStringLiteral("id"))).toString().trimmed();
+    if (!targetId.isEmpty() && target.value(QStringLiteral("id")).toString() != targetId) {
+        return false;
+    }
+
+    const QString titleContains = options.value(QStringLiteral("pageTitle"), options.value(QStringLiteral("titleContains"))).toString().trimmed();
+    if (!titleContains.isEmpty()
+        && !target.value(QStringLiteral("title")).toString().contains(titleContains, Qt::CaseInsensitive)) {
+        return false;
+    }
+
+    const QString urlContains = options.value(QStringLiteral("pageUrl"), options.value(QStringLiteral("urlContains"))).toString().trimmed();
+    if (!urlContains.isEmpty()
+        && !target.value(QStringLiteral("url")).toString().contains(urlContains, Qt::CaseInsensitive)) {
+        return false;
+    }
+
+    return true;
+}
+
+QJsonArray filterWebView2Targets(const QJsonArray& pages, int browserProcessId, const QVariantMap& options) {
+    QJsonArray filtered;
+    const bool pageTargetsOnly = options.value(QStringLiteral("pageTargetsOnly"), true).toBool();
+    const bool allowAboutBlank = options.value(QStringLiteral("allowAboutBlank"), false).toBool();
+    for (const QJsonValue& value : pages) {
+        if (!value.isObject()) {
+            continue;
+        }
+        const QJsonObject target = value.toObject();
+        if (pageTargetsOnly && target.value(QStringLiteral("type")).toString() != QStringLiteral("page")) {
+            continue;
+        }
+        if (!allowAboutBlank && target.value(QStringLiteral("url")).toString().startsWith(QStringLiteral("about:"), Qt::CaseInsensitive)) {
+            continue;
+        }
+        if (!webView2TargetMatchesPid(target, browserProcessId)) {
+            continue;
+        }
+        if (!webView2TargetMatchesTextFilters(target, options)) {
+            continue;
+        }
+        if (target.value(QStringLiteral("webSocketDebuggerUrl")).toString().isEmpty()) {
+            continue;
+        }
+        filtered.append(target);
+    }
+    return filtered;
+}
+
+QVariantList webView2TargetsToVariantList(const QJsonArray& targets) {
+    QVariantList list;
+    list.reserve(targets.size());
+    for (const QJsonValue& value : targets) {
+        if (value.isObject()) {
+            list.append(value.toObject().toVariantMap());
+        }
+    }
+    return list;
+}
+
+QVariantMap webView2TargetToVariantMap(const QJsonObject& target) {
+    return target.toVariantMap();
+}
 
 QString findLuaExecutable(const QString& overridePath = {}) {
     const QString trimmedOverride = overridePath.trimmed();
@@ -1832,6 +1953,7 @@ ApplicationController::ApplicationController(QObject* parent)
         [this]() {
             return m_processName;
         });
+    m_webView2Inspector = std::make_unique<killcore::WebView2Inspector>();
     m_codePatchManager = std::make_unique<CodePatchManager>(
         m_handle,
         [this](const QString& event, const QVariantMap& payload) {
@@ -1936,6 +2058,9 @@ ApplicationController::ApplicationController(QObject* parent)
 }
 
 ApplicationController::~ApplicationController() {
+    if (m_webView2Inspector) {
+        m_webView2Inspector->disconnect();
+    }
     m_clrInspectorBridge.reset();
     m_debugFeatureManager.reset();
     KE_LOG_INFO() << "ApplicationController destroyed";
@@ -4383,6 +4508,209 @@ QVariantMap ApplicationController::generateClrObjectReport(const QString& object
 QVariantMap ApplicationController::disassembleClrMethod(const QString& objectAddressHex, const QString& methodName, int instructionCount) {
     return m_clrInspectorBridge->disassembleClrMethod(objectAddressHex, methodName, instructionCount);
 }
+
+QVariantMap ApplicationController::getWebView2InspectorStatus() const {
+    QVariantMap result = webView2ResultEnvelope(QStringLiteral("debug"), false);
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("connected")] = m_webView2Inspector && m_webView2Inspector->isConnected();
+    result[QStringLiteral("browserProcessId")] = m_webView2BrowserProcessId;
+    result[QStringLiteral("endpoint")] = m_webView2Endpoint;
+    result[QStringLiteral("target")] = m_webView2ActiveTarget;
+    return result;
+}
+
+QVariantMap ApplicationController::listWebView2CdpTargets(int browserProcessId, const QVariantMap& options) const {
+    QVariantMap result = webView2ResultEnvelope(QStringLiteral("debug"), false);
+    const QString httpUrl = defaultWebView2CdpEndpoint(options);
+    const QJsonArray pages = killcore::WebView2Inspector::listAvailablePages(httpUrl);
+    const QJsonArray targets = filterWebView2Targets(pages, browserProcessId, options);
+
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("endpoint")] = httpUrl;
+    result[QStringLiteral("browserProcessId")] = browserProcessId;
+    result[QStringLiteral("totalDiscovered")] = pages.size();
+    result[QStringLiteral("count")] = targets.size();
+    result[QStringLiteral("targets")] = webView2TargetsToVariantList(targets);
+    result[QStringLiteral("pageTargetsOnly")] = options.value(QStringLiteral("pageTargetsOnly"), true).toBool();
+    result[QStringLiteral("allowAboutBlank")] = options.value(QStringLiteral("allowAboutBlank"), false).toBool();
+    if (pages.isEmpty()) {
+        result[QStringLiteral("warning")] = webView2SetupHint();
+    } else if (targets.isEmpty()) {
+        result[QStringLiteral("warning")] = QStringLiteral(
+            "Des targets CDP existent, mais aucune ne correspond aux filtres demandes. "
+            "Essayer browserProcessId=0, allowAboutBlank=true, ou retirer pageTitle/pageUrl/targetId.");
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::connectWebView2Inspector(int browserProcessId, const QVariantMap& options) {
+    QVariantMap result = webView2ResultEnvelope(QStringLiteral("debug"), true);
+    if (!m_webView2Inspector) {
+        result[QStringLiteral("error")] = QStringLiteral("Inspecteur WebView2 non initialise.");
+        return result;
+    }
+
+    const QString explicitWsUrl = options.value(QStringLiteral("webSocketDebuggerUrl")).toString().trimmed();
+    QJsonObject selectedTarget;
+    QString wsUrl = explicitWsUrl;
+    const QString httpUrl = defaultWebView2CdpEndpoint(options);
+
+    if (wsUrl.isEmpty()) {
+        const QJsonArray pages = killcore::WebView2Inspector::listAvailablePages(httpUrl);
+        const QJsonArray targets = filterWebView2Targets(pages, browserProcessId, options);
+        if (targets.isEmpty()) {
+            result[QStringLiteral("endpoint")] = httpUrl;
+            result[QStringLiteral("browserProcessId")] = browserProcessId;
+            result[QStringLiteral("totalDiscovered")] = pages.size();
+            result[QStringLiteral("error")] = pages.isEmpty()
+                ? webView2SetupHint()
+                : QStringLiteral("Aucune target WebView2 CDP exploitable ne correspond au PID/filtre demande.");
+            return result;
+        }
+        selectedTarget = targets.first().toObject();
+        wsUrl = selectedTarget.value(QStringLiteral("webSocketDebuggerUrl")).toString();
+    }
+
+    if (wsUrl.isEmpty()) {
+        result[QStringLiteral("error")] = QStringLiteral("Target CDP sans webSocketDebuggerUrl.");
+        return result;
+    }
+
+    if (m_webView2Inspector->isConnected()) {
+        m_webView2Inspector->disconnect();
+    }
+    const bool connected = m_webView2Inspector->connectToWebSocket(wsUrl);
+    result[QStringLiteral("success")] = connected;
+    result[QStringLiteral("connected")] = connected;
+    result[QStringLiteral("endpoint")] = httpUrl;
+    result[QStringLiteral("browserProcessId")] = browserProcessId;
+    result[QStringLiteral("webSocketDebuggerUrl")] = wsUrl;
+    if (!selectedTarget.isEmpty()) {
+        result[QStringLiteral("target")] = webView2TargetToVariantMap(selectedTarget);
+    }
+    if (!connected) {
+        result[QStringLiteral("error")] = QStringLiteral(
+            "Connexion WebSocket CDP echouee. Verifier que la target WebView2 existe toujours et que Remote Tools expose bien /msedge.");
+        return result;
+    }
+
+    m_webView2Endpoint = httpUrl;
+    m_webView2BrowserProcessId = browserProcessId;
+    m_webView2ActiveTarget = selectedTarget.isEmpty()
+        ? QVariantMap{{QStringLiteral("webSocketDebuggerUrl"), wsUrl}}
+        : webView2TargetToVariantMap(selectedTarget);
+    return result;
+}
+
+QVariantMap ApplicationController::disconnectWebView2Inspector() {
+    QVariantMap result = webView2ResultEnvelope(QStringLiteral("debug"), false);
+    if (m_webView2Inspector) {
+        m_webView2Inspector->disconnect();
+    }
+    m_webView2ActiveTarget.clear();
+    m_webView2Endpoint.clear();
+    m_webView2BrowserProcessId = 0;
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("connected")] = false;
+    return result;
+}
+
+QVariantMap ApplicationController::evaluateWebView2JavaScript(const QString& expression, const QVariantMap& options) {
+    QVariantMap result = webView2ResultEnvelope(QStringLiteral("script"), true);
+    if (!m_webView2Inspector || !m_webView2Inspector->isConnected()) {
+        result[QStringLiteral("error")] = QStringLiteral("Aucune target WebView2 CDP connectee.");
+        return result;
+    }
+    if (expression.trimmed().isEmpty()) {
+        result[QStringLiteral("error")] = QStringLiteral("Expression JavaScript vide.");
+        return result;
+    }
+
+    const bool returnByValue = options.value(QStringLiteral("returnByValue"), true).toBool();
+    const QJsonObject response = m_webView2Inspector->evaluateJavaScript(expression, returnByValue);
+    result[QStringLiteral("raw")] = response.toVariantMap();
+    result[QStringLiteral("target")] = m_webView2ActiveTarget;
+    if (response.isEmpty()) {
+        result[QStringLiteral("error")] = QStringLiteral("Evaluation JavaScript sans reponse CDP.");
+        return result;
+    }
+    if (response.contains(QStringLiteral("error"))) {
+        result[QStringLiteral("error")] = QStringLiteral("Erreur CDP pendant Runtime.evaluate.");
+        result[QStringLiteral("cdpError")] = response.value(QStringLiteral("error")).toVariant();
+        return result;
+    }
+
+    const QJsonObject responseResult = response.value(QStringLiteral("result")).toObject();
+    if (responseResult.contains(QStringLiteral("exceptionDetails"))) {
+        result[QStringLiteral("error")] = QStringLiteral("Exception JavaScript pendant Runtime.evaluate.");
+        result[QStringLiteral("exceptionDetails")] = responseResult.value(QStringLiteral("exceptionDetails")).toVariant();
+        return result;
+    }
+
+    const QJsonObject remoteObject = responseResult.value(QStringLiteral("result")).toObject();
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("type")] = remoteObject.value(QStringLiteral("type")).toString();
+    result[QStringLiteral("subtype")] = remoteObject.value(QStringLiteral("subtype")).toString();
+    result[QStringLiteral("description")] = remoteObject.value(QStringLiteral("description")).toString();
+    result[QStringLiteral("value")] = remoteObject.value(QStringLiteral("value")).toVariant();
+    return result;
+}
+
+QVariantMap ApplicationController::findWebView2DisplayedValues(const QString& value, const QVariantMap& options) {
+    QVariantMap result = webView2ResultEnvelope(QStringLiteral("debug"), false);
+    if (!m_webView2Inspector || !m_webView2Inspector->isConnected()) {
+        result[QStringLiteral("error")] = QStringLiteral("Aucune target WebView2 CDP connectee.");
+        return result;
+    }
+
+    bool ok = false;
+    const int numericValue = value.trimmed().toInt(&ok);
+    if (!ok) {
+        result[QStringLiteral("error")] = QStringLiteral("Valeur numerique invalide pour findDisplayedValues.");
+        return result;
+    }
+
+    const QJsonArray matches = m_webView2Inspector->findDisplayedValues(numericValue);
+    const int maxResults = std::max(1, options.value(QStringLiteral("maxResults"), 100).toInt());
+    QJsonArray limited;
+    for (int i = 0; i < matches.size() && i < maxResults; ++i) {
+        limited.append(matches.at(i));
+    }
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("value")] = numericValue;
+    result[QStringLiteral("count")] = limited.size();
+    result[QStringLiteral("totalMatches")] = matches.size();
+    result[QStringLiteral("matches")] = webView2TargetsToVariantList(limited);
+    result[QStringLiteral("target")] = m_webView2ActiveTarget;
+    return result;
+}
+
+QVariantMap ApplicationController::findWebView2DisplayedText(const QString& text, const QVariantMap& options) {
+    QVariantMap result = webView2ResultEnvelope(QStringLiteral("debug"), false);
+    if (!m_webView2Inspector || !m_webView2Inspector->isConnected()) {
+        result[QStringLiteral("error")] = QStringLiteral("Aucune target WebView2 CDP connectee.");
+        return result;
+    }
+    if (text.isEmpty()) {
+        result[QStringLiteral("error")] = QStringLiteral("Texte vide.");
+        return result;
+    }
+
+    const QJsonArray matches = m_webView2Inspector->findDisplayedText(text);
+    const int maxResults = std::max(1, options.value(QStringLiteral("maxResults"), 100).toInt());
+    QJsonArray limited;
+    for (int i = 0; i < matches.size() && i < maxResults; ++i) {
+        limited.append(matches.at(i));
+    }
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("text")] = text;
+    result[QStringLiteral("count")] = limited.size();
+    result[QStringLiteral("totalMatches")] = matches.size();
+    result[QStringLiteral("matches")] = webView2TargetsToVariantList(limited);
+    result[QStringLiteral("target")] = m_webView2ActiveTarget;
+    return result;
+}
+
 QVariantMap ApplicationController::probeKernelDriver() const {
     return m_kernelDriverManager->probeKernelDriver();
 }
