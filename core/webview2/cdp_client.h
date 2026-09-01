@@ -52,7 +52,9 @@ public:
      * @param timeoutMs Timeout en millisecondes
      * @return Résultat ou objet avec champ "error"
      */
-    QJsonObject sendCommandSync(const QString& method, const QJsonObject& params, int timeoutMs = 5000);
+    QJsonObject sendCommandSync(const QString& method,
+                                const QJsonObject& params = QJsonObject(),
+                                int timeoutMs = 5000);
 
     /**
      * @brief Active un domaine CDP pour recevoir ses événements.
@@ -116,7 +118,18 @@ private:
  * @param httpUrl URL HTTP (ex: http://127.0.0.1:9333/json)
  * @return Liste des pages avec leurs URLs WebSocket, ou vide si échec
  */
-QJsonArray discoverCdpPages(const QString& httpUrl);
+QJsonArray discoverCdpPages(const QString& httpUrl, bool pageTargetsOnly = true);
+
+/**
+ * @brief Découvre les pages CDP avec fallback WebView2 UWP via Windows Device Portal.
+ * @param directHttpUrl Endpoint direct (ex: http://127.0.0.1:9333/json)
+ * @param statusMessage Message lisible sur le chemin retenu ou l'étape manquante
+ * @param pageTargetsOnly Si true, ne remonte que les targets CDP de type "page"
+ * @return Liste aplatie des pages/targets CDP
+ */
+QJsonArray discoverCdpPagesWithFallback(const QString& directHttpUrl,
+                                        QString* statusMessage = nullptr,
+                                        bool pageTargetsOnly = true);
 
 /**
  * @brief Trouve l'URL WebSocket d'une page par son titre ou URL.
@@ -125,6 +138,9 @@ QJsonArray discoverCdpPages(const QString& httpUrl);
  * @param pageUrl URL de la page à chercher (partiel match)
  * @return URL WebSocket ou QString() si non trouvée
  */
-QString findCdpWebSocketUrl(const QString& httpUrl, const QString& pageTitle = QString(), const QString& pageUrl = QString());
+QString findCdpWebSocketUrl(const QString& httpUrl,
+                            const QString& pageTitle = QString(),
+                            const QString& pageUrl = QString(),
+                            bool pageTargetsOnly = true);
 
 } // namespace killcore

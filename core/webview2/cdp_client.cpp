@@ -6,6 +6,7 @@
 #include <QEventLoop>
 #include <QTimer>
 #include <QJsonDocument>
+#include <QCoreApplication>
 #include <QDebug>
 
 namespace killcore {
@@ -88,6 +89,8 @@ QJsonObject CdpClient::sendCommandSync(const QString& method, const QJsonObject&
     timer.setInterval(timeoutMs);
 
     connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+
+    timer.start();
 
     while (!finished && timer.isActive()) {
         QCoreApplication::processEvents(QEventLoop::WaitForMoreEvents, 100);
@@ -202,10 +205,89 @@ void CdpClient::onTextMessageReceived(const QString& message)
     }
 }
 
-QJsonArray discoverCdpPages(const QString& httpUrl)
+namespace {
+
+struct HttpJsonResult {
+    QJsonDocument document;
+    QString error;
+    int httpStatus = 0;
+};
+
+bool isWdpMsedgeRoot(const QJsonObject& object)
 {
+    return object.contains(QStringLiteral("targets"))
+        && object[QStringLiteral("targets")].isArray()
+        && object.contains(QStringLiteral("version"));
+}
+
+bool shouldKeepTarget(const QJsonObject& target, bool pageTargetsOnly)
+{
+    if (target[QStringLiteral("webSocketDebuggerUrl")].toString().isEmpty()) {
+        return false;
+    }
+
+    if (!pageTargetsOnly) {
+        return true;
+    }
+
+    return target[QStringLiteral("type")].toString().compare(QStringLiteral("page"), Qt::CaseInsensitive) == 0;
+}
+
+QJsonObject withWdpBrowserMetadata(QJsonObject target, const QJsonObject& browser)
+{
+    const QJsonObject version = browser[QStringLiteral("version")].toObject();
+    const QJsonObject info = browser[QStringLiteral("info")].toObject();
+
+    target[QStringLiteral("wdpBrowserProcessId")] = info[QStringLiteral("browserProcessId")];
+    target[QStringLiteral("wdpBrowserWebSocketDebuggerUrl")] =
+        version[QStringLiteral("webSocketDebuggerUrl")].toString();
+    target[QStringLiteral("wdpBrowser")] = version[QStringLiteral("Browser")].toString();
+
+    return target;
+}
+
+QJsonArray flattenCdpTargets(const QJsonDocument& document, bool pageTargetsOnly)
+{
+    QJsonArray result;
+    if (!document.isArray()) {
+        return result;
+    }
+
+    const QJsonArray values = document.array();
+    for (const QJsonValue& value : values) {
+        if (!value.isObject()) {
+            continue;
+        }
+
+        const QJsonObject object = value.toObject();
+        if (isWdpMsedgeRoot(object)) {
+            const QJsonArray targets = object[QStringLiteral("targets")].toArray();
+            for (const QJsonValue& targetValue : targets) {
+                if (!targetValue.isObject()) {
+                    continue;
+                }
+
+                QJsonObject target = withWdpBrowserMetadata(targetValue.toObject(), object);
+                if (shouldKeepTarget(target, pageTargetsOnly)) {
+                    result.append(target);
+                }
+            }
+            continue;
+        }
+
+        if (shouldKeepTarget(object, pageTargetsOnly)) {
+            result.append(object);
+        }
+    }
+
+    return result;
+}
+
+HttpJsonResult fetchJson(const QString& httpUrl, int timeoutMs = 5000)
+{
+    HttpJsonResult result;
     QNetworkAccessManager manager;
-    QNetworkRequest request(QUrl(httpUrl));
+    QNetworkRequest request{QUrl(httpUrl)};
     QNetworkReply* reply = manager.get(request);
 
     QEventLoop loop;
@@ -219,23 +301,102 @@ QJsonArray discoverCdpPages(const QString& httpUrl)
 
     loop.exec();
 
-    QJsonArray result;
-
     if (reply->error() == QNetworkReply::NoError) {
         QByteArray data = reply->readAll();
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isArray()) {
-            result = doc.array();
+        QJsonParseError parseError;
+        result.document = QJsonDocument::fromJson(data, &parseError);
+        if (parseError.error != QJsonParseError::NoError) {
+            result.error = QStringLiteral("Réponse CDP non JSON depuis %1 : %2")
+                .arg(httpUrl, parseError.errorString());
         }
+    } else if (timer.isActive()) {
+        const QVariant status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        result.httpStatus = status.isValid() ? status.toInt() : 0;
+        result.error = QStringLiteral("Endpoint CDP inaccessible (%1) : %2")
+            .arg(httpUrl, reply->errorString());
+    } else {
+        result.error = QStringLiteral("Timeout en interrogeant l'endpoint CDP %1").arg(httpUrl);
     }
 
     reply->deleteLater();
     return result;
 }
 
-QString findCdpWebSocketUrl(const QString& httpUrl, const QString& pageTitle, const QString& pageUrl)
+QString wdpMsedgeUrl()
 {
-    QJsonArray pages = discoverCdpPages(httpUrl);
+    return QStringLiteral("http://127.0.0.1:50080/msedge");
+}
+
+bool isWdpUrl(const QString& httpUrl)
+{
+    const QUrl url(httpUrl);
+    return url.port() == 50080 && url.path().contains(QStringLiteral("msedge"), Qt::CaseInsensitive);
+}
+
+} // namespace
+
+QJsonArray discoverCdpPages(const QString& httpUrl, bool pageTargetsOnly)
+{
+    const HttpJsonResult response = fetchJson(httpUrl);
+    if (!response.error.isEmpty()) {
+        qWarning() << response.error;
+        return {};
+    }
+
+    return flattenCdpTargets(response.document, pageTargetsOnly);
+}
+
+QJsonArray discoverCdpPagesWithFallback(const QString& directHttpUrl,
+                                        QString* statusMessage,
+                                        bool pageTargetsOnly)
+{
+    QJsonArray directPages = discoverCdpPages(directHttpUrl, pageTargetsOnly);
+    if (!directPages.isEmpty()) {
+        if (statusMessage) {
+            *statusMessage = QStringLiteral("Endpoint CDP direct disponible : %1").arg(directHttpUrl);
+        }
+        return directPages;
+    }
+
+    if (isWdpUrl(directHttpUrl)) {
+        if (statusMessage) {
+            *statusMessage = QStringLiteral(
+                "Aucune target CDP sur %1. Vérifier que la cible WebView2 est lancée avec "
+                "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--enable-features=msEdgeDevToolsWdpRemoteDebugging.")
+                .arg(directHttpUrl);
+        }
+        return {};
+    }
+
+    const QString wdpUrl = wdpMsedgeUrl();
+    QJsonArray wdpPages = discoverCdpPages(wdpUrl, pageTargetsOnly);
+    if (!wdpPages.isEmpty()) {
+        if (statusMessage) {
+            *statusMessage = QStringLiteral(
+                "Endpoint CDP direct indisponible (%1) ; fallback Windows Device Portal actif via %2.")
+                .arg(directHttpUrl, wdpUrl);
+        }
+        return wdpPages;
+    }
+
+    if (statusMessage) {
+        *statusMessage = QStringLiteral(
+            "Aucune target CDP trouvée depuis %1. Pour une app desktop/Electron/CEF, vérifier le port direct "
+            "(ex: --remote-debugging-port et /json). Pour une app UWP/Store WebView2, installer "
+            "Tools.DeveloperMode.Core, activer Portail d'appareil, installer Remote Tools for Microsoft Edge, "
+            "puis relancer la cible avec --enable-features=msEdgeDevToolsWdpRemoteDebugging.")
+            .arg(directHttpUrl);
+    }
+
+    return {};
+}
+
+QString findCdpWebSocketUrl(const QString& httpUrl,
+                            const QString& pageTitle,
+                            const QString& pageUrl,
+                            bool pageTargetsOnly)
+{
+    QJsonArray pages = discoverCdpPagesWithFallback(httpUrl, nullptr, pageTargetsOnly);
 
     for (const QJsonValue& pageValue : pages) {
         if (!pageValue.isObject()) continue;

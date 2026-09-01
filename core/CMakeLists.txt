@@ -1,4 +1,4 @@
-l# =============================================================================
+# =============================================================================
 # KillCore — Moteur déterministe C++20 (mémoire, scanner, candidats)
 # =============================================================================
 
@@ -168,8 +168,6 @@ add_library(killcore STATIC
     webview2/cdp_client.cpp
     webview2/webview2_inspector.h
     webview2/webview2_inspector.cpp
-    webview2/cdp_proxy_dll.h
-    webview2/cdp_proxy_dll.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
