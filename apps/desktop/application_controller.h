@@ -827,6 +827,34 @@ public:
     Q_INVOKABLE QVariantMap findWebView2DisplayedValues(const QString& value, const QVariantMap& options);
     Q_INVOKABLE QVariantMap findWebView2DisplayedText(const QString& text, const QVariantMap& options);
 
+    /// Active/désactive la variable d'environnement utilisateur
+    /// WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333 (via
+    /// HKCU\Environment + broadcast WM_SETTINGCHANGE, équivalent de `setx` en
+    /// natif). Force TOUS les hôtes WebView2 du user Windows courant à exposer
+    /// un port de debug CDP à leur prochain lancement — portée large et
+    /// persistante, jamais posée silencieusement : le frontend confirme via
+    /// RiskGate avant d'appeler enable. disable retire la variable sans
+    /// confirmation (symétrie avec disableAutomationMode()).
+    Q_INVOKABLE QVariantMap enableWebView2CdpDebugFlag();
+    Q_INVOKABLE QVariantMap disableWebView2CdpDebugFlag();
+    Q_INVOKABLE QVariantMap getWebView2CdpDebugFlagStatus() const;
+
+    /// Diagnostic système pour préparer l'inspection WebView2 sur les cibles
+    /// UWP/Store (chaîne Windows Device Portal, cf. docs/PHASE_TRACKER.md) :
+    /// état Developer Mode (HKLM\...\AppModelUnlock) et de la capability
+    /// optionnelle Tools.DeveloperMode.Core. Lecture seule.
+    Q_INVOKABLE QVariantMap getWebView2SystemPrepStatus() const;
+
+    /// Installe la capability Windows optionnelle Tools.DeveloperMode.Core
+    /// (Add-WindowsCapability, invite UAC visible via `runas` — jamais
+    /// silencieux, même mécanisme que requestWindowsDefenderExclusion()).
+    /// Peut prendre plusieurs minutes et rester silencieuse côté process :
+    /// le frontend doit prévenir l'utilisateur avant de lancer, puis proposer
+    /// un nouveau getWebView2SystemPrepStatus() pour re-tester. N'ouvre PAS le
+    /// CDP TCP direct des apps Store UWP (restriction AppContainer séparée,
+    /// toujours en place) : uniquement un prérequis pour Windows Device Portal.
+    Q_INVOKABLE QVariantMap installWebView2DeveloperModeCapability();
+
     /// Probe le driver noyau optionnel KillEngineKernel.sys (health check uniquement).
     Q_INVOKABLE QVariantMap probeKernelDriver() const;
 

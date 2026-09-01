@@ -78,6 +78,17 @@ QVariantList toolDefinitions() {
         makeTool("apply_stealth_mode", "Active le mode discret pour masquer KillEngine du processus cible. Profils : 'sc2' (tous les modules anti-détection), 'default' (anti-debug seul), 'minimal' (masquage processus seul). À utiliser quand l'utilisateur mentionne un jeu qui détecte les outils mémoire.", {"profile"}, "injection", true),
         makeTool("restore_stealth_mode", "Désactive le mode discret et restaure l'état original des modules activés.", {}, "injection", true),
         makeTool("get_stealth_status", "Retourne l'état courant du mode discret (actif ou non, profil utilisé, modules activés). Lecture seule, exécute directement.", {}, "safe", false),
+        // WEBVIEW-C : exposition LLM des Q_INVOKABLE ApplicationController
+        // ajoutes en WEBVIEW-D. Connexion externe et JS arbitraire restent
+        // derriere RiskGate (requiresConfirmation=true) ; les lectures DOM et
+        // le listing de targets sont des observations controlees.
+        makeTool("getWebView2InspectorStatus", "Retourne l'etat courant de l'inspecteur WebView2/CDP : connecte ou non, endpoint utilise, target active.", {}, "safe", false),
+        makeTool("listWebView2CdpTargets", "Liste les targets CDP WebView2 disponibles pour un PID browser WebView2 donne. Utiliser browserProcessId=0 pour lister toutes les targets visibles via le port direct ou le fallback WDP /msedge avant de choisir une target.", {"browserProcessId"}, "debug", false),
+        makeTool("connectWebView2Inspector", "Connecte l'inspecteur WebView2 a une target CDP par PID/filtres/options ou webSocketDebuggerUrl explicite. Action sensible car elle s'attache a un process externe : confirmation RiskGate obligatoire.", {"browserProcessId"}, "debug", true),
+        makeTool("disconnectWebView2Inspector", "Deconnecte l'inspecteur WebView2/CDP courant.", {}, "safe", false),
+        makeTool("evaluateWebView2JavaScript", "Evalue une expression JavaScript arbitraire dans la target WebView2 connectee. Peut lire ou modifier l'etat JS selon le code fourni : confirmation RiskGate obligatoire.", {"expression"}, "script", true),
+        makeTool("findWebView2DisplayedValues", "Cherche une valeur numerique affichee dans le DOM de la target WebView2 connectee via une expression JS controlee.", {"value"}, "debug", false),
+        makeTool("findWebView2DisplayedText", "Cherche un texte affiche dans le DOM de la target WebView2 connectee via une expression JS controlee.", {"text"}, "debug", false),
     };
 }
 

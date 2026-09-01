@@ -152,6 +152,89 @@ export interface KernelMemoryWriteResult {
   error?: string
 }
 
+export interface WebView2CdpTarget {
+  targetId: string
+  title?: string
+  url?: string
+  type?: string
+  webSocketDebuggerUrl?: string
+}
+
+export interface WebView2InspectorStatus {
+  success: boolean
+  connected: boolean
+  browserProcessId?: number
+  endpoint?: string
+  target?: Record<string, unknown>
+  error?: string
+  risk?: string
+  requiresConfirmation?: boolean
+  capability?: string
+}
+
+export interface WebView2TargetsResponse {
+  success: boolean
+  endpoint?: string
+  browserProcessId?: number
+  totalDiscovered?: number
+  count?: number
+  targets?: WebView2CdpTarget[]
+  pageTargetsOnly?: boolean
+  allowAboutBlank?: boolean
+  warning?: string
+  error?: string
+}
+
+export interface WebView2EvaluateResult {
+  success: boolean
+  value?: unknown
+  type?: string
+  subtype?: string
+  description?: string
+  error?: string
+}
+
+export interface WebView2FindResult {
+  nodeId?: string
+  selector?: string
+  tagName?: string
+  textContent?: string
+  value?: unknown
+  attributes?: Record<string, string>
+}
+
+export interface WebView2FindResponse {
+  success: boolean
+  matches?: WebView2FindResult[]
+  count?: number
+  totalMatches?: number
+  error?: string
+}
+
+export interface WebView2DebugFlagResult {
+  success: boolean
+  enabled?: boolean
+  value?: string
+  error?: string
+}
+
+export interface WebView2SystemPrepStatus {
+  success: boolean
+  developerModeEnabled?: boolean
+  allowAllTrustedApps?: boolean
+  capabilityQueried?: boolean
+  capabilityState?: string
+  capabilityInstalled?: boolean
+  error?: string
+}
+
+export interface WebView2InstallCapabilityResult {
+  success: boolean
+  message?: string
+  cancelled?: boolean
+  error?: string
+}
+
 export interface ClrInspectorStatus {
   success: boolean
   available: boolean
@@ -1385,6 +1468,22 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   openUserGuide?(): Promise<boolean>
   /** Demande une exclusion Windows Defender pour KillEngine.exe (invite UAC visible, jamais silencieux). */
   requestWindowsDefenderExclusion?(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>
+  /** Inspecteur WebView2/CDP pour inspection de contenu web embarqué. */
+  getWebView2InspectorStatus?(): Promise<WebView2InspectorStatus>
+  listWebView2CdpTargets?(): Promise<WebView2TargetsResponse>
+  connectWebView2Inspector?(targetId?: string): Promise<WebView2InspectorStatus>
+  disconnectWebView2Inspector?(): Promise<WebView2InspectorStatus>
+  evaluateWebView2JavaScript?(script: string, options?: Record<string, unknown>): Promise<WebView2EvaluateResult>
+  findWebView2DisplayedValues?(value: string, options?: Record<string, unknown>): Promise<WebView2FindResponse>
+  findWebView2DisplayedText?(text: string, options?: Record<string, unknown>): Promise<WebView2FindResponse>
+  /** Active/désactive WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333 (HKCU\Environment) pour TOUS les hôtes WebView2 du user courant. Poser derrière RiskGate — jamais silencieux. */
+  enableWebView2CdpDebugFlag?(): Promise<WebView2DebugFlagResult>
+  disableWebView2CdpDebugFlag?(): Promise<WebView2DebugFlagResult>
+  getWebView2CdpDebugFlagStatus?(): Promise<WebView2DebugFlagResult>
+  /** Diagnostic Developer Mode Windows + capability Tools.DeveloperMode.Core, lecture seule. */
+  getWebView2SystemPrepStatus?(): Promise<WebView2SystemPrepStatus>
+  /** Add-WindowsCapability élevé (invite UAC visible) — peut prendre plusieurs minutes, ne bloque pas l'appel. */
+  installWebView2DeveloperModeCapability?(): Promise<WebView2InstallCapabilityResult>
   /** Inspecteur CLR/ClrMD externe via helper .NET et named pipe. */
   getClrInspectorStatus?(): Promise<ClrInspectorStatus>
   attachClrInspector?(): Promise<ClrRpcResult>
@@ -2513,6 +2612,76 @@ class BackendService {
       },
       async requestWindowsDefenderExclusion() {
         return { success: false, cancelled: true, error: 'Indisponible dans le mock.' }
+      },
+      async getWebView2InspectorStatus() {
+        return {
+          success: true,
+          connected: false,
+          error: '',
+        }
+      },
+      async listWebView2CdpTargets() {
+        return {
+          success: true,
+          error: '',
+          targets: [],
+        }
+      },
+      async connectWebView2Inspector(_targetId?: string) {
+        return {
+          success: true,
+          connected: false,
+          error: 'Indisponible dans le mock.',
+        }
+      },
+      async disconnectWebView2Inspector() {
+        return {
+          success: true,
+          connected: false,
+          error: '',
+        }
+      },
+      async evaluateWebView2JavaScript(_script: string, _options?: Record<string, unknown>) {
+        return {
+          success: false,
+          error: 'Indisponible dans le mock.',
+        }
+      },
+      async findWebView2DisplayedValues(_value: string, _options?: Record<string, unknown>) {
+        return {
+          success: false,
+          error: 'Indisponible dans le mock.',
+          matches: [],
+        }
+      },
+      async findWebView2DisplayedText(_text: string, _options?: Record<string, unknown>) {
+        return {
+          success: false,
+          error: 'Indisponible dans le mock.',
+          matches: [],
+        }
+      },
+      async enableWebView2CdpDebugFlag() {
+        return { success: true, enabled: true, value: '--remote-debugging-port=9333' }
+      },
+      async disableWebView2CdpDebugFlag() {
+        return { success: true, enabled: false }
+      },
+      async getWebView2CdpDebugFlagStatus() {
+        return { success: true, enabled: false, value: '' }
+      },
+      async getWebView2SystemPrepStatus() {
+        return {
+          success: true,
+          developerModeEnabled: false,
+          allowAllTrustedApps: false,
+          capabilityQueried: false,
+          capabilityState: 'Inconnu (mock)',
+          capabilityInstalled: false,
+        }
+      },
+      async installWebView2DeveloperModeCapability() {
+        return { success: false, error: 'Indisponible dans le mock.' }
       },
       async getClrInspectorStatus() {
         return {

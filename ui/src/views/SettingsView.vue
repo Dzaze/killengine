@@ -990,6 +990,95 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
+        <h2>Débogage CDP WebView2 (avancé)</h2>
+        <span>{{ store.webView2CdpDebugFlagStatus?.enabled ? 'Actif' : 'Inactif' }}</span>
+      </div>
+      <p class="hint">
+        Force <code>--remote-debugging-port=9333</code> sur <strong>tous les hôtes WebView2 du user Windows
+        courant</strong> à leur prochain lancement — nécessaire pour que KillEngine inspecte l'état JavaScript d'une
+        app WebView2/Electron/CEF non packagée (Store/UWP passe par une autre voie, voir le diagnostic ci-dessous).
+        Portée large et persistante tant que non désactivé.
+      </p>
+      <div class="panel-actions">
+        <button
+          v-if="!store.webView2CdpDebugFlagStatus?.enabled"
+          class="btn btn-secondary compact"
+          :disabled="store.webView2CdpDebugFlagBusy"
+          @click="store.enableWebView2CdpDebugFlag()"
+        >
+          Activer le débogage CDP
+        </button>
+        <button
+          v-else
+          class="btn btn-secondary compact"
+          :disabled="store.webView2CdpDebugFlagBusy"
+          @click="store.disableWebView2CdpDebugFlag()"
+        >
+          Désactiver le débogage CDP
+        </button>
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.webView2CdpDebugFlagBusy"
+          @click="store.refreshWebView2CdpDebugFlagStatus()"
+        >
+          Rafraîchir le statut
+        </button>
+      </div>
+      <p v-if="store.webView2CdpDebugFlagStatus?.value" class="status-line">
+        Variable posée : <code>{{ store.webView2CdpDebugFlagStatus.value }}</code>
+      </p>
+      <p v-if="store.webView2CdpDebugFlagStatus?.error" class="error">
+        {{ store.webView2CdpDebugFlagStatus.error }}
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Préparer l'inspection WebView2 (apps Store/UWP)</h2>
+        <span>{{ store.webView2SystemPrepStatus?.capabilityInstalled ? 'Prêt' : 'À préparer' }}</span>
+      </div>
+      <p class="hint">
+        Diagnostic pour la chaîne Windows Device Portal (nécessaire pour inspecter le CDP d'apps WebView2
+        packagées Store/UWP, ex: apps du Microsoft Store) : Mode développeur Windows et capability optionnelle
+        <code>Tools.DeveloperMode.Core</code>. Ne débloque PAS le port CDP direct de ces apps (restriction
+        AppContainer séparée, toujours présente) — uniquement un prérequis pour le Portail d'appareil.
+      </p>
+      <div class="panel-actions">
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.webView2SystemPrepBusy"
+          @click="store.refreshWebView2SystemPrepStatus()"
+        >
+          {{ store.webView2SystemPrepBusy ? 'Diagnostic…' : 'Lancer le diagnostic' }}
+        </button>
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.webView2SystemPrepBusy || store.webView2SystemPrepStatus?.capabilityInstalled"
+          @click="store.installWebView2DeveloperModeCapability()"
+        >
+          Installer la capability (invite UAC)
+        </button>
+      </div>
+      <div v-if="store.webView2SystemPrepStatus" class="settings-grid compact-grid">
+        <div>
+          <strong>Mode développeur</strong>
+          <span>{{ store.webView2SystemPrepStatus.developerModeEnabled ? 'Activé' : 'Désactivé' }}</span>
+        </div>
+        <div>
+          <strong>Capability Tools.DeveloperMode.Core</strong>
+          <span>{{ store.webView2SystemPrepStatus.capabilityState || '—' }}</span>
+        </div>
+      </div>
+      <p v-if="store.webView2CapabilityInstallResult?.message" class="status-line">
+        {{ store.webView2CapabilityInstallResult.message }}
+      </p>
+      <p v-else-if="store.webView2CapabilityInstallResult?.error" class="error">
+        {{ store.webView2CapabilityInstallResult.error }}
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
         <h2>Log principal</h2>
         <span>{{ store.logLines.length }}</span>
       </div>

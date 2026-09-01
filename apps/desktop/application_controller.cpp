@@ -4711,6 +4711,157 @@ QVariantMap ApplicationController::findWebView2DisplayedText(const QString& text
     return result;
 }
 
+namespace {
+// Meme flag et meme port que WEBVIEW-A/B (voir docs/PHASE_TRACKER.md) : force
+// le port de debug CDP sur TOUS les hotes WebView2 du user Windows courant a
+// leur prochain lancement, pas seulement une cible visee.
+const QString kWebView2DebugFlagEnvName = QStringLiteral("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+const QString kWebView2DebugFlagValue = QStringLiteral("--remote-debugging-port=9333");
+const QString kWebView2DevModeCapabilityName = QStringLiteral("Tools.DeveloperMode.Core~~~~0.0.1.0");
+
+// Equivalent natif de `setx` (qui ecrit HKCU\Environment puis broadcast) :
+// QSettings seul persiste la valeur mais ne notifie pas les process deja
+// lances -- necessaire pour qu'une relance immediate de la cible la voie.
+void broadcastEnvironmentChange() {
+    DWORD_PTR dwResult = 0;
+    SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0,
+        reinterpret_cast<LPARAM>(L"Environment"), SMTO_ABORTIFHUNG, 5000, &dwResult);
+}
+} // namespace
+
+QVariantMap ApplicationController::enableWebView2CdpDebugFlag() {
+    QVariantMap result;
+    result[QStringLiteral("success")] = false;
+#ifdef Q_OS_WIN
+    QSettings env(QStringLiteral("HKEY_CURRENT_USER\\Environment"), QSettings::NativeFormat);
+    env.setValue(kWebView2DebugFlagEnvName, kWebView2DebugFlagValue);
+    env.sync();
+    broadcastEnvironmentChange();
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("value")] = kWebView2DebugFlagValue;
+    KE_LOG_INFO() << "enableWebView2CdpDebugFlag: variable posee, relance des cibles WebView2 requise.";
+#else
+    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+#endif
+    return result;
+}
+
+QVariantMap ApplicationController::disableWebView2CdpDebugFlag() {
+    QVariantMap result;
+    result[QStringLiteral("success")] = false;
+#ifdef Q_OS_WIN
+    QSettings env(QStringLiteral("HKEY_CURRENT_USER\\Environment"), QSettings::NativeFormat);
+    env.remove(kWebView2DebugFlagEnvName);
+    env.sync();
+    broadcastEnvironmentChange();
+    result[QStringLiteral("success")] = true;
+    KE_LOG_INFO() << "disableWebView2CdpDebugFlag: variable retiree.";
+#else
+    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+#endif
+    return result;
+}
+
+QVariantMap ApplicationController::getWebView2CdpDebugFlagStatus() const {
+    QVariantMap result;
+#ifdef Q_OS_WIN
+    QSettings env(QStringLiteral("HKEY_CURRENT_USER\\Environment"), QSettings::NativeFormat);
+    const QString value = env.value(kWebView2DebugFlagEnvName).toString();
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("enabled")] = !value.isEmpty();
+    result[QStringLiteral("value")] = value;
+#else
+    result[QStringLiteral("success")] = false;
+    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+#endif
+    return result;
+}
+
+QVariantMap ApplicationController::getWebView2SystemPrepStatus() const {
+    QVariantMap result;
+    result[QStringLiteral("success")] = true;
+#ifdef Q_OS_WIN
+    QSettings appModelUnlock(
+        QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock"),
+        QSettings::NativeFormat);
+    result[QStringLiteral("developerModeEnabled")] =
+        appModelUnlock.value(QStringLiteral("AllowDevelopmentWithoutDevLicense"), 0).toInt() != 0;
+    result[QStringLiteral("allowAllTrustedApps")] =
+        appModelUnlock.value(QStringLiteral("AllowAllTrustedApps"), 0).toInt() != 0;
+
+    QProcess probe;
+    probe.setProgram(QStringLiteral("powershell.exe"));
+    probe.setArguments({
+        QStringLiteral("-NoProfile"),
+        QStringLiteral("-Command"),
+        QStringLiteral("(Get-WindowsCapability -Online -Name %1).State").arg(kWebView2DevModeCapabilityName),
+    });
+    probe.start();
+    const bool finished = probe.waitForFinished(15000);
+    const QString output = QString::fromLocal8Bit(probe.readAllStandardOutput()).trimmed();
+    result[QStringLiteral("capabilityQueried")] = finished;
+    result[QStringLiteral("capabilityState")] = output.isEmpty() ? QStringLiteral("Inconnu") : output;
+    result[QStringLiteral("capabilityInstalled")] =
+        output.compare(QStringLiteral("Installed"), Qt::CaseInsensitive) == 0;
+#else
+    result[QStringLiteral("success")] = false;
+    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+#endif
+    return result;
+}
+
+QVariantMap ApplicationController::installWebView2DeveloperModeCapability() {
+    QVariantMap result;
+    result[QStringLiteral("success")] = false;
+#ifdef Q_OS_WIN
+    // Meme mecanisme que requestWindowsDefenderExclusion()/blockProcessNetwork()
+    // : invite UAC visible via `runas`, jamais silencieux. Contrairement a ces
+    // deux-la, on n'attend PAS la fin du process (WaitForSingleObject) : cette
+    // installation peut prendre plusieurs minutes et rester silencieuse cote
+    // DISM (verifie en session live, cf. docs/PHASE_TRACKER.md) -- bloquer
+    // l'appel Q_INVOKABLE ce longtemps gelerait l'UI. L'utilisateur relance un
+    // getWebView2SystemPrepStatus() pour re-tester une fois termine.
+    const QString psCommand = QStringLiteral(
+        "Add-WindowsCapability -Online -Name %1; "
+        "Write-Host 'Termine -- vous pouvez fermer cette fenetre.'; Start-Sleep -Seconds 5")
+        .arg(kWebView2DevModeCapabilityName);
+    const std::wstring parameters =
+        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.hwnd = nullptr;
+    sei.lpVerb = L"runas";
+    sei.lpFile = L"powershell.exe";
+    sei.lpParameters = parameters.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+
+    if (!ShellExecuteExW(&sei)) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_CANCELLED) {
+            result[QStringLiteral("cancelled")] = true;
+            result[QStringLiteral("error")] = QStringLiteral("Invite UAC refusée par l'utilisateur.");
+        } else {
+            result[QStringLiteral("error")] = QStringLiteral("ShellExecuteExW a échoué (code %1).").arg(err);
+        }
+        return result;
+    }
+    if (sei.hProcess) {
+        CloseHandle(sei.hProcess);
+    }
+    result[QStringLiteral("success")] = true;
+    result[QStringLiteral("message")] = QStringLiteral(
+        "Installation lancée dans une fenêtre PowerShell élevée. Peut prendre plusieurs minutes et rester "
+        "silencieuse : suivre l'état dans Paramètres > Système > Fonctionnalités facultatives > Historique, "
+        "ou relancer un diagnostic ici une fois terminé.");
+    KE_LOG_INFO() << "installWebView2DeveloperModeCapability: installation lancée (async, UAC affiché).";
+#else
+    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+#endif
+    return result;
+}
+
 QVariantMap ApplicationController::probeKernelDriver() const {
     return m_kernelDriverManager->probeKernelDriver();
 }

@@ -538,6 +538,112 @@ FieldStabilityToolMatch matchFieldStabilityTool(const QString& query) {
         "elle ressemble à un champ affiché recalculé ou à une source événementielle."};
 }
 
+struct WebView2ToolMatch {
+    QString tool;
+    QVariantMap args;
+    QString rationale;
+};
+
+bool wantsWebView2Query(const QString& q) {
+    return q.contains("webview2") || q.contains("webview")
+        || q.contains("cdp") || q.contains("devtools")
+        || q.contains("javascript") || q.contains("script js")
+        || q.contains("runtime.evaluate") || q.contains("dom");
+}
+
+int webView2PidFromQueryOrContext(const QString& query, const QVariantMap& context) {
+    const QRegularExpression pidRe(R"(\bpid\s*[:=]?\s*(\d{2,10})\b)", QRegularExpression::CaseInsensitiveOption);
+    const auto pidMatch = pidRe.match(query);
+    if (pidMatch.hasMatch()) {
+        bool ok = false;
+        const int pid = pidMatch.captured(1).toInt(&ok);
+        if (ok && pid > 0) {
+            return pid;
+        }
+    }
+    bool ok = false;
+    const int contextPid = context.value("pid", context.value("processId")).toInt(&ok);
+    return ok && contextPid > 0 ? contextPid : 0;
+}
+
+QString firstQuotedText(const QString& query) {
+    const QRegularExpression quotedRe(QStringLiteral("\"([^\"]+)\"|'([^']+)'"));
+    const auto match = quotedRe.match(query);
+    if (!match.hasMatch()) {
+        return {};
+    }
+    return match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
+}
+
+QString javascriptExpressionFromQuery(const QString& query) {
+    const QString quoted = firstQuotedText(query);
+    if (!quoted.isEmpty()) {
+        return quoted;
+    }
+    const QRegularExpression afterMarkerRe(R"((?:js|javascript|eval|evalue|évalue|runtime\.evaluate)\s*[:=]\s*(.+)$)",
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match = afterMarkerRe.match(query);
+    return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+WebView2ToolMatch matchWebView2Tool(const QString& query, const QVariantMap& context) {
+    const QString q = query.toLower();
+    if (!wantsWebView2Query(q)) {
+        return {};
+    }
+
+    if (q.contains("status") || q.contains("statut") || q.contains("etat") || q.contains("état")) {
+        return {"getWebView2InspectorStatus", {},
+            "Je verifie l'etat courant de l'inspecteur WebView2/CDP."};
+    }
+
+    const int browserProcessId = webView2PidFromQueryOrContext(query, context);
+    const QVariantMap pidArgs{{"browserProcessId", browserProcessId}};
+    if (q.contains("liste") || q.contains("lister") || q.contains("list")
+        || q.contains("target") || q.contains("targets") || q.contains("/msedge")
+        || q.contains("json")) {
+        return {"listWebView2CdpTargets", pidArgs,
+            "Je liste d'abord les targets CDP WebView2 disponibles avant toute connexion."};
+    }
+
+    if (q.contains("disconnect") || q.contains("deconnect") || q.contains("déconnect")) {
+        return {"disconnectWebView2Inspector", {},
+            "Je deconnecte l'inspecteur WebView2/CDP courant."};
+    }
+
+    if (q.contains("connect") || q.contains("attache") || q.contains("attach")
+        || q.contains("branche")) {
+        if (browserProcessId <= 0 && !q.contains("websocketdebuggerurl")) {
+            return {"listWebView2CdpTargets", pidArgs,
+                "Avant de connecter WebView2, je liste les targets CDP disponibles pour choisir le bon PID/target."};
+        }
+        return {"connectWebView2Inspector", pidArgs,
+            "Je prepare la connexion a une target WebView2/CDP ; cette action passe par le RiskGate."};
+    }
+
+    const QString expression = javascriptExpressionFromQuery(query);
+    if (!expression.isEmpty()) {
+        return {"evaluateWebView2JavaScript", {{"expression", expression}},
+            "J'evalue le JavaScript demande dans la target WebView2 connectee ; cette action passe par le RiskGate."};
+    }
+
+    if ((q.contains("valeur") || q.contains("value")) && !decimalNumbersFromQuery(query).isEmpty()) {
+        return {"findWebView2DisplayedValues", {{"value", decimalNumbersFromQuery(query).first()}},
+            "Je cherche cette valeur affichee dans le DOM WebView2 connecte."};
+    }
+
+    if (q.contains("texte") || q.contains("text") || q.contains("dom")) {
+        const QString text = firstQuotedText(query);
+        if (!text.isEmpty()) {
+            return {"findWebView2DisplayedText", {{"text", text}},
+                "Je cherche ce texte dans le DOM WebView2 connecte."};
+        }
+    }
+
+    return {"listWebView2CdpTargets", pidArgs,
+        "Demande WebView2/CDP detectee : je commence par lister les targets disponibles."};
+}
+
 struct AutoReportToolMatch {
     QString tool;
     QString rationale;
@@ -1013,6 +1119,11 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
             result["aiBackend"] = "deterministic_module_listing_fastpath";
             return result;
         }
+        if (const auto webView2Match = matchWebView2Tool(query, context); !webView2Match.tool.isEmpty()) {
+            QVariantMap result = makeToolCall(webView2Match.tool, webView2Match.args, webView2Match.rationale);
+            result["aiBackend"] = "deterministic_webview2_fastpath";
+            return result;
+        }
         if (const auto trainerMatch = matchTrainerTool(query); !trainerMatch.tool.isEmpty()) {
             QVariantMap result = makeToolCall(trainerMatch.tool, trainerMatch.args, trainerMatch.rationale);
             result["aiBackend"] = "deterministic_trainer_fastpath";
@@ -1353,6 +1464,9 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     if (wantsModuleExplorationWithoutValue(q) && numbers.isEmpty()) {
         return makeToolCall("list_process_modules", {},
             "Tu demandes une cible de gameplay dans les DLL/modules sans valeur affichée exploitable : je liste d'abord les modules chargés, puis il faudra donner l'XP visible ou passer par Trace UI string/Changed Pages.");
+    }
+    if (const auto webView2Match = matchWebView2Tool(query, context); !webView2Match.tool.isEmpty()) {
+        return makeToolCall(webView2Match.tool, webView2Match.args, webView2Match.rationale);
     }
     if (const auto autoReportMatch = matchAutoReportTool(query); !autoReportMatch.tool.isEmpty()) {
         return makeToolCall(autoReportMatch.tool, {}, autoReportMatch.rationale);

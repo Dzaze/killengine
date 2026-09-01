@@ -214,6 +214,10 @@
         "term": "UWP",
         "definition": "Universal Windows Platform — a type of Windows app (often installed via the Microsoft Store) with its own storage rules (LocalSettings, sandboxed folders) different from a classic program."
       },
+      "webview2": {
+        "term": "WebView2 (CDP)",
+        "definition": "The web engine (Chromium/Edge) some Windows apps embed for their UI — often Store apps. KillEngine's WebView2 Inspector queries its JavaScript state via the Chrome DevTools Protocol (CDP) instead of raw memory, useful when a classic memory scan only finds engine noise (V8/Blink) instead of real data."
+      },
       "writeprocessmemory": {
         "term": "WriteProcessMemory",
         "definition": "The low-level Windows function that writes bytes into another process's memory. This is the final mechanism behind most of KillEngine's writes and patches."

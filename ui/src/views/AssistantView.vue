@@ -612,6 +612,9 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
   } else if (actionId === 'open_clr_inspector') {
     store.activeView = 'clr'
     store.pushMessage('assistant', "CLR Inspector ouvert : cherche l'objet par type ou par valeur de champ plutôt que par adresse brute — c'est l'équivalent d'une chaîne de pointeurs pour ce genre de cible.")
+  } else if (actionId === 'open_webview2_inspector') {
+    store.activeView = 'webview2'
+    store.pushMessage('assistant', "WebView2 Inspector ouvert : inspecte les pages web embarquées via le protocole Chrome DevTools (CDP) — utile pour les jeux Electron ou les UI web.")
   }
   await scrollToBottom()
 }

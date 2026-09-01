@@ -76,7 +76,7 @@ export interface SessionPromotionResult {
   warnings: string[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
 
 export interface MemoryPreviewDecodedValue {
   label: string
@@ -1218,6 +1218,98 @@ export const useAppStore = defineStore('app', () => {
 
   async function disableAutomationMode() {
     return automationPipeStore.disableAutomationMode()
+  }
+
+  // Exigence produit du 31/08/2026 (docs/PHASE_TRACKER.md, chantier WebView2/CDP) :
+  // la variable d'env forçant le port de debug CDP WebView2 doit passer par un
+  // vrai RiskGate en Paramètres, jamais posée silencieusement. Activer prévient
+  // explicitement de la portée large (tous les hôtes WebView2 du user courant,
+  // pas juste la cible visée) ; désactiver ne nécessite aucune confirmation
+  // (même asymétrie que enableAutomationMode/disableAutomationMode ci-dessus).
+  const webView2CdpDebugFlagStatus = ref<{ success: boolean; enabled?: boolean; value?: string; error?: string } | null>(null)
+  const webView2CdpDebugFlagBusy = ref(false)
+
+  async function refreshWebView2CdpDebugFlagStatus() {
+    webView2CdpDebugFlagBusy.value = true
+    try {
+      const result = await backend.getController().getWebView2CdpDebugFlagStatus?.()
+      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: 'Réponse backend absente.' }
+    } finally {
+      webView2CdpDebugFlagBusy.value = false
+    }
+  }
+
+  async function enableWebView2CdpDebugFlag() {
+    const accepted = await confirmRiskAction(
+      'debug',
+      'Activer le débogage CDP WebView2',
+      "Force TOUS les hôtes WebView2 du user Windows courant (pas seulement une cible précise) à exposer un port de débogage CDP (--remote-debugging-port=9333) à leur PROCHAIN lancement — nécessaire pour inspecter l'état JavaScript d'une app WebView2/Electron/CEF non packagée (les apps Store/UWP passent par une autre voie, voir le diagnostic ci-dessous). Désactivable à tout moment.",
+    )
+    if (!accepted) return null
+    webView2CdpDebugFlagBusy.value = true
+    try {
+      const result = await backend.getController().enableWebView2CdpDebugFlag?.()
+      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      return result ?? null
+    } finally {
+      webView2CdpDebugFlagBusy.value = false
+    }
+  }
+
+  async function disableWebView2CdpDebugFlag() {
+    webView2CdpDebugFlagBusy.value = true
+    try {
+      const result = await backend.getController().disableWebView2CdpDebugFlag?.()
+      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      return result ?? null
+    } finally {
+      webView2CdpDebugFlagBusy.value = false
+    }
+  }
+
+  // Exigence produit du 01/09/2026 : diagnostic guidé "Préparer l'inspection
+  // WebView2" pour les cibles UWP/Store (chaîne Windows Device Portal). Lecture
+  // seule pour le statut ; l'installation de la capability reste derrière un
+  // RiskGate même si Windows affiche déjà sa propre invite UAC, pour expliquer
+  // POURQUOI avant de déclencher l'invite système.
+  const webView2SystemPrepStatus = ref<{
+    success: boolean
+    developerModeEnabled?: boolean
+    allowAllTrustedApps?: boolean
+    capabilityQueried?: boolean
+    capabilityState?: string
+    capabilityInstalled?: boolean
+    error?: string
+  } | null>(null)
+  const webView2SystemPrepBusy = ref(false)
+  const webView2CapabilityInstallResult = ref<{ success: boolean; message?: string; cancelled?: boolean; error?: string } | null>(null)
+
+  async function refreshWebView2SystemPrepStatus() {
+    webView2SystemPrepBusy.value = true
+    try {
+      const result = await backend.getController().getWebView2SystemPrepStatus?.()
+      webView2SystemPrepStatus.value = result ?? { success: false, error: 'Réponse backend absente.' }
+    } finally {
+      webView2SystemPrepBusy.value = false
+    }
+  }
+
+  async function installWebView2DeveloperModeCapability() {
+    const accepted = await confirmRiskAction(
+      'debug',
+      "Installer la capacité Windows « Mode développeur »",
+      "Lance Add-WindowsCapability avec une invite UAC visible pour installer Tools.DeveloperMode.Core — prérequis pour activer le Portail d'appareil Windows, nécessaire à l'inspection CDP des apps UWP/Store (ex: apps du Microsoft Store). Ne débloque PAS le port CDP direct des apps Store (restriction AppContainer séparée, toujours présente). Peut prendre plusieurs minutes et rester silencieux : suivre l'état dans Paramètres Windows ou relancer ce diagnostic ensuite.",
+    )
+    if (!accepted) return null
+    webView2SystemPrepBusy.value = true
+    webView2CapabilityInstallResult.value = null
+    try {
+      const result = await backend.getController().installWebView2DeveloperModeCapability?.()
+      webView2CapabilityInstallResult.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      return result ?? null
+    } finally {
+      webView2SystemPrepBusy.value = false
+    }
   }
 
   async function executeCheckpointFindWhatWrites(checkpoint: Record<string, unknown>) {
@@ -3743,6 +3835,16 @@ export const useAppStore = defineStore('app', () => {
     refreshAutomationPipeStatus,
     enableAutomationMode,
     disableAutomationMode,
+    webView2CdpDebugFlagStatus,
+    webView2CdpDebugFlagBusy,
+    refreshWebView2CdpDebugFlagStatus,
+    enableWebView2CdpDebugFlag,
+    disableWebView2CdpDebugFlag,
+    webView2SystemPrepStatus,
+    webView2SystemPrepBusy,
+    webView2CapabilityInstallResult,
+    refreshWebView2SystemPrepStatus,
+    installWebView2DeveloperModeCapability,
     prepareCheckpointAob,
     executeCheckpointForceValue,
     createTrainerFeature,

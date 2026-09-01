@@ -15,6 +15,7 @@ import ScriptingView from '@/views/ScriptingView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import SpeedhackView from '@/views/SpeedhackView.vue'
 import TrainerView from '@/views/TrainerView.vue'
+import WebView2InspectorView from '@/views/WebView2InspectorView.vue'
 
 const store = useAppStore()
 const { locale } = useI18n()
@@ -24,6 +25,7 @@ const currentView = computed(() => {
   if (store.activeView === 'investigation') return InvestigationView
   if (store.activeView === 'memory') return MemoryView
   if (store.activeView === 'clr') return ClrInspectorView
+  if (store.activeView === 'webview2') return WebView2InspectorView
   if (store.activeView === 'scripting') return ScriptingView
   if (store.activeView === 'speedhack') return SpeedhackView
   if (store.activeView === 'network') return NetworkView
@@ -91,6 +93,13 @@ watch(
           @click="store.activeView = 'clr'"
         >
           CLR
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'webview2' }"
+          @click="store.activeView = 'webview2'"
+        >
+          WebView2
         </button>
         <button
           class="nav-item"
