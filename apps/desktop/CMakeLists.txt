@@ -16,6 +16,7 @@ qt_add_executable(KillEngine
     code_patch_manager.cpp
     debug_feature_manager.cpp
     display_string_investigator.cpp
+    external_tool_profiler.cpp
     freeze_hotkey_overlay_manager.cpp
     kernel_driver_manager.cpp
     save_file_investigator.cpp

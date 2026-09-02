@@ -203,7 +203,7 @@ const riskLabels: Record<string, string> = {
 .tool-category > strong {
   display: block;
   margin-bottom: 4px;
-  color: var(--text);
+  color: var(--text-primary);
   font-size: 12px;
 }
 

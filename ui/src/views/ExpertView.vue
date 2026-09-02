@@ -3270,7 +3270,7 @@ onMounted(() => {
   padding: 8px 10px;
   border: 1px solid rgba(247, 118, 142, 0.26);
   border-radius: 6px;
-  color: var(--muted);
+  color: var(--text-dim);
   background: rgba(247, 118, 142, 0.08);
 }
 

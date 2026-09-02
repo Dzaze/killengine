@@ -1610,7 +1610,7 @@ onMounted(() => {
   font-size: 11px;
   line-height: 1.5;
   white-space: pre;
-  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  background: var(--bg-tertiary);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
@@ -1630,7 +1630,7 @@ onMounted(() => {
 .gcroot-path {
   margin: 14px 0 4px;
   padding-top: 12px;
-  border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 8px;

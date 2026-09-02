@@ -155,7 +155,8 @@
       "modeStatic": "static fallback list",
       "media": "Media elements: {video} video(s), {audio} audio(s), {iframes} iframe(s).",
       "error": "JS context probe failed.",
-      "success": "JS context probe finished."
+      "success": "JS context probe finished.",
+      "explore": "Explore"
     }
   },
   "lexicon": {

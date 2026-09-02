@@ -47,6 +47,7 @@ class AutomationPipeManager;
 class ClrInspectorBridge;
 class CodePatchManager;
 class DebugFeatureManager;
+class ExternalToolProfiler;
 class FreezeHotkeyOverlayManager;
 class InvestigationNotebookManager;
 class KernelDriverManager;
@@ -523,6 +524,24 @@ public:
 
     /// Dump d'une region memoire vers fichier binaire (.bin) sous QStandardPaths::DocumentsLocation/KillEngine/dumps.
     Q_INVOKABLE QVariantMap dumpMemoryRegion(const QString& addressHex, int size, const QString& fileName);
+
+    /// EXTMOD-1 : capture un checkpoint nommé (modules + carte mémoire + hash de
+    /// contenu optionnel) de l'état structurel du process attaché. Options :
+    /// moduleName (filtre les régions à un module précis), hashContent (bool,
+    /// défaut true), maxHashBytesMb (défaut 64, clamp 8-512).
+    Q_INVOKABLE QVariantMap captureProfilerCheckpoint(const QString& label, const QVariantMap& options);
+
+    /// EXTMOD-1 : diff entre deux checkpoints déjà capturés — modules
+    /// ajoutés/retirés, pages ajoutées/retirées/changées avec classification
+    /// (injected_module_page, new_executable_writable_page, code_page_changed, ...).
+    Q_INVOKABLE QVariantMap getProfilerDiff(const QString& labelA, const QString& labelB, const QVariantMap& options) const;
+
+    /// EXTMOD-1 : liste les checkpoints capturés dans la session courante.
+    Q_INVOKABLE QVariantMap listProfilerCheckpoints() const;
+
+    /// EXTMOD-1 : vide les checkpoints de la session courante (aussi fait
+    /// automatiquement à chaque nouvel attachProcess).
+    Q_INVOKABLE QVariantMap clearProfilerSession();
 
     /// Cherche une signature AOB dans les régions mémoire du processus.
     /// Pattern: "48 8B ?? ?? 89", options: executableOnly, imageOnly, startAddress, stopAddress, maxResults.
@@ -1280,6 +1299,7 @@ private:
     std::unique_ptr<ClrInspectorBridge> m_clrInspectorBridge;
     std::unique_ptr<killcore::WebView2Inspector> m_webView2Inspector;
     std::unique_ptr<CodePatchManager> m_codePatchManager;
+    std::unique_ptr<ExternalToolProfiler> m_externalToolProfiler;
     std::unique_ptr<DebugFeatureManager> m_debugFeatureManager;
     std::unique_ptr<FreezeHotkeyOverlayManager> m_freezeHotkeyOverlayManager;
     std::unique_ptr<InvestigationNotebookManager> m_investigationNotebookManager;

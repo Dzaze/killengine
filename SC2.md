@@ -15,7 +15,7 @@ Le snapshot compresse en LZ4 (~30-50 % de la taille brute), donc 2048 Mo captur�
 
 ### Type de valeur : **Int32** (entier signé 32-bit) — le plus fiable
 
-Dans SC2, les ressources sont stockées en mémoire comme des **entiers 32-bit** :
+Dans SC2, les ressources sont souvent stockées en mémoire comme des **entiers 32-bit** :
 
 | Ressource | Type | Notes |
 |-----------|------|-------|
@@ -24,7 +24,15 @@ Dans SC2, les ressources sont stockées en mémoire comme des **entiers 32-bit**
 | **Approvisionnement (supply/pop)** | Int32 | Used + Cap |
 | **Terrazine / Custom** | Int32 | Idem |
 
-> ⚠️ Ne **pas** utiliser Float32/Float64 pour les ressources de base SC2 — ce sont des nombres entiers. Les floats apparaissent plutôt pour les HP/énergie/cooldowns des unités.
+> ⚠️ Ne **pas** commencer par Float32/Float64 pour les ressources de base SC2 — ce sont généralement des nombres entiers. Les floats apparaissent plutôt pour les HP/énergie/cooldowns des unités.
+
+### Représentations scalées : à garder en tête
+
+KillEngine sait déjà chercher des variantes de représentation dans le scan exact multi-type : `x10`, `x100`, `x1000`, `x4096`, `x65536`.
+
+Pour SC2 et les moteurs Blizzard, `x4096` est un candidat important à tester quand la valeur exacte ne suffit pas. Exemple : `135` affiché peut être stocké comme `552960` (`135 * 4096`). `x65536` reste aussi utile pour les fixed-point plus classiques.
+
+Limite actuelle : le workflow **Unknown Auto** compare plusieurs types bruts (`Int32`, `UInt32`, `Float32`, etc.), mais il ne labellise pas encore les candidats comme `x4096`/`x65536` et ne sait pas filtrer directement un delta affiché (`+7`) en delta brut (`+28672` pour `x4096`). Après une passe Unknown `ça augmente`, faire une passe **Exact** avec la valeur affichée courante peut relabelliser les survivants via les variantes.
 
 ### Méthodologie de scan unknown (la plus sûre)
 
@@ -38,7 +46,7 @@ Dans SC2, les ressources sont stockées en mémoire comme des **entiers 32-bit**
 
 3. **Répéter 4–6 fois** jusqu'à réduire à une dizaine de candidats.
 
-4. **Vérifier** : la valeur affichée en jeu doit correspondre exactement au nombre lu dans KillEngine (ex : `150` minéraux = `150` en mémoire, pas 1500 ni 15.0).
+4. **Vérifier** : la valeur affichée en jeu peut correspondre exactement au nombre lu dans KillEngine (`150` minéraux = `150` en mémoire), ou apparaître sous forme scalée (`150 * 4096`, `150 * 65536`, etc.). Si le candidat porte un `variantLabel`, écrire/freezer la valeur affichée : KillEngine encode ensuite la valeur réelle selon le multiplicateur.
 
 ### Astuces spécifiques SC2
 
@@ -92,7 +100,7 @@ Voir la section en haut de ce document : SC2 consomme 2–3 Go de RAM, le snapsh
 
 ```yaml
 1. Profondeur scan  : Auto ou 2048 Mo minimum
-2. Type             : Int32 (pas Float pour les ressources)
+2. Type             : Int32 d'abord, puis variantes x4096/x65536 si exact pauvre
 3. Intervalle freeze : 16 ms dans Write / Freeze si la valeur clignote
 4. VirtualProtectEx : automatique (Phase 16), vérifie les logs
 5. Double stockage  : freeze les deux candidats si tu en trouves plusieurs

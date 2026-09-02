@@ -155,7 +155,8 @@
       "modeStatic": "liste statique de repli",
       "media": "Éléments média : {video} vidéo(s), {audio} audio(s), {iframes} iframe(s).",
       "error": "Échec du sondage du contexte JS.",
-      "success": "Sondage du contexte JS terminé."
+      "success": "Sondage du contexte JS terminé.",
+      "explore": "Explorer"
     }
   },
   "lexicon": {

@@ -1606,7 +1606,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 }
 
 .embedded-agent-list > strong {
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 .model-candidates summary {

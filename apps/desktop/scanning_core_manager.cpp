@@ -372,28 +372,7 @@ QHash<QString, QByteArray> variantBytesByKey(const QList<killcore::ValueVariant>
 
 
 QList<killcore::ValueVariant> smartAutoScanVariants(const QString& rawValue) {
-    QList<killcore::ValueVariant> variants;
-    const QList<killcore::ValueType> fastTypes = {
-        killcore::ValueType::UInt16,
-        killcore::ValueType::Int32,
-        killcore::ValueType::UInt32,
-        killcore::ValueType::Int64,
-        killcore::ValueType::Float32,
-        killcore::ValueType::Float64,
-    };
-
-    for (const auto type : fastTypes) {
-        killcore::ScanValue value;
-        if (!killcore::parseScanValue(rawValue, type, &value)) {
-            continue;
-        }
-        killcore::ValueVariant variant;
-        variant.value = value;
-        variant.label = killcore::valueTypeToString(type);
-        variant.secondary = false;
-        variants.append(variant);
-    }
-    return variants;
+    return killcore::generateScanVariants(rawValue, killcore::ValueType::Int32, false);
 }
 
 

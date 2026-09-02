@@ -445,4 +445,18 @@ function ke.candidates_table(page_index, page_size, filter)
   return ke.call_table("getCandidates", { page_index or 0, page_size or 50, filter or "" })
 end
 
+-- Mode Stealth (PHASE 241+) : activation du profil de protection anti-detection
+-- Profils disponibles : "sc2" (complet), "default" (anti-debug seul), "minimal" (masquage processus seul)
+function ke.apply_stealth(profile)
+  return ke.call_table("applyStealthMode", { profile or "sc2" })
+end
+
+function ke.restore_stealth()
+  return ke.call_table("restoreStealthMode", {})
+end
+
+function ke.get_stealth_status()
+  return ke.call_table("getStealthStatus", {})
+end
+
 return ke

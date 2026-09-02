@@ -17,6 +17,7 @@
 #include "automation_pipe_manager.h"
 #include "clr_inspector_bridge.h"
 #include "code_patch_manager.h"
+#include "external_tool_profiler.h"
 #include "debug_feature_manager.h"
 #include "freeze_hotkey_overlay_manager.h"
 #include "investigation_notebook_manager.h"
@@ -1965,6 +1966,14 @@ ApplicationController::ApplicationController(QObject* parent)
         [this]() {
             return m_pid;
         });
+    m_externalToolProfiler = std::make_unique<ExternalToolProfiler>(
+        m_handle,
+        [this](const QString& event, const QVariantMap& payload) {
+            appendScanTelemetry(event, payload);
+        },
+        [this]() {
+            return m_pid;
+        });
     m_profileManager = std::make_unique<ProfileManager>(*this);
     m_freezeHotkeyOverlayManager = std::make_unique<FreezeHotkeyOverlayManager>(
         m_handle,
@@ -2347,6 +2356,7 @@ bool ApplicationController::attachProcess(int pid) {
     scanState().clearSnapshot();
     m_writeFreezeCoreManager->clearSessionState();
     m_codePatchManager->clearSessionState();
+    m_externalToolProfiler->clearSessionState();
     m_activeProfileTargets.clear();
     m_autoWriteValueHistory.clear();
 
@@ -3353,7 +3363,13 @@ QVariantMap ApplicationController::writeMemoryHex(const QString& addressHex, con
         return result;
     }
 
-    killcore::MemoryWriter writer(m_handle);
+    killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
+    if (!writeHandle.isValid()) {
+        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        return result;
+    }
+
+    killcore::MemoryWriter writer(writeHandle);
     const auto writeResult = writer.write(address, bytes, true);
 
     result["success"] = writeResult.success;
@@ -3434,6 +3450,23 @@ QVariantMap ApplicationController::dumpMemoryRegion(const QString& addressHex, i
     KE_LOG_INFO() << "dumpMemoryRegion: " << read.bytesRead << " octets dumps depuis 0x" << std::hex << address;
     return result;
 }
+
+QVariantMap ApplicationController::captureProfilerCheckpoint(const QString& label, const QVariantMap& options) {
+    return m_externalToolProfiler->captureProfilerCheckpoint(label, options);
+}
+
+QVariantMap ApplicationController::getProfilerDiff(const QString& labelA, const QString& labelB, const QVariantMap& options) const {
+    return m_externalToolProfiler->getProfilerDiff(labelA, labelB, options);
+}
+
+QVariantMap ApplicationController::listProfilerCheckpoints() const {
+    return m_externalToolProfiler->listProfilerCheckpoints();
+}
+
+QVariantMap ApplicationController::clearProfilerSession() {
+    return m_externalToolProfiler->clearProfilerSession();
+}
+
 QVariantMap ApplicationController::scanAobPattern(const QString& patternText, const QVariantMap& optionsMap) {
     return m_codePatchManager->scanAobPattern(patternText, optionsMap);
 }
