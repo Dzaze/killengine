@@ -415,6 +415,28 @@ QByteArray targetBytesForCandidate(
 
 
 
+// SC2-UNKNOWN-1 : traduit un delta AFFICHÉ (ex. "+7") en delta BRUT attendu
+// pour ce candidat précis, selon la variante d'échelle déjà taguée sur son
+// variantLabel (ex. "Int32 x4096" -> 7*4096=28672). Même raisonnement que
+// targetBytesForCandidate ci-dessus pour le mode Exact, appliqué au mode
+// Delta : sans ça, un narrowing "delta +7" sur des candidats issus d'un scan
+// multi-échelle ne matchait jamais les représentations scalées (le brut
+// change de 28672, pas de 7).
+double targetDeltaForCandidate(double rawDelta, const killcore::Candidate& candidate) {
+    if (candidateNeedsAutoVariantMatch(candidate)) {
+        return rawDelta;
+    }
+    const auto variants = killcore::generateDeltaVariants(rawDelta, candidate.type);
+    for (const auto& variant : variants) {
+        if (variant.label == candidate.variantLabel) {
+            return variant.rawDelta;
+        }
+    }
+    return rawDelta; // Label de variante non scalé (ex. cross-type "Float32 from Int32") : pas de scaling connu.
+}
+
+
+
 bool matchCandidateExactVariant(
     const QString& rawValue,
     const killcore::Candidate& candidate,
@@ -1642,9 +1664,13 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
                     case killcore::NextScanMode::Decreased:
                         keep = currentNumber < previousNumber;
                         break;
-                    case killcore::NextScanMode::Delta:
-                        keep = std::abs((currentNumber - previousNumber) - targetNumber) < 0.000001;
+                    case killcore::NextScanMode::Delta: {
+                        const double scaledTarget = targetDeltaForCandidate(targetNumber, candidate);
+                        const double tolerance = (candidate.type == killcore::ValueType::Float32
+                            || candidate.type == killcore::ValueType::Float64) ? 0.0001 : 0.5;
+                        keep = std::abs((currentNumber - previousNumber) - scaledTarget) < tolerance;
                         break;
+                    }
                     case killcore::NextScanMode::Between:
                         keep = currentNumber >= rangeMin && currentNumber <= rangeMax;
                         break;
@@ -1937,9 +1963,13 @@ QVariantMap ScanningCoreManager::nextScan(const QString& mode, const QString& va
             case killcore::NextScanMode::Decreased:
                 keep = currentNumber < previousNumber;
                 break;
-            case killcore::NextScanMode::Delta:
-                keep = std::abs((currentNumber - previousNumber) - targetNumber) < 0.000001;
+            case killcore::NextScanMode::Delta: {
+                const double scaledTarget = targetDeltaForCandidate(targetNumber, candidate);
+                const double tolerance = (candidate.type == killcore::ValueType::Float32
+                    || candidate.type == killcore::ValueType::Float64) ? 0.0001 : 0.5;
+                keep = std::abs((currentNumber - previousNumber) - scaledTarget) < tolerance;
                 break;
+            }
             case killcore::NextScanMode::Between:
                 keep = currentNumber >= rangeMin && currentNumber <= rangeMax;
                 break;
@@ -2320,7 +2350,7 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
 
 
 
-QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QString& valueType) {
+QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QString& valueType, const QString& deltaValue) {
     QVariantMap result;
     result["success"] = false;
 
@@ -2334,11 +2364,20 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
         result["error"] = "Mode invalide.";
         return result;
     }
+    double displayedDelta = 0.0;
+    if (scanMode == killcore::NextScanMode::Delta) {
+        bool ok = false;
+        displayedDelta = deltaValue.trimmed().replace(',', '.').toDouble(&ok);
+        if (!ok) {
+            result["error"] = "Valeur delta requise et invalide pour un unknown scan en mode delta.";
+            return result;
+        }
+    }
     auto state = scanState();
     auto& candidates = state.candidates();
     auto& snapshotStore = state.snapshot();
     if (!candidates.isEmpty()) {
-        QVariantMap refined = nextScan(mode, "");
+        QVariantMap refined = nextScan(mode, scanMode == killcore::NextScanMode::Delta ? deltaValue : QString());
         refined["kind"] = "unknown_refine";
         refined["refinedFromCandidates"] = true;
         refined["checkedBytes"] = refined.value("checked");
@@ -2387,41 +2426,83 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
         : std::max<qsizetype>(1, kUnknownAutoMaxReturnedMatches / typesToRun.size());
     QStringList truncatedTypes;
     for (const auto type : typesToRun) {
-        const auto scan = snapshotStore.compare(m_controller.m_handle, type, scanMode);
-        checkedBytes += scan.checkedBytes;
-        matchesFound += scan.matchesFound;
-        partial = partial || scan.partial;
-        cancelled = cancelled || scan.cancelled;
-        compareSuccess = compareSuccess && scan.success;
-        if (!scan.errorMessage.isEmpty() && compareError.isEmpty()) {
-            compareError = scan.errorMessage;
-        }
+        // SC2-UNKNOWN-1 : en mode Delta, teste un delta AFFICHÉ (ex. "+7")
+        // contre chaque représentation fixed-point du type courant
+        // (x1/x10/x100/x1000/x4096/x65536, cf. generateDeltaVariants) — sinon
+        // un score interne stocké en virgule fixe (135 affiché = 552960
+        // brut) ne matcherait jamais un delta affiché "+7" (delta brut réel
+        // 28672 pour x4096). Pour les autres modes, un seul passage "neutre"
+        // (pas de targetDelta/label à appliquer).
+        const auto deltaVariants = (scanMode == killcore::NextScanMode::Delta)
+            ? killcore::generateDeltaVariants(displayedDelta, type)
+            : QList<killcore::DeltaVariant>{killcore::DeltaVariant{}};
 
-        const auto typeCandidates = candidatesFromUnknownScan(m_controller.m_handle, scan);
+        bool typeSuccess = true;
+        bool typePartial = false;
+        size_t typeCheckedBytes = 0;
+        size_t typeMatchesFound = 0;
+        QString typeError;
         qsizetype addedForType = 0;
-        for (const auto& candidate : typeCandidates) {
-            const QString key = QString::number(candidate.address, 16) + "|" + killcore::valueTypeToString(candidate.type);
-            if (seenCandidates.contains(key)) {
-                continue;
-            }
+
+        for (const auto& deltaVariant : deltaVariants) {
             if (addedForType >= perTypeCap) {
-                partial = true;
-                truncatedTypes.append(killcore::valueTypeToString(type));
+                break; // Deja au plafond pour ce type : inutile de tester les echelles restantes.
+            }
+
+            killcore::ScanOptions scanOptions;
+            if (scanMode == killcore::NextScanMode::Delta) {
+                scanOptions.targetDelta = deltaVariant.rawDelta;
+                scanOptions.matchVariantLabel = deltaVariant.label;
+            }
+            const auto scan = snapshotStore.compare(m_controller.m_handle, type, scanMode, nullptr, scanOptions);
+            checkedBytes += scan.checkedBytes;
+            matchesFound += scan.matchesFound;
+            typeCheckedBytes += scan.checkedBytes;
+            typeMatchesFound += scan.matchesFound;
+            partial = partial || scan.partial;
+            typePartial = typePartial || scan.partial;
+            cancelled = cancelled || scan.cancelled;
+            compareSuccess = compareSuccess && scan.success;
+            typeSuccess = typeSuccess && scan.success;
+            if (!scan.errorMessage.isEmpty() && compareError.isEmpty()) {
+                compareError = scan.errorMessage;
+            }
+            if (!scan.errorMessage.isEmpty() && typeError.isEmpty()) {
+                typeError = scan.errorMessage;
+            }
+
+            const auto typeCandidates = candidatesFromUnknownScan(m_controller.m_handle, scan);
+            for (const auto& candidate : typeCandidates) {
+                const QString key = QString::number(candidate.address, 16) + "|" + killcore::valueTypeToString(candidate.type);
+                if (seenCandidates.contains(key)) {
+                    continue;
+                }
+                if (addedForType >= perTypeCap) {
+                    partial = true;
+                    typePartial = true;
+                    if (!truncatedTypes.contains(killcore::valueTypeToString(type))) {
+                        truncatedTypes.append(killcore::valueTypeToString(type));
+                    }
+                    break;
+                }
+                seenCandidates.insert(key);
+                unknownCandidates.append(candidate);
+                ++addedForType;
+            }
+
+            if (cancelled) {
                 break;
             }
-            seenCandidates.insert(key);
-            unknownCandidates.append(candidate);
-            ++addedForType;
         }
 
         typeSummaries.append(QVariantMap{
             {"type", killcore::valueTypeToString(type)},
-            {"success", scan.success},
-            {"partial", scan.partial || addedForType >= perTypeCap},
-            {"checkedBytes", static_cast<qulonglong>(scan.checkedBytes)},
-            {"matchesFound", static_cast<qulonglong>(scan.matchesFound)},
+            {"success", typeSuccess},
+            {"partial", typePartial || addedForType >= perTypeCap},
+            {"checkedBytes", static_cast<qulonglong>(typeCheckedBytes)},
+            {"matchesFound", static_cast<qulonglong>(typeMatchesFound)},
             {"stored", addedForType},
-            {"error", scan.errorMessage},
+            {"error", typeError},
         });
         if (cancelled) {
             break;
@@ -2462,7 +2543,7 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
 
 
 
-QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const QString& valueType) {
+QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const QString& valueType, const QString& deltaValue) {
     QVariantMap result;
     result["success"] = false;
     result["started"] = false;
@@ -2481,6 +2562,15 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
         result["error"] = "Mode invalide.";
         return result;
     }
+    double displayedDelta = 0.0;
+    if (scanMode == killcore::NextScanMode::Delta) {
+        bool ok = false;
+        displayedDelta = deltaValue.trimmed().replace(',', '.').toDouble(&ok);
+        if (!ok) {
+            result["error"] = "Valeur delta requise et invalide pour un unknown scan en mode delta.";
+            return result;
+        }
+    }
     auto state = scanState();
     auto& candidates = state.candidates();
     auto& snapshotStore = state.snapshot();
@@ -2497,7 +2587,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
         if (refineCandidateCount <= 20000) {
             QElapsedTimer timer;
             timer.start();
-            QVariantMap refined = nextScan(mode, "");
+            QVariantMap refined = nextScan(mode, scanMode == killcore::NextScanMode::Delta ? deltaValue : QString());
             refined["requestId"] = m_controller.m_nextScanRequestId++;
             refined["kind"] = "unknown_refine";
             refined["refinedFromCandidates"] = true;
@@ -2519,7 +2609,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
             });
             return refined;
         }
-        QVariantMap refined = nextScanAsync(mode, "");
+        QVariantMap refined = nextScanAsync(mode, scanMode == killcore::NextScanMode::Delta ? deltaValue : QString());
         refined["refinedFromCandidates"] = true;
         return refined;
     }
@@ -2549,7 +2639,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, mode, valueType, autoType, typesToRun, scanMode, cancellation]() {
+    std::thread([self, requestId, pid, mode, valueType, autoType, typesToRun, scanMode, displayedDelta, cancellation]() {
         QList<killcore::Candidate> unknownCandidates;
         QVariantList typeSummaries;
         size_t checkedBytes = 0;
@@ -2581,58 +2671,95 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
                 : std::max<qsizetype>(1, kUnknownAutoMaxReturnedMatches / typesToRun.size());
             QStringList truncatedTypes;
             for (const auto type : typesToRun) {
-                killcore::ScanOptions compareOptions;
-                compareOptions.progressCallback = [self, typeIndex, totalTypes, &lastUnknownProgress](const killcore::ScanProgress& progress) {
-                    int withinTypePercent = 0;
-                    if (progress.regionsTotal > 0) {
-                        withinTypePercent = static_cast<int>((progress.regionsScanned * 100) / progress.regionsTotal);
-                    }
-                    int percent = 1 + ((typeIndex * 100 + withinTypePercent) * 94) / (totalTypes * 100);
-                    percent = std::clamp(percent, 1, 95);
-                    if (percent <= lastUnknownProgress || (percent - lastUnknownProgress < 2 && percent < 95)) {
-                        return;
-                    }
-                    lastUnknownProgress = percent;
-                    emitQueuedScanProgress(self, percent);
-                };
-                const auto scan = self->scanState().snapshot().compare(workerHandle, type, scanMode, cancellation.get(), compareOptions);
-                ++typeIndex;
-                checkedBytes += scan.checkedBytes;
-                matchesFound += scan.matchesFound;
-                partial = partial || scan.partial;
-                cancelled = cancelled || scan.cancelled;
-                compareSuccess = compareSuccess && scan.success;
-                if (!scan.errorMessage.isEmpty() && compareError.isEmpty()) {
-                    compareError = scan.errorMessage;
-                }
+                // SC2-UNKNOWN-1 : voir la version synchrone (unknownNextScan)
+                // pour le detail — en mode Delta, un delta affiche est teste
+                // contre chaque echelle fixed-point du type courant.
+                const auto deltaVariants = (scanMode == killcore::NextScanMode::Delta)
+                    ? killcore::generateDeltaVariants(displayedDelta, type)
+                    : QList<killcore::DeltaVariant>{killcore::DeltaVariant{}};
 
-                const auto typeCandidates = scan.success && !scan.cancelled
-                    ? candidatesFromUnknownScan(workerHandle, scan)
-                    : QList<killcore::Candidate>{};
+                bool typeSuccess = true;
+                bool typePartial = false;
+                size_t typeCheckedBytes = 0;
+                size_t typeMatchesFound = 0;
+                QString typeError;
                 qsizetype addedForType = 0;
-                for (const auto& candidate : typeCandidates) {
-                    const QString key = QString::number(candidate.address, 16) + "|" + killcore::valueTypeToString(candidate.type);
-                    if (seenCandidates.contains(key)) {
-                        continue;
-                    }
+
+                for (const auto& deltaVariant : deltaVariants) {
                     if (addedForType >= perTypeCap) {
-                        partial = true;
-                        truncatedTypes.append(killcore::valueTypeToString(type));
                         break;
                     }
-                    seenCandidates.insert(key);
-                    unknownCandidates.append(candidate);
-                    ++addedForType;
+
+                    killcore::ScanOptions compareOptions;
+                    compareOptions.progressCallback = [self, typeIndex, totalTypes, &lastUnknownProgress](const killcore::ScanProgress& progress) {
+                        int withinTypePercent = 0;
+                        if (progress.regionsTotal > 0) {
+                            withinTypePercent = static_cast<int>((progress.regionsScanned * 100) / progress.regionsTotal);
+                        }
+                        int percent = 1 + ((typeIndex * 100 + withinTypePercent) * 94) / (totalTypes * 100);
+                        percent = std::clamp(percent, 1, 95);
+                        if (percent <= lastUnknownProgress || (percent - lastUnknownProgress < 2 && percent < 95)) {
+                            return;
+                        }
+                        lastUnknownProgress = percent;
+                        emitQueuedScanProgress(self, percent);
+                    };
+                    if (scanMode == killcore::NextScanMode::Delta) {
+                        compareOptions.targetDelta = deltaVariant.rawDelta;
+                        compareOptions.matchVariantLabel = deltaVariant.label;
+                    }
+                    const auto scan = self->scanState().snapshot().compare(workerHandle, type, scanMode, cancellation.get(), compareOptions);
+                    checkedBytes += scan.checkedBytes;
+                    matchesFound += scan.matchesFound;
+                    typeCheckedBytes += scan.checkedBytes;
+                    typeMatchesFound += scan.matchesFound;
+                    partial = partial || scan.partial;
+                    typePartial = typePartial || scan.partial;
+                    cancelled = cancelled || scan.cancelled;
+                    compareSuccess = compareSuccess && scan.success;
+                    typeSuccess = typeSuccess && scan.success;
+                    if (!scan.errorMessage.isEmpty() && compareError.isEmpty()) {
+                        compareError = scan.errorMessage;
+                    }
+                    if (!scan.errorMessage.isEmpty() && typeError.isEmpty()) {
+                        typeError = scan.errorMessage;
+                    }
+
+                    const auto typeCandidates = scan.success && !scan.cancelled
+                        ? candidatesFromUnknownScan(workerHandle, scan)
+                        : QList<killcore::Candidate>{};
+                    for (const auto& candidate : typeCandidates) {
+                        const QString key = QString::number(candidate.address, 16) + "|" + killcore::valueTypeToString(candidate.type);
+                        if (seenCandidates.contains(key)) {
+                            continue;
+                        }
+                        if (addedForType >= perTypeCap) {
+                            partial = true;
+                            typePartial = true;
+                            if (!truncatedTypes.contains(killcore::valueTypeToString(type))) {
+                                truncatedTypes.append(killcore::valueTypeToString(type));
+                            }
+                            break;
+                        }
+                        seenCandidates.insert(key);
+                        unknownCandidates.append(candidate);
+                        ++addedForType;
+                    }
+
+                    if (cancelled) {
+                        break;
+                    }
                 }
+                ++typeIndex;
 
                 typeSummaries.append(QVariantMap{
                     {"type", killcore::valueTypeToString(type)},
-                    {"success", scan.success},
-                    {"partial", scan.partial || addedForType >= perTypeCap},
-                    {"checkedBytes", static_cast<qulonglong>(scan.checkedBytes)},
-                    {"matchesFound", static_cast<qulonglong>(scan.matchesFound)},
+                    {"success", typeSuccess},
+                    {"partial", typePartial || addedForType >= perTypeCap},
+                    {"checkedBytes", static_cast<qulonglong>(typeCheckedBytes)},
+                    {"matchesFound", static_cast<qulonglong>(typeMatchesFound)},
                     {"stored", addedForType},
-                    {"error", scan.errorMessage},
+                    {"error", typeError},
                 });
                 if (cancelled) {
                     break;

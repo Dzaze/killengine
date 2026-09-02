@@ -35,6 +35,7 @@ ExternalToolProfiler::ExternalToolProfiler(
 void ExternalToolProfiler::clearSessionState() {
     m_checkpoints.clear();
     m_checkpointOrder.clear();
+    m_timeline.reset();
 }
 
 QVariantMap ExternalToolProfiler::clearProfilerSession() {
@@ -63,6 +64,10 @@ QVariantMap ExternalToolProfiler::listProfilerCheckpoints() const {
 }
 
 QVariantMap ExternalToolProfiler::captureProfilerCheckpoint(const QString& label, const QVariantMap& options) {
+    return captureCheckpointInternal(label, options);
+}
+
+QVariantMap ExternalToolProfiler::captureCheckpointInternal(const QString& label, const QVariantMap& options) {
     QVariantMap result;
     result["success"] = false;
 
@@ -111,6 +116,12 @@ QVariantMap ExternalToolProfiler::captureProfilerCheckpoint(const QString& label
     const bool hashContent = options.value("hashContent", true).toBool();
     const uint64_t maxHashBytes = static_cast<uint64_t>(
         std::clamp(options.value("maxHashBytesMb", 64).toInt(), 8, 512)) * 1024ull * 1024ull;
+    // EXTMOD-2 : budget separe (plus petit par defaut) pour retenir les octets
+    // bruts par page 4K, necessaires au byte-diff fin dans getProfilerDiff.
+    // Ne declenche aucune lecture supplementaire : construit a partir du meme
+    // buffer deja lu pour le hash de region ci-dessous.
+    uint64_t pageBytesBudget = static_cast<uint64_t>(
+        std::clamp(options.value("maxPageBytesMb", 32).toInt(), 4, 256)) * 1024ull * 1024ull;
 
     const auto regions = killcore::MemoryMap::snapshot(m_handle);
     killcore::MemoryReader reader(m_handle);
@@ -145,6 +156,7 @@ QVariantMap ExternalToolProfiler::captureProfilerCheckpoint(const QString& label
                 state.contentHash = profilerHash(data);
                 state.hashed = true;
                 hashBudgetUsed += read.bytesRead;
+                state.pages = killcore::splitIntoPages(region.baseAddress, data, pageBytesBudget);
             }
         }
 
@@ -194,14 +206,36 @@ QVariantMap ExternalToolProfiler::regionStateToVariant(const ProfilerRegionState
     return variant;
 }
 
-QString ExternalToolProfiler::classifyRegion(
+bool ExternalToolProfiler::isNewlyAddedModuleRegion(
     const ProfilerRegionState& region,
-    const QList<ProfilerModuleState>& newlyAddedModules) const {
+    const QList<ProfilerModuleState>& newlyAddedModules) {
     for (const auto& module : newlyAddedModules) {
         const uint64_t moduleEnd = module.baseAddress + module.size;
         if (region.baseAddress >= module.baseAddress && region.baseAddress < moduleEnd) {
-            return "injected_module_page";
+            return true;
         }
+    }
+    return false;
+}
+
+QString ExternalToolProfiler::resolveModuleOffsetLabel(uint64_t address, const QList<ProfilerModuleState>& modules) {
+    for (const auto& module : modules) {
+        if (module.size == 0) {
+            continue;
+        }
+        const uint64_t moduleEnd = module.baseAddress + module.size;
+        if (address >= module.baseAddress && address < moduleEnd) {
+            return QString("%1+0x%2").arg(module.name).arg(address - module.baseAddress, 0, 16);
+        }
+    }
+    return QString();
+}
+
+QString ExternalToolProfiler::classifyRegion(
+    const ProfilerRegionState& region,
+    const QList<ProfilerModuleState>& newlyAddedModules) const {
+    if (isNewlyAddedModuleRegion(region, newlyAddedModules)) {
+        return "injected_module_page";
     }
     if (region.executable && region.writable) {
         return "new_executable_writable_page";
@@ -264,10 +298,21 @@ QVariantMap ExternalToolProfiler::getProfilerDiff(const QString& labelA, const Q
     }
 
     const int maxHits = std::clamp(options.value("maxHits", 500).toInt(), 1, 5000);
+    // EXTMOD-2 : diff fin par pages 4K a l'interieur des regions changees.
+    const bool includePageDiff = options.value("includePageDiff", true).toBool();
+    const int maxSampleDeltas = std::clamp(options.value("maxSampleDeltasPerPage", 16).toInt(), 1, 64);
+    const int maxTopChangedPages = std::clamp(options.value("maxTopChangedPages", 100).toInt(), 1, 2000);
 
     QVariantList regionsAdded;
     QVariantList regionsRemoved;
     QVariantList regionsChanged;
+    // Agregat toutes-regions, trie par nombre de bytes differents (les plus
+    // sur des candidats "point d'accroche" en premier).
+    struct TopPageEntry {
+        QVariantMap variant;
+        qint64 byteDiffCount{-1};
+    };
+    QList<TopPageEntry> topPages;
 
     for (auto it = regionsB.constBegin(); it != regionsB.constEnd() && regionsAdded.size() < maxHits; ++it) {
         if (!regionsA.contains(it.key())) {
@@ -293,6 +338,7 @@ QVariantMap ExternalToolProfiler::getProfilerDiff(const QString& labelA, const Q
         if (!protectionChanged && !typeChanged && !contentChanged) {
             continue;
         }
+        const bool newlyAddedModuleRegion = isNewlyAddedModuleRegion(after, newlyAddedModules);
         QVariantMap entry = regionStateToVariant(after);
         entry["classification"] = classifyRegion(after, newlyAddedModules);
         entry["protectionBefore"] = before.protection;
@@ -302,7 +348,31 @@ QVariantMap ExternalToolProfiler::getProfilerDiff(const QString& labelA, const Q
         entry["protectionChanged"] = protectionChanged;
         entry["memoryTypeChanged"] = typeChanged;
         entry["contentChanged"] = contentChanged;
+
+        if (includePageDiff && contentChanged && !before.pages.isEmpty() && !after.pages.isEmpty()) {
+            const auto pageDiffs = killcore::diffPageContents(
+                before.pages, after.pages, after.executable, newlyAddedModuleRegion, maxSampleDeltas);
+            QVariantList pagesChanged;
+            pagesChanged.reserve(pageDiffs.size());
+            for (const auto& pageDiff : pageDiffs) {
+                QVariantMap pageVariant = killcore::pageDiffResultToVariant(pageDiff);
+                pageVariant["moduleOffset"] = resolveModuleOffsetLabel(pageDiff.address, b.modules);
+                pagesChanged.append(pageVariant);
+                topPages.append({pageVariant, pageDiff.byteDiffCount});
+            }
+            entry["pagesChanged"] = pagesChanged;
+            entry["pagesChangedCount"] = pagesChanged.size();
+        }
+
         regionsChanged.append(entry);
+    }
+
+    std::sort(topPages.begin(), topPages.end(), [](const TopPageEntry& x, const TopPageEntry& y) {
+        return x.byteDiffCount > y.byteDiffCount;
+    });
+    QVariantList topChangedPages;
+    for (int i = 0; i < topPages.size() && i < maxTopChangedPages; ++i) {
+        topChangedPages.append(topPages.at(i).variant);
     }
 
     result["success"] = true;
@@ -313,12 +383,64 @@ QVariantMap ExternalToolProfiler::getProfilerDiff(const QString& labelA, const Q
     result["regionsAdded"] = regionsAdded;
     result["regionsRemoved"] = regionsRemoved;
     result["regionsChanged"] = regionsChanged;
+    result["topChangedPages"] = topChangedPages;
     result["modulesAddedCount"] = modulesAdded.size();
     result["modulesRemovedCount"] = modulesRemoved.size();
     result["regionsAddedCount"] = regionsAdded.size();
     result["regionsRemovedCount"] = regionsRemoved.size();
     result["regionsChangedCount"] = regionsChanged.size();
+    result["topChangedPagesCount"] = topChangedPages.size();
     result["error"] = QString();
+    return result;
+}
+
+QVariantMap ExternalToolProfiler::recordProfilerTimelineStep(const QString& stepName, const QVariantMap& options) {
+    const QString trimmedStep = stepName.trimmed();
+    if (trimmedStep.isEmpty()) {
+        QVariantMap result;
+        result["success"] = false;
+        result["error"] = "Nom d'étape timeline requis.";
+        return result;
+    }
+
+    // Meme checkpoint que captureProfilerCheckpoint, sous un label distinct
+    // par etape pour ne pas ecraser une etape precedente de meme nom logique.
+    const QString label = QString("timeline:%1:%2").arg(m_timeline.stepCount()).arg(trimmedStep);
+    QVariantMap captureResult = captureCheckpointInternal(label, options);
+    if (!captureResult.value("success").toBool()) {
+        return captureResult;
+    }
+
+    m_timeline.beginStep(trimmedStep);
+    const auto& checkpoint = m_checkpoints.value(label);
+    for (const auto& region : checkpoint.regions) {
+        for (const auto& page : region.pages) {
+            if (page.hashed) {
+                m_timeline.recordPageHash(page.address, page.hash);
+            }
+        }
+    }
+
+    captureResult["stepName"] = trimmedStep;
+    captureResult["stepIndex"] = m_timeline.stepCount() - 1;
+    captureResult["timelineLabel"] = label;
+    return captureResult;
+}
+
+QVariantMap ExternalToolProfiler::getProfilerTimelineSummary() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["stepCount"] = m_timeline.stepCount();
+    result["stepNames"] = QVariant(m_timeline.stepNames());
+    result["pages"] = m_timeline.classifyPagesAsVariant();
+    result["error"] = QString();
+    return result;
+}
+
+QVariantMap ExternalToolProfiler::clearProfilerTimeline() {
+    m_timeline.reset();
+    QVariantMap result;
+    result["success"] = true;
     return result;
 }
 

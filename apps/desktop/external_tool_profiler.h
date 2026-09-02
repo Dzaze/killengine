@@ -1,6 +1,7 @@
 #pragma once
 
 #include "process/process_handle.h"
+#include "profiler/page_diff_analyzer.h"
 
 #include <QHash>
 #include <QList>
@@ -49,6 +50,22 @@ public:
 
     QVariantMap clearProfilerSession();
 
+    /// EXTMOD-2 : demarre/poursuit une session timeline nommee. A appeler
+    /// avant chaque etape (ex: "baseline", "tool_attached_off", "toggle_on",
+    /// "stimulus_done", "toggle_off") : capture un checkpoint sous le meme
+    /// label que l'etape puis alimente le tracker de stabilite par page.
+    /// Options identiques a captureProfilerCheckpoint (moduleName,
+    /// maxHashBytesMb, maxPageBytesMb).
+    QVariantMap recordProfilerTimelineStep(const QString& stepName, const QVariantMap& options);
+
+    /// EXTMOD-2 : resume de la session timeline courante — classification de
+    /// stabilite par page (toggle_state_candidate / runtime_noise /
+    /// one_time_state_change) sur l'ensemble des etapes enregistrees.
+    QVariantMap getProfilerTimelineSummary() const;
+
+    /// Vide la session timeline (checkpoints eux-memes conserves).
+    QVariantMap clearProfilerTimeline();
+
 private:
     struct ProfilerModuleState {
         QString name;
@@ -66,6 +83,10 @@ private:
         bool writable{false};
         bool hashed{false};
         uint64_t contentHash{0};
+        /// EXTMOD-2 : pages 4K de la region (hash toujours present si
+        /// `hashed`, bytes bruts seulement dans la limite du budget
+        /// maxPageBytesMb — voir splitIntoPages).
+        QList<killcore::PageContent> pages;
     };
 
     struct ProfilerCheckpoint {
@@ -81,12 +102,23 @@ private:
     QString classifyRegion(
         const ProfilerRegionState& region,
         const QList<ProfilerModuleState>& newlyAddedModules) const;
+    static bool isNewlyAddedModuleRegion(
+        const ProfilerRegionState& region,
+        const QList<ProfilerModuleState>& newlyAddedModules);
+    /// Resout module+offset pour une adresse absolue. Chaine vide si
+    /// l'adresse ne tombe dans aucun module connu (page privee/mappee).
+    static QString resolveModuleOffsetLabel(uint64_t address, const QList<ProfilerModuleState>& modules);
+    /// Capture interne partagee par captureProfilerCheckpoint() et
+    /// recordProfilerTimelineStep() : construit un ProfilerCheckpoint sous
+    /// `label` a partir de l'etat courant du process attache.
+    QVariantMap captureCheckpointInternal(const QString& label, const QVariantMap& options);
 
     const killcore::ProcessHandle& m_handle;
     TelemetryCallback m_appendScanTelemetry;
     PidCallback m_pid;
     QHash<QString, ProfilerCheckpoint> m_checkpoints;
     QList<QString> m_checkpointOrder;
+    killcore::ProfilerTimelineTracker m_timeline;
 };
 
 } // namespace killengine

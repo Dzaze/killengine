@@ -327,11 +327,18 @@ public:
     /// Capture un snapshot unknown dans un worker thread avec filtres Mode Expert.
     Q_INVOKABLE QVariantMap captureUnknownSnapshotAsyncWithOptions(const QVariantMap& expertOptions);
 
-    /// Compare le snapshot unknown initial avec l'état courant.
-    Q_INVOKABLE QVariantMap unknownNextScan(const QString& mode, const QString& valueType);
+    /// Compare le snapshot unknown initial avec l'état courant. `deltaValue`
+    /// (optionnel, requis pour mode "delta") : delta AFFICHÉ observé entre
+    /// deux lectures (ex. "7") — SC2-UNKNOWN-1, testé automatiquement contre
+    /// les mêmes échelles fixed-point que le scan exact (x10/x100/x1000/
+    /// x4096/x65536) en type "Auto", labellisant les survivants en
+    /// conséquence (ex. "Int32 x4096") pour que le narrowing exact suivant
+    /// sache déjà retraduire une valeur affichée dans la bonne échelle.
+    Q_INVOKABLE QVariantMap unknownNextScan(const QString& mode, const QString& valueType, const QString& deltaValue = QString());
 
-    /// Compare le snapshot unknown dans un worker thread.
-    Q_INVOKABLE QVariantMap unknownNextScanAsync(const QString& mode, const QString& valueType);
+    /// Compare le snapshot unknown dans un worker thread. Voir unknownNextScan
+    /// pour `deltaValue`.
+    Q_INVOKABLE QVariantMap unknownNextScanAsync(const QString& mode, const QString& valueType, const QString& deltaValue = QString());
 
     /// Écrit une valeur typée à une adresse.
     Q_INVOKABLE QVariantMap writeMemoryValue(const QString& addressHex, const QString& valueType, const QString& value);
@@ -531,9 +538,13 @@ public:
     /// défaut true), maxHashBytesMb (défaut 64, clamp 8-512).
     Q_INVOKABLE QVariantMap captureProfilerCheckpoint(const QString& label, const QVariantMap& options);
 
-    /// EXTMOD-1 : diff entre deux checkpoints déjà capturés — modules
-    /// ajoutés/retirés, pages ajoutées/retirées/changées avec classification
-    /// (injected_module_page, new_executable_writable_page, code_page_changed, ...).
+    /// EXTMOD-1/EXTMOD-2 : diff entre deux checkpoints déjà capturés —
+    /// modules ajoutés/retirés, régions ajoutées/retirées/changées avec
+    /// classification (injected_module_page, new_executable_writable_page,
+    /// code_page_changed, ...), et depuis EXTMOD-2 un diff fin par pages 4K
+    /// à l'intérieur de chaque région changée (options : includePageDiff
+    /// défaut true, maxSampleDeltasPerPage défaut 16, maxTopChangedPages
+    /// défaut 100) exposé aussi en agrégat trié dans "topChangedPages".
     Q_INVOKABLE QVariantMap getProfilerDiff(const QString& labelA, const QString& labelB, const QVariantMap& options) const;
 
     /// EXTMOD-1 : liste les checkpoints capturés dans la session courante.
@@ -542,6 +553,24 @@ public:
     /// EXTMOD-1 : vide les checkpoints de la session courante (aussi fait
     /// automatiquement à chaque nouvel attachProcess).
     Q_INVOKABLE QVariantMap clearProfilerSession();
+
+    /// EXTMOD-2 : capture une étape timeline nommée (ex: "baseline",
+    /// "tool_attached_off", "toggle_on", "stimulus_done", "toggle_off") —
+    /// mêmes options que captureProfilerCheckpoint (moduleName,
+    /// maxHashBytesMb, maxPageBytesMb) — et alimente le tracker de stabilité
+    /// par page utilisé par getProfilerTimelineSummary.
+    Q_INVOKABLE QVariantMap recordProfilerTimelineStep(const QString& stepName, const QVariantMap& options);
+
+    /// EXTMOD-2 : résumé de la session timeline — pages classées
+    /// toggle_state_candidate (change plus d'une fois mais pas à chaque
+    /// étape — meilleur signal), runtime_noise (change à chaque étape,
+    /// probablement un compteur), one_time_state_change (change une seule
+    /// fois, ex: init d'un module injecté).
+    Q_INVOKABLE QVariantMap getProfilerTimelineSummary() const;
+
+    /// EXTMOD-2 : vide la session timeline (les checkpoints eux-mêmes,
+    /// capturés via clearProfilerSession, ne sont pas affectés).
+    Q_INVOKABLE QVariantMap clearProfilerTimeline();
 
     /// Cherche une signature AOB dans les régions mémoire du processus.
     /// Pattern: "48 8B ?? ?? 89", options: executableOnly, imageOnly, startAddress, stopAddress, maxResults.

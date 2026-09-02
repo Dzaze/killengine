@@ -168,6 +168,11 @@ add_library(killcore STATIC
     webview2/cdp_client.cpp
     webview2/webview2_inspector.h
     webview2/webview2_inspector.cpp
+
+    # EXTMOD-2 — diff fin par pages 4K + classification de stabilite (session
+    # timeline) pour ExternalToolProfiler (apps/desktop/external_tool_profiler.*)
+    profiler/page_diff_analyzer.h
+    profiler/page_diff_analyzer.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

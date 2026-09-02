@@ -2891,12 +2891,12 @@ QVariantMap ApplicationController::captureUnknownSnapshotAsyncWithOptions(const 
     return m_scanningCoreManager->captureUnknownSnapshotAsyncWithOptions(expertOptions);
 }
 
-QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QString& valueType) {
-    return m_scanningCoreManager->unknownNextScan(mode, valueType);
+QVariantMap ApplicationController::unknownNextScan(const QString& mode, const QString& valueType, const QString& deltaValue) {
+    return m_scanningCoreManager->unknownNextScan(mode, valueType, deltaValue);
 }
 
-QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, const QString& valueType) {
-    return m_scanningCoreManager->unknownNextScanAsync(mode, valueType);
+QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, const QString& valueType, const QString& deltaValue) {
+    return m_scanningCoreManager->unknownNextScanAsync(mode, valueType, deltaValue);
 }
 
 QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, const QString& valueType, const QString& value) {
@@ -3465,6 +3465,18 @@ QVariantMap ApplicationController::listProfilerCheckpoints() const {
 
 QVariantMap ApplicationController::clearProfilerSession() {
     return m_externalToolProfiler->clearProfilerSession();
+}
+
+QVariantMap ApplicationController::recordProfilerTimelineStep(const QString& stepName, const QVariantMap& options) {
+    return m_externalToolProfiler->recordProfilerTimelineStep(stepName, options);
+}
+
+QVariantMap ApplicationController::getProfilerTimelineSummary() const {
+    return m_externalToolProfiler->getProfilerTimelineSummary();
+}
+
+QVariantMap ApplicationController::clearProfilerTimeline() {
+    return m_externalToolProfiler->clearProfilerTimeline();
 }
 
 QVariantMap ApplicationController::scanAobPattern(const QString& patternText, const QVariantMap& optionsMap) {

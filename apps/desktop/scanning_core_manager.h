@@ -42,8 +42,8 @@ public:
     QVariantMap captureUnknownSnapshotWithOptions(const QVariantMap& expertOptions);
     QVariantMap captureUnknownSnapshotAsync();
     QVariantMap captureUnknownSnapshotAsyncWithOptions(const QVariantMap& expertOptions);
-    QVariantMap unknownNextScan(const QString& mode, const QString& valueType);
-    QVariantMap unknownNextScanAsync(const QString& mode, const QString& valueType);
+    QVariantMap unknownNextScan(const QString& mode, const QString& valueType, const QString& deltaValue = QString());
+    QVariantMap unknownNextScanAsync(const QString& mode, const QString& valueType, const QString& deltaValue = QString());
     QVariantMap scanGroupScan(const QVariantList& entries, const QVariantMap& options);
 
 private:

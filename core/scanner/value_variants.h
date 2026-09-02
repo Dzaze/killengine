@@ -48,4 +48,24 @@ QList<ValueVariant> generateScanVariants(
 /// Retourne 0.0 si `bytes` est trop court pour `type`.
 double scanBytesToDouble(const QByteArray& bytes, ValueType type);
 
+/// Variante de delta scalé pour un scan Unknown en mode Delta (SC2-UNKNOWN-1).
+struct DeltaVariant {
+    double  rawDelta{0.0}; ///< Delta attendu sur la valeur brute stockée (ex. 7 * 4096 = 28672).
+    QString label;         ///< Libellé de variante (ex. "Int32 x4096"), même convention que ValueVariant::label.
+};
+
+/// Génère les deltas bruts correspondant à un delta affiché, pour les mêmes
+/// facteurs d'échelle que generateScanVariants (x1/x10/x100/x1000/x4096/x65536).
+///
+/// Motivation : un scan Unknown en mode Delta compare `(current - previous)`
+/// sur la mémoire brute, mais l'utilisateur ne connaît que le delta affiché
+/// à l'écran (ex. "+7"). Si le jeu stocke la valeur en virgule fixe (score
+/// interne = affiché * 4096), le delta brut réel est 28672, pas 7 — sans
+/// cette fonction, un scan Delta raterait silencieusement ces représentations
+/// (même trou que celui déjà comblé pour le scan exact, voir
+/// docs/PHASE_TRACKER.md "SC2-UNKNOWN-1"). Les types flottants ne sont pas
+/// scalés (le scaling en virgule fixe est une technique réservée aux
+/// entiers) : un seul DeltaVariant non scalé est retourné pour eux.
+QList<DeltaVariant> generateDeltaVariants(double displayedDelta, ValueType type);
+
 } // namespace killcore

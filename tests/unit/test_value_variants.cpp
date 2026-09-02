@@ -92,3 +92,44 @@ TEST(ValueVariants, IncludesCompactUnsignedAndFixedPointScales) {
     EXPECT_TRUE(variantHasValue(variants, ValueType::Int32, 35.0 * 65536.0));
     EXPECT_FALSE(variantHasValue(variants, ValueType::UInt8, 35.0));
 }
+
+// SC2-UNKNOWN-1 : le scan Unknown en mode Delta doit pouvoir traduire un
+// delta affiché (ex. +7) en delta brut scalé (ex. +28672 pour x4096), le
+// même trou que generateScanVariants comblait déjà pour le scan exact.
+
+bool deltaVariantHasValue(const QList<killcore::DeltaVariant>& variants, double expectedRawDelta, const QString& labelSuffix) {
+    for (const auto& v : variants) {
+        if (std::abs(v.rawDelta - expectedRawDelta) < 0.0001 && v.label.endsWith(labelSuffix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+TEST(ValueVariants, DeltaVariantsIncludeUnscaledAndFixedPointScales) {
+    const auto variants = killcore::generateDeltaVariants(7.0, ValueType::Int32);
+    EXPECT_TRUE(deltaVariantHasValue(variants, 7.0, "Int32"));
+    EXPECT_TRUE(deltaVariantHasValue(variants, 70.0, "x10"));
+    EXPECT_TRUE(deltaVariantHasValue(variants, 700.0, "x100"));
+    EXPECT_TRUE(deltaVariantHasValue(variants, 7000.0, "x1000"));
+    EXPECT_TRUE(deltaVariantHasValue(variants, 28672.0, "x4096"));
+    EXPECT_TRUE(deltaVariantHasValue(variants, 458752.0, "x65536"));
+    EXPECT_EQ(variants.size(), 6);
+}
+
+TEST(ValueVariants, DeltaVariantsPreserveSign) {
+    const auto variants = killcore::generateDeltaVariants(-3.0, ValueType::Int16);
+    EXPECT_TRUE(deltaVariantHasValue(variants, -3.0, "Int16"));
+    EXPECT_TRUE(deltaVariantHasValue(variants, -12288.0, "x4096"));
+}
+
+TEST(ValueVariants, DeltaVariantsSkipScalingForFloatTypes) {
+    const auto variantsF32 = killcore::generateDeltaVariants(2.5, ValueType::Float32);
+    ASSERT_EQ(variantsF32.size(), 1);
+    EXPECT_DOUBLE_EQ(variantsF32.first().rawDelta, 2.5);
+    EXPECT_EQ(variantsF32.first().label, "Float32");
+
+    const auto variantsF64 = killcore::generateDeltaVariants(2.5, ValueType::Float64);
+    ASSERT_EQ(variantsF64.size(), 1);
+    EXPECT_EQ(variantsF64.first().label, "Float64");
+}

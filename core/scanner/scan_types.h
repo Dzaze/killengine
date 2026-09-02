@@ -72,6 +72,14 @@ struct ScanOptions {
     bool     copyOnWriteOnly{false};   ///< Ne scanner que les régions copy-on-write (mapped privé writable)
     bool     fastScan{true};           ///< Active l'alignement automatique par taille de type
     std::function<void(const ScanProgress&)> progressCallback;
+
+    // SC2-UNKNOWN-1 — Unknown scan en mode Delta (SnapshotStore::compare) :
+    // delta brut attendu ((valeur courante - valeur snapshot) == targetDelta,
+    // tolérance selon le type), et libellé de variante à apposer sur chaque
+    // ScanMatch retourné (ex. "Int32 x4096" — voir scanner/value_variants.h
+    // generateDeltaVariants, l'appelant boucle une fois par variante d'échelle).
+    double  targetDelta{0.0};
+    QString matchVariantLabel;
 };
 
 struct ScanResult {

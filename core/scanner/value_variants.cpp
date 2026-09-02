@@ -110,10 +110,10 @@ void appendNumericVariant(QList<ValueVariant>& out, const QString& label, ValueT
     out.append(variant);
 }
 
-void appendScaledIntVariants(QList<ValueVariant>& out, ValueType type, double base, bool secondary) {
-    const QString typeName = valueTypeToString(type);
-    appendNumericVariant(out, typeName, type, base, secondary);
-
+// Facteurs de scaling fixed-point communs (scores/monnaies internes stockés
+// multipliés par une puissance de 10 ou de 2). Partagé par
+// appendScaledIntVariants, appendFloatVariants et generateDeltaVariants.
+const QList<QPair<int, QString>>& fixedPointScales() {
     static const QList<QPair<int, QString>> scales = {
         {10, "x10"},
         {100, "x100"},
@@ -121,7 +121,14 @@ void appendScaledIntVariants(QList<ValueVariant>& out, ValueType type, double ba
         {4096, "x4096"},
         {65536, "x65536"},
     };
-    for (const auto& scale : scales) {
+    return scales;
+}
+
+void appendScaledIntVariants(QList<ValueVariant>& out, ValueType type, double base, bool secondary) {
+    const QString typeName = valueTypeToString(type);
+    appendNumericVariant(out, typeName, type, base, secondary);
+
+    for (const auto& scale : fixedPointScales()) {
         appendNumericVariant(out, QString("%1 %2").arg(typeName, scale.second), type, base * scale.first, true);
     }
 }
@@ -130,14 +137,7 @@ void appendFloatVariants(QList<ValueVariant>& out, const QString& label, ValueTy
     appendNumericVariant(out, label, type, base, secondary);
 
     // Variantes de scaling fréquentes pour les scores/argent internes.
-    static const QList<QPair<int, QString>> scales = {
-        {10, "x10"},
-        {100, "x100"},
-        {1000, "x1000"},
-        {4096, "x4096"},
-        {65536, "x65536"},
-    };
-    for (const auto& scale : scales) {
+    for (const auto& scale : fixedPointScales()) {
         appendNumericVariant(out, QString("%1 %2").arg(label, scale.second), type, base * scale.first, true);
     }
 }
@@ -227,6 +227,22 @@ QList<ValueVariant> generateScanVariants(
     appendNumericVariant(out, "Float64", ValueType::Float64, base, true);
 
     return deduplicatedByBytes(out);
+}
+
+QList<DeltaVariant> generateDeltaVariants(double displayedDelta, ValueType type) {
+    QList<DeltaVariant> out;
+    const QString typeName = valueTypeToString(type);
+
+    if (type == ValueType::Float32 || type == ValueType::Float64) {
+        out.append({displayedDelta, typeName});
+        return out;
+    }
+
+    out.append({displayedDelta, typeName});
+    for (const auto& scale : fixedPointScales()) {
+        out.append({displayedDelta * scale.first, QString("%1 %2").arg(typeName, scale.second)});
+    }
+    return out;
 }
 
 double scanBytesToDouble(const QByteArray& bytes, ValueType type) {

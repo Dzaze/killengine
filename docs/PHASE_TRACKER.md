@@ -32,7 +32,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 ## Validations restantes
 
 - **UWP-STATE-1** : logique de diff avant/après validée par des données synthétiques via le pipe, mais pas encore par un vrai test terrain sur Solitaire (snapshot avant/gain XP/snapshot après/comparer) — reste à faire si quelqu'un reprend la piste Solitaire XP.
-- **EXTMOD-1** : avant d'ouvrir un chantier générique "capacité de hook de logique de jeu", il faut differ `SC2_x64.exe` lui-même (pas les DLL de Wand) avant/après toggle pour confirmer si l'accroche réelle est un hook/redirection ou un patch statique — voir entrée "décision propriétaire" du 01/09/2026 ci-dessous.
+- **EXTMOD-1/EXTMOD-2** : le diff `SC2_x64.exe` lui-même (pas les DLL de Wand) a été fait le 02/09/2026 (voir entrée "EXTMOD-2 — test terrain Wand/SC2..." ci-dessous) mais avec un profiler grossier (hash par région entière, ~66 Mo) — résultat inconclusif (aucun patch code évident détecté, signal noyé dans une grosse région `mapped RW`). Le diff fin par pages 4K + Timeline Recorder demandé à l'issue de cette session a été livré et validé sur cible synthétique le 02/09/2026 (voir entrée "EXTMOD-2 — outil livré" ci-dessous) mais **pas encore rejoué sur SC2/Wand réel** — reste à faire dès que le propriétaire + Wand sont de nouveau disponibles ensemble : reprendre exactement le même protocole (baseline/attach/toggle_on/stimulus/toggle_off) via `recordProfilerTimelineStep` au lieu de `captureProfilerCheckpoint` manuel, pour obtenir la classification `toggle_state_candidate`/`runtime_noise`/`code_patch_candidate` sur SC2 réel.
 - Sinon, aucune validation en attente : le chantier WebView2/CDP (WEBVIEW-A à F) et UWP-STATE-1 sont clos, voir "État courant" et `docs/PHASE_TRACKER_HISTORY.md` pour le détail.
 
 ## Journal actif
@@ -192,3 +192,64 @@ Nommage volontairement générique (pas de vocabulaire SC2/Wand dans le code pro
 **Pourquoi** : demande propriétaire explicite : "relance un build et test puis comit tout", reprise après disponibilité de Wand et avant consolidation Git.
 
 **Comment vérifié** : `.\scripts\build.ps1` → OK (`Build successful!`, `build\bin\KillEngine.exe` généré). `.\build\bin\killengine_unit_tests.exe` → OK, 291 tests passés sur 43 suites.
+
+### EXTMOD-2 — test terrain Wand/SC2 avec `ExternalToolProfiler` : besoin d'un diff fin par pages/bytes (02/09/2026, Codex)
+
+**Quoi** : session live SC2 campagne/offline avec Wand disponible, KillEngine lancé avec `KILLENGINE_AUTOMATION_PIPE=1`, attaché à `SC2_x64.exe` PID 11420. Séquence capturée via `captureProfilerCheckpoint(..., {moduleName:"SC2_x64.exe", maxHashBytesMb:256})` :
+- `baseline_sc2` avant attach Wand : 122 modules, 5 régions du module `SC2_x64.exe` hashées (~134 Mo).
+- `wand_attached_off_sc2` après attach Wand, toggle OFF : 132 modules. Diff baseline→OFF : 10 modules ajoutés (`TrainerLibPlugin_x64.dll`, `CELib_x64.dll`, `Trainer_49560_b593cf46cc.dll`, `InputCapturePlugin_x64.dll`, `tophat_service_x64.dll`, etc.) et 1 région `mapped RW` changée dans `SC2_x64.exe` (`0x7ff6353d0000`, ~66.8 Mo), aucune région code changée.
+- `recruit_fast_on_sc2` après activation du toggle Wand **Recrutement rapide** : 136 modules. Diff OFF→ON : 4 modules graphiques ajoutés (`d3d11.dll`, drivers Intel, `we-graphics-hook64.dll`) et la même région `mapped RW` changée, toujours aucune région code `SC2_x64.exe` modifiée.
+- `recruit_fast_after_unit_sc2` après recrutement d'une unité et consommation de 50 cristaux : aucun nouveau module, même région `mapped RW` changée.
+- `recruit_fast_off_after_unit_sc2` après désactivation du toggle : aucun module retiré, même région `mapped RW` changée.
+
+**Pourquoi** : valider la décision EXTMOD-1 : différencier `SC2_x64.exe` lui-même avant/après toggle Wand pour savoir si Wand applique un patch/hook dans le module du jeu ou pilote l'effet via DLL injectées/état runtime. Le propriétaire a demandé explicitement de travailler avec Wand maintenant qu'il est de nouveau disponible.
+
+**Conclusion terrain** : aucun patch code évident dans `SC2_x64.exe` n'a été détecté par le profiler actuel sur le toggle `Recrutement rapide`. Wand injecte ses modules dès l'attache, puis garde les modules chargés même toggle OFF. Le signal côté module jeu reste concentré dans une grosse région `mapped RW` (~66.8 Mo), trop large pour conclure précisément. Hypothèse actuelle : effet piloté par couche injectée/état runtime plutôt que patch statique simple dans `.text`, ou granularité actuelle trop grossière pour voir le point d'accroche.
+
+**Outil à ajouter en priorité** : faire évoluer `ExternalToolProfiler` vers un **diff fin par pages/bytes** :
+- hasher et comparer par pages 4K à l'intérieur des régions changées, pas seulement par région entière ;
+- retourner top pages changées avec offsets module (`SC2_x64.exe+0x...`), nombre de bytes différents, premiers deltas bornés, stabilité ON/OFF/stimulus ;
+- classer `toggle_state_candidate`, `runtime_noise`, `code_patch_candidate`, `injected_module_state`, `mapped_data_changed` ;
+- exposer le résultat au pipe et à l'UI avant de relancer un gros chantier générique de hook.
+
+**Outil complémentaire à ajouter** : créer un **Timeline Recorder** au-dessus du profiler pour automatiser le protocole terrain :
+- définir une session nommée avec étapes (`baseline`, `tool_attached_off`, `toggle_on`, `stimulus_done`, `toggle_off`) ;
+- capturer les checkpoints dans l'ordre, avec horodatage, notes humaines et options identiques (`moduleName`, budget hash, scope modules injectés) ;
+- produire automatiquement les diffs utiles entre étapes adjacentes et contre baseline ;
+- éviter les oublis/manips manuelles pendant les tests live avec Wand ou tout autre outil externe autorisé.
+
+**Comment vérifié** : appels pipe réels `captureProfilerCheckpoint`/`getProfilerDiff` sur `SC2_x64.exe` pendant une partie locale active. Pas de modification de code dans cette session ; mise à jour tracker seulement, donc pas de build relancé.
+
+### EXTMOD-2 — outil livré : diff fin par pages 4K + Timeline Recorder (02/09/2026, Claude)
+
+**Quoi** : implémentation de l'"outil à ajouter en priorité" identifié dans l'entrée EXTMOD-2 ci-dessus. Nouveau module cœur pur (aucun accès process, testable unitairement) `core/profiler/page_diff_analyzer.h/.cpp` :
+- `splitIntoPages()` : découpe un buffer déjà lu (région) en pages 4K, hash FNV-1a par page, retient les bytes bruts par page tant qu'un budget dédié (`maxPageBytesMb`) n'est pas épuisé — aucune lecture mémoire supplémentaire, réutilise le buffer déjà lu pour le hash de région existant.
+- `diffPageContents()` : diff page par page entre deux checkpoints, classification `injected_module_state` / `code_patch_candidate` / `mapped_data_changed`, et pour les pages dont les deux côtés ont des bytes bruts : `byteDiffCount` exact + `sampleDeltas` bornés ({offset, before, after}).
+- `ProfilerTimelineTracker` : accumulateur de session nommée (mêmes principes que `ChangedPagesConsensus`) — pour chaque page vue à travers N étapes (`baseline`/`tool_attached_off`/`toggle_on`/`stimulus_done`/`toggle_off`), classe `toggle_state_candidate` (change plus d'une fois mais pas à chaque étape — meilleur signal), `runtime_noise` (change à chaque étape), `one_time_state_change` (change une seule fois), silencieuse si jamais changée.
+
+Branché dans `apps/desktop/external_tool_profiler.*` : `captureProfilerCheckpoint`/`getProfilerDiff` étendus (options `maxPageBytesMb`, `includePageDiff`, `maxSampleDeltasPerPage`, `maxTopChangedPages` ; sortie `pagesChanged` par région + agrégat global `topChangedPages` trié par nombre de bytes différents, avec `moduleOffset` résolu type `SC2_x64.exe+0x...`). 3 nouvelles méthodes `Q_INVOKABLE` sur `ApplicationController` : `recordProfilerTimelineStep(stepName, options)`, `getProfilerTimelineSummary()`, `clearProfilerTimeline()`.
+
+**Pourquoi** : conclusion de la session EXTMOD-2 précédente — un hash de région entière (~66 Mo) ne permettait pas de localiser le point d'accroche réel d'un outil externe (Wand/SC2) à l'intérieur d'une grosse région `mapped RW`. Le granularité page + la stabilité multi-étapes sont les deux signaux demandés explicitement pour distinguer bruit/compteur d'un vrai candidat "point d'accroche".
+
+**Comment vérifié** : 11 nouveaux tests unitaires purs (`tests/unit/test_page_diff_analyzer.cpp`, dont un scénario complet noise/toggle/one-time/jamais-changé) — 305/305 tests passent après ajout (302 avant + 3 non liés à ce chantier, voir SC2-UNKNOWN-1 ci-dessous). `scripts\build.ps1` → OK. Puis validation live réelle via le pipe automation (pas seulement les tests unitaires, cf. [[feedback_verify_dont_trust_agent_build_claims]]) : `KillEngine.exe` attaché à `Notepad.exe` (cible synthétique jetable) — séquence `recordProfilerTimelineStep` × 4 (baseline/dialog_open/dialog_closed/dialog_reopen), `getProfilerDiff` entre deux checkpoints après une vraie frappe clavier a retourné des `topChangedPages` avec des deltas d'octets réels et exacts (ex. page à `f5547fb000`, 861 bytes différents, `sampleDeltas` avec les vraies valeurs avant/après) ; `getProfilerTimelineSummary` a classé 13098 pages sur la session 4-étapes sans crash (toutes `one_time_state_change` dans ce test précis car les étapes 0-2 étaient filtrées `moduleName:"notepad.exe"` et l'étape 3 non filtrée — artefact du test, pas un bug) ; `clearProfilerTimeline` confirmé remettre `stepCount` à 0.
+
+**Reste ouvert** : le vrai test terrain SC2/Wand avec ce nouvel outil (remplacer le script PowerShell manuel de la découverte EXTMOD-1 initiale) n'a pas été refait dans cette session — nécessite le propriétaire + Wand disponible en live, voir "Validations restantes".
+
+### Retest live `writeMemoryHex` — fix confirmé (02/09/2026, Claude)
+
+**Quoi** : le fix du 02/09/2026 (handle `ReadOnly` réutilisé à tort, voir entrée "Bug trouvé et corrigé" ci-dessus) n'avait pas encore été revalidé en live après le fix (le test SC2 s'était arrêté avant). Revalidé sur `Notepad.exe` (cible synthétique) : `readMemoryPreview` → `writeMemoryHex("DE AD BE EF")` → `success:true, verified:true` (plus d'`ERROR_ACCESS_DENIED`) → `readMemoryPreview` de nouveau confirme les 4 bytes bien écrits. Item de "Validations restantes" clos.
+
+### SC2-UNKNOWN-1 — Unknown Delta scale-aware, live-vérifié (02/09/2026, Claude)
+
+**Quoi** : le workflow Unknown (snapshot avant/après sans valeur affichée cible, `SnapshotStore::compare`) n'implémentait PAS DU TOUT le mode Delta (`NextScanMode::Delta` explicitement rejeté) et le narrowing Delta sur candidats déjà scannés (`nextScan`/`nextScanAsync`) ignorait le `variantLabel` scalé du candidat (ex. "Int32 x4096") — un delta affiché "+7" n'était jamais retraduit en delta brut "+28672" pour une valeur stockée en virgule fixe x4096, contrairement au scan exact déjà corrigé (voir "Fix scan Auto" ci-dessus).
+
+**Corrigé** :
+- `core/scanner/value_variants.h/.cpp` : nouvelle fonction pure `generateDeltaVariants(displayedDelta, type)` — génère les deltas bruts scalés x1/x10/x100/x1000/x4096/x65536 pour les types entiers (inchangé pour les floats, le scaling fixed-point ne s'y applique pas). Facteurs d'échelle dupliqués 2× dans le fichier factorisés en un seul `fixedPointScales()` au passage.
+- `core/scanner/scan_types.h` : `ScanOptions` gagne `targetDelta`/`matchVariantLabel`.
+- `core/snapshot/snapshot_store.cpp` : `SnapshotStore::compare` accepte maintenant `NextScanMode::Delta` (tolérance 0.5 pour les entiers, 0.0001 pour les floats), labellise chaque `ScanMatch` retourné avec `options.matchVariantLabel`.
+- `apps/desktop/scanning_core_manager.cpp` : `unknownNextScan`/`unknownNextScanAsync` gagnent un paramètre `deltaValue` (nouveau, optionnel — `Q_INVOKABLE` rétrocompatible) ; en mode delta + type Auto, boucle sur `generateDeltaVariants` par type (comme le scan exact multi-échelle) et labellise les survivants. Nouvelle fonction `targetDeltaForCandidate()` (même principe que `targetBytesForCandidate` pour le mode Exact) appliquée aux deux chemins de narrowing Delta existants (`nextScan` sync + `nextScanAsync`) — corrige aussi le narrowing Delta post-scan-exact-scalé, pas seulement le chemin Unknown. Bug latent corrigé au passage : la branche "refine" d'`unknownNextScan(Async)` appelait `nextScan(mode, "")`/`nextScanAsync(mode, "")` avec une valeur vide même en mode delta — aurait toujours échoué (`"Valeur delta invalide"`) dès qu'un Unknown scan delta était relancé sur des candidats déjà présents.
+- `apps/desktop/application_controller.h/.cpp` : `unknownNextScan`/`unknownNextScanAsync` exposent `deltaValue` (paramètre `Q_INVOKABLE` optionnel, défaut `QString()`).
+
+**Comment vérifié** : 3 nouveaux tests unitaires purs (`tests/unit/test_value_variants.cpp`, échelle/signe/floats non scalés) — 305/305 après ajout. `scripts\build.ps1` → OK. Live via le pipe sur `KillEngineTestTarget.exe` : localisation de `g_hidden_score` (valeur 5000) par scan exact, écriture directe `5000→5007` (delta contrôlé), `unknownNextScan("delta","Int32","7")` → `success:true, matchesFound:2` — le candidat contrôlé ressort avec `variantLabel:"Int32"` (non scalé) et `lastValueNumber:5007` exact, plus un second candidat coïncident labellisé `"Int32 x65536"` (preuve que la boucle multi-échelle tourne réellement et labellise correctement). Puis test du chemin narrowing (candidats déjà présents) : écriture `5007→5014` (encore +7), relance `unknownNextScan("delta","Int32","7")` → `matchesFound:1, stored:1` — seul le candidat non-scalé (qui a vraiment re-changé de +7) survit, le candidat x65536 coïncident (qui n'a pas re-changé de +458752) est correctement éliminé, confirmant que `targetDeltaForCandidate` retraduit bien le delta par candidat sur le chemin de narrowing aussi.
+
+**Reste ouvert** : aucun test terrain sur SC2/un vrai jeu à valeur scalée réelle (limité aux cibles synthétiques disponibles dans cette session) — comportement à confirmer si l'occasion se présente sur une cible avec un score interne réellement stocké en fixed-point.

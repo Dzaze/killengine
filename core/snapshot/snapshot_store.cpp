@@ -80,7 +80,7 @@ bool equalsValue(const char* a, const char* b, ValueType type) {
     return std::memcmp(a, b, size) == 0;
 }
 
-bool matchesMode(const char* previous, const char* current, ValueType type, NextScanMode mode) {
+bool matchesMode(const char* previous, const char* current, ValueType type, NextScanMode mode, double targetDelta) {
     const double prev = bytesToDouble(previous, type);
     const double now = bytesToDouble(current, type);
 
@@ -93,8 +93,14 @@ bool matchesMode(const char* previous, const char* current, ValueType type, Next
             return now > prev;
         case NextScanMode::Decreased:
             return now < prev;
+        case NextScanMode::Delta: {
+            // Tolerance large pour les entiers scales x4096/x65536 issus de
+            // generateDeltaVariants (erreur d'arrondi possible sur le delta
+            // scale lui-meme), stricte pour les floats bruts.
+            const double tolerance = (type == ValueType::Float32 || type == ValueType::Float64) ? 0.0001 : 0.5;
+            return std::abs((now - prev) - targetDelta) < tolerance;
+        }
         case NextScanMode::Exact:
-        case NextScanMode::Delta:
         case NextScanMode::Between:
             return false;
     }
@@ -383,8 +389,8 @@ UnknownScanResult SnapshotStore::compare(
         return result;
     }
 
-    if (mode == NextScanMode::Exact || mode == NextScanMode::Delta || mode == NextScanMode::Between) {
-        result.errorMessage = "Unknown scan supports changed/unchanged/increased/decreased.";
+    if (mode == NextScanMode::Exact || mode == NextScanMode::Between) {
+        result.errorMessage = "Unknown scan supports changed/unchanged/increased/decreased/delta.";
         return result;
     }
 
@@ -436,10 +442,10 @@ UnknownScanResult SnapshotStore::compare(
         const qsizetype comparable = std::min(previous.block.data.size(), read.data.size());
         const qsizetype step = static_cast<qsizetype>(std::max<size_t>(valueSize, 1));
         for (qsizetype offset = 0; offset <= comparable - static_cast<qsizetype>(valueSize); offset += step) {
-            if (matchesMode(previous.block.data.constData() + offset, read.data.constData() + offset, type, mode)) {
+            if (matchesMode(previous.block.data.constData() + offset, read.data.constData() + offset, type, mode, options.targetDelta)) {
                 ++result.matchesFound;
                 if (result.matches.size() < static_cast<qsizetype>(kUnknownMaxReturnedMatches)) {
-                    result.matches.append({region.baseAddress + static_cast<uint64_t>(offset), type});
+                    result.matches.append({region.baseAddress + static_cast<uint64_t>(offset), type, 1.0, options.matchVariantLabel});
                 } else {
                     result.partial = true;
                     result.success = true;
