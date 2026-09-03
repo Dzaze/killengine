@@ -1,6 +1,8 @@
 # Référence exhaustive des réponses `Q_INVOKABLE`
 
 > Généré par extraction directe du code source le 30/08/2026 (PHASE 238) — à revalider si le code change, ne pas copier-coller sans revérifier après un futur refactor. Voir `docs/AUTOMATION_API.md` pour le protocole général et les méthodes les plus courantes.
+>
+> **Audit du 03/09/2026 (Claude)** : comparaison automatisée de la liste complète des méthodes `Q_INVOKABLE` de `application_controller.h` contre ce document a trouvé 57 méthodes livrées après le 30/08/2026 et jamais ajoutées ici (Memory Timeline, Memory Heatmap, Pattern Learning, WebView2/CDP, Lua REPL, Profiler externe, Changed Pages, `compareProcessSaveFileSnapshots`), plus un nom de méthode obsolète (`getStealthModeStatus` → `getStealthStatus`). Recherche de stubs non implémentés (`notImplementedResult`/TODO/FIXME) sur l'ensemble de `application_controller.cpp` et des managers concernés : aucun trouvé — l'écart était strictement documentaire, pas fonctionnel (contrairement à `MemoryTimelineAnalyzer` avant le 03/09/2026, qui lui était un vrai stub, voir `docs/PHASE_TRACKER.md`). Sections ajoutées/complétées marquées « ajouté 03/09/2026 » ci-dessous ; chaque clé reste extraite du `.cpp` réel, même convention que le reste du document.
 
 Ce document inventorie, pour **chaque** méthode `Q_INVOKABLE` de `ApplicationController` (`apps/desktop/application_controller.h`), la forme réelle de sa réponse (clés du `QVariantMap`, ou type scalaire), extraite en lisant l'implémentation réelle (le `.cpp` du manager délégué quand il y en a un, sinon `application_controller.cpp` directement). Aucune clé listée ici n'a été devinée : chaque entrée correspond à une ligne `result["clé"] = ...` (ou équivalent) effectivement lue dans le code au 30/08/2026.
 
@@ -87,6 +89,21 @@ Réponse : `{ success, windows: [{hwnd, pid, pidMatchesAttached, visible, text, 
 
 ### `readUiAutomationTree(options)`
 Réponse : `{ success, elements: [{name, value, controlType, x, y, width, height}], elementCount, scannedCount, hwnd, rootName, rootControlType, findAllHr, error }` (Windows uniquement)
+
+### `startChangedPagesSession(options)` (ajouté 03/09/2026)
+Capture initiale d'une session de diff de pages consensus (voir aussi `applyChangedPagesRound` ci-dessous). `options` transmis à `startChangedPagesDiff` en interne, avec `includeImage: true` par défaut (inclut les régions Image RW, pas seulement Private).
+Réponse : `{ success, blocksCaptured, bytesCaptured, regionsScanned, unreadable, partial, roundsApplied: 0, error }`
+
+### `applyChangedPagesRound(previousValue, currentValue, options)` (ajouté 03/09/2026)
+Applique un round de diff sur les blocs capturés par `startChangedPagesSession`, puis sonde immédiatement les meilleurs candidats. `options` : `maxHits` (1-2000, défaut 300), `maxDistanceToChange` (0-4096, défaut 256), `probeCount` (0-200, défaut 25).
+Réponse : `{ success, previousValue, currentValue, hits: [...], hitsFound, blocksChecked, blocksChanged, blocksDropped, bytesChecked, changedBytes, unreadable, blocksRemaining, partial, roundsApplied, probesConfirmed, probesContradicted, probesStale, entriesTotal, entriesEliminated, entriesConfirmedAtLeast2, topEntries: [{address, type, variantLabel, roundsConfirmed, ...}], error }` — erreur si aucune session active ou plus aucun bloc.
+
+### `getChangedPagesConsensus(options)` (ajouté 03/09/2026)
+`options` : `maxResults` (1-500, défaut 50), `minConfirmed` (1-100, défaut 2).
+Réponse : `{ success: true, sessionActive, roundsApplied, entriesTotal, entriesEliminated, entriesConfirmed, minConfirmed, topEntries, confirmedEntries (sous-ensemble de topEntries avec roundsConfirmed >= minConfirmed) }`
+
+### `stopChangedPagesSession()` (ajouté 03/09/2026)
+Réponse : `{ success: true, sessionActive: false, roundsApplied, entriesTotal, entriesEliminated, entriesConfirmed, confirmedEntriesList, error: "" }` — réinitialise l'état de session (les blocs capturés sont libérés).
 
 ### `scanUiStrings(value, options)`
 Fichier : `display_string_investigator.cpp` (`UiStringInvestigator`)
@@ -281,6 +298,165 @@ Réponse : `{ success, chainCount, elapsedMs, error?, message, bestChain? ({modu
 
 ### `savePointerChainProfileTarget(profileName, targetName, chain, valueType, description)`
 Réponse : `{ success, profileName, targetName, resolvedAddress, isNewProfile, chainLabel, message, error }`
+
+---
+
+## Memory Heatmap (PROPOSITIONS-1 #5, ajouté 03/09/2026)
+
+Fichier source : `apps/desktop/application_controller.cpp` délègue à `apps/desktop/memory_heatmap_manager.cpp` (classe `MemoryHeatmapManager`). Absent de la génération du 30/08/2026 (câblé le 02/09/2026) — ajouté ici lors de l'audit du 03/09/2026.
+
+### `startMemoryHeatmap(addressHex, options)`
+`addressHex` optionnel (borne `options.minAddress` si non vide). `options` : `minAddress`/`maxAddress` (hex ou décimal), `regionSize` (défaut 4096), `maxRegions` (défaut 10000), `samplingIntervalMs` (défaut 100), `trackReads`/`trackWrites` (défaut true), `maxPagesPerTick` (défaut 4096).
+Réponse : `{ success, error? ("Aucun processus attaché."|"Impossible de démarrer la collecte heatmap (déjà en cours ?).") }`
+
+### `stopMemoryHeatmap()`
+Réponse : `{ success: true, stats, topRegions }`
+
+### `getMemoryHeatmapStatus()`
+Réponse : `{ success: true, collecting, stats }`
+
+### `getMemoryHeatmapData()`
+Réponse : `{ success: true, topRegions, stats }`
+
+`stats` : `{ totalRegions, activeRegions, totalAccesses, totalWrites, totalReads, averageIntensity, collecting }`. `topRegions` : liste de `{ baseAddress (hex "0x..."), size, accessCount, writeCount, readCount, intensity }`, triée par intensité, jusqu'à 100 entrées.
+
+---
+
+## Pattern Learning (PROPOSITIONS-1 #2, ajouté 03/09/2026)
+
+Fichier source : `apps/desktop/application_controller.cpp` délègue à `apps/desktop/pattern_learning_manager.cpp` (classe `PatternLearningManager`), qui délègue à son tour à `core/pattern_learning/pattern_learning_engine.cpp` (classe `PatternLearningEngine`) et `game_profile_database.cpp`. Initialisé automatiquement à la construction (persistance JSON, pas besoin de process attaché pour la plupart des méthodes). Absent de la génération du 30/08/2026 (câblé le 02/09/2026) — ajouté ici lors de l'audit du 03/09/2026.
+
+### `isPatternLearningInitialized()`
+Réponse : `bool`.
+
+### `getPatternLearningStatistics()`
+Réponse : `{ initialized: true, knownGames, engineSignaturesLoaded, patternRulesLoaded }` — `QVariantMap` vide si le moteur n'est pas initialisé.
+
+### `detectGameEngine(moduleNames, memorySample)`
+`moduleNames` : liste de noms de modules chargés. `memorySample` : `{data: <bytes>}` optionnel.
+Réponse (`EngineDetectionResult::toVariantMap()`) : `{ type (int), typeName ("Unity"/"Unreal"/"Godot"/...), version, confidence, signature }` — map vide si moteur non initialisé.
+
+### `classifyMemoryPattern(addressHex, valueHistory, timestamps)`
+Réponse (`PatternClassification::toVariantMap()`) : `{ type (int), typeName ("counter"/"health"/"flag"/"timer"/...), confidence, suggestedValueType, suggestedScale, reasoning: [string] }` — map vide si adresse invalide ou moteur non initialisé.
+
+### `loadGameProfile(gameName)`
+Réponse (`GameProfile::toVariantMap()`) : `{ gameName, executableName, engineType (int), engineTypeName, engineVersion, sessionCount, lastUpdated (epoch ms), knownOffsets: [{name, offset (hex sans 0x), valueType, scale, patternType (int), stabilityScore}], successfulPaths: [string] }` — map vide si le profil n'existe pas.
+
+### `saveGameProfile(profile)`
+Réponse : `bool` (`profile` doit être un objet parseable par `GameProfile::fromVariantMap`, mêmes clés que ci-dessus).
+
+### `listKnownGameProfiles()`
+Réponse : `QVariantList` de noms de jeux (strings), pas d'objet englobant.
+
+### `deleteGameProfile(gameName)`
+Réponse : `bool`.
+
+### `recordLearningSession(session)`
+`session` : `{ sessionId?, gameName, timestamp?, resolutionPath, wasSuccessful, durationMs, discoveredPatterns: [{type, valueHistory?, ...}] }`. Réponse : `void` (pas de retour).
+
+### `suggestPatternResolutionPaths(gameName, targetType)` / `suggestPatternValueTypes(engineType, patternType)`
+Réponse : `QVariantList` de strings.
+
+### `getPatternValueTypeSuccessRate(gameName, valueType)`
+Réponse : `double`.
+
+### `clusterPatternAddresses(addresses, features)`
+`addresses` : liste d'adresses hex. `features` : liste de vecteurs de features (`[[double,...], ...]`), même longueur que `addresses`.
+Réponse : `QVariantList` de `{ id (int), label, addresses: [hex sans 0x], dominantType (int) }`.
+
+### `startPatternTracking(addressHex, valueType)` / `stopPatternTracking(addressHex)` / `recordPatternTrackingValue(addressHex, value)`
+Réponse : `void`. Accumulent des échantillons pour une adresse (suivi temps réel), consommés par `getPatternTrackingAnalysis`.
+
+### `getPatternTrackingAnalysis(addressHex)`
+Réponse : `{ address, sampleCount, valueType, classification? (forme `classifyMemoryPattern` ci-dessus, présent seulement si sampleCount >= 3) }` — map vide si l'adresse n'est pas suivie (pas d'appel `startPatternTracking` préalable).
+
+### `analyzePatternCandidates(candidates)`
+`candidates` : liste de `{address, history: [double,...]}`.
+Réponse : `{ totalAnalyzed, typeDistribution: {"<type int en string>": count, ...}, dominantType (int), dominantTypeCount, groupedCandidates (sous-liste des candidats du type dominant) }`.
+
+### `getTopPatternSuggestions(gameName, patternType, count)`
+Charge le profil `gameName`, filtre ses `knownOffsets` par `patternType`, trie par `stabilityScore` décroissant.
+Réponse : `QVariantList` de `{ name, address (hex sans 0x), valueType, scale, stabilityScore }`, jusqu'à `count` entrées (liste vide si profil introuvable).
+
+---
+
+## WebView2 / CDP (chantier WEBVIEW-*, ajouté 03/09/2026)
+
+Fichier source : `apps/desktop/application_controller.cpp`, classe `killcore::WebView2Inspector` (`core/`). Voir `docs/WEBVIEW2_CDP_GUIDE.md` si présent pour le contexte produit (activer le flag debug, préparation système). Absent de la génération du 30/08/2026 (livré 01/09/2026, PHASE WEBVIEW-*) — ajouté ici lors de l'audit du 03/09/2026.
+
+Presque toutes ces méthodes retournent une enveloppe commune (`webView2ResultEnvelope`) : `{ success: false, risk ("debug"|"script"), requiresConfirmation, capability: "webview2_cdp", ... }` avant d'ajouter les clés spécifiques ci-dessous (et de passer `success` à `true` en cas de réussite).
+
+### `getWebView2InspectorStatus()`
+Réponse : `{ success: true, connected, browserProcessId, endpoint, target }` (pas l'enveloppe standard — construite séparément).
+
+### `listWebView2CdpTargets(browserProcessId, options)`
+Réponse : `{ success, endpoint, browserProcessId, totalDiscovered, count, targets: [CDP target JSON brut], pageTargetsOnly, allowAboutBlank, warning? }`
+
+### `connectWebView2Inspector(browserProcessId, options)`
+`options.webSocketDebuggerUrl` optionnel (sinon découverte automatique via `listWebView2CdpTargets`).
+Réponse (succès) : `{ success: true, connected: true, endpoint, browserProcessId, webSocketDebuggerUrl, target? }`. Échecs : `error` + selon le cas `totalDiscovered`/`endpoint`/`browserProcessId` (aucune target) ou `"Target CDP sans webSocketDebuggerUrl."` ou `"Connexion WebSocket CDP echouee..."`.
+
+### `disconnectWebView2Inspector()`
+Réponse : `{ success: true, connected: false }`
+
+### `evaluateWebView2JavaScript(expression, options)`
+`options.returnByValue` (défaut true).
+Réponse (succès) : `{ success: true, raw (réponse CDP brute), target, type, subtype, description, value }`. Échecs : `error` (+ `cdpError` ou `exceptionDetails` selon le cas).
+
+### `findWebView2DisplayedValues(value, options)` / `findWebView2DisplayedText(text, options)`
+`options.maxResults` (défaut 100).
+Réponse : `{ success: true, value|text, count, totalMatches, matches: [CDP node JSON], target }`
+
+### `probeWebView2GlobalScope()`
+Réponse : `{ success: true, customGlobals: [{name, ...}], customGlobalsCount, totalGlobalsSeen, baselineMode ("dynamic_about_blank"|"static_fallback"), media, target }`
+
+### `enableWebView2CdpDebugFlag()` / `disableWebView2CdpDebugFlag()`
+Modifie `HKCU\Environment` (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), Windows uniquement.
+Réponse : `{ success, value? (flag posé), error? ("Fonctionnalité Windows uniquement." hors Windows) }`
+
+### `getWebView2CdpDebugFlagStatus()`
+Réponse : `{ success, enabled, value }` (Windows) ou `{ success: false, error }` (autre OS).
+
+### `getWebView2SystemPrepStatus()`
+Réponse : `{ success: true, developerModeEnabled, allowAllTrustedApps, capabilityQueried, capabilityState, capabilityInstalled }` (Windows, via requête registre + `Get-WindowsCapability` PowerShell, jusqu'à 15s) ou `{ success: false, error }` (autre OS).
+
+### `installWebView2DeveloperModeCapability()`
+Lance `Add-WindowsCapability` dans un PowerShell élevé (invite UAC visible, `runas`), sans attendre la fin (peut prendre plusieurs minutes).
+Réponse : `{ success: true, message }`, ou `{ success: false, cancelled: true, error }` (UAC refusé), ou `{ success: false, error }` (échec `ShellExecuteExW`).
+
+### `validatePageStability(addressHex, options)`
+Lit une page plusieurs fois pour détecter une réécriture active (utile pour distinguer une valeur "affichée" recalculée en continu). `options` : `readCount` (2-10, défaut 3), `intervalMs` (50-2000, défaut 100), `pageSize` (1-65536, défaut 4096).
+Réponse : `{ success, stable, readCount, unreadable, changeCount, reason, error? }`
+
+---
+
+## Profiler externe (`ExternalToolProfiler`, EXTMOD-1/2, ajouté 03/09/2026)
+
+Fichier source : `apps/desktop/application_controller.cpp` délègue à `apps/desktop/external_tool_profiler.cpp`. Sert à diffé­rencier deux snapshots (modules + régions mémoire hashées) pour repérer ce qu'un outil tiers (trainer externe, mod) a injecté/modifié — voir `project_extmod1_wand_sc2_discovery` en mémoire projet. Absent de la génération du 30/08/2026 (livré début 09/2026) — ajouté ici lors de l'audit du 03/09/2026.
+
+### `captureProfilerCheckpoint(label, options)`
+`options` : `moduleName?` (filtre le scan à ce module), `hashContent` (défaut true), `maxHashBytesMb` (8-512, défaut 64), `maxPageBytesMb` (4-256, défaut 32).
+Réponse : `{ success, label, pid, moduleCount, regionCount, regionsHashed, hashBytesUsed, moduleFilterApplied, error }`
+
+### `listProfilerCheckpoints()`
+Réponse : `{ success: true, checkpoints: [{label, capturedAtMs, pid, moduleCount, regionCount}] }`
+
+### `getProfilerDiff(labelA, labelB, options)`
+`options` : `maxHits` (1-5000, défaut 500), `includePageDiff` (défaut true), `maxSampleDeltasPerPage` (1-64, défaut 16), `maxTopChangedPages` (1-2000, défaut 100).
+Réponse : `{ success, labelA, labelB, modulesAdded/modulesRemoved: [{name, path, baseAddress (hex), size}], regionsAdded/regionsRemoved/regionsChanged: [{baseAddress, size, protection, memoryType, executable, writable, hashed, classification ("injected_module_page"|"new_executable_writable_page"|"code_page_changed"|"image_data_page_changed"|"private_page_changed"|"other"), pagesChanged?, pagesChangedCount?}], topChangedPages: [pages triées par nb d'octets différents], modulesAddedCount/modulesRemovedCount/regionsAddedCount/regionsRemovedCount/regionsChangedCount/topChangedPagesCount, error }` — nécessite deux checkpoints déjà capturés (`error` sinon).
+
+### `clearProfilerSession()`
+Réponse : `{ success: true }` (réinitialise tous les checkpoints).
+
+### `recordProfilerTimelineStep(stepName, options)`
+Capture un checkpoint sous un label `"timeline:<index>:<stepName>"` et l'ajoute à la timeline interne (hash de pages par étape).
+Réponse : même forme que `captureProfilerCheckpoint` + `stepName`, `stepIndex`, `timelineLabel`.
+
+### `getProfilerTimelineSummary()`
+Réponse : `{ success: true, stepCount, stepNames: [string], pages (classification des pages à travers les étapes), error: "" }`
+
+### `clearProfilerTimeline()`
+Réponse : `{ success: true }`
 
 ---
 
@@ -490,6 +666,33 @@ Réponse : `{ success, error, errorLine, patchedRegions: [{address, size, wasAll
 ### `restoreAutoAssemblerScript()`
 Réponse : `{ success, restoredAddresses?: [hex], active, error }`
 
+### Live Lua REPL (PROPOSITIONS-1 #4, PHASE 207, ajouté 03/09/2026)
+
+Fichier source : `apps/desktop/lua_repl_manager.cpp` (classe `LuaReplManager`). Process `lua.exe` persistant (contrairement à `executeLuaScript` qui relance un process à chaque appel) — variables et `require("killengine")` survivent d'une ligne à l'autre. Absent de la génération du 30/08/2026 — ajouté ici lors de l'audit du 03/09/2026.
+
+### `startLuaRepl(options)`
+`options` : `luaPath?`, `timeoutMs?` (par ligne, 1000-120000, défaut 15000), `pipeName?` (défaut `"KillEngineAutomationPipe"`).
+Réponse (succès) : `{ success: true, luaPath, helperPath, driverPath, pipeName }`. Échecs : `error` (déjà en cours, interpréteur/helper introuvable, process n'a pas démarré sous 3s).
+
+### `sendLuaReplLine(line)`
+Envoie une ligne au REPL déjà démarré (asynchrone — le résultat arrive via `getLuaReplLineResult`).
+Réponse : `{ success: true, started: true, requestId }`, ou `{ success: false, error: "REPL non démarré..." }`.
+
+### `getLuaReplLineResult(requestId)`
+Réponse : `{ found: false, finished: false }` si pas encore de résultat, sinon `{ found: true, requestId, line, output, error, finished }`.
+
+### `getLuaReplHistory(maxEntries)`
+Réponse : `{ success: true, entries: [{requestId, line, output, error, finished}], totalCount }` (0 ou négatif = tout l'historique).
+
+### `getLuaReplCompletions(prefix)`
+Réponse : `{ success: true, completions: [string] }` (noms `ke.*` extraits de `scripts/killengine.lua`), ou `{ success: false, error }` si le helper est introuvable.
+
+### `stopLuaRepl()`
+Réponse : `{ success: true, wasRunning }`.
+
+### `getLuaReplStatus()`
+Réponse : `{ running, pendingLines, historyCount, luaPath, helperPath }` (pas de `success`).
+
 ---
 
 ## Chat / Smart Search / Auto Resolve
@@ -627,6 +830,10 @@ Réponse : `{ success, error }`
 ### `patchProcessSaveFileBytes(path, findHex, replaceHex)`
 Réponse : `{ success, path, occurrencesFound, error }`
 
+### `compareProcessSaveFileSnapshots(before, after)` (ajouté 03/09/2026)
+Compare deux snapshots retournés par `discoverProcessSaveFiles` (avant/après une action utilisateur) sur taille + date de dernière écriture — pas de hash de contenu.
+Réponse : `{ success: true, added: [entrée après], removed: [entrée avant], modified: [{path, sizeBytesBefore, sizeBytesAfter, sizeDeltaBytes, lastWriteTimeBefore, lastWriteTimeAfter}], addedCount, removedCount, modifiedCount, unchangedCount, error: "" }`
+
 ---
 
 ## Kernel driver
@@ -728,8 +935,8 @@ Désactive le mode discret et restaure l'état original des modules activés.
 
 Réponse : `{ success, restored, warnings? }`
 
-### `getStealthModeStatus()`
-Retourne l'état courant du mode discret.
+### `getStealthStatus()`
+Retourne l'état courant du mode discret. **Corrigé 03/09/2026** : documenté ici sous le nom `getStealthModeStatus()`, qui n'existe plus dans `application_controller.h` — la méthode réelle s'appelle `getStealthStatus()` (même forme de réponse, vérifié contre le code au 03/09/2026).
 
 Réponse : `{ active, profile, modules: {antiDebug, processMask, dllMask} }`
 
@@ -738,3 +945,5 @@ Réponse : `{ active, profile, modules: {antiDebug, processMask, dllMask} }`
 ## Résumé du périmètre couvert
 
 Toutes les méthodes `Q_INVOKABLE` listées dans `apps/desktop/application_controller.h` au 30/08/2026 sont couvertes ci-dessus, sauf les cas explicitement marqués "non résolu" (contenu de `result` opaque provenant du helper .NET CLR externe, ou branches internes du moteur IA local `ai/ai_engine.cpp`). Aucune clé de réponse listée dans ce document n'a été inventée : chacune correspond à une affectation `result["clé"] = ...` (ou équivalent QVariantMap) lue directement dans le `.cpp` cité en regard.
+
+**Mise à jour 03/09/2026** : couverture étendue à toutes les méthodes `Q_INVOKABLE` livrées entre le 30/08/2026 et le 03/09/2026 (Memory Timeline — déjà dans `docs/AUTOMATION_API.md` —, Memory Heatmap, Pattern Learning, WebView2/CDP, Lua REPL, Profiler externe, Changed Pages, `compareProcessSaveFileSnapshots`), suite à un audit comparant automatiquement la liste des méthodes du header à ce document. Reste un instantané figé à cette date : toute méthode `Q_INVOKABLE` ajoutée après le 03/09/2026 doit être revérifiée avec la méthode de grep décrite dans `docs/AUTOMATION_API.md` avant d'être documentée ici.
