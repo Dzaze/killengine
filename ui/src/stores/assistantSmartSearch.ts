@@ -38,7 +38,7 @@ import { useScanningStore } from './scanning'
 import { useTrainerStore, type TrainerFeature } from './trainer'
 import { useWriteFreezeStore } from './writeFreeze'
 
-export type AssistantView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
+export type AssistantView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
 
 export interface ChatMessage {
   id: number

@@ -1711,6 +1711,25 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   detectTimelinePatterns?(addressHex: string): Promise<Record<string, unknown>>
   analyzeTimelineBehavior?(addressHex: string): Promise<Record<string, unknown>>
   predictTimelineNextValue?(addressHex: string): Promise<Record<string, unknown>>
+
+  /** ANALYSE-CLINE-1 — Memory Heatmap : scanne passivement les accès (lecture/écriture) sur tout l'espace mémoire du process attaché, borné par tick (voir HeatmapConfig::maxPagesPerTick côté backend). Vue dédiée : MemoryHeatmapView.vue. */
+  startMemoryHeatmap?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
+  stopMemoryHeatmap?(): Promise<Record<string, unknown>>
+  getMemoryHeatmapStatus?(): Promise<Record<string, unknown>>
+  getMemoryHeatmapData?(): Promise<Record<string, unknown>>
+
+  /** ANALYSE-CLINE-1 — Pattern Learning : classification de patterns mémoire (compteur/santé/flag/timer/coordonnée), détection de moteur de jeu, profils par jeu réutilisables. Vue dédiée : PatternLearningView.vue. Retours bruts (pas de champ `success`) : un QVariantMap/QVariantList vide signale un échec (moteur non initialisé, adresse invalide, profil introuvable...). */
+  isPatternLearningInitialized?(): Promise<boolean>
+  getPatternLearningStatistics?(): Promise<Record<string, unknown>>
+  detectGameEngine?(moduleNames: string[], memorySample: Record<string, unknown>): Promise<Record<string, unknown>>
+  classifyMemoryPattern?(addressHex: string, valueHistory: number[], timestamps: number[]): Promise<Record<string, unknown>>
+  loadGameProfile?(gameName: string): Promise<Record<string, unknown>>
+  saveGameProfile?(profile: Record<string, unknown>): Promise<boolean>
+  listKnownGameProfiles?(): Promise<string[]>
+  deleteGameProfile?(gameName: string): Promise<boolean>
+  suggestPatternResolutionPaths?(gameName: string, targetType: number): Promise<string[]>
+  suggestPatternValueTypes?(engineType: number, patternType: number): Promise<string[]>
+  getTopPatternSuggestions?(gameName: string, patternType: number, count: number): Promise<Array<Record<string, unknown>>>
   /** Sauvegarde un script Lua (texte brut) dans un profil, rejouable sans le retaper. */
   saveProfileLuaScript?(
     profileName: string,

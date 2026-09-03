@@ -77,7 +77,7 @@ export interface SessionPromotionResult {
   warnings: string[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
 
 export interface MemoryPreviewDecodedValue {
   label: string
@@ -2553,6 +2553,164 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // ANALYSE-CLINE-1 — Memory Heatmap (03/09/2026, Claude). Wrappers minces au
+  // même patron que les fonctions Timeline ci-dessus : traduisent la forme
+  // QVariantMap du backend, journalisent l'échec, ne dupliquent aucun état
+  // (MemoryHeatmapView.vue garde son propre état local).
+  async function startMemoryHeatmap(addressHex: string, options: Record<string, unknown>): Promise<boolean> {
+    const controller = backend.getController()
+    if (!controller.startMemoryHeatmap) return false
+    try {
+      const result = await controller.startMemoryHeatmap(addressHex, options)
+      if (result.success !== true) {
+        addActionLog('memory_heatmap', 'Heatmap non démarrée', String(result.error ?? ''), 'warning')
+      }
+      return result.success === true
+    } catch (e) {
+      addActionLog('memory_heatmap', 'Heatmap non démarrée', String(e), 'error')
+      return false
+    }
+  }
+
+  async function stopMemoryHeatmap(): Promise<Record<string, unknown> | null> {
+    const controller = backend.getController()
+    if (!controller.stopMemoryHeatmap) return null
+    try {
+      return await controller.stopMemoryHeatmap()
+    } catch (e) {
+      addActionLog('memory_heatmap', 'Arrêt heatmap échoué', String(e), 'warning')
+      return null
+    }
+  }
+
+  async function getMemoryHeatmapStatus(): Promise<Record<string, unknown> | null> {
+    const controller = backend.getController()
+    if (!controller.getMemoryHeatmapStatus) return null
+    try {
+      return await controller.getMemoryHeatmapStatus()
+    } catch {
+      return null
+    }
+  }
+
+  async function getMemoryHeatmapData(): Promise<Record<string, unknown> | null> {
+    const controller = backend.getController()
+    if (!controller.getMemoryHeatmapData) return null
+    try {
+      return await controller.getMemoryHeatmapData()
+    } catch {
+      return null
+    }
+  }
+
+  // ANALYSE-CLINE-1 — Pattern Learning (03/09/2026, Claude). Mêmes wrappers
+  // minces. Le backend ne renvoie pas de champ `success` pour ces méthodes
+  // (pass-through direct de PatternLearningManager) : un objet/tableau vide
+  // signale un échec (moteur non initialisé, adresse invalide, profil
+  // introuvable...), donc ces wrappers testent la présence de clés plutôt
+  // que `result.success`.
+  async function getPatternLearningStatistics(): Promise<Record<string, unknown> | null> {
+    const controller = backend.getController()
+    if (!controller.getPatternLearningStatistics) return null
+    try {
+      const result = await controller.getPatternLearningStatistics()
+      return Object.keys(result).length > 0 ? result : null
+    } catch {
+      return null
+    }
+  }
+
+  async function detectGameEngine(moduleNames: string[]): Promise<Record<string, unknown> | null> {
+    const controller = backend.getController()
+    if (!controller.detectGameEngine) return null
+    try {
+      const result = await controller.detectGameEngine(moduleNames, {})
+      return Object.keys(result).length > 0 ? result : null
+    } catch (e) {
+      addActionLog('pattern_learning', 'Détection de moteur échouée', String(e), 'warning')
+      return null
+    }
+  }
+
+  async function classifyMemoryPattern(
+    addressHex: string,
+    valueHistory: number[],
+    timestamps: number[],
+  ): Promise<Record<string, unknown> | null> {
+    const controller = backend.getController()
+    if (!controller.classifyMemoryPattern) return null
+    try {
+      const result = await controller.classifyMemoryPattern(addressHex, valueHistory, timestamps)
+      return Object.keys(result).length > 0 ? result : null
+    } catch (e) {
+      addActionLog('pattern_learning', 'Classification échouée', String(e), 'warning')
+      return null
+    }
+  }
+
+  async function loadGameProfile(gameName: string): Promise<Record<string, unknown> | null> {
+    const controller = backend.getController()
+    if (!controller.loadGameProfile) return null
+    try {
+      const result = await controller.loadGameProfile(gameName)
+      return Object.keys(result).length > 0 ? result : null
+    } catch (e) {
+      addActionLog('pattern_learning', 'Chargement du profil échoué', String(e), 'warning')
+      return null
+    }
+  }
+
+  async function saveGameProfile(profile: Record<string, unknown>): Promise<boolean> {
+    const controller = backend.getController()
+    if (!controller.saveGameProfile) return false
+    try {
+      const ok = await controller.saveGameProfile(profile)
+      if (!ok) {
+        addActionLog('pattern_learning', 'Sauvegarde du profil échouée', String(profile.gameName ?? ''), 'warning')
+      }
+      return ok
+    } catch (e) {
+      addActionLog('pattern_learning', 'Sauvegarde du profil échouée', String(e), 'error')
+      return false
+    }
+  }
+
+  async function listKnownGameProfiles(): Promise<string[]> {
+    const controller = backend.getController()
+    if (!controller.listKnownGameProfiles) return []
+    try {
+      return await controller.listKnownGameProfiles()
+    } catch {
+      return []
+    }
+  }
+
+  async function deleteGameProfile(gameName: string): Promise<boolean> {
+    const controller = backend.getController()
+    if (!controller.deleteGameProfile) return false
+    try {
+      return await controller.deleteGameProfile(gameName)
+    } catch (e) {
+      addActionLog('pattern_learning', 'Suppression du profil échouée', String(e), 'warning')
+      return false
+    }
+  }
+
+  async function getTopPatternSuggestions(
+    gameName: string,
+    patternType: number,
+    count: number,
+  ): Promise<Array<Record<string, unknown>>> {
+    const controller = backend.getController()
+    if (!controller.getTopPatternSuggestions) return []
+    try {
+      return await controller.getTopPatternSuggestions(gameName, patternType, count)
+    } catch (e) {
+      addActionLog('pattern_learning', 'Suggestions indisponibles', String(e), 'warning')
+      return []
+    }
+  }
+
   function luaProfileName(): string {
     return (processName.value || 'KillEngineTrainer')
       .replace(/\.[^.]+$/, '')
@@ -4041,6 +4199,18 @@ export const useAppStore = defineStore('app', () => {
     analyzeTimelineBehavior,
     predictTimelineNextValue,
     exportTimelineToJson,
+    startMemoryHeatmap,
+    stopMemoryHeatmap,
+    getMemoryHeatmapStatus,
+    getMemoryHeatmapData,
+    getPatternLearningStatistics,
+    detectGameEngine,
+    classifyMemoryPattern,
+    loadGameProfile,
+    saveGameProfile,
+    listKnownGameProfiles,
+    deleteGameProfile,
+    getTopPatternSuggestions,
     refreshSavedLuaScripts,
     saveLuaScript,
     loadSavedLuaScript,

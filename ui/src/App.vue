@@ -9,6 +9,8 @@ import InvestigationView from '@/views/InvestigationView.vue'
 import LexiconView from '@/views/LexiconView.vue'
 import MemoryView from '@/views/MemoryView.vue'
 import MemoryTimelineView from '@/views/MemoryTimelineView.vue'
+import MemoryHeatmapView from '@/views/MemoryHeatmapView.vue'
+import PatternLearningView from '@/views/PatternLearningView.vue'
 import NetworkView from '@/views/NetworkView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import ProcessView from '@/views/ProcessView.vue'
@@ -26,6 +28,8 @@ const currentView = computed(() => {
   if (store.activeView === 'investigation') return InvestigationView
   if (store.activeView === 'memory') return MemoryView
   if (store.activeView === 'memory-timeline') return MemoryTimelineView
+  if (store.activeView === 'memory-heatmap') return MemoryHeatmapView
+  if (store.activeView === 'pattern-learning') return PatternLearningView
   if (store.activeView === 'clr') return ClrInspectorView
   if (store.activeView === 'webview2') return WebView2InspectorView
   if (store.activeView === 'scripting') return ScriptingView
@@ -95,6 +99,20 @@ watch(
           @click="store.activeView = 'memory-timeline'"
         >
           Timeline
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'memory-heatmap' }"
+          @click="store.activeView = 'memory-heatmap'"
+        >
+          Heatmap
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'pattern-learning' }"
+          @click="store.activeView = 'pattern-learning'"
+        >
+          Pattern Learning
         </button>
         <button
           class="nav-item"

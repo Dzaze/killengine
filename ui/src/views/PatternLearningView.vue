@@ -1,0 +1,491 @@
+<script setup lang="ts">
+// ANALYSE-CLINE-1 — vue dédiée Pattern Learning (03/09/2026, Claude). Le
+// backend (core/pattern_learning/*, apps/desktop/pattern_learning_manager.*)
+// et les 18 méthodes Q_INVOKABLE existaient déjà depuis c9991c3
+// (02/09/2026) mais sans aucune vue. Couverture volontairement partielle
+// (statistiques, détection moteur, classification, profils, suggestions) —
+// voir docs/PHASE_TRACKER.md "ANALYSE-CLINE-1"/"PATTERN-LEARNING-1" pour ce
+// qui reste hors scope (clustering, suivi temps réel).
+import { computed, onMounted, ref } from 'vue'
+import { useAppStore } from '@/stores/app'
+import PanelIntro from '@/components/common/PanelIntro.vue'
+
+const store = useAppStore()
+
+const PATTERN_TYPE_NAMES = [
+  'Inconnu',
+  'Compteur de ressource',
+  'Points de vie',
+  'Drapeau d’état',
+  'Timer',
+  'Coordonnée',
+  'Référence UI',
+  'Bruit',
+]
+
+const statistics = ref<Record<string, unknown>>({})
+
+async function loadStatistics() {
+  const result = await store.getPatternLearningStatistics()
+  statistics.value = result ?? {}
+}
+
+// --- Détection de moteur ---
+const detectionResult = ref<Record<string, unknown> | null>(null)
+const detecting = ref(false)
+
+async function runDetectEngine() {
+  detecting.value = true
+  try {
+    const moduleNames = store.processModules.map((m) => m.name)
+    detectionResult.value = await store.detectGameEngine(moduleNames)
+  } finally {
+    detecting.value = false
+  }
+}
+
+// --- Classification de pattern ---
+const classifyAddress = ref('')
+const classifyValues = ref('')
+const classifying = ref(false)
+const classification = ref<Record<string, unknown> | null>(null)
+
+async function runClassify() {
+  const values = classifyValues.value
+    .split(',')
+    .map((v) => Number(v.trim()))
+    .filter((v) => !Number.isNaN(v))
+  if (!classifyAddress.value.trim() || values.length === 0) return
+  classifying.value = true
+  try {
+    const timestamps = values.map((_, i) => i * 100)
+    classification.value = await store.classifyMemoryPattern(classifyAddress.value.trim(), values, timestamps)
+  } finally {
+    classifying.value = false
+  }
+}
+
+// --- Profils ---
+const knownGames = ref<string[]>([])
+const selectedGame = ref('')
+const loadedProfile = ref<Record<string, unknown> | null>(null)
+const newGameName = ref('')
+const newExecutableName = ref('')
+const profileBusy = ref(false)
+
+async function refreshGames() {
+  knownGames.value = await store.listKnownGameProfiles()
+}
+
+async function loadSelectedProfile() {
+  if (!selectedGame.value) return
+  profileBusy.value = true
+  try {
+    loadedProfile.value = await store.loadGameProfile(selectedGame.value)
+  } finally {
+    profileBusy.value = false
+  }
+}
+
+async function deleteSelectedProfile() {
+  if (!selectedGame.value) return
+  profileBusy.value = true
+  try {
+    const ok = await store.deleteGameProfile(selectedGame.value)
+    if (ok) {
+      if (loadedProfile.value?.gameName === selectedGame.value) loadedProfile.value = null
+      selectedGame.value = ''
+      await refreshGames()
+    }
+  } finally {
+    profileBusy.value = false
+  }
+}
+
+async function createProfile() {
+  if (!newGameName.value.trim()) return
+  profileBusy.value = true
+  try {
+    const ok = await store.saveGameProfile({
+      gameName: newGameName.value.trim(),
+      executableName: newExecutableName.value.trim(),
+    })
+    if (ok) {
+      newGameName.value = ''
+      newExecutableName.value = ''
+      await refreshGames()
+    }
+  } finally {
+    profileBusy.value = false
+  }
+}
+
+// --- Suggestions ---
+const suggestGameName = ref('')
+const suggestPatternType = ref(1)
+const suggestCount = ref(5)
+const suggestions = ref<Array<Record<string, unknown>>>([])
+const suggesting = ref(false)
+
+async function runSuggestions() {
+  if (!suggestGameName.value.trim()) return
+  suggesting.value = true
+  try {
+    suggestions.value = await store.getTopPatternSuggestions(
+      suggestGameName.value.trim(),
+      suggestPatternType.value,
+      suggestCount.value,
+    )
+  } finally {
+    suggesting.value = false
+  }
+}
+
+const classificationReasoning = computed(() => (classification.value?.reasoning as string[] | undefined) ?? [])
+const profileKnownOffsets = computed(
+  () => (loadedProfile.value?.knownOffsets as Array<Record<string, unknown>> | undefined) ?? [],
+)
+
+onMounted(() => {
+  void loadStatistics()
+  void refreshGames()
+})
+</script>
+
+<template>
+  <div class="pattern-learning-view">
+    <div class="header">
+      <div>
+        <h1>Pattern Learning</h1>
+        <p>Classification de patterns mémoire et profils par jeu réutilisables.</p>
+      </div>
+    </div>
+
+    <PanelIntro
+      what="Classe automatiquement un historique de valeurs observées (compteur, santé, drapeau, timer, coordonnée...) et détecte le moteur de jeu (Unity/Unreal/Godot) à partir des modules chargés."
+      purpose="Réutiliser ce qui a déjà marché sur un jeu (offsets connus, chemins de résolution) plutôt que de repartir de zéro à chaque session."
+      how="Détecte le moteur depuis les modules du process attaché, classe un historique de valeurs collé à la main, ou charge/crée un profil par nom de jeu."
+    />
+
+    <section class="panel">
+      <h3>Statistiques</h3>
+      <div class="stats-row">
+        <div class="stat"><span class="stat-label">Jeux connus</span><span class="stat-value">{{ statistics.knownGames ?? '—' }}</span></div>
+        <div class="stat"><span class="stat-label">Signatures moteur</span><span class="stat-value">{{ statistics.engineSignaturesLoaded ?? '—' }}</span></div>
+        <div class="stat"><span class="stat-label">Règles de pattern</span><span class="stat-value">{{ statistics.patternRulesLoaded ?? '—' }}</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Détection de moteur</h3>
+      <p class="hint">
+        {{ store.isAttached ? `${store.processModules.length} module(s) chargé(s) sur ${store.processName}` : 'Aucun processus attaché — la détection utilisera une liste de modules vide.' }}
+      </p>
+      <button class="btn btn-secondary" :disabled="detecting" @click="runDetectEngine">
+        {{ detecting ? 'Détection…' : 'Détecter le moteur' }}
+      </button>
+      <div v-if="detectionResult" class="result-box">
+        <div><span class="k">Moteur</span><span class="v">{{ detectionResult.typeName }}</span></div>
+        <div v-if="detectionResult.version"><span class="k">Version</span><span class="v">{{ detectionResult.version }}</span></div>
+        <div><span class="k">Confiance</span><span class="v">{{ (Number(detectionResult.confidence) * 100).toFixed(0) }}%</span></div>
+        <div v-if="detectionResult.signature"><span class="k">Signature</span><span class="v mono">{{ detectionResult.signature }}</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Classifier un historique de valeurs</h3>
+      <div class="field-row">
+        <label>Adresse</label>
+        <input v-model="classifyAddress" placeholder="7ff600001234" />
+      </div>
+      <div class="field-row">
+        <label>Valeurs (séparées par des virgules)</label>
+        <input v-model="classifyValues" placeholder="100, 98, 95, 90, 85" />
+      </div>
+      <button class="btn btn-secondary" :disabled="classifying" @click="runClassify">
+        {{ classifying ? 'Classification…' : 'Classifier' }}
+      </button>
+      <div v-if="classification" class="result-box">
+        <div><span class="k">Type</span><span class="v">{{ classification.typeName }}</span></div>
+        <div><span class="k">Confiance</span><span class="v">{{ (Number(classification.confidence) * 100).toFixed(0) }}%</span></div>
+        <div v-if="classification.suggestedValueType"><span class="k">Type suggéré</span><span class="v">{{ classification.suggestedValueType }} (échelle {{ classification.suggestedScale }})</span></div>
+        <ul v-if="classificationReasoning.length > 0" class="reasoning">
+          <li v-for="(reason, i) in classificationReasoning" :key="i">{{ reason }}</li>
+        </ul>
+      </div>
+      <div v-else-if="classifying === false && classifyAddress" class="hint">Aucun résultat pour l'instant.</div>
+    </section>
+
+    <section class="panel">
+      <h3>Profils de jeu ({{ knownGames.length }})</h3>
+      <div class="profile-list">
+        <button
+          v-for="game in knownGames"
+          :key="game"
+          class="btn btn-secondary compact"
+          :class="{ active: selectedGame === game }"
+          @click="selectedGame = game"
+        >
+          {{ game }}
+        </button>
+        <span v-if="knownGames.length === 0" class="hint">Aucun profil enregistré.</span>
+      </div>
+      <div class="actions-row">
+        <button class="btn btn-secondary" :disabled="!selectedGame || profileBusy" @click="loadSelectedProfile">Charger</button>
+        <button class="btn btn-secondary" :disabled="!selectedGame || profileBusy" @click="deleteSelectedProfile">Supprimer</button>
+        <button class="btn btn-secondary compact" @click="refreshGames">Rafraîchir</button>
+      </div>
+
+      <div v-if="loadedProfile" class="result-box">
+        <div><span class="k">Jeu</span><span class="v">{{ loadedProfile.gameName }}</span></div>
+        <div v-if="loadedProfile.executableName"><span class="k">Exécutable</span><span class="v">{{ loadedProfile.executableName }}</span></div>
+        <div><span class="k">Moteur</span><span class="v">{{ loadedProfile.engineTypeName }} {{ loadedProfile.engineVersion }}</span></div>
+        <div><span class="k">Sessions</span><span class="v">{{ loadedProfile.sessionCount ?? 0 }}</span></div>
+        <div v-if="profileKnownOffsets.length > 0" class="table-wrap">
+          <table>
+            <thead><tr><th>Nom</th><th>Offset</th><th>Type</th><th>Échelle</th><th>Stabilité</th></tr></thead>
+            <tbody>
+              <tr v-for="(offset, i) in profileKnownOffsets" :key="i">
+                <td>{{ offset.name }}</td>
+                <td class="mono">{{ offset.offset }}</td>
+                <td>{{ offset.valueType }}</td>
+                <td>{{ offset.scale }}</td>
+                <td>{{ (Number(offset.stabilityScore) * 100).toFixed(0) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="create-row">
+        <input v-model="newGameName" placeholder="Nom du jeu" />
+        <input v-model="newExecutableName" placeholder="Exécutable (optionnel)" />
+        <button class="btn btn-secondary compact" :disabled="!newGameName.trim() || profileBusy" @click="createProfile">Créer profil vide</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Suggestions</h3>
+      <div class="field-row">
+        <label>Jeu</label>
+        <input v-model="suggestGameName" placeholder="Nom du jeu" />
+      </div>
+      <div class="field-row">
+        <label>Type de pattern</label>
+        <select v-model.number="suggestPatternType">
+          <option v-for="(name, idx) in PATTERN_TYPE_NAMES" :key="idx" :value="idx">{{ name }}</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label>Nombre</label>
+        <input v-model.number="suggestCount" type="number" min="1" max="20" />
+      </div>
+      <button class="btn btn-secondary" :disabled="!suggestGameName.trim() || suggesting" @click="runSuggestions">
+        {{ suggesting ? 'Recherche…' : 'Suggestions' }}
+      </button>
+      <div v-if="suggestions.length > 0" class="table-wrap">
+        <table>
+          <thead><tr><th>Nom</th><th>Adresse</th><th>Type</th><th>Échelle</th><th>Stabilité</th></tr></thead>
+          <tbody>
+            <tr v-for="(s, i) in suggestions" :key="i">
+              <td>{{ s.name }}</td>
+              <td class="mono">{{ s.address }}</td>
+              <td>{{ s.valueType }}</td>
+              <td>{{ s.scale }}</td>
+              <td>{{ (Number(s.stabilityScore) * 100).toFixed(0) }}%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else-if="suggesting === false && suggestGameName" class="hint">Aucune suggestion pour l'instant.</div>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+.pattern-learning-view {
+  padding: 24px 32px;
+  max-width: 1100px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.header h1 {
+  color: var(--text-primary);
+  font-size: 22px;
+}
+
+.header p {
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 14px;
+}
+
+.panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.hint {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin: 0 0 10px 0;
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 16px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  max-width: 420px;
+}
+
+.field-row label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.field-row input,
+.field-row select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.result-box {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  font-size: 13px;
+}
+
+.result-box > div {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.result-box .k {
+  color: var(--text-dim);
+  min-width: 110px;
+}
+
+.result-box .v {
+  color: var(--text-primary);
+}
+
+.result-box .v.mono {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+}
+
+.reasoning {
+  margin: 8px 0 0 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+
+.profile-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.profile-list .btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.actions-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.create-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.create-row input {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 160px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 500;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.mono {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  color: var(--text-primary);
+}
+</style>
