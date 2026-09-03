@@ -88,8 +88,8 @@ Absente de `docs/AUTOMATION_API_REFERENCE.md` (snapshot généré le 30/08/2026,
 | `detectTimelinePatterns(addressHex)` | hex string | `success`, `address`, `patterns` (liste : `type` ex. `step_function`/`cyclic`/`linear`, `confidence`, `description`, `correlationScore`, `periodMs`, `slope`) — peut être `[]` si aucun pattern au-dessus du seuil de confiance |
 | `analyzeTimelineBehavior(addressHex)` | hex string | `success`, `behavior` (`changesPerSecond`, `regularityScore`, `distinctValueCount`, `minValueHex`, `maxValueHex`, `mostCommonValueHex`, `typicalResponseTimeMs`, `hasBurstBehavior`) |
 | `predictTimelineNextValue(addressHex)` | hex string | `success`, `address`, `valueHex`, `changeProbability` |
-
-**Non exposé au pipe** (existe seulement sur `MemoryTimelineManager`, pas sur `ApplicationController`) : `findCorrelations`, `generateReport`. Un agent qui a besoin de corrélations entre séries doit pour l'instant les calculer lui-même à partir de `getAllTimelineSeries()`.
+| `findTimelineCorrelations()` (ajouté 03/09/2026) | aucun | `success`, `correlations` (liste : `addressA`, `addressB`, `pearsonCoefficient`, `timeLagMs`, `isLeading`) — compare toutes les paires parmi les séries actuellement collectées |
+| `generateTimelineReport()` (ajouté 03/09/2026) | aucun | `success`, `report` (texte résumant patterns/comportement par série) |
 
 ### Référence exhaustive de toutes les méthodes
 

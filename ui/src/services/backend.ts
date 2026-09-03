@@ -1707,10 +1707,13 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   findStableTimelineAddresses?(minDurationMs: number): Promise<Record<string, unknown>>
   exportTimelineToJson?(): Promise<Record<string, unknown>>
   exportTimelineToCsv?(): Promise<Record<string, unknown>>
-  /** Non implémentées côté backend (MemoryTimelineAnalyzer sans logique) — retournent {success:false, error}. */
+  /** Analyses avancées MemoryTimelineAnalyzer (implémenté le 03/09/2026). */
   detectTimelinePatterns?(addressHex: string): Promise<Record<string, unknown>>
   analyzeTimelineBehavior?(addressHex: string): Promise<Record<string, unknown>>
   predictTimelineNextValue?(addressHex: string): Promise<Record<string, unknown>>
+  /** Corrélations entre toutes les séries surveillées + rapport texte (ajoutés le 03/09/2026). */
+  findTimelineCorrelations?(): Promise<Record<string, unknown>>
+  generateTimelineReport?(): Promise<Record<string, unknown>>
 
   /** ANALYSE-CLINE-1 — Memory Heatmap : scanne passivement les accès (lecture/écriture) sur tout l'espace mémoire du process attaché, borné par tick (voir HeatmapConfig::maxPagesPerTick côté backend). Vue dédiée : MemoryHeatmapView.vue. */
   startMemoryHeatmap?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>

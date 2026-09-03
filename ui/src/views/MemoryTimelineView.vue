@@ -3,7 +3,7 @@
     <PanelIntro
       what="Un visualiseur de l'évolution temporelle des valeurs mémoire — courbe de valeur au fil du temps pour un ensemble d'adresses surveillées."
       purpose="Repérer des cycles (timers, animations), des adresses volatiles vs stables, et suivre visuellement comment une valeur évolue pendant que le jeu tourne."
-      how="Ajoute une ou plusieurs adresses, démarre la collecte, puis sélectionne une adresse pour voir sa courbe. La détection de patterns/profil comportemental/prédiction reste à implémenter (non disponible pour l'instant)."
+      how="Ajoute une ou plusieurs adresses, démarre la collecte, puis sélectionne une adresse pour voir sa courbe. Détection de patterns, profil comportemental, prédiction, corrélations entre adresses et rapport texte disponibles depuis l'onglet Analyse rapide."
     />
 
     <!-- Configuration Panel -->
@@ -175,6 +175,8 @@
         <button @click="findStable">Trouver stables</button>
         <button @click="analyzeBehavior">Profil comportemental</button>
         <button @click="predictNext">Prédiction</button>
+        <button @click="findCorrelations">Corrélations</button>
+        <button @click="generateReport">Rapport texte</button>
       </div>
       
       <!-- Results -->
@@ -360,6 +362,21 @@ async function predictNext() {
     `Probabilité de changement: ${(Number(prediction.changeProbability) * 100).toFixed(1)}%`,
     `Valeur prédite: ${String(prediction.predictedValueHex)}`
   ]
+}
+
+async function findCorrelations() {
+  const correlations = await store.findTimelineCorrelations()
+  quickResults.value = correlations.length > 0
+    ? correlations.map((c: any) =>
+        `${c.addressA} ↔ ${c.addressB} : r=${Number(c.pearsonCoefficient).toFixed(2)}` +
+        (c.timeLagMs ? `, décalage ${Number(c.timeLagMs).toFixed(0)}ms` : '') +
+        (c.isLeading ? ' (A mène B)' : ''))
+    : ['Aucune corrélation trouvée (au moins 2 adresses surveillées avec des données requises)']
+}
+
+async function generateReport() {
+  const report = await store.generateTimelineReport()
+  quickResults.value = report ? report.split('\n').filter(line => line.trim() !== '') : ['Rapport non disponible']
 }
 
 // Chart drawing

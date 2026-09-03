@@ -1203,6 +1203,15 @@ public:
     Q_INVOKABLE QVariantMap analyzeTimelineBehavior(const QString& addressHex);
     Q_INVOKABLE QVariantMap predictTimelineNextValue(const QString& addressHex);
 
+    /// Corrélations entre toutes les séries surveillées actuellement (pas de
+    /// paramètre d'adresse — compare toutes les paires). Rapport texte
+    /// résumant patterns/corrélations/profils sur l'ensemble des séries.
+    /// Ajoutés le 03/09/2026 (Claude) : la logique existait déjà sur
+    /// MemoryTimelineManager depuis le câblage initial mais n'était pas
+    /// exposée ici ni côté frontend.
+    Q_INVOKABLE QVariantMap findTimelineCorrelations();
+    Q_INVOKABLE QVariantMap generateTimelineReport();
+
     /// PROPOSITIONS-1 #2 — Pattern Learning : classification de patterns
     /// mémoire (compteur/santé/flag/timer/coordonnée), détection de moteur
     /// de jeu (Unity/Unreal/Godot), profils par jeu réutilisables entre

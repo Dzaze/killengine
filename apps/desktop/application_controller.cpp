@@ -5690,6 +5690,17 @@ QVariantMap ApplicationController::predictTimelineNextValue(const QString& addre
     return m_memoryTimelineManager->predictNextValue(addressHex);
 }
 
+QVariantMap ApplicationController::findTimelineCorrelations() {
+    QVariantMap result;
+    result["success"] = true;
+    result["correlations"] = m_memoryTimelineManager->findCorrelations();
+    return result;
+}
+
+QVariantMap ApplicationController::generateTimelineReport() {
+    return m_memoryTimelineManager->generateReport();
+}
+
 bool ApplicationController::isPatternLearningInitialized() const {
     return m_patternLearningManager->isInitialized();
 }

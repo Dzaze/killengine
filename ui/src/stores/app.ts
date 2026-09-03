@@ -2541,6 +2541,38 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function findTimelineCorrelations(): Promise<Array<Record<string, unknown>>> {
+    const controller = backend.getController()
+    if (!controller.findTimelineCorrelations) return []
+    try {
+      const result = await controller.findTimelineCorrelations()
+      if (result.success !== true) {
+        addActionLog('memory_timeline', 'Recherche de corrélations non disponible', String(result.error ?? ''), 'warning')
+        return []
+      }
+      return (result.correlations as Array<Record<string, unknown>>) ?? []
+    } catch (e) {
+      addActionLog('memory_timeline', 'Recherche de corrélations non disponible', String(e), 'error')
+      return []
+    }
+  }
+
+  async function generateTimelineReport(): Promise<string | null> {
+    const controller = backend.getController()
+    if (!controller.generateTimelineReport) return null
+    try {
+      const result = await controller.generateTimelineReport()
+      if (result.success !== true) {
+        addActionLog('memory_timeline', 'Génération de rapport non disponible', String(result.error ?? ''), 'warning')
+        return null
+      }
+      return (result.report as string) ?? null
+    } catch (e) {
+      addActionLog('memory_timeline', 'Génération de rapport non disponible', String(e), 'error')
+      return null
+    }
+  }
+
   async function exportTimelineToJson(): Promise<string | null> {
     const controller = backend.getController()
     if (!controller.exportTimelineToJson) return null
@@ -4198,6 +4230,8 @@ export const useAppStore = defineStore('app', () => {
     findStableTimelineAddresses,
     analyzeTimelineBehavior,
     predictTimelineNextValue,
+    findTimelineCorrelations,
+    generateTimelineReport,
     exportTimelineToJson,
     startMemoryHeatmap,
     stopMemoryHeatmap,
