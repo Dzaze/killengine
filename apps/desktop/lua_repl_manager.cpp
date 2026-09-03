@@ -20,7 +20,15 @@ namespace killengine {
 
 namespace {
 
-const QByteArray kSentinel = "\x01KE_REPL_END\x01\n";
+// Pas de \n final ici, volontairement : le driver (killengine_repl_driver.lua)
+// écrit SENTINEL suivi d'un "\n", mais sous Windows le CRT du process lua.exe
+// traduit ce "\n" en "\r\n" avant qu'il n'atteigne le pipe (mode texte
+// standard de stdout) -- un sentinel exigeant un "\n" brut ne matchait donc
+// jamais, et chaque ligne timeoutait après 15s malgré une exécution Lua
+// réussie (bug live trouvé le 03/09/2026 en testant le REPL via le pipe
+// d'automation contre une vraie KillEngine.exe). Le reliquat de saut de
+// ligne après le marqueur est avalé explicitement dans workerLoop().
+const QByteArray kSentinel = "\x01KE_REPL_END\x01";
 const QByteArray kStopCommand = "\x01KE_REPL_STOP\x01";
 
 QString readFileText(const QString& path) {
@@ -306,6 +314,14 @@ void LuaReplManager::workerLoop(QString luaPath, QString driverPath, QString hel
         if (extraction.found) {
             output = extraction.output;
             stdoutBuffer = extraction.remaining;
+            // Avale le saut de ligne qui suivait le marqueur (voir kSentinel
+            // ci-dessus) pour qu'il ne fuite pas en tête de la sortie de la
+            // prochaine commande.
+            if (stdoutBuffer.startsWith("\r\n")) {
+                stdoutBuffer.remove(0, 2);
+            } else if (stdoutBuffer.startsWith('\n')) {
+                stdoutBuffer.remove(0, 1);
+            }
         } else {
             output = QString::fromUtf8(stdoutBuffer);
             stdoutBuffer.clear();
