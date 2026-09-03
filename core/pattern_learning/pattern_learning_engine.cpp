@@ -536,8 +536,15 @@ std::vector<PatternLearningEngine::Cluster> PatternLearningEngine::clusterAddres
     
     std::vector<Cluster> clusters;
     if (addresses.empty() || features.empty()) return clusters;
-    
-    // Simple k-means clustering (k=3 for Resource/Health/Other)
+    // Durci (03/09/2026, Claude) : la boucle d'assignation ci-dessous indexe
+    // features[i] pour i jusqu'à addresses.size()-1, et l'initialisation des
+    // centroïdes pioche aussi dans features via un index tiré entre 0 et
+    // addresses.size()-1 -- un appelant (pipe/frontend) qui passe des listes
+    // de tailles différentes provoquait un accès hors limites sur un
+    // std::vector (comportement indéfini, plantage du process), jamais
+    // détecté car jamais testé jusqu'ici. Refuser proprement plutôt que
+    // deviner un remplissage.
+    if (addresses.size() != features.size()) return clusters;
     const int k = 3;
     std::vector<int> assignments(addresses.size(), 0);
     
