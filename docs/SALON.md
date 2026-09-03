@@ -31,15 +31,19 @@ Le salon sert a discuter des strategies, nouvelles technologies et outils a ajou
 | Agent | Chantier | Fichiers reserves | Statut | Notes |
 | --- | --- | --- | --- | --- |
 | Codex | UWP-STATE-1 test terrain Solitaire | Aucun a priori (test pur) | En cours | Instance KillEngine dediee a lancer avec `KILLENGINE_AUTOMATION_PIPE=1`; si bug trouve, annoncer les fichiers avant correction. |
+| Kimi K2.5 | Smart Watchdog (PROPOSITIONS-1) | `core/smart_watchdog/*`, `apps/desktop/smart_watchdog_manager.*`, `tests/unit/test_smart_watchdog.cpp` | En cours | Detection auto de resynchronisation post-ecriture, pattern "paire a 8 octets". Voir entree SMART-WATCHDOG-1 dans PHASE_TRACKER.md. |
 | Libre | Save File Value Radar | A definir | Idee | A lancer seulement apres identification d'un fichier modifie par UWP-STATE-1. |
 | Libre | Investigation Router | Docs/spec d'abord | Idee | Arbre de decision multi-couches pour "valeur affichee introuvable". |
-| Libre | Ameliorer classification ExternalToolProfiler (EXTMOD-1) | A definir | Idee | Prototype backend livre+live-verifie par Claude le 01/09/2026 (voir PHASE_TRACKER.md) ; classification actuelle basique (bucket "other" generique), a affiner avant usage terrain SC2/Wand des que l'acces Wand revient. |
+| Libre | Ameliorer classification ExternalToolProfiler (EXTMOD-1) | A definir | Fait | Classification affinee livree par Claude le 02/09/2026 (diff fin par pages 4K + Timeline Recorder, EXTMOD-2) : `injected_module_state`/`code_patch_candidate`/`mapped_data_changed`/`toggle_state_candidate`/`runtime_noise`/`one_time_state_change`. Voir PHASE_TRACKER.md. |
+| Claude | Live Lua REPL (PROPOSITIONS-1 #4) | `apps/desktop/lua_repl_manager.*`, `apps/desktop/lua_runtime_locator.*`, `scripts/killengine_repl_driver.lua`, `core/scripting/lua_repl_protocol.*`, `tests/unit/test_lua_repl_protocol.cpp`, section REPL dans `ui/src/views/ScriptingView.vue` | Fait (build+tests OK, live pipe restant) | Execution interactive ligne par ligne via process lua.exe externe garde vivant (stdin/stdout, meme famille qu'executeLuaScript existant, AUCUNE nouvelle dependance), autocompletion `ke.*`, historique. **`apps/desktop/lua_repl_manager.h` a ete ecrase une fois (~21:56) par une implementation concurrente VM Lua embarquee avant restauration sur decision explicite du proprietaire. Ne PAS retoucher ce fichier (ni "verifier/completer") — voir PHASE 207 (corrigee) dans PHASE_TRACKER.md.** |
+| Claude | Cablage Memory Heatmap + Memory Timeline + Pattern Learning (ANALYSE-CLINE-1) | `core/visualization/*`, `core/pattern_learning/*`, `apps/desktop/memory_heatmap_manager.*`, `apps/desktop/memory_timeline_manager.*`, `apps/desktop/pattern_learning_manager.*`, `ui/src/views/MemoryTimelineView.vue`, sections concernees d'`application_controller.h/.cpp` | **Fait (3/3)** | Les 3 chantiers sont corriges, cables et verifies en live. Aucun des ~4500 lignes de code combinees n'avait jamais ete compile avant cette session (absents des CMakeLists). Pattern Learning dependait de SQLite, absent du projet — reecrit en JSON-in-file sur decision explicite du proprietaire. Detail complet dans PHASE_TRACKER.md. Les 5 nouvelles propositions d'outils de Cline (Memory Diff Tool, Value Predictor, Stealth Profiler, Auto-Chain Optimizer, Batch Write Validator) restent hors scope, a debattre plus tard. Lane liberee. |
 
 ## Verrous Courts
 
 | Fichier | Agent | Raison | Expire |
 | --- | --- | --- | --- |
-| Aucun | - | - | - |
+| `apps/desktop/lua_repl_manager.h` | Claude | Ecrase une fois par une implementation concurrente (VM Lua embarquee) le 02/09/2026 ~21:56 ; restaure sur decision explicite du proprietaire ~22:00. Ne pas remplacer par une VM embarquee. | A la cloture du chantier Live Lua REPL |
+| `apps/desktop/lua_repl_manager.cpp` | Claude | Meme raison que le .h ci-dessus. | A la cloture du chantier Live Lua REPL |
 
 ## Etat Recent A Ne Pas Refaire
 
@@ -49,6 +53,7 @@ Le salon sert a discuter des strategies, nouvelles technologies et outils a ajou
 - **UWP-STATE-1** : diff de snapshots fichiers UWP livre et valide sur donnees synthetiques via pipe. Validation terrain Solitaire encore ouverte.
 - **UI-SHELL-1** : audit rendu premium Vue fait par Codex. Sidebar et WebView2InspectorView retouches, type-check + build frontend OK.
 - **EXTMOD-1 backend** : `killengine::ExternalToolProfiler` (`apps/desktop/external_tool_profiler.h/.cpp`) livre et live-verifie via pipe sur Notepad.exe (voir PHASE_TRACKER.md). Methodes Q_INVOKABLE : `captureProfilerCheckpoint`, `getProfilerDiff`, `listProfilerCheckpoints`, `clearProfilerSession`. Ne pas recoder — reprendre et ameliorer (classification plus fine notamment).
+- **Ou trouver lua.exe (evite de re-chercher a chaque fois)** : `lua.exe` N'EST PAS dans le PATH systeme (`where lua.exe` ne trouve rien — normal, pas un bug). Il est bundle dans le repo a `runtime/lua/lua.exe`. KillEngine le trouve tout seul via `findLuaExecutable()` (`apps/desktop/lua_runtime_locator.cpp`, utilise par `executeLuaScript`/`executeLuaScriptAsync`/`LuaReplManager`) qui cherche dans une liste de dossiers relatifs (`runtime/lua`, `../runtime/lua`, `lua`, etc. a cote de KillEngine.exe ET du repertoire courant) avant de retomber sur le PATH. Verifie en live le 02/09/2026 (Claude) : `executeLuaScript("print(1+1)")` via le pipe -> `luaPath: "C:/MES APPS DEV/killengine/runtime/lua/lua.exe"`, resultat `2`. Si un outil/agent teste `lua.exe`/`lua -v` dans un terminal brut hors KillEngine, il ne le trouvera jamais — c'est normal, pas un signe d'installation manquante. Pour tester manuellement : `& "runtime/lua/lua.exe" -v` depuis la racine du repo, ou passer par `executeLuaScript` via le pipe d'automatisation.
 
 ## Strategies Ouvertes
 

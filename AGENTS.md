@@ -65,12 +65,9 @@ Le dépôt contient plus d'une vingtaine de fichiers `.md`. Cette carte existe p
 | **`model/README.md`** (+ `model/assistant/`, `model/auto_resolver/`, `model/qwen/README.md`) | Convention du dossier des agents IA embarqués (manifests JSON, poids GGUF partagés) | Si la tâche touche le tool-calling IA local ou l'ajout d'un agent embarqué |
 | **`docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md`** | Architecture préparatoire du connecteur kernel : pont user-mode probe-only, contrat IOCTL minimal, garde-fous et non-objectifs | Avant toute discussion ou modification touchant un éventuel driver noyau |
 
-### 🗄️ Historique / legacy — **ne pas prendre pour l'état actuel du projet**
+### 🗄️ Historique / legacy
 
-| Fichier | Rôle | Piège à éviter |
-| --- | --- | --- |
-| **`message entre ia.md`** | Log de session ad-hoc du 09/08/2026, antérieur à la mise en place de `docs/PHASE_TRACKER.md` | Superseded — ne plus y écrire, `PHASE_TRACKER.md` est le seul journal à jour |
-| **`docs/SC2_IMPROVEMENT_ANALYSIS.md`** | Diagnostic d'origine de pourquoi SC2 posait problème (freeze en polling, pas de `VirtualProtectEx`, pas de breakpoint pour remonter à la source) | Tout ce que ce document liste comme "non implémenté" est livré depuis (voir `POWER_UP_ROADMAP.md` sections A et F) — utile pour le contexte du diagnostic d'origine, pas pour le statut actuel |
+Les anciens fichiers legacy qui contredisaient l'état courant ont été purgés le 02/09/2026. Ne recréer un fichier historique séparé que si son contenu n'est pas déjà couvert par `docs/PHASE_TRACKER_HISTORY.md`.
 
 ### 🔧 Référence rapide
 

@@ -151,7 +151,7 @@ candidates_next_scan_filter      420.00       249800     18000000 stream address
 
 1. **Machine dépendante** : les valeurs absolues dépendent du CPU, du disque, de la charge système. Toujours comparer des runs sur la même machine, idéalement au repos.
 2. **KillEngineTestTarget est petit** (~quelques Mo de mémoire writable). Les métriques de scan sont donc peu stressantes ; le volume synthétique compense pour le `CandidateStore`.
-3. **Pas de scan réel "gros jeu"** : pour des scénarios type SC2 (plusieurs Go de mémoire), il faut lancer l'app réelle. Ce benchmark ne remplace pas le test manuel SC2 documenté dans `docs/SC2_IMPROVEMENT_ANALYSIS.md`.
+3. **Pas de scan réel "gros jeu"** : pour des scénarios type SC2 (plusieurs Go de mémoire), il faut lancer l'app réelle. Ce benchmark ne remplace pas les protocoles terrain SC2 documentés dans `SC2.md` et `docs/PHASE_TRACKER.md`.
 4. **Unknown compare `Changed`** : sur le target de test, la quantité de changements entre capture et compare dépend du timer de bruit interne du target ; les `matches` peuvent varier légèrement.
 5. **Génération synthétique** : utilise `std::rand()` (PRNR déterministe via graine fixe 42) pour la reproductibilité, mais ne reflète pas la distribution réelle d'un jeu.
 6. **Stockage temporaire** : le benchmark force `setFileBackedThreshold(1)` pour exercer le code file-backed ; en production, le seuil par défaut est 250 000. La valeur `0` désactive le basculement file-backed.

@@ -89,7 +89,7 @@ SC2 met à jour ses valeurs ~60 fois par seconde (toutes les ~16 ms). Le freeze 
 ### Cause 3 : Tu as trouvé la valeur "displayed", pas la "real"
 SC2 stocke souvent une valeur d'affichage ET une valeur réelle. Si tu freezes l'affichage, le jeu la réécrit depuis la vraie source.
 
-**Solution** : Il faut remonter à l'instruction qui écrit (find what writes), puis à la source gameplay. Voir `docs/SC2_IMPROVEMENT_ANALYSIS.md` pour les détails techniques.
+**Solution** : Il faut remonter à l'instruction qui écrit (`findWhatWrites` / `findWhatAccesses`), puis à la source gameplay. Les capacités modernes correspondantes sont suivies dans `docs/POWER_UP_ROADMAP.md` et leurs validations passées dans `docs/PHASE_TRACKER_HISTORY.md`.
 
 ### Cause 4 : Profondeur de scan insuffisante
 Voir la section en haut de ce document : SC2 consomme 2–3 Go de RAM, le snapshot unknown par défaut (128 Mo) ne couvre que ~5 % de la mémoire.
@@ -107,4 +107,4 @@ Voir la section en haut de ce document : SC2 consomme 2–3 Go de RAM, le snapsh
 6. Find what writes : (Phase 17 future) pour remonter à la vraie source
 ```
 
-Pour l'analyse technique complète des approches alternatives (hardware breakpoints, page guards, DLL injection), voir **`docs/SC2_IMPROVEMENT_ANALYSIS.md`**.
+Pour les approches modernes utiles sur SC2 (hardware breakpoints, page guards, DLL injection, stealth), voir `docs/POWER_UP_ROADMAP.md` et le protocole actif `EXTMOD-2-SC2-REPRISE` dans `docs/PHASE_TRACKER.md`.

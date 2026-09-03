@@ -22,11 +22,17 @@
 #include "freeze_hotkey_overlay_manager.h"
 #include "investigation_notebook_manager.h"
 #include "kernel_driver_manager.h"
+#include "lua_repl_manager.h"
+#include "lua_runtime_locator.h"
+#include "memory_heatmap_manager.h"
+#include "memory_timeline_manager.h"
+#include "pattern_learning_manager.h"
 #include "profile_manager.h"
 #include "save_file_investigator.h"
 #include "scanning_core_manager.h"
 #include "settings_diagnostics_manager.h"
 #include "smart_search_manager.h"
+#include "smart_watchdog_manager.h"
 #include "write_freeze_core_manager.h"
 #include "query_text_utils.h"
 #include "model_locator.h"
@@ -238,70 +244,6 @@ QVariantList webView2TargetsToVariantList(const QJsonArray& targets) {
 
 QVariantMap webView2TargetToVariantMap(const QJsonObject& target) {
     return target.toVariantMap();
-}
-
-QString findLuaExecutable(const QString& overridePath = {}) {
-    const QString trimmedOverride = overridePath.trimmed();
-    if (!trimmedOverride.isEmpty()) {
-        const QFileInfo overrideFile(trimmedOverride);
-        if (overrideFile.exists() && overrideFile.isFile()) {
-            return overrideFile.absoluteFilePath();
-        }
-    }
-
-    const QDir appDir(QCoreApplication::applicationDirPath());
-    const QStringList executableNames = {
-        QStringLiteral("lua.exe"),
-        QStringLiteral("lua54.exe"),
-        QStringLiteral("lua5.4.exe"),
-        QStringLiteral("luajit.exe"),
-    };
-    const QStringList bundledDirectories = {
-        appDir.filePath("runtime/lua"),
-        appDir.filePath("lua"),
-        appDir.absolutePath(),
-        appDir.filePath("../runtime/lua"),
-        appDir.filePath("../../runtime/lua"),
-        QDir::current().filePath("runtime/lua"),
-        QDir::current().filePath("third_party/lua"),
-        QDir::current().filePath("third_party/lua/bin"),
-        QDir::current().filePath("tools/lua"),
-    };
-    for (const auto& directory : bundledDirectories) {
-        const QDir dir(directory);
-        for (const auto& name : executableNames) {
-            const QFileInfo file(dir.filePath(name));
-            if (file.exists() && file.isFile()) {
-                return file.absoluteFilePath();
-            }
-        }
-    }
-
-    for (const auto& name : executableNames) {
-        const QString found = QStandardPaths::findExecutable(name);
-        if (!found.isEmpty()) {
-            return found;
-        }
-    }
-
-    return {};
-}
-
-QString findKillEngineLuaHelper() {
-    const QDir appDir(QCoreApplication::applicationDirPath());
-    const QStringList candidates = {
-        appDir.filePath("scripts/killengine.lua"),
-        appDir.filePath("../scripts/killengine.lua"),
-        appDir.filePath("../../scripts/killengine.lua"),
-        QDir::current().filePath("scripts/killengine.lua"),
-    };
-    for (const auto& candidate : candidates) {
-        const QFileInfo file(candidate);
-        if (file.exists() && file.isFile()) {
-            return file.absoluteFilePath();
-        }
-    }
-    return {};
 }
 
 /// Résultat interne partagé par executeLuaScript (bloquant) et
@@ -565,6 +507,7 @@ QVariantMap memoryStatsToVariantMap(const killcore::MemoryMapStats& stats) {
 
 double bytesToDouble(const QByteArray& bytes, killcore::ValueType type);
 QString bytesToHex(const QByteArray& bytes);
+std::optional<uint64_t> bytesToWatchValue(const QByteArray& bytes);
 
 QVariantMap candidateToVariantMap(const killcore::Candidate& candidate) {
     QVariantMap entry;
@@ -1204,6 +1147,16 @@ QString explicitValueTypeFromText(const QString& text) {
 
 QString bytesToHex(const QByteArray& bytes) {
     return QString::fromLatin1(bytes.toHex(' '));
+}
+
+std::optional<uint64_t> bytesToWatchValue(const QByteArray& bytes) {
+    if (bytes.isEmpty() || bytes.size() > static_cast<int>(sizeof(uint64_t))) {
+        return std::nullopt;
+    }
+
+    uint64_t value = 0;
+    std::memcpy(&value, bytes.constData(), static_cast<size_t>(bytes.size()));
+    return value;
 }
 
 QStringList killengineTemporaryFileNames() {
@@ -1926,21 +1879,69 @@ ApplicationController::ApplicationController(QObject* parent)
     m_scanningCoreManager = std::make_unique<ScanningCoreManager>(*this, this);
     m_settingsDiagnosticsManager = std::make_unique<SettingsDiagnosticsManager>(*this);
     m_smartSearchManager = std::make_unique<SmartSearchManager>(*this);
-    m_uiStringInvestigator = std::make_unique<UiStringInvestigator>(
-        m_handle,
-        [this](const QString& event, const QVariantMap& payload) {
-            appendScanTelemetry(event, payload);
-        },
-        [](const QVariantMap& expertOptions) {
-            return scanOptionsFromSettingsAndExpertOptions(expertOptions);
-        },
-        [this]() {
-            emit scanStarted();
-        },
-        [this](int percent) {
-            emit scanProgress(percent);
+    m_smartWatchdogManager = std::make_unique<SmartWatchdogManager>(this);
+    m_smartWatchdogManager->setReadValueCallback([this](uint64_t address, uint32_t size) -> std::optional<uint64_t> {
+        if (!m_attached || !m_handle.isValid() || size == 0 || size > sizeof(uint64_t)) {
+            return std::nullopt;
+        }
+
+        killcore::MemoryReader reader(m_handle);
+        const auto read = reader.read(address, size);
+        if (!read.success || read.data.size() < static_cast<int>(size)) {
+            return std::nullopt;
+        }
+        return bytesToWatchValue(read.data.left(static_cast<int>(size)));
+    });
+    connect(m_smartWatchdogManager.get(), &SmartWatchdogManager::resyncDetected, this, [this](uint64_t address, const QString& suggestion) {
+        appendScanTelemetry("smart_watchdog_resync", {
+            {"address", QString::number(address, 16).toUpper()},
+            {"suggestion", suggestion},
         });
-    m_clrInspectorBridge = std::make_unique<ClrInspectorBridge>(
+    });
+    connect(m_smartWatchdogManager.get(), &SmartWatchdogManager::writeConfirmedStable, this, [this](uint64_t address) {
+        appendScanTelemetry("smart_watchdog_stable", {
+            {"address", QString::number(address, 16).toUpper()},
+        });
+    });
+    connect(m_smartWatchdogManager.get(), &SmartWatchdogManager::twinPatternDetected, this, [this](uint64_t displayAddress, uint64_t sourceAddress) {
+        appendScanTelemetry("smart_watchdog_twin_pattern", {
+            {"displayAddress", QString::number(displayAddress, 16).toUpper()},
+            {"sourceAddress", QString::number(sourceAddress, 16).toUpper()},
+        });
+    });
+      m_uiStringInvestigator = std::make_unique<UiStringInvestigator>(
+          m_handle,
+          [this](const QString& event, const QVariantMap& payload) {
+              appendScanTelemetry(event, payload);
+          },
+          [](const QVariantMap& expertOptions) {
+              return scanOptionsFromSettingsAndExpertOptions(expertOptions);
+          },
+          [this]() {
+              emit scanStarted();
+          },
+          [this](int percent) {
+              emit scanProgress(percent);
+          });
+      // MemoryHeatmapManager ne prend pas (processHandle, telemetry) au
+      // constructeur -- son API reelle (memory_heatmap_manager.h) recoit le
+      // handle par appel via startHeatmapCollection(quint64, options), pas a
+      // la construction. Corrige ici pour compiler ; le reste du branchement
+      // (appel a startHeatmapCollection depuis un Q_INVOKABLE, telemetry via
+      // setUpdateCallback) reste a faire par l'agent proprietaire de ce
+      // chantier -- voir docs/SALON.md.
+      m_memoryHeatmapManager = std::make_unique<MemoryHeatmapManager>(this);
+      m_memoryTimelineManager = std::make_unique<MemoryTimelineManager>(this);
+      m_patternLearningManager = std::make_unique<PatternLearningManager>(this);
+      connect(m_patternLearningManager.get(), &PatternLearningManager::engineDetected, this, &ApplicationController::patternLearningEngineDetected);
+      connect(m_patternLearningManager.get(), &PatternLearningManager::patternClassified, this, &ApplicationController::patternLearningClassified);
+      connect(m_patternLearningManager.get(), &PatternLearningManager::suggestionReady, this, &ApplicationController::patternLearningSuggestionReady);
+      connect(m_patternLearningManager.get(), &PatternLearningManager::trackingUpdated, this, &ApplicationController::patternLearningTrackingUpdated);
+      // Ouvre juste un fichier JSON (pas de process attaché nécessaire) --
+      // initialisation auto pour que le reste de l'API soit utilisable
+      // immédiatement, sans étape "initialize" explicite côté appelant.
+      m_patternLearningManager->initialize();
+      m_clrInspectorBridge = std::make_unique<ClrInspectorBridge>(
         m_handle,
         [this](const QString& event, const QVariantMap& payload) {
             appendScanTelemetry(event, payload);
@@ -2003,6 +2004,8 @@ ApplicationController::ApplicationController(QObject* parent)
         [this](const QString& event, const QVariantMap& payload) {
             appendScanTelemetry(event, payload);
         });
+    m_luaReplManager = std::make_unique<LuaReplManager>(this);
+    connect(m_luaReplManager.get(), &LuaReplManager::lineFinished, this, &ApplicationController::luaReplLineFinished);
     m_saveFileInvestigator = std::make_unique<SaveFileInvestigator>(
         m_handle,
         [this]() {
@@ -2899,8 +2902,49 @@ QVariantMap ApplicationController::unknownNextScanAsync(const QString& mode, con
     return m_scanningCoreManager->unknownNextScanAsync(mode, valueType, deltaValue);
 }
 
+void ApplicationController::watchSmartWriteIfPossible(uint64_t address, const QByteArray& writtenBytes, const QByteArray& originalBytes) {
+    if (!m_smartWatchdogManager) {
+        return;
+    }
+
+    const auto writtenValue = bytesToWatchValue(writtenBytes);
+    const auto originalValue = bytesToWatchValue(originalBytes);
+    if (!writtenValue || !originalValue || writtenBytes.size() != originalBytes.size()) {
+        return;
+    }
+
+    m_smartWatchdogManager->setEnabled(true);
+    m_smartWatchdogManager->watchWrite(
+        address,
+        *writtenValue,
+        *originalValue,
+        static_cast<uint32_t>(writtenBytes.size()));
+}
+
 QVariantMap ApplicationController::writeMemoryValue(const QString& addressHex, const QString& valueType, const QString& value) {
-    return m_writeFreezeCoreManager->writeMemoryValue(addressHex, valueType, value);
+    uint64_t address = 0;
+    killcore::ValueType type = killcore::ValueType::Int32;
+    killcore::ScanValue scanValue;
+    QString parseError;
+    QByteArray originalBytes;
+    QByteArray targetBytes;
+    const bool canWatch = parseHexAddress(addressHex, &address)
+        && killcore::parseValueType(valueType, &type)
+        && killcore::parseScanValue(value, type, &scanValue, &parseError);
+    if (canWatch && m_handle.isValid()) {
+        targetBytes = killcore::scanValueToBytes(scanValue);
+        killcore::MemoryReader reader(m_handle);
+        const auto read = reader.read(address, static_cast<size_t>(targetBytes.size()));
+        if (read.success && read.data.size() >= targetBytes.size()) {
+            originalBytes = read.data.left(targetBytes.size());
+        }
+    }
+
+    QVariantMap result = m_writeFreezeCoreManager->writeMemoryValue(addressHex, valueType, value);
+    if (result.value("success").toBool() && !originalBytes.isEmpty()) {
+        watchSmartWriteIfPossible(address, targetBytes, originalBytes);
+    }
+    return result;
 }
 
 // H3 (docs/STRATEGY_ROOM.md, session Solitaire du 19/08/2026) : certaines
@@ -3383,6 +3427,7 @@ QVariantMap ApplicationController::writeMemoryHex(const QString& addressHex, con
     result["error"] = writeResult.errorMessage;
 
     if (writeResult.success) {
+        watchSmartWriteIfPossible(address, bytes, writeResult.previousValue);
         KE_LOG_INFO() << "writeMemoryHex: " << writeResult.bytesWritten << " octets ecrits a 0x" << std::hex << address;
     }
     return result;
@@ -5410,6 +5455,315 @@ QVariantMap ApplicationController::cancelLuaScriptExecution() {
     result["success"] = true;
     result["error"] = "";
     return result;
+}
+
+QVariantMap ApplicationController::startLuaRepl(const QVariantMap& options) {
+    return m_luaReplManager->start(options);
+}
+
+QVariantMap ApplicationController::sendLuaReplLine(const QString& line) {
+    return m_luaReplManager->sendLine(line);
+}
+
+QVariantMap ApplicationController::getLuaReplLineResult(int requestId) const {
+    return m_luaReplManager->lineResult(requestId);
+}
+
+QVariantMap ApplicationController::getLuaReplHistory(int maxEntries) const {
+    return m_luaReplManager->history(maxEntries);
+}
+
+QVariantMap ApplicationController::getLuaReplCompletions(const QString& prefix) const {
+    return m_luaReplManager->completions(prefix);
+}
+
+QVariantMap ApplicationController::stopLuaRepl() {
+    return m_luaReplManager->stop();
+}
+
+QVariantMap ApplicationController::getLuaReplStatus() const {
+    return m_luaReplManager->status();
+}
+
+QVariantMap ApplicationController::startMemoryHeatmap(const QString& addressHex, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_handle.isValid()) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    QVariantMap mergedOptions = options;
+    const QString trimmedAddress = addressHex.trimmed();
+    if (!trimmedAddress.isEmpty()) {
+        bool ok = false;
+        const quint64 minAddress = trimmedAddress.toULongLong(&ok, 16);
+        if (!ok) {
+            result["error"] = "Adresse de base invalide (attendu hexadécimal, ex. 7ff600000000).";
+            return result;
+        }
+        mergedOptions["minAddress"] = static_cast<qulonglong>(minAddress);
+    }
+
+    const quint64 nativeHandle = reinterpret_cast<quint64>(m_handle.rawHandle());
+    const bool started = m_memoryHeatmapManager->startHeatmapCollection(nativeHandle, mergedOptions);
+    result["success"] = started;
+    if (!started) {
+        result["error"] = "Impossible de démarrer la collecte heatmap (déjà en cours ?).";
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::stopMemoryHeatmap() {
+    QVariantMap result;
+    m_memoryHeatmapManager->stopHeatmapCollection();
+    result["success"] = true;
+    result["stats"] = m_memoryHeatmapManager->getHeatmapStats();
+    result["topRegions"] = m_memoryHeatmapManager->getTopHeatmapRegions(100);
+    return result;
+}
+
+QVariantMap ApplicationController::getMemoryHeatmapStatus() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["collecting"] = m_memoryHeatmapManager->isCollecting();
+    result["stats"] = m_memoryHeatmapManager->getHeatmapStats();
+    return result;
+}
+
+QVariantMap ApplicationController::getMemoryHeatmapData() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["topRegions"] = m_memoryHeatmapManager->getTopHeatmapRegions(100);
+    result["stats"] = m_memoryHeatmapManager->getHeatmapStats();
+    return result;
+}
+
+QVariantMap ApplicationController::addTimelineAddress(const QString& addressHex, int valueSize) {
+    QVariantMap result;
+    result["success"] = m_memoryTimelineManager->addAddress(addressHex, valueSize);
+    if (!result["success"].toBool()) {
+        result["error"] = "Adresse invalide (attendu hexadécimal, ex. 7ff600000000).";
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::removeTimelineAddress(const QString& addressHex) {
+    QVariantMap result;
+    result["success"] = m_memoryTimelineManager->removeAddress(addressHex);
+    return result;
+}
+
+QVariantMap ApplicationController::clearTimelineAddresses() {
+    m_memoryTimelineManager->clearAddresses();
+    QVariantMap result;
+    result["success"] = true;
+    return result;
+}
+
+QVariantMap ApplicationController::getTimelineWatchedAddresses() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["addresses"] = m_memoryTimelineManager->getWatchedAddresses();
+    return result;
+}
+
+QVariantMap ApplicationController::setTimelineConfig(const QVariantMap& options) {
+    if (options.contains("samplingIntervalMs")) {
+        m_memoryTimelineManager->setSamplingInterval(options.value("samplingIntervalMs").toInt());
+    }
+    if (options.contains("maxDurationMs")) {
+        m_memoryTimelineManager->setMaxDuration(options.value("maxDurationMs").toInt());
+    }
+    if (options.contains("trackOnlyChanges")) {
+        m_memoryTimelineManager->setTrackOnlyChanges(options.value("trackOnlyChanges").toBool());
+    }
+    QVariantMap result;
+    result["success"] = true;
+    result["config"] = m_memoryTimelineManager->getConfig();
+    return result;
+}
+
+QVariantMap ApplicationController::getTimelineConfig() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["config"] = m_memoryTimelineManager->getConfig();
+    return result;
+}
+
+QVariantMap ApplicationController::startTimelineCollection() {
+    QVariantMap result;
+    if (!m_handle.isValid()) {
+        result["success"] = false;
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    m_memoryTimelineManager->setProcessHandle(m_handle.rawHandle());
+    const bool started = m_memoryTimelineManager->startCollection();
+    result["success"] = started;
+    if (!started) {
+        result["error"] = "Impossible de démarrer (aucune adresse surveillée, ou collecte déjà en cours ?).";
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::stopTimelineCollection() {
+    m_memoryTimelineManager->stopCollection();
+    QVariantMap result;
+    result["success"] = true;
+    return result;
+}
+
+QVariantMap ApplicationController::getTimelineStatus() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["collecting"] = m_memoryTimelineManager->isCollecting();
+    result["watchedAddressCount"] = m_memoryTimelineManager->watchedAddressCount();
+    result["stats"] = m_memoryTimelineManager->currentStats();
+    return result;
+}
+
+QVariantMap ApplicationController::getTimelineSeriesForAddress(const QString& addressHex) const {
+    QVariantMap result;
+    result["success"] = true;
+    result["series"] = m_memoryTimelineManager->getSeriesForAddress(addressHex);
+    return result;
+}
+
+QVariantMap ApplicationController::getAllTimelineSeries() const {
+    QVariantMap result;
+    result["success"] = true;
+    result["series"] = m_memoryTimelineManager->getAllSeries();
+    return result;
+}
+
+QVariantMap ApplicationController::findVolatileTimelineAddresses(double threshold) {
+    QVariantMap result;
+    result["success"] = true;
+    result["addresses"] = m_memoryTimelineManager->findVolatileAddresses(threshold);
+    return result;
+}
+
+QVariantMap ApplicationController::findStableTimelineAddresses(int minDurationMs) {
+    QVariantMap result;
+    result["success"] = true;
+    result["addresses"] = m_memoryTimelineManager->findStableAddresses(minDurationMs);
+    return result;
+}
+
+QVariantMap ApplicationController::exportTimelineToJson() {
+    QVariantMap result;
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/KillEngine/timeline";
+    QDir().mkpath(dir);
+    const QString filePath = dir + "/timeline_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".json";
+    result["success"] = m_memoryTimelineManager->exportToJson(filePath);
+    result["filepath"] = filePath;
+    if (!result["success"].toBool()) {
+        result["error"] = "Échec de l'export JSON.";
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::exportTimelineToCsv() {
+    QVariantMap result;
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/KillEngine/timeline";
+    QDir().mkpath(dir);
+    const QString filePath = dir + "/timeline_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".csv";
+    result["success"] = m_memoryTimelineManager->exportToCsv(filePath);
+    result["filepath"] = filePath;
+    if (!result["success"].toBool()) {
+        result["error"] = "Échec de l'export CSV.";
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::detectTimelinePatterns(const QString& addressHex) {
+    return m_memoryTimelineManager->detectPatterns(addressHex);
+}
+
+QVariantMap ApplicationController::analyzeTimelineBehavior(const QString& addressHex) {
+    return m_memoryTimelineManager->analyzeBehavior(addressHex);
+}
+
+QVariantMap ApplicationController::predictTimelineNextValue(const QString& addressHex) {
+    return m_memoryTimelineManager->predictNextValue(addressHex);
+}
+
+bool ApplicationController::isPatternLearningInitialized() const {
+    return m_patternLearningManager->isInitialized();
+}
+
+QVariantMap ApplicationController::getPatternLearningStatistics() const {
+    return m_patternLearningManager->getStatistics();
+}
+
+QVariantMap ApplicationController::detectGameEngine(const QVariantList& moduleNames, const QVariantMap& memorySample) {
+    return m_patternLearningManager->detectEngine(moduleNames, memorySample);
+}
+
+QVariantMap ApplicationController::classifyMemoryPattern(const QString& addressHex, const QVariantList& valueHistory, const QVariantList& timestamps) {
+    return m_patternLearningManager->classifyPattern(addressHex, valueHistory, timestamps);
+}
+
+QVariantMap ApplicationController::loadGameProfile(const QString& gameName) {
+    return m_patternLearningManager->loadProfile(gameName);
+}
+
+bool ApplicationController::saveGameProfile(const QVariantMap& profile) {
+    return m_patternLearningManager->saveProfile(profile);
+}
+
+QVariantList ApplicationController::listKnownGameProfiles() {
+    return m_patternLearningManager->listKnownGames();
+}
+
+bool ApplicationController::deleteGameProfile(const QString& gameName) {
+    return m_patternLearningManager->deleteProfile(gameName);
+}
+
+void ApplicationController::recordLearningSession(const QVariantMap& session) {
+    m_patternLearningManager->recordSession(session);
+}
+
+QVariantList ApplicationController::suggestPatternResolutionPaths(const QString& gameName, int targetType) {
+    return m_patternLearningManager->suggestResolutionPaths(gameName, targetType);
+}
+
+QVariantList ApplicationController::suggestPatternValueTypes(int engineType, int patternType) {
+    return m_patternLearningManager->suggestValueTypes(engineType, patternType);
+}
+
+double ApplicationController::getPatternValueTypeSuccessRate(const QString& gameName, const QString& valueType) {
+    return m_patternLearningManager->getTypeSuccessRate(gameName, valueType);
+}
+
+QVariantList ApplicationController::clusterPatternAddresses(const QVariantList& addresses, const QVariantList& features) {
+    return m_patternLearningManager->clusterAddresses(addresses, features);
+}
+
+void ApplicationController::startPatternTracking(const QString& addressHex, const QString& valueType) {
+    m_patternLearningManager->startPatternTracking(addressHex, valueType);
+}
+
+void ApplicationController::stopPatternTracking(const QString& addressHex) {
+    m_patternLearningManager->stopPatternTracking(addressHex);
+}
+
+void ApplicationController::recordPatternTrackingValue(const QString& addressHex, double value) {
+    m_patternLearningManager->recordValue(addressHex, value);
+}
+
+QVariantMap ApplicationController::getPatternTrackingAnalysis(const QString& addressHex) {
+    return m_patternLearningManager->getPatternAnalysis(addressHex);
+}
+
+QVariantMap ApplicationController::analyzePatternCandidates(const QVariantList& candidates) {
+    return m_patternLearningManager->analyzeCandidates(candidates);
+}
+
+QVariantList ApplicationController::getTopPatternSuggestions(const QString& gameName, int patternType, int count) {
+    return m_patternLearningManager->getTopSuggestions(gameName, patternType, count);
 }
 
 QVariantMap ApplicationController::saveProfileLuaScript(

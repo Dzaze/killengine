@@ -77,7 +77,7 @@ export interface SessionPromotionResult {
   warnings: string[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
 
 export interface MemoryPreviewDecodedValue {
   label: string
@@ -280,6 +280,27 @@ export const useAppStore = defineStore('app', () => {
   const luaSavedScriptsBusy = ref(false)
   const luaScriptSaveName = ref('')
   const luaScriptSaveResult = ref<Record<string, unknown> | null>(null)
+  // PROPOSITIONS-1 #4 — Live Lua REPL : process lua.exe persistant (contrairement
+  // à luaScriptText ci-dessus, un script complet relancé à chaque exécution).
+  // Une seule confirmation RiskGate au démarrage de la session (pas par ligne
+  // envoyée ensuite) — même logique que chatOrigin/chat_memory_write (une
+  // confirmation d'entrée dans un canal, pas une par action à l'intérieur).
+  interface LuaReplHistoryEntry {
+    requestId: number
+    line: string
+    output: string
+    error: string
+    finished: boolean
+    elapsedMs?: number
+  }
+  const luaReplActive = ref(false)
+  const luaReplBusy = ref(false)
+  const luaReplInput = ref('')
+  const luaReplHistory = ref<LuaReplHistoryEntry[]>([])
+  const luaReplCompletions = ref<string[]>([])
+  const luaReplRecall = ref<string[]>([]) // lignes tapees, pour navigation haut/bas (distinct de l'historique execute)
+  const luaReplRecallIndex = ref<number | null>(null)
+  const luaReplStartResult = ref<Record<string, unknown> | null>(null)
   // Store Investigation extrait (candidat S6, docs/REFACTOR_ROADMAP.md, 29/08/2026) --
   // activeInvestigation/investigationArchive restent des refs directement mutables
   // (storeToRefs), les fonctions sont ci-dessous des wrappers minces qui gardent les
@@ -2188,6 +2209,350 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function startLuaReplSession() {
+    if (luaReplActive.value) return
+    if (!await confirmRiskAction(
+      'injection',
+      'Démarrer le REPL Lua',
+      'Une fois démarré, chaque ligne envoyée peut appeler le pipe d’automatisation KillEngine et déclencher les actions exposées par le backend — pas de confirmation supplémentaire par ligne.',
+    )) return
+
+    const controller = backend.getController()
+    if (!controller.startLuaRepl) {
+      luaReplStartResult.value = { success: false, error: 'Live Lua REPL non exposé par ce backend.' }
+      return
+    }
+    try {
+      const result = await controller.startLuaRepl({
+        timeoutMs: luaScriptTimeoutMs.value,
+        pipeName: luaScriptingStatus.value?.pipeName ?? 'KillEngineAutomationPipe',
+      })
+      luaReplStartResult.value = result
+      luaReplActive.value = result.success === true
+      luaReplHistory.value = []
+      if (luaReplActive.value) {
+        addActionLog('lua_repl', 'REPL Lua démarré', String(result.luaPath ?? ''), 'success')
+        void refreshLuaReplCompletions('')
+      } else {
+        addActionLog('lua_repl', 'REPL Lua non démarré', String(result.error ?? ''), 'error')
+      }
+    } catch (e) {
+      luaReplStartResult.value = { success: false, error: String(e) }
+      addActionLog('lua_repl', 'REPL Lua non démarré', String(e), 'error')
+    }
+  }
+
+  async function stopLuaReplSession() {
+    const controller = backend.getController()
+    if (!controller.stopLuaRepl) return
+    try {
+      await controller.stopLuaRepl()
+    } catch (e) {
+      addActionLog('lua_repl', 'Arrêt REPL Lua échoué', String(e), 'warning')
+    } finally {
+      luaReplActive.value = false
+      luaReplBusy.value = false
+    }
+  }
+
+  async function refreshLuaReplCompletions(prefix: string) {
+    const controller = backend.getController()
+    if (!controller.getLuaReplCompletions) return
+    try {
+      const result = await controller.getLuaReplCompletions(prefix)
+      luaReplCompletions.value = result.success === true
+        ? ((result.completions as string[]) ?? [])
+        : []
+    } catch {
+      luaReplCompletions.value = []
+    }
+  }
+
+  async function sendLuaReplLine() {
+    const line = luaReplInput.value
+    if (!line.trim() || luaReplBusy.value || !luaReplActive.value) return
+    luaReplRecall.value.push(line)
+    luaReplRecallIndex.value = null
+    luaReplInput.value = ''
+
+    const controller = backend.getController()
+    if (!controller.sendLuaReplLine) {
+      addActionLog('lua_repl', 'REPL Lua indisponible', 'sendLuaReplLine absent du backend.', 'error')
+      return
+    }
+
+    luaReplBusy.value = true
+    const finishedSignal = controller.luaReplLineFinished
+    const pendingEntry: LuaReplHistoryEntry = { requestId: -1, line, output: '', error: '', finished: false }
+    luaReplHistory.value.push(pendingEntry)
+
+    await new Promise<void>((resolve) => {
+      let requestId: number | null = null
+      let settled = false
+      const timeoutMs = luaScriptTimeoutMs.value + 5000
+      const earlyPayloads: Array<Record<string, unknown>> = []
+
+      const finish = (payload: Record<string, unknown>) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(watchdog)
+        finishedSignal?.disconnect?.(handler)
+        luaReplBusy.value = false
+        pendingEntry.requestId = Number(payload.requestId ?? requestId ?? 0)
+        pendingEntry.output = String(payload.output ?? '')
+        pendingEntry.error = String(payload.error ?? '')
+        pendingEntry.finished = true
+        pendingEntry.elapsedMs = Number(payload.elapsedMs ?? 0)
+        resolve()
+      }
+
+      const watchdog = window.setTimeout(() => {
+        if (settled) return
+        pendingEntry.error = 'Timeout client en attente de cette ligne.'
+        finish({})
+      }, timeoutMs)
+
+      // Même payload que luaScriptExecutionFinished : "requestId" est une clé
+      // du payload, pas un argument de signal séparé (QWebChannelSignal<T>
+      // ne modélise qu'un seul payload).
+      const handler = (payload: Record<string, unknown>) => {
+        if (requestId === null) {
+          earlyPayloads.push(payload)
+          return
+        }
+        if (Number(payload.requestId) !== requestId) return
+        finish(payload)
+      }
+      finishedSignal?.connect?.(handler)
+
+      controller.sendLuaReplLine!(line).then(async (start) => {
+        if (settled) return
+        if (start.success !== true || start.started !== true) {
+          pendingEntry.error = String(start.error ?? 'Impossible d’envoyer cette ligne.')
+          finish({})
+          return
+        }
+        requestId = Number(start.requestId)
+        for (const payload of earlyPayloads.splice(0)) {
+          handler(payload)
+          if (settled) return
+        }
+        // Le pipe d'automatisation ne relaie pas les signaux Qt (voir doc backend) --
+        // si aucun signal n'est disponible, on bascule sur le poll getLuaReplLineResult.
+        if (!finishedSignal?.connect) {
+          while (!settled) {
+            await new Promise((r) => window.setTimeout(r, 200))
+            if (settled) return
+            const polled = await controller.getLuaReplLineResult!(requestId)
+            if (polled.found === true && polled.finished === true) {
+              finish(polled)
+              return
+            }
+          }
+        }
+      }).catch((e) => {
+        if (settled) return
+        pendingEntry.error = String(e)
+        finish({})
+      })
+    })
+  }
+
+  function recallLuaReplHistory(direction: -1 | 1) {
+    if (luaReplRecall.value.length === 0) return
+    const current = luaReplRecallIndex.value
+    let next: number
+    if (current === null) {
+      next = direction === -1 ? luaReplRecall.value.length - 1 : luaReplRecall.value.length
+    } else {
+      next = current + direction
+    }
+    if (next < 0) next = 0
+    if (next >= luaReplRecall.value.length) {
+      luaReplRecallIndex.value = null
+      luaReplInput.value = ''
+      return
+    }
+    luaReplRecallIndex.value = next
+    luaReplInput.value = luaReplRecall.value[next] ?? ''
+  }
+
+  // PROPOSITIONS-1 #3 — Memory Timeline (02/09/2026, Claude). Wrappers minces
+  // au-dessus du backend, comme saveLuaScript/refreshLuaScriptingStatus —
+  // MemoryTimelineView.vue garde son propre état local (watchedAddresses,
+  // isCollecting, etc.), ces fonctions ne font que traduire la forme
+  // QVariantMap du backend (success/error/...) vers ce que la vue attend.
+  async function addTimelineAddress(addressHex: string, valueSize: number): Promise<boolean> {
+    const controller = backend.getController()
+    if (!controller.addTimelineAddress) return false
+    try {
+      const result = await controller.addTimelineAddress(addressHex, valueSize)
+      if (result.success !== true) {
+        addActionLog('memory_timeline', 'Adresse timeline refusée', String(result.error ?? addressHex), 'warning')
+      }
+      return result.success === true
+    } catch (e) {
+      addActionLog('memory_timeline', 'Adresse timeline refusée', String(e), 'error')
+      return false
+    }
+  }
+
+  async function removeTimelineAddress(addressHex: string): Promise<void> {
+    const controller = backend.getController()
+    if (!controller.removeTimelineAddress) return
+    try {
+      await controller.removeTimelineAddress(addressHex)
+    } catch (e) {
+      addActionLog('memory_timeline', 'Suppression adresse timeline échouée', String(e), 'warning')
+    }
+  }
+
+  function clearTimelineAddresses(): void {
+    const controller = backend.getController()
+    void controller.clearTimelineAddresses?.()
+  }
+
+  async function getTimelineWatchedAddresses(): Promise<string[]> {
+    const controller = backend.getController()
+    if (!controller.getTimelineWatchedAddresses) return []
+    try {
+      const result = await controller.getTimelineWatchedAddresses()
+      return result.success === true ? ((result.addresses as string[]) ?? []) : []
+    } catch {
+      return []
+    }
+  }
+
+  async function setTimelineConfig(config: Record<string, unknown>): Promise<void> {
+    const controller = backend.getController()
+    if (!controller.setTimelineConfig) return
+    try {
+      await controller.setTimelineConfig(config)
+    } catch (e) {
+      addActionLog('memory_timeline', 'Configuration timeline échouée', String(e), 'warning')
+    }
+  }
+
+  async function startTimelineCollection(): Promise<boolean> {
+    const controller = backend.getController()
+    if (!controller.startTimelineCollection) return false
+    try {
+      const result = await controller.startTimelineCollection()
+      if (result.success !== true) {
+        addActionLog('memory_timeline', 'Collecte timeline non démarrée', String(result.error ?? ''), 'warning')
+      }
+      return result.success === true
+    } catch (e) {
+      addActionLog('memory_timeline', 'Collecte timeline non démarrée', String(e), 'error')
+      return false
+    }
+  }
+
+  async function stopTimelineCollection(): Promise<void> {
+    const controller = backend.getController()
+    if (!controller.stopTimelineCollection) return
+    try {
+      await controller.stopTimelineCollection()
+    } catch (e) {
+      addActionLog('memory_timeline', 'Arrêt collecte timeline échoué', String(e), 'warning')
+    }
+  }
+
+  async function getTimelineSeries(addressHex: string): Promise<Record<string, unknown> | null> {
+    const controller = backend.getController()
+    if (!controller.getTimelineSeriesForAddress) return null
+    try {
+      const result = await controller.getTimelineSeriesForAddress(addressHex)
+      return result.success === true ? (result.series as Record<string, unknown>) : null
+    } catch {
+      return null
+    }
+  }
+
+  async function detectTimelinePatterns(addressHex: string): Promise<Array<Record<string, unknown>>> {
+    const controller = backend.getController()
+    if (!controller.detectTimelinePatterns) return []
+    try {
+      const result = await controller.detectTimelinePatterns(addressHex)
+      if (result.success !== true) {
+        addActionLog('memory_timeline', 'Détection de patterns non disponible', String(result.error ?? ''), 'warning')
+        return []
+      }
+      return (result.patterns as Array<Record<string, unknown>>) ?? []
+    } catch (e) {
+      addActionLog('memory_timeline', 'Détection de patterns non disponible', String(e), 'error')
+      return []
+    }
+  }
+
+  async function findVolatileTimelineAddresses(threshold: number): Promise<string[]> {
+    const controller = backend.getController()
+    if (!controller.findVolatileTimelineAddresses) return []
+    try {
+      const result = await controller.findVolatileTimelineAddresses(threshold)
+      return result.success === true ? ((result.addresses as string[]) ?? []) : []
+    } catch {
+      return []
+    }
+  }
+
+  async function findStableTimelineAddresses(minDurationMs: number): Promise<string[]> {
+    const controller = backend.getController()
+    if (!controller.findStableTimelineAddresses) return []
+    try {
+      const result = await controller.findStableTimelineAddresses(minDurationMs)
+      return result.success === true ? ((result.addresses as string[]) ?? []) : []
+    } catch {
+      return []
+    }
+  }
+
+  async function analyzeTimelineBehavior(addressHex: string): Promise<Record<string, unknown>> {
+    const controller = backend.getController()
+    const fallback = { changesPerSecond: 0, regularityScore: 0, hasBurstBehavior: false }
+    if (!controller.analyzeTimelineBehavior) return fallback
+    try {
+      const result = await controller.analyzeTimelineBehavior(addressHex)
+      if (result.success !== true) {
+        addActionLog('memory_timeline', 'Profil comportemental non disponible', String(result.error ?? ''), 'warning')
+        return fallback
+      }
+      return result
+    } catch (e) {
+      addActionLog('memory_timeline', 'Profil comportemental non disponible', String(e), 'error')
+      return fallback
+    }
+  }
+
+  async function predictTimelineNextValue(addressHex: string): Promise<Record<string, unknown>> {
+    const controller = backend.getController()
+    const fallback = { changeProbability: 0, predictedValueHex: '0x0' }
+    if (!controller.predictTimelineNextValue) return fallback
+    try {
+      const result = await controller.predictTimelineNextValue(addressHex)
+      if (result.success !== true) {
+        addActionLog('memory_timeline', 'Prédiction non disponible', String(result.error ?? ''), 'warning')
+        return fallback
+      }
+      return result
+    } catch (e) {
+      addActionLog('memory_timeline', 'Prédiction non disponible', String(e), 'error')
+      return fallback
+    }
+  }
+
+  async function exportTimelineToJson(): Promise<string | null> {
+    const controller = backend.getController()
+    if (!controller.exportTimelineToJson) return null
+    try {
+      const result = await controller.exportTimelineToJson()
+      return result.success === true ? String(result.filepath ?? '') : null
+    } catch (e) {
+      addActionLog('memory_timeline', 'Export timeline échoué', String(e), 'error')
+      return null
+    }
+  }
+
   function luaProfileName(): string {
     return (processName.value || 'KillEngineTrainer')
       .replace(/\.[^.]+$/, '')
@@ -3651,6 +4016,31 @@ export const useAppStore = defineStore('app', () => {
     refreshLuaScriptingStatus,
     executeLuaScript,
     cancelLuaScriptExecution,
+    luaReplActive,
+    luaReplBusy,
+    luaReplInput,
+    luaReplHistory,
+    luaReplCompletions,
+    luaReplStartResult,
+    startLuaReplSession,
+    stopLuaReplSession,
+    sendLuaReplLine,
+    refreshLuaReplCompletions,
+    recallLuaReplHistory,
+    addTimelineAddress,
+    removeTimelineAddress,
+    clearTimelineAddresses,
+    getTimelineWatchedAddresses,
+    setTimelineConfig,
+    startTimelineCollection,
+    stopTimelineCollection,
+    getTimelineSeries,
+    detectTimelinePatterns,
+    findVolatileTimelineAddresses,
+    findStableTimelineAddresses,
+    analyzeTimelineBehavior,
+    predictTimelineNextValue,
+    exportTimelineToJson,
     refreshSavedLuaScripts,
     saveLuaScript,
     loadSavedLuaScript,

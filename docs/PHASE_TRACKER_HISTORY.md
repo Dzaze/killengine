@@ -2657,6 +2657,26 @@ Règle de collision : chaque sous-phase ne touche que sa propre liste de fichier
 
 ---
 
+### PHASE 206 — Smart Watchdog v1 clôturé (core + Qt + raccordement écritures) (02/09/2026, Codex)
+
+**Quoi** :
+- `core/smart_watchdog/smart_watchdog.*` : correction de `checkAll()` pour muter les entrées surveillées, incrémenter `totalChecks`, accumuler `consecutiveResyncTicks`, désactiver les entrées confirmées resync/expirées, et retourner `Stable` tant que l’écriture tient.
+- `core/smart_watchdog/smart_watchdog.*` : `detectTwinPattern()` ne retourne plus la première adresse lisible autour de la cible ; le twin doit maintenant contenir la valeur attendue, masquée selon la taille surveillée.
+- `apps/desktop/smart_watchdog_manager.*` : ajout d’une callback de lecture mémoire injectable, polling réel via `checkAll()`, comptage seulement des watches actives, suggestion enrichie avec twin validé.
+- `apps/desktop/application_controller.*` : raccordement minimal du manager au contrôleur, lecture via `killcore::MemoryReader`, démarrage automatique après écritures réussies `writeMemoryValue()` et `writeMemoryHex()`, télémétrie `smart_watchdog_resync`, `smart_watchdog_stable`, `smart_watchdog_twin_pattern`.
+- `tests/unit/test_smart_watchdog.cpp` : extension de la suite à 11 tests couvrant seuil multi-poll, expiration stable, masquage par taille, accumulation via `checkAll()` et twin strictement matching.
+
+**Pourquoi** : le chantier était marqué actif/en construction. Le code existant compilait mais la logique ne pouvait pas accumuler un resync entre polls, le manager n’avait qu’une lecture placeholder, et le twin pattern pouvait proposer une adresse voisine sans vérifier sa valeur. Pour notre workflow SC2/Wand, l’objectif utile est qu’une écriture de byte qui ne tient pas puisse être surveillée automatiquement après `writeMemoryHex()`.
+
+**Comment vérifié** :
+- `.\scripts\build.ps1` OK après intégration.
+- `.\build\bin\killengine_unit_tests.exe --gtest_filter=SmartWatchdogTest.*` OK, 11/11.
+- `.\build\bin\killengine_unit_tests.exe` OK, 324/324.
+
+**Statut** : clos et retiré des chantiers actifs du tracker. Reste possible en amélioration future : exposition UI dédiée et action automatique de re-freeze, mais la v1 core + manager + raccordement écritures est terminée.
+
+---
+
 ### Chantier planifié — UWP-STATE-1 : Spec Inspecteur UWP State
 
 **2026-09-01 (Cline, Kimi K2.5)** : Préparation du mini-spec pour l'inspection du stockage fichier UWP (piste Solitaire XP).
@@ -2709,3 +2729,681 @@ Règle de collision : chaque sous-phase ne touche que sa propre liste de fichier
 **Comment vérifié** : `.\scripts\build.ps1` → `Build successful!`, `npm run build` → 0 erreur, 291/291 tests unitaires. Logique de diff testée en live via le pipe avec des données synthétiques (3 fichiers : 1 modifié taille+date, 1 supprimé, 1 ajouté) → classification exacte (`addedCount:1, removedCount:1, modifiedCount:1`, delta de taille correct). **Pas de test terrain complet sur Solitaire** (snapshot avant/gain XP/snapshot après/comparer) à ce stade — la logique de diff est prouvée correcte, mais son usage réel pour retrouver l'XP Solitaire reste à faire.
 
 **Écart avec le spec initial** : pas de `core/uwp/uwp_state_inspector.h/.cpp`, pas de `tests/unit/test_uwp_state_inspector.cpp` (la logique testée vit dans `apps/desktop/`, non lié à la cible de tests unitaires — même contrainte déjà connue pour `ApplicationController`/`AutomationPipeServer`, cf. AGENTS.md), pas de `UwpStatePanel.vue` séparé (intégré directement dans `InvestigationView.vue`). Économie substantielle de code en réutilisant l'existant plutôt qu'en le redéveloppant.
+---
+
+## Transfert depuis PHASE_TRACKER actif — nettoyage outils (02/09/2026, Codex)
+
+Blocs transférés hors du tracker actif pour garder le journal lisible. Ils étaient clos, validés, ou déjà résumés dans l’état courant ; le détail reste conservé ici pour reprise historique.
+### Chantier clos — Inspection WebView2/JS (CDP) + UWP State Inspector (31/08-01/09/2026)
+
+Démarré le 31/08/2026 suite à l'investigation Solitaire XP (voir "État courant"). Objectif atteint : 3ᵉ mode d'investigation KillEngine (inspection d'état JavaScript via Chrome DevTools Protocol pour cibles hybrides natif+web), plus un mode complémentaire d'investigation disque (snapshot avant/après fichiers UWP). **Détail complet (12 points de diagnostic WEBVIEW-A, implémentations WEBVIEW-B à F, 9 bugs de contrat trouvés en usage réel, UWP-STATE-1) archivé dans `docs/PHASE_TRACKER_HISTORY.md`** — ne pas re-déduire, consulter l'historique avant de reprendre ce sujet.
+
+**Résumé des sous-phases closes** :
+- **WEBVIEW-A** : accès CDP débloqué via Windows Device Portal + app Store "Remote Tools for Microsoft Edge" (le port CDP direct reste bloqué pour les apps UWP, restriction AppContainer définitive).
+- **WEBVIEW-B** : client CDP core (`core/webview2/cdp_client.*`, `webview2_inspector.*`) avec discovery direct + fallback WDP.
+- **WEBVIEW-C** : 7 outils Assistant/LLM (`ai/tool_registry.cpp`, `ai/ai_engine.cpp`, `ai/llama_runtime.cpp`), routage déterministe deux-étages.
+- **WEBVIEW-D** : façade `ApplicationController` (Q_INVOKABLE + classification de risque).
+- **WEBVIEW-E** : panneau dédié `WebView2InspectorView.vue` (calqué sur le CLR Inspector) + 2 fonctionnalités Paramètres (toggle debug CDP, diagnostic préparation WebView2). Validé en live par le propriétaire : lecture, écriture et retour de résultat structuré confirmés sur une vraie target Solitaire.
+- **WEBVIEW-F** : reconnaissance automatique du contexte JS à la connexion (`probeWebView2GlobalScope`, baseline dynamique `about:blank`), validée en live — isole correctement le SDK publicitaire réel d'une page (`omid`, `videojs`, etc.) du bruit natif Chromium.
+- **UWP-STATE-1** : snapshot avant/après fichiers UWP + diff (`compareProcessSaveFileSnapshots`), réutilisant l'infrastructure `discover_save_files` existante (PHASE 90+) plutôt que de la refaire. Logique de diff validée par données synthétiques ; test terrain réel sur Solitaire XP encore à faire (voir "Validations restantes").
+
+**Conclusion pour Solitaire XP spécifiquement** : ni la mémoire native ni WebView2/CDP n'exposent le plateau de jeu (probablement natif XAML/DirectComposition) — reste ouvert via UWP-STATE-1 sur `LocalState`.
+
+Règle de collision : si un nouveau sous-chantier WebView2/CDP ou UWP State démarre, poser les lanes de fichiers dans `docs/SALON.md` avant de coder (même règle que [[parallel_split_phase188_codex_pointer_map_deps]]).
+
+### WEBVIEW-E — bug de contraste CSS trouvé en usage réel (01/09/2026, Claude)
+
+**Quoi** : le propriétaire a signalé que le champ "Évaluer du JavaScript" était quasi illisible. Cause trouvée : `WebView2InspectorView.vue` utilisait dans tout son `<style>` des variables CSS **inventées qui n'existent nulle part dans le thème de l'app** (`--surface-1/2/3`, `--border-color`, `--primary`, `--text-muted`, `--success-bg`/`--success-text`, `--warning-bg`/`--warning-text`, `--error-bg`/`--error-text`) — le vrai thème global (`App.vue :root`) définit `--bg-primary/secondary/tertiary/accent`, `--text-primary/secondary/dim`, `--accent`, `--success`, `--warning`, `--error`, `--border`. Une variable CSS non définie rend la déclaration invalide, donc `background`/`color`/`border-color` ne s'appliquaient jamais sur la quasi-totalité du panneau (pas seulement le champ JS signalé).
+
+**Corrigé** : toutes les occurrences remplacées par les vraies variables du thème (`--border-color`→`--border`, `--surface-1`→`--bg-secondary`, `--surface-2`→`--bg-tertiary`, `--surface-3`→`--bg-accent`, `--primary`→`--accent`, `--text-muted`→`--text-dim`, et les paires `*-bg`/`*-text` remplacées par `background: var(--bg-tertiary)` + `color: var(--success|warning|error)`, même convention que `ClrInspectorView.vue` déjà validée visuellement).
+
+**Comment vérifié** : `npm run build` → 0 erreur. Grep de toutes les `var(--...)` du fichier après correction : seules les 11 vraies variables du thème restent. Pas de rebuild C++ nécessaire (l'app charge `ui/dist/index.html` en direct) — un simple relancement de `KillEngine.exe` suffit.
+
+**Leçon** : encore un bug de contrat, cette fois entre le CSS d'une vue et le thème global — même famille de problème que les décalages de champs backend/frontend déjà documentés (cf. [[feedback_verify_dont_trust_agent_build_claims]]), sauf qu'ici rien ne pouvait le détecter avant un usage réel : une variable CSS invalide ne casse ni le build ni TypeScript, elle rend juste une déclaration silencieusement inopérante.
+
+### WEBVIEW-F — bouton "Explorer" par globale détectée (01/09/2026, Claude)
+
+**Quoi** : chaque entrée de la liste "Reconnaissance du contexte JS" (`customGlobals`) a maintenant un bouton "Explorer" qui pré-remplit le champ "Évaluer du JavaScript" avec une expression adaptée au type CDP de la globale (`buildProbeExpression()`, `WebView2InspectorView.vue`) : `window["nom"].toString().slice(0,500)` pour une fonction (affiche le code source), `JSON.stringify(Object.keys(window["nom"]))` pour un objet, ou lecture directe pour les valeurs primitives. Notation crochet systématique (pas `window.nom`) car certains noms observés ne sont pas des identifiants JS valides (ex: `"0"`, `"1"` pour des références de frame). Le champ est pré-rempli mais pas auto-évalué : l'utilisateur garde la main pour cliquer "Évaluer" et confirmer le RiskGate — pas d'exécution surprise.
+
+**Pourquoi** : suite à une session de test manuel en direct sur la pub Solitaire (lecture/écriture confirmées, y compris un gag visuel de rotation CSS), le besoin de creuser une globale détectée sans retaper de JS à la main a été demandé explicitement (option B retenue face à une alternative "base de signatures connues").
+
+**Comment vérifié** : `npm run build` → 0 erreur. Pas de test live de ce bouton précis à ce stade (nécessite de rouvrir l'app avec le CSS corrigé ci-dessus).
+
+### UI-SHELL-1 — audit rendu premium des vues Vue (01/09/2026, Codex)
+
+**Quoi** : retouche ciblée du CSS de `ui/src/App.vue` pour améliorer le panneau latéral global : fond plus profond, séparation droite plus lisible, relief discret, logo plus net, liens de navigation plus contrastés, état actif avec fond progressif et indicateur vertical accent orange/bleu. Audit statique des variables CSS dans toutes les vues/composants Vue, puis corrections de variables de thème invalides ou legacy : `--text` → `--text-primary` dans `ui/src/views/SettingsView.vue` et `ui/src/components/settings/AssistantToolsPanel.vue`, `--muted` → `--text-dim` dans `ui/src/views/ExpertView.vue`, `--surface-2`/`--border-color` legacy → `--bg-tertiary`/`--border` dans `ui/src/views/ClrInspectorView.vue`. Passe premium dédiée sur `ui/src/views/WebView2InspectorView.vue` : sections plus profondes, badges statut en pilule, boutons avec hover/focus plus nets, targets sélectionnées avec indicateur vertical, inputs/résultats plus contrastés, responsive compact. Aucun contrat backend/frontend modifié.
+
+**Pourquoi** : retour propriétaire sur capture live : le contraste du panneau latéral gauche n'était "pas foufou" et pouvait être plus stylé/premium. Objectif étendu ensuite à une vérification globale des pages `.vue` : éviter les variables CSS silencieusement invalides et harmoniser les finitions visuelles avec le thème réel de KillEngine.
+
+**Comment vérifié** : captures visuelles des 14 vues principales (`Assistant`, `Processus`, `Investigation`, `Mémoire`, `CLR`, `WebView2`, `Lua`, `Profils`, `Trainer`, `Speedhack`, `Réseau`, `Expert`, `Lexique`, `Paramètres`) via Vite local + Edge headless/CDP, planche contact inspectée manuellement ; capture WebView2 régénérée après la passe dédiée et inspectée. Script d'audit CSS : plus aucune variable `var(--...)` sans fallback ne référence une variable absente du thème. `cd ui && npm run type-check` → OK. `cd ui && npm run build` → OK (154 modules transformés, warning Vite pré-existant sur la taille du chunk JS > 500 kB). `git diff --check` sur les fichiers touchés → OK, seuls les avertissements Git LF/CRLF habituels.
+
+### DOCS-SALON-1 — nettoyage du salon IA (01/09/2026, Codex)
+
+**Quoi** : `docs/SALON.md` a été compacté pour redevenir une salle de stratégie lisible : objectifs/règles, format d'idée, lanes actives réelles, état récent à ne pas refaire, stratégies ouvertes (Solitaire XP, Investigation Router, UWP State/Save File Radar, UIA/OCR, ETW). Les longs échanges WebView2/UWP déjà consignés dans `docs/PHASE_TRACKER.md` et `docs/PHASE_TRACKER_HISTORY.md` ont été remplacés par des résumés et renvois.
+
+**Pourquoi** : retour propriétaire : le salon doit surtout servir à discuter de stratégies, nouvelles technologies et outils à ajouter à KillEngine, pas devenir un second tracker verbeux ni un log de conversation complet.
+
+**Comment vérifié** : relecture du salon nettoyé et `git diff --check` sur `docs/SALON.md`/`docs/PHASE_TRACKER.md`. Pas de build requis (docs-only).
+
+### EXTMOD-1 — chantier identifié : Injected Module Differ / External Tool Profiler (01/09/2026, Codex)
+
+**Quoi** : nouveau chantier produit identifié à partir d'une session terrain SC2 campagne/offline avec l'accord explicite du propriétaire : ajouter à KillEngine une capacité d'investigation passive des modifications faites par un outil externe autorisé sur une cible locale. Nom de travail : **Injected Module Differ** / **External Tool Profiler**. Le prototype manuel a comparé `SC2_x64.exe` avant/après activation du toggle `Invincibilité` dans Wand : modules chargés, protections mémoire, hash par page des DLL injectées, puis diff byte par byte sur les pages candidates. Détail stratégique et offsets conservés dans `docs/SALON.md` section "External Modifier Profiler / SC2 Campagne".
+
+**Pourquoi** : après les limites rencontrées sur Solitaire XP (valeur affichée introuvable en mémoire native et plateau absent de WebView2), la session SC2 donne une piste plus générale pour KillEngine : quand une valeur ou un effet n'est pas trouvable par scan brut, observer les changements structurels autour de la cible (DLL injectées, pages XRW, protections, patches, stimulus ON/OFF) peut révéler la couche réellement responsable. Sur SC2, Wand ne se contente pas d'écrire une valeur externe : il injecte au moins `TrainerLibPlugin_x64.dll`, `Trainer_49560_b593cf46cc.dll` et `we-graphics-hook64.dll` dans `SC2_x64.exe`.
+
+**Preuves terrain** : avant activation, SC2 avait 120 modules et aucun module Wand évident ; après activation `Invincibilité`, SC2 passe à 132 modules, charge les DLL ci-dessus, crée de nouvelles pages `IMAGE XRW` (~16.68 Mo) et augmente les régions exécutables privées. Désactiver le toggle ne décharge pas les DLL : le OFF agit probablement sur un état interne ou un patch déjà injecté. Diff OFF->ON : 258 pages changées au sens large mais seulement 3 pages changées en contenu. Diff `ON après dégât absorbé` vs `OFF après mort` : deltas byte-level courts sur 8 pages, dont `Trainer_49560_b593cf46cc.dll+0x7A000`, `+0x7B000`, `+0x20000`, `+0x81000` et `TrainerLibPlugin_x64.dll+0x1BF000`.
+
+**Prototype minimal proposé** : dans une future phase dédiée, créer un outil KillEngine qui capture deux scénarios nommés (`baseline`, `toggle on`, `stimulus`) et produit automatiquement : diff de modules, diff de protections mémoire, détection des nouvelles pages RX/RWX/XRW, hash par page, byte-diff borné, classement "module injecté / page code / page data / bruit compteur". Le mode doit rester explicite et réservé aux cibles locales/autorisées/offline ; pas de contournement anti-cheat, pas d'usage multijoueur.
+
+### SC2-LUA-1 — Wrappers Lua et documentation pour SC2 en mode stealth (02/09/2026, Claude)
+
+**Quoi** : création d'une couche d'abstraction Lua pour le mode stealth SC2 et documentation des stratégies alternatives de scan pour les minéraux.
+
+**Fichiers créés** :
+- `scripts/killengine.lua` : wrappers `apply_stealth()`, `restore_stealth()`, `get_stealth_status()`, `kernel_write_value()`, `changed_pages_session_*()`
+- `scripts/lua_examples/sc2_minerals_stealth.lua` : exemple complet de script SC2 avec mode stealth actif
+- `docs/SC2_MINERALS_STRATEGIES.md` : guide des 7 stratégies alternatives au scan classique
+
+**Stratégies documentées** (approche sans debugger) :
+1. **Mode Stealth** : anti-debug + masquage processus/DLL via `apply_stealth("sc2")`
+2. **Scan Multi-Type** : Int32, Float32, Int32×100, ×4096, ×65536 en une passe
+3. **Scan Chiffré (XOR)** : quand les valeurs semblent aléatoires
+4. **Trace UI String** : partir de l'affichage texte pour remonter à la source numérique
+5. **Changed Pages Consensus** : session multi-rounds pour éliminer les copies UI volatiles
+6. **Écriture via Driver Kernel** : plus discrète que WriteProcessMemory
+7. **Freeze Logiciel** : polling à 16ms au lieu de hardware breakpoint (détectable)
+
+**Pourquoi** : SC2 détecte les debuggers et les injections DLL. L'utilisateur demande une approche par pipe Lua qui évite d'attacher un debugger tout en restant fonctionnelle pour modifier les minéraux.
+
+**Comment vérifié** : `npm run build` → OK. Les wrappers Lua sont des bindings vers les méthodes `Q_INVOKABLE` existantes d'`ApplicationController` (déjà validées en PHASE 253-261). La documentation couvre les pièges connus (valeur ×100, copies UI, Warden).
+
+**Usage** :
+```bash
+# Lancer le script depuis KillEngine (Scripting view) ou ligne de commande
+lua scripts/lua_examples/sc2_minerals_stealth.lua <pid_sc2> 50 9999
+```
+
+**Note** : Le mode stealth masque les signatures connues mais n'élimine pas totalement le risque de détection. Préférer les sessions courtes et éviter les écritures trop fréquentes.
+
+**Comment vérifié** : validation live sur la machine du propriétaire, SC2 campagne/offline lancé, KillEngine démarré avec `KILLENGINE_AUTOMATION_PIPE=1`, `ping` OK, `attachProcess(19172)` OK. Relevés faits passivement par PowerShell (`Get-Process`, enumeration modules, `VirtualQueryEx`, `ReadProcessMemory` borné aux DLL injectées), puis consignés dans `docs/SALON.md`. Pas de build requis ici : documentation/planification uniquement, aucune modification de code.
+
+### EXTMOD-1 — décision propriétaire : valider le mécanisme avant d'ouvrir le chantier générique (01/09/2026, Claude)
+
+**Quoi** : objectif reformulé explicitement par le propriétaire — ce chantier ne vise pas à reproduire l'effet Wand sur SC2 spécifiquement, mais à identifier **ce qui manque à KillEngine de manière générique** par rapport à ce que font les trainers tiers pro (type Wand/WeMod). Question posée : est-ce que la découverte EXTMOD-1 justifie déjà d'ouvrir ce chantier générique ?
+
+**Réponse/décision** : pas encore — il manque une preuve. Le byte-diff fait jusqu'ici (voir entrée EXTMOD-1 ci-dessus et `docs/SALON.md`) ne porte que sur l'intérieur des DLL injectées par Wand (son propre état interne qui change quand le toggle est OFF). Ça montre que Wand ne se contente pas d'un freeze de valeur statique (que KillEngine sait déjà faire), mais ça ne prouve pas encore *comment* l'effet s'accroche réellement dans `SC2_x64.exe` (hook de fonction/redirection vs patch statique classique). KillEngine dispose déjà d'un moteur de hook (MinHook, réutilisé pour le speedhack Mono, cf. `docs/PHASE_TRACKER_HISTORY.md` PHASE 14B) mais il n'est câblé que pour ce cas précis, pas exposé comme capacité générique.
+
+**Prochaine étape validée avant tout chantier générique** : nouvelle session terrain SC2/Wand — cette fois differ `SC2_x64.exe` lui-même (pas les DLL de Wand) avant/après activation du toggle, pour confirmer si le point d'accroche réel est un hook de fonction/redirection dans le jeu ou un patch statique classique. Si hook confirmé → ouvrir le chantier générique "capacité de hook de logique de jeu" en plus du freeze/patch de valeur existant. Si patch statique → le gap est peut-être ailleurs (base de données d'offsets par jeu, pas la technique).
+
+**Comment vérifier** : à faire — session live, propriétaire + agent disponible, cible `SC2_x64.exe` campagne/offline, comparer pages code/data de SC2 lui-même avant/après toggle Wand (pas seulement les DLL injectées cette fois).
+
+### EXTMOD-1 — prototype backend `ExternalToolProfiler` livré et live-vérifié (01/09/2026, Claude)
+
+**Quoi** : pendant que Wand était indisponible (limite d'usage atteinte), construction du moteur générique proposé dans l'entrée EXTMOD-1 ci-dessus. Nouveau manager `killengine::ExternalToolProfiler` (`apps/desktop/external_tool_profiler.h/.cpp`), branché sur `ApplicationController` comme les autres managers (`m_codePatchManager`, etc.), 4 nouvelles méthodes `Q_INVOKABLE` :
+- `captureProfilerCheckpoint(label, options)` — capture nommée de l'état structurel du process attaché : modules (`ProcessEnumerator::enumerateModules`) + carte mémoire (`MemoryMap::snapshot`, protections/types) + hash de contenu par région (budget borné, `maxHashBytesMb`, défaut 64 Mo). Option `moduleName` pour scoper aux régions d'un module précis (évite de tout hasher sur un gros process).
+- `getProfilerDiff(labelA, labelB, options)` — diff entre deux checkpoints : modules ajoutés/retirés, régions ajoutées/retirées/changées (protection, type, ou hash de contenu), avec classification (`injected_module_page`, `new_executable_writable_page`, `code_page_changed`, `image_data_page_changed`, `private_page_changed`, `other`).
+- `listProfilerCheckpoints()` / `clearProfilerSession()`.
+- `clearSessionState()` appelé automatiquement à chaque `attachProcess` (comme les autres managers) pour ne pas mélanger les checkpoints de deux cibles différentes.
+
+Nommage volontairement générique (pas de vocabulaire SC2/Wand dans le code produit), conforme à la règle [[feedback_tools_must_stay_generic]] déjà appliquée ailleurs dans KillEngine.
+
+**Pourquoi** : c'est le prototype minimal proposé dans l'entrée EXTMOD-1 initiale — réutilise l'infra existante (`ProcessEnumerator`, `MemoryMap`, `MemoryReader`, même hash FNV-1a que `display_string_investigator.cpp`) plutôt que de la refaire, dans l'esprit de [[phase189_clr_struct_nesting_and_doc_staleness]] et des autres réutilisations déjà documentées.
+
+**Comment vérifié** : build via `scripts\build.ps1` (nécessaire — un `ninja` lancé directement hors `vcvars64.bat` échoue avec des erreurs `type_traits`/`cstdint` introuvables ; attention aussi à ne pas utiliser un `ninja.exe` trouvé au hasard dans le PATH, celui du projet est `C:\Python313\Scripts\ninja.exe`, cf. `CMAKE_MAKE_PROGRAM` dans `build/CMakeCache.txt`). Build réussi (`KillEngine.exe` relié, tests unitaires aussi compilés). Puis validation live réelle via le pipe automation (pas seulement un build propre, cf. [[feedback_verify_dont_trust_agent_build_claims]]) : `KillEngine.exe` lancé avec `KILLENGINE_AUTOMATION_PIPE=1`, attaché à `Notepad.exe` (cible synthétique, PID réel trouvé via `getProcesses` — le PID retourné par `Start-Process -PassThru` est un launcher, pas le vrai process UWP). Séquence testée avec succès : deux checkpoints identiques → diff vide (0 faux positif) ; déclenchement réel d'un changement (Ctrl+O, dialogue Ouvrir) → diff détecte correctement 2 régions ajoutées, 2 retirées, 36 changées de contenu, 0 module ajouté (cohérent : le dialogue de la version UWP moderne de Notepad ne charge pas de nouvelle DLL dans le process, juste de la mémoire de tas/UI) ; `listProfilerCheckpoints` retourne les 4 labels attendus ; ré-`attachProcess` sur un autre PID (`explorer.exe`) vide bien la session (`checkpoints: []`).
+
+**Limites connues du prototype, à traiter avant usage terrain SC2** : classification actuelle basique (une seule bucket "other" pour tout ce qui n'est ni module injecté ni page RWX ni image) — suffisant pour distinguer "rien de suspect" de "signal à regarder", mais pas encore un classement fin bruit/compteur/stable. Pas de byte-diff intégré (reste composé avec `dumpMemoryRegion` existant en aval, volontairement — pas de duplication). Le matching de région par `baseAddress` exact peut rater un cas où Windows fusionne/scinde des régions entre deux captures (accepté comme limite connue, pas rencontré dans ce test).
+
+**Prochaine étape** : reprendre le protocole SC2/Wand (ressources illimitées, cf. discussion propriétaire) dès que l'accès Wand revient, cette fois avec `captureProfilerCheckpoint`/`getProfilerDiff` au lieu du script PowerShell manuel utilisé pour la découverte initiale.
+
+### Fix scan Auto — variantes scalées manquantes (x100/x1000/x4096/x65536), live-vérifié sur SC2 réel (01-02/09/2026, Codex puis Claude)
+
+**Quoi** : pendant un test terrain sur une partie SC2 privée (capture de ressources), le propriétaire a remarqué que le mode Auto du scan exact multi-type ne cherchait pas les représentations scalées d'une valeur — seulement quelques types bruts figés (`UInt16, Int32, UInt32, Int64, Float32, Float64`), sans jamais tester qu'un jeu puisse stocker en mémoire une valeur multipliée par un facteur fixe (`x10, x100, x1000, x4096, x65536` — courant pour les compteurs à virgule fixe). Codex a corrigé `smartAutoScanVariants` (`apps/desktop/scanning_core_manager.cpp:374`) pour déléguer entièrement à `killcore::generateScanVariants` (déjà utilisé ailleurs) au lieu d'une liste de types codée en dur — ça ajoute d'un coup la couverture Int16/Int8/UInt8 manquante et les variantes scalées. `SC2.md` a aussi été mis à jour avec une section dédiée expliquant le phénomène (ex: `135` affiché peut être stocké `552960` = `135*4096`) et une limite encore ouverte : le workflow **Unknown Auto** (scan différentiel sans valeur de départ) n'est lui pas encore scale-aware — ne sait pas traduire un delta affiché (`+7`) en delta brut scalé (`+28672` pour x4096). Ce point reste à traiter séparément.
+
+**Pourquoi ce test** : Codex a été bloqué par un quota d'usage 5h juste après le fix, avant de pouvoir revalider en conditions réelles. Claude a repris le retest live (contexte/quota séparé) pendant que Codex était indisponible.
+
+**Comment vérifié** : build via `scripts\build.ps1` (déjà relinké à 00:12:45 avant même la reprise). KillEngine relancé avec `KILLENGINE_AUTOMATION_PIPE=1`, attaché à `SC2_x64.exe` PID 24152 (partie privée en cours, campagne/offline). `startExactScanMultiType("1199","Auto")` sur la vraie mémoire SC2 (minerai affiché = 1199) → 10898 candidats, avec des `variantLabel` scalés bien présents dans les résultats (ex: `"Int32 x65536"`), confirmant que le trou signalé est comblé sur cible réelle, pas seulement en théorie. Relecture du code de `nextScan`/`targetBytesForCandidate` (`scanning_core_manager.cpp:394`) : confirme que le narrowing (`nextScan`) est lui aussi scale-aware — il régénère les bytes cibles pour chaque candidat selon son propre `variantLabel` stocké, pas juste le scan initial. Tentative de narrowing complet (1199→1099) non poursuivie jusqu'au bout (0 survivant sur le premier round `exact`, attendu vu le volume de faux positifs d'un premier passage multi-type/multi-échelle sur 2 Go — pas un signe de bug) ; propriétaire a choisi d'arrêter là, le fix étant déjà démontré sur cible réelle.
+
+### Bug trouvé et corrigé — `writeMemoryHex` réutilisait le handle ReadOnly de l'attach (02/09/2026, Claude)
+
+**Quoi** : pendant le test terrain SC2 (narrowing minerai via Changed Pages, cf. ci-dessus), écriture de test `1099` via `writeMemoryHex` sur 3 candidats → échec sur les 3 avec `WriteProcessMemory failed ... error=5` (`ERROR_ACCESS_DENIED`). Cause trouvée dans le code : `ApplicationController::writeMemoryHex` (`apps/desktop/application_controller.cpp:3366`, avant fix) instanciait `killcore::MemoryWriter` directement sur `m_handle` — le handle partagé ouvert par `attachProcess` avec `killcore::ProcessAccess::ReadOnly` (voir `application_controller.cpp:2335`), qui n'a ni `PROCESS_VM_WRITE` ni `PROCESS_VM_OPERATION`. Tous les autres chemins d'écriture du moteur (`write_freeze_core_manager.cpp`, `freeze_hotkey_overlay_manager.cpp`) ouvrent au contraire leur propre handle `ProcessAccess::ReadWrite` à la demande — seul `writeMemoryHex` avait ce bug, confirmé en testant `writeMemoryValue` (chemin correct) sur la même adresse au même moment : succès immédiat (`verified: true`), prouvant que ce n'était pas une protection côté SC2 mais bien le handle ReadOnly réutilisé à tort.
+
+**Corrigé** : `writeMemoryHex` ouvre maintenant son propre `killcore::ProcessHandle` en `ReadWrite` avant d'écrire, même pattern que `write_freeze_core_manager.cpp:165`.
+
+**Comment vérifié** : build via `scripts\build.ps1` — premier essai échoué (`LNK1104: impossible d'ouvrir bin\KillEngine.exe`, le process attaché à SC2 tenait encore le fichier verrouillé, cf. [[feedback_check_binary_staleness_before_blaming_code]]), `KillEngine.exe` arrêté puis rebuild réussi. Pas encore re-testé en live sur `writeMemoryHex` lui-même après ce fix (le test SC2 s'est arrêté avant) — à revalider à la prochaine session si `writeMemoryHex` est réutilisé.
+
+### SC2-UNKNOWN-1 — variantes `x4096`/`x65536` dans l'Auto exact (01/09/2026, Codex)
+
+**Quoi** : correction ciblée de `apps/desktop/scanning_core_manager.cpp` après remarque du propriétaire pendant le test terrain SC2 : le générateur générique `core/scanner/value_variants.*` contient déjà les variantes `x10`, `x100`, `x1000`, `x4096`, `x65536`, et le scan exact multi-type `Auto` les utilisait bien, mais le chemin `SmartAuto` utilisé par l'Assistant avait encore une liste rapide maison de types bruts (`UInt16`, `Int32`, `UInt32`, `Int64`, `Float32`, `Float64`). `SmartAuto` est maintenant aligné sur `generateScanVariants(value, Int32, false)` pour inclure les mêmes variantes que l'Auto produit.
+
+**Pourquoi** : pour SC2, une ressource affichée peut être stockée comme fixed-point (`135 * 4096 = 552960`, par exemple). Le libellé "Auto" doit donc vouloir dire "types + représentations utiles", pas "quelques types bruts". Sans cette correction, une demande Assistant avec valeur connue pouvait rater un candidat `x4096`/`x65536` alors que le moteur savait déjà le chercher par ailleurs.
+
+**Reste ouvert** : le workflow `Unknown Auto` ne passe toujours pas par `generateScanVariants()` car il compare un snapshot avant/après sans valeur affichée cible ; il boucle seulement sur des `ValueType` bruts. Une passe Unknown `Increased` peut conserver un fixed-point parce que le brut augmente aussi, mais KillEngine ne sait pas encore exploiter directement le delta affiché (`+7`) comme delta brut (`+28672` pour `x4096`) ni labelliser automatiquement les survivants. Futur chantier possible : refine Unknown delta-aware basé sur `previousDisplayedValue`, `currentDisplayedValue` et les variantes de `value_variants`.
+
+**Comment vérifié** : lecture ciblée de `core/scanner/value_variants.h/.cpp` (variantes `x4096`/`x65536` présentes et testées par `tests/unit/test_value_variants.cpp`), `apps/desktop/scanning_core_manager.cpp` (`startExactScanMultiType()` et `smartAutoScanVariants()`), et `core/snapshot/snapshot_store.cpp` (`SnapshotStore::compare()` mono-`ValueType`, changed/unchanged/increased/decreased seulement). Pas de build lancé volontairement pendant la session multi-agent en cours ; vérification légère par `git diff --check` et scan mojibake sur les fichiers touchés.
+
+### Validation globale avant commit — Build + unit tests (02/09/2026, Codex)
+
+**Quoi** : validation finale du lot de changements en attente avant commit sur `main` : profiler externe, wrappers/scripts SC2, retouches UI, correction `SmartAuto` scale-aware et correction `writeMemoryHex`.
+
+**Pourquoi** : demande propriétaire explicite : "relance un build et test puis comit tout", reprise après disponibilité de Wand et avant consolidation Git.
+
+**Comment vérifié** : `.\scripts\build.ps1` → OK (`Build successful!`, `build\bin\KillEngine.exe` généré). `.\build\bin\killengine_unit_tests.exe` → OK, 291 tests passés sur 43 suites.
+
+### EXTMOD-2 — test terrain Wand/SC2 avec `ExternalToolProfiler` : besoin d'un diff fin par pages/bytes (02/09/2026, Codex)
+
+**Quoi** : session live SC2 campagne/offline avec Wand disponible, KillEngine lancé avec `KILLENGINE_AUTOMATION_PIPE=1`, attaché à `SC2_x64.exe` PID 11420. Séquence capturée via `captureProfilerCheckpoint(..., {moduleName:"SC2_x64.exe", maxHashBytesMb:256})` :
+- `baseline_sc2` avant attach Wand : 122 modules, 5 régions du module `SC2_x64.exe` hashées (~134 Mo).
+- `wand_attached_off_sc2` après attach Wand, toggle OFF : 132 modules. Diff baseline→OFF : 10 modules ajoutés (`TrainerLibPlugin_x64.dll`, `CELib_x64.dll`, `Trainer_49560_b593cf46cc.dll`, `InputCapturePlugin_x64.dll`, `tophat_service_x64.dll`, etc.) et 1 région `mapped RW` changée dans `SC2_x64.exe` (`0x7ff6353d0000`, ~66.8 Mo), aucune région code changée.
+- `recruit_fast_on_sc2` après activation du toggle Wand **Recrutement rapide** : 136 modules. Diff OFF→ON : 4 modules graphiques ajoutés (`d3d11.dll`, drivers Intel, `we-graphics-hook64.dll`) et la même région `mapped RW` changée, toujours aucune région code `SC2_x64.exe` modifiée.
+- `recruit_fast_after_unit_sc2` après recrutement d'une unité et consommation de 50 cristaux : aucun nouveau module, même région `mapped RW` changée.
+- `recruit_fast_off_after_unit_sc2` après désactivation du toggle : aucun module retiré, même région `mapped RW` changée.
+
+**Pourquoi** : valider la décision EXTMOD-1 : différencier `SC2_x64.exe` lui-même avant/après toggle Wand pour savoir si Wand applique un patch/hook dans le module du jeu ou pilote l'effet via DLL injectées/état runtime. Le propriétaire a demandé explicitement de travailler avec Wand maintenant qu'il est de nouveau disponible.
+
+**Conclusion terrain** : aucun patch code évident dans `SC2_x64.exe` n'a été détecté par le profiler actuel sur le toggle `Recrutement rapide`. Wand injecte ses modules dès l'attache, puis garde les modules chargés même toggle OFF. Le signal côté module jeu reste concentré dans une grosse région `mapped RW` (~66.8 Mo), trop large pour conclure précisément. Hypothèse actuelle : effet piloté par couche injectée/état runtime plutôt que patch statique simple dans `.text`, ou granularité actuelle trop grossière pour voir le point d'accroche.
+
+**Outil à ajouter en priorité** : faire évoluer `ExternalToolProfiler` vers un **diff fin par pages/bytes** :
+- hasher et comparer par pages 4K à l'intérieur des régions changées, pas seulement par région entière ;
+- retourner top pages changées avec offsets module (`SC2_x64.exe+0x...`), nombre de bytes différents, premiers deltas bornés, stabilité ON/OFF/stimulus ;
+- classer `toggle_state_candidate`, `runtime_noise`, `code_patch_candidate`, `injected_module_state`, `mapped_data_changed` ;
+- exposer le résultat au pipe et à l'UI avant de relancer un gros chantier générique de hook.
+
+**Outil complémentaire à ajouter** : créer un **Timeline Recorder** au-dessus du profiler pour automatiser le protocole terrain :
+- définir une session nommée avec étapes (`baseline`, `tool_attached_off`, `toggle_on`, `stimulus_done`, `toggle_off`) ;
+- capturer les checkpoints dans l'ordre, avec horodatage, notes humaines et options identiques (`moduleName`, budget hash, scope modules injectés) ;
+- produire automatiquement les diffs utiles entre étapes adjacentes et contre baseline ;
+- éviter les oublis/manips manuelles pendant les tests live avec Wand ou tout autre outil externe autorisé.
+
+**Comment vérifié** : appels pipe réels `captureProfilerCheckpoint`/`getProfilerDiff` sur `SC2_x64.exe` pendant une partie locale active. Pas de modification de code dans cette session ; mise à jour tracker seulement, donc pas de build relancé.
+
+### EXTMOD-2 — outil livré : diff fin par pages 4K + Timeline Recorder (02/09/2026, Claude)
+
+**Quoi** : implémentation de l'"outil à ajouter en priorité" identifié dans l'entrée EXTMOD-2 ci-dessus. Nouveau module cœur pur (aucun accès process, testable unitairement) `core/profiler/page_diff_analyzer.h/.cpp` :
+- `splitIntoPages()` : découpe un buffer déjà lu (région) en pages 4K, hash FNV-1a par page, retient les bytes bruts par page tant qu'un budget dédié (`maxPageBytesMb`) n'est pas épuisé — aucune lecture mémoire supplémentaire, réutilise le buffer déjà lu pour le hash de région existant.
+- `diffPageContents()` : diff page par page entre deux checkpoints, classification `injected_module_state` / `code_patch_candidate` / `mapped_data_changed`, et pour les pages dont les deux côtés ont des bytes bruts : `byteDiffCount` exact + `sampleDeltas` bornés ({offset, before, after}).
+- `ProfilerTimelineTracker` : accumulateur de session nommée (mêmes principes que `ChangedPagesConsensus`) — pour chaque page vue à travers N étapes (`baseline`/`tool_attached_off`/`toggle_on`/`stimulus_done`/`toggle_off`), classe `toggle_state_candidate` (change plus d'une fois mais pas à chaque étape — meilleur signal), `runtime_noise` (change à chaque étape), `one_time_state_change` (change une seule fois), silencieuse si jamais changée.
+
+Branché dans `apps/desktop/external_tool_profiler.*` : `captureProfilerCheckpoint`/`getProfilerDiff` étendus (options `maxPageBytesMb`, `includePageDiff`, `maxSampleDeltasPerPage`, `maxTopChangedPages` ; sortie `pagesChanged` par région + agrégat global `topChangedPages` trié par nombre de bytes différents, avec `moduleOffset` résolu type `SC2_x64.exe+0x...`). 3 nouvelles méthodes `Q_INVOKABLE` sur `ApplicationController` : `recordProfilerTimelineStep(stepName, options)`, `getProfilerTimelineSummary()`, `clearProfilerTimeline()`.
+
+**Pourquoi** : conclusion de la session EXTMOD-2 précédente — un hash de région entière (~66 Mo) ne permettait pas de localiser le point d'accroche réel d'un outil externe (Wand/SC2) à l'intérieur d'une grosse région `mapped RW`. Le granularité page + la stabilité multi-étapes sont les deux signaux demandés explicitement pour distinguer bruit/compteur d'un vrai candidat "point d'accroche".
+
+**Comment vérifié** : 11 nouveaux tests unitaires purs (`tests/unit/test_page_diff_analyzer.cpp`, dont un scénario complet noise/toggle/one-time/jamais-changé) — 305/305 tests passent après ajout (302 avant + 3 non liés à ce chantier, voir SC2-UNKNOWN-1 ci-dessous). `scripts\build.ps1` → OK. Puis validation live réelle via le pipe automation (pas seulement les tests unitaires, cf. [[feedback_verify_dont_trust_agent_build_claims]]) : `KillEngine.exe` attaché à `Notepad.exe` (cible synthétique jetable) — séquence `recordProfilerTimelineStep` × 4 (baseline/dialog_open/dialog_closed/dialog_reopen), `getProfilerDiff` entre deux checkpoints après une vraie frappe clavier a retourné des `topChangedPages` avec des deltas d'octets réels et exacts (ex. page à `f5547fb000`, 861 bytes différents, `sampleDeltas` avec les vraies valeurs avant/après) ; `getProfilerTimelineSummary` a classé 13098 pages sur la session 4-étapes sans crash (toutes `one_time_state_change` dans ce test précis car les étapes 0-2 étaient filtrées `moduleName:"notepad.exe"` et l'étape 3 non filtrée — artefact du test, pas un bug) ; `clearProfilerTimeline` confirmé remettre `stepCount` à 0.
+
+**Reste ouvert** : le vrai test terrain SC2/Wand avec ce nouvel outil (remplacer le script PowerShell manuel de la découverte EXTMOD-1 initiale) n'a pas été refait dans cette session — nécessite le propriétaire + Wand disponible en live, voir "Validations restantes".
+
+### Retest live `writeMemoryHex` — fix confirmé (02/09/2026, Claude)
+
+**Quoi** : le fix du 02/09/2026 (handle `ReadOnly` réutilisé à tort, voir entrée "Bug trouvé et corrigé" ci-dessus) n'avait pas encore été revalidé en live après le fix (le test SC2 s'était arrêté avant). Revalidé sur `Notepad.exe` (cible synthétique) : `readMemoryPreview` → `writeMemoryHex("DE AD BE EF")` → `success:true, verified:true` (plus d'`ERROR_ACCESS_DENIED`) → `readMemoryPreview` de nouveau confirme les 4 bytes bien écrits. Item de "Validations restantes" clos.
+
+### SC2-UNKNOWN-1 — Unknown Delta scale-aware, live-vérifié (02/09/2026, Claude)
+
+**Quoi** : le workflow Unknown (snapshot avant/après sans valeur affichée cible, `SnapshotStore::compare`) n'implémentait PAS DU TOUT le mode Delta (`NextScanMode::Delta` explicitement rejeté) et le narrowing Delta sur candidats déjà scannés (`nextScan`/`nextScanAsync`) ignorait le `variantLabel` scalé du candidat (ex. "Int32 x4096") — un delta affiché "+7" n'était jamais retraduit en delta brut "+28672" pour une valeur stockée en virgule fixe x4096, contrairement au scan exact déjà corrigé (voir "Fix scan Auto" ci-dessus).
+
+**Corrigé** :
+- `core/scanner/value_variants.h/.cpp` : nouvelle fonction pure `generateDeltaVariants(displayedDelta, type)` — génère les deltas bruts scalés x1/x10/x100/x1000/x4096/x65536 pour les types entiers (inchangé pour les floats, le scaling fixed-point ne s'y applique pas). Facteurs d'échelle dupliqués 2× dans le fichier factorisés en un seul `fixedPointScales()` au passage.
+- `core/scanner/scan_types.h` : `ScanOptions` gagne `targetDelta`/`matchVariantLabel`.
+- `core/snapshot/snapshot_store.cpp` : `SnapshotStore::compare` accepte maintenant `NextScanMode::Delta` (tolérance 0.5 pour les entiers, 0.0001 pour les floats), labellise chaque `ScanMatch` retourné avec `options.matchVariantLabel`.
+- `apps/desktop/scanning_core_manager.cpp` : `unknownNextScan`/`unknownNextScanAsync` gagnent un paramètre `deltaValue` (nouveau, optionnel — `Q_INVOKABLE` rétrocompatible) ; en mode delta + type Auto, boucle sur `generateDeltaVariants` par type (comme le scan exact multi-échelle) et labellise les survivants. Nouvelle fonction `targetDeltaForCandidate()` (même principe que `targetBytesForCandidate` pour le mode Exact) appliquée aux deux chemins de narrowing Delta existants (`nextScan` sync + `nextScanAsync`) — corrige aussi le narrowing Delta post-scan-exact-scalé, pas seulement le chemin Unknown. Bug latent corrigé au passage : la branche "refine" d'`unknownNextScan(Async)' appelait `nextScan(mode, "")`/`nextScanAsync(mode, "")` avec une valeur vide même en mode delta — aurait toujours échoué (`"Valeur delta invalide"`) dès qu'un Unknown scan delta était relancé sur des candidats déjà présents.
+- `apps/desktop/application_controller.h/.cpp` : `unknownNextScan`/`unknownNextScanAsync` exposent `deltaValue` (paramètre `Q_INVOKABLE` optionnel, défaut `QString()`).
+
+**Comment vérifié** : 3 nouveaux tests unitaires purs (`tests/unit/test_value_variants.cpp`, échelle/signe/floats non scalés) — 305/305 après ajout. `scripts\build.ps1` → OK. Live via le pipe sur `KillEngineTestTarget.exe` : localisation de `g_hidden_score` (valeur 5000) par scan exact, écriture directe `5000→5007` (delta contrôlé), `unknownNextScan("delta","Int32","7")` → `success:true, matchesFound:2` — le candidat contrôlé ressort avec `variantLabel:"Int32"` (non scalé) et `lastValueNumber:5007` exact, plus un second candidat coïncident labellisé `"Int32 x65536"` (preuve que la boucle multi-échelle tourne réellement et labellise correctement). Puis test du chemin narrowing (candidats déjà présents) : écriture `5007→5014` (encore +7), relance `unknownNextScan("delta","Int32","7")` → `matchesFound:1, stored:1` — seul le candidat non-scalé (qui a vraiment re-changé de +7) survit, le candidat x65536 coïncident (qui n'a pas re-changé de +458752) est correctement éliminé, confirmant que `targetDeltaForCandidate` retraduit bien le delta par candidat sur le chemin de narrowing aussi.
+
+**Reste ouvert** : aucun test terrain sur SC2/un vrai jeu à valeur scalée réelle (limité aux cibles synthétiques disponibles dans cette session) — comportement à confirmer si l'occasion se présente sur une cible avec un score interne réellement stocké en fixed-point.
+
+### PROPOSITIONS-1 — Propositions d'améliorations et nouveaux outils (02/09/2026, Kimi K2.5)
+
+**Quoi** : proposition de 8 améliorations/outils priorisés pour KillEngine, basés sur l'analyse des chantiers récents (Solitaire XP, SC2/Wand, EXTMOD, WebView2/CDP) et des patterns observés en conditions réelles.
+
+**Propositions priorisées** :
+
+🔥 **Priorité Haute**
+
+1. **Smart Watchdog** — Détection auto de resynchronisation
+   - Surveillance post-écriture automatique (extension de `writeDidNotHold`)
+   - Détection de copies jumelles (pattern "paire à 8 octets" observé sur Solitaire XP)
+   - Suggestion auto : "Cette adresse semble être recalculée — essayer [+0x8] (cible) au lieu de [+0x0] (affichage)"
+   - *Justification* : résout le problème Solitaire XP où les écritures étaient écrasées silencieusement
+
+2. **Pattern Learning Engine** — Apprentissage par moteur de jeu
+   - Classification auto des cibles : "Unity 2022", "Unreal 5", "Godot", "Custom"
+   - Suggestion de types : "Dans les jeux Unity, les ressources sont souvent Int32×100"
+   - Base de données locale des layouts mémoire par jeu
+   - *Justification* : évite de redécouvrir les mêmes patterns à chaque session
+
+🔶 **Priorité Moyenne**
+
+3. **Memory Timeline Visualizer**
+   - Vue graphique des changements mémoire au fil du temps (extension du Timeline Recorder EXTMOD-2)
+   - Classification visuelle : compteur régulier vs état stable vs bruit
+   - Heatmap des pages modifiées
+
+4. **Live Lua REPL**
+   - Exécution interactive ligne par ligne (pas seulement fichiers)
+   - Autocomplétion des fonctions `ke.*`
+   - Historique des commandes
+
+5. **Cross-Session Memory Fingerprinting**
+   - Signature stable d'une cible (indépendante de l'ASLR)
+   - Détection de version : "Ce pattern correspond à SC2 5.0.12"
+   - Comparaison avec des sessions précédentes
+
+🔷 **Priorité Basse / Futur**
+
+6. **Time Travel Debugging**
+   - Capturer des états mémoire complets à t0, t1, t2...
+   - Revenir à un état précédent
+   - "Branches" temporelles pour tester différentes modifications
+
+7. **3D Memory Explorer**
+   - Vue spatiale de l'espace mémoire
+   - Clustering visuel par module/type
+   - Navigation WASD dans la mémoire
+
+8. **Network-Memory Correlation**
+   - Capture des paquets liés au processus
+   - Corrélation : "Cette valeur a changé 50ms après ce paquet"
+   - Détection de la source de vérité (locale vs serveur)
+
+**Pourquoi** : après l'analyse des échecs récents (Solitaire XP introuvable, SC2/Wand nécessitant un diff fin), ces outils combleraient les gaps identifiés : détection d'écritures qui ne tiennent pas, apprentissage des patterns par moteur, visualisation des changements temporels, et corrélation avec d'autres sources (réseau, disque).
+
+**Recommandation immédiate** : le **Smart Watchdog** est le plus impactant car il s'appuie sur des mécanismes existants (`writeDidNotHold`, `findWhatWrites`) et résout un problème réel déjà rencontré (Solitaire XP).
+
+**Comment vérifié** : proposition théorique basée sur l'analyse des phases 263-270 (Solitaire XP), EXTMOD-1/2 (SC2/Wand), et WebView2/UWP-STATE-1. Aucun code produit dans cette entrée — à débattre/découper en phases si le propriétaire valide une ou plusieurs pistes.
+---
+
+## Détails compactés depuis PHASE_TRACKER actif — chantiers outils en construction (02/09/2026, Codex)
+
+Blocs de conception détaillés transférés pour alléger le tracker actif. Les chantiers restent ouverts dans `docs/PHASE_TRACKER.md` sous forme de résumés opérationnels tant que le build, les tests et la validation finale ne sont pas faits.
+### SMART-WATCHDOG-1 — Chantier Smart Watchdog lancé (02/09/2026, Kimi K2.5)
+
+**Quoi** : développement du **Smart Watchdog** — outil de détection automatique des écritures qui ne tiennent pas (resynchronisation) et suggestion de corrections. Extension naturelle de `writeDidNotHold` existant.
+
+**Architecture** :
+- `core/smart_watchdog/smart_watchdog.h/.cpp` : logique pure (détection pattern, suggestion offsets)
+- `apps/desktop/smart_watchdog_manager.h/.cpp` : manager Qt (état, timers, signaux)
+- Intégration `ApplicationController` : méthodes `Q_INVOKABLE` pour activer/désactiver
+- Tests unitaires : `tests/unit/test_smart_watchdog.cpp`
+
+**Fonctionnalités v1** :
+1. **Surveillance post-écriture** : après `writeMemoryValue`, surveillance automatique pendant N secondes
+2. **Détection resync** : si la valeur redevient l'originale → signal `writeResyncDetected`
+3. **Pattern paire** : détection de copies jumelles (offset +8, +16 typiques)
+4. **Suggestion intelligente** : "Essayer adresse+0x8" quand pattern détecté
+
+**Fonctionnalités additionnelles (v2 étendue)** :
+
+5. **Détection anti-cheat patterns** :
+   - Surveillance des accès mémoire suspects (lectures fréquentes depuis des threads externes)
+   - Détection de hooks système (NtReadVirtualMemory, NtWriteVirtualMemory hookés)
+   - Identification de drivers de protection (EasyAntiCheat, BattlEye, Vanguard signatures)
+   - Alertes graduées : `info` (présence détectée) → `warning` (protection active) → `critical` (détection d'écriture suspecte)
+
+6. **Contournement automatique suggéré** :
+   - Si resync détecté → suggestion de stratégie : "Freeze BP", "Pointer chain", "DLL injection"
+   - Si anti-cheat détecté → suggestion de mode : "Stealth", "Kernel driver", "Hardware breakpoint"
+   - Score de risque calculé : `risk = f(anti_cheat_detected, resync_frequency, process_protection_level)`
+   - Recommandation contextuelle : "Ce jeu utilise X anti-cheat → privilégier le mode Y"
+
+7. **Fingerprinting de protection** :
+   - Signature des mécanismes de protection par jeu
+   - Base de données locale : `SC2 → pas d'anti-cheat, resync possible via affichage`
+   - Apprentissage : si une stratégie fonctionne, la mémoriser pour ce processus
+
+8. **Mode "Ghost Write"** :
+   - Détection du moment précis où la valeur est réécrite
+   - Synchronisation du write KillEngine avec le cycle de l'anti-cheat
+   - Écriture "entre les mailles" : timing précis pour minimiser la détection
+
+9. **Corrélation multi-adresses** :
+   - Si écriture sur A échoue, surveiller automatiquement A+0x8, A+0x10, A+0x100
+   - Détection de structures : "Ces 4 adresses forment un pattern de tableau"
+   - Suggestion de cible alternative basée sur la stabilité observée
+
+10. **Rapport de santé du write** :
+    - Score de confiance en temps réel : 0-100%
+    - Historique des échecs/succès par adresse
+    - Prédiction : "Cette adresse a 85% de chances d'être resynchronisée dans les 5s"
+
+11. **Auto-Remediation** (Correction automatique) :
+    - Tentative auto de contournement quand resync détecté
+    - Séquence : détecter resync → essayer offset+0x8 → si tient, confirmer → sinon essayer +0x10, etc.
+    - Mode "agressif" : essayer jusqu'à 10 offsets automatiquement
+    - Mode "conservateur" : suggérer mais attendre validation utilisateur
+    - Log de toutes les tentatives avec résultats
+
+12. **Behavioral Analysis** (Analyse comportementale) :
+    - Profilage du pattern d'écriture du jeu : fréquence, rythme, threads sources
+    - Détection de "write storms" (burst d'écritures = protection active)
+    - Identification des "zones calmes" (moments où écrire est plus sûr)
+    - Suggestion de timing optimal pour les écritures
+
+13. **Memory Integrity Check** (Vérification d'intégrité) :
+    - Checksum des régions critiques avant/après écriture
+    - Détection de modifications inattendues (corruption, anti-tamper)
+    - Comparaison avec une baseline "saine" du processus
+    - Alertes si intégrité compromise
+
+14. **Predictive Write** (Écriture prédictive) :
+    - Anticipation de la prochaine valeur basée sur le pattern observé
+    - "La valeur augmente de +1 toutes les 2s → prochaine prédite : X+1"
+    - Écriture de la valeur cible AVANT que le jeu ne la recalcule
+    - Synchronisation parfaite avec le cycle de jeu
+
+15. **Stealth Score Monitor** (Surveillance furtivité) :
+    - Score global de furtivité du processus cible : 0-100
+    - Indicateurs : debugger présent ? anti-cheat actif ? hooks détectés ?
+    - Tendance temporelle : "Le score est passé de 80 à 30 en 10s"
+    - Alertes quand le score passe sous un seuil critique
+
+16. **Cross-Process Watchdog** (Surveillance multi-processus) :
+    - Surveillance des processus liés (launcher, anti-cheat, service compagnon)
+    - Détection de processus de protection qui démarrent après l'attache
+    - Corrélation : "Processus X a lu la mémoire de Y à t+5s"
+    - Alertes sur activité suspecte dans les processus voisins
+
+17. **Write Replay** (Rejeu intelligent) :
+    - Mémorisation des écritures qui ont tenu
+    - Rejeu automatique si valeur redevient originale (resync)
+    - Stratégies : rejeu immédiat, rejeu différé, rejeu avec variation
+    - Statistiques de succès par stratégie de rejeu
+
+18. **Smart Freeze** (Freeze adaptatif) :
+    - Basculement automatique entre modes : polling → hardware breakpoint → kernel
+    - Détection du mode optimal selon la réactivité de la cible
+    - Fallback automatique si freeze détecté comme inefficace
+    - Optimisation du polling interval en temps réel (16ms → 100ms selon stabilité)
+
+19. **Signature-Based Detection** (Détection par signature) :
+    - Base de données de signatures de resync connues par jeu
+    - Pattern matching : "Ce comportement ressemble à Unity 2022.3 resync pattern #3"
+    - Mise à jour communautaire des signatures
+    - Apprentissage automatique des nouveaux patterns
+
+20. **Collaborative Watchdog** (Mode collaboratif) :
+    - Partage anonymisé des patterns de resync réussis
+    - Base de données crowd-sourcée : "Pour SC2+Wand, l'offset +0x21F89 fonctionne"
+    - Recommandations basées sur la communauté
+    - Mode offline avec cache local
+
+21. **Watchdog AI Assistant** (IA intégrée) :
+    - Analyse des patterns de resync par l'IA locale (llama.cpp)
+    - Suggestions personnalisées : "Basé sur vos 5 dernières sessions SC2..."
+    - Dialogue naturel : "Pourquoi cette adresse ne tient pas ?"
+    - Apprentissage des préférences utilisateur (agressif vs conservateur)
+
+22. **Memory Region Health Map** (Carte de santé mémoire) :
+    - Visualisation heatmap des régions mémoire (vert/jaune/rouge)
+    - Vert = stable, Jaune = resync occasionnel, Rouge = resync fréquent
+    - Navigation interactive : cliquer sur une zone pour voir les détails
+    - Historique temporel : évolution de la santé sur la session
+
+23. **Auto-Documentation** (Rapports automatiques) :
+    - Génération de rapport PDF/HTML à la fin de chaque session
+    - Résumé : écritures tentées, succès, échecs, patterns détectés
+    - Screenshots automatiques des moments clés (resync détecté)
+    - Export JSON pour analyse externe
+
+24. **Comparative Analysis** (Analyse comparative) :
+    - Comparaison entre deux sessions du même jeu
+    - Détection des différences : "Session A : offset +0x8 stable, Session B : offset +0x10 stable"
+    - Identification des facteurs de variation (version du jeu, anti-cheat, etc.)
+    - Recommandations basées sur les différences observées
+
+25. **Real-time Threat Level** (Niveau de menace temps réel) :
+    - Indicateur visuel 0-10 du niveau de "danger" d'écriture
+    - Basé sur : anti-cheat détecté, resync historique, protection mémoire, threads suspects
+    - Alertes sonores/visualles quand le niveau dépasse un seuil
+    - Mode "panic" : arrêt automatique de toutes les écritures si niveau critique
+
+26. **Smart Backup/Restore** (Sauvegarde intelligente) :
+    - Snapshot automatique de la mémoire avant chaque écriture
+    - Restauration en un clic si resync détecté
+    - Diff visuel entre état avant/après
+    - Gestionnaire de versions : "Revenir à l'état de 10:23"
+
+27. **Process Behavior Fingerprint** (Empreinte comportementale) :
+    - Signature unique du comportement mémoire du processus
+    - Détection d'anomalies : "Ce comportement diffère de la baseline SC2 connue"
+    - Identification de versions : "Pattern correspond à SC2 5.0.12, pas 5.0.11"
+    - Alertes si comportement inhabituel (possible mise à jour anti-cheat)
+
+28. **Adaptive Polling** (Polling adaptatif) :
+    - Ajustement dynamique de la fréquence de surveillance
+    - Fréquence élevée (16ms) pendant les écritures actives
+    - Fréquence réduite (500ms) en période de calme
+    - Économie de ressources CPU tout en maintenant la réactivité
+
+29. **Multi-Value Watch** (Surveillance multi-valeurs) :
+    - Surveillance simultanée de plusieurs adresses liées (ressources, santé, mana)
+    - Détection de corrélations : "Quand santé change, mana change aussi"
+    - Suggestion de groupes : "Ces 4 valeurs forment un pattern de ressources"
+    - Écriture groupée atomique sur plusieurs adresses
+
+30. **Session Replay** (Rejeu de session) :
+    - Enregistrement complet d'une session (écritures, timings, résultats)
+    - Rejouer exactement la même séquence sur une nouvelle instance
+    - Mode "benchmark" : comparer les résultats entre deux rejoues
+    - Partage de sessions : "Télécharger cette session Solitaire XP résolue"
+
+31. **Watchdog Scripting API** (API scriptable) :
+    - Exposition complète du Watchdog en Lua
+    - Callbacks personnalisables : `onResyncDetected`, `onAntiCheatAlert`
+    - Scripts de réaction automatique : "Si resync → essayer offset+0x8"
+    - Intégration avec le système de scripting existant
+
+32. **Memory Entropy Analysis** (Analyse d'entropie) :
+    - Calcul de l'entropie des régions mémoire (aléatoire vs structuré)
+    - Détection de chiffrement : "Cette région semble chiffrée (entropie 7.8/8)"
+    - Identification des structures : "Pattern de tableau détecté (entropie 2.3)"
+    - Suggestion de méthodes de contournement selon l'entropie
+
+33. **Watchdog Dashboard** (Tableau de bord dédié) :
+    - Vue d'ensemble temps réel de tous les indicateurs
+    - Graphiques : taux de resync, stabilité des écritures, score de furtivité
+    - Alertes en temps réel avec actions rapides
+    - Personnalisation de l'affichage (drag & drop des widgets)
+
+34. **Smart Value Prediction** (Prédiction intelligente) :
+    - Prédiction non linéaire : accélération, décélération, patterns cycliques
+    - "La valeur suit une courbe sinusoïdale → prochaine prédite : X"
+    - Apprentissage des patterns de jeu (jour/nuit, cycles économiques)
+    - Synchronisation avec les événements de jeu détectés
+
+35. **Resync Chain Analysis** (Analyse de chaîne de resync) :
+    - Détection des cascades : écriture sur A provoque resync sur B, C, D
+    - Cartographie des dépendances mémoire
+    - Identification de la "source" vs les "copies"
+    - Suggestion de cibler la source plutôt que les copies
+
+**Lane SALON** : réservée sous `Kimi K2.5 | Smart Watchdog | core/smart_watchdog/*, apps/desktop/smart_watchdog_manager.*`
+
+**Pourquoi maintenant** : le problème Solitaire XP (écritures écrasées silencieusement) est un pattern récurrent. KillEngine doit détecter et suggérer, pas juste échouer silencieusement.
+
+**Risques** : faux positifs si la valeur change naturellement (pas resync). Mitigation : tolérance et confirmation par pattern.
+
+**Validation prévue** : tests unitaires + test live sur `KillEngineTestTarget.exe` avec resync simulé.
+
+### MEMORY-TIMELINE-VIS-1 — Chantier Memory Timeline Visualizer lancé (02/09/2026, Kimi K2.5)
+
+**Quoi** : développement du **Memory Timeline Visualizer** — outil de visualisation graphique des changements mémoire au fil du temps. Extension visuelle du Timeline Recorder (EXTMOD-2) déjà livré.
+
+**Architecture** :
+- `core/visualization/memory_timeline_collector.h/.cpp` : collecte et stockage des données temporelles
+- `core/visualization/memory_timeline_analyzer.h/.cpp` : analyse des patterns (tendance, stabilité, anomalies)
+- `apps/desktop/memory_timeline_manager.h/.cpp` : manager Qt (état, rendu, signaux)
+- UI Vue : `ui/src/views/MemoryTimelineView.vue` — visualisation interactive
+- Tests : `tests/unit/test_memory_timeline.cpp`
+
+**Fonctionnalités v1** :
+
+1. **Timeline Graphique Interactive** :
+   - Axe X : temps (échelle ajustable : ms, s, min)
+   - Axe Y : valeur mémoire (adaptatif selon le type : Int32, Float32, etc.)
+   - Courbes multiples : une par adresse surveillée
+   - Zoom / pan : navigation fluide dans le temps
+   - Play/Pause : lecture temps réel ou historique
+
+2. **Classification Visuelle Automatique** :
+   - Couleur verte : valeur stable (peu de variation)
+   - Couleur orange : compteur régulier (pattern linéaire/cyclique détecté)
+   - Couleur rouge : bruit / instable (variations chaotiques)
+   - Couleur bleue : resync détecté (chute soudaine à la valeur originale)
+   - Légende dynamique avec pourcentage de stabilité
+
+3. **Heatmap des Pages Modifiées** :
+   - Vue matricielle : temps (X) vs adresses/pages (Y)
+   - Intensité de couleur = fréquence de modification
+   - Détection des "hot zones" (régions très actives)
+   - Filtrage par module (ex: "n'afficher que SC2_x64.exe+0x...")
+
+4. **Détection d'Événements** :
+   - Marqueurs automatiques : "Écriture KillEngine", "Resync détecté", "Freeze activé"
+   - Marqueurs utilisateur : clic sur la timeline pour annoter
+   - Détection de patterns : "Cette valeur suit une courbe sinusoïdale"
+   - Alertes visuelles : clignotement sur seuil dépassé
+
+5. **Comparaison Multi-Sessions** :
+   - Charger deux timelines côte à côte
+   - Synchronisation temporelle relative (t=0 au premier write)
+   - Diff visuel : "Session A stable, Session B avec resyncs"
+   - Export de la comparaison (image ou données)
+
+6. **Intégration Smart Watchdog** :
+   - Affichage du "health score" en temps réel sur la timeline
+   - Corrélation : clic sur un resync → zoom sur la timeline
+   - Prédiction visuelle : "D'après le pattern, resync probable dans 3s"
+
+**Fonctionnalités v2 étendues** :
+
+7. **3D Timeline View** :
+   - Vue 3D : temps (X) × valeur (Y) × profondeur (Z = confiance/stabilité)
+   - Rotation libre pour voir les patterns cachés
+   - Clustering visuel des comportements similaires
+
+8. **Anomaly Detection ML** :
+   - Détection automatique des comportements anormaux
+   - "Cette valeur change différemment de son historique"
+   - Suggestion : "Pattern anormal — vérifier si anti-cheat actif"
+
+9. **Export & Partage** :
+   - Export MP4/GIF de la timeline animée
+   - Export JSON/CSV des données brutes
+   - Partage communautaire : "Timeline SC2 minéraux pattern stable"
+
+10. **Mode "Time Travel"** :
+    - Clic sur un point de la timeline → restauration de l'état mémoire à ce moment
+    - Comparaison avant/après en split-screen
+    - "Rejouer" une séquence d'écritures à vitesse réduite
+
+**Lane SALON** : réservée sous `Kimi K2.5 | Memory Timeline Visualizer | core/visualization/memory_timeline_*, apps/desktop/memory_timeline_manager.*, ui/src/views/MemoryTimelineView.vue`
+
+**Pourquoi maintenant** : le Timeline Recorder (EXTMOD-2) capture déjà les données temporelles. La visualisation manque pour exploiter pleinement ces données — difficile de voir les patterns (resync, cycles, stabilité) dans des logs textuels.
+
+**Dépendances** :
+- EXTMOD-2 (Timeline Recorder) — déjà livré
+- Smart Watchdog (SMART-WATCHDOG-1) — pour corrélation health score
+- Chart.js ou D3.js pour le frontend — à ajouter au projet Vue
+
+**Risques** :
+- Performance : timeline avec 10000+ points → optimisation nécessaire (décimation, niveaux de détail)
+- Mémoire : stockage des historiques → limite configurable (garder les N dernières minutes)
+
+**Validation prévue** :
+- Tests unitaires sur l'analyse de patterns
+- Test live sur KillEngineTestTarget avec resync simulé
+- Test SC2 : visualisation du pattern de minéraux
+
+---
+
+### PATTERN-LEARNING-1 — Chantier Pattern Learning Engine lancé (02/09/2026, Kimi K2.5)
+
+**Quoi** : développement du **Pattern Learning Engine** — système d'apprentissage automatique des patterns mémoire par moteur de jeu. Classification auto des cibles et suggestions contextuelles basées sur l'historique.
+
+**Architecture** :
+- `core/pattern_learning/pattern_learning_engine.h/.cpp` : moteur d'apprentissage (classification, clustering, prédiction)
+- `core/pattern_learning/game_profile_database.h/.cpp` : base de données locale des profiles par jeu
+- `core/pattern_learning/feature_extractor.h/.cpp` : extraction de caractéristiques (entropie, structures, accès)
+- `apps/desktop/pattern_learning_manager.h/.cpp` : manager Qt (état, signaux, persistence)
+- UI Vue : `ui/src/views/PatternLearningView.vue` — interface de visualisation des patterns
+- Tests : `tests/unit/test_pattern_learning.cpp`
+
+**Fonctionnalités v1** :
+
+1. **Classification Auto du Moteur** :
+   - Détection du moteur : "Unity 2022", "Unreal Engine 5", "Godot 4", "Custom"
+   - Méthodes : signatures de modules, patterns d'allocation, entropie caractéristique
+   - Confiance calculée : "Unity 2022.3.45f1 détecté (confiance 94%)"
+   - Fallback : "Moteur inconnu — apprentissage à partir des patterns observés"
+
+2. **Base de Données Locale des Layouts** :
+   - Stockage SQLite : `%LOCALAPPDATA%/KillEngine/patterns/game_profiles.db`
+   - Structure par jeu : nom, moteur, version, offsets connus, types de valeurs
+   - Exemple : `SC2 → {resources: {type: "Int32", scale: 1, offsets: [...]}, health: {...}}`
+   - Mise à jour incrémentale après chaque session réussie
+
+3. **Suggestion Contextuelle de Types** :
+   - "Dans les jeux Unity, les ressources sont souvent Int32×100"
+   - "Unreal Engine 5 utilise fréquemment Float32 pour la santé"
+   - Suggestion proactive lors du scan : "Essayer Int32×100 d'abord ?"
+   - Score de confiance basé sur le taux de succès historique
+
+4. **Apprentissage des Patterns de Résolution** :
+   - Mémorisation des chemins de résolution réussis
+   - "Pour SC2 minéraux : scan exact Int32 → narrowing → offset +0x8 stable"
+   - Recommandation : "Vous avez résolu ce pattern 3 fois — raccourci disponible"
+   - Partage possible : export/import de patterns (JSON chiffré)
+
+5. **Détection de Version** :
+   - Fingerprint de version : "Ce pattern correspond à SC2 5.0.12"
+   - Alerte : "Version différente de la baseline — patterns peuvent avoir changé"
+   - Adaptation automatique : "Nouvelle version détectée — apprentissage des nouveaux offsets"
+
+6. **Clustering des Comportements** :
+   - Regroupement des adresses par comportement similaire
+   - "Groupe A : compteurs réguliers (ressources)"
+   - "Groupe B : états stables (options)"
+   - "Groupe C : bruit/UI (à ignorer)"
+   - Visualisation graphique des clusters
+
+**Fonctionnalités v2 étendues** :
+
+7. **Prédiction de Structures** :
+   - "Cette adresse ressemble à un PlayerState Unity"
+   - Suggestion de champs voisins : "À +0x10 : santé probable, À +0x20 : mana"
+   - Template de structures par moteur : `UnityPlayerState { health: Int32 @ 0x10, ... }`
+
+8. **Analyse Comparative Inter-Sessions** :
+   - "Session précédente : offset +0x8 stable"
+   - "Session actuelle : offset +0x10 nécessaire"
+   - Détection de changements de version/patch
+   - Migration automatique des patterns
+
+9. **Mode "Expert Auto"** :
+   - Lancement automatique du workflow optimal selon le jeu détecté
+   - "SC2 détecté → lancer scan multi-type + changed pages consensus"
+   - Pas d'intervention utilisateur pour les jeux connus
+   - Confirmation finale avant écriture (sécurité)
+
+10. **Intégration Smart Watchdog + Timeline** :
+    - Corrélation patterns ↔ resync : "Ce pattern a 20% de resync historique"
+    - Suggestion de mode freeze selon le pattern : "Pattern bruyant → privilégier hardware BP"
+    - Visualisation temporelle des patterns appris
+
+**Lane SALON** : réservée sous `Kimi K2.5 | Pattern Learning Engine | core/pattern_learning/*, apps/desktop/pattern_learning_manager.*, ui/src/views/PatternLearningView.vue`
+
+**Pourquoi maintenant** : après 35 fonctionnalités de Smart Watchdog et 10 de Timeline Visualizer, KillEngine a besoin d'intelligence "long terme" — ne pas redécouvrir les mêmes patterns à chaque session, mais apprendre et suggérer automatiquement.
+
+**Dépendances** :
+- Smart Watchdog (SMART-WATCHDOG-1) — pour corrélation resync/patterns
+- Memory Timeline Visualizer (MEMORY-TIMELINE-VIS-1) — pour visualisation
+- SQLite — déjà utilisé ailleurs dans KillEngine
+
+**Risques** :
+- Faux positifs de classification → mitigation : score de confiance + fallback manuel
+- Base de données qui grossit → mitigation : compression, nettoyage automatique
+
+**Validation prévue** :
+- Tests unitaires sur classification
+- Test live : SC2, Solitaire, Unity game → détection correcte du moteur
+
+---

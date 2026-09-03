@@ -24,7 +24,14 @@ qt_add_executable(KillEngine
     automation_pipe_manager.cpp
     crash_handler.cpp
     investigation_notebook_manager.cpp
+    smart_watchdog_manager.cpp
+    lua_runtime_locator.cpp
+    lua_repl_manager.cpp
+    memory_heatmap_manager.cpp
+    memory_timeline_manager.cpp
+    pattern_learning_manager.cpp
 )
+
 
 if(WIN32)
     target_sources(KillEngine PRIVATE killengine.rc)

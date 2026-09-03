@@ -1680,6 +1680,37 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   executeLuaScriptAsync?(scriptText: string, options: Record<string, unknown>): Promise<LuaScriptRunStartResult>
   cancelLuaScriptExecution?(): Promise<Record<string, unknown>>
   luaScriptExecutionFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** PROPOSITIONS-1 #4 — Live Lua REPL : process lua.exe persistant (état partagé entre lignes), contrairement à executeLuaScript. */
+  startLuaRepl?(options: Record<string, unknown>): Promise<Record<string, unknown>>
+  /** Toujours asynchrone (voir commentaire C++) : retourne {started, requestId} immédiatement. */
+  sendLuaReplLine?(line: string): Promise<Record<string, unknown>>
+  /** Poll sûr sur le pipe d'automatisation (qui ne relaie pas luaReplLineFinished). */
+  getLuaReplLineResult?(requestId: number): Promise<Record<string, unknown>>
+  getLuaReplHistory?(maxEntries: number): Promise<Record<string, unknown>>
+  getLuaReplCompletions?(prefix: string): Promise<Record<string, unknown>>
+  stopLuaRepl?(): Promise<Record<string, unknown>>
+  getLuaReplStatus?(): Promise<Record<string, unknown>>
+  luaReplLineFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** PROPOSITIONS-1 #3 — Memory Timeline : surveille l'évolution d'un ensemble d'adresses explicitement ajoutées. */
+  addTimelineAddress?(addressHex: string, valueSize: number): Promise<Record<string, unknown>>
+  removeTimelineAddress?(addressHex: string): Promise<Record<string, unknown>>
+  clearTimelineAddresses?(): Promise<Record<string, unknown>>
+  getTimelineWatchedAddresses?(): Promise<Record<string, unknown>>
+  setTimelineConfig?(options: Record<string, unknown>): Promise<Record<string, unknown>>
+  getTimelineConfig?(): Promise<Record<string, unknown>>
+  startTimelineCollection?(): Promise<Record<string, unknown>>
+  stopTimelineCollection?(): Promise<Record<string, unknown>>
+  getTimelineStatus?(): Promise<Record<string, unknown>>
+  getTimelineSeriesForAddress?(addressHex: string): Promise<Record<string, unknown>>
+  getAllTimelineSeries?(): Promise<Record<string, unknown>>
+  findVolatileTimelineAddresses?(threshold: number): Promise<Record<string, unknown>>
+  findStableTimelineAddresses?(minDurationMs: number): Promise<Record<string, unknown>>
+  exportTimelineToJson?(): Promise<Record<string, unknown>>
+  exportTimelineToCsv?(): Promise<Record<string, unknown>>
+  /** Non implémentées côté backend (MemoryTimelineAnalyzer sans logique) — retournent {success:false, error}. */
+  detectTimelinePatterns?(addressHex: string): Promise<Record<string, unknown>>
+  analyzeTimelineBehavior?(addressHex: string): Promise<Record<string, unknown>>
+  predictTimelineNextValue?(addressHex: string): Promise<Record<string, unknown>>
   /** Sauvegarde un script Lua (texte brut) dans un profil, rejouable sans le retaper. */
   saveProfileLuaScript?(
     profileName: string,

@@ -173,6 +173,44 @@ add_library(killcore STATIC
     # timeline) pour ExternalToolProfiler (apps/desktop/external_tool_profiler.*)
     profiler/page_diff_analyzer.h
     profiler/page_diff_analyzer.cpp
+
+    # SMART-WATCHDOG-1 — Detection auto de resynchronisation post-ecriture
+    smart_watchdog/smart_watchdog.h
+    smart_watchdog/smart_watchdog.cpp
+
+    # PROPOSITIONS-1 #5 — Memory Heatmap : visualisation de l'activité mémoire
+    visualization/memory_heatmap_collector.h
+    visualization/memory_heatmap_collector.cpp
+
+    # PROPOSITIONS-1 #3 — Memory Timeline : collecte de séries temporelles
+    # mémoire pour un ensemble d'adresses explicitement surveillées. Corrigé
+    # et enregistré ici le 02/09/2026 (Claude) — n'était jamais compilé avant
+    # (appelait une méthode MemoryReader inexistante, jamais détecté faute
+    # d'être dans ce fichier). memory_timeline_analyzer.h existe mais n'a pas
+    # de .cpp (déclaration pure, non implémentée) — volontairement PAS ajouté
+    # ici tant qu'il n'a pas de corps de fonction.
+    visualization/memory_timeline_collector.h
+    visualization/memory_timeline_collector.cpp
+
+    # PROPOSITIONS-1 #4 — Live Lua REPL : protocole stdin/stdout pur entre
+    # LuaReplManager (apps/desktop) et scripts/killengine_repl_driver.lua
+    scripting/lua_repl_protocol.h
+    scripting/lua_repl_protocol.cpp
+
+    # PROPOSITIONS-1 #2 — Pattern Learning : classification de patterns
+    # mémoire (compteur/santé/flag/timer/coordonnée), détection de moteur de
+    # jeu, clustering. Corrigé et enregistré ici le 02/09/2026 (Claude) —
+    # n'était jamais compilé avant. Bugs trouvés : game_profile_database.cpp
+    # dépendait de SQLite (absent du projet, jamais vendoré) — réécrit en
+    # JSON-in-file (cohérent avec profile_store.cpp) ; extractVersionFromMemory()
+    # appelée dans pattern_learning_engine.cpp mais jamais définie ; includes
+    # <set>/<map>/<limits> manquants.
+    pattern_learning/feature_extractor.h
+    pattern_learning/feature_extractor.cpp
+    pattern_learning/game_profile_database.h
+    pattern_learning/game_profile_database.cpp
+    pattern_learning/pattern_learning_engine.h
+    pattern_learning/pattern_learning_engine.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

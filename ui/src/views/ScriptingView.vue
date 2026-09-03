@@ -155,6 +155,64 @@ onMounted(() => {
         <pre>{{ store.luaScriptResult?.stderr || store.luaScriptResult?.error || '' }}</pre>
       </div>
     </section>
+
+    <section class="repl-shell">
+      <div class="editor-head">
+        <h2>REPL interactif</h2>
+        <div class="header-actions">
+          <button
+            v-if="!store.luaReplActive"
+            class="btn btn-primary compact"
+            type="button"
+            :disabled="store.luaScriptingStatus?.available !== true"
+            @click="store.startLuaReplSession()"
+          >
+            Démarrer
+          </button>
+          <button v-else class="btn btn-danger compact" type="button" @click="store.stopLuaReplSession()">
+            Arrêter
+          </button>
+        </div>
+      </div>
+      <p class="hint">
+        Un process Lua gardé vivant : les variables et <code>require("killengine")</code> persistent d'une ligne à
+        l'autre, contrairement à "Exécuter" ci-dessus qui relance un process à chaque fois.
+      </p>
+      <p v-if="store.luaReplStartResult && store.luaReplStartResult.success === false" class="error">
+        {{ store.luaReplStartResult.error }}
+      </p>
+
+      <div v-if="store.luaReplActive" class="repl-transcript">
+        <p v-if="!store.luaReplHistory.length" class="hint">Tape une ligne ci-dessous et Entrée pour l'exécuter.</p>
+        <div v-for="entry in store.luaReplHistory" :key="entry.requestId + '-' + entry.line" class="repl-entry">
+          <div class="repl-entry-line">&gt; {{ entry.line }}</div>
+          <pre v-if="entry.output" class="repl-entry-output">{{ entry.output }}</pre>
+          <pre v-if="entry.error" class="repl-entry-error">{{ entry.error }}</pre>
+          <span v-if="!entry.finished" class="hint">...</span>
+        </div>
+      </div>
+
+      <div v-if="store.luaReplActive" class="repl-input-row">
+        <span class="repl-prompt">&gt;</span>
+        <input
+          v-model="store.luaReplInput"
+          class="input repl-input"
+          list="lua-repl-completions"
+          placeholder="ke.ping('hello') / 1+1 / local x = 5"
+          :disabled="store.luaReplBusy"
+          spellcheck="false"
+          @keydown.enter="store.sendLuaReplLine()"
+          @keydown.up.prevent="store.recallLuaReplHistory(-1)"
+          @keydown.down.prevent="store.recallLuaReplHistory(1)"
+        />
+        <datalist id="lua-repl-completions">
+          <option v-for="name in store.luaReplCompletions" :key="name" :value="name" />
+        </datalist>
+        <button class="btn btn-secondary compact" type="button" :disabled="store.luaReplBusy || !store.luaReplInput.trim()" @click="store.sendLuaReplLine()">
+          {{ store.luaReplBusy ? '...' : 'Envoyer' }}
+        </button>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -295,6 +353,67 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+}
+
+.repl-shell {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.repl-transcript {
+  margin-top: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.repl-entry {
+  margin-bottom: 8px;
+}
+
+.repl-entry-line {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.repl-entry-output,
+.repl-entry-error {
+  margin: 2px 0 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.repl-entry-output {
+  color: var(--text-dim);
+}
+
+.repl-entry-error {
+  color: var(--error);
+}
+
+.repl-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.repl-prompt {
+  color: var(--text-dim);
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.repl-input {
+  flex: 1;
+  font-family: "Cascadia Mono", Consolas, monospace;
 }
 
 .saved-scripts-list {

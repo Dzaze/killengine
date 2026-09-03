@@ -51,11 +51,16 @@ class ExternalToolProfiler;
 class FreezeHotkeyOverlayManager;
 class InvestigationNotebookManager;
 class KernelDriverManager;
+class LuaReplManager;
+class MemoryHeatmapManager;
+class MemoryTimelineManager;
+class PatternLearningManager;
 class ProfileManager;
 class SaveFileInvestigator;
 class ScanningCoreManager;
 class SettingsDiagnosticsManager;
 class SmartSearchManager;
+class SmartWatchdogManager;
 class UiStringInvestigator;
 class WriteFreezeCoreManager;
 
@@ -1132,6 +1137,149 @@ public:
     /// Demande l'arrêt (kill du processus lua.exe) du script Lua externe en cours.
     Q_INVOKABLE QVariantMap cancelLuaScriptExecution();
 
+    /// PROPOSITIONS-1 #5 — Memory Heatmap : démarre la collecte d'activité
+    /// mémoire (lectures/écritures) sur le process attaché. Le heatmap
+    /// visualise l'intensité d'accès mémoire pour identifier les zones
+    /// "chaudes" où le jeu modifie constamment des valeurs. Câblage +
+    /// correction du collecteur (perf + intensité) : 02/09/2026, Claude —
+    /// voir PHASE_TRACKER.md "ANALYSE-CLINE-1" et
+    /// core/visualization/memory_heatmap_collector.cpp.
+    /// `addressHex` (optionnel) : borne le scan à partir de cette adresse
+    /// (remplit options.minAddress) — laisser vide pour tout l'espace
+    /// process (le collecteur borne lui-même le travail par tick, voir
+    /// HeatmapConfig::maxPagesPerTick, donc c'est sûr même sans borne).
+    /// options : minAddress/maxAddress (hex ou décimal), regionSize (défaut
+    /// 4096), maxRegions (défaut 10000), samplingIntervalMs (défaut 100),
+    /// trackReads/trackWrites (défaut true), maxPagesPerTick (défaut 4096).
+    Q_INVOKABLE QVariantMap startMemoryHeatmap(const QString& addressHex, const QVariantMap& options);
+
+    /// Arrête la collecte du heatmap et retourne les données collectées
+    /// (stats + régions les plus actives).
+    Q_INVOKABLE QVariantMap stopMemoryHeatmap();
+
+    /// Retourne l'état courant du heatmap (actif/inactif, statistiques).
+    Q_INVOKABLE QVariantMap getMemoryHeatmapStatus() const;
+
+    /// Retourne les données du heatmap pour affichage (top régions +
+    /// statistiques). Peut être appelé pendant la collecte pour un
+    /// affichage temps réel.
+    Q_INVOKABLE QVariantMap getMemoryHeatmapData() const;
+
+    /// PROPOSITIONS-1 #3 — Memory Timeline : surveille l'évolution d'un
+    /// ensemble d'adresses explicitement ajoutées (contrairement au Heatmap,
+    /// ne scanne jamais tout l'espace mémoire — sûr par construction).
+    /// Câblage complet (backend + frontend) : 02/09/2026, Claude — voir
+    /// docs/PHASE_TRACKER.md "Memory Timeline". Les méthodes d'analyse
+    /// avancée (detectTimelinePatterns/analyzeTimelineBehavior/
+    /// predictTimelineNextValue) retournent explicitement success:false —
+    /// MemoryTimelineAnalyzer n'a pas de logique implémentée.
+    Q_INVOKABLE QVariantMap addTimelineAddress(const QString& addressHex, int valueSize);
+    Q_INVOKABLE QVariantMap removeTimelineAddress(const QString& addressHex);
+    Q_INVOKABLE QVariantMap clearTimelineAddresses();
+    Q_INVOKABLE QVariantMap getTimelineWatchedAddresses() const;
+
+    /// options : samplingIntervalMs, maxDurationMs, trackOnlyChanges.
+    Q_INVOKABLE QVariantMap setTimelineConfig(const QVariantMap& options);
+    Q_INVOKABLE QVariantMap getTimelineConfig() const;
+
+    /// Démarre/arrête la collecte sur le process attaché. Il faut au moins
+    /// une adresse surveillée (addTimelineAddress) avant de démarrer.
+    Q_INVOKABLE QVariantMap startTimelineCollection();
+    Q_INVOKABLE QVariantMap stopTimelineCollection();
+    Q_INVOKABLE QVariantMap getTimelineStatus() const;
+
+    Q_INVOKABLE QVariantMap getTimelineSeriesForAddress(const QString& addressHex) const;
+    Q_INVOKABLE QVariantMap getAllTimelineSeries() const;
+    Q_INVOKABLE QVariantMap findVolatileTimelineAddresses(double threshold);
+    Q_INVOKABLE QVariantMap findStableTimelineAddresses(int minDurationMs);
+
+    /// Exporte vers Documents/KillEngine/timeline/ (chemin auto-généré,
+    /// horodaté) et retourne le chemin utilisé — même convention que
+    /// dumpMemoryRegion.
+    Q_INVOKABLE QVariantMap exportTimelineToJson();
+    Q_INVOKABLE QVariantMap exportTimelineToCsv();
+
+    /// Non implémentées (MemoryTimelineAnalyzer sans logique) — retournent
+    /// {success:false, error:"..."} explicitement plutôt que de planter ou
+    /// de renvoyer des données inventées.
+    Q_INVOKABLE QVariantMap detectTimelinePatterns(const QString& addressHex);
+    Q_INVOKABLE QVariantMap analyzeTimelineBehavior(const QString& addressHex);
+    Q_INVOKABLE QVariantMap predictTimelineNextValue(const QString& addressHex);
+
+    /// PROPOSITIONS-1 #2 — Pattern Learning : classification de patterns
+    /// mémoire (compteur/santé/flag/timer/coordonnée), détection de moteur
+    /// de jeu (Unity/Unreal/Godot), profils par jeu réutilisables entre
+    /// sessions. Câblage + bugs réels trouvés/corrigés (SQLite absent du
+    /// projet → réécrit en JSON, fonction jamais définie, ordre de
+    /// déclaration, const-correctness) : 02/09/2026, Claude — voir
+    /// docs/PHASE_TRACKER.md "ANALYSE-CLINE-1"/"Pattern Learning".
+    /// Initialisé automatiquement à la construction (ouvre juste un fichier
+    /// JSON, pas besoin de process attaché) — pas de vue Vue.js dédiée,
+    /// même statut que Memory Heatmap.
+    Q_INVOKABLE bool isPatternLearningInitialized() const;
+    Q_INVOKABLE QVariantMap getPatternLearningStatistics() const;
+
+    /// moduleNames: liste de noms de modules chargés. memorySample: {data: <bytes>}.
+    Q_INVOKABLE QVariantMap detectGameEngine(const QVariantList& moduleNames, const QVariantMap& memorySample);
+
+    /// Classe un historique de valeurs observées à une adresse (compteur, santé, flag, timer...).
+    Q_INVOKABLE QVariantMap classifyMemoryPattern(const QString& addressHex, const QVariantList& valueHistory, const QVariantList& timestamps);
+
+    Q_INVOKABLE QVariantMap loadGameProfile(const QString& gameName);
+    Q_INVOKABLE bool saveGameProfile(const QVariantMap& profile);
+    Q_INVOKABLE QVariantList listKnownGameProfiles();
+    Q_INVOKABLE bool deleteGameProfile(const QString& gameName);
+    Q_INVOKABLE void recordLearningSession(const QVariantMap& session);
+    Q_INVOKABLE QVariantList suggestPatternResolutionPaths(const QString& gameName, int targetType);
+    Q_INVOKABLE QVariantList suggestPatternValueTypes(int engineType, int patternType);
+    Q_INVOKABLE double getPatternValueTypeSuccessRate(const QString& gameName, const QString& valueType);
+    Q_INVOKABLE QVariantList clusterPatternAddresses(const QVariantList& addresses, const QVariantList& features);
+
+    /// Suivi temps réel : accumule des échantillons pour une adresse puis
+    /// classe le pattern une fois assez de données collectées.
+    Q_INVOKABLE void startPatternTracking(const QString& addressHex, const QString& valueType);
+    Q_INVOKABLE void stopPatternTracking(const QString& addressHex);
+    Q_INVOKABLE void recordPatternTrackingValue(const QString& addressHex, double value);
+    Q_INVOKABLE QVariantMap getPatternTrackingAnalysis(const QString& addressHex);
+
+    /// candidates: liste de {address, history}. Classe chaque candidat et regroupe par type dominant.
+    Q_INVOKABLE QVariantMap analyzePatternCandidates(const QVariantList& candidates);
+    Q_INVOKABLE QVariantList getTopPatternSuggestions(const QString& gameName, int patternType, int count);
+
+    /// PROPOSITIONS-1 #4 — Live Lua REPL : démarre un process lua.exe
+    /// persistant (scripts/killengine_repl_driver.lua) gardé vivant entre
+    /// chaque ligne envoyée via sendLuaReplLine, contrairement à
+    /// executeLuaScript qui relance un process à chaque appel — les
+    /// variables et `require("killengine")` persistent d'une ligne à
+    /// l'autre. Options : luaPath?, timeoutMs? (par ligne, défaut 15000),
+    /// pipeName?.
+    Q_INVOKABLE QVariantMap startLuaRepl(const QVariantMap& options);
+
+    /// Envoie une ligne au REPL démarré via startLuaRepl. Toujours
+    /// asynchrone (comme executeLuaScriptAsync) : retourne {started:true,
+    /// requestId} immédiatement — une ligne qui appelle ke.call(...) doit
+    /// pouvoir joindre le pipe d'automatisation sans que ce thread soit
+    /// bloqué à l'attendre. Résultat réel via getLuaReplLineResult(requestId)
+    /// (poll, sûr sur le pipe d'automatisation) ou le signal luaReplLineFinished
+    /// (frontend Qt uniquement, le pipe ne relaie pas les signaux).
+    Q_INVOKABLE QVariantMap sendLuaReplLine(const QString& line);
+
+    /// Résultat d'une ligne envoyée via sendLuaReplLine (poll par requestId).
+    Q_INVOKABLE QVariantMap getLuaReplLineResult(int requestId) const;
+
+    /// Historique de la session REPL courante (0 ou négatif = tout).
+    Q_INVOKABLE QVariantMap getLuaReplHistory(int maxEntries) const;
+
+    /// Complétion des fonctions `ke.*` connues (extraites de
+    /// scripts/killengine.lua), filtrées par `prefix` (vide = tout).
+    Q_INVOKABLE QVariantMap getLuaReplCompletions(const QString& prefix) const;
+
+    /// Arrête le REPL (le process lua.exe persistant).
+    Q_INVOKABLE QVariantMap stopLuaRepl();
+
+    /// Statut courant du REPL (actif, lignes en attente, taille historique).
+    Q_INVOKABLE QVariantMap getLuaReplStatus() const;
+
     /// Sauvegarde un script Lua (texte brut) dans un profil, rejouable sans le retaper.
     Q_INVOKABLE QVariantMap saveProfileLuaScript(
         const QString& profileName,
@@ -1253,6 +1401,17 @@ signals:
     void findWhatWritesFinished(const QVariantMap& result);
     void saveFileWatchFinished(const QVariantMap& result);
     void luaScriptExecutionFinished(const QVariantMap& result);
+    /// PROPOSITIONS-1 #4 — Live Lua REPL : une ligne envoyée via
+    /// sendLuaReplLine a terminé (result contient "requestId", même
+    /// convention que luaScriptExecutionFinished). Reçu par le frontend Qt
+    /// (QWebChannel) ; PAS relayé par le pipe d'automatisation
+    /// (getLuaReplLineResult poll à la place).
+    void luaReplLineFinished(const QVariantMap& result);
+    /// PROPOSITIONS-1 #2 — Pattern Learning.
+    void patternLearningEngineDetected(const QString& gameName, const QVariantMap& engineInfo);
+    void patternLearningClassified(const QString& address, const QVariantMap& classification);
+    void patternLearningSuggestionReady(const QString& context, const QStringList& suggestions);
+    void patternLearningTrackingUpdated(const QString& addressHex, const QVariantMap& analysis);
     void candidateFieldTestFinished(const QVariantMap& result);
     void pageGuardWatchFinished(const QVariantMap& result);
     void inProcessBreakpointWatchFinished(const QVariantMap& result);
@@ -1291,6 +1450,7 @@ private:
     QVariantMap writeMemoryValueConfirmed(const QString& addressHex, const QString& valueType, const QString& value, bool persistHistory = true);
     void persistWriteHistorySequenceEntry(uint64_t address, killcore::ValueType type, const QString& valueText);
     bool hasAddressBeenWriteVerified(uint64_t address) const;
+    void watchSmartWriteIfPossible(uint64_t address, const QByteArray& writtenBytes, const QByteArray& originalBytes);
     void detectStableCandidateGroup(killcore::NextScanMode mode, const QList<killcore::Candidate>& survivors, QVariantMap* result);
     QVariantMap rewriteLastAutoWriteTargets(const QString& value, const QString& query);
     QVariantMap activateChatMemoryTargetsFromQuery(const QString& query);
@@ -1325,6 +1485,9 @@ private:
     int                     m_pid{0};
     killcore::ProcessHandle m_handle;
     std::unique_ptr<UiStringInvestigator> m_uiStringInvestigator;
+    std::unique_ptr<MemoryHeatmapManager> m_memoryHeatmapManager;
+    std::unique_ptr<MemoryTimelineManager> m_memoryTimelineManager;
+    std::unique_ptr<PatternLearningManager> m_patternLearningManager;
     std::unique_ptr<ClrInspectorBridge> m_clrInspectorBridge;
     std::unique_ptr<killcore::WebView2Inspector> m_webView2Inspector;
     std::unique_ptr<CodePatchManager> m_codePatchManager;
@@ -1333,10 +1496,12 @@ private:
     std::unique_ptr<FreezeHotkeyOverlayManager> m_freezeHotkeyOverlayManager;
     std::unique_ptr<InvestigationNotebookManager> m_investigationNotebookManager;
     std::unique_ptr<KernelDriverManager> m_kernelDriverManager;
+    std::unique_ptr<LuaReplManager> m_luaReplManager;
     std::unique_ptr<SaveFileInvestigator> m_saveFileInvestigator;
     std::unique_ptr<ScanningCoreManager> m_scanningCoreManager;
     std::unique_ptr<SettingsDiagnosticsManager> m_settingsDiagnosticsManager;
     std::unique_ptr<SmartSearchManager> m_smartSearchManager;
+    std::unique_ptr<SmartWatchdogManager> m_smartWatchdogManager;
     std::unique_ptr<WriteFreezeCoreManager> m_writeFreezeCoreManager;
     std::unique_ptr<ProfileManager> m_profileManager;
     // Etat de blockProcessNetwork()/unblockProcessNetwork() : survit a un
@@ -1435,6 +1600,7 @@ private:
     // PHASE 119 -- pont callVueStoreAction() : page assignee par
     // setWebEnginePage() depuis main.cpp, jamais possedee ici.
     QPointer<QWebEnginePage> m_webEnginePage;
+
 };
 
 } // namespace killengine
