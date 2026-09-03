@@ -70,6 +70,27 @@ Cluster vérifié en direct via le pipe (`scripts/test-automation-pipe-profile-m
 | `deleteProfile(profileName)` | 1 string | booléen brut, pas un objet |
 | `listProfiles()` | aucun | liste de profils (pas un objet englobant) |
 
+### Memory Timeline (`core/visualization/memory_timeline_*`, PHASES 200-203 + analyzer 03/09/2026)
+
+Absente de `docs/AUTOMATION_API_REFERENCE.md` (snapshot généré le 30/08/2026, avant cette famille de méthodes) — table ajoutée ici pour qu'un agent piloté par le pipe la découvre sans avoir à deviner. Formes de réponse copiées depuis `apps/desktop/application_controller.cpp`/`memory_timeline_manager.cpp` et vérifiées live via `KillEngineTestTarget.exe`.
+
+| Méthode | Params | Champs clés de la réponse |
+| --- | --- | --- |
+| `addTimelineAddress(addressHex, valueSize)` / `removeTimelineAddress(addressHex)` / `clearTimelineAddresses()` | hex string + int, ou rien | `success` (+ `error` si adresse invalide) |
+| `getTimelineWatchedAddresses()` | aucun | `success`, `addresses` (liste hex) |
+| `setTimelineConfig({samplingIntervalMs?, maxDurationMs?, trackOnlyChanges?})` / `getTimelineConfig()` | objet partiel, ou rien | `success`, `config` (`samplingIntervalMs`, `maxDurationMs`, `maxPointsPerSeries`, `trackOnlyChanges`, `calculateStatistics`) |
+| `startTimelineCollection()` / `stopTimelineCollection()` | aucun | `success` (+ `error` si aucun processus attaché) |
+| `getTimelineStatus()` | aucun | `success`, `collecting`, `watchedAddressCount`, `stats` |
+| `getTimelineSeriesForAddress(addressHex)` | hex string | `success`, `series` (`address`, `valueSize`, `changeCount`, `averageIntervalMs`, `volatilityScore`, `points` : liste `{timestampMs, valueHex, isValid}`) |
+| `getAllTimelineSeries()` | aucun | `success`, `series` (liste du format ci-dessus) |
+| `findVolatileTimelineAddresses(threshold)` / `findStableTimelineAddresses(minDurationMs)` | double / int | `success`, `addresses` |
+| `exportTimelineToJson()` / `exportTimelineToCsv()` | aucun | `success`, `filepath` (+ `error` si échec) |
+| `detectTimelinePatterns(addressHex)` | hex string | `success`, `address`, `patterns` (liste : `type` ex. `step_function`/`cyclic`/`linear`, `confidence`, `description`, `correlationScore`, `periodMs`, `slope`) — peut être `[]` si aucun pattern au-dessus du seuil de confiance |
+| `analyzeTimelineBehavior(addressHex)` | hex string | `success`, `behavior` (`changesPerSecond`, `regularityScore`, `distinctValueCount`, `minValueHex`, `maxValueHex`, `mostCommonValueHex`, `typicalResponseTimeMs`, `hasBurstBehavior`) |
+| `predictTimelineNextValue(addressHex)` | hex string | `success`, `address`, `valueHex`, `changeProbability` |
+
+**Non exposé au pipe** (existe seulement sur `MemoryTimelineManager`, pas sur `ApplicationController`) : `findCorrelations`, `generateReport`. Un agent qui a besoin de corrélations entre séries doit pour l'instant les calculer lui-même à partir de `getAllTimelineSeries()`.
+
 ### Référence exhaustive de toutes les méthodes
 
 `docs/AUTOMATION_API_REFERENCE.md` (PHASE 238, 30/08/2026) inventorie la forme de réponse des ~200 méthodes `Q_INVOKABLE` restantes, groupées par domaine (scan, write/freeze, trainer, CLR, patch/AOB, debug, settings/diagnostics, workspace/pointer chains, Lua, chat/IA, injection, save-file, kernel, réseau/speedhack). Fait une fois le refactor entièrement clos (backend C1-C14, frontend S1-S12), condition explicitement posée en PHASE 233 pour ne pas documenter une surface encore en mouvement. **Reste un instantané figé à sa date de génération** — une méthode modifiée après coup (un chantier en cours au moment de la génération, ex. `inferStructureInstanceDelta`, est marqué comme tel dans le doc) doit être revérifiée avec la méthode ci-dessous plutôt que de faire aveuglément confiance à l'instantané.
