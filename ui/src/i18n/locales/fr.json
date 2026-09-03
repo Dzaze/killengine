@@ -251,6 +251,14 @@
         "term": "RiskGate",
         "definition": "Le garde-fou de confirmation de KillEngine : avant toute action qui modifie réellement quelque chose (écriture, patch, freeze...), une boîte de dialogue demande une confirmation explicite."
       },
+      "correlation": {
+        "term": "Corrélation",
+        "definition": "Une mesure statistique (coefficient de Pearson, entre -1 et 1) qui indique si deux adresses surveillées varient ensemble — utile pour repérer qu'un champ \"affiché\" recopie un champ \"source\", ou que deux valeurs sont liées par le même mécanisme de jeu. 1 = varient exactement pareil, 0 = aucun lien apparent."
+      },
+      "stealth": {
+        "term": "Stealth (mode furtif)",
+        "definition": "Un ensemble de modules qui masquent l'attache de KillEngine face aux mécanismes anti-debug/anti-cheat d'une cible : antiDebug (cache le débogueur aux vérifications du programme), processMask (renomme le processus KillEngine), dllMask (cache les DLLs injectées par KillEngine). Activable par profil dans Paramètres, ou après une analyse de détectabilité qui recommande quoi activer selon ce qui a été repéré dans la cible."
+      },
       "scan": {
         "term": "Scan",
         "definition": "Une recherche dans toute la mémoire du processus pour trouver les adresses qui contiennent une valeur donnée (scan exact) ou qui varient d'une certaine façon (augmente, diminue, valeur inconnue). C'est la base de toute recherche de valeur dans KillEngine."
