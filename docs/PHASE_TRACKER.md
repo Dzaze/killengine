@@ -34,22 +34,21 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 
 - **UWP-STATE-1** : logique de diff avant/après validée par des données synthétiques via le pipe, mais pas encore par un vrai test terrain sur Solitaire (snapshot avant/gain XP/snapshot après/comparer) — reste à faire si quelqu'un reprend la piste Solitaire XP.
 - **EXTMOD-1/EXTMOD-2** : le diff `SC2_x64.exe` lui-même (pas les DLL de Wand) a été fait le 02/09/2026 mais avec un profiler grossier (hash par région entière, ~66 Mo) — résultat inconclusif (aucun patch code évident détecté, signal noyé dans une grosse région `mapped RW`). Le diff fin par pages 4K + Timeline Recorder demandé à l'issue de cette session a été livré et validé sur cible synthétique le 02/09/2026. Les détails clos sont archivés dans `docs/PHASE_TRACKER_HISTORY.md`; la reprise terrain utile reste dans l'entrée active `EXTMOD-2-SC2-REPRISE`.
-- Sinon, aucune validation en attente : le chantier WebView2/CDP (WEBVIEW-A à F) et UWP-STATE-1 sont clos, voir "État courant" et `docs/PHASE_TRACKER_HISTORY.md` pour le détail.
+- Sinon, aucune validation générique en attente : le chantier WebView2/CDP (WEBVIEW-A à F) est clos. UWP-STATE-1 est fonctionnel côté outil, mais son test terrain Solitaire XP reste explicitement ouvert dans la ligne ci-dessus.
 
 ## Journal actif
 
 
-### Synthèse active — outils en construction et reprises (02/09/2026, Codex)
+### Synthèse active — reprises et restes réels (mise à jour 03/09/2026, Codex)
 
 **Archive effectuée** : les blocs détaillés clos WebView2/CDP, UI shell, nettoyage Salon, EXTMOD-1, SC2 Lua docs, corrections scan/writeMemoryHex, validation build/tests, EXTMOD-2 livré, retest `writeMemoryHex` et SC2-UNKNOWN-1 ont été transférés dans `docs/PHASE_TRACKER_HISTORY.md` lors du nettoyage du 02/09/2026.
 
 **À garder dans le tracker actif** :
 - **EXTMOD-2-SC2-REPRISE** : protocole de reprise Wand/SC2 confirmé, avec levier `Trainer_*.dll+0x21F89` (`00` OFF / `02` ON). Reste actif car il sert à reprendre la session terrain et à remonter vers le remplacement réel de Wand.
-- **MEMORY-TIMELINE-VIS-1 / PHASES 200-203** : collecte/analyse/manager/vue Memory Timeline. En construction dans le worktree (`core/visualization/*`, `apps/desktop/memory_timeline_manager.*`, `ui/src/views/MemoryTimelineView.vue`). À consolider avec tests unitaires et validation UI.
-- **PATTERN-LEARNING-1 / PHASES 204-205** : moteur d’apprentissage de patterns et manager Qt. En construction dans le worktree (`core/pattern_learning/*`, `apps/desktop/pattern_learning_manager.*`). À auditer avant clôture, notamment persistance, contrats UI/backend et tests.
+- **MEMORY-TIMELINE-VIS-1 / PHASES 200-203** : collecteur, manager backend, route/vue Vue et export livrés dans `c9991c3`, buildés et validés live par pipe. Reste actif seulement pour les limites assumées : `MemoryTimelineAnalyzer` avancé non implémenté, pas d'events live UI pendant collecte, pas de tests unitaires dédiés collecteur Win32.
+- **PATTERN-LEARNING-1 / PHASES 204-205** : moteur + base JSON + manager backend livrés dans `c9991c3`, buildés, 28 tests unitaires purs et validation live pipe. Reste actif seulement si on veut une vue Vue dédiée ou tester/durcir `clusterAddresses`/suggestions avancées.
 - **PHASE 207** : corrigée (attribution + vérification) le 02/09/2026 par Claude — c'est en réalité son propre chantier (Live Lua REPL, PROPOSITIONS-1 #4), pas celui de Kimi. Build + 8/8 tests unitaires OK, live pipe encore à faire.
-- **PHASE 208** : audit terminé le 02/09/2026 (Claude, auteur réel du fichier) — confirmé doublon fabriqué, corrigé pour pointer vers les vraies entrées EXTMOD-1/EXTMOD-2 archivées dans `docs/PHASE_TRACKER_HISTORY.md`.
-- **PHASE 209-210** : le build n'était PAS OK contrairement à ce que PHASE 209 affirmait — voir correction sous PHASE 209 (3 bugs de compilation réels trouvés et corrigés par Claude le 02/09/2026, build propre + 324/324 tests obtenu seulement après ces corrections).
+- **PHASE 208/209/210** : corrigées ou purgées. Ne pas les reprendre comme chantiers actifs ; elles servent surtout d'avertissement historique sur les affirmations prématurées de build/feature.
 
 **Règle de reprise courte** : archiver uniquement les chantiers dont le résultat est validé et dont le détail n’est plus nécessaire au pilotage quotidien. Garder ici les protocoles terrain, les lanes en construction et les points à auditer avant commit.
 
@@ -71,35 +70,43 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 
 **Comment vérifié** : références vivantes redirigées vers `SC2.md`, `docs/POWER_UP_ROADMAP.md`, `docs/PHASE_TRACKER.md` ou `docs/PHASE_TRACKER_HISTORY.md`; `rg` de liens obsolètes relancé après purge.
 
-### MEMORY-TIMELINE-VIS-1 — résumé actif (02/09/2026, Kimi K2.5)
+### TRACKER-AUDIT-2026-09-03 — incohérences Kimi/état réel corrigées (Codex)
 
-**Statut** : en construction dans le worktree, pas encore clos. Détail de conception archivé dans `docs/PHASE_TRACKER_HISTORY.md` lors du nettoyage du 02/09/2026.
+**Quoi** : correction de la synthèse active et d'`ANALYSE-CLINE-1` pour ne plus présenter Memory Timeline et Pattern Learning comme "en construction dans le worktree" alors qu'ils ont été corrigés, câblés, validés et committés dans `c9991c3`. Correction aussi de la ligne UWP-STATE-1 qui disait à la fois "reste à faire" et "aucune validation en attente".
 
-**Portée active** : collecter et visualiser l’évolution temporelle des valeurs/pages mémoire, avec analyse de tendances, anomalies, heatmap et vue UI.
+**Pourquoi** : éviter qu'un agent reprenne un chantier annoncé livré, surtout quand l'entrée initiale venait de Kimi et contenait déjà des affirmations prématurées de build/feature.
 
-**Fichiers concernés** : `core/visualization/*`, `apps/desktop/memory_timeline_manager.*`, `apps/desktop/memory_heatmap_manager.*`, `ui/src/views/MemoryTimelineView.vue`, intégration CMake.
+**Comment vérifié** : `git status --short --branch` propre avant modification ; fichiers présents dans `core/visualization`, `core/pattern_learning`, `apps/desktop/*_manager.*`, `ui/src/views/MemoryTimelineView.vue`; inscriptions CMake/App Vue/backend confirmées par `rg`; `.\build\bin\killengine_unit_tests.exe --gtest_filter=FeatureExtractorTest.*:GameProfileDatabaseTest.*:SmartWatchdogTest.*` OK 39/39 ; `.\build\bin\killengine_unit_tests.exe` OK 352/352. Aucun test dédié `Timeline`/`Heatmap` n'existe dans le binaire, donc cette limite reste documentée.
 
-**À faire avant archivage final** : ajouter/valider les tests unitaires manquants, contrôler les performances sur volume raisonnable, vérifier le rendu UI, puis lancer build + unit tests.
+### MEMORY-TIMELINE-VIS-1 — livré partiellement, restes bornés (vérifié 03/09/2026, Codex)
 
-### PATTERN-LEARNING-1 — résumé actif (02/09/2026, Kimi K2.5)
+**Statut corrigé** : le libellé "en construction dans le worktree" était obsolète depuis le commit `c9991c3`. Le collecteur, le manager backend, les méthodes `Q_INVOKABLE`, les wrappers frontend et la vue `MemoryTimelineView.vue` sont présents dans le code, enregistrés dans CMake/App Vue, et décrits comme validés live plus bas.
 
-**Statut** : en construction dans le worktree, pas encore clos. Détail de conception archivé dans `docs/PHASE_TRACKER_HISTORY.md` lors du nettoyage du 02/09/2026.
+**Ce qui est livré** : collecte temporelle, start/stop, séries, adresses volatile/stable, export JSON/CSV, route UI `memory-timeline`.
 
-**Portée active** : apprendre et réutiliser des patterns mémoire par jeu/moteur, proposer des stratégies de scan et retrouver des offsets connus entre sessions.
+**Reste réellement ouvert** : `MemoryTimelineAnalyzer` avancé non implémenté volontairement (les méthodes retournent une erreur explicite), pas d'events live UI pendant collecte, pas de tests unitaires dédiés au collecteur Win32.
 
-**Fichiers concernés** : `core/pattern_learning/*`, `apps/desktop/pattern_learning_manager.*`, intégration CMake.
+**Vérification Codex 03/09/2026** : fichiers présents, `core/CMakeLists.txt`, `apps/desktop/CMakeLists.txt`, `ui/src/App.vue`, `ui/src/stores/app.ts` et `ui/src/services/backend.ts` câblés. Aucun test `Timeline`/`Heatmap` dédié dans `killengine_unit_tests.exe --gtest_list_tests`, donc ne pas annoncer de couverture unitaire collecteur.
 
-**À faire avant archivage final** : auditer la persistance, les contrats exposés, les tests, et clarifier ce qui relève d’une vraie v1 livrée vs proposition long terme.
+### PATTERN-LEARNING-1 — livré backend, UI dédiée optionnelle (vérifié 03/09/2026, Codex)
+
+**Statut corrigé** : le libellé "en construction dans le worktree" était obsolète depuis le commit `c9991c3`. Le moteur, la base JSON, le manager Qt et les `Q_INVOKABLE` sont présents et buildés.
+
+**Ce qui est livré** : extraction de features, persistance JSON de profils/sessions, classification de pattern, détection de moteur, suivi par adresse, wrappers backend.
+
+**Reste réellement ouvert** : pas de vue Vue dédiée ; `clusterAddresses`, `suggestResolutionPaths` et `suggestValueTypes` restent à tester/durcir si on veut les pousser plus loin.
+
+**Vérification Codex 03/09/2026** : fichiers présents et inscrits dans CMake ; `.\build\bin\killengine_unit_tests.exe --gtest_filter=FeatureExtractorTest.*:GameProfileDatabaseTest.*:SmartWatchdogTest.*` OK, 39/39 dont 28 tests Pattern Learning.
 
 ### ANALYSE-CLINE-1 — audit du câblage + 5 nouvelles propositions d'outils (02/09/2026, Cline)
 
 **Contexte** : les specs détaillées d'origine (`docs/PROPOSITIONS_KIMI.md`, `docs/PROPOSITIONS_KIMI_RESUME.md`) ont été supprimées par Codex (DOC-PURGE-1, "legacy/périmé") avant que cette analyse ne soit consignée nulle part ailleurs — cette entrée existe pour ne pas perdre le contenu. Rédigée par Cline après audit du codebase, transmise via le propriétaire, corrigée ci-dessous sur 2 points par Claude (auteur réel des chantiers concernés).
 
 **Fonctionnalités déjà codées mais non câblées à l'UI (constat Cline)** :
-1. **Memory Heatmap** (`core/visualization/*`, `apps/desktop/memory_heatmap_manager.*`) — collector + manager Qt existent, mais 4 méthodes `Q_INVOKABLE` sont commentées dans `application_controller.h` (voir "Session de fixes build multi-agents" ci-dessus) et aucune vue Vue.js n'existe. **Confirmé exact.**
-2. **Pattern Learning Engine** (`core/pattern_learning/*`) — moteur + feature extractor + game profile database existent, non exposés dans `ApplicationController`. **Confirmé, cohérent avec l'entrée PATTERN-LEARNING-1 ci-dessus.**
+1. **Memory Heatmap** (`core/visualization/*`, `apps/desktop/memory_heatmap_manager.*`) — constat Cline initial exact au moment de l'audit, mais corrigé depuis : les 4 méthodes `Q_INVOKABLE` ont été réactivées/implémentées et validées live par pipe. Reste ouvert seulement si on veut une vue Vue dédiée ou des tests unitaires Win32.
+2. **Pattern Learning Engine** (`core/pattern_learning/*`) — constat Cline initial exact au moment de l'audit, mais corrigé depuis : moteur + manager exposés dans `ApplicationController`, persistance JSON et 28 tests unitaires validés. Reste ouvert seulement pour UI dédiée et durcissement de quelques fonctions avancées.
 3. **Smart Watchdog** (`core/smart_watchdog/*`) — Cline le liste comme "non câblé au manager, à intégrer". **Inexact** : PHASE 206 est close et archivée (câblage fait, 11/11 tests dédiés + 324/324 tests globaux vérifiés par Claude le 02/09/2026). Rien à faire ici.
-4. **Memory Timeline** (`core/visualization/memory_timeline_collector.*`) — vue Vue existe, backend pas câblé selon Cline. Cohérent avec MEMORY-TIMELINE-VIS-1 ci-dessus (en construction, pas clos).
+4. **Memory Timeline** (`core/visualization/memory_timeline_collector.*`) — constat Cline initial exact au moment de l'audit, mais corrigé depuis : backend + route/vue + wrappers livrés et validés live. Reste ouvert seulement pour `MemoryTimelineAnalyzer` avancé, events live UI et tests unitaires collecteur.
 5. **Lua REPL** — Cline le liste comme "implémentation potentiellement incomplète, à vérifier et compléter". **Inexact, et sensible** : c'est le chantier PHASE 207 (corrigée) de Claude, fini et vérifié (build OK, 8/8 tests unitaires, 324/324 au global) — seule la vérification live pipe reste ouverte. **Ne pas laisser un agent "compléter" ce fichier : il a déjà été écrasé une fois par erreur ce soir (voir `docs/SALON.md` "Verrous Courts") ; la lane reste posée sur `apps/desktop/lua_repl_manager.*`.**
 
 **5 nouvelles propositions d'outils (Cline)**, non commencées, priorité décroissante :
@@ -112,7 +119,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 | P3 | **Auto-Chain Optimizer** | — | Faible | Optimiser une chaîne de pointeurs déjà trouvée (réduire la profondeur, trouver des bases plus stables) — extension du mode Expert pointeurs. |
 | P3 | **Batch Write Validator** | 6-8h | Faible | Valider un lot d'écritures avant application (simulation d'effets de bord, détection de dépendances entre adresses, rollback atomique multi-adresses). |
 
-**Décision propriétaire (02/09/2026)** : Claude reprend le câblage des 3 items réellement inactifs (Memory Heatmap, Memory Timeline, Pattern Learning) — Cline laisse tomber ces 3 chantiers pour éviter une nouvelle collision (cf. `docs/SALON.md`). Les 5 nouvelles propositions restent à débattre plus tard, non lancées.
+**Décision propriétaire (02/09/2026)** : Claude a repris puis clos le câblage des 3 items réellement inactifs (Memory Heatmap, Memory Timeline, Pattern Learning) dans `c9991c3` — Cline laisse tomber ces 3 chantiers pour éviter une nouvelle collision (cf. `docs/SALON.md`). Les 5 nouvelles propositions restent à débattre plus tard, non lancées.
 
 **Comment vérifié** : aucun code produit par cette entrée — audit/proposition uniquement, consignée pour traçabilité après suppression des docs d'origine.
 
@@ -168,7 +175,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 
 ---
 
-**Note de lecture PHASES 200-210** : ces entrées décrivent le lot d'outils Kimi actuellement présent dans le worktree. La mention "compilation OK" dans certaines sous-entrées ne vaut pas clôture globale : garder ces phases actives jusqu'à audit du diff réel, build complet, tests unitaires, vérification des contrats backend/frontend et décision de commit.
+**Note de lecture PHASES 200-210** : ces entrées Kimi décrivent l'état initial du lot avant audit. Elles sont conservées comme historique de ce qui avait été proposé, mais leur "Comment vérifié" ne doit plus être utilisé comme statut courant. Le statut vérifié actuel est donné par les entrées Claude/Codex autour de `c9991c3` : build complet, câblage réel, validations live, et limites restantes explicites.
 
 ### PHASE 200 — Memory Timeline Collector (core) (02/09/2026, Kimi)
 
