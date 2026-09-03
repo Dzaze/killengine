@@ -940,6 +940,11 @@ Retourne l'état courant du mode discret. **Corrigé 03/09/2026** : documenté i
 
 Réponse : `{ active, profile, modules: {antiDebug, processMask, dllMask} }`
 
+### `analyzeStealthRisk()` (ajouté 03/09/2026 — Stealth Profiler, chantier Cline repris)
+Analyse le process attaché (modules chargés + visibilité du débogueur via `CheckRemoteDebuggerPresent`) et retourne un score de détectabilité avec des recommandations concrètes — contrairement à `getStealthStatus()` qui ne fait que refléter l'état des modules, sans jamais regarder la cible réelle. Logique de scoring pure dans `core/debug/stealth_profiler.h` (`StealthProfiler::analyze`), directement testable en isolation (`tests/unit/test_stealth_profiler.cpp`).
+
+Réponse : `{ success, riskScore (0-100), riskLevel ("low"|"medium"|"high"), threats: [{name, source ("module"|"debugger_visible"|"coverage_gap"), detail, riskPoints}], recommendations: [string], moduleCount, stealthActive, stealthProfile, error? ("Aucun processus attaché.") }`
+
 ---
 
 ## Résumé du périmètre couvert

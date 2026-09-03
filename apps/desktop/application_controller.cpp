@@ -40,6 +40,7 @@
 #include "candidates/candidate_store.h"
 #include "crash_handler.h"
 #include "debug/hardware_breakpoint.h"
+#include "debug/stealth_profiler.h"
 #include "profiles/ghidra_bridge.h"
 #include "logging/logger.h"
 #include "memory/memory_map.h"
@@ -6090,6 +6091,39 @@ QVariantMap ApplicationController::getStealthStatus() const {
         {"processMask", m_stealthProcessMaskActive},
         {"dllMask", m_stealthDllMaskActive}
     };
+    return result;
+}
+
+QVariantMap ApplicationController::analyzeStealthRisk() const {
+    QVariantMap result;
+    if (!m_attached) {
+        result["success"] = false;
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+    const auto modules = killcore::ProcessEnumerator::enumerateModules(static_cast<uint32_t>(m_pid));
+    QStringList moduleNames;
+    moduleNames.reserve(modules.size());
+    for (const auto& module : modules) {
+        moduleNames.append(module.name);
+    }
+
+    BOOL debuggerPresent = FALSE;
+    CheckRemoteDebuggerPresent(m_handle.rawHandle(), &debuggerPresent);
+
+    const auto analysis = killcore::StealthProfiler::analyze(
+        moduleNames,
+        debuggerPresent != FALSE,
+        m_antiDebugSession.isActive(),
+        m_stealthProcessMaskActive,
+        m_stealthDllMaskActive);
+
+    result = analysis.toVariantMap();
+    result["success"] = true;
+    result["moduleCount"] = moduleNames.size();
+    result["stealthActive"] = m_stealthActive;
+    result["stealthProfile"] = m_stealthProfile;
     return result;
 }
 

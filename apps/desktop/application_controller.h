@@ -1387,6 +1387,16 @@ public:
     /// Retourne l'état actuel du mode de protection unifié.
     Q_INVOKABLE QVariantMap getStealthStatus() const;
 
+    /// Stealth Profiler (chantier Cline, repris 03/09/2026) — analyse le
+    /// process attaché (modules chargés + visibilité du débogueur) et
+    /// retourne un score de détectabilité (0-100) avec des recommandations
+    /// concrètes, au lieu du choix binaire de profil fixe qu'est
+    /// applyStealthMode(). Logique de scoring pure dans
+    /// core/debug/stealth_profiler.h, cet appel ne fait que rassembler les
+    /// entrées réelles (ProcessEnumerator::enumerateModules,
+    /// CheckRemoteDebuggerPresent).
+    Q_INVOKABLE QVariantMap analyzeStealthRisk() const;
+
     /// Démarre AutomationPipeServer si KILLENGINE_AUTOMATION_PIPE=1 (chemin dev
     /// existant) OU si QSettings "automation/pipeEnabled" est vrai (mode
     /// Automation persistant). Appelée une fois au démarrage depuis main.cpp

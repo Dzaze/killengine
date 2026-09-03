@@ -133,6 +133,11 @@ add_library(killcore STATIC
     debug/anti_debug.h
     debug/anti_debug.cpp
 
+    # Stealth Profiler (chantier Cline, repris 03/09/2026) — score de
+    # détectabilité + recommandations au-dessus des modules stealth existants.
+    debug/stealth_profiler.h
+    debug/stealth_profiler.cpp
+
     # Phase 19 — Scan de valeurs chiffrées/obfusquées
     scanner/encrypted_scan.h
     scanner/encrypted_scan.cpp
