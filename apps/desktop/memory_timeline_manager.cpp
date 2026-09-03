@@ -1,19 +1,64 @@
 #include "memory_timeline_manager.h"
+#include "../core/visualization/memory_timeline_analyzer.h"
 #include "../core/visualization/memory_timeline_collector.h"
 #include "../core/logging/logger.h"
+#include <QChar>
 #include <QDebug>
 
 namespace killengine {
 
 namespace {
-QVariantMap notImplementedResult(const QString& feature) {
+QString bytesToHex(const std::vector<uint8_t>& value) {
+    QString hexValue = "0x";
+    for (auto it = value.rbegin(); it != value.rend(); ++it) {
+        hexValue += QString("%1").arg(*it, 2, 16, QChar('0'));
+    }
+    return hexValue;
+}
+
+bool parseAddress(const QString& addressHex, uint64_t& address) {
+    QString normalized = addressHex.trimmed();
+    if (normalized.startsWith("0x", Qt::CaseInsensitive)) {
+        normalized = normalized.mid(2);
+    }
+    bool ok = false;
+    address = normalized.toULongLong(&ok, 16);
+    return ok;
+}
+
+QString patternTypeToString(killcore::TimelinePattern::Type type) {
+    switch (type) {
+        case killcore::TimelinePattern::Type::Constant: return "constant";
+        case killcore::TimelinePattern::Type::StepFunction: return "step_function";
+        case killcore::TimelinePattern::Type::Linear: return "linear";
+        case killcore::TimelinePattern::Type::Cyclic: return "cyclic";
+        case killcore::TimelinePattern::Type::RandomWalk: return "random_walk";
+        case killcore::TimelinePattern::Type::Correlated: return "correlated";
+        case killcore::TimelinePattern::Type::AntiCheatPattern: return "anti_cheat_pattern";
+        case killcore::TimelinePattern::Type::Unknown:
+        default: return "unknown";
+    }
+}
+
+QVariantMap patternToVariantMap(const killcore::TimelinePattern& pattern) {
     QVariantMap result;
-    result["success"] = false;
-    result["error"] = QString(
-        "%1 non implémenté — MemoryTimelineAnalyzer (core/visualization/"
-        "memory_timeline_analyzer.h) déclare l'API mais n'a pas de .cpp. "
-        "Voir docs/PHASE_TRACKER.md \"Memory Timeline\"."
-    ).arg(feature);
+    result["type"] = patternTypeToString(pattern.type);
+    result["address"] = QString("0x%1").arg(pattern.address, 0, 16);
+    result["confidence"] = pattern.confidence;
+    result["description"] = QString::fromStdString(pattern.description);
+    result["correlationScore"] = pattern.correlationScore;
+    result["periodMs"] = static_cast<int>(pattern.periodMs);
+    result["slope"] = pattern.slope;
+    return result;
+}
+
+QVariantMap correlationToVariantMap(const killcore::TimelineCorrelation& correlation) {
+    QVariantMap result;
+    result["addressA"] = QString("0x%1").arg(correlation.addressA, 0, 16);
+    result["addressB"] = QString("0x%1").arg(correlation.addressB, 0, 16);
+    result["pearsonCoefficient"] = correlation.pearsonCoefficient;
+    result["timeLagMs"] = correlation.timeLagMs;
+    result["isLeading"] = correlation.isLeading;
     return result;
 }
 }
@@ -21,10 +66,13 @@ QVariantMap notImplementedResult(const QString& feature) {
 class MemoryTimelineManager::Impl {
 public:
     std::unique_ptr<killcore::MemoryTimelineCollector> collector;
+    std::unique_ptr<killcore::MemoryTimelineAnalyzer> analyzer;
     void* processHandle = nullptr;
     bool paused = false;
 
-    Impl() : collector(std::make_unique<killcore::MemoryTimelineCollector>()) {}
+    Impl()
+        : collector(std::make_unique<killcore::MemoryTimelineCollector>())
+        , analyzer(std::make_unique<killcore::MemoryTimelineAnalyzer>()) {}
 };
 
 MemoryTimelineManager::MemoryTimelineManager(QObject* parent)
@@ -51,11 +99,7 @@ void MemoryTimelineManager::setupCallbacks() {
             pointData["isValid"] = point.isValid;
             
             // Convertir la valeur en hex string
-            QString hexValue = "0x";
-            for (auto it = point.value.rbegin(); it != point.value.rend(); ++it) {
-                hexValue += QString("%1").arg(*it, 2, 16, QChar('0'));
-            }
-            pointData["valueHex"] = hexValue;
+            pointData["valueHex"] = bytesToHex(point.value);
             
             QString addressHex = QString("0x%1").arg(point.address, 0, 16);
             emit dataPointReceived(addressHex, pointData);
@@ -87,9 +131,8 @@ QVariantMap MemoryTimelineManager::currentStats() const {
 }
 
 bool MemoryTimelineManager::addAddress(const QString& addressHex, int valueSize) {
-    bool ok;
-    uint64_t address = addressHex.toULongLong(&ok, 16);
-    if (!ok) {
+    uint64_t address = 0;
+    if (!parseAddress(addressHex, address)) {
         KE_LOG_WARN() << "Invalid address hex: " << addressHex.toStdString();
         return false;
     }
@@ -100,9 +143,8 @@ bool MemoryTimelineManager::addAddress(const QString& addressHex, int valueSize)
 }
 
 bool MemoryTimelineManager::removeAddress(const QString& addressHex) {
-    bool ok;
-    uint64_t address = addressHex.toULongLong(&ok, 16);
-    if (!ok) return false;
+    uint64_t address = 0;
+    if (!parseAddress(addressHex, address)) return false;
     
     m_impl->collector->removeAddress(address);
     emit addressesChanged();
@@ -185,9 +227,8 @@ QVariantMap MemoryTimelineManager::getConfig() const {
 }
 
 QVariantMap MemoryTimelineManager::getSeriesForAddress(const QString& addressHex) const {
-    bool ok;
-    uint64_t address = addressHex.toULongLong(&ok, 16);
-    if (!ok) return QVariantMap();
+    uint64_t address = 0;
+    if (!parseAddress(addressHex, address)) return QVariantMap();
     
     auto series = m_impl->collector->getSeriesForAddress(address);
     return seriesToVariantMap(series);
@@ -203,9 +244,8 @@ QVariantList MemoryTimelineManager::getAllSeries() const {
 }
 
 QVariantMap MemoryTimelineManager::getSeriesStats(const QString& addressHex) const {
-    bool ok;
-    uint64_t address = addressHex.toULongLong(&ok, 16);
-    if (!ok) return QVariantMap();
+    uint64_t address = 0;
+    if (!parseAddress(addressHex, address)) return QVariantMap();
     
     auto series = m_impl->collector->getSeriesForAddress(address);
     
@@ -222,18 +262,69 @@ QVariantMap MemoryTimelineManager::getSeriesStats(const QString& addressHex) con
 }
 
 QVariantMap MemoryTimelineManager::detectPatterns(const QString& addressHex) {
-    Q_UNUSED(addressHex);
-    return notImplementedResult("Détection de patterns");
+    QVariantMap result;
+    uint64_t address = 0;
+    if (!parseAddress(addressHex, address)) {
+        result["success"] = false;
+        result["error"] = "Adresse invalide";
+        return result;
+    }
+
+    const auto series = m_impl->collector->getSeriesForAddress(address);
+    const auto patterns = m_impl->analyzer->detectPatterns(series);
+    QVariantList patternList;
+    for (const auto& pattern : patterns) {
+        patternList.append(patternToVariantMap(pattern));
+    }
+
+    result["success"] = true;
+    result["address"] = QString("0x%1").arg(address, 0, 16);
+    result["patterns"] = patternList;
+    return result;
 }
 
 QVariantList MemoryTimelineManager::findCorrelations() {
-    // TODO: Implémenter
-    return QVariantList();
+    std::vector<killcore::TimelineSeries> seriesList;
+    const auto allSeries = m_impl->collector->getSeries();
+    seriesList.reserve(allSeries.size());
+    for (const auto& [address, series] : allSeries) {
+        Q_UNUSED(address);
+        seriesList.push_back(series);
+    }
+
+    QVariantList result;
+    for (const auto& correlation : m_impl->analyzer->findCorrelations(seriesList)) {
+        result.append(correlationToVariantMap(correlation));
+    }
+    return result;
 }
 
 QVariantMap MemoryTimelineManager::analyzeBehavior(const QString& addressHex) {
-    Q_UNUSED(addressHex);
-    return notImplementedResult("Profil comportemental");
+    QVariantMap result;
+    uint64_t address = 0;
+    if (!parseAddress(addressHex, address)) {
+        result["success"] = false;
+        result["error"] = "Adresse invalide";
+        return result;
+    }
+
+    const auto series = m_impl->collector->getSeriesForAddress(address);
+    const auto profile = m_impl->analyzer->createBehaviorProfile(series);
+
+    QVariantMap behavior;
+    behavior["address"] = QString("0x%1").arg(profile.address, 0, 16);
+    behavior["changesPerSecond"] = profile.changesPerSecond;
+    behavior["regularityScore"] = profile.regularityScore;
+    behavior["minValueHex"] = bytesToHex(profile.minValue);
+    behavior["maxValueHex"] = bytesToHex(profile.maxValue);
+    behavior["mostCommonValueHex"] = bytesToHex(profile.mostCommonValue);
+    behavior["distinctValueCount"] = static_cast<int>(profile.distinctValueCount);
+    behavior["typicalResponseTimeMs"] = static_cast<int>(profile.typicalResponseTimeMs);
+    behavior["hasBurstBehavior"] = profile.hasBurstBehavior;
+
+    result["success"] = true;
+    result["behavior"] = behavior;
+    return result;
 }
 
 QVariantList MemoryTimelineManager::findVolatileAddresses(double threshold) {
@@ -263,12 +354,36 @@ bool MemoryTimelineManager::exportToCsv(const QString& filepath) {
 }
 
 QVariantMap MemoryTimelineManager::generateReport() {
-    return notImplementedResult("Génération de rapport");
+    std::vector<killcore::TimelineSeries> seriesList;
+    const auto allSeries = m_impl->collector->getSeries();
+    seriesList.reserve(allSeries.size());
+    for (const auto& [address, series] : allSeries) {
+        Q_UNUSED(address);
+        seriesList.push_back(series);
+    }
+
+    QVariantMap result;
+    result["success"] = true;
+    result["report"] = QString::fromStdString(m_impl->analyzer->generateAnalysisReport(seriesList));
+    return result;
 }
 
 QVariantMap MemoryTimelineManager::predictNextValue(const QString& addressHex) {
-    Q_UNUSED(addressHex);
-    return notImplementedResult("Prédiction de valeur");
+    QVariantMap result;
+    uint64_t address = 0;
+    if (!parseAddress(addressHex, address)) {
+        result["success"] = false;
+        result["error"] = "Adresse invalide";
+        return result;
+    }
+
+    const auto series = m_impl->collector->getSeriesForAddress(address);
+    const auto prediction = m_impl->analyzer->predictNextValue(series);
+    result["success"] = true;
+    result["address"] = QString("0x%1").arg(address, 0, 16);
+    result["valueHex"] = bytesToHex(prediction);
+    result["changeProbability"] = m_impl->analyzer->predictChangeProbability(series);
+    return result;
 }
 
 void MemoryTimelineManager::setProcessHandle(void* handle) {
@@ -293,11 +408,7 @@ QVariantMap MemoryTimelineManager::seriesToVariantMap(const killcore::TimelineSe
         pointData["timestampMs"] = static_cast<qint64>(point.timestampMs);
         pointData["isValid"] = point.isValid;
         
-        QString hexValue = "0x";
-        for (auto it = point.value.rbegin(); it != point.value.rend(); ++it) {
-            hexValue += QString("%1").arg(*it, 2, 16, QChar('0'));
-        }
-        pointData["valueHex"] = hexValue;
+        pointData["valueHex"] = bytesToHex(point.value);
         points.append(pointData);
     }
     result["points"] = points;

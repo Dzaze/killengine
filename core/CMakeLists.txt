@@ -183,14 +183,12 @@ add_library(killcore STATIC
     visualization/memory_heatmap_collector.cpp
 
     # PROPOSITIONS-1 #3 — Memory Timeline : collecte de séries temporelles
-    # mémoire pour un ensemble d'adresses explicitement surveillées. Corrigé
-    # et enregistré ici le 02/09/2026 (Claude) — n'était jamais compilé avant
-    # (appelait une méthode MemoryReader inexistante, jamais détecté faute
-    # d'être dans ce fichier). memory_timeline_analyzer.h existe mais n'a pas
-    # de .cpp (déclaration pure, non implémentée) — volontairement PAS ajouté
-    # ici tant qu'il n'a pas de corps de fonction.
+    # mémoire pour un ensemble d'adresses explicitement surveillées, puis
+    # analyse pure des patterns/corrélations/profils/prédictions.
     visualization/memory_timeline_collector.h
     visualization/memory_timeline_collector.cpp
+    visualization/memory_timeline_analyzer.h
+    visualization/memory_timeline_analyzer.cpp
 
     # PROPOSITIONS-1 #4 — Live Lua REPL : protocole stdin/stdout pur entre
     # LuaReplManager (apps/desktop) et scripts/killengine_repl_driver.lua

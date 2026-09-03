@@ -1168,11 +1168,10 @@ public:
     /// PROPOSITIONS-1 #3 — Memory Timeline : surveille l'évolution d'un
     /// ensemble d'adresses explicitement ajoutées (contrairement au Heatmap,
     /// ne scanne jamais tout l'espace mémoire — sûr par construction).
-    /// Câblage complet (backend + frontend) : 02/09/2026, Claude — voir
-    /// docs/PHASE_TRACKER.md "Memory Timeline". Les méthodes d'analyse
-    /// avancée (detectTimelinePatterns/analyzeTimelineBehavior/
-    /// predictTimelineNextValue) retournent explicitement success:false —
-    /// MemoryTimelineAnalyzer n'a pas de logique implémentée.
+    /// Câblage backend + frontend initial : 02/09/2026, Claude — voir
+    /// docs/PHASE_TRACKER.md "Memory Timeline". L'analyse avancée est
+    /// portée par MemoryTimelineAnalyzer (patterns/corrélations/profil/
+    /// prédiction/rapport).
     Q_INVOKABLE QVariantMap addTimelineAddress(const QString& addressHex, int valueSize);
     Q_INVOKABLE QVariantMap removeTimelineAddress(const QString& addressHex);
     Q_INVOKABLE QVariantMap clearTimelineAddresses();
@@ -1199,9 +1198,7 @@ public:
     Q_INVOKABLE QVariantMap exportTimelineToJson();
     Q_INVOKABLE QVariantMap exportTimelineToCsv();
 
-    /// Non implémentées (MemoryTimelineAnalyzer sans logique) — retournent
-    /// {success:false, error:"..."} explicitement plutôt que de planter ou
-    /// de renvoyer des données inventées.
+    /// Analyses avancées de la timeline collectée.
     Q_INVOKABLE QVariantMap detectTimelinePatterns(const QString& addressHex);
     Q_INVOKABLE QVariantMap analyzeTimelineBehavior(const QString& addressHex);
     Q_INVOKABLE QVariantMap predictTimelineNextValue(const QString& addressHex);

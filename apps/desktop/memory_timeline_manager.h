@@ -8,6 +8,7 @@
 
 namespace killcore {
     class MemoryTimelineCollector;
+    class MemoryTimelineAnalyzer;
     struct TimelineSeries;
 }
 
@@ -59,8 +60,7 @@ public:
     Q_INVOKABLE QVariantList getAllSeries() const;
     Q_INVOKABLE QVariantMap getSeriesStats(const QString& addressHex) const;
 
-    // Analyses simples (implémentées dans le collecteur, sans dépendance à
-    // MemoryTimelineAnalyzer — voir ci-dessous).
+    // Analyses simples / corrélations rapides.
     Q_INVOKABLE QVariantList findCorrelations();
     Q_INVOKABLE QVariantList findVolatileAddresses(double threshold);
     Q_INVOKABLE QVariantList findStableAddresses(int minDurationMs);
@@ -69,13 +69,7 @@ public:
     Q_INVOKABLE bool exportToJson(const QString& filepath);
     Q_INVOKABLE bool exportToCsv(const QString& filepath);
 
-    // Analyses avancées (détection de patterns, profil comportemental,
-    // prédiction, rapport) : NON IMPLÉMENTÉES. `core/visualization/
-    // memory_timeline_analyzer.h` déclare l'API mais n'a pas de .cpp — voir
-    // docs/PHASE_TRACKER.md "Memory Timeline". Retournent explicitement
-    // success:false plutôt que de prétendre fonctionner ou de planter au
-    // link. Signatures QVariantMap (au lieu de QVariantList/QString comme
-    // dans la version originale de Cline) pour porter success/error.
+    // Analyses avancées portées par MemoryTimelineAnalyzer.
     Q_INVOKABLE QVariantMap detectPatterns(const QString& addressHex);
     Q_INVOKABLE QVariantMap analyzeBehavior(const QString& addressHex);
     Q_INVOKABLE QVariantMap predictNextValue(const QString& addressHex);

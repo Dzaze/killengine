@@ -34,6 +34,7 @@ add_executable(killengine_unit_tests
     unit/test_page_diff_analyzer.cpp
     unit/test_smart_watchdog.cpp
     unit/test_lua_repl_protocol.cpp
+    unit/test_memory_timeline_analyzer.cpp
     unit/test_feature_extractor.cpp
     unit/test_game_profile_database.cpp
 )
