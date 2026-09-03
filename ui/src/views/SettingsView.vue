@@ -15,6 +15,13 @@ const runtimeRows = computed(() => [
   { label: 'Workflow', value: store.workflowStatus },
 ])
 
+const stealthThreats = computed(
+  () => (store.stealthRiskAnalysis?.threats as Array<Record<string, unknown>> | undefined) ?? [],
+)
+const stealthRecommendations = computed(
+  () => (store.stealthRiskAnalysis?.recommendations as string[] | undefined) ?? [],
+)
+
 const debugEvents = computed(() => [...store.smartSearchDebugEvents].reverse())
 const learnedAutoProfile = computed(() => store.autoResolveReport?.learnedProfile ?? {})
 const strategyWins = computed(() => {
@@ -990,6 +997,97 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
+        <h2>Mode Stealth (avancé)</h2>
+        <span>{{ store.stealthStatus?.active ? `Actif (${store.stealthStatus.profile})` : 'Inactif' }}</span>
+      </div>
+      <p class="hint">
+        Masque l'attache KillEngine face aux mécanismes anti-debug/anti-cheat courants : hooks anti-anti-debug
+        (<code>IsDebuggerPresent</code>/<code>CheckRemoteDebuggerPresent</code>/<code>NtQueryInformationProcess</code>),
+        masquage du nom de process KillEngine, masquage des DLLs injectées. Nécessite un processus attaché.
+        « Analyser la détectabilité » scanne les modules chargés dans le processus attaché à la recherche de
+        protections connues (BattlEye, Easy Anti-Cheat, Vanguard, PunkBuster, GameGuard, Xigncode3, Denuvo, mhyprot…)
+        et recommande quoi activer — plutôt que de deviner un profil à l'aveugle.
+      </p>
+      <div class="panel-actions">
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.stealthBusy || !store.isAttached"
+          @click="store.applyStealthMode('sc2')"
+        >
+          Activer « sc2 » (tout)
+        </button>
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.stealthBusy || !store.isAttached"
+          @click="store.applyStealthMode('default')"
+        >
+          Activer « default » (antiDebug)
+        </button>
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.stealthBusy || !store.isAttached"
+          @click="store.applyStealthMode('minimal')"
+        >
+          Activer « minimal » (processMask)
+        </button>
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.stealthBusy || !store.stealthStatus?.active"
+          @click="store.restoreStealthMode()"
+        >
+          Restaurer / désactiver
+        </button>
+        <button class="btn btn-secondary compact" :disabled="store.stealthBusy" @click="store.refreshStealthStatus()">
+          Rafraîchir le statut
+        </button>
+      </div>
+      <div v-if="store.stealthStatus?.modules" class="settings-grid compact-grid">
+        <div>
+          <strong>antiDebug</strong>
+          <span>{{ store.stealthStatus.modules.antiDebug ? 'actif' : 'inactif' }}</span>
+        </div>
+        <div>
+          <strong>processMask</strong>
+          <span>{{ store.stealthStatus.modules.processMask ? 'actif' : 'inactif' }}</span>
+        </div>
+        <div>
+          <strong>dllMask</strong>
+          <span>{{ store.stealthStatus.modules.dllMask ? 'actif' : 'inactif' }}</span>
+        </div>
+      </div>
+
+      <div class="panel-actions" style="margin-top: 12px">
+        <button
+          class="btn btn-secondary compact"
+          :disabled="store.stealthBusy || !store.isAttached"
+          @click="store.analyzeStealthRisk()"
+        >
+          Analyser la détectabilité
+        </button>
+      </div>
+      <p v-if="!store.isAttached" class="hint">Attache-toi à un processus pour lancer l'analyse.</p>
+
+      <div v-if="store.stealthRiskAnalysis?.success" class="stealth-analysis">
+        <div class="stealth-risk-line">
+          <span class="risk-badge" :class="`risk-${store.stealthRiskAnalysis.riskLevel}`">
+            {{ store.stealthRiskAnalysis.riskLevel }} — {{ store.stealthRiskAnalysis.riskScore }}/100
+          </span>
+          <span class="hint">{{ store.stealthRiskAnalysis.moduleCount }} module(s) scanné(s)</span>
+        </div>
+        <ul v-if="stealthThreats.length" class="stealth-threat-list">
+          <li v-for="(threat, idx) in stealthThreats" :key="idx">
+            <strong>{{ threat.name }}</strong> ({{ threat.source }}) — {{ threat.detail }}
+          </li>
+        </ul>
+        <ul v-if="stealthRecommendations.length" class="stealth-recommendation-list">
+          <li v-for="(rec, idx) in stealthRecommendations" :key="idx">{{ rec }}</li>
+        </ul>
+      </div>
+      <p v-else-if="store.stealthRiskAnalysis?.error" class="error">{{ store.stealthRiskAnalysis.error }}</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
         <h2>Débogage CDP WebView2 (avancé)</h2>
         <span>{{ store.webView2CdpDebugFlagStatus?.enabled ? 'Actif' : 'Inactif' }}</span>
       </div>
@@ -1863,5 +1961,55 @@ code {
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+.stealth-analysis {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stealth-risk-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.risk-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+}
+
+.risk-badge.risk-low {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+}
+
+.risk-badge.risk-medium {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+}
+
+.risk-badge.risk-high {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 50%, var(--border));
+}
+
+.stealth-threat-list,
+.stealth-recommendation-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.stealth-threat-list li,
+.stealth-recommendation-list li {
+  margin-bottom: 4px;
 }
 </style>

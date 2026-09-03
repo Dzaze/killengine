@@ -1297,6 +1297,69 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // Stealth Profiler (03/09/2026) : mode de protection unifié (antiDebug/
+  // processMask/dllMask) piloté jusqu'ici uniquement via le pipe/Lua, aucune
+  // UI. Activer un profil modifie le process attaché (hooks + masquage) ->
+  // RiskGate 'debug', même asymétrie que WebView2 CDP ci-dessus (désactiver
+  // ne demande aucune confirmation). analyzeStealthRisk est une analyse pure
+  // lecture seule, jamais gardée par RiskGate.
+  const stealthStatus = ref<{
+    active: boolean
+    profile: string
+    modules?: { antiDebug: boolean; processMask: boolean; dllMask: boolean }
+  } | null>(null)
+  const stealthRiskAnalysis = ref<Record<string, unknown> | null>(null)
+  const stealthBusy = ref(false)
+
+  async function refreshStealthStatus() {
+    stealthBusy.value = true
+    try {
+      const result = await backend.getController().getStealthStatus?.()
+      stealthStatus.value = result ?? null
+    } finally {
+      stealthBusy.value = false
+    }
+  }
+
+  async function applyStealthMode(profile: string) {
+    const accepted = await confirmRiskAction(
+      'debug',
+      `Activer le mode Stealth (profil "${profile}")`,
+      "Modifie le process attaché : hooks anti-anti-debug (IsDebuggerPresent/CheckRemoteDebuggerPresent/NtQueryInformationProcess), masquage du nom de process KillEngine et/ou masquage des DLLs injectées, selon le profil choisi. Désactivable à tout moment via restoreStealthMode.",
+    )
+    if (!accepted) return null
+    stealthBusy.value = true
+    try {
+      const result = await backend.getController().applyStealthMode?.(profile)
+      await refreshStealthStatus()
+      return result ?? null
+    } finally {
+      stealthBusy.value = false
+    }
+  }
+
+  async function restoreStealthMode() {
+    stealthBusy.value = true
+    try {
+      const result = await backend.getController().restoreStealthMode?.()
+      await refreshStealthStatus()
+      return result ?? null
+    } finally {
+      stealthBusy.value = false
+    }
+  }
+
+  async function analyzeStealthRisk() {
+    stealthBusy.value = true
+    try {
+      const result = await backend.getController().analyzeStealthRisk?.()
+      stealthRiskAnalysis.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      return result ?? null
+    } finally {
+      stealthBusy.value = false
+    }
+  }
+
   // Exigence produit du 01/09/2026 : diagnostic guidé "Préparer l'inspection
   // WebView2" pour les cibles UWP/Store (chaîne Windows Device Portal). Lecture
   // seule pour le statut ; l'installation de la capability reste derrière un
@@ -4505,6 +4568,13 @@ export const useAppStore = defineStore('app', () => {
     refreshAutomationPipeStatus,
     enableAutomationMode,
     disableAutomationMode,
+    stealthStatus,
+    stealthRiskAnalysis,
+    stealthBusy,
+    refreshStealthStatus,
+    applyStealthMode,
+    restoreStealthMode,
+    analyzeStealthRisk,
     webView2CdpDebugFlagStatus,
     webView2CdpDebugFlagBusy,
     refreshWebView2CdpDebugFlagStatus,
