@@ -1485,6 +1485,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   applyStealthMode?(profile: string): Promise<StealthModeResult>
   restoreStealthMode?(): Promise<StealthModeResult>
   getStealthStatus?(): Promise<StealthModeStatus>
+  /** Stealth Profiler (03/09/2026) : score de détectabilité (0-100) + recommandations, à partir des modules chargés dans le process attaché et de la visibilité du débogueur côté cible. */
+  analyzeStealthRisk?(): Promise<Record<string, unknown>>
   startAutoResolve?(query: string, options: Record<string, unknown>): Promise<SmartSearchResult>
   getAutoResolveReport?(maxEvents: number): Promise<AutoResolveReportResult>
   clearAutoResolveMemory?(allProcesses: boolean): Promise<Record<string, unknown>>
@@ -1754,12 +1756,6 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ): Promise<Record<string, unknown>>
   /** Après une écriture confirmée : cherche une chaîne de pointeurs stable vers cette adresse. Lecture seule, bornée, à appeler explicitement (jamais automatiquement après chaque écriture). */
   suggestStableLocatorForAddress?(addressHex: string, options: PointerScanOptions): Promise<StableLocatorSuggestion>
-  /** Active un mode de fonctionnement avancé (profil : "sc2", "default", "minimal"). */
-  applyStealthMode?(profile: string): Promise<StealthModeResult>
-  /** Désactive le mode de fonctionnement avancé et restaure l'état initial. */
-  restoreStealthMode?(): Promise<StealthModeResult>
-  /** Retourne l'état courant du mode de fonctionnement avancé. */
-  getStealthModeStatus?(): Promise<StealthModeStatus>
 }
 
 class BackendService {
@@ -3078,12 +3074,15 @@ class BackendService {
           modules: { antiDebug: false, processMask: false, dllMask: false },
         }
       },
-      async getStealthModeStatus() {
+      async getStealthStatus() {
         return {
           active: false,
           profile: '',
           modules: { antiDebug: false, processMask: false, dllMask: false },
         }
+      },
+      async analyzeStealthRisk() {
+        return { success: false, error: 'Mock backend', riskScore: 0, riskLevel: 'low', threats: [], recommendations: [] }
       },
     }
   }
