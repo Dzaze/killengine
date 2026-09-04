@@ -88,7 +88,27 @@
     "trainer": "Trainer",
     "speedhack": "Speedhack",
     "network": "Réseau",
-    "lexicon": "Lexique"
+    "lexicon": "Lexique",
+    "modules": "Modules"
+  },
+  "modules": {
+    "intro": "Dépendances optionnelles de KillEngine : statut installé/manquant et installation depuis l'UI (scripts locaux, téléchargement réseau, invite UAC). Pensez à installer les modules manquants avant d'exporter le package sur une autre machine.",
+    "refresh": "Actualiser",
+    "refreshing": "Analyse…",
+    "empty": "Aucun module détecté — relancer l'analyse.",
+    "progress": "Installation en cours…",
+    "cancel": "Annuler",
+    "status": {
+      "ok": "installé",
+      "missing": "manquant"
+    },
+    "install": {
+      "lua": "Installer",
+      "model": "Télécharger",
+      "clr": "Compiler",
+      "kernel": "Installer (UAC)",
+      "generic": "Installer"
+    }
   },
   "webview2": {
     "error": {

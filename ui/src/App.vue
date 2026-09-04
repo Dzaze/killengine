@@ -8,6 +8,7 @@ import ExpertView from '@/views/ExpertView.vue'
 import InvestigationView from '@/views/InvestigationView.vue'
 import LexiconView from '@/views/LexiconView.vue'
 import MemoryView from '@/views/MemoryView.vue'
+import ModulesView from '@/views/ModulesView.vue'
 import MemoryTimelineView from '@/views/MemoryTimelineView.vue'
 import MemoryHeatmapView from '@/views/MemoryHeatmapView.vue'
 import PatternLearningView from '@/views/PatternLearningView.vue'
@@ -39,6 +40,7 @@ const currentView = computed(() => {
   if (store.activeView === 'trainer') return TrainerView
   if (store.activeView === 'expert') return ExpertView
   if (store.activeView === 'lexicon') return LexiconView
+  if (store.activeView === 'modules') return ModulesView
   if (store.activeView === 'settings') return SettingsView
   return AssistantView
 })
@@ -176,6 +178,13 @@ watch(
           @click="store.activeView = 'lexicon'"
         >
           {{ $t('nav.lexicon') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'modules' }"
+          @click="store.activeView = 'modules'"
+        >
+          {{ $t('nav.modules') }}
         </button>
         <button
           class="nav-item"

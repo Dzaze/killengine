@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import {
   backend,
   type AutoResolveReportResult,
+  type ModuleCatalogItem,
   type CandidateFieldTestResult,
   type ClrPathWriteOperation,
   type LuaScriptRunResult,
@@ -77,7 +78,7 @@ export interface SessionPromotionResult {
   warnings: string[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'modules' | 'settings'
 
 export interface MemoryPreviewDecodedValue {
   label: string
@@ -588,6 +589,7 @@ export const useAppStore = defineStore('app', () => {
   let backendHotkeySignalConnected = false
   let backendFreezeInstabilitySignalConnected = false
   let backendWriteWatchSignalConnected = false
+  let backendModuleInstallSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
   // d'une reconnexion du signal (ex: rechargement dev).
@@ -1413,6 +1415,99 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // Vue "Modules" (menu gauche) : catalogue des modules complémentaires
+  // optionnels (runtime Lua, modèle IA GGUF, inspecteur CLR, driver noyau)
+  // avec statut installé/manquant et installation depuis l'UI — finalité
+  // d'exportabilité de KillEngine sur d'autres machines.
+  const moduleCatalog = ref<ModuleCatalogItem[]>([])
+  const moduleCatalogBusy = ref(false)
+  const moduleInstallBusy = ref(false)
+  const moduleInstallModuleId = ref<string | null>(null)
+  const moduleInstallProgress = ref<string>('')
+  const moduleInstallResult = ref<Record<string, unknown> | null>(null)
+
+  async function refreshModuleCatalog() {
+    moduleCatalogBusy.value = true
+    try {
+      const result = await backend.getController().getModuleCatalog?.()
+      moduleCatalog.value = result?.modules ?? []
+    } catch (e) {
+      moduleCatalog.value = []
+      addActionLog('modules', 'Catalogue modules', String(e), 'error')
+    } finally {
+      moduleCatalogBusy.value = false
+    }
+  }
+
+  async function installModule(moduleId: string) {
+    if (moduleInstallBusy.value) return null
+    const labels: Record<string, string> = {
+      lua_runtime: 'Installer le runtime Lua externe',
+      ai_model: 'Télécharger le modèle IA embarqué (GGUF)',
+      clr_inspector: 'Compiler l’inspecteur CLR',
+      kernel_driver: 'Installer le driver noyau',
+    }
+    const accepted = await confirmRiskAction(
+      'debug',
+      labels[moduleId] ?? `Installer le module ${moduleId}`,
+      'Lance le script d’installation correspondant (PowerShell local, téléchargement réseau ou invite UAC visible). Peut prendre plusieurs minutes ; la progression est affichée dans la vue Modules.',
+    )
+    if (!accepted) return null
+    moduleInstallBusy.value = true
+    moduleInstallModuleId.value = moduleId
+    moduleInstallProgress.value = ''
+    moduleInstallResult.value = null
+    try {
+      const controller = backend.getController()
+      const started = await controller.installModule?.(moduleId, {})
+      if (!started?.started) {
+        moduleInstallResult.value = started ?? { success: false, error: 'Réponse backend absente.' }
+        return moduleInstallResult.value
+      }
+      // kernel_driver : lancé élevé et détaché, pas de signal de fin attendu.
+      if (moduleId === 'kernel_driver') {
+        moduleInstallResult.value = { success: true, message: String(started.message ?? '') }
+        return moduleInstallResult.value
+      }
+      const finishedSignal = controller.moduleInstallFinished
+      if (!finishedSignal) {
+        moduleInstallResult.value = { success: false, error: 'Signal moduleInstallFinished absent.' }
+        return moduleInstallResult.value
+      }
+      const requestId = Number(started.requestId ?? 0)
+      await new Promise<void>((resolve) => {
+        let settled = false
+        const watchdog = window.setTimeout(() => {
+          if (settled) return
+          settled = true
+          finishedSignal.disconnect?.(handler)
+          moduleInstallBusy.value = false
+          moduleInstallResult.value = { success: false, error: 'Timeout client en attente de l’installation.' }
+          resolve()
+        }, 30 * 60 * 1000)
+        const handler = (payload: Record<string, unknown>) => {
+          if (Number(payload.requestId) !== requestId) return
+          settled = true
+          window.clearTimeout(watchdog)
+          finishedSignal.disconnect?.(handler)
+          moduleInstallBusy.value = false
+          moduleInstallResult.value = payload
+          resolve()
+        }
+        finishedSignal.connect(handler)
+      })
+      return moduleInstallResult.value
+    } finally {
+      moduleInstallBusy.value = false
+      moduleInstallModuleId.value = null
+    }
+  }
+
+  async function cancelModuleInstall() {
+    const result = await backend.getController().cancelModuleInstall?.()
+    return result ?? { success: false, error: 'Réponse backend absente.' }
+  }
+
   async function executeCheckpointFindWhatWrites(checkpoint: Record<string, unknown>) {
     const address = checkpointAddress(checkpoint)
     const type = checkpointType(checkpoint)
@@ -1953,6 +2048,17 @@ export const useAppStore = defineStore('app', () => {
           )
         })
         backendWriteWatchSignalConnected = true
+      }
+      if (!backendModuleInstallSignalConnected) {
+        // Vue "Modules" : progression des installations de module en cours
+        // (téléchargement GGUF, scripts PowerShell) — le résultat final passe
+        // par moduleInstallFinished, attendu dans installModule().
+        controller.moduleInstallProgress?.connect((progress) => {
+          if (moduleInstallBusy.value) {
+            moduleInstallProgress.value = String(progress.message ?? '')
+          }
+        })
+        backendModuleInstallSignalConnected = true
       }
       version.value = await controller.getVersion()
       loadActionLog()
@@ -4593,6 +4699,15 @@ export const useAppStore = defineStore('app', () => {
     webView2CapabilityInstallResult,
     refreshWebView2SystemPrepStatus,
     installWebView2DeveloperModeCapability,
+    moduleCatalog,
+    moduleCatalogBusy,
+    moduleInstallBusy,
+    moduleInstallModuleId,
+    moduleInstallProgress,
+    moduleInstallResult,
+    refreshModuleCatalog,
+    installModule,
+    cancelModuleInstall,
     prepareCheckpointAob,
     executeCheckpointForceValue,
     createTrainerFeature,

@@ -1232,6 +1232,25 @@ export interface AiModelStatus {
   error?: string
 }
 
+/** Module complémentaire du catalogue (vue "Modules") : runtime Lua, modèle IA, inspecteur CLR, driver noyau. */
+export interface ModuleCatalogItem {
+  id: string
+  displayName: string
+  description: string
+  installed: boolean
+  status: string
+  detail?: string
+  path?: string
+  installable: boolean
+  installKind: string
+}
+
+export interface ModuleCatalog {
+  success: boolean
+  modules: ModuleCatalogItem[]
+  error?: string
+}
+
   export interface PointerChainInfo {
     module: string
     baseOffset: string
@@ -1503,6 +1522,14 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ping(message: string): Promise<string>
   getSettings(): Promise<AppSettings>
   getAiModelStatus?(): Promise<AiModelStatus>
+  /** Catalogue des modules complémentaires (vue "Modules") : statut + installation. */
+  getModuleCatalog?(): Promise<ModuleCatalog>
+  /** Lance l'installation d'un module (async, progression via moduleInstallProgress). */
+  installModule?(moduleId: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>
+  /** Annule l'installation de module en cours. */
+  cancelModuleInstall?(): Promise<Record<string, unknown>>
+  moduleInstallProgress?: QWebChannelSignal<Record<string, unknown>>
+  moduleInstallFinished?: QWebChannelSignal<Record<string, unknown>>
   /** Sélecteur de fichier natif pour le chemin GGUF personnalisé (remplace la saisie manuelle). */
   browseForModelFile?(): Promise<Record<string, unknown>>
   /** Modale de bienvenue première ouverture (QSettings, survit à un profil Windows différent). */
@@ -2700,6 +2727,23 @@ class BackendService {
       async browseForModelFile() {
         return { success: false, cancelled: true }
       },
+      async getModuleCatalog() {
+        return {
+          success: true,
+          modules: [
+            { id: 'lua_runtime', displayName: 'Runtime Lua externe', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'script' },
+            { id: 'ai_model', displayName: 'Modèle IA embarqué (GGUF)', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'download' },
+            { id: 'clr_inspector', displayName: 'Inspecteur CLR (ClrMD)', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'script' },
+            { id: 'kernel_driver', displayName: 'Driver noyau KillEngineKernel', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'elevated' },
+          ],
+        }
+      },
+      async installModule(_moduleId: string, _options?: Record<string, unknown>) {
+        return { success: false, started: false, moduleId: _moduleId, error: 'Indisponible dans le mock.' }
+      },
+      async cancelModuleInstall() {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
       async hasSeenOnboarding() {
         return true
       },
@@ -2862,6 +2906,7 @@ class BackendService {
                 healthProbe: true, // Permet au driver de répondre aux requêtes de santé
                 processMemoryAccess: true, // Permet au driver de lire et écrire dans la mémoire des processus
                 privilegedInstrumentation: true, // Permet au driver d'utiliser des fonctionnalités d'instrumentation privilégiées
+                handleTable: true, // Permet au driver de masquer/restaurer des handles (STEALTH-Q3)
             },
         };
     },
@@ -2879,6 +2924,7 @@ class BackendService {
             healthProbe: true,
             processMemoryAccess: true,
             privilegedInstrumentation: true,
+            handleTable: true,
           },
         }
       },

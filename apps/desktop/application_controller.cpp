@@ -5163,6 +5163,367 @@ QVariantMap ApplicationController::browseForModelFile() {
     return m_settingsDiagnosticsManager->browseForModelFile();
 }
 
+namespace {
+// Résolution des scripts d'installation des modules complémentaires :
+// dev (build/bin -> ../../scripts) ET package portable (scripts/ à la racine,
+// cf. scripts/package-windows.ps1 qui copie killengine.lua + automation-pipe-call.ps1).
+QString findModuleCatalogScript(const QString& scriptName) {
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.filePath(QStringLiteral("scripts/%1").arg(scriptName)),
+        appDir.filePath(QStringLiteral("../scripts/%1").arg(scriptName)),
+        appDir.filePath(QStringLiteral("../../scripts/%1").arg(scriptName)),
+        QDir::current().filePath(QStringLiteral("scripts/%1").arg(scriptName)),
+    };
+    for (const auto& candidate : candidates) {
+        const QFileInfo file(candidate);
+        if (file.exists() && file.isFile()) {
+            return file.absoluteFilePath();
+        }
+    }
+    return {};
+}
+
+QString findModuleCatalogModelDir() {
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.filePath("model/qwen"),
+        appDir.filePath("../../model/qwen"),
+        QDir::current().filePath("model/qwen"),
+    };
+    for (const auto& candidate : candidates) {
+        if (QFileInfo(candidate).isDir()) {
+            return QDir(candidate).absolutePath();
+        }
+    }
+    return {};
+}
+} // namespace
+
+QVariantMap ApplicationController::getModuleCatalog() const {
+    QVariantMap result;
+    result["success"] = true;
+    QVariantList modules;
+
+    // 1) Runtime Lua externe (lua.exe + helper killengine.lua).
+    {
+        const QVariantMap lua = getLuaScriptingStatus();
+        const bool available = lua.value("available").toBool();
+        QVariantMap item;
+        item["id"] = QStringLiteral("lua_runtime");
+        item["displayName"] = QStringLiteral("Runtime Lua externe");
+        item["description"] = QStringLiteral("Interpréteur lua.exe + helper scripts/killengine.lua — scripting Lua pilotant KillEngine via le pipe d'automatisation.");
+        item["installed"] = available;
+        item["status"] = available ? QStringLiteral("ok") : QStringLiteral("missing");
+        item["detail"] = lua.value("message").toString();
+        item["path"] = lua.value("luaPath").toString();
+        item["installable"] = true;
+        item["installKind"] = QStringLiteral("script");
+        modules.append(item);
+    }
+
+    // 2) Modèle IA embarqué (GGUF partagé des agents).
+    {
+        const QVariantMap ai = getAiModelStatus();
+        const bool ready = ai.value("ready").toBool();
+        QVariantMap item;
+        item["id"] = QStringLiteral("ai_model");
+        item["displayName"] = QStringLiteral("Modèle IA embarqué (GGUF)");
+        item["description"] = QStringLiteral("Qwen3.5-2B Q4_K_M (~1,4 Go) pour l'Assistant et l'Auto Resolver — téléchargé depuis Hugging Face (bartowski/Qwen_Qwen3.5-2B-GGUF, même quantification que le modèle embarqué).");
+        item["installed"] = ready;
+        item["status"] = ready ? QStringLiteral("ok") : QStringLiteral("missing");
+        item["detail"] = ai.value("message").toString();
+        item["path"] = ai.value("modelPath").toString();
+        item["installable"] = true;
+        item["installKind"] = QStringLiteral("download");
+        modules.append(item);
+    }
+
+    // 3) Inspecteur CLR (helper .NET ClrMD).
+    {
+        const QVariantMap clr = getClrInspectorStatus();
+        const bool available = clr.value("available").toBool();
+        QVariantMap item;
+        item["id"] = QStringLiteral("clr_inspector");
+        item["displayName"] = QStringLiteral("Inspecteur CLR (ClrMD)");
+        item["description"] = QStringLiteral("Helper .NET KillEngineClrInspector.exe — lecture/écriture des objets managés des cibles .NET via named pipe.");
+        item["installed"] = available;
+        item["status"] = available ? QStringLiteral("ok") : QStringLiteral("missing");
+        item["detail"] = available ? QStringLiteral("Helper détecté.") : QStringLiteral("Helper introuvable — build local requis (SDK .NET 8+).");
+        item["path"] = clr.value("helperPath").toString();
+        item["installable"] = true;
+        item["installKind"] = QStringLiteral("script");
+        modules.append(item);
+    }
+
+    // 4) Driver noyau optionnel.
+    {
+        const QVariantMap drv = probeKernelDriver();
+        const bool connected = drv.value("status").toString().compare(QStringLiteral("connected"), Qt::CaseInsensitive) == 0;
+        QVariantMap item;
+        item["id"] = QStringLiteral("kernel_driver");
+        item["displayName"] = QStringLiteral("Driver noyau KillEngineKernel");
+        item["description"] = QStringLiteral("Driver kernel optionnel (mémoire privilégiée, table de handles) — service Windows KillEngineKernel.");
+        item["installed"] = connected;
+        item["status"] = connected ? QStringLiteral("ok") : QStringLiteral("missing");
+        item["detail"] = drv.value("message").toString();
+        item["path"] = drv.value("devicePath").toString();
+        item["installable"] = true;
+        item["installKind"] = QStringLiteral("elevated");
+        modules.append(item);
+    }
+
+    result["modules"] = modules;
+    return result;
+}
+
+QVariantMap ApplicationController::installModule(const QString& moduleId, const QVariantMap& options) {
+    QVariantMap result;
+    result["success"] = false;
+    result["started"] = false;
+    result["moduleId"] = moduleId;
+    Q_UNUSED(options);
+
+    if (m_moduleInstallInProgress) {
+        result["error"] = QStringLiteral("Une installation de module est déjà en cours.");
+        return result;
+    }
+    if (moduleId != QStringLiteral("lua_runtime")
+        && moduleId != QStringLiteral("ai_model")
+        && moduleId != QStringLiteral("clr_inspector")
+        && moduleId != QStringLiteral("kernel_driver")) {
+        result["error"] = QStringLiteral("Module inconnu : %1").arg(moduleId);
+        return result;
+    }
+
+    // kernel_driver : invite UAC visible, async, même mécanisme que
+    // installWebView2DeveloperModeCapability — le service Windows est créé et
+    // démarré dans la fenêtre PowerShell élevée, pas de thread worker ici.
+    if (moduleId == QStringLiteral("kernel_driver")) {
+        const QString script = findModuleCatalogScript(QStringLiteral("install-kernel-driver.ps1"));
+        if (script.isEmpty()) {
+            result["error"] = QStringLiteral("scripts/install-kernel-driver.ps1 introuvable.");
+            return result;
+        }
+        const std::wstring parameters =
+            L"-NoProfile -ExecutionPolicy Bypass -File \"" + script.toStdWString() + L"\" -Configuration Release";
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.hwnd = nullptr;
+        sei.lpVerb = L"runas";
+        sei.lpFile = L"powershell.exe";
+        sei.lpParameters = parameters.c_str();
+        sei.nShow = SW_SHOWNORMAL;
+        if (!ShellExecuteExW(&sei)) {
+            const DWORD err = GetLastError();
+            if (err == ERROR_CANCELLED) {
+                result["cancelled"] = true;
+                result["error"] = QStringLiteral("Invite UAC refusée par l'utilisateur.");
+            } else {
+                result["error"] = QStringLiteral("ShellExecuteExW a échoué (code %1).").arg(err);
+            }
+            return result;
+        }
+        if (sei.hProcess) {
+            CloseHandle(sei.hProcess);
+        }
+        result["success"] = true;
+        result["started"] = true;
+        result["message"] = QStringLiteral(
+            "Installation lancée dans une fenêtre PowerShell élevée (service Windows KillEngineKernel). "
+            "Relancer le diagnostic Modules une fois terminé.");
+        KE_LOG_INFO() << "installModule(kernel_driver): installation lancée (async, UAC affiché).";
+        return result;
+    }
+
+    // lua_runtime / clr_inspector : script PowerShell local dans un thread worker.
+    // ai_model : téléchargement curl.exe du GGUF officiel dans un thread worker.
+    QString script;
+    if (moduleId != QStringLiteral("ai_model")) {
+        const QString scriptName = moduleId == QStringLiteral("lua_runtime")
+            ? QStringLiteral("setup-lua-runtime.ps1")
+            : QStringLiteral("build-clr-inspector.ps1");
+        script = findModuleCatalogScript(scriptName);
+        if (script.isEmpty()) {
+            result["error"] = QStringLiteral("%1 introuvable.").arg(scriptName);
+            return result;
+        }
+    }
+
+    const int requestId = ++m_moduleInstallRequestId;
+    const QString requestedModule = moduleId;
+    const QString requestedScript = script;
+    const QPointer<ApplicationController> self(this);
+    auto cancellation = std::make_shared<killcore::CancellationToken>();
+
+    m_moduleInstallInProgress = true;
+    m_moduleInstallId = moduleId;
+    m_activeModuleInstallCancellation = cancellation;
+
+    KE_LOG_INFO() << "installModule(" << moduleId << ", requestId=" << requestId << ")";
+
+    std::thread([self, requestId, requestedModule, requestedScript, cancellation]() {
+        QVariantMap finished;
+        finished["requestId"] = requestId;
+        finished["moduleId"] = requestedModule;
+        finished["success"] = false;
+
+        if (requestedModule == QStringLiteral("ai_model")) {
+            // Source officielle bartowski (même quantification Q4_K_M que le
+            // modèle embarqué) — téléchargement en .partial puis renommage,
+            // jamais de fichier final tronqué laissé derrière.
+            const QString modelDir = findModuleCatalogModelDir();
+            if (modelDir.isEmpty()) {
+                finished["error"] = QStringLiteral("Dossier model/qwen introuvable.");
+            } else {
+                const QString url = QStringLiteral(
+                    "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf");
+                const QString dest = QDir(modelDir).filePath(QStringLiteral("Qwen_Qwen3.5-2B-Q4_K_M.gguf"));
+                const QString partial = dest + QStringLiteral(".partial");
+                QFile::remove(partial);
+
+                QProcess proc;
+                proc.setProgram(QStringLiteral("curl.exe"));
+                proc.setArguments({
+                    QStringLiteral("-L"), QStringLiteral("--fail"), QStringLiteral("--retry"), QStringLiteral("3"),
+                    QStringLiteral("--connect-timeout"), QStringLiteral("30"),
+                    QStringLiteral("-o"), partial, url,
+                });
+                proc.setProcessChannelMode(QProcess::MergedChannels);
+                proc.start();
+                if (!proc.waitForStarted(15000)) {
+                    finished["error"] = QStringLiteral("curl.exe n'a pas démarré.");
+                } else {
+                    while (proc.state() == QProcess::Running) {
+                        if (cancellation->isCancelled()) {
+                            proc.kill();
+                            finished["cancelled"] = true;
+                            finished["message"] = QStringLiteral("Téléchargement annulé.");
+                            QFile::remove(partial);
+                            break;
+                        }
+                        if (proc.waitForReadyRead(500)) {
+                            const QString line = QString::fromLocal8Bit(proc.readAllStandardOutput()).trimmed();
+                            if (!line.isEmpty()) {
+                                QVariantMap progress;
+                                progress["requestId"] = requestId;
+                                progress["moduleId"] = requestedModule;
+                                progress["percent"] = -1;
+                                progress["message"] = QStringLiteral("Téléchargement du modèle (~1,4 Go)…");
+                                QMetaObject::invokeMethod(self.data(), [self, progress]() {
+                                    if (self) {
+                                        emit self->moduleInstallProgress(progress);
+                                    }
+                                }, Qt::QueuedConnection);
+                            }
+                        }
+                    }
+                    proc.waitForFinished(10000);
+                    if (!finished.contains(QStringLiteral("cancelled"))) {
+                        const bool ok = proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
+                        if (ok && QFile::exists(partial)) {
+                            QFile::remove(dest);
+                            QFile::rename(partial, dest);
+                            finished["success"] = true;
+                            finished["message"] = QStringLiteral("Modèle téléchargé : %1").arg(dest);
+                        } else {
+                            finished["error"] = QStringLiteral("Échec du téléchargement (code %1).").arg(proc.exitCode());
+                            QFile::remove(partial);
+                        }
+                    }
+                }
+            }
+        } else {
+            QProcess proc;
+            proc.setProgram(QStringLiteral("powershell.exe"));
+            proc.setArguments({
+                QStringLiteral("-NoProfile"),
+                QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"),
+                QStringLiteral("-File"), requestedScript,
+            });
+            if (requestedModule == QStringLiteral("lua_runtime")) {
+                proc.arguments().append(QStringLiteral("-Force"));
+            }
+            proc.setProcessChannelMode(QProcess::MergedChannels);
+            proc.start();
+            if (!proc.waitForStarted(15000)) {
+                finished["error"] = QStringLiteral("powershell.exe n'a pas démarré.");
+            } else {
+                while (proc.state() == QProcess::Running) {
+                    if (cancellation->isCancelled()) {
+                        proc.kill();
+                        finished["cancelled"] = true;
+                        finished["message"] = QStringLiteral("Installation annulée.");
+                        break;
+                    }
+                    if (proc.waitForReadyRead(500)) {
+                        const QString line = QString::fromLocal8Bit(proc.readAllStandardOutput()).trimmed();
+                        if (!line.isEmpty()) {
+                            QVariantMap progress;
+                            progress["requestId"] = requestId;
+                            progress["moduleId"] = requestedModule;
+                            progress["percent"] = -1;
+                            progress["message"] = line;
+                            QMetaObject::invokeMethod(self.data(), [self, progress]() {
+                                if (self) {
+                                    emit self->moduleInstallProgress(progress);
+                                }
+                            }, Qt::QueuedConnection);
+                        }
+                    }
+                }
+                proc.waitForFinished(10000);
+                if (!finished.contains(QStringLiteral("cancelled"))) {
+                    const bool ok = proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
+                    finished["success"] = ok;
+                    if (ok) {
+                        finished["message"] = requestedModule == QStringLiteral("lua_runtime")
+                            ? QStringLiteral("Runtime Lua installé dans runtime/lua.")
+                            : QStringLiteral("Inspecteur CLR compilé.");
+                    } else {
+                        finished["error"] = QStringLiteral("Échec du script (code %1).").arg(proc.exitCode());
+                    }
+                }
+            }
+        }
+
+        if (!self) {
+            return;
+        }
+        QMetaObject::invokeMethod(self.data(), [self, finished]() {
+            if (!self) {
+                return;
+            }
+            self->m_moduleInstallInProgress = false;
+            self->m_moduleInstallId.clear();
+            self->m_activeModuleInstallCancellation.reset();
+            self->appendScanTelemetry(QStringLiteral("module_install"), {
+                {"moduleId", finished.value("moduleId")},
+                {"success", finished.value("success")},
+            });
+            emit self->moduleInstallFinished(finished);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    result["success"] = true;
+    result["started"] = true;
+    result["requestId"] = requestId;
+    return result;
+}
+
+QVariantMap ApplicationController::cancelModuleInstall() {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_moduleInstallInProgress || !m_activeModuleInstallCancellation) {
+        result["error"] = QStringLiteral("Aucune installation de module en cours.");
+        return result;
+    }
+    m_activeModuleInstallCancellation->cancel();
+    result["success"] = true;
+    return result;
+}
+
 QVariantMap ApplicationController::saveSettings(const QVariantMap& settings) {
     return m_settingsDiagnosticsManager->saveSettings(settings);
 }

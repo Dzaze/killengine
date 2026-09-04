@@ -88,7 +88,27 @@
     "trainer": "Trainer",
     "speedhack": "Speedhack",
     "network": "Network",
-    "lexicon": "Glossary"
+    "lexicon": "Glossary",
+    "modules": "Modules"
+  },
+  "modules": {
+    "intro": "Optional KillEngine dependencies: installed/missing status and in-UI installation (local scripts, network download, UAC prompt). Install missing modules before exporting the package to another machine.",
+    "refresh": "Refresh",
+    "refreshing": "Scanning…",
+    "empty": "No module detected — run a scan.",
+    "progress": "Installation in progress…",
+    "cancel": "Cancel",
+    "status": {
+      "ok": "installed",
+      "missing": "missing"
+    },
+    "install": {
+      "lua": "Install",
+      "model": "Download",
+      "clr": "Build",
+      "kernel": "Install (UAC)",
+      "generic": "Install"
+    }
   },
   "webview2": {
     "error": {

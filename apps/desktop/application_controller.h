@@ -972,6 +972,26 @@ public:
     /// Ouvre un sélecteur de fichier natif pour choisir un modèle GGUF (remplace la saisie manuelle du chemin).
     Q_INVOKABLE QVariantMap browseForModelFile();
 
+    /// Catalogue des modules complémentaires optionnels (runtime Lua externe,
+    /// modèle IA GGUF, inspecteur CLR, driver noyau) : statut installé/manquant,
+    /// description, script d'installation. Alimente la vue "Modules" du menu
+    /// gauche — finalité d'exportabilité sur d'autres machines (téléchargement
+    /// des dépendances depuis l'UI, demande utilisateur).
+    Q_INVOKABLE QVariantMap getModuleCatalog() const;
+
+    /// Lance l'installation d'un module du catalogue (moduleId = lua_runtime |
+    /// ai_model | clr_inspector | kernel_driver) sans bloquer l'UI : les trois
+    /// premiers modules tournent dans un thread worker (PowerShell), kernel_driver
+    /// passe par une invite UAC visible (runas, même mécanisme que
+    /// installWebView2DeveloperModeCapability). Progression via
+    /// moduleInstallProgress, résultat final via moduleInstallFinished (payload
+    /// porte requestId + moduleId).
+    Q_INVOKABLE QVariantMap installModule(const QString& moduleId, const QVariantMap& options);
+
+    /// Annule l'installation de module en cours (thread worker uniquement —
+    /// pas d'effet sur le cas élevé UAC déjà détaché).
+    Q_INVOKABLE QVariantMap cancelModuleInstall();
+
     /// Sauvegarde les paramètres persistants de l'application.
     Q_INVOKABLE QVariantMap saveSettings(const QVariantMap& settings);
 
@@ -1424,6 +1444,12 @@ signals:
     void findWhatWritesFinished(const QVariantMap& result);
     void saveFileWatchFinished(const QVariantMap& result);
     void luaScriptExecutionFinished(const QVariantMap& result);
+    /// Vue "Modules" : progression d'une installation de module en cours
+    /// (payload : requestId, moduleId, percent, message).
+    void moduleInstallProgress(const QVariantMap& progress);
+    /// Vue "Modules" : résultat final d'une installation de module
+    /// (payload : requestId, moduleId, success, message, error).
+    void moduleInstallFinished(const QVariantMap& result);
     /// PROPOSITIONS-1 #4 — Live Lua REPL : une ligne envoyée via
     /// sendLuaReplLine a terminé (result contient "requestId", même
     /// convention que luaScriptExecutionFinished). Reçu par le frontend Qt
@@ -1574,6 +1600,13 @@ private:
     // manipulation cross-thread du QProcess lui-meme.
     bool                     m_luaScriptInProgress{false};
     std::shared_ptr<killcore::CancellationToken> m_activeLuaScriptCancellation;
+    // Vue "Modules" (installation de module complémentaire) : état dédié de
+    // l'installation en cours — un seul module à la fois, annulable via
+    // cancelModuleInstall() (thread worker uniquement, pas le cas élevé UAC).
+    bool                     m_moduleInstallInProgress{false};
+    QString                  m_moduleInstallId;
+    int                      m_moduleInstallRequestId{0};
+    std::shared_ptr<killcore::CancellationToken> m_activeModuleInstallCancellation;
     killai::AIEngine         m_ai;
     bool                     m_smartSearchActive{false};
     QString                  m_smartSearchInitialValue;
