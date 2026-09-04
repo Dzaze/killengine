@@ -1,5 +1,8 @@
 > **ATTENTION - Priorité Des Ordres Projet**
 > Un ordre prioritaire explicite du propriétaire du projet prime sur les consignes temporaires de session des agents IA.
+
+> **ATTENTION - Build réservé** (décision propriétaire, 04/09/2026)
+> Seuls Codex et Claude sont habilités à lancer un build sur ce dépôt (`scripts\build.ps1`). Les autres agents (Cline, Roo, etc.) écrivent le code mais ne buildent pas eux-mêmes — voir `AGENTS.md` et `docs/PHASE_TRACKER.md`.
 # KillEngine — Feuille de route pour rendre le hacking plus puissant
 
 > Ce document part de l'état actuel (Phase 18 partielle) et identifie les **axes concrèts** pour aller plus loin.

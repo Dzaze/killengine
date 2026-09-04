@@ -33,6 +33,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 - Ne jamais supprimer d'historique sans transfert explicite.
 - Pour les gros détails d'une phase future, préférer un document dédié dans `docs/` puis garder ici un résumé avec lien.
 - **Build complet KillEngine = long, ne pas vérifier l'état en boucle.** Un build complet (`scripts/build.ps1`, voir [[killengine_build_wrong_ninja_in_path]]) prend plusieurs minutes. Claude le lance en arrière-plan (`run_in_background: true`) et reçoit une notification automatique dès qu'il se termine — inutile de le sonder entre-temps (pas de `Get-Process`/poll en boucle, pas de nouvelle commande "pour vérifier"). Ne jamais tuer un build en cours pour le relancer ou pour lancer autre chose en parallèle : ça ne fait que perdre le travail de compilation déjà fait et repartir de zéro. Attendre la notification de fin, puis seulement agir sur le résultat.
+- **Seuls Codex et Claude sont habilités à lancer un build sur ce dépôt** (décision propriétaire, 04/09/2026). Les autres agents (Cline, Roo, etc.) écrivent/proposent le code mais consignent ici que le build/les tests restent à faire par Codex ou Claude, plutôt que d'exécuter `scripts\build.ps1` eux-mêmes.
 
 ## Validations restantes
 
