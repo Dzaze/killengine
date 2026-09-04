@@ -12,20 +12,30 @@ namespace killcore {
 struct AntiDebugResult {
     bool success{false};
     QString error;
-    int hooksInstalled{0};
+    /// Nombre de champs PEB effectivement patchés (0-3).
+    int fieldsPatched{0};
+    /// Adresse du PEB de la cible (0 si inconnue).
+    uint64_t pebAddress{0};
 };
 
 /**
  * @brief Contourne les mécanismes anti-debug de SC2 et autres jeux.
  *
- * Hook les fonctions suivantes dans le processus cible :
- *   - IsDebuggerPresent → retourne FALSE
- *   - CheckRemoteDebuggerPresent → retourne FALSE
- *   - NtQueryInformationProcess → retourne FALSE pour ProcessDebugPort
- *   - NtSetInformationProcess → empêche la désactivation du debug
+ * Patche directement le PEB (Process Environment Block) du processus cible :
+ *   - BeingDebugged = 0          (PEB+0x2, x64)
+ *   - NtGlobalFlag &= ~0x70      (PEB+0xBC, x64 — bits de check heap)
+ *   - DebugObjectHandle = 0      (PEB+0x1C, x64)
  *
- * Utilise un VEH (Vectored Exception Handler) dans le processus cible
- * pour intercepter les appels, sans nécessiter de DLL injectée.
+ * C'est la technique classique anti-anti-debug : elle couvre à la fois les
+ * chemins qui appellent IsDebuggerPresent/CheckRemoteDebuggerPresent (qui
+ * lisent BeingDebugged) et ceux qui lisent le PEB directement.
+ *
+ * Remplace l'ancienne approche (INT3 écrits sur les fonctions anti-debug
+ * sans aucun handler enregistré dans la cible — le module rapportait succès
+ * mais le jeu crashait au premier check anti-debug, voir STEALTH-Q dans
+ * docs/PHASE_TRACKER.md).
+ *
+ * stop() restaure les valeurs originales.
  */
 class AntiDebugSession {
 public:
@@ -35,10 +45,10 @@ public:
     AntiDebugSession(const AntiDebugSession&) = delete;
     AntiDebugSession& operator=(const AntiDebugSession&) = delete;
 
-    /// Installe les hooks anti-anti-debug dans le processus cible.
+    /// Patche le PEB du processus cible.
     AntiDebugResult start(const ProcessHandle& process);
 
-    /// Retire les hooks anti-anti-debug.
+    /// Restaure les valeurs PEB originales.
     void stop();
 
     bool isActive() const { return m_active; }
@@ -47,14 +57,10 @@ private:
     bool m_active{false};
     uint32_t m_pid{0};
     HANDLE m_hProcess{nullptr};
-    uint64_t m_isDebuggerPresentAddr{0};
-    uint64_t m_checkRemoteDebuggerPresentAddr{0};
-    uint64_t m_ntQueryInformationProcessAddr{0};
-    uint64_t m_ntSetInformationProcessAddr{0};
-    BYTE m_originalByte1{0};
-    BYTE m_originalByte2{0};
-    BYTE m_originalByte3{0};
-    BYTE m_originalByte4{0};
+    uint64_t m_pebAddress{0};
+    BYTE m_originalBeingDebugged{0};
+    DWORD m_originalNtGlobalFlag{0};
+    uint64_t m_originalDebugObjectHandle{0};
 };
 
 } // namespace killcore

@@ -5151,6 +5151,10 @@ QVariantMap ApplicationController::writeMemoryValueKernel(const QString& address
     return result;
 }
 
+QVariantMap ApplicationController::handleTable(const QString& ownerPid, const QString& handleValue, bool hide) const {
+    return m_kernelDriverManager->handleTable(ownerPid, handleValue, hide);
+}
+
 QVariantMap ApplicationController::getAiModelStatus() const {
     return m_settingsDiagnosticsManager->getAiModelStatus();
 }

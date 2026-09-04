@@ -331,6 +331,8 @@ body {
 
 .nav {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 14px 8px;
   display: flex;
   flex-direction: column;

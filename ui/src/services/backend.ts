@@ -147,6 +147,7 @@ export interface KernelDriverStatus {
     healthProbe: boolean
     processMemoryAccess: boolean
     privilegedInstrumentation: boolean
+    handleTable: boolean
   }
 }
 
@@ -1603,6 +1604,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   writeMemoryKernel?(addressHex: string, hexBytes: string): Promise<KernelMemoryWriteResult>
   /** Comme writeMemoryKernel, mais avec une valeur typée (valueType/value) au lieu d'octets hex bruts — utilisé par l'escalade kernel Expert et l'Assistant (checkpoint kernel_write). Même risque, même confirmRiskAction côté store. */
   writeMemoryValueKernel?(addressHex: string, valueType: string, value: string): Promise<KernelMemoryWriteResult>
+  /** Masque (hide=true) ou restaure (hide=false) un handle specifique dans la table de handles du process proprietaire via le driver noyau. ownerPid vide = process courant. handleValue en hexadecimal (ex: "0x1234). */
+  handleTable?(ownerPid: string, handleValue: string, hide: boolean): Promise<Record<string, unknown>>
   saveSettings(settings: AppSettings): Promise<AppSettings>
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
@@ -2883,6 +2886,9 @@ class BackendService {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async writeMemoryKernel(_addressHex: string, _hexBytes: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async handleTable(_ownerPid: string, _handleValue: string, _hide: boolean) {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
       async writeMemoryValueKernel(_addressHex: string, _valueType: string, _value: string) {

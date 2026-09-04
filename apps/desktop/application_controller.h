@@ -959,6 +959,13 @@ public:
     /// kernel_write) ou le bouton d'escalade en mode Expert.
     Q_INVOKABLE QVariantMap writeMemoryValueKernel(const QString& addressHex, const QString& valueType, const QString& value);
 
+    /// Masque (hide=true) ou restaure (hide=false) un handle specifique dans
+    /// la table de handles du process proprietaire via le driver noyau
+    /// (kKillEngineKernelIoctlHandleTable). ownerPid vide = process courant
+    /// (KillEngine lui-meme). handleValue en hexadecimal (ex: "0x1234).
+    /// Necessite capabilities.handleTable=true (voir probeKernelDriver).
+    Q_INVOKABLE QVariantMap handleTable(const QString& ownerPid, const QString& handleValue, bool hide) const;
+
     /// Retourne un diagnostic lisible du runtime IA local (modèle GGUF + llama-cli).
     Q_INVOKABLE QVariantMap getAiModelStatus() const;
 

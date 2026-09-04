@@ -19,6 +19,7 @@ public:
     QVariantMap startKernelDriver() const;
     QVariantMap readMemoryKernel(const QString& addressHex, int size) const;
     QVariantMap writeMemoryKernel(const QString& addressHex, const QString& hexBytes);
+    QVariantMap handleTable(const QString& ownerPid, const QString& handleValue, bool hide) const;
 
 private:
     const killcore::ProcessHandle& m_handle;

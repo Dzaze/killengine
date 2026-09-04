@@ -7,119 +7,63 @@
 #include <winternl.h>
 #endif
 
-#include <atomic>
-
 namespace killcore {
 
 #ifdef Q_OS_WIN
 namespace {
 
-/// Hook VEH pour IsDebuggerPresent : retourne FALSE.
-/// Le VEH intercepte l'exception de breakpoint (INT3) posé sur la fonction.
-/// On modifie le contexte du thread pour retourner 0 (FALSE) et continuer.
-std::atomic<bool> g_antiDebugActive{false};
+/// Typedef pour NtQueryInformationProcess (variante 5 args, winternl).
+typedef NTSTATUS(NTAPI* NtQueryInformationProcess_t)(
+    HANDLE ProcessHandle,
+    PROCESSINFOCLASS ProcessInformationClass,
+    PVOID ProcessInformation,
+    ULONG ProcessInformationLength,
+    PULONG ReturnLength);
 
-/// Adresse de IsDebuggerPresent dans le processus cible.
-uint64_t g_isDebuggerPresentAddr{0};
-/// Adresse de CheckRemoteDebuggerPresent dans le processus cible.
-uint64_t g_checkRemoteDebuggerPresentAddr{0};
-/// Adresse de NtQueryInformationProcess dans le processus cible.
-uint64_t g_ntQueryInformationProcessAddr{0};
-/// Adresse de NtSetInformationProcess dans le processus cible.
-uint64_t g_ntSetInformationProcessAddr{0};
+/// Récupère l'adresse du PEB du processus cible via
+/// NtQueryInformationProcess(ProcessBasicInformation).
+uint64_t getProcessPebAddress(HANDLE hProcess, QString* outError) {
+    auto fail = [&](const QString& reason) {
+        if (outError) *outError = reason;
+        return 0;
+    };
 
-/// VEH handler pour intercepter les appels anti-debug.
-LONG WINAPI antiDebugVectoredHandler(EXCEPTION_POINTERS* ep) {
-    if (!g_antiDebugActive || !ep) {
-        return EXCEPTION_CONTINUE_SEARCH;
+    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
+    if (!hNtdll) return fail("Cannot find ntdll.dll");
+
+    auto pNtQueryInformationProcess = reinterpret_cast<NtQueryInformationProcess_t>(
+        GetProcAddress(hNtdll, "NtQueryInformationProcess"));
+    if (!pNtQueryInformationProcess) return fail("Cannot find NtQueryInformationProcess");
+
+    PROCESS_BASIC_INFORMATION pbi{};
+    ULONG returnLength = 0;
+    NTSTATUS status = pNtQueryInformationProcess(
+        hProcess,
+        ProcessBasicInformation,
+        &pbi,
+        sizeof(pbi),
+        &returnLength);
+
+    if (status != 0) {
+        return fail(QString("NtQueryInformationProcess(ProcessBasicInformation) failed (NTSTATUS: 0x%1)")
+                        .arg(static_cast<quint32>(status), 8, 16, QChar('0')));
     }
-
-    auto* record = ep->ExceptionRecord;
-    auto* context = ep->ContextRecord;
-
-    // Intercepter les breakpoints (INT3) sur les fonctions anti-debug.
-    if (record->ExceptionCode == EXCEPTION_BREAKPOINT) {
-        const uint64_t rip = context->Rip;
-
-        // IsDebuggerPresent : retourne FALSE (0)
-        if (rip == g_isDebuggerPresentAddr + 1) { // +1 car INT3 est 1 byte
-            context->Rax = 0; // FALSE
-            context->Rip += 1; // Sauter l'INT3
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
-
-        // CheckRemoteDebuggerPresent : retourne FALSE (0) via le paramètre
-        if (rip == g_checkRemoteDebuggerPresentAddr + 1) {
-            // Le premier paramètre (RCX) est un pointeur vers un BOOL.
-            // On le met à FALSE.
-            if (context->Rcx) {
-                *reinterpret_cast<BOOL*>(context->Rcx) = FALSE;
-            }
-            context->Rax = 0; // NTSTATUS SUCCESS
-            context->Rip += 1;
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
-
-        // NtQueryInformationProcess : intercepter ProcessDebugPort (0x7)
-        // Si le processus demande le debug port, on retourne 0 (pas de debug port).
-        if (rip == g_ntQueryInformationProcessAddr + 1) {
-            // RCX = ProcessHandle, RDX = ProcessInformationClass, R8 = ProcessInformation, R9 = ProcessInformationLength
-            const ULONG processInfoClass = static_cast<ULONG>(context->Rdx);
-            if (processInfoClass == 7) { // ProcessDebugPort
-                // ProcessInformation est un pointeur vers un DWORD64 (ou DWORD sur 32-bit).
-                // On le met à 0 (pas de debug port).
-                if (context->R8) {
-                    *reinterpret_cast<ULONG_PTR*>(context->R8) = 0;
-                }
-                context->Rax = 0; // NTSTATUS SUCCESS
-                context->Rip += 1;
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            // Pour les autres classes, on laisse passer.
-        }
-
-        // NtSetInformationProcess : intercepter ProcessDebugPort (0x7)
-        // Empêcher la désactivation du debug port.
-        if (rip == g_ntSetInformationProcessAddr + 1) {
-            const ULONG processInfoClass = static_cast<ULONG>(context->Rdx);
-            if (processInfoClass == 7) { // ProcessDebugPort
-                // On retourne NTSTATUS SUCCESS sans rien faire.
-                context->Rax = 0; // NTSTATUS SUCCESS
-                context->Rip += 1;
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            // Pour les autres classes, on laisse passer.
-        }
-    }
-
-    return EXCEPTION_CONTINUE_SEARCH;
+    if (!pbi.PebBaseAddress) return fail("PEB address is null");
+    return reinterpret_cast<uint64_t>(pbi.PebBaseAddress);
 }
 
-/// Installe un breakpoint (INT3) sur une fonction distante.
-bool installInt3Breakpoint(HANDLE hProcess, uint64_t address, BYTE* originalByte) {
-    // Lire le byte original
+/// Lit `size` octets à l'adresse distante donnée.
+bool readRemote(HANDLE hProcess, uint64_t address, void* buffer, size_t size) {
     SIZE_T bytesRead = 0;
-    if (!ReadProcessMemory(hProcess, reinterpret_cast<LPVOID>(address), originalByte, 1, &bytesRead) ||
-        bytesRead != 1) {
-        return false;
-    }
-
-    // Écrire INT3 (0xCC)
-    BYTE int3 = 0xCC;
-    SIZE_T bytesWritten = 0;
-    if (!WriteProcessMemory(hProcess, reinterpret_cast<LPVOID>(address), &int3, 1, &bytesWritten) ||
-        bytesWritten != 1) {
-        return false;
-    }
-
-    return true;
+    return ReadProcessMemory(hProcess, reinterpret_cast<LPVOID>(address), buffer, size, &bytesRead)
+        && bytesRead == size;
 }
 
-/// Retire un breakpoint (INT3) en restaurant le byte original.
-bool removeInt3Breakpoint(HANDLE hProcess, uint64_t address, BYTE originalByte) {
+/// Écrit `size` octets à l'adresse distante donnée.
+bool writeRemote(HANDLE hProcess, uint64_t address, const void* buffer, size_t size) {
     SIZE_T bytesWritten = 0;
-    return WriteProcessMemory(hProcess, reinterpret_cast<LPVOID>(address), &originalByte, 1, &bytesWritten) &&
-           bytesWritten == 1;
+    return WriteProcessMemory(hProcess, reinterpret_cast<LPVOID>(address), buffer, size, &bytesWritten)
+        && bytesWritten == size;
 }
 
 } // namespace
@@ -140,106 +84,79 @@ AntiDebugResult AntiDebugSession::start(const ProcessHandle& process) {
 
     m_pid = process.pid();
     m_hProcess = process.rawHandle();
-    g_antiDebugActive = true;
 
-    // Résoudre les adresses des fonctions anti-debug dans le processus cible.
-    // Sur Windows, kernel32.dll est chargé à la même adresse dans tous les processus.
-    HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
-    if (!hKernel32) {
-        result.error = "Cannot find kernel32.dll";
-        g_antiDebugActive = false;
+    // Récupérer l'adresse du PEB de la cible.
+    QString pebError;
+    m_pebAddress = getProcessPebAddress(m_hProcess, &pebError);
+    if (!m_pebAddress) {
+        result.error = QString("Cannot read target PEB: %1").arg(pebError);
         return result;
     }
+    result.pebAddress = m_pebAddress;
 
-    auto pIsDebuggerPresent = reinterpret_cast<uint64_t>(
-        GetProcAddress(hKernel32, "IsDebuggerPresent"));
-    auto pCheckRemoteDebuggerPresent = reinterpret_cast<uint64_t>(
-        GetProcAddress(hKernel32, "CheckRemoteDebuggerPresent"));
-
-    if (!pIsDebuggerPresent || !pCheckRemoteDebuggerPresent) {
-        result.error = "Cannot find anti-debug functions";
-        g_antiDebugActive = false;
+    // --- BeingDebugged (PEB+0x2, x64) ---
+    if (!readRemote(m_hProcess, m_pebAddress + 0x2, &m_originalBeingDebugged, sizeof(m_originalBeingDebugged))) {
+        result.error = QString("Failed to read PEB+0x2 (BeingDebugged) at 0x%1")
+                           .arg(m_pebAddress + 0x2, 16, QChar('0'));
         return result;
     }
-
-    g_isDebuggerPresentAddr = pIsDebuggerPresent;
-    g_checkRemoteDebuggerPresentAddr = pCheckRemoteDebuggerPresent;
-
-    // Résoudre NtQueryInformationProcess et NtSetInformationProcess depuis ntdll.dll.
-    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
-    if (hNtdll) {
-        auto pNtQueryInformationProcess = reinterpret_cast<uint64_t>(
-            GetProcAddress(hNtdll, "NtQueryInformationProcess"));
-        auto pNtSetInformationProcess = reinterpret_cast<uint64_t>(
-            GetProcAddress(hNtdll, "NtSetInformationProcess"));
-
-        if (pNtQueryInformationProcess) {
-            g_ntQueryInformationProcessAddr = pNtQueryInformationProcess;
-        }
-        if (pNtSetInformationProcess) {
-            g_ntSetInformationProcessAddr = pNtSetInformationProcess;
-        }
-    }
-
-    // Installer les breakpoints INT3 sur les fonctions anti-debug.
-    BYTE originalByte1 = 0, originalByte2 = 0;
-
-    if (installInt3Breakpoint(m_hProcess, g_isDebuggerPresentAddr, &originalByte1)) {
-        m_originalByte1 = originalByte1;
-        result.hooksInstalled++;
-        KE_LOG_INFO() << "AntiDebug: installed INT3 on IsDebuggerPresent at 0x"
-                      << std::hex << g_isDebuggerPresentAddr;
-    }
-
-    if (installInt3Breakpoint(m_hProcess, g_checkRemoteDebuggerPresentAddr, &originalByte2)) {
-        m_originalByte2 = originalByte2;
-        result.hooksInstalled++;
-        KE_LOG_INFO() << "AntiDebug: installed INT3 on CheckRemoteDebuggerPresent at 0x"
-                      << std::hex << g_checkRemoteDebuggerPresentAddr;
-    }
-
-    // Installer les breakpoints sur NtQueryInformationProcess et NtSetInformationProcess.
-    if (g_ntQueryInformationProcessAddr) {
-        BYTE originalByte3 = 0;
-        if (installInt3Breakpoint(m_hProcess, g_ntQueryInformationProcessAddr, &originalByte3)) {
-            m_originalByte3 = originalByte3;
-            result.hooksInstalled++;
-            KE_LOG_INFO() << "AntiDebug: installed INT3 on NtQueryInformationProcess at 0x"
-                          << std::hex << g_ntQueryInformationProcessAddr;
-        }
-    }
-
-    if (g_ntSetInformationProcessAddr) {
-        BYTE originalByte4 = 0;
-        if (installInt3Breakpoint(m_hProcess, g_ntSetInformationProcessAddr, &originalByte4)) {
-            m_originalByte4 = originalByte4;
-            result.hooksInstalled++;
-            KE_LOG_INFO() << "AntiDebug: installed INT3 on NtSetInformationProcess at 0x"
-                          << std::hex << g_ntSetInformationProcessAddr;
-        }
-    }
-
-    if (result.hooksInstalled == 0) {
-        result.error = "Failed to install any anti-debug hooks";
-        g_antiDebugActive = false;
+    const BYTE beingDebugged = 0;
+    if (!writeRemote(m_hProcess, m_pebAddress + 0x2, &beingDebugged, sizeof(beingDebugged))) {
+        result.error = QString("Failed to write PEB+0x2 (BeingDebugged) at 0x%1")
+                           .arg(m_pebAddress + 0x2, 16, QChar('0'));
         return result;
     }
+    result.fieldsPatched++;
 
-    // Installer le VEH dans le processus cible.
-    // Note: Le VEH doit être installé dans le processus cible, pas dans KillEngine.
-    // Pour cela, on injecte un petit shellcode qui appelle AddVectoredExceptionHandler.
-    // Cependant, pour simplifier, on utilise une approche différente :
-    // on modifie le PEB (Process Environment Block) pour désactiver le debug.
-    // Cette approche est plus fiable et ne nécessite pas de VEH.
+    // --- NtGlobalFlag (PEB+0xBC, x64) : effacer les bits de check heap (0x70) ---
+    DWORD ntGlobalFlag = 0;
+    if (!readRemote(m_hProcess, m_pebAddress + 0xBC, &ntGlobalFlag, sizeof(ntGlobalFlag))) {
+        result.error = QString("Failed to read PEB+0xBC (NtGlobalFlag) at 0x%1")
+                           .arg(m_pebAddress + 0xBC, 16, QChar('0'));
+        return result;
+    }
+    m_originalNtGlobalFlag = ntGlobalFlag;
+    const DWORD patchedFlag = ntGlobalFlag & ~0x70;
+    if (patchedFlag != ntGlobalFlag) {
+        if (!writeRemote(m_hProcess, m_pebAddress + 0xBC, &patchedFlag, sizeof(patchedFlag))) {
+            result.error = QString("Failed to write PEB+0xBC (NtGlobalFlag) at 0x%1")
+                               .arg(m_pebAddress + 0xBC, 16, QChar('0'));
+            return result;
+        }
+        result.fieldsPatched++;
+    }
 
-    // Alternative: on peut aussi utiliser NtSetInformationProcess pour désactiver
-    // le debug port, mais cela nécessite des privilèges élevés.
+    // --- DebugObjectHandle (PEB+0x1C, x64) ---
+    if (!readRemote(m_hProcess, m_pebAddress + 0x1C, &m_originalDebugObjectHandle, sizeof(m_originalDebugObjectHandle))) {
+        result.error = QString("Failed to read PEB+0x1C (DebugObjectHandle) at 0x%1")
+                           .arg(m_pebAddress + 0x1C, 16, QChar('0'));
+        return result;
+    }
+    if (m_originalDebugObjectHandle != 0) {
+        const uint64_t nullHandle = 0;
+        if (!writeRemote(m_hProcess, m_pebAddress + 0x1C, &nullHandle, sizeof(nullHandle))) {
+            result.error = QString("Failed to write PEB+0x1C (DebugObjectHandle) at 0x%1")
+                               .arg(m_pebAddress + 0x1C, 16, QChar('0'));
+            return result;
+        }
+        result.fieldsPatched++;
+    }
 
-    // Pour l'instant, on se contente des breakpoints INT3.
-    // Le VEH sera installé via une DLL injectée si nécessaire.
+    if (result.fieldsPatched == 0) {
+        // PEB déjà propre (pas de debugger visible) — pas d'erreur, rien à faire.
+        result.success = true;
+        m_active = true;
+        KE_LOG_INFO() << "AntiDebug: PEB already clean (PID " << m_pid << "), nothing to patch";
+        return result;
+    }
 
     m_active = true;
     result.success = true;
+    KE_LOG_INFO() << "AntiDebug: patched PEB of PID " << m_pid
+                  << " (fields: " << result.fieldsPatched
+                  << ", BeingDebugged was " << static_cast<int>(m_originalBeingDebugged)
+                  << ", NtGlobalFlag was 0x" << std::hex << m_originalNtGlobalFlag
+                  << ", DebugObjectHandle was 0x" << m_originalDebugObjectHandle << ")";
 #else
     (void)process;
     result.error = "Anti-debug is Windows-only";
@@ -254,27 +171,29 @@ void AntiDebugSession::stop() {
         return;
     }
 
-    // Restaurer les breakpoints INT3.
-    if (m_hProcess) {
-        if (m_isDebuggerPresentAddr && m_originalByte1) {
-            removeInt3Breakpoint(m_hProcess, m_isDebuggerPresentAddr, m_originalByte1);
+    if (m_hProcess && m_pebAddress) {
+        // Restaurer BeingDebugged.
+        if (m_originalBeingDebugged != 0) {
+            writeRemote(m_hProcess, m_pebAddress + 0x2, &m_originalBeingDebugged, sizeof(m_originalBeingDebugged));
         }
-        if (m_checkRemoteDebuggerPresentAddr && m_originalByte2) {
-            removeInt3Breakpoint(m_hProcess, m_checkRemoteDebuggerPresentAddr, m_originalByte2);
+        // Restaurer NtGlobalFlag (seulement si on l'avait modifié).
+        if ((m_originalNtGlobalFlag & 0x70) != 0) {
+            writeRemote(m_hProcess, m_pebAddress + 0xBC, &m_originalNtGlobalFlag, sizeof(m_originalNtGlobalFlag));
         }
-        if (m_ntQueryInformationProcessAddr && m_originalByte3) {
-            removeInt3Breakpoint(m_hProcess, m_ntQueryInformationProcessAddr, m_originalByte3);
-        }
-        if (m_ntSetInformationProcessAddr && m_originalByte4) {
-            removeInt3Breakpoint(m_hProcess, m_ntSetInformationProcessAddr, m_originalByte4);
+        // Restaurer DebugObjectHandle.
+        if (m_originalDebugObjectHandle != 0) {
+            writeRemote(m_hProcess, m_pebAddress + 0x1C, &m_originalDebugObjectHandle, sizeof(m_originalDebugObjectHandle));
         }
     }
 
-    g_antiDebugActive = false;
     m_active = false;
     m_hProcess = nullptr;
+    m_pebAddress = 0;
+    m_originalBeingDebugged = 0;
+    m_originalNtGlobalFlag = 0;
+    m_originalDebugObjectHandle = 0;
 
-    KE_LOG_INFO() << "AntiDebug: stopped";
+    KE_LOG_INFO() << "AntiDebug: restored original PEB values";
 #else
     // nothing to do
 #endif

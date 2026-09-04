@@ -46,6 +46,7 @@ QVariantMap KernelDriverManager::probeKernelDriver() const {
     capabilities["healthProbe"] = probe.capabilities.healthProbe;
     capabilities["processMemoryAccess"] = probe.capabilities.processMemoryAccess;
     capabilities["privilegedInstrumentation"] = probe.capabilities.privilegedInstrumentation;
+    capabilities["handleTable"] = probe.capabilities.handleTable;
 
     QVariantMap result;
     result["success"] = probe.status == killcore::KernelDriverProbeStatus::Connected;
@@ -79,6 +80,7 @@ QVariantMap KernelDriverManager::startKernelDriver() const {
         capabilities["healthProbe"] = false;
         capabilities["processMemoryAccess"] = false;
         capabilities["privilegedInstrumentation"] = false;
+        capabilities["handleTable"] = false;
         result["capabilities"] = capabilities;
     };
 
@@ -264,6 +266,67 @@ QVariantMap KernelDriverManager::writeMemoryKernel(const QString& addressHex, co
         result["error"] = "Écriture kernel échouée (driver non chargé/non connecté, adresse invalide côté cible, ou accès refusé).";
         KE_LOG_WARN() << "writeMemoryKernel: échec pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString();
     }
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+    return result;
+}
+
+QVariantMap KernelDriverManager::handleTable(const QString& ownerPid, const QString& handleValue, bool hide) const {
+    QVariantMap result;
+    result["success"] = false;
+    result["action"] = hide ? QStringLiteral("hide") : QStringLiteral("restore");
+
+    bool ok = false;
+    QString normalizedPid = ownerPid.trimmed();
+    if (normalizedPid.isEmpty()) {
+        normalizedPid = QStringLiteral("0");
+    }
+    const uint64_t pid = normalizedPid.toULongLong(&ok, 0);
+    if (!ok) {
+        result["error"] = "PID propriétaire invalide.";
+        return result;
+    }
+
+    QString normalizedHandle = handleValue.trimmed();
+    if (normalizedHandle.startsWith("0x", Qt::CaseInsensitive)) {
+        normalizedHandle = normalizedHandle.mid(2);
+    }
+    const uint64_t handle = normalizedHandle.toULongLong(&ok, 16);
+    if (!ok || handle == 0) {
+        result["error"] = "Valeur de handle invalide (hexadécimal attendu, ex: \"0x1234\").";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    const killcore::KernelDriverBridge bridge;
+    const auto owner = reinterpret_cast<HANDLE>(pid);
+    bool found = false;
+    uint64_t entryIndex = 0;
+    uint64_t originalObject = 0;
+    const bool done = bridge.handleTable(owner, handle, hide ? 0 : 1, found, entryIndex, originalObject);
+    if (!done) {
+        result["error"] = "Appel IOCTL table de handles échoué (driver non chargé/non connecté, ou layout non supporté).";
+        KE_LOG_WARN() << "handleTable: échec pid=" << pid << " handle=0x" << QString::number(handle, 16).toStdString();
+        m_appendScanTelemetry("kernel_driver_handle_table", result);
+        return result;
+    }
+    result["success"] = true;
+    result["found"] = found;
+    result["entryIndex"] = static_cast<qlonglong>(entryIndex);
+    result["originalObject"] = QStringLiteral("0x%1").arg(originalObject, 16, QChar('0')).toUpper();
+    if (!found) {
+        result["message"] = hide
+            ? QStringLiteral("Aucune entrée trouvée pour ce handle (déjà masquée ou inexistante).")
+            : QStringLiteral("Aucune entrée sauvegardée pour ce handle (rien à restaurer).");
+    } else {
+        result["message"] = hide
+            ? QStringLiteral("Handle masqué de la table (entrée %1).").arg(entryIndex)
+            : QStringLiteral("Handle restauré dans la table (entrée %1).").arg(entryIndex);
+    }
+    KE_LOG_INFO() << "handleTable: pid=" << pid << " handle=0x" << QString::number(handle, 16).toStdString()
+                  << " action=" << (hide ? "hide" : "restore") << " found=" << found;
+    m_appendScanTelemetry("kernel_driver_handle_table", result);
 #else
     result["error"] = "Fonctionnalité Windows uniquement.";
 #endif

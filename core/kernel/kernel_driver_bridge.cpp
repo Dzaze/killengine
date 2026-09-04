@@ -22,6 +22,7 @@ constexpr std::uint32_t kKillEngineKernelDeviceType = 0x8000;
 constexpr std::uint32_t kIoctlIndexHealth = 0x801;
 constexpr std::uint32_t kIoctlIndexReadMemory = 0x802;
 constexpr std::uint32_t kIoctlIndexWriteMemory = 0x803;
+constexpr std::uint32_t kIoctlIndexHandleTable = 0x804;
 
 #ifdef _WIN32
 DWORD ioctlHealthProbe() {
@@ -34,6 +35,10 @@ DWORD ioctlReadMemory() {
 
 DWORD ioctlWriteMemory() {
     return CTL_CODE(kKillEngineKernelDeviceType, kIoctlIndexWriteMemory, METHOD_BUFFERED, FILE_WRITE_DATA);
+}
+
+DWORD ioctlHandleTable() {
+    return CTL_CODE(kKillEngineKernelDeviceType, kIoctlIndexHandleTable, METHOD_BUFFERED, FILE_WRITE_DATA);
 }
 
 QString systemErrorMessage(DWORD errorCode) {
@@ -132,6 +137,7 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
     result.capabilities.healthProbe = (response.flags & 0x1u) != 0;
     result.capabilities.processMemoryAccess = response.processMemoryRead && response.processMemoryWrite;
     result.capabilities.privilegedInstrumentation = true;
+    result.capabilities.handleTable = (response.flags & 0x2u) != 0;
 
     if (response.protocolVersion != kProtocolVersion) {
         result.status = KernelDriverProbeStatus::Incompatible;
@@ -240,6 +246,67 @@ QByteArray KernelDriverBridge::readMemory(HANDLE processId, uint64_t address, si
             return ok ? buffer : QByteArray();
         #endif
         }
+#endif // Q_OS_WIN
+
+#ifdef Q_OS_WIN
+bool KernelDriverBridge::handleTable(HANDLE ownerPid, uint64_t handleValue, int action,
+                                     bool& found, uint64_t& entryIndex, uint64_t& originalObject) const {
+    #ifndef _WIN32
+        return false;
+    #else
+        found = false;
+        entryIndex = 0;
+        originalObject = 0;
+
+        const std::wstring widePath = m_devicePath.toStdWString();
+        HANDLE device = CreateFileW(widePath.c_str(),
+                                    GENERIC_READ | GENERIC_WRITE,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    nullptr,
+                                    OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+        if (device == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+
+        struct HandleTableRequest {
+            HANDLE ProcessId;
+            HANDLE HandleValue;
+            ULONG  Action;
+        };
+
+        struct HandleTableResponse {
+            BOOLEAN found;
+            ULONG   entryIndex;
+            UINT64  originalObject;
+        };
+
+        HandleTableRequest request{};
+        request.ProcessId = ownerPid;
+        request.HandleValue = reinterpret_cast<HANDLE>(handleValue);
+        request.Action = static_cast<ULONG>(action);
+
+        HandleTableResponse response{};
+        DWORD bytesReturned = 0;
+        const BOOL ok = DeviceIoControl(device,
+                                        ioctlHandleTable(),
+                                        &request,
+                                        sizeof(request),
+                                        &response,
+                                        sizeof(response),
+                                        &bytesReturned,
+                                        nullptr);
+        CloseHandle(device);
+
+        if (ok && bytesReturned >= sizeof(response)) {
+            found = (response.found != 0);
+            entryIndex = static_cast<uint64_t>(response.entryIndex);
+            originalObject = response.originalObject;
+        }
+        return ok;
+    #endif
+}
 #endif // Q_OS_WIN
 
 } // namespace killcore

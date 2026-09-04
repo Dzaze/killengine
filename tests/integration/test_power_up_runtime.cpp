@@ -16,13 +16,20 @@
 
 #include <gtest/gtest.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <winternl.h>
+#endif
+
 #include "process/process_handle.h"
 #include "process/process_enumerator.h"
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
+#include "debug/anti_debug.h"
 #include "debug/breakpoint_freeze.h"
+#include "inject/dll_mask.h"
 #include "debug/hardware_breakpoint.h"
 #include "debug/page_guard.h"
 #include "inject/dll_injector.h"
@@ -780,4 +787,138 @@ TEST(PowerUpRuntimeTest, ResolveRemoteExportAddressReportsMissingFunction) {
     EXPECT_FALSE(resolved);
     EXPECT_EQ(address, 0ULL);
     EXPECT_FALSE(error.isEmpty());
+}
+
+// STEALTH-Q (Q.1) — le module anti_debug patche réellement le PEB de la cible :
+// BeingDebugged remis à 0, restauré à l'arrêt. Avant ce correctif, le module
+// écrivait des INT3 sans aucun handler enregistré dans la cible (succès
+// rapporté, crash garanti au premier check anti-debug).
+TEST(PowerUpRuntimeTest, AntiDebugPebPatchClearsAndRestoresBeingDebugged) {
+    if (!debugPrivilegesAvailable()) {
+        GTEST_SKIP() << "Debug privileges not available — skipping anti-debug PEB patch test";
+    }
+
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start";
+
+    killcore::ProcessHandle handle(target.pid(), killcore::ProcessAccess::ReadWrite);
+    ASSERT_TRUE(handle.isValid()) << "Could not open test target process";
+
+    // Récupérer l'adresse du PEB de la cible.
+    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
+    ASSERT_NE(hNtdll, nullptr) << "ntdll.dll not found";
+    using NtQueryInformationProcessFn = NTSTATUS(NTAPI*)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
+    auto pNtQuery = reinterpret_cast<NtQueryInformationProcessFn>(
+        GetProcAddress(hNtdll, "NtQueryInformationProcess"));
+    ASSERT_NE(pNtQuery, nullptr) << "NtQueryInformationProcess not found";
+
+    PROCESS_BASIC_INFORMATION pbi{};
+    ULONG returnLength = 0;
+    ASSERT_EQ(pNtQuery(handle.rawHandle(), ProcessBasicInformation, &pbi, sizeof(pbi), &returnLength), 0)
+        << "NtQueryInformationProcess(ProcessBasicInformation) failed";
+    ASSERT_NE(pbi.PebBaseAddress, nullptr) << "PEB address is null";
+    const uint64_t peb = reinterpret_cast<uint64_t>(pbi.PebBaseAddress);
+
+    // Lire BeingDebugged (PEB+0x2, x64).
+    BYTE beingDebugged = 0;
+    ASSERT_TRUE(handle.rawHandle() && ReadProcessMemory(handle.rawHandle(),
+        reinterpret_cast<LPVOID>(peb + 0x2), &beingDebugged, sizeof(beingDebugged), nullptr))
+        << "Could not read BeingDebugged";
+    const BYTE original = beingDebugged;
+
+    // Simuler un debugger visible côté cible.
+    const BYTE debuggerVisible = 1;
+    ASSERT_TRUE(WriteProcessMemory(handle.rawHandle(),
+        reinterpret_cast<LPVOID>(peb + 0x2), &debuggerVisible, sizeof(debuggerVisible), nullptr))
+        << "Could not write BeingDebugged=1";
+
+    // Lancer la session anti-debug : doit patcher BeingDebugged à 0.
+    killcore::AntiDebugSession session;
+    const auto result = session.start(handle);
+    ASSERT_TRUE(result.success) << result.error.toStdString();
+    EXPECT_EQ(result.pebAddress, peb);
+    EXPECT_GE(result.fieldsPatched, 1);
+    EXPECT_TRUE(session.isActive());
+
+    // Vérifier que BeingDebugged est bien remis à 0.
+    ASSERT_TRUE(ReadProcessMemory(handle.rawHandle(),
+        reinterpret_cast<LPVOID>(peb + 0x2), &beingDebugged, sizeof(beingDebugged), nullptr));
+    EXPECT_EQ(beingDebugged, 0) << "BeingDebugged was not cleared by AntiDebugSession";
+
+    // Arrêter : doit restaurer la valeur originale (1 dans ce test).
+    session.stop();
+    EXPECT_FALSE(session.isActive());
+
+    ASSERT_TRUE(ReadProcessMemory(handle.rawHandle(),
+        reinterpret_cast<LPVOID>(peb + 0x2), &beingDebugged, sizeof(beingDebugged), nullptr));
+    EXPECT_EQ(beingDebugged, original) << "BeingDebugged was not restored by AntiDebugSession::stop";
+
+    EXPECT_TRUE(target.started()) << "Test target crashed during anti-debug PEB patch";
+}
+
+// STEALTH-Q (Q.2) — le nouveau dll_mask (patch de liste chaînée Ldr) masque
+// réellement un module : invisible pour EnumProcessModules après maskDll,
+// visible à nouveau après restoreDll. Avant ce correctif, le module reposait
+// sur NtUnmapViewOfSection (code resté mappé/exécutable) et CreateRemoteThread
+// pour la restauration (pattern bloqué par l'EDR après un cycle breakpoint).
+TEST(PowerUpRuntimeTest, DllMaskListPatchHidesAndRestoresModule) {
+    if (!debugPrivilegesAvailable()) {
+        GTEST_SKIP() << "Debug privileges not available — skipping dll_mask list patch test";
+    }
+
+    TestTargetProcess target;
+    ASSERT_TRUE(target.started()) << "KillEngineTestTarget.exe did not start";
+
+    // Qt6::Core est chargé dans la cible (voir tests/CMakeLists.txt) — module
+    // stable à masquer, pas le module principal (toujours dans les listes).
+    const QString moduleName = QStringLiteral("Qt6Core.dll");
+
+    // Baseline : le module est visible avant masquage.
+    {
+        const auto modules = killcore::ProcessEnumerator::enumerateModules(target.pid());
+        bool visible = false;
+        for (const auto& module : modules) {
+            if (module.name.compare(moduleName, Qt::CaseInsensitive) == 0) {
+                visible = true;
+                break;
+            }
+        }
+        ASSERT_TRUE(visible) << "Qt6Core.dll not found in test target modules — test premise broken";
+    }
+
+    const auto mask = killcore::DllMask::maskDll(target.pid(), moduleName);
+    ASSERT_TRUE(mask.success) << mask.error.toStdString();
+
+    // Après masquage : plus visible pour EnumProcessModules.
+    {
+        const auto modules = killcore::ProcessEnumerator::enumerateModules(target.pid());
+        bool visible = false;
+        for (const auto& module : modules) {
+            if (module.name.compare(moduleName, Qt::CaseInsensitive) == 0) {
+                visible = true;
+                break;
+            }
+        }
+        EXPECT_FALSE(visible) << "Qt6Core.dll still visible after maskDll (list patch ineffective)";
+    }
+
+    EXPECT_TRUE(target.started()) << "Test target crashed while module was masked";
+
+    const auto restore = killcore::DllMask::restoreDll(target.pid(), moduleName);
+    ASSERT_TRUE(restore.success) << restore.error.toStdString();
+
+    // Après restauration : visible à nouveau.
+    {
+        const auto modules = killcore::ProcessEnumerator::enumerateModules(target.pid());
+        bool visible = false;
+        for (const auto& module : modules) {
+            if (module.name.compare(moduleName, Qt::CaseInsensitive) == 0) {
+                visible = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(visible) << "Qt6Core.dll not visible after restoreDll (relink ineffective)";
+    }
+
+    EXPECT_TRUE(target.started()) << "Test target crashed after dll_mask restore";
 }

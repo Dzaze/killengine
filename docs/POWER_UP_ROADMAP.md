@@ -402,6 +402,55 @@ Toutes les phases 19-21 ci-dessus sont closes. Les 6 candidats listés ci-dessou
 
 ---
 
+## Q. Stealth / anti-cheat — plus agressif sur les jeux AAA et en ligne
+
+**État réel au 03/09/2026 :** la couche stealth existe (`core/debug/stealth_profiler.*` scoring 0-100, `applyStealthMode("sc2"|"default"|"minimal")` avec les 3 modules antiDebug/processMask/dllMask, panneau dans `SettingsView.vue`) mais chacun des 4 chantiers ci-dessous est soit cassé, soit incomplet, soit non exposé — consigné le 03/09/2026 après revue complète du code stealth (STEALTH-SC2-1 a corrigé le bug de résolution RVA dans anti_debug, mais les problèmes plus profonds ci-dessous restent).
+
+### Q.1 — PEB anti-debug réel : le module anti_debug est cassé
+
+**État réel au 03/09/2026 :** ✅ Fait (Roo) — `core/debug/anti_debug.h/.cpp` réécrits : plus d'INT3 orphelins, lecture du PEB cible via `NtQueryInformationProcess(ProcessBasicInformation)` puis patch direct de `BeingDebugged=0` (PEB+0x2), `NtGlobalFlag &= ~0x70` (PEB+0xBC), `DebugObjectHandle=0` (PEB+0x1C), `stop()` restaure les valeurs originales. `AntiDebugResult` porte `fieldsPatched`/`pebAddress`. Test d'intégration `PowerUpRuntimeTest.AntiDebugPebPatchClearsAndRestoresBeingDebugged` ajouté. Voir `docs/PHASE_TRACKER.md` entrée STEALTH-Q1.
+
+**Problème :** `core/debug/anti_debug.cpp` installe des breakpoints INT3 sur `IsDebuggerPresent`/`CheckRemoteDebuggerPresent`/`NtQueryInformationProcess`/`NtSetInformationProcess` dans la cible, mais **aucun handler d'exception n'est jamais enregistré dans le processus cible** (commentaire lignes 276-287 : "Pour l'instant, on se contente des breakpoints INT3. Le VEH sera installé via une DLL injectée si nécessaire."). Résultat : le module rapporte succès, mais le jeu crasherait au premier check anti-debug (INT3 déclenché, pas de handler → `EXCEPTION_BREAKPOINT` propagé).
+
+**Solution :** patcher le PEB de la cible directement (Win32 pur, pas de DLL, pas d'injection) :
+1. `PEB->BeingDebugged = 0` (offset 0x2 sur x64)
+2. `PEB->NtGlobalFlag &= ~0x70` (offset 0xBC sur x64 — effacer les bits de check heap)
+3. `PEB->DebugObjectHandle = 0` (offset 0x1C sur x64)
+
+**Fichiers touchés :** `core/debug/anti_debug.h/.cpp`, `apps/desktop/application_controller.cpp`, test unitaire pour la logique pure.
+
+### Q.2 — Module list hiding v2 : patcher la liste chaînée du loader PEB au lieu de NtUnmapViewOfSection
+
+**État réel au 03/09/2026 :** ✅ Fait (Roo) — `core/inject/dll_mask.cpp` réécrit : lecture du PEB cible, déliement du nœud `LDR_DATA_TABLE_ENTRY` des 3 listes Ldr (`InLoadOrder`/`InMemoryOrder`/`InInitializationOrder`), restauration par ré-lier du nœud (aucune réinjection, plus de `CreateRemoteThread`). Test d'intégration `PowerUpRuntimeTest.DllMaskListPatchHidesAndRestoresModule` ajouté (masque `Qt6Core.dll` dans la cible, vérifie disparition/réapparition dans `enumerateModules`). Voir `docs/PHASE_TRACKER.md` entrée STEALTH-Q2.
+
+**Problème :** `core/inject/dll_mask.cpp` masque une DLL via `NtUnmapViewOfSection` — le module devient invisible pour `EnumProcessModules`, mais son code reste mappé/exécutable, et `restoreDll` repose sur `CreateRemoteThread` + `LoadLibraryW`, exactement le pattern bloqué par Defender for Endpoint après un cycle breakpoint (voir `réponse-claude.md` + `docs/STRATEGY_ROOM.md`, root-cause 20/08/2026).
+
+**Solution :** patcher la liste chaînée `PEB->Ldr->InLoadOrderModuleList` (et `InMemoryOrderModuleList`) pour chaîner autour du module masqué — invisible pour toute énumération (y compris les parcours manuels de la liste, ce que font les anti-cheats), pas de démapping, pas de réinjection pour restaurer (juste re-lier le nœud).
+
+**Fichiers touchés :** `core/inject/dll_mask.h/.cpp`, `apps/desktop/application_controller.cpp`, test unitaire pour la logique pure de patch de liste.
+
+### Q.3 — Extension driver kernel stealth : masquage de handles / écritures sans trace
+
+**Problème :** `tools/kernel_driver/KillEngineKernel/driver.cpp` fait aujourd'hui uniquement lecture/écriture mémoire (`kKillEngineKernelIoctlReadMemory`/`WriteMemory`). L'anti-cheat peut toujours voir les handles de KillEngine sur la cible dans la table de handles (`NtQuerySystemInformation`/`SystemHandleTable`), et chaque `WriteProcessMemory` laisse une trace dans les pages modifiées (détectable par un anti-cheat qui fait du page-scan).
+
+**Solution :** ajouter des IOCTLs au driver existant :
+1. Masquer les handles de KillEngine sur la cible de la table de handles (délier de la table, ou marquer comme hidden).
+2. Optionnel : écritures mémoire via le driver qui ne laissent pas de trace dans les pages modifiées (déjà possible via `KeStackAttachProcess`, mais la signature page-diff diffère).
+
+**Fichiers touchés :** `tools/kernel_driver/KillEngineKernel/driver.cpp/.h`, `core/kernel/kernel_driver_bridge.h/.cpp`, `apps/desktop/application_controller.cpp`.
+
+### Q.4 — Hooks anti-cheat ciblés : exposer api_hook comme outil bypass
+
+**Problème :** `core/inject/api_hook.cpp` (MinHook in-process, modes Count/ForceReturn) existe et est testé (`PowerUpRuntimeTest.ApiHookCountsRealCallsOutOfProcess`), mais n'est exposé que comme "interception de fonctions" générique dans `InjectionPanel.vue`. Pendant ce temps `core/debug/stealth_profiler.cpp` détecte déjà quel anti-cheat est présent (BattlEye, EAC, Vanguard, etc.) — mais rien ne relie les deux : une fois la protection détectée, pas de moyen de hooker ses fonctions de scan pour leur faire retourner des résultats faux.
+
+**Solution :**
+1. Exposer un outil "bypass" dans l'Assistant (nouvelle entrée dans `ai/tool_registry.cpp`) qui prend un `module!fonction` + valeur de retour forcée et appelle `startApiHook` en mode ForceReturn.
+2. Optionnel : pré-remplir le hook depuis l'anti-cheat détecté par `analyzeStealthRisk()` (fonctions de scan connues par produit).
+
+**Fichiers touchés :** `ai/tool_registry.cpp`, `apps/desktop/application_controller.cpp`, `ui/src/services/backend.ts`, `ui/src/stores/app.ts`.
+
+---
+
 ## Résumé visuel : où est KillEngine aujourd'hui vs les pros
 
 ```

@@ -81,6 +81,7 @@ temp/
 # Local agent config / personal notes (machine-specific, not shared)
 .claude/
 suite reboot.txt
+réponse-claude.md
 
 # Benchmark results (machine-specific)
 docs/benchmark-results/

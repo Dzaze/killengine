@@ -1332,6 +1332,14 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await backend.getController().applyStealthMode?.(profile)
       await refreshStealthStatus()
+      if (result && !result.success) {
+        const details = Array.isArray(result.warnings) && result.warnings.length > 0
+          ? result.warnings.join('\n')
+          : (result.error ?? 'Erreur inconnue')
+        pushMessage('assistant', `Mode Stealth (${profile}) — échec :\n${details}`)
+      } else if (result && result.success && Array.isArray(result.warnings) && result.warnings.length > 0) {
+        pushMessage('assistant', `Mode Stealth (${profile}) actif avec avertissements :\n${result.warnings.join('\n')}`)
+      }
       return result ?? null
     } finally {
       stealthBusy.value = false
