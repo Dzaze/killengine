@@ -26,10 +26,10 @@ typedef NTSTATUS(NTAPI* NtQueryInformationProcess_t)(
 
 /// Layout x64 du PEB / PEB_LDR_DATA / LDR_DATA_TABLE_ENTRY (offsets standards,
 /// stables depuis Windows XP x64).
-constexpr uint64_t kPebLdrOffset = 0x30;      ///< PEB->Ldr (PPEB_LDR_DATA)
-constexpr uint64_t kLdrLoadOrderHead = 0x20;  ///< Ldr->InLoadOrderModuleList
-constexpr uint64_t kLdrMemoryOrderHead = 0x30; ///< Ldr->InMemoryOrderModuleList
-constexpr uint64_t kLdrInitOrderHead = 0x38;   ///< Ldr->InInitializationOrderModuleList
+constexpr uint64_t kPebLdrOffset = 0x18;      ///< PEB->Ldr (PPEB_LDR_DATA) — offset x64 standard
+constexpr uint64_t kLdrLoadOrderHead = 0x10;  ///< Ldr->InLoadOrderModuleList
+constexpr uint64_t kLdrMemoryOrderHead = 0x20; ///< Ldr->InMemoryOrderModuleList
+constexpr uint64_t kLdrInitOrderHead = 0x30;   ///< Ldr->InInitializationOrderModuleList
 constexpr uint64_t kEntryLoadOrderLinks = 0x00; ///< entry->InLoadOrderLinks
 constexpr uint64_t kEntryMemoryOrderLinks = 0x10; ///< entry->InMemoryOrderLinks
 constexpr uint64_t kEntryInitOrderLinks = 0x20;   ///< entry->InInitializationOrderLinks

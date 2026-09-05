@@ -94,6 +94,7 @@
   "modules": {
     "intro": "Dépendances optionnelles de KillEngine : statut installé/manquant et installation depuis l'UI (scripts locaux, téléchargement réseau, invite UAC). Pensez à installer les modules manquants avant d'exporter le package sur une autre machine.",
     "refresh": "Actualiser",
+    "refreshAll": "Tout rafraîchir",
     "refreshing": "Analyse…",
     "empty": "Aucun module détecté — relancer l'analyse.",
     "progress": "Installation en cours…",
@@ -107,7 +108,53 @@
       "model": "Télécharger",
       "clr": "Compiler",
       "kernel": "Installer (UAC)",
-      "generic": "Installer"
+      "generic": "Installer",
+      "edr": "Vérifier / Exclure",
+      "debugPriv": "Vérifier / Activer",
+      "stealth": "Appliquer",
+      "restore": "Restaurer",
+      "handleHider": "Masquer"
+    },
+    "sections": {
+      "dependencies": "Dépendances",
+      "testEnv": "Environnement de test",
+      "stealth": "Sécurité / Stealth"
+    },
+    "edr": {
+      "check": "Vérifier",
+      "addExclusion": "Ajouter exclusion",
+      "confirmTitle": "Vérifier le blocage EDR",
+      "confirmDesc": "Tester si l'EDR bloque l'injection de code sur le processus attaché. Cela simule VirtualAllocEx + WriteProcessMemory + CreateRemoteThread.",
+      "addExclusionTitle": "Ajouter une exclusion Defender",
+      "addExclusionDesc": "Ajouter le dossier build/bin aux exclusions de Microsoft Defender. Cela nécessite une élévation UAC.",
+      "copied": "Copié !",
+      "showManual": "Solutions manuelles",
+      "hideManual": "Masquer solutions manuelles",
+      "manualTitle": "Solutions manuelles (à exécuter en tant qu'administrateur)",
+      "step1Title": "Étape 1 — Exclusion PowerShell (recommandé)",
+      "step1Desc": "Ajoute le dossier de build aux exclusions Defender. Exécutez dans un PowerShell administrateur.",
+      "step2Title": "Étape 2 — Désactiver Windows Defender (registre)",
+      "step2Desc": "Désactive complètement Windows Defender via le registre. Nécessite un redémarrage.",
+      "step3Title": "Étape 3 — Désactiver la surveillance comportementale",
+      "step3Desc": "Désactive uniquement la surveillance comportementale (moins agressif que l'étape 2).",
+      "copy": "Copier",
+      "manualWarning": "⚠ Ces modifications réduisent la protection de votre système. Réactivez-les après vos sessions de test."
+    },
+    "debugPriv": {
+      "check": "Vérifier",
+      "enable": "Activer",
+      "confirmTitle": "Activer SeDebugName",
+      "confirmDesc": "Activer le privilège SeDebugName pour le processus courant — requis pour les breakpoints matériels et l'injection."
+    },
+    "handleHider": {
+      "ownerPid": "PID du process cible",
+      "handleValue": "Valeur du handle (hex)",
+      "hide": "Masquer",
+      "hiding": "Masquage..."
+    },
+    "stealth": {
+      "confirmTitle": "Appliquer le profil Stealth SC2",
+      "confirmDesc": "Appliquer le profil stealth SC2 (anti-debug PEB + process mask + dll mask) sur le processus attaché. Cela rend KillEngine plus discret."
     }
   },
   "webview2": {
@@ -442,6 +489,36 @@
       "cost": "Attache le debugger Windows. Fais varier la valeur dans le programme pendant la fenêtre de capture, sinon rien n'est capturé.",
       "example": "L'adresse trouvée refuse de rester figée. Clique Écrit par, puis frappe un coup dans le jeu pendant la capture : KillEngine affiche l'instruction exacte qui écrit cette valeur, avec son module et son offset."
     },
+    "autoDissect": {
+      "title": "Auto-dissect",
+      "intro": "Scanne automatiquement la mémoire pour trouver toutes les instances d'un template de structure sauvegardé.",
+      "empty": "Aucune instance trouvée correspondant au template.",
+      "scan": "Scanner instances",
+      "maxResults": "Max résultats",
+      "minConfidence": "Confiance min",
+      "address": "Adresse",
+      "confidence": "Confiance",
+      "values": "Valeurs",
+      "scannedRegions": "Régions scannées",
+      "totalCandidates": "Candidats testés",
+      "what": "Parcourt toutes les régions writable du process et matche les champs du template pour découvrir automatiquement toutes les entités (joueurs, unités, objets) du même type.",
+      "when": "Quand tu as sauvegardé un template de structure (ex: layout d'un joueur) et que tu veux trouver TOUTES les instances de cette structure en mémoire d'un coup.",
+      "cost": "Lecture mémoire seule, pas d'écriture. Peut être lent sur les gros processus (scan de toutes les régions writable).",
+      "example": "Tu as trouvé le layout d'un joueur (HP@+0x0, Mana@+0x4, XP@+0x8). Clique Auto-dissect : KillEngine scanne toute la mémoire et retourne les adresses de TOUS les joueurs/unités avec ce même layout."
+    },
+    "findWhatAccesses": {
+      "title": "Lu par",
+      "intro": "Capture les instructions du programme qui LISSENT cette adresse (lecture seule, pas d'écriture).",
+      "empty": "Aucun accès capturé pendant la fenêtre d'observation.",
+      "cancelled": "Capture annulée par l'utilisateur.",
+      "instruction": "Instruction",
+      "module": "Module",
+      "thread": "Thread",
+      "what": "Attache le debugger et capture les instructions qui lisent cette adresse — utile pour remonter aux sources de calcul sans modifier la mémoire.",
+      "when": "Quand tu veux savoir QUI lit une valeur sans la modifier (ex: comprendre d'où vient un calcul avant de décider quoi écrire).",
+      "cost": "Attache le debugger Windows. Fais varier la valeur dans le programme pendant la fenêtre de capture.",
+      "example": "Tu as trouvé l'adresse d'une valeur mais ne sais pas comment elle est calculée. Clique Lu par, puis déclenche l'action dans le jeu : KillEngine affiche toutes les instructions qui lisent cette adresse."
+    },
     "disassembleBackward": {
       "title": "Désassembler en amont",
       "what": "Lit les octets juste avant l'instruction capturée par Écrit par, et reconstruit les instructions qui la précèdent (lecture seule, aucun attach debugger). Les instructions avec un opérande mémoire simple [registre+déplacement] sont mises en avant comme « champs candidats ».",
@@ -486,10 +563,89 @@
     },
     "network": {
       "title": "Réseau",
+      "intro": "Analyse et contrôle du trafic réseau du processus attaché.",
+      "empty": "Aucun processus attaché.",
       "what": "Ajoute (ou retire) une règle pare-feu Windows dédiée bloquant tout le trafic entrant/sortant de l'exécutable du processus attaché.",
       "when": "Pour vérifier si une valeur mémoire instable vient d'une synchro serveur en arrière-plan plutôt que d'une réallocation purement locale — coupe le réseau, observe si le comportement change, puis rétablis-le une fois le test terminé.",
       "cost": "Modifie le pare-feu Windows via une invite UAC (élévation explicite) : même palier de risque que le speedhack, confirmation requise. La règle persiste même après avoir détaché le processus, jusqu'à rétablissement explicite.",
-      "example": "Un compteur affiché ne correspond à aucune adresse mémoire stable malgré plusieurs scans. Coupe le réseau du processus, fais varier le compteur en jeu (hors ligne), et regarde si le scan converge mieux — si oui, la valeur dépend probablement d'une synchro serveur."
+      "example": "Un compteur affiché ne correspond à aucune adresse mémoire stable malgré plusieurs scans. Coupe le réseau du processus, fais varier le compteur en jeu (hors ligne), et regarde si le scan converge mieux — si oui, la valeur dépend probablement d'une synchro serveur.",
+      "connections": {
+        "title": "Connexions actives",
+        "empty": "Aucune connexion réseau détectée.",
+        "refresh": "Actualiser",
+        "live": "Live",
+        "protocol": "Protocole",
+        "localAddr": "Adresse locale",
+        "remoteAddr": "Adresse distante",
+        "remoteHost": "Hôte distant",
+        "state": "État",
+        "lastRefresh": "Dernier refresh",
+        "dnsResolving": "Résolution DNS...",
+        "totalLabel": "connexions",
+        "establishedLabel": "actives",
+        "remoteAddr": "Adresse distante..."
+      },
+      "modules": {
+        "title": "Modules réseau chargés",
+        "empty": "Aucun module réseau connu détecté.",
+        "name": "Module",
+        "category": "Catégorie",
+        "path": "Chemin",
+        "count": "modules détectés",
+        "category_winsock": "Socket API",
+        "category_http": "HTTP / Web",
+        "category_dns": "DNS",
+        "category_crypto": "Chiffrement / TLS",
+        "category_system": "Système"
+      },
+      "proxy": {
+        "title": "Proxy HTTP",
+        "intro": "Intercepte et modifie les requêtes HTTP/HTTPS du jeu en temps réel.",
+        "port": "Port",
+        "interceptHttps": "Intercepter HTTPS",
+        "start": "Démarrer le proxy",
+        "stop": "Arrêter le proxy",
+        "active": "Proxy actif",
+        "inactive": "Proxy inactif",
+        "requests": "Requêtes interceptées",
+        "noRequests": "Aucune requête interceptée.",
+        "method": "Méthode",
+        "url": "URL",
+        "requestBody": "Body requête",
+        "responseBody": "Body réponse",
+        "modify": "Modifier",
+        "apply": "Appliquer",
+        "editorPlaceholder": "Nouveau body JSON..."
+      },
+      "dnsSpoof": {
+        "title": "Spoof DNS",
+        "intro": "Redirige un domaine vers une IP locale via le fichier hosts Windows.",
+        "domain": "Domaine",
+        "targetIp": "IP cible",
+        "add": "Ajouter l'entrée",
+        "remove": "Retirer",
+        "entries": "Entrées actives",
+        "noEntries": "Aucune entrée active."
+      },
+      "lagSwitch": {
+        "title": "Lag switch",
+        "intro": "Retarde artificiellement les réponses réseau du jeu.",
+        "delay": "Délai",
+        "ms": "ms",
+        "enable": "Activer le lag switch",
+        "disable": "Désactiver",
+        "active": "Lag actif",
+        "inactive": "Lag inactif"
+      },
+      "block": {
+        "title": "Blocage réseau",
+        "intro": "Coupe le trafic entrant/sortant du processus attaché via une règle pare-feu Windows.",
+        "status": "Statut",
+        "blocked": "Réseau coupé",
+        "unblocked": "Réseau normal",
+        "toggle": "Couper le réseau",
+        "toggleRestore": "Rétablir le réseau"
+      }
     },
     "pointerChains": {
       "title": "Pointer chains",

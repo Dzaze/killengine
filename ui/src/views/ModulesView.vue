@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useRiskGateStore } from '@/stores/riskGate'
+import { backend } from '@/services/backend'
 
 const { t } = useI18n()
 const store = useAppStore()
+const riskGate = useRiskGateStore()
 
 const statusLabel = (status: string) => {
   if (status === 'ok') return t('modules.status.ok')
@@ -24,12 +27,201 @@ const installLabel = (moduleId: string) => {
     case 'ai_model': return t('modules.install.model')
     case 'clr_inspector': return t('modules.install.clr')
     case 'kernel_driver': return t('modules.install.kernel')
+    case 'edr_exclusion': return t('modules.install.edr')
+    case 'debug_privilege': return t('modules.install.debugPriv')
+    case 'stealth_sc2_profile': return t('modules.install.stealth')
+    case 'handle_hider': return t('modules.install.handleHider')
     default: return t('modules.install.generic')
   }
 }
 
 const isInstallTarget = (moduleId: string) => {
   return store.moduleInstallBusy && store.moduleInstallModuleId === moduleId
+}
+
+// MODULES-V2 : état des diagnostics
+const edrResult = ref<Record<string, unknown> | null>(null)
+const debugPrivResult = ref<Record<string, unknown> | null>(null)
+const edrBusy = ref(false)
+const debugPrivBusy = ref(false)
+const showEdrManualFix = ref(false)
+const stealthBusy = ref(false)
+const handleHiderBusy = ref(false)
+const handleHiderOwnerPid = ref('')
+const handleHiderHandleValue = ref('')
+const handleHiderResult = ref<Record<string, unknown> | null>(null)
+const copiedBtn = ref<string | null>(null)
+
+// Build directory path for exclusion commands
+const buildDir = typeof window !== 'undefined' && window.location
+  ? 'c:\\MES APPS DEV\\killengine\\build\\bin'
+  : 'build\\bin'
+
+function copyToClipboard(text: string, btnId: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    copiedBtn.value = btnId
+    setTimeout(() => { copiedBtn.value = null }, 1500)
+  }).catch(() => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    copiedBtn.value = btnId
+    setTimeout(() => { copiedBtn.value = null }, 1500)
+  })
+}
+
+function copyEdrExclusionCmd() {
+  copyToClipboard(`powershell -Command "Add-MpPreference -ExclusionPath '${buildDir}'"`, 'edr1')
+}
+
+function copyRegDisableSpyware() {
+  copyToClipboard('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f', 'edr2')
+}
+
+function copyRegDisableBehavior() {
+  copyToClipboard('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v DisableBehaviorMonitoring /t REG_DWORD /d 1 /f', 'edr3')
+}
+
+// Rafraîchir tous les diagnostics
+async function refreshAllDiagnostics() {
+  await Promise.all([runEdrCheck(), runDebugPrivCheck()])
+  await store.refreshModuleCatalog()
+}
+
+async function runEdrCheck() {
+  if (edrBusy.value) return
+  edrBusy.value = true
+  edrResult.value = null
+  try {
+    const result = await backend.getController().checkEdrBlocking?.()
+    edrResult.value = result ?? { error: 'Réponse backend absente.' }
+  } catch (e) {
+    edrResult.value = { success: false, error: String(e) }
+  } finally {
+    edrBusy.value = false
+  }
+}
+
+async function runDebugPrivCheck() {
+  if (debugPrivBusy.value) return
+  debugPrivBusy.value = true
+  debugPrivResult.value = null
+  try {
+    const result = await backend.getController().checkDebugPrivilege?.()
+    debugPrivResult.value = result ?? { error: 'Réponse backend absente.' }
+  } catch (e) {
+    debugPrivResult.value = { success: false, error: String(e) }
+  } finally {
+    debugPrivBusy.value = false
+  }
+}
+
+// Retourne le statut effectif d'un module (priorité aux résultats de diagnostic)
+function moduleEffectiveStatus(mod: { id: string; status: string }) {
+  if (mod.id === 'debug_privilege' && debugPrivResult.value?.enabled) return 'ok'
+  if (mod.id === 'edr_exclusion' && edrResult.value && !edrResult.value.blocked) return 'ok'
+  return mod.status
+}
+
+async function handleInstall(modId: string) {
+  if (modId === 'edr_exclusion') {
+    if (!store.isAttached) {
+      edrResult.value = { success: false, error: 'Aucun processus attaché — impossible de tester.' }
+      return
+    }
+    const accepted = await riskGate.confirmRiskAction('debug', t('modules.edr.confirmTitle'), t('modules.edr.confirmDesc'))
+    if (!accepted) return
+    await runEdrCheck()
+    if (edrResult.value?.blocked) {
+      const addAccepted = await riskGate.confirmRiskAction('debug', t('modules.edr.addExclusionTitle'), t('modules.edr.addExclusionDesc'))
+      if (addAccepted) {
+        try {
+          const result = await backend.getController().addEdrExclusion?.('')
+          edrResult.value = result ?? { error: 'Réponse backend absente.' }
+        } catch (e) {
+          edrResult.value = { success: false, error: String(e) }
+        }
+      }
+    }
+    return
+  }
+
+  if (modId === 'debug_privilege') {
+    const accepted = await riskGate.confirmRiskAction('debug', t('modules.debugPriv.confirmTitle'), t('modules.debugPriv.confirmDesc'))
+    if (!accepted) return
+    // Activer le privilège, pas juste vérifier
+    debugPrivBusy.value = true
+    debugPrivResult.value = null
+    try {
+      const result = await backend.getController().enableDebugPrivilege?.()
+      debugPrivResult.value = result ?? { error: 'Réponse backend absente.' }
+    } catch (e) {
+      debugPrivResult.value = { success: false, error: String(e) }
+    } finally {
+      debugPrivBusy.value = false
+    }
+    return
+  }
+
+  if (modId === 'stealth_sc2_profile') {
+    const accepted = await riskGate.confirmRiskAction('debug', t('modules.stealth.confirmTitle'), t('modules.stealth.confirmDesc'))
+    if (!accepted) return
+    stealthBusy.value = true
+    try {
+      const result = await backend.getController().applyStealthProfile?.('sc2')
+      if (result?.success) {
+        await store.refreshModuleCatalog()
+      }
+      edrResult.value = result ?? { error: 'Réponse backend absente.' }
+    } catch (e) {
+      edrResult.value = { success: false, error: String(e) }
+    } finally {
+      stealthBusy.value = false
+    }
+    return
+  }
+
+  if (modId === 'restore_stealth') {
+    stealthBusy.value = true
+    try {
+      const result = await backend.getController().restoreStealthProfile?.()
+      if (result?.success) {
+        await store.refreshModuleCatalog()
+      }
+      edrResult.value = result ?? { error: 'Réponse backend absente.' }
+    } catch (e) {
+      edrResult.value = { success: false, error: String(e) }
+    } finally {
+      stealthBusy.value = false
+    }
+    return
+  }
+
+  if (modId === 'handle_hider') {
+    if (!handleHiderOwnerPid.value.trim() || !handleHiderHandleValue.value.trim()) {
+      handleHiderResult.value = { success: false, error: 'Remplis le PID et la valeur du handle.' }
+      return
+    }
+    handleHiderBusy.value = true
+    handleHiderResult.value = null
+    try {
+      const ownerPid = parseInt(handleHiderOwnerPid.value, 10)
+      const handleValue = parseInt(handleHiderHandleValue.value, 16) || parseInt(handleHiderHandleValue.value, 10)
+      const result = await backend.getController().hideHandle?.(ownerPid, handleValue)
+      handleHiderResult.value = result ?? { error: 'Réponse backend absente.' }
+    } catch (e) {
+      handleHiderResult.value = { success: false, error: String(e) }
+    } finally {
+      handleHiderBusy.value = false
+    }
+    return
+  }
+
+  // Modules classiques (lua_runtime, ai_model, clr_inspector, kernel_driver)
+  store.installModule(modId)
 }
 
 onMounted(() => {
@@ -45,11 +237,11 @@ onMounted(() => {
         <p>{{ $t('modules.intro') }}</p>
       </div>
       <button
-        class="btn-secondary refresh-btn"
-        :disabled="store.moduleCatalogBusy || store.moduleInstallBusy"
-        @click="store.refreshModuleCatalog()"
+        class="btn btn-secondary refresh-btn"
+        :disabled="store.moduleCatalogBusy || store.moduleInstallBusy || edrBusy || debugPrivBusy"
+        @click="refreshAllDiagnostics()"
       >
-        {{ store.moduleCatalogBusy ? $t('modules.refreshing') : $t('modules.refresh') }}
+        {{ (store.moduleCatalogBusy || edrBusy || debugPrivBusy) ? $t('modules.refreshing') : $t('modules.refreshAll') }}
       </button>
     </div>
 
@@ -57,42 +249,183 @@ onMounted(() => {
       {{ $t('modules.empty') }}
     </div>
 
-    <div v-for="mod in store.moduleCatalog" :key="mod.id" class="module-card" :class="{ busy: isInstallTarget(mod.id) }">
-      <div class="module-head">
-        <div class="module-title">
-          <span class="module-name">{{ mod.displayName }}</span>
-          <span class="module-status" :class="statusClass(mod.status)">{{ statusLabel(mod.status) }}</span>
+    <!-- Section 1 : Dépendances -->
+    <section class="module-section">
+      <h2>{{ $t('modules.sections.dependencies') }}</h2>
+      <div v-for="mod in store.moduleCatalog.filter(m => !m.section || m.section === 'dependencies')" :key="mod.id" class="module-card" :class="{ busy: isInstallTarget(mod.id) }">
+        <div class="module-head">
+          <div class="module-title">
+            <span class="module-name">{{ mod.displayName }}</span>
+            <span class="module-status" :class="statusClass(moduleEffectiveStatus(mod))">{{ statusLabel(moduleEffectiveStatus(mod)) }}</span>
+          </div>
+          <button
+            v-if="mod.installable && !store.moduleInstallBusy"
+            class="btn btn-primary install-btn"
+            @click="handleInstall(mod.id)"
+          >
+            {{ installLabel(mod.id) }}
+          </button>
         </div>
-        <button
-          v-if="mod.installable && !store.moduleInstallBusy"
-          class="btn-primary install-btn"
-          @click="store.installModule(mod.id)"
-        >
-          {{ installLabel(mod.id) }}
-        </button>
-      </div>
-      <p class="module-desc">{{ mod.description }}</p>
-      <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
-      <p v-if="mod.path" class="module-path">{{ mod.path }}</p>
+        <p class="module-desc">{{ mod.description }}</p>
+        <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
+        <p v-if="mod.path" class="module-path">{{ mod.path }}</p>
 
-      <div v-if="isInstallTarget(mod.id)" class="install-progress">
-        <div class="progress-bar">
-          <div class="progress-fill" />
+        <div v-if="isInstallTarget(mod.id)" class="install-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" />
+          </div>
+          <p class="progress-text">{{ store.moduleInstallProgress || $t('modules.progress') }}</p>
+          <button class="btn btn-secondary cancel-btn" @click="store.cancelModuleInstall()">
+            {{ $t('modules.cancel') }}
+          </button>
         </div>
-        <p class="progress-text">{{ store.moduleInstallProgress || $t('modules.progress') }}</p>
-        <button class="btn-secondary cancel-btn" @click="store.cancelModuleInstall()">
-          {{ $t('modules.cancel') }}
-        </button>
       </div>
-    </div>
+    </section>
 
+    <!-- Section 2 : Environnement de test -->
+    <section class="module-section">
+      <h2>🔧 {{ $t('modules.sections.testEnv') }}</h2>
+      <div v-for="mod in store.moduleCatalog.filter(m => m.section === 'test_env')" :key="mod.id" class="module-card" :class="{ busy: isInstallTarget(mod.id) }">
+        <div class="module-head">
+          <div class="module-title">
+            <span class="module-name">{{ mod.displayName }}</span>
+            <span class="module-status" :class="statusClass(moduleEffectiveStatus(mod))">{{ statusLabel(moduleEffectiveStatus(mod)) }}</span>
+          </div>
+          <div class="module-actions">
+            <button
+              v-if="mod.id === 'edr_exclusion' && !edrBusy"
+              class="btn btn-secondary check-btn"
+              :disabled="!store.isAttached"
+              :title="!store.isAttached ? 'Attache un processus pour tester' : ''"
+              @click="runEdrCheck()"
+            >
+              {{ $t('modules.edr.check') }}
+            </button>
+            <button
+              v-if="mod.id === 'debug_privilege' && !debugPrivBusy"
+              class="btn btn-secondary check-btn"
+              @click="runDebugPrivCheck()"
+            >
+              {{ $t('modules.debugPriv.check') }}
+            </button>
+          </div>
+        </div>
+        <p class="module-desc">{{ mod.description }}</p>
+        <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
+
+        <!-- Résultats de diagnostic -->
+        <div v-if="mod.id === 'edr_exclusion' && edrResult" class="diag-result" :class="edrResult.blocked ? 'blocked' : 'ok'">
+          <p>{{ String(edrResult.message ?? edrResult.error ?? '') }}</p>
+          <div v-if="edrResult.blocked" class="edr-fix-actions">
+            <button
+              class="btn btn-primary fix-btn"
+              @click="handleInstall('edr_exclusion')"
+            >
+              {{ $t('modules.edr.addExclusion') }}
+            </button>
+            <button
+              class="btn btn-secondary fix-btn"
+              @click="showEdrManualFix = !showEdrManualFix"
+            >
+              {{ showEdrManualFix ? $t('modules.edr.hideManual') : $t('modules.edr.showManual') }}
+            </button>
+          </div>
+          <!-- Solutions manuelles (clés registre + PowerShell) -->
+          <div v-if="edrResult.blocked && showEdrManualFix" class="edr-manual-fix">
+            <h4>{{ $t('modules.edr.manualTitle') }}</h4>
+            <div class="manual-step">
+              <strong>{{ $t('modules.edr.step1Title') }}</strong>
+              <p>{{ $t('modules.edr.step1Desc') }}</p>
+              <pre class="manual-code">powershell -Command "Add-MpPreference -ExclusionPath '{{ buildDir }}'"</pre>
+              <button class="btn btn-secondary compact" @click="copyEdrExclusionCmd" :title="$t('modules.edr.copy')">
+                {{ $t('modules.edr.copy') }}
+              </button>
+            </div>
+            <div class="manual-step">
+              <strong>{{ $t('modules.edr.step2Title') }}</strong>
+              <p>{{ $t('modules.edr.step2Desc') }}</p>
+              <pre class="manual-code">reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f</pre>
+              <button class="btn btn-secondary compact" @click="copyRegDisableSpyware" :title="$t('modules.edr.copy')">
+                {{ $t('modules.edr.copy') }}
+              </button>
+            </div>
+            <div class="manual-step">
+              <strong>{{ $t('modules.edr.step3Title') }}</strong>
+              <p>{{ $t('modules.edr.step3Desc') }}</p>
+              <pre class="manual-code">reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableBehaviorMonitoring /t REG_DWORD /d 1 /f</pre>
+              <button class="btn btn-secondary compact" @click="copyRegDisableBehavior" :title="$t('modules.edr.copy')">
+                {{ $t('modules.edr.copy') }}
+              </button>
+            </div>
+            <p class="manual-warning">{{ $t('modules.edr.manualWarning') }}</p>
+          </div>
+        </div>
+        <div v-if="mod.id === 'debug_privilege' && debugPrivResult" class="diag-result" :class="debugPrivResult.enabled ? 'ok' : 'disabled'">
+          <p>{{ String(debugPrivResult.message ?? debugPrivResult.error ?? '') }}</p>
+          <button
+            v-if="!debugPrivResult.enabled"
+            class="btn btn-primary fix-btn"
+            @click="handleInstall('debug_privilege')"
+          >
+            {{ $t('modules.debugPriv.enable') }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3 : Sécurité / Stealth -->
+    <section class="module-section">
+      <h2>🛡️ {{ $t('modules.sections.stealth') }}</h2>
+      <div v-for="mod in store.moduleCatalog.filter(m => m.section === 'stealth')" :key="mod.id" class="module-card" :class="{ busy: isInstallTarget(mod.id) }">
+        <div class="module-head">
+          <div class="module-title">
+            <span class="module-name">{{ mod.displayName }}</span>
+            <span class="module-status" :class="statusClass(moduleEffectiveStatus(mod))">{{ statusLabel(moduleEffectiveStatus(mod)) }}</span>
+          </div>
+          <div class="module-actions">
+            <button
+              v-if="mod.id === 'stealth_sc2_profile' && !stealthBusy"
+              class="btn btn-primary install-btn"
+              @click="handleInstall(mod.id)"
+            >
+              {{ installLabel(mod.id) }}
+            </button>
+            <button
+              v-if="mod.id === 'stealth_sc2_profile' && store.stealthStatus?.active && !stealthBusy"
+              class="btn btn-secondary install-btn"
+              @click="handleInstall('restore_stealth')"
+            >
+              {{ $t('modules.install.restore') }}
+            </button>
+          </div>
+        </div>
+        <p class="module-desc">{{ mod.description }}</p>
+        <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
+
+        <!-- Handle Hider UI -->
+        <div v-if="mod.id === 'handle_hider'" class="handle-hider-ui">
+          <div class="handle-hider-inputs">
+            <input v-model="handleHiderOwnerPid" class="input compact-input" :placeholder="$t('modules.handleHider.ownerPid')" type="number" min="0" />
+            <input v-model="handleHiderHandleValue" class="input compact-input" :placeholder="$t('modules.handleHider.handleValue')" />
+            <button class="btn btn-primary compact" :disabled="handleHiderBusy || !handleHiderOwnerPid.trim() || !handleHiderHandleValue.trim()" @click="handleInstall('handle_hider')">
+              {{ handleHiderBusy ? $t('modules.handleHider.hiding') : $t('modules.handleHider.hide') }}
+            </button>
+          </div>
+          <div v-if="handleHiderResult" class="diag-result" :class="handleHiderResult.success ? 'ok' : 'blocked'">
+            <p>{{ String(handleHiderResult.message ?? handleHiderResult.error ?? '') }}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Résultat global d'installation -->
     <div
       v-if="store.moduleInstallResult && !store.moduleInstallBusy"
       class="install-result"
       :class="store.moduleInstallResult.success ? 'success' : 'error'"
     >
       <p>{{ String(store.moduleInstallResult.message ?? store.moduleInstallResult.error ?? '') }}</p>
-      <button class="btn-secondary" @click="store.refreshModuleCatalog()">
+      <button class="btn btn-secondary" @click="store.refreshModuleCatalog()">
         {{ $t('modules.refresh') }}
       </button>
     </div>
@@ -136,6 +469,18 @@ onMounted(() => {
   border-radius: 6px;
   color: var(--text-dim);
   text-align: center;
+}
+
+.module-section {
+  margin-bottom: 28px;
+}
+
+.module-section h2 {
+  font-size: 16px;
+  color: var(--text-primary);
+  margin: 0 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
 }
 
 .module-card {
@@ -204,6 +549,80 @@ onMounted(() => {
   color: var(--text-dim);
   font-family: 'Consolas', monospace;
   word-break: break-all;
+}
+
+.module-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.check-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.install-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.fix-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.cancel-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.diag-result {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.diag-result p {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.diag-result.ok {
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+  color: var(--success);
+}
+
+.diag-result.blocked {
+  border-color: color-mix(in srgb, var(--error) 40%, var(--border));
+  color: var(--error);
+}
+
+.diag-result.disabled {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+  color: var(--warning);
+}
+
+.handle-hider-ui {
+  margin-top: 12px;
+}
+
+.handle-hider-inputs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.handle-hider-inputs .input {
+  flex: 1;
+  min-width: 100px;
+}
+
+.copied-feedback {
+  color: var(--success);
+  font-size: 11px;
+  margin-left: 4px;
 }
 
 .install-progress {

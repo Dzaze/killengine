@@ -1394,6 +1394,49 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
         }
     }
 
+    // Réseau — outils de diagnostic (lecture seule, exécutés directement)
+    if (q.contains("connexion") || q.contains("connection") || q.contains("tcp") || q.contains("udp") || q.contains("network connection")) {
+        return makeToolCall("get_process_network_connections", {}, "Liste des connexions réseau demandée.");
+    }
+    if (q.contains("module réseau") || q.contains("network module") || q.contains("dll réseau") || q.contains("network dll") || q.contains("wininet") || q.contains("winhttp") || q.contains("ws2_32")) {
+        return makeToolCall("get_process_network_modules", {}, "Liste des modules réseau demandée.");
+    }
+
+    // Réseau — Proxy HTTP
+    if (q.contains("proxy http") || q.contains("http proxy") || q.contains("intercept") || q.contains("requete http") || q.contains("http request")) {
+        if (q.contains("stop") || q.contains("arrête") || q.contains("arrete") || q.contains("coupe")) {
+            return makeToolCall("stop_http_proxy", {}, "Arrêt du proxy HTTP demandé.");
+        }
+        if (q.contains("start") || q.contains("démarre") || q.contains("demarre") || q.contains("active") || q.contains("lance")) {
+            QVariantMap args;
+            args["port"] = 8080;
+            args["interceptHttps"] = q.contains("https");
+            return makeToolCall("start_http_proxy", args, "Démarrage du proxy HTTP demandé.");
+        }
+        if (q.contains("liste") || q.contains("list") || q.contains("voir") || q.contains("affiche")) {
+            return makeToolCall("get_http_proxy_requests", {}, "Liste des requêtes interceptées demandée.");
+        }
+        if (q.contains("modif") || q.contains("change") || q.contains("edit")) {
+            return makeToolCall("modify_http_request", {{"requestId", ""}, {"newBody", ""}}, "Modification de requête HTTP demandée (préciser requestId et body).");
+        }
+    }
+
+    // Réseau — Spoof DNS
+    if (q.contains("spoof dns") || q.contains("dns spoof") || q.contains("redirige dns") || q.contains("redirect dns") || q.contains("hosts file")) {
+        if (q.contains("retir") || q.contains("restor") || q.contains("supprim") || q.contains("remove")) {
+            return makeToolCall("restore_dns", {{"domain", ""}}, "Restauration DNS demandée (préciser le domaine).");
+        }
+        return makeToolCall("spoof_dns", {{"domain", ""}, {"targetIp", "127.0.0.1"}}, "Spoof DNS demandé (préciser le domaine et l'IP cible).");
+    }
+
+    // Réseau — Lag switch
+    if (q.contains("lag switch") || q.contains("lagswitch") || q.contains("retard") || q.contains("delay network") || q.contains("slow network") || q.contains("network lag")) {
+        if (q.contains("stop") || q.contains("arrête") || q.contains("arrete") || q.contains("désactive") || q.contains("desactive")) {
+            return makeToolCall("set_lag_switch", {{"enabled", false}, {"delayMs", 0}}, "Désactivation du lag switch demandée.");
+        }
+        return makeToolCall("set_lag_switch", {{"enabled", true}, {"delayMs", 1000}}, "Activation du lag switch demandée (délai par défaut 1000ms).");
+    }
+
     if (q.contains("write") || q.contains("écri") || q.contains("mettre")) {
         return makeToolCall("write_value", {
             {"address", firstHexAddress(query)},
@@ -1610,6 +1653,47 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             return makeToolCall("block_process_network", {{"mode", "on"}}, "Coupure reseau demandee par l'utilisateur.");
         }
     }
+
+    // Réseau — outils de diagnostic (lecture seule)
+    if (q.contains("connexion") || q.contains("connection") || q.contains("tcp") || q.contains("udp") || q.contains("network connection")) {
+        return makeToolCall("get_process_network_connections", {}, "Liste des connexions reseau demandee.");
+    }
+    if (q.contains("module reseau") || q.contains("network module") || q.contains("dll reseau") || q.contains("network dll") || q.contains("wininet") || q.contains("winhttp") || q.contains("ws2_32")) {
+        return makeToolCall("get_process_network_modules", {}, "Liste des modules reseau demandee.");
+    }
+
+    // Réseau — Proxy HTTP
+    if (q.contains("proxy http") || q.contains("http proxy") || q.contains("intercept") || q.contains("requete http") || q.contains("http request")) {
+        if (q.contains("stop") || q.contains("arrete") || q.contains("coupe")) {
+            return makeToolCall("stop_http_proxy", {}, "Arret du proxy HTTP demande.");
+        }
+        if (q.contains("start") || q.contains("demarre") || q.contains("active") || q.contains("lance")) {
+            QVariantMap args;
+            args["port"] = 8080;
+            args["interceptHttps"] = q.contains("https");
+            return makeToolCall("start_http_proxy", args, "Demarrage du proxy HTTP demande.");
+        }
+        if (q.contains("liste") || q.contains("list") || q.contains("voir") || q.contains("affiche")) {
+            return makeToolCall("get_http_proxy_requests", {}, "Liste des requetes interceptees demandee.");
+        }
+    }
+
+    // Réseau — Spoof DNS
+    if (q.contains("spoof dns") || q.contains("dns spoof") || q.contains("redirige dns") || q.contains("redirect dns") || q.contains("hosts file")) {
+        if (q.contains("retir") || q.contains("restor") || q.contains("supprim") || q.contains("remove")) {
+            return makeToolCall("restore_dns", {{"domain", ""}}, "Restauration DNS demandee (preciser le domaine).");
+        }
+        return makeToolCall("spoof_dns", {{"domain", ""}, {"targetIp", "127.0.0.1"}}, "Spoof DNS demande (preciser le domaine et l'IP cible).");
+    }
+
+    // Réseau — Lag switch
+    if (q.contains("lag switch") || q.contains("lagswitch") || q.contains("retard") || q.contains("delay network") || q.contains("slow network") || q.contains("network lag")) {
+        if (q.contains("stop") || q.contains("arrete") || q.contains("desactive")) {
+            return makeToolCall("set_lag_switch", {{"enabled", false}, {"delayMs", 0}}, "Desactivation du lag switch demandee.");
+        }
+        return makeToolCall("set_lag_switch", {{"enabled", true}, {"delayMs", 1000}}, "Activation du lag switch demandee (delai par defaut 1000ms).");
+    }
+
     // PHASE 271 : Mode discret / Stealth mode - fast-paths explicites
     {
         const bool wantsStealthOff = q.contains("désactive le mode discret") || q.contains("desactive le mode discret")

@@ -3,6 +3,12 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shellapi.h>
+#include <iphlpapi.h>
+#include <psapi.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "psapi.lib")
+#pragma comment(lib, "ws2_32.lib")
 // objbase.h avant UIAutomation.h : WIN32_LEAN_AND_MEAN (deja actif via
 // windows.h ci-dessus) exclut les headers COM/OLE par defaut, or
 // UIAutomationCore.h a besoin de la macro "interface" (-> struct) et des
@@ -41,6 +47,8 @@
 #include "crash_handler.h"
 #include "debug/hardware_breakpoint.h"
 #include "debug/stealth_profiler.h"
+#include "inject/lag_switch.h"
+#include "inject/http_proxy.h"
 #include "profiles/ghidra_bridge.h"
 #include "logging/logger.h"
 #include "memory/memory_map.h"
@@ -64,6 +72,7 @@
 #include "scanner/memory_window_search.h"
 #include "scanner/encrypted_scan.h"
 #include "scanner/structure_analyzer.h"
+#include "scanner/auto_dissect.h"
 #include "scanner/value_variants.h"
 #include "snapshot/snapshot_store.h"
 #include "webview2/webview2_inspector.h"
@@ -2766,6 +2775,78 @@ QVariantMap ApplicationController::inferStructureInstanceDelta(
     return result;
 }
 
+QVariantMap ApplicationController::findStructureInstances(const QVariantMap& templateJson) const {
+    QVariantMap result;
+    result["success"] = false;
+    result["instances"] = QVariantList{};
+
+    if (!m_handle.isValid()) {
+        result["error"] = QStringLiteral("Aucun processus attaché.");
+        return result;
+    }
+
+    // Reconstruire le StructureTemplate depuis le JSON
+    killcore::StructureTemplate tmpl;
+    tmpl.name = templateJson.value("name").toString();
+    tmpl.instanceDelta = templateJson.value("instanceDelta", 0).toLongLong();
+
+    const auto fieldsArray = templateJson.value("fields").toList();
+    for (const auto& fVal : fieldsArray) {
+        const auto fMap = fVal.toMap();
+        killcore::StructureField f;
+        f.offset = fMap.value("offset", 0).toInt();
+        const QString typeStr = fMap.value("type").toString();
+        if (typeStr == "Int8") f.type = killcore::FieldType::Int8;
+        else if (typeStr == "UInt8") f.type = killcore::FieldType::UInt8;
+        else if (typeStr == "Int16") f.type = killcore::FieldType::Int16;
+        else if (typeStr == "UInt16") f.type = killcore::FieldType::UInt16;
+        else if (typeStr == "Int32") f.type = killcore::FieldType::Int32;
+        else if (typeStr == "UInt32") f.type = killcore::FieldType::UInt32;
+        else if (typeStr == "Int64") f.type = killcore::FieldType::Int64;
+        else if (typeStr == "UInt64") f.type = killcore::FieldType::UInt64;
+        else if (typeStr == "Float32") f.type = killcore::FieldType::Float32;
+        else if (typeStr == "Float64") f.type = killcore::FieldType::Float64;
+        else if (typeStr == "Ptr64") f.type = killcore::FieldType::Pointer64;
+        else f.type = killcore::FieldType::Int32; // défaut
+        f.label = fMap.value("label").toString();
+        tmpl.fields.append(f);
+    }
+
+    if (tmpl.fields.isEmpty()) {
+        result["error"] = QStringLiteral("Template vide — aucun champ à matcher.");
+        return result;
+    }
+
+    killcore::AutoDissectOptions options;
+    options.maxResults = std::clamp(templateJson.value("maxResults", 128).toInt(), 1, 1024);
+    options.requirePointerValidity = templateJson.value("requirePointerValidity", true).toBool();
+    options.minConfidence = std::clamp(templateJson.value("minConfidence", 0.5).toDouble(), 0.0, 1.0);
+
+    const auto autoResult = killcore::findStructureInstances(m_handle, tmpl, options);
+
+    result["success"] = autoResult.success;
+    result["error"] = autoResult.error;
+    result["scannedRegions"] = autoResult.scannedRegions;
+    result["totalCandidates"] = autoResult.totalCandidates;
+
+    QVariantList instances;
+    for (const auto& inst : autoResult.instances) {
+        QVariantMap item;
+        item["baseAddress"] = QString::number(inst.baseAddress, 16).toUpper();
+        item["confidence"] = inst.confidence;
+        QVariantList values;
+        for (const auto& v : inst.fieldValues) {
+            values.append(v);
+        }
+        item["fieldValues"] = values;
+        instances.append(item);
+    }
+    result["instances"] = instances;
+    result["instanceCount"] = instances.size();
+
+    return result;
+}
+
 QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVariantMap& optionsMap) const {
     return m_uiStringInvestigator->scanUiStrings(value, optionsMap);
 }
@@ -4528,6 +4609,663 @@ QVariantMap ApplicationController::getProcessNetworkBlockStatus() const {
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// Réseau — Connexions actives + modules DLL (lecture seule)
+// ---------------------------------------------------------------------------
+
+namespace {
+// Cache DNS LRU simple (max 256 entrées, TTL 60s)
+struct DnsCacheEntry {
+    QString hostname;
+    qint64 timestamp; // ms since epoch
+};
+using DnsCacheMap = QHash<QString, DnsCacheEntry>;
+Q_GLOBAL_STATIC(DnsCacheMap, g_dnsCache)
+
+QString resolveIpToHostname(const QString& ip) {
+    if (ip.isEmpty()) return QString();
+
+    // Loopback / privé — pas de résolution
+    if (ip.startsWith("127.") || ip == "::1" || ip.startsWith("10.") ||
+        ip.startsWith("192.168.") || ip.startsWith("169.254.") ||
+        ip.startsWith("fe80:") || ip.startsWith("fc00:") || ip.startsWith("fd00:")) {
+        return QString();
+    }
+
+    // Check cache
+    auto& cache = *g_dnsCache();
+    if (cache.contains(ip)) {
+        const auto& entry = cache[ip];
+        if (QDateTime::currentMSecsSinceEpoch() - entry.timestamp < 60000) {
+            return entry.hostname; // "" si déjà résolu en échec
+        }
+        cache.remove(ip);
+    }
+
+    // Résolution asynchrone avec timeout
+    auto future = std::async(std::launch::async, [ipStr = ip.toStdString()]() -> QString {
+        sockaddr_storage addr{};
+        sockaddr_in* sin4 = reinterpret_cast<sockaddr_in*>(&addr);
+        sockaddr_in6* sin6 = reinterpret_cast<sockaddr_in6*>(&addr);
+        socklen_t addrLen = 0;
+
+        if (inet_pton(AF_INET, ipStr.c_str(), &sin4->sin_addr) == 1) {
+            sin4->sin_family = AF_INET;
+            addrLen = sizeof(sockaddr_in);
+        } else if (inet_pton(AF_INET6, ipStr.c_str(), &sin6->sin6_addr) == 1) {
+            sin6->sin6_family = AF_INET6;
+            addrLen = sizeof(sockaddr_in6);
+        } else {
+            return QString(); // IP invalide
+        }
+
+        char host[NI_MAXHOST] = {0};
+        if (getnameinfo(reinterpret_cast<sockaddr*>(&addr), addrLen, host, sizeof(host),
+                        nullptr, 0, NI_NAMEREQD) == 0) {
+            return QString::fromUtf8(host);
+        }
+        return QString(); // Échec
+    });
+
+    if (future.wait_for(std::chrono::milliseconds(500)) == std::future_status::ready) {
+        QString result = future.get();
+        cache.insert(ip, {result, QDateTime::currentMSecsSinceEpoch()});
+        // Nettoyer si > 256
+        if (cache.size() > 256) {
+            // Supprimer les plus anciennes
+            qint64 oldest = QDateTime::currentMSecsSinceEpoch();
+            QString oldestKey;
+            for (auto it = cache.begin(); it != cache.end(); ++it) {
+                if (it.value().timestamp < oldest) {
+                    oldest = it.value().timestamp;
+                    oldestKey = it.key();
+                }
+            }
+            if (!oldestKey.isEmpty()) cache.remove(oldestKey);
+        }
+        return result;
+    }
+    return QString(); // Timeout
+}
+
+QString tcpStateToString(DWORD state) {
+    switch (state) {
+        case MIB_TCP_STATE_CLOSED:    return "CLOSED";
+        case MIB_TCP_STATE_LISTEN:    return "LISTEN";
+        case MIB_TCP_STATE_SYN_SENT:  return "SYN_SENT";
+        case MIB_TCP_STATE_SYN_RCVD:  return "SYN_RECEIVED";
+        case MIB_TCP_STATE_ESTAB:     return "ESTABLISHED";
+        case MIB_TCP_STATE_FIN_WAIT1: return "FIN_WAIT_1";
+        case MIB_TCP_STATE_FIN_WAIT2: return "FIN_WAIT_2";
+        case MIB_TCP_STATE_CLOSE_WAIT: return "CLOSE_WAIT";
+        case MIB_TCP_STATE_CLOSING:   return "CLOSING";
+        case MIB_TCP_STATE_LAST_ACK:  return "LAST_ACK";
+        case MIB_TCP_STATE_TIME_WAIT: return "TIME_WAIT";
+        case MIB_TCP_STATE_DELETE_TCB: return "DELETE_TCB";
+        default:                      return "UNKNOWN";
+    }
+}
+
+QString formatIpPort(uint32_t ip, uint16_t port) {
+    char buf[64];
+    in_addr addr{};
+    addr.S_un.S_addr = ip;
+    const char* ipStr = inet_ntop(AF_INET, &addr, buf, sizeof(buf));
+    if (ipStr) {
+        return QStringLiteral("%1:%2").arg(QString::fromUtf8(ipStr)).arg(port);
+    }
+    return QStringLiteral("?.?:%1").arg(port);
+}
+
+// Liste des DLL réseau connues
+struct NetworkDllInfo {
+    const char* namePattern; // nom exact ou préfixe (se termine par *)
+    const char* category;
+    const char* description;
+    bool isPrefix;
+};
+
+const NetworkDllInfo kNetworkDlls[] = {
+    {"ws2_32.dll",     "winsock", "Windows Socket 2 API", false},
+    {"winhttp.dll",    "http",    "Windows HTTP client", false},
+    {"wininet.dll",    "http",    "Windows HTTP/FTP client (legacy)", false},
+    {"urlmon.dll",     "http",    "URL Moniker (IE/legacy)", false},
+    {"mswsock.dll",    "winsock", "Microsoft Windows Socket Helper", false},
+    {"dnsapi.dll",     "dns",     "DNS Resolver API", false},
+    {"iphlpapi.dll",   "system",  "IP Helper API", false},
+    {"curl.dll",       "http",    "cURL library", false},
+    {"libcurl.dll",    "http",    "cURL library (alternate name)", false},
+    {"openssl.dll",    "crypto",  "OpenSSL", false},
+    {"schannel.dll",   "crypto",  "Windows TLS/SSL", false},
+    {"httpapi.dll",    "http",    "HTTP Server API", false},
+    {"webio.dll",      "http",    "WebIO (WinHTTP internal)", false},
+    {"libssl",         "crypto",  "OpenSSL SSL library", true},
+    {"libcrypto",      "crypto",  "OpenSSL Crypto library", true},
+};
+
+bool isNetworkDll(const QString& dllName) {
+    QString lower = dllName.toLower();
+    for (const auto& info : kNetworkDlls) {
+        if (info.isPrefix) {
+            if (lower.startsWith(QString::fromUtf8(info.namePattern))) return true;
+        } else {
+            if (lower == QString::fromUtf8(info.namePattern)) return true;
+        }
+    }
+    return false;
+}
+
+const NetworkDllInfo* findNetworkDllInfo(const QString& dllName) {
+    QString lower = dllName.toLower();
+    for (const auto& info : kNetworkDlls) {
+        if (info.isPrefix) {
+            if (lower.startsWith(QString::fromUtf8(info.namePattern))) return &info;
+        } else {
+            if (lower == QString::fromUtf8(info.namePattern)) return &info;
+        }
+    }
+    return nullptr;
+}
+} // namespace
+
+QVariantMap ApplicationController::getProcessNetworkConnections() {
+    QVariantMap result;
+    result["success"] = false;
+    result["connections"] = QVariantList();
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    QVariantList connections;
+
+    // TCP connections
+    {
+        ULONG size = 0;
+        if (GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == ERROR_INSUFFICIENT_BUFFER && size > 0) {
+            QByteArray buffer(static_cast<int>(size), 0);
+            auto* table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID*>(buffer.data());
+            if (GetExtendedTcpTable(table, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+                for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                    const auto& row = table->table[i];
+                    if (static_cast<int>(row.dwOwningPid) != m_pid) continue;
+
+                    uint16_t localPort = ntohs(static_cast<uint16_t>(row.dwLocalPort));
+                    uint16_t remotePort = ntohs(static_cast<uint16_t>(row.dwRemotePort));
+                    QString localAddr = formatIpPort(row.dwLocalAddr, localPort);
+                    QString remoteAddr = formatIpPort(row.dwRemoteAddr, remotePort);
+                    QString state = tcpStateToString(row.dwState);
+
+                    QVariantMap conn;
+                    conn["protocol"] = "TCP";
+                    conn["localAddr"] = localAddr;
+                    conn["remoteAddr"] = remoteAddr;
+                    conn["state"] = state;
+                    conn["pid"] = static_cast<int>(row.dwOwningPid);
+
+                    // Résolution DNS (best-effort, asynchrone)
+                    uint32_t remote = ntohl(row.dwRemoteAddr);
+                    if (remote != 0 && ((remote >> 24) != 127)) {
+                        QString ipOnly = remoteAddr.split(':').first();
+                        QString hostname = resolveIpToHostname(ipOnly);
+                        conn["remoteHost"] = hostname.isEmpty() ? QVariant() : hostname;
+                    } else {
+                        conn["remoteHost"] = QVariant();
+                    }
+
+                    connections.append(conn);
+                }
+            }
+        }
+    }
+
+    // UDP connections
+    {
+        ULONG size = 0;
+        if (GetExtendedUdpTable(nullptr, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0) == ERROR_INSUFFICIENT_BUFFER && size > 0) {
+            QByteArray buffer(static_cast<int>(size), 0);
+            auto* table = reinterpret_cast<MIB_UDPTABLE_OWNER_PID*>(buffer.data());
+            if (GetExtendedUdpTable(table, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0) == NO_ERROR) {
+                for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                    const auto& row = table->table[i];
+                    if (static_cast<int>(row.dwOwningPid) != m_pid) continue;
+
+                    uint16_t localPort = ntohs(static_cast<uint16_t>(row.dwLocalPort));
+                    QString localAddr = formatIpPort(row.dwLocalAddr, localPort);
+
+                    QVariantMap conn;
+                    conn["protocol"] = "UDP";
+                    conn["localAddr"] = localAddr;
+                    conn["remoteAddr"] = QVariant(); // UDP est sans connexion : pas de pair distant dans cette table
+                    conn["state"] = QVariant(); // UDP n'a pas d'état
+                    conn["pid"] = static_cast<int>(row.dwOwningPid);
+                    conn["remoteHost"] = QVariant();
+
+                    connections.append(conn);
+                }
+            }
+        }
+    }
+
+    result["success"] = true;
+    result["connections"] = connections;
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::getProcessNetworkModules() {
+    QVariantMap result;
+    result["success"] = false;
+    result["modules"] = QVariantList();
+
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, static_cast<DWORD>(m_pid));
+    if (!hProcess) {
+        result["error"] = "Impossible d'ouvrir le processus.";
+        return result;
+    }
+
+    HMODULE modules[1024];
+    DWORD cbNeeded = 0;
+    if (!EnumProcessModules(hProcess, modules, sizeof(modules), &cbNeeded)) {
+        CloseHandle(hProcess);
+        result["error"] = "EnumProcessModules échoué.";
+        return result;
+    }
+
+    QVariantList dllList;
+    DWORD moduleCount = cbNeeded / sizeof(HMODULE);
+    for (DWORD i = 0; i < moduleCount; ++i) {
+        wchar_t path[MAX_PATH] = {0};
+        if (GetModuleFileNameExW(hProcess, modules[i], path, MAX_PATH) > 0) {
+            QString dllPath = QString::fromWCharArray(path);
+            QString dllName = QFileInfo(dllPath).fileName();
+            if (isNetworkDll(dllName)) {
+                const auto* info = findNetworkDllInfo(dllName);
+                QVariantMap mod;
+                mod["name"] = dllName;
+                mod["path"] = dllPath;
+                mod["category"] = info ? QString::fromUtf8(info->category) : "system";
+                mod["description"] = info ? QString::fromUtf8(info->description) : dllName;
+                dllList.append(mod);
+            }
+        }
+    }
+    CloseHandle(hProcess);
+
+    // Trier par catégorie puis nom
+    std::sort(dllList.begin(), dllList.end(), [](const QVariant& a, const QVariant& b) {
+        auto catA = a.toMap()["category"].toString();
+        auto catB = b.toMap()["category"].toString();
+        if (catA != catB) return catA < catB;
+        return a.toMap()["name"].toString() < b.toMap()["name"].toString();
+    });
+
+    result["success"] = true;
+    result["modules"] = dllList;
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Proxy HTTP — injection DLL + MinHook sur HttpSendRequest/WinHttpSendRequest
+// ---------------------------------------------------------------------------
+
+QVariantMap ApplicationController::startHttpProxy(int port, bool interceptHttps) {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    if (!m_httpProxySession) {
+        m_httpProxySession = std::make_unique<killcore::HttpProxySession>();
+    }
+
+    if (m_httpProxySession->isActive()) {
+        result["error"] = "Un proxy HTTP est déjà actif.";
+        return result;
+    }
+
+    // Trouver le handler DLL
+    const QString handlerPath = QCoreApplication::applicationDirPath()
+        + QStringLiteral("/KillEngineHttpProxyHandler.dll");
+    if (!QFile::exists(handlerPath)) {
+        result["error"] = "Handler proxy HTTP introuvable: " + handlerPath;
+        return result;
+    }
+
+    QString error;
+    if (!m_httpProxySession->start(m_handle, interceptHttps, handlerPath, &error)) {
+        result["error"] = error;
+        return result;
+    }
+
+    result["success"] = true;
+    result["port"] = port;
+    result["interceptHttps"] = interceptHttps;
+    KE_LOG_INFO() << "startHttpProxy: port=" << port << " interceptHttps=" << interceptHttps;
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::stopHttpProxy() {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (m_httpProxySession && m_httpProxySession->isActive()) {
+        m_httpProxySession->stop();
+        result["success"] = true;
+        KE_LOG_INFO() << "stopHttpProxy: stopped";
+    } else {
+        result["error"] = "Aucun proxy HTTP actif.";
+    }
+
+    return result;
+}
+
+QVariantMap ApplicationController::getHttpProxyRequests() {
+    QVariantMap result;
+    result["success"] = false;
+    result["requests"] = QVariantList();
+
+    if (!m_httpProxySession || !m_httpProxySession->isActive()) {
+        result["error"] = "Aucun proxy HTTP actif.";
+        return result;
+    }
+
+    auto requests = m_httpProxySession->getRequests();
+    QVariantList list;
+    for (const auto& req : requests) {
+        QVariantMap entry;
+        entry["method"] = req.method;
+        entry["url"] = req.url;
+        entry["requestBody"] = req.requestBody;
+        entry["responseBody"] = req.responseBody;
+        entry["timestamp"] = req.timestamp;
+        entry["modified"] = req.modified;
+        list.append(entry);
+    }
+
+    result["success"] = true;
+    result["requests"] = list;
+    return result;
+}
+
+QVariantMap ApplicationController::modifyHttpRequest(const QString& requestId, const QString& newRequestBody) {
+    QVariantMap result;
+    result["success"] = false;
+
+    if (!m_httpProxySession || !m_httpProxySession->isActive()) {
+        result["error"] = "Aucun proxy HTTP actif.";
+        return result;
+    }
+
+    // requestId est l'index de la requête dans le buffer
+    bool ok = false;
+    int index = requestId.toInt(&ok);
+    if (!ok || index < 0) {
+        result["error"] = "Index de requête invalide.";
+        return result;
+    }
+
+    if (m_httpProxySession->modifyRequest(index, newRequestBody)) {
+        result["success"] = true;
+        KE_LOG_INFO() << "modifyHttpRequest: index=" << index;
+    } else {
+        result["error"] = "Impossible de modifier cette requête (déjà envoyée ou index invalide).";
+    }
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Spoof DNS — écriture fichier hosts Windows (UAC requis)
+// ---------------------------------------------------------------------------
+
+namespace {
+QString hostsFilePath() {
+    return QStringLiteral("C:\\Windows\\System32\\drivers\\etc\\hosts");
+}
+
+QString sanitizeHostsLine(const QString& domain, const QString& targetIp) {
+    // Nettoyer les caractères dangereux pour la commande PowerShell
+    QString safeDomain = domain;
+    safeDomain.replace("'", "''");
+    QString safeIp = targetIp;
+    safeIp.replace("'", "''");
+    return QStringLiteral("{0} {1}").arg(safeIp, safeDomain);
+}
+} // namespace
+
+QVariantMap ApplicationController::spoofDns(const QString& domain, const QString& targetIp) {
+    QVariantMap result;
+    result["success"] = false;
+    if (domain.isEmpty() || targetIp.isEmpty()) {
+        result["error"] = "Domaine et IP cible requis.";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    const QString hostsPath = hostsFilePath();
+    const QString line = sanitizeHostsLine(domain, targetIp);
+
+    // PowerShell : lire le fichier, vérifier si la ligne existe, ajouter si non
+    const QString psCommand = QStringLiteral(
+        "$path = '%1'; "
+        "$line = '%2'; "
+        "$content = Get-Content $path -ErrorAction SilentlyContinue; "
+        "if ($content -match ('^\\s*' + [regex]::Escape('%3') + '\\s')) { "
+        "  'already_exists'; "
+        "} else { "
+        "  Add-Content -Path $path -Value $line -Encoding utf8; "
+        "  'added'; "
+        "}").arg(hostsPath, line, domain);
+
+    const std::wstring parameters =
+        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.hwnd = nullptr;
+    sei.lpVerb = L"runas"; // UAC requis
+    sei.lpFile = L"powershell.exe";
+    sei.lpParameters = parameters.c_str();
+    sei.nShow = SW_HIDE;
+
+    if (!ShellExecuteExW(&sei)) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_CANCELLED) {
+            result["cancelled"] = true;
+            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        } else {
+            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+        }
+        return result;
+    }
+
+    if (sei.hProcess) {
+        WaitForSingleObject(sei.hProcess, 15000);
+        DWORD exitCode = 1;
+        GetExitCodeProcess(sei.hProcess, &exitCode);
+        CloseHandle(sei.hProcess);
+
+        if (exitCode == 0) {
+            result["success"] = true;
+            result["domain"] = domain;
+            result["targetIp"] = targetIp;
+            result["action"] = "added";
+        } else {
+            result["error"] = QStringLiteral("PowerShell a échoué (code %1).").arg(exitCode);
+        }
+    } else {
+        result["success"] = true; // Best-effort
+        result["domain"] = domain;
+        result["targetIp"] = targetIp;
+    }
+
+    KE_LOG_INFO() << "spoofDns: domain=" << domain.toStdString()
+                  << " ip=" << targetIp.toStdString()
+                  << " success=" << result.value("success").toBool();
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::restoreDns(const QString& domain) {
+    QVariantMap result;
+    result["success"] = false;
+    if (domain.isEmpty()) {
+        result["error"] = "Domaine requis.";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    const QString hostsPath = hostsFilePath();
+
+    // PowerShell : lire le fichier, retirer les lignes correspondant au domaine
+    const QString psCommand = QStringLiteral(
+        "$path = '%1'; "
+        "$domain = '%2'; "
+        "$content = Get-Content $path -ErrorAction SilentlyContinue; "
+        "$filtered = $content | Where-Object { $_ -notmatch ('^\\s*' + [regex]::Escape($domain) + '\\s') }; "
+        "$filtered | Set-Content -Path $path -Encoding utf8; "
+        "'removed'").arg(hostsPath, domain);
+
+    const std::wstring parameters =
+        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.hwnd = nullptr;
+    sei.lpVerb = L"runas"; // UAC requis
+    sei.lpFile = L"powershell.exe";
+    sei.lpParameters = parameters.c_str();
+    sei.nShow = SW_HIDE;
+
+    if (!ShellExecuteExW(&sei)) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_CANCELLED) {
+            result["cancelled"] = true;
+            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        } else {
+            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+        }
+        return result;
+    }
+
+    if (sei.hProcess) {
+        WaitForSingleObject(sei.hProcess, 15000);
+        DWORD exitCode = 1;
+        GetExitCodeProcess(sei.hProcess, &exitCode);
+        CloseHandle(sei.hProcess);
+
+        if (exitCode == 0) {
+            result["success"] = true;
+            result["domain"] = domain;
+            result["action"] = "removed";
+        } else {
+            result["error"] = QStringLiteral("PowerShell a échoué (code %1).").arg(exitCode);
+        }
+    } else {
+        result["success"] = true; // Best-effort
+        result["domain"] = domain;
+    }
+
+    KE_LOG_INFO() << "restoreDns: domain=" << domain.toStdString()
+                  << " success=" << result.value("success").toBool();
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Lag switch — injection DLL + MinHook sur recv/WSARecv
+// ---------------------------------------------------------------------------
+
+QVariantMap ApplicationController::setLagSwitch(bool enabled, int delayMs) {
+    QVariantMap result;
+    result["success"] = false;
+    if (!m_attached || m_pid <= 0) {
+        result["error"] = "Aucun processus attaché.";
+        return result;
+    }
+    if (delayMs < 0 || delayMs > 10000) {
+        result["error"] = "Délai invalide (0-10000 ms).";
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    if (enabled) {
+        // Démarrer ou mettre à jour le lag switch
+        if (!m_lagSwitchSession) {
+            m_lagSwitchSession = std::make_unique<killcore::LagSwitchSession>();
+        }
+
+        if (!m_lagSwitchSession->isActive()) {
+            // Trouver le handler DLL
+            const QString handlerPath = QCoreApplication::applicationDirPath()
+                + QStringLiteral("/KillEngineLagSwitchHandler.dll");
+            if (!QFile::exists(handlerPath)) {
+                result["error"] = "Handler lag switch introuvable: " + handlerPath;
+                return result;
+            }
+
+            QString error;
+            if (!m_lagSwitchSession->start(m_handle, delayMs, handlerPath, &error)) {
+                result["error"] = error;
+                return result;
+            }
+        } else {
+            // Mettre à jour le délai
+            m_lagSwitchSession->setDelayMs(delayMs);
+        }
+
+        result["success"] = true;
+        result["active"] = true;
+        result["delayMs"] = delayMs;
+    } else {
+        // Arrêter le lag switch
+        if (m_lagSwitchSession && m_lagSwitchSession->isActive()) {
+            m_lagSwitchSession->stop();
+        }
+        result["success"] = true;
+        result["active"] = false;
+    }
+
+    KE_LOG_INFO() << "setLagSwitch: enabled=" << enabled << " delayMs=" << delayMs
+                  << " success=" << result.value("success").toBool();
+#else
+    result["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return result;
+}
+
 QVariantMap ApplicationController::getClrInspectorStatus() const {
     return m_clrInspectorBridge->getClrInspectorStatus();
 }
@@ -5273,6 +6011,76 @@ QVariantMap ApplicationController::getModuleCatalog() const {
         modules.append(item);
     }
 
+    // --- MODULES-V2 : Section 2 — Environnement de test ---
+
+    // 5) EDR blocking check (diagnostic, pas d'installation).
+    {
+        QVariantMap item;
+        item["id"] = QStringLiteral("edr_exclusion");
+        item["displayName"] = QStringLiteral("Exclusion EDR / Defender");
+        item["description"] = QStringLiteral("Vérifie si l'EDR bloque l'injection de code (VirtualAllocEx/WriteProcessMemory/CreateRemoteThread) et propose d'ajouter une exclusion pour le dossier build/bin.");
+        item["installed"] = false; // diagnostic dynamique
+        item["status"] = QStringLiteral("unknown");
+        item["detail"] = QStringLiteral("Cliquez sur 'Vérifier' pour tester.");
+        item["installable"] = true;
+        item["installKind"] = QStringLiteral("diagnostic");
+        item["section"] = QStringLiteral("test_env");
+        modules.append(item);
+    }
+
+    // 6) Debug privilege check.
+    {
+        QVariantMap item;
+        item["id"] = QStringLiteral("debug_privilege");
+        item["displayName"] = QStringLiteral("Privilège SeDebugName");
+        item["description"] = QStringLiteral("Vérifie et active le privilège SeDebugName — requis pour tous les tests de breakpoint matériel et d'injection.");
+        item["installed"] = false; // diagnostic dynamique
+        item["status"] = QStringLiteral("unknown");
+        item["detail"] = QStringLiteral("Cliquez sur 'Vérifier' pour tester.");
+        item["installable"] = true;
+        item["installKind"] = QStringLiteral("diagnostic");
+        item["section"] = QStringLiteral("test_env");
+        modules.append(item);
+    }
+
+    // --- MODULES-V2 : Section 3 — Sécurité / Stealth ---
+
+    // 7) Stealth SC2 profile.
+    {
+        QVariantMap item;
+        item["id"] = QStringLiteral("stealth_sc2_profile");
+        item["displayName"] = QStringLiteral("Profil Stealth SC2");
+        item["description"] = QStringLiteral("Applique le profil stealth SC2 (anti-debug PEB + process mask + dll mask) en un clic — pour les jeux AAA/online.");
+        item["installed"] = m_stealthActive;
+        item["status"] = m_stealthActive ? QStringLiteral("ok") : QStringLiteral("missing");
+        item["detail"] = m_stealthActive
+            ? QStringLiteral("Stealth actif (profil : %1)").arg(m_stealthProfile)
+            : QStringLiteral("Stealth inactif — profils disponibles : sc2, default, minimal.");
+        item["installable"] = true;
+        item["installKind"] = QStringLiteral("stealth");
+        item["section"] = QStringLiteral("stealth");
+        modules.append(item);
+    }
+
+    // 8) Handle hider (kernel driver).
+    {
+        const QVariantMap drv = probeKernelDriver();
+        const bool connected = drv.value("status").toString().compare(QStringLiteral("connected"), Qt::CaseInsensitive) == 0;
+        QVariantMap item;
+        item["id"] = QStringLiteral("handle_hider");
+        item["displayName"] = QStringLiteral("Masquage de handles (kernel)");
+        item["description"] = QStringLiteral("Masque les handles KillEngine dans la table de handles de la cible via le driver kernel (IOCTL 0x804) — invisible à NtQuerySystemInformation/SystemHandleTable.");
+        item["installed"] = connected;
+        item["status"] = connected ? QStringLiteral("ok") : QStringLiteral("missing");
+        item["detail"] = connected
+            ? QStringLiteral("Driver kernel actif — prêt à masquer des handles.")
+            : QStringLiteral("Driver kernel non connecté — installez d'abord le module 'Driver noyau'.");
+        item["installable"] = false; // action ponctuelle, pas d'installation
+        item["installKind"] = QStringLiteral("stealth");
+        item["section"] = QStringLiteral("stealth");
+        modules.append(item);
+    }
+
     result["modules"] = modules;
     return result;
 }
@@ -5288,6 +6096,22 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
         result["error"] = QStringLiteral("Une installation de module est déjà en cours.");
         return result;
     }
+    // MODULES-V2 : modules V2 (diagnostic/stealth) — pas d'installation async,
+    // action synchrone directe.
+    if (moduleId == QStringLiteral("edr_exclusion")) {
+        return addEdrExclusion(QString());
+    }
+    if (moduleId == QStringLiteral("debug_privilege")) {
+        return enableDebugPrivilege();
+    }
+    if (moduleId == QStringLiteral("stealth_sc2_profile")) {
+        return applyStealthProfile(QStringLiteral("sc2"));
+    }
+    if (moduleId == QStringLiteral("handle_hider")) {
+        result["error"] = QStringLiteral("Utilisez la fonctionnalité de masquage de handle depuis l'Expert ou le pipe d'automatisation.");
+        return result;
+    }
+
     if (moduleId != QStringLiteral("lua_runtime")
         && moduleId != QStringLiteral("ai_model")
         && moduleId != QStringLiteral("clr_inspector")
@@ -5361,7 +6185,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
     m_moduleInstallId = moduleId;
     m_activeModuleInstallCancellation = cancellation;
 
-    KE_LOG_INFO() << "installModule(" << moduleId << ", requestId=" << requestId << ")";
+    KE_LOG_INFO() << "installModule(" << moduleId.toStdString() << ", requestId=" << requestId << ")";
 
     std::thread([self, requestId, requestedModule, requestedScript, cancellation]() {
         QVariantMap finished;
@@ -5521,6 +6345,288 @@ QVariantMap ApplicationController::cancelModuleInstall() {
     }
     m_activeModuleInstallCancellation->cancel();
     result["success"] = true;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// MODULES-V2 : Environnement de test + Sécurité/Stealth
+// ---------------------------------------------------------------------------
+
+QVariantMap ApplicationController::checkEdrBlocking() const {
+    QVariantMap result;
+    result["success"] = false;
+    result["blocked"] = true;
+    result["error"] = QStringLiteral("Aucun processus attaché.");
+
+    if (!m_handle.isValid()) {
+        return result;
+    }
+
+#ifdef Q_OS_WIN
+    HANDLE hProcess = OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION,
+        FALSE, static_cast<DWORD>(m_pid));
+    if (!hProcess) {
+        result["error"] = QStringLiteral("OpenProcess failed (error: %1)").arg(GetLastError());
+        return result;
+    }
+
+    // Test 1 : VirtualAllocEx
+    LPVOID mem = VirtualAllocEx(hProcess, nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    const DWORD allocErr = GetLastError();
+    if (!mem) {
+        CloseHandle(hProcess);
+        result["blocked"] = true;
+        result["stage"] = QStringLiteral("VirtualAllocEx");
+        result["errorCode"] = static_cast<int>(allocErr);
+        if (allocErr == ERROR_ACCESS_DENIED) {
+            result["error"] = QStringLiteral(
+                "VirtualAllocEx bloqué (ACCESS_DENIED) — signature EDR/Defender for Endpoint détectée. "
+                "Ajoutez une exclusion pour le dossier build/bin dans Windows Security.");
+        } else {
+            result["error"] = QStringLiteral("VirtualAllocEx failed (error: %1)").arg(allocErr);
+        }
+        result["success"] = true;
+        return result;
+    }
+
+    // Test 2 : WriteProcessMemory (write dummy bytes)
+    const unsigned char dummy[16] = {0};
+    SIZE_T written = 0;
+    const BOOL wpmOk = WriteProcessMemory(hProcess, mem, dummy, sizeof(dummy), &written);
+    const DWORD wpmErr = GetLastError();
+    if (!wpmOk) {
+        VirtualFreeEx(hProcess, mem, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        result["blocked"] = true;
+        result["stage"] = QStringLiteral("WriteProcessMemory");
+        result["errorCode"] = static_cast<int>(wpmErr);
+        result["error"] = QStringLiteral("WriteProcessMemory bloqué (error: %1)").arg(wpmErr);
+        result["success"] = true;
+        return result;
+    }
+
+    // Test 3 : GetProcAddress + CreateRemoteThread (simulation LoadLibrary)
+    HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
+    FARPROC loadLibraryAddr = nullptr;
+    if (hKernel32) {
+        loadLibraryAddr = GetProcAddress(hKernel32, "LoadLibraryW");
+    }
+    if (!loadLibraryAddr) {
+        // Pas un blocage EDR, juste un problème local — on considère que c'est OK
+        VirtualFreeEx(hProcess, mem, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        result["blocked"] = false;
+        result["success"] = true;
+        result["message"] = QStringLiteral("GetProcAddress(Local LoadLibraryW) échoué, mais VirtualAllocEx/WriteProcessMemory OK.");
+        return result;
+    }
+
+    HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0,
+        reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibraryAddr), mem, 0, nullptr);
+    const DWORD crtErr = GetLastError();
+    VirtualFreeEx(hProcess, mem, 0, MEM_RELEASE);
+    CloseHandle(hProcess);
+
+    if (!hThread) {
+        result["blocked"] = true;
+        result["stage"] = QStringLiteral("CreateRemoteThread");
+        result["errorCode"] = static_cast<int>(crtErr);
+        if (crtErr == ERROR_ACCESS_DENIED) {
+            result["error"] = QStringLiteral(
+                "CreateRemoteThread bloqué (ACCESS_DENIED) — signature EDR/Defender for Endpoint détectée. "
+                "Ajoutez une exclusion pour le dossier build/bin dans Windows Security.");
+        } else {
+            result["error"] = QStringLiteral("CreateRemoteThread failed (error: %1)").arg(crtErr);
+        }
+        result["success"] = true;
+        return result;
+    }
+
+    // Tout a réussi — pas de blocage EDR détecté
+    CloseHandle(hThread);
+    result["blocked"] = false;
+    result["success"] = true;
+    result["message"] = QStringLiteral("Aucun blocage EDR détecté — injection de code fonctionnelle sur cette machine.");
+#else
+    result["error"] = QStringLiteral("EDR check is Windows-only");
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::addEdrExclusion(const QString& path) {
+    QVariantMap result;
+    result["success"] = false;
+
+    const QString exclusionPath = path.isEmpty()
+        ? QDir(QCoreApplication::applicationDirPath()).filePath("bin")
+        : path;
+
+#ifdef Q_OS_WIN
+    // Lancer PowerShell en admin avec Add-MpPreference
+    const std::wstring cmd = L"powershell.exe";
+    const std::wstring args =
+        L"-NoProfile -Command \"Add-MpPreference -ExclusionPath '" +
+        exclusionPath.toStdWString() + L"'\"";
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"runas";
+    sei.lpFile = cmd.c_str();
+    sei.lpParameters = args.c_str();
+    sei.nShow = SW_HIDE;
+
+    if (!ShellExecuteExW(&sei)) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_CANCELLED) {
+            result["error"] = QStringLiteral("L'utilisateur a refusé l'élévation UAC.");
+        } else {
+            result["error"] = QStringLiteral("ShellExecuteExW failed (error: %1)").arg(err);
+        }
+        return result;
+    }
+
+    if (sei.hProcess) {
+        WaitForSingleObject(sei.hProcess, 30000);
+        DWORD exitCode = 0;
+        GetExitCodeProcess(sei.hProcess, &exitCode);
+        CloseHandle(sei.hProcess);
+
+        if (exitCode == 0) {
+            result["success"] = true;
+            result["message"] = QStringLiteral("Exclusion ajoutée : %1").arg(exclusionPath);
+        } else {
+            result["error"] = QStringLiteral("PowerShell a retourné le code %1.").arg(exitCode);
+        }
+    }
+#else
+    result["error"] = QStringLiteral("EDR exclusion is Windows-only");
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::checkDebugPrivilege() const {
+    QVariantMap result;
+    result["success"] = false;
+    result["hasDebugPrivilege"] = false;
+
+#ifdef Q_OS_WIN
+    HANDLE hToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        result["error"] = QStringLiteral("OpenProcessToken failed (error: %1)").arg(GetLastError());
+        return result;
+    }
+
+    TOKEN_PRIVILEGES tp{};
+    DWORD size = 0;
+    if (GetTokenInformation(hToken, TokenPrivileges, &tp, sizeof(tp), &size) ||
+        GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+        // Allouer la bonne taille
+        std::vector<BYTE> buffer(size);
+        if (GetTokenInformation(hToken, TokenPrivileges, buffer.data(), static_cast<DWORD>(buffer.size()), &size)) {
+            const auto* privileges = reinterpret_cast<const TOKEN_PRIVILEGES*>(buffer.data());
+            bool found = false;
+            for (DWORD i = 0; i < privileges->PrivilegeCount; ++i) {
+                wchar_t name[64] = {};
+                DWORD nameLen = sizeof(name) / sizeof(wchar_t);
+                LUID luid = privileges->Privileges[i].Luid;
+                LookupPrivilegeNameW(nullptr, &luid, name, &nameLen);
+                if (QString::fromWCharArray(name) == QString::fromWCharArray(SE_DEBUG_NAME)) {
+                    found = true;
+                    const bool enabled = (privileges->Privileges[i].Attributes & SE_PRIVILEGE_ENABLED) != 0;
+                    result["hasDebugPrivilege"] = true;
+                    result["enabled"] = enabled;
+                    result["success"] = true;
+                    result["message"] = enabled
+                        ? QStringLiteral("SeDebugName est actif.")
+                        : QStringLiteral("SeDebugName est présent mais désactivé.");
+                    break;
+                }
+            }
+            if (!found) {
+                result["hasDebugPrivilege"] = false;
+                result["success"] = true;
+                result["message"] = QStringLiteral("SeDebugName n'est pas présent dans les privilèges du token.");
+            }
+        }
+    }
+    CloseHandle(hToken);
+#else
+    result["error"] = QStringLiteral("Debug privilege check is Windows-only");
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::enableDebugPrivilege() {
+    QVariantMap result;
+    result["success"] = false;
+
+#ifdef Q_OS_WIN
+    HANDLE hToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
+        result["error"] = QStringLiteral("OpenProcessToken failed (error: %1)").arg(GetLastError());
+        return result;
+    }
+
+    TOKEN_PRIVILEGES tp{};
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    if (!LookupPrivilegeValueW(nullptr, SE_DEBUG_NAME, &tp.Privileges[0].Luid)) {
+        result["error"] = QStringLiteral("LookupPrivilegeValueW failed (error: %1)").arg(GetLastError());
+        CloseHandle(hToken);
+        return result;
+    }
+
+    const BOOL ok = AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp), nullptr, nullptr);
+    const DWORD err = GetLastError();
+    CloseHandle(hToken);
+
+    if (!ok || err == ERROR_NOT_ALL_ASSIGNED) {
+        result["error"] = QStringLiteral("AdjustTokenPrivileges failed (error: %1). Vérifiez que vous avez les droits admin.").arg(err);
+        return result;
+    }
+
+    result["success"] = true;
+    result["message"] = QStringLiteral("SeDebugName activé avec succès.");
+#else
+    result["error"] = QStringLiteral("Debug privilege enable is Windows-only");
+#endif
+
+    return result;
+}
+
+QVariantMap ApplicationController::applyStealthProfile(const QString& profile) {
+    // Réutilise applyStealthMode existant — c'est déjà un Q_INVOKABLE
+    // mais on veut un retour explicite pour la vue Modules.
+    return applyStealthMode(profile);
+}
+
+QVariantMap ApplicationController::restoreStealthProfile() {
+    // Réutilise restoreStealthMode existant.
+    return restoreStealthMode();
+}
+
+QVariantMap ApplicationController::hideHandle(uint64_t ownerPid, uint64_t handleValue) {
+    QVariantMap result;
+    result["success"] = false;
+
+    // Utilise le kernel driver manager existant (signature QString-based).
+    const auto drvResult = m_kernelDriverManager->handleTable(
+        QString::number(ownerPid),
+        QStringLiteral("0x") + QString::number(handleValue, 16),
+        true /* hide */);
+
+    if (!drvResult.value("success").toBool()) {
+        result["error"] = drvResult.value("error").toString();
+        return result;
+    }
+
+    result["success"] = true;
+    result["message"] = drvResult.value("message").toString();
     return result;
 }
 

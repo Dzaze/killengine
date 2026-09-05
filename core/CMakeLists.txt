@@ -146,6 +146,10 @@ add_library(killcore STATIC
     scanner/structure_analyzer.h
     scanner/structure_analyzer.cpp
 
+    # Phase auto-dissect — Scan automatique d'instances de structures
+    scanner/auto_dissect.h
+    scanner/auto_dissect.cpp
+
     # Phase 20 — Injection DLL + Hooking
     inject/dll_injector.h
     inject/dll_injector.cpp
@@ -160,6 +164,16 @@ add_library(killcore STATIC
     inject/api_hook_ipc.h
     inject/api_hook.h
     inject/api_hook.cpp
+
+    # Lag switch — injection DLL + MinHook sur recv/WSARecv
+    inject/lag_switch_ipc.h
+    inject/lag_switch.h
+    inject/lag_switch.cpp
+
+    # Proxy HTTP — injection DLL + MinHook sur HttpSendRequest/WinHttpSendRequest
+    inject/http_proxy_ipc.h
+    inject/http_proxy.h
+    inject/http_proxy.cpp
 
     scripting/auto_assembler.h
     scripting/auto_assembler.cpp
@@ -313,4 +327,32 @@ set_target_properties(KillEngineApiHookHandler PROPERTIES OUTPUT_NAME "KillEngin
 if(WIN32)
     target_compile_definitions(KillEngineApiHookHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
     target_link_libraries(KillEngineApiHookHandler PRIVATE minhook)
+endif()
+
+# ---------------------------------------------------------------------------
+# Lag switch handler — DLL injectée qui retarde recv/WSARecv via MinHook
+# ---------------------------------------------------------------------------
+add_library(KillEngineLagSwitchHandler SHARED
+    inject/lag_switch_ipc.h
+    inject/lag_switch_handler/lag_switch_handler.cpp
+)
+target_include_directories(KillEngineLagSwitchHandler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+set_target_properties(KillEngineLagSwitchHandler PROPERTIES OUTPUT_NAME "KillEngineLagSwitchHandler")
+if(WIN32)
+    target_compile_definitions(KillEngineLagSwitchHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+    target_link_libraries(KillEngineLagSwitchHandler PRIVATE minhook ws2_32)
+endif()
+
+# ---------------------------------------------------------------------------
+# Proxy HTTP handler — DLL injectée qui intercepte HttpSendRequest/WinHttpSendRequest
+# ---------------------------------------------------------------------------
+add_library(KillEngineHttpProxyHandler SHARED
+    inject/http_proxy_ipc.h
+    inject/http_proxy_handler/http_proxy_handler.cpp
+)
+target_include_directories(KillEngineHttpProxyHandler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+set_target_properties(KillEngineHttpProxyHandler PROPERTIES OUTPUT_NAME "KillEngineHttpProxyHandler")
+if(WIN32)
+    target_compile_definitions(KillEngineHttpProxyHandler PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+    target_link_libraries(KillEngineHttpProxyHandler PRIVATE minhook winhttp wininet)
 endif()

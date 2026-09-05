@@ -38,6 +38,8 @@ class QWebEnginePage;
 
 namespace killcore {
 class WebView2Inspector;
+class LagSwitchSession;
+class HttpProxySession;
 }
 
 namespace killengine {
@@ -212,6 +214,9 @@ public:
         const QString& baseAddressBHex,
         const QString& fieldAddressBHex,
         const QVariantMap& options) const;
+
+    /// Scanne automatiquement la mémoire pour trouver toutes les instances d'un template de structure.
+    Q_INVOKABLE QVariantMap findStructureInstances(const QVariantMap& templateJson) const;
 
     /// Cherche une valeur affichée sous forme de texte (ASCII / UTF-16LE) dans la mémoire.
     Q_INVOKABLE QVariantMap scanUiStrings(const QString& value, const QVariantMap& options) const;
@@ -788,6 +793,34 @@ public:
     /// d'élévation nécessaire.
     Q_INVOKABLE QVariantMap getProcessNetworkBlockStatus() const;
 
+    /// Liste les connexions TCP/UDP actives du processus attaché (lecture
+    /// seule, via GetExtendedTcpTable/GetExtendedUdpTable). Inclut la
+    /// résolution DNS best-effort (getnameinfo, asynchrone, cache LRU).
+    /// Retourne {success, connections: [{protocol, localAddr, remoteAddr,
+    /// remoteHost, state, pid}], error}.
+    Q_INVOKABLE QVariantMap getProcessNetworkConnections();
+
+    /// Liste les modules DLL réseau chargés par le processus attaché
+    /// (EnumProcessModules + GetModuleFileNameEx, filtré sur une liste
+    /// connue de DLL réseau). Retourne {success, modules: [{name, path,
+    /// category, description}], error}.
+    Q_INVOKABLE QVariantMap getProcessNetworkModules();
+
+    /// Proxy HTTP : intercepte les requêtes HTTP/HTTPS du process attaché
+    /// via injection DLL + hook WinINet/WinHTTP.
+    Q_INVOKABLE QVariantMap startHttpProxy(int port, bool interceptHttps);
+    Q_INVOKABLE QVariantMap stopHttpProxy();
+    Q_INVOKABLE QVariantMap getHttpProxyRequests();
+    Q_INVOKABLE QVariantMap modifyHttpRequest(const QString& requestId, const QString& newRequestBody);
+
+    /// Spoof DNS : ajoute/retire une entrée dans le fichier hosts Windows.
+    Q_INVOKABLE QVariantMap spoofDns(const QString& domain, const QString& targetIp);
+    Q_INVOKABLE QVariantMap restoreDns(const QString& domain);
+
+    /// Lag switch : retarde les fonctions recv/WSARecv du process attaché
+    /// via injection DLL + MinHook.
+    Q_INVOKABLE QVariantMap setLagSwitch(bool enabled, int delayMs);
+
     /// Inspecteur CLR/ClrMD externe : lance le helper .NET si
     /// necessaire puis dialogue avec lui via JSON-RPC sur named pipe.
     Q_INVOKABLE QVariantMap getClrInspectorStatus() const;
@@ -991,6 +1024,29 @@ public:
     /// Annule l'installation de module en cours (thread worker uniquement —
     /// pas d'effet sur le cas élevé UAC déjà détaché).
     Q_INVOKABLE QVariantMap cancelModuleInstall();
+
+    // MODULES-V2 : Environnement de test + Sécurité/Stealth
+    /// Vérifie si l'EDR bloque l'injection de code sur le process attaché
+    /// (VirtualAllocEx + WriteProcessMemory + CreateRemoteThread simulés).
+    Q_INVOKABLE QVariantMap checkEdrBlocking() const;
+
+    /// Ajoute une exclusion Defender pour le dossier build/bin (PowerShell admin).
+    Q_INVOKABLE QVariantMap addEdrExclusion(const QString& path);
+
+    /// Vérifie si le privilège SeDebugName est actif pour le process courant.
+    Q_INVOKABLE QVariantMap checkDebugPrivilege() const;
+
+    /// Active le privilège SeDebugName pour le process courant.
+    Q_INVOKABLE QVariantMap enableDebugPrivilege();
+
+    /// Applique un profil stealth (sc2/default/minimal) sur le process attaché.
+    Q_INVOKABLE QVariantMap applyStealthProfile(const QString& profile);
+
+    /// Restaure le mode stealth actif.
+    Q_INVOKABLE QVariantMap restoreStealthProfile();
+
+    /// Masque un handle spécifique dans la table de handles de la cible (via driver kernel).
+    Q_INVOKABLE QVariantMap hideHandle(uint64_t ownerPid, uint64_t handleValue);
 
     /// Sauvegarde les paramètres persistants de l'application.
     Q_INVOKABLE QVariantMap saveSettings(const QVariantMap& settings);
@@ -1558,6 +1614,9 @@ private:
     // detach (voir doc au-dessus de la declaration Q_INVOKABLE).
     QString                 m_networkBlockRuleToken;
     QString                 m_networkBlockExePath;
+    // Lag switch session (injection DLL + MinHook sur recv/WSARecv)
+    std::unique_ptr<killcore::LagSwitchSession> m_lagSwitchSession;
+    std::unique_ptr<killcore::HttpProxySession> m_httpProxySession;
     QVariantMap             m_webView2ActiveTarget;
     QString                 m_webView2Endpoint;
     int                     m_webView2BrowserProcessId{0};

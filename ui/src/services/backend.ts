@@ -1004,6 +1004,33 @@ export interface ProcessNetworkBlockStatus {
   error?: string
 }
 
+// Réseau — Connexions actives du processus attaché (lecture seule)
+export interface NetworkConnection {
+  protocol: 'TCP' | 'UDP'
+  localAddr: string
+  remoteAddr: string
+  remoteHost: string | null
+  state: string
+  pid: number
+}
+
+export interface NetworkModule {
+  name: string
+  path: string
+  category: 'winsock' | 'http' | 'dns' | 'crypto' | 'system'
+  description: string
+}
+
+export interface HttpProxyRequest {
+  id: string
+  method: string
+  url: string
+  requestBody: string | null
+  responseBody: string | null
+  timestamp: number
+  modified: boolean
+}
+
 // Statut de l interception de fonctions (roadmap section B) : hook MinHook
 // injecte qui compte les appels d une fonction (mode 0) ou force son retour
 // (mode 1). callCount est lu en direct depuis l IPC partagee.
@@ -1243,6 +1270,8 @@ export interface ModuleCatalogItem {
   path?: string
   installable: boolean
   installKind: string
+  /** MODULES-V2 : section d'affichage ('dependencies' | 'test_env' | 'stealth'). */
+  section?: string
 }
 
 export interface ModuleCatalog {
@@ -1408,6 +1437,8 @@ export interface ModuleCatalog {
     fieldAddressBHex: string,
     options: Record<string, unknown>,
   ): Promise<Record<string, unknown>>
+  /** Scanne automatiquement la mémoire pour trouver toutes les instances d'un template de structure. */
+  findStructureInstances?(templateJson: Record<string, unknown>): Promise<Record<string, unknown>>
   addInvestigationHypothesis?(description: string, baselineScore?: number): Promise<Record<string, unknown>>
   recordInvestigationTestResult?(hypothesisId: string, confirmed: boolean, evidenceNote: string): Promise<Record<string, unknown>>
   getInvestigationNotebookSynthesis?(): Promise<Record<string, unknown>>
@@ -1464,6 +1495,20 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   blockProcessNetwork?(): Promise<ProcessNetworkBlockStatus>
   unblockProcessNetwork?(): Promise<ProcessNetworkBlockStatus>
   getProcessNetworkBlockStatus?(): Promise<ProcessNetworkBlockStatus>
+  /** Réseau — Connexions actives du processus attaché (lecture seule). */
+  getProcessNetworkConnections?(): Promise<{ success: boolean; connections: NetworkConnection[]; error?: string }>
+  /** Réseau — Modules DLL réseau chargés par le processus attaché (lecture seule). */
+  getProcessNetworkModules?(): Promise<{ success: boolean; modules: NetworkModule[]; error?: string }>
+  /** Proxy HTTP — Intercepte les requêtes HTTP/HTTPS du process attaché. */
+  startHttpProxy?(port: number, interceptHttps: boolean): Promise<{ success: boolean; port?: number; proxyPid?: number; error?: string }>
+  stopHttpProxy?(): Promise<{ success: boolean; error?: string }>
+  getHttpProxyRequests?(): Promise<{ success: boolean; requests: HttpProxyRequest[]; error?: string }>
+  modifyHttpRequest?(requestId: string, newRequestBody: string): Promise<{ success: boolean; error?: string }>
+  /** Spoof DNS — Ajoute/retire une entrée dans le fichier hosts Windows. */
+  spoofDns?(domain: string, targetIp: string): Promise<{ success: boolean; error?: string }>
+  restoreDns?(domain: string): Promise<{ success: boolean; error?: string }>
+  /** Lag switch — Retarde les fonctions recv/WSARecv du process attaché. */
+  setLagSwitch?(enabled: boolean, delayMs: number): Promise<{ success: boolean; error?: string }>
   /** Roadmap section B - interception de fonctions : hook MinHook injecte sur module!fonction. mode: 0=compter, 1=forcer retour. */
   startApiHook?(moduleName: string, functionName: string, mode: number, forcedReturnValue: number): Promise<ApiHookStatus>
   stopApiHook?(): Promise<ApiHookStatus>
@@ -1530,6 +1575,20 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   cancelModuleInstall?(): Promise<Record<string, unknown>>
   moduleInstallProgress?: QWebChannelSignal<Record<string, unknown>>
   moduleInstallFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** MODULES-V2 : vérifie si l'EDR bloque l'injection sur le process attaché. */
+  checkEdrBlocking?(): Promise<Record<string, unknown>>
+  /** MODULES-V2 : ajoute une exclusion Defender pour le dossier build/bin. */
+  addEdrExclusion?(path: string): Promise<Record<string, unknown>>
+  /** MODULES-V2 : vérifie si SeDebugName est actif. */
+  checkDebugPrivilege?(): Promise<Record<string, unknown>>
+  /** MODULES-V2 : active SeDebugName. */
+  enableDebugPrivilege?(): Promise<Record<string, unknown>>
+  /** MODULES-V2 : applique un profil stealth (sc2/default/minimal). */
+  applyStealthProfile?(profile: string): Promise<Record<string, unknown>>
+  /** MODULES-V2 : restaure le mode stealth. */
+  restoreStealthProfile?(): Promise<Record<string, unknown>>
+  /** MODULES-V2 : masque un handle dans la table de handles (kernel). */
+  hideHandle?(ownerPid: number, handleValue: number): Promise<Record<string, unknown>>
   /** Sélecteur de fichier natif pour le chemin GGUF personnalisé (remplace la saisie manuelle). */
   browseForModelFile?(): Promise<Record<string, unknown>>
   /** Modale de bienvenue première ouverture (QSettings, survit à un profil Windows différent). */
@@ -2262,6 +2321,14 @@ class BackendService {
           candidates: [],
         }
       },
+      async findStructureInstances(_templateJson: Record<string, unknown>) {
+        return {
+          success: false,
+          error: 'Mock backend',
+          instances: [],
+          instanceCount: 0,
+        }
+      },
       async addInvestigationHypothesis(_description: string, _baselineScore = 50) {
         return {
           success: false,
@@ -2560,6 +2627,50 @@ class BackendService {
       async getProcessNetworkBlockStatus() {
         return { success: true, blocked: false }
       },
+      async getProcessNetworkConnections() {
+        return {
+          success: true,
+          connections: [
+            { protocol: 'TCP', localAddr: '192.168.1.10:49832', remoteAddr: '52.14.88.23:443', remoteHost: 'matchmaking.steamserver.net', state: 'ESTABLISHED', pid: 12345 },
+            { protocol: 'TCP', localAddr: '192.168.1.10:49833', remoteAddr: '104.18.32.7:80', remoteHost: null, state: 'TIME_WAIT', pid: 12345 }
+          ]
+        }
+      },
+      async getProcessNetworkModules() {
+        return {
+          success: true,
+          modules: [
+            { name: 'ws2_32.dll', path: 'C:\\Windows\\System32\\ws2_32.dll', category: 'winsock', description: 'Windows Socket 2 API' },
+            { name: 'winhttp.dll', path: 'C:\\Windows\\System32\\winhttp.dll', category: 'http', description: 'Windows HTTP client' }
+          ]
+        }
+      },
+      async startHttpProxy(port, _interceptHttps) {
+        return { success: true, port, proxyPid: 99999 }
+      },
+      async stopHttpProxy() {
+        return { success: true }
+      },
+      async getHttpProxyRequests() {
+        return {
+          success: true,
+          requests: [
+            { id: 'req_001', method: 'POST', url: 'https://api.game.com/sync', requestBody: '{"health":100}', responseBody: '{"health":95}', timestamp: Date.now(), modified: false }
+          ]
+        }
+      },
+      async modifyHttpRequest(_requestId, _newRequestBody) {
+        return { success: true }
+      },
+      async spoofDns(_domain, _targetIp) {
+        return { success: true }
+      },
+      async restoreDns(_domain) {
+        return { success: true }
+      },
+      async setLagSwitch(_enabled, _delayMs) {
+        return { success: true }
+      },
       async startApiHook(_m: string, _fn: string, _mode: number, _ret: number) {
         return { success: false, active: false, error: 'Mock backend' }
       },
@@ -2743,6 +2854,28 @@ class BackendService {
       },
       async cancelModuleInstall() {
         return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      // MODULES-V2 mocks
+      async checkEdrBlocking() {
+        return { success: true, blocked: false, message: 'Mock: aucun blocage EDR détecté.' }
+      },
+      async addEdrExclusion(_path: string) {
+        return { success: false, error: 'Mock: exclusion non disponible.' }
+      },
+      async checkDebugPrivilege() {
+        return { success: true, hasDebugPrivilege: true, enabled: true, message: 'Mock: SeDebugName actif.' }
+      },
+      async enableDebugPrivilege() {
+        return { success: true, message: 'Mock: SeDebugName activé.' }
+      },
+      async applyStealthProfile(_profile: string) {
+        return { success: false, error: 'Mock: stealth non disponible.' }
+      },
+      async restoreStealthProfile() {
+        return { success: false, error: 'Mock: stealth non disponible.' }
+      },
+      async hideHandle(_ownerPid: number, _handleValue: number) {
+        return { success: false, error: 'Mock: handle hider non disponible.' }
       },
       async hasSeenOnboarding() {
         return true

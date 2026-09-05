@@ -94,6 +94,7 @@
   "modules": {
     "intro": "Optional KillEngine dependencies: installed/missing status and in-UI installation (local scripts, network download, UAC prompt). Install missing modules before exporting the package to another machine.",
     "refresh": "Refresh",
+    "refreshAll": "Refresh all",
     "refreshing": "Scanning…",
     "empty": "No module detected — run a scan.",
     "progress": "Installation in progress…",
@@ -107,7 +108,53 @@
       "model": "Download",
       "clr": "Build",
       "kernel": "Install (UAC)",
-      "generic": "Install"
+      "generic": "Install",
+      "edr": "Check / Exclude",
+      "debugPriv": "Check / Enable",
+      "stealth": "Apply",
+      "restore": "Restore",
+      "handleHider": "Hide"
+    },
+    "sections": {
+      "dependencies": "Dependencies",
+      "testEnv": "Test Environment",
+      "stealth": "Security / Stealth"
+    },
+    "edr": {
+      "check": "Check",
+      "addExclusion": "Add Exclusion",
+      "confirmTitle": "Check EDR Blocking",
+      "confirmDesc": "Test if the EDR blocks code injection on the attached process. This simulates VirtualAllocEx + WriteProcessMemory + CreateRemoteThread.",
+      "addExclusionTitle": "Add Defender Exclusion",
+      "addExclusionDesc": "Add the build/bin folder to Microsoft Defender exclusions. This requires UAC elevation.",
+      "copied": "Copied!",
+      "showManual": "Manual solutions",
+      "hideManual": "Hide manual solutions",
+      "manualTitle": "Manual solutions (run as administrator)",
+      "step1Title": "Step 1 — PowerShell exclusion (recommended)",
+      "step1Desc": "Adds the build folder to Defender exclusions. Run in an elevated PowerShell.",
+      "step2Title": "Step 2 — Disable Windows Defender (registry)",
+      "step2Desc": "Completely disables Windows Defender via registry. Requires a reboot.",
+      "step3Title": "Step 3 — Disable behavior monitoring",
+      "step3Desc": "Disables only behavior monitoring (less aggressive than step 2).",
+      "copy": "Copy",
+      "manualWarning": "⚠ These changes reduce your system's protection. Re-enable them after your test sessions."
+    },
+    "debugPriv": {
+      "check": "Check",
+      "enable": "Enable",
+      "confirmTitle": "Enable SeDebugName",
+      "confirmDesc": "Enable the SeDebugName privilege for the current process — required for hardware breakpoints and injection."
+    },
+    "handleHider": {
+      "ownerPid": "Target process PID",
+      "handleValue": "Handle value (hex)",
+      "hide": "Hide",
+      "hiding": "Hiding..."
+    },
+    "stealth": {
+      "confirmTitle": "Apply SC2 Stealth Profile",
+      "confirmDesc": "Apply the SC2 stealth profile (PEB anti-debug + process mask + dll mask) to the attached process. This makes KillEngine more discreet."
     }
   },
   "webview2": {
@@ -442,6 +489,36 @@
       "cost": "Attaches the Windows debugger. Change the value in the program during the capture window, otherwise nothing is caught.",
       "example": "The address you found refuses to stay frozen. Click Find what writes, then land a hit in-game during the capture window: KillEngine shows the exact instruction writing that value, with its module and offset."
     },
+    "autoDissect": {
+      "title": "Auto-dissect",
+      "intro": "Automatically scans memory to find all instances of a saved structure template.",
+      "empty": "No instance found matching the template.",
+      "scan": "Scan instances",
+      "maxResults": "Max results",
+      "minConfidence": "Min confidence",
+      "address": "Address",
+      "confidence": "Confidence",
+      "values": "Values",
+      "scannedRegions": "Scanned regions",
+      "totalCandidates": "Tested candidates",
+      "what": "Walks all writable regions of the process and matches template fields to automatically discover all entities (players, units, items) of the same type.",
+      "when": "When you've saved a structure template (e.g. a player layout) and want to find ALL instances of that structure in memory at once.",
+      "cost": "Memory read only, no write. Can be slow on large processes (scans all writable regions).",
+      "example": "You found a player layout (HP@+0x0, Mana@+0x4, XP@+0x8). Click Auto-dissect: KillEngine scans all memory and returns addresses of ALL players/units with that same layout."
+    },
+    "findWhatAccesses": {
+      "title": "Find what accesses",
+      "intro": "Captures the program instructions that READ this address (read-only, no write).",
+      "empty": "No access captured during the observation window.",
+      "cancelled": "Capture cancelled by the user.",
+      "instruction": "Instruction",
+      "module": "Module",
+      "thread": "Thread",
+      "what": "Attaches the debugger and captures instructions that read this address — useful to trace computation sources without modifying memory.",
+      "when": "When you want to know WHO reads a value without modifying it (e.g. understanding where a calculation comes from before deciding what to write).",
+      "cost": "Attaches the Windows debugger. Change the value in the program during the capture window.",
+      "example": "You found a value's address but don't know how it's computed. Click Find what accesses, then trigger the action in-game: KillEngine shows all instructions reading this address."
+    },
     "disassembleBackward": {
       "title": "Disassemble backward",
       "what": "Reads the bytes right before the instruction captured by Find what writes, and reconstructs the instructions that lead up to it (read-only, no debugger attach). Instructions with a simple [register+displacement] memory operand are highlighted as \"candidate fields\".",
@@ -486,10 +563,89 @@
     },
     "network": {
       "title": "Network",
+      "intro": "Analyze and control network traffic of the attached process.",
+      "empty": "No process attached.",
       "what": "Adds (or removes) a dedicated Windows Firewall rule blocking all inbound/outbound traffic for the attached process's executable.",
       "when": "To check whether an unstable memory value comes from a background server sync rather than a purely local reallocation — block the network, observe whether the behavior changes, then restore it once the test is done.",
       "cost": "Modifies the Windows Firewall via a UAC prompt (explicit elevation): same risk tier as speedhack, confirmation required. The rule persists even after detaching the process, until explicitly restored.",
-      "example": "A displayed counter doesn't match any stable memory address despite several scans. Block the process's network, vary the counter in-game (offline), and see if the scan converges better — if so, the value likely depends on a server sync."
+      "example": "A displayed counter doesn't match any stable memory address despite several scans. Block the process's network, vary the counter in-game (offline), and see if the scan converges better — if so, the value likely depends on a server sync.",
+      "connections": {
+        "title": "Active connections",
+        "empty": "No network connections detected.",
+        "refresh": "Refresh",
+        "live": "Live",
+        "protocol": "Protocol",
+        "localAddr": "Local address",
+        "remoteAddr": "Remote address",
+        "remoteHost": "Remote host",
+        "state": "State",
+        "lastRefresh": "Last refresh",
+        "dnsResolving": "DNS resolving...",
+        "totalLabel": "connections",
+        "establishedLabel": "active",
+        "remoteAddr": "Remote address..."
+      },
+      "modules": {
+        "title": "Loaded network modules",
+        "empty": "No known network modules detected.",
+        "name": "Module",
+        "category": "Category",
+        "path": "Path",
+        "count": "modules detected",
+        "category_winsock": "Socket API",
+        "category_http": "HTTP / Web",
+        "category_dns": "DNS",
+        "category_crypto": "Encryption / TLS",
+        "category_system": "System"
+      },
+      "proxy": {
+        "title": "HTTP Proxy",
+        "intro": "Intercepts and modifies HTTP/HTTPS requests from the game in real time.",
+        "port": "Port",
+        "interceptHttps": "Intercept HTTPS",
+        "start": "Start proxy",
+        "stop": "Stop proxy",
+        "active": "Proxy active",
+        "inactive": "Proxy inactive",
+        "requests": "Intercepted requests",
+        "noRequests": "No intercepted requests.",
+        "method": "Method",
+        "url": "URL",
+        "requestBody": "Request body",
+        "responseBody": "Response body",
+        "modify": "Modify",
+        "apply": "Apply",
+        "editorPlaceholder": "New body JSON..."
+      },
+      "dnsSpoof": {
+        "title": "DNS Spoof",
+        "intro": "Redirects a domain to a local IP via the Windows hosts file.",
+        "domain": "Domain",
+        "targetIp": "Target IP",
+        "add": "Add entry",
+        "remove": "Remove",
+        "entries": "Active entries",
+        "noEntries": "No active entries."
+      },
+      "lagSwitch": {
+        "title": "Lag switch",
+        "intro": "Artificially delays the game's network responses.",
+        "delay": "Delay",
+        "ms": "ms",
+        "enable": "Enable lag switch",
+        "disable": "Disable",
+        "active": "Lag active",
+        "inactive": "Lag inactive"
+      },
+      "block": {
+        "title": "Network block",
+        "intro": "Blocks all inbound/outbound traffic of the attached process via a Windows Firewall rule.",
+        "status": "Status",
+        "blocked": "Network blocked",
+        "unblocked": "Network normal",
+        "toggle": "Block network",
+        "toggleRestore": "Restore network"
+      }
     },
     "pointerChains": {
       "title": "Pointer chains",

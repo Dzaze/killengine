@@ -23,6 +23,8 @@ import RegionPanel from '@/components/expert/RegionPanel.vue'
 import NextScanPanel from '@/components/expert/NextScanPanel.vue'
 import WatchLivePanel from '@/components/expert/WatchLivePanel.vue'
 import GroupScanPanel from '@/components/expert/GroupScanPanel.vue'
+import FindWhatAccessesPanel from '@/components/expert/FindWhatAccessesPanel.vue'
+import AutoDissectPanel from '@/components/expert/AutoDissectPanel.vue'
 import PointerChainWatchPanel from '@/components/expert/PointerChainWatchPanel.vue'
 import ActionLogPanel from '@/components/expert/ActionLogPanel.vue'
 import SessionPanel from '@/components/expert/SessionPanel.vue'
@@ -2749,6 +2751,8 @@ onMounted(() => {
       <PointerChainScanPanel v-show="showStep('inspect')" />
 
       <GroupScanPanel v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
+      <FindWhatAccessesPanel v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
+      <AutoDissectPanel v-show="showStep('find')" />
       <PointerChainWatchPanel v-show="showStep('inspect')" />
       <SessionPanel v-show="showStep('persist')" />
       <ActionLogPanel v-show="showStep('persist')" />

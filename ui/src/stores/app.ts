@@ -28,6 +28,7 @@ import { useInvestigationStore, type InvestigationRun, type InvestigationStep } 
 import { useActionLogStore, type UserActionLogEntry } from './actionLog'
 import { useClrInspectorStore } from './clrInspector'
 import { useSpeedhackStore } from './speedhack'
+import { useNetworkStore } from './network'
 import { useAutomationPipeStore } from './automationPipe'
 import { useKernelDriverStore } from './kernelDriver'
 import { useRiskGateStore, type RiskDialogState } from './riskGate'
@@ -266,6 +267,33 @@ export const useAppStore = defineStore('app', () => {
     apiHookMode,
     apiHookForcedReturn,
   } = storeToRefs(speedhackStore)
+
+  // Store Réseau (connexions, DLL, proxy HTTP, spoof DNS, lag switch)
+  const networkStore = useNetworkStore()
+  const networkConnections = networkStore.networkConnections
+  const networkModules = networkStore.networkModules
+  const networkConnectionsBusy = networkStore.networkConnectionsBusy
+  const networkModulesBusy = networkStore.networkModulesBusy
+  const networkLastRefresh = networkStore.networkLastRefresh
+  const liveRefreshEnabled = networkStore.liveRefreshEnabled
+  const httpProxyActive = networkStore.httpProxyActive
+  const httpProxyBusy = networkStore.httpProxyBusy
+  const httpProxyPort = networkStore.httpProxyPort
+  const httpProxyInterceptHttps = networkStore.httpProxyInterceptHttps
+  const httpProxyRequests = networkStore.httpProxyRequests
+  const selectedHttpRequest = networkStore.selectedHttpRequest
+  const httpRequestBodyEditor = networkStore.httpRequestBodyEditor
+  const dnsSpoofEntries = networkStore.dnsSpoofEntries
+  const dnsSpoofBusy = networkStore.dnsSpoofBusy
+  const dnsSpoofDomain = networkStore.dnsSpoofDomain
+  const dnsSpoofTargetIp = networkStore.dnsSpoofTargetIp
+  const lagSwitchActive = networkStore.lagSwitchActive
+  const lagSwitchBusy = networkStore.lagSwitchBusy
+  const lagSwitchDelayMs = networkStore.lagSwitchDelayMs
+  const _networkFilterProtocol = networkStore._networkFilterProtocol
+  const _networkFilterState = networkStore._networkFilterState
+  const _networkFilterIp = networkStore._networkFilterIp
+
   const luaScriptingStatus = ref<LuaScriptingStatus | null>(null)
   const luaScriptText = ref([
     'local ke = require("killengine")',
@@ -4665,6 +4693,46 @@ export const useAppStore = defineStore('app', () => {
     blockProcessNetwork,
     unblockProcessNetwork,
     refreshProcessNetworkBlockStatus,
+    // Réseau — lecture seule
+    networkConnections,
+    networkModules,
+    networkConnectionsBusy,
+    networkModulesBusy,
+    networkLastRefresh,
+    liveRefreshEnabled,
+    refreshNetworkConnections: networkStore.refreshNetworkConnections,
+    refreshNetworkModules: networkStore.refreshNetworkModules,
+    refreshAllNetwork: networkStore.refreshAllNetwork,
+    startLiveRefresh: networkStore.startLiveRefresh,
+    stopLiveRefresh: networkStore.stopLiveRefresh,
+    // Proxy HTTP
+    httpProxyActive,
+    httpProxyBusy,
+    httpProxyPort,
+    httpProxyInterceptHttps,
+    httpProxyRequests,
+    selectedHttpRequest,
+    httpRequestBodyEditor,
+    startHttpProxy: networkStore.startHttpProxy,
+    stopHttpProxy: networkStore.stopHttpProxy,
+    refreshHttpProxyRequests: networkStore.refreshHttpProxyRequests,
+    modifySelectedHttpRequest: networkStore.modifySelectedHttpRequest,
+    // Spoof DNS
+    dnsSpoofEntries,
+    dnsSpoofBusy,
+    dnsSpoofDomain,
+    dnsSpoofTargetIp,
+    addDnsSpoofEntry: networkStore.addDnsSpoofEntry,
+    removeDnsSpoofEntry: networkStore.removeDnsSpoofEntry,
+    // Lag switch
+    lagSwitchActive,
+    lagSwitchBusy,
+    lagSwitchDelayMs,
+    toggleLagSwitch: networkStore.toggleLagSwitch,
+    // Network filter state (refs)
+    _networkFilterProtocol,
+    _networkFilterState,
+    _networkFilterIp,
     apiHookStatus,
     apiHookBusy,
     apiHookModuleName,

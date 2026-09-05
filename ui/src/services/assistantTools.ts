@@ -58,6 +58,8 @@ export const assistantTools: AssistantTool[] = [
 
   // --- Debug / Patch ---
   { name: 'find_what_writes', category: 'Debug / Patch', risk: 'debug', execution: 'redirect', summary: 'Capture l\'instruction qui écrit une adresse.', note: 'Attache un debugger et nécessite une variation live → bouton « Écrit par » dans la vue Expert.' },
+  { name: 'find_what_accesses', category: 'Debug / Patch', risk: 'debug', execution: 'redirect', summary: 'Capture les instructions qui lisent une adresse (sans écrire).', note: 'Attache un debugger → bouton « Lu par » dans la vue Expert.' },
+  { name: 'auto_dissect', category: 'Debug / Patch', risk: 'safe', execution: 'direct', summary: 'Scanne automatiquement la mémoire pour trouver toutes les instances d\'un template de structure.', note: 'Lecture seule, nécessite un template sauvegardé.' },
   { name: 'analyze_field_stability', category: 'Debug / Patch', risk: 'debug', execution: 'direct', summary: 'Classe le rythme d\'écriture : champ affiché recalculé vs vraie source.' },
   { name: 'generate_aob', category: 'Debug / Patch', risk: 'patch', execution: 'direct', summary: 'Génère une signature AOB depuis une adresse d\'instruction.' },
   { name: 'suggest_patch', category: 'Debug / Patch', risk: 'patch', execution: 'direct', summary: 'Suggère des patchs de code sans les appliquer.' },
@@ -68,6 +70,10 @@ export const assistantTools: AssistantTool[] = [
   { name: 'kernel_write', category: 'Injection / Kernel / Système', risk: 'injection', execution: 'confirm', summary: 'Écrit via le driver noyau (contourne les protections usermode).' },
   { name: 'speedhack_set', category: 'Injection / Kernel / Système', risk: 'injection', execution: 'confirm', summary: 'Accélère, ralentit ou remet la vitesse du processus.' },
   { name: 'block_process_network', category: 'Injection / Kernel / Système', risk: 'injection', execution: 'confirm', summary: 'Coupe ou rétablit le réseau du processus (pare-feu).' },
+  { name: 'start_http_proxy', category: 'Injection / Kernel / Système', risk: 'injection', execution: 'confirm', summary: 'Intercepte les requêtes HTTP/HTTPS du processus cible.' },
+  { name: 'stop_http_proxy', category: 'Injection / Kernel / Système', risk: 'safe', execution: 'direct', summary: 'Arrête le proxy HTTP.' },
+  { name: 'set_lag_switch', category: 'Injection / Kernel / Système', risk: 'injection', execution: 'confirm', summary: 'Retarde les fonctions recv/WSARecv du processus cible.' },
+  { name: 'spoof_dns', category: 'Injection / Kernel / Système', risk: 'injection', execution: 'confirm', summary: 'Redirige un domaine vers une IP locale via le fichier hosts.' },
 
   // --- Fichiers de sauvegarde / UWP ---
   { name: 'discover_save_files', category: 'Fichiers de sauvegarde / UWP', risk: 'safe', execution: 'direct', summary: 'Cherche les fichiers de sauvegarde probables du processus (UWP).' },

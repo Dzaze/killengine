@@ -618,3 +618,129 @@ Frontend : `ui/src/services/backend.ts` (interfaces `ModuleCatalogItem`/`ModuleC
 **Comment vérifié** : code écrit, scan mojibake (`Ã[\x80-\xBF]|â€`) sur les fichiers touchés : rien. `scripts/check-line-endings.ps1` : fichiers modifiés en LF, cohérent avec le projet. **Build + tests pas encore lancés par moi (seuls Codex/Claude sont habilités — décision propriétaire 04/09/2026) ; le propriétaire a déjà lancé `.\scripts\build.ps1` en arrière-plan** — à faire ensuite : `.\build\bin\killengine_unit_tests.exe`. Pas de test unitaire dédié (méthodes `ApplicationController` non liées aux binaires de test — même limite que les autres méthodes de ce fichier, validation par smoke-test réel). À vérifier en conditions réelles : ouverture de la vue Modules, statut des 4 modules sur cette machine, et au moins un cycle d'installation réel (le téléchargement GGUF ~1,4 Go est le cas le plus long).
 
 **Fichiers concernés** : `apps/desktop/application_controller.h`, `apps/desktop/application_controller.cpp`, `ui/src/views/ModulesView.vue` (nouveau), `ui/src/App.vue`, `ui/src/services/backend.ts`, `ui/src/stores/app.ts`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`.
+
+### STEALTH-Q1/Q2 — corrections des 2 bugs de tests trouvés par Claude (04/09/2026, Roo)
+
+**Diagnostic (relecture complète du code par Roo, diagnostic Claude confirmé)** : les 2 échecs de tests signalés par Claude sont bien réels, chacun d'une nature différente :
+1. `PowerUpRuntimeTest.AntiDebugPebPatchClearsAndRestoresBeingDebugged` — **bug de test, pas de bug de code**. La variable `original` était capturée AVANT l'écriture simulée `BeingDebugged=1` (valeur donc `0`), mais `session.start()` lit la valeur APRÈS l'écriture (`1`) et c'est celle-là que `stop()` restaure. L'assertion finale comparait donc `1 != 0` → échec garanti. Le commentaire de la ligne (`// doit restaurer la valeur originale (1 dans ce test)`) prouve que l'auteur savait quelle valeur était restaurée — seule la variable de comparaison était fausse. Le code `anti_debug.cpp` est sain (restaure bien ce qu'il a observé au `start()`).
+2. `PowerUpRuntimeTest.DllMaskListPatchHidesAndRestoresModule` — **vrai bug dans le code stealth** (`core/inject/dll_mask.cpp`) : les 3 constantes d'offsets de têtes de liste `PEB_LDR_DATA` étaient fausses (`kLdrLoadOrderHead=0x20`, `kLdrMemoryOrderHead=0x30`, `kLdrInitOrderHead=0x38`) au lieu des valeurs réelles du layout x64 (`0x10`/`0x20`/`0x30`). Conséquence : `unlinkModuleFromList` parcourait/déliait les mauvaises listes (délie en réalité de la memory-order et de la init-order en croyant faire la load-order et la memory-order, et le 3e appel pointait sur le `Blink` de la tête init-order) → masquage partiel/inefficace. Les offsets des champs dans `LDR_DATA_TABLE_ENTRY` (`0x00`/`0x10`/`0x20`/`DllBase=0x30`) et `PEB->Ldr` (`0x30`) étaient corrects — seul le trio de têtes était en cause.
+
+**Correctif** :
+1. `tests/integration/test_power_up_runtime.cpp` — suppression de la variable `original` (capturée trop tôt) et remplacement de l'assertion finale par `EXPECT_EQ(beingDebugged, 1)` avec commentaire expliquant pourquoi la valeur restaurée est bien `1` dans ce test.
+2. `core/inject/dll_mask.cpp` — `kLdrLoadOrderHead`/`kLdrMemoryOrderHead`/`kLdrInitOrderHead` corrigés en `0x10`/`0x20`/`0x30`.
+
+**Comment vérifié** : relecture complète de `dll_mask.cpp`/`anti_debug.cpp`/`process_enumerator.cpp` + des 2 tests avant correction. Pas de build/test lancé par moi (seuls Codex/Claude sont habilités — décision propriétaire 04/09/2026) — à faire : `.\scripts\build.ps1` puis `.\build\bin\killengine_integration_tests.exe --gtest_filter=PowerUpRuntimeTest.AntiDebug*` + `.\build\bin\killengine_integration_tests.exe --gtest_filter=PowerUpRuntimeTest.DllMask*`. Note secondaire à garder en tête si le test DllMask échouait encore après correction : le check de visibilité du test passe par `enumerateModules` → `CreateToolhelp32Snapshot`, qui peut lire une source différente (liste de modules noyau) des listes PEB user-mode qui sont patchées — à vérifier dans ce cas seulement.
+
+**Fichiers concernés** : `core/inject/dll_mask.cpp`, `tests/integration/test_power_up_runtime.cpp`.
+
+### STEALTH-Q2-FIX — correction `kPebLdrOffset` faux (`0x30` → `0x18`) dans `dll_mask.cpp` (04/09/2026, Roo)
+
+**Diagnostic** : le test `PowerUpRuntimeTest.DllMaskListPatchHidesAndRestoresModule` échouait à la ligne 889 avec le message :
+```
+Failed to mask DLL 'Qt6Core.dll' in process 9588: module found at 0x000000000000000\0
+but not present in any Ldr list (Failed to read entry DllBase at 0x000000000000000;
+Module list walk exceeded 4096 nodes (corrupt list?); Module list walk exceeded 4096 nodes (corrupt list?))
+```
+Root cause : `kPebLdrOffset` (ligne 29 de `core/inject/dll_mask.cpp`) était défini à `0x30` au lieu de `0x18`. Sur PEB x64, l'offset `0x30` pointe sur `GdiSharedHandleTable`, pas sur `Ldr` — le code lisait donc une structure sans rapport, parcourait de la mémoire invalide, et échouait systématiquement sur les 3 listes. Les offsets des têtes de liste dans `PEB_LDR_DATA` (`0x10`/`0x20`/`0x30`) étaient déjà corrects (corrigés dans STEALTH-Q1/Q2 ci-dessus) — seul l'offset d'accès au `PEB->Ldr` lui-même était faux.
+
+**Correctif** : `kPebLdrOffset` corrigé de `0x30` à `0x18` dans `core/inject/dll_mask.cpp`.
+
+**Comment vérifié** : correctif appliqué, build + test **pas encore lancés** (seuls Codex/Claude sont habilités — décision propriétaire 04/09/2026) — à faire : `.\scripts\build.ps1` puis `.\build\bin\killengine_integration_tests.exe --gtest_filter=PowerUpRuntimeTest.DllMask*`.
+
+**Fichiers concernés** : `core/inject/dll_mask.cpp`.
+
+### MODULES-UI-FIX — vue Modules non visible dans l'UI (04/09/2026, Roo)
+
+**Signalé par le propriétaire** : le bouton "Modules" ajouté dans PHASE MODULES-UI (04/09/2026) n'apparaît pas dans la sidebar de l'application.
+
+**Vérification code** : tout est correctement branché côté code — `AppView` inclut `'modules'` (ligne 81 de `ui/src/stores/app.ts`), le bouton nav existe (ligne 182-188 de `ui/src/App.vue`), les clés i18n `nav.modules` existent dans fr.json/en.json, le `currentView` retourne `ModulesView` pour `activeView === 'modules'`.
+
+**Cause probable** : le frontend (`ui/dist/`) n'a pas été rebuild après l'ajout de la vue, ou le build C++ n'a pas copié les assets frontend mis à jour dans le dossier de sortie. Le code source est correct, c'est un bug de pipeline de build/déploiement.
+
+**Comment vérifié** : `cd ui && npm run build` pour reconstruire le frontend, puis `.\scripts\build.ps1` pour le rebuild C++ complet. Ouvrir KillEngine et vérifier que le bouton "Modules" apparaît dans la sidebar entre "Lexique" et "Paramètres".
+
+**Fichiers concernés** : `ui/src/views/ModulesView.vue`, `ui/src/App.vue`, `ui/src/stores/app.ts`, `ui/src/services/backend.ts`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`.
+
+### MODULES-V2 — restructuration de la vue Modules en 3 sections (04/09/2026, Roo)
+
+**Quoi** : proposition de réorganiser la vue Modules (`ui/src/views/ModulesView.vue`) en 3 sections distinctes :
+
+1. **Dépendances (existant, inchangé)** : `lua_runtime`, `ai_model`, `clr_inspector`, `kernel_driver` — statut installé/manquant + installation.
+2. **Environnement de test (nouveau)** :
+   - `edr_exclusion` — détecte si l'EDR bloque l'injection (`VirtualAllocEx` + `CreateRemoteThread` sur le process attaché), propose d'ajouter une exclusion pour le dossier `build/bin` via `Add-MpPreference -ExclusionPath` (PowerShell admin, confirmation explicite + RiskGate `debug`).
+   - `debug_privilege` — vérifie que le privilège `SeDebugName` est actif, propose de l'activer si manquant (nécessaire pour tous les tests de breakpoint/injection, `AdjustTokenPrivileges`).
+3. **Sécurité / Stealth (nouveau)** :
+   - `stealth_sc2_profile` — applique le profil stealth SC2 (anti-debug PEB + process mask + dll mask) en un clic depuis l'UI, avec confirmation RiskGate `debug`.
+   - `handle_hider` — utilise le driver kernel (IOCTL 0x804, STEALTH-Q3) pour masquer les handles KillEngine dans la table de handles de la cible.
+
+**Pourquoi** : demande du propriétaire — centraliser dans la vue Modules tous les outils de configuration/environnement qui ne sont pas des features de scan pures, avec une UX cohérente (catalogue → statut → action avec confirmation → progression).
+
+**Comment vérifié** : chantier non implémenté, juste consigné. À faire : modifier `ModulesView.vue` pour ajouter les sections 2 et 3, ajouter les méthodes backend correspondantes (`checkEdrBlocking`, `addEdrExclusion`, `checkDebugPrivilege`, `enableDebugPrivilege`, `applyStealthProfile`, `hideHandle`), câbler dans `backend.ts`/`app.ts`.
+
+**Fichiers concernés** : `ui/src/views/ModulesView.vue`, `ui/src/services/backend.ts`, `ui/src/stores/app.ts`, `apps/desktop/application_controller.h`, `apps/desktop/application_controller.cpp`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`.
+
+### MODULES-UI-FIX2 — erreur de build frontend : `AssistantView` manquait `'modules'` (04/09/2026, Roo)
+
+**Diagnostic** : signalé par Claude lors du rebuild frontend — `src/stores/app.ts(531,5): error TS2322: Type 'Ref<AppView, AppView>' is not assignable to type 'Ref<AssistantView, AssistantView>'. Type '"modules"' is not assignable to type 'AssistantView'`. Le type `AssistantView` dans `ui/src/stores/assistantSmartSearch.ts` (ligne 41) n'incluait pas `'modules'`, alors que `AppView` dans `app.ts` (ligne 81) l'incluait déjà. Le `configureAssistantSmartSearchContext` reçoit `activeView` comme `Ref<AppView>` mais le type attendu était `Ref<AssistantView>` — incompatibilité TypeScript.
+
+**Correctif** : `'modules'` ajouté à l'union de types `AssistantView` dans `ui/src/stores/assistantSmartSearch.ts` (ligne 41).
+
+**Comment vérifié** : correctif appliqué, rebuild frontend à relancer (`cd ui && npm run build`). Pas de changement de comportement fonctionnel, juste une cohérence de types TypeScript.
+
+**Fichiers concernés** : `ui/src/stores/assistantSmartSearch.ts`.
+
+### MODULES-V2-FIN — vue Modules achevée, reste basse priorité (05/09/2026, Roo)
+
+**Quoi** : la vue Modules est fonctionnellement complète — 3 sections (📦 Dépendances, 🔧 Environnement de test, 🛡️ Sécurité/Stealth), 8 modules avec actions fonctionnelles, solutions manuelles EDR, feedback visuel, rafraîchissement auto, i18n FR/EN.
+
+**Reste basse priorité (non bloquant)** :
+1. **Historique d'installation** — afficher la date de dernière install réussie pour chaque module (nécessite stockage persistant côté backend, ex: QSettings ou fichier JSON).
+2. **Détection auto du chemin EDR** — au lieu de hardcoder `build\bin`, lire depuis `QCoreApplication::applicationDirPath()` (cosmétique, le chemin actuel fonctionne).
+3. **Validation terrain SC2** — tester `applyStealthMode("sc2")` et EDR exclusion sur `SC2_x64.exe` réel pour confirmer le fonctionnement en conditions réelles.
+4. **Tests unitaires dédiés** — pas de tests GTest pour les nouvelles méthodes MODULES-V2 (`checkEdrBlocking`, `addEdrExclusion`, `checkDebugPrivilege`, `enableDebugPrivilege`, `hideHandle`) — même statut que les autres modules stealth (validés par usage réel).
+
+**Comment vérifié** : build + tests pas encore lancés (seuls Codex/Claude sont habilités) — à faire : `.\scripts\build.ps1` puis `.\build\bin\killengine_unit_tests.exe`. Validation manuelle de la vue Modules dans l'UI : toutes les sections affichent leurs modules, les boutons sont cliquables, les diagnostics retournent des résultats, les solutions manuelles EDR sont copiables.
+
+**Fichiers concernés** : `ui/src/views/ModulesView.vue`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`, `apps/desktop/application_controller.h`, `apps/desktop/application_controller.cpp`, `ui/src/services/backend.ts`.
+
+### NETWORK-V2 — Câblage final NetworkView (05/09/2026, Roo)
+
+**Quoi** : NetworkView était câblée à ~95% (C++ → backend.ts → network.ts → app.ts → NetworkView.vue → i18n) mais il manquait 3 détails pour que la vue soit 100% fonctionnelle :
+1. **Polling auto des requêtes HTTP** — `refreshHttpProxyRequests()` existait mais n'était jamais appelé automatiquement quand le proxy était actif. Ajouté : `startHttpProxyPolling()` / `stopHttpProxyPolling()` dans `network.ts` (timer 1.5s, même patron que `liveRefresh` pour les connexions), appelées dans `startHttpProxy()` / `stopHttpProxy()`.
+2. **Clés i18n manquantes** — `network.connections.remoteAddr` utilisé comme placeholder dans NetworkView.vue mais absent des JSON. Ajouté dans `fr.json` + `en.json`.
+3. **Assistant tools réseau** — `start_http_proxy`, `stop_http_proxy`, `set_lag_switch`, `spoof_dns` absents de `assistantTools.ts` — l'Assistant ne pouvait pas les utiliser en langage naturel. Ajouté (4 entrées, risk `injection`/`safe`).
+
+**Pourquoi** : demande du propriétaire — "rendre KillEngine meilleur dans la triche de tous les jeux" → NetworkView complète (connexions, DLL, proxy HTTP, lag switch, spoof DNS) est le chantier prioritaire identifié.
+
+**Comment vérifié** : build + tests pas encore lancés (seuls Codex/Claude sont habilités) — à faire : `.\scripts\build.ps1` puis `cd ui && npm run type-check` + `cd ui && npm run build`. Validation manuelle attendue : les requêtes HTTP se rafraîchissent toutes les 1.5s quand le proxy est actif, l'Assistant peut invoquer les 4 nouveaux outils réseau.
+
+**Fichiers concernés** : `ui/src/stores/network.ts`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`, `ui/src/services/assistantTools.ts`.
+
+### FWA-1 — Panneau dédié "Lu par" (Find What Accesses) (05/09/2026, Roo)
+
+**Quoi** : Le backend C++ `findWhatAccesses`/`findWhatAccessesAsync` existait déjà (hardware breakpoint en mode lecture, DR0-DR7, `hardware_breakpoint.cpp`), câblé dans `DebugFeatureManager` et `ApplicationController`, avec signal `findWhatAccessesFinished`. Le frontend avait la fonction `runFindWhatAccesses()` et le bouton "Lu par" dans `ExpertView.vue` (ligne 2736), mais **aucun panneau dédié pour afficher les résultats** — `GroupScanPanel` était réutilisé (ligne 2751) avec une prop mal nommée, ce qui n'affichait pas les hits de lecture correctement. Corrigé :
+1. **Nouveau composant** `ui/src/components/expert/FindWhatAccessesPanel.vue` — panneau dédié affichant la table des hits debugger (instruction RIP, module+offset, thread ID) avec badge risque `code` (attache debugger).
+2. **ExpertView.vue** — import du nouveau composant, remplacement de l'usage abusif de `GroupScanPanel` pour les résultats "Lu par".
+3. **i18n** — clés `findWhatAccesses.*` ajoutées dans `fr.json` + `en.json` (title, intro, empty, cancelled, instruction, module, thread, what, when, cost, example).
+4. **Assistant** — outil `find_what_accesses` ajouté dans `assistantTools.ts` (risk `debug`, execution `redirect`).
+
+**Pourquoi** : suite du chantier "rendre KillEngine meilleur dans la triche de tous les jeux" — Find What Accesses permet de remonter aux sources de calcul d'une valeur sans la modifier (contrairement à Find What Writes qui capture les écritures). Essentiel pour les valeurs interpolées/dérivées où le champ affiché n'est pas la source.
+
+**Comment vérifié** : build + tests pas encore lancés (seuls Codex/Claude sont habilités) — à faire : `cd ui && npm run type-check` + `cd ui && npm run build`. Validation manuelle attendue : le bouton "Lu par" sur une source UI string affiche maintenant un panneau dédié avec la table des hits (RIP, module, thread), l'Assistant peut invoquer `find_what_accesses` en langage naturel.
+
+**Fichiers concernés** : `ui/src/components/expert/FindWhatAccessesPanel.vue` (nouveau), `ui/src/views/ExpertView.vue`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`, `ui/src/services/assistantTools.ts`.
+
+### AUTO-DISSECT-1 — Scan automatique d'instances de structures (05/09/2026, Roo)
+
+**Quoi** : Le backend C++ `analyzeStructureMemory`/`inferStructureInstanceDelta`/`deduceTemplate` existait déjà (`core/scanner/structure_analyzer.*`) mais demandait à l'utilisateur de **manuellement** trouver 2 instances et entrer leurs adresses pour calculer un stride. Aucun scan automatique n'existait pour trouver toutes les instances d'un template connu. Corrigé :
+1. **Nouveau module C++** `core/scanner/auto_dissect.h/.cpp` — `findStructureInstances(process, template, options)` : parcourt toutes les régions writable du process, matche les champs du template (types, offsets), vérifie la validité des pointeurs, calcule un score de confiance, retourne une liste d'instances découvertes.
+2. **Backend** : `ApplicationController::findStructureInstances(templateJson)` (nouveau `Q_INVOKABLE`), câblé dans `apps/desktop/application_controller.h/.cpp`.
+3. **UI** : `ui/src/components/expert/AutoDissectPanel.vue` (nouveau composant) — panneau avec contrôles (maxResults, minConfidence), bouton "Scanner instances", table de résultats (adresse, confiance %, valeurs des champs). Ajouté dans `ExpertView.vue` (étape "find").
+4. **i18n** — clés `autoDissect.*` ajoutées dans `fr.json` + `en.json`.
+5. **Assistant** — outil `auto_dissect` ajouté dans `assistantTools.ts` (risk `safe`, execution `direct`).
+
+**Pourquoi** : suite du chantier "rendre KillEngine meilleur dans la triche de tous les jeux" — l'auto-dissect permet de trouver automatiquement TOUTES les entités (joueurs, unités, objets) d'un même type en mémoire à partir d'un seul template sauvegardé. Essentiel pour les RTS, RPG, MOBA où il y a des dizaines/centaines d'entités du même layout.
+
+**Comment vérifié** : build + tests pas encore lancés (seuls Codex/Claude sont habilités) — à faire : `.\scripts\build.ps1` puis `cd ui && npm run type-check` + `cd ui && npm run build`. Validation manuelle attendue : le panneau Auto-dissect apparaît dans l'étape "Inspecter" d'Expert, scanne la mémoire avec le dernier template sauvegardé, affiche une table d'instances avec adresses/confiance/valeurs.
+
+**Fichiers concernés** : `core/scanner/auto_dissect.h` (nouveau), `core/scanner/auto_dissect.cpp` (nouveau), `core/CMakeLists.txt`, `apps/desktop/application_controller.h`, `apps/desktop/application_controller.cpp`, `ui/src/components/expert/AutoDissectPanel.vue` (nouveau), `ui/src/views/ExpertView.vue`, `ui/src/services/backend.ts`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`, `ui/src/services/assistantTools.ts`.

@@ -824,8 +824,6 @@ TEST(PowerUpRuntimeTest, AntiDebugPebPatchClearsAndRestoresBeingDebugged) {
     ASSERT_TRUE(handle.rawHandle() && ReadProcessMemory(handle.rawHandle(),
         reinterpret_cast<LPVOID>(peb + 0x2), &beingDebugged, sizeof(beingDebugged), nullptr))
         << "Could not read BeingDebugged";
-    const BYTE original = beingDebugged;
-
     // Simuler un debugger visible côté cible.
     const BYTE debuggerVisible = 1;
     ASSERT_TRUE(WriteProcessMemory(handle.rawHandle(),
@@ -845,13 +843,14 @@ TEST(PowerUpRuntimeTest, AntiDebugPebPatchClearsAndRestoresBeingDebugged) {
         reinterpret_cast<LPVOID>(peb + 0x2), &beingDebugged, sizeof(beingDebugged), nullptr));
     EXPECT_EQ(beingDebugged, 0) << "BeingDebugged was not cleared by AntiDebugSession";
 
-    // Arrêter : doit restaurer la valeur originale (1 dans ce test).
+    // Arrêter : doit restaurer la valeur observée au start() (1 dans ce test,
+    // car le test a simulé un debugger visible avant de lancer la session).
     session.stop();
     EXPECT_FALSE(session.isActive());
 
     ASSERT_TRUE(ReadProcessMemory(handle.rawHandle(),
         reinterpret_cast<LPVOID>(peb + 0x2), &beingDebugged, sizeof(beingDebugged), nullptr));
-    EXPECT_EQ(beingDebugged, original) << "BeingDebugged was not restored by AntiDebugSession::stop";
+    EXPECT_EQ(beingDebugged, 1) << "BeingDebugged was not restored by AntiDebugSession::stop";
 
     EXPECT_TRUE(target.started()) << "Test target crashed during anti-debug PEB patch";
 }
