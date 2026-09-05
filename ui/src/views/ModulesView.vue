@@ -52,6 +52,58 @@ const handleHiderHandleValue = ref('')
 const handleHiderResult = ref<Record<string, unknown> | null>(null)
 const copiedBtn = ref<string | null>(null)
 
+// Registre Defender (étapes 2/3 des solutions manuelles) : géré par le backend
+// (élévation UAC + RiskGate), plus du simple copier-coller — état local car il
+// n'y a pas d'appel "check" côté backend, seulement l'action elle-même.
+const defenderDisabled = ref(false)
+const defenderDisableBusy = ref(false)
+const defenderDisableResult = ref<Record<string, unknown> | null>(null)
+const behaviorMonitoringDisabled = ref(false)
+const behaviorMonitoringBusy = ref(false)
+const behaviorMonitoringResult = ref<Record<string, unknown> | null>(null)
+
+async function toggleDefenderDisabled() {
+  const next = !defenderDisabled.value
+  const accepted = await riskGate.confirmRiskAction(
+    'debug',
+    next ? t('modules.edr.confirmDisableTitle') : t('modules.edr.confirmReenableTitle'),
+    next ? t('modules.edr.confirmDisableDesc') : t('modules.edr.confirmReenableDesc'),
+  )
+  if (!accepted) return
+  defenderDisableBusy.value = true
+  defenderDisableResult.value = null
+  try {
+    const result = await backend.getController().setWindowsDefenderDisabled?.(next)
+    defenderDisableResult.value = result ?? { error: 'Réponse backend absente.' }
+    if (result?.success) defenderDisabled.value = next
+  } catch (e) {
+    defenderDisableResult.value = { success: false, error: String(e) }
+  } finally {
+    defenderDisableBusy.value = false
+  }
+}
+
+async function toggleBehaviorMonitoringDisabled() {
+  const next = !behaviorMonitoringDisabled.value
+  const accepted = await riskGate.confirmRiskAction(
+    'debug',
+    next ? t('modules.edr.confirmDisableBehaviorTitle') : t('modules.edr.confirmReenableBehaviorTitle'),
+    next ? t('modules.edr.confirmDisableBehaviorDesc') : t('modules.edr.confirmReenableBehaviorDesc'),
+  )
+  if (!accepted) return
+  behaviorMonitoringBusy.value = true
+  behaviorMonitoringResult.value = null
+  try {
+    const result = await backend.getController().setDefenderBehaviorMonitoringDisabled?.(next)
+    behaviorMonitoringResult.value = result ?? { error: 'Réponse backend absente.' }
+    if (result?.success) behaviorMonitoringDisabled.value = next
+  } catch (e) {
+    behaviorMonitoringResult.value = { success: false, error: String(e) }
+  } finally {
+    behaviorMonitoringBusy.value = false
+  }
+}
+
 // Build directory path for exclusion commands
 const buildDir = typeof window !== 'undefined' && window.location
   ? 'c:\\MES APPS DEV\\killengine\\build\\bin'
@@ -163,6 +215,10 @@ async function handleInstall(modId: string) {
     } finally {
       debugPrivBusy.value = false
     }
+    // enableDebugPrivilege() ne renvoie pas de champ `enabled` (juste success/message) —
+    // re-vérifier via checkDebugPrivilege() pour que le badge reflète l'état réel sans
+    // attendre un retour sur cette vue.
+    await runDebugPrivCheck()
     return
   }
 
@@ -345,17 +401,43 @@ onMounted(() => {
               <strong>{{ $t('modules.edr.step2Title') }}</strong>
               <p>{{ $t('modules.edr.step2Desc') }}</p>
               <pre class="manual-code">reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f</pre>
-              <button class="btn btn-secondary compact" @click="copyRegDisableSpyware" :title="$t('modules.edr.copy')">
-                {{ $t('modules.edr.copy') }}
-              </button>
+              <div class="manual-step-actions">
+                <button class="btn btn-secondary compact" @click="copyRegDisableSpyware" :title="$t('modules.edr.copy')">
+                  {{ $t('modules.edr.copy') }}
+                </button>
+                <button
+                  class="btn compact"
+                  :class="defenderDisabled ? 'btn-secondary' : 'btn-primary'"
+                  :disabled="defenderDisableBusy"
+                  @click="toggleDefenderDisabled()"
+                >
+                  {{ defenderDisableBusy ? '...' : (defenderDisabled ? $t('modules.edr.reactivate') : $t('modules.edr.execute')) }}
+                </button>
+              </div>
+              <p v-if="defenderDisableResult" class="manual-step-result" :class="defenderDisableResult.success ? 'warning' : 'error'">
+                {{ String(defenderDisableResult.message ?? defenderDisableResult.error ?? '') }}
+              </p>
             </div>
             <div class="manual-step">
               <strong>{{ $t('modules.edr.step3Title') }}</strong>
               <p>{{ $t('modules.edr.step3Desc') }}</p>
               <pre class="manual-code">reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableBehaviorMonitoring /t REG_DWORD /d 1 /f</pre>
-              <button class="btn btn-secondary compact" @click="copyRegDisableBehavior" :title="$t('modules.edr.copy')">
-                {{ $t('modules.edr.copy') }}
-              </button>
+              <div class="manual-step-actions">
+                <button class="btn btn-secondary compact" @click="copyRegDisableBehavior" :title="$t('modules.edr.copy')">
+                  {{ $t('modules.edr.copy') }}
+                </button>
+                <button
+                  class="btn compact"
+                  :class="behaviorMonitoringDisabled ? 'btn-secondary' : 'btn-primary'"
+                  :disabled="behaviorMonitoringBusy"
+                  @click="toggleBehaviorMonitoringDisabled()"
+                >
+                  {{ behaviorMonitoringBusy ? '...' : (behaviorMonitoringDisabled ? $t('modules.edr.reactivate') : $t('modules.edr.execute')) }}
+                </button>
+              </div>
+              <p v-if="behaviorMonitoringResult" class="manual-step-result" :class="behaviorMonitoringResult.success ? 'warning' : 'error'">
+                {{ String(behaviorMonitoringResult.message ?? behaviorMonitoringResult.error ?? '') }}
+              </p>
             </div>
             <p class="manual-warning">{{ $t('modules.edr.manualWarning') }}</p>
           </div>
@@ -461,6 +543,13 @@ onMounted(() => {
 
 .refresh-btn {
   flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
+  background: color-mix(in srgb, var(--success) 12%, var(--bg-accent));
+  color: var(--success);
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 20%, var(--bg-accent));
 }
 
 .empty {
@@ -600,6 +689,78 @@ onMounted(() => {
 
 .diag-result.disabled {
   border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+  color: var(--warning);
+}
+
+.edr-manual-fix {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.edr-manual-fix h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.manual-step {
+  margin-bottom: 12px;
+}
+
+.manual-step strong {
+  display: block;
+  font-size: 12px;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.manual-step p {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.manual-code {
+  display: block;
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-dim);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.manual-step-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.manual-step-result {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+.manual-step-result.ok {
+  color: var(--success);
+}
+
+.manual-step-result.warning {
+  color: var(--warning);
+}
+
+.manual-step-result.error {
+  color: var(--error);
+}
+
+.manual-warning {
+  margin-top: 4px;
+  font-size: 11px;
   color: var(--warning);
 }
 

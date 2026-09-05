@@ -1033,6 +1033,15 @@ public:
     /// Ajoute une exclusion Defender pour le dossier build/bin (PowerShell admin).
     Q_INVOKABLE QVariantMap addEdrExclusion(const QString& path);
 
+    /// Active (disabled=true) ou réactive (disabled=false) Windows Defender via
+    /// le registre (élévation UAC) — alternative plus agressive à l'exclusion
+    /// ciblée, réversible en rappelant avec disabled=false.
+    Q_INVOKABLE QVariantMap setWindowsDefenderDisabled(bool disabled);
+
+    /// Active/désactive uniquement la surveillance comportementale Defender
+    /// (élévation UAC, réversible) — moins agressif que la désactivation complète.
+    Q_INVOKABLE QVariantMap setDefenderBehaviorMonitoringDisabled(bool disabled);
+
     /// Vérifie si le privilège SeDebugName est actif pour le process courant.
     Q_INVOKABLE QVariantMap checkDebugPrivilege() const;
 

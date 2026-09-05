@@ -276,7 +276,7 @@ watch(() => store.isAttached, (attached) => {
         <div class="action-config">
           <label>
             {{ $t('network.proxy.port') }}
-            <input v-model.number="store.httpProxyPort" class="small-input" type="number" min="1024" max="65535" />
+            <input v-model.number="store.httpProxyPort" class="input small-input" type="number" min="1024" max="65535" />
           </label>
           <label class="checkbox-label">
             <input v-model="store.httpProxyInterceptHttps" type="checkbox" />
@@ -371,7 +371,7 @@ watch(() => store.isAttached, (attached) => {
         <div class="action-config">
           <label>
             {{ $t('network.lagSwitch.delay') }}
-            <input v-model.number="store.lagSwitchDelayMs" class="small-input" type="number" min="0" max="10000" step="100" />
+            <input v-model.number="store.lagSwitchDelayMs" class="input small-input" type="number" min="0" max="10000" step="100" />
             {{ $t('network.lagSwitch.ms') }}
           </label>
           <button

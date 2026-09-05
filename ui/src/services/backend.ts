@@ -1583,6 +1583,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   checkDebugPrivilege?(): Promise<Record<string, unknown>>
   /** MODULES-V2 : active SeDebugName. */
   enableDebugPrivilege?(): Promise<Record<string, unknown>>
+  /** MODULES-V2 : active/désactive Windows Defender via le registre (élévation UAC, réversible). */
+  setWindowsDefenderDisabled?(disabled: boolean): Promise<Record<string, unknown>>
+  /** MODULES-V2 : active/désactive la surveillance comportementale Defender (élévation UAC, réversible). */
+  setDefenderBehaviorMonitoringDisabled?(disabled: boolean): Promise<Record<string, unknown>>
   /** MODULES-V2 : applique un profil stealth (sc2/default/minimal). */
   applyStealthProfile?(profile: string): Promise<Record<string, unknown>>
   /** MODULES-V2 : restaure le mode stealth. */
@@ -2867,6 +2871,12 @@ class BackendService {
       },
       async enableDebugPrivilege() {
         return { success: true, message: 'Mock: SeDebugName activé.' }
+      },
+      async setWindowsDefenderDisabled(disabled: boolean) {
+        return { success: true, disabled, message: disabled ? 'Mock: clé écrite, redémarrage requis pour désactiver Defender.' : 'Mock: clé retirée, redémarrage requis pour réactiver Defender.' }
+      },
+      async setDefenderBehaviorMonitoringDisabled(disabled: boolean) {
+        return { success: true, disabled, message: disabled ? 'Mock: clé écrite, redémarrage requis.' : 'Mock: clé retirée, redémarrage requis.' }
       },
       async applyStealthProfile(_profile: string) {
         return { success: false, error: 'Mock: stealth non disponible.' }

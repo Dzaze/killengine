@@ -138,6 +138,16 @@
       "step3Title": "Step 3 — Disable behavior monitoring",
       "step3Desc": "Disables only behavior monitoring (less aggressive than step 2).",
       "copy": "Copy",
+      "execute": "Execute",
+      "reactivate": "Re-enable",
+      "confirmDisableTitle": "Disable Windows Defender",
+      "confirmDisableDesc": "Completely disables Windows Defender via the registry (UAC elevation required). Reduces your system's protection — remember to re-enable it once testing is done. ⚠ A restart is required for the change to take effect.",
+      "confirmReenableTitle": "Re-enable Windows Defender",
+      "confirmReenableDesc": "Removes the registry override disabling Windows Defender (UAC elevation required). ⚠ A restart is required for protection to actually be restored — Defender stays disabled until then despite the key being removed.",
+      "confirmDisableBehaviorTitle": "Disable behavior monitoring",
+      "confirmDisableBehaviorDesc": "Disables only Windows Defender's behavior monitoring via the registry (UAC elevation required) — less aggressive than a full disable. ⚠ A restart is required for the change to take effect.",
+      "confirmReenableBehaviorTitle": "Re-enable behavior monitoring",
+      "confirmReenableBehaviorDesc": "Removes the registry override disabling behavior monitoring (UAC elevation required). ⚠ A restart is required for protection to actually be restored.",
       "manualWarning": "⚠ These changes reduce your system's protection. Re-enable them after your test sessions."
     },
     "debugPriv": {
@@ -370,6 +380,96 @@
         "term": "XOR",
         "definition": "A simple logical operation sometimes used by programs to slightly mask a value in memory (e.g. storing value XOR key instead of the raw value) to throw off a direct scan. A value \"XOR-obfuscated\" won't be found by a plain exact scan on the displayed number."
       }
+    }
+  },
+  "findWhatAccesses": {
+    "title": "Find what accesses",
+    "intro": "Captures the program instructions that READ this address (read-only, no write).",
+    "empty": "No access captured during the observation window.",
+    "cancelled": "Capture cancelled by the user.",
+    "instruction": "Instruction",
+    "module": "Module",
+    "thread": "Thread"
+  },
+  "network": {
+    "title": "Network",
+    "intro": "Analyze and control network traffic of the attached process.",
+    "empty": "No process attached.",
+    "connections": {
+      "title": "Active connections",
+      "empty": "No network connections detected.",
+      "refresh": "Refresh",
+      "live": "Live",
+      "protocol": "Protocol",
+      "localAddr": "Local address",
+      "remoteAddr": "Remote address",
+      "remoteHost": "Remote host",
+      "state": "State",
+      "lastRefresh": "Last refresh",
+      "dnsResolving": "DNS resolving...",
+      "totalLabel": "connections",
+      "establishedLabel": "active"
+    },
+    "modules": {
+      "title": "Loaded network modules",
+      "empty": "No known network modules detected.",
+      "name": "Module",
+      "category": "Category",
+      "path": "Path",
+      "count": "modules detected",
+      "category_winsock": "Socket API",
+      "category_http": "HTTP / Web",
+      "category_dns": "DNS",
+      "category_crypto": "Encryption / TLS",
+      "category_system": "System"
+    },
+    "proxy": {
+      "title": "HTTP Proxy",
+      "intro": "Intercepts and modifies HTTP/HTTPS requests from the game in real time.",
+      "port": "Port",
+      "interceptHttps": "Intercept HTTPS",
+      "start": "Start proxy",
+      "stop": "Stop proxy",
+      "active": "Proxy active",
+      "inactive": "Proxy inactive",
+      "requests": "Intercepted requests",
+      "noRequests": "No intercepted requests.",
+      "method": "Method",
+      "url": "URL",
+      "requestBody": "Request body",
+      "responseBody": "Response body",
+      "modify": "Modify",
+      "apply": "Apply",
+      "editorPlaceholder": "New body JSON..."
+    },
+    "dnsSpoof": {
+      "title": "DNS Spoof",
+      "intro": "Redirects a domain to a local IP via the Windows hosts file.",
+      "domain": "Domain",
+      "targetIp": "Target IP",
+      "add": "Add entry",
+      "remove": "Remove",
+      "entries": "Active entries",
+      "noEntries": "No active entries."
+    },
+    "lagSwitch": {
+      "title": "Lag switch",
+      "intro": "Artificially delays the game's network responses.",
+      "delay": "Delay",
+      "ms": "ms",
+      "enable": "Enable lag switch",
+      "disable": "Disable",
+      "active": "Lag active",
+      "inactive": "Lag inactive"
+    },
+    "block": {
+      "title": "Network block",
+      "intro": "Blocks all inbound/outbound traffic of the attached process via a Windows Firewall rule.",
+      "status": "Status",
+      "blocked": "Network blocked",
+      "unblocked": "Network normal",
+      "toggle": "Block network",
+      "toggleRestore": "Restore network"
     }
   },
   "help": {

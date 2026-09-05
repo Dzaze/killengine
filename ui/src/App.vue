@@ -45,6 +45,19 @@ const currentView = computed(() => {
   return AssistantView
 })
 
+// Sépare une éventuelle mise en garde "⚠ ..." de la fin du detail du risk-modal
+// pour la mettre en évidence dans une couleur distincte (var(--warning)) —
+// convention déjà utilisée ailleurs dans l'app (ex: ModulesView manualWarning).
+const riskDialogDetailParts = computed(() => {
+  const detail = store.riskDialog?.detail ?? ''
+  const markerIndex = detail.indexOf('⚠')
+  if (markerIndex === -1) return { text: detail, warning: '' }
+  return {
+    text: detail.slice(0, markerIndex).trim(),
+    warning: detail.slice(markerIndex).trim(),
+  }
+})
+
 onMounted(() => {
   store.init()
 })
@@ -73,6 +86,13 @@ watch(
           @click="store.activeView = 'assistant'"
         >
           {{ $t('nav.assistant') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'modules' }"
+          @click="store.activeView = 'modules'"
+        >
+          {{ $t('nav.modules') }}
         </button>
         <button
           class="nav-item"
@@ -181,13 +201,6 @@ watch(
         </button>
         <button
           class="nav-item"
-          :class="{ active: store.activeView === 'modules' }"
-          @click="store.activeView = 'modules'"
-        >
-          {{ $t('nav.modules') }}
-        </button>
-        <button
-          class="nav-item"
           :class="{ active: store.activeView === 'settings' }"
           @click="store.activeView = 'settings'"
         >
@@ -244,7 +257,8 @@ watch(
           <span class="risk-pill">{{ store.riskDialog.risk }}</span>
         </div>
         <h2 id="risk-title">{{ store.riskDialog.title }}</h2>
-        <p class="risk-detail">{{ store.riskDialog.detail }}</p>
+        <p class="risk-detail">{{ riskDialogDetailParts.text }}</p>
+        <p v-if="riskDialogDetailParts.warning" class="risk-detail-highlight">{{ riskDialogDetailParts.warning }}</p>
         <p class="risk-warning">
           Cette action modifie ou observe activement un processus local. Confirme uniquement si tu contrôles ce processus et acceptes le risque.
         </p>
@@ -469,6 +483,17 @@ body {
 .risk-detail {
   margin-top: 10px;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.risk-detail-highlight {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  background: color-mix(in srgb, var(--warning) 10%, var(--bg-tertiary));
+  color: var(--warning);
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 

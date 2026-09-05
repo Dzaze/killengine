@@ -6352,6 +6352,96 @@ QVariantMap ApplicationController::cancelModuleInstall() {
 // MODULES-V2 : Environnement de test + Sécurité/Stealth
 // ---------------------------------------------------------------------------
 
+namespace {
+#ifdef Q_OS_WIN
+// Lance une commande via ShellExecuteExW en élévation UAC (verbe "runas"),
+// attend sa fin et rapporte success/error selon le code de sortie — même
+// mécanisme que addEdrExclusion, factorisé ici pour les actions registre
+// Defender (disable/re-enable) qui doivent toutes deux passer par ce chemin.
+QVariantMap runElevatedCommand(const QString& program, const QString& args, DWORD timeoutMs = 30000) {
+    QVariantMap result;
+    result["success"] = false;
+
+    const std::wstring cmd = program.toStdWString();
+    const std::wstring argsW = args.toStdWString();
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"runas";
+    sei.lpFile = cmd.c_str();
+    sei.lpParameters = argsW.c_str();
+    sei.nShow = SW_HIDE;
+
+    if (!ShellExecuteExW(&sei)) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_CANCELLED) {
+            result["error"] = QStringLiteral("L'utilisateur a refusé l'élévation UAC.");
+        } else {
+            result["error"] = QStringLiteral("ShellExecuteExW failed (error: %1)").arg(err);
+        }
+        return result;
+    }
+
+    if (sei.hProcess) {
+        WaitForSingleObject(sei.hProcess, timeoutMs);
+        DWORD exitCode = 0;
+        GetExitCodeProcess(sei.hProcess, &exitCode);
+        CloseHandle(sei.hProcess);
+
+        if (exitCode == 0) {
+            result["success"] = true;
+        } else {
+            result["error"] = QStringLiteral("La commande a retourné le code %1.").arg(exitCode);
+        }
+    }
+    return result;
+}
+#endif
+} // namespace
+
+QVariantMap ApplicationController::setWindowsDefenderDisabled(bool disabled) {
+    QVariantMap result;
+    result["success"] = false;
+#ifdef Q_OS_WIN
+    const QString args = QStringLiteral(
+        "add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\" /v DisableAntiSpyware /t REG_DWORD /d %1 /f"
+    ).arg(disabled ? 1 : 0);
+
+    result = runElevatedCommand(QStringLiteral("reg.exe"), args);
+    if (result.value("success").toBool()) {
+        result["disabled"] = disabled;
+        result["message"] = disabled
+            ? QStringLiteral("Clé registre écrite. Redémarre Windows pour que Defender soit réellement désactivé — pense à réactiver après tes tests.")
+            : QStringLiteral("Clé registre retirée. Redémarre Windows pour que Defender soit réellement réactivé.");
+    }
+#else
+    result["error"] = QStringLiteral("Windows only");
+#endif
+    return result;
+}
+
+QVariantMap ApplicationController::setDefenderBehaviorMonitoringDisabled(bool disabled) {
+    QVariantMap result;
+    result["success"] = false;
+#ifdef Q_OS_WIN
+    const QString args = QStringLiteral(
+        "add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection\" /v DisableBehaviorMonitoring /t REG_DWORD /d %1 /f"
+    ).arg(disabled ? 1 : 0);
+
+    result = runElevatedCommand(QStringLiteral("reg.exe"), args);
+    if (result.value("success").toBool()) {
+        result["disabled"] = disabled;
+        result["message"] = disabled
+            ? QStringLiteral("Clé registre écrite. Redémarre Windows pour que la surveillance comportementale soit réellement désactivée — pense à réactiver après tes tests.")
+            : QStringLiteral("Clé registre retirée. Redémarre Windows pour que la surveillance comportementale soit réellement réactivée.");
+    }
+#else
+    result["error"] = QStringLiteral("Windows only");
+#endif
+    return result;
+}
+
 QVariantMap ApplicationController::checkEdrBlocking() const {
     QVariantMap result;
     result["success"] = false;

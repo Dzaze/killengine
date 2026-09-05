@@ -138,6 +138,16 @@
       "step3Title": "Étape 3 — Désactiver la surveillance comportementale",
       "step3Desc": "Désactive uniquement la surveillance comportementale (moins agressif que l'étape 2).",
       "copy": "Copier",
+      "execute": "Exécuter",
+      "reactivate": "Réactiver",
+      "confirmDisableTitle": "Désactiver Windows Defender",
+      "confirmDisableDesc": "Désactive complètement Windows Defender via le registre (élévation UAC requise). Réduit la protection de votre système — pense à réactiver une fois le test terminé. ⚠ Un redémarrage est nécessaire pour que le changement prenne effet.",
+      "confirmReenableTitle": "Réactiver Windows Defender",
+      "confirmReenableDesc": "Retire la désactivation registre de Windows Defender (élévation UAC requise). ⚠ Un redémarrage est nécessaire pour que la protection soit réellement rétablie — Defender reste désactivé jusque-là malgré la clé retirée.",
+      "confirmDisableBehaviorTitle": "Désactiver la surveillance comportementale",
+      "confirmDisableBehaviorDesc": "Désactive uniquement la surveillance comportementale de Windows Defender via le registre (élévation UAC requise) — moins agressif qu'une désactivation complète. ⚠ Un redémarrage est nécessaire pour que le changement prenne effet.",
+      "confirmReenableBehaviorTitle": "Réactiver la surveillance comportementale",
+      "confirmReenableBehaviorDesc": "Retire la désactivation registre de la surveillance comportementale (élévation UAC requise). ⚠ Un redémarrage est nécessaire pour que la protection soit réellement rétablie.",
       "manualWarning": "⚠ Ces modifications réduisent la protection de votre système. Réactivez-les après vos sessions de test."
     },
     "debugPriv": {
@@ -370,6 +380,96 @@
         "term": "XOR",
         "definition": "Une opération logique simple parfois utilisée par les programmes pour masquer légèrement une valeur en mémoire (ex: stocker valeur XOR clé au lieu de la valeur brute) afin de gêner un scan direct. Une valeur \"obfusquée en XOR\" ne se trouve pas par un scan exact classique sur la valeur affichée."
       }
+    }
+  },
+  "findWhatAccesses": {
+    "title": "Lu par",
+    "intro": "Capture les instructions du programme qui LISENT cette adresse (lecture seule, pas d'écriture).",
+    "empty": "Aucun accès capturé pendant la fenêtre d'observation.",
+    "cancelled": "Capture annulée par l'utilisateur.",
+    "instruction": "Instruction",
+    "module": "Module",
+    "thread": "Thread"
+  },
+  "network": {
+    "title": "Réseau",
+    "intro": "Analyse et contrôle du trafic réseau du processus attaché.",
+    "empty": "Aucun processus attaché.",
+    "connections": {
+      "title": "Connexions actives",
+      "empty": "Aucune connexion réseau détectée.",
+      "refresh": "Actualiser",
+      "live": "Live",
+      "protocol": "Protocole",
+      "localAddr": "Adresse locale",
+      "remoteAddr": "Adresse distante",
+      "remoteHost": "Hôte distant",
+      "state": "État",
+      "lastRefresh": "Dernier refresh",
+      "dnsResolving": "Résolution DNS...",
+      "totalLabel": "connexions",
+      "establishedLabel": "actives"
+    },
+    "modules": {
+      "title": "Modules réseau chargés",
+      "empty": "Aucun module réseau connu détecté.",
+      "name": "Module",
+      "category": "Catégorie",
+      "path": "Chemin",
+      "count": "modules détectés",
+      "category_winsock": "Socket API",
+      "category_http": "HTTP / Web",
+      "category_dns": "DNS",
+      "category_crypto": "Chiffrement / TLS",
+      "category_system": "Système"
+    },
+    "proxy": {
+      "title": "Proxy HTTP",
+      "intro": "Intercepte et modifie les requêtes HTTP/HTTPS du jeu en temps réel.",
+      "port": "Port",
+      "interceptHttps": "Intercepter HTTPS",
+      "start": "Démarrer le proxy",
+      "stop": "Arrêter le proxy",
+      "active": "Proxy actif",
+      "inactive": "Proxy inactif",
+      "requests": "Requêtes interceptées",
+      "noRequests": "Aucune requête interceptée.",
+      "method": "Méthode",
+      "url": "URL",
+      "requestBody": "Body requête",
+      "responseBody": "Body réponse",
+      "modify": "Modifier",
+      "apply": "Appliquer",
+      "editorPlaceholder": "Nouveau body JSON..."
+    },
+    "dnsSpoof": {
+      "title": "Spoof DNS",
+      "intro": "Redirige un domaine vers une IP locale via le fichier hosts Windows.",
+      "domain": "Domaine",
+      "targetIp": "IP cible",
+      "add": "Ajouter l'entrée",
+      "remove": "Retirer",
+      "entries": "Entrées actives",
+      "noEntries": "Aucune entrée active."
+    },
+    "lagSwitch": {
+      "title": "Lag switch",
+      "intro": "Retarde artificiellement les réponses réseau du jeu.",
+      "delay": "Délai",
+      "ms": "ms",
+      "enable": "Activer le lag switch",
+      "disable": "Désactiver",
+      "active": "Lag actif",
+      "inactive": "Lag inactif"
+    },
+    "block": {
+      "title": "Blocage réseau",
+      "intro": "Coupe le trafic entrant/sortant du processus attaché via une règle pare-feu Windows.",
+      "status": "Statut",
+      "blocked": "Réseau coupé",
+      "unblocked": "Réseau normal",
+      "toggle": "Couper le réseau",
+      "toggleRestore": "Rétablir le réseau"
     }
   },
   "help": {
