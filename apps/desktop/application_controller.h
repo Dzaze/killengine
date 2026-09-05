@@ -1031,16 +1031,24 @@ public:
     Q_INVOKABLE QVariantMap checkEdrBlocking() const;
 
     /// Ajoute une exclusion Defender pour le dossier build/bin (PowerShell admin).
-    Q_INVOKABLE QVariantMap addEdrExclusion(const QString& path);
+    /// Non bloquant : la commande élevée tourne sur un thread séparé, le
+    /// résultat arrive via edrExclusionAddedFinished. Nécessaire car
+    /// ShellExecuteExW("runas") + son attente peuvent durer plusieurs secondes
+    /// (invite UAC comprise) et geler tout le thread GUI sinon (Q_INVOKABLE
+    /// s'exécute sur le thread propriétaire de l'objet, ici le thread GUI).
+    Q_INVOKABLE QVariantMap addEdrExclusionAsync(const QString& path);
 
     /// Active (disabled=true) ou réactive (disabled=false) Windows Defender via
     /// le registre (élévation UAC) — alternative plus agressive à l'exclusion
-    /// ciblée, réversible en rappelant avec disabled=false.
-    Q_INVOKABLE QVariantMap setWindowsDefenderDisabled(bool disabled);
+    /// ciblée, réversible en rappelant avec disabled=false. Non bloquant, voir
+    /// addEdrExclusionAsync ; résultat via windowsDefenderDisabledFinished.
+    Q_INVOKABLE QVariantMap setWindowsDefenderDisabledAsync(bool disabled);
 
     /// Active/désactive uniquement la surveillance comportementale Defender
     /// (élévation UAC, réversible) — moins agressif que la désactivation complète.
-    Q_INVOKABLE QVariantMap setDefenderBehaviorMonitoringDisabled(bool disabled);
+    /// Non bloquant, voir addEdrExclusionAsync ; résultat via
+    /// defenderBehaviorMonitoringDisabledFinished.
+    Q_INVOKABLE QVariantMap setDefenderBehaviorMonitoringDisabledAsync(bool disabled);
 
     /// Vérifie si le privilège SeDebugName est actif pour le process courant.
     Q_INVOKABLE QVariantMap checkDebugPrivilege() const;
@@ -1531,6 +1539,13 @@ signals:
     void inProcessBreakpointWatchFinished(const QVariantMap& result);
     /// EDR test : le processus cible a été tué par l'EDR pendant le test
     void processKilledByEdr(const QVariantMap& info);
+
+    /// Résultat différé de addEdrExclusionAsync (voir sa déclaration).
+    void edrExclusionAddedFinished(const QVariantMap& result);
+    /// Résultat différé de setWindowsDefenderDisabledAsync.
+    void windowsDefenderDisabledFinished(const QVariantMap& result);
+    /// Résultat différé de setDefenderBehaviorMonitoringDisabledAsync.
+    void defenderBehaviorMonitoringDisabledFinished(const QVariantMap& result);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le

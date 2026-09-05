@@ -2372,6 +2372,11 @@ bool ApplicationController::attachProcess(int pid) {
     m_externalToolProfiler->clearSessionState();
     m_activeProfileTargets.clear();
     m_autoWriteValueHistory.clear();
+    // Le compteur de tentatives EDR (rate limiting, voir checkEdrBlocking) est
+    // par-cible : sans ce reset, un test réalisé sur un ancien processus attaché
+    // rendait le tout premier test sur un NOUVEAU processus faussement "fiable"
+    // (m_edrCheckCount >= 4 hérité de la session précédente).
+    m_edrCheckCount = 0;
 
     KE_LOG_INFO() << "Attached to PID " << pid << " (" << m_processName.toStdString() << ")";
 
@@ -6099,7 +6104,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
     // MODULES-V2 : modules V2 (diagnostic/stealth) — pas d'installation async,
     // action synchrone directe.
     if (moduleId == QStringLiteral("edr_exclusion")) {
-        return addEdrExclusion(QString());
+        return addEdrExclusionAsync(QString());
     }
     if (moduleId == QStringLiteral("debug_privilege")) {
         return enableDebugPrivilege();
@@ -6400,9 +6405,9 @@ QVariantMap runElevatedCommand(const QString& program, const QString& args, DWOR
 #endif
 } // namespace
 
-QVariantMap ApplicationController::setWindowsDefenderDisabled(bool disabled) {
-    QVariantMap result;
-    result["success"] = false;
+QVariantMap ApplicationController::setWindowsDefenderDisabledAsync(bool disabled) {
+    QVariantMap started;
+    started["success"] = false;
 #ifdef Q_OS_WIN
     // Chercher le script .bat : d'abord dans le layout distribué (scripts/ à côté de l'exe),
     // puis dans le layout dev (../../scripts/).
@@ -6415,28 +6420,44 @@ QVariantMap ApplicationController::setWindowsDefenderDisabled(bool disabled) {
     const QString batPathNative = QDir::toNativeSeparators(batPath);
 
     if (!QFile::exists(batPath)) {
-        result["error"] = QStringLiteral("Script introuvable : %1 — utilise le fichier .bat manuellement.").arg(batPathNative);
-        return result;
+        started["error"] = QStringLiteral("Script introuvable : %1 — utilise le fichier .bat manuellement.").arg(batPathNative);
+        return started;
     }
 
-    const QString cmdArgs = QStringLiteral("/c \"%1\"").arg(batPathNative);
-    result = runElevatedCommand(QStringLiteral("cmd.exe"), cmdArgs);
+    // L'élévation UAC + l'exécution du script tournent sur un thread séparé :
+    // sinon le WaitForSingleObject(30s) de runElevatedCommand gèle tout le
+    // thread GUI (Q_INVOKABLE via QWebChannel s'exécute sur le thread
+    // propriétaire de l'objet) pendant toute la durée de l'invite UAC.
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, batPathNative, disabled]() {
+        const QString cmdArgs = QStringLiteral("/c \"%1\"").arg(batPathNative);
+        QVariantMap result = runElevatedCommand(QStringLiteral("cmd.exe"), cmdArgs);
 
-    if (result.value("success").toBool()) {
-        result["disabled"] = disabled;
-        result["message"] = disabled
-            ? QStringLiteral("Script de désactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.")
-            : QStringLiteral("Script de réactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.");
-    }
+        if (result.value("success").toBool()) {
+            result["disabled"] = disabled;
+            result["message"] = disabled
+                ? QStringLiteral("Script de désactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.")
+                : QStringLiteral("Script de réactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.");
+        }
+
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->windowsDefenderDisabledFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = QStringLiteral("Windows only");
+    started["error"] = QStringLiteral("Windows only");
 #endif
-    return result;
+    return started;
 }
 
-QVariantMap ApplicationController::setDefenderBehaviorMonitoringDisabled(bool disabled) {
-    QVariantMap result;
-    result["success"] = false;
+QVariantMap ApplicationController::setDefenderBehaviorMonitoringDisabledAsync(bool disabled) {
+    QVariantMap started;
+    started["success"] = false;
 #ifdef Q_OS_WIN
     // Le script disable_defender_registry.bat gère déjà les deux clés
     // (DisableAntiSpyware + DisableBehaviorMonitoring). On le réutilise ici.
@@ -6449,23 +6470,35 @@ QVariantMap ApplicationController::setDefenderBehaviorMonitoringDisabled(bool di
     const QString batPathNative = QDir::toNativeSeparators(batPath);
 
     if (!QFile::exists(batPath)) {
-        result["error"] = QStringLiteral("Script introuvable : %1 — utilise le fichier .bat manuellement.").arg(batPathNative);
-        return result;
+        started["error"] = QStringLiteral("Script introuvable : %1 — utilise le fichier .bat manuellement.").arg(batPathNative);
+        return started;
     }
 
-    const QString cmdArgs = QStringLiteral("/c \"%1\"").arg(batPathNative);
-    result = runElevatedCommand(QStringLiteral("cmd.exe"), cmdArgs);
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, batPathNative, disabled]() {
+        const QString cmdArgs = QStringLiteral("/c \"%1\"").arg(batPathNative);
+        QVariantMap result = runElevatedCommand(QStringLiteral("cmd.exe"), cmdArgs);
 
-    if (result.value("success").toBool()) {
-        result["disabled"] = disabled;
-        result["message"] = disabled
-            ? QStringLiteral("Script de désactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.")
-            : QStringLiteral("Script de réactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.");
-    }
+        if (result.value("success").toBool()) {
+            result["disabled"] = disabled;
+            result["message"] = disabled
+                ? QStringLiteral("Script de désactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.")
+                : QStringLiteral("Script de réactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.");
+        }
+
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->defenderBehaviorMonitoringDisabledFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = QStringLiteral("Windows only");
+    started["error"] = QStringLiteral("Windows only");
 #endif
-    return result;
+    return started;
 }
 
 QVariantMap ApplicationController::checkEdrBlocking() const {
@@ -6622,9 +6655,9 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
     return result;
 }
 
-QVariantMap ApplicationController::addEdrExclusion(const QString& path) {
-    QVariantMap result;
-    result["success"] = false;
+QVariantMap ApplicationController::addEdrExclusionAsync(const QString& path) {
+    QVariantMap started;
+    started["success"] = false;
 
     const QString exclusionPath = path.isEmpty()
         ? QDir(QCoreApplication::applicationDirPath()).filePath("bin")
@@ -6640,59 +6673,75 @@ QVariantMap ApplicationController::addEdrExclusion(const QString& path) {
         batPath = QDir(appDir).filePath("../../scripts/" + batName);
     }
     const QString batPathNative = QDir::toNativeSeparators(batPath);
+    const bool useBat = QFile::exists(batPath);
 
-    if (!QFile::exists(batPath)) {
-        // Fallback : exécuter PowerShell directement si le .bat est absent
-        const std::wstring cmd = L"powershell.exe";
-        const std::wstring args =
-            L"-NoProfile -Command \"Add-MpPreference -ExclusionPath '" +
-            exclusionPath.toStdWString() + L"'\"";
+    // Même raisonnement que setWindowsDefenderDisabledAsync : l'élévation UAC
+    // (ShellExecuteExW "runas") et son attente tournent sur un thread séparé
+    // pour ne pas geler le thread GUI pendant toute la durée de l'invite UAC
+    // + l'exécution de la commande.
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, exclusionPath, batPathNative, useBat]() {
+        QVariantMap result;
+        result["success"] = false;
 
-        SHELLEXECUTEINFOW sei{};
-        sei.cbSize = sizeof(sei);
-        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-        sei.lpVerb = L"runas";
-        sei.lpFile = cmd.c_str();
-        sei.lpParameters = args.c_str();
-        sei.nShow = SW_HIDE;
+        if (!useBat) {
+            // Fallback : exécuter PowerShell directement si le .bat est absent
+            const std::wstring cmd = L"powershell.exe";
+            const std::wstring args =
+                L"-NoProfile -Command \"Add-MpPreference -ExclusionPath '" +
+                exclusionPath.toStdWString() + L"'\"";
 
-        if (!ShellExecuteExW(&sei)) {
-            const DWORD err = GetLastError();
-            if (err == ERROR_CANCELLED) {
-                result["error"] = QStringLiteral("L'utilisateur a refusé l'élévation UAC.");
-            } else {
-                result["error"] = QStringLiteral("ShellExecuteExW failed (error: %1)").arg(err);
+            SHELLEXECUTEINFOW sei{};
+            sei.cbSize = sizeof(sei);
+            sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+            sei.lpVerb = L"runas";
+            sei.lpFile = cmd.c_str();
+            sei.lpParameters = args.c_str();
+            sei.nShow = SW_HIDE;
+
+            if (!ShellExecuteExW(&sei)) {
+                const DWORD err = GetLastError();
+                if (err == ERROR_CANCELLED) {
+                    result["error"] = QStringLiteral("L'utilisateur a refusé l'élévation UAC.");
+                } else {
+                    result["error"] = QStringLiteral("ShellExecuteExW failed (error: %1)").arg(err);
+                }
+            } else if (sei.hProcess) {
+                WaitForSingleObject(sei.hProcess, 30000);
+                DWORD exitCode = 0;
+                GetExitCodeProcess(sei.hProcess, &exitCode);
+                CloseHandle(sei.hProcess);
+
+                if (exitCode == 0) {
+                    result["success"] = true;
+                    result["message"] = QStringLiteral("Exclusion ajoutée : %1").arg(exclusionPath);
+                } else {
+                    result["error"] = QStringLiteral("PowerShell a retourné le code %1.").arg(exitCode);
+                }
             }
-            return result;
-        }
+        } else {
+            const QString cmdArgs = QStringLiteral("/c \"%1\"").arg(batPathNative);
+            result = runElevatedCommand(QStringLiteral("cmd.exe"), cmdArgs);
 
-        if (sei.hProcess) {
-            WaitForSingleObject(sei.hProcess, 30000);
-            DWORD exitCode = 0;
-            GetExitCodeProcess(sei.hProcess, &exitCode);
-            CloseHandle(sei.hProcess);
-
-            if (exitCode == 0) {
-                result["success"] = true;
-                result["message"] = QStringLiteral("Exclusion ajoutée : %1").arg(exclusionPath);
-            } else {
-                result["error"] = QStringLiteral("PowerShell a retourné le code %1.").arg(exitCode);
+            if (result.value("success").toBool()) {
+                result["message"] = QStringLiteral("Script d'exclusion exécuté. Vérifie la console pour le résultat.");
             }
         }
-    } else {
-        const QString cmdArgs = QStringLiteral("/c \"%1\"").arg(batPathNative);
-        result = runElevatedCommand(QStringLiteral("cmd.exe"), cmdArgs);
 
-        if (result.value("success").toBool()) {
-            result["success"] = true;
-            result["message"] = QStringLiteral("Script d'exclusion exécuté. Vérifie la console pour le résultat.");
-        }
-    }
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->edrExclusionAddedFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = QStringLiteral("EDR exclusion is Windows-only");
+    started["error"] = QStringLiteral("EDR exclusion is Windows-only");
 #endif
 
-    return result;
+    return started;
 }
 
 QVariantMap ApplicationController::checkDebugPrivilege() const {

@@ -1579,16 +1579,22 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   checkEdrBlocking?(): Promise<Record<string, unknown>>
   /** MODULES-V2 : le processus cible a été tué par l'EDR pendant le test. */
   processKilledByEdr?: QWebChannelSignal<Record<string, unknown>>
-  /** MODULES-V2 : ajoute une exclusion Defender pour le dossier build/bin. */
-  addEdrExclusion?(path: string): Promise<Record<string, unknown>>
+  /** MODULES-V2 : ajoute une exclusion Defender pour le dossier build/bin. Non bloquant (élévation UAC sur thread séparé côté backend) — le résultat final arrive via edrExclusionAddedFinished, cet appel ne fait que démarrer l'opération. */
+  addEdrExclusionAsync?(path: string): Promise<Record<string, unknown>>
+  /** MODULES-V2 : résultat différé de addEdrExclusionAsync. */
+  edrExclusionAddedFinished?: QWebChannelSignal<Record<string, unknown>>
   /** MODULES-V2 : vérifie si SeDebugName est actif. */
   checkDebugPrivilege?(): Promise<Record<string, unknown>>
   /** MODULES-V2 : active SeDebugName. */
   enableDebugPrivilege?(): Promise<Record<string, unknown>>
-  /** MODULES-V2 : active/désactive Windows Defender via le registre (élévation UAC, réversible). */
-  setWindowsDefenderDisabled?(disabled: boolean): Promise<Record<string, unknown>>
-  /** MODULES-V2 : active/désactive la surveillance comportementale Defender (élévation UAC, réversible). */
-  setDefenderBehaviorMonitoringDisabled?(disabled: boolean): Promise<Record<string, unknown>>
+  /** MODULES-V2 : active/désactive Windows Defender via le registre (élévation UAC, réversible). Non bloquant, voir addEdrExclusionAsync ; résultat via windowsDefenderDisabledFinished. */
+  setWindowsDefenderDisabledAsync?(disabled: boolean): Promise<Record<string, unknown>>
+  /** MODULES-V2 : résultat différé de setWindowsDefenderDisabledAsync. */
+  windowsDefenderDisabledFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** MODULES-V2 : active/désactive la surveillance comportementale Defender (élévation UAC, réversible). Non bloquant ; résultat via defenderBehaviorMonitoringDisabledFinished. */
+  setDefenderBehaviorMonitoringDisabledAsync?(disabled: boolean): Promise<Record<string, unknown>>
+  /** MODULES-V2 : résultat différé de setDefenderBehaviorMonitoringDisabledAsync. */
+  defenderBehaviorMonitoringDisabledFinished?: QWebChannelSignal<Record<string, unknown>>
   /** MODULES-V2 : applique un profil stealth (sc2/default/minimal). */
   applyStealthProfile?(profile: string): Promise<Record<string, unknown>>
   /** MODULES-V2 : restaure le mode stealth. */
@@ -2866,21 +2872,24 @@ class BackendService {
         return { success: true, blocked: false, message: 'Mock: aucun blocage EDR détecté.' }
       },
       processKilledByEdr: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
-      async addEdrExclusion(_path: string) {
-        return { success: false, error: 'Mock: exclusion non disponible.' }
+      async addEdrExclusionAsync(_path: string) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      edrExclusionAddedFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
       async checkDebugPrivilege() {
         return { success: true, hasDebugPrivilege: true, enabled: true, message: 'Mock: SeDebugName actif.' }
       },
       async enableDebugPrivilege() {
         return { success: true, message: 'Mock: SeDebugName activé.' }
       },
-      async setWindowsDefenderDisabled(disabled: boolean) {
-        return { success: true, disabled, message: disabled ? 'Mock: clé écrite, redémarrage requis pour désactiver Defender.' : 'Mock: clé retirée, redémarrage requis pour réactiver Defender.' }
+      async setWindowsDefenderDisabledAsync(_disabled: boolean) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
-      async setDefenderBehaviorMonitoringDisabled(disabled: boolean) {
-        return { success: true, disabled, message: disabled ? 'Mock: clé écrite, redémarrage requis.' : 'Mock: clé retirée, redémarrage requis.' }
+      windowsDefenderDisabledFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
+      async setDefenderBehaviorMonitoringDisabledAsync(_disabled: boolean) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      defenderBehaviorMonitoringDisabledFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
       async applyStealthProfile(_profile: string) {
         return { success: false, error: 'Mock: stealth non disponible.' }
       },

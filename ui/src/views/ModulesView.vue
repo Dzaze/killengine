@@ -50,6 +50,7 @@ const edrBusy = ref(false)
 const debugPrivBusy = ref(false)
 const showEdrManualFix = ref(false)
 const stealthBusy = ref(false)
+const stealthResult = ref<Record<string, unknown> | null>(null)
 const handleHiderBusy = ref(false)
 const handleHiderOwnerPid = ref('')
 const handleHiderHandleValue = ref('')
@@ -66,6 +67,11 @@ const behaviorMonitoringDisabled = ref(false)
 const behaviorMonitoringBusy = ref(false)
 const behaviorMonitoringResult = ref<Record<string, unknown> | null>(null)
 
+// setWindowsDefenderDisabledAsync/setDefenderBehaviorMonitoringDisabledAsync/
+// addEdrExclusionAsync ne bloquent plus le thread GUI : elles démarrent
+// l'élévation UAC + la commande sur un thread séparé côté backend et
+// renvoient juste {started:true} immédiatement. Le vrai résultat arrive plus
+// tard via un signal (voir onMounted) — busy reste true jusque-là.
 async function toggleDefenderDisabled() {
   const next = !defenderDisabled.value
   const accepted = await riskGate.confirmRiskAction(
@@ -77,12 +83,14 @@ async function toggleDefenderDisabled() {
   defenderDisableBusy.value = true
   defenderDisableResult.value = null
   try {
-    const result = await backend.getController().setWindowsDefenderDisabled?.(next)
-    defenderDisableResult.value = result ?? { error: 'Réponse backend absente.' }
-    if (result?.success) defenderDisabled.value = next
+    const result = await backend.getController().setWindowsDefenderDisabledAsync?.(next)
+    if (!result?.started) {
+      // Échec immédiat (mock, ou erreur avant même de lancer le thread) — pas de signal à attendre.
+      defenderDisableResult.value = result ?? { error: 'Réponse backend absente.' }
+      defenderDisableBusy.value = false
+    }
   } catch (e) {
     defenderDisableResult.value = { success: false, error: String(e) }
-  } finally {
     defenderDisableBusy.value = false
   }
 }
@@ -98,12 +106,13 @@ async function toggleBehaviorMonitoringDisabled() {
   behaviorMonitoringBusy.value = true
   behaviorMonitoringResult.value = null
   try {
-    const result = await backend.getController().setDefenderBehaviorMonitoringDisabled?.(next)
-    behaviorMonitoringResult.value = result ?? { error: 'Réponse backend absente.' }
-    if (result?.success) behaviorMonitoringDisabled.value = next
+    const result = await backend.getController().setDefenderBehaviorMonitoringDisabledAsync?.(next)
+    if (!result?.started) {
+      behaviorMonitoringResult.value = result ?? { error: 'Réponse backend absente.' }
+      behaviorMonitoringBusy.value = false
+    }
   } catch (e) {
     behaviorMonitoringResult.value = { success: false, error: String(e) }
-  } finally {
     behaviorMonitoringBusy.value = false
   }
 }
@@ -198,11 +207,17 @@ async function handleInstall(modId: string) {
     if (edrResult.value?.blocked) {
       const addAccepted = await riskGate.confirmRiskAction('debug', t('modules.edr.addExclusionTitle'), t('modules.edr.addExclusionDesc'))
       if (addAccepted) {
+        edrBusy.value = true
         try {
-          const result = await backend.getController().addEdrExclusion?.('')
-          edrResult.value = result ?? { error: 'Réponse backend absente.' }
+          const result = await backend.getController().addEdrExclusionAsync?.('')
+          if (!result?.started) {
+            edrResult.value = result ?? { error: 'Réponse backend absente.' }
+            edrBusy.value = false
+          }
+          // sinon : edrExclusionAddedFinished (voir onMounted) mettra à jour edrResult + edrBusy
         } catch (e) {
           edrResult.value = { success: false, error: String(e) }
+          edrBusy.value = false
         }
       }
     }
@@ -231,17 +246,22 @@ async function handleInstall(modId: string) {
   }
 
   if (modId === 'stealth_sc2_profile') {
-    const accepted = await riskGate.confirmRiskAction('debug', t('modules.stealth.confirmTitle'), t('modules.stealth.confirmDesc'))
-    if (!accepted) return
+    // Réutilise store.applyStealthMode (app.ts) au lieu d'appeler le backend
+    // directement : cette action gère déjà la confirmation RiskGate ET
+    // rafraîchit store.stealthStatus après coup — sans ça, le bouton
+    // "Restaurer" ci-dessous (qui lit store.stealthStatus?.active) ne
+    // s'affichait jamais après un "Appliquer" réussi depuis cet écran.
     stealthBusy.value = true
     try {
-      const result = await backend.getController().applyStealthProfile?.('sc2')
-      if (result?.success) {
-        await store.refreshModuleCatalog()
+      const result = await store.applyStealthMode('sc2')
+      if (result) {
+        stealthResult.value = result as unknown as Record<string, unknown>
+        if (result.success) {
+          await store.refreshModuleCatalog()
+        }
       }
-      edrResult.value = result ?? { error: 'Réponse backend absente.' }
     } catch (e) {
-      edrResult.value = { success: false, error: String(e) }
+      stealthResult.value = { success: false, error: String(e) }
     } finally {
       stealthBusy.value = false
     }
@@ -251,13 +271,15 @@ async function handleInstall(modId: string) {
   if (modId === 'restore_stealth') {
     stealthBusy.value = true
     try {
-      const result = await backend.getController().restoreStealthProfile?.()
-      if (result?.success) {
-        await store.refreshModuleCatalog()
+      const result = await store.restoreStealthMode()
+      if (result) {
+        stealthResult.value = result as unknown as Record<string, unknown>
+        if (result.success) {
+          await store.refreshModuleCatalog()
+        }
       }
-      edrResult.value = result ?? { error: 'Réponse backend absente.' }
     } catch (e) {
-      edrResult.value = { success: false, error: String(e) }
+      stealthResult.value = { success: false, error: String(e) }
     } finally {
       stealthBusy.value = false
     }
@@ -290,6 +312,26 @@ async function handleInstall(modId: string) {
 
 onMounted(() => {
   void store.refreshModuleCatalog()
+
+  // Résultats différés des actions Defender/EDR non bloquantes (voir
+  // addEdrExclusionAsync/setWindowsDefenderDisabledAsync/
+  // setDefenderBehaviorMonitoringDisabledAsync) — le backend démarre le
+  // travail sur un thread séparé et notifie ici une fois terminé.
+  const controller = backend.getController()
+  controller.edrExclusionAddedFinished?.connect((result: Record<string, unknown>) => {
+    edrResult.value = result
+    edrBusy.value = false
+  })
+  controller.windowsDefenderDisabledFinished?.connect((result: Record<string, unknown>) => {
+    defenderDisableResult.value = result
+    if (result?.success) defenderDisabled.value = Boolean(result.disabled)
+    defenderDisableBusy.value = false
+  })
+  controller.defenderBehaviorMonitoringDisabledFinished?.connect((result: Record<string, unknown>) => {
+    behaviorMonitoringResult.value = result
+    if (result?.success) behaviorMonitoringDisabled.value = Boolean(result.disabled)
+    behaviorMonitoringBusy.value = false
+  })
 })
 </script>
 
@@ -519,6 +561,11 @@ onMounted(() => {
         </div>
         <p class="module-desc">{{ mod.description }}</p>
         <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
+
+        <!-- Résultat Appliquer/Restaurer Stealth -->
+        <div v-if="mod.id === 'stealth_sc2_profile' && stealthResult" class="diag-result" :class="stealthResult.success ? 'ok' : 'blocked'">
+          <p>{{ String(stealthResult.message ?? stealthResult.error ?? '') }}</p>
+        </div>
 
         <!-- Handle Hider UI -->
         <div v-if="mod.id === 'handle_hider'" class="handle-hider-ui">
