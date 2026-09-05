@@ -1529,6 +1529,8 @@ signals:
     void candidateFieldTestFinished(const QVariantMap& result);
     void pageGuardWatchFinished(const QVariantMap& result);
     void inProcessBreakpointWatchFinished(const QVariantMap& result);
+    /// EDR test : le processus cible a été tué par l'EDR pendant le test
+    void processKilledByEdr(const QVariantMap& info);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le
@@ -1655,6 +1657,7 @@ private:
     killcore::AntiDebugSession m_antiDebugSession;
     QString m_stealthProfile;
     bool m_stealthActive{false};
+    mutable int m_edrCheckCount{0}; // Compteur de tentatives EDR (rate limiting detection)
     bool m_stealthProcessMaskActive{false};
     bool m_stealthDllMaskActive{false};
     // Test automatique des champs candidats (voir testCandidateFieldsAsync) : etat

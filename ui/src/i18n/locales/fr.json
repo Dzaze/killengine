@@ -123,6 +123,7 @@
     "edr": {
       "check": "Vérifier",
       "addExclusion": "Ajouter exclusion",
+      "addExclusionPreventive": "Ajouter exclusion (préventif)",
       "confirmTitle": "Vérifier le blocage EDR",
       "confirmDesc": "Tester si l'EDR bloque l'injection de code sur le processus attaché. Cela simule VirtualAllocEx + WriteProcessMemory + CreateRemoteThread.",
       "addExclusionTitle": "Ajouter une exclusion Defender",

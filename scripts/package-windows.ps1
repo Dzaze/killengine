@@ -136,6 +136,12 @@ $scriptsOut = Join-Path $packageRoot "scripts"
 New-Item -ItemType Directory -Force -Path $scriptsOut | Out-Null
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\killengine.lua") -Destination $scriptsOut -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\automation-pipe-call.ps1") -Destination $scriptsOut -Force
+
+# EDR helper scripts (used by the Modules view for Defender exclusions/registry changes)
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\add_defender_exclusion.bat") -Destination $scriptsOut -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\disable_defender_registry.bat") -Destination $scriptsOut -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\enable_defender_registry.bat") -Destination $scriptsOut -Force
+
 $luaExamples = Join-Path $repoRoot "scripts\lua_examples"
 if (Test-Path $luaExamples) {
     Copy-Item -LiteralPath $luaExamples -Destination $scriptsOut -Recurse -Force
@@ -295,6 +301,9 @@ $requiredRuntimeItems = @(
     "PACKAGE_README.txt",
     "scripts\killengine.lua",
     "scripts\automation-pipe-call.ps1",
+    "scripts\add_defender_exclusion.bat",
+    "scripts\disable_defender_registry.bat",
+    "scripts\enable_defender_registry.bat",
     "scripts\lua_examples\README.md",
     "USER_GUIDE.md",
     "V1_REGRESSION_CHECKLIST.md",

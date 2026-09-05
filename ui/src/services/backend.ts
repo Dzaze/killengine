@@ -1577,6 +1577,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   moduleInstallFinished?: QWebChannelSignal<Record<string, unknown>>
   /** MODULES-V2 : vérifie si l'EDR bloque l'injection sur le process attaché. */
   checkEdrBlocking?(): Promise<Record<string, unknown>>
+  /** MODULES-V2 : le processus cible a été tué par l'EDR pendant le test. */
+  processKilledByEdr?: QWebChannelSignal<Record<string, unknown>>
   /** MODULES-V2 : ajoute une exclusion Defender pour le dossier build/bin. */
   addEdrExclusion?(path: string): Promise<Record<string, unknown>>
   /** MODULES-V2 : vérifie si SeDebugName est actif. */
@@ -2863,6 +2865,7 @@ class BackendService {
       async checkEdrBlocking() {
         return { success: true, blocked: false, message: 'Mock: aucun blocage EDR détecté.' }
       },
+      processKilledByEdr: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
       async addEdrExclusion(_path: string) {
         return { success: false, error: 'Mock: exclusion non disponible.' }
       },

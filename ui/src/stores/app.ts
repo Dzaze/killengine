@@ -617,6 +617,7 @@ export const useAppStore = defineStore('app', () => {
   let backendHotkeySignalConnected = false
   let backendFreezeInstabilitySignalConnected = false
   let backendWriteWatchSignalConnected = false
+  let backendEdrKillSignalConnected = false
   let backendModuleInstallSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
@@ -2076,6 +2077,24 @@ export const useAppStore = defineStore('app', () => {
           )
         })
         backendWriteWatchSignalConnected = true
+      }
+      if (!backendEdrKillSignalConnected) {
+        // EDR test : le processus cible a été tué par l'EDR pendant le test
+        controller.processKilledByEdr?.connect((info) => {
+          const pid = Number(info.pid ?? 0)
+          const name = String(info.processName ?? 'inconnu')
+          pushMessage(
+            'assistant',
+            `⚠️ L'EDR a tué le processus cible "${name}" (PID ${pid}) pendant le test EDR. C'est une signature claire que l'EDR est actif. Ajoute une exclusion PowerShell pour éviter ce comportement.`,
+            {
+              recoveryActions: [
+                { id: 'add_edr_exclusion', label: 'Ajouter exclusion Defender' },
+                { id: 'open_expert', label: 'Ouvrir Expert' },
+              ],
+            },
+          )
+        })
+        backendEdrKillSignalConnected = true
       }
       if (!backendModuleInstallSignalConnected) {
         // Vue "Modules" : progression des installations de module en cours

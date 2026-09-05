@@ -9,6 +9,7 @@
 #include <QWebEngineSettings>
 #include <QWebEngineView>
 #include <QMainWindow>
+#include <QShortcut>
 #include <QUrl>
 #include <QIcon>
 #include <QDir>
@@ -161,6 +162,26 @@ int runApplication(int argc, char* argv[]) {
 
     mainWindow.setCentralWidget(view);
     mainWindow.show();
+
+    // F12 — DevTools Chromium (onglet Console : erreurs/warnings JS de l'UI
+    // Vue en temps reel, meme mecanisme qu'un navigateur). Fenetre separee,
+    // creee une seule fois puis reutilisee/relevee aux appuis suivants.
+    auto* devToolsWindow = new QMainWindow(&mainWindow);
+    devToolsWindow->setWindowTitle("KillEngine — DevTools");
+    devToolsWindow->resize(1000, 700);
+    auto* devToolsView = new QWebEngineView(devToolsWindow);
+    auto* devToolsPage = new QWebEnginePage(webEngineProfile, devToolsView);
+    devToolsView->setPage(devToolsPage);
+    devToolsWindow->setCentralWidget(devToolsView);
+    webEnginePage->setDevToolsPage(devToolsPage);
+
+    auto* devToolsShortcut = new QShortcut(QKeySequence(Qt::Key_F12), &mainWindow);
+    devToolsShortcut->setContext(Qt::ApplicationShortcut);
+    QObject::connect(devToolsShortcut, &QShortcut::activated, [devToolsWindow]() {
+        devToolsWindow->show();
+        devToolsWindow->raise();
+        devToolsWindow->activateWindow();
+    });
 
     KE_LOG_INFO() << "KillEngine UI loaded. Entering event loop...";
 

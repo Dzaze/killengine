@@ -12,12 +12,16 @@ const riskGate = useRiskGateStore()
 const statusLabel = (status: string) => {
   if (status === 'ok') return t('modules.status.ok')
   if (status === 'missing') return t('modules.status.missing')
+  if (status === 'provisional') return 'Testé — résultat provisoire'
+  if (status === 'blocked') return 'Attention : blocage présent'
   return status
 }
 
 const statusClass = (status: string) => {
   if (status === 'ok') return 'ok'
   if (status === 'missing') return 'missing'
+  if (status === 'provisional') return 'provisional'
+  if (status === 'blocked') return 'blocked'
   return 'unknown'
 }
 
@@ -174,7 +178,11 @@ async function runDebugPrivCheck() {
 // Retourne le statut effectif d'un module (priorité aux résultats de diagnostic)
 function moduleEffectiveStatus(mod: { id: string; status: string }) {
   if (mod.id === 'debug_privilege' && debugPrivResult.value?.enabled) return 'ok'
-  if (mod.id === 'edr_exclusion' && edrResult.value && !edrResult.value.blocked) return 'ok'
+  if (mod.id === 'edr_exclusion' && edrResult.value) {
+    if (edrResult.value.blocked) return 'blocked'
+    if (edrResult.value.provisional) return 'provisional' // Résultat testé mais pas fiable (rate limiting EDR)
+    return 'ok'
+  }
   return mod.status
 }
 
@@ -369,15 +377,43 @@ onMounted(() => {
         <p class="module-desc">{{ mod.description }}</p>
         <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
 
+        <!-- Guide EDR / Tamper Protection -->
+        <div class="edr-guide">
+          <p class="guide-title">📖 Guide de résolution EDR</p>
+          <div class="guide-step">
+            <strong>Étape 1 — Exclusion PowerShell (recommandé, fonctionne toujours)</strong>
+            <p>Ajoute le dossier de build aux exclusions Defender. C'est la méthode la plus fiable car elle n'est pas bloquée par Tamper Protection.</p>
+            <p class="guide-action">Clique sur <strong>"Ajouter exclusion"</strong> ci-dessous, ou lance manuellement :</p>
+            <pre class="manual-code">powershell -Command "Add-MpPreference -ExclusionPath '{{ buildDir }}'"</pre>
+          </div>
+          <div class="guide-step">
+            <strong>Étape 2 — Désactiver Tamper Protection (si tu veux les clés registre)</strong>
+            <p>Les clés registre de désactivation de Defender sont bloquées par Tamper Protection. Pour les écrire :</p>
+            <ol class="guide-list">
+              <li>Ouvre <strong>Windows Security</strong> → Protection contre les virus et menaces</li>
+              <li>Clique sur <strong>Paramètres de protection contre les menaces</strong></li>
+              <li>Désactive <strong>Tamper Protection</strong></li>
+              <li>Clique sur <strong>"Désactiver Defender"</strong> ci-dessous</li>
+              <li><strong>Redémarre Windows</strong> pour que les modifications prennent effet</li>
+            </ol>
+          </div>
+          <div class="guide-step">
+            <strong>Étape 3 — Réactiver Defender après tes tests</strong>
+            <p>Quand tu as fini tes tests, réactive Defender pour la sécurité de ta machine :</p>
+            <p class="guide-action">Clique sur <strong>"Réactiver Defender"</strong> ci-dessous, puis redémarre Windows.</p>
+          </div>
+        </div>
+
         <!-- Résultats de diagnostic -->
-        <div v-if="mod.id === 'edr_exclusion' && edrResult" class="diag-result" :class="edrResult.blocked ? 'blocked' : 'ok'">
+        <div v-if="mod.id === 'edr_exclusion' && edrResult" class="diag-result" :class="edrResult.blocked ? 'blocked' : (edrResult.provisional ? 'provisional' : 'ok')">
+          <p v-if="edrResult.attemptCount" class="attempt-count">Tentative {{ edrResult.attemptCount }}</p>
           <p>{{ String(edrResult.message ?? edrResult.error ?? '') }}</p>
-          <div v-if="edrResult.blocked" class="edr-fix-actions">
+          <div v-if="edrResult.blocked || edrResult.provisional" class="edr-fix-actions">
             <button
               class="btn btn-primary fix-btn"
               @click="handleInstall('edr_exclusion')"
             >
-              {{ $t('modules.edr.addExclusion') }}
+              {{ edrResult.provisional ? $t('modules.edr.addExclusionPreventive') : $t('modules.edr.addExclusion') }}
             </button>
             <button
               class="btn btn-secondary fix-btn"
@@ -543,13 +579,15 @@ onMounted(() => {
 
 .refresh-btn {
   flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-  background: color-mix(in srgb, var(--success) 12%, var(--bg-accent));
+  border: 1px solid var(--success);
+  background: color-mix(in srgb, var(--success) 18%, var(--bg-accent));
   color: var(--success);
+  font-weight: 600;
 }
 
 .refresh-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--success) 20%, var(--bg-accent));
+  background: color-mix(in srgb, var(--success) 30%, var(--bg-accent));
+  border-color: var(--success);
 }
 
 .empty {
@@ -615,6 +653,18 @@ onMounted(() => {
   border-color: color-mix(in srgb, var(--success) 50%, var(--border));
 }
 
+.module-status.provisional {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.module-status.blocked {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .module-status.missing {
   color: var(--warning);
   border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
@@ -672,6 +722,13 @@ onMounted(() => {
   border: 1px solid var(--border);
 }
 
+.diag-result .attempt-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
 .diag-result p {
   margin: 0 0 8px;
   font-size: 12px;
@@ -682,14 +739,72 @@ onMounted(() => {
   color: var(--success);
 }
 
+.diag-result.provisional {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--warning);
+}
+
 .diag-result.blocked {
   border-color: color-mix(in srgb, var(--error) 40%, var(--border));
+  background: color-mix(in srgb, var(--error) 8%, transparent);
   color: var(--error);
 }
 
 .diag-result.disabled {
   border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
   color: var(--warning);
+}
+
+.edr-guide {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warning) 5%, var(--bg-secondary));
+}
+
+.edr-guide .guide-title {
+  margin: 0 0 10px;
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.edr-guide .guide-step {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.edr-guide .guide-step:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.edr-guide .guide-step strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.edr-guide .guide-step p {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.edr-guide .guide-action {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.edr-guide .guide-list {
+  margin: 4px 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .edr-manual-fix {
