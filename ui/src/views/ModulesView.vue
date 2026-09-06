@@ -420,7 +420,7 @@ onMounted(() => {
         <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
 
         <!-- Guide EDR / Tamper Protection -->
-        <div class="edr-guide">
+        <div v-if="mod.id === 'edr_exclusion'" class="edr-guide">
           <p class="guide-title">📖 Guide de résolution EDR</p>
           <div class="guide-step">
             <strong>Étape 1 — Exclusion PowerShell (recommandé, fonctionne toujours)</strong>
