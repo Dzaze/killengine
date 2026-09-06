@@ -427,6 +427,14 @@ CandidateStore::StoredCandidate CandidateStore::candidateToStored(const Candidat
     if (valueSize > 0) {
         std::memcpy(stored.value, candidate.lastValue.constData(), static_cast<size_t>(valueSize));
     }
+    stored.confidence = candidate.confidence;
+    stored.secondaryVariant = candidate.secondaryVariant ? 1 : 0;
+    const QByteArray labelUtf8 = candidate.variantLabel.toUtf8();
+    const qsizetype labelSize = std::min<qsizetype>(labelUtf8.size(), sizeof(stored.variantLabel));
+    stored.variantLabelSize = static_cast<uint8_t>(std::max<qsizetype>(labelSize, 0));
+    if (labelSize > 0) {
+        std::memcpy(stored.variantLabel, labelUtf8.constData(), static_cast<size_t>(labelSize));
+    }
     return stored;
 }
 
@@ -437,6 +445,12 @@ Candidate CandidateStore::storedToCandidate(const StoredCandidate& stored) {
     const qsizetype valueSize = std::min<qsizetype>(stored.valueSize, sizeof(stored.value));
     if (valueSize > 0) {
         candidate.lastValue = QByteArray(stored.value, valueSize);
+    }
+    candidate.confidence = stored.confidence;
+    candidate.secondaryVariant = stored.secondaryVariant != 0;
+    const qsizetype labelSize = std::min<qsizetype>(stored.variantLabelSize, sizeof(stored.variantLabel));
+    if (labelSize > 0) {
+        candidate.variantLabel = QString::fromUtf8(stored.variantLabel, labelSize);
     }
     return candidate;
 }

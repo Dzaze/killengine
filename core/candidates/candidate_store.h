@@ -78,11 +78,23 @@ public:
     CandidatePage page(size_t pageIndex, size_t pageSize, const QString& addressFilter = {}) const;
 
 private:
+    // Format binaire brut (memcpy) écrit dans un QTemporaryFile propre à la
+    // session (auto-remove, jamais relu après un redémarrage) : changer ce
+    // layout n'a aucun souci de rétrocompatibilité. confidence/secondaryVariant
+    // et variantLabel (tronqué) doivent survivre au bascule fichier au-delà de
+    // fileBackedThreshold — sans ça, tout candidat perdait sa confiance
+    // calculée (retour silencieux à 1.0) dès qu'un scan sur un gros jeu (RAM
+    // de plusieurs Go, seuil fichier facilement atteint) passait en mode
+    // fichier.
     struct StoredCandidate {
         uint64_t address{0};
         uint8_t type{0};
         uint8_t valueSize{0};
         char value[8]{};
+        double confidence{1.0};
+        uint8_t secondaryVariant{0};
+        uint8_t variantLabelSize{0};
+        char variantLabel[32]{};
     };
 
     void persistIfNeeded();

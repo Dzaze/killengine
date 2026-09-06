@@ -89,6 +89,37 @@ TEST(CandidateStoreTest, SpillsLargeCandidateSetToTemporaryFile) {
     EXPECT_EQ(page.candidates[0].lastValue, QByteArray::fromHex("64000000"));
 }
 
+// Le format binaire fichier (StoredCandidate) a longtemps perdu confidence/
+// variantLabel/secondaryVariant au round-trip (retour silencieux à
+// confidence=1.0) dès qu'un scan dépassait fileBackedThreshold — ce qui
+// arrive facilement sur un jeu de plusieurs Go de RAM. Ce test verrouille
+// que ces champs survivent bien au bascule fichier.
+TEST(CandidateStoreTest, PreservesConfidenceAndVariantAcrossFileBackedRoundTrip) {
+    killcore::ScanResult scan;
+    scan.matches.append({0x1000, killcore::ValueType::Int32, 0.72, "Float32 x100", true});
+    scan.matches.append({0x2000, killcore::ValueType::Int32, 0.96, "", false});
+    for (int i = 0; i < 10; ++i) {
+        scan.matches.append({static_cast<uint64_t>(0x3000 + i * 4), killcore::ValueType::Int32});
+    }
+
+    killcore::CandidateStore store;
+    store.setFileBackedThreshold(5);
+    store.replaceFromScan(scan, QByteArray::fromHex("64000000"));
+    ASSERT_TRUE(store.isFileBacked());
+
+    auto page = store.page(0, 2);
+    ASSERT_EQ(page.candidates.size(), 2);
+    EXPECT_EQ(page.candidates[0].address, 0x1000u);
+    EXPECT_DOUBLE_EQ(page.candidates[0].confidence, 0.72);
+    EXPECT_EQ(page.candidates[0].variantLabel, "Float32 x100");
+    EXPECT_TRUE(page.candidates[0].secondaryVariant);
+
+    EXPECT_EQ(page.candidates[1].address, 0x2000u);
+    EXPECT_DOUBLE_EQ(page.candidates[1].confidence, 0.96);
+    EXPECT_TRUE(page.candidates[1].variantLabel.isEmpty());
+    EXPECT_FALSE(page.candidates[1].secondaryVariant);
+}
+
 TEST(CandidateStoreTest, FiltersFileBackedCandidatesWithoutHydratingWholeStore) {
     killcore::ScanResult scan;
     scan.matches.append({0x1000, killcore::ValueType::Int32});
