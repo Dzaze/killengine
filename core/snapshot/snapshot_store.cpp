@@ -1,6 +1,7 @@
 #include "snapshot_store.h"
 
 #include "logging/logger.h"
+#include "scanner/candidate_confidence.h"
 #include "snapshot_codec.h"
 
 #include <QDir>
@@ -397,6 +398,15 @@ UnknownScanResult SnapshotStore::compare(
     const size_t valueSize = valueTypeSize(type);
     MemoryReader reader(process);
 
+    // Score de confiance calculé une fois par région snapshotée (pas une fois
+    // par match) : même discipline de performance que ScanEngine::exactScan
+    // (voir core/scanner/candidate_confidence.h). m_regions ici est une
+    // QList<SnapshotRegion> (pas de flags readable/writable/type) donc on
+    // relit une carte mémoire live pour retrouver les vraies caractéristiques
+    // de chaque région au moment du compare(), pas au moment de la capture.
+    const auto liveRegions = MemoryMap::snapshot(process);
+    const CandidateConfidenceContext confidenceContext;
+
     // Meme raisonnement que SnapshotStore::capture ci-dessus : rapporte
     // avant traitement de chaque region, y compris les cas ignores/invalides
     // plus bas, plutot que de dupliquer l'appel a chaque `continue`.
@@ -439,13 +449,21 @@ UnknownScanResult SnapshotStore::compare(
             continue;
         }
 
+        // Une seule recherche de région (O(log R)) par région snapshotée,
+        // pas par match — voir le commentaire plus haut.
+        const MemoryRegion* liveRegion = findRegionForAddress(liveRegions, region.baseAddress);
+        const double regionScore = liveRegion
+            ? computeRegionScore(*liveRegion, confidenceContext)
+            : 0.1; // Région disparue depuis la capture = suspect, même convention que regionScoreAtAddress.
+        const double regionConfidence = computeScanTimeConfidence(regionScore, /*secondaryVariant=*/false);
+
         const qsizetype comparable = std::min(previous.block.data.size(), read.data.size());
         const qsizetype step = static_cast<qsizetype>(std::max<size_t>(valueSize, 1));
         for (qsizetype offset = 0; offset <= comparable - static_cast<qsizetype>(valueSize); offset += step) {
             if (matchesMode(previous.block.data.constData() + offset, read.data.constData() + offset, type, mode, options.targetDelta)) {
                 ++result.matchesFound;
                 if (result.matches.size() < static_cast<qsizetype>(kUnknownMaxReturnedMatches)) {
-                    result.matches.append({region.baseAddress + static_cast<uint64_t>(offset), type, 1.0, options.matchVariantLabel});
+                    result.matches.append({region.baseAddress + static_cast<uint64_t>(offset), type, regionConfidence, options.matchVariantLabel});
                 } else {
                     result.partial = true;
                     result.success = true;
