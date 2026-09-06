@@ -45,10 +45,16 @@ public:
     AntiDebugSession(const AntiDebugSession&) = delete;
     AntiDebugSession& operator=(const AntiDebugSession&) = delete;
 
-    /// Patche le PEB du processus cible.
-    AntiDebugResult start(const ProcessHandle& process);
+    /// Patche le PEB du processus cible. Ouvre son propre handle en écriture
+    /// (ProcessAccess::ReadWrite), indépendant de celui de l'appelant — le
+    /// handle principal d'ApplicationController est en lecture seule
+    /// (voir ApplicationController::attachProcess), et cette session reste
+    /// active bien après le retour de start() (jusqu'à stop()), donc elle ne
+    /// peut pas se contenter d'emprunter un handle dont elle ne contrôle pas
+    /// la durée de vie.
+    AntiDebugResult start(uint32_t pid);
 
-    /// Restaure les valeurs PEB originales.
+    /// Restaure les valeurs PEB originales et ferme le handle interne.
     void stop();
 
     bool isActive() const { return m_active; }
@@ -56,7 +62,7 @@ public:
 private:
     bool m_active{false};
     uint32_t m_pid{0};
-    HANDLE m_hProcess{nullptr};
+    ProcessHandle m_processHandle;
     uint64_t m_pebAddress{0};
     BYTE m_originalBeingDebugged{0};
     DWORD m_originalNtGlobalFlag{0};

@@ -832,7 +832,7 @@ TEST(PowerUpRuntimeTest, AntiDebugPebPatchClearsAndRestoresBeingDebugged) {
 
     // Lancer la session anti-debug : doit patcher BeingDebugged à 0.
     killcore::AntiDebugSession session;
-    const auto result = session.start(handle);
+    const auto result = session.start(target.pid());
     ASSERT_TRUE(result.success) << result.error.toStdString();
     EXPECT_EQ(result.pebAddress, peb);
     EXPECT_GE(result.fieldsPatched, 1);

@@ -8013,7 +8013,7 @@ QVariantMap ApplicationController::applyStealthMode(const QString& profile) {
     int modulesActivated = 0;
 
     if (antiDebug) {
-        auto antiResult = m_antiDebugSession.start(m_handle);
+        auto antiResult = m_antiDebugSession.start(static_cast<uint32_t>(m_pid));
         if (antiResult.success) {
             modulesActivated++;
         } else {

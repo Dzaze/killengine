@@ -73,21 +73,26 @@ AntiDebugSession::~AntiDebugSession() {
     stop();
 }
 
-AntiDebugResult AntiDebugSession::start(const ProcessHandle& process) {
+AntiDebugResult AntiDebugSession::start(uint32_t pid) {
     AntiDebugResult result;
 
 #ifdef Q_OS_WIN
-    if (!process.isValid()) {
-        result.error = "Invalid process handle";
+    // ReadWrite (pas AllAccess) : c'est une simple lecture/écriture mémoire,
+    // pas une injection. Handle propre à cette session (pas celui, en lecture
+    // seule, du contrôleur principal) car il doit rester valide bien après le
+    // retour de start(), jusqu'au stop() qui restaure les valeurs d'origine.
+    m_processHandle.close();
+    if (!m_processHandle.open(pid, ProcessAccess::ReadWrite)) {
+        result.error = "Cannot open target process for read/write";
         return result;
     }
 
-    m_pid = process.pid();
-    m_hProcess = process.rawHandle();
+    m_pid = pid;
+    const HANDLE hProcess = m_processHandle.rawHandle();
 
     // Récupérer l'adresse du PEB de la cible.
     QString pebError;
-    m_pebAddress = getProcessPebAddress(m_hProcess, &pebError);
+    m_pebAddress = getProcessPebAddress(hProcess, &pebError);
     if (!m_pebAddress) {
         result.error = QString("Cannot read target PEB: %1").arg(pebError);
         return result;
@@ -95,13 +100,13 @@ AntiDebugResult AntiDebugSession::start(const ProcessHandle& process) {
     result.pebAddress = m_pebAddress;
 
     // --- BeingDebugged (PEB+0x2, x64) ---
-    if (!readRemote(m_hProcess, m_pebAddress + 0x2, &m_originalBeingDebugged, sizeof(m_originalBeingDebugged))) {
+    if (!readRemote(hProcess, m_pebAddress + 0x2, &m_originalBeingDebugged, sizeof(m_originalBeingDebugged))) {
         result.error = QString("Failed to read PEB+0x2 (BeingDebugged) at 0x%1")
                            .arg(m_pebAddress + 0x2, 16, QChar('0'));
         return result;
     }
     const BYTE beingDebugged = 0;
-    if (!writeRemote(m_hProcess, m_pebAddress + 0x2, &beingDebugged, sizeof(beingDebugged))) {
+    if (!writeRemote(hProcess, m_pebAddress + 0x2, &beingDebugged, sizeof(beingDebugged))) {
         result.error = QString("Failed to write PEB+0x2 (BeingDebugged) at 0x%1")
                            .arg(m_pebAddress + 0x2, 16, QChar('0'));
         return result;
@@ -110,7 +115,7 @@ AntiDebugResult AntiDebugSession::start(const ProcessHandle& process) {
 
     // --- NtGlobalFlag (PEB+0xBC, x64) : effacer les bits de check heap (0x70) ---
     DWORD ntGlobalFlag = 0;
-    if (!readRemote(m_hProcess, m_pebAddress + 0xBC, &ntGlobalFlag, sizeof(ntGlobalFlag))) {
+    if (!readRemote(hProcess, m_pebAddress + 0xBC, &ntGlobalFlag, sizeof(ntGlobalFlag))) {
         result.error = QString("Failed to read PEB+0xBC (NtGlobalFlag) at 0x%1")
                            .arg(m_pebAddress + 0xBC, 16, QChar('0'));
         return result;
@@ -118,7 +123,7 @@ AntiDebugResult AntiDebugSession::start(const ProcessHandle& process) {
     m_originalNtGlobalFlag = ntGlobalFlag;
     const DWORD patchedFlag = ntGlobalFlag & ~0x70;
     if (patchedFlag != ntGlobalFlag) {
-        if (!writeRemote(m_hProcess, m_pebAddress + 0xBC, &patchedFlag, sizeof(patchedFlag))) {
+        if (!writeRemote(hProcess, m_pebAddress + 0xBC, &patchedFlag, sizeof(patchedFlag))) {
             result.error = QString("Failed to write PEB+0xBC (NtGlobalFlag) at 0x%1")
                                .arg(m_pebAddress + 0xBC, 16, QChar('0'));
             return result;
@@ -127,14 +132,14 @@ AntiDebugResult AntiDebugSession::start(const ProcessHandle& process) {
     }
 
     // --- DebugObjectHandle (PEB+0x1C, x64) ---
-    if (!readRemote(m_hProcess, m_pebAddress + 0x1C, &m_originalDebugObjectHandle, sizeof(m_originalDebugObjectHandle))) {
+    if (!readRemote(hProcess, m_pebAddress + 0x1C, &m_originalDebugObjectHandle, sizeof(m_originalDebugObjectHandle))) {
         result.error = QString("Failed to read PEB+0x1C (DebugObjectHandle) at 0x%1")
                            .arg(m_pebAddress + 0x1C, 16, QChar('0'));
         return result;
     }
     if (m_originalDebugObjectHandle != 0) {
         const uint64_t nullHandle = 0;
-        if (!writeRemote(m_hProcess, m_pebAddress + 0x1C, &nullHandle, sizeof(nullHandle))) {
+        if (!writeRemote(hProcess, m_pebAddress + 0x1C, &nullHandle, sizeof(nullHandle))) {
             result.error = QString("Failed to write PEB+0x1C (DebugObjectHandle) at 0x%1")
                                .arg(m_pebAddress + 0x1C, 16, QChar('0'));
             return result;
@@ -158,7 +163,7 @@ AntiDebugResult AntiDebugSession::start(const ProcessHandle& process) {
                   << ", NtGlobalFlag was 0x" << std::hex << m_originalNtGlobalFlag
                   << ", DebugObjectHandle was 0x" << m_originalDebugObjectHandle << ")";
 #else
-    (void)process;
+    (void)pid;
     result.error = "Anti-debug is Windows-only";
 #endif
 
@@ -171,23 +176,24 @@ void AntiDebugSession::stop() {
         return;
     }
 
-    if (m_hProcess && m_pebAddress) {
+    const HANDLE hProcess = m_processHandle.rawHandle();
+    if (hProcess && m_pebAddress) {
         // Restaurer BeingDebugged.
         if (m_originalBeingDebugged != 0) {
-            writeRemote(m_hProcess, m_pebAddress + 0x2, &m_originalBeingDebugged, sizeof(m_originalBeingDebugged));
+            writeRemote(hProcess, m_pebAddress + 0x2, &m_originalBeingDebugged, sizeof(m_originalBeingDebugged));
         }
         // Restaurer NtGlobalFlag (seulement si on l'avait modifié).
         if ((m_originalNtGlobalFlag & 0x70) != 0) {
-            writeRemote(m_hProcess, m_pebAddress + 0xBC, &m_originalNtGlobalFlag, sizeof(m_originalNtGlobalFlag));
+            writeRemote(hProcess, m_pebAddress + 0xBC, &m_originalNtGlobalFlag, sizeof(m_originalNtGlobalFlag));
         }
         // Restaurer DebugObjectHandle.
         if (m_originalDebugObjectHandle != 0) {
-            writeRemote(m_hProcess, m_pebAddress + 0x1C, &m_originalDebugObjectHandle, sizeof(m_originalDebugObjectHandle));
+            writeRemote(hProcess, m_pebAddress + 0x1C, &m_originalDebugObjectHandle, sizeof(m_originalDebugObjectHandle));
         }
     }
 
+    m_processHandle.close();
     m_active = false;
-    m_hProcess = nullptr;
     m_pebAddress = 0;
     m_originalBeingDebugged = 0;
     m_originalNtGlobalFlag = 0;
