@@ -972,6 +972,22 @@ onMounted(() => {
   min-width: 100px;
 }
 
+/* Flèches natives du champ PID (type="number") : moches, non thémables de
+   façon fiable entre navigateurs, et leur clic a déjà déclenché un vrai crash
+   (voir le fix .trim()) — même choix que SettingsView.vue, un champ nombre
+   propre sans spinner plutôt qu'un spinner customisé. */
+.handle-hider-inputs input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.handle-hider-inputs input[type="number"]::-webkit-outer-spin-button,
+.handle-hider-inputs input[type="number"]::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 .copied-feedback {
   color: var(--success);
   font-size: 11px;
