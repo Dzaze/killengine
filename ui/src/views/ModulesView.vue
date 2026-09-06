@@ -311,7 +311,13 @@ async function handleInstall(modId: string) {
   }
 
   if (modId === 'handle_hider') {
-    if (!handleHiderOwnerPid.value.trim() || !handleHiderHandleValue.value.trim()) {
+    // handleHiderOwnerPid est lié à un <input type="number"> : Vue convertit
+    // automatiquement sa valeur en Number dès qu'on interagit avec (y compris
+    // les flèches ↑↓ natives du champ), même si le ref est initialisé comme
+    // une chaîne vide — .trim() plante sur un Number (bug UI signalé par
+    // l'utilisateur : bandeau d'erreur fatale rouge). String(...) le protège
+    // dans les deux cas.
+    if (!String(handleHiderOwnerPid.value).trim() || !handleHiderHandleValue.value.trim()) {
       handleHiderResult.value = { success: false, error: 'Remplis le PID et la valeur du handle.' }
       return
     }
@@ -596,7 +602,7 @@ onMounted(() => {
           <div class="handle-hider-inputs">
             <input v-model="handleHiderOwnerPid" class="input compact-input" :placeholder="$t('modules.handleHider.ownerPid')" type="number" min="0" />
             <input v-model="handleHiderHandleValue" class="input compact-input" :placeholder="$t('modules.handleHider.handleValue')" />
-            <button class="btn btn-primary compact" :disabled="handleHiderBusy || !handleHiderOwnerPid.trim() || !handleHiderHandleValue.trim()" @click="handleInstall('handle_hider')">
+            <button class="btn btn-primary compact" :disabled="handleHiderBusy || !String(handleHiderOwnerPid).trim() || !handleHiderHandleValue.trim()" @click="handleInstall('handle_hider')">
               {{ handleHiderBusy ? $t('modules.handleHider.hiding') : $t('modules.handleHider.hide') }}
             </button>
           </div>
