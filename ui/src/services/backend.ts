@@ -1499,9 +1499,14 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   getProcessNetworkConnections?(): Promise<{ success: boolean; connections: NetworkConnection[]; error?: string }>
   /** Réseau — Modules DLL réseau chargés par le processus attaché (lecture seule). */
   getProcessNetworkModules?(): Promise<{ success: boolean; modules: NetworkModule[]; error?: string }>
-  /** Proxy HTTP — Intercepte les requêtes HTTP/HTTPS du process attaché. */
-  startHttpProxy?(port: number, interceptHttps: boolean): Promise<{ success: boolean; port?: number; proxyPid?: number; error?: string }>
-  stopHttpProxy?(): Promise<{ success: boolean; error?: string }>
+  /** Proxy HTTP — Intercepte les requêtes HTTP/HTTPS du process attaché. Non bloquant (injection + attente handler sur thread séparé côté backend) — résultat via httpProxyStartFinished, cet appel ne fait que démarrer l'opération. */
+  startHttpProxyAsync?(port: number, interceptHttps: boolean): Promise<{ success: boolean; started?: boolean; port?: number; proxyPid?: number; error?: string }>
+  /** Résultat différé de startHttpProxyAsync. */
+  httpProxyStartFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** Non bloquant ; résultat via httpProxyStopFinished. */
+  stopHttpProxyAsync?(): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de stopHttpProxyAsync. */
+  httpProxyStopFinished?: QWebChannelSignal<Record<string, unknown>>
   getHttpProxyRequests?(): Promise<{ success: boolean; requests: HttpProxyRequest[]; error?: string }>
   modifyHttpRequest?(requestId: string, newRequestBody: string): Promise<{ success: boolean; error?: string }>
   /** Spoof DNS — Ajoute/retire une entrée dans le fichier hosts Windows. Non bloquant (élévation UAC sur thread séparé côté backend) — le résultat final arrive via dnsSpoofFinished/dnsRestoreFinished, cet appel ne fait que démarrer l'opération. */
@@ -1511,8 +1516,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   restoreDnsAsync?(domain: string): Promise<{ success: boolean; started?: boolean; error?: string }>
   /** Résultat différé de restoreDnsAsync. */
   dnsRestoreFinished?: QWebChannelSignal<Record<string, unknown>>
-  /** Lag switch — Retarde les fonctions recv/WSARecv du process attaché. */
-  setLagSwitch?(enabled: boolean, delayMs: number): Promise<{ success: boolean; error?: string }>
+  /** Lag switch — Retarde les fonctions recv/WSARecv du process attaché. Non bloquant (injection/désinstallation sur thread séparé côté backend) — résultat via lagSwitchFinished, cet appel ne fait que démarrer l'opération. */
+  setLagSwitchAsync?(enabled: boolean, delayMs: number): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de setLagSwitchAsync. */
+  lagSwitchFinished?: QWebChannelSignal<Record<string, unknown>>
   /** Roadmap section B - interception de fonctions : hook MinHook injecte sur module!fonction. mode: 0=compter, 1=forcer retour. */
   startApiHook?(moduleName: string, functionName: string, mode: number, forcedReturnValue: number): Promise<ApiHookStatus>
   stopApiHook?(): Promise<ApiHookStatus>
@@ -2661,12 +2668,14 @@ class BackendService {
           ]
         }
       },
-      async startHttpProxy(port, _interceptHttps) {
-        return { success: true, port, proxyPid: 99999 }
+      async startHttpProxyAsync(_port: number, _interceptHttps: boolean) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
-      async stopHttpProxy() {
-        return { success: true }
+      httpProxyStartFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
+      async stopHttpProxyAsync() {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      httpProxyStopFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
       async getHttpProxyRequests() {
         return {
           success: true,
@@ -2686,9 +2695,10 @@ class BackendService {
         return { success: false, started: false, error: 'Mock backend' }
       },
       dnsRestoreFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
-      async setLagSwitch(_enabled, _delayMs) {
-        return { success: true }
+      async setLagSwitchAsync(_enabled: boolean, _delayMs: number) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      lagSwitchFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
       async startApiHook(_m: string, _fn: string, _mode: number, _ret: number) {
         return { success: false, active: false, error: 'Mock backend' }
       },

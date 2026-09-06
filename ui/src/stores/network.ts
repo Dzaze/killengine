@@ -115,20 +115,34 @@ export function useNetworkStore() {
   }
 
   // ── Actions : Proxy HTTP ───────────────────────────────────────
+  // startHttpProxyAsync/stopHttpProxyAsync ne bloquent plus le thread GUI
+  // (injection DLL + attente du handler jusqu'à 6s/3s sur thread séparé côté
+  // backend) : elles renvoient juste {started:true} immédiatement, le vrai
+  // résultat arrive via onHttpProxyStartFinished/onHttpProxyStopFinished
+  // (branchés dans app.ts) — busy reste true jusque-là.
   async function startHttpProxy() {
     const controller = backend.getController()
     httpProxyBusy.value = true
     try {
-      const result = await controller.startHttpProxy?.(httpProxyPort.value, httpProxyInterceptHttps.value)
-      if (result?.success) {
-        httpProxyActive.value = true
-        startHttpProxyPolling()
-        actionLogStore.addActionLog('http_proxy', 'Proxy HTTP démarré', `Port ${result.port ?? httpProxyPort.value}`, 'success')
-      } else {
+      const result = await controller.startHttpProxyAsync?.(httpProxyPort.value, httpProxyInterceptHttps.value)
+      if (!result?.started) {
+        httpProxyBusy.value = false
         actionLogStore.addActionLog('http_proxy', 'Proxy HTTP échoué', result?.error ?? 'raison inconnue', 'error')
       }
-    } finally {
+    } catch (e) {
       httpProxyBusy.value = false
+      actionLogStore.addActionLog('http_proxy', 'Proxy HTTP échoué', String(e), 'error')
+    }
+  }
+
+  function onHttpProxyStartFinished(result: Record<string, unknown>) {
+    httpProxyBusy.value = false
+    if (result.success) {
+      httpProxyActive.value = true
+      startHttpProxyPolling()
+      actionLogStore.addActionLog('http_proxy', 'Proxy HTTP démarré', `Port ${result.port ?? httpProxyPort.value}`, 'success')
+    } else {
+      actionLogStore.addActionLog('http_proxy', 'Proxy HTTP échoué', String(result.error ?? 'raison inconnue'), 'error')
     }
   }
 
@@ -136,15 +150,22 @@ export function useNetworkStore() {
     const controller = backend.getController()
     httpProxyBusy.value = true
     try {
-      const result = await controller.stopHttpProxy?.()
-      if (result?.success) {
-        httpProxyActive.value = false
-        httpProxyRequests.value = []
-        stopHttpProxyPolling()
-        actionLogStore.addActionLog('http_proxy', 'Proxy HTTP arrêté', '', 'success')
+      const result = await controller.stopHttpProxyAsync?.()
+      if (!result?.started) {
+        httpProxyBusy.value = false
       }
-    } finally {
+    } catch (e) {
       httpProxyBusy.value = false
+    }
+  }
+
+  function onHttpProxyStopFinished(result: Record<string, unknown>) {
+    httpProxyBusy.value = false
+    if (result.success) {
+      httpProxyActive.value = false
+      httpProxyRequests.value = []
+      stopHttpProxyPolling()
+      actionLogStore.addActionLog('http_proxy', 'Proxy HTTP arrêté', '', 'success')
     }
   }
 
@@ -231,25 +252,39 @@ export function useNetworkStore() {
   }
 
   // ── Actions : Lag switch ───────────────────────────────────────
+  // setLagSwitchAsync ne bloque plus le thread GUI (injection/désinstallation
+  // sur thread séparé côté backend, jusqu'à 6s/3s) : elle renvoie juste
+  // {started:true} immédiatement, le vrai résultat arrive via
+  // onLagSwitchFinished (branché dans app.ts) — busy reste true jusque-là.
   async function toggleLagSwitch() {
     const controller = backend.getController()
     lagSwitchBusy.value = true
     try {
       const enabled = !lagSwitchActive.value
-      const result = await controller.setLagSwitch?.(enabled, lagSwitchDelayMs.value)
-      if (result?.success) {
-        lagSwitchActive.value = enabled
-        actionLogStore.addActionLog(
-          'lag_switch',
-          enabled ? 'Lag switch activé' : 'Lag switch désactivé',
-          enabled ? `+${lagSwitchDelayMs.value}ms sur recv/WSARecv` : '',
-          enabled ? 'warning' : 'success'
-        )
-      } else {
+      const result = await controller.setLagSwitchAsync?.(enabled, lagSwitchDelayMs.value)
+      if (!result?.started) {
+        lagSwitchBusy.value = false
         actionLogStore.addActionLog('lag_switch', 'Lag switch échoué', result?.error ?? 'raison inconnue', 'error')
       }
-    } finally {
+    } catch (e) {
       lagSwitchBusy.value = false
+      actionLogStore.addActionLog('lag_switch', 'Lag switch échoué', String(e), 'error')
+    }
+  }
+
+  function onLagSwitchFinished(result: Record<string, unknown>) {
+    lagSwitchBusy.value = false
+    if (result.success) {
+      const active = Boolean(result.active)
+      lagSwitchActive.value = active
+      actionLogStore.addActionLog(
+        'lag_switch',
+        active ? 'Lag switch activé' : 'Lag switch désactivé',
+        active ? `+${lagSwitchDelayMs.value}ms sur recv/WSARecv` : '',
+        active ? 'warning' : 'success'
+      )
+    } else {
+      actionLogStore.addActionLog('lag_switch', 'Lag switch échoué', String(result.error ?? 'raison inconnue'), 'error')
     }
   }
 
@@ -279,6 +314,8 @@ export function useNetworkStore() {
     httpRequestBodyEditor,
     startHttpProxy,
     stopHttpProxy,
+    onHttpProxyStartFinished,
+    onHttpProxyStopFinished,
     refreshHttpProxyRequests,
     modifySelectedHttpRequest,
     // Spoof DNS
@@ -295,6 +332,7 @@ export function useNetworkStore() {
     lagSwitchBusy,
     lagSwitchDelayMs,
     toggleLagSwitch,
+    onLagSwitchFinished,
     // HTTP proxy polling
     startHttpProxyPolling,
     stopHttpProxyPolling,

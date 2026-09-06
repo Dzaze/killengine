@@ -619,6 +619,7 @@ export const useAppStore = defineStore('app', () => {
   let backendWriteWatchSignalConnected = false
   let backendEdrKillSignalConnected = false
   let backendDnsSpoofSignalConnected = false
+  let backendNetworkInjectionSignalConnected = false
   let backendModuleInstallSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
@@ -2107,6 +2108,21 @@ export const useAppStore = defineStore('app', () => {
           networkStore.onDnsRestoreFinished(result)
         })
         backendDnsSpoofSignalConnected = true
+      }
+      if (!backendNetworkInjectionSignalConnected) {
+        // Proxy HTTP / lag switch non bloquants (voir startHttpProxyAsync/
+        // stopHttpProxyAsync/setLagSwitchAsync) : résultat différé relayé
+        // vers le store Réseau.
+        controller.httpProxyStartFinished?.connect((result) => {
+          networkStore.onHttpProxyStartFinished(result)
+        })
+        controller.httpProxyStopFinished?.connect((result) => {
+          networkStore.onHttpProxyStopFinished(result)
+        })
+        controller.lagSwitchFinished?.connect((result) => {
+          networkStore.onLagSwitchFinished(result)
+        })
+        backendNetworkInjectionSignalConnected = true
       }
       if (!backendModuleInstallSignalConnected) {
         // Vue "Modules" : progression des installations de module en cours

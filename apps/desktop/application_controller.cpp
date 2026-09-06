@@ -4929,12 +4929,12 @@ QVariantMap ApplicationController::getProcessNetworkModules() {
 // Proxy HTTP — injection DLL + MinHook sur HttpSendRequest/WinHttpSendRequest
 // ---------------------------------------------------------------------------
 
-QVariantMap ApplicationController::startHttpProxy(int port, bool interceptHttps) {
-    QVariantMap result;
-    result["success"] = false;
+QVariantMap ApplicationController::startHttpProxyAsync(int port, bool interceptHttps) {
+    QVariantMap started;
+    started["success"] = false;
     if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
+        started["error"] = "Aucun processus attaché.";
+        return started;
     }
 
 #ifdef Q_OS_WIN
@@ -4943,48 +4943,96 @@ QVariantMap ApplicationController::startHttpProxy(int port, bool interceptHttps)
     }
 
     if (m_httpProxySession->isActive()) {
-        result["error"] = "Un proxy HTTP est déjà actif.";
-        return result;
+        started["error"] = "Un proxy HTTP est déjà actif.";
+        return started;
     }
 
     // Trouver le handler DLL
     const QString handlerPath = QCoreApplication::applicationDirPath()
         + QStringLiteral("/KillEngineHttpProxyHandler.dll");
     if (!QFile::exists(handlerPath)) {
-        result["error"] = "Handler proxy HTTP introuvable: " + handlerPath;
-        return result;
+        started["error"] = "Handler proxy HTTP introuvable: " + handlerPath;
+        return started;
     }
 
-    QString error;
-    if (!m_httpProxySession->start(m_handle, interceptHttps, handlerPath, &error)) {
-        result["error"] = error;
-        return result;
-    }
+    // HttpProxySession::start() pose l'injection puis poll jusqu'à 6s en
+    // attendant la confirmation du handler — tourne sur un thread séparé
+    // pour ne pas geler le thread GUI (Q_INVOKABLE via QWebChannel). Le
+    // thread rouvre son propre ProcessHandle (même convention que
+    // testCandidateFieldsAsync) : m_handle appartient au thread GUI et
+    // pourrait être fermé par un detachProcess() concurrent, alors qu'un
+    // handle indépendant reste valable pour toute la durée de l'opération.
+    // m_httpProxySession n'est jamais recréé une fois construit (voir le
+    // reste de ce fichier), le pointeur brut reste donc valide.
+    killcore::HttpProxySession* session = m_httpProxySession.get();
+    const int pid = m_pid;
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, session, pid, port, interceptHttps, handlerPath]() {
+        QVariantMap result;
+        result["success"] = false;
 
-    result["success"] = true;
-    result["port"] = port;
-    result["interceptHttps"] = interceptHttps;
-    KE_LOG_INFO() << "startHttpProxy: port=" << port << " interceptHttps=" << interceptHttps;
+        killcore::ProcessHandle freshHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadWrite);
+        QString error;
+        if (!session->start(freshHandle, interceptHttps, handlerPath, &error)) {
+            result["error"] = error;
+        } else {
+            result["success"] = true;
+            result["port"] = port;
+            result["interceptHttps"] = interceptHttps;
+            KE_LOG_INFO() << "startHttpProxyAsync: port=" << port << " interceptHttps=" << interceptHttps;
+        }
+
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->httpProxyStartFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = "Fonctionnalité Windows uniquement.";
 #endif
 
-    return result;
+    return started;
 }
 
-QVariantMap ApplicationController::stopHttpProxy() {
-    QVariantMap result;
-    result["success"] = false;
+QVariantMap ApplicationController::stopHttpProxyAsync() {
+    QVariantMap started;
+    started["success"] = false;
 
-    if (m_httpProxySession && m_httpProxySession->isActive()) {
-        m_httpProxySession->stop();
-        result["success"] = true;
-        KE_LOG_INFO() << "stopHttpProxy: stopped";
-    } else {
-        result["error"] = "Aucun proxy HTTP actif.";
+    if (!m_httpProxySession || !m_httpProxySession->isActive()) {
+        started["error"] = "Aucun proxy HTTP actif.";
+        return started;
     }
 
-    return result;
+#ifdef Q_OS_WIN
+    // HttpProxySession::stop() poll jusqu'à 3s en attendant la confirmation
+    // du handler — même raisonnement que startHttpProxyAsync ci-dessus.
+    killcore::HttpProxySession* session = m_httpProxySession.get();
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, session]() {
+        session->stop();
+        KE_LOG_INFO() << "stopHttpProxyAsync: stopped";
+
+        QVariantMap result;
+        result["success"] = true;
+
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->httpProxyStopFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
+#else
+    started["error"] = "Fonctionnalité Windows uniquement.";
+#endif
+
+    return started;
 }
 
 QVariantMap ApplicationController::getHttpProxyRequests() {
@@ -5240,7 +5288,7 @@ QVariantMap ApplicationController::restoreDnsAsync(const QString& domain) {
 // Lag switch — injection DLL + MinHook sur recv/WSARecv
 // ---------------------------------------------------------------------------
 
-QVariantMap ApplicationController::setLagSwitch(bool enabled, int delayMs) {
+QVariantMap ApplicationController::setLagSwitchAsync(bool enabled, int delayMs) {
     QVariantMap result;
     result["success"] = false;
     if (!m_attached || m_pid <= 0) {
@@ -5253,44 +5301,91 @@ QVariantMap ApplicationController::setLagSwitch(bool enabled, int delayMs) {
     }
 
 #ifdef Q_OS_WIN
-    if (enabled) {
-        // Démarrer ou mettre à jour le lag switch
-        if (!m_lagSwitchSession) {
-            m_lagSwitchSession = std::make_unique<killcore::LagSwitchSession>();
+    if (!m_lagSwitchSession) {
+        m_lagSwitchSession = std::make_unique<killcore::LagSwitchSession>();
+    }
+
+    if (enabled && !m_lagSwitchSession->isActive()) {
+        // Démarrage : LagSwitchSession::start() poll jusqu'à 6s en attendant
+        // la confirmation du handler — tourne sur un thread séparé pour ne
+        // pas geler le thread GUI. Même convention que
+        // startHttpProxyAsync/testCandidateFieldsAsync : le thread rouvre
+        // son propre ProcessHandle plutôt que de partager m_handle, qui
+        // pourrait être fermé par un detachProcess() concurrent.
+        const QString handlerPath = QCoreApplication::applicationDirPath()
+            + QStringLiteral("/KillEngineLagSwitchHandler.dll");
+        if (!QFile::exists(handlerPath)) {
+            result["error"] = "Handler lag switch introuvable: " + handlerPath;
+            return result;
         }
 
-        if (!m_lagSwitchSession->isActive()) {
-            // Trouver le handler DLL
-            const QString handlerPath = QCoreApplication::applicationDirPath()
-                + QStringLiteral("/KillEngineLagSwitchHandler.dll");
-            if (!QFile::exists(handlerPath)) {
-                result["error"] = "Handler lag switch introuvable: " + handlerPath;
-                return result;
-            }
-
+        killcore::LagSwitchSession* session = m_lagSwitchSession.get();
+        const int pid = m_pid;
+        const QPointer<ApplicationController> self(this);
+        std::thread([self, session, pid, delayMs, handlerPath]() {
+            killcore::ProcessHandle freshHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadWrite);
             QString error;
-            if (!m_lagSwitchSession->start(m_handle, delayMs, handlerPath, &error)) {
-                result["error"] = error;
-                return result;
+            QVariantMap finished;
+            if (!session->start(freshHandle, delayMs, handlerPath, &error)) {
+                finished["success"] = false;
+                finished["error"] = error;
+            } else {
+                finished["success"] = true;
+                finished["active"] = true;
+                finished["delayMs"] = delayMs;
+                KE_LOG_INFO() << "setLagSwitchAsync: started delayMs=" << delayMs;
             }
-        } else {
-            // Mettre à jour le délai
-            m_lagSwitchSession->setDelayMs(delayMs);
-        }
 
+            if (!self) return;
+            QMetaObject::invokeMethod(self.data(), [self, finished]() {
+                if (!self) return;
+                emit self->lagSwitchFinished(finished);
+            }, Qt::QueuedConnection);
+        }).detach();
+
+        result["success"] = true;
+        result["started"] = true;
+        return result;
+    }
+
+    if (!enabled && m_lagSwitchSession->isActive()) {
+        // Arrêt : LagSwitchSession::stop() poll jusqu'à 3s, même raisonnement.
+        killcore::LagSwitchSession* session = m_lagSwitchSession.get();
+        const QPointer<ApplicationController> self(this);
+        std::thread([self, session]() {
+            session->stop();
+            KE_LOG_INFO() << "setLagSwitchAsync: stopped";
+
+            QVariantMap finished;
+            finished["success"] = true;
+            finished["active"] = false;
+
+            if (!self) return;
+            QMetaObject::invokeMethod(self.data(), [self, finished]() {
+                if (!self) return;
+                emit self->lagSwitchFinished(finished);
+            }, Qt::QueuedConnection);
+        }).detach();
+
+        result["success"] = true;
+        result["started"] = true;
+        return result;
+    }
+
+    // Ni démarrage ni arrêt réel : juste une mise à jour du délai sur une
+    // session déjà active (instantané, pas besoin de thread séparé), ou une
+    // désactivation alors que rien n'est actif.
+    if (enabled) {
+        m_lagSwitchSession->setDelayMs(delayMs);
         result["success"] = true;
         result["active"] = true;
         result["delayMs"] = delayMs;
     } else {
-        // Arrêter le lag switch
-        if (m_lagSwitchSession && m_lagSwitchSession->isActive()) {
-            m_lagSwitchSession->stop();
-        }
         result["success"] = true;
         result["active"] = false;
     }
 
-    KE_LOG_INFO() << "setLagSwitch: enabled=" << enabled << " delayMs=" << delayMs
+    KE_LOG_INFO() << "setLagSwitchAsync: enabled=" << enabled << " delayMs=" << delayMs
                   << " success=" << result.value("success").toBool();
 #else
     result["error"] = "Fonctionnalité Windows uniquement.";

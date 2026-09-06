@@ -807,9 +807,13 @@ public:
     Q_INVOKABLE QVariantMap getProcessNetworkModules();
 
     /// Proxy HTTP : intercepte les requêtes HTTP/HTTPS du process attaché
-    /// via injection DLL + hook WinINet/WinHTTP.
-    Q_INVOKABLE QVariantMap startHttpProxy(int port, bool interceptHttps);
-    Q_INVOKABLE QVariantMap stopHttpProxy();
+    /// via injection DLL + hook WinINet/WinHTTP. Non bloquant : l'injection
+    /// puis l'attente de confirmation du handler (HttpProxySession::start/stop,
+    /// jusqu'à 6s/3s de polling) tournent sur un thread séparé — sinon ça
+    /// gèle le thread GUI comme spoofDnsAsync avant son fix. Résultat via
+    /// httpProxyStartFinished / httpProxyStopFinished.
+    Q_INVOKABLE QVariantMap startHttpProxyAsync(int port, bool interceptHttps);
+    Q_INVOKABLE QVariantMap stopHttpProxyAsync();
     Q_INVOKABLE QVariantMap getHttpProxyRequests();
     Q_INVOKABLE QVariantMap modifyHttpRequest(const QString& requestId, const QString& newRequestBody);
 
@@ -822,8 +826,10 @@ public:
     Q_INVOKABLE QVariantMap restoreDnsAsync(const QString& domain);
 
     /// Lag switch : retarde les fonctions recv/WSARecv du process attaché
-    /// via injection DLL + MinHook.
-    Q_INVOKABLE QVariantMap setLagSwitch(bool enabled, int delayMs);
+    /// via injection DLL + MinHook. Non bloquant, même raisonnement que
+    /// startHttpProxyAsync (LagSwitchSession::start/stop pollent jusqu'à
+    /// 6s/3s) ; résultat via lagSwitchFinished.
+    Q_INVOKABLE QVariantMap setLagSwitchAsync(bool enabled, int delayMs);
 
     /// Inspecteur CLR/ClrMD externe : lance le helper .NET si
     /// necessaire puis dialogue avec lui via JSON-RPC sur named pipe.
@@ -1555,6 +1561,13 @@ signals:
     void dnsSpoofFinished(const QVariantMap& result);
     /// Résultat différé de restoreDnsAsync.
     void dnsRestoreFinished(const QVariantMap& result);
+
+    /// Résultat différé de startHttpProxyAsync.
+    void httpProxyStartFinished(const QVariantMap& result);
+    /// Résultat différé de stopHttpProxyAsync.
+    void httpProxyStopFinished(const QVariantMap& result);
+    /// Résultat différé de setLagSwitchAsync.
+    void lagSwitchFinished(const QVariantMap& result);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le
