@@ -51,6 +51,30 @@ const debugPrivBusy = ref(false)
 const showEdrManualFix = ref(false)
 const stealthBusy = ref(false)
 const stealthResult = ref<Record<string, unknown> | null>(null)
+
+// applyStealthMode/restoreStealthMode ne renvoient jamais de champ `message`
+// (voir application_controller.cpp) : sur un succès sans warning, il n'y a ni
+// message ni error, et le template affichait un encadré vide (bug UI signalé
+// par l'utilisateur). Reconstruit un texte lisible à partir des champs
+// réellement présents (profile/modulesActivated/restored/warnings/error).
+function stealthResultText(result: Record<string, unknown> | null): string {
+  if (!result) return ''
+  if (result.error) return String(result.error)
+
+  const parts: string[] = []
+  if (result.restored) {
+    parts.push('Stealth restauré.')
+  } else if (result.profile) {
+    const count = typeof result.modulesActivated === 'number' ? result.modulesActivated : undefined
+    parts.push(`Stealth actif (profil : ${String(result.profile)}${count !== undefined ? `, ${count} module(s) activé(s)` : ''}).`)
+  } else if (result.success) {
+    parts.push('Opération réussie.')
+  }
+  if (Array.isArray(result.warnings) && result.warnings.length > 0) {
+    parts.push(`Avertissement(s) : ${result.warnings.join(', ')}`)
+  }
+  return parts.join(' ')
+}
 const handleHiderBusy = ref(false)
 const handleHiderOwnerPid = ref('')
 const handleHiderHandleValue = ref('')
@@ -564,7 +588,7 @@ onMounted(() => {
 
         <!-- Résultat Appliquer/Restaurer Stealth -->
         <div v-if="mod.id === 'stealth_sc2_profile' && stealthResult" class="diag-result" :class="stealthResult.success ? 'ok' : 'blocked'">
-          <p>{{ String(stealthResult.message ?? stealthResult.error ?? '') }}</p>
+          <p>{{ stealthResultText(stealthResult) }}</p>
         </div>
 
         <!-- Handle Hider UI -->
