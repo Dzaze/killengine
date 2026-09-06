@@ -6,6 +6,7 @@
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
 #include "process/process_handle.h"
+#include "scanner/candidate_confidence.h"
 #include "scanner/encrypted_scan.h"
 #include "scanner/scan_engine.h"
 #include "scanner/value_variants.h"
@@ -549,7 +550,35 @@ QVariantMap candidateObservationToVariantMap(
     return observation;
 }
 
-
+// Contrepartie "décodage" de candidateObservationToVariantMap() : reconstruit
+// le format attendu par CandidateConfidenceContext::valueHistory à partir du
+// QHash<adresse, QVariantList> accumulé par ApplicationController au fil des
+// next_scan (m_candidateValueHistory).
+QHash<uint64_t, QList<killcore::ConfidenceObservation>> buildConfidenceValueHistory(
+    const QHash<uint64_t, QVariantList>& rawHistory) {
+    QHash<uint64_t, QList<killcore::ConfidenceObservation>> history;
+    history.reserve(rawHistory.size());
+    for (auto it = rawHistory.constBegin(); it != rawHistory.constEnd(); ++it) {
+        QList<killcore::ConfidenceObservation> observations;
+        observations.reserve(it.value().size());
+        for (const auto& entryVariant : it.value()) {
+            const QVariantMap entry = entryVariant.toMap();
+            if (!entry.value("readable", true).toBool()) {
+                continue; // Une lecture ratée ne renseigne rien sur la stabilité.
+            }
+            killcore::ConfidenceObservation obs;
+            obs.address = it.key();
+            obs.previousValue = entry.value("previousNumber").toDouble();
+            obs.currentValue = entry.value("currentNumber").toDouble();
+            obs.kept = entry.value("kept", true).toBool();
+            observations.append(obs);
+        }
+        if (!observations.isEmpty()) {
+            history.insert(it.key(), observations);
+        }
+    }
+    return history;
+}
 
 QString noCandidateDiagnosticMessage(const QVariantMap& actionResult, const QString& tool) {
     const qulonglong checked = tool == "next_scan"
@@ -1556,13 +1585,16 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
     const int pid = m_controller.m_pid;
     const QPointer<ApplicationController> self(&m_controller);
     auto cancellation = std::make_shared<killcore::CancellationToken>();
+    // Copié sur le thread GUI (m_candidateValueHistory n'est pas thread-safe)
+    // pour être capturé par valeur dans le worker — voir buildConfidenceValueHistory().
+    const auto confidenceHistory = buildConfidenceValueHistory(m_controller.m_candidateValueHistory);
 
     m_controller.m_scanInProgress = true;
     m_controller.m_activeScanCancellation = cancellation;
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, mode, value, scanMode, firstCandidateType, candidateSnapshot, candidateThreshold, targetNumber, rangeMin, rangeMax, cancellation]() mutable {
+    std::thread([self, requestId, pid, mode, value, scanMode, firstCandidateType, candidateSnapshot, candidateThreshold, targetNumber, rangeMin, rangeMax, cancellation, confidenceHistory]() mutable {
         QElapsedTimer timer;
         timer.start();
         QVariantMap finished;
@@ -1605,6 +1637,10 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
         } else {
             killcore::MemoryReader reader(workerHandle);
             QString streamError;
+            const auto confidenceRegions = killcore::MemoryMap::snapshot(workerHandle);
+            killcore::CandidateConfidenceContext confidenceContext;
+            confidenceContext.regions = &confidenceRegions;
+            confidenceContext.valueHistory = &confidenceHistory;
             const bool completed = killcore::CandidateStore::forEachCandidate(candidateSnapshot, [&](const killcore::Candidate& candidate) {
                 if (cancellation->isCancelled()) {
                     cancelled = true;
@@ -1694,6 +1730,8 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
                     }
                     auto updated = updatedCandidate;
                     updated.lastValue = current;
+                    confidenceContext.secondaryVariant = updated.secondaryVariant;
+                    updated.confidence = killcore::computeCandidateConfidence(updated.address, updated.type, confidenceContext);
                     if (streamOutput) {
                         if (!survivors.appendFileBackedCandidate(updated, &error)) {
                             return false;
@@ -1912,6 +1950,15 @@ QVariantMap ScanningCoreManager::nextScan(const QString& mode, const QString& va
     QVariantList debugSamples;
     QVariantList valueHistoryUpdates;
 
+    // Score de confiance recalculé par candidat survivant : region snapshot +
+    // historique de valeurs déjà accumulé par les next_scan précédents
+    // (m_candidateValueHistory), voir buildConfidenceValueHistory().
+    const auto confidenceRegions = killcore::MemoryMap::snapshot(m_controller.m_handle);
+    const auto confidenceHistory = buildConfidenceValueHistory(m_controller.m_candidateValueHistory);
+    killcore::CandidateConfidenceContext confidenceContext;
+    confidenceContext.regions = &confidenceRegions;
+    confidenceContext.valueHistory = &confidenceHistory;
+
     for (const auto& candidate : candidates.candidates()) {
         const size_t bytesToRead = killcore::valueTypeSize(candidate.type);
         const auto read = reader.read(candidate.address, bytesToRead);
@@ -1993,6 +2040,8 @@ QVariantMap ScanningCoreManager::nextScan(const QString& mode, const QString& va
             }
             auto updated = updatedCandidate;
             updated.lastValue = current;
+            confidenceContext.secondaryVariant = updated.secondaryVariant;
+            updated.confidence = killcore::computeCandidateConfidence(updated.address, updated.type, confidenceContext);
             survivors.append(updated);
         }
     }

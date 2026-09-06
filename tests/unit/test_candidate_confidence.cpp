@@ -11,6 +11,8 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
+
 using namespace killcore;
 
 namespace {
@@ -159,10 +161,6 @@ TEST(CandidateConfidenceScore, ScanTimeConfidenceReachesHighForIdealRegionAndPri
 }
 
 TEST(CandidateConfidenceScore, NonReadableRegionScoresLow) {
-    // computeCandidateConfidence() mélange stabilité (neutre 0.5) et variante
-    // (1.0) au score de région, donc le score global ne descend pas très bas
-    // même pour une région non-readable — c'est computeRegionScore() elle-même
-    // qui doit être basse ici, ce que ce test vérifie directement.
     const auto regions = sampleRegions();
     const MemoryRegion* region = findRegionForAddress(regions, 0x5200);
     ASSERT_NE(region, nullptr);
@@ -171,4 +169,70 @@ TEST(CandidateConfidenceScore, NonReadableRegionScoresLow) {
     CandidateConfidenceContext ctx;
     const double regionScore = computeRegionScore(*region, ctx);
     EXPECT_LT(regionScore, 0.3);
+}
+
+namespace {
+
+ConfidenceObservation makeObservation(double previous, double current, bool kept = true) {
+    ConfidenceObservation obs;
+    obs.previousValue = previous;
+    obs.currentValue = current;
+    obs.kept = kept;
+    return obs;
+}
+
+} // namespace
+
+TEST(CandidateConfidenceScore, HistoryIncreasesConfidenceAsRoundsSurvived) {
+    // Un candidat qui a survécu à plusieurs next_scan doit inspirer plus
+    // confiance qu'un candidat qui vient d'être trouvé (aucun historique) —
+    // c'est tout le point de brancher valueHistory dans le scan.
+    const auto regions = sampleRegions();
+    CandidateConfidenceContext noHistoryCtx;
+    noHistoryCtx.regions = &regions;
+    const double noHistoryConfidence = computeCandidateConfidence(0x1500, ValueType::Int32, noHistoryCtx);
+
+    QHash<uint64_t, QList<ConfidenceObservation>> history;
+    history.insert(0x1500, {makeObservation(100, 100), makeObservation(100, 100), makeObservation(100, 100)});
+    CandidateConfidenceContext withHistoryCtx;
+    withHistoryCtx.regions = &regions;
+    withHistoryCtx.valueHistory = &history;
+    const double withHistoryConfidence = computeCandidateConfidence(0x1500, ValueType::Int32, withHistoryCtx);
+
+    EXPECT_GT(withHistoryConfidence, noHistoryConfidence);
+}
+
+TEST(CandidateConfidenceScore, MoreRoundsSurvivedIsAtLeastAsConfidentAsFewer) {
+    const auto regions = sampleRegions();
+    QHash<uint64_t, QList<ConfidenceObservation>> shortHistory;
+    shortHistory.insert(0x1500, {makeObservation(100, 100)});
+    QHash<uint64_t, QList<ConfidenceObservation>> longHistory;
+    longHistory.insert(0x1500, {makeObservation(100, 100), makeObservation(100, 100),
+                                 makeObservation(100, 100), makeObservation(100, 100),
+                                 makeObservation(100, 100)});
+
+    CandidateConfidenceContext shortCtx;
+    shortCtx.regions = &regions;
+    shortCtx.valueHistory = &shortHistory;
+    CandidateConfidenceContext longCtx;
+    longCtx.regions = &regions;
+    longCtx.valueHistory = &longHistory;
+
+    EXPECT_GE(computeCandidateConfidence(0x1500, ValueType::Int32, longCtx),
+              computeCandidateConfidence(0x1500, ValueType::Int32, shortCtx));
+}
+
+TEST(CandidateConfidenceScore, NonFiniteHistoryValueTanksConfidence) {
+    // Une valeur non finie (NaN/Inf) apparue dans l'historique est un signe
+    // de mémoire corrompue ou mal typée (ex. des octets aléatoires réinterprétés
+    // en Float32) : ça doit faire chuter la confiance, pas juste rester neutre.
+    const auto regions = sampleRegions();
+    QHash<uint64_t, QList<ConfidenceObservation>> history;
+    history.insert(0x1500, {makeObservation(100, 100),
+                             makeObservation(std::numeric_limits<double>::quiet_NaN(), 100)});
+
+    CandidateConfidenceContext ctx;
+    ctx.regions = &regions;
+    ctx.valueHistory = &history;
+    EXPECT_LT(computeCandidateConfidence(0x1500, ValueType::Int32, ctx), 0.3);
 }

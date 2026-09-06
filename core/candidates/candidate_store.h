@@ -20,6 +20,7 @@ struct Candidate {
     QByteArray lastValue;
     double confidence{1.0}; ///< Phase 13 : score de confiance [0.0, 1.0].
     QString variantLabel;   ///< Phase 13 : libellé de variante (ex. "Float32 x100").
+    bool   secondaryVariant{false}; ///< Variante de moindre priorité (×100, unsigned...), voir CandidateConfidenceContext.
 };
 
 struct CandidatePage {

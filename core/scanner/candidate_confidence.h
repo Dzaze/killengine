@@ -16,6 +16,14 @@ namespace killcore {
  *
  * Phase 13 - Précision de recherche : le scoring de confiance utilise
  * l'historique des valeurs observées pour mesurer la stabilité d'un candidat.
+ *
+ * `kept` n'est pas exploité par computeCandidateConfidence() aujourd'hui :
+ * le store qui alimente cet historique ne conserve que les candidats ayant
+ * survécu à chaque next_scan (les autres sont retirés du store, pas
+ * simplement marqués), donc pour un candidat encore présent tout son
+ * historique vaut par construction kept=true. Le signal de stabilité réel
+ * est le nombre d'observations (tours survécus) et leur caractère fini
+ * (previousValue/currentValue non NaN/Inf), voir computeCandidateConfidence().
  */
 struct ConfidenceObservation {
     uint64_t address{0};
@@ -45,9 +53,23 @@ struct CandidateConfidenceContext {
  * Facteurs pris en compte :
  *   - région writable (bonus)
  *   - type de région Private/Mapped (bonus) vs Image (malus)
- *   - stabilité historique (un candidat qui reste cohérent à travers les
- *     observations gagne en confiance)
+ *   - stabilité historique : le poids accordé à ce facteur grandit avec le
+ *     nombre de tours de next_scan survécus (rendement décroissant, plafond
+ *     après quelques tours) plutôt que d'être figé dès la première
+ *     observation — sinon un candidat sans AUCUN historique (voir
+ *     computeScanTimeConfidence(), qui met tout le poids sur région/variante)
+ *     pourrait paradoxalement scorer plus haut qu'un candidat qui vient
+ *     juste de commencer à faire ses preuves. Une valeur non finie (NaN/Inf)
+ *     observée à un moment donné (mémoire corrompue/mal typée) court-circuite
+ *     tout ça avec une pénalité directe et sévère.
  *   - variante secondaire (malus léger pour ×100, ×1000, unsigned...)
+ *
+ * Si `context.valueHistory` ne contient aucune observation pour `address`
+ * (candidat jamais encore passé par un next_scan, ou historique non fourni),
+ * retombe sur computeScanTimeConfidence() — formule continue avec celle-ci à
+ * 0 tour survécu. Prévu pour être appelé par candidat lors d'un next_scan
+ * (une adresse à la fois, contrairement à exact_scan qui appelle
+ * computeRegionScore() une fois par région balayée).
  *
  * @return Score dans [0.0, 1.0].
  */

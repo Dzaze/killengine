@@ -27,6 +27,16 @@ namespace {
 constexpr double kClampMin = 0.0;
 constexpr double kClampMax = 1.0;
 
+// Pondération de base (historique disponible et mature, ex. 5+ tours de
+// next_scan) : stabilité = signal le plus fort, puis région, puis variante.
+// Partagée par computeCandidateConfidence() et computeScanTimeConfidence()
+// pour qu'un candidat sans historique et un candidat avec un historique
+// encore jeune restent comparables (voir les deux fonctions ci-dessous).
+constexpr double kStabilityWeight = 0.45;
+constexpr double kRegionWeightBase = 0.40;
+constexpr double kVariantWeightBase = 0.15;
+constexpr int kRoundsForMaxStabilityWeight = 5;
+
 double clamp01(double v) {
     return std::clamp(v, kClampMin, kClampMax);
 }
@@ -46,45 +56,14 @@ double regionScoreAtAddress(
     return computeRegionScore(*region, context);
 }
 
-double computeStabilityScore(
-    uint64_t address,
-    const CandidateConfidenceContext& context) {
-    if (!context.valueHistory) {
-        return 0.5;
-    }
-
-    const auto it = context.valueHistory->constFind(address);
-    if (it == context.valueHistory->constEnd() || it.value().isEmpty()) {
-        return 0.5; // Pas d'historique = neutre.
-    }
-
-    const auto& observations = it.value();
-    int keptCount = 0;
-    int consistentCount = 0;
-
-    for (const auto& obs : observations) {
-        if (obs.kept) {
-            ++keptCount;
-        }
-        // Une variation cohérente = la valeur précédente correspond à l'attendu.
-        if (obs.kept && std::isfinite(obs.previousValue) && std::isfinite(obs.currentValue)) {
-            ++consistentCount;
-        }
-    }
-
-    const double keptRatio = observations.size() > 0
-        ? static_cast<double>(keptCount) / static_cast<double>(observations.size())
-        : 0.0;
-    const double consistentRatio = observations.size() > 0
-        ? static_cast<double>(consistentCount) / static_cast<double>(observations.size())
-        : 0.0;
-
-    // Plus l'adresse a survécu aux réductions, plus elle est digne de confiance.
-    return clamp01(0.4 + 0.4 * keptRatio + 0.2 * consistentRatio);
-}
-
 double computeVariantScore(const CandidateConfidenceContext& context) {
     return context.secondaryVariant ? 0.85 : 1.0;
+}
+
+bool hasCorruptedObservation(const QList<ConfidenceObservation>& observations) {
+    return std::any_of(observations.begin(), observations.end(), [](const ConfidenceObservation& obs) {
+        return !std::isfinite(obs.previousValue) || !std::isfinite(obs.currentValue);
+    });
 }
 
 } // namespace
@@ -127,14 +106,59 @@ double computeCandidateConfidence(
     ValueType /*type*/,
     const CandidateConfidenceContext& context) {
     const double regionScore = regionScoreAtAddress(address, context);
-    const double stabilityScore = computeStabilityScore(address, context);
+
+    const QList<ConfidenceObservation>* observations = nullptr;
+    if (context.valueHistory) {
+        const auto it = context.valueHistory->constFind(address);
+        if (it != context.valueHistory->constEnd() && !it.value().isEmpty()) {
+            observations = &it.value();
+        }
+    }
+
+    if (!observations) {
+        // Aucun historique réel pour cette adresse (premier next_scan sur ce
+        // candidat, ou pas d'historique du tout) : la stabilité n'a rien à
+        // apporter. Redistribuer son poids entre région et variante plutôt
+        // que de la garder neutre à 0.5 — voir computeScanTimeConfidence().
+        return computeScanTimeConfidence(regionScore, context.secondaryVariant);
+    }
+
+    if (hasCorruptedObservation(*observations)) {
+        // Valeur non finie (NaN/Inf) observée à un moment donné = signal fort
+        // de mauvais typage ou de mémoire invalide (ex. octets aléatoires
+        // réinterprétés en Float32) — indépendant du nombre de tours ou de
+        // la qualité de région : pénalité directe et sévère, pas une simple
+        // dilution dans un ratio.
+        return clamp01(regionScore * 0.2);
+    }
+
     const double variantScore = computeVariantScore(context);
 
-    // Pondération : la stabilité historique est le signal le plus fort,
-    // suivie de la pertinence de la région, puis de la variante.
-    const double score = 0.45 * stabilityScore
-                       + 0.40 * regionScore
-                       + 0.15 * variantScore;
+    // Le poids accordé à la stabilité grandit avec le nombre de tours de
+    // next_scan survécus (rendement décroissant, plafond à
+    // kRoundsForMaxStabilityWeight tours), au lieu d'être figé à
+    // kStabilityWeight dès la première observation : sinon un candidat qui
+    // vient tout juste de survivre à UN tour serait jugé aussi stable
+    // qu'après cinq, et pire, un candidat SANS AUCUN historique (formule
+    // ci-dessus, qui met tout le poids sur région+variante) pourrait
+    // paradoxalement scorer plus haut qu'un candidat qui a déjà commencé à
+    // faire ses preuves. Le poids retiré à la stabilité est redistribué à
+    // région/variante au prorata de leur pondération de base, pour que la
+    // formule soit continue avec computeScanTimeConfidence() à 0 tour et
+    // avec la pondération classique 0.45/0.40/0.15 au plafond.
+    const double roundsRatio = std::min(
+        1.0, static_cast<double>(observations->size()) / kRoundsForMaxStabilityWeight);
+    const double stabilityWeight = kStabilityWeight * roundsRatio;
+    const double remainingWeight = 1.0 - stabilityWeight;
+    const double regionWeight = remainingWeight * (kRegionWeightBase / (kRegionWeightBase + kVariantWeightBase));
+    const double variantWeight = remainingWeight * (kVariantWeightBase / (kRegionWeightBase + kVariantWeightBase));
+
+    // Stabilité = 1.0 : aucune corruption détectée (sinon retour anticipé
+    // ci-dessus), donc l'historique disponible est pleinement en faveur du
+    // candidat pour ce que le poids ci-dessus lui accorde.
+    const double score = stabilityWeight * 1.0
+                       + regionWeight * regionScore
+                       + variantWeight * variantScore;
 
     return clamp01(score);
 }
@@ -145,15 +169,14 @@ double computeScanTimeConfidence(double regionScore, bool secondaryVariant) {
     // computeCandidateConfidence() n'a donc aucune information réelle à
     // apporter. Plutôt que de la garder à 0.5 et diluer le score (une région
     // parfaite plafonnerait alors à ~0.775, jamais "fiabilité élevée"), on
-    // redistribue son poids (0.45) entre région (0.40) et variante (0.15) au
-    // prorata : région = 0.40/0.55, variante = 0.15/0.55. Une fois un
-    // historique réel disponible (next_scan), computeCandidateConfidence()
-    // reprend la pondération complète à trois facteurs.
-    constexpr double kRegionWeight = 0.40 / 0.55;
-    constexpr double kVariantWeight = 0.15 / 0.55;
+    // redistribue son poids entre région et variante au prorata de leur
+    // pondération de base — équivalent à computeCandidateConfidence() avec
+    // stabilityWeight=0 (0 tour survécu).
     const double variantScore = secondaryVariant ? 0.85 : 1.0;
-    const double score = kRegionWeight * clamp01(regionScore)
-                       + kVariantWeight * variantScore;
+    const double regionWeight = kRegionWeightBase / (kRegionWeightBase + kVariantWeightBase);
+    const double variantWeight = kVariantWeightBase / (kRegionWeightBase + kVariantWeightBase);
+    const double score = regionWeight * clamp01(regionScore)
+                       + variantWeight * variantScore;
     return clamp01(score);
 }
 

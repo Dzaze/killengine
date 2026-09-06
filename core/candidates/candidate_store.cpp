@@ -55,6 +55,7 @@ void CandidateStore::replaceFromScan(const ScanResult& scan, const QByteArray& s
         candidate.lastValue = scannedValue;
         candidate.confidence = match.confidence;
         candidate.variantLabel = match.variantLabel;
+        candidate.secondaryVariant = match.secondaryVariant;
         m_candidates.append(candidate);
     }
 

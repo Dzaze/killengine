@@ -26,7 +26,8 @@ void scanBuffer(
     uint64_t rangeStart,
     uint64_t rangeEnd,
     double confidence = 1.0,
-    const QString& variantLabel = {}) {
+    const QString& variantLabel = {},
+    bool secondaryVariant = false) {
     if (!result || needle.isEmpty() || buffer.size() < needle.size()) {
         return;
     }
@@ -70,6 +71,7 @@ void scanBuffer(
                 match.type = type;
                 match.confidence = confidence;
                 match.variantLabel = variantLabel;
+                match.secondaryVariant = secondaryVariant;
                 result->matches.append(match);
             } else {
                 result->partial = true;
@@ -511,7 +513,8 @@ ScanResult ScanEngine::exactScanMultiType(
                     options.startAddress,
                     options.stopAddress,
                     confidence,
-                    variant.label);
+                    variant.label,
+                    variant.secondary);
                 mergeChunkMatches(chunkResult);
             }
 
