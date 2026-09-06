@@ -622,6 +622,7 @@ export const useAppStore = defineStore('app', () => {
   let backendNetworkInjectionSignalConnected = false
   let backendSpeedhackApiHookSignalConnected = false
   let backendElevatedNetworkActionsSignalConnected = false
+  let backendNetworkConnectionsSignalConnected = false
   let backendModuleInstallSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
@@ -2155,6 +2156,15 @@ export const useAppStore = defineStore('app', () => {
           speedhackStore.onUnblockProcessNetworkFinished(result)
         })
         backendElevatedNetworkActionsSignalConnected = true
+      }
+      if (!backendNetworkConnectionsSignalConnected) {
+        // Liste des connexions réseau non bloquante (voir
+        // getProcessNetworkConnectionsAsync) : résultat différé relayé vers
+        // le store Réseau.
+        controller.processNetworkConnectionsFinished?.connect((result) => {
+          networkStore.onNetworkConnectionsFinished(result)
+        })
+        backendNetworkConnectionsSignalConnected = true
       }
       if (!backendModuleInstallSignalConnected) {
         // Vue "Modules" : progression des installations de module en cours

@@ -48,17 +48,31 @@ export function useNetworkStore() {
   const lagSwitchDelayMs = ref(1000)
 
   // ── Actions : Lecture seule ────────────────────────────────────
+  // getProcessNetworkConnectionsAsync ne bloque plus le thread GUI (la
+  // résolution DNS inverse par IP distante, jusqu'à 500ms chacune, tourne
+  // sur un thread séparé côté backend) : elle renvoie juste {started:true}
+  // immédiatement, le vrai résultat arrive via onNetworkConnectionsFinished
+  // (branché dans app.ts). Le garde busy évite qu'un cycle "Live" (toutes
+  // les 2s) ne parte alors qu'un précédent tourne encore.
   async function refreshNetworkConnections() {
+    if (networkConnectionsBusy.value) return
     const controller = backend.getController()
     networkConnectionsBusy.value = true
     try {
-      const result = await controller.getProcessNetworkConnections?.()
-      if (result?.success) {
-        networkConnections.value = result.connections ?? []
+      const result = await controller.getProcessNetworkConnectionsAsync?.()
+      if (!result?.started) {
+        networkConnectionsBusy.value = false
       }
-    } finally {
+    } catch (e) {
       networkConnectionsBusy.value = false
-      networkLastRefresh.value = new Date().toLocaleTimeString()
+    }
+  }
+
+  function onNetworkConnectionsFinished(result: { success: boolean; connections?: NetworkConnection[]; error?: string }) {
+    networkConnectionsBusy.value = false
+    networkLastRefresh.value = new Date().toLocaleTimeString()
+    if (result.success) {
+      networkConnections.value = result.connections ?? []
     }
   }
 
@@ -300,6 +314,7 @@ export function useNetworkStore() {
     _networkFilterState,
     _networkFilterIp,
     refreshNetworkConnections,
+    onNetworkConnectionsFinished,
     refreshNetworkModules,
     refreshAllNetwork,
     startLiveRefresh,

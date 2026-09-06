@@ -1501,8 +1501,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   /** Résultat différé de unblockProcessNetworkAsync. */
   processNetworkUnblockFinished?: QWebChannelSignal<ProcessNetworkBlockStatus>
   getProcessNetworkBlockStatus?(): Promise<ProcessNetworkBlockStatus>
-  /** Réseau — Connexions actives du processus attaché (lecture seule). */
-  getProcessNetworkConnections?(): Promise<{ success: boolean; connections: NetworkConnection[]; error?: string }>
+  /** Réseau — Connexions actives du processus attaché (lecture seule). Non bloquant (résolution DNS par connexion sur thread séparé côté backend) — résultat via processNetworkConnectionsFinished, cet appel ne fait que démarrer l'opération. */
+  getProcessNetworkConnectionsAsync?(): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de getProcessNetworkConnectionsAsync. */
+  processNetworkConnectionsFinished?: QWebChannelSignal<{ success: boolean; connections?: NetworkConnection[]; error?: string }>
   /** Réseau — Modules DLL réseau chargés par le processus attaché (lecture seule). */
   getProcessNetworkModules?(): Promise<{ success: boolean; modules: NetworkModule[]; error?: string }>
   /** Proxy HTTP — Intercepte les requêtes HTTP/HTTPS du process attaché. Non bloquant (injection + attente handler sur thread séparé côté backend) — résultat via httpProxyStartFinished, cet appel ne fait que démarrer l'opération. */
@@ -2666,15 +2668,10 @@ class BackendService {
       async getProcessNetworkBlockStatus() {
         return { success: true, blocked: false }
       },
-      async getProcessNetworkConnections() {
-        return {
-          success: true,
-          connections: [
-            { protocol: 'TCP', localAddr: '192.168.1.10:49832', remoteAddr: '52.14.88.23:443', remoteHost: 'matchmaking.steamserver.net', state: 'ESTABLISHED', pid: 12345 },
-            { protocol: 'TCP', localAddr: '192.168.1.10:49833', remoteAddr: '104.18.32.7:80', remoteHost: null, state: 'TIME_WAIT', pid: 12345 }
-          ]
-        }
+      async getProcessNetworkConnectionsAsync() {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      processNetworkConnectionsFinished: undefined as unknown as QWebChannelSignal<{ success: boolean; connections?: NetworkConnection[]; error?: string }>,
       async getProcessNetworkModules() {
         return {
           success: true,

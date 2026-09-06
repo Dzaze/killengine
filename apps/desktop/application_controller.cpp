@@ -89,6 +89,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QMutex>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -4759,6 +4760,13 @@ struct DnsCacheEntry {
 };
 using DnsCacheMap = QHash<QString, DnsCacheEntry>;
 Q_GLOBAL_STATIC(DnsCacheMap, g_dnsCache)
+// getProcessNetworkConnectionsAsync() tourne sur un thread de travail séparé
+// (voir plus bas) ; en mode Live (rafraîchi toutes les 2s côté frontend), un
+// nouveau cycle peut démarrer avant que le précédent n'ait fini de résoudre
+// toutes ses IP si la résolution prend plus longtemps que l'intervalle —
+// deux threads pourraient alors toucher g_dnsCache en même temps. QHash
+// n'est pas thread-safe pour un accès concurrent, d'où ce mutex.
+Q_GLOBAL_STATIC(QMutex, g_dnsCacheMutex)
 
 QString resolveIpToHostname(const QString& ip) {
     if (ip.isEmpty()) return QString();
@@ -4771,13 +4779,16 @@ QString resolveIpToHostname(const QString& ip) {
     }
 
     // Check cache
-    auto& cache = *g_dnsCache();
-    if (cache.contains(ip)) {
-        const auto& entry = cache[ip];
-        if (QDateTime::currentMSecsSinceEpoch() - entry.timestamp < 60000) {
-            return entry.hostname; // "" si déjà résolu en échec
+    {
+        QMutexLocker locker(g_dnsCacheMutex());
+        auto& cache = *g_dnsCache();
+        if (cache.contains(ip)) {
+            const auto& entry = cache[ip];
+            if (QDateTime::currentMSecsSinceEpoch() - entry.timestamp < 60000) {
+                return entry.hostname; // "" si déjà résolu en échec
+            }
+            cache.remove(ip);
         }
-        cache.remove(ip);
     }
 
     // Résolution asynchrone avec timeout
@@ -4807,6 +4818,8 @@ QString resolveIpToHostname(const QString& ip) {
 
     if (future.wait_for(std::chrono::milliseconds(500)) == std::future_status::ready) {
         QString result = future.get();
+        QMutexLocker locker(g_dnsCacheMutex());
+        auto& cache = *g_dnsCache();
         cache.insert(ip, {result, QDateTime::currentMSecsSinceEpoch()});
         // Nettoyer si > 256
         if (cache.size() > 256) {
@@ -4906,94 +4919,115 @@ const NetworkDllInfo* findNetworkDllInfo(const QString& dllName) {
 }
 } // namespace
 
-QVariantMap ApplicationController::getProcessNetworkConnections() {
-    QVariantMap result;
-    result["success"] = false;
-    result["connections"] = QVariantList();
+QVariantMap ApplicationController::getProcessNetworkConnectionsAsync() {
+    QVariantMap started;
+    started["success"] = false;
 
     if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
+        started["error"] = "Aucun processus attaché.";
+        return started;
     }
 
 #ifdef Q_OS_WIN
-    QVariantList connections;
+    // La résolution DNS inverse par connexion (jusqu'à 500ms chacune, voir
+    // resolveIpToHostname) peut totaliser plusieurs secondes pour un process
+    // avec de nombreuses IP distantes distinctes non cachées — déportée sur
+    // un thread séparé pour ne pas geler le thread GUI (Q_INVOKABLE via
+    // QWebChannel), y compris en mode "Live" (rafraîchi toutes les 2s).
+    const int pid = m_pid;
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, pid]() {
+        QVariantMap result;
+        result["success"] = false;
+        result["connections"] = QVariantList();
 
-    // TCP connections
-    {
-        ULONG size = 0;
-        if (GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == ERROR_INSUFFICIENT_BUFFER && size > 0) {
-            QByteArray buffer(static_cast<int>(size), 0);
-            auto* table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID*>(buffer.data());
-            if (GetExtendedTcpTable(table, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
-                for (DWORD i = 0; i < table->dwNumEntries; ++i) {
-                    const auto& row = table->table[i];
-                    if (static_cast<int>(row.dwOwningPid) != m_pid) continue;
+        QVariantList connections;
 
-                    uint16_t localPort = ntohs(static_cast<uint16_t>(row.dwLocalPort));
-                    uint16_t remotePort = ntohs(static_cast<uint16_t>(row.dwRemotePort));
-                    QString localAddr = formatIpPort(row.dwLocalAddr, localPort);
-                    QString remoteAddr = formatIpPort(row.dwRemoteAddr, remotePort);
-                    QString state = tcpStateToString(row.dwState);
+        // TCP connections
+        {
+            ULONG size = 0;
+            if (GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == ERROR_INSUFFICIENT_BUFFER && size > 0) {
+                QByteArray buffer(static_cast<int>(size), 0);
+                auto* table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID*>(buffer.data());
+                if (GetExtendedTcpTable(table, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+                    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                        const auto& row = table->table[i];
+                        if (static_cast<int>(row.dwOwningPid) != pid) continue;
 
-                    QVariantMap conn;
-                    conn["protocol"] = "TCP";
-                    conn["localAddr"] = localAddr;
-                    conn["remoteAddr"] = remoteAddr;
-                    conn["state"] = state;
-                    conn["pid"] = static_cast<int>(row.dwOwningPid);
+                        uint16_t localPort = ntohs(static_cast<uint16_t>(row.dwLocalPort));
+                        uint16_t remotePort = ntohs(static_cast<uint16_t>(row.dwRemotePort));
+                        QString localAddr = formatIpPort(row.dwLocalAddr, localPort);
+                        QString remoteAddr = formatIpPort(row.dwRemoteAddr, remotePort);
+                        QString state = tcpStateToString(row.dwState);
 
-                    // Résolution DNS (best-effort, asynchrone)
-                    uint32_t remote = ntohl(row.dwRemoteAddr);
-                    if (remote != 0 && ((remote >> 24) != 127)) {
-                        QString ipOnly = remoteAddr.split(':').first();
-                        QString hostname = resolveIpToHostname(ipOnly);
-                        conn["remoteHost"] = hostname.isEmpty() ? QVariant() : hostname;
-                    } else {
-                        conn["remoteHost"] = QVariant();
+                        QVariantMap conn;
+                        conn["protocol"] = "TCP";
+                        conn["localAddr"] = localAddr;
+                        conn["remoteAddr"] = remoteAddr;
+                        conn["state"] = state;
+                        conn["pid"] = static_cast<int>(row.dwOwningPid);
+
+                        // Résolution DNS (best-effort)
+                        uint32_t remote = ntohl(row.dwRemoteAddr);
+                        if (remote != 0 && ((remote >> 24) != 127)) {
+                            QString ipOnly = remoteAddr.split(':').first();
+                            QString hostname = resolveIpToHostname(ipOnly);
+                            conn["remoteHost"] = hostname.isEmpty() ? QVariant() : hostname;
+                        } else {
+                            conn["remoteHost"] = QVariant();
+                        }
+
+                        connections.append(conn);
                     }
-
-                    connections.append(conn);
                 }
             }
         }
-    }
 
-    // UDP connections
-    {
-        ULONG size = 0;
-        if (GetExtendedUdpTable(nullptr, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0) == ERROR_INSUFFICIENT_BUFFER && size > 0) {
-            QByteArray buffer(static_cast<int>(size), 0);
-            auto* table = reinterpret_cast<MIB_UDPTABLE_OWNER_PID*>(buffer.data());
-            if (GetExtendedUdpTable(table, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0) == NO_ERROR) {
-                for (DWORD i = 0; i < table->dwNumEntries; ++i) {
-                    const auto& row = table->table[i];
-                    if (static_cast<int>(row.dwOwningPid) != m_pid) continue;
+        // UDP connections
+        {
+            ULONG size = 0;
+            if (GetExtendedUdpTable(nullptr, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0) == ERROR_INSUFFICIENT_BUFFER && size > 0) {
+                QByteArray buffer(static_cast<int>(size), 0);
+                auto* table = reinterpret_cast<MIB_UDPTABLE_OWNER_PID*>(buffer.data());
+                if (GetExtendedUdpTable(table, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0) == NO_ERROR) {
+                    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                        const auto& row = table->table[i];
+                        if (static_cast<int>(row.dwOwningPid) != pid) continue;
 
-                    uint16_t localPort = ntohs(static_cast<uint16_t>(row.dwLocalPort));
-                    QString localAddr = formatIpPort(row.dwLocalAddr, localPort);
+                        uint16_t localPort = ntohs(static_cast<uint16_t>(row.dwLocalPort));
+                        QString localAddr = formatIpPort(row.dwLocalAddr, localPort);
 
-                    QVariantMap conn;
-                    conn["protocol"] = "UDP";
-                    conn["localAddr"] = localAddr;
-                    conn["remoteAddr"] = QVariant(); // UDP est sans connexion : pas de pair distant dans cette table
-                    conn["state"] = QVariant(); // UDP n'a pas d'état
-                    conn["pid"] = static_cast<int>(row.dwOwningPid);
-                    conn["remoteHost"] = QVariant();
+                        QVariantMap conn;
+                        conn["protocol"] = "UDP";
+                        conn["localAddr"] = localAddr;
+                        conn["remoteAddr"] = QVariant(); // UDP est sans connexion : pas de pair distant dans cette table
+                        conn["state"] = QVariant(); // UDP n'a pas d'état
+                        conn["pid"] = static_cast<int>(row.dwOwningPid);
+                        conn["remoteHost"] = QVariant();
 
-                    connections.append(conn);
+                        connections.append(conn);
+                    }
                 }
             }
         }
-    }
 
-    result["success"] = true;
-    result["connections"] = connections;
+        result["success"] = true;
+        result["connections"] = connections;
+
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->processNetworkConnectionsFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = "Fonctionnalité Windows uniquement.";
 #endif
 
-    return result;
+    return started;
 }
 
 QVariantMap ApplicationController::getProcessNetworkModules() {

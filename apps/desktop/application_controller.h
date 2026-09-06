@@ -814,10 +814,15 @@ public:
 
     /// Liste les connexions TCP/UDP actives du processus attaché (lecture
     /// seule, via GetExtendedTcpTable/GetExtendedUdpTable). Inclut la
-    /// résolution DNS best-effort (getnameinfo, asynchrone, cache LRU).
-    /// Retourne {success, connections: [{protocol, localAddr, remoteAddr,
-    /// remoteHost, state, pid}], error}.
-    Q_INVOKABLE QVariantMap getProcessNetworkConnections();
+    /// résolution DNS best-effort (getnameinfo, cache LRU 60s). Non bloquant :
+    /// même si chaque résolution individuelle a un timeout de 500ms, la
+    /// boucle qui les enchaîne pour chaque IP distante distincte tournait
+    /// sur le thread GUI (jusqu'à N × 500ms pour N IP non cachées) — déportée
+    /// sur un thread séparé. Retourne {success, started} immédiatement ;
+    /// résultat via processNetworkConnectionsFinished (payload : {success,
+    /// connections: [{protocol, localAddr, remoteAddr, remoteHost, state,
+    /// pid}], error}).
+    Q_INVOKABLE QVariantMap getProcessNetworkConnectionsAsync();
 
     /// Liste les modules DLL réseau chargés par le processus attaché
     /// (EnumProcessModules + GetModuleFileNameEx, filtré sur une liste
@@ -1605,6 +1610,8 @@ signals:
     void processNetworkBlockFinished(const QVariantMap& result);
     /// Résultat différé de unblockProcessNetworkAsync.
     void processNetworkUnblockFinished(const QVariantMap& result);
+    /// Résultat différé de getProcessNetworkConnectionsAsync.
+    void processNetworkConnectionsFinished(const QVariantMap& result);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le
