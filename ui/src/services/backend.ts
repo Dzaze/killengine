@@ -1486,8 +1486,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   testCandidateFieldsAsync?(writeInstructionAddressHex: string, knownWriteTargetAddressHex: string, options: Record<string, unknown>): Promise<CandidateFieldTestStartResult>
   cancelCandidateFieldTest?(): Promise<Record<string, unknown>>
   candidateFieldTestFinished?: QWebChannelSignal<CandidateFieldTestResult>
-  /** Roadmap section J — Speedhack : accélère/ralentit le temps perçu par la cible attachée. */
-  startSpeedhack?(factor: number): Promise<SpeedhackStatus>
+  /** Roadmap section J — Speedhack : accélère/ralentit le temps perçu par la cible attachée. Non bloquant (injection + attente handler sur thread séparé côté backend) — résultat via speedhackStartFinished, cet appel ne fait que démarrer l'opération. */
+  startSpeedhackAsync?(factor: number): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de startSpeedhackAsync. */
+  speedhackStartFinished?: QWebChannelSignal<SpeedhackStatus>
   setSpeedhackFactor?(factor: number): Promise<SpeedhackStatus>
   stopSpeedhack?(): Promise<SpeedhackStatus>
   getSpeedhackStatus?(): Promise<SpeedhackStatus>
@@ -1520,9 +1522,14 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   setLagSwitchAsync?(enabled: boolean, delayMs: number): Promise<{ success: boolean; started?: boolean; error?: string }>
   /** Résultat différé de setLagSwitchAsync. */
   lagSwitchFinished?: QWebChannelSignal<Record<string, unknown>>
-  /** Roadmap section B - interception de fonctions : hook MinHook injecte sur module!fonction. mode: 0=compter, 1=forcer retour. */
-  startApiHook?(moduleName: string, functionName: string, mode: number, forcedReturnValue: number): Promise<ApiHookStatus>
-  stopApiHook?(): Promise<ApiHookStatus>
+  /** Roadmap section B - interception de fonctions : hook MinHook injecte sur module!fonction. mode: 0=compter, 1=forcer retour. Non bloquant (injection + attente handler sur thread séparé côté backend) — résultat via apiHookStartFinished, cet appel ne fait que démarrer l'opération. */
+  startApiHookAsync?(moduleName: string, functionName: string, mode: number, forcedReturnValue: number): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de startApiHookAsync. */
+  apiHookStartFinished?: QWebChannelSignal<ApiHookStatus>
+  /** Non bloquant ; résultat via apiHookStopFinished. */
+  stopApiHookAsync?(): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de stopApiHookAsync. */
+  apiHookStopFinished?: QWebChannelSignal<ApiHookStatus>
   getApiHookStatus?(): Promise<ApiHookStatus>
   /** Phase 20 — outils Expert manuels gardés par confirmRiskAction('injection', ...) côté store. */
   injectDllIntoProcess?(dllPath: string): Promise<Record<string, unknown>>
@@ -2629,9 +2636,10 @@ class BackendService {
       async cancelCandidateFieldTest() {
         return { success: false, error: 'Mock backend' }
       },
-      async startSpeedhack(_factor: number) {
-        return { success: false, active: false, factor: 1.0, error: 'Mock backend' }
+      async startSpeedhackAsync(_factor: number) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      speedhackStartFinished: undefined as unknown as QWebChannelSignal<SpeedhackStatus>,
       async setSpeedhackFactor(_factor: number) {
         return { success: false, active: false, factor: 1.0, error: 'Mock backend' }
       },
@@ -2699,12 +2707,14 @@ class BackendService {
         return { success: false, started: false, error: 'Mock backend' }
       },
       lagSwitchFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
-      async startApiHook(_m: string, _fn: string, _mode: number, _ret: number) {
-        return { success: false, active: false, error: 'Mock backend' }
+      async startApiHookAsync(_m: string, _fn: string, _mode: number, _ret: number) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
-      async stopApiHook() {
-        return { success: true, active: false }
+      apiHookStartFinished: undefined as unknown as QWebChannelSignal<ApiHookStatus>,
+      async stopApiHookAsync() {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      apiHookStopFinished: undefined as unknown as QWebChannelSignal<ApiHookStatus>,
       async getApiHookStatus() {
         return { success: true, active: false }
       },

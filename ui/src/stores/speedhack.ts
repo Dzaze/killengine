@@ -49,43 +49,61 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     }
   }
 
+  // startApiHookAsync/stopApiHookAsync ne bloquent plus le thread GUI
+  // (injection + attente du handler jusqu'à 6s/3s sur thread séparé côté
+  // backend) : elles renvoient juste {started:true} immédiatement, le vrai
+  // résultat arrive via onApiHookStartFinished/onApiHookStopFinished
+  // (branchés dans app.ts) — busy reste true jusque-là.
   /** Pas de confirmRiskAction ici -- app.ts confirme avant d'appeler. */
   async function startApiHook() {
     const controller = backend.getController()
-    if (!controller.startApiHook) {
+    if (!controller.startApiHookAsync) {
       actionLogStore.addActionLog('injection', 'Interception indisponible', 'Backend non exposé.', 'warning')
       return null
     }
     apiHookBusy.value = true
     try {
-      const result = await controller.startApiHook(apiHookModuleName.value, apiHookFunctionName.value, apiHookMode.value, apiHookForcedReturn.value)
-      apiHookStatus.value = result
-      if (result.success) {
-        actionLogStore.addActionLog('injection', 'Interception active', `${apiHookModuleName.value}!${apiHookFunctionName.value}, mode ${apiHookMode.value === 1 ? 'forcer retour' : 'compter'}.`, 'success')
-      } else {
-        actionLogStore.addActionLog('injection', 'Interception échouée', result.error || 'raison inconnue', 'error')
+      const result = await controller.startApiHookAsync(apiHookModuleName.value, apiHookFunctionName.value, apiHookMode.value, apiHookForcedReturn.value)
+      if (!result?.started) {
+        apiHookBusy.value = false
+        actionLogStore.addActionLog('injection', 'Interception échouée', result?.error || 'raison inconnue', 'error')
       }
       return result
     } catch (e) {
+      apiHookBusy.value = false
       actionLogStore.addActionLog('injection', 'Interception échouée', String(e), 'error')
       return null
-    } finally {
-      apiHookBusy.value = false
+    }
+  }
+
+  function onApiHookStartFinished(result: ApiHookStatus) {
+    apiHookBusy.value = false
+    apiHookStatus.value = result
+    if (result.success) {
+      actionLogStore.addActionLog('injection', 'Interception active', `${apiHookModuleName.value}!${apiHookFunctionName.value}, mode ${apiHookMode.value === 1 ? 'forcer retour' : 'compter'}.`, 'success')
+    } else {
+      actionLogStore.addActionLog('injection', 'Interception échouée', result.error || 'raison inconnue', 'error')
     }
   }
 
   async function stopApiHook() {
     const controller = backend.getController()
-    if (!controller.stopApiHook) return null
+    if (!controller.stopApiHookAsync) return null
     try {
-      const result = await controller.stopApiHook()
-      apiHookStatus.value = result
-      actionLogStore.addActionLog('injection', 'Interception retirée', result.finalCallCount !== undefined ? `${result.finalCallCount} appel(s) intercepté(s) au total.` : 'Hook retiré.', 'success')
+      const result = await controller.stopApiHookAsync()
+      if (!result?.started) {
+        actionLogStore.addActionLog('injection', 'Retrait de l interception échoué', result?.error || 'raison inconnue', 'error')
+      }
       return result
     } catch (e) {
       actionLogStore.addActionLog('injection', 'Retrait de l interception échoué', String(e), 'error')
       return null
     }
+  }
+
+  function onApiHookStopFinished(result: ApiHookStatus) {
+    apiHookStatus.value = result
+    actionLogStore.addActionLog('injection', 'Interception retirée', result.finalCallCount !== undefined ? `${result.finalCallCount} appel(s) intercepté(s) au total.` : 'Hook retiré.', 'success')
   }
 
   async function refreshApiHookStatus() {
@@ -99,29 +117,41 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     }
   }
 
+  // startSpeedhackAsync ne bloque plus le thread GUI (injection + attente du
+  // handler jusqu'à 2s sur thread séparé côté backend) : elle renvoie juste
+  // {started:true} immédiatement, le vrai résultat arrive via
+  // onSpeedhackStartFinished (branché dans app.ts) — busy reste true
+  // jusque-là.
   /** Pas de confirmRiskAction/logAiAudit ici -- app.ts s'en charge avant/après. */
   async function startSpeedhack(factor: number) {
     const controller = backend.getController()
-    if (!controller.startSpeedhack) {
+    if (!controller.startSpeedhackAsync) {
       actionLogStore.addActionLog('speedhack', 'Speedhack indisponible', 'Backend non exposé.', 'warning')
       return null
     }
     speedhackBusy.value = true
     try {
-      const result = await controller.startSpeedhack(factor)
-      speedhackStatus.value = result
-      if (result.success) {
-        speedhackFactor.value = factor
-        actionLogStore.addActionLog('speedhack', 'Speedhack activé', `Facteur ${factor}x.`, 'success')
-      } else {
-        actionLogStore.addActionLog('speedhack', 'Speedhack échoué', result.error || 'raison inconnue', 'error')
+      const result = await controller.startSpeedhackAsync(factor)
+      if (!result?.started) {
+        speedhackBusy.value = false
+        actionLogStore.addActionLog('speedhack', 'Speedhack échoué', result?.error || 'raison inconnue', 'error')
       }
       return result
     } catch (e) {
+      speedhackBusy.value = false
       actionLogStore.addActionLog('speedhack', 'Speedhack échoué', String(e), 'error')
       return null
-    } finally {
-      speedhackBusy.value = false
+    }
+  }
+
+  function onSpeedhackStartFinished(result: SpeedhackStatus) {
+    speedhackBusy.value = false
+    speedhackStatus.value = result
+    if (result.success) {
+      speedhackFactor.value = result.factor
+      actionLogStore.addActionLog('speedhack', 'Speedhack activé', `Facteur ${result.factor}x.`, 'success')
+    } else {
+      actionLogStore.addActionLog('speedhack', 'Speedhack échoué', result.error || 'raison inconnue', 'error')
     }
   }
 
@@ -236,9 +266,12 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     apiHookForcedReturn,
     refreshSpeedhackStatus,
     startApiHook,
+    onApiHookStartFinished,
     stopApiHook,
+    onApiHookStopFinished,
     refreshApiHookStatus,
     startSpeedhack,
+    onSpeedhackStartFinished,
     setSpeedhackFactor,
     stopSpeedhack,
     blockProcessNetwork,

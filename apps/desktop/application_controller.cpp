@@ -3410,20 +3410,70 @@ QVariantMap ApplicationController::cancelInProcessBreakpointWatch() {
     return m_debugFeatureManager->cancelInProcessBreakpointWatch();
 }
 
-QVariantMap ApplicationController::startInProcessBreakpointFreeze(const QString& addressHex, const QString& valueType, const QString& value, const QVariantMap& options) {
-    return m_debugFeatureManager->startInProcessBreakpointFreeze(addressHex, valueType, value, options);
+QVariantMap ApplicationController::startInProcessBreakpointFreezeAsync(const QString& addressHex, const QString& valueType, const QString& value, const QVariantMap& options) {
+    QVariantMap started;
+    // DebugFeatureManager::startInProcessBreakpointFreeze() rouvre son propre
+    // ProcessHandle en interne (indépendant de m_handle) et poll jusqu'à 2s en
+    // attendant la confirmation du handler — tourne sur un thread séparé pour
+    // ne pas geler le thread GUI, même raisonnement que
+    // startHttpProxyAsync/setLagSwitchAsync. m_debugFeatureManager n'est
+    // jamais recréé une fois construit, le pointeur brut reste donc valide.
+    DebugFeatureManager* dfm = m_debugFeatureManager.get();
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, dfm, addressHex, valueType, value, options]() {
+        const QVariantMap result = dfm->startInProcessBreakpointFreeze(addressHex, valueType, value, options);
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->inProcessBreakpointFreezeStartFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
+    return started;
 }
 
-QVariantMap ApplicationController::stopInProcessBreakpointFreeze() {
-    return m_debugFeatureManager->stopInProcessBreakpointFreeze();
+QVariantMap ApplicationController::stopInProcessBreakpointFreezeAsync() {
+    QVariantMap started;
+    DebugFeatureManager* dfm = m_debugFeatureManager.get();
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, dfm]() {
+        const QVariantMap result = dfm->stopInProcessBreakpointFreeze();
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->inProcessBreakpointFreezeStopFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
+    return started;
 }
 
 QVariantMap ApplicationController::getInProcessBreakpointFreezeStats() const {
     return m_debugFeatureManager->getInProcessBreakpointFreezeStats();
 }
 
-QVariantMap ApplicationController::startSpeedhack(double factor) {
-    return m_debugFeatureManager->startSpeedhack(factor);
+QVariantMap ApplicationController::startSpeedhackAsync(double factor) {
+    QVariantMap started;
+    // SpeedhackSession::start() poll jusqu'à 2s en attendant la confirmation
+    // du handler — même raisonnement que startInProcessBreakpointFreezeAsync.
+    DebugFeatureManager* dfm = m_debugFeatureManager.get();
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, dfm, factor]() {
+        const QVariantMap result = dfm->startSpeedhack(factor);
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->speedhackStartFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
+    return started;
 }
 
 QVariantMap ApplicationController::setSpeedhackFactor(double factor) {
@@ -3434,13 +3484,45 @@ QVariantMap ApplicationController::stopSpeedhack() {
     return m_debugFeatureManager->stopSpeedhack();
 }
 
-QVariantMap ApplicationController::startApiHook(const QString& moduleName, const QString& functionName,
+QVariantMap ApplicationController::startApiHookAsync(const QString& moduleName, const QString& functionName,
                                                 int mode, qlonglong forcedReturnValue) {
-    return m_debugFeatureManager->startApiHook(moduleName, functionName, mode, forcedReturnValue);
+    QVariantMap started;
+    // ApiHookSession::start() poll jusqu'à 6s en attendant la confirmation du
+    // handler — même raisonnement que startInProcessBreakpointFreezeAsync.
+    DebugFeatureManager* dfm = m_debugFeatureManager.get();
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, dfm, moduleName, functionName, mode, forcedReturnValue]() {
+        const QVariantMap result = dfm->startApiHook(moduleName, functionName, mode, forcedReturnValue);
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->apiHookStartFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
+    return started;
 }
 
-QVariantMap ApplicationController::stopApiHook() {
-    return m_debugFeatureManager->stopApiHook();
+QVariantMap ApplicationController::stopApiHookAsync() {
+    QVariantMap started;
+    // ApiHookSession::stop() poll jusqu'à 3s en attendant la confirmation du
+    // handler — même raisonnement.
+    DebugFeatureManager* dfm = m_debugFeatureManager.get();
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, dfm]() {
+        const QVariantMap result = dfm->stopApiHook();
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->apiHookStopFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
+    return started;
 }
 
 QVariantMap ApplicationController::getApiHookStatus() const {

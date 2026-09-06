@@ -620,6 +620,7 @@ export const useAppStore = defineStore('app', () => {
   let backendEdrKillSignalConnected = false
   let backendDnsSpoofSignalConnected = false
   let backendNetworkInjectionSignalConnected = false
+  let backendSpeedhackApiHookSignalConnected = false
   let backendModuleInstallSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
@@ -2123,6 +2124,21 @@ export const useAppStore = defineStore('app', () => {
           networkStore.onLagSwitchFinished(result)
         })
         backendNetworkInjectionSignalConnected = true
+      }
+      if (!backendSpeedhackApiHookSignalConnected) {
+        // Speedhack / API hook non bloquants (voir startSpeedhackAsync/
+        // startApiHookAsync/stopApiHookAsync) : résultat différé relayé vers
+        // le store Speedhack.
+        controller.speedhackStartFinished?.connect((result) => {
+          speedhackStore.onSpeedhackStartFinished(result)
+        })
+        controller.apiHookStartFinished?.connect((result) => {
+          speedhackStore.onApiHookStartFinished(result)
+        })
+        controller.apiHookStopFinished?.connect((result) => {
+          speedhackStore.onApiHookStopFinished(result)
+        })
+        backendSpeedhackApiHookSignalConnected = true
       }
       if (!backendModuleInstallSignalConnected) {
         // Vue "Modules" : progression des installations de module en cours

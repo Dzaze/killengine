@@ -496,11 +496,16 @@ public:
     /// Freeze via breakpoint in-process : le composant injecté réécrit lui-même la valeur figée
     /// juste après chaque écriture interceptée, sans jamais attacher de débogueur externe (à la
     /// différence de freezeWithBreakpoint qui, lui, dépend du canal de debug Win32). Reste actif
-    /// jusqu'à stopInProcessBreakpointFreeze().
-    Q_INVOKABLE QVariantMap startInProcessBreakpointFreeze(const QString& addressHex, const QString& valueType, const QString& value, const QVariantMap& options);
+    /// jusqu'à stopInProcessBreakpointFreezeAsync(). Non bloquant : l'injection puis l'attente de
+    /// confirmation du handler (jusqu'à 2s de polling) tournent sur un thread séparé — sinon ça
+    /// gèle le thread GUI comme les autres fonctionnalités d'injection avant leur fix. Résultat
+    /// via inProcessBreakpointFreezeStartFinished.
+    Q_INVOKABLE QVariantMap startInProcessBreakpointFreezeAsync(const QString& addressHex, const QString& valueType, const QString& value, const QVariantMap& options);
 
-    /// Arrête le freeze breakpoint in-process actif.
-    Q_INVOKABLE QVariantMap stopInProcessBreakpointFreeze();
+    /// Arrête le freeze breakpoint in-process actif. Non bloquant (attente de
+    /// désarmement jusqu'à 2s sur thread séparé) ; résultat via
+    /// inProcessBreakpointFreezeStopFinished.
+    Q_INVOKABLE QVariantMap stopInProcessBreakpointFreezeAsync();
 
     /// Stats en direct du freeze breakpoint in-process actif (hitCount, threads armées) —
     /// lecture directe de la mémoire partagée, pas d'attente de l'arrêt.
@@ -510,8 +515,10 @@ public:
     /// processus attaché (hook des fonctions de temps depuis un composant injecté,
     /// voir core/debug/speedhack.h). factor=1.0 vitesse normale, factor=0.0 pause.
     /// Réutilise un composant déjà installé sur cette cible s'il existe (pas besoin
-    /// de réinjecter pour réactiver, voir SpeedhackSession::start).
-    Q_INVOKABLE QVariantMap startSpeedhack(double factor);
+    /// de réinjecter pour réactiver, voir SpeedhackSession::start). Non bloquant :
+    /// l'injection + l'attente de confirmation du handler (jusqu'à 2s de polling)
+    /// tournent sur un thread séparé ; résultat via speedhackStartFinished.
+    Q_INVOKABLE QVariantMap startSpeedhackAsync(double factor);
 
     /// Change le facteur en direct sans réinjecter — pour un slider côté UI.
     Q_INVOKABLE QVariantMap setSpeedhackFactor(double factor);
@@ -523,12 +530,17 @@ public:
     /// Roadmap section B - Interception de fonctions : pose un hook MinHook
     /// in-process (composant injecte KillEngineApiHookHandler.dll) sur
     /// module!fonction pour compter les appels et/ou forcer la valeur de
-    /// retour. mode: 0 = compter seulement, 1 = forcer le retour.
-    Q_INVOKABLE QVariantMap startApiHook(const QString& moduleName, const QString& functionName,
+    /// retour. mode: 0 = compter seulement, 1 = forcer le retour. Non
+    /// bloquant : l'injection + l'attente de confirmation du handler (jusqu'à
+    /// 6s de polling) tournent sur un thread séparé ; résultat via
+    /// apiHookStartFinished.
+    Q_INVOKABLE QVariantMap startApiHookAsync(const QString& moduleName, const QString& functionName,
                                         int mode, qlonglong forcedReturnValue);
 
-    /// Retire le hook et referme la session (le composant reste charge).
-    Q_INVOKABLE QVariantMap stopApiHook();
+    /// Retire le hook et referme la session (le composant reste charge). Non
+    /// bloquant (attente de confirmation jusqu'à 3s sur thread séparé) ;
+    /// résultat via apiHookStopFinished.
+    Q_INVOKABLE QVariantMap stopApiHookAsync();
 
     /// Statut courant (actif, compteurs d appels, erreurs).
     Q_INVOKABLE QVariantMap getApiHookStatus() const;
@@ -1568,6 +1580,17 @@ signals:
     void httpProxyStopFinished(const QVariantMap& result);
     /// Résultat différé de setLagSwitchAsync.
     void lagSwitchFinished(const QVariantMap& result);
+
+    /// Résultat différé de startInProcessBreakpointFreezeAsync.
+    void inProcessBreakpointFreezeStartFinished(const QVariantMap& result);
+    /// Résultat différé de stopInProcessBreakpointFreezeAsync.
+    void inProcessBreakpointFreezeStopFinished(const QVariantMap& result);
+    /// Résultat différé de startSpeedhackAsync.
+    void speedhackStartFinished(const QVariantMap& result);
+    /// Résultat différé de startApiHookAsync.
+    void apiHookStartFinished(const QVariantMap& result);
+    /// Résultat différé de stopApiHookAsync.
+    void apiHookStopFinished(const QVariantMap& result);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le
