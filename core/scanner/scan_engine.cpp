@@ -1,6 +1,7 @@
 #include "scan_engine.h"
 
 #include "logging/logger.h"
+#include "scanner/candidate_confidence.h"
 #include "scanner/performance_profile.h"
 #include "scanner/worker_pool.h"
 
@@ -267,6 +268,12 @@ ScanResult ScanEngine::exactScan(
 
         const auto& task = scanRegions[taskIndex];
         const uint64_t scanSize = task.scanEnd - task.scanStart;
+        // Score de région calculé une fois par région balayée (pas par match ni
+        // par candidat) : task.region est déjà la MemoryRegion exacte, aucun
+        // lookup nécessaire.
+        const double regionConfidence = computeScanTimeConfidence(
+            computeRegionScore(task.region, CandidateConfidenceContext{}),
+            /*secondaryVariant=*/false);
         MemoryReader reader(m_process);
         uint64_t offset = 0;
         QByteArray overlap;
@@ -305,7 +312,8 @@ ScanResult ScanEngine::exactScan(
                 options.maxResults,
                 effectiveAlignment,
                 options.startAddress,
-                options.stopAddress);
+                options.stopAddress,
+                regionConfidence);
             mergeChunkMatches(chunkResult);
 
             bytesScanned.fetch_add(read.bytesRead, std::memory_order_relaxed);
@@ -443,6 +451,10 @@ ScanResult ScanEngine::exactScanMultiType(
 
         const auto& task = scanRegions[taskIndex];
         const uint64_t scanSize = task.scanEnd - task.scanStart;
+        // Score de région calculé une fois par région balayée (pas par variante
+        // ni par match) : task.region est déjà la MemoryRegion exacte, aucun
+        // lookup nécessaire.
+        const double regionScore = computeRegionScore(task.region, CandidateConfidenceContext{});
         MemoryReader reader(m_process);
         uint64_t offset = 0;
         QByteArray overlap;
@@ -485,7 +497,7 @@ ScanResult ScanEngine::exactScanMultiType(
 
                 // Les variantes secondaires (×100, unsigned...) reçoivent un malus de confiance,
                 // appliqué seulement si l'adresse n'a pas déjà été matchée par une variante primaire.
-                const double confidence = variant.secondary ? 0.85 : 1.0;
+                const double confidence = computeScanTimeConfidence(regionScore, variant.secondary);
 
                 ScanResult chunkResult;
                 scanBuffer(

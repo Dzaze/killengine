@@ -8,11 +8,16 @@ namespace killcore {
 const MemoryRegion* findRegionForAddress(
     const QList<MemoryRegion>& regions,
     uint64_t address) {
-    for (const auto& region : regions) {
-        const uint64_t end = region.baseAddress + region.size;
-        if (address >= region.baseAddress && address < end) {
-            return &region;
-        }
+    // regions DOIT être trié par baseAddress croissant, sans chevauchement
+    // (voir le contrat dans le .h) : recherche binaire de la dernière région
+    // dont baseAddress <= address, puis vérification de la borne haute.
+    auto it = std::upper_bound(
+        regions.begin(), regions.end(), address,
+        [](uint64_t value, const MemoryRegion& region) { return value < region.baseAddress; });
+    if (it == regions.begin()) return nullptr;
+    --it;
+    if (address >= it->baseAddress && address < it->baseAddress + it->size) {
+        return &(*it);
     }
     return nullptr;
 }
@@ -26,7 +31,7 @@ double clamp01(double v) {
     return std::clamp(v, kClampMin, kClampMax);
 }
 
-double computeRegionScore(
+double regionScoreAtAddress(
     uint64_t address,
     const CandidateConfidenceContext& context) {
     if (!context.regions) {
@@ -38,34 +43,7 @@ double computeRegionScore(
         return 0.1; // Région disparue = très suspect.
     }
 
-    if (!region->readable || region->guarded) {
-        return 0.1;
-    }
-
-    double score = 0.5;
-
-    if (context.preferWritable && region->writable) {
-        score += 0.25;
-    } else if (context.preferWritable && !region->writable) {
-        score -= 0.1;
-    }
-
-    if (region->executable) {
-        // Les régions exécutables sont rarement des valeurs de jeu.
-        score -= 0.2;
-    }
-
-    if (context.preferPrivateOrMapped) {
-        if (region->type == MemoryType::Private) {
-            score += 0.2;
-        } else if (region->type == MemoryType::Mapped) {
-            score += 0.1;
-        } else if (region->type == MemoryType::Image) {
-            score -= 0.15;
-        }
-    }
-
-    return clamp01(score);
+    return computeRegionScore(*region, context);
 }
 
 double computeStabilityScore(
@@ -111,11 +89,44 @@ double computeVariantScore(const CandidateConfidenceContext& context) {
 
 } // namespace
 
+double computeRegionScore(
+    const MemoryRegion& region,
+    const CandidateConfidenceContext& context) {
+    if (!region.readable || region.guarded) {
+        return 0.1;
+    }
+
+    double score = 0.5;
+
+    if (context.preferWritable && region.writable) {
+        score += 0.25;
+    } else if (context.preferWritable && !region.writable) {
+        score -= 0.1;
+    }
+
+    if (region.executable) {
+        // Les régions exécutables sont rarement des valeurs de jeu.
+        score -= 0.2;
+    }
+
+    if (context.preferPrivateOrMapped) {
+        if (region.type == MemoryType::Private) {
+            score += 0.2;
+        } else if (region.type == MemoryType::Mapped) {
+            score += 0.1;
+        } else if (region.type == MemoryType::Image) {
+            score -= 0.15;
+        }
+    }
+
+    return clamp01(score);
+}
+
 double computeCandidateConfidence(
     uint64_t address,
     ValueType /*type*/,
     const CandidateConfidenceContext& context) {
-    const double regionScore = computeRegionScore(address, context);
+    const double regionScore = regionScoreAtAddress(address, context);
     const double stabilityScore = computeStabilityScore(address, context);
     const double variantScore = computeVariantScore(context);
 
@@ -125,6 +136,24 @@ double computeCandidateConfidence(
                        + 0.40 * regionScore
                        + 0.15 * variantScore;
 
+    return clamp01(score);
+}
+
+double computeScanTimeConfidence(double regionScore, bool secondaryVariant) {
+    // Aucun historique de valeurs n'existe encore au moment du scan lui-même
+    // (exact_scan/next_scan) : la composante stabilité de
+    // computeCandidateConfidence() n'a donc aucune information réelle à
+    // apporter. Plutôt que de la garder à 0.5 et diluer le score (une région
+    // parfaite plafonnerait alors à ~0.775, jamais "fiabilité élevée"), on
+    // redistribue son poids (0.45) entre région (0.40) et variante (0.15) au
+    // prorata : région = 0.40/0.55, variante = 0.15/0.55. Une fois un
+    // historique réel disponible (next_scan), computeCandidateConfidence()
+    // reprend la pondération complète à trois facteurs.
+    constexpr double kRegionWeight = 0.40 / 0.55;
+    constexpr double kVariantWeight = 0.15 / 0.55;
+    const double variantScore = secondaryVariant ? 0.85 : 1.0;
+    const double score = kRegionWeight * clamp01(regionScore)
+                       + kVariantWeight * variantScore;
     return clamp01(score);
 }
 

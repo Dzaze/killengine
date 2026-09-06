@@ -57,7 +57,42 @@ double computeCandidateConfidence(
     const CandidateConfidenceContext& context);
 
 /**
+ * @brief Score de pertinence [0.0, 1.0] d'une région mémoire déjà connue.
+ *
+ * Variante de computeCandidateConfidence() pour l'appelant qui a déjà la
+ * MemoryRegion sous la main (typiquement : le scan lui-même, une fois par
+ * région balayée, pas une fois par candidat) — évite une recherche
+ * (même en O(log R)) là où elle n'apporte rien.
+ */
+double computeRegionScore(
+    const MemoryRegion& region,
+    const CandidateConfidenceContext& context);
+
+/**
+ * @brief Score de confiance calculable au moment du scan, avant tout
+ * historique de valeurs (exact_scan / next_scan sur le pipeline normal).
+ *
+ * Aucune observation n'existe encore à ce stade : la composante stabilité de
+ * computeCandidateConfidence() n'a rien à apporter, donc son poids (0.45)
+ * est redistribué au prorata entre région et variante plutôt que de diluer
+ * le score avec une valeur neutre — une région idéale (writable/private)
+ * avec une variante primaire doit pouvoir atteindre une confiance élevée dès
+ * le premier scan, pas seulement après plusieurs next_scan.
+ */
+double computeScanTimeConfidence(double regionScore, bool secondaryVariant);
+
+/**
  * @brief Recherche la région contenant une adresse.
+ *
+ * `regions` DOIT être trié par baseAddress croissant et ne pas contenir de
+ * chevauchement (recherche binaire, pas un scan linéaire) — voir
+ * auto_dissect.h::isPointerValid() pour le même contrat.
+ *
+ * Utilisée en interne par computeCandidateConfidence() quand seule l'adresse
+ * est connue. Le scan classique (exact_scan/next_scan) a lui déjà la
+ * MemoryRegion exacte sous la main pour chaque région balayée et appelle
+ * directement computeRegionScore() une fois par région, pas par candidat —
+ * pas de lookup ici sur le chemin chaud.
  *
  * @return Pointeur vers la région (nullptr si introuvable).
  */
