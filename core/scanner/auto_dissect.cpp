@@ -29,13 +29,18 @@ static QVariant readFieldValue(const QByteArray& buf, int offset, FieldType type
     }
 }
 
-/// Vérifie si une adresse de pointeur pointe vers une page valide (committed + readable).
-static bool isPointerValid(const QList<MemoryRegion>& regions, uint64_t addr) {
+// Voir la déclaration dans auto_dissect.h pour le contrat complet (regions
+// triées, non chevauchantes) — définition non-static ici pour rester
+// testable en isolation (tests/unit/test_auto_dissect.cpp).
+bool isPointerValid(const QList<MemoryRegion>& sortedRegions, uint64_t addr) {
     if (addr == 0) return false;
-    for (const auto& r : regions) {
-        if (addr >= r.baseAddress && addr < r.baseAddress + r.size) {
-            return r.state == MemoryState::Committed && r.readable;
-        }
+    auto it = std::upper_bound(
+        sortedRegions.begin(), sortedRegions.end(), addr,
+        [](uint64_t value, const MemoryRegion& region) { return value < region.baseAddress; });
+    if (it == sortedRegions.begin()) return false;
+    --it;
+    if (addr >= it->baseAddress && addr < it->baseAddress + it->size) {
+        return it->state == MemoryState::Committed && it->readable;
     }
     return false;
 }
@@ -108,8 +113,15 @@ AutoDissectResult findStructureInstances(
     }
     if (structSize < 4) structSize = 4;
 
-    // Récupérer la carte mémoire
-    const auto regions = MemoryMap::snapshot(process);
+    // Récupérer la carte mémoire. MemoryMap::snapshot() les retourne déjà en
+    // ordre d'adresses croissantes (VirtualQueryEx avancé séquentiellement),
+    // mais on trie explicitement ici pour ne pas faire dépendre la
+    // correction de isPointerValid() d'un invariant implicite d'un autre
+    // fichier — coût négligeable (une fois, pas par candidat testé).
+    auto regions = MemoryMap::snapshot(process);
+    std::sort(regions.begin(), regions.end(), [](const MemoryRegion& a, const MemoryRegion& b) {
+        return a.baseAddress < b.baseAddress;
+    });
     MemoryReader reader(process);
 
     int instancesFound = 0;

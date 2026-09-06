@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
 import InfoDot from '@/components/expert/InfoDot.vue'
@@ -12,6 +12,11 @@ const result = ref<Record<string, unknown> | null>(null)
 const maxResults = ref(128)
 const minConfidence = ref(0.5)
 
+// findStructureInstancesAsync ne bloque plus le thread GUI (le scan peut
+// tester des dizaines de millions de positions sur toute la mémoire
+// writable de la cible, potentiellement plusieurs secondes/minutes) :
+// elle renvoie juste {started:true} immédiatement, le vrai résultat arrive
+// via le signal findStructureInstancesFinished (branché ci-dessous).
 async function runAutoDissect() {
   // Utiliser le template sélectionné ou le dernier sauvegardé
   const template = store.structureTemplates[store.structureTemplates.length - 1]
@@ -24,8 +29,9 @@ async function runAutoDissect() {
   result.value = null
   try {
     const controller = backend.getController()
-    if (!controller.findStructureInstances) {
-      result.value = { success: false, error: 'findStructureInstances non disponible dans ce backend.' }
+    if (!controller.findStructureInstancesAsync) {
+      busy.value = false
+      result.value = { success: false, error: 'findStructureInstancesAsync non disponible dans ce backend.' }
       return
     }
     const templateJson: Record<string, unknown> = {
@@ -36,13 +42,24 @@ async function runAutoDissect() {
       minConfidence: minConfidence.value,
       requirePointerValidity: true,
     }
-    result.value = await controller.findStructureInstances(templateJson)
+    const started = await controller.findStructureInstancesAsync(templateJson)
+    if (!started?.started) {
+      busy.value = false
+      result.value = started ?? { success: false, error: 'Réponse backend absente.' }
+    }
   } catch (e) {
-    result.value = { success: false, error: String(e) }
-  } finally {
     busy.value = false
+    result.value = { success: false, error: String(e) }
   }
 }
+
+onMounted(() => {
+  const controller = backend.getController()
+  controller.findStructureInstancesFinished?.connect((finished: Record<string, unknown>) => {
+    busy.value = false
+    result.value = finished
+  })
+})
 </script>
 
 <template>

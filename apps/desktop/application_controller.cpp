@@ -2781,14 +2781,13 @@ QVariantMap ApplicationController::inferStructureInstanceDelta(
     return result;
 }
 
-QVariantMap ApplicationController::findStructureInstances(const QVariantMap& templateJson) const {
-    QVariantMap result;
-    result["success"] = false;
-    result["instances"] = QVariantList{};
+QVariantMap ApplicationController::findStructureInstancesAsync(const QVariantMap& templateJson) const {
+    QVariantMap started;
+    started["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = QStringLiteral("Aucun processus attaché.");
-        return result;
+        started["error"] = QStringLiteral("Aucun processus attaché.");
+        return started;
     }
 
     // Reconstruire le StructureTemplate depuis le JSON
@@ -2819,8 +2818,8 @@ QVariantMap ApplicationController::findStructureInstances(const QVariantMap& tem
     }
 
     if (tmpl.fields.isEmpty()) {
-        result["error"] = QStringLiteral("Template vide — aucun champ à matcher.");
-        return result;
+        started["error"] = QStringLiteral("Template vide — aucun champ à matcher.");
+        return started;
     }
 
     killcore::AutoDissectOptions options;
@@ -2828,29 +2827,49 @@ QVariantMap ApplicationController::findStructureInstances(const QVariantMap& tem
     options.requirePointerValidity = templateJson.value("requirePointerValidity", true).toBool();
     options.minConfidence = std::clamp(templateJson.value("minConfidence", 0.5).toDouble(), 0.0, 1.0);
 
-    const auto autoResult = killcore::findStructureInstances(m_handle, tmpl, options);
+    // Le scan lui-même (potentiellement des dizaines de millions de positions
+    // testées, voir auto_dissect.cpp) tourne sur un thread séparé pour ne pas
+    // geler le thread GUI. Le thread rouvre son propre ProcessHandle en
+    // lecture seule (même convention que testCandidateFieldsAsync) plutôt
+    // que de partager m_handle, qui pourrait être fermé par un
+    // detachProcess() concurrent pendant un scan long.
+    const int pid = m_pid;
+    const QPointer<ApplicationController> self(const_cast<ApplicationController*>(this));
+    std::thread([self, pid, tmpl, options]() {
+        killcore::ProcessHandle scanHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
+        const auto autoResult = killcore::findStructureInstances(scanHandle, tmpl, options);
 
-    result["success"] = autoResult.success;
-    result["error"] = autoResult.error;
-    result["scannedRegions"] = autoResult.scannedRegions;
-    result["totalCandidates"] = autoResult.totalCandidates;
+        QVariantMap result;
+        result["success"] = autoResult.success;
+        result["error"] = autoResult.error;
+        result["scannedRegions"] = autoResult.scannedRegions;
+        result["totalCandidates"] = autoResult.totalCandidates;
 
-    QVariantList instances;
-    for (const auto& inst : autoResult.instances) {
-        QVariantMap item;
-        item["baseAddress"] = QString::number(inst.baseAddress, 16).toUpper();
-        item["confidence"] = inst.confidence;
-        QVariantList values;
-        for (const auto& v : inst.fieldValues) {
-            values.append(v);
+        QVariantList instances;
+        for (const auto& inst : autoResult.instances) {
+            QVariantMap item;
+            item["baseAddress"] = QString::number(inst.baseAddress, 16).toUpper();
+            item["confidence"] = inst.confidence;
+            QVariantList values;
+            for (const auto& v : inst.fieldValues) {
+                values.append(v);
+            }
+            item["fieldValues"] = values;
+            instances.append(item);
         }
-        item["fieldValues"] = values;
-        instances.append(item);
-    }
-    result["instances"] = instances;
-    result["instanceCount"] = instances.size();
+        result["instances"] = instances;
+        result["instanceCount"] = instances.size();
 
-    return result;
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->findStructureInstancesFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
+    return started;
 }
 
 QVariantMap ApplicationController::scanUiStrings(const QString& value, const QVariantMap& optionsMap) const {

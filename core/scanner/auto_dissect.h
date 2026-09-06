@@ -2,6 +2,7 @@
 
 #include "scanner/structure_analyzer.h"
 #include "memory/memory_reader.h"
+#include "memory/memory_region.h"
 
 #include <QList>
 #include <QString>
@@ -33,6 +34,15 @@ struct AutoDissectOptions {
     bool requirePointerValidity{true}; ///< Vérifier que les champs pointeurs pointent vers des pages valides
     double minConfidence{0.5};    ///< Seuil de confiance minimum
 };
+
+/// Vérifie si une adresse de pointeur pointe vers une page valide (committed
+/// + readable). `sortedRegions` DOIT être trié par baseAddress croissant et
+/// ne pas contenir de chevauchement (recherche binaire, pas un scan
+/// linéaire) — voir auto_dissect.cpp pour le détail. Exposée ici (plutôt que
+/// `static` dans le .cpp) pour être testée directement en isolation :
+/// c'est le seul endroit où une régression réintroduirait silencieusement
+/// des faux négatifs (une structure valide ignorée) dans le scan complet.
+bool isPointerValid(const QList<MemoryRegion>& sortedRegions, uint64_t addr);
 
 /// Scanne la mémoire du process pour trouver toutes les instances d'un template de structure.
 AutoDissectResult findStructureInstances(

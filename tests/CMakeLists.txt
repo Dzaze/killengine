@@ -41,6 +41,7 @@ add_executable(killengine_unit_tests
     unit/test_stealth_profiler.cpp
     unit/test_feature_extractor.cpp
     unit/test_game_profile_database.cpp
+    unit/test_auto_dissect.cpp
 )
 
 target_link_libraries(killengine_unit_tests PRIVATE

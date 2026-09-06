@@ -1437,8 +1437,10 @@ export interface ModuleCatalog {
     fieldAddressBHex: string,
     options: Record<string, unknown>,
   ): Promise<Record<string, unknown>>
-  /** Scanne automatiquement la mémoire pour trouver toutes les instances d'un template de structure. */
-  findStructureInstances?(templateJson: Record<string, unknown>): Promise<Record<string, unknown>>
+  /** Scanne automatiquement la mémoire pour trouver toutes les instances d'un template de structure. Non bloquant (le scan tourne sur thread séparé côté backend) — résultat via findStructureInstancesFinished, cet appel ne fait que démarrer l'opération. */
+  findStructureInstancesAsync?(templateJson: Record<string, unknown>): Promise<Record<string, unknown>>
+  /** Résultat différé de findStructureInstancesAsync. */
+  findStructureInstancesFinished?: QWebChannelSignal<Record<string, unknown>>
   addInvestigationHypothesis?(description: string, baselineScore?: number): Promise<Record<string, unknown>>
   recordInvestigationTestResult?(hypothesisId: string, confirmed: boolean, evidenceNote: string): Promise<Record<string, unknown>>
   getInvestigationNotebookSynthesis?(): Promise<Record<string, unknown>>
@@ -2359,14 +2361,10 @@ class BackendService {
           candidates: [],
         }
       },
-      async findStructureInstances(_templateJson: Record<string, unknown>) {
-        return {
-          success: false,
-          error: 'Mock backend',
-          instances: [],
-          instanceCount: 0,
-        }
+      async findStructureInstancesAsync(_templateJson: Record<string, unknown>) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      findStructureInstancesFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
       async addInvestigationHypothesis(_description: string, _baselineScore = 50) {
         return {
           success: false,

@@ -215,8 +215,14 @@ public:
         const QString& fieldAddressBHex,
         const QVariantMap& options) const;
 
-    /// Scanne automatiquement la mémoire pour trouver toutes les instances d'un template de structure.
-    Q_INVOKABLE QVariantMap findStructureInstances(const QVariantMap& templateJson) const;
+    /// Scanne automatiquement la mémoire pour trouver toutes les instances d'un
+    /// template de structure. Non bloquant : le scan (potentiellement des
+    /// dizaines de millions de positions testées sur toute la mémoire
+    /// writable de la cible) tourne sur un thread séparé — sinon ça gèle le
+    /// thread GUI pour toute la durée du scan, qui peut se compter en
+    /// secondes voire minutes selon la taille de la cible et le template.
+    /// Résultat via findStructureInstancesFinished.
+    Q_INVOKABLE QVariantMap findStructureInstancesAsync(const QVariantMap& templateJson) const;
 
     /// Cherche une valeur affichée sous forme de texte (ASCII / UTF-16LE) dans la mémoire.
     Q_INVOKABLE QVariantMap scanUiStrings(const QString& value, const QVariantMap& options) const;
@@ -1612,6 +1618,8 @@ signals:
     void processNetworkUnblockFinished(const QVariantMap& result);
     /// Résultat différé de getProcessNetworkConnectionsAsync.
     void processNetworkConnectionsFinished(const QVariantMap& result);
+    /// Résultat différé de findStructureInstancesAsync.
+    void findStructureInstancesFinished(const QVariantMap& result);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le
