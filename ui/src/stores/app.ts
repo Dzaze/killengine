@@ -618,6 +618,7 @@ export const useAppStore = defineStore('app', () => {
   let backendFreezeInstabilitySignalConnected = false
   let backendWriteWatchSignalConnected = false
   let backendEdrKillSignalConnected = false
+  let backendDnsSpoofSignalConnected = false
   let backendModuleInstallSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
@@ -2095,6 +2096,17 @@ export const useAppStore = defineStore('app', () => {
           )
         })
         backendEdrKillSignalConnected = true
+      }
+      if (!backendDnsSpoofSignalConnected) {
+        // Spoof DNS non bloquant (voir spoofDnsAsync/restoreDnsAsync) :
+        // résultat différé relayé vers le store Réseau.
+        controller.dnsSpoofFinished?.connect((result) => {
+          networkStore.onDnsSpoofFinished(result)
+        })
+        controller.dnsRestoreFinished?.connect((result) => {
+          networkStore.onDnsRestoreFinished(result)
+        })
+        backendDnsSpoofSignalConnected = true
       }
       if (!backendModuleInstallSignalConnected) {
         // Vue "Modules" : progression des installations de module en cours

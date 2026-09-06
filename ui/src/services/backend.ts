@@ -1504,9 +1504,13 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   stopHttpProxy?(): Promise<{ success: boolean; error?: string }>
   getHttpProxyRequests?(): Promise<{ success: boolean; requests: HttpProxyRequest[]; error?: string }>
   modifyHttpRequest?(requestId: string, newRequestBody: string): Promise<{ success: boolean; error?: string }>
-  /** Spoof DNS — Ajoute/retire une entrée dans le fichier hosts Windows. */
-  spoofDns?(domain: string, targetIp: string): Promise<{ success: boolean; error?: string }>
-  restoreDns?(domain: string): Promise<{ success: boolean; error?: string }>
+  /** Spoof DNS — Ajoute/retire une entrée dans le fichier hosts Windows. Non bloquant (élévation UAC sur thread séparé côté backend) — le résultat final arrive via dnsSpoofFinished/dnsRestoreFinished, cet appel ne fait que démarrer l'opération. */
+  spoofDnsAsync?(domain: string, targetIp: string): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de spoofDnsAsync. */
+  dnsSpoofFinished?: QWebChannelSignal<Record<string, unknown>>
+  restoreDnsAsync?(domain: string): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de restoreDnsAsync. */
+  dnsRestoreFinished?: QWebChannelSignal<Record<string, unknown>>
   /** Lag switch — Retarde les fonctions recv/WSARecv du process attaché. */
   setLagSwitch?(enabled: boolean, delayMs: number): Promise<{ success: boolean; error?: string }>
   /** Roadmap section B - interception de fonctions : hook MinHook injecte sur module!fonction. mode: 0=compter, 1=forcer retour. */
@@ -2674,12 +2678,14 @@ class BackendService {
       async modifyHttpRequest(_requestId, _newRequestBody) {
         return { success: true }
       },
-      async spoofDns(_domain, _targetIp) {
-        return { success: true }
+      async spoofDnsAsync(_domain: string, _targetIp: string) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
-      async restoreDns(_domain) {
-        return { success: true }
+      dnsSpoofFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
+      async restoreDnsAsync(_domain: string) {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      dnsRestoreFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
       async setLagSwitch(_enabled, _delayMs) {
         return { success: true }
       },

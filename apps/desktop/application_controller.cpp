@@ -5061,12 +5061,12 @@ QString sanitizeHostsLine(const QString& domain, const QString& targetIp) {
 }
 } // namespace
 
-QVariantMap ApplicationController::spoofDns(const QString& domain, const QString& targetIp) {
-    QVariantMap result;
-    result["success"] = false;
+QVariantMap ApplicationController::spoofDnsAsync(const QString& domain, const QString& targetIp) {
+    QVariantMap started;
+    started["success"] = false;
     if (domain.isEmpty() || targetIp.isEmpty()) {
-        result["error"] = "Domaine et IP cible requis.";
-        return result;
+        started["error"] = "Domaine et IP cible requis.";
+        return started;
     }
 
 #ifdef Q_OS_WIN
@@ -5085,65 +5085,81 @@ QVariantMap ApplicationController::spoofDns(const QString& domain, const QString
         "  'added'; "
         "}").arg(hostsPath, line, domain);
 
-    const std::wstring parameters =
-        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+    // L'élévation UAC + l'exécution PowerShell tournent sur un thread séparé :
+    // sinon WaitForSingleObject(15s) gèle tout le thread GUI (Q_INVOKABLE via
+    // QWebChannel s'exécute sur le thread propriétaire de l'objet) pendant
+    // toute la durée de l'invite UAC.
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, psCommand, domain, targetIp]() {
+        QVariantMap result;
+        result["success"] = false;
 
-    SHELLEXECUTEINFOW sei{};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.hwnd = nullptr;
-    sei.lpVerb = L"runas"; // UAC requis
-    sei.lpFile = L"powershell.exe";
-    sei.lpParameters = parameters.c_str();
-    sei.nShow = SW_HIDE;
+        const std::wstring parameters =
+            L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
 
-    if (!ShellExecuteExW(&sei)) {
-        const DWORD err = GetLastError();
-        if (err == ERROR_CANCELLED) {
-            result["cancelled"] = true;
-            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.hwnd = nullptr;
+        sei.lpVerb = L"runas"; // UAC requis
+        sei.lpFile = L"powershell.exe";
+        sei.lpParameters = parameters.c_str();
+        sei.nShow = SW_HIDE;
+
+        if (!ShellExecuteExW(&sei)) {
+            const DWORD err = GetLastError();
+            if (err == ERROR_CANCELLED) {
+                result["cancelled"] = true;
+                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+            } else {
+                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+            }
+        } else if (sei.hProcess) {
+            WaitForSingleObject(sei.hProcess, 15000);
+            DWORD exitCode = 1;
+            GetExitCodeProcess(sei.hProcess, &exitCode);
+            CloseHandle(sei.hProcess);
+
+            if (exitCode == 0) {
+                result["success"] = true;
+                result["domain"] = domain;
+                result["targetIp"] = targetIp;
+                result["action"] = "added";
+            } else {
+                result["error"] = QStringLiteral("PowerShell a échoué (code %1).").arg(exitCode);
+            }
         } else {
-            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
-        }
-        return result;
-    }
-
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, 15000);
-        DWORD exitCode = 1;
-        GetExitCodeProcess(sei.hProcess, &exitCode);
-        CloseHandle(sei.hProcess);
-
-        if (exitCode == 0) {
-            result["success"] = true;
+            result["success"] = true; // Best-effort
             result["domain"] = domain;
             result["targetIp"] = targetIp;
-            result["action"] = "added";
-        } else {
-            result["error"] = QStringLiteral("PowerShell a échoué (code %1).").arg(exitCode);
         }
-    } else {
-        result["success"] = true; // Best-effort
-        result["domain"] = domain;
-        result["targetIp"] = targetIp;
-    }
 
-    KE_LOG_INFO() << "spoofDns: domain=" << domain.toStdString()
-                  << " ip=" << targetIp.toStdString()
-                  << " success=" << result.value("success").toBool();
+        KE_LOG_INFO() << "spoofDnsAsync: domain=" << domain.toStdString()
+                      << " ip=" << targetIp.toStdString()
+                      << " success=" << result.value("success").toBool();
+
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->dnsSpoofFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = "Fonctionnalité Windows uniquement.";
 #endif
 
-    return result;
+    return started;
 }
 
-QVariantMap ApplicationController::restoreDns(const QString& domain) {
-    QVariantMap result;
-    result["success"] = false;
+QVariantMap ApplicationController::restoreDnsAsync(const QString& domain) {
+    QVariantMap started;
+    started["success"] = false;
     if (domain.isEmpty()) {
-        result["error"] = "Domaine requis.";
-        return result;
+        started["error"] = "Domaine requis.";
+        return started;
     }
 
 #ifdef Q_OS_WIN
@@ -5158,54 +5174,66 @@ QVariantMap ApplicationController::restoreDns(const QString& domain) {
         "$filtered | Set-Content -Path $path -Encoding utf8; "
         "'removed'").arg(hostsPath, domain);
 
-    const std::wstring parameters =
-        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, psCommand, domain]() {
+        QVariantMap result;
+        result["success"] = false;
 
-    SHELLEXECUTEINFOW sei{};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.hwnd = nullptr;
-    sei.lpVerb = L"runas"; // UAC requis
-    sei.lpFile = L"powershell.exe";
-    sei.lpParameters = parameters.c_str();
-    sei.nShow = SW_HIDE;
+        const std::wstring parameters =
+            L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
 
-    if (!ShellExecuteExW(&sei)) {
-        const DWORD err = GetLastError();
-        if (err == ERROR_CANCELLED) {
-            result["cancelled"] = true;
-            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.hwnd = nullptr;
+        sei.lpVerb = L"runas"; // UAC requis
+        sei.lpFile = L"powershell.exe";
+        sei.lpParameters = parameters.c_str();
+        sei.nShow = SW_HIDE;
+
+        if (!ShellExecuteExW(&sei)) {
+            const DWORD err = GetLastError();
+            if (err == ERROR_CANCELLED) {
+                result["cancelled"] = true;
+                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+            } else {
+                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+            }
+        } else if (sei.hProcess) {
+            WaitForSingleObject(sei.hProcess, 15000);
+            DWORD exitCode = 1;
+            GetExitCodeProcess(sei.hProcess, &exitCode);
+            CloseHandle(sei.hProcess);
+
+            if (exitCode == 0) {
+                result["success"] = true;
+                result["domain"] = domain;
+                result["action"] = "removed";
+            } else {
+                result["error"] = QStringLiteral("PowerShell a échoué (code %1).").arg(exitCode);
+            }
         } else {
-            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
-        }
-        return result;
-    }
-
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, 15000);
-        DWORD exitCode = 1;
-        GetExitCodeProcess(sei.hProcess, &exitCode);
-        CloseHandle(sei.hProcess);
-
-        if (exitCode == 0) {
-            result["success"] = true;
+            result["success"] = true; // Best-effort
             result["domain"] = domain;
-            result["action"] = "removed";
-        } else {
-            result["error"] = QStringLiteral("PowerShell a échoué (code %1).").arg(exitCode);
         }
-    } else {
-        result["success"] = true; // Best-effort
-        result["domain"] = domain;
-    }
 
-    KE_LOG_INFO() << "restoreDns: domain=" << domain.toStdString()
-                  << " success=" << result.value("success").toBool();
+        KE_LOG_INFO() << "restoreDnsAsync: domain=" << domain.toStdString()
+                      << " success=" << result.value("success").toBool();
+
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->dnsRestoreFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = "Fonctionnalité Windows uniquement.";
 #endif
 
-    return result;
+    return started;
 }
 
 // ---------------------------------------------------------------------------

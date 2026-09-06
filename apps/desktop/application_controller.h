@@ -814,8 +814,12 @@ public:
     Q_INVOKABLE QVariantMap modifyHttpRequest(const QString& requestId, const QString& newRequestBody);
 
     /// Spoof DNS : ajoute/retire une entrée dans le fichier hosts Windows.
-    Q_INVOKABLE QVariantMap spoofDns(const QString& domain, const QString& targetIp);
-    Q_INVOKABLE QVariantMap restoreDns(const QString& domain);
+    /// Non bloquant : l'élévation UAC (ShellExecuteExW "runas") + son attente
+    /// tournent sur un thread séparé, comme addEdrExclusionAsync — sinon tout
+    /// le thread GUI gèle pendant l'invite UAC (jusqu'à 15s). Résultat via
+    /// dnsSpoofFinished / dnsRestoreFinished.
+    Q_INVOKABLE QVariantMap spoofDnsAsync(const QString& domain, const QString& targetIp);
+    Q_INVOKABLE QVariantMap restoreDnsAsync(const QString& domain);
 
     /// Lag switch : retarde les fonctions recv/WSARecv du process attaché
     /// via injection DLL + MinHook.
@@ -1546,6 +1550,11 @@ signals:
     void windowsDefenderDisabledFinished(const QVariantMap& result);
     /// Résultat différé de setDefenderBehaviorMonitoringDisabledAsync.
     void defenderBehaviorMonitoringDisabledFinished(const QVariantMap& result);
+
+    /// Résultat différé de spoofDnsAsync.
+    void dnsSpoofFinished(const QVariantMap& result);
+    /// Résultat différé de restoreDnsAsync.
+    void dnsRestoreFinished(const QVariantMap& result);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le

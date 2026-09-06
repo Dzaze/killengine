@@ -174,21 +174,37 @@ export function useNetworkStore() {
   }
 
   // ── Actions : Spoof DNS ────────────────────────────────────────
+  // spoofDnsAsync/restoreDnsAsync ne bloquent plus le thread GUI (élévation
+  // UAC + PowerShell sur thread séparé côté backend) : elles renvoient juste
+  // {started:true} immédiatement, le vrai résultat arrive via un signal
+  // (onDnsSpoofFinished/onDnsRestoreFinished, branchés dans app.ts) — busy
+  // reste true jusque-là.
   async function addDnsSpoofEntry() {
     if (!dnsSpoofDomain.value.trim() || !dnsSpoofTargetIp.value.trim()) return
     const controller = backend.getController()
     dnsSpoofBusy.value = true
     try {
-      const result = await controller.spoofDns?.(dnsSpoofDomain.value, dnsSpoofTargetIp.value)
-      if (result?.success) {
-        dnsSpoofEntries.value.push({ domain: dnsSpoofDomain.value, targetIp: dnsSpoofTargetIp.value })
-        actionLogStore.addActionLog('dns_spoof', `DNS spoofé: ${dnsSpoofDomain.value} → ${dnsSpoofTargetIp.value}`, '', 'success')
-        dnsSpoofDomain.value = ''
-      } else {
+      const result = await controller.spoofDnsAsync?.(dnsSpoofDomain.value, dnsSpoofTargetIp.value)
+      if (!result?.started) {
+        dnsSpoofBusy.value = false
         actionLogStore.addActionLog('dns_spoof', 'Spoof DNS échoué', result?.error ?? 'raison inconnue', 'error')
       }
-    } finally {
+    } catch (e) {
       dnsSpoofBusy.value = false
+      actionLogStore.addActionLog('dns_spoof', 'Spoof DNS échoué', String(e), 'error')
+    }
+  }
+
+  function onDnsSpoofFinished(result: Record<string, unknown>) {
+    dnsSpoofBusy.value = false
+    const domain = String(result.domain ?? '')
+    const targetIp = String(result.targetIp ?? '')
+    if (result.success) {
+      dnsSpoofEntries.value.push({ domain, targetIp })
+      actionLogStore.addActionLog('dns_spoof', `DNS spoofé: ${domain} → ${targetIp}`, '', 'success')
+      if (dnsSpoofDomain.value === domain) dnsSpoofDomain.value = ''
+    } else {
+      actionLogStore.addActionLog('dns_spoof', 'Spoof DNS échoué', String(result.error ?? 'raison inconnue'), 'error')
     }
   }
 
@@ -196,13 +212,21 @@ export function useNetworkStore() {
     const controller = backend.getController()
     dnsSpoofBusy.value = true
     try {
-      const result = await controller.restoreDns?.(domain)
-      if (result?.success) {
-        dnsSpoofEntries.value = dnsSpoofEntries.value.filter(e => e.domain !== domain)
-        actionLogStore.addActionLog('dns_spoof', `DNS restauré: ${domain}`, '', 'success')
+      const result = await controller.restoreDnsAsync?.(domain)
+      if (!result?.started) {
+        dnsSpoofBusy.value = false
       }
-    } finally {
+    } catch (e) {
       dnsSpoofBusy.value = false
+    }
+  }
+
+  function onDnsRestoreFinished(result: Record<string, unknown>) {
+    dnsSpoofBusy.value = false
+    const domain = String(result.domain ?? '')
+    if (result.success) {
+      dnsSpoofEntries.value = dnsSpoofEntries.value.filter(e => e.domain !== domain)
+      actionLogStore.addActionLog('dns_spoof', `DNS restauré: ${domain}`, '', 'success')
     }
   }
 
@@ -264,6 +288,8 @@ export function useNetworkStore() {
     dnsSpoofTargetIp,
     addDnsSpoofEntry,
     removeDnsSpoofEntry,
+    onDnsSpoofFinished,
+    onDnsRestoreFinished,
     // Lag switch
     lagSwitchActive,
     lagSwitchBusy,
