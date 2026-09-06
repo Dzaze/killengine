@@ -482,38 +482,59 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
         )
       }
     } else {
+      // setSpeedhackFactor reste synchrone (pas d'injection, juste un
+      // réglage sur une session déjà active) ; startSpeedhack (première
+      // activation) est non bloquant depuis son passage en Async — le
+      // résultat définitif n'est plus dispo ici, seulement l'accusé de
+      // démarrage. Le vrai résultat arrive via onSpeedhackStartFinished,
+      // visible dans le panneau Speedhack.
       const alreadyActive = store.speedhackStatus?.active === true
-      const result = alreadyActive ? await store.setSpeedhackFactor(factor) : await store.startSpeedhack(factor)
-      if (result === null) {
-        store.pushMessage('assistant', "Speedhack bloqué par ton mode Auto actuel (Safe) ou refusé à la confirmation. Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+      if (alreadyActive) {
+        const result = await store.setSpeedhackFactor(factor)
+        if (result === null) {
+          store.pushMessage('assistant', "Speedhack bloqué par ton mode Auto actuel (Safe) ou refusé à la confirmation. Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+        } else {
+          store.pushMessage(
+            'assistant',
+            result.success ? `Speedhack ajusté à ${factor}x sur ${store.processName || 'la cible'}.` : `Speedhack échoué : ${result.error ?? 'raison inconnue'}.`,
+            { isError: !result.success, recoveryActions: [{ id: 'open_speedhack', label: 'Ouvrir Speedhack' }] },
+          )
+        }
       } else {
-        store.pushMessage(
-          'assistant',
-          result.success
-            ? `Speedhack ${alreadyActive ? 'ajusté' : 'activé'} à ${factor}x sur ${store.processName || 'la cible'}.`
-            : `Speedhack échoué : ${result.error ?? 'raison inconnue'}.`,
-          {
-            isError: !result.success,
-            recoveryActions: result.success ? [{ id: 'open_speedhack', label: 'Ouvrir Speedhack' }] : undefined,
-          },
-        )
+        const result = await store.startSpeedhack(factor)
+        if (result === null) {
+          store.pushMessage('assistant', "Speedhack bloqué par ton mode Auto actuel (Safe) ou refusé à la confirmation. Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+        } else if (!result.started) {
+          store.pushMessage('assistant', `Speedhack échoué : ${result.error ?? 'raison inconnue'}.`, { isError: true })
+        } else {
+          store.pushMessage(
+            'assistant',
+            `Activation du speedhack à ${factor}x en cours sur ${store.processName || 'la cible'}...`,
+            { recoveryActions: [{ id: 'open_speedhack', label: 'Ouvrir Speedhack' }] },
+          )
+        }
       }
     }
   } else if (actionId === 'network_block_apply') {
+    // blockProcessNetworkAsync/unblockProcessNetworkAsync ne bloquent plus le
+    // thread GUI (élévation UAC sur thread séparé) : le résultat définitif
+    // n'est plus disponible ici, seulement l'accusé de démarrage. Le vrai
+    // résultat (succès, exePath...) arrive plus tard via
+    // onBlockProcessNetworkFinished/onUnblockProcessNetworkFinished, visible
+    // dans le panneau Réseau / le journal d'actions.
     const off = typeof action === 'string' ? false : action.mode === 'off'
     const result = off ? await store.unblockProcessNetwork() : await store.blockProcessNetwork()
     if (result === null) {
       store.pushMessage('assistant', "Blocage réseau bloqué par ton mode Auto actuel (Safe/Expert) ou refusé à la confirmation. Passe en Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+    } else if (!result.started) {
+      store.pushMessage('assistant', `Blocage réseau échoué : ${result.error ?? 'raison inconnue'}.`, { isError: true })
     } else {
       store.pushMessage(
         'assistant',
-        result.success
-          ? (off ? 'Réseau rétabli, règle pare-feu retirée.' : `Réseau coupé pour ${result.exePath ?? store.processName ?? 'la cible'} — compare la stabilité des scans maintenant.`)
-          : `Blocage réseau échoué : ${result.error ?? 'raison inconnue'}.`,
-        {
-          isError: !result.success,
-          recoveryActions: result.success ? [{ id: 'open_network', label: 'Ouvrir Réseau' }] : undefined,
-        },
+        off
+          ? "Retrait de la règle pare-feu en cours (invite UAC)..."
+          : "Coupure réseau en cours (invite UAC)... Le résultat apparaîtra dans le journal d'actions.",
+        { recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }] },
       )
     }
   } else if (actionId === 'write_value_confirm' || actionId === 'freeze_value_confirm') {

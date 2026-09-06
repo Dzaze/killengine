@@ -4404,10 +4404,10 @@ bool ApplicationController::openUserGuide() const {
     return false;
 }
 
-QVariantMap ApplicationController::requestWindowsDefenderExclusion() {
-    QVariantMap result;
-    result["success"] = false;
-    result["cancelled"] = false;
+QVariantMap ApplicationController::requestWindowsDefenderExclusionAsync() {
+    QVariantMap started;
+    started["success"] = false;
+    started["cancelled"] = false;
 
 #ifdef Q_OS_WIN
     const QString installDir = QDir::toNativeSeparators(QCoreApplication::applicationDirPath());
@@ -4422,55 +4422,71 @@ QVariantMap ApplicationController::requestWindowsDefenderExclusion() {
         "Add-MpPreference -ExclusionPath '%1' -ExclusionProcess '%2'")
         .arg(installDir, exeName);
 
-    const std::wstring parameters =
-        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+    // L'élévation UAC + son attente (jusqu'à 15s) tournent sur un thread
+    // séparé pour ne pas geler le thread GUI (Q_INVOKABLE via QWebChannel),
+    // même raisonnement que spoofDnsAsync.
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, psCommand, installDir, exeName]() {
+        QVariantMap result;
+        result["success"] = false;
+        result["cancelled"] = false;
 
-    SHELLEXECUTEINFOW sei{};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.hwnd = nullptr;
-    sei.lpVerb = L"runas"; // declenche l'invite UAC visible -- jamais silencieux
-    sei.lpFile = L"powershell.exe";
-    sei.lpParameters = parameters.c_str();
-    sei.nShow = SW_HIDE;
+        const std::wstring parameters =
+            L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
 
-    if (!ShellExecuteExW(&sei)) {
-        const DWORD err = GetLastError();
-        if (err == ERROR_CANCELLED) {
-            result["cancelled"] = true;
-            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.hwnd = nullptr;
+        sei.lpVerb = L"runas"; // declenche l'invite UAC visible -- jamais silencieux
+        sei.lpFile = L"powershell.exe";
+        sei.lpParameters = parameters.c_str();
+        sei.nShow = SW_HIDE;
+
+        if (!ShellExecuteExW(&sei)) {
+            const DWORD err = GetLastError();
+            if (err == ERROR_CANCELLED) {
+                result["cancelled"] = true;
+                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+            } else {
+                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+            }
+            KE_LOG_WARN() << "requestWindowsDefenderExclusionAsync: ShellExecuteExW failed, error=" << err;
+        } else if (sei.hProcess) {
+            WaitForSingleObject(sei.hProcess, 15000);
+            DWORD exitCode = 1;
+            GetExitCodeProcess(sei.hProcess, &exitCode);
+            CloseHandle(sei.hProcess);
+            result["success"] = (exitCode == 0);
+            if (exitCode != 0) {
+                result["error"] = QStringLiteral(
+                    "Add-MpPreference a échoué (code %1) — l'exclusion est peut-être gérée de façon centralisée "
+                    "par une politique d'entreprise (Tamper Protection) et ne peut pas être modifiée localement.")
+                    .arg(exitCode);
+            }
         } else {
-            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+            // Pas de handle de process a attendre -- best-effort, on suppose que
+            // l'invite s'est affichee correctement.
+            result["success"] = true;
         }
-        KE_LOG_WARN() << "requestWindowsDefenderExclusion: ShellExecuteExW failed, error=" << err;
-        return result;
-    }
 
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, 15000);
-        DWORD exitCode = 1;
-        GetExitCodeProcess(sei.hProcess, &exitCode);
-        CloseHandle(sei.hProcess);
-        result["success"] = (exitCode == 0);
-        if (exitCode != 0) {
-            result["error"] = QStringLiteral(
-                "Add-MpPreference a échoué (code %1) — l'exclusion est peut-être gérée de façon centralisée "
-                "par une politique d'entreprise (Tamper Protection) et ne peut pas être modifiée localement.")
-                .arg(exitCode);
-        }
-    } else {
-        // Pas de handle de process a attendre -- best-effort, on suppose que
-        // l'invite s'est affichee correctement.
-        result["success"] = true;
-    }
+        KE_LOG_INFO() << "requestWindowsDefenderExclusionAsync: success=" << result.value("success").toBool()
+                      << " path=" << installDir.toStdString() << " process=" << exeName.toStdString();
 
-    KE_LOG_INFO() << "requestWindowsDefenderExclusion: success=" << result.value("success").toBool()
-                  << " path=" << installDir.toStdString() << " process=" << exeName.toStdString();
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->windowsDefenderExclusionRequestFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = "Fonctionnalité Windows uniquement.";
 #endif
 
-    return result;
+    return started;
 }
 
 namespace {
@@ -4493,94 +4509,114 @@ QString firewallRuleNameIn(const QString& token) {
 }
 } // namespace
 
-QVariantMap ApplicationController::blockProcessNetwork() {
-    QVariantMap result;
-    result["success"] = false;
-    result["cancelled"] = false;
+QVariantMap ApplicationController::blockProcessNetworkAsync() {
+    QVariantMap started;
+    started["success"] = false;
+    started["cancelled"] = false;
 
     if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
-        return result;
+        started["error"] = "Aucun processus attaché.";
+        return started;
     }
 
 #ifdef Q_OS_WIN
     const QString exePath = QDir::toNativeSeparators(m_handle.executablePath());
     if (exePath.isEmpty()) {
-        result["error"] = "Chemin de l'exécutable introuvable pour le processus attaché.";
-        return result;
+        started["error"] = "Chemin de l'exécutable introuvable pour le processus attaché.";
+        return started;
     }
     const QString ruleToken = sanitizeFirewallRuleToken(QFileInfo(exePath).fileName());
     const QString ruleOut = firewallRuleNameOut(ruleToken);
     const QString ruleIn = firewallRuleNameIn(ruleToken);
 
     // Guillemets simples PowerShell pour le chemin — meme convention que
-    // requestWindowsDefenderExclusion() ci-dessus (un chemin contenant une
-    // apostrophe casserait cette commande, cas limite non gere ici).
+    // requestWindowsDefenderExclusionAsync() ci-dessus (un chemin contenant
+    // une apostrophe casserait cette commande, cas limite non gere ici).
     const QString psCommand = QStringLiteral(
         "New-NetFirewallRule -DisplayName '%1' -Direction Outbound -Program '%2' -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null; "
         "New-NetFirewallRule -DisplayName '%3' -Direction Inbound -Program '%2' -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null")
         .arg(ruleOut, exePath, ruleIn);
 
-    const std::wstring parameters =
-        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+    // Même raisonnement que requestWindowsDefenderExclusionAsync : thread
+    // séparé pour ne pas geler le thread GUI pendant l'invite UAC. Les
+    // membres m_networkBlockRuleToken/m_networkBlockExePath ne sont écrits
+    // que dans le callback marshalé sur le thread GUI ci-dessous, jamais
+    // depuis le thread de travail.
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, psCommand, ruleToken, ruleOut, ruleIn, exePath]() {
+        QVariantMap result;
+        result["success"] = false;
+        result["cancelled"] = false;
 
-    SHELLEXECUTEINFOW sei{};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.hwnd = nullptr;
-    sei.lpVerb = L"runas"; // declenche l'invite UAC visible -- jamais silencieux
-    sei.lpFile = L"powershell.exe";
-    sei.lpParameters = parameters.c_str();
-    sei.nShow = SW_HIDE;
+        const std::wstring parameters =
+            L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
 
-    if (!ShellExecuteExW(&sei)) {
-        const DWORD err = GetLastError();
-        if (err == ERROR_CANCELLED) {
-            result["cancelled"] = true;
-            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.hwnd = nullptr;
+        sei.lpVerb = L"runas"; // declenche l'invite UAC visible -- jamais silencieux
+        sei.lpFile = L"powershell.exe";
+        sei.lpParameters = parameters.c_str();
+        sei.nShow = SW_HIDE;
+
+        if (!ShellExecuteExW(&sei)) {
+            const DWORD err = GetLastError();
+            if (err == ERROR_CANCELLED) {
+                result["cancelled"] = true;
+                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+            } else {
+                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+            }
+            KE_LOG_WARN() << "blockProcessNetworkAsync: ShellExecuteExW failed, error=" << err;
+        } else if (sei.hProcess) {
+            WaitForSingleObject(sei.hProcess, 15000);
+            DWORD exitCode = 1;
+            GetExitCodeProcess(sei.hProcess, &exitCode);
+            CloseHandle(sei.hProcess);
+            result["success"] = (exitCode == 0);
+            if (exitCode != 0) {
+                result["error"] = QStringLiteral("New-NetFirewallRule a échoué (code %1).").arg(exitCode);
+            }
         } else {
-            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+            // Pas de handle de process a attendre -- best-effort, meme logique
+            // que requestWindowsDefenderExclusionAsync().
+            result["success"] = true;
         }
-        KE_LOG_WARN() << "blockProcessNetwork: ShellExecuteExW failed, error=" << err;
-        return result;
-    }
 
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, 15000);
-        DWORD exitCode = 1;
-        GetExitCodeProcess(sei.hProcess, &exitCode);
-        CloseHandle(sei.hProcess);
-        result["success"] = (exitCode == 0);
-        if (exitCode != 0) {
-            result["error"] = QStringLiteral("New-NetFirewallRule a échoué (code %1).").arg(exitCode);
+        if (result.value("success").toBool()) {
+            result["ruleOutbound"] = ruleOut;
+            result["ruleInbound"] = ruleIn;
+            result["exePath"] = exePath;
         }
-    } else {
-        // Pas de handle de process a attendre -- best-effort, meme logique
-        // que requestWindowsDefenderExclusion().
-        result["success"] = true;
-    }
 
-    if (result.value("success").toBool()) {
-        m_networkBlockRuleToken = ruleToken;
-        m_networkBlockExePath = exePath;
-        result["ruleOutbound"] = ruleOut;
-        result["ruleInbound"] = ruleIn;
-        result["exePath"] = exePath;
-    }
+        KE_LOG_INFO() << "blockProcessNetworkAsync: success=" << result.value("success").toBool()
+                      << " exe=" << exePath.toStdString();
 
-    KE_LOG_INFO() << "blockProcessNetwork: success=" << result.value("success").toBool()
-                  << " exe=" << exePath.toStdString();
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result, ruleToken, exePath]() {
+            if (!self) return;
+            if (result.value("success").toBool()) {
+                self->m_networkBlockRuleToken = ruleToken;
+                self->m_networkBlockExePath = exePath;
+            }
+            emit self->processNetworkBlockFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = "Fonctionnalité Windows uniquement.";
 #endif
 
-    return result;
+    return started;
 }
 
-QVariantMap ApplicationController::unblockProcessNetwork() {
-    QVariantMap result;
-    result["success"] = false;
-    result["cancelled"] = false;
+QVariantMap ApplicationController::unblockProcessNetworkAsync() {
+    QVariantMap started;
+    started["success"] = false;
+    started["cancelled"] = false;
 
 #ifdef Q_OS_WIN
     QString ruleToken = m_networkBlockRuleToken;
@@ -4592,8 +4628,8 @@ QVariantMap ApplicationController::unblockProcessNetwork() {
         }
     }
     if (ruleToken.isEmpty()) {
-        result["error"] = "Aucune règle de blocage réseau KillEngine connue à retirer.";
-        return result;
+        started["error"] = "Aucune règle de blocage réseau KillEngine connue à retirer.";
+        return started;
     }
 
     const QString ruleOut = firewallRuleNameOut(ruleToken);
@@ -4603,54 +4639,69 @@ QVariantMap ApplicationController::unblockProcessNetwork() {
         "Remove-NetFirewallRule -DisplayName '%2' -ErrorAction SilentlyContinue")
         .arg(ruleOut, ruleIn);
 
-    const std::wstring parameters =
-        L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
+    // Même raisonnement que blockProcessNetworkAsync : thread séparé, et les
+    // membres m_networkBlockRuleToken/m_networkBlockExePath ne sont vidés que
+    // dans le callback marshalé sur le thread GUI.
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, psCommand]() {
+        QVariantMap result;
+        result["success"] = false;
+        result["cancelled"] = false;
 
-    SHELLEXECUTEINFOW sei{};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.hwnd = nullptr;
-    sei.lpVerb = L"runas";
-    sei.lpFile = L"powershell.exe";
-    sei.lpParameters = parameters.c_str();
-    sei.nShow = SW_HIDE;
+        const std::wstring parameters =
+            L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
 
-    if (!ShellExecuteExW(&sei)) {
-        const DWORD err = GetLastError();
-        if (err == ERROR_CANCELLED) {
-            result["cancelled"] = true;
-            result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.hwnd = nullptr;
+        sei.lpVerb = L"runas";
+        sei.lpFile = L"powershell.exe";
+        sei.lpParameters = parameters.c_str();
+        sei.nShow = SW_HIDE;
+
+        if (!ShellExecuteExW(&sei)) {
+            const DWORD err = GetLastError();
+            if (err == ERROR_CANCELLED) {
+                result["cancelled"] = true;
+                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+            } else {
+                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+            }
+            KE_LOG_WARN() << "unblockProcessNetworkAsync: ShellExecuteExW failed, error=" << err;
+        } else if (sei.hProcess) {
+            WaitForSingleObject(sei.hProcess, 15000);
+            DWORD exitCode = 1;
+            GetExitCodeProcess(sei.hProcess, &exitCode);
+            CloseHandle(sei.hProcess);
+            result["success"] = (exitCode == 0);
+            if (exitCode != 0) {
+                result["error"] = QStringLiteral("Remove-NetFirewallRule a échoué (code %1).").arg(exitCode);
+            }
         } else {
-            result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+            result["success"] = true;
         }
-        KE_LOG_WARN() << "unblockProcessNetwork: ShellExecuteExW failed, error=" << err;
-        return result;
-    }
 
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, 15000);
-        DWORD exitCode = 1;
-        GetExitCodeProcess(sei.hProcess, &exitCode);
-        CloseHandle(sei.hProcess);
-        result["success"] = (exitCode == 0);
-        if (exitCode != 0) {
-            result["error"] = QStringLiteral("Remove-NetFirewallRule a échoué (code %1).").arg(exitCode);
-        }
-    } else {
-        result["success"] = true;
-    }
+        KE_LOG_INFO() << "unblockProcessNetworkAsync: success=" << result.value("success").toBool();
 
-    if (result.value("success").toBool()) {
-        m_networkBlockRuleToken.clear();
-        m_networkBlockExePath.clear();
-    }
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            if (result.value("success").toBool()) {
+                self->m_networkBlockRuleToken.clear();
+                self->m_networkBlockExePath.clear();
+            }
+            emit self->processNetworkUnblockFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
 
-    KE_LOG_INFO() << "unblockProcessNetwork: success=" << result.value("success").toBool();
+    started["success"] = true;
+    started["started"] = true;
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = "Fonctionnalité Windows uniquement.";
 #endif
 
-    return result;
+    return started;
 }
 
 QVariantMap ApplicationController::getProcessNetworkBlockStatus() const {

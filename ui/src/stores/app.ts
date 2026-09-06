@@ -621,6 +621,7 @@ export const useAppStore = defineStore('app', () => {
   let backendDnsSpoofSignalConnected = false
   let backendNetworkInjectionSignalConnected = false
   let backendSpeedhackApiHookSignalConnected = false
+  let backendElevatedNetworkActionsSignalConnected = false
   let backendModuleInstallSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
@@ -2140,6 +2141,21 @@ export const useAppStore = defineStore('app', () => {
         })
         backendSpeedhackApiHookSignalConnected = true
       }
+      if (!backendElevatedNetworkActionsSignalConnected) {
+        // Exclusion Defender / blocage réseau non bloquants (voir
+        // requestWindowsDefenderExclusionAsync/blockProcessNetworkAsync/
+        // unblockProcessNetworkAsync) : résultat différé.
+        controller.windowsDefenderExclusionRequestFinished?.connect((result) => {
+          onWindowsDefenderExclusionRequestFinished(result)
+        })
+        controller.processNetworkBlockFinished?.connect((result) => {
+          speedhackStore.onBlockProcessNetworkFinished(result)
+        })
+        controller.processNetworkUnblockFinished?.connect((result) => {
+          speedhackStore.onUnblockProcessNetworkFinished(result)
+        })
+        backendElevatedNetworkActionsSignalConnected = true
+      }
       if (!backendModuleInstallSignalConnected) {
         // Vue "Modules" : progression des installations de module en cours
         // (téléchargement GGUF, scripts PowerShell) — le résultat final passe
@@ -2185,15 +2201,29 @@ export const useAppStore = defineStore('app', () => {
   const defenderExclusionResult = ref<{ success: boolean; cancelled?: boolean; error?: string } | null>(null)
   const defenderExclusionBusy = ref(false)
 
+  // requestWindowsDefenderExclusionAsync ne bloque plus le thread GUI
+  // (élévation UAC + Add-MpPreference jusqu'à 15s sur thread séparé côté
+  // backend) : elle renvoie juste {started:true} immédiatement, le vrai
+  // résultat arrive via le signal windowsDefenderExclusionRequestFinished
+  // (branché plus bas dans init()) — busy reste true jusque-là.
   async function requestWindowsDefenderExclusion() {
     defenderExclusionBusy.value = true
     defenderExclusionResult.value = null
     try {
-      const result = await backend.getController().requestWindowsDefenderExclusion?.()
-      defenderExclusionResult.value = result ?? { success: false, error: 'Réponse backend absente.' }
-    } finally {
+      const result = await backend.getController().requestWindowsDefenderExclusionAsync?.()
+      if (!result?.started) {
+        defenderExclusionBusy.value = false
+        defenderExclusionResult.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      }
+    } catch (e) {
       defenderExclusionBusy.value = false
+      defenderExclusionResult.value = { success: false, error: String(e) }
     }
+  }
+
+  function onWindowsDefenderExclusionRequestFinished(result: { success: boolean; cancelled?: boolean; error?: string }) {
+    defenderExclusionBusy.value = false
+    defenderExclusionResult.value = result
   }
 
   async function refreshKernelDriverStatus() {

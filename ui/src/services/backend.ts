@@ -1493,9 +1493,13 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   setSpeedhackFactor?(factor: number): Promise<SpeedhackStatus>
   stopSpeedhack?(): Promise<SpeedhackStatus>
   getSpeedhackStatus?(): Promise<SpeedhackStatus>
-  /** Coupe/rétablit le réseau du processus attaché (règle pare-feu dédiée, invite UAC). Utile pour isoler une synchro serveur en arrière-plan comme cause d'instabilité mémoire. */
-  blockProcessNetwork?(): Promise<ProcessNetworkBlockStatus>
-  unblockProcessNetwork?(): Promise<ProcessNetworkBlockStatus>
+  /** Coupe/rétablit le réseau du processus attaché (règle pare-feu dédiée, invite UAC). Utile pour isoler une synchro serveur en arrière-plan comme cause d'instabilité mémoire. Non bloquant (élévation UAC sur thread séparé côté backend) — résultat via processNetworkBlockFinished/processNetworkUnblockFinished, cet appel ne fait que démarrer l'opération. */
+  blockProcessNetworkAsync?(): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de blockProcessNetworkAsync. */
+  processNetworkBlockFinished?: QWebChannelSignal<ProcessNetworkBlockStatus>
+  unblockProcessNetworkAsync?(): Promise<{ success: boolean; started?: boolean; error?: string }>
+  /** Résultat différé de unblockProcessNetworkAsync. */
+  processNetworkUnblockFinished?: QWebChannelSignal<ProcessNetworkBlockStatus>
   getProcessNetworkBlockStatus?(): Promise<ProcessNetworkBlockStatus>
   /** Réseau — Connexions actives du processus attaché (lecture seule). */
   getProcessNetworkConnections?(): Promise<{ success: boolean; connections: NetworkConnection[]; error?: string }>
@@ -1625,8 +1629,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   hasSeenOnboarding?(): Promise<boolean>
   setOnboardingSeen?(seen: boolean): Promise<void>
   openUserGuide?(): Promise<boolean>
-  /** Demande une exclusion Windows Defender pour KillEngine.exe (invite UAC visible, jamais silencieux). */
-  requestWindowsDefenderExclusion?(): Promise<{ success: boolean; cancelled?: boolean; error?: string }>
+  /** Demande une exclusion Windows Defender pour KillEngine.exe (invite UAC visible, jamais silencieux). Non bloquant (élévation UAC sur thread séparé côté backend) — résultat via windowsDefenderExclusionRequestFinished, cet appel ne fait que démarrer l'opération. */
+  requestWindowsDefenderExclusionAsync?(): Promise<{ success: boolean; started?: boolean; cancelled?: boolean; error?: string }>
+  /** Résultat différé de requestWindowsDefenderExclusionAsync. */
+  windowsDefenderExclusionRequestFinished?: QWebChannelSignal<{ success: boolean; cancelled?: boolean; error?: string }>
   /** Inspecteur WebView2/CDP pour inspection de contenu web embarqué. */
   getWebView2InspectorStatus?(): Promise<WebView2InspectorStatus>
   listWebView2CdpTargets?(browserProcessId: number, options?: Record<string, unknown>): Promise<WebView2TargetsResponse>
@@ -2649,12 +2655,14 @@ class BackendService {
       async getSpeedhackStatus() {
         return { success: true, active: false, factor: 1.0 }
       },
-      async blockProcessNetwork() {
-        return { success: false, blocked: false, error: 'Mock backend' }
+      async blockProcessNetworkAsync() {
+        return { success: false, started: false, error: 'Mock backend' }
       },
-      async unblockProcessNetwork() {
-        return { success: false, blocked: false, error: 'Mock backend' }
+      processNetworkBlockFinished: undefined as unknown as QWebChannelSignal<ProcessNetworkBlockStatus>,
+      async unblockProcessNetworkAsync() {
+        return { success: false, started: false, error: 'Mock backend' }
       },
+      processNetworkUnblockFinished: undefined as unknown as QWebChannelSignal<ProcessNetworkBlockStatus>,
       async getProcessNetworkBlockStatus() {
         return { success: true, blocked: false }
       },
@@ -2932,9 +2940,10 @@ class BackendService {
       async openUserGuide() {
         return false
       },
-      async requestWindowsDefenderExclusion() {
-        return { success: false, cancelled: true, error: 'Indisponible dans le mock.' }
+      async requestWindowsDefenderExclusionAsync() {
+        return { success: false, started: false, cancelled: true, error: 'Indisponible dans le mock.' }
       },
+      windowsDefenderExclusionRequestFinished: undefined as unknown as QWebChannelSignal<{ success: boolean; cancelled?: boolean; error?: string }>,
       async getWebView2InspectorStatus() {
         return {
           success: true,

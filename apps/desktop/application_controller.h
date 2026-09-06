@@ -782,8 +782,12 @@ public:
     /// traitent cette séquence comme une heuristique d'injection de code
     /// malveillante — voir docs/STRATEGY_ROOM.md, 20/08/2026. Ne fait RIEN
     /// silencieusement : cette méthode existe précisément pour que ce soit
-    /// toujours un choix explicite de l'utilisateur, jamais automatique.
-    Q_INVOKABLE QVariantMap requestWindowsDefenderExclusion();
+    /// toujours un choix explicite de l'utilisateur, jamais automatique. Non
+    /// bloquant : l'élévation UAC (ShellExecuteExW "runas") + son attente
+    /// (jusqu'à 15s) tournent sur un thread séparé — sinon ça gèle le thread
+    /// GUI comme les autres actions élevées avant leur fix. Résultat via
+    /// windowsDefenderExclusionRequestFinished.
+    Q_INVOKABLE QVariantMap requestWindowsDefenderExclusionAsync();
 
     /// Coupe l'accès réseau (entrant + sortant) du processus attaché via une
     /// règle pare-feu Windows dédiée à son exécutable — déclenche une invite
@@ -792,13 +796,16 @@ public:
     /// vient d'une synchro serveur en arrière-plan plutôt que d'une
     /// réallocation purement locale (testé en pratique sur Solitaire, voir
     /// docs/STRATEGY_ROOM.md, 24/08/2026). La règle persiste après un
-    /// detachProcess() — appeler unblockProcessNetwork() pour la retirer.
-    Q_INVOKABLE QVariantMap blockProcessNetwork();
+    /// detachProcess() — appeler unblockProcessNetworkAsync() pour la
+    /// retirer. Non bloquant, même raisonnement ; résultat via
+    /// processNetworkBlockFinished.
+    Q_INVOKABLE QVariantMap blockProcessNetworkAsync();
 
-    /// Retire la règle posée par blockProcessNetwork() pour le processus
+    /// Retire la règle posée par blockProcessNetworkAsync() pour le processus
     /// attaché (ou pour le dernier exécutable bloqué si entretemps détaché).
-    /// Déclenche aussi une invite UAC (Remove-NetFirewallRule).
-    Q_INVOKABLE QVariantMap unblockProcessNetwork();
+    /// Déclenche aussi une invite UAC (Remove-NetFirewallRule). Non bloquant ;
+    /// résultat via processNetworkUnblockFinished.
+    Q_INVOKABLE QVariantMap unblockProcessNetworkAsync();
 
     /// Etat courant de blocage réseau pour le processus attaché (ou le
     /// dernier exécutable bloqué). Lecture seule (Get-NetFirewallRule), pas
@@ -1591,6 +1598,13 @@ signals:
     void apiHookStartFinished(const QVariantMap& result);
     /// Résultat différé de stopApiHookAsync.
     void apiHookStopFinished(const QVariantMap& result);
+
+    /// Résultat différé de requestWindowsDefenderExclusionAsync.
+    void windowsDefenderExclusionRequestFinished(const QVariantMap& result);
+    /// Résultat différé de blockProcessNetworkAsync.
+    void processNetworkBlockFinished(const QVariantMap& result);
+    /// Résultat différé de unblockProcessNetworkAsync.
+    void processNetworkUnblockFinished(const QVariantMap& result);
 
     /// Émis quand un freeze par polling est détecté instable (la valeur repart
     /// avant chaque réécriture pendant plusieurs ticks d'affilée) : le

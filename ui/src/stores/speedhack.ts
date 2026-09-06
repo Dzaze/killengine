@@ -189,53 +189,76 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     }
   }
 
+  // blockProcessNetworkAsync/unblockProcessNetworkAsync ne bloquent plus le
+  // thread GUI (élévation UAC + New-NetFirewallRule/Remove-NetFirewallRule
+  // jusqu'à 15s sur thread séparé côté backend) : elles renvoient juste
+  // {started:true} immédiatement, le vrai résultat arrive via
+  // onBlockProcessNetworkFinished/onUnblockProcessNetworkFinished (branchés
+  // dans app.ts) — busy reste true jusque-là.
+  let _pendingBlockProcessName = ''
+
   /** Pas de confirmRiskAction/logAiAudit ici -- app.ts s'en charge avant/après. */
   async function blockProcessNetwork(processNameValue = '') {
     const controller = backend.getController()
-    if (!controller.blockProcessNetwork) {
+    if (!controller.blockProcessNetworkAsync) {
       actionLogStore.addActionLog('network_block', 'Blocage réseau indisponible', 'Backend non exposé.', 'warning')
       return null
     }
+    _pendingBlockProcessName = processNameValue
     networkBlockBusy.value = true
     try {
-      const result = await controller.blockProcessNetwork()
-      networkBlockStatus.value = { ...result, blocked: result.success ? true : networkBlockStatus.value?.blocked ?? false }
-      if (result.success) {
-        actionLogStore.addActionLog('network_block', 'Réseau coupé', `${result.exePath ?? processNameValue} isolé du réseau.`, 'success')
-      } else if (result.cancelled) {
-        actionLogStore.addActionLog('network_block', 'Blocage réseau annulé', 'Invite UAC refusée.', 'warning')
-      } else {
-        actionLogStore.addActionLog('network_block', 'Blocage réseau échoué', result.error || 'raison inconnue', 'error')
+      const result = await controller.blockProcessNetworkAsync()
+      if (!result?.started) {
+        networkBlockBusy.value = false
+        actionLogStore.addActionLog('network_block', 'Blocage réseau échoué', result?.error || 'raison inconnue', 'error')
       }
       return result
     } catch (e) {
+      networkBlockBusy.value = false
       actionLogStore.addActionLog('network_block', 'Blocage réseau échoué', String(e), 'error')
       return null
-    } finally {
-      networkBlockBusy.value = false
+    }
+  }
+
+  function onBlockProcessNetworkFinished(result: ProcessNetworkBlockStatus) {
+    networkBlockBusy.value = false
+    networkBlockStatus.value = { ...result, blocked: result.success ? true : networkBlockStatus.value?.blocked ?? false }
+    if (result.success) {
+      actionLogStore.addActionLog('network_block', 'Réseau coupé', `${result.exePath ?? _pendingBlockProcessName} isolé du réseau.`, 'success')
+    } else if (result.cancelled) {
+      actionLogStore.addActionLog('network_block', 'Blocage réseau annulé', 'Invite UAC refusée.', 'warning')
+    } else {
+      actionLogStore.addActionLog('network_block', 'Blocage réseau échoué', result.error || 'raison inconnue', 'error')
     }
   }
 
   async function unblockProcessNetwork() {
     const controller = backend.getController()
-    if (!controller.unblockProcessNetwork) return null
+    if (!controller.unblockProcessNetworkAsync) return null
     networkBlockBusy.value = true
     try {
-      const result = await controller.unblockProcessNetwork()
-      if (result.success) {
-        networkBlockStatus.value = { ...result, blocked: false }
-        actionLogStore.addActionLog('network_block', 'Réseau rétabli', 'Règle pare-feu retirée.', 'success')
-      } else if (result.cancelled) {
-        actionLogStore.addActionLog('network_block', 'Rétablissement réseau annulé', 'Invite UAC refusée.', 'warning')
-      } else {
-        actionLogStore.addActionLog('network_block', 'Rétablissement réseau échoué', result.error || 'raison inconnue', 'error')
+      const result = await controller.unblockProcessNetworkAsync()
+      if (!result?.started) {
+        networkBlockBusy.value = false
+        actionLogStore.addActionLog('network_block', 'Rétablissement réseau échoué', result?.error || 'raison inconnue', 'error')
       }
       return result
     } catch (e) {
+      networkBlockBusy.value = false
       actionLogStore.addActionLog('network_block', 'Rétablissement réseau échoué', String(e), 'error')
       return null
-    } finally {
-      networkBlockBusy.value = false
+    }
+  }
+
+  function onUnblockProcessNetworkFinished(result: ProcessNetworkBlockStatus) {
+    networkBlockBusy.value = false
+    if (result.success) {
+      networkBlockStatus.value = { ...result, blocked: false }
+      actionLogStore.addActionLog('network_block', 'Réseau rétabli', 'Règle pare-feu retirée.', 'success')
+    } else if (result.cancelled) {
+      actionLogStore.addActionLog('network_block', 'Rétablissement réseau annulé', 'Invite UAC refusée.', 'warning')
+    } else {
+      actionLogStore.addActionLog('network_block', 'Rétablissement réseau échoué', result.error || 'raison inconnue', 'error')
     }
   }
 
@@ -275,7 +298,9 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     setSpeedhackFactor,
     stopSpeedhack,
     blockProcessNetwork,
+    onBlockProcessNetworkFinished,
     unblockProcessNetwork,
+    onUnblockProcessNetworkFinished,
     refreshProcessNetworkBlockStatus,
   }
 })
