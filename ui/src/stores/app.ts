@@ -1334,6 +1334,81 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // Backend IA externe (T5, docs/EXTERNAL_AI_BACKEND_ROADMAP.md, 07/09/2026) :
+  // bascule manuelle globale vers un backend Claude (clé API personnelle),
+  // à côté du modèle local qui reste le défaut. Activer envoie le contexte
+  // des appels d'outils (adresses mémoire, nom du process, éventuellement du
+  // code désassemblé) à un tiers -> RiskGate 'injection' explicite, même
+  // asymétrie que WebView2 CDP/Stealth ci-dessus (repasser en local ne
+  // nécessite aucune confirmation). hasExternalAiApiKey() ne retourne jamais
+  // la clé elle-même, juste un booléen.
+  const externalAiActiveBackend = ref<'local' | 'claude'>('local')
+  const externalAiHasApiKey = ref(false)
+  const externalAiRequestCount = ref(0)
+  const externalAiBusy = ref(false)
+  const externalAiError = ref('')
+
+  async function refreshExternalAiStatus() {
+    const controller = backend.getController()
+    const [activeBackend, hasKey, requestCount] = await Promise.all([
+      controller.getActiveAiBackend?.() ?? Promise.resolve('local'),
+      controller.hasExternalAiApiKey?.() ?? Promise.resolve(false),
+      controller.getExternalAiRequestCount?.() ?? Promise.resolve(0),
+    ])
+    externalAiActiveBackend.value = activeBackend === 'claude' ? 'claude' : 'local'
+    externalAiHasApiKey.value = !!hasKey
+    externalAiRequestCount.value = Number(requestCount) || 0
+  }
+
+  async function setExternalAiApiKey(apiKey: string) {
+    externalAiBusy.value = true
+    externalAiError.value = ''
+    try {
+      const result = await backend.getController().setExternalAiApiKey?.(apiKey)
+      if (!result?.success) {
+        externalAiError.value = String(result?.error ?? 'Échec de l\'enregistrement de la clé.')
+      }
+      await refreshExternalAiStatus()
+      return result ?? null
+    } finally {
+      externalAiBusy.value = false
+    }
+  }
+
+  async function clearExternalAiApiKey() {
+    externalAiBusy.value = true
+    try {
+      const result = await backend.getController().clearExternalAiApiKey?.()
+      await refreshExternalAiStatus()
+      return result ?? null
+    } finally {
+      externalAiBusy.value = false
+    }
+  }
+
+  async function setActiveAiBackend(target: 'local' | 'claude') {
+    if (target === 'claude') {
+      const accepted = await confirmRiskAction(
+        'injection',
+        'Activer le backend IA externe (Claude)',
+        "Bascule le chat Assistant vers un backend externe (API Claude, clé personnelle) pour les tâches qui demandent un raisonnement plus profond. Dès qu'il est actif, le contexte des appels d'outils (adresses mémoire, nom du process, parfois le nom du jeu ciblé, éventuellement des extraits de code désassemblé) part vers un tiers (Anthropic) à chaque requête. Chaque outil sensible (écriture mémoire, kernel, réseau, stealth...) reste soumis à une confirmation RiskGate séparée avant exécution. Désactivable à tout moment (repasse au modèle local embarqué).",
+      )
+      if (!accepted) return null
+    }
+    externalAiBusy.value = true
+    externalAiError.value = ''
+    try {
+      const result = await backend.getController().setActiveAiBackend?.(target)
+      if (!result?.success) {
+        externalAiError.value = String(result?.error ?? 'Échec du changement de backend.')
+      }
+      await refreshExternalAiStatus()
+      return result ?? null
+    } finally {
+      externalAiBusy.value = false
+    }
+  }
+
   // Stealth Profiler (03/09/2026) : mode de protection unifié (antiDebug/
   // processMask/dllMask) piloté jusqu'ici uniquement via le pipe/Lua, aucune
   // UI. Activer un profil modifie le process attaché (hooks + masquage) ->
@@ -2281,6 +2356,7 @@ export const useAppStore = defineStore('app', () => {
       loadWorkspaceProjects()
       await loadSettings()
       await refreshKernelDriverStatus()
+      await refreshExternalAiStatus()
       await refreshLuaScriptingStatus()
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
@@ -4947,6 +5023,15 @@ export const useAppStore = defineStore('app', () => {
     enableAutomationMode,
     disableAutomationMode,
     stealthStatus,
+    externalAiActiveBackend,
+    externalAiHasApiKey,
+    externalAiRequestCount,
+    externalAiBusy,
+    externalAiError,
+    refreshExternalAiStatus,
+    setExternalAiApiKey,
+    clearExternalAiApiKey,
+    setActiveAiBackend,
     stealthRiskAnalysis,
     stealthBusy,
     refreshStealthStatus,

@@ -1,6 +1,6 @@
 # Backend IA externe (clé API) — chantier de réflexion
 
-Statut : T1-T4 codés et testés (07/09/2026), T5 (UI Réglages) et T6 (vérification terrain) restants. Scoping ouvert le 06/09/2026 suite à une
+Statut : T1-T5 codés et testés (07/09/2026), seul T6 (vérification terrain avec une vraie clé API) reste. Scoping ouvert le 06/09/2026 suite à une
 session d'investigation live (Solitaire XP, voir `PHASE_TRACKER.md` entrée
 `INVESTIGATION-SOLITAIRE-XP-2` et la mémoire `solitaire_memory_editing_technique.md`)
 qui a servi de cas d'école.
@@ -226,14 +226,24 @@ tests unitaires pour `ClaudeChatManager` lui-même — dépend trop fortement
 d'`ApplicationController`/Qt event loop pour être testé isolément sans mock
 lourd ; la vérification réelle est T6 (test terrain).
 
-**T5 — UI Réglages** — dépend de T4.
-Nouvelle section dans `SettingsView.vue`, juste à côté du champ "Chemin
-personnalisé GGUF" existant (même zone de réglages IA) : sélecteur de backend
-(radio "Local" / "Claude"), champ clé API (masqué, boutons Enregistrer/
-Supprimer), compteur de requêtes affiché, confirmation `confirmRiskAction`/
-RiskGate à l'activation (texte explicite sur le compromis confidentialité, même
-pattern que Stealth/CDP WebView2). Wrappers minces dans `backend.ts`/`app.ts`,
-même convention que les autres blocs Settings.
+**T5 — UI Réglages — fait (07/09/2026, Claude).**
+Nouvelle section "Backend IA externe (Claude)" dans `SettingsView.vue`, juste
+après le panneau "IA locale" existant (même zone de réglages IA) : sélecteur
+de backend (`<select>` Local/Claude), champ clé API (`type="password"`,
+boutons Enregistrer/Supprimer), compteur de requêtes affiché, clé jamais
+renvoyée en clair. Bascule vers `"claude"` gardée par `confirmRiskAction`
+(risk `'injection'`, texte explicite sur le compromis confidentialité — même
+asymétrie que Stealth/CDP WebView2 : repasser en local ne demande aucune
+confirmation). Wrappers minces dans `ui/src/stores/app.ts`
+(`refreshExternalAiStatus`/`setExternalAiApiKey`/`clearExternalAiApiKey`/
+`setActiveAiBackend`), types déjà ajoutés dans `backend.ts` pendant T4.
+`npm run type-check`/`npm run build` OK, build C++ complet + 454/454 tests
+OK (aucune régression). **Non fait cette passe** : vérification visuelle live
+via CDP (`QTWEBENGINE_REMOTE_DEBUGGING`, technique habituelle du projet) —
+les classes CSS réutilisées (`settings-grid`/`model-path-row`/
+`model-status-grid`/`status-pill`) sont bien déjà stylées ailleurs dans le
+même fichier, mais le rendu réel n'a pas été capturé en écran ; à faire à
+l'occasion de T6 ou d'un rapide coup d'œil manuel.
 
 **T6 — Vérification terrain** — dépend de tout ce qui précède.
 Build complet + suite de tests unitaires. Puis test réel : activer le backend

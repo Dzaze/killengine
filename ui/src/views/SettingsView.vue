@@ -32,6 +32,13 @@ const valueTypes = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int6
 const performanceModes = ['Auto', 'Eco', 'Normal', 'Performance', 'Max']
 const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096, 8192]
 const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
+const externalAiApiKeyInput = ref('')
+async function saveExternalAiApiKey() {
+  const result = await store.setExternalAiApiKey(externalAiApiKeyInput.value)
+  if (result?.success) {
+    externalAiApiKeyInput.value = ''
+  }
+}
 const workspaceExportText = ref('')
 const workspaceExportStatus = ref('')
 const auditExportText = ref('')
@@ -441,6 +448,73 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       </details>
       <p class="hint">
         Safe autorise seulement les actions sans danger et les écritures confirmées. Expert débloque debugger/patch confirmés. Trainer prépare les actions avancées type hook/injection.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>Backend IA externe (Claude)</h2>
+        <div class="panel-actions">
+          <span class="status-pill" :class="store.externalAiActiveBackend === 'claude' ? 'ok' : 'warn'">
+            {{ store.externalAiActiveBackend === 'claude' ? 'Claude actif' : 'Local actif' }}
+          </span>
+        </div>
+      </div>
+      <p class="hint">
+        Optionnel, jamais activé par défaut. Bascule le chat Assistant vers l'API Claude (clé API personnelle) pour les tâches qui demandent un raisonnement plus profond que le modèle local embarqué. Dès qu'il est actif, le contexte des appels d'outils (adresses mémoire, nom du process, éventuellement du code désassemblé) part vers un tiers (Anthropic) à chaque requête. Chaque outil sensible (écriture mémoire, kernel, réseau, stealth...) reste soumis à sa propre confirmation RiskGate avant exécution — activer ce backend n'exécute rien tout seul.
+      </p>
+      <div class="settings-grid">
+        <label>
+          <span>Backend actif</span>
+          <select
+            class="input"
+            :value="store.externalAiActiveBackend"
+            :disabled="store.externalAiBusy"
+            @change="store.setActiveAiBackend(($event.target as HTMLSelectElement).value as 'local' | 'claude')"
+          >
+            <option value="local">Local (modèle embarqué)</option>
+            <option value="claude">Claude (clé API)</option>
+          </select>
+        </label>
+      </div>
+      <div class="model-path-row">
+        <input
+          v-model="externalAiApiKeyInput"
+          class="input"
+          type="password"
+          autocomplete="off"
+          placeholder="Clé API Claude (sk-ant-...)"
+        />
+        <button
+          class="btn btn-secondary compact"
+          type="button"
+          :disabled="store.externalAiBusy || !externalAiApiKeyInput.trim()"
+          @click="saveExternalAiApiKey()"
+        >
+          Enregistrer
+        </button>
+        <button
+          class="btn btn-secondary compact"
+          type="button"
+          :disabled="store.externalAiBusy || !store.externalAiHasApiKey"
+          @click="store.clearExternalAiApiKey()"
+        >
+          Supprimer
+        </button>
+      </div>
+      <div class="model-status-grid">
+        <div class="runtime-cell">
+          <span>Clé enregistrée</span>
+          <strong>{{ store.externalAiHasApiKey ? 'oui' : 'non' }}</strong>
+        </div>
+        <div class="runtime-cell">
+          <span>Requêtes cette session</span>
+          <strong>{{ store.externalAiRequestCount }}</strong>
+        </div>
+      </div>
+      <p v-if="store.externalAiError" class="error">{{ store.externalAiError }}</p>
+      <p class="hint">
+        La clé est chiffrée (DPAPI Windows, liée au compte utilisateur) avant stockage — jamais en clair, jamais renvoyée par le backend une fois enregistrée. Aucune limite de requêtes imposée par KillEngine : le compteur ci-dessus est informatif seulement, le coût réel dépend de ton compte Anthropic.
       </p>
     </section>
 
