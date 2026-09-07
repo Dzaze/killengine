@@ -46,6 +46,12 @@ Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 
 ## Journal actif
 
+### Panneau "Outils Assistant" désynchronisé du registre (07/09/2026, Claude)
+
+**Quoi** : signalé par le propriétaire ("la section outil dans paramètre n'en expose que 41") en relisant le panneau `AssistantToolsPanel.vue` livré avec T5. `ui/src/services/assistantTools.ts` est une copie statique manuelle de `ai/tool_registry.cpp`, gardée par un compteur `ASSISTANT_TOOLS_SNAPSHOT` censé alerter en cas de dérive — le compteur disait encore 35 alors que le tableau avait dérivé à 41, lui-même très en retard sur les 57 outils réels du registre (conséquence directe du chantier T1-T5 qui a fait grossir le registre : réseau, proxy HTTP, DNS, stealth, WebView2/CDP). Corrigé : les 16 outils manquants ajoutés, 2 entrées fantômes retirées (`find_what_accesses`/`auto_dissect`, absents de `ai/tool_registry.cpp` donc jamais réellement joignables depuis le chat), `stop_http_proxy` recorrigé (affiché à tort `safe`/direct, en réalité `injection`/confirmation), et une note `CLAUDE_ONLY_NOTE` ajoutée sur chaque outil que le dispatch du modèle local (`SmartSearchManager::startSmartSearch`) ne cable jamais (retombe sur "outil non supporté") mais que le nouveau backend Claude (T4) sait exécuter — les deux backends divergent réellement en couverture désormais, le panneau le dit au lieu de laisser croire à un comportement uniforme. `ASSISTANT_TOOLS_SNAPSHOT` remonté à 57.
+
+**Comment vérifié** : `npm run type-check`/`npm run build` OK, build C++ complet + 454/454 tests OK (changement UI/données pur, aucun comportement backend touché).
+
 ### EXTERNAL-AI-BACKEND T5 — UI Réglages (07/09/2026, Claude)
 
 **Quoi** : nouveau panneau "Backend IA externe (Claude)" dans `ui/src/views/SettingsView.vue`, juste après "IA locale" — sélecteur Local/Claude, champ clé API masqué (Enregistrer/Supprimer), compteur de requêtes, message explicite sur le compromis confidentialité. Nouvel état + fonctions dans `ui/src/stores/app.ts` (`externalAiActiveBackend`/`externalAiHasApiKey`/`externalAiRequestCount`/`refreshExternalAiStatus`/`setExternalAiApiKey`/`clearExternalAiApiKey`/`setActiveAiBackend`), `refreshExternalAiStatus()` appelé au démarrage comme les autres statuts. Bascule vers `"claude"` gardée par `confirmRiskAction('injection', ...)` — même asymétrie que Stealth/CDP WebView2 (repasser en local ne demande rien).
