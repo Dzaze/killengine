@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useAppStore, type WorkflowPreset } from '@/stores/app'
+import { useWebView2InspectorStore } from '@/stores/webView2Inspector'
 import { backend } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
@@ -536,6 +537,111 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
           : "Coupure réseau en cours (invite UAC)... Le résultat apparaîtra dans le journal d'actions.",
         { recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }] },
       )
+    }
+  } else if (actionId === 'dns_spoof_apply') {
+    // Couverture chat modèle local (07/09/2026, meme patron que
+    // network_block_apply ci-dessus) : reutilise networkStore.addDnsSpoofEntry/
+    // removeDnsSpoofEntry (deja branches vers dnsSpoofFinished/dnsRestoreFinished
+    // dans app.ts), en poussant d'abord les valeurs fournies par le modele
+    // dans les refs que ces fonctions parametree-less lisent.
+    const restore = typeof action === 'string' ? false : action.mode === 'restore'
+    const domain = typeof action === 'string' ? '' : String(action.domain ?? '')
+    const targetIp = typeof action === 'string' ? '' : String(action.targetIp ?? '')
+    if (!domain) {
+      store.pushMessage('assistant', "Domaine manquant pour l'action DNS.", { isError: true })
+    } else if (restore) {
+      await store.removeDnsSpoofEntry(domain)
+      store.pushMessage('assistant', `Restauration DNS en cours pour ${domain}... Le résultat apparaîtra dans le journal d'actions.`, {
+        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      })
+    } else {
+      store.dnsSpoofDomain = domain
+      store.dnsSpoofTargetIp = targetIp || '127.0.0.1'
+      await store.addDnsSpoofEntry()
+      store.pushMessage('assistant', `Redirection DNS en cours : ${domain} -> ${store.dnsSpoofTargetIp}... Le résultat apparaîtra dans le journal d'actions.`, {
+        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      })
+    }
+  } else if (actionId === 'http_proxy_apply') {
+    const stop = typeof action === 'string' ? false : action.mode === 'stop'
+    if (stop) {
+      await store.stopHttpProxy()
+      store.pushMessage('assistant', "Arrêt du proxy HTTP en cours... Le résultat apparaîtra dans le journal d'actions.", {
+        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      })
+    } else {
+      const port = typeof action === 'string' ? 8080 : Number(action.port ?? 8080)
+      const interceptHttps = typeof action === 'string' ? true : action.interceptHttps !== false
+      store.httpProxyPort = port
+      store.httpProxyInterceptHttps = interceptHttps
+      await store.startHttpProxy()
+      store.pushMessage('assistant', `Démarrage du proxy HTTP en cours (port ${port})... Le résultat apparaîtra dans le journal d'actions.`, {
+        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      })
+    }
+  } else if (actionId === 'modify_http_request_apply') {
+    const requestId = typeof action === 'string' ? '' : String(action.requestId ?? '')
+    const newBody = typeof action === 'string' ? '' : String(action.newBody ?? '')
+    if (!requestId) {
+      store.pushMessage('assistant', "Identifiant de requête HTTP manquant.", { isError: true })
+    } else {
+      store.selectedHttpRequest = requestId
+      await store.modifySelectedHttpRequest(newBody)
+      store.pushMessage('assistant', `Requête ${requestId} modifiée.`, {
+        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      })
+    }
+  } else if (actionId === 'lag_switch_apply') {
+    const enabled = typeof action === 'string' ? true : action.enabled !== false
+    const delayMs = typeof action === 'string' ? 1000 : Number(action.delayMs ?? 1000)
+    if (store.lagSwitchActive === enabled) {
+      store.pushMessage('assistant', enabled ? 'Lag switch déjà actif.' : 'Lag switch déjà désactivé.')
+    } else {
+      store.lagSwitchDelayMs = delayMs
+      await store.toggleLagSwitch()
+      store.pushMessage('assistant', `${enabled ? 'Activation' : 'Désactivation'} du lag switch en cours... Le résultat apparaîtra dans le journal d'actions.`, {
+        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      })
+    }
+  } else if (actionId === 'stealth_mode_apply') {
+    // applyStealthMode/restoreStealthMode gardent leur propre confirmRiskAction
+    // interne (panneau Stealth des Réglages) -- reutilises tel quel, pas de
+    // second mecanisme de confirmation invente ici.
+    const restore = typeof action === 'string' ? false : action.mode === 'restore'
+    const profile = typeof action === 'string' ? 'default' : String(action.profile ?? 'default')
+    const result = restore ? await store.restoreStealthMode() : await store.applyStealthMode(profile)
+    if (result === null) {
+      store.pushMessage('assistant', "Mode discret refusé à la confirmation.", { isError: true })
+    } else {
+      store.pushMessage(
+        'assistant',
+        result.success
+          ? (restore ? 'Mode discret désactivé.' : `Mode discret activé (profil ${profile}).`)
+          : `Échec : ${result.error ?? 'raison inconnue'}`,
+        { isError: !result.success },
+      )
+    }
+  } else if (actionId === 'webview2_evaluate_apply') {
+    const expression = typeof action === 'string' ? '' : String(action.expression ?? '')
+    if (!expression.trim()) {
+      store.pushMessage('assistant', "Expression JavaScript manquante.", { isError: true })
+    } else {
+      const webView2Store = useWebView2InspectorStore()
+      if (!webView2Store.isConnected) {
+        store.pushMessage('assistant', "Aucune target WebView2 connectée — ouvre l'onglet WebView2 pour t'y connecter d'abord.", {
+          isError: true,
+          recoveryActions: [{ id: 'open_webview2_inspector', label: 'Ouvrir WebView2' }],
+        })
+      } else {
+        const result = await webView2Store.evaluateJavaScript(expression)
+        store.pushMessage(
+          'assistant',
+          result?.success
+            ? `Résultat : ${JSON.stringify(result.value ?? null)}`
+            : `Échec : ${webView2Store.error ?? result?.error ?? 'raison inconnue'}`,
+          { isError: !result?.success },
+        )
+      }
     }
   } else if (actionId === 'write_value_confirm' || actionId === 'freeze_value_confirm') {
     // PHASE 120-D : meme patron que kernel_write_targets ci-dessus, reutilise

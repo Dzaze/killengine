@@ -4435,6 +4435,223 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
                 ? QString("Le fichier a changé (%1) pendant la fenêtre d'observation.").arg(actionResult.value("changeType").toString())
                 : "Aucun changement détecté pendant la fenêtre d'observation.";
         }
+    // PHASE (couverture chat modèle local, 07/09/2026) : les outils
+    // ci-dessous existaient dans ai/tool_registry.cpp (donc visibles du
+    // modèle local, PHASE 271-272 -- aucun outil caché du schéma) mais
+    // tombaient tous sur "unsupported_tool" faute d'avoir jamais été câblés
+    // ici, contrairement au backend Claude (ClaudeChatManager::executeTool,
+    // PHASE EXTERNAL-AI-BACKEND T4) qui les couvre déjà tous. Corrigé pour
+    // que les deux backends se comportent de façon cohérente : un outil
+    // annoncé au modèle doit réellement s'exécuter, jamais échouer
+    // silencieusement. Lecture seule : exécution directe. Écriture/action
+    // sensible : même patron requires_confirmation + recoveryActions que
+    // kernel_write/speedhack_set/block_process_network plus haut -- le clic
+    // reste obligatoire, réutilise les fonctions store déjà confirmées.
+    } else if (tool == "get_stealth_status") {
+        actionResult = m_controller.getStealthStatus();
+        actionResult["success"] = true;
+        result["message"] = actionResult.value("active").toBool()
+            ? QString("Mode discret actif (profil %1).").arg(actionResult.value("profile").toString())
+            : "Mode discret inactif.";
+    } else if (tool == "get_process_network_modules") {
+        actionResult = m_controller.getProcessNetworkModules();
+        if (actionResult.value("success").toBool()) {
+            result["message"] = QString("%1 module(s) réseau chargé(s) par le processus attaché.").arg(actionResult.value("modules").toList().size());
+        }
+    } else if (tool == "get_http_proxy_requests") {
+        actionResult = m_controller.getHttpProxyRequests();
+        if (actionResult.value("success").toBool()) {
+            result["message"] = QString("%1 requête(s) HTTP interceptée(s).").arg(actionResult.value("requests").toList().size());
+        }
+    } else if (tool == "getWebView2InspectorStatus") {
+        actionResult = m_controller.getWebView2InspectorStatus();
+        if (actionResult.value("success").toBool()) {
+            result["message"] = actionResult.value("connected").toBool()
+                ? QString("Inspecteur WebView2 connecté (target %1).").arg(actionResult.value("target").toString())
+                : "Inspecteur WebView2 non connecté.";
+        }
+    } else if (tool == "listWebView2CdpTargets") {
+        actionResult = m_controller.listWebView2CdpTargets(args.value("browserProcessId").toInt(), {});
+        if (actionResult.value("success").toBool()) {
+            result["message"] = QString("%1 target(s) CDP WebView2 trouvée(s).").arg(actionResult.value("count").toInt());
+        }
+    } else if (tool == "disconnectWebView2Inspector") {
+        actionResult = m_controller.disconnectWebView2Inspector();
+        if (actionResult.value("success").toBool()) {
+            result["message"] = "Inspecteur WebView2 déconnecté.";
+        }
+    } else if (tool == "findWebView2DisplayedValues") {
+        actionResult = m_controller.findWebView2DisplayedValues(args.value("value").toString(), {});
+        if (actionResult.value("success").toBool()) {
+            result["message"] = QString("%1 correspondance(s) trouvée(s) dans le DOM pour %2.").arg(actionResult.value("count").toInt()).arg(args.value("value").toString());
+        }
+    } else if (tool == "findWebView2DisplayedText") {
+        actionResult = m_controller.findWebView2DisplayedText(args.value("text").toString(), {});
+        if (actionResult.value("success").toBool()) {
+            result["message"] = QString("%1 correspondance(s) trouvée(s) dans le DOM pour ce texte.").arg(actionResult.value("count").toInt());
+        }
+    } else if (tool == "probeWebView2GlobalScope") {
+        actionResult = m_controller.probeWebView2GlobalScope();
+        if (actionResult.value("success").toBool()) {
+            result["message"] = "Scope JS global (window) sondé — voir l'onglet WebView2 pour le détail.";
+        }
+    } else if (tool == "get_process_network_connections") {
+        // getProcessNetworkConnectionsAsync ne bloque pas le thread GUI (la
+        // resolution DNS inverse tourne sur un thread separe cote backend) --
+        // le vrai resultat arrive plus tard via processNetworkConnectionsFinished
+        // (deja branche vers networkStore dans app.ts). Meme patron que les
+        // recoveryActions "en cours..." ci-dessus pour les tools *Async : on
+        // renvoie l'accuse de demarrage tout de suite, resultat visible dans
+        // le panneau Reseau.
+        actionResult = {{"success", true}};
+        m_controller.getProcessNetworkConnectionsAsync();
+        result["workflowStatus"] = "network_connections_requested";
+        result["message"] = "Récupération des connexions réseau en cours (résolution DNS inverse en tâche de fond)...";
+        result["recoveryActions"] = QVariantList{QVariantMap{{"id", "open_network"}, {"label", "Ouvrir Réseau"}}};
+    } else if (tool == "spoof_dns" || tool == "restore_dns") {
+        const bool isRestore = (tool == "restore_dns");
+        const QString domain = args.value("domain").toString().trimmed();
+        const QString targetIp = args.value("targetIp").toString().trimmed();
+        if (domain.isEmpty() || (!isRestore && targetIp.isEmpty())) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = isRestore
+                ? "Il me faut le domaine dont l'entrée DNS spoofée doit être retirée."
+                : "Il me faut le domaine et l'IP locale cible pour rediriger le DNS.";
+            stampIntent(&result);
+            return result;
+        }
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = isRestore
+            ? "Retire l'entrée spoofée du fichier hosts Windows."
+            : "Redirige un domaine vers une IP locale via le fichier hosts Windows (invite UAC).";
+        result["message"] = isRestore
+            ? QString("Restauration DNS demandée pour %1. Confirme pour retirer l'entrée du fichier hosts.").arg(domain)
+            : QString("Redirection DNS demandée : %1 -> %2. Confirme pour appliquer.").arg(domain, targetIp);
+        result["recoveryActions"] = QVariantList{QVariantMap{
+            {"id", "dns_spoof_apply"},
+            {"label", isRestore ? QString("Restaurer %1").arg(domain) : QString("Rediriger %1").arg(domain)},
+            {"mode", isRestore ? "restore" : "spoof"},
+            {"domain", domain},
+            {"targetIp", targetIp},
+            {"requiresConfirmation", true},
+        }};
+        stampIntent(&result);
+        return result;
+    } else if (tool == "start_http_proxy" || tool == "stop_http_proxy") {
+        const bool isStop = (tool == "stop_http_proxy");
+        const int port = args.value("port", 8080).toInt();
+        const bool interceptHttps = args.value("interceptHttps", true).toBool();
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = isStop
+            ? "Arrête le proxy HTTP local et retire les hooks du processus attaché."
+            : "Intercepte les requêtes HTTP/HTTPS du processus attaché via injection DLL + hook WinINet/WinHTTP.";
+        result["message"] = isStop
+            ? "Arrêt du proxy HTTP demandé. Confirme pour arrêter."
+            : QString("Démarrage du proxy HTTP demandé (port %1%2). Confirme pour appliquer.")
+                  .arg(port)
+                  .arg(interceptHttps ? ", HTTPS inclus" : "");
+        result["recoveryActions"] = QVariantList{QVariantMap{
+            {"id", "http_proxy_apply"},
+            {"label", isStop ? "Arrêter le proxy HTTP" : QString("Démarrer le proxy HTTP (port %1)").arg(port)},
+            {"mode", isStop ? "stop" : "start"},
+            {"port", port},
+            {"interceptHttps", interceptHttps},
+            {"requiresConfirmation", true},
+        }};
+        stampIntent(&result);
+        return result;
+    } else if (tool == "modify_http_request") {
+        const QString requestId = args.value("requestId").toString().trimmed();
+        const QString newBody = args.value("newBody").toString();
+        if (requestId.isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Il me faut l'identifiant de la requête HTTP interceptée à modifier (voir get_http_proxy_requests).";
+            stampIntent(&result);
+            return result;
+        }
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = "Modifie le body d'une requête HTTP interceptée avant qu'elle ne soit envoyée.";
+        result["message"] = QString("Modification demandée pour la requête %1. Confirme pour appliquer.").arg(requestId);
+        result["recoveryActions"] = QVariantList{QVariantMap{
+            {"id", "modify_http_request_apply"},
+            {"label", "Modifier la requête"},
+            {"requestId", requestId},
+            {"newBody", newBody},
+            {"requiresConfirmation", true},
+        }};
+        stampIntent(&result);
+        return result;
+    } else if (tool == "set_lag_switch") {
+        const bool enabled = args.value("enabled").toBool();
+        const int delayMs = args.value("delayMs", 1000).toInt();
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = enabled
+            ? "Retarde artificiellement recv/WSARecv du processus attaché via injection DLL + MinHook."
+            : "Désactive le lag switch et retire le retard artificiel.";
+        result["message"] = enabled
+            ? QString("Lag switch demandé : %1 ms de retard. Confirme pour appliquer.").arg(delayMs)
+            : "Désactivation du lag switch demandée. Confirme pour appliquer.";
+        result["recoveryActions"] = QVariantList{QVariantMap{
+            {"id", "lag_switch_apply"},
+            {"label", enabled ? QString("Activer le lag switch (%1 ms)").arg(delayMs) : "Désactiver le lag switch"},
+            {"enabled", enabled},
+            {"delayMs", delayMs},
+            {"requiresConfirmation", true},
+        }};
+        stampIntent(&result);
+        return result;
+    } else if (tool == "apply_stealth_mode" || tool == "restore_stealth_mode") {
+        const bool isRestore = (tool == "restore_stealth_mode");
+        const QString profile = args.value("profile", "default").toString();
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = isRestore
+            ? "Désactive le mode discret et restaure l'état original des modules activés."
+            : "Active le mode discret (anti-debug, masquage process/DLL) pour masquer KillEngine du processus attaché.";
+        result["message"] = isRestore
+            ? "Désactivation du mode discret demandée. Confirme pour restaurer."
+            : QString("Activation du mode discret demandée (profil '%1'). Confirme pour appliquer.").arg(profile);
+        result["recoveryActions"] = QVariantList{QVariantMap{
+            {"id", "stealth_mode_apply"},
+            {"label", isRestore ? "Désactiver le mode discret" : QString("Activer le mode discret (%1)").arg(profile)},
+            {"mode", isRestore ? "restore" : "apply"},
+            {"profile", profile},
+            {"requiresConfirmation", true},
+        }};
+        stampIntent(&result);
+        return result;
+    } else if (tool == "connectWebView2Inspector") {
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = "Connecte l'inspecteur WebView2 à une target CDP — s'attache à un process externe.";
+        result["message"] = "Connexion à l'inspecteur WebView2 demandée. Confirme pour t'attacher (voir l'onglet WebView2 pour choisir la target).";
+        result["recoveryActions"] = QVariantList{QVariantMap{{"id", "open_webview2_inspector"}, {"label", "Ouvrir WebView2"}}};
+        stampIntent(&result);
+        return result;
+    } else if (tool == "evaluateWebView2JavaScript") {
+        const QString expression = args.value("expression").toString();
+        if (expression.trimmed().isEmpty()) {
+            result["actionStatus"] = "needs_clarification";
+            result["message"] = "Il me faut l'expression JavaScript à évaluer dans la target WebView2 connectée.";
+            stampIntent(&result);
+            return result;
+        }
+        result["actionStatus"] = "requires_confirmation";
+        result["requiresConfirmation"] = true;
+        result["confirmationReason"] = "Évalue une expression JavaScript arbitraire dans la target WebView2 connectée — peut lire ou modifier l'état JS.";
+        result["message"] = QString("Évaluation JS demandée : %1. Confirme pour exécuter.").arg(expression);
+        result["recoveryActions"] = QVariantList{QVariantMap{
+            {"id", "webview2_evaluate_apply"},
+            {"label", "Évaluer le JavaScript"},
+            {"expression", expression},
+            {"requiresConfirmation", true},
+        }};
+        stampIntent(&result);
+        return result;
     } else {
         result["actionStatus"] = "unsupported_tool";
         result["actionError"] = QString("Outil Smart Search non supporté: %1").arg(tool);

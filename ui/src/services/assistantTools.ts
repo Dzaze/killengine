@@ -13,11 +13,16 @@
  * Depuis le 07/09/2026, KillEngine a DEUX backends de chat possibles (voir
  * Réglages > "Backend IA externe (Claude)") : le modèle local embarqué
  * (défaut) et un backend Claude optionnel (`apps/desktop/claude_chat_manager.cpp`).
- * Le backend Claude couvre les 57 outils du registre ; le dispatch du modèle
- * local (`SmartSearchManager::startSmartSearch`) n'a lui jamais été étendu
- * au-delà d'un sous-ensemble historique et renvoie "outil non supporté" sur
- * le reste (réseau, proxy HTTP, DNS, stealth, WebView2/CDP) — champ `note`
- * précisé pour chacun de ces outils ci-dessous.
+ * Le backend Claude couvrait déjà les 57 outils du registre (T4) ; le
+ * dispatch du modèle local (`SmartSearchManager::startSmartSearch`) a été
+ * étendu le même jour pour couvrir lui aussi les 20 outils réseau/proxy
+ * HTTP/DNS/stealth/WebView2 qui tombaient auparavant sur "outil non
+ * supporté" malgré leur présence dans le schéma envoyé au modèle (PHASE
+ * 271-272 : aucun outil caché du schéma — un outil annoncé doit réellement
+ * s'exécuter). Les deux backends couvrent maintenant les mêmes 57 outils ;
+ * la seule différence restante est notée sur `connectWebView2Inspector`
+ * ci-dessous (le modèle local redirige vers l'onglet WebView2 plutôt que de
+ * se connecter directement).
  */
 
 /** Comment l'outil s'exécute réellement depuis le chat Assistant. */
@@ -39,10 +44,6 @@ export interface AssistantTool {
 
 /** Nombre d'outils au moment de la dernière synchronisation avec le registre. */
 export const ASSISTANT_TOOLS_SNAPSHOT = 57
-
-/** Note réutilisée pour tout outil que seul le backend Claude sait exécuter aujourd'hui. */
-const CLAUDE_ONLY_NOTE =
-  'Exécutable uniquement via le backend Claude (Réglages > Backend IA externe). Le modèle local renvoie "outil non supporté" sur cette action.'
 
 /**
  * Statuts d'exécution (PHASE 146/147/148, étendu T4 backend Claude) :
@@ -87,20 +88,20 @@ export const assistantTools: AssistantTool[] = [
 
   // --- Réseau ---
   { name: 'block_process_network', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Coupe ou rétablit le réseau du processus (pare-feu).' },
-  { name: 'get_process_network_connections', category: 'Réseau', risk: 'safe', execution: 'direct', summary: 'Liste les connexions TCP/UDP actives du processus, avec résolution DNS.', note: CLAUDE_ONLY_NOTE },
-  { name: 'get_process_network_modules', category: 'Réseau', risk: 'safe', execution: 'direct', summary: 'Liste les modules DLL réseau chargés (wininet, winhttp, ws2_32...).', note: CLAUDE_ONLY_NOTE },
-  { name: 'start_http_proxy', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Intercepte les requêtes HTTP/HTTPS du processus cible.', note: CLAUDE_ONLY_NOTE },
-  { name: 'stop_http_proxy', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Arrête le proxy HTTP actif et retire les hooks.', note: CLAUDE_ONLY_NOTE },
-  { name: 'get_http_proxy_requests', category: 'Réseau', risk: 'safe', execution: 'direct', summary: 'Liste les requêtes HTTP interceptées par le proxy actif.', note: CLAUDE_ONLY_NOTE },
-  { name: 'modify_http_request', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Modifie le body d\'une requête HTTP interceptée avant envoi.', note: CLAUDE_ONLY_NOTE },
-  { name: 'spoof_dns', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Redirige un domaine vers une IP locale via le fichier hosts.', note: CLAUDE_ONLY_NOTE },
-  { name: 'restore_dns', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Retire l\'entrée DNS spoofée du fichier hosts.', note: CLAUDE_ONLY_NOTE },
-  { name: 'set_lag_switch', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Retarde les fonctions recv/WSARecv du processus cible.', note: CLAUDE_ONLY_NOTE },
+  { name: 'get_process_network_connections', category: 'Réseau', risk: 'safe', execution: 'direct', summary: 'Liste les connexions TCP/UDP actives du processus, avec résolution DNS.', note: 'Asynchrone (résolution DNS inverse en tâche de fond) — le résultat définitif apparaît dans le panneau Réseau, pas immédiatement dans le chat.' },
+  { name: 'get_process_network_modules', category: 'Réseau', risk: 'safe', execution: 'direct', summary: 'Liste les modules DLL réseau chargés (wininet, winhttp, ws2_32...).' },
+  { name: 'start_http_proxy', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Intercepte les requêtes HTTP/HTTPS du processus cible.' },
+  { name: 'stop_http_proxy', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Arrête le proxy HTTP actif et retire les hooks.' },
+  { name: 'get_http_proxy_requests', category: 'Réseau', risk: 'safe', execution: 'direct', summary: 'Liste les requêtes HTTP interceptées par le proxy actif.' },
+  { name: 'modify_http_request', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Modifie le body d\'une requête HTTP interceptée avant envoi.' },
+  { name: 'spoof_dns', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Redirige un domaine vers une IP locale via le fichier hosts.' },
+  { name: 'restore_dns', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Retire l\'entrée DNS spoofée du fichier hosts.' },
+  { name: 'set_lag_switch', category: 'Réseau', risk: 'injection', execution: 'confirm', summary: 'Retarde les fonctions recv/WSARecv du processus cible.' },
 
   // --- Stealth ---
-  { name: 'apply_stealth_mode', category: 'Stealth', risk: 'injection', execution: 'confirm', summary: 'Active le mode discret (anti-debug, masquage process/DLL).', note: CLAUDE_ONLY_NOTE },
-  { name: 'restore_stealth_mode', category: 'Stealth', risk: 'injection', execution: 'confirm', summary: 'Désactive le mode discret et restaure l\'état original.', note: CLAUDE_ONLY_NOTE },
-  { name: 'get_stealth_status', category: 'Stealth', risk: 'safe', execution: 'direct', summary: 'Retourne l\'état courant du mode discret (actif, profil, modules).', note: CLAUDE_ONLY_NOTE },
+  { name: 'apply_stealth_mode', category: 'Stealth', risk: 'injection', execution: 'confirm', summary: 'Active le mode discret (anti-debug, masquage process/DLL).' },
+  { name: 'restore_stealth_mode', category: 'Stealth', risk: 'injection', execution: 'confirm', summary: 'Désactive le mode discret et restaure l\'état original.' },
+  { name: 'get_stealth_status', category: 'Stealth', risk: 'safe', execution: 'direct', summary: 'Retourne l\'état courant du mode discret (actif, profil, modules).' },
 
   // --- Fichiers de sauvegarde / UWP ---
   { name: 'discover_save_files', category: 'Fichiers de sauvegarde / UWP', risk: 'safe', execution: 'direct', summary: 'Cherche les fichiers de sauvegarde probables du processus (UWP).' },
@@ -117,12 +118,12 @@ export const assistantTools: AssistantTool[] = [
   { name: 'trainer_restore_request', category: 'Trainer', risk: 'write', execution: 'confirm', summary: 'Prépare une demande de restauration Trainer.', note: 'Confirmation à donner dans l\'onglet Trainer (modèle local) ou via le clic RiskGate déclenché par le backend Claude.' },
 
   // --- WebView2 / CDP ---
-  { name: 'getWebView2InspectorStatus', category: 'WebView2 / CDP', risk: 'safe', execution: 'direct', summary: 'Retourne l\'état de l\'inspecteur WebView2/CDP (connecté, endpoint, target).', note: CLAUDE_ONLY_NOTE },
-  { name: 'listWebView2CdpTargets', category: 'WebView2 / CDP', risk: 'debug', execution: 'direct', summary: 'Liste les targets CDP WebView2 disponibles pour un process browser donné.', note: CLAUDE_ONLY_NOTE },
-  { name: 'connectWebView2Inspector', category: 'WebView2 / CDP', risk: 'debug', execution: 'confirm', summary: 'Connecte l\'inspecteur à une target CDP.', note: `S'attache à un process externe. ${CLAUDE_ONLY_NOTE}` },
-  { name: 'disconnectWebView2Inspector', category: 'WebView2 / CDP', risk: 'safe', execution: 'direct', summary: 'Déconnecte l\'inspecteur WebView2/CDP courant.', note: CLAUDE_ONLY_NOTE },
-  { name: 'evaluateWebView2JavaScript', category: 'WebView2 / CDP', risk: 'script', execution: 'confirm', summary: 'Évalue une expression JavaScript arbitraire dans la target connectée.', note: `Peut lire ou modifier l'état JS selon le code fourni. ${CLAUDE_ONLY_NOTE}` },
-  { name: 'findWebView2DisplayedValues', category: 'WebView2 / CDP', risk: 'debug', execution: 'direct', summary: 'Cherche une valeur numérique affichée dans le DOM de la target connectée.', note: CLAUDE_ONLY_NOTE },
-  { name: 'findWebView2DisplayedText', category: 'WebView2 / CDP', risk: 'debug', execution: 'direct', summary: 'Cherche un texte affiché dans le DOM de la target connectée.', note: CLAUDE_ONLY_NOTE },
-  { name: 'probeWebView2GlobalScope', category: 'WebView2 / CDP', risk: 'safe', execution: 'direct', summary: 'Sonde le scope JS global (window) de la target connectée.', note: CLAUDE_ONLY_NOTE },
+  { name: 'getWebView2InspectorStatus', category: 'WebView2 / CDP', risk: 'safe', execution: 'direct', summary: 'Retourne l\'état de l\'inspecteur WebView2/CDP (connecté, endpoint, target).' },
+  { name: 'listWebView2CdpTargets', category: 'WebView2 / CDP', risk: 'debug', execution: 'direct', summary: 'Liste les targets CDP WebView2 disponibles pour un process browser donné.' },
+  { name: 'connectWebView2Inspector', category: 'WebView2 / CDP', risk: 'debug', execution: 'confirm', summary: 'Connecte l\'inspecteur à une target CDP.', note: 'S\'attache à un process externe. Le backend Claude s\'y connecte directement après confirmation ; le modèle local redirige vers l\'onglet WebView2 pour choisir la target à la main.' },
+  { name: 'disconnectWebView2Inspector', category: 'WebView2 / CDP', risk: 'safe', execution: 'direct', summary: 'Déconnecte l\'inspecteur WebView2/CDP courant.' },
+  { name: 'evaluateWebView2JavaScript', category: 'WebView2 / CDP', risk: 'script', execution: 'confirm', summary: 'Évalue une expression JavaScript arbitraire dans la target connectée.', note: 'Peut lire ou modifier l\'état JS selon le code fourni. Nécessite une target déjà connectée (connectWebView2Inspector ou l\'onglet WebView2).' },
+  { name: 'findWebView2DisplayedValues', category: 'WebView2 / CDP', risk: 'debug', execution: 'direct', summary: 'Cherche une valeur numérique affichée dans le DOM de la target connectée.' },
+  { name: 'findWebView2DisplayedText', category: 'WebView2 / CDP', risk: 'debug', execution: 'direct', summary: 'Cherche un texte affiché dans le DOM de la target connectée.' },
+  { name: 'probeWebView2GlobalScope', category: 'WebView2 / CDP', risk: 'safe', execution: 'direct', summary: 'Sonde le scope JS global (window) de la target connectée.' },
 ]
