@@ -46,6 +46,11 @@ add_library(killcore STATIC
     kernel/kernel_driver_bridge.h
     kernel/kernel_driver_bridge.cpp
 
+    # Backend IA externe (T1) — chiffrement DPAPI de la clé API, lié au
+    # compte Windows courant. Voir docs/EXTERNAL_AI_BACKEND_ROADMAP.md.
+    security/dpapi_key_store.h
+    security/dpapi_key_store.cpp
+
     # Memory
     memory/memory_map.cpp
     memory/memory_reader.cpp
@@ -243,6 +248,7 @@ target_link_libraries(killcore PUBLIC
     psapi
     dbghelp
     advapi32
+    crypt32
 )
 
 if(TARGET Zydis::Zydis)

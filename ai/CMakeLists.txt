@@ -13,6 +13,7 @@ add_library(killai STATIC
     llama_server.cpp
     model_locator.cpp
     tool_registry.cpp
+    anthropic_tool_schema.cpp
     tool_validator.cpp
     state_machine.cpp
     auto_resolver.cpp

@@ -1,6 +1,6 @@
 # Backend IA externe (clé API) — chantier de réflexion
 
-Statut : proposition, pas encore de code. Scoping ouvert le 06/09/2026 suite à une
+Statut : T1/T2 codés et testés (07/09/2026), T3-T6 pas encore commencés. Scoping ouvert le 06/09/2026 suite à une
 session d'investigation live (Solitaire XP, voir `PHASE_TRACKER.md` entrée
 `INVESTIGATION-SOLITAIRE-XP-2` et la mémoire `solitaire_memory_editing_technique.md`)
 qui a servi de cas d'école.
@@ -97,28 +97,38 @@ extraits de code désassemblé) part vers un tiers. Ça doit être :
 ## Découpage en tâches d'implémentation (06/09/2026)
 
 Ordre de dépendance ci-dessous ; T1 et T2 sont indépendantes et peuvent démarrer
-en parallèle, tout le reste en découle. Rien n'est commencé.
+en parallèle, tout le reste en découle.
 
-**T1 — Stockage clé API (DPAPI)** — indépendant.
-Petit module dédié (`CryptProtectData`/`CryptUnprotectData`, Win32, même pattern
-`#ifdef Q_OS_WIN` que le reste du code), blob chiffré stocké dans QSettings, lié
-au compte Windows de l'utilisateur. Tests unitaires : round-trip encrypt/decrypt
-(faisable dans le process de test lui-même, aucun besoin d'UI réelle).
+**T1 — Stockage clé API (DPAPI) — fait (07/09/2026, Claude).**
+`core/security/dpapi_key_store.h/.cpp` (namespace `killcore`), `CryptProtectData`/
+`CryptUnprotectData` derrière `#ifdef _WIN32` (stub explicite non-Windows,
+jamais de fallback silencieux), lié à `crypt32` dans `core/CMakeLists.txt`. Ne
+touche pas encore QSettings lui-même — c'est une brique de chiffrement pure
+(`encrypt(QByteArray) -> QByteArray`/`decrypt(...)`), le stockage réel dans
+QSettings viendra avec T4 (`setExternalAiApiKey`). 4 tests unitaires
+(`tests/unit/test_dpapi_key_store.cpp`) : round-trip réel (pas de mock, même
+esprit que `test_memory_heatmap_collector.cpp`), round-trip chaîne vide, blob
+corrompu échoue explicitement, blob vide échoue explicitement. Build + 439/439
+tests OK.
 
-**T2 — Schéma d'outils Anthropic** — indépendant de T1.
-Fonction de conversion `ToolRegistry::availableTools()` → format `tools` de
-l'API Messages Anthropic (`name`/`description`/`input_schema` JSON Schema).
-**Point dur identifié en cogitant (06/09/2026)** : `ai/tool_registry.cpp`
-(`makeTool()`) ne stocke aujourd'hui que `{name, description, requiredArgs
-(juste les noms d'arguments, pas de types), risk, requiresConfirmation}` — pas
-de type par argument (int/string/bool/etc.), pas de description par argument.
-Anthropic attend un vrai JSON Schema typé. **À trancher avant de coder** :
-(a) tout passer en `string` générique dans `input_schema` (rapide, mais Claude
-doit deviner les types depuis le contexte, plus de risque d'appels malformés),
-ou (b) enrichir `tool_registry.cpp` avec de vrais types/descriptions par
-argument (plus de travail up-front, meilleure fiabilité des appels — et ça
-profiterait aussi potentiellement au modèle local). Tests unitaires : chaque
-outil enregistré produit un schéma valide.
+**T2 — Schéma d'outils Anthropic — fait (07/09/2026, Claude).**
+Décision tranchée par le propriétaire : **option (b)**, enrichir
+`tool_registry.cpp` avec de vrais types/descriptions par argument plutôt que du
+`string` générique partout. `ArgSpec{name, type, description}` ajouté à
+`makeTool()` dans `ai/tool_registry.cpp` (~50 outils, tous les arguments
+existants annotés un par un depuis leur usage réel dans
+`smart_search_manager.cpp`) ; `requiredArgs` (juste les noms) reste inchangé
+pour compat avec les consommateurs existants (`ai_engine.cpp`,
+`llama_runtime.cpp`), un nouveau champ `args` (liste typée) s'ajoute en plus.
+Nouveau module `ai/anthropic_tool_schema.h/.cpp`
+(`killai::toolsToAnthropicSchema(QVariantList) -> QJsonArray`) qui convertit ça
+en `input_schema` JSON Schema Anthropic (`type: object`, `properties`,
+`required`). 4 tests unitaires (`tests/unit/test_anthropic_tool_schema.cpp`) :
+un schéma par outil enregistré, outil avec arguments (types + required
+corrects), outil sans arguments (properties vide, pas de required), types
+booléen/entier préservés. Le prompt hardcodé de `llama_runtime.cpp` (modèle
+local) n'a pas été touché — reste hors scope de T2, piste notée pour plus tard
+si utile.
 
 **T3 — Client HTTP Claude (Messages API)** — dépend de T2, indépendant de T1.
 Nouveau module (manager dédié, même patron que les autres managers

@@ -12,6 +12,7 @@ add_executable(killengine_unit_tests
     unit/test_logger.cpp
     unit/test_candidate_store.cpp
     unit/test_ai_tools.cpp
+    unit/test_anthropic_tool_schema.cpp
     unit/test_query_text_utils.cpp
     unit/test_ai_adaptive.cpp
     unit/test_auto_resolver.cpp
@@ -22,6 +23,7 @@ add_executable(killengine_unit_tests
     unit/test_power_up_modules.cpp
     unit/test_breakpoint_arbiter.cpp
     unit/test_kernel_driver_bridge.cpp
+    unit/test_dpapi_key_store.cpp
     unit/test_speedhack_clock.cpp
     unit/test_package_storage.cpp
     unit/test_file_watch.cpp
