@@ -20,6 +20,17 @@ TEST(AnthropicMessagesTest, RequestBodyOmitsToolsWhenSchemaIsEmpty) {
     EXPECT_GT(body.value("max_tokens").toInt(), 0);
 }
 
+TEST(AnthropicMessagesTest, RequestBodyOmitsSystemFieldWhenEmpty) {
+    const QJsonObject body = buildAnthropicRequestBody(QJsonArray(), QJsonArray());
+    EXPECT_FALSE(body.contains("system"));
+}
+
+TEST(AnthropicMessagesTest, RequestBodyIncludesSystemPromptWhenProvided) {
+    const QJsonObject body = buildAnthropicRequestBody(QJsonArray(), QJsonArray(), "claude-sonnet-4-5", 4096, "Tu es l'assistant KillEngine.");
+    ASSERT_TRUE(body.contains("system"));
+    EXPECT_EQ(body.value("system").toString(), "Tu es l'assistant KillEngine.");
+}
+
 TEST(AnthropicMessagesTest, RequestBodyIncludesToolsWhenSchemaProvided) {
     QJsonArray tools;
     tools.append(QJsonObject{{"name", "exact_scan"}});

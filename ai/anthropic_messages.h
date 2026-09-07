@@ -13,14 +13,18 @@ namespace killai {
 // ClaudeBackendClient (qui fait le vrai POST HTTP) pour rester testables
 // unitairement sans réseau. Voir docs/EXTERNAL_AI_BACKEND_ROADMAP.md.
 
-// Corps JSON d'une requête POST /v1/messages : {model, max_tokens, tools
-// (omis si vide), messages}. `messages` est l'historique complet de la
-// conversation (rôles user/assistant), construit et maintenu par l'appelant
-// au fil de la boucle agentique.
+// Corps JSON d'une requête POST /v1/messages : {model, max_tokens, system
+// (omis si vide), tools (omis si vide), messages}. `messages` est
+// l'historique complet de la conversation (rôles user/assistant), construit
+// et maintenu par l'appelant au fil de la boucle agentique. `systemPrompt`
+// est un champ top-level du protocole Anthropic (pas un message) — son
+// contenu (méthodologie KillEngine) est entièrement à la charge de
+// l'appelant, cette fonction reste agnostique de son contenu.
 QJsonObject buildAnthropicRequestBody(const QJsonArray& toolsSchema,
                                        const QJsonArray& messages,
                                        const QString& model = QStringLiteral("claude-sonnet-4-5"),
-                                       int maxTokens = 4096);
+                                       int maxTokens = 4096,
+                                       const QString& systemPrompt = QString());
 
 // Message utilisateur simple {role: "user", content: text}.
 QJsonObject makeUserMessage(const QString& text);

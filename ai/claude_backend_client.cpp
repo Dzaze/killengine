@@ -79,7 +79,8 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
                                               const QString& userMessage,
                                               const QJsonArray& toolsSchema,
                                               const ToolExecutor& executor,
-                                              int maxToolTurns) {
+                                              int maxToolTurns,
+                                              const QString& systemPrompt) {
     QVariantMap result;
 
     if (apiKey.trimmed().isEmpty()) {
@@ -105,7 +106,7 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
     bool receivedAnyResponse = false;
 
     for (int turn = 0; turn < maxToolTurns; ++turn) {
-        const QJsonObject requestBody = buildAnthropicRequestBody(toolsSchema, m_conversationHistory);
+        const QJsonObject requestBody = buildAnthropicRequestBody(toolsSchema, m_conversationHistory, QStringLiteral("claude-sonnet-4-5"), 4096, systemPrompt);
 
         int httpStatus = 0;
         bool networkOk = false;

@@ -55,11 +55,17 @@ public:
     // (kMaxHistoryMessages) réinitialise la conversation avec un message
     // explicite plutôt que de la laisser grossir indéfiniment ou de la
     // tronquer silencieusement au milieu d'un échange tool_use/tool_result.
+    // `systemPrompt` est transmis tel quel au champ top-level "system" du
+    // protocole Anthropic à chaque requête de cette conversation — son
+    // contenu (méthodologie KillEngine) est entièrement à la charge de
+    // l'appelant (ClaudeChatManager), cette classe reste agnostique de son
+    // contenu comme du reste des outils.
     QVariantMap sendMessage(const QString& apiKey,
                              const QString& userMessage,
                              const QJsonArray& toolsSchema,
                              const ToolExecutor& executor,
-                             int maxToolTurns = 8);
+                             int maxToolTurns = 8,
+                             const QString& systemPrompt = QString());
 
     // Efface l'historique de conversation — à appeler quand le contexte
     // devient invalide (changement de processus attaché, désactivation du

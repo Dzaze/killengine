@@ -8,10 +8,14 @@ namespace killai {
 QJsonObject buildAnthropicRequestBody(const QJsonArray& toolsSchema,
                                        const QJsonArray& messages,
                                        const QString& model,
-                                       int maxTokens) {
+                                       int maxTokens,
+                                       const QString& systemPrompt) {
     QJsonObject body;
     body["model"] = model;
     body["max_tokens"] = maxTokens;
+    if (!systemPrompt.isEmpty()) {
+        body["system"] = systemPrompt;
+    }
     if (!toolsSchema.isEmpty()) {
         body["tools"] = toolsSchema;
     }

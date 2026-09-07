@@ -218,6 +218,20 @@ TEST(ClaudeBackendClientTest, ResetConversationClearsHistoryForNextMessage) {
     EXPECT_EQ(secondCallMessages.at(0).toObject().value("content").toString(), "nouveau contexte");
 }
 
+TEST(ClaudeBackendClientTest, ForwardsSystemPromptOnEveryRequest) {
+    QString capturedSystem;
+    ClaudeBackendClient client([&](const QString&, const QJsonObject& requestBody, int& httpStatus, bool& ok, QString&) -> QByteArray {
+        httpStatus = 200;
+        ok = true;
+        capturedSystem = requestBody.value("system").toString();
+        return finalTextResponseBody("ok");
+    });
+
+    client.sendMessage("sk-ant-test", "test", QJsonArray(), nullptr, 8, "Tu es l'assistant KillEngine.");
+
+    EXPECT_EQ(capturedSystem, "Tu es l'assistant KillEngine.");
+}
+
 TEST(ClaudeBackendClientTest, NetworkFailureOnFirstCallDoesNotLeaveDanglingUserMessage) {
     ClaudeBackendClient client([&](const QString&, const QJsonObject&, int&, bool& ok, QString& errorMessage) -> QByteArray {
         ok = false;
