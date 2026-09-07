@@ -14,6 +14,8 @@ add_library(killai STATIC
     model_locator.cpp
     tool_registry.cpp
     anthropic_tool_schema.cpp
+    anthropic_messages.cpp
+    claude_backend_client.cpp
     tool_validator.cpp
     state_machine.cpp
     auto_resolver.cpp

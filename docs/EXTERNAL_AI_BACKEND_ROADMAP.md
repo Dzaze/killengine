@@ -1,6 +1,6 @@
 # Backend IA externe (clé API) — chantier de réflexion
 
-Statut : T1/T2 codés et testés (07/09/2026), T3-T6 pas encore commencés. Scoping ouvert le 06/09/2026 suite à une
+Statut : T1/T2/T3 codés et testés (07/09/2026), T4-T6 pas encore commencés. Scoping ouvert le 06/09/2026 suite à une
 session d'investigation live (Solitaire XP, voir `PHASE_TRACKER.md` entrée
 `INVESTIGATION-SOLITAIRE-XP-2` et la mémoire `solitaire_memory_editing_technique.md`)
 qui a servi de cas d'école.
@@ -130,24 +130,64 @@ booléen/entier préservés. Le prompt hardcodé de `llama_runtime.cpp` (modèle
 local) n'a pas été touché — reste hors scope de T2, piste notée pour plus tard
 si utile.
 
-**T3 — Client HTTP Claude (Messages API)** — dépend de T2, indépendant de T1.
-Nouveau module (manager dédié, même patron que les autres managers
-`apps/desktop/*_manager.*`) utilisant `QNetworkAccessManager` (déjà présent
-dans le projet via `core/webview2/cdp_client.cpp` — aucune nouvelle
-dépendance). Boucle agentique : envoie message + tools → reçoit un bloc
-`tool_use` → exécute le `Q_INVOKABLE` correspondant → renvoie `tool_result` →
-répète jusqu'à réponse texte finale. Commencer par une requête simple
-non-streamée (pas de SSE) pour la v1 — plus simple, le streaming pourra venir
-plus tard si la latence perçue le justifie. Erreur explicite (401 clé
-invalide, erreurs réseau) — jamais de fallback silencieux (décision ci-dessus).
-Compteur de requêtes incrémenté à chaque appel API.
+**T3 — Client HTTP Claude (Messages API) — fait (07/09/2026, Claude).**
+Réalisé en 3 modules, tous dans `ai/` (pas `apps/desktop/*_manager.*` comme
+envisagé initialement — voir écart ci-dessous) :
+- `ai/anthropic_messages.h/.cpp` : briques pures sans accès réseau (construction
+  des messages user/assistant/tool_result, parsing d'une réponse `/v1/messages`
+  en texte + blocs `tool_use`, distinction erreur HTTP explicite ex. 401 vs JSON
+  illisible). Entièrement testable sans réseau.
+- `ai/claude_backend_client.h/.cpp` (`killai::ClaudeBackendClient`) : boucle
+  agentique bornée (`maxToolTurns`, défaut 8, garde-fou anti-boucle infinie) —
+  envoie message + tools → reçoit `tool_use` → exécute via un `ToolExecutor`
+  injecté → renvoie `tool_result` → répète jusqu'à réponse texte finale.
+  Transport HTTP réel via `QNetworkAccessManager` + `QEventLoop` (même patron
+  que `core/webview2/cdp_client.cpp::sendCommandSync`), mais **injectable**
+  (`HttpPostFn`) pour permettre de tester toute la boucle sans réseau réel.
+  Requête non-streamée (pas de SSE), erreur explicite (401, réseau, boucle non
+  terminée) — jamais de fallback silencieux. Compteur de requêtes
+  (`requestCount()`) incrémenté à chaque appel HTTP réel.
+- 15 tests unitaires (`tests/unit/test_anthropic_messages.cpp`,
+  `tests/unit/test_claude_backend_client.cpp`), dont la boucle complète
+  outil→résultat→réponse finale, l'arrêt après `maxToolTurns`, et la
+  propagation d'erreur réseau/401 — tout sans toucher le réseau.
+
+**Écart de conception vs. l'énoncé initial de T3, tranché en cogitant
+(07/09/2026)** : le texte d'origine disait "exécute le `Q_INVOKABLE`
+correspondant" directement depuis ce module. En creusant, la seule logique
+existante qui sait faire "nom d'outil → vrai appel `ApplicationController`"
+est celle, très longue (~860 lignes) et non factorisée, embarquée dans
+`SmartSearchManager::startSmartSearch` (`apps/desktop/smart_search_manager.cpp`
+lignes ~3543-4405) — elle mélange dispatch et contexte local de la fonction
+(pas une méthode `dispatch(tool, args)` réutilisable telle quelle). L'extraire
+proprement aurait été un refactor invasif d'un fichier chaud, partagé avec
+d'autres agents (voir [[parallel_codex_sessions]], [[project_refactor_roadmap_established]])
+— hors scope raisonnable d'une tâche T3 sensée être "indépendante". Décision :
+`ClaudeBackendClient` ne connaît **aucun** outil KillEngine — le mapping réel
+est injecté via `ToolExecutor` (`std::function<QVariantMap(QString, QVariantMap)>`),
+explicitement délégué à T4 ("Route le point d'entrée existant..."). Cela
+déplace aussi, vers T4, la question de sécurité laissée ouverte : la logique
+de dispatch existante refuse déjà d'exécuter un outil `requiresConfirmation=true`
+depuis un contexte chat (elle renvoie `requires_confirmation` sans agir, voir
+PHASE 140) — T4 devra décider si l'exécuteur injecté au backend Claude adopte
+la même politique (probable, cohérent avec PHASE 271-272 : sécurité via
+RiskGate à l'exécution, jamais via censure du schéma d'outils) plutôt que
+d'exécuter les outils risqués sans confirmation comme le fait le pipe
+d'automatisation (mode dev opt-in distinct, voir `docs/AUTOMATION_API.md`).
 
 **T4 — `Q_INVOKABLE` `ApplicationController`** — dépend de T1 + T3.
 `setExternalAiApiKey(key)` / `clearExternalAiApiKey()` / `hasExternalAiApiKey()`
 (ce dernier ne retourne jamais la clé elle-même, juste un booléen),
 `setActiveAiBackend("local"|"claude")` / `getActiveAiBackend()`,
 `getExternalAiRequestCount()`. Route le point d'entrée existant du chat
-Assistant vers le bon backend selon le choix actif de l'utilisateur.
+Assistant vers le bon backend selon le choix actif de l'utilisateur. **Doit
+aussi construire le `ToolExecutor` réel** passé à `ClaudeBackendClient::sendMessage`
+(voir écart T3 ci-dessus) : pour chaque tool_use reçu, retrouver
+`requiresConfirmation` via `ToolRegistry::toolMetadata(name)`, exécuter
+directement si `false`, sinon renvoyer un `tool_result` explicite du type
+"nécessite une confirmation utilisateur dans l'UI KillEngine, non exécuté" au
+lieu d'agir — cohérent avec le comportement déjà établi du chat local
+(PHASE 140) plutôt que le contournement RiskGate du pipe d'automatisation.
 
 **T5 — UI Réglages** — dépend de T4.
 Nouvelle section dans `SettingsView.vue`, juste à côté du champ "Chemin

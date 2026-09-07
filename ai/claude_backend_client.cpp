@@ -1,0 +1,149 @@
+#include "claude_backend_client.h"
+
+#include "anthropic_messages.h"
+
+#include <QEventLoop>
+#include <QJsonDocument>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QTimer>
+#include <QUrl>
+
+namespace killai {
+
+namespace {
+constexpr const char* kAnthropicMessagesUrl = "https://api.anthropic.com/v1/messages";
+constexpr const char* kAnthropicVersion = "2023-06-01";
+} // namespace
+
+ClaudeBackendClient::ClaudeBackendClient(HttpPostFn httpPost)
+    : m_httpPost(std::move(httpPost)) {
+    if (!m_httpPost) {
+        m_httpPost = [this](const QString& apiKey, const QJsonObject& requestBody, int& httpStatus, bool& ok, QString& errorMessage) {
+            return defaultHttpPost(apiKey, requestBody, httpStatus, ok, errorMessage);
+        };
+    }
+}
+
+QByteArray ClaudeBackendClient::defaultHttpPost(const QString& apiKey, const QJsonObject& requestBody, int& httpStatus, bool& ok, QString& errorMessage) {
+    QNetworkAccessManager manager;
+
+    QNetworkRequest request{QUrl(QString::fromLatin1(kAnthropicMessagesUrl))};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setRawHeader("x-api-key", apiKey.toUtf8());
+    request.setRawHeader("anthropic-version", kAnthropicVersion);
+
+    const QByteArray body = QJsonDocument(requestBody).toJson(QJsonDocument::Compact);
+    QNetworkReply* reply = manager.post(request, body);
+
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timer.start(60000);
+    loop.exec();
+
+    if (!timer.isActive()) {
+        reply->abort();
+        reply->deleteLater();
+        ok = false;
+        httpStatus = 0;
+        errorMessage = "Délai dépassé en attendant l'API Anthropic (60s).";
+        return {};
+    }
+    timer.stop();
+
+    httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray responseBody = reply->readAll();
+    const bool networkFailed = reply->error() != QNetworkReply::NoError && httpStatus == 0;
+    if (networkFailed) {
+        ok = false;
+        errorMessage = reply->errorString();
+    } else {
+        ok = true;
+    }
+    reply->deleteLater();
+    return responseBody;
+}
+
+QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
+                                              const QString& userMessage,
+                                              const QJsonArray& toolsSchema,
+                                              const ToolExecutor& executor,
+                                              int maxToolTurns) {
+    QVariantMap result;
+
+    if (apiKey.trimmed().isEmpty()) {
+        result["success"] = false;
+        result["error"] = "Clé API Claude manquante.";
+        return result;
+    }
+
+    QJsonArray messages;
+    messages.append(makeUserMessage(userMessage));
+
+    int toolCallsExecuted = 0;
+
+    for (int turn = 0; turn < maxToolTurns; ++turn) {
+        const QJsonObject requestBody = buildAnthropicRequestBody(toolsSchema, messages);
+
+        int httpStatus = 0;
+        bool networkOk = false;
+        QString networkError;
+        const QByteArray rawBody = m_httpPost(apiKey, requestBody, httpStatus, networkOk, networkError);
+        ++m_requestCount;
+
+        if (!networkOk) {
+            result["success"] = false;
+            result["error"] = QString("Erreur réseau: %1").arg(networkError);
+            result["toolCallsExecuted"] = toolCallsExecuted;
+            result["requestCount"] = m_requestCount;
+            return result;
+        }
+
+        const AnthropicTurnResult parsed = parseAnthropicResponse(rawBody, httpStatus);
+        if (!parsed.ok) {
+            result["success"] = false;
+            result["error"] = parsed.errorMessage;
+            result["toolCallsExecuted"] = toolCallsExecuted;
+            result["requestCount"] = m_requestCount;
+            return result;
+        }
+
+        if (parsed.toolUses.isEmpty()) {
+            result["success"] = true;
+            result["message"] = parsed.textOutput;
+            result["stopReason"] = parsed.stopReason;
+            result["toolCallsExecuted"] = toolCallsExecuted;
+            result["requestCount"] = m_requestCount;
+            return result;
+        }
+
+        messages.append(makeAssistantMessage(parsed.rawContentBlocks));
+
+        QJsonArray toolResultBlocks;
+        for (const auto& toolUse : parsed.toolUses) {
+            QVariantMap toolResult;
+            if (executor) {
+                toolResult = executor(toolUse.name, toolUse.input);
+            } else {
+                toolResult["success"] = false;
+                toolResult["error"] = "Aucun exécuteur d'outil configuré côté KillEngine.";
+            }
+            ++toolCallsExecuted;
+            const bool isError = !toolResult.value("success", true).toBool();
+            toolResultBlocks.append(makeToolResultBlock(toolUse.id, toolResult, isError));
+        }
+        messages.append(makeToolResultMessage(toolResultBlocks));
+    }
+
+    result["success"] = false;
+    result["error"] = QString("Boucle d'appels d'outils non terminée après %1 tours.").arg(maxToolTurns);
+    result["toolCallsExecuted"] = toolCallsExecuted;
+    result["requestCount"] = m_requestCount;
+    return result;
+}
+
+} // namespace killai

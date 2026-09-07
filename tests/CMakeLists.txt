@@ -13,6 +13,8 @@ add_executable(killengine_unit_tests
     unit/test_candidate_store.cpp
     unit/test_ai_tools.cpp
     unit/test_anthropic_tool_schema.cpp
+    unit/test_anthropic_messages.cpp
+    unit/test_claude_backend_client.cpp
     unit/test_query_text_utils.cpp
     unit/test_ai_adaptive.cpp
     unit/test_auto_resolver.cpp
