@@ -463,6 +463,9 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       <p class="hint">
         Optionnel, jamais activé par défaut. Bascule le chat Assistant vers l'API Claude (clé API personnelle) pour les tâches qui demandent un raisonnement plus profond que le modèle local embarqué. Dès qu'il est actif, le contexte des appels d'outils (adresses mémoire, nom du process, éventuellement du code désassemblé) part vers un tiers (Anthropic) à chaque requête. Chaque outil sensible (écriture mémoire, kernel, réseau, stealth...) reste soumis à sa propre confirmation RiskGate avant exécution — activer ce backend n'exécute rien tout seul.
       </p>
+      <p class="hint">
+        Ce backend Claude n'est qu'une option parmi d'autres, pas une limite : tu peux tout aussi bien piloter KillEngine avec le modèle en ligne de ton choix (parfois plus permissif) via le <strong>Mode Automation</strong> ci-dessous (section "Mode Automation (avancé)") — le pipe local expose toute la surface `Q_INVOKABLE` sans restriction à n'importe quel outil/agent externe sur cette machine, par exemple une extension comme Roo Code branchée dessus. Voir <code>docs/AUTOMATION_API.md</code> pour le protocole.
+      </p>
       <div class="settings-grid">
         <label>
           <span>Backend actif</span>
