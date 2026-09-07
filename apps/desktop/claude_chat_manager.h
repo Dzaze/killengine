@@ -44,6 +44,11 @@ public:
 
     int requestCount() const;
 
+    // Efface l'historique de conversation Claude (voir killai::ClaudeBackendClient::
+    // resetConversation) -- appelé à l'attach/detach d'un processus pour éviter
+    // que Claude ne réutilise des adresses mémoire d'un processus précédent.
+    void resetConversation();
+
     /// Appelé par ApplicationController::resolveClaudePendingAction
     /// (Q_INVOKABLE), lui-même appelé par le frontend après une confirmation
     /// RiskGate ou l'exécution d'une action Trainer côté Pinia.

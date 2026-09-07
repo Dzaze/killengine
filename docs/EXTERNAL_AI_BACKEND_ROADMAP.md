@@ -1,6 +1,6 @@
 # Backend IA externe (clé API) — chantier de réflexion
 
-Statut : T1-T5 codés et testés (07/09/2026), seul T6 (vérification terrain avec une vraie clé API) reste. Scoping ouvert le 06/09/2026 suite à une
+Statut : T1-T5 codés et testés (07/09/2026), T6 (vérification terrain) démarré le même jour — premier test live a trouvé et corrigé un bug réel (aucun historique de conversation entre messages, voir `docs/PHASE_TRACKER.md`), reste à re-tester après correctif. Scoping ouvert le 06/09/2026 suite à une
 session d'investigation live (Solitaire XP, voir `PHASE_TRACKER.md` entrée
 `INVESTIGATION-SOLITAIRE-XP-2` et la mémoire `solitaire_memory_editing_technique.md`)
 qui a servi de cas d'école.

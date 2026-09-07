@@ -160,3 +160,72 @@ TEST(ClaudeBackendClientTest, StopsAfterMaxToolTurnsInsteadOfLoopingForever) {
     EXPECT_EQ(callCount, 3);
     EXPECT_EQ(result.value("toolCallsExecuted").toInt(), 3);
 }
+
+TEST(ClaudeBackendClientTest, SecondMessageIncludesFirstTurnsHistory) {
+    // Regression PHASE (test terrain 07/09/2026, docs/EXTERNAL_AI_BACKEND_ROADMAP.md
+    // T6) : sans historique persistant, chaque nouveau message repartait de
+    // zero -- Claude "oubliait" tout ce qui precedait.
+    int callIndex = 0;
+    QJsonArray secondCallMessages;
+
+    ClaudeBackendClient client([&](const QString&, const QJsonObject& requestBody, int& httpStatus, bool& ok, QString&) -> QByteArray {
+        ++callIndex;
+        httpStatus = 200;
+        ok = true;
+        if (callIndex == 1) {
+            return finalTextResponseBody("J'ai trouvé 3 candidats pour 15.");
+        }
+        secondCallMessages = requestBody.value("messages").toArray();
+        return finalTextResponseBody("D'accord, je continue avec la valeur 30.");
+    });
+
+    const QVariantMap first = client.sendMessage("sk-ant-test", "cherche 15", QJsonArray(), nullptr);
+    ASSERT_TRUE(first.value("success").toBool());
+
+    const QVariantMap second = client.sendMessage("sk-ant-test", "maintenant c'est 30", QJsonArray(), nullptr);
+    ASSERT_TRUE(second.value("success").toBool());
+
+    // Le deuxieme appel doit porter : le 1er message user, la 1ere reponse
+    // assistant, et le 2eme message user -- pas juste le dernier message seul.
+    ASSERT_EQ(secondCallMessages.size(), 3);
+    EXPECT_EQ(secondCallMessages.at(0).toObject().value("role").toString(), "user");
+    EXPECT_EQ(secondCallMessages.at(0).toObject().value("content").toString(), "cherche 15");
+    EXPECT_EQ(secondCallMessages.at(1).toObject().value("role").toString(), "assistant");
+    EXPECT_EQ(secondCallMessages.at(2).toObject().value("role").toString(), "user");
+    EXPECT_EQ(secondCallMessages.at(2).toObject().value("content").toString(), "maintenant c'est 30");
+    EXPECT_EQ(client.conversationMessageCount(), 4); // user1, assistant1, user2, assistant2
+}
+
+TEST(ClaudeBackendClientTest, ResetConversationClearsHistoryForNextMessage) {
+    QJsonArray secondCallMessages;
+    int callIndex = 0;
+
+    ClaudeBackendClient client([&](const QString&, const QJsonObject& requestBody, int& httpStatus, bool& ok, QString&) -> QByteArray {
+        ++callIndex;
+        httpStatus = 200;
+        ok = true;
+        if (callIndex == 2) {
+            secondCallMessages = requestBody.value("messages").toArray();
+        }
+        return finalTextResponseBody("ok");
+    });
+
+    client.sendMessage("sk-ant-test", "premier message", QJsonArray(), nullptr);
+    client.resetConversation();
+    client.sendMessage("sk-ant-test", "nouveau contexte", QJsonArray(), nullptr);
+
+    ASSERT_EQ(secondCallMessages.size(), 1);
+    EXPECT_EQ(secondCallMessages.at(0).toObject().value("content").toString(), "nouveau contexte");
+}
+
+TEST(ClaudeBackendClientTest, NetworkFailureOnFirstCallDoesNotLeaveDanglingUserMessage) {
+    ClaudeBackendClient client([&](const QString&, const QJsonObject&, int&, bool& ok, QString& errorMessage) -> QByteArray {
+        ok = false;
+        errorMessage = "Connection refused";
+        return {};
+    });
+
+    client.sendMessage("sk-ant-test", "premier message", QJsonArray(), nullptr);
+
+    EXPECT_EQ(client.conversationMessageCount(), 0);
+}

@@ -45,11 +45,31 @@ public:
     // {success, message, error, stopReason, toolCallsExecuted, requestCount}.
     // Erreur explicite (401, réseau, boucle non terminée) — jamais de
     // fallback silencieux vers le modèle local (décision roadmap #6).
+    //
+    // Conserve l'historique complet de la conversation (tous les messages
+    // user/assistant/tool_result depuis la dernière resetConversation())
+    // comme état interne, et le renvoie intégralement à chaque appel — sans
+    // ça, chaque nouveau message repart de zéro et Claude "oublie" tout ce
+    // qui précède (bug constaté en test terrain le 07/09/2026, voir
+    // docs/EXTERNAL_AI_BACKEND_ROADMAP.md T6). Un garde-fou
+    // (kMaxHistoryMessages) réinitialise la conversation avec un message
+    // explicite plutôt que de la laisser grossir indéfiniment ou de la
+    // tronquer silencieusement au milieu d'un échange tool_use/tool_result.
     QVariantMap sendMessage(const QString& apiKey,
                              const QString& userMessage,
                              const QJsonArray& toolsSchema,
                              const ToolExecutor& executor,
                              int maxToolTurns = 8);
+
+    // Efface l'historique de conversation — à appeler quand le contexte
+    // devient invalide (changement de processus attaché, désactivation du
+    // backend Claude) pour éviter que Claude ne réutilise des adresses
+    // mémoire d'un autre processus.
+    void resetConversation();
+
+    // Nombre de messages actuellement conservés dans l'historique (pour
+    // diagnostic/tests, pas affiché à l'utilisateur).
+    int conversationMessageCount() const { return m_conversationHistory.size(); }
 
     // Compteur de transparence — nombre de requêtes HTTP envoyées à
     // l'API Anthropic depuis la construction de ce client (décision
@@ -61,6 +81,7 @@ private:
 
     HttpPostFn m_httpPost;
     int m_requestCount = 0;
+    QJsonArray m_conversationHistory;
 };
 
 } // namespace killai

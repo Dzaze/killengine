@@ -2380,6 +2380,9 @@ bool ApplicationController::attachProcess(int pid) {
     // rendait le tout premier test sur un NOUVEAU processus faussement "fiable"
     // (m_edrCheckCount >= 4 hérité de la session précédente).
     m_edrCheckCount = 0;
+    // Meme raison : l'historique de conversation Claude contient des adresses
+    // memoire du processus precedent, invalides pour le nouveau.
+    m_claudeChatManager->resetConversation();
 
     KE_LOG_INFO() << "Attached to PID " << pid << " (" << m_processName.toStdString() << ")";
 
@@ -2416,6 +2419,7 @@ void ApplicationController::detachProcess() {
     m_writeFreezeCoreManager->clearSessionState();
     m_activeProfileTargets.clear();
     m_autoWriteValueHistory.clear();
+    m_claudeChatManager->resetConversation();
 
     emit attachmentChanged();
 }

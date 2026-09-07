@@ -68,6 +68,13 @@ QByteArray ClaudeBackendClient::defaultHttpPost(const QString& apiKey, const QJs
     return responseBody;
 }
 
+namespace {
+// Garde-fou anti-croissance illimitée : reset explicite (message dédié
+// renvoyé à l'appelant) plutôt qu'une troncature silencieuse au milieu d'un
+// echange tool_use/tool_result, qui casserait le format attendu par l'API.
+constexpr int kMaxHistoryMessages = 200;
+} // namespace
+
 QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
                                               const QString& userMessage,
                                               const QJsonArray& toolsSchema,
@@ -81,13 +88,24 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
         return result;
     }
 
-    QJsonArray messages;
-    messages.append(makeUserMessage(userMessage));
+    bool conversationWasReset = false;
+    if (m_conversationHistory.size() >= kMaxHistoryMessages) {
+        resetConversation();
+        conversationWasReset = true;
+    }
+
+    // L'historique complet (tous les tours precedents) est conserve comme
+    // etat membre entre deux appels a sendMessage() -- sans ca, chaque
+    // nouveau message utilisateur reparaitrait de zero pour Claude (bug
+    // constate en test terrain le 07/09/2026, voir
+    // docs/EXTERNAL_AI_BACKEND_ROADMAP.md T6).
+    m_conversationHistory.append(makeUserMessage(userMessage));
 
     int toolCallsExecuted = 0;
+    bool receivedAnyResponse = false;
 
     for (int turn = 0; turn < maxToolTurns; ++turn) {
-        const QJsonObject requestBody = buildAnthropicRequestBody(toolsSchema, messages);
+        const QJsonObject requestBody = buildAnthropicRequestBody(toolsSchema, m_conversationHistory);
 
         int httpStatus = 0;
         bool networkOk = false;
@@ -96,32 +114,46 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
         ++m_requestCount;
 
         if (!networkOk) {
+            if (!receivedAnyResponse) {
+                // Le message utilisateur n'a jamais eu de reponse -- le
+                // retirer pour eviter deux messages "user" consecutifs au
+                // prochain appel (l'API Anthropic attend une alternance).
+                m_conversationHistory.removeLast();
+            }
             result["success"] = false;
             result["error"] = QString("Erreur réseau: %1").arg(networkError);
             result["toolCallsExecuted"] = toolCallsExecuted;
             result["requestCount"] = m_requestCount;
+            result["conversationReset"] = conversationWasReset;
             return result;
         }
 
         const AnthropicTurnResult parsed = parseAnthropicResponse(rawBody, httpStatus);
         if (!parsed.ok) {
+            if (!receivedAnyResponse) {
+                m_conversationHistory.removeLast();
+            }
             result["success"] = false;
             result["error"] = parsed.errorMessage;
             result["toolCallsExecuted"] = toolCallsExecuted;
             result["requestCount"] = m_requestCount;
+            result["conversationReset"] = conversationWasReset;
             return result;
         }
+        receivedAnyResponse = true;
 
         if (parsed.toolUses.isEmpty()) {
+            m_conversationHistory.append(makeAssistantMessage(parsed.rawContentBlocks));
             result["success"] = true;
             result["message"] = parsed.textOutput;
             result["stopReason"] = parsed.stopReason;
             result["toolCallsExecuted"] = toolCallsExecuted;
             result["requestCount"] = m_requestCount;
+            result["conversationReset"] = conversationWasReset;
             return result;
         }
 
-        messages.append(makeAssistantMessage(parsed.rawContentBlocks));
+        m_conversationHistory.append(makeAssistantMessage(parsed.rawContentBlocks));
 
         QJsonArray toolResultBlocks;
         for (const auto& toolUse : parsed.toolUses) {
@@ -136,14 +168,19 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
             const bool isError = !toolResult.value("success", true).toBool();
             toolResultBlocks.append(makeToolResultBlock(toolUse.id, toolResult, isError));
         }
-        messages.append(makeToolResultMessage(toolResultBlocks));
+        m_conversationHistory.append(makeToolResultMessage(toolResultBlocks));
     }
 
     result["success"] = false;
     result["error"] = QString("Boucle d'appels d'outils non terminée après %1 tours.").arg(maxToolTurns);
     result["toolCallsExecuted"] = toolCallsExecuted;
     result["requestCount"] = m_requestCount;
+    result["conversationReset"] = conversationWasReset;
     return result;
+}
+
+void ClaudeBackendClient::resetConversation() {
+    m_conversationHistory = QJsonArray();
 }
 
 } // namespace killai

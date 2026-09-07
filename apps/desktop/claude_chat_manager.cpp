@@ -112,6 +112,10 @@ int ClaudeChatManager::requestCount() const {
     return m_client.requestCount();
 }
 
+void ClaudeChatManager::resetConversation() {
+    m_client.resetConversation();
+}
+
 void ClaudeChatManager::resolvePendingAction(const QString& pendingId, const QVariantMap& result) {
     auto it = m_pending.find(pendingId);
     if (it == m_pending.end()) {
