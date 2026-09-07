@@ -48,6 +48,7 @@ const riskLabels: Record<string, string> = {
   debug: 'debug',
   patch: 'patch',
   injection: 'injection',
+  script: 'script',
 }
 </script>
 
