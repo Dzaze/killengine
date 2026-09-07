@@ -624,6 +624,7 @@ export const useAppStore = defineStore('app', () => {
   let backendElevatedNetworkActionsSignalConnected = false
   let backendNetworkConnectionsSignalConnected = false
   let backendModuleInstallSignalConnected = false
+  let backendClaudePendingActionSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
   // d'une reconnexion du signal (ex: rechargement dev).
@@ -2176,6 +2177,98 @@ export const useAppStore = defineStore('app', () => {
           }
         })
         backendModuleInstallSignalConnected = true
+      }
+      if (!backendClaudePendingActionSignalConnected) {
+        // Backend IA externe (T4, docs/EXTERNAL_AI_BACKEND_ROADMAP.md) : le
+        // backend Claude met sa boucle agentique en pause (C++, bloquant)
+        // en attendant une action frontend, puis reprend dès que
+        // resolveClaudePendingAction() est appelé. Deux natures d'action :
+        // - "confirm_and_execute_in_cpp" : confirmation RiskGate réelle,
+        //   la vraie écriture/action a lieu ENSUITE côté C++ (pas ici) ;
+        // - "trainer_*" : aucun Q_INVOKABLE équivalent n'existe pour le CRUD
+        //   Trainer (purement côté Pinia) -- l'action réelle a lieu ICI.
+        controller.claudePendingActionRequested?.connect(async (request) => {
+          const pendingId = String(request.pendingId ?? '')
+          if (!pendingId) return
+          const kind = String(request.kind ?? '')
+          const args = (request.args as Record<string, unknown>) ?? {}
+
+          if (kind === 'confirm_and_execute_in_cpp') {
+            const risk = (request.risk as Parameters<typeof confirmRiskAction>[0]) ?? 'injection'
+            const description = String(request.description ?? 'Action demandée par le backend Claude.')
+            const approved = await confirmRiskAction(risk, 'Confirmation backend Claude', description)
+            await controller.resolveClaudePendingAction?.(pendingId, { approved })
+            return
+          }
+
+          if (kind === 'trainer_list_features') {
+            await controller.resolveClaudePendingAction?.(pendingId, {
+              success: true,
+              features: trainerStore.trainerFeatures.map((f) => ({
+                id: f.id,
+                name: f.name,
+                action: f.action,
+                address: f.address,
+                valueType: f.valueType,
+                value: f.value,
+                enabled: f.enabled,
+                locatorKind: f.locatorKind,
+              })),
+            })
+            return
+          }
+
+          if (kind === 'trainer_create_write') {
+            const locator = (request.locator as Record<string, unknown>) ?? {}
+            const feature = trainerStore.createTrainerFeature({
+              name: 'Assistant Claude Trainer write',
+              action: 'write',
+              address: String(args.address ?? ''),
+              valueType: String(args.valueType ?? 'Int32'),
+              value: String(args.value ?? ''),
+              locatorKind: locator.locatorKind as TrainerFeature['locatorKind'] | undefined,
+              aobPattern: locator.aobPattern as string | undefined,
+              pointerChain: locator.pointerChain as TrainerFeature['pointerChain'] | undefined,
+            })
+            await controller.resolveClaudePendingAction?.(pendingId, {
+              success: !!feature,
+              error: feature ? undefined : 'Adresse manquante ou feature refusée.',
+              feature: feature ? { id: feature.id, name: feature.name, locatorKind: feature.locatorKind } : undefined,
+            })
+            return
+          }
+
+          if (kind === 'trainer_delete_feature') {
+            const id = Number(args.id)
+            trainerStore.deleteTrainerFeature(id)
+            await controller.resolveClaudePendingAction?.(pendingId, { success: true })
+            return
+          }
+
+          if (kind === 'trainer_apply_request' || kind === 'trainer_restore_request') {
+            const id = Number(args.id)
+            const all = args.all === true
+            if (kind === 'trainer_apply_request') {
+              if (all) await trainerStore.applyAllTrainerFeatures()
+              else await trainerStore.applyTrainerFeature(id)
+            } else {
+              if (all) await trainerStore.restoreAllTrainerFeatures()
+              else await trainerStore.restoreTrainerFeature(id)
+            }
+            const feature = !all ? trainerStore.trainerFeatures.find((f) => f.id === id) : undefined
+            await controller.resolveClaudePendingAction?.(pendingId, {
+              success: all || (kind === 'trainer_apply_request' ? feature?.enabled === true : feature?.enabled === false),
+              error: !all ? feature?.lastError || undefined : undefined,
+            })
+            return
+          }
+
+          await controller.resolveClaudePendingAction?.(pendingId, {
+            success: false,
+            error: `Type d'action inconnu côté frontend: ${kind}`,
+          })
+        })
+        backendClaudePendingActionSignalConnected = true
       }
       version.value = await controller.getVersion()
       loadActionLog()

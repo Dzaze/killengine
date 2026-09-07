@@ -1,6 +1,6 @@
 # Backend IA externe (clé API) — chantier de réflexion
 
-Statut : T1/T2/T3 codés et testés (07/09/2026), T4-T6 pas encore commencés. Scoping ouvert le 06/09/2026 suite à une
+Statut : T1-T4 codés et testés (07/09/2026), T5 (UI Réglages) et T6 (vérification terrain) restants. Scoping ouvert le 06/09/2026 suite à une
 session d'investigation live (Solitaire XP, voir `PHASE_TRACKER.md` entrée
 `INVESTIGATION-SOLITAIRE-XP-2` et la mémoire `solitaire_memory_editing_technique.md`)
 qui a servi de cas d'école.
@@ -175,19 +175,56 @@ RiskGate à l'exécution, jamais via censure du schéma d'outils) plutôt que
 d'exécuter les outils risqués sans confirmation comme le fait le pipe
 d'automatisation (mode dev opt-in distinct, voir `docs/AUTOMATION_API.md`).
 
-**T4 — `Q_INVOKABLE` `ApplicationController`** — dépend de T1 + T3.
-`setExternalAiApiKey(key)` / `clearExternalAiApiKey()` / `hasExternalAiApiKey()`
-(ce dernier ne retourne jamais la clé elle-même, juste un booléen),
-`setActiveAiBackend("local"|"claude")` / `getActiveAiBackend()`,
-`getExternalAiRequestCount()`. Route le point d'entrée existant du chat
-Assistant vers le bon backend selon le choix actif de l'utilisateur. **Doit
-aussi construire le `ToolExecutor` réel** passé à `ClaudeBackendClient::sendMessage`
-(voir écart T3 ci-dessus) : pour chaque tool_use reçu, retrouver
-`requiresConfirmation` via `ToolRegistry::toolMetadata(name)`, exécuter
-directement si `false`, sinon renvoyer un `tool_result` explicite du type
-"nécessite une confirmation utilisateur dans l'UI KillEngine, non exécuté" au
-lieu d'agir — cohérent avec le comportement déjà établi du chat local
-(PHASE 140) plutôt que le contournement RiskGate du pipe d'automatisation.
+**T4 — `Q_INVOKABLE` `ApplicationController` + `ToolExecutor` réel — fait (07/09/2026, Claude).**
+Portée finalement plus large que prévu : en creusant le mapping tool → appel
+réel, ~20 des 57 outils se sont révélés soit asynchrones (résultat livré par
+un signal Qt *Finished*, pas par la valeur de retour), soit inexistants côté
+`Q_INVOKABLE` (CRUD Trainer, purement Pinia). Décision prise avec le
+propriétaire (07/09/2026) : couverture complète tout de suite plutôt qu'une
+tranche verticale — détail complet du mécanisme et de chaque mapping outil
+dans `docs/PHASE_TRACKER.md`, entrée "EXTERNAL-AI-BACKEND T4".
+
+Résumé de ce qui a été construit :
+- `apps/desktop/claude_chat_manager.h/.cpp` (`killengine::ClaudeChatManager`) :
+  câble `killai::ClaudeBackendClient` (T3) à `ApplicationController` — clé API
+  (DPAPI, QSettings `ai/externalApiKeyBlob`), backend actif (QSettings
+  `ai/activeBackend`), et surtout `executeTool()`, le `ToolExecutor` réel pour
+  les 57 outils du registre (voir table complète dans PHASE_TRACKER.md).
+- Nouveau pont générique "action en attente" (`waitForFrontendAction`,
+  `waitForControllerSignal`) qui met en pause la boucle agentique bloquante
+  (même thread, `QCoreApplication::processEvents()` pompé en boucle — même
+  patron que l'attente 90s du modèle local, `ai/llama_server.cpp`) pour :
+  confirmations RiskGate réelles (exécution réelle en C++ après approbation,
+  jamais côté frontend), complétion de méthodes `*Async` existantes (signal
+  Qt natif, `QEventLoop` bornée), et actions Trainer (round-trip vers Pinia,
+  aucun `Q_INVOKABLE` équivalent n'existe).
+- `Q_INVOKABLE` ajoutés sur `ApplicationController` :
+  `setExternalAiApiKey`/`clearExternalAiApiKey`/`hasExternalAiApiKey` (ce
+  dernier ne retourne jamais la clé), `setActiveAiBackend`/`getActiveAiBackend`,
+  `getExternalAiRequestCount`, `resolveClaudePendingAction`. Nouveau signal
+  `claudePendingActionRequested`.
+- `SmartSearchManager::startSmartSearch` (point d'entrée existant du chat)
+  court-circuite désormais toute l'heuristique locale et délègue à
+  `ClaudeChatManager::sendMessage` quand le backend actif est `"claude"`.
+- Câblage frontend minimal mais fonctionnel dans `ui/src/stores/app.ts`
+  (`claudePendingActionRequested?.connect(...)`) : route les confirmations
+  vers `confirmRiskAction` existant (RiskGate déjà en place, aucune nouvelle
+  UX inventée) et les actions Trainer vers les fonctions Pinia existantes
+  (`createTrainerFeature`/`deleteTrainerFeature`/`applyTrainerFeature`/...).
+  Types ajoutés dans `ui/src/services/backend.ts`. `npm run type-check` et
+  `npm run build` OK.
+- 3 outils toujours explicitement bloqués en exécution autonome, quelle que
+  soit la confirmation (`find_what_writes`, `test_candidate_fields`,
+  `patch_file_bytes`) — même politique de sécurité que le chat local (PHASE
+  140) : tâche de fond ~1 min avec suivi visuel, ou édition de fichier réel
+  sans confirmation cliquable équivalente. `prepare_write_checkpoint`
+  également bloqué (dépend de l'historique de scan interne au modèle local,
+  jamais peuplé par ce chemin).
+
+Build complet + 454/454 tests unitaires (aucune régression). Pas de nouveaux
+tests unitaires pour `ClaudeChatManager` lui-même — dépend trop fortement
+d'`ApplicationController`/Qt event loop pour être testé isolément sans mock
+lourd ; la vérification réelle est T6 (test terrain).
 
 **T5 — UI Réglages** — dépend de T4.
 Nouvelle section dans `SettingsView.vue`, juste à côté du champ "Chemin

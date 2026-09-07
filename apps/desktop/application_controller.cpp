@@ -21,6 +21,7 @@
 
 #include "auto_resolver.h"
 #include "automation_pipe_manager.h"
+#include "claude_chat_manager.h"
 #include "clr_inspector_bridge.h"
 #include "code_patch_manager.h"
 #include "external_tool_profiler.h"
@@ -2009,6 +2010,7 @@ ApplicationController::ApplicationController(QObject* parent)
         },
         this);
     m_automationPipeManager = std::make_unique<AutomationPipeManager>(this);
+    m_claudeChatManager = std::make_unique<ClaudeChatManager>(this);
     m_investigationNotebookManager = std::make_unique<InvestigationNotebookManager>();
     m_kernelDriverManager = std::make_unique<KernelDriverManager>(
         m_handle,
@@ -7967,6 +7969,34 @@ QVariantMap ApplicationController::disableAutomationMode() {
 
 QVariantMap ApplicationController::getAutomationPipeStatus() {
     return m_automationPipeManager->getAutomationPipeStatus();
+}
+
+QVariantMap ApplicationController::setExternalAiApiKey(const QString& apiKey) {
+    return m_claudeChatManager->setApiKey(apiKey);
+}
+
+QVariantMap ApplicationController::clearExternalAiApiKey() {
+    return m_claudeChatManager->clearApiKey();
+}
+
+bool ApplicationController::hasExternalAiApiKey() const {
+    return m_claudeChatManager->hasApiKey();
+}
+
+QVariantMap ApplicationController::setActiveAiBackend(const QString& backend) {
+    return m_claudeChatManager->setActiveBackend(backend);
+}
+
+QString ApplicationController::getActiveAiBackend() const {
+    return m_claudeChatManager->activeBackend();
+}
+
+int ApplicationController::getExternalAiRequestCount() const {
+    return m_claudeChatManager->requestCount();
+}
+
+void ApplicationController::resolveClaudePendingAction(const QString& pendingId, const QVariantMap& result) {
+    m_claudeChatManager->resolvePendingAction(pendingId, result);
 }
 
 QVariantMap ApplicationController::savePointerChainProfileTarget(

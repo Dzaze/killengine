@@ -22,6 +22,7 @@ qt_add_executable(KillEngine
     save_file_investigator.cpp
     automation_pipe_server.cpp
     automation_pipe_manager.cpp
+    claude_chat_manager.cpp
     crash_handler.cpp
     investigation_notebook_manager.cpp
     smart_watchdog_manager.cpp

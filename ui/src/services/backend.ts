@@ -1573,6 +1573,17 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   enableAutomationMode?(): Promise<Record<string, unknown>>
   disableAutomationMode?(): Promise<Record<string, unknown>>
   getAutomationPipeStatus?(): Promise<Record<string, unknown>>
+  /** Backend IA externe (T4, docs/EXTERNAL_AI_BACKEND_ROADMAP.md) : clé API Claude chiffrée DPAPI + bascule locale/Claude. hasExternalAiApiKey ne retourne jamais la clé elle-même. */
+  setExternalAiApiKey?(apiKey: string): Promise<Record<string, unknown>>
+  clearExternalAiApiKey?(): Promise<Record<string, unknown>>
+  hasExternalAiApiKey?(): Promise<boolean>
+  setActiveAiBackend?(backend: 'local' | 'claude'): Promise<Record<string, unknown>>
+  getActiveAiBackend?(): Promise<string>
+  getExternalAiRequestCount?(): Promise<number>
+  /** Répond à claudePendingActionRequested (confirmation RiskGate ou résultat d'une action Trainer exécutée côté Pinia). */
+  resolveClaudePendingAction?(pendingId: string, result: Record<string, unknown>): Promise<void>
+  /** Le backend Claude a besoin d'une action frontend avant de continuer. Payload : {pendingId, kind, toolName?, args, description?, locator?}. */
+  claudePendingActionRequested?: QWebChannelSignal<Record<string, unknown>>
   applyStealthMode?(profile: string): Promise<StealthModeResult>
   restoreStealthMode?(): Promise<StealthModeResult>
   getStealthStatus?(): Promise<StealthModeStatus>

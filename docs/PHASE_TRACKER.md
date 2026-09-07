@@ -26,7 +26,7 @@ Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 - **STEALTH-SC2-1 close (03/09/2026, Roo)** : bug silencieux `applyStealthMode("sc2")` (antiDebug/dllMask échouaient, voir "constat en bonus" de l'entrée Stealth Profiler) root-causé (résolution d'adresses anti-debug sans RVA cible — faux avec l'ASLR) et corrigé, messages d'erreur dllMask précisés, échec/warnings stealth remontés dans l'Assistant. Build OK, 402/402 tests. Reste à valider en terrain sur `SC2_x64.exe`. Détail dans l'entrée "STEALTH-SC2-1" du Journal actif.
 - **STEALTH-Q3 livré (04/09/2026, Roo)** : nouveau IOCTL 0x804 dans le driver kernel — masquage/restauration d'un handle spécifique dans la table de handles d'un process (invisible à `NtQuerySystemInformation`/`SystemHandleTable`), chaîne complète câblée driver → bridge → manager → `Q_INVOKABLE` → `backend.ts`. Build OK, 403/403 tests (dont le nouveau `HandleTableReturnsFalseWhenDriverMissing`). Build clean du `.sys` en cours par le propriétaire. Détail dans l'entrée "STEALTH-Q3" du Journal actif.
 - **MODULES-UI livré (04/09/2026, Roo)** : nouvelle entrée de menu gauche "Modules" + vue dédiée — catalogue des 4 dépendances optionnelles (runtime Lua externe, modèle IA GGUF, inspecteur CLR, driver noyau) avec statut installé/manquant et installation depuis l'UI (scripts PowerShell locaux, téléchargement réseau du GGUF depuis Hugging Face, invite UAC pour le driver). Finalité d'exportabilité de KillEngine sur d'autres machines. Code écrit, build + tests à faire par Codex/Claude. Détail dans l'entrée "MODULES-UI" du Journal actif.
-- **Backend IA externe (clé API) — chantier de réflexion ouvert le 06/09/2026, décisions de conception prises le même jour.** Constat né de la session Solitaire (voir ci-dessus) que le modèle local embarqué (Qwen3.5-2B) n'aurait probablement pas pu mener seul l'investigation multi-étapes de la session — pas un manque d'outils, un manque de profondeur de raisonnement. Décision retenue : backend IA externe optionnel (clé API), choisi dans les Réglages à côté du modèle local qui reste le défaut. **Un seul provider pour commencer : Claude — OpenAI/Codex ou tout autre provider ne sera ajouté que sur demande explicite du propriétaire, ne pas généraliser par anticipation.** Bascule manuelle globale (pas de routage automatique par tâche), clé stockée via DPAPI Windows, tous les outils disponibles sans restriction, coût géré par l'utilisateur (compteur de transparence seulement), erreur explicite si la clé échoue (jamais de fallback silencieux). **T1 (stockage DPAPI), T2 (schéma d'outils Anthropic) et T3 (client HTTP Claude + boucle agentique) codés et testés le 07/09/2026** — voir entrées "EXTERNAL-AI-BACKEND T1/T2" et "T3" ci-dessous. T4-T6 restants, détail dans `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`.
+- **Backend IA externe (clé API) — chantier de réflexion ouvert le 06/09/2026, décisions de conception prises le même jour.** Constat né de la session Solitaire (voir ci-dessus) que le modèle local embarqué (Qwen3.5-2B) n'aurait probablement pas pu mener seul l'investigation multi-étapes de la session — pas un manque d'outils, un manque de profondeur de raisonnement. Décision retenue : backend IA externe optionnel (clé API), choisi dans les Réglages à côté du modèle local qui reste le défaut. **Un seul provider pour commencer : Claude — OpenAI/Codex ou tout autre provider ne sera ajouté que sur demande explicite du propriétaire, ne pas généraliser par anticipation.** Bascule manuelle globale (pas de routage automatique par tâche), clé stockée via DPAPI Windows, tous les outils disponibles sans restriction, coût géré par l'utilisateur (compteur de transparence seulement), erreur explicite si la clé échoue (jamais de fallback silencieux). **T1-T4 codés et testés le 07/09/2026** (DPAPI, schéma d'outils Anthropic, client HTTP + boucle agentique, ToolExecutor réel pour les 57 outils + pont de confirmation frontend) — voir entrées "EXTERNAL-AI-BACKEND T1/T2", "T3" et "T4" ci-dessous (T4 inclut la table complète du mapping outil → exécution réelle). T5 (UI Réglages) et T6 (vérification terrain) restants, détail dans `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`.
 
 ## Règle d'utilisation
 
@@ -45,6 +45,78 @@ Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 - Sinon, aucune validation générique en attente : le chantier WebView2/CDP (WEBVIEW-A à F) est clos. UWP-STATE-1 est désormais validé en conditions réelles (03/09/2026, sur `Notepad.exe`) ; seule son application concrète à Solitaire XP reste explicitement ouverte (ligne ci-dessus).
 
 ## Journal actif
+
+### EXTERNAL-AI-BACKEND T4 — ToolExecutor réel, pont de confirmation, câblage complet (07/09/2026, Claude)
+
+**Quoi** : `apps/desktop/claude_chat_manager.h/.cpp` (`killengine::ClaudeChatManager`) câble `killai::ClaudeBackendClient` (T3) à la vraie surface `ApplicationController`, avec couverture complète des 57 outils du registre (`ai/tool_registry.cpp`) — décision propriétaire du 07/09/2026 de faire la couverture complète tout de suite plutôt qu'une tranche verticale, malgré la complexité découverte en cours de route (détaillée ci-dessous). `Q_INVOKABLE` ajoutés sur `ApplicationController` : `setExternalAiApiKey`/`clearExternalAiApiKey`/`hasExternalAiApiKey`/`setActiveAiBackend`/`getActiveAiBackend`/`getExternalAiRequestCount`/`resolveClaudePendingAction`, nouveau signal `claudePendingActionRequested`. `SmartSearchManager::startSmartSearch` route désormais vers `ClaudeChatManager::sendMessage` quand le backend actif est `"claude"` (court-circuite toute l'heuristique locale). Câblage frontend minimal dans `ui/src/stores/app.ts` (route confirmations vers `confirmRiskAction` existant, actions Trainer vers les fonctions Pinia existantes). `npm run type-check`/`npm run build` OK, build C++ complet + 454/454 tests unitaires OK.
+
+**Complexité découverte en creusant (pourquoi ce n'est pas un simple mapping 1:1)** : ~30 outils sont des appels synchrones directs, mais ~9 correspondent à des méthodes `*Async` dont le vrai résultat arrive plus tard via un signal Qt `*Finished` (pas la valeur de retour immédiate), et 5 (le CRUD Trainer) n'ont **aucun** `Q_INVOKABLE` équivalent — le Trainer n'existe que côté Pinia (`ui/src/stores/trainer.ts`), pour une raison de réentrance documentée (PHASE 168/169) : un callback JS ne peut pas être invoqué de façon synchrone depuis l'intérieur du même appel `Q_INVOKABLE` bloquant. Solution : un pont générique "action en attente" dans `ClaudeChatManager` — `waitForFrontendAction()` émet `claudePendingActionRequested` et pompe `QCoreApplication::processEvents()` en boucle (même patron que l'attente 90s du modèle local, `ai/llama_server.cpp`) jusqu'à ce que le frontend rappelle `resolveClaudePendingAction(pendingId, result)` ; `waitForControllerSignal()` fait l'équivalent pour un signal Qt natif (`QEventLoop` bornée par timeout, même patron que `core/webview2/cdp_client.cpp::sendCommandSync`). Ce pont sert à 3 usages : confirmations RiskGate réelles (exécution réelle en C++ après approbation, jamais côté frontend — cohérent avec PHASE 271-272), attente de complétion `*Async`, et round-trip Trainer vers Pinia.
+
+**Table complète du mapping outil → exécution réelle** (référence pour la suite du chantier, tous dans `apps/desktop/claude_chat_manager.cpp::executeTool` sauf mention contraire) :
+
+| Outil (`ai/tool_registry.cpp`) | Exécution réelle | Confirmation | Notes |
+|---|---|---|---|
+| `exact_scan` | `ApplicationController::startExactScan` | non | direct |
+| `exact_scan_module` | `getProcessModules` + `startExactScanExpert` bornée | non | résolution module reproduite depuis `smart_search_manager.cpp` |
+| `exact_scan_multi_type` | `startExactScanMultiType` | non | direct |
+| `next_scan` | `nextScan` | non | direct |
+| `unknown_capture` | `captureUnknownSnapshot` | non | direct |
+| `unknown_compare` | `unknownNextScan` | non | direct |
+| `auto_resolve` | `startAutoResolve` | non | direct |
+| `encrypted_scan` | `scanEncryptedValue` | non | mode=xor/key=0/keySearchBits=16 par défaut |
+| `trace_ui_string` | `scanUiStrings` | non | direct |
+| `analyze_ui_sources` | `analyzeUiStringSources` | non | direct |
+| `read_window_text` | `readAttachedWindowText` | non | direct |
+| `list_process_modules` | `getProcessModules(m_pid)` | non | accès `m_pid` via `friend class ClaudeChatManager` |
+| `start_changed_pages_diff` | `startChangedPagesDiff` | non | direct |
+| `finish_changed_pages_diff` | `finishChangedPagesDiff` | non | direct |
+| `analyze_field_stability` | `analyzeFieldStability` | non | direct |
+| `get_auto_report` | `getAutoResolveReport` | non | direct |
+| `generate_aob` | `generateAobSignature` | non | direct |
+| `suggest_patch` | `suggestCodePatches` | non | direct |
+| `disassemble_backward` | `disassembleBackward` | non | direct |
+| `discover_save_files` | `discoverProcessSaveFiles` | non | direct |
+| `inspect_local_settings` | `inspectProcessLocalSettings` | non | direct |
+| `read_save_file_text` | `readProcessSaveFileText` | non | direct |
+| `watch_save_file` | `watchSaveFileForChanges` | non | direct |
+| `get_stealth_status` | `getStealthStatus` | non | direct |
+| `getWebView2InspectorStatus` | `getWebView2InspectorStatus` | non | direct |
+| `listWebView2CdpTargets` | `listWebView2CdpTargets` | non | direct |
+| `disconnectWebView2Inspector` | `disconnectWebView2Inspector` | non | direct |
+| `findWebView2DisplayedValues` | `findWebView2DisplayedValues` | non | direct |
+| `findWebView2DisplayedText` | `findWebView2DisplayedText` | non | direct |
+| `probeWebView2GlobalScope` | `probeWebView2GlobalScope` | non | direct |
+| `get_process_network_modules` | `getProcessNetworkModules` | non | direct (sync, pas `*Async`) |
+| `get_http_proxy_requests` | `getHttpProxyRequests` | non | direct (sync) |
+| `get_process_network_connections` | `getProcessNetworkConnectionsAsync` → attend `processNetworkConnectionsFinished` | non | 1er outil "safe mais async" |
+| `write_value` | confirmation puis `writeMemoryValue` | **oui** | |
+| `freeze_value` | confirmation puis `setFreezeValue` | **oui** | |
+| `kernel_write` | confirmation puis `writeMemoryValueKernel` | **oui** | |
+| `speedhack_set` | confirmation puis `stopSpeedhack` / `setSpeedhackFactor` (si déjà actif, via `getSpeedhackStatus().active`) / `startSpeedhackAsync` → attend `speedhackStartFinished` | **oui** | logique de décision reproduite depuis `ui/src/views/AssistantView.vue` (`speedhack_apply`) |
+| `block_process_network` | confirmation puis `blockProcessNetworkAsync`/`unblockProcessNetworkAsync` → attend `processNetworkBlockFinished`/`processNetworkUnblockFinished` | **oui** | |
+| `start_http_proxy` | confirmation puis `startHttpProxyAsync` → attend `httpProxyStartFinished` | **oui** | |
+| `stop_http_proxy` | confirmation puis `stopHttpProxyAsync` → attend `httpProxyStopFinished` | **oui** | |
+| `modify_http_request` | confirmation puis `modifyHttpRequest` | **oui** | sync |
+| `spoof_dns` | confirmation puis `spoofDnsAsync` → attend `dnsSpoofFinished` | **oui** | |
+| `restore_dns` | confirmation puis `restoreDnsAsync` → attend `dnsRestoreFinished` | **oui** | |
+| `set_lag_switch` | confirmation puis `setLagSwitchAsync` → attend `lagSwitchFinished` | **oui** | |
+| `apply_stealth_mode` | confirmation puis `applyStealthMode` | **oui** | sync |
+| `restore_stealth_mode` | confirmation puis `restoreStealthMode` | **oui** | sync |
+| `connectWebView2Inspector` | confirmation puis `connectWebView2Inspector` | **oui** | sync |
+| `evaluateWebView2JavaScript` | confirmation puis `evaluateWebView2JavaScript` | **oui** | sync |
+| `trainer_list_features` | round-trip Pinia (`trainerFeatures`) | non | aucun `Q_INVOKABLE` |
+| `trainer_create_write` | round-trip Pinia (`createTrainerFeature`), locator AOB/pointer-chain résolu en C++ avant l'envoi (reproduit PHASE 163) | non | aucun `Q_INVOKABLE` |
+| `trainer_delete_feature` | round-trip Pinia (`deleteTrainerFeature`) | non | aucun `Q_INVOKABLE` |
+| `trainer_apply_request` | round-trip Pinia (`applyTrainerFeature`/`applyAllTrainerFeatures`) | via Pinia | RiskGate déjà interne à la fonction store (PHASE 120-D) |
+| `trainer_restore_request` | round-trip Pinia (`restoreTrainerFeature`/`restoreAllTrainerFeatures`) | via Pinia | idem |
+| `find_what_writes` | toujours refusé | — | tâche de fond ~debugger live, jamais autonome (PHASE 140) |
+| `test_candidate_fields` | toujours refusé | — | tâche de fond ~1 min, jamais autonome (PHASE 140) |
+| `patch_file_bytes` | toujours refusé | — | édition fichier réelle, pas d'UI cliquable équivalente (PHASE 148) |
+| `prepare_write_checkpoint` | toujours refusé | — | dépend de l'état de scan interne au modèle local, jamais peuplé par ce chemin |
+
+**Comment vérifié** : build complet (`scripts/build.ps1`) OK, 454/454 tests unitaires C++ (aucune régression), `npm run type-check`/`npm run build` OK côté frontend. Pas de test terrain réel (nécessite une vraie clé API Anthropic) — c'est exactement l'objet de T6.
+
+**Reste ouvert** : T5 (UI Réglages : sélecteur backend, champ clé API, compteur requêtes, `confirmRiskAction` à l'activation) et T6 (vérification terrain avec une vraie clé API).
 
 ### EXTERNAL-AI-BACKEND T3 — client HTTP Claude + boucle agentique (07/09/2026, Claude)
 

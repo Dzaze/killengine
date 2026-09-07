@@ -46,6 +46,7 @@ namespace killengine {
 
 class AutomationPipeServer;
 class AutomationPipeManager;
+class ClaudeChatManager;
 class ClrInspectorBridge;
 class CodePatchManager;
 class DebugFeatureManager;
@@ -80,6 +81,7 @@ class ApplicationController : public QObject {
     friend class ProfileManager;
     friend class SettingsDiagnosticsManager;
     friend class SmartSearchManager;
+    friend class ClaudeChatManager;
 
     // Propriétés exposées à QML/JS
     Q_PROPERTY(QString version READ version CONSTANT)
@@ -1548,8 +1550,40 @@ public:
     /// minces, le cycle de vie réel vit dans apps/desktop/automation_pipe_manager.*.
     void ensureAutomationPipeStartedIfConfigured();
 
+    /// Backend IA externe (T4, docs/EXTERNAL_AI_BACKEND_ROADMAP.md) : clé API
+    /// Claude chiffrée via DPAPI (core/security/dpapi_key_store.h) et stockée
+    /// dans QSettings — hasExternalAiApiKey() ne retourne jamais la clé
+    /// elle-même, juste un booléen (décision roadmap #3).
+    Q_INVOKABLE QVariantMap setExternalAiApiKey(const QString& apiKey);
+    Q_INVOKABLE QVariantMap clearExternalAiApiKey();
+    Q_INVOKABLE bool hasExternalAiApiKey() const;
+
+    /// Bascule manuelle globale entre le modèle local (défaut) et le backend
+    /// Claude — pas de routage automatique par tâche (décision roadmap #2).
+    Q_INVOKABLE QVariantMap setActiveAiBackend(const QString& backend);
+    Q_INVOKABLE QString getActiveAiBackend() const;
+
+    /// Compteur de transparence — nombre de requêtes envoyées à l'API
+    /// Anthropic depuis le démarrage de l'app (décision roadmap #5, pas de
+    /// limite imposée par KillEngine).
+    Q_INVOKABLE int getExternalAiRequestCount() const;
+
+    /// Appelé par le frontend en réponse à claudePendingActionRequested :
+    /// une confirmation RiskGate (kind="confirm_and_execute_in_cpp",
+    /// result={"approved":bool}) ou le résultat réel d'une action Trainer
+    /// exécutée côté Pinia (kind="trainer_*"). Débloque l'appel
+    /// ClaudeChatManager::sendMessage en attente pour ce pendingId.
+    Q_INVOKABLE void resolveClaudePendingAction(const QString& pendingId, const QVariantMap& result);
+
 signals:
     void attachmentChanged();
+
+    /// Backend IA externe (T4) : le backend Claude a besoin d'une action
+    /// frontend avant de pouvoir continuer (confirmation RiskGate réelle, ou
+    /// exécution d'une action Trainer qui n'existe que côté Pinia). Le
+    /// frontend doit répondre via resolveClaudePendingAction(pendingId, ...).
+    /// Payload : {pendingId, kind, toolName?, args, description?, locator?}.
+    void claudePendingActionRequested(const QVariantMap& request);
     void scanStarted();
     void scanProgress(int percent);
     void scanStatsUpdated(int candidateCount);
@@ -1741,6 +1775,7 @@ private:
     int                      m_nextScanRequestId{1};
     int                      m_nextDebugRequestId{1};
     std::unique_ptr<AutomationPipeManager> m_automationPipeManager;
+    std::unique_ptr<ClaudeChatManager> m_claudeChatManager;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
     // Stealth mode state
     killcore::AntiDebugSession m_antiDebugSession;

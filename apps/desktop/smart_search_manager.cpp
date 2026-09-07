@@ -2,6 +2,7 @@
 
 #include "application_controller.h"
 #include "auto_resolver.h"
+#include "claude_chat_manager.h"
 #include "freeze_hotkey_overlay_manager.h"
 #include "logging/logger.h"
 #include "memory/memory_reader.h"
@@ -2672,6 +2673,38 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         busy["status"] = "ai_busy";
         return busy;
     }
+
+    // Backend IA externe (T4, docs/EXTERNAL_AI_BACKEND_ROADMAP.md) : bascule
+    // manuelle globale (decision roadmap #2, pas de routage automatique par
+    // tache) -- quand le backend actif est "claude", on court-circuite TOUTE
+    // l'heuristique locale ci-dessous (intents/pre-intents specifiques au
+    // modele embarque Qwen) et on delegue entierement au backend Claude, qui
+    // fait son propre raisonnement multi-tours cote API. m_smartSearchBusy
+    // protege ce chemin comme le chemin local (ClaudeChatManager::sendMessage
+    // pompe processEvents() en attendant l'API/les confirmations, meme risque
+    // de reentrance qu'un appel IA local).
+    if (m_controller.getActiveAiBackend() == "claude") {
+        m_controller.m_smartSearchBusy = true;
+        const QVariantMap claudeResult = m_controller.m_claudeChatManager->sendMessage(query);
+        m_controller.m_smartSearchBusy = false;
+
+        QVariantMap result;
+        result["query"] = query;
+        result["aiReady"] = true;
+        result["aiBackend"] = "claude";
+        if (claudeResult.value("success").toBool()) {
+            result["actionStatus"] = "executed";
+            result["message"] = claudeResult.value("message").toString();
+        } else {
+            result["actionStatus"] = "failed";
+            result["error"] = claudeResult.value("error").toString();
+            result["message"] = claudeResult.value("error").toString();
+        }
+        result["toolCallsExecuted"] = claudeResult.value("toolCallsExecuted");
+        result["requestCount"] = claudeResult.value("requestCount");
+        return result;
+    }
+
     const QStringList numbers = numbersFromText(query);
     const QStringList chatAddresses = hexAddressesFromText(query);
     const QString explicitValueType = explicitValueTypeFromText(query);
