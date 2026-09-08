@@ -5,6 +5,7 @@
 #include "logging/logger.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSettings>
@@ -805,6 +806,16 @@ void AIEngine::clearHistory() {
     m_history.clear();
 }
 
+void AIEngine::warmupLocalModel() {
+    if (!ensureLlamaInitialized()) return;
+    const auto warmup = m_llama.warmup(m_registry);
+    if (warmup.success) {
+        KE_LOG_INFO() << "AIEngine warmup: llama.cpp prompt cache primed (" << warmup.backend.toStdString() << ").";
+    } else if (!warmup.errorMessage.isEmpty()) {
+        KE_LOG_INFO() << "AIEngine warmup skipped/failed (non-fatal): " << warmup.errorMessage.toStdString();
+    }
+}
+
 QVariantMap AIEngine::lastHistoryTurn() const {
     return m_history.isEmpty() ? QVariantMap{} : m_history.last().toMap();
 }
@@ -833,7 +844,16 @@ bool AIEngine::ensureLlamaInitialized() {
 }
 
 QVariantMap AIEngine::modelToolCallWithRetry(const QString& query, const QVariantMap& context, QString* backend) {
+    // PHASE (08/09/2026) : timing loggue pour surveiller la latence reelle du
+    // modele local en conditions terrain -- a servi a diagnostiquer un
+    // enchainement de timeouts/retries qui pouvait cumuler plusieurs minutes
+    // sur une requete texte libre ambigue (voir docs/PHASE_TRACKER.md), fixe
+    // en reduisant le budget de generation (LlamaRuntime::planToolCall).
+    QElapsedTimer callTimer;
+    callTimer.start();
     auto generated = m_llama.planToolCall(query, m_registry, context);
+    KE_LOG_INFO() << "AIEngine model tool call: attempt 1 took " << callTimer.elapsed()
+                  << "ms, success=" << generated.success << " backend=" << generated.backend.toStdString();
     QString error;
     QVariantMap call = generated.success ? LlamaRuntime::extractToolCallJson(generated.output, &error) : QVariantMap{};
 
@@ -842,7 +862,10 @@ QVariantMap AIEngine::modelToolCallWithRetry(const QString& query, const QVarian
     if (generated.success && call.isEmpty()) {
         KE_LOG_INFO() << "AIEngine retrying model tool call after invalid JSON: " << error.toStdString();
         const QString correctiveQuery = query + "\n(Rappel: reponds UNIQUEMENT par l'objet JSON du schema, sans texte autour.)";
+        callTimer.restart();
         generated = m_llama.planToolCall(correctiveQuery, m_registry, context);
+        KE_LOG_INFO() << "AIEngine model tool call: attempt 2 (corrective) took " << callTimer.elapsed()
+                      << "ms, success=" << generated.success << " backend=" << generated.backend.toStdString();
         if (generated.success) {
             call = LlamaRuntime::extractToolCallJson(generated.output, &error);
         }
@@ -1192,6 +1215,8 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
         }
         QString backend;
         const QVariantMap call = modelToolCallWithRetry(query, modelContext, &backend);
+        KE_LOG_INFO() << "AIEngine model tool call resolved: empty=" << call.isEmpty()
+                      << " tool=" << call.value("tool").toString().toStdString();
         if (!call.isEmpty()) {
             QString error;
             QVariantMap result;

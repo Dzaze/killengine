@@ -1044,6 +1044,15 @@ public:
     /// Retourne un diagnostic lisible du runtime IA local (modèle GGUF + llama-cli).
     Q_INVOKABLE QVariantMap getAiModelStatus() const;
 
+    /// Démarre le serveur llama.cpp persistant et amorce son cache_prompt en
+    /// arrière-plan (requête factice, cf. AIEngine::warmupLocalModel), pour
+    /// que le premier vrai message utilisateur n'ait pas à payer le coût de
+    /// démarrage à froid. À appeler quand le panneau Assistant s'ouvre, pas
+    /// au boot. Retourne immédiatement (le travail réel, potentiellement
+    /// bloquant jusqu'à ~90s au tout premier chargement modèle, est déporté
+    /// via un timer à délai nul pour ne pas geler l'appel JS).
+    Q_INVOKABLE void warmupLocalAiModel();
+
     /// Ouvre un sélecteur de fichier natif pour choisir un modèle GGUF (remplace la saisie manuelle du chemin).
     Q_INVOKABLE QVariantMap browseForModelFile();
 

@@ -6217,6 +6217,16 @@ QVariantMap ApplicationController::getAiModelStatus() const {
     return m_settingsDiagnosticsManager->getAiModelStatus();
 }
 
+void ApplicationController::warmupLocalAiModel() {
+    // Delai nul: rend la main a l'appelant JS immediatement, le demarrage du
+    // serveur llama.cpp (bloquant jusqu'a ~90s au tout premier chargement
+    // modele, cf. LlamaServer::startAndWait) s'execute au tour de boucle
+    // d'evenements suivant sans faire attendre le WebChannel.
+    QTimer::singleShot(0, this, [this]() {
+        m_ai.warmupLocalModel();
+    });
+}
+
 QVariantMap ApplicationController::browseForModelFile() {
     return m_settingsDiagnosticsManager->browseForModelFile();
 }

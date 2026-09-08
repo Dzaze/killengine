@@ -46,6 +46,53 @@ Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 
 ## Journal actif
 
+### Modèle local — 3 des 5 pistes du goulot d'étranglement fermées + warmup livré + bug de gel total trouvé ET corrigé (08/09/2026, Claude)
+
+**Statut : pistes 2, 4, 5 fermées (root cause trouvée + fix vérifié). Piste 1 (warmup) implémentée et vérifiée live. Piste 3 dépriorisée. Un bug distinct et plus grave (gel total de l'app) découvert pendant la vérification live, root-causé et corrigé le même jour : voir entrée séparée juste en dessous.**
+
+**Piste 4 (dimensionnement contexte) + Piste 2 (mystère "user time quasi nul") : même root cause, fermées ensemble.**
+Mesure du prefixe statique réel du prompt (`ai/llama_runtime.cpp::buildPrompt`, méthodologie + règles + exemples + 58 outils) : **14 389 caractères ≈ 3600-4100 tokens estimés**, à comparer aux `-c 4096` du serveur persistant (`ai/llama_server.cpp`) — marge quasi nulle une fois contexte/historique/query ajoutés.
+
+Root cause du "user time quasi nul mais plusieurs secondes d'attente" (test manuel `llama-cli` isolé, log verbeux `-v --log-timestamps`) : **le fallback `llama-cli` (ai/llama_runtime.cpp) ne passait AUCUN `-c`**, retombant sur le contexte natif max du modèle Qwen3.5 — **262144 tokens**. Ça alloue à froid, à CHAQUE appel `llama-cli` (process one-shot, jamais de cache) :
+- un buffer KV de **3072 Mio** (mesuré : alloc+premier-touche = **585ms**)
+- la réservation du sous-système prompt-cache/slot associée (~1s de plus)
+
+soit l'essentiel du temps "d'attente" observé, pour un prompt qui tient dans quelques milliers de tokens. Corrigé : `kLlamaContextSize = 8192` partagé (nouvelle constante `ai/llama_server.h`), passé à la fois à `llama-server` (`-c`) et — nouveauté — au fallback `llama-cli` qui n'en recevait pas du tout. Vérifié live sur cette machine (i5-8250U) : KV buffer 3072→96 Mio, alloc 585ms→19ms, temps total `llama-cli` cold ~4,7-5s→~3,6-3,7s (le reste est le coût de chargement disque du modèle + tokenizer, propre à `llama-cli`, structurellement plus lent que le serveur persistant — voir piste 1). Build complet + 461/461 tests unitaires après coup.
+
+**Piste 5 (dispatch CPU) : vérifiée, écartée.** Log `system_info` du test manuel confirme `AVX2=1 | FMA=1 | F16C=1 | BMI2=1` sans AVX512 — matche exactement le tier "haswell" attendu pour un Intel i5-8250U (Kaby Lake-R). Pas de mauvais dispatch vers un binaire générique/sous-optimal parmi les 14 variantes `ggml-cpu-*.dll` livrées.
+
+**Piste 1 (préchauffage serveur) : implémentée, PAS au boot de l'app (décision explicite du propriétaire — l'init IA reste volontairement paresseuse, cf. commentaire `ai_engine.cpp::init()`) mais à l'ouverture du panneau Assistant** :
+- `LlamaRuntime::warmup(registry)` (nouveau) : requête factice `buildPrompt("", registry, {})` avec `n_predict=4` (juste le prefill du prefixe statique compte, pas la génération).
+- `AIEngine::warmupLocalModel()` (nouveau) : `ensureLlamaInitialized()` puis `m_llama.warmup(...)`, log succès/échec non-fatal.
+- `ApplicationController::warmupLocalAiModel()` Q_INVOKABLE (nouveau) : dispatch via `QTimer::singleShot(0, ...)` pour rendre la main immédiatement au JS (le démarrage serveur peut bloquer ~90s au premier chargement modèle).
+- Frontend (`AssistantView.vue`) : `onMounted` appelle le warmup, MAIS attend l'évènement `backend.onConnectionChange` si le WebChannel n'est pas encore connecté — **bug trouvé et corrigé en live** : `AssistantView` est la vue par défaut (`stores/app.ts::activeView = ref('assistant')`), donc elle monte AVANT que `backend.connect()` ait fini ; la première version appelait `backend.getController()` immédiatement, qui jette une exception silencieusement avalée par le `try/catch` — le warmup ne partait JAMAIS. Corrigé, revérifié live : log confirme `llama-server up on port 8827 (startup 2439 ms)` puis `AIEngine warmup: llama.cpp prompt cache primed (llama-server)` ~72s plus tard, entièrement en arrière-plan avant tout message réel. Gardé par backend actif (`externalAiActiveBackend`) : ignoré si Claude externe est actif.
+
+**Piste 3 (réduire le prompt système) : dépriorisée.** Avec `-c 8192`, le prompt statique (~3600-4100 tokens) a maintenant une marge confortable (~50% du contexte) au lieu d'être quasi à ras du `-c 4096` précédent. Pas de raison de retoucher la formulation des outils/règles tant que le nombre d'outils n'augmente pas significativement.
+
+**Comment vérifié** : build complet + 461/461 tests unitaires (aucune régression) après le fix contexte ET après l'ajout du warmup ; `npm run type-check` + `npm run build` propres côté frontend ; vérification live complète du warmup via lancement réel de `KillEngine.exe` + pipe d'automatisation + lecture du log (voir ci-dessus, bug de timing frontend trouvé et corrigé dans le même passage).
+
+---
+
+### 🟢 BUG SÉPARÉ TROUVÉ ET CORRIGÉ — gel total de l'application sur une réponse modèle tronquée (08/09/2026, Claude)
+
+**Statut : root cause confirmée en conditions live, corrigée, testée (461→463 tests unitaires, 2 nouveaux), re-vérifiée en live via le pipe d'automatisation. Fermé.**
+
+**Découvert par accident** en vérifiant le warmup ci-dessus : après un warmup réussi (cache prêt), `startSmartSearch("aide moi a comprendre comment progresser dans mon investigation")` (texte libre, aucun process attaché) gelait TOUTE l'application — même un `ping` indépendant sur une nouvelle connexion pipe restait sans réponse plusieurs minutes plus tard, prouvant que ce n'était pas juste une requête lente mais **le thread principal Qt entier bloqué à 100% CPU**.
+
+**Root cause confirmée** (instrumentation temporaire ajoutée puis retirée, timing loggué à chaque étape jusqu'à isoler l'appel exact) : `LlamaRuntime::extractToolCallJson`/`extractIntentJson` (`ai/llama_runtime.cpp`) parcourent le texte généré par le modèle en cherchant chaque `{` en partant de la fin :
+```cpp
+start = text.lastIndexOf('{', start - 1);
+```
+`QString::lastIndexOf(ch, from)` avec un `from` négatif ne veut PAS dire "rien avant cette position" mais **"recompte depuis la fin de la chaîne"** (doc Qt). Quand `start` valait 0 (un `{` en tout début de texte, ex: JSON tronqué qui ne se referme jamais faute d'avoir atteint le budget de génération), `start - 1 == -1` relançait donc la recherche depuis la fin et retrouvait indéfiniment le MÊME `{` — **boucle infinie à 100% CPU** sur le thread appelant (le thread principal Qt en usage réel, puisque tout l'appel IA est synchrone). Reproduit et confirmé en direct : une réponse modèle tronquée de 85 caractères commençant par `{` déclenchait le gel à coup sûr.
+
+**Corrigé** : `if (start == 0) break;` avant le `lastIndexOf` recursif, dans les deux fonctions (`ai/llama_runtime.cpp`).
+
+**Tests de non-régression ajoutés** (`tests/unit/test_ai_tools.cpp`) : `ExtractToolCallJsonDoesNotHangOnUnterminatedJsonAtStart` et `ExtractIntentJsonDoesNotHangOnUnterminatedJsonAtStart`, JSON tronqué démarrant à l'index 0 sur les deux fonctions — passent en 0ms (avant le fix, ces cas auraient gelé le test runner indéfiniment).
+
+**Comment vérifié en live** : même requête exacte renvoyée via le pipe d'automatisation après le fix → réponse en **56,5s** (bornée par les deux tentatives modèle réelles, ~33s+22s, cf. entrée goulot d'étranglement ci-dessus) au lieu d'un gel infini (tué après 9+ minutes sans résolution lors de la première reproduction) ; `ping` indépendant confirmé réactif immédiatement après.
+
+**Effet de bord positif découvert en même temps** : le budget de génération `planToolCall` a été réduit de 384 à 200 tokens (voir entrée goulot d'étranglement ci-dessus) pendant cette même investigation — sans ce changement, les tentatives auraient pris plus longtemps mais le bug de boucle infinie aurait été identique une fois une réponse tronquée obtenue ; les deux corrections sont complémentaires, pas redondantes.
+
 ### Modèle local — goulot d'étranglement "llama.cpp exécute" identifié, à traiter (08/09/2026, Claude)
 
 **Statut : diagnostic complet fait ce soir, correctif partiel déjà livré (voir entrée suivante ci-dessous), reste ouvert.** Investigation déclenchée par une question du propriétaire ("le modèle local a-t-il bien accès à `get_candidates` ?"), poussée jusqu'à une cause racine claire — pas un bug de code isolé, un vrai goulot de performance sur la case "llama.cpp exécute" du schéma d'architecture du produit (Qwen comprend → **llama.cpp exécute** → KillEngine décide). Une seule IA est impliquée (confirmé dans le code : `AIEngine::modelToolCallWithRetry`, un seul appel modèle par requête, `--parallel 1` côté `llama-server`) — le ralentissement n'est pas un problème d'architecture à deux cerveaux, il est dans le moteur d'exécution lui-même sur le prompt actuel.

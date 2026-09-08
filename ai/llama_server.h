@@ -7,6 +7,20 @@
 
 namespace killai {
 
+// PHASE (08/09/2026, goulot d'etranglement) : partage entre llama_server.cpp
+// (-c passe a llama-server) et llama_runtime.cpp (-c passe au fallback
+// llama-cli, qui jusqu'ici n'en passait AUCUN et retombait donc sur le
+// contexte natif max du modele Qwen3.5 -- 262144 tokens. Mesure live sur
+// cette machine (i5-8250U) : ce defaut alloue a froid un buffer KV de 3072
+// Mio (allocation+premier touche = 585ms) plus la reservation du sous-systeme
+// prompt-cache/slot associee (~1s de plus), pour un prompt qui tient dans
+// quelques milliers de tokens -- explique l'essentiel du "user time quasi nul
+// mais plusieurs secondes d'attente" observe sur llama-cli. 8192 couvre le
+// prompt actuel (methodologie + 58 outils, ~14 000 caracteres statiques,
+// ~3600-4100 tokens estimes) + generation (jusqu'a 512 tokens) avec de la
+// marge, pour un cout memoire trivial (~96 Mio de KV cache).
+constexpr int kLlamaContextSize = 8192;
+
 /// Resultat d'une completion servie par le llama-server persistant.
 struct LlamaServerCompletion {
     bool success{false};

@@ -53,6 +53,14 @@ public:
     /// Vide l'historique conversationnel (reset de session).
     void clearHistory();
 
+    /// Demarre le serveur llama.cpp persistant et amorce son cache_prompt en
+    /// arriere-plan (voir LlamaRuntime::warmup) pour que le premier vrai
+    /// message utilisateur n'ait pas a payer le cout de demarrage a froid.
+    /// A appeler quand l'utilisateur ouvre le panneau Assistant -- init()
+    /// reste volontairement paresseuse au boot de l'application (voir init()
+    /// ci-dessus), ce warmup est le seul declencheur explicite hors chat.
+    void warmupLocalModel();
+
 private:
     QVariantMap deterministicIntent(const QString& query);
     QVariantMap makeToolCall(const QString& tool, const QVariantMap& args, const QString& rationale);

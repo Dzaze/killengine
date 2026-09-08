@@ -1604,6 +1604,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ping(message: string): Promise<string>
   getSettings(): Promise<AppSettings>
   getAiModelStatus?(): Promise<AiModelStatus>
+  /** Démarre le serveur llama.cpp local et amorce son cache de prompt en arrière-plan (à appeler à l'ouverture du panneau Assistant, pas au boot). Ne bloque pas, aucun retour utile. */
+  warmupLocalAiModel?(): Promise<void>
   /** Catalogue des modules complémentaires (vue "Modules") : statut + installation. */
   getModuleCatalog?(): Promise<ModuleCatalog>
   /** Lance l'installation d'un module (async, progression via moduleInstallProgress). */
@@ -2889,6 +2891,9 @@ class BackendService {
       },
       async browseForModelFile() {
         return { success: false, cancelled: true }
+      },
+      async warmupLocalAiModel() {
+        // No-op en mock: rien à réchauffer sans backend Qt réel.
       },
       async getModuleCatalog() {
         return {

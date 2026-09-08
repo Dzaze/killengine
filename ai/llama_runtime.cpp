@@ -170,6 +170,7 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
         "-m", m_info.modelPath,
         "-p", prompt,
         "-n", QString::number(nPredict),
+        "-c", QString::number(kLlamaContextSize),
         "--temp", "0",
         "--no-display-prompt",
         "--single-turn",
@@ -217,9 +218,25 @@ LlamaGenerationResult LlamaRuntime::planToolCall(
         result.errorMessage = m_info.errorMessage;
         return result;
     }
-    // Budget genereux: le bloc <think> eventuel est stripte ensuite, le JSON
-    // doit rester dans le budget.
-    auto generated = generate(buildPrompt(query, registry, context), 384);
+    // PHASE (08/09/2026, diagnostic gel app) : 384 etait bien plus que
+    // necessaire pour un JSON compact (schema+exemples imposent une reponse
+    // courte, et le template Qwen force deja un bloc <think></think> VIDE en
+    // prefill cote serveur -- voir "generation_prompt" dans les logs verbeux
+    // llama-server, le modele ne "depense" donc pas de budget dessus).
+    // Mesure live : une requete ambigue en texte libre peut faire ramble le
+    // modele jusqu'au bout du budget sans jamais produire de JSON valide, et
+    // a ~13 t/s sur ce CPU, 384 tokens (~30s) depasse regulierement
+    // kDefaultCompletionTimeoutMs (45s, ai/llama_server.cpp) une fois le
+    // moindre overhead ajoute -- ce qui declenche un retry cote client
+    // (LlamaServer::complete()) qui, avec --parallel 1, ne fait QUE
+    // re-attendre en file une nouvelle generation tout aussi longue au lieu
+    // d'accelerer quoi que ce soit, cumulant plusieurs dizaines de secondes a
+    // chaque echec (observe live : ~9 minutes cumulees sur une seule requete
+    // dans le pire cas, thread principal Qt bloque tout du long). Reduit a
+    // 200 : ~15s de generation au pire cas (confortable sous 45s), largement
+    // suffisant pour n'importe quel JSON du schema y compris args.query qui
+    // peut recopier une requete utilisateur assez longue.
+    auto generated = generate(buildPrompt(query, registry, context), 200);
     if (generated.success) {
         generated.output = stripThinkingBlocks(generated.output);
     }
@@ -237,6 +254,18 @@ LlamaGenerationResult LlamaRuntime::planIntent(const QString& query) const {
         generated.output = stripThinkingBlocks(generated.output);
     }
     return generated;
+}
+
+LlamaGenerationResult LlamaRuntime::warmup(const ToolRegistry& registry) const {
+    LlamaGenerationResult result;
+    if (!m_info.available) {
+        result.errorMessage = m_info.errorMessage;
+        return result;
+    }
+    // n_predict volontairement petit: seul le prefill du prefixe statique
+    // (systeme+regles+outils) compte ici pour amorcer cache_prompt, pas le
+    // contenu genere (jete).
+    return generate(buildPrompt(QString(), registry, QVariantMap()), 4);
 }
 
 LlamaGenerationResult LlamaRuntime::planInvestigationNotebook(const QString& symptom, const QVariantMap& context) const {
@@ -281,6 +310,18 @@ QVariantMap LlamaRuntime::extractToolCallJson(const QString& text, QString* erro
             }
         }
 
+        // PHASE (08/09/2026, gel total confirme live) : QString::lastIndexOf
+        // traite un `from` negatif comme "recompte depuis la fin" (voir doc
+        // Qt), PAS comme "rien avant cette position" -- quand start valait 0
+        // (un '{' au tout debut du texte, ex: JSON tronque qui ne se referme
+        // jamais), `start - 1 == -1` relancait donc la recherche depuis la
+        // fin de la chaine, retrouvant indefiniment le MEME '{' -- boucle
+        // infinie a 100% CPU sur le thread principal Qt, gel total de
+        // l'application (aucune requete, meme un simple ping, ne repond plus
+        // tant que ca tourne). Reproduit et confirme en conditions reelles
+        // via le pipe d'automatisation sur une reponse modele tronquee de 85
+        // caracteres commencant par '{'.
+        if (start == 0) break;
         start = text.lastIndexOf('{', start - 1);
     }
 
@@ -314,6 +355,18 @@ QVariantMap LlamaRuntime::extractIntentJson(const QString& text, QString* error)
             }
         }
 
+        // PHASE (08/09/2026, gel total confirme live) : QString::lastIndexOf
+        // traite un `from` negatif comme "recompte depuis la fin" (voir doc
+        // Qt), PAS comme "rien avant cette position" -- quand start valait 0
+        // (un '{' au tout debut du texte, ex: JSON tronque qui ne se referme
+        // jamais), `start - 1 == -1` relancait donc la recherche depuis la
+        // fin de la chaine, retrouvant indefiniment le MEME '{' -- boucle
+        // infinie a 100% CPU sur le thread principal Qt, gel total de
+        // l'application (aucune requete, meme un simple ping, ne repond plus
+        // tant que ca tourne). Reproduit et confirme en conditions reelles
+        // via le pipe d'automatisation sur une reponse modele tronquee de 85
+        // caracteres commencant par '{'.
+        if (start == 0) break;
         start = text.lastIndexOf('{', start - 1);
     }
 

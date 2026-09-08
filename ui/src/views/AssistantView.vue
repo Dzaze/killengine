@@ -1,5 +1,14 @@
+<script lang="ts">
+// Portee module (persiste tant que l'app tourne, contrairement aux
+// variables de <script setup> qui sont recreees a chaque (re)montage du
+// composant) : evite de renvoyer la requete de warmup a chaque fois que
+// l'utilisateur navigue vers puis hors de l'onglet Assistant dans la meme
+// session.
+let localAiWarmupRequested = false
+</script>
+
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAppStore, type WorkflowPreset } from '@/stores/app'
 import { useWebView2InspectorStore } from '@/stores/webView2Inspector'
 import { backend } from '@/services/backend'
@@ -63,6 +72,41 @@ watch(() => store.messages.length, () => {
 
 onUnmounted(() => {
   if (thinkingTimer) clearInterval(thinkingTimer)
+})
+
+// PHASE (08/09/2026, goulot d'etranglement) : amorce le serveur llama.cpp
+// local et son cache_prompt des l'ouverture du panneau Assistant, pas au
+// boot de l'app (l'init reste volontairement paresseuse cote backend, voir
+// ai/ai_engine.cpp) -- evite que le tout premier vrai message utilisateur
+// paie le cout de demarrage a froid (~90s au pire). Ignore si le backend
+// externe (Claude) est actif : rien a rechauffer localement dans ce cas.
+async function triggerLocalAiWarmup() {
+  if (localAiWarmupRequested) return
+  localAiWarmupRequested = true
+  try {
+    await store.refreshExternalAiStatus()
+    if (store.externalAiActiveBackend !== 'claude') {
+      await backend.getController().warmupLocalAiModel?.()
+    }
+  } catch {
+    // Best-effort: le warmup n'est qu'une optimisation de latence, un echec reste silencieux.
+  }
+}
+
+onMounted(() => {
+  // AssistantView est la vue par defaut (store.activeView initial = 'assistant',
+  // voir stores/app.ts) : elle monte AVANT que backend.connect() (QWebChannel,
+  // lance depuis App.vue) ait fini -- backend.getController() jetterait donc
+  // une exception silencieuse ici si on l'appelait tout de suite. On attend
+  // l'evenement de connexion effective plutot que de deviner un delai.
+  if (backend.isConnected) {
+    void triggerLocalAiWarmup()
+    return
+  }
+  const unsubscribe = backend.onConnectionChange(() => {
+    unsubscribe()
+    void triggerLocalAiWarmup()
+  })
 })
 
 const isAwaitingChange = computed(() => store.workflowStatus === 'awaiting_value_change')

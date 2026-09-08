@@ -279,6 +279,30 @@ TEST(LlamaRuntimeTest, ExtractsLastToolCallWhenPromptContainsJson) {
     EXPECT_EQ(call.value("args").toMap().value("valueType").toString(), "Int32");
 }
 
+// PHASE (08/09/2026) : bug reel confirme en conditions live via le pipe
+// d'automatisation -- une reponse modele tronquee commencant par '{' et ne se
+// refermant jamais (donc findJsonObjectEnd() ne trouve jamais de fin valide)
+// bouclait indefiniment : QString::lastIndexOf('{', -1) ne signifie PAS
+// "rien avant l'index 0" mais "recompte depuis la fin de la chaine" (doc Qt),
+// donc quand start valait 0, `start - 1 == -1` relancait la recherche depuis
+// la fin et retrouvait indefiniment le MEME '{', gelant a 100% CPU le thread
+// appelant (le thread principal Qt en conditions reelles -- gel total de
+// l'application, meme un simple ping ne repondait plus). Ce test doit
+// terminer quasi instantanement ; s'il bloque, la regression est revenue.
+TEST(LlamaRuntimeTest, ExtractToolCallJsonDoesNotHangOnUnterminatedJsonAtStart) {
+    QString error;
+    const auto call = killai::LlamaRuntime::extractToolCallJson("{\"tool\":\"exact_scan\"", &error);
+    EXPECT_TRUE(call.isEmpty());
+    EXPECT_FALSE(error.isEmpty());
+}
+
+TEST(LlamaRuntimeTest, ExtractIntentJsonDoesNotHangOnUnterminatedJsonAtStart) {
+    QString error;
+    const auto intent = killai::LlamaRuntime::extractIntentJson("{\"intent\":\"Unknown\"", &error);
+    EXPECT_TRUE(intent.isEmpty());
+    EXPECT_FALSE(error.isEmpty());
+}
+
 // PHASE 140 : bug reel trouve en corrigeant l'ecart "outils annonces mais non
 // dispatches" (PHASE 139) -- la ligne "Schema obligatoire" dans
 // LlamaRuntime::buildPrompt (ai/llama_runtime.cpp) est codee en dur, PAS

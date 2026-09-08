@@ -246,7 +246,7 @@ bool LlamaServer::startAndWait(QString* error) {
         "--port", QString::number(m_port),
         "--host", "127.0.0.1",
         "--no-webui",
-        "-c", "4096",
+        "-c", QString::number(kLlamaContextSize),
         "--parallel", "1",
     };
     bool threadsOk = false;

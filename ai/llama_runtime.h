@@ -44,6 +44,12 @@ public:
     LlamaGenerationResult planIntent(const QString& query) const;
     LlamaGenerationResult planInvestigationNotebook(const QString& symptom, const QVariantMap& context = {}) const;
 
+    /// Requete factice (prefixe statique du prompt uniquement, n_predict
+    /// volontairement petit) pour amorcer cache_prompt cote llama-server
+    /// AVANT le premier vrai message utilisateur -- voir docs/PHASE_TRACKER.md
+    /// (goulot d'etranglement "llama.cpp execute", piste 1, 08/09/2026).
+    LlamaGenerationResult warmup(const ToolRegistry& registry) const;
+
     static QVariantMap extractToolCallJson(const QString& text, QString* error = nullptr);
     static QVariantMap extractIntentJson(const QString& text, QString* error = nullptr);
 
