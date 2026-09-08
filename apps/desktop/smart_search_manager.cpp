@@ -3659,6 +3659,25 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = m_controller.startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
     } else if (tool == "next_scan") {
         actionResult = m_controller.nextScan(args.value("mode").toString(), args.value("value").toString());
+    } else if (tool == "get_candidates") {
+        // PHASE (T6, evaluation live 08/09/2026) : sans cet outil, aucun moyen
+        // honnete de repondre "quelle est l'adresse ?" une fois la liste
+        // reduite -- next_scan/exact_scan ne renvoient qu'un compteur, jamais
+        // les adresses. Meme raisonnement cote backend Claude
+        // (ClaudeChatManager::executeTool).
+        actionResult = m_controller.getCandidates(0, 50, QString());
+        actionResult["success"] = true;
+        if (actionResult.value("displaySuppressed").toBool()) {
+            result["message"] = QString("Trop de candidats pour les lister (%1 au total). Continue à réduire avec next_scan avant de rappeler get_candidates.")
+                                     .arg(actionResult.value("totalCount").toULongLong());
+        } else {
+            const int shown = actionResult.value("candidates").toList().size();
+            result["message"] = shown > 0
+                ? QString("%1 candidat(s) affiché(s) sur %2 au total. Plusieurs adresses réelles peuvent légitimement correspondre à la même valeur logique (copies redondantes, checksums) — ne suppose pas qu'une seule est la bonne.")
+                      .arg(shown)
+                      .arg(actionResult.value("totalCount").toULongLong())
+                : "Aucun candidat en mémoire actuellement. Lance d'abord un exact_scan.";
+        }
     } else if (tool == "unknown_capture") {
         actionResult = m_controller.captureUnknownSnapshot();
     } else if (tool == "unknown_compare") {

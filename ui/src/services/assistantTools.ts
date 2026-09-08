@@ -43,7 +43,7 @@ export interface AssistantTool {
 }
 
 /** Nombre d'outils au moment de la dernière synchronisation avec le registre. */
-export const ASSISTANT_TOOLS_SNAPSHOT = 57
+export const ASSISTANT_TOOLS_SNAPSHOT = 58
 
 /**
  * Statuts d'exécution (PHASE 146/147/148, étendu T4 backend Claude) :
@@ -59,6 +59,7 @@ export const assistantTools: AssistantTool[] = [
   { name: 'exact_scan_module', category: 'Scan mémoire', risk: 'safe', execution: 'direct', summary: 'Scan exact borné à un module/DLL chargé précis.' },
   { name: 'exact_scan_multi_type', category: 'Scan mémoire', risk: 'safe', execution: 'direct', summary: 'Scan exact multi-type quand la représentation mémoire est inconnue.' },
   { name: 'next_scan', category: 'Scan mémoire', risk: 'safe', execution: 'direct', summary: 'Réduit les candidats existants après variation.' },
+  { name: 'get_candidates', category: 'Scan mémoire', risk: 'safe', execution: 'direct', summary: 'Liste les candidats actuels (adresse, type, valeur, confiance) une fois la liste réduite.', note: 'Seul moyen honnête d\'obtenir une adresse réelle — next_scan/exact_scan ne renvoient qu\'un compteur. Ajouté le 08/09/2026 après un test terrain où, faute de cet outil, l\'assistant relançait un scan complet au lieu de répondre.' },
   { name: 'encrypted_scan', category: 'Scan mémoire', risk: 'safe', execution: 'direct', summary: 'Scan chiffré borné XOR/Add/Sub/NOT.' },
   { name: 'trace_ui_string', category: 'Scan mémoire', risk: 'safe', execution: 'direct', summary: 'Cherche la valeur affichée en ASCII/UTF-16 (strings UI).' },
   { name: 'analyze_ui_sources', category: 'Scan mémoire', risk: 'safe', execution: 'direct', summary: 'Analyse les sources numériques proches des strings UI.' },

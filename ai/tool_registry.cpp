@@ -67,6 +67,7 @@ QVariantList toolDefinitions() {
             {arg("value", "string", "Valeur affichée à l'écran, testée sur plusieurs types numériques faute de connaître sa représentation mémoire.")}),
         makeTool("next_scan", "Réduit les candidats existants.",
             {arg("mode", "string", "Mode de réduction des candidats existants (ex: increased, decreased, changed, unchanged, exact).")}),
+        makeTool("get_candidates", "Liste les candidats actuels (adresse, type, dernière valeur, confiance) issus du dernier exact_scan/next_scan. À utiliser une fois la liste réduite à un petit nombre de candidats, pour obtenir une adresse réelle avant de proposer write_value/freeze_value — ne jamais inventer une adresse, toujours passer par cet outil. Si le nombre de candidats est encore trop grand, le résultat revient tronqué (displaySuppressed) : continue à réduire avec next_scan avant de rappeler cet outil. Il peut légitimement y avoir plusieurs adresses réelles pour une même valeur logique (copies redondantes, checksums) — ne suppose pas qu'une seule adresse est forcément la bonne, la liste peut en montrer plusieurs à considérer. Lecture seule, exécute directement.", {}),
         makeTool("encrypted_scan", "Scan chiffre borne XOR/Add/Sub/NOT sur valeur entiere affichee.",
             {arg("value", "string", "Valeur entière affichée à l'écran à rechercher sous forme chiffrée (XOR/Add/Sub/NOT)."),
              arg("valueType", "string", "Type numérique entier de la valeur (ex: int32, int16, int64).")}),

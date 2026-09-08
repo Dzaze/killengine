@@ -99,6 +99,20 @@ TEST(AIToolRegistryTest, ExposesModernSafeAutoTools) {
     EXPECT_TRUE(fieldStability.value("requiredArgs").toStringList().contains("address"));
 }
 
+TEST(AIToolRegistryTest, GetCandidatesIsSafeAndArgless) {
+    // PHASE (T6, 08/09/2026) : ajoute apres une evaluation live ou l'absence
+    // de cet outil forcait l'assistant a relancer un scan complet au lieu de
+    // repondre "quelle est l'adresse ?" (next_scan/exact_scan ne renvoient
+    // qu'un compteur, jamais les adresses reelles).
+    killai::ToolRegistry registry;
+
+    ASSERT_TRUE(registry.hasTool("get_candidates"));
+    const auto tool = registry.toolMetadata("get_candidates");
+    EXPECT_EQ(tool.value("risk").toString(), "safe");
+    EXPECT_FALSE(tool.value("requiresConfirmation").toBool());
+    EXPECT_TRUE(tool.value("requiredArgs").toStringList().isEmpty());
+}
+
 TEST(AIToolRegistryTest, MarksRiskyToolsAsConfirmationRequired) {
     killai::ToolRegistry registry;
 

@@ -81,7 +81,15 @@ const QString kSystemPrompt = QStringLiteral(
     "discover_save_files, puis read_save_file_text avec le chemin RÉELLEMENT retourné, puis "
     "watch_save_file pour confirmer QUAND le fichier est réécrit avant toute tentative d'édition.\n"
     "- Avant de figer/patcher une adresse trouvée par scan -> analyze_field_stability pour juger si "
-    "c'est un champ affiché recalculé ou une vraie source.\n\n"
+    "c'est un champ affiché recalculé ou une vraie source.\n"
+    "- Pour obtenir l'adresse exacte des candidats restants -> get_candidates (aucun argument, lecture "
+    "seule). Ne devine JAMAIS une adresse toi-même : next_scan/exact_scan ne renvoient qu'un nombre de "
+    "candidats, jamais leur adresse -- get_candidates est le seul moyen honnête de la connaître. Si le "
+    "résultat revient tronqué (displaySuppressed=true), il reste trop de candidats : continue à réduire "
+    "avec next_scan avant de rappeler get_candidates, plutôt que de relancer un scan. Plusieurs adresses "
+    "réelles peuvent légitimement correspondre à la même valeur logique (copies redondantes, checksums) "
+    "-- ne suppose pas qu'une seule adresse est forcément la bonne, examine celles que get_candidates "
+    "retourne.\n\n"
     "Tu es en conversation continue : l'historique complet des tours précédents t'est fourni à chaque "
     "message, utilise-le au lieu de redemander une information déjà donnée.");
 
@@ -379,6 +387,18 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
     }
     if (tool == "next_scan") {
         return m_controller->nextScan(args.value("mode").toString(), args.value("value").toString());
+    }
+    if (tool == "get_candidates") {
+        // PHASE (T6, evaluation live 08/09/2026) : sans cet outil, aucun moyen
+        // honnete de repondre "quelle est l'adresse ?" une fois la liste
+        // reduite -- next_scan/exact_scan ne renvoient qu'un compteur, jamais
+        // les adresses. pageSize=50 suffit largement une fois reduit ; si
+        // candidateStore reste trop gros, ApplicationController::getCandidates
+        // renvoie displaySuppressed=true (aucune adresse), signal clair pour
+        // continuer a reduire avant de rappeler cet outil.
+        QVariantMap result = m_controller->getCandidates(0, 50, QString());
+        result["success"] = true;
+        return result;
     }
     if (tool == "unknown_capture") {
         return m_controller->captureUnknownSnapshot();
