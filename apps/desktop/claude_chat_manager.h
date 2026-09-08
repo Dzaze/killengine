@@ -84,6 +84,17 @@ private:
     killai::ClaudeBackendClient m_client;
     QHash<QString, PendingEntry> m_pending;
     int m_nextPendingId = 1;
+
+    // PHASE (T6, test terrain 07/09/2026) : constaté en direct -- malgré la
+    // consigne du system prompt ("recherche déjà active -> next_scan, pas
+    // exact_scan"), Claude a rappelé exact_scan à chaque nouvelle valeur XP
+    // au lieu de next_scan, ce qui redémarre un scan complet à chaque fois
+    // (candidats qui remontent au lieu de descendre). Un texte de prompt
+    // seul n'est pas assez fiable pour une règle aussi structurelle --
+    // exact_scan/exact_scan_multi_type/exact_scan_module sont donc bloqués
+    // ici tant qu'un scan est déjà actif, avec un message qui force Claude à
+    // utiliser next_scan à la place (garde-fou côté code, pas seulement prompt).
+    bool m_scanActive = false;
 };
 
 } // namespace killengine

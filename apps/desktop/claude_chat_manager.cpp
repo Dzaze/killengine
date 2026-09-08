@@ -172,6 +172,10 @@ int ClaudeChatManager::requestCount() const {
 
 void ClaudeChatManager::resetConversation() {
     m_client.resetConversation();
+    // Le contexte de scan (candidats en memoire) redemarre aussi a
+    // l'attach/detach -- voir ApplicationController::attachProcess/detachProcess,
+    // meme raison que le reset de l'historique de conversation.
+    m_scanActive = false;
 }
 
 void ClaudeChatManager::resolvePendingAction(const QString& pendingId, const QVariantMap& result) {
@@ -296,12 +300,48 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
     // Lecture seule / sans confirmation, appel direct synchrone.
     // ------------------------------------------------------------------
     if (tool == "exact_scan") {
-        return m_controller->startExactScan(args.value("value").toString(), args.value("valueType").toString());
+        if (m_scanActive) {
+            // Coup de semonce a usage unique (voir commentaire sur m_scanActive,
+            // claude_chat_manager.h) : force Claude a reconsiderer sa decision
+            // sans le bloquer indefiniment si une toute nouvelle recherche est
+            // reellement voulue -- le desarmement immediat laisse un vrai
+            // rappel d'exact_scan reussir la fois suivante.
+            m_scanActive = false;
+            return makeErrorResult(
+                "Un scan est déjà actif avec des candidats en mémoire depuis un précédent exact_scan. "
+                "Si l'objectif est de réduire cette liste avec la nouvelle valeur observée, utilise next_scan "
+                "(mode=\"exact\", value=...) à la place -- rappeler exact_scan redémarre un scan complet et "
+                "perd toute la réduction déjà faite. Si tu veux vraiment abandonner cette recherche et en "
+                "démarrer une toute nouvelle, tu peux rappeler exact_scan.");
+        }
+        const QVariantMap result = m_controller->startExactScan(args.value("value").toString(), args.value("valueType").toString());
+        if (result.value("success").toBool()) {
+            m_scanActive = true;
+        }
+        return result;
     }
     if (tool == "exact_scan_multi_type") {
-        return m_controller->startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
+        if (m_scanActive) {
+            m_scanActive = false;
+            return makeErrorResult(
+                "Un scan est déjà actif avec des candidats en mémoire. Si l'objectif est de réduire cette "
+                "liste, utilise next_scan (mode=\"exact\", value=...) à la place. Si tu veux vraiment "
+                "démarrer une toute nouvelle recherche, tu peux rappeler exact_scan_multi_type.");
+        }
+        const QVariantMap result = m_controller->startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
+        if (result.value("success").toBool()) {
+            m_scanActive = true;
+        }
+        return result;
     }
     if (tool == "exact_scan_module") {
+        if (m_scanActive) {
+            m_scanActive = false;
+            return makeErrorResult(
+                "Un scan est déjà actif avec des candidats en mémoire. Si l'objectif est de réduire cette "
+                "liste, utilise next_scan (mode=\"exact\", value=...) à la place. Si tu veux vraiment "
+                "démarrer une toute nouvelle recherche, tu peux rappeler exact_scan_module.");
+        }
         // Reproduit la resolution de module de SmartSearchManager (meme
         // recherche insensible a la casse, exacte puis partielle) via
         // startExactScanExpert avec start/stopAddress bornes au module.
@@ -332,6 +372,9 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         expertOptions["copyOnWriteOnly"] = false;
         QVariantMap result = m_controller->startExactScanExpert(args.value("value").toString(), args.value("valueType").toString(), expertOptions);
         result["module"] = matched.value("name");
+        if (result.value("success").toBool()) {
+            m_scanActive = true;
+        }
         return result;
     }
     if (tool == "next_scan") {
