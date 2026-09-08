@@ -46,6 +46,26 @@ Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 
 ## Journal actif
 
+### Modèle local — goulot d'étranglement "llama.cpp exécute" identifié, à traiter (08/09/2026, Claude)
+
+**Statut : diagnostic complet fait ce soir, correctif partiel déjà livré (voir entrée suivante ci-dessous), reste ouvert.** Investigation déclenchée par une question du propriétaire ("le modèle local a-t-il bien accès à `get_candidates` ?"), poussée jusqu'à une cause racine claire — pas un bug de code isolé, un vrai goulot de performance sur la case "llama.cpp exécute" du schéma d'architecture du produit (Qwen comprend → **llama.cpp exécute** → KillEngine décide). Une seule IA est impliquée (confirmé dans le code : `AIEngine::modelToolCallWithRetry`, un seul appel modèle par requête, `--parallel 1` côté `llama-server`) — le ralentissement n'est pas un problème d'architecture à deux cerveaux, il est dans le moteur d'exécution lui-même sur le prompt actuel.
+
+**Constat confirmé en direct (session pipe + `KillEngineTestTarget.exe`)** :
+- Une requête en texte libre "à froid" (serveur juste démarré, aucun `cache_prompt` encore établi) peut dépasser largement les timeouts, même généreux (45s serveur ×2 + 90s fallback `llama-cli` = 90s+90s observés, requête finalement jamais aboutie).
+- Une fois le préfixe du prompt mis en cache par le serveur persistant (même suite à une 1ère tentative qui a échoué côté client), une requête identique répond en **2,78 secondes** — le serveur avait continué de travailler en arrière-plan malgré le timeout client. Confirme que ce n'est pas un vrai plafond de puissance de calcul insurmontable, juste un coût de démarrage à froid mal budgété.
+- Test manuel `llama-cli` isolé (hors KillEngine) sur un prompt court : `Prompt: 26.0 t/s | Generation: 13.3 t/s` — débit mesuré plutôt faible pour un modèle 2B Q4 sur ce CPU (Intel i5-8250U, 4 cœurs/8 threads, mobile 15W), mais `user 0m0.077s` / `sys 0m0.030s` pour 6,3s d'horloge murale : le process a passé l'essentiel du temps à **attendre**, pas à calculer — piste ouverte (chargement disque du modèle 1,4 Go à chaque appel `llama-cli` froid ? autre attente ?), pas encore isolée précisément.
+- `-t 8` explicite testé manuellement : aucune différence mesurable (25,5 t/s vs 26,0 t/s) — écarte le nombre de threads comme cause principale.
+- Contexte serveur actuel : `-c 4096` (`ai/llama_server.cpp:249`) — à vérifier si le prompt actuel (méthodologie + 58 outils) s'en approche, sujet distinct de la lenteur mais à ne pas négliger.
+
+**Pistes pour la suite (aucune encore implémentée, pas de décision prise sur laquelle prioriser)** :
+1. **Préchauffer le serveur au démarrage de l'app** : envoyer une requête factice (juste le préfixe statique du prompt) en arrière-plan dès que `llama-server` démarre, avant que l'utilisateur ne tape le premier message — évite que le tout premier message réel paie le coût du cache froid. Semble la piste la plus directement payante vu la confirmation "requête en cache = 2,78s".
+2. **Isoler la vraie cause du `user time` quasi nul** sur le test `llama-cli` manuel (chargement disque du modèle à chaque appel froid ? antivirus/Defender scannant le `.gguf` à chaque accès ? autre attente I/O ?) — mesurer précisément avant d'optimiser à l'aveugle.
+3. **Réduire la taille du prompt système** (méthodologie + 58 outils) si possible sans perdre en capacité réelle — reformulations plus concises plutôt que retrait d'outils (la décision PHASE 271-272 de ne rien censurer du schéma reste valable, il s'agit de compacité d'écriture, pas de retirer des capacités).
+4. **Vérifier le dimensionnement du contexte** (`-c 4096`) par rapport à la taille réelle du prompt construit aujourd'hui, pour écarter un effet de bord (troncature, dégradation) distinct de la lenteur pure.
+5. **Vérifier quel binaire CPU (`ggml-cpu-*.dll`) est réellement sélectionné** au runtime pour ce CPU précis (Kaby Lake Refresh, AVX2 sans AVX512) — écarter un mauvais dispatch qui utiliserait un binaire générique/sous-optimal plutôt que la variante adaptée.
+
+**Comment vérifié (ce qui a déjà été testé ce soir, à ne pas refaire inutilement la prochaine fois)** : timeouts par défaut augmentés + cooldown de retry serveur déjà livrés et committés (voir entrée suivante) ; hypothèse cache confirmée en conditions réelles (pipe + process de test synthétique) ; nombre de threads écarté comme cause ; architecture à une seule IA confirmée en lisant le code (`ai_engine.cpp`, `auto_resolver.cpp`, `llama_server.cpp`).
+
 ### Modèle local — timeout serveur trop court + désactivation permanente après un seul échec (08/09/2026, Claude)
 
 **Quoi** : en creusant pourquoi le modèle local semblait "en difficulté" sur des requêtes en texte libre (question du propriétaire sur l'accès au nouvel outil `get_candidates`), deux vrais bugs trouvés dans `ai/llama_server.cpp`/`ai/llama_runtime.cpp`, confirmés via les logs réels (`killengine_2026-09-08_11-06-02.log`) :
