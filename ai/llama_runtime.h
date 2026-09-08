@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
+#include <QtGlobal>
 
 namespace killai {
 
@@ -71,7 +72,15 @@ private:
     LlamaRuntimeInfo m_info;
     QString m_serverExecutablePath;
     /// true tant que le serveur persistant reste utilisable (retombe sur llama-cli sinon).
+    /// PHASE (08/09/2026) : avant, un seul echec (ex: lenteur passagere sous
+    /// charge, cf. docs/PHASE_TRACKER.md) desactivait le serveur persistant
+    /// pour le reste de la session sans jamais reessayer -- toute requete
+    /// suivante retombait alors sur llama-cli (processus a froid, sans cache
+    /// de prompt, structurellement plus lent) meme une fois la machine
+    /// redevenue disponible. m_serverRetryAfterMs porte le prochain instant
+    /// (QDateTime::currentMSecsSinceEpoch()) ou reessayer le serveur.
     mutable bool m_serverUsable{true};
+    mutable qint64 m_serverRetryAfterMs{0};
 };
 
 } // namespace killai

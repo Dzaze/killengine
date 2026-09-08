@@ -25,7 +25,13 @@ namespace killai {
 namespace {
 
 constexpr int kDefaultPort = 8827;
-constexpr int kDefaultCompletionTimeoutMs = 15000;
+// PHASE (08/09/2026, session live) : 15000ms etait trop court -- constate en
+// conditions reelles (machine sous charge, mais aussi juste au premier
+// appel sans cache_prompt) qu'un prompt de la taille actuelle (methodologie
+// + ~58 outils) peut legitimement depasser 15s de prefill CPU sur un
+// portable modeste (Intel i5-8250U, 4 coeurs). Remonte a 45s : assez pour
+// un premier appel a froid, tout en restant borne.
+constexpr int kDefaultCompletionTimeoutMs = 45000;
 constexpr int kDefaultStartupTimeoutMs = 90000;
 
 bool serverDisabledByEnv() {

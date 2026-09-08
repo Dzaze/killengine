@@ -46,6 +46,23 @@ Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 
 ## Journal actif
 
+### Modèle local — timeout serveur trop court + désactivation permanente après un seul échec (08/09/2026, Claude)
+
+**Quoi** : en creusant pourquoi le modèle local semblait "en difficulté" sur des requêtes en texte libre (question du propriétaire sur l'accès au nouvel outil `get_candidates`), deux vrais bugs trouvés dans `ai/llama_server.cpp`/`ai/llama_runtime.cpp`, confirmés via les logs réels (`killengine_2026-09-08_11-06-02.log`) :
+1. `kDefaultCompletionTimeoutMs = 15000` (15s) — trop court pour une inférence CPU complète sur le prompt actuel (méthodologie + 58 outils, assez long) sur un portable modeste (Intel i5-8250U, 4 cœurs), surtout au tout premier appel (aucun `cache_prompt` encore établi).
+2. **Le vrai bug** : `LlamaRuntime::m_serverUsable` (`ai/llama_runtime.h`) passait à `false` de façon **définitive** dès le premier échec du serveur persistant, sans jamais retenter — toute la session basculait alors sur `llama-cli` (processus à froid à chaque appel, sans cache) pour le reste de la session, y compris une fois la machine redevenue disponible. Un seul ralentissement passager (constaté ce soir : rebuilds C++ en parallèle) dégradait donc irréversiblement toute la session.
+
+Reproduit en direct via le pipe d'automatisation : première requête → `llama-server` timeout (15s ×2) → bascule `llama-cli` → timeout aussi (60s) → message générique après ~90s d'attente totale. Process `llama-server` vérifié non bloqué (CPU quasi nul en le remesurant), confirmant un problème de configuration/design plutôt qu'un vrai crash.
+
+**Corrigé** :
+- `kDefaultCompletionTimeoutMs` : 15s → 45s (`ai/llama_server.cpp`).
+- Timeout `llama-cli` (fallback) : 60s → 90s, même budget que le chargement modèle du serveur (`ai/llama_runtime.cpp`).
+- `m_serverUsable` retente désormais le serveur persistant après un cooldown de 2 minutes (`m_serverRetryAfterMs`, nouveau) au lieu de l'abandonner pour le reste de la session — un échec passager ne condamne plus toute la session au fallback plus lent.
+
+**Comment vérifié** : build complet + 461/461 tests unitaires (aucune régression, ces constantes n'étaient testées par aucun test existant). Pas encore re-testé en conditions réelles calmes (machine libérée des rebuilds) — prochaine étape.
+
+**Reste ouvert** : confirmer qu'une requête en texte libre aboutit maintenant en conditions normales (pas de rebuild concurrent), et que le cooldown de 2 minutes permet bien un retour au serveur persistant plus tard dans la même session.
+
 ### EXTERNAL-AI-BACKEND T6 — bug trouvé en test terrain : aucun historique de conversation (07/09/2026, Claude)
 
 **Quoi** : premier vrai test terrain du backend Claude par le propriétaire (clé API réelle, session live sur Solitaire XP). Fonctionnel de bout en bout (scans exécutés, candidats trouvés, mode Stealth confirmé/exécuté correctement), mais qualité de conversation très moyenne : Claude "oubliait" systématiquement le contexte entre deux messages (ex: demande la valeur XP actuelle alors qu'elle vient d'être donnée deux messages plus tôt, malgré un rappel explicite du propriétaire). Root cause confirmée : `ClaudeBackendClient::sendMessage()` construisait un tableau `messages` **local** à chaque appel, ne contenant que le message utilisateur courant — aucun historique des tours précédents n'était jamais renvoyé à l'API. La boucle agentique interne à UN message (tool_use → tool_result → réponse) fonctionnait bien ; c'est la mémoire ENTRE deux messages qui manquait entièrement.

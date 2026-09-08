@@ -5,6 +5,7 @@
 #include "logging/logger.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -16,6 +17,12 @@
 namespace killai {
 
 namespace {
+
+/// Delai avant de retenter le serveur persistant apres un echec (voir
+/// m_serverRetryAfterMs, ai/llama_runtime.h) -- assez long pour ne pas
+/// marteler un serveur reellement casse a chaque message, assez court pour
+/// se retablir dans la meme session apres un ralentissement passager.
+constexpr qint64 kServerRetryCooldownMs = 120000; // 2 minutes
 
 /// Retire les blocs de raisonnement <think>...</think> emis par Qwen3.5
 /// (le champ content de /completion peut en contenir si le mode reasoning
@@ -120,19 +127,34 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
     LlamaGenerationResult result;
 
     // 1) Serveur persistant: modele deja charge en RAM, prefixe cache.
-    if (m_serverUsable && !m_serverExecutablePath.isEmpty()) {
+    // PHASE (08/09/2026) : reessaie apres un cooldown plutot que d'abandonner
+    // le serveur pour le reste de la session sur un seul echec (voir
+    // m_serverRetryAfterMs, ai/llama_runtime.h) -- un echec passager
+    // (machine chargee au moment precis de l'appel) ne doit pas condamner
+    // toute la session au fallback llama-cli, plus lent (aucun cache de
+    // prompt, processus a froid a chaque appel).
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const bool serverDueForRetry = !m_serverUsable && nowMs >= m_serverRetryAfterMs;
+    if ((m_serverUsable || serverDueForRetry) && !m_serverExecutablePath.isEmpty()) {
         const auto completion = LlamaServer::instance().complete(
             prompt, nPredict, QStringList{"\nRequete utilisateur:", "Requete:"});
         if (completion.success) {
+            if (!m_serverUsable) {
+                KE_LOG_INFO() << "llama-server recovered after cooldown, resuming persistent server.";
+            }
+            m_serverUsable = true;
             result.success = true;
             result.output = completion.content;
             result.backend = "llama-server";
             return result;
         }
-        // Echec serveur: on retombe sur llama-cli pour cette session sans
-        // reessayer le serveur a chaque message (evite les ralentissements).
+        // Echec (premier ou apres cooldown) : retombe sur llama-cli pour ce
+        // message, mais reessaiera le serveur automatiquement apres
+        // kServerRetryCooldownMs plutot que jamais.
         m_serverUsable = false;
-        KE_LOG_INFO() << "llama-server unavailable, falling back to llama-cli: "
+        m_serverRetryAfterMs = nowMs + kServerRetryCooldownMs;
+        KE_LOG_INFO() << "llama-server unavailable, falling back to llama-cli (retry in "
+                      << (kServerRetryCooldownMs / 1000) << "s): "
                       << completion.errorMessage.toStdString();
     }
 
@@ -162,7 +184,12 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
         return result;
     }
 
-    if (!process.waitForFinished(60000)) {
+    // PHASE (08/09/2026) : 60s s'est revele insuffisant en conditions reelles
+    // pour un prompt de cette taille (~58 outils) traite a froid (aucun cache,
+    // contrairement au serveur persistant) sur un CPU portable modeste --
+    // remonte a 90s, meme budget que le chargement modele du serveur
+    // (startupTimeoutMs, ai/llama_server.cpp).
+    if (!process.waitForFinished(90000)) {
         process.kill();
         process.waitForFinished(3000);
         result.errorMessage = "llama-cli timed out.";
