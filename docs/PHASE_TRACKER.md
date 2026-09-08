@@ -64,6 +64,8 @@ Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 4. **Vérifier le dimensionnement du contexte** (`-c 4096`) par rapport à la taille réelle du prompt construit aujourd'hui, pour écarter un effet de bord (troncature, dégradation) distinct de la lenteur pure.
 5. **Vérifier quel binaire CPU (`ggml-cpu-*.dll`) est réellement sélectionné** au runtime pour ce CPU précis (Kaby Lake Refresh, AVX2 sans AVX512) — écarter un mauvais dispatch qui utiliserait un binaire générique/sous-optimal plutôt que la variante adaptée.
 
+**Écarté explicitement (vérifié, pas juste supposé)** : le "Mode Performance" du produit (`killcore::PerformanceMode`, Auto/Eco/Normal/Performance/Max, `core/scanner/performance_profile.h`) n'a **aucun lien** avec le runtime IA — confiné entièrement au scanner mémoire (`ScanningCoreManager`, threads/chunk de scan). Zéro référence dans tout le dossier `ai/`. Le paramétrage de threads du runtime IA est totalement séparé (`KILLENGINE_LLAMA_SERVER_THREADS`, déjà testé et écarté ci-dessus). Ne pas reproposer cette piste sans nouvelle preuve.
+
 **Comment vérifié (ce qui a déjà été testé ce soir, à ne pas refaire inutilement la prochaine fois)** : timeouts par défaut augmentés + cooldown de retry serveur déjà livrés et committés (voir entrée suivante) ; hypothèse cache confirmée en conditions réelles (pipe + process de test synthétique) ; nombre de threads écarté comme cause ; architecture à une seule IA confirmée en lisant le code (`ai_engine.cpp`, `auto_resolver.cpp`, `llama_server.cpp`).
 
 ### Modèle local — timeout serveur trop court + désactivation permanente après un seul échec (08/09/2026, Claude)
