@@ -1,6 +1,7 @@
 #include "save_file_investigator.h"
 
 #include "logging/logger.h"
+#include "localization/localization.h"
 #include "memory/memory_reader.h"
 #include "process/file_watch.h"
 #include "process/package_storage.h"
@@ -44,21 +45,21 @@ QVariantMap SaveFileInvestigator::discoverProcessSaveFiles(int maxResults) const
     result["files"] = filesList;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     QString familyName;
     QString error;
     if (!killcore::resolvePackageFamilyName(m_handle, &familyName, &error)) {
-        result["error"] = error.isEmpty() ? "Résolution du package échouée." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Résolution du package échouée.", "Couldn't resolve the package.") : error;
         return result;
     }
     result["familyName"] = familyName;
 
     QVector<killcore::PackageSaveFileEntry> files;
     if (!killcore::listPackageSaveFiles(familyName, maxResults, /*excludeNoise=*/true, &files, &error)) {
-        result["error"] = error.isEmpty() ? "Listage des fichiers échoué." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Listage des fichiers échoué.", "Couldn't list the files.") : error;
         return result;
     }
 
@@ -158,14 +159,14 @@ QVariantMap SaveFileInvestigator::inspectProcessLocalSettings(int maxValues) con
     result["values"] = valuesList;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     QString familyName;
     QString error;
     if (!killcore::resolvePackageFamilyName(m_handle, &familyName, &error)) {
-        result["error"] = error.isEmpty() ? "Résolution du package échouée." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Résolution du package échouée.", "Couldn't resolve the package.") : error;
         return result;
     }
     result["familyName"] = familyName;
@@ -174,7 +175,7 @@ QVariantMap SaveFileInvestigator::inspectProcessLocalSettings(int maxValues) con
     QString settingsPath;
     if (!killcore::inspectPackageLocalSettings(familyName, maxValues, &values, &settingsPath, &error)) {
         result["settingsPath"] = settingsPath;
-        result["error"] = error.isEmpty() ? "Inspection LocalSettings échouée." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Inspection LocalSettings échouée.", "Couldn't inspect LocalSettings.") : error;
         return result;
     }
 
@@ -202,12 +203,12 @@ QVariantMap SaveFileInvestigator::readProcessSaveFileText(const QString& path, i
     result["path"] = path;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     if (!isPathUnderPackagesRoot(path)) {
-        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
+        result["error"] = KE_TXT("Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).", "Path rejected: it must be under %LOCALAPPDATA%\\Packages\\ (use discoverProcessSaveFiles to list valid paths).");
         return result;
     }
 
@@ -215,7 +216,7 @@ QVariantMap SaveFileInvestigator::readProcessSaveFileText(const QString& path, i
     bool truncated = false;
     QString error;
     if (!killcore::readPackageSaveFileText(path, maxBytes, &text, &truncated, &error)) {
-        result["error"] = error.isEmpty() ? "Lecture du fichier échouée." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Lecture du fichier échouée.", "Couldn't read the file.") : error;
         return result;
     }
 
@@ -232,15 +233,15 @@ QVariantMap SaveFileInvestigator::watchSaveFileForChanges(const QString& path, c
     result["path"] = path;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (!isPathUnderPackagesRoot(path)) {
-        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
+        result["error"] = KE_TXT("Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).", "Path rejected: it must be under %LOCALAPPDATA%\\Packages\\ (use discoverProcessSaveFiles to list valid paths).");
         return result;
     }
     if (m_saveFileWatchInProgress) {
-        result["error"] = "Une surveillance de fichier est déjà en cours.";
+        result["error"] = KE_TXT("Une surveillance de fichier est déjà en cours.", "A file watch is already running.");
         return result;
     }
 
@@ -258,7 +259,7 @@ QVariantMap SaveFileInvestigator::watchSaveFileForChanges(const QString& path, c
     m_activeSaveFileWatchCancellation.reset();
 
     if (!started) {
-        result["error"] = error.isEmpty() ? "Surveillance du fichier échouée." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Surveillance du fichier échouée.", "Couldn't watch the file for changes.") : error;
         return result;
     }
 
@@ -268,7 +269,7 @@ QVariantMap SaveFileInvestigator::watchSaveFileForChanges(const QString& path, c
     result["cancelled"] = outcome.cancelled;
     result["error"] = outcome.changed
         ? ""
-        : (outcome.cancelled ? "Surveillance annulée." : "Aucun changement détecté avant le timeout.");
+        : (outcome.cancelled ? KE_TXT("Surveillance annulée.", "File watch cancelled.") : KE_TXT("Aucun changement détecté avant le timeout.", "No changes detected before the timeout."));
     return result;
 }
 
@@ -279,15 +280,15 @@ QVariantMap SaveFileInvestigator::startSaveFileWatchAsync(const QString& path, c
     result["path"] = path;
 
     if (m_saveFileWatchInProgress) {
-        result["error"] = "Une surveillance de fichier est déjà en cours.";
+        result["error"] = KE_TXT("Une surveillance de fichier est déjà en cours.", "A file watch is already running.");
         return result;
     }
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (!isPathUnderPackagesRoot(path)) {
-        result["error"] = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).";
+        result["error"] = KE_TXT("Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\ (utilise discoverProcessSaveFiles pour lister les chemins valides).", "Path rejected: it must be under %LOCALAPPDATA%\\Packages\\ (use discoverProcessSaveFiles to list valid paths).");
         return result;
     }
 
@@ -327,10 +328,10 @@ QVariantMap SaveFileInvestigator::startSaveFileWatchAsync(const QString& path, c
             finished["changeType"] = outcome.changeType;
             finished["cancelled"] = outcome.cancelled;
             finished["error"] = !started
-                ? (error.isEmpty() ? "Surveillance du fichier échouée." : error)
+                ? (error.isEmpty() ? KE_TXT("Surveillance du fichier échouée.", "Couldn't watch the file for changes.") : error)
                 : (outcome.changed
                        ? ""
-                       : (outcome.cancelled ? "Surveillance annulée." : "Aucun changement détecté avant le timeout."));
+                       : (outcome.cancelled ? KE_TXT("Surveillance annulée.", "File watch cancelled.") : KE_TXT("Aucun changement détecté avant le timeout.", "No changes detected before the timeout.")));
 
             self->m_saveFileWatchInProgress = false;
             self->m_activeSaveFileWatchCancellation.reset();
@@ -349,7 +350,7 @@ QVariantMap SaveFileInvestigator::cancelSaveFileWatch() {
     QVariantMap result;
     result["success"] = false;
     if (!m_saveFileWatchInProgress || !m_activeSaveFileWatchCancellation) {
-        result["error"] = "Aucune surveillance de fichier active à annuler.";
+        result["error"] = KE_TXT("Aucune surveillance de fichier active à annuler.", "No active file watch to cancel.");
         return result;
     }
 
@@ -366,7 +367,7 @@ QVariantMap SaveFileInvestigator::patchProcessSaveFileBytes(const QString& path,
     result["occurrencesFound"] = 0;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -374,7 +375,7 @@ QVariantMap SaveFileInvestigator::patchProcessSaveFileBytes(const QString& path,
     int occurrencesFound = 0;
     if (!killcore::patchPackageSaveFileBytes(path, findHex, replaceHex, &error, &occurrencesFound)) {
         result["occurrencesFound"] = occurrencesFound;
-        result["error"] = error.isEmpty() ? "Patch du fichier échoué." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Patch du fichier échoué.", "Couldn't patch the file.") : error;
         return result;
     }
 
