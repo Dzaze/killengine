@@ -17,6 +17,14 @@ Après la clôture du chantier de localisation du chat IA, question posée par l
 
 Concrètement, en anglais, restent quasi intégralement en français : `AssistantView.vue`, `ExpertView.vue` (le plus gros, ~150 lignes, + ses ~16 sous-panneaux dans `components/expert/`), `InvestigationView.vue`, `SettingsView.vue` (~100 lignes), `TrainerView.vue`, `ProfileView.vue`, `ScriptingView.vue`, `ClrInspectorView.vue`, `MemoryHeatmapView.vue`, `MemoryTimelineView.vue`, `PatternLearningView.vue`, `SpeedhackView.vue`, `LexiconView.vue`, et des pans entiers de `ModulesView.vue`/`NetworkView.vue`/`WebView2InspectorView.vue` malgré leurs `$t()` déjà présents ailleurs dans le même fichier.
 
+## Troisième poche de texte non traduit — messages de chat générés côté TypeScript (découvert 09/09/2026 en démarrant U1)
+
+En commençant U1 (`AssistantView.vue`), découverte que le fichier fait en réalité **2115 lignes**, pas ~25 chaînes : son `<script setup>` contient **68 appels `store.pushMessage('assistant', "texte français")`** — des messages de chat construits côté frontend TypeScript (gestion des `recoveryActions`, retours d'erreur, confirmations), entièrement distincts du texte généré par le backend C++ (déjà couvert par `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`, clos) et des libellés statiques de template (ce que l'audit initial de cette roadmap avait scanné, `<template>` uniquement).
+
+**Le même pattern existe ailleurs** : `grep -rc "pushMessage(" ui/src/views ui/src/stores` remonte aussi 31 appels dans trois stores Pinia : `ui/src/stores/app.ts` (5), `ui/src/stores/assistantSmartSearch.ts` (20), `ui/src/stores/writeFreeze.ts` (6) — des fichiers `.ts` qui n'étaient même pas dans le périmètre de l'audit initial (`.vue` uniquement).
+
+**Décision propriétaire (09/09/2026)** : élargir la roadmap plutôt que de la traiter comme un chantier séparé — chaque candidat de vue qui a un `<script setup>` avec du texte de chat en dur doit aussi traiter son script, pas seulement son template. Nouveaux candidats U20-U22 ajoutés ci-dessous pour les 3 stores.
+
 ## Deux systèmes d'aide distincts — ne pas les confondre
 
 L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** dans l'UI, à ne pas mélanger pendant la traduction :
@@ -39,8 +47,8 @@ L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** d
 
 | # | Candidat | Fichier(s) | Chaînes trouvées (audit) | `$t()` déjà présent ? | Priorité | Statut |
 | --- | --- | --- | --- | --- | --- | --- |
-| [ ] U1 | Assistant (vue principale du chat) | `ui/src/views/AssistantView.vue` | ~25 | Non | **Haute** — vue la plus utilisée | Pas commencé |
-| [ ] U2 | Processus (attache, mode d'accès mémoire) | `ui/src/views/ProcessView.vue` | ~10 | Non | **Haute** — première vue vue par un nouvel utilisateur (démarrage) | Pas commencé |
+| [x] U1 | Assistant (vue principale du chat) — template + script (`pushMessage`, `workflowLabel`, `safeStepLabel`, etc.) | `ui/src/views/AssistantView.vue` | 216 clés `assistant.*` ajoutées (template + les 68 `pushMessage` + `workflowLabel`/`safeStepLabel`/`confidenceFor`/etc. du script) | Non → complet | **Haute** — vue la plus utilisée | **Fait, testé (09/09/2026, Claude)** |
+| [x] U2 | Processus (attache, mode d'accès mémoire) | `ui/src/views/ProcessView.vue` | 22 clés `process.*` ajoutées (namespace existant réutilisé), intro + filtre + mode d'accès + actions driver kernel | Non → complet | **Haute** — première vue vue par un nouvel utilisateur (démarrage) | **Fait, testé (09/09/2026, Codex)** |
 | [ ] U3 | Mode Expert — vue principale | `ui/src/views/ExpertView.vue` | ~150 (le plus gros fichier) | Non | Haute | Pas commencé |
 | [ ] U3a | └ `AobSignaturePanel.vue` | `ui/src/components/expert/AobSignaturePanel.vue` | ~15 | Non (aide InfoDot oui, template non) | Moyenne | Pas commencé |
 | [ ] U3b | └ `AutoDissectPanel.vue` | `ui/src/components/expert/AutoDissectPanel.vue` | ~1 | Non | Basse | Pas commencé |
@@ -75,7 +83,10 @@ L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** d
 | [ ] U16 | Modules — reste (guide EDR notamment) | `ui/src/views/ModulesView.vue` | ~12 restants (41 `$t()` déjà en place) | Partiel | Basse | Pas commencé |
 | [ ] U17 | WebView2 Inspector — reste | `ui/src/views/WebView2InspectorView.vue` | ~3 (bannière intro) | Partiel (19 `$t()` déjà en place) | Basse | Pas commencé |
 | [ ] U18 | Lexique | `ui/src/views/LexiconView.vue` | 1 | Non | Basse | Pas commencé |
-| [ ] U19 | `PanelIntro.vue` (partagé par toutes les vues) | `ui/src/components/common/PanelIntro.vue` | ~2 (le texte fixe du composant lui-même, ex. "À quoi ça sert ?") | Non | **Bloquant léger** — voir note | Pas commencé |
+| [x] U19 | `PanelIntro.vue` (partagé par toutes les vues) | `ui/src/components/common/PanelIntro.vue` | 4 clés `common.panelIntro.*` (les 3 labels + `aria-label`) | Non → complet | **Bloquant léger** — voir note | **Fait, testé (09/09/2026, Codex)** |
+| [ ] U20 | Store `app.ts` — messages `pushMessage` | `ui/src/stores/app.ts` | ~5 | Non | Moyenne | Pas commencé |
+| [ ] U21 | Store `assistantSmartSearch.ts` — messages `pushMessage` | `ui/src/stores/assistantSmartSearch.ts` | ~20 | Non | Moyenne-haute — même famille que U1 | Pas commencé |
+| [ ] U22 | Store `writeFreeze.ts` — messages `pushMessage` | `ui/src/stores/writeFreeze.ts` | ~6 | Non | Moyenne | Pas commencé |
 
 **Note U19** : `PanelIntro.vue` lui-même n'a que 2 chaînes fixes à traduire, mais ses props `what=`/`purpose=`/`how=` sont câblées en dur depuis **chaque vue appelante** (U1 à U18) — donc U19 se fait mécaniquement en même temps que chaque vue traitée, pas comme un chantier séparé. Le traiter en premier (le composant lui-même) débloque juste la convention de clé (`intro.what`/`intro.purpose`/`intro.how` par namespace de vue) que les autres candidats réutiliseront.
 
@@ -86,6 +97,14 @@ L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** d
 3. **U3 (Expert + ses 16 sous-panneaux)** — le plus gros morceau, à répartir entre plusieurs agents en parallèle (fichiers disjoints, comme pour le chantier backend) une fois U1/U2 clos et la convention de clé validée en pratique sur au moins une vue complète.
 4. **U4-U9** (Investigation, Settings, Trainer, Profils, Scripting, CLR Inspector) — vues secondaires mais complètes, à prendre dans n'importe quel ordre selon disponibilité agent.
 5. **U10-U18** — résidus de fichiers déjà partiellement traduits + fichiers à faible trafic (Heatmap, Timeline, Pattern Learning, Speedhack, Lexique) : faible priorité, chantier permanent comme `docs/REFACTOR_ROADMAP.md`.
+
+## Progrès (09/09/2026)
+
+**U19, U1, U2 clos, premier round de travail parallèle sur ce chantier** : Codex sur U19 (`PanelIntro.vue`) + U2 (`ProcessView.vue`) dans un worktree séparé (`../killengine-codex-ui-u19-u2`), Claude sur U1 (`AssistantView.vue`) dans le dossier principal — fichiers disjoints, aucune collision.
+
+- **U1** : 216 clés `assistant.*` ajoutées. Couvre le template ET le script `<script setup>` (les 68 appels `pushMessage`, `workflowLabel`, `safeStepLabel`, `confidenceFor`, `valueHistoryFor`, `writeSummaryFor`, `filteredCandidatesFor`, les tableaux de messages "thinking"). Vérifié `npm run type-check` + `npm run build` OK, puis **vérification visuelle réelle** via CDP (`Page.captureScreenshot` + `Runtime.evaluate` pour naviguer/basculer la langue, voir [[killengine_cdp_screenshot_technique]]) : capture FR et EN comparées côte à côte, tout le contenu dans le périmètre de ce fichier s'affiche bien traduit.
+- **U2 + U19** : 22 clés `process.*` (namespace existant réutilisé) + 4 clés `common.panelIntro.*`. Vérifié par Claude après coup (pas juste le rapport de Codex) : `npm run type-check` + `npm run build` OK dans le worktree, balayage de contrôle sans trouver de chaîne française oubliée, valeurs FR/EN comparées une à une (aucune identique suspecte, les 4 valeurs identiques trouvées — "Modules", "Standard", "Kernel", "{count} modules" — sont des termes techniques partagés, pas des oublis).
+- **Résidu visible en live, hors périmètre de U1/U2/U19** : les cartes d'exemple "Valeur directe"/"Valeur inconnue"/etc. dans l'écran d'accueil de l'Assistant restent en français — elles viennent de `store.workflowPresets`, défini dans `ui/src/stores/assistantSmartSearch.ts` (candidat U21, pas encore traité). Confirme que le découpage par candidat de cette roadmap correspond bien aux frontières réelles du code.
 
 ## Règle d'usage
 

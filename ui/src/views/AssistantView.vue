@@ -9,11 +9,13 @@ let localAiWarmupRequested = false
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore, type WorkflowPreset } from '@/stores/app'
 import { useWebView2InspectorStore } from '@/stores/webView2Inspector'
 import { backend } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
+const { t, locale } = useI18n()
 const store = useAppStore()
 const chatInput = ref('')
 const chatScroll = ref<HTMLElement | null>(null)
@@ -26,21 +28,21 @@ const chatScroll = ref<HTMLElement | null>(null)
 // pour le texte libre qui tombe dans l'intent Unknown et part côté raisonnement
 // IA (ai/ai_engine.cpp) — annoncer "Recherche en mémoire..." pour un message
 // comme "il va falloir trouver les xp dans les dll" était trompeur.
-const concreteThinkingMessages = [
-  'Je vais rechercher ça en mémoire...',
-  'Analyse de ta requête...',
-  'Recherche en mémoire...',
-  'Comparaison des candidats...',
-  'Filtrage des faux positifs...',
-  'Optimisation des résultats...',
-]
-const genericThinkingMessages = [
-  'Je réfléchis...',
-  'Analyse de ta requête...',
-  'Je regarde ce que je peux faire...',
-]
+const concreteThinkingMessages = computed(() => [
+  t('assistant.thinking.searchingMemory'),
+  t('assistant.thinking.analyzingQuery'),
+  t('assistant.thinking.searchingInMemory'),
+  t('assistant.thinking.comparingCandidates'),
+  t('assistant.thinking.filteringFalsePositives'),
+  t('assistant.thinking.optimizingResults'),
+])
+const genericThinkingMessages = computed(() => [
+  t('assistant.thinking.reflecting'),
+  t('assistant.thinking.analyzingQuery'),
+  t('assistant.thinking.lookingAtOptions'),
+])
 const thinkingIndex = ref(0)
-const activeThinkingMessages = ref(concreteThinkingMessages)
+const activeThinkingMessages = ref(concreteThinkingMessages.value)
 const thinkingText = ref(activeThinkingMessages.value[0])
 let thinkingTimer: ReturnType<typeof setInterval> | null = null
 let lastSentQuery = ''
@@ -52,8 +54,8 @@ function queryLooksLikeConcreteScan(text: string): boolean {
 watch(() => store.isSearching, (searching) => {
   if (searching) {
     activeThinkingMessages.value = queryLooksLikeConcreteScan(lastSentQuery)
-      ? concreteThinkingMessages
-      : genericThinkingMessages
+      ? concreteThinkingMessages.value
+      : genericThinkingMessages.value
     thinkingIndex.value = 0
     thinkingText.value = activeThinkingMessages.value[0]
     thinkingTimer = setInterval(() => {
@@ -113,14 +115,14 @@ const needsMoreRefinement = computed(() => store.workflowStatus === 'needs_more_
 const isWorkflowActive = computed(() => store.workflowStatus !== 'idle')
 const hasActiveAddresses = computed(() => store.activeChatMemoryTargets.length > 0)
 const searchPlaceholder = computed(() => {
-  if (isAwaitingChange.value || needsMoreRefinement.value) return 'Donne la nouvelle valeur observée dans le jeu...'
-  if (hasActiveAddresses.value) return 'Ex: mets les à 3000, freeze à 500, ou lance une nouvelle recherche...'
-  return 'Ex: j’ai une valeur à 905 je la veux à 10000'
+  if (isAwaitingChange.value || needsMoreRefinement.value) return t('assistant.placeholder.newObservedValue')
+  if (hasActiveAddresses.value) return t('assistant.placeholder.hasActiveAddresses')
+  return t('assistant.placeholder.default')
 })
 const searchStatusText = computed(() => {
   if (store.isSearching) return thinkingText.value
   if (isWorkflowActive.value) return workflowLabel(store.workflowStatus)
-  return store.isAttached ? 'Prêt à chercher' : 'Attache un processus avant de scanner'
+  return store.isAttached ? t('assistant.status.readyToSearch') : t('assistant.status.attachFirst')
 })
 const contextItems = computed(() => {
   const context = store.smartSearchContext
@@ -128,21 +130,21 @@ const contextItems = computed(() => {
 
   const items: Array<{ label: string, value: string }> = []
   if (context.profileTargets.length > 0) {
-    items.push({ label: 'État', value: 'profil actif' })
+    items.push({ label: t('assistant.context.state'), value: t('assistant.context.activeProfile') })
   } else if (context.chatTargets.length > 0) {
-    items.push({ label: 'État', value: 'adresses actives' })
+    items.push({ label: t('assistant.context.state'), value: t('assistant.context.activeAddresses') })
   } else if (context.active || context.candidateCount > 0) {
-    items.push({ label: 'État', value: 'recherche active' })
+    items.push({ label: t('assistant.context.state'), value: t('assistant.context.activeSearch') })
   } else {
-    items.push({ label: 'État', value: 'aucun contexte actif' })
+    items.push({ label: t('assistant.context.state'), value: t('assistant.context.noActiveContext') })
   }
-  if (context.initialValue) items.push({ label: 'Recherche', value: context.initialValue })
-  if (context.targetValue) items.push({ label: 'Cible', value: context.targetValue })
-  if (context.valueType) items.push({ label: 'Type', value: context.valueType })
-  if (context.candidateCount > 0) items.push({ label: 'Candidats', value: String(context.candidateCount) })
+  if (context.initialValue) items.push({ label: t('assistant.context.search'), value: context.initialValue })
+  if (context.targetValue) items.push({ label: t('assistant.context.target'), value: context.targetValue })
+  if (context.valueType) items.push({ label: t('assistant.context.type'), value: context.valueType })
+  if (context.candidateCount > 0) items.push({ label: t('assistant.context.candidates'), value: String(context.candidateCount) })
   if (context.chatTargets.length > 0) {
     items.push({
-      label: 'Adresses',
+      label: t('assistant.context.addresses'),
       value: context.chatTargets.map((target) => `0x${target.address}`).join(' · '),
     })
   }
@@ -153,21 +155,21 @@ const contextItems = computed(() => {
         .filter(Boolean),
     ))
     if (groups.length > 0) {
-      items.push({ label: 'Groupes profil', value: groups.join(' · ') })
+      items.push({ label: t('assistant.context.profileGroups'), value: groups.join(' · ') })
     }
     items.push({
-      label: 'Cibles profil',
+      label: t('assistant.context.profileTargets'),
       value: context.profileTargets.map((target) => `${target.profile}:${target.target}`).join(' · '),
     })
   }
-  if (context.hasUndoReduction) items.push({ label: 'Réduction', value: 'restaurable' })
+  if (context.hasUndoReduction) items.push({ label: t('assistant.context.reduction'), value: t('assistant.context.restorable') })
   if (context.writeHistory && context.writeHistory.length > 0) {
-    items.push({ label: 'Écritures', value: context.writeHistory.join(' -> ') })
+    items.push({ label: t('assistant.context.writes'), value: context.writeHistory.join(' -> ') })
   }
   if (store.investigationReport?.numericSources?.top?.length) {
     const best = store.investigationReport.numericSources.top[0]
     items.push({
-      label: 'Enquête',
+      label: t('assistant.context.investigation'),
       value: `top 0x${best.address ?? '?'} · ${Math.round(Number(best.score ?? 0) * 100)}%`,
     })
   }
@@ -273,10 +275,10 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
   } else if (actionId === 'new_search') {
     await store.startNewSearchContext()
   } else if (actionId === 'continue_candidates') {
-    store.pushMessage('assistant', 'Garde le jeu ouvert, fais varier la valeur et donne-moi la nouvelle valeur observée pour continuer la réduction.')
+    store.pushMessage('assistant', t('assistant.msg.continueCandidates'))
   } else if (actionId === 'undo_reduction') {
     await store.undoCandidateScan()
-    store.pushMessage('assistant', 'J’ai restauré les candidats précédents. Tu peux maintenant essayer changed, increased, ou une autre représentation.')
+    store.pushMessage('assistant', t('assistant.msg.undoReduction'))
   } else if (actionId === 'try_changed') {
     await store.undoCandidateScan()
     store.nextScanMode = 'changed'
@@ -306,7 +308,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     store.unknownScanMode = 'changed'
     await store.runAutoUnknownObservation(actionValue || store.targetValueGuided || 'capture')
   } else if (actionId === 'continue_unknown_observation') {
-    store.pushMessage('assistant', 'Fais varier la valeur dans le processus, puis tape la nouvelle observation ici. Je reprendrai Unknown automatiquement.')
+    store.pushMessage('assistant', t('assistant.msg.continueUnknownObservation'))
   } else if (actionId === 'try_encrypted_scan' || actionId === 'encrypted_scan') {
     store.pendingAssistantAction = ''
     const value = actionValue || store.targetValueGuided || store.smartSearchContext?.initialValue || ''
@@ -314,7 +316,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
       await store.runAutoEncryptedScan(value)
     } else {
       store.activeView = 'expert'
-      store.pushMessage('assistant', 'Donne-moi une valeur affichée, puis je lancerai le scan chiffré borné.')
+      store.pushMessage('assistant', t('assistant.msg.needDisplayedValueEncrypted'))
     }
   } else if (actionId === 'trace_ui_string' || actionId === 'trace_ui_sources') {
     await store.acknowledgePendingSmartSearchRecovery()
@@ -323,7 +325,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
       await store.runAutoTraceUiString(value)
     } else {
       store.activeView = 'expert'
-      store.pushMessage('assistant', 'Donne-moi la valeur affichée à l’écran, puis je lancerai Trace UI string.')
+      store.pushMessage('assistant', t('assistant.msg.needDisplayedValueTrace'))
     }
   } else if (actionId === 'start_changed_pages_diff' || actionId === 'start_changed_pages_session') {
     await store.acknowledgePendingSmartSearchRecovery()
@@ -333,7 +335,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
       : controller.startChangedPagesDiff
     if (!start) {
       store.activeView = 'expert'
-      store.pushMessage('assistant', 'Changed Pages non exposé par ce backend.', { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.changedPagesNotExposed'), { isError: true })
     } else {
       const result = await start({
         maxBytesMb: 64,
@@ -346,22 +348,22 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
       store.pushMessage(
         'assistant',
         payload.success
-          ? `Changed Pages démarré (${blocks} bloc(s), 64 Mo max). Fais varier la valeur affichée, puis donne-moi l'ancienne et la nouvelle valeur.`
-          : `Changed Pages n'a pas pu démarrer : ${String(payload.error ?? 'raison inconnue')}.`,
+          ? t('assistant.msg.changedPagesStarted', { blocks })
+          : t('assistant.msg.changedPagesFailed', { reason: String(payload.error ?? t('assistant.msg.unknownReason')) }),
         { isError: payload.success !== true },
       )
     }
   } else if (actionId === 'review_encrypted_hits') {
     store.activeView = 'expert'
-    store.pushMessage('assistant', 'J’ai ouvert Expert : inspecte les hits chiffrés, Watch les meilleurs, puis transforme seulement une piste confirmée en write/freeze.')
+    store.pushMessage('assistant', t('assistant.msg.reviewEncryptedHits'))
   } else if (actionId === 'reduce_again' || actionId === 'reduce_with_new_value') {
-    store.pushMessage('assistant', 'Fais varier la valeur dans le jeu, tape la nouvelle valeur observée, puis appuie sur Auto pour réduire les candidats.')
+    store.pushMessage('assistant', t('assistant.msg.reduceAgain'))
   } else if (actionId === 'run_exact' || actionId === 'exact_or_multitype') {
     store.searchQuery = actionValue || store.targetValueGuided || ''
     if (store.searchQuery.trim()) await store.doAutoResolve()
   } else if (actionId === 'attach_process') {
     store.activeView = 'process'
-    store.pushMessage('assistant', 'Va dans Process, attache une application autorisée, puis reviens ici : je reprendrai le plan.')
+    store.pushMessage('assistant', t('assistant.msg.goAttachProcess'))
   } else if (actionId === 'open_expert') {
     const expertStep = typeof action === 'string' ? '' : String(action.expertStep ?? '')
     if (expertStep === 'find' || expertStep === 'inspect' || expertStep === 'act' || expertStep === 'persist') {
@@ -372,48 +374,48 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
       store.pendingExpertAnchor = expertAnchor
     }
     store.activeView = 'expert'
-    store.pushMessage('assistant', 'Expert ouvert. Je garde le contexte Assistant pour continuer la chaîne dès que tu valides une piste.')
+    store.pushMessage('assistant', t('assistant.msg.expertOpenedContinueChain'))
   } else if (actionId === 'confirm_test_write' || actionId === 'guarded_write' || actionId === 'review_top_candidates') {
-    store.pushMessage('assistant', 'Checkpoint écriture : je peux préparer le test, mais confirme explicitement la valeur à écrire et les candidats à utiliser.')
+    store.pushMessage('assistant', t('assistant.msg.checkpointWrite'))
   } else if (actionId === 'escalate_freeze_bp') {
     const address = typeof action === 'string' ? '' : String(action.address ?? '')
     await store.escalateFreezeToBreakpoint(address)
   } else if (actionId === 'confirm_breakpoint_freeze' || actionId === 'guarded_freeze') {
-    store.pushMessage('assistant', 'Checkpoint freeze BP : confirme l’adresse, le type et la valeur figée avant que je lance un breakpoint hardware.')
+    store.pushMessage('assistant', t('assistant.msg.checkpointFreezeBp'))
   } else if (actionId === 'trainer_checkpoint') {
     store.activeView = 'expert'
-    store.pushMessage('assistant', 'Checkpoint trainer : vérifie la signature AOB et les matches avant tout patch ou hook.')
+    store.pushMessage('assistant', t('assistant.msg.checkpointTrainer'))
   } else if (actionId === 'find_what_writes_targets') {
     const address = typeof action === 'string' ? '' : String(action.address ?? '')
     const type = typeof action === 'string' ? 'Int32' : String(action.type ?? 'Int32')
     if (!address) {
-      store.pushMessage('assistant', "Aucune adresse récente à capturer.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.noRecentAddressToCapture'), { isError: true })
     } else {
-      store.pushMessage('assistant', 'Fais varier la valeur dans le jeu maintenant : je capture qui écrit sur cette adresse pendant quelques secondes...')
+      store.pushMessage('assistant', t('assistant.msg.findWhatWritesCapturing'))
       await scrollToBottom()
       const result = await store.executeCheckpointFindWhatWrites({ address, type })
       if (result === null) {
-        store.pushMessage('assistant', "Capture bloquée par ton mode Auto actuel (Safe). Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+        store.pushMessage('assistant', t('assistant.msg.captureBlockedBySafeMode'), { isError: true })
       } else {
         const hits = Array.isArray((result as Record<string, unknown>).hits) ? (result as Record<string, unknown>).hits as Array<Record<string, unknown>> : []
         const firstRip = hits.length > 0 ? String(hits[0].instructionPointer ?? '').trim() : ''
         store.pushMessage(
           'assistant',
           hits.length > 0
-            ? `Capturé : ${hits.length} instruction(s) écrivent sur 0x${address}. Ajoutées aux checkpoints d'Investigation — tu peux y valider une piste avant d'écrire.`
-            : `Aucune écriture capturée sur 0x${address} pendant la fenêtre. Soit la valeur n'a pas changé pendant la capture (réessaie en faisant varier plus vite), soit cette adresse n'est plus la bonne.`,
+            ? t('assistant.msg.findWhatWritesCaptured', { count: hits.length, address })
+            : t('assistant.msg.findWhatWritesNoHit', { address }),
           {
             isError: hits.length === 0,
             recoveryActions: firstRip
               ? [
                   {
                     id: 'disassemble_backward_targets',
-                    label: 'Chercher la vraie source',
+                    label: t('assistant.msg.findRealSourceLabel'),
                     address: firstRip,
                     watchedAddress: address,
-                    reason: "Si l'écriture ne tient jamais, l'adresse ciblée est souvent un compteur animé recalculé à chaque frame — remonter le désassemblage trouve le vrai champ source.",
+                    reason: t('assistant.msg.findRealSourceReason'),
                   },
-                  { id: 'open_expert', label: 'Ouvrir Expert' },
+                  { id: 'open_expert', label: t('assistant.msg.openExpertLabel') },
                 ]
               : undefined,
           },
@@ -424,31 +426,31 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     const address = typeof action === 'string' ? '' : String(action.address ?? '')
     const watchedAddress = typeof action === 'string' ? '' : String(action.watchedAddress ?? '')
     if (!address) {
-      store.pushMessage('assistant', "Aucun RIP capturé à désassembler.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.noRipToDisassemble'), { isError: true })
     } else {
       const result = await store.executeCheckpointDisassembleBackward({ address })
       if (result === null) {
-        store.pushMessage('assistant', "Désassemblage bloqué par ton mode Auto actuel (Safe). Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+        store.pushMessage('assistant', t('assistant.msg.disassembleBlockedBySafeMode'), { isError: true })
       } else {
         const candidates = Array.isArray(result.candidateFields) ? result.candidateFields : []
         if (candidates.length === 0) {
-          store.pushMessage('assistant', `Aucun champ candidat trouvé avant 0x${address}. L'instruction capturée n'est peut-être pas la fin d'une chaîne de calcul exploitable — essaie une autre adresse ou vérifie le désassemblage dans Expert.`, { isError: true })
+          store.pushMessage('assistant', t('assistant.msg.noCandidateFieldFound', { address }), { isError: true })
         } else {
           const list = candidates
             .map((field) => `[${field.memBaseRegister}+0x${Number(field.memDisplacement ?? 0).toString(16)}]`)
             .join(', ')
           store.pushMessage(
             'assistant',
-            `${candidates.length} champ(s) candidat(s) trouvé(s) avant 0x${address} : ${list}. Ajoutés aux checkpoints d'Investigation. Ce sont souvent les vraies sources ("actuel"/"cible") d'un compteur animé, mais deviner lequel à l'œil demande de lire de l'assembleur.`,
+            t('assistant.msg.candidateFieldsFound', { count: candidates.length, address, list }),
             {
               recoveryActions: watchedAddress
                 ? [
                     {
                       id: 'test_candidate_fields',
-                      label: 'Tester automatiquement lequel tient',
+                      label: t('assistant.msg.testWhichHoldsLabel'),
                       address,
                       watchedAddress,
-                      reason: 'Écrit une valeur test sur chaque champ, attend quelques secondes, puis vérifie lequel tient — pas besoin de lire l\'assembleur toi-même.',
+                      reason: t('assistant.msg.testWhichHoldsReason'),
                     },
                   ]
                 : undefined,
@@ -461,31 +463,31 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     const address = typeof action === 'string' ? '' : String(action.address ?? '')
     const watchedAddress = typeof action === 'string' ? '' : String(action.watchedAddress ?? '')
     if (!address || !watchedAddress) {
-      store.pushMessage('assistant', "Adresse RIP ou adresse écrite manquante pour le test.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.missingRipOrWrittenAddress'), { isError: true })
     } else {
-      store.pushMessage('assistant', 'Test en cours : écriture d\'une valeur test sur chaque champ candidat, puis vérification dans quelques secondes...')
+      store.pushMessage('assistant', t('assistant.msg.candidateFieldsTesting'))
       await scrollToBottom()
       const result = await store.executeCandidateFieldTest(address, watchedAddress)
       if (result === null) {
-        store.pushMessage('assistant', "Test bloqué par ton mode Auto actuel (Safe) ou refusé à la confirmation. Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+        store.pushMessage('assistant', t('assistant.msg.testBlockedBySafeMode'), { isError: true })
       } else {
         const outcomes = Array.isArray(result.results) ? result.results : []
         const holding = outcomes.filter((o) => o.verdict === 'holds')
         if (outcomes.length === 0) {
-          store.pushMessage('assistant', `Test échoué : ${result.error ?? 'raison inconnue'}.`, { isError: true })
+          store.pushMessage('assistant', t('assistant.msg.testFailed', { reason: result.error ?? t('assistant.msg.unknownReason') }), { isError: true })
         } else {
           const summary = outcomes
-            .map((o) => `[${o.memBaseRegister}+0x${Number(o.memDisplacement ?? 0).toString(16)}] : ${o.verdict === 'holds' ? 'tient' : o.verdict === 'reverts' ? 'repart' : 'erreur'}`)
+            .map((o) => `[${o.memBaseRegister}+0x${Number(o.memDisplacement ?? 0).toString(16)}] : ${o.verdict === 'holds' ? t('assistant.msg.verdictHolds') : o.verdict === 'reverts' ? t('assistant.msg.verdictReverts') : t('assistant.msg.verdictError')}`)
             .join(', ')
           const best = holding[0]
           store.pushMessage(
             'assistant',
             holding.length > 0
-              ? `Résultat : ${summary}. 0x${best.address} tient — c'est probablement la vraie source. Dis-moi la valeur à y écrire (ex: "mets 3000 à 0x${best.address}"), pas sur l'adresse affichée d'origine.`
-              : `Résultat : ${summary}. Aucun champ ne tient — essaie un autre RIP capturé, ou vérifie le désassemblage dans Expert.`,
+              ? t('assistant.msg.candidateFieldHolds', { summary, address: best.address })
+              : t('assistant.msg.noCandidateFieldHolds', { summary }),
             {
               isError: holding.length === 0,
-              recoveryActions: holding.length === 0 ? [{ id: 'open_expert', label: 'Ouvrir Expert' }] : undefined,
+              recoveryActions: holding.length === 0 ? [{ id: 'open_expert', label: t('assistant.msg.openExpertLabel') }] : undefined,
             },
           )
         }
@@ -496,17 +498,17 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     const value = typeof action === 'string' ? '' : String(action.value ?? '')
     const valueType = typeof action === 'string' ? 'Int32' : String(action.valueType ?? 'Int32')
     if (!address || !value) {
-      store.pushMessage('assistant', "Adresse ou valeur manquante pour l'écriture kernel.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.missingAddressOrValueKernel'), { isError: true })
     } else {
       const result = await store.executeCheckpointKernelWrite({ address, value, type: valueType })
       if (result === null) {
-        store.pushMessage('assistant', "Écriture kernel bloquée par ton mode Auto actuel (Safe) ou refusée à la confirmation. Passe en Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+        store.pushMessage('assistant', t('assistant.msg.kernelWriteBlockedBySafeMode'), { isError: true })
       } else {
         store.pushMessage(
           'assistant',
           result.success
-            ? `Écrit ${value} à 0x${address} via le driver kernel (${result.bytesWritten ?? 0} octet(s), contourne les protections usermode).`
-            : `Écriture kernel échouée : ${result.error ?? 'raison inconnue'}. Vérifie que le driver KillEngineKernel est chargé (Paramètres > Driver kernel).`,
+            ? t('assistant.msg.kernelWriteSuccess', { value, address, bytes: result.bytesWritten ?? 0 })
+            : t('assistant.msg.kernelWriteFailed', { reason: result.error ?? t('assistant.msg.unknownReason') }),
           { isError: !result.success },
         )
       }
@@ -517,11 +519,11 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     if (mode === 'off') {
       const result = await store.stopSpeedhack()
       if (result === null) {
-        store.pushMessage('assistant', "Impossible de désactiver le speedhack (backend indisponible).", { isError: true })
+        store.pushMessage('assistant', t('assistant.msg.speedhackDisableUnavailable'), { isError: true })
       } else {
         store.pushMessage(
           'assistant',
-          result.success ? 'Speedhack désactivé, vitesse remise à la normale.' : `Échec : ${result.error ?? 'raison inconnue'}`,
+          result.success ? t('assistant.msg.speedhackDisabled') : t('assistant.msg.genericFailure', { reason: result.error ?? t('assistant.msg.unknownReason') }),
           { isError: !result.success },
         )
       }
@@ -536,25 +538,25 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
       if (alreadyActive) {
         const result = await store.setSpeedhackFactor(factor)
         if (result === null) {
-          store.pushMessage('assistant', "Speedhack bloqué par ton mode Auto actuel (Safe) ou refusé à la confirmation. Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+          store.pushMessage('assistant', t('assistant.msg.speedhackBlockedBySafeMode'), { isError: true })
         } else {
           store.pushMessage(
             'assistant',
-            result.success ? `Speedhack ajusté à ${factor}x sur ${store.processName || 'la cible'}.` : `Speedhack échoué : ${result.error ?? 'raison inconnue'}.`,
-            { isError: !result.success, recoveryActions: [{ id: 'open_speedhack', label: 'Ouvrir Speedhack' }] },
+            result.success ? t('assistant.msg.speedhackAdjusted', { factor, target: store.processName || t('assistant.msg.theTarget') }) : t('assistant.msg.speedhackFailed', { reason: result.error ?? t('assistant.msg.unknownReason') }),
+            { isError: !result.success, recoveryActions: [{ id: 'open_speedhack', label: t('assistant.msg.openSpeedhackLabel') }] },
           )
         }
       } else {
         const result = await store.startSpeedhack(factor)
         if (result === null) {
-          store.pushMessage('assistant', "Speedhack bloqué par ton mode Auto actuel (Safe) ou refusé à la confirmation. Passe en Expert ou Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+          store.pushMessage('assistant', t('assistant.msg.speedhackBlockedBySafeMode'), { isError: true })
         } else if (!result.started) {
-          store.pushMessage('assistant', `Speedhack échoué : ${result.error ?? 'raison inconnue'}.`, { isError: true })
+          store.pushMessage('assistant', t('assistant.msg.speedhackFailed', { reason: result.error ?? t('assistant.msg.unknownReason') }), { isError: true })
         } else {
           store.pushMessage(
             'assistant',
-            `Activation du speedhack à ${factor}x en cours sur ${store.processName || 'la cible'}...`,
-            { recoveryActions: [{ id: 'open_speedhack', label: 'Ouvrir Speedhack' }] },
+            t('assistant.msg.speedhackActivating', { factor, target: store.processName || t('assistant.msg.theTarget') }),
+            { recoveryActions: [{ id: 'open_speedhack', label: t('assistant.msg.openSpeedhackLabel') }] },
           )
         }
       }
@@ -569,16 +571,16 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     const off = typeof action === 'string' ? false : action.mode === 'off'
     const result = off ? await store.unblockProcessNetwork() : await store.blockProcessNetwork()
     if (result === null) {
-      store.pushMessage('assistant', "Blocage réseau bloqué par ton mode Auto actuel (Safe/Expert) ou refusé à la confirmation. Passe en Trainer dans Paramètres pour autoriser ce type d'action.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.networkBlockBlockedBySafeMode'), { isError: true })
     } else if (!result.started) {
-      store.pushMessage('assistant', `Blocage réseau échoué : ${result.error ?? 'raison inconnue'}.`, { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.networkBlockFailed', { reason: result.error ?? t('assistant.msg.unknownReason') }), { isError: true })
     } else {
       store.pushMessage(
         'assistant',
         off
-          ? "Retrait de la règle pare-feu en cours (invite UAC)..."
-          : "Coupure réseau en cours (invite UAC)... Le résultat apparaîtra dans le journal d'actions.",
-        { recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }] },
+          ? t('assistant.msg.networkUnblockInProgress')
+          : t('assistant.msg.networkBlockInProgress'),
+        { recoveryActions: [{ id: 'open_network', label: t('assistant.msg.openNetworkLabel') }] },
       )
     }
   } else if (actionId === 'dns_spoof_apply') {
@@ -591,26 +593,26 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     const domain = typeof action === 'string' ? '' : String(action.domain ?? '')
     const targetIp = typeof action === 'string' ? '' : String(action.targetIp ?? '')
     if (!domain) {
-      store.pushMessage('assistant', "Domaine manquant pour l'action DNS.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.missingDnsDomain'), { isError: true })
     } else if (restore) {
       await store.removeDnsSpoofEntry(domain)
-      store.pushMessage('assistant', `Restauration DNS en cours pour ${domain}... Le résultat apparaîtra dans le journal d'actions.`, {
-        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      store.pushMessage('assistant', t('assistant.msg.dnsRestoreInProgress', { domain }), {
+        recoveryActions: [{ id: 'open_network', label: t('assistant.msg.openNetworkLabel') }],
       })
     } else {
       store.dnsSpoofDomain = domain
       store.dnsSpoofTargetIp = targetIp || '127.0.0.1'
       await store.addDnsSpoofEntry()
-      store.pushMessage('assistant', `Redirection DNS en cours : ${domain} -> ${store.dnsSpoofTargetIp}... Le résultat apparaîtra dans le journal d'actions.`, {
-        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      store.pushMessage('assistant', t('assistant.msg.dnsRedirectInProgress', { domain, targetIp: store.dnsSpoofTargetIp }), {
+        recoveryActions: [{ id: 'open_network', label: t('assistant.msg.openNetworkLabel') }],
       })
     }
   } else if (actionId === 'http_proxy_apply') {
     const stop = typeof action === 'string' ? false : action.mode === 'stop'
     if (stop) {
       await store.stopHttpProxy()
-      store.pushMessage('assistant', "Arrêt du proxy HTTP en cours... Le résultat apparaîtra dans le journal d'actions.", {
-        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      store.pushMessage('assistant', t('assistant.msg.httpProxyStopInProgress'), {
+        recoveryActions: [{ id: 'open_network', label: t('assistant.msg.openNetworkLabel') }],
       })
     } else {
       const port = typeof action === 'string' ? 8080 : Number(action.port ?? 8080)
@@ -618,32 +620,32 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
       store.httpProxyPort = port
       store.httpProxyInterceptHttps = interceptHttps
       await store.startHttpProxy()
-      store.pushMessage('assistant', `Démarrage du proxy HTTP en cours (port ${port})... Le résultat apparaîtra dans le journal d'actions.`, {
-        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      store.pushMessage('assistant', t('assistant.msg.httpProxyStartInProgress', { port }), {
+        recoveryActions: [{ id: 'open_network', label: t('assistant.msg.openNetworkLabel') }],
       })
     }
   } else if (actionId === 'modify_http_request_apply') {
     const requestId = typeof action === 'string' ? '' : String(action.requestId ?? '')
     const newBody = typeof action === 'string' ? '' : String(action.newBody ?? '')
     if (!requestId) {
-      store.pushMessage('assistant', "Identifiant de requête HTTP manquant.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.missingHttpRequestId'), { isError: true })
     } else {
       store.selectedHttpRequest = requestId
       await store.modifySelectedHttpRequest(newBody)
-      store.pushMessage('assistant', `Requête ${requestId} modifiée.`, {
-        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      store.pushMessage('assistant', t('assistant.msg.httpRequestModified', { requestId }), {
+        recoveryActions: [{ id: 'open_network', label: t('assistant.msg.openNetworkLabel') }],
       })
     }
   } else if (actionId === 'lag_switch_apply') {
     const enabled = typeof action === 'string' ? true : action.enabled !== false
     const delayMs = typeof action === 'string' ? 1000 : Number(action.delayMs ?? 1000)
     if (store.lagSwitchActive === enabled) {
-      store.pushMessage('assistant', enabled ? 'Lag switch déjà actif.' : 'Lag switch déjà désactivé.')
+      store.pushMessage('assistant', enabled ? t('assistant.msg.lagSwitchAlreadyActive') : t('assistant.msg.lagSwitchAlreadyDisabled'))
     } else {
       store.lagSwitchDelayMs = delayMs
       await store.toggleLagSwitch()
-      store.pushMessage('assistant', `${enabled ? 'Activation' : 'Désactivation'} du lag switch en cours... Le résultat apparaîtra dans le journal d'actions.`, {
-        recoveryActions: [{ id: 'open_network', label: 'Ouvrir Réseau' }],
+      store.pushMessage('assistant', enabled ? t('assistant.msg.lagSwitchEnabling') : t('assistant.msg.lagSwitchDisabling'), {
+        recoveryActions: [{ id: 'open_network', label: t('assistant.msg.openNetworkLabel') }],
       })
     }
   } else if (actionId === 'stealth_mode_apply') {
@@ -654,34 +656,34 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     const profile = typeof action === 'string' ? 'default' : String(action.profile ?? 'default')
     const result = restore ? await store.restoreStealthMode() : await store.applyStealthMode(profile)
     if (result === null) {
-      store.pushMessage('assistant', "Mode discret refusé à la confirmation.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.stealthDeniedConfirmation'), { isError: true })
     } else {
       store.pushMessage(
         'assistant',
         result.success
-          ? (restore ? 'Mode discret désactivé.' : `Mode discret activé (profil ${profile}).`)
-          : `Échec : ${result.error ?? 'raison inconnue'}`,
+          ? (restore ? t('assistant.msg.stealthDisabled') : t('assistant.msg.stealthEnabled', { profile }))
+          : t('assistant.msg.genericFailure', { reason: result.error ?? t('assistant.msg.unknownReason') }),
         { isError: !result.success },
       )
     }
   } else if (actionId === 'webview2_evaluate_apply') {
     const expression = typeof action === 'string' ? '' : String(action.expression ?? '')
     if (!expression.trim()) {
-      store.pushMessage('assistant', "Expression JavaScript manquante.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.missingJsExpression'), { isError: true })
     } else {
       const webView2Store = useWebView2InspectorStore()
       if (!webView2Store.isConnected) {
-        store.pushMessage('assistant', "Aucune target WebView2 connectée — ouvre l'onglet WebView2 pour t'y connecter d'abord.", {
+        store.pushMessage('assistant', t('assistant.msg.noWebview2TargetConnected'), {
           isError: true,
-          recoveryActions: [{ id: 'open_webview2_inspector', label: 'Ouvrir WebView2' }],
+          recoveryActions: [{ id: 'open_webview2_inspector', label: t('assistant.msg.openWebview2Label') }],
         })
       } else {
         const result = await webView2Store.evaluateJavaScript(expression)
         store.pushMessage(
           'assistant',
           result?.success
-            ? `Résultat : ${JSON.stringify(result.value ?? null)}`
-            : `Échec : ${webView2Store.error ?? result?.error ?? 'raison inconnue'}`,
+            ? t('assistant.msg.jsResult', { result: JSON.stringify(result.value ?? null) })
+            : t('assistant.msg.genericFailure', { reason: webView2Store.error ?? result?.error ?? t('assistant.msg.unknownReason') }),
           { isError: !result?.success },
         )
       }
@@ -695,17 +697,17 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     const value = typeof action === 'string' ? '' : String(action.value ?? '')
     const valueType = typeof action === 'string' ? 'Int32' : String(action.valueType ?? 'Int32')
     if (!address || !value) {
-      store.pushMessage('assistant', isFreeze ? "Adresse ou valeur manquante pour le freeze." : "Adresse ou valeur manquante pour l'écriture.", { isError: true })
+      store.pushMessage('assistant', isFreeze ? t('assistant.msg.missingAddressOrValueFreeze') : t('assistant.msg.missingAddressOrValueWrite'), { isError: true })
     } else {
       const result = await store.executeCheckpointWrite({ address, type: valueType, value }, isFreeze)
       if (result === null) {
-        store.pushMessage('assistant', isFreeze ? "Freeze refusé à la confirmation ou adresse/valeur invalide." : "Écriture refusée à la confirmation ou adresse/valeur invalide.", { isError: true })
+        store.pushMessage('assistant', isFreeze ? t('assistant.msg.freezeDeniedConfirmation') : t('assistant.msg.writeDeniedConfirmation'), { isError: true })
       } else {
         store.pushMessage(
           'assistant',
           result.success
-            ? (isFreeze ? `Figé ${value} (${valueType}) à 0x${address}.` : `Écrit ${value} (${valueType}) à 0x${address}.`)
-            : `${isFreeze ? 'Freeze échoué' : 'Écriture échouée'} : ${result.error ?? 'raison inconnue'}.`,
+            ? (isFreeze ? t('assistant.msg.frozeValue', { value, valueType, address }) : t('assistant.msg.wroteValue', { value, valueType, address }))
+            : (isFreeze ? t('assistant.msg.freezeFailed', { reason: result.error ?? t('assistant.msg.unknownReason') }) : t('assistant.msg.writeFailed', { reason: result.error ?? t('assistant.msg.unknownReason') })),
           { isError: !result.success },
         )
       }
@@ -722,7 +724,7 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     // suffit quel que soit leur nombre.
     const value = typeof action === 'string' ? '' : String(action.value ?? '')
     if (!value) {
-      store.pushMessage('assistant', "Valeur manquante.", { isError: true })
+      store.pushMessage('assistant', t('assistant.msg.missingValue'), { isError: true })
     } else {
       const result = actionId === 'chat_memory_write_confirm'
         ? await store.confirmChatMemoryWrite(value)
@@ -730,11 +732,11 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
           ? await store.confirmChatMemoryFreeze(value)
           : await store.confirmRewriteLastAutoWrite(value)
       if (result === null) {
-        store.pushMessage('assistant', "Action refusée à la confirmation ou indisponible.", { isError: true })
+        store.pushMessage('assistant', t('assistant.msg.actionDeniedOrUnavailable'), { isError: true })
       } else {
         store.pushMessage(
           'assistant',
-          String(result.message ?? (result.success ? 'Fait.' : 'Échoué.')),
+          String(result.message ?? (result.success ? t('assistant.msg.done') : t('assistant.msg.failed'))),
           { isError: result.success !== true },
         )
       }
@@ -750,11 +752,11 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
     if (all) {
       if (restore) await store.restoreAllTrainerFeatures()
       else await store.applyAllTrainerFeatures()
-      store.pushMessage('assistant', restore ? 'Restauration de toutes les features Trainer actives terminée.' : 'Activation de toutes les features Trainer terminée.')
+      store.pushMessage('assistant', restore ? t('assistant.msg.trainerRestoreAllDone') : t('assistant.msg.trainerApplyAllDone'))
     } else {
       const id = Number(idTarget)
       if (!id || id <= 0) {
-        store.pushMessage('assistant', "Id de feature Trainer invalide.", { isError: true })
+        store.pushMessage('assistant', t('assistant.msg.invalidTrainerFeatureId'), { isError: true })
       } else {
         if (restore) await store.restoreTrainerFeature(id)
         else await store.applyTrainerFeature(id)
@@ -763,28 +765,28 @@ async function runRecoveryAction(action: Record<string, unknown> | string) {
         store.pushMessage(
           'assistant',
           ok
-            ? `Feature Trainer #${id} ${restore ? 'restaurée' : 'activée'}.`
-            : `Feature Trainer #${id} : ${feature?.lastError || 'pas de changement (refusé à la confirmation ou déjà dans cet état).'}`,
+            ? t('assistant.msg.trainerFeatureDone', { id, action: restore ? t('assistant.msg.restored') : t('assistant.msg.activated') })
+            : t('assistant.msg.trainerFeatureIssue', { id, reason: feature?.lastError || t('assistant.msg.noChangeDeniedOrAlreadySet') }),
           { isError: !ok },
         )
       }
     }
   } else if (actionId === 'open_network') {
     store.activeView = 'network'
-    store.pushMessage('assistant', "Réseau ouvert : coupe ou rétablis l'accès réseau de la cible depuis là.")
+    store.pushMessage('assistant', t('assistant.msg.openedNetwork'))
   } else if (actionId === 'open_speedhack') {
     store.activeView = 'speedhack'
-    store.pushMessage('assistant', "Speedhack ouvert : le slider et les presets sont là, réglables en direct.")
+    store.pushMessage('assistant', t('assistant.msg.openedSpeedhack'))
   } else if (actionId === 'open_pointer_scan') {
     store.pendingExpertStep = 'inspect'
     store.activeView = 'expert'
-    store.pushMessage('assistant', "Expert ouvert, section Pointeurs : lance un scan de pointeur stable vers la dernière adresse. Ça permet de la retrouver même si elle change d'une partie à l'autre.")
+    store.pushMessage('assistant', t('assistant.msg.openedPointerScan'))
   } else if (actionId === 'open_clr_inspector') {
     store.activeView = 'clr'
-    store.pushMessage('assistant', "CLR Inspector ouvert : cherche l'objet par type ou par valeur de champ plutôt que par adresse brute — c'est l'équivalent d'une chaîne de pointeurs pour ce genre de cible.")
+    store.pushMessage('assistant', t('assistant.msg.openedClrInspector'))
   } else if (actionId === 'open_webview2_inspector') {
     store.activeView = 'webview2'
-    store.pushMessage('assistant', "WebView2 Inspector ouvert : inspecte les pages web embarquées via le protocole Chrome DevTools (CDP) — utile pour les jeux Electron ou les UI web.")
+    store.pushMessage('assistant', t('assistant.msg.openedWebview2Inspector'))
   }
   await scrollToBottom()
 }
@@ -795,16 +797,16 @@ function recoveryActionClass(action: Record<string, unknown>): string {
 }
 
 function recoveryActionLabel(action: Record<string, unknown>): string {
-  const label = String(action.label ?? action.id ?? 'Action')
+  const label = String(action.label ?? action.id ?? t('assistant.msg.actionLabel'))
   const requiresConfirmation = action.requiresConfirmation === true || action.safe === false
-  return requiresConfirmation ? `Confirmer: ${label}` : label
+  return requiresConfirmation ? t('assistant.msg.confirmLabel', { label }) : label
 }
 
 function recoveryActionTitle(action: Record<string, unknown>): string {
   const reason = String(action.reason ?? '').trim()
   const requiresConfirmation = action.requiresConfirmation === true || action.safe === false
-  if (requiresConfirmation) return reason || 'Action risquée : confirmation explicite requise avant exécution.'
-  return reason || 'Action sûre : lecture, scan ou navigation.'
+  if (requiresConfirmation) return reason || t('assistant.msg.riskyActionTitle')
+  return reason || t('assistant.msg.safeActionTitle')
 }
 
 function safeStepClass(step: Record<string, unknown>): string {
@@ -815,11 +817,11 @@ function safeStepClass(step: Record<string, unknown>): string {
 }
 
 function safeStepLabel(step: Record<string, unknown>): string {
-  const tool = String(step.tool ?? 'outil')
-  if (tool === 'exact_scan_multi_type') return 'Scan multi-type'
-  if (tool === 'next_scan') return 'Réduction'
-  if (tool === 'scan_encrypted_value') return 'Scan chiffré'
-  if (tool === 'scan_ui_strings') return 'Trace UI string'
+  const tool = String(step.tool ?? t('assistant.msg.toolFallback'))
+  if (tool === 'exact_scan_multi_type') return t('assistant.msg.toolMultiTypeScan')
+  if (tool === 'next_scan') return t('assistant.msg.toolReduction')
+  if (tool === 'scan_encrypted_value') return t('assistant.msg.toolEncryptedScan')
+  if (tool === 'scan_ui_strings') return t('assistant.msg.toolTraceUiString')
   return tool
 }
 
@@ -828,43 +830,43 @@ function safeStepMetric(step: Record<string, unknown>): string {
     ? step.payload as Record<string, unknown>
     : {}
   const count = payload.matchesFound ?? payload.matchesReturned ?? payload.candidateStoreSize ?? payload.remaining
-  const partial = payload.partial === true ? ' · partiel' : ''
+  const partial = payload.partial === true ? ` · ${t('assistant.msg.partial')}` : ''
   if (count === undefined || count === null || count === '') return partial.trim()
-  return `${Number(count).toLocaleString('fr-FR')} résultat(s)${partial}`
+  return t('assistant.msg.resultCount', { count: Number(count).toLocaleString(locale.value === 'en' ? 'en-US' : 'fr-FR'), partial })
 }
 
 function workflowLabel(status: string | undefined): string {
   switch (status) {
     case 'awaiting_value_change':
-      return 'En attente : change la valeur dans le jeu'
+      return t('assistant.workflow.awaitingValueChange')
     case 'awaiting_new_value':
-      return 'En attente : donne la nouvelle valeur'
+      return t('assistant.workflow.awaitingNewValue')
     case 'needs_more_refinement':
-      return 'Encore trop de candidats — raffine davantage'
+      return t('assistant.workflow.needsMoreRefinement')
     case 'auto_write_done':
-      return 'Adresses actives pour modification'
+      return t('assistant.workflow.autoWriteDone')
     case 'freeze_done':
-      return 'Freeze actif'
+      return t('assistant.workflow.freezeDone')
     case 'requires_manual_write':
-      return 'Écriture prête à confirmer'
+      return t('assistant.workflow.requiresManualWrite')
     case 'awaiting_write_confirmation':
-      return 'Auto : écriture à confirmer'
+      return t('assistant.workflow.awaitingWriteConfirmation')
     case 'auto_resolve_no_candidate':
-      return 'Auto : aucune piste restante'
+      return t('assistant.workflow.autoResolveNoCandidate')
     case 'awaiting_unknown_observation':
-      return 'Auto : snapshot Unknown prêt'
+      return t('assistant.workflow.awaitingUnknownObservation')
     case 'auto_resolve_planned':
-      return 'Auto : plan prêt'
+      return t('assistant.workflow.autoResolvePlanned')
     case 'auto_write_partial_or_failed':
-      return 'Écriture partielle — vérifie manuellement'
+      return t('assistant.workflow.autoWritePartialOrFailed')
     case 'auto_write_problem':
-      return 'Adresses à vérifier'
+      return t('assistant.workflow.autoWriteProblem')
     case 'no_candidate':
-      return 'Aucun candidat restant'
+      return t('assistant.workflow.noCandidate')
     case 'trace_ui_string_found':
-      return 'En attente : filtrer dans Expert'
+      return t('assistant.workflow.traceUiStringFound')
     default:
-      return 'Prêt'
+      return t('assistant.workflow.ready')
   }
 }
 
@@ -902,9 +904,9 @@ function confidenceFor(record: Record<string, unknown>): string {
   if (label) return label
   const confidence = Number(record.confidence ?? Number.NaN)
   if (!Number.isFinite(confidence)) return ''
-  if (confidence >= 0.85) return 'fiabilité élevée'
-  if (confidence >= 0.65) return 'fiabilité moyenne'
-  return 'fiabilité faible'
+  if (confidence >= 0.85) return t('assistant.msg.confidenceHigh')
+  if (confidence >= 0.65) return t('assistant.msg.confidenceMedium')
+  return t('assistant.msg.confidenceLow')
 }
 
 function valueHistoryFor(record: Record<string, unknown>): string {
@@ -919,7 +921,7 @@ function valueHistoryFor(record: Record<string, unknown>): string {
 
   const uniqueValues = values.filter((value, index) => index === 0 || value !== values[index - 1])
   if (uniqueValues.length === 0) return ''
-  return `ancienne valeur observée : ${uniqueValues.slice(-4).join(' -> ')}`
+  return t('assistant.msg.previousObservedValue', { values: uniqueValues.slice(-4).join(' -> ') })
 }
 
 function writeHistoryFor(message: typeof store.messages[number]): string {
@@ -930,8 +932,8 @@ function writeHistoryFor(message: typeof store.messages[number]): string {
 function writeSummaryFor(message: typeof store.messages[number], record: Record<string, unknown>): string {
   const previous = message.previousTargetValue
   const current = String(record.value ?? message.targetValue ?? '').trim()
-  if (previous && current && previous !== current) return `dernière écriture : ${previous} · nouvelle écriture : ${current}`
-  if (current) return `nouvelle écriture : ${current}`
+  if (previous && current && previous !== current) return t('assistant.msg.writeSummaryChanged', { previous, current })
+  if (current) return t('assistant.msg.writeSummaryNew', { current })
   return ''
 }
 
@@ -940,7 +942,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   if (filtered.length === 0) return ''
   return filtered
     .map((candidate) => {
-      const reason = String(candidate.noiseFilterReason ?? 'rejeté')
+      const reason = String(candidate.noiseFilterReason ?? t('assistant.msg.rejected'))
       return `0x${candidate.address} (${candidate.regionType ?? '?'}) · ${reason}`
     })
     .join('\n')
@@ -953,7 +955,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
     <div class="header">
       <div>
         <h1>{{ $t('search.title') }}</h1>
-        <p class="subtitle">Décris ce que tu cherches, KillEngine fait le reste.</p>
+        <p class="subtitle">{{ $t('assistant.subtitle') }}</p>
       </div>
       <div class="header-actions">
         <div v-if="isWorkflowActive" class="workflow-badge" :class="workflowClass(store.workflowStatus)">
@@ -961,15 +963,15 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           {{ workflowLabel(store.workflowStatus) }}
         </div>
         <button class="btn btn-secondary btn-small" :disabled="store.isSearching" @click="store.startNewSearchContext()">
-          Nouvelle recherche
+          {{ $t('assistant.newSearch') }}
         </button>
       </div>
     </div>
 
     <PanelIntro
-      what="Le chat principal pour trouver et modifier des valeurs en mémoire sans connaître les termes techniques."
-      purpose="Décrire ce que tu cherches en langage naturel (une valeur affichée, un freeze, un trainer...) et laisser KillEngine choisir le bon outil."
-      how="Attache un processus, puis écris ta demande dans le champ de recherche en bas — une valeur affichée à l'écran suffit pour démarrer un scan."
+      :what="$t('assistant.intro.what')"
+      :purpose="$t('assistant.intro.purpose')"
+      :how="$t('assistant.intro.how')"
     />
 
     <div class="assistant-status-strip" :class="{ 'is-working': store.isSearching }">
@@ -982,13 +984,13 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
     <div v-if="store.activeChatMemoryTargets.length > 0" class="active-targets">
       <div>
-        <strong>{{ store.activeChatMemoryTargets.length }} adresse(s) mémoire active(s)</strong>
+        <strong>{{ $t('assistant.activeAddressesCount', { count: store.activeChatMemoryTargets.length }) }}</strong>
         <span>
           {{ store.activeChatMemoryTargets.map((target) => `0x${target.address}`).join(' · ') }}
         </span>
       </div>
       <button class="btn btn-secondary btn-small" @click="store.clearActiveChatMemoryTargets()">
-        Oublier
+        {{ $t('assistant.forget') }}
       </button>
     </div>
 
@@ -1004,8 +1006,8 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
       <!-- Empty state -->
       <div v-if="store.messages.length === 0" class="empty-state">
         <div class="empty-icon">⚡</div>
-        <h2>Bienvenue dans l'Assistant</h2>
-        <p>Écris par exemple :</p>
+        <h2>{{ $t('assistant.empty.welcome') }}</h2>
+        <p>{{ $t('assistant.empty.tryExample') }}</p>
         <div class="workflow-presets">
           <button
             v-for="preset in store.workflowPresets"
@@ -1017,29 +1019,29 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           >
             <strong>{{ preset.title }}</strong>
             <span>{{ preset.description }}</span>
-            <em>{{ preset.mode === 'auto' ? 'Auto' : 'Guide' }} · {{ preset.risk }}</em>
+            <em>{{ preset.mode === 'auto' ? $t('assistant.empty.auto') : $t('assistant.empty.guided') }} · {{ preset.risk }}</em>
           </button>
         </div>
         <div class="examples">
-          <button class="example-chip" @click="sendExample('Argent : 41250')">
-            Argent : 41250
+          <button class="example-chip" @click="sendExample($t('assistant.empty.example1Query'))">
+            {{ $t('assistant.empty.example1Label') }}
           </button>
-          <button class="example-chip" @click="sendExample('Score 1500 → 99999')">
-            Score 1500 → 99999
+          <button class="example-chip" @click="sendExample($t('assistant.empty.example2Query'))">
+            {{ $t('assistant.empty.example2Label') }}
           </button>
           <button class="example-chip" @click="sendExample('41250 99999')">
             41250 99999
           </button>
-          <button class="example-chip" @click="sendExample('quelle piste tester maintenant ?')">
-            Quelle piste tester ?
+          <button class="example-chip" @click="sendExample($t('assistant.empty.example4Query'))">
+            {{ $t('assistant.empty.example4Label') }}
           </button>
-          <button class="example-chip" @click="sendExample('pourquoi le trainer est bloqué ?')">
-            Pourquoi bloqué ?
+          <button class="example-chip" @click="sendExample($t('assistant.empty.example5Query'))">
+            {{ $t('assistant.empty.example5Label') }}
           </button>
         </div>
         <div v-if="!store.isAttached" class="warn-text">
-          <p>⚠ Attache d'abord un processus pour pouvoir chercher une valeur.</p>
-          <button class="btn btn-secondary compact" @click="store.activeView = 'process'">Aller à Processus</button>
+          <p>⚠ {{ $t('assistant.empty.attachFirstWarning') }}</p>
+          <button class="btn btn-secondary compact" @click="store.activeView = 'process'">{{ $t('assistant.empty.goToProcess') }}</button>
         </div>
       </div>
 
@@ -1055,7 +1057,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         </div>
         <div class="message-body">
           <div class="message-meta">
-            <span class="message-role">{{ msg.isThinking ? 'KillEngine réfléchit' : msg.role === 'user' ? 'Toi' : 'KillEngine' }}</span>
+            <span class="message-role">{{ msg.isThinking ? $t('assistant.msg.killEngineThinking') : msg.role === 'user' ? $t('assistant.msg.you') : 'KillEngine' }}</span>
             <span class="message-time">{{ msg.time }}</span>
           </div>
           <div v-if="msg.isThinking" class="thinking-card">
@@ -1068,17 +1070,17 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           </div>
           <div v-else class="message-text" :class="{ 'is-error': msg.isError }">{{ msg.text }}</div>
           <div v-if="msg.intentRationale" class="decision-line">
-            Décision : {{ msg.intentRationale }}
+            {{ $t('assistant.msg.decisionLabel') }} {{ msg.intentRationale }}
           </div>
 
           <!-- Candidate badge -->
           <div v-if="msg.candidateCount !== undefined && msg.role === 'assistant'" class="message-badges">
-            <span class="badge badge-info">{{ msg.candidateCount }} candidat(s)</span>
-            <span v-if="msg.targetValue" class="badge badge-target">cible : {{ msg.targetValue }}</span>
+            <span class="badge badge-info">{{ $t('assistant.msg.candidateCount', { count: msg.candidateCount }) }}</span>
+            <span v-if="msg.targetValue" class="badge badge-target">{{ $t('assistant.msg.targetLabel') }} {{ msg.targetValue }}</span>
           </div>
 
           <div v-if="msg.executedSafeSteps && msg.executedSafeSteps.length > 0" class="safe-steps-box">
-            <div class="suggestions-title">Actions sûres exécutées</div>
+            <div class="suggestions-title">{{ $t('assistant.msg.safeStepsExecuted') }}</div>
             <div
               v-for="(step, index) in msg.executedSafeSteps"
               :key="`${step.tool}-${index}`"
@@ -1101,16 +1103,16 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
             :class="msg.invalidated ? 'auto-invalidated' : (msg.autoWriteOk ? 'auto-ok' : 'auto-fail')"
           >
             <div class="auto-write-title">
-              {{ msg.invalidated ? '✗ Signalé non fonctionnel ensuite' : (msg.autoWriteOk ? '✓ Écriture auto réussie' : '⚠ Écriture auto partielle') }}
+              {{ msg.invalidated ? `✗ ${$t('assistant.msg.reportedNotWorking')}` : (msg.autoWriteOk ? `✓ ${$t('assistant.msg.autoWriteSucceeded')}` : `⚠ ${$t('assistant.msg.autoWritePartial')}`) }}
             </div>
             <p v-if="msg.invalidated" class="invalidated-note">
-              L'écriture a bien été appliquée en mémoire, mais tu as indiqué que ça n'a pas changé le comportement du jeu — ce n'est probablement pas la bonne adresse.
+              {{ $t('assistant.msg.invalidatedNote') }}
             </p>
             <div v-if="writeHistoryFor(msg)" class="write-history-line">
-              Historique : {{ writeHistoryFor(msg) }}
+              {{ $t('assistant.msg.historyLabel') }} {{ writeHistoryFor(msg) }}
             </div>
             <div v-if="msg.activeTargetCount" class="active-write-line">
-              {{ msg.activeTargetCount }} adresse(s) gardée(s) actives pour les prochaines modifications.
+              {{ $t('assistant.msg.activeAddressesKept', { count: msg.activeTargetCount }) }}
             </div>
             <div
               v-for="(r, i) in msg.autoWriteResults"
@@ -1118,34 +1120,34 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
               class="auto-write-row"
             >
               <span>0x{{ r.address }}</span>
-              <span>{{ msg.invalidated ? '✗ invalidé' : (r.verified ? '✓ final vérifié' : '✗ non vérifié') }}</span>
+              <span>{{ msg.invalidated ? `✗ ${$t('assistant.msg.invalidated')}` : (r.verified ? `✓ ${$t('assistant.msg.finalVerified')}` : `✗ ${$t('assistant.msg.notVerified')}`) }}</span>
               <span v-if="writeSummaryFor(msg, r)" class="write-summary">{{ writeSummaryFor(msg, r) }}</span>
               <span v-if="r.confirmationMode" class="confirm-steps">
-                {{ r.temporaryVerified ? 'test OK' : 'test KO' }}
+                {{ r.temporaryVerified ? $t('assistant.msg.testOk') : $t('assistant.msg.testFailedShort') }}
                 ·
-                {{ r.restoredBeforeFinal ? 'restauré' : 'non restauré' }}
+                {{ r.restoredBeforeFinal ? $t('assistant.msg.restored') : $t('assistant.msg.notRestored') }}
               </span>
               <span v-if="valueHistoryFor(r)" class="value-history">{{ valueHistoryFor(r) }}</span>
             </div>
             <p class="rollback-note">
-              Tu peux annuler toutes les écritures automatiques ci-dessous.
+              {{ $t('assistant.msg.canUndoAllWrites') }}
             </p>
             <button class="btn btn-secondary btn-rollback-batch" @click="store.rollbackLastWriteBatch()">
-              ↩ Rollback toutes les écritures
+              ↩ {{ $t('assistant.msg.rollbackAllWrites') }}
             </button>
             <div class="message-actions">
               <button class="btn btn-secondary btn-small" @click="useMessageSuggestions(msg)">
-                Réutiliser ces adresses
+                {{ $t('assistant.msg.reuseTheseAddresses') }}
               </button>
               <button class="btn btn-secondary btn-small" @click="startNewSearchFromMessage()">
-                Nouvelle recherche
+                {{ $t('assistant.newSearch') }}
               </button>
             </div>
           </div>
 
           <!-- Suggestions -->
           <div v-if="suggestionRowsFor(msg).length > 0" class="suggestions-box">
-            <div class="suggestions-title">Adresses suggérées</div>
+            <div class="suggestions-title">{{ $t('assistant.msg.suggestedAddresses') }}</div>
             <div
               v-for="(suggestion, index) in suggestionRowsFor(msg)"
               :key="`${suggestion.address}-${index}`"
@@ -1160,34 +1162,34 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
               </div>
               <div class="suggestion-actions">
                 <button class="btn btn-secondary btn-small" @click="testSingleAddress(suggestion)">
-                  Tester cette adresse
+                  {{ $t('assistant.msg.testThisAddress') }}
                 </button>
                 <button class="btn btn-secondary btn-small" @click="watchSuggestion(suggestion)">
                   Watch
                 </button>
                 <button class="btn btn-secondary btn-small" @click="keepSuggestion(suggestion)">
-                  Garder
+                  {{ $t('assistant.msg.keep') }}
                 </button>
                 <button class="btn btn-secondary btn-small" @click="ignoreSuggestion(suggestion)">
-                  Ignorer
+                  {{ $t('assistant.msg.ignore') }}
                 </button>
               </div>
             </div>
             <div class="message-actions">
               <button class="btn btn-secondary btn-small" @click="searchTargetElsewhere(msg)">
-                Chercher cette valeur ailleurs
+                {{ $t('assistant.msg.searchValueElsewhere') }}
               </button>
               <button class="btn btn-secondary btn-small" @click="searchSuggestionAsType(suggestionRowsFor(msg)[0], 'Int32')">
-                Chercher en Int32
+                {{ $t('assistant.msg.searchAsInt32') }}
               </button>
               <button class="btn btn-secondary btn-small" @click="searchSuggestionAsType(suggestionRowsFor(msg)[0], 'Float32')">
-                Chercher en Float32
+                {{ $t('assistant.msg.searchAsFloat32') }}
               </button>
             </div>
           </div>
 
           <div v-if="msg.recoveryActions && msg.recoveryActions.length > 0" class="recovery-box">
-            <div class="suggestions-title">Que faire maintenant ?</div>
+            <div class="suggestions-title">{{ $t('assistant.msg.whatNow') }}</div>
             <div class="message-actions">
               <button
                 v-for="action in msg.recoveryActions"
@@ -1203,14 +1205,14 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
           </div>
 
           <div v-if="filteredCandidatesFor(msg)" class="filtered-box">
-            <div class="suggestions-title">Filtre anti-bruit</div>
+            <div class="suggestions-title">{{ $t('assistant.msg.noiseFilterTitle') }}</div>
             <pre class="suggestions-list">{{ filteredCandidatesFor(msg) }}</pre>
           </div>
 
           <!-- Requires confirmation -->
           <div v-if="msg.requiresConfirmation" class="confirm-box">
             <span class="confirm-icon">🔐</span>
-            {{ msg.confirmationReason || 'Confirmation nécessaire avant de continuer — vérifie les actions proposées ci-dessous.' }}
+            {{ msg.confirmationReason || $t('assistant.msg.confirmationRequired') }}
           </div>
         </div>
       </div>
@@ -1223,7 +1225,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         ✅ {{ $t('actions.iHaveChanged') }}
       </button>
       <span class="quick-hint">
-        Change la valeur dans le jeu, clique ici, puis indique la nouvelle valeur.
+        {{ $t('assistant.quickActions.changeValueHint') }}
       </span>
     </div>
 
@@ -1242,7 +1244,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         <span v-if="store.isSearching" class="btn-spinner" aria-hidden="true"></span>
         <span v-else>{{ $t('search.button') }}</span>
       </button>
-      <button class="btn btn-secondary" :disabled="!chatInput.trim() || store.isSearching" title="Planifie et lance seulement les actions sûres." @click="sendAutoResolve()">
+      <button class="btn btn-secondary" :disabled="!chatInput.trim() || store.isSearching" :title="$t('assistant.autoButtonTitle')" @click="sendAutoResolve()">
         Auto
       </button>
     </div>
