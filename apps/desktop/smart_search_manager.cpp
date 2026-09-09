@@ -451,7 +451,27 @@ bool looksLikeLastAutoWriteRewrite(const QString& query) {
         || q.contains(" les ")
         || q.contains(" ça ")
         || q.contains(" ca ")
-        || q.contains("les mettre");
+        || q.contains("les mettre")
+        // Equivalents anglais (localisation du chat IA, 09/09/2026) : la
+        // reconnaissance des intentions restait francophone uniquement meme
+        // apres la traduction complete des reponses -- un anglophone qui
+        // ecrit "change it instead" ou "set it to" tombait hors de ce
+        // raccourci rapide et repartait sur le chemin IA generique.
+        || q.contains("instead")
+        || q.contains("change it")
+        || q.contains("modify it")
+        || q.contains("set it")
+        || q.contains("put ")
+        || q.contains("i want")
+        || q.contains("i'd like")
+        || q.contains("i would like")
+        || q.contains("increase")
+        || q.contains("replace")
+        || q.contains("define")
+        || q.contains("these address")
+        || q.contains("the address")
+        || q.contains("set them")
+        || q.contains("put them");
 }
 
 bool looksLikeMemoryTargetWriteRequest(const QString& query) {
@@ -459,7 +479,9 @@ bool looksLikeMemoryTargetWriteRequest(const QString& query) {
     return looksLikeLastAutoWriteRewrite(q)
         || q.contains("passer")
         || q.contains("mets")
-        || q.contains("met ");
+        || q.contains("met ")
+        || q.contains("set ")
+        || q.contains("put ");
 }
 
 bool looksLikeNewSearchRequest(const QString& query) {
@@ -489,7 +511,26 @@ bool looksLikeNewSearchRequest(const QString& query) {
         || q.contains("j abandonne")
         || q.contains("oublie ça")
         || q.contains("oublie ca")
-        || q.contains("peu importe");
+        || q.contains("peu importe")
+        // Equivalents anglais (localisation du chat IA, 09/09/2026).
+        || q.contains("new search")
+        || q.contains("another search")
+        || q.contains("new scan")
+        || q.contains("new value")
+        || q.contains("another value")
+        || q.contains("something else")
+        || q.contains("value to search")
+        || q.contains("not these address")
+        || q.contains("start over")
+        || q.contains("restart")
+        || q.contains("never mind")
+        || q.contains("nevermind")
+        || q.contains("i give up")
+        || q.contains("forget it")
+        || q.contains("doesn't matter")
+        || q.contains("doesnt matter")
+        || q.contains("does not matter")
+        || q.contains("whatever");
 }
 
 bool looksLikeClearActiveTargetsRequest(const QString& query) {
@@ -499,13 +540,24 @@ bool looksLikeClearActiveTargetsRequest(const QString& query) {
         || q.contains("efface")
         || q.contains("supprime")
         || q.contains("retire")
-        || q.contains("vide");
+        || q.contains("vide")
+        // Equivalents anglais (localisation du chat IA, 09/09/2026).
+        || q.contains("forget")
+        || q.contains("clear")
+        || q.contains("remove")
+        || q.contains("delete")
+        || q.contains("empty");
     const bool targetWord = q.contains("adresse")
         || q.contains("memoire")
         || q.contains("mémoire")
         || q.contains("cible")
         || q.contains("profil")
-        || q.contains("contexte");
+        || q.contains("contexte")
+        || q.contains("address")
+        || q.contains("memory")
+        || q.contains("target")
+        || q.contains("profile")
+        || q.contains("context");
     return clearVerb && targetWord;
 }
 
@@ -548,7 +600,32 @@ bool looksLikeBadTargetReport(const QString& query) {
         || q.contains("planté")
         || q.contains("plante")
         || q.contains("jeu s'est fermé")
-        || q.contains("jeu s est ferme");
+        || q.contains("jeu s est ferme")
+        // Equivalents anglais (localisation du chat IA, 09/09/2026). Chaque
+        // tournure avec apostrophe a aussi sa variante sans apostrophe (frappe
+        // rapide/mobile qui l'omet couramment), meme logique que les variantes
+        // accentuees/non-accentuees deja gerees cote francais.
+        || q.contains("doesn't work")
+        || q.contains("doesnt work")
+        || q.contains("does not work")
+        || q.contains("didn't work")
+        || q.contains("didnt work")
+        || q.contains("did not work")
+        || q.contains("not working")
+        || q.contains("no effect")
+        || q.contains("nothing happened")
+        || q.contains("still the same")
+        || q.contains("same as before")
+        || q.contains("wrong address")
+        || q.contains("not the right")
+        || q.contains("doesn't change")
+        || q.contains("doesnt change")
+        || q.contains("does not change")
+        || q.contains("nothing changes")
+        || q.contains("no change")
+        || q.contains("crashed")
+        || q.contains("game closed")
+        || q.contains("game crashed");
 }
 
 bool looksLikeGoodTargetReport(const QString& query) {
@@ -575,7 +652,18 @@ bool looksLikeGoodTargetReport(const QString& query) {
         || q.contains("ça a changé")
         || q.contains("ca a change")
         || q.contains("nickel")
-        || q.contains("parfait");
+        || q.contains("parfait")
+        // Equivalents anglais (localisation du chat IA, 09/09/2026). "that's it"
+        // est volontairement absent, meme raison que "c'est ça" en francais.
+        || q.contains("it worked")
+        || q.contains("that worked")
+        || q.contains("it works")
+        || q.contains("that's the right")
+        || q.contains("that is the right")
+        || q.contains("right address")
+        || q.contains("it changed")
+        || q.contains("that changed")
+        || q.contains("perfect");
 }
 
 bool looksLikeFreezeRequest(const QString& query) {
@@ -588,7 +676,7 @@ bool looksLikeFreezeRequest(const QString& query) {
         || q.contains("ne freeze pas") || q.contains("ne pas freeze")
         || q.contains("ne pas freezer") || q.contains("without freeze")
         || q.contains("without freezing") || q.contains("no freeze")
-        || q.contains("do not freeze") || q.contains("don't freeze");
+        || q.contains("do not freeze") || q.contains("don't freeze") || q.contains("dont freeze");
     if (negated) {
         return false;
     }
@@ -604,7 +692,12 @@ bool looksLikeFreezeRequest(const QString& query) {
         || q.contains("garde a")
         || q.contains("garde à")
         || q.contains("maintien")
-        || q.contains("maintenir");
+        || q.contains("maintenir")
+        // Equivalents anglais (localisation du chat IA, 09/09/2026).
+        || q.contains("lock")
+        || q.contains("hold at")
+        || q.contains("keep it at")
+        || q.contains("keep at");
 }
 
 SmartSearchIntent classifySmartSearchIntent(

@@ -21,7 +21,11 @@ constexpr int kMaxHistoryTurns = 12;
 bool looksLikeBadTargets(const QString& q) {
     return q.contains("marche pas") || q.contains("marché pas") || q.contains("pas marché")
         || q.contains("ne marche pas") || q.contains("mauvaise adresse")
-        || q.contains("pas bon") || q.contains("rien change");
+        || q.contains("pas bon") || q.contains("rien change")
+        // Equivalents anglais (localisation du chat IA, 09/09/2026).
+        || q.contains("doesn't work") || q.contains("doesnt work") || q.contains("does not work")
+        || q.contains("not working") || q.contains("wrong address")
+        || q.contains("not good") || q.contains("no change");
 }
 
 bool describesIncrease(const QString& q) {
