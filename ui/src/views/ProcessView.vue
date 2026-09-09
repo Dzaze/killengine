@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { useI18n } from 'vue-i18n'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 import type { ProcessInfo } from '@/services/backend'
 
 const store = useAppStore()
+const { t } = useI18n()
 const searchFilter = ref('')
 const selectedPid = ref<number | null>(null)
 const windowOnly = ref(false)
@@ -13,10 +15,10 @@ const windowOnly = ref(false)
 const filteredProcesses = ref<ProcessInfo[]>([])
 const selectedProcess = computed(() => store.processes.find((p) => p.pid === selectedPid.value) ?? null)
 const kernelStatusText = computed(() => {
-  if (!store.kernelDriverStatus) return 'Non testé'
-  if (store.kernelMemoryReady) return 'Driver prêt'
-  if (store.kernelDriverStatus.status === 'connected') return 'Probe seul'
-  return 'Driver non chargé'
+  if (!store.kernelDriverStatus) return t('process.kernelStatus.notTested')
+  if (store.kernelMemoryReady) return t('process.kernelStatus.ready')
+  if (store.kernelDriverStatus.status === 'connected') return t('process.kernelStatus.probeOnly')
+  return t('process.kernelStatus.notLoaded')
 })
 
 function updateFiltered() {
@@ -63,9 +65,9 @@ onMounted(async () => {
     </div>
 
     <PanelIntro
-      what="La liste des processus Windows en cours d'exécution."
-      purpose="Choisir et attacher le programme que tu veux inspecter ou modifier — indispensable avant toute autre action dans KillEngine."
-      how="Cherche le processus dans la liste (ou rafraîchis-la), clique dessus puis sur Attacher."
+      :what="$t('process.intro.what')"
+      :purpose="$t('process.intro.purpose')"
+      :how="$t('process.intro.how')"
     />
 
     <!-- Attached status -->
@@ -83,7 +85,7 @@ onMounted(async () => {
     <div class="filter-bar">
       <input
         v-model="searchFilter"
-        placeholder="Filtrer..."
+        :placeholder="$t('process.filterPlaceholder')"
         class="search-input"
         @input="updateFiltered"
       />
@@ -108,7 +110,7 @@ onMounted(async () => {
           <div class="proc-details">
             <span class="proc-pid">PID {{ proc.pid }}</span>
             <span class="proc-arch">{{ proc.arch }}</span>
-            <span class="proc-modules">{{ proc.moduleCount }} modules</span>
+            <span class="proc-modules">{{ $t('process.moduleCount', { count: proc.moduleCount }) }}</span>
             <span v-if="proc.hasWindow" class="proc-window">{{ $t('process.hasWindow') }}</span>
           </div>
           <div class="proc-path" :title="proc.path">{{ proc.path }}</div>
@@ -123,12 +125,12 @@ onMounted(async () => {
     <!-- Attach button -->
     <div v-if="selectedPid !== null && !store.isAttached" class="attach-bar">
       <div class="attach-summary">
-        <span>Sélectionné: {{ selectedProcess?.name ?? 'processus' }} · PID {{ selectedPid }}</span>
-        <small>Mode d'accès mémoire choisi avant attache.</small>
+        <span>{{ $t('process.selectedProcess', { name: selectedProcess?.name ?? $t('process.fallbackProcess'), pid: selectedPid }) }}</span>
+        <small>{{ $t('process.accessMode.preAttachHint') }}</small>
       </div>
       <div class="access-mode-panel">
         <div class="access-mode-title">
-          <strong>Mode d'accès mémoire</strong>
+          <strong>{{ $t('process.accessMode.title') }}</strong>
           <InfoDot topic="processKernelAccess" align="right" />
         </div>
         <div class="access-mode-options">
@@ -138,8 +140,8 @@ onMounted(async () => {
             type="button"
             @click="store.setMemoryAccessMode('standard')"
           >
-            <strong>Standard</strong>
-            <span>Lecture/écriture usermode</span>
+            <strong>{{ $t('process.accessMode.standard') }}</strong>
+            <span>{{ $t('process.accessMode.standardDescription') }}</span>
           </button>
           <button
             class="mode-option"
@@ -147,34 +149,34 @@ onMounted(async () => {
             type="button"
             @click="store.setMemoryAccessMode('kernel')"
           >
-            <strong>Kernel</strong>
+            <strong>{{ $t('process.accessMode.kernel') }}</strong>
             <span>{{ kernelStatusText }}</span>
           </button>
         </div>
         <p v-if="store.memoryAccessMode === 'kernel' && store.kernelMemoryReady" class="access-mode-hint ready">
-          Le process s'attache normalement ; les lectures/écritures interactives utiliseront le driver kernel.
+          {{ $t('process.accessMode.kernelReadyHint') }}
         </p>
         <p v-else-if="store.memoryAccessMode === 'kernel'" class="access-mode-hint warning">
-          Tu peux attacher quand même, mais les lectures/écritures kernel refuseront tant que le driver n'est pas prêt.
+          {{ $t('process.accessMode.kernelWarningHint') }}
         </p>
         <div v-if="store.memoryAccessMode === 'kernel'" class="kernel-driver-actions">
           <button
             class="btn btn-secondary"
             type="button"
             :disabled="store.kernelDriverStatusLoading"
-            title="Vérifie si KillEngineKernel est chargé et expose l'accès mémoire kernel."
+            :title="$t('process.kernelActions.testTitle')"
             @click="store.refreshKernelDriverStatus()"
           >
-            {{ store.kernelDriverStatusLoading ? 'Test...' : 'Tester driver' }}
+            {{ store.kernelDriverStatusLoading ? $t('process.kernelActions.testing') : $t('process.kernelActions.test') }}
           </button>
           <button
             class="btn btn-secondary"
             type="button"
             :disabled="store.kernelDriverStartLoading || store.kernelDriverStatusLoading || store.kernelMemoryReady"
-            title="Démarre le service Windows KillEngineKernel s'il est installé mais arrêté. Nécessite KillEngine lancé administrateur."
+            :title="$t('process.kernelActions.startTitle')"
             @click="startKernelDriverFromAttach()"
           >
-            {{ store.kernelDriverStartLoading ? 'Chargement...' : (store.kernelMemoryReady ? 'Driver chargé' : 'Charger driver') }}
+            {{ store.kernelDriverStartLoading ? $t('process.kernelActions.loading') : (store.kernelMemoryReady ? $t('process.kernelActions.loaded') : $t('process.kernelActions.load')) }}
           </button>
         </div>
         <p v-if="store.memoryAccessMode === 'kernel' && store.kernelDriverStatusError" class="access-mode-hint warning">

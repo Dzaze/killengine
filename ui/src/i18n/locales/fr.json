@@ -2,6 +2,14 @@
   "app": {
     "attached": "Attaché"
   },
+  "common": {
+    "panelIntro": {
+      "ariaLabel": "À propos de ce panneau",
+      "what": "C'est quoi ?",
+      "purpose": "À quoi ça sert ?",
+      "how": "Comment l'utiliser ?"
+    }
+  },
   "process": {
     "select": "Sélectionner un processus",
     "refresh": "Rafraîchir",
@@ -11,7 +19,40 @@
     "windowOnly": "Fenêtres seulement",
     "hasWindow": "fenêtre",
     "noModules": "Aucun module accessible",
-    "noProcesses": "Aucun processus trouvé"
+    "noProcesses": "Aucun processus trouvé",
+    "intro": {
+      "what": "La liste des processus Windows en cours d'exécution.",
+      "purpose": "Choisir et attacher le programme que tu veux inspecter ou modifier — indispensable avant toute autre action dans KillEngine.",
+      "how": "Cherche le processus dans la liste (ou rafraîchis-la), clique dessus puis sur Attacher."
+    },
+    "filterPlaceholder": "Filtrer...",
+    "moduleCount": "{count} modules",
+    "selectedProcess": "Sélectionné: {name} · PID {pid}",
+    "fallbackProcess": "processus",
+    "kernelStatus": {
+      "notTested": "Non testé",
+      "ready": "Driver prêt",
+      "probeOnly": "Probe seul",
+      "notLoaded": "Driver non chargé"
+    },
+    "accessMode": {
+      "preAttachHint": "Mode d'accès mémoire choisi avant attache.",
+      "title": "Mode d'accès mémoire",
+      "standard": "Standard",
+      "standardDescription": "Lecture/écriture usermode",
+      "kernel": "Kernel",
+      "kernelReadyHint": "Le process s'attache normalement ; les lectures/écritures interactives utiliseront le driver kernel.",
+      "kernelWarningHint": "Tu peux attacher quand même, mais les lectures/écritures kernel refuseront tant que le driver n'est pas prêt."
+    },
+    "kernelActions": {
+      "testTitle": "Vérifie si KillEngineKernel est chargé et expose l'accès mémoire kernel.",
+      "testing": "Test...",
+      "test": "Tester driver",
+      "startTitle": "Démarre le service Windows KillEngineKernel s'il est installé mais arrêté. Nécessite KillEngine lancé administrateur.",
+      "loading": "Chargement...",
+      "loaded": "Driver chargé",
+      "load": "Charger driver"
+    }
   },
   "memory": {
     "title": "Carte mémoire",
