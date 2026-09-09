@@ -47,6 +47,24 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## Journal actif
 
+### Localisation du chat IA — L1/L2/L3 clos, fusionné et poussé (09/09/2026, Codex + Claude)
+
+**Suite et clôture de l'entrée ci-dessous** (chantier repris après la pause/replanification du 08/09/2026, sur décision explicite du propriétaire de le staffer en parallèle avec Codex).
+
+**Répartition sans collision de fichiers** (prompt de partage donné à Codex, voir `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`) :
+- **Codex → L2** (`apps/desktop/smart_search_manager.cpp`, le plus gros fichier) : 411 occurrences localisées via `KE_TXT`, y compris arguments de fonctions, littéraux multilignes et libellés sans accents. Build + 468/468 tests de son côté, audit de validation détaillé consigné dans la roadmap.
+- **Claude → L3** (`ai/ai_engine.cpp`) : les ~84 rationales `makeToolCall(...)` restantes (chaînes en argument de fonction, découvertes en cours de route le 08/09) — toutes les fonctions `matchXxxTool` (Trainer, field-stability, WebView2/CDP, auto-report, UI-sources, AOB/suggest-patch/disassemble-backward) et les deux fonctions `deterministicPlan`/`deterministicPlanWithContext`. Balayage final du fichier : seul littéral français restant est une instruction de retry envoyée au modèle (pas du texte utilisateur), laissé tel quel délibérément.
+
+**Collision évitée de justesse, pas par le partitionnement de fichiers mais par la chance** : Codex a créé et basculé sur une branche (`agent/ai-chat-localization-l2`) dans le **même dossier de travail** partagé par les deux agents (pas de worktree séparé) pendant que Claude avait des modifications non commitées sur `ai_engine.cpp` — le changement de branche sous les pieds de l'autre agent aurait pu écraser du travail si les fichiers s'étaient chevauchés. Ici aucun conflit réel car les fichiers étaient bien disjoints comme prévu, mais **noter pour la prochaine fois** : préférer des worktrees git séparés (`EnterWorktree`) quand deux agents travaillent en parallèle dans la même session, pas juste un partitionnement de fichiers à l'intérieur du même checkout.
+
+**Intégration** : commit L3 (`a756c31`) par-dessus le commit L2 de Codex (`947e624`) sur la branche partagée, fusion en fast-forward vers `main` (aucun conflit), branche temporaire supprimée. Build complet + **468/468 tests** sur `main` fusionné.
+
+**Vérifié en live** (Codex n'avait pas fait de validation visuelle) : bascule réelle `saveSettings({"language":"en"})` via le pipe d'automatisation, confirmé que les messages du chat s'affichent en anglais de bout en bout — `"Hi! Tell me what you want to find..."` (garde social) et `"First attach a process in the Process tab, then run your search again."` (garde-fou process, atteint via le chemin de repli déterministe après échec du modèle sur une requête ambiguë). Langue remise sur `fr` après test.
+
+**Poussé sur `origin/main`** (`2e2dd33..a756c31`, 3 commits).
+
+**Reste ouvert** : L2b (`apps/desktop/claude_chat_manager.cpp`, backend Claude externe, absent du scope initial — prochaine priorité recommandée) et L4-L12 (voir `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` pour le détail et l'ordre). Chantier permanent à faible priorité désormais, façon `docs/REFACTOR_ROADMAP.md` — pas un blocage pour d'autres phases produit.
+
 ### Message auto_resolve reformulé + chantier de localisation du chat IA documenté (08/09/2026, Claude)
 
 **Retour terrain propriétaire** en testant le fix de gel ci-dessous en conditions réelles : le message d'échec d'`auto_resolve` sans valeur numérique ("Aucune valeur numérique détectée.") sonnait comme un rejet sec plutôt que comme une clarification utile. Deux corrections :

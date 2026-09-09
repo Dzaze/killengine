@@ -3,7 +3,7 @@
 
 # KillEngine — Feuille de route de localisation du chat IA
 
-> Chantier **ouvert, priorité à définir avec le propriétaire** (pas encore staffé). Voir `docs/PHASE_TRACKER.md` pour le pont vers cette feuille de route et la règle d'usage des roadmaps.
+> Chantier **staffé, L1/L2/L3 clos** (09/09/2026, travail parallèle Codex + Claude). Voir `docs/PHASE_TRACKER.md` pour le pont vers cette feuille de route et la règle d'usage des roadmaps.
 
 ## Origine (08/09/2026)
 
@@ -77,12 +77,13 @@ Total brut : ~960 affectations sur 23 fichiers — **ce chiffre ratait entièrem
 ## Progrès (08/09/2026)
 
 - **L1 (fondation) — fait, testé.** `core/localization/localization.{h,cpp}` : `killcore::currentUiLanguage()` (lit `QSettings "ui/language"`, déjà écrit par `saveSettings()`) + `killcore::localizedText(fr, en)` + macro `KE_TXT(fr, en)`. Bonus trouvé en testant : `tests/unit/test_main.cpp` ne configurait aucun `QCoreApplication`/org+app name, donc **`QSettings()` ne pouvait jamais écrire nulle part dans les tests** (`status() == AccessError`, masqué jusqu'ici car les tests existants touchant QSettings avaient toujours un filet de sécurité par variable d'environnement en parallèle) — corrigé (`QCoreApplication` + org/app "KillEngine" enregistrés via un `::testing::Environment` global). 5 nouveaux tests (`tests/unit/test_localization.cpp`), 468/468 tests passent au total.
-- **`ai/ai_engine.cpp` — partiellement fait :**
-  - Playbook d'enquête (`makeInvestigationPlaybookResponse`, struct `Entry` restructurée en paires `{fr, en}` par champ, 9 entrées × 7 champs) — **fait**.
-  - `recoveryActionsForTopic` (labels de boutons) — **fait**.
-  - Toutes les affectations directes `["message"]`/`["rationale"]`/`["error"]` du 1ᵉʳ audit (~20 chaînes) — **faites**.
-  - **~83 rationales `makeToolCall(...)` restantes** (chaînes en argument de fonction, découvertes seulement à ce stade) — **pas encore faites**.
+- **`ai/ai_engine.cpp` (L3) — fait, testé (09/09/2026).**
+  - Playbook d'enquête (`makeInvestigationPlaybookResponse`, struct `Entry` restructurée en paires `{fr, en}` par champ, 9 entrées × 7 champs) — fait.
+  - `recoveryActionsForTopic` (labels de boutons) — fait.
+  - Toutes les affectations directes `["message"]`/`["rationale"]`/`["error"]` du 1ᵉʳ audit (~20 chaînes) — faites.
+  - **~84 rationales `makeToolCall(...)` restantes** (chaînes en argument de fonction, découvertes en cours de route) — **faites** : toutes les fonctions `matchXxxTool` (Trainer, field-stability, WebView2/CDP, auto-report, UI-sources, AOB/suggest-patch/disassemble-backward) et les deux fonctions `deterministicPlan`/`deterministicPlanWithContext` (freeze, kernel_write, speedhack, network block, HTTP proxy, DNS spoof, lag switch, stealth mode, write_value, prepare_write_checkpoint, unknown_capture/compare, trace_ui_string, encrypted_scan, next_scan). Balayage final du fichier (grep accentué) : seul littéral français restant est `formatReminder` (ligne ~1138), une instruction envoyée au modèle en retry, pas du texte affiché à l'utilisateur — laissé tel quel délibérément.
 - **`smart_search_manager.cpp` (L2) — fait, testé (09/09/2026).** 411 occurrences localisées via `KE_TXT` : messages, erreurs, rationales, confirmations, libellés, recommandations et arguments de fonctions (`addStrategyScore`, `proactiveAction`, étapes exécutées, confirmations chat). Audit étendu aux chaînes sans accents, aux littéraux multilignes et aux verbes courts assemblés. Les mots-clés de reconnaissance FR/EN restent inchangés.
+- **Intégration (09/09/2026, Claude)** : Codex a travaillé sur une branche locale (`agent/ai-chat-localization-l2`, commit `947e624`) pendant que L3 se terminait dessus dans le même dossier de travail (branche partagée, pas de worktree séparé — collision de branche évitée de justesse, fichiers disjoints donc aucun conflit réel). L3 committé par-dessus (`a756c31`), fusionné en fast-forward sur `main`, branche temporaire supprimée. Build complet + **468/468 tests** sur `main` fusionné. **Vérifié en live** via le pipe d'automatisation : bascule réelle `saveSettings({"language":"en"})`, confirmé que les messages du chat (garde-fou "aucun processus attaché", clarification sociale "salut") s'affichent bien en anglais de bout en bout, y compris via le chemin de repli déterministe après échec du modèle. Poussé sur `origin/main` (`2e2dd33..a756c31`).
 
 ## Recommandation pour la suite (vu l'ampleur réelle)
 
@@ -103,7 +104,7 @@ Compte tenu du volume réel (1200-2000+ chaînes, pas ~960), traduire à la main
 | # | Candidat | Fichier(s) | Occurrences (corrigées) | Priorité | Statut |
 | --- | --- | --- | --- | --- | --- |
 | [x] L1 | Fondation : helper de traduction + lecture `ui/language` | `core/localization/localization.{h,cpp}` | — | **Bloquant** | **Fait, testé (08/09/2026)** |
-| [~] L3 | Coordination modèle (intents, retries, rejets, playbook d'enquête, fallback déterministe) | `ai/ai_engine.cpp` | 188 (dont ~83 rationales `makeToolCall` restantes) | **Haute** | **En cours** — affectations + playbook faits, rationales `makeToolCall` restantes |
+| [x] L3 | Coordination modèle (intents, retries, rejets, playbook d'enquête, fallback déterministe) | `ai/ai_engine.cpp` | 188 (affectations + playbook + ~84 rationales `makeToolCall`) | **Haute** | **Fait, testé (09/09/2026)** |
 | [x] L2 | Dispatch chat/IA (auto_resolve, exact_scan, next_scan, erreurs génériques) | `apps/desktop/smart_search_manager.cpp` | **411 occurrences traitées** (audit initial : 371 lignes accentuées) | **Haute** — cœur de la demande initiale | **Fait, testé (09/09/2026)** |
 | [ ] L2b | Backend IA externe (Claude) — chat | `apps/desktop/claude_chat_manager.cpp` | **98 — absent du 1ᵉʳ audit, à ajouter au périmètre** | Haute (même famille que L2/L3) | Pas commencé, pas encore dans le scope initial |
 | [ ] L4 | Outils scan (exact/next/unknown/groupe/chiffré) | `apps/desktop/scanning_core_manager.cpp` | 44 | Moyenne | Pas commencé |
@@ -117,7 +118,7 @@ Compte tenu du volume réel (1200-2000+ chaînes, pas ~960), traduire à la main
 | [ ] L11b | Investigation notebook planner | `ai/investigation_notebook_planner.cpp` | 40 — absent du 1ᵉʳ audit | Basse-moyenne | Pas commencé |
 | [ ] L12 | Reste (`application_controller.cpp` — 235, `settings_diagnostics_manager.cpp`, `freeze_hotkey_overlay_manager.cpp`, `lua_repl_manager.cpp`, `automation_pipe_server.cpp`, `claude_backend_client.cpp`, `external_tool_profiler.cpp`, `clr_inspector_bridge.cpp`...) — à cribler pour isoler le sous-ensemble réellement visible en chat vs panneaux dédiés déjà couverts par l'i18n statique | multiple | ~330 cumulés | Basse / à évaluer si nécessaire du tout | Pas commencé |
 
-**Ordre recommandé (mis à jour le 09/09/2026)** : L1 et L2 faits. L2 a été confié séparément sur demande explicite du propriétaire pendant la poursuite de L3 (`ai_engine.cpp`). L2b (backend Claude) reste à traiter. L4-L10/L11b peuvent être pris en parallèle par agent une fois L2/L3 clos (même logique de partitionnement que `docs/REFACTOR_ROADMAP.md`) — **cribler chaque fichier avec la commande grep de la section "Recommandation" avant de s'engager**, pour ne pas revivre la surprise `makeToolCall`. L11/L12 à ré-évaluer une fois L2-L10 clos : possible qu'une bonne partie de leur contenu ne soit jamais montrée dans le chat.
+**Ordre recommandé (mis à jour le 09/09/2026)** : L1, L2 et L3 clos — le cœur du chat (Assistant local) est intégralement bilingue FR/EN. L2 a été confié à Codex sur demande explicite du propriétaire pendant que Claude finissait L3 (`ai_engine.cpp`), les deux fusionnés sans conflit (fichiers disjoints). **Prochaine priorité : L2b (backend Claude externe, `claude_chat_manager.cpp`)** — même famille que L2/L3, absent du scope initial. L4-L10/L11b peuvent être pris en parallèle par agent une fois L2b clos (même logique de partitionnement que `docs/REFACTOR_ROADMAP.md`) — **cribler chaque fichier avec la commande grep de la section "Recommandation" avant de s'engager**, pour ne pas revivre la surprise `makeToolCall`. L11/L12 à ré-évaluer une fois L2-L10 clos : possible qu'une bonne partie de leur contenu ne soit jamais montrée dans le chat.
 
 ### Validation L2 — 09/09/2026 (Codex)
 
