@@ -5,6 +5,7 @@
 #include "claude_chat_manager.h"
 #include "freeze_hotkey_overlay_manager.h"
 #include "logging/logger.h"
+#include "localization/localization.h"
 #include "memory/memory_reader.h"
 #include "pointer/pointer_chain.h"
 #include "process/process_enumerator.h"
@@ -636,13 +637,13 @@ SmartSearchIntent classifySmartSearchIntent(
 
     if (wantsClearTargets) {
         intent.kind = SmartSearchIntentKind::ClearActiveTargets;
-        intent.rationale = "L'utilisateur demande d'oublier les adresses, profils ou cibles actives.";
+        intent.rationale = KE_TXT("L'utilisateur demande d'oublier les adresses, profils ou cibles actives.", "The user asks to forget the active addresses, profiles or targets.");
     } else if (reportsBadTargets && (hasLastAutoWriteTargets || hasChatMemoryTargets)) {
         intent.kind = SmartSearchIntentKind::ReportBadTargets;
-        intent.rationale = "L'utilisateur indique que les dernières adresses écrites ne donnent pas le résultat attendu.";
+        intent.rationale = KE_TXT("L'utilisateur indique que les dernières adresses écrites ne donnent pas le résultat attendu.", "The user reports that the last addresses written did not produce the expected result.");
     } else if (reportsGoodTargets && (hasLastAutoWriteTargets || hasChatMemoryTargets)) {
         intent.kind = SmartSearchIntentKind::ReportGoodTargets;
-        intent.rationale = "L'utilisateur confirme que les dernières adresses écrites fonctionnent.";
+        intent.rationale = KE_TXT("L'utilisateur confirme que les dernières adresses écrites fonctionnent.", "The user confirms that writes to the last addresses worked.");
     } else if (awaitingUiStringTraceValue && !intent.resetContext && (hasOneNumber || !query.trimmed().isEmpty())) {
         // L'assistant vient de proposer "Tracer le texte affiché" et attend la
         // valeur affichée en reponse. Sans cette interception, une reponse en
@@ -650,54 +651,54 @@ SmartSearchIntent classifySmartSearchIntent(
         // retombe sur WriteMemoryTargets plus bas et reecrit betement ce
         // nombre sur les adresses deja invalidees, au lieu de tracer.
         intent.kind = SmartSearchIntentKind::AnswerTraceUiStringPrompt;
-        intent.rationale = "L'utilisateur répond à la proposition de tracer le texte affiché.";
+        intent.rationale = KE_TXT("L'utilisateur répond à la proposition de tracer le texte affiché.", "The user is responding to the suggestion to trace the displayed text.");
     } else if (awaitingUiStringFilterValue && !intent.resetContext && (hasOneNumber || !query.trimmed().isEmpty())) {
         // Meme interception pour l'etape 2 du pipeline Trace UI string
         // (filtrer les strings survivantes puis analyser les sources
         // numeriques autour) : sans elle, la reponse "nouvelle valeur
         // affichee" retombe elle aussi sur l'ancien pipeline numerique.
         intent.kind = SmartSearchIntentKind::AnswerTraceUiFilterPrompt;
-        intent.rationale = "L'utilisateur répond à la proposition de filtrer les strings suivies.";
+        intent.rationale = KE_TXT("L'utilisateur répond à la proposition de filtrer les strings suivies.", "The user is responding to the suggestion to filter the tracked strings.");
     } else if (awaitingWriteTargetValue && !intent.resetContext && (hasOneNumber || !query.trimmed().isEmpty())) {
         // L'assistant a demande la valeur a ecrire (candidats reduits mais
         // aucune cible connue). Sans cette interception, la reponse retombe
         // sur ExactScan et repart sur un scan complet, abandonnant la
         // reduction deja faite.
         intent.kind = SmartSearchIntentKind::AnswerWriteTargetPrompt;
-        intent.rationale = "L'utilisateur donne la valeur à écrire sur les candidats déjà réduits.";
+        intent.rationale = KE_TXT("L'utilisateur donne la valeur à écrire sur les candidats déjà réduits.", "The user provides the value to write to the remaining candidates.");
     } else if (smartSearchActive && hasCandidates && hasOneNumber) {
         intent.kind = SmartSearchIntentKind::RefineScan;
-        intent.rationale = "Un scan guidé est actif et l'utilisateur donne une nouvelle valeur observée.";
+        intent.rationale = KE_TXT("Un scan guidé est actif et l'utilisateur donne une nouvelle valeur observée.", "A guided scan is active and the user provides a newly observed value.");
     } else if (intent.resetContext && numbers.isEmpty()) {
         intent.kind = SmartSearchIntentKind::ResetContext;
-        intent.rationale = "L'utilisateur demande un nouveau contexte sans donner encore de valeur.";
+        intent.rationale = KE_TXT("L'utilisateur demande un nouveau contexte sans donner encore de valeur.", "The user asks to start fresh without providing a value yet.");
     } else if (!addresses.isEmpty()) {
         intent.kind = hasOneNumber && wantsFreeze
             ? SmartSearchIntentKind::FreezeMemoryTargets
             : (hasOneNumber && wantsMemoryWrite
                 ? SmartSearchIntentKind::WriteMemoryTargets
                 : SmartSearchIntentKind::ActivateMemoryTargets);
-        intent.rationale = "Le message contient une ou plusieurs adresses mémoire explicites.";
+        intent.rationale = KE_TXT("Le message contient une ou plusieurs adresses mémoire explicites.", "The message contains one or more explicit memory addresses.");
     } else if (hasChatMemoryTargets && hasOneNumber && !intent.resetContext && wantsFreeze) {
         intent.kind = SmartSearchIntentKind::FreezeMemoryTargets;
-        intent.rationale = "Des adresses mémoire sont actives et l'utilisateur demande de freezer la valeur.";
+        intent.rationale = KE_TXT("Des adresses mémoire sont actives et l'utilisateur demande de freezer la valeur.", "Memory addresses are active and the user asks to freeze the value.");
     } else if (hasLastAutoWriteTargets && hasOneNumber && !intent.resetContext && wantsLastRewrite) {
         intent.kind = SmartSearchIntentKind::RewriteLastTargets;
-        intent.rationale = "L'utilisateur demande de modifier les dernières adresses écrites.";
+        intent.rationale = KE_TXT("L'utilisateur demande de modifier les dernières adresses écrites.", "The user asks to modify the last addresses written.");
     } else if (hasChatMemoryTargets && hasOneNumber && !intent.resetContext) {
         intent.kind = SmartSearchIntentKind::WriteMemoryTargets;
-        intent.rationale = "Des adresses mémoire sont actives dans la conversation.";
+        intent.rationale = KE_TXT("Des adresses mémoire sont actives dans la conversation.", "Memory addresses are active in the conversation.");
     } else if (hasOneNumber && !intent.resetContext && wantsMemoryWrite) {
         intent.kind = SmartSearchIntentKind::WriteProfileTargets;
-        intent.rationale = "L'utilisateur formule une intention d'écriture sur une cible nommée.";
+        intent.rationale = KE_TXT("L'utilisateur formule une intention d'écriture sur une cible nommée.", "The user asks to write to a named target.");
     } else if (numbers.size() >= 2) {
         intent.kind = SmartSearchIntentKind::GuidedScan;
-        intent.rationale = "Le message contient une valeur actuelle et une valeur cible.";
+        intent.rationale = KE_TXT("Le message contient une valeur actuelle et une valeur cible.", "The message contains a current value and a target value.");
     } else if (hasOneNumber) {
         intent.kind = SmartSearchIntentKind::ExactScan;
         intent.rationale = intent.resetContext
-            ? "Nouvelle recherche demandée avec une valeur."
-            : "Recherche exacte depuis une valeur unique.";
+            ? KE_TXT("Nouvelle recherche demandée avec une valeur.", "A new search is requested with a value.")
+            : KE_TXT("Recherche exacte depuis une valeur unique.", "Exact search from a single value.");
     }
 
     return intent;
@@ -743,12 +744,12 @@ bool processHasActiveRemoteConnections(int) {
 
 QString confidenceLabel(double confidence) {
     if (confidence >= 0.85) {
-        return "fiabilité élevée";
+        return KE_TXT("fiabilité élevée", "high confidence");
     }
     if (confidence >= 0.65) {
-        return "fiabilité moyenne";
+        return KE_TXT("fiabilité moyenne", "medium confidence");
     }
-    return "fiabilité faible";
+    return KE_TXT("fiabilité faible", "low confidence");
 }
 
 // Historique inter-sessions des adresses ecrites par le pipeline auto-write,
@@ -840,7 +841,7 @@ int flagNoisyCandidates(
         }
         if (unrelatedHits > 0) {
             suggestion["noisyHistoryHits"] = unrelatedHits;
-            suggestion["confidenceReason"] = QString("⚠ vue dans %1 recherche(s) différente(s) sans rapport — probablement du bruit · %2")
+            suggestion["confidenceReason"] = KE_TXT("⚠ vue dans %1 recherche(s) différente(s) sans rapport — probablement du bruit · %2", "⚠ seen in %1 unrelated search(es) — probably noise · %2")
                 .arg(unrelatedHits)
                 .arg(suggestion.value("confidenceReason").toString());
         } else {
@@ -879,7 +880,7 @@ QVariantList suggestedWritesForCandidates(const killcore::CandidateStore& candid
         suggestion["confidence"] = candidate.confidence;
         suggestion["confidenceLabel"] = confidenceLabel(candidate.confidence);
         suggestion["confidenceReason"] = candidate.variantLabel.isEmpty()
-            ? QString("adresse survivante des réductions")
+            ? KE_TXT("adresse survivante des réductions", "address that survived refinement")
             : QString("%1 · %2").arg(confidenceLabel(candidate.confidence), candidate.variantLabel);
         if (!candidate.variantLabel.isEmpty()) {
             suggestion["variantLabel"] = candidate.variantLabel;
@@ -971,8 +972,8 @@ QVariantMap SmartSearchManager::activateChatMemoryTargetsFromQuery(const QString
     result["targetCount"] = writeState.chatTargetCount();
     result["suggestedWrites"] = suggestions;
     result["message"] = !writeState.hasChatTargets()
-        ? QString("Je n'ai pas reconnu d'adresse mémoire valide dans ton message.")
-        : QString("J'ai sélectionné %1 adresse(s) mémoire depuis ton message. Donne-moi maintenant la valeur à écrire dessus.")
+        ? KE_TXT("Je n'ai pas reconnu d'adresse mémoire valide dans ton message.", "I couldn't find a valid memory address in your message.")
+        : KE_TXT("J'ai sélectionné %1 adresse(s) mémoire depuis ton message. Donne-moi maintenant la valeur à écrire dessus.", "I've selected %1 memory address(es) from your message. Now tell me the value to write to them.")
               .arg(writeState.chatTargetCount());
     m_controller.appendSmartSearchDebug("chat_memory_targets_activated", result);
     return result;
@@ -1048,7 +1049,7 @@ QVariantMap SmartSearchManager::writeChatMemoryTargetsFromQuery(const QString& q
     QVariantMap actionResult;
     actionResult["success"] = allWritesOk;
     actionResult["remaining"] = static_cast<qulonglong>(writeState.chatTargetCount());
-    actionResult["error"] = allWritesOk ? QString() : QString("Au moins une écriture sur adresse donnée a échoué.");
+    actionResult["error"] = allWritesOk ? QString() : KE_TXT("Au moins une écriture sur adresse donnée a échoué.", "At least one write to the supplied addresses failed.");
 
     result["success"] = allWritesOk;
     result["actionResult"] = actionResult;
@@ -1060,12 +1061,12 @@ QVariantMap SmartSearchManager::writeChatMemoryTargetsFromQuery(const QString& q
     result["activeTargetCount"] = writeState.chatTargetCount();
     result["previousTargetValue"] = previousTargetValue;
     result["writeHistory"] = writeHistoryToVariantList(m_controller.m_autoWriteValueHistory);
-    result["rollbackNote"] = "Tu peux annuler cette écriture via le bouton rollback batch dans l'assistant.";
+    result["rollbackNote"] = KE_TXT("Tu peux annuler cette écriture via le bouton rollback batch dans l'assistant.", "You can undo this write with the assistant's batch rollback button.");
     result["message"] = allWritesOk
-        ? QString("J'ai écrit %1 sur %2 adresse(s) mémoire sélectionnée(s) dans la conversation. Je garde ces adresses actives pour les prochaines modifications.")
+        ? KE_TXT("J'ai écrit %1 sur %2 adresse(s) mémoire sélectionnée(s) dans la conversation. Je garde ces adresses actives pour les prochaines modifications.", "I've written %1 to %2 memory address(es) selected in the conversation. I'll keep these addresses active for further changes.")
               .arg(value)
               .arg(writeState.chatTargetCount())
-        : QString("J'ai essayé d'écrire %1 sur les adresses mémoire sélectionnées, mais au moins une écriture a échoué.")
+        : KE_TXT("J'ai essayé d'écrire %1 sur les adresses mémoire sélectionnées, mais au moins une écriture a échoué.", "I tried to write %1 to the selected memory addresses, but at least one write failed.")
               .arg(value);
     m_controller.appendSmartSearchDebug("chat_memory_write", result);
     return result;
@@ -1117,14 +1118,14 @@ QVariantMap SmartSearchManager::freezeChatMemoryTargetsFromQuery(const QString& 
     result["freezeResults"] = freezeResults;
     result["activeTargetCount"] = m_controller.m_chatMemoryTargets.size();
     result["message"] = frozenCount > 0
-        ? QString("Freeze activé sur %1/%2 adresse(s) active(s) à %3. Je garde ces adresses actives pour pouvoir modifier ensuite.")
+        ? KE_TXT("Freeze activé sur %1/%2 adresse(s) active(s) à %3. Je garde ces adresses actives pour pouvoir modifier ensuite.", "Freeze enabled on %1/%2 active address(es) at %3. I'll keep these addresses active for further changes.")
               .arg(frozenCount)
               .arg(m_controller.m_chatMemoryTargets.size())
               .arg(value)
-        : QString("Je n'ai pas pu activer le freeze sur les adresses actives.");
+        : KE_TXT("Je n'ai pas pu activer le freeze sur les adresses actives.", "I couldn't enable freeze on the active addresses.");
     if (!allFreezeOk) {
         result["workflowStatus"] = "freeze_partial_or_failed";
-        result["error"] = "Au moins un freeze a échoué.";
+        result["error"] = KE_TXT("Au moins un freeze a échoué.", "At least one freeze failed.");
     }
 
     m_controller.appendSmartSearchDebug("chat_memory_freeze", result);
@@ -1214,7 +1215,7 @@ QVariantMap SmartSearchManager::clearScanContext() {
     result["hadUndoReduction"] = hadUndo;
     result["hadUnknownSnapshot"] = hadSnapshot;
     result["wasSmartSearchActive"] = wasSmartSearchActive;
-    result["message"] = QString("Contexte de scan vidé : %1 candidat(s) supprimé(s).").arg(candidateCount);
+    result["message"] = KE_TXT("Contexte de scan vidé : %1 candidat(s) supprimé(s).", "Scan context cleared: %1 candidate(s) removed.").arg(candidateCount);
     m_controller.appendSmartSearchDebug("scan_context_cleared", result);
     return result;
 }
@@ -1408,44 +1409,44 @@ QVariantMap SmartSearchManager::getAutoResolveReport(int maxEvents) const {
     displayValueReport["exactZeroCount"] = telemetryReport.exactZeroCount;
     displayValueReport["recommendation"] = telemetryReport.displayValueRecommendation;
     displayValueReport["warnings"] = QVariantList{
-        "Les strings UI peuvent etre des copies d'affichage, pas la source gameplay.",
-        "Ne pas ecrire globalValueHits en masse; tester Top 5/Top 25 seulement.",
-        "Si exact=0 et Trace UI donne des strings, privilegier source analysis avant patch/debug."
+        KE_TXT("Les strings UI peuvent etre des copies d'affichage, pas la source gameplay.", "UI strings may be display copies, not the gameplay source."),
+        KE_TXT("Ne pas ecrire globalValueHits en masse; tester Top 5/Top 25 seulement.", "Don't write to globalValueHits in bulk; test only the Top 5/Top 25."),
+        KE_TXT("Si exact=0 et Trace UI donne des strings, privilegier source analysis avant patch/debug.", "If exact=0 and Trace UI finds strings, prioritize source analysis before patching/debugging.")
     };
 
     QVariantList recommendations;
     QVariantList guardrails;
-    guardrails.append(QVariantMap{{"id", "no_auto_write"}, {"label", "Aucune écriture automatique sans confirmation"}, {"risk", "write"}});
-    guardrails.append(QVariantMap{{"id", "no_auto_debug"}, {"label", "Aucun debugger/hardware breakpoint sans confirmation"}, {"risk", "debug"}});
-    guardrails.append(QVariantMap{{"id", "no_auto_patch"}, {"label", "Aucun patch/injection sans confirmation"}, {"risk", "patch"}});
+    guardrails.append(QVariantMap{{"id", "no_auto_write"}, {"label", KE_TXT("Aucune écriture automatique sans confirmation", "No automatic writes without confirmation")}, {"risk", "write"}});
+    guardrails.append(QVariantMap{{"id", "no_auto_debug"}, {"label", KE_TXT("Aucun debugger/hardware breakpoint sans confirmation", "No debugger/hardware breakpoints without confirmation")}, {"risk", "debug"}});
+    guardrails.append(QVariantMap{{"id", "no_auto_patch"}, {"label", KE_TXT("Aucun patch/injection sans confirmation", "No patches/injection without confirmation")}, {"risk", "patch"}});
 
     const auto& candidates = m_controller.scanState().candidates();
 
     if (!m_controller.m_handle.isValid()) {
-        recommendations.append(QVariantMap{{"id", "attach_process"}, {"label", "Attacher un processus"}, {"safe", true}, {"reason", "Aucun processus actif."}});
+        recommendations.append(QVariantMap{{"id", "attach_process"}, {"label", KE_TXT("Attacher un processus", "Attach a process")}, {"safe", true}, {"reason", KE_TXT("Aucun processus actif.", "No active process.")}});
     } else if (!m_controller.m_chatMemoryTargets.isEmpty() || !m_controller.m_activeProfileTargets.isEmpty()) {
-        recommendations.append(QVariantMap{{"id", "guarded_write"}, {"label", "Proposer une écriture confirmée"}, {"safe", false}, {"reason", "Des cibles mémoire sont déjà actives."}});
-        recommendations.append(QVariantMap{{"id", "guarded_freeze"}, {"label", "Proposer un freeze confirmé"}, {"safe", false}, {"reason", "Des cibles mémoire sont déjà actives."}});
+        recommendations.append(QVariantMap{{"id", "guarded_write"}, {"label", KE_TXT("Proposer une écriture confirmée", "Propose a write with confirmation")}, {"safe", false}, {"reason", KE_TXT("Des cibles mémoire sont déjà actives.", "Memory targets are already active.")}});
+        recommendations.append(QVariantMap{{"id", "guarded_freeze"}, {"label", KE_TXT("Proposer un freeze confirmé", "Propose a freeze with confirmation")}, {"safe", false}, {"reason", KE_TXT("Des cibles mémoire sont déjà actives.", "Memory targets are already active.")}});
     } else if (m_controller.m_smartSearchActive && !candidates.isEmpty()) {
-        recommendations.append(QVariantMap{{"id", "reduce_with_new_value"}, {"label", "Réduire avec la nouvelle valeur observée"}, {"safe", true}, {"reason", "Une recherche guidée contient encore des candidats."}});
+        recommendations.append(QVariantMap{{"id", "reduce_with_new_value"}, {"label", KE_TXT("Réduire avec la nouvelle valeur observée", "Refine with the newly observed value")}, {"safe", true}, {"reason", KE_TXT("Une recherche guidée contient encore des candidats.", "A guided search still has candidates.")}});
         if (candidates.size() <= kAutoWriteCandidateLimit) {
-            recommendations.append(QVariantMap{{"id", "review_top_candidates"}, {"label", "Préparer un test d'écriture confirmé"}, {"safe", false}, {"reason", "Le nombre de candidats est assez bas."}});
+            recommendations.append(QVariantMap{{"id", "review_top_candidates"}, {"label", KE_TXT("Préparer un test d'écriture confirmé", "Prepare a test write for confirmation")}, {"safe", false}, {"reason", KE_TXT("Le nombre de candidats est assez bas.", "The candidate count is low enough.")}});
         }
     } else {
-        recommendations.append(QVariantMap{{"id", "exact_or_multitype"}, {"label", "Lancer un scan exact multi-type"}, {"safe", true}, {"reason", "Aucun contexte actif exploitable."}});
-        recommendations.append(QVariantMap{{"id", "encrypted_scan"}, {"label", "Essayer un scan chiffré borné"}, {"safe", true}, {"reason", "Utile si le scan exact ne trouve rien."}});
-        recommendations.append(QVariantMap{{"id", "unknown_capture"}, {"label", "Capturer unknown initial value"}, {"safe", true}, {"reason", "Utile quand la valeur réelle n'est pas connue ou transformée."}});
+        recommendations.append(QVariantMap{{"id", "exact_or_multitype"}, {"label", KE_TXT("Lancer un scan exact multi-type", "Run a multi-type exact scan")}, {"safe", true}, {"reason", KE_TXT("Aucun contexte actif exploitable.", "No usable active context.")}});
+        recommendations.append(QVariantMap{{"id", "encrypted_scan"}, {"label", KE_TXT("Essayer un scan chiffré borné", "Try a bounded encrypted scan")}, {"safe", true}, {"reason", KE_TXT("Utile si le scan exact ne trouve rien.", "Useful when an exact scan finds nothing.")}});
+        recommendations.append(QVariantMap{{"id", "unknown_capture"}, {"label", KE_TXT("Capturer unknown initial value", "Capture an unknown initial value")}, {"safe", true}, {"reason", KE_TXT("Utile quand la valeur réelle n'est pas connue ou transformée.", "Useful when the actual value is unknown or transformed.")}});
     }
 
     if (eventCounts.value("ui_string_investigation_finish").toInt() > 0 || eventCounts.value("ui_string_sources_analyze").toInt() > 0) {
-        recommendations.append(QVariantMap{{"id", "trace_ui_sources"}, {"label", "Exploiter les sources Trace UI string"}, {"safe", true}, {"reason", "La télémétrie récente contient des pistes UI/string."}});
+        recommendations.append(QVariantMap{{"id", "trace_ui_sources"}, {"label", KE_TXT("Exploiter les sources Trace UI string", "Use the Trace UI string sources")}, {"safe", true}, {"reason", KE_TXT("La télémétrie récente contient des pistes UI/string.", "Recent telemetry contains UI/string leads.")}});
     }
     if (eventCounts.value("find_what_writes").toInt() > 0 || eventCounts.value("aob_signature").toInt() > 0) {
-        recommendations.append(QVariantMap{{"id", "trainer_checkpoint"}, {"label", "Préparer checkpoint AOB/patch"}, {"safe", false}, {"reason", "Des signaux debugger/AOB existent déjà."}});
+        recommendations.append(QVariantMap{{"id", "trainer_checkpoint"}, {"label", KE_TXT("Préparer checkpoint AOB/patch", "Prepare an AOB/patch checkpoint")}, {"safe", false}, {"reason", KE_TXT("Des signaux debugger/AOB existent déjà.", "Debugger/AOB evidence is already available.")}});
     }
     if (learnedProfile.value("noCandidateCount").toInt() >= 2) {
-        recommendations.prepend(QVariantMap{{"id", "trace_ui_string"}, {"label", "Privilégier Trace UI string"}, {"safe", true}, {"reason", "Les scans exacts récents de ce processus ont souvent fini sans candidat."}});
-        recommendations.prepend(QVariantMap{{"id", "encrypted_scan"}, {"label", "Privilégier scan chiffré"}, {"safe", true}, {"reason", "Mémoire locale : plusieurs scans sans candidat sur ce processus."}});
+        recommendations.prepend(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Privilégier Trace UI string", "Prioritize Trace UI string")}, {"safe", true}, {"reason", KE_TXT("Les scans exacts récents de ce processus ont souvent fini sans candidat.", "Recent exact scans of this process often returned no candidates.")}});
+        recommendations.prepend(QVariantMap{{"id", "encrypted_scan"}, {"label", KE_TXT("Privilégier scan chiffré", "Prioritize an encrypted scan")}, {"safe", true}, {"reason", KE_TXT("Mémoire locale : plusieurs scans sans candidat sur ce processus.", "Local history: several scans of this process returned no candidates.")}});
     }
     if (learnedProfile.value("noCandidateCount").toInt() >= 4) {
         // Signal fort de réallocation/instabilité mémoire persistante malgré
@@ -1456,10 +1457,10 @@ QVariantMap SmartSearchManager::getAutoResolveReport(int maxEvents) const {
         // docs/STRATEGY_ROOM.md, 24/08/2026 (cas Solitaire "Bulles").
         recommendations.prepend(QVariantMap{
             {"id", "block_process_network"},
-            {"label", "Couper le réseau du processus (diagnostic)"},
+            {"label", KE_TXT("Couper le réseau du processus (diagnostic)", "Disconnect the process from the network (diagnostic)")},
             {"safe", false},
             {"requiresConfirmation", true},
-            {"reason", "Plusieurs stratégies de scan ont échoué sur ce processus — la valeur est peut-être resynchronisée depuis un serveur en arrière-plan plutôt que purement locale."}
+            {"reason", KE_TXT("Plusieurs stratégies de scan ont échoué sur ce processus — la valeur est peut-être resynchronisée depuis un serveur en arrière-plan plutôt que purement locale.", "Several scan strategies failed on this process — the value may be synced from a server in the background rather than stored only locally.")}
         });
     }
     if (learnedProfile.value("noCandidateCount").toInt() >= 6) {
@@ -1472,20 +1473,20 @@ QVariantMap SmartSearchManager::getAutoResolveReport(int maxEvents) const {
         // de toutes les pistes memoire.
         recommendations.prepend(QVariantMap{
             {"id", "discover_save_files"},
-            {"label", "Chercher fichiers et paramètres UWP sur le disque"},
+            {"label", KE_TXT("Chercher fichiers et paramètres UWP sur le disque", "Find UWP files and settings on disk")},
             {"safe", true},
             {"requiresConfirmation", false},
-            {"reason", "De nombreuses strategies memoire ont echoue meme apres isolation reseau — la valeur affichee vient peut-etre d'un fichier de sauvegarde ou de LocalSettings plutot que d'une adresse memoire stable."}
+            {"reason", KE_TXT("De nombreuses strategies memoire ont echoue meme apres isolation reseau — la valeur affichee vient peut-etre d'un fichier de sauvegarde ou de LocalSettings plutot que d'une adresse memoire stable.", "Many memory strategies failed even after network isolation — the displayed value may come from a save file or LocalSettings rather than a stable memory address.")}
         });
     }
     const QString lastSuccessfulAudit = learnedProfile.value("lastSuccessfulAuditEvent").toString();
     if (!lastSuccessfulAudit.isEmpty()) {
         recommendations.prepend(QVariantMap{
             {"id", "reuse_successful_strategy"},
-            {"label", "Réutiliser la dernière stratégie gagnante"},
+            {"label", KE_TXT("Réutiliser la dernière stratégie gagnante", "Reuse the last successful strategy")},
             {"safe", lastSuccessfulAudit.contains("write") || lastSuccessfulAudit.contains("freeze") ? false : true},
             {"requiresConfirmation", lastSuccessfulAudit.contains("write") || lastSuccessfulAudit.contains("freeze")},
-            {"reason", QString("Dernière action validée pour ce processus : %1.").arg(lastSuccessfulAudit)}
+            {"reason", KE_TXT("Dernière action validée pour ce processus : %1.", "Last validated action for this process: %1.").arg(lastSuccessfulAudit)}
         });
     }
 
@@ -1524,11 +1525,11 @@ QVariantMap SmartSearchManager::getAutoResolveReport(int maxEvents) const {
         traceUiScore += 10;
     }
 
-    addStrategyScore("reduce_with_new_value", "Réduire candidats existants", reduceScore, "Meilleur choix quand une recherche guidée est active.");
-    addStrategyScore("exact_or_multitype", "Scan exact multi-type", exactScore, "Point d'entrée le plus rapide quand la valeur réelle est connue.");
-    addStrategyScore("unknown_capture", "Unknown initial value", unknownScore, "Bon choix si la valeur bouge mais la représentation mémoire est inconnue.");
-    addStrategyScore("encrypted_scan", "Scan chiffré borné", encryptedScore, "Bon choix si le scan exact échoue souvent.");
-    addStrategyScore("trace_ui_string", "Trace UI string", traceUiScore, "Bon choix si le jeu affiche une copie UI plutôt que la source gameplay.");
+    addStrategyScore("reduce_with_new_value", KE_TXT("Réduire candidats existants", "Refine existing candidates"), reduceScore, KE_TXT("Meilleur choix quand une recherche guidée est active.", "Best choice when a guided search is active."));
+    addStrategyScore("exact_or_multitype", KE_TXT("Scan exact multi-type", "Multi-type exact scan"), exactScore, KE_TXT("Point d'entrée le plus rapide quand la valeur réelle est connue.", "The fastest starting point when the actual value is known."));
+    addStrategyScore("unknown_capture", "Unknown initial value", unknownScore, KE_TXT("Bon choix si la valeur bouge mais la représentation mémoire est inconnue.", "A good choice when the value changes but its memory representation is unknown."));
+    addStrategyScore("encrypted_scan", KE_TXT("Scan chiffré borné", "Bounded encrypted scan"), encryptedScore, KE_TXT("Bon choix si le scan exact échoue souvent.", "A good choice when exact scans often fail."));
+    addStrategyScore("trace_ui_string", "Trace UI string", traceUiScore, KE_TXT("Bon choix si le jeu affiche une copie UI plutôt que la source gameplay.", "A good choice when the game displays a UI copy rather than the gameplay source."));
 
     std::sort(strategyScores.begin(), strategyScores.end(), [](const QVariant& a, const QVariant& b) {
         return a.toMap().value("score").toInt() > b.toMap().value("score").toInt();
@@ -1559,44 +1560,44 @@ QVariantMap SmartSearchManager::getAutoResolveReport(int maxEvents) const {
     if (!m_controller.m_handle.isValid()) {
         nextBestAction = proactiveAction(
             "attach_process",
-            "Attacher un processus",
+            KE_TXT("Attacher un processus", "Attach a process"),
             "attach_process",
             100,
             true,
             "safe",
-            "Aucun processus actif : l'assistant ne peut pas scanner tant qu'une cible autorisée n'est pas attachée.");
+            KE_TXT("Aucun processus actif : l'assistant ne peut pas scanner tant qu'une cible autorisée n'est pas attachée.", "No active process: the assistant can't scan until an authorized target is attached."));
     } else if (!m_controller.m_chatMemoryTargets.isEmpty() || !m_controller.m_activeProfileTargets.isEmpty()) {
         nextBestAction = proactiveAction(
             "guarded_write",
-            "Préparer une écriture confirmée",
+            KE_TXT("Préparer une écriture confirmée", "Prepare a write for confirmation"),
             "chat_memory_write",
             88,
             false,
             "write",
-            "Des cibles mémoire sont déjà actives; la prochaine action utile est un test confirmé, pas une nouvelle recherche.");
+            KE_TXT("Des cibles mémoire sont déjà actives; la prochaine action utile est un test confirmé, pas une nouvelle recherche.", "Memory targets are already active; a test with confirmation is the useful next step, not another search."));
     } else if (m_controller.m_smartSearchActive && !candidates.isEmpty()) {
         const int confidence = candidates.size() <= kAutoWriteCandidateLimit ? 90 : 82;
         nextBestAction = proactiveAction(
             candidates.size() <= kAutoWriteCandidateLimit ? "review_top_candidates" : "reduce_with_new_value",
-            candidates.size() <= kAutoWriteCandidateLimit ? "Préparer test d'écriture confirmé" : "Réduire avec nouvelle valeur",
+            candidates.size() <= kAutoWriteCandidateLimit ? KE_TXT("Préparer test d'écriture confirmé", "Prepare a test write for confirmation") : KE_TXT("Réduire avec nouvelle valeur", "Refine with a new value"),
             candidates.size() <= kAutoWriteCandidateLimit ? "prepare_guarded_write" : "next_scan",
             confidence,
             candidates.size() > kAutoWriteCandidateLimit,
             candidates.size() <= kAutoWriteCandidateLimit ? "write" : "safe",
             candidates.size() <= kAutoWriteCandidateLimit
-                ? "Le nombre de candidats est assez bas; il faut passer par une confirmation avant écriture/freeze."
-                : "Une recherche est déjà active; refaire varier la valeur donnera la réduction la plus rentable.");
+                ? KE_TXT("Le nombre de candidats est assez bas; il faut passer par une confirmation avant écriture/freeze.", "The candidate count is low enough; confirmation is required before writing/freezing.")
+                : KE_TXT("Une recherche est déjà active; refaire varier la valeur donnera la réduction la plus rentable.", "A search is already active; changing the value again is the most effective way to narrow it down."));
     } else {
         const QString strategyId = preferredStrategy.value("id").toString();
         const int confidence = preferredStrategy.value("score", 50).toInt();
         if (strategyId == "trace_ui_string") {
-            nextBestAction = proactiveAction("trace_ui_string", "Lancer Trace UI string", "scan_ui_strings", confidence, true, "safe", preferredStrategy.value("reason").toString());
+            nextBestAction = proactiveAction("trace_ui_string", KE_TXT("Lancer Trace UI string", "Run Trace UI string"), "scan_ui_strings", confidence, true, "safe", preferredStrategy.value("reason").toString());
         } else if (strategyId == "encrypted_scan") {
-            nextBestAction = proactiveAction("encrypted_scan", "Lancer scan chiffré borné", "scan_encrypted_value", confidence, true, "safe", preferredStrategy.value("reason").toString());
+            nextBestAction = proactiveAction("encrypted_scan", KE_TXT("Lancer scan chiffré borné", "Run a bounded encrypted scan"), "scan_encrypted_value", confidence, true, "safe", preferredStrategy.value("reason").toString());
         } else if (strategyId == "unknown_capture") {
-            nextBestAction = proactiveAction("unknown_capture", "Capturer Unknown initial value", "unknown_capture", confidence, true, "safe", preferredStrategy.value("reason").toString());
+            nextBestAction = proactiveAction("unknown_capture", KE_TXT("Capturer Unknown initial value", "Capture an unknown initial value"), "unknown_capture", confidence, true, "safe", preferredStrategy.value("reason").toString());
         } else {
-            nextBestAction = proactiveAction("exact_or_multitype", "Lancer scan exact multi-type", "exact_scan_multi_type", confidence, true, "safe", preferredStrategy.value("reason").toString());
+            nextBestAction = proactiveAction("exact_or_multitype", KE_TXT("Lancer scan exact multi-type", "Run a multi-type exact scan"), "exact_scan_multi_type", confidence, true, "safe", preferredStrategy.value("reason").toString());
         }
     }
 
@@ -1628,7 +1629,7 @@ QVariantMap SmartSearchManager::getAutoResolveReport(int maxEvents) const {
     result["aob"] = aobReport;
     result["recommendations"] = recommendations;
     result["guardrails"] = guardrails;
-    result["summary"] = QString("%1 candidat(s), %2 cible(s) active(s), %3 événement(s) récent(s).")
+    result["summary"] = KE_TXT("%1 candidat(s), %2 cible(s) active(s), %3 événement(s) récent(s).", "%1 candidate(s), %2 active target(s), %3 recent event(s).")
         .arg(candidates.size())
         .arg(m_controller.m_chatMemoryTargets.size() + m_controller.m_activeProfileTargets.size())
         .arg(recentEvents.size());
@@ -1642,12 +1643,12 @@ QVariantMap SmartSearchManager::clearAutoResolveMemory(bool allProcesses) {
     result["allProcesses"] = allProcesses;
     if (allProcesses) {
         settings.remove("autoResolver");
-        result["message"] = "Mémoire Auto vidée pour tous les processus.";
+        result["message"] = KE_TXT("Mémoire Auto vidée pour tous les processus.", "Auto memory cleared for all processes.");
     } else {
         const QString gameKey = autoResolverGameKey(m_controller.processName());
         settings.remove(QString("autoResolver/process/%1").arg(gameKey));
         result["gameKey"] = gameKey;
-        result["message"] = QString("Mémoire Auto vidée pour %1.").arg(gameKey);
+        result["message"] = KE_TXT("Mémoire Auto vidée pour %1.", "Auto memory cleared for %1.").arg(gameKey);
     }
     m_controller.appendSmartSearchDebug("auto_resolve_memory_cleared", result);
     return result;
@@ -1886,14 +1887,14 @@ QVariantMap SmartSearchManager::replayWriteHistorySequence() {
     result["success"] = false;
 
     if (!m_controller.m_attached || !m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     const QVariantMap sequenceResult = getWriteHistorySequence();
     const QVariantList entries = sequenceResult.value("sequence").toList();
     if (entries.isEmpty()) {
-        result["error"] = "Aucune séquence d'écritures à rejouer pour cet exécutable.";
+        result["error"] = KE_TXT("Aucune séquence d'écritures à rejouer pour cet exécutable.", "No write sequence to replay for this executable.");
         return result;
     }
 
@@ -1910,7 +1911,7 @@ QVariantMap SmartSearchManager::replayWriteHistorySequence() {
         detail["value"] = entry.value("value");
         if (!entry.value("resolved").toBool()) {
             detail["success"] = false;
-            detail["error"] = "Module non chargé dans le processus attaché.";
+            detail["error"] = KE_TXT("Module non chargé dans le processus attaché.", "Module not loaded in the attached process.");
             skippedCount++;
             details.append(detail);
             continue;
@@ -1958,7 +1959,7 @@ QVariantMap SmartSearchManager::writeProfileTargetsFromQuery(const QString& quer
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -2146,7 +2147,7 @@ QVariantMap SmartSearchManager::writeProfileTargetsFromQuery(const QString& quer
     QVariantMap actionResult;
     actionResult["success"] = allWritesOk;
     actionResult["remaining"] = static_cast<qulonglong>(resolvedTargets.size());
-    actionResult["error"] = allWritesOk ? QString() : QString("Au moins une écriture depuis le profil a échoué.");
+    actionResult["error"] = allWritesOk ? QString() : KE_TXT("Au moins une écriture depuis le profil a échoué.", "At least one write from the profile failed.");
 
     result["success"] = allWritesOk;
     result["query"] = query;
@@ -2166,14 +2167,14 @@ QVariantMap SmartSearchManager::writeProfileTargetsFromQuery(const QString& quer
     result["previousTargetValue"] = previousTargetValue;
     result["writeHistory"] = writeHistoryToVariantList(m_controller.m_autoWriteValueHistory);
     result["rollbackNote"] = wroteRawMemoryTarget
-        ? "Tu peux annuler les écritures mémoire brutes via le bouton rollback batch dans l'assistant. Les champs CLR passent par ClrMD et ne sont pas ajoutés au rollback mémoire."
-        : "Écriture CLR effectuée via ClrMD : aucun rollback mémoire brut n'a été ajouté.";
+        ? KE_TXT("Tu peux annuler les écritures mémoire brutes via le bouton rollback batch dans l'assistant. Les champs CLR passent par ClrMD et ne sont pas ajoutés au rollback mémoire.", "You can undo raw memory writes with the assistant's batch rollback button. CLR fields use ClrMD and aren't included in memory rollback.")
+        : KE_TXT("Écriture CLR effectuée via ClrMD : aucun rollback mémoire brut n'a été ajouté.", "CLR write performed through ClrMD: no raw memory rollback was added.");
     result["message"] = allWritesOk
-        ? QString("J'ai utilisé le profil et j'ai mis %1 sur %2 cible(s) \"%3\". Les cibles CLR restent reliées à leur locator logique.")
+        ? KE_TXT("J'ai utilisé le profil et j'ai mis %1 sur %2 cible(s) \"%3\". Les cibles CLR restent reliées à leur locator logique.", "I've used the profile to set %2 target(s) named \"%3\" to %1. CLR targets remain linked to their logical locator.")
               .arg(value)
               .arg(resolvedTargets.size())
               .arg(matchedGroupName)
-        : QString("J'ai trouvé %1 cible(s) \"%2\" dans le profil, mais au moins une écriture vers %3 a échoué.")
+        : KE_TXT("J'ai trouvé %1 cible(s) \"%2\" dans le profil, mais au moins une écriture vers %3 a échoué.", "I've found %1 target(s) named \"%2\" in the profile, but at least one write of %3 failed.")
               .arg(resolvedTargets.size())
               .arg(matchedGroupName)
               .arg(value);
@@ -2191,13 +2192,13 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
 
     const QString trimmed = query.trimmed();
     if (trimmed.isEmpty()) {
-        result["error"] = "Objectif vide.";
-        result["message"] = "Donne-moi un objectif avec une valeur, par exemple : minéraux 41250 vers 99999.";
+        result["error"] = KE_TXT("Objectif vide.", "Empty objective.");
+        result["message"] = KE_TXT("Donne-moi un objectif avec une valeur, par exemple : minéraux 41250 vers 99999.", "Give me an objective with a value, for example: minerals 41250 to 99999.");
         return result;
     }
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
-        result["message"] = "Attache d'abord un processus, puis relance l'auto-résolution.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
+        result["message"] = KE_TXT("Attache d'abord un processus, puis relance l'auto-résolution.", "Attach a process first, then run auto-resolve again.");
         return result;
     }
 
@@ -2207,9 +2208,9 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
         // reconnaitre explicitement l'objectif de l'utilisateur (evite un
         // message qui sonne comme un rejet sec type "action a echoue :
         // Aucune valeur numerique detectee").
-        result["error"] = "Aucune valeur numérique détectée.";
+        result["error"] = KE_TXT("Aucune valeur numérique détectée.", "No numeric value detected.");
         result["message"] = QString(
-            "Je comprends que tu veux modifier « %1 », mais il me faut au moins la valeur actuelle affichée à l'écran pour démarrer (par exemple : « 500 vers 9999 »).")
+            KE_TXT("Je comprends que tu veux modifier « %1 », mais il me faut au moins la valeur actuelle affichée à l'écran pour démarrer (par exemple : « 500 vers 9999 »).", "I understand you want to change \"%1\", but I need at least the current value shown on screen to get started (for example: \"500 to 9999\")."))
             .arg(trimmed);
         return result;
     }
@@ -2221,7 +2222,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
     bool targetOk = false;
     const qlonglong targetValue = numbers.first().toLongLong(&targetOk);
     if (!targetOk) {
-        result["error"] = "Valeur numérique invalide.";
+        result["error"] = KE_TXT("Valeur numérique invalide.", "Invalid numeric value.");
         return result;
     }
 
@@ -2260,9 +2261,9 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
     };
 
     QVariantList actions;
-    actions.append(QVariantMap{{"id", "run_exact"}, {"label", "Scan Auto multi-type"}, {"safe", true}});
-    actions.append(QVariantMap{{"id", "try_unknown_increased"}, {"label", "Passer en Unknown"}, {"safe", true}});
-    actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert"}, {"safe", true}});
+    actions.append(QVariantMap{{"id", "run_exact"}, {"label", KE_TXT("Scan Auto multi-type", "Auto multi-type scan")}, {"safe", true}});
+    actions.append(QVariantMap{{"id", "try_unknown_increased"}, {"label", KE_TXT("Passer en Unknown", "Switch to Unknown")}, {"safe", true}});
+    actions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Ouvrir Expert", "Open Expert")}, {"safe", true}});
     QVariantList executedSafeSteps;
     const int maxSafeSteps = std::clamp(options.value("maxSafeSteps", 2).toInt(), 1, 5);
     auto appendSafeStep = [&executedSafeSteps](const QString& tool, const QString& status, const QString& detail, const QVariantMap& payload = {}) {
@@ -2282,7 +2283,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
         result["success"] = true;
         result["actionStatus"] = "planned_only";
         result["nextActions"] = actions;
-        result["message"] = QString("Plan auto prêt : %1 étapes. Je n'ai rien exécuté parce que le mode exécution sûre est désactivé.")
+        result["message"] = KE_TXT("Plan auto prêt : %1 étapes. Je n'ai rien exécuté parce que le mode exécution sûre est désactivé.", "Auto plan ready: %1 steps. I haven't run anything because safe execution mode is disabled.")
                                 .arg(plan.size());
         m_controller.appendSmartSearchDebug("auto_resolve_plan", result);
         return result;
@@ -2294,7 +2295,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
         appendSafeStep(
             "next_scan",
             reduction.value("success").toBool() ? "success" : "error",
-            QString("Réduction exacte avec la nouvelle valeur %1.").arg(numbers.first()),
+            KE_TXT("Réduction exacte avec la nouvelle valeur %1.", "Exact refinement with the new value %1.").arg(numbers.first()),
             reduction);
         result["firstAction"] = reduction;
         result["safeAction"] = "next_scan";
@@ -2321,7 +2322,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                 appendSafeStep(
                     "scan_encrypted_value",
                     encrypted.value("success").toBool() ? "success" : "error",
-                    QString("Fallback scan chiffré XOR borné après réduction vide."),
+                    KE_TXT("Fallback scan chiffré XOR borné après réduction vide.", "Bounded XOR encrypted scan fallback after refinement returned no candidates."),
                     encrypted);
                 result["fallbackAction"] = encrypted;
                 result["encryptedMatches"] = encrypted.value("matches");
@@ -2329,9 +2330,9 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                 if (encrypted.value("success").toBool() && encryptedCount > 0) {
                     result["workflowStatus"] = "awaiting_encrypted_review";
                     result["candidateCount"] = encryptedCount;
-                    actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Comparer avec Trace UI string"}, {"safe", true}});
-                    actions.append(QVariantMap{{"id", "review_encrypted_hits"}, {"label", "Inspecter hits chiffrés"}, {"safe", true}});
-                    result["message"] = QString("La réduction a vidé les candidats, donc j'ai enchaîné un scan chiffré XOR borné : %1 hit(s). On inspecte ces pistes avant tout write.")
+                    actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Comparer avec Trace UI string", "Compare with Trace UI string")}, {"safe", true}});
+                    actions.append(QVariantMap{{"id", "review_encrypted_hits"}, {"label", KE_TXT("Inspecter hits chiffrés", "Inspect encrypted hits")}, {"safe", true}});
+                    result["message"] = KE_TXT("La réduction a vidé les candidats, donc j'ai enchaîné un scan chiffré XOR borné : %1 hit(s). On inspecte ces pistes avant tout write.", "Refinement removed all candidates, so I followed up with a bounded XOR encrypted scan: %1 hit(s). Let's inspect these leads before writing anything.")
                                             .arg(encryptedCount);
                 } else {
                     int uiStringCount = 0;
@@ -2347,7 +2348,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                         appendSafeStep(
                             "scan_ui_strings",
                             trace.value("success").toBool() ? "success" : "error",
-                            "Fallback Trace UI string borné après scan chiffré vide.",
+                            KE_TXT("Fallback Trace UI string borné après scan chiffré vide.", "Bounded Trace UI string fallback after the encrypted scan returned no hits."),
                             trace);
                         result["fallbackTraceUiAction"] = trace;
                         result["uiStringMatches"] = trace.value("matches");
@@ -2356,9 +2357,9 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                     if (uiStringCount > 0) {
                         result["workflowStatus"] = "awaiting_trace_ui_review";
                         result["candidateCount"] = uiStringCount;
-                        actions.append(QVariantMap{{"id", "trace_ui_sources"}, {"label", "Analyser sources UI"}, {"safe", true}});
-                        actions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Basculer en Unknown"}, {"safe", true}});
-                        result["message"] = QString("La réduction et le scan chiffré sont vides, mais Trace UI string a trouvé %1 string(s). Prochaine étape : analyser les sources UI.")
+                        actions.append(QVariantMap{{"id", "trace_ui_sources"}, {"label", KE_TXT("Analyser sources UI", "Analyze UI sources")}, {"safe", true}});
+                        actions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", KE_TXT("Basculer en Unknown", "Switch to Unknown")}, {"safe", true}});
+                        result["message"] = KE_TXT("La réduction et le scan chiffré sont vides, mais Trace UI string a trouvé %1 string(s). Prochaine étape : analyser les sources UI.", "Refinement and the encrypted scan returned nothing, but Trace UI string found %1 string(s). Next step: analyze the UI sources.")
                                                 .arg(uiStringCount);
                     } else {
                         QVariantMap unknownOptions{
@@ -2371,39 +2372,39 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                         appendSafeStep(
                             "unknown_capture",
                             unknown.value("success").toBool() ? "success" : "error",
-                            "Capture Unknown bornée après fallbacks vides; attente d'une variation utilisateur.",
+                            KE_TXT("Capture Unknown bornée après fallbacks vides; attente d'une variation utilisateur.", "Bounded Unknown capture after empty fallbacks; waiting for the user to change the value."),
                             unknown);
                         result["unknownCaptureAction"] = unknown;
                         result["workflowStatus"] = unknown.value("success").toBool() ? "awaiting_unknown_observation" : "auto_resolve_no_candidate";
-                        actions.append(QVariantMap{{"id", "continue_unknown_observation"}, {"label", "Continuer après variation"}, {"safe", true}});
-                        actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Relancer Trace UI string"}, {"safe", true}});
+                        actions.append(QVariantMap{{"id", "continue_unknown_observation"}, {"label", KE_TXT("Continuer après variation", "Continue after the value changes")}, {"safe", true}});
+                        actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Relancer Trace UI string", "Run Trace UI string again")}, {"safe", true}});
                         result["message"] = unknown.value("success").toBool()
-                            ? QString("La réduction, le scan chiffré et Trace UI string sont vides. J'ai capturé un snapshot Unknown borné : fais varier la valeur, puis donne-moi la nouvelle observation.")
-                            : QString("Les fallbacks safe sont vides et la capture Unknown a échoué : %1").arg(unknown.value("error").toString());
+                            ? KE_TXT("La réduction, le scan chiffré et Trace UI string sont vides. J'ai capturé un snapshot Unknown borné : fais varier la valeur, puis donne-moi la nouvelle observation.", "Refinement, the encrypted scan and Trace UI string returned nothing. I've captured a bounded Unknown snapshot: change the value, then tell me what you observe.")
+                            : KE_TXT("Les fallbacks safe sont vides et la capture Unknown a échoué : %1", "The safe fallbacks returned nothing and the Unknown capture failed: %1").arg(unknown.value("error").toString());
                     }
                 }
             } else {
-                actions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Basculer en Unknown"}, {"safe", true}});
-                actions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Essayer scan chiffré"}, {"safe", true}});
-                result["message"] = "J'ai réduit avec la nouvelle valeur, mais il ne reste aucun candidat. Je propose de passer en Unknown ou en scan chiffré borné.";
+                actions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", KE_TXT("Basculer en Unknown", "Switch to Unknown")}, {"safe", true}});
+                actions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", KE_TXT("Essayer scan chiffré", "Try an encrypted scan")}, {"safe", true}});
+                result["message"] = KE_TXT("J'ai réduit avec la nouvelle valeur, mais il ne reste aucun candidat. Je propose de passer en Unknown ou en scan chiffré borné.", "I've refined with the new value, but no candidates remain. I suggest switching to Unknown or a bounded encrypted scan.");
             }
         } else if (remaining <= kAutoWriteCandidateLimit) {
             const QString writeValue = !m_controller.m_smartSearchTargetValue.isEmpty()
                 ? m_controller.m_smartSearchTargetValue
                 : (numbers.size() > 1 ? numbers.at(1) : numbers.first());
             const QVariantList suggestions = suggestedWritesForCandidates(candidates, writeValue, kAutoWriteCandidateLimit);
-            actions.append(QVariantMap{{"id", "confirm_test_write"}, {"label", "Tester l'écriture sur les candidats"}, {"safe", false}, {"requiresConfirmation", true}});
-            actions.append(QVariantMap{{"id", "confirm_breakpoint_freeze"}, {"label", "Préparer freeze BP confirmé"}, {"safe", false}, {"requiresConfirmation", true}});
+            actions.append(QVariantMap{{"id", "confirm_test_write"}, {"label", KE_TXT("Tester l'écriture sur les candidats", "Test a write on the candidates")}, {"safe", false}, {"requiresConfirmation", true}});
+            actions.append(QVariantMap{{"id", "confirm_breakpoint_freeze"}, {"label", KE_TXT("Préparer freeze BP confirmé", "Prepare a breakpoint freeze for confirmation")}, {"safe", false}, {"requiresConfirmation", true}});
             result["requiresConfirmation"] = true;
-            result["confirmationReason"] = "Écriture/freeze sur mémoire de processus : je prépare, tu confirmes avant action.";
+            result["confirmationReason"] = KE_TXT("Écriture/freeze sur mémoire de processus : je prépare, tu confirmes avant action.", "Writing/freezing process memory: I'll prepare it, and you confirm before anything runs.");
             result["suggestedWrites"] = suggestions;
             result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
-            result["message"] = QString("J'ai réduit à %1 candidat(s). On est dans la zone intéressante : prochaine étape, test d'écriture confirmé ou freeze BP confirmé.")
+            result["message"] = KE_TXT("J'ai réduit à %1 candidat(s). On est dans la zone intéressante : prochaine étape, test d'écriture confirmé ou freeze BP confirmé.", "I've narrowed it down to %1 candidate(s). This looks promising: next, confirm a test write or a breakpoint freeze.")
                                     .arg(remaining);
         } else {
-            actions.append(QVariantMap{{"id", "reduce_again"}, {"label", "Réduire encore avec une nouvelle valeur"}, {"safe", true}});
-            actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Chercher via Trace UI string"}, {"safe", true}});
-            result["message"] = QString("J'ai réduit à %1 candidat(s). Fais encore varier la valeur et donne-moi la nouvelle valeur pour continuer automatiquement.")
+            actions.append(QVariantMap{{"id", "reduce_again"}, {"label", KE_TXT("Réduire encore avec une nouvelle valeur", "Refine again with a new value")}, {"safe", true}});
+            actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Chercher via Trace UI string", "Search with Trace UI string")}, {"safe", true}});
+            result["message"] = KE_TXT("J'ai réduit à %1 candidat(s). Fais encore varier la valeur et donne-moi la nouvelle valeur pour continuer automatiquement.", "I've narrowed it down to %1 candidate(s). Change the value again and tell me the new value to continue automatically.")
                                     .arg(remaining);
         }
 
@@ -2417,7 +2418,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
     appendSafeStep(
         "exact_scan_multi_type",
         firstScan.value("success").toBool() ? "success" : "error",
-        QString("Scan initial multi-type pour %1.").arg(numbers.first()),
+        KE_TXT("Scan initial multi-type pour %1.", "Initial multi-type scan for %1.").arg(numbers.first()),
         firstScan);
     result["firstAction"] = firstScan;
     result["success"] = firstScan.value("success").toBool();
@@ -2443,7 +2444,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                 appendSafeStep(
                     "scan_encrypted_value",
                     encrypted.value("success").toBool() ? "success" : "error",
-                    "Fallback scan chiffré XOR borné après scan exact vide.",
+                    KE_TXT("Fallback scan chiffré XOR borné après scan exact vide.", "Bounded XOR encrypted scan fallback after the exact scan returned no candidates."),
                     encrypted);
                 result["fallbackAction"] = encrypted;
                 result["encryptedMatches"] = encrypted.value("matches");
@@ -2451,9 +2452,9 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                 if (encrypted.value("success").toBool() && encryptedCount > 0) {
                     result["workflowStatus"] = "awaiting_encrypted_review";
                     result["candidateCount"] = encryptedCount;
-                    actions.prepend(QVariantMap{{"id", "review_encrypted_hits"}, {"label", "Inspecter hits chiffrés"}, {"safe", true}});
-                    actions.prepend(QVariantMap{{"id", "trace_ui_string"}, {"label", "Comparer Trace UI string"}, {"safe", true}});
-                    result["message"] = QString("Le scan exact n'a rien trouvé. J'ai enchaîné automatiquement un scan chiffré XOR borné : %1 hit(s). On valide ces pistes avant toute action risquée.")
+                    actions.prepend(QVariantMap{{"id", "review_encrypted_hits"}, {"label", KE_TXT("Inspecter hits chiffrés", "Inspect encrypted hits")}, {"safe", true}});
+                    actions.prepend(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Comparer Trace UI string", "Compare Trace UI string")}, {"safe", true}});
+                    result["message"] = KE_TXT("Le scan exact n'a rien trouvé. J'ai enchaîné automatiquement un scan chiffré XOR borné : %1 hit(s). On valide ces pistes avant toute action risquée.", "The exact scan found nothing. I automatically followed up with a bounded XOR encrypted scan: %1 hit(s). Let's validate these leads before taking any risky action.")
                                             .arg(encryptedCount);
                 } else {
                     int uiStringCount = 0;
@@ -2469,7 +2470,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                         appendSafeStep(
                             "scan_ui_strings",
                             trace.value("success").toBool() ? "success" : "error",
-                            "Fallback Trace UI string borné après scan chiffré vide.",
+                            KE_TXT("Fallback Trace UI string borné après scan chiffré vide.", "Bounded Trace UI string fallback after the encrypted scan returned no hits."),
                             trace);
                         result["fallbackTraceUiAction"] = trace;
                         result["uiStringMatches"] = trace.value("matches");
@@ -2478,8 +2479,8 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                     if (uiStringCount > 0) {
                         result["workflowStatus"] = "awaiting_trace_ui_review";
                         result["candidateCount"] = uiStringCount;
-                        actions.prepend(QVariantMap{{"id", "trace_ui_sources"}, {"label", "Analyser sources UI"}, {"safe", true}});
-                        result["message"] = QString("Le scan exact et le scan chiffré sont vides, mais Trace UI string a trouvé %1 string(s). Prochaine étape : analyser les sources UI.")
+                        actions.prepend(QVariantMap{{"id", "trace_ui_sources"}, {"label", KE_TXT("Analyser sources UI", "Analyze UI sources")}, {"safe", true}});
+                        result["message"] = KE_TXT("Le scan exact et le scan chiffré sont vides, mais Trace UI string a trouvé %1 string(s). Prochaine étape : analyser les sources UI.", "The exact and encrypted scans returned nothing, but Trace UI string found %1 string(s). Next step: analyze the UI sources.")
                                             .arg(uiStringCount);
                     } else {
                         QVariantMap unknownOptions{
@@ -2492,37 +2493,37 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
                         appendSafeStep(
                             "unknown_capture",
                             unknown.value("success").toBool() ? "success" : "error",
-                            "Capture Unknown bornée après fallbacks vides; attente d'une variation utilisateur.",
+                            KE_TXT("Capture Unknown bornée après fallbacks vides; attente d'une variation utilisateur.", "Bounded Unknown capture after empty fallbacks; waiting for the user to change the value."),
                             unknown);
                         result["unknownCaptureAction"] = unknown;
                         result["workflowStatus"] = unknown.value("success").toBool() ? "awaiting_unknown_observation" : "auto_resolve_no_candidate";
-                        actions.prepend(QVariantMap{{"id", "continue_unknown_observation"}, {"label", "Continuer après variation"}, {"safe", true}});
+                        actions.prepend(QVariantMap{{"id", "continue_unknown_observation"}, {"label", KE_TXT("Continuer après variation", "Continue after the value changes")}, {"safe", true}});
                         result["message"] = unknown.value("success").toBool()
-                            ? QString("Le scan exact, le scan chiffré et Trace UI string sont vides. J'ai capturé un snapshot Unknown borné : fais varier la valeur, puis donne-moi la nouvelle observation.")
-                            : QString("Les fallbacks safe sont vides et la capture Unknown a échoué : %1").arg(unknown.value("error").toString());
+                            ? KE_TXT("Le scan exact, le scan chiffré et Trace UI string sont vides. J'ai capturé un snapshot Unknown borné : fais varier la valeur, puis donne-moi la nouvelle observation.", "The exact scan, encrypted scan and Trace UI string returned nothing. I've captured a bounded Unknown snapshot: change the value, then tell me what you observe.")
+                            : KE_TXT("Les fallbacks safe sont vides et la capture Unknown a échoué : %1", "The safe fallbacks returned nothing and the Unknown capture failed: %1").arg(unknown.value("error").toString());
                     }
                 }
             } else {
-                actions.prepend(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Essayer scan chiffré"}, {"safe", true}});
-                result["message"] = "J'ai lancé le scan initial, mais il n'a rien trouvé. Prochaine piste : Unknown ou scan chiffré.";
+                actions.prepend(QVariantMap{{"id", "try_encrypted_scan"}, {"label", KE_TXT("Essayer scan chiffré", "Try an encrypted scan")}, {"safe", true}});
+                result["message"] = KE_TXT("J'ai lancé le scan initial, mais il n'a rien trouvé. Prochaine piste : Unknown ou scan chiffré.", "I've run the initial scan, but it found nothing. Next lead: Unknown or an encrypted scan.");
             }
         } else {
             const QString writeValue = numbers.size() > 1 ? numbers.at(1) : numbers.first();
             const QVariantList suggestions = suggestedWritesForCandidates(candidates, writeValue, kAutoWriteCandidateLimit);
             if (candidateCount <= kAutoWriteCandidateLimit) {
                 result["requiresConfirmation"] = true;
-                result["confirmationReason"] = "Petit nombre de candidats : confirme avant tout test d'écriture ou freeze.";
+                result["confirmationReason"] = KE_TXT("Petit nombre de candidats : confirme avant tout test d'écriture ou freeze.", "Only a few candidates remain: confirm before any test write or freeze.");
                 result["suggestedWrites"] = suggestions;
                 result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
-                actions.prepend(QVariantMap{{"id", "confirm_test_write"}, {"label", "Tester l'écriture sur les candidats"}, {"safe", false}, {"requiresConfirmation", true}});
+                actions.prepend(QVariantMap{{"id", "confirm_test_write"}, {"label", KE_TXT("Tester l'écriture sur les candidats", "Test a write on the candidates")}, {"safe", false}, {"requiresConfirmation", true}});
             }
-            result["message"] = QString("J'ai lancé le plan auto et trouvé %1 candidat(s). Fais varier la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire.")
+            result["message"] = KE_TXT("J'ai lancé le plan auto et trouvé %1 candidat(s). Fais varier la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire.", "I've run the auto plan and found %1 candidate(s). Change the value in the game, then tell me the new value to narrow it down.")
                                     .arg(candidateCount);
         }
     } else {
         result["workflowStatus"] = "action_failed";
         result["error"] = firstScan.value("error").toString();
-        result["message"] = QString("Le plan est prêt, mais le premier scan a échoué : %1").arg(result.value("error").toString());
+        result["message"] = KE_TXT("Le plan est prêt, mais le premier scan a échoué : %1", "The plan is ready, but the first scan failed: %1").arg(result.value("error").toString());
     }
 
     result["nextActions"] = actions;
@@ -2586,15 +2587,15 @@ QVariantMap SmartSearchManager::buildFailureEscalationRecovery(const QString& qu
     case 1:
         m_controller.m_pendingRecoveryAction = "trace_ui_string";
         recovery["message"] = QString(
-            "D'accord, ces adresses ne sont pas les bonnes. On change de méthode : au lieu de continuer à deviner par "
+            KE_TXT("D'accord, ces adresses ne sont pas les bonnes. On change de méthode : au lieu de continuer à deviner par "
             "essais numériques, je vais tracer le texte affiché à l'écran (\"%1\") pour remonter à la vraie source — "
             "l'adresse trouvée était peut-être une simple copie d'affichage. Donne-moi la valeur actuellement affichée "
-            "dans le jeu (tu peux juste me répondre par la valeur, pas besoin de cliquer le bouton).")
+            "dans le jeu (tu peux juste me répondre par la valeur, pas besoin de cliquer le bouton).", "All right, those aren't the right addresses. Let's try a different approach: instead of more numeric guesses, I'll trace the text shown on screen (\"%1\") back to the actual source — the address we found may have been just a display copy. Tell me the value currently shown in the game (you can just reply with the value; no need to click the button)."))
             .arg(lastValue);
         actions.append(QVariantMap{
-            {"id", "trace_ui_string"}, {"label", "Tracer le texte affiché"},
+            {"id", "trace_ui_string"}, {"label", KE_TXT("Tracer le texte affiché", "Trace the displayed text")},
             {"value", lastValue},
-            {"reason", "Étape 1/4 : chercher la vraie source derrière la valeur affichée."}});
+            {"reason", KE_TXT("Étape 1/4 : chercher la vraie source derrière la valeur affichée.", "Step 1/4: find the actual source behind the displayed value.")}});
         break;
     case 2: {
         m_controller.m_pendingRecoveryAction.clear();
@@ -2604,13 +2605,13 @@ QVariantMap SmartSearchManager::buildFailureEscalationRecovery(const QString& qu
             address = QString::number(m_controller.m_lastAutoWriteTargets.first().address, 16);
             type = killcore::valueTypeToString(m_controller.m_lastAutoWriteTargets.first().type);
         }
-        recovery["message"] = "Toujours pas la bonne piste. Étape suivante : je capture directement l'instruction qui "
+        recovery["message"] = KE_TXT("Toujours pas la bonne piste. Étape suivante : je capture directement l'instruction qui "
                                "écrit sur la dernière adresse pendant que tu fais varier la valeur dans le jeu — ça dit "
-                               "si cette adresse est vraiment utilisée par le jeu ou non.";
+                               "si cette adresse est vraiment utilisée par le jeu ou non.", "Still not the right lead. Next, I'll capture the instruction that writes to the last address while you change the value in the game — this tells us whether the game actually uses that address.");
         actions.append(QVariantMap{
-            {"id", "find_what_writes_targets"}, {"label", "Capturer qui écrit dessus"},
+            {"id", "find_what_writes_targets"}, {"label", KE_TXT("Capturer qui écrit dessus", "Capture what writes here")},
             {"address", address}, {"type", type},
-            {"reason", "Étape 2/4 : pose un point d'arrêt matériel et capture les prochaines écritures."}});
+            {"reason", KE_TXT("Étape 2/4 : pose un point d'arrêt matériel et capture les prochaines écritures.", "Step 2/4: set a hardware breakpoint and capture the next writes.")}});
         break;
     }
     case 3:
@@ -2620,16 +2621,16 @@ QVariantMap SmartSearchManager::buildFailureEscalationRecovery(const QString& qu
         // qui route directement vers runAutoEncryptedScan si la reponse
         // suivante est en texte libre plutot qu'un clic de bouton.
         recovery["pendingRecoveryAction"] = "encrypted_scan";
-        recovery["message"] = "On passe aux pistes avancées. Je commence par un scan chiffré (XOR/Add/Sub/NOT) : "
+        recovery["message"] = KE_TXT("On passe aux pistes avancées. Je commence par un scan chiffré (XOR/Add/Sub/NOT) : "
                                "donne-moi la valeur actuellement affichée dans le jeu (pas besoin de cliquer le bouton). "
                                "Si ça ne donne rien non plus, il restera la piste du pointeur stable, pour le cas où "
-                               "l'adresse bouge d'une partie à l'autre.";
+                               "l'adresse bouge d'une partie à l'autre.", "Let's try the advanced options. I'll start with an encrypted scan (XOR/Add/Sub/NOT): tell me the value currently shown in the game (no need to click the button). If that finds nothing either, we can still look for a stable pointer in case the address moves between games.");
         actions.append(QVariantMap{
-            {"id", "try_encrypted_scan"}, {"label", "Scan chiffré (XOR)"}, {"value", lastValue},
-            {"reason", "Étape 3/4 : la valeur est peut-être stockée sous une forme chiffrée simple."}});
+            {"id", "try_encrypted_scan"}, {"label", KE_TXT("Scan chiffré (XOR)", "Encrypted scan (XOR)")}, {"value", lastValue},
+            {"reason", KE_TXT("Étape 3/4 : la valeur est peut-être stockée sous une forme chiffrée simple.", "Step 3/4: the value may be stored using simple encryption.")}});
         actions.append(QVariantMap{
-            {"id", "open_pointer_scan"}, {"label", "Chercher un pointeur stable"},
-            {"reason", "Étape 3/4 : l'adresse change peut-être à chaque partie, un pointeur la retrouve automatiquement."}});
+            {"id", "open_pointer_scan"}, {"label", KE_TXT("Chercher un pointeur stable", "Find a stable pointer")},
+            {"reason", KE_TXT("Étape 3/4 : l'adresse change peut-être à chaque partie, un pointeur la retrouve automatiquement.", "Step 3/4: the address may change with each game; a pointer can find it again automatically.")}});
         break;
     default: {
         m_controller.m_pendingRecoveryAction.clear();
@@ -2637,27 +2638,27 @@ QVariantMap SmartSearchManager::buildFailureEscalationRecovery(const QString& qu
         recovery["hasActiveRemoteConnection"] = hasRemoteConnection;
         recovery["message"] = hasRemoteConnection
             ? QString(
-                  "On a maintenant essayé la recherche directe, le traçage du texte affiché, la capture des écritures "
+                  KE_TXT("On a maintenant essayé la recherche directe, le traçage du texte affiché, la capture des écritures "
                   "et les pistes avancées (pointeur/chiffré). Il est probable que cette valeur soit protégée, calculée "
                   "par le jeu à la volée, ou synchronisée avec un serveur — d'ailleurs %1 a actuellement une connexion "
                   "réseau active vers un serveur distant, ce qui renforce cette hypothèse (indice, pas une preuve). Si "
                   "c'est bien ça, la modifier localement ne suffira probablement pas. Tu peux repartir sur une autre "
-                  "valeur, ou continuer manuellement dans l'onglet Expert.")
+                  "valeur, ou continuer manuellement dans l'onglet Expert.", "We've now tried direct searches, tracing the displayed text, capturing writes, and advanced leads (pointers/encryption). This value is likely protected, calculated on the fly, or synced with a server — %1 currently has an active connection to a remote server, which supports that possibility (a clue, not proof). If so, changing it locally probably won't be enough. You can start over with another value or continue manually in the Expert tab."))
                   .arg(m_controller.processName())
-            : "On a maintenant essayé la recherche directe, le traçage du texte affiché, la capture des écritures et "
+            : KE_TXT("On a maintenant essayé la recherche directe, le traçage du texte affiché, la capture des écritures et "
               "les pistes avancées (pointeur/chiffré). Il est probable que cette valeur soit protégée, calculée par le "
               "jeu à la volée, ou synchronisée avec un serveur — ce qui la rend difficile à modifier directement avec "
-              "KillEngine. Tu peux repartir sur une autre valeur, ou continuer manuellement dans l'onglet Expert.";
-        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Continuer dans Expert"}});
+              "KillEngine. Tu peux repartir sur une autre valeur, ou continuer manuellement dans l'onglet Expert.", "We've now tried direct searches, tracing the displayed text, capturing writes, and advanced leads (pointers/encryption). This value is likely protected, calculated on the fly, or synced with a server, making it difficult to modify directly with KillEngine. You can start over with another value or continue manually in the Expert tab.");
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Continuer dans Expert", "Continue in Expert")}});
         break;
     }
     }
 
-    actions.append(QVariantMap{{"id", "rollback_batch"}, {"label", "Rollback dernier lot"}});
-    actions.append(QVariantMap{{"id", "clear_targets"}, {"label", "Oublier ces adresses"}});
-    actions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+    actions.append(QVariantMap{{"id", "rollback_batch"}, {"label", KE_TXT("Rollback dernier lot", "Roll back the last batch")}});
+    actions.append(QVariantMap{{"id", "clear_targets"}, {"label", KE_TXT("Oublier ces adresses", "Forget these addresses")}});
+    actions.append(QVariantMap{{"id", "new_search"}, {"label", KE_TXT("Nouvelle recherche", "New search")}});
     if (!m_controller.scanState().candidates().isEmpty()) {
-        actions.append(QVariantMap{{"id", "continue_candidates"}, {"label", "Continuer avec les autres candidats"}});
+        actions.append(QVariantMap{{"id", "continue_candidates"}, {"label", KE_TXT("Continuer avec les autres candidats", "Continue with the other candidates")}});
     }
     recovery["recoveryActions"] = actions;
     return recovery;
@@ -2675,7 +2676,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         // risquer un etat incoherent.
         QVariantMap busy;
         busy["success"] = false;
-        busy["error"] = "Une requête est déjà en cours, réessaie dans un instant.";
+        busy["error"] = KE_TXT("Une requête est déjà en cours, réessaie dans un instant.", "A request is already running. Try again in a moment.");
         busy["status"] = "ai_busy";
         return busy;
     }
@@ -2816,8 +2817,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         changed["status"] = "tool_call";
         changed["state"] = m_controller.m_smartSearchActive ? QString("Refining") : QString("Idle");
         changed["rationale"] = observed.size() >= 2
-            ? QString("La phrase demande explicitement Changed Pages avec deux valeurs : je compare les pages modifiées sur les deux dernières valeurs observées.")
-            : QString("La phrase demande explicitement Changed Pages : je capture un snapshot lecture seule avant la prochaine variation.");
+            ? KE_TXT("La phrase demande explicitement Changed Pages avec deux valeurs : je compare les pages modifiées sur les deux dernières valeurs observées.", "The request explicitly asks for Changed Pages with two values: I'll compare the changed pages using the last two observed values.")
+            : KE_TXT("La phrase demande explicitement Changed Pages : je capture un snapshot lecture seule avant la prochaine variation.", "The request explicitly asks for Changed Pages: I'll capture a read-only snapshot before the next change.");
         changed["error"] = "";
         if (observed.size() >= 2) {
             args["previousValue"] = observed.at(0);
@@ -2831,10 +2832,10 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
                 ? (actionResult.value("hitCount", actionResult.value("hits").toList().size()).toInt() > 0 ? "diff_hits_found" : "no_candidate")
                 : "action_failed";
             changed["message"] = actionResult.value("success").toBool()
-                ? QString("Mode Inspecteur : comparaison Changed Pages %1 → %2 effectuée. %3 piste(s) trouvée(s) dans les pages réellement modifiées.")
+                ? KE_TXT("Mode Inspecteur : comparaison Changed Pages %1 → %2 effectuée. %3 piste(s) trouvée(s) dans les pages réellement modifiées.", "Inspector mode: Changed Pages comparison %1 → %2 complete. Found %3 lead(s) in pages that actually changed.")
                       .arg(observed.at(0), observed.at(1))
                       .arg(actionResult.value("hitCount", actionResult.value("hits").toList().size()).toInt())
-                : QString("Changed Pages : comparaison impossible pour l'instant (%1). Lance d'abord Changed Pages avant la prochaine variation, puis redonne l'ancienne et la nouvelle valeur.")
+                : KE_TXT("Changed Pages : comparaison impossible pour l'instant (%1). Lance d'abord Changed Pages avant la prochaine variation, puis redonne l'ancienne et la nouvelle valeur.", "Changed Pages: can't compare yet (%1). Start Changed Pages before the next change, then give me the old and new values again.")
                       .arg(actionResult.value("error").toString());
         } else {
             if (!numbers.isEmpty()) {
@@ -2851,9 +2852,9 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             actionResult = m_controller.startChangedPagesDiff(diffOptions);
             changed["workflowStatus"] = actionResult.value("success").toBool() ? "awaiting_observed_variation" : "action_failed";
             changed["message"] = actionResult.value("success").toBool()
-                ? QString("Mode Inspecteur : snapshot Changed Pages capturé (%1 blocs, 64 Mo max). Fais varier l'XP, puis donne-moi l'ancienne et la nouvelle valeur.")
+                ? KE_TXT("Mode Inspecteur : snapshot Changed Pages capturé (%1 blocs, 64 Mo max). Fais varier l'XP, puis donne-moi l'ancienne et la nouvelle valeur.", "Inspector mode: Changed Pages snapshot captured (%1 blocks, 64 MB max). Change the XP, then tell me the old and new values.")
                       .arg(actionResult.value("blocksCaptured").toInt())
-                : QString("Changed Pages : snapshot impossible (%1).").arg(actionResult.value("error").toString());
+                : KE_TXT("Changed Pages : snapshot impossible (%1).", "Changed Pages: couldn't capture a snapshot (%1).").arg(actionResult.value("error").toString());
         }
         changed["args"] = args;
         changed["actionResult"] = actionResult;
@@ -2875,8 +2876,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         social["actionStatus"] = "not_executed";
         social["workflowStatus"] = "idle";
         social["message"] =
-            "Salut ! Dis-moi ce que tu veux chercher ou comprendre : une valeur affichée, une adresse, "
-            "un freeze, un trainer, un script Lua, ou une investigation plus guidée.";
+            KE_TXT("Salut ! Dis-moi ce que tu veux chercher ou comprendre : une valeur affichée, une adresse, "
+            "un freeze, un trainer, un script Lua, ou une investigation plus guidée.", "Hi! Tell me what you want to find or understand: a displayed value, an address, a freeze, a trainer, a Lua script, or a more guided investigation.");
         social["debugFile"] = m_controller.smartSearchDebugFilePath();
         stampIntent(&social);
         m_controller.appendSmartSearchDebug("smart_search_social_guard", social);
@@ -2937,7 +2938,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         cleared["chatTargetsCleared"] = chatCount;
         cleared["profileTargetsCleared"] = profileCount;
         cleared["lastAutoWriteTargetsCleared"] = lastCount;
-        cleared["message"] = QString("C'est fait, j'ai oublié les adresses et profils actifs de la conversation.");
+        cleared["message"] = KE_TXT("C'est fait, j'ai oublié les adresses et profils actifs de la conversation.", "Done, I've cleared the conversation's active addresses and profiles.");
         stampIntent(&cleared);
         m_controller.appendSmartSearchDebug("smart_search_clear_active_targets", cleared);
         return cleared;
@@ -2951,7 +2952,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         reset["status"] = "context_reset";
         reset["actionStatus"] = "executed";
         reset["workflowStatus"] = "idle";
-        reset["message"] = "D'accord, je repars sur une recherche propre. Donne-moi la nouvelle valeur à chercher.";
+        reset["message"] = KE_TXT("D'accord, je repars sur une recherche propre. Donne-moi la nouvelle valeur à chercher.", "All right, let's start a fresh search. Tell me the new value to look for.");
         stampIntent(&reset);
         m_controller.appendSmartSearchDebug("smart_search_context_reset", reset);
         return reset;
@@ -3006,7 +3007,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
 
         if (confirmedTargets.isEmpty()) {
             recovery["workflowStatus"] = "idle";
-            recovery["message"] = "Content que ça marche ! Je n'ai pas d'adresse active à sauvegarder pour le moment.";
+            recovery["message"] = KE_TXT("Content que ça marche ! Je n'ai pas d'adresse active à sauvegarder pour le moment.", "Glad it works! I don't have an active address to save right now.");
             stampIntent(&recovery);
             m_controller.appendSmartSearchDebug("smart_search_good_targets_reported", recovery);
             return recovery;
@@ -3014,10 +3015,10 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
 
         const QString gameKey = autoResolverGameKey(m_controller.processName());
         const QString baseName = (!m_controller.m_smartSearchInitialValue.isEmpty() && !m_controller.m_smartSearchTargetValue.isEmpty())
-            ? QString("Cible confirmée %1→%2").arg(m_controller.m_smartSearchInitialValue, m_controller.m_smartSearchTargetValue)
-            : QString("Cible confirmée %1").arg(QDateTime::currentDateTime().toString("dd/MM HH:mm"));
+            ? KE_TXT("Cible confirmée %1→%2", "Confirmed target %1→%2").arg(m_controller.m_smartSearchInitialValue, m_controller.m_smartSearchTargetValue)
+            : KE_TXT("Cible confirmée %1", "Confirmed target %1").arg(QDateTime::currentDateTime().toString("dd/MM HH:mm"));
         const QString description = QString(
-            "Confirmée par l'utilisateur le %1 (recherche %2 → %3).")
+            KE_TXT("Confirmée par l'utilisateur le %1 (recherche %2 → %3).", "Confirmed by the user on %1 (search %2 → %3)."))
             .arg(QDateTime::currentDateTime().toString("dd/MM/yyyy HH:mm"))
             .arg(m_controller.m_smartSearchInitialValue.isEmpty() ? QString("?") : m_controller.m_smartSearchInitialValue)
             .arg(m_controller.m_smartSearchTargetValue.isEmpty() ? QString("?") : m_controller.m_smartSearchTargetValue);
@@ -3057,19 +3058,19 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         recovery["savedProfileTargets"] = savedTargets;
         recovery["profileName"] = gameKey;
         if (savedTargets.isEmpty()) {
-            recovery["message"] = "Content que ça marche ! La sauvegarde en profil a échoué, mais l'adresse reste active pour cette session.";
+            recovery["message"] = KE_TXT("Content que ça marche ! La sauvegarde en profil a échoué, mais l'adresse reste active pour cette session.", "Glad it works! Saving to the profile failed, but the address remains active for this session.");
         } else {
             recovery["message"] = anyModuleOffset
                 ? QString(
-                      "Nickel ! J'ai sauvegardé %1 dans le profil « %2 » (onglet Profils) — elle survivra à un "
-                      "redémarrage du jeu, tu pourras la réactiver direct la prochaine fois sans tout rescanner.")
-                      .arg(savedTargets.size() == 1 ? "cette adresse" : QString("ces %1 adresses").arg(savedTargets.size()))
+                      KE_TXT("Nickel ! J'ai sauvegardé %1 dans le profil « %2 » (onglet Profils) — elle survivra à un "
+                      "redémarrage du jeu, tu pourras la réactiver direct la prochaine fois sans tout rescanner.", "Great! I've saved %1 in the \"%2\" profile (Profiles tab). It will survive a game restart, so you can reactivate it next time without scanning everything again."))
+                      .arg(savedTargets.size() == 1 ? KE_TXT("cette adresse", "this address") : KE_TXT("ces %1 adresses", "these %1 addresses").arg(savedTargets.size()))
                       .arg(gameKey)
                 : QString(
-                      "Nickel ! J'ai sauvegardé %1 dans le profil « %2 » (onglet Profils). Attention : elle est en "
+                      KE_TXT("Nickel ! J'ai sauvegardé %1 dans le profil « %2 » (onglet Profils). Attention : elle est en "
                       "mémoire non associée à un module, donc l'adresse ne survivra probablement pas à un "
-                      "redémarrage du jeu — il faudra la reconfirmer la prochaine fois.")
-                      .arg(savedTargets.size() == 1 ? "cette adresse" : QString("ces %1 adresses").arg(savedTargets.size()))
+                      "redémarrage du jeu — il faudra la reconfirmer la prochaine fois.", "Great! I've saved %1 in the \"%2\" profile (Profiles tab). Note that the memory isn't associated with a module, so the address probably won't survive a game restart — you'll need to confirm it again next time."))
+                      .arg(savedTargets.size() == 1 ? KE_TXT("cette adresse", "this address") : KE_TXT("ces %1 adresses", "these %1 addresses").arg(savedTargets.size()))
                       .arg(gameKey);
         }
         stampIntent(&recovery);
@@ -3104,22 +3105,22 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
                 m_controller.m_pendingUiStringCandidates = scanResult.value("candidates").toList();
                 recovery["workflowStatus"] = "trace_ui_string_found";
                 recovery["message"] = QString(
-                    "Trace UI string : %1 occurrence(s) du texte \"%2\" trouvées en mémoire. Fais varier la valeur dans "
+                    KE_TXT("Trace UI string : %1 occurrence(s) du texte \"%2\" trouvées en mémoire. Fais varier la valeur dans "
                     "le jeu, puis donne-moi la nouvelle valeur affichée — je filtre les bonnes pistes et je cherche la "
-                    "source numérique derrière, automatiquement.")
+                    "source numérique derrière, automatiquement.", "Trace UI string: found %1 occurrence(s) of \"%2\" in memory. Change the value in the game, then tell me the new displayed value — I'll automatically filter the leads and look for the numeric source behind them."))
                     .arg(stringsFound)
                     .arg(traceValue);
             } else {
                 m_controller.m_pendingRecoveryAction.clear();
                 recovery["workflowStatus"] = "no_candidate";
                 recovery["message"] = QString(
-                    "Trace UI string : le texte \"%1\" n'a pas été trouvé en mémoire. Vérifie la valeur affichée "
-                    "exacte, ou passe en Unknown.")
+                    KE_TXT("Trace UI string : le texte \"%1\" n'a pas été trouvé en mémoire. Vérifie la valeur affichée "
+                    "exacte, ou passe en Unknown.", "Trace UI string: couldn't find \"%1\" in memory. Check the exact displayed value, or switch to Unknown."))
                     .arg(traceValue);
                 QVariantList recoveryActions;
-                recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Scan chiffré (XOR)"}, {"value", traceValue}});
-                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Unknown (valeur inconnue)"}});
-                recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+                recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", KE_TXT("Scan chiffré (XOR)", "Encrypted scan (XOR)")}, {"value", traceValue}});
+                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", KE_TXT("Unknown (valeur inconnue)", "Unknown (unknown value)")}});
+                recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", KE_TXT("Nouvelle recherche", "New search")}});
                 recovery["recoveryActions"] = recoveryActions;
             }
             if (!scanResult.value("candidates").isNull()) {
@@ -3128,7 +3129,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         } else {
             m_controller.m_pendingRecoveryAction.clear();
             recovery["workflowStatus"] = "action_failed";
-            recovery["message"] = QString("Le traçage du texte affiché a échoué : %1").arg(scanResult.value("error").toString());
+            recovery["message"] = KE_TXT("Le traçage du texte affiché a échoué : %1", "Tracing the displayed text failed: %1").arg(scanResult.value("error").toString());
         }
         stampIntent(&recovery);
         m_controller.appendSmartSearchDebug("smart_search_answer_trace_ui_string_prompt", recovery);
@@ -3168,10 +3169,10 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             recovery["workflowStatus"] = "no_candidate";
             recovery["actionStatus"] = "failed";
             recovery["message"] = QString(
-                "Plus aucune string ne suit la valeur \"%1\" — on a perdu la piste du texte affiché.").arg(filterValue);
+                KE_TXT("Plus aucune string ne suit la valeur \"%1\" — on a perdu la piste du texte affiché.", "No strings follow the value \"%1\" anymore — we've lost the displayed text lead.")).arg(filterValue);
             QVariantList recoveryActions;
-            recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Scan chiffré (XOR)"}, {"value", filterValue}});
-            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+            recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", KE_TXT("Scan chiffré (XOR)", "Encrypted scan (XOR)")}, {"value", filterValue}});
+            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", KE_TXT("Nouvelle recherche", "New search")}});
             recovery["recoveryActions"] = recoveryActions;
             stampIntent(&recovery);
             m_controller.appendSmartSearchDebug("smart_search_answer_trace_ui_filter_prompt", recovery);
@@ -3217,14 +3218,14 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             recovery["workflowStatus"] = "no_candidate";
             recovery["actionStatus"] = "failed";
             recovery["message"] = QString(
-                "%1 string(s) suivent toujours \"%2\", mais aucune source numérique plausible autour, même en "
+                KE_TXT("%1 string(s) suivent toujours \"%2\", mais aucune source numérique plausible autour, même en "
                 "élargissant la recherche jusqu'à 16 Mo. La valeur est peut-être calculée par le jeu plutôt que "
-                "stockée telle quelle.")
+                "stockée telle quelle.", "%1 string(s) still follow \"%2\", but there's no plausible numeric source nearby, even with the search expanded to 16 MB. The game may calculate the value rather than store it directly."))
                 .arg(survivors.size())
                 .arg(filterValue);
             QVariantList recoveryActions;
-            recoveryActions.append(QVariantMap{{"id", "open_expert"}, {"label", "Continuer dans Expert"}});
-            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+            recoveryActions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Continuer dans Expert", "Continue in Expert")}});
+            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", KE_TXT("Nouvelle recherche", "New search")}});
             recovery["recoveryActions"] = recoveryActions;
             stampIntent(&recovery);
             m_controller.appendSmartSearchDebug("smart_search_answer_trace_ui_filter_prompt", recovery);
@@ -3288,14 +3289,14 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         recovery["activeTargetCount"] = m_controller.m_chatMemoryTargets.size();
         recovery["previousTargetValue"] = filterValue;
         recovery["writeHistory"] = writeHistoryToVariantList(m_controller.m_autoWriteValueHistory);
-        recovery["rollbackNote"] = "Tu peux annuler toutes les écritures via le bouton rollback batch dans l'assistant.";
+        recovery["rollbackNote"] = KE_TXT("Tu peux annuler toutes les écritures via le bouton rollback batch dans l'assistant.", "You can undo all writes with the assistant's batch rollback button.");
         recovery["message"] = allWritesOk
             ? QString(
-                  "Traçage terminé : %1 source(s) numérique(s) trouvée(s) derrière le texte affiché, écriture de %2 "
-                  "appliquée. Fais varier la valeur pour confirmer que ça tient, ou dis-moi si ça n'a pas marché.")
+                  KE_TXT("Traçage terminé : %1 source(s) numérique(s) trouvée(s) derrière le texte affiché, écriture de %2 "
+                  "appliquée. Fais varier la valeur pour confirmer que ça tient, ou dis-moi si ça n'a pas marché.", "Trace complete: found %1 numeric source(s) behind the displayed text and wrote %2. Change the value to check that it holds, or tell me if it didn't work."))
                   .arg(sourceList.size())
                   .arg(writeValue)
-            : QString("Sources numériques trouvées, mais l'écriture a partiellement échoué sur certaines adresses.");
+            : KE_TXT("Sources numériques trouvées, mais l'écriture a partiellement échoué sur certaines adresses.", "Numeric sources found, but writes failed on some addresses.");
         stampIntent(&recovery);
         m_controller.appendSmartSearchDebug("smart_search_answer_trace_ui_filter_prompt", recovery);
         return recovery;
@@ -3320,7 +3321,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         confirmResult["actionStatus"] = "requires_confirmation";
         confirmResult["requiresConfirmation"] = true;
         confirmResult["confirmationReason"] = confirmationReason;
-        confirmResult["message"] = QString("%1 : %2 sur %3 adresse(s). Confirme pour appliquer.")
+        confirmResult["message"] = KE_TXT("%1 : %2 sur %3 adresse(s). Confirme pour appliquer.", "%1: %2 on %3 address(es). Confirm to apply.")
             .arg(actionRequestedLabel, value)
             .arg(m_controller.m_chatMemoryTargets.size());
         QVariantList recoveryActions;
@@ -3343,27 +3344,27 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         if (intent.kind == SmartSearchIntentKind::WriteMemoryTargets
             && activation.value("success").toBool()
             && numbers.size() == 1) {
-            return makeChatMemoryConfirmation("chat_memory_write_confirm", numbers.first(), "écrire", "Écriture demandée",
-                "Cette action modifie la mémoire de la cible attachée.");
+            return makeChatMemoryConfirmation("chat_memory_write_confirm", numbers.first(), KE_TXT("écrire", "write"), KE_TXT("Écriture demandée", "Write requested"),
+                KE_TXT("Cette action modifie la mémoire de la cible attachée.", "This action modifies the attached target's memory."));
         }
         if (intent.kind == SmartSearchIntentKind::FreezeMemoryTargets
             && activation.value("success").toBool()
             && numbers.size() == 1) {
-            return makeChatMemoryConfirmation("chat_memory_freeze_confirm", numbers.first(), "figer", "Freeze demandé",
-                "Fige cette/ces adresse(s) en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite.");
+            return makeChatMemoryConfirmation("chat_memory_freeze_confirm", numbers.first(), KE_TXT("figer", "freeze"), KE_TXT("Freeze demandé", "Freeze requested"),
+                KE_TXT("Fige cette/ces adresse(s) en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite.", "Freezes these memory addresses by writing repeatedly. Stays active until explicitly disabled."));
         }
         stampIntent(&activation);
         return activation;
     }
 
     if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::WriteMemoryTargets && numbers.size() == 1) {
-        return makeChatMemoryConfirmation("chat_memory_write_confirm", numbers.first(), "écrire", "Écriture demandée",
-            "Cette action modifie la mémoire de la cible attachée.");
+        return makeChatMemoryConfirmation("chat_memory_write_confirm", numbers.first(), KE_TXT("écrire", "write"), KE_TXT("Écriture demandée", "Write requested"),
+            KE_TXT("Cette action modifie la mémoire de la cible attachée.", "This action modifies the attached target's memory."));
     }
 
     if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::FreezeMemoryTargets && numbers.size() == 1) {
-        return makeChatMemoryConfirmation("chat_memory_freeze_confirm", numbers.first(), "figer", "Freeze demandé",
-            "Fige cette/ces adresse(s) en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite.");
+        return makeChatMemoryConfirmation("chat_memory_freeze_confirm", numbers.first(), KE_TXT("figer", "freeze"), KE_TXT("Freeze demandé", "Freeze requested"),
+            KE_TXT("Fige cette/ces adresse(s) en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite.", "Freezes these memory addresses by writing repeatedly. Stays active until explicitly disabled."));
     }
 
     if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::RewriteLastTargets && numbers.size() == 1) {
@@ -3376,8 +3377,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             && std::all_of(m_controller.m_lastAutoWriteTargets.begin(), m_controller.m_lastAutoWriteTargets.end(),
                            [](const AutoWriteTarget& t) { return t.chatOrigin; });
         if (allChatOrigin) {
-            return makeChatMemoryConfirmation("rewrite_last_auto_write_confirm", numbers.first(), "remettre", "Réécriture demandée",
-                "Réécrit la dernière valeur sur les adresses actives (issues du chat).");
+            return makeChatMemoryConfirmation("rewrite_last_auto_write_confirm", numbers.first(), KE_TXT("remettre", "set again"), KE_TXT("Réécriture demandée", "Rewrite requested"),
+                KE_TXT("Réécrit la dernière valeur sur les adresses actives (issues du chat).", "Writes the last value again to the active addresses from the chat."));
         }
         auto rewriteTargets = m_controller.rewriteLastAutoWriteTargets(numbers.first(), query);
         stampIntent(&rewriteTargets);
@@ -3395,7 +3396,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
     QVariantMap result;
     if (intent.kind == SmartSearchIntentKind::ResetContext) {
         result["status"] = "reset_only";
-        result["message"] = "D'accord, j'ai oublié le contexte actif. Donne-moi la nouvelle valeur à chercher.";
+        result["message"] = KE_TXT("D'accord, j'ai oublié le contexte actif. Donne-moi la nouvelle valeur à chercher.", "All right, I've cleared the active context. Tell me the new value to look for.");
         result["workflowStatus"] = "idle";
         result["error"] = "";
     } else if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::ExactScan && numbers.size() == 1) {
@@ -3424,7 +3425,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["status"] = "tool_call";
         result["tool"] = "next_scan";
         result["args"] = args;
-        result["rationale"] = "Recherche active : la phrase demande explicitement de réduire les candidats avec une nouvelle valeur observée, même si elle mentionne un module ou d'autres nombres de contexte.";
+        result["rationale"] = KE_TXT("Recherche active : la phrase demande explicitement de réduire les candidats avec une nouvelle valeur observée, même si elle mentionne un module ou d'autres nombres de contexte.", "Active search: the request explicitly asks to refine candidates with a newly observed value, even if it mentions a module or other contextual numbers.");
         result["state"] = "Refining";
         result["error"] = "";
     } else if (!smartSearchBypassesMemoryPreIntent && intent.kind == SmartSearchIntentKind::RefineScan && numbers.size() == 1) {
@@ -3446,7 +3447,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["status"] = "tool_call";
         result["tool"] = "trace_ui_string";
         result["args"] = args;
-        result["rationale"] = "La phrase demande explicitement Trace UI string : je cherche le texte affiché au lieu de relancer un scan module ou global.";
+        result["rationale"] = KE_TXT("La phrase demande explicitement Trace UI string : je cherche le texte affiché au lieu de relancer un scan module ou global.", "The request explicitly asks for Trace UI string: I'll search for the displayed text instead of restarting a module or global scan.");
         result["state"] = m_controller.m_smartSearchActive ? QString("Refining") : QString("Idle");
         result["error"] = "";
     } else if (intent.kind == SmartSearchIntentKind::AnswerWriteTargetPrompt) {
@@ -3478,7 +3479,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["status"] = "tool_call";
         result["tool"] = "list_process_modules";
         result["args"] = args;
-        result["rationale"] = "La requête cible les XP/score/niveau dans les DLL/modules sans nom de module précis : je liste d'abord les modules chargés au lieu de lancer un scan global.";
+        result["rationale"] = KE_TXT("La requête cible les XP/score/niveau dans les DLL/modules sans nom de module précis : je liste d'abord les modules chargés au lieu de lancer un scan global.", "The request targets XP/score/level in DLLs/modules without naming a specific module: I'll list the loaded modules before running a global scan.");
         result["state"] = m_controller.m_smartSearchActive ? QString("Refining") : QString("Idle");
         result["error"] = "";
     } else if (!smartSearchBypassesMemoryPreIntent
@@ -3497,16 +3498,16 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["initialValue"] = numbers.at(0);
         result["requestedTargetValue"] = numbers.at(1);
         result["message"] = QString(
-            "Pour %1, je ne lance pas un scan exact multi-type automatique depuis le chat : cette cible produit beaucoup "
+            KE_TXT("Pour %1, je ne lance pas un scan exact multi-type automatique depuis le chat : cette cible produit beaucoup "
             "de copies UI et l'appel peut bloquer l'interface. On reste en lecture seule : démarre une session Changed "
             "Pages multi-round à %2, ou cherche d'abord le texte affiché %2, puis fais varier la valeur et donne-moi les "
-            "transitions observées.")
-            .arg(m_controller.processName().isEmpty() ? QString("cette cible") : m_controller.processName())
+            "transitions observées.", "For %1, I won't run an automatic multi-type exact scan from the chat: this target produces many UI copies and the call may block the interface. Let's stay read-only: start a multi-round Changed Pages session at %2, or first search for the displayed text %2, then change the value and tell me the transitions you observe."))
+            .arg(m_controller.processName().isEmpty() ? KE_TXT("cette cible", "this target") : m_controller.processName())
             .arg(numbers.at(0));
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", "start_changed_pages_session"},
-            {"label", "Changed Pages multi-round"},
+            {"label", KE_TXT("Changed Pages multi-round", "Multi-round Changed Pages")},
             {"value", numbers.at(0)},
             {"safe", true},
         });
@@ -3562,7 +3563,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["actionStatus"] = "not_executed";
         if (result.value("message").toString().trimmed().isEmpty()
             && result.value("error").toString().trimmed().isEmpty()) {
-            result["message"] = "D'accord. Donne-moi la valeur à chercher, ou précise que tu veux écrire sur une adresse active.";
+            result["message"] = KE_TXT("D'accord. Donne-moi la valeur à chercher, ou précise que tu veux écrire sur une adresse active.", "All right. Tell me the value to look for, or specify that you want to write to an active address.");
         }
         stampIntent(&result);
         return result;
@@ -3602,13 +3603,13 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
 
         if (!foundModule) {
             actionResult["success"] = false;
-            actionResult["error"] = QString("Module '%1' introuvable dans le processus attaché. Liste d'abord les modules/DLL.").arg(requestedModule);
+            actionResult["error"] = KE_TXT("Module '%1' introuvable dans le processus attaché. Liste d'abord les modules/DLL.", "Module '%1' not found in the attached process. List the modules/DLLs first.").arg(requestedModule);
             actionResult["module"] = requestedModule;
             result["workflowStatus"] = "module_not_found";
             result["message"] = actionResult.value("error").toString();
         } else if (scanValue.isEmpty()) {
             actionResult["success"] = false;
-            actionResult["error"] = "Il me faut une valeur à scanner dans ce module.";
+            actionResult["error"] = KE_TXT("Il me faut une valeur à scanner dans ce module.", "I need a value to scan for in this module.");
             result["actionStatus"] = "needs_clarification";
             result["workflowStatus"] = "missing_value";
             result["message"] = actionResult.value("error").toString();
@@ -3638,18 +3639,18 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             QVariantList recoveryActions;
             if (moduleCandidateCount > 0) {
                 result["message"] = QString(
-                    "Scan module %1 : %2 candidat(s) pour %3 dans [%4..%5]. Fais changer l'XP dans le jeu, puis tape la nouvelle valeur affichée pour réduire ces candidats. Exemple : maintenant l'XP affichée est 1120.")
+                    KE_TXT("Scan module %1 : %2 candidat(s) pour %3 dans [%4..%5]. Fais changer l'XP dans le jeu, puis tape la nouvelle valeur affichée pour réduire ces candidats. Exemple : maintenant l'XP affichée est 1120.", "Module scan %1: %2 candidate(s) for %3 in [%4..%5]. Change the XP in the game, then enter the new displayed value to refine these candidates. Example: the displayed XP is now 1120."))
                     .arg(matchedModule.name)
                     .arg(moduleCandidateCount)
                     .arg(scanValue)
                     .arg(actionResult.value("moduleBase").toString())
                     .arg(actionResult.value("moduleEnd").toString());
-                recoveryActions.append(QVariantMap{{"id", "reduce_again"}, {"label", "Réduire avec nouvelle XP"}, {"safe", true}});
+                recoveryActions.append(QVariantMap{{"id", "reduce_again"}, {"label", KE_TXT("Réduire avec nouvelle XP", "Refine with new XP")}, {"safe", true}});
                 recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}, {"value", scanValue}, {"safe", true}});
                 recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}, {"safe", true}});
             } else {
                 result["message"] = QString(
-                    "Scan module %1 : aucun candidat pour %2 dans [%3..%4]. On évite de repartir en global : essaie Trace UI string avec %2 ou Changed Pages avant/après une variation d'XP.")
+                    KE_TXT("Scan module %1 : aucun candidat pour %2 dans [%3..%4]. On évite de repartir en global : essaie Trace UI string avec %2 ou Changed Pages avant/après une variation d'XP.", "Module scan %1: no candidates for %2 in [%3..%4]. Let's avoid starting another global scan: try Trace UI string with %2, or Changed Pages before and after an XP change."))
                     .arg(matchedModule.name)
                     .arg(scanValue)
                     .arg(actionResult.value("moduleBase").toString())
@@ -3674,15 +3675,15 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = m_controller.getCandidates(0, 50, QString());
         actionResult["success"] = true;
         if (actionResult.value("displaySuppressed").toBool()) {
-            result["message"] = QString("Trop de candidats pour les lister (%1 au total). Continue à réduire avec next_scan avant de rappeler get_candidates.")
+            result["message"] = KE_TXT("Trop de candidats pour les lister (%1 au total). Continue à réduire avec next_scan avant de rappeler get_candidates.", "Too many candidates to list (%1 total). Keep refining with next_scan before calling get_candidates again.")
                                      .arg(actionResult.value("totalCount").toULongLong());
         } else {
             const int shown = actionResult.value("candidates").toList().size();
             result["message"] = shown > 0
-                ? QString("%1 candidat(s) affiché(s) sur %2 au total. Plusieurs adresses réelles peuvent légitimement correspondre à la même valeur logique (copies redondantes, checksums) — ne suppose pas qu'une seule est la bonne.")
+                ? KE_TXT("%1 candidat(s) affiché(s) sur %2 au total. Plusieurs adresses réelles peuvent légitimement correspondre à la même valeur logique (copies redondantes, checksums) — ne suppose pas qu'une seule est la bonne.", "Showing %1 of %2 candidate(s). Several real addresses can legitimately represent the same logical value (redundant copies, checksums) — don't assume only one is correct.")
                       .arg(shown)
                       .arg(actionResult.value("totalCount").toULongLong())
-                : "Aucun candidat en mémoire actuellement. Lance d'abord un exact_scan.";
+                : KE_TXT("Aucun candidat en mémoire actuellement. Lance d'abord un exact_scan.", "No candidates in memory right now. Run an exact_scan first.");
         }
     } else if (tool == "unknown_capture") {
         actionResult = m_controller.captureUnknownSnapshot();
@@ -3712,16 +3713,16 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             const auto encryptedMatches = actionResult.value("matchesFound").toULongLong();
             result["workflowStatus"] = encryptedMatches > 0 ? "awaiting_value_change" : "no_candidate";
             result["message"] = encryptedMatches > 0
-                ? QString("Scan chiffré : %1 adresse(s) correspondent à %2 sous une forme chiffrée (XOR/Add/Sub). Fais varier la valeur puis redonne-la moi pour affiner.")
+                ? KE_TXT("Scan chiffré : %1 adresse(s) correspondent à %2 sous une forme chiffrée (XOR/Add/Sub). Fais varier la valeur puis redonne-la moi pour affiner.", "Encrypted scan: %1 address(es) match %2 in an encrypted form (XOR/Add/Sub). Change the value, then tell me the new value to refine.")
                       .arg(encryptedMatches)
                       .arg(args.value("value").toString())
-                : QString("Scan chiffré : aucune adresse ne correspond à %1 sous forme chiffrée. On peut tenter la Trace UI string ou Unknown.")
+                : KE_TXT("Scan chiffré : aucune adresse ne correspond à %1 sous forme chiffrée. On peut tenter la Trace UI string ou Unknown.", "Encrypted scan: no addresses match %1 in an encrypted form. We can try Trace UI string or Unknown.")
                       .arg(args.value("value").toString());
             if (encryptedMatches == 0) {
                 QVariantList recoveryActions;
-                recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Chercher le texte affiché"}, {"value", args.value("value")}});
-                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Unknown (valeur inconnue)"}});
-                recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+                recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Chercher le texte affiché", "Find the displayed text")}, {"value", args.value("value")}});
+                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", KE_TXT("Unknown (valeur inconnue)", "Unknown (unknown value)")}});
+                recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", KE_TXT("Nouvelle recherche", "New search")}});
                 result["recoveryActions"] = recoveryActions;
             }
         }
@@ -3736,8 +3737,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["suggestedWrite"] = suggestions.isEmpty() ? QVariantMap{} : suggestions.first().toMap();
         result["workflowStatus"] = suggestions.isEmpty() ? "no_candidate" : "awaiting_write_confirmation";
         result["message"] = suggestions.isEmpty()
-            ? QString("Aucun candidat fiable a preparer. Continue a reduire la liste avec de nouvelles valeurs observees.")
-            : QString("Checkpoint pret: %1 adresse(s) candidate(s) pour ecrire %2. Confirme l'ecriture pour appliquer.")
+            ? KE_TXT("Aucun candidat fiable a preparer. Continue a reduire la liste avec de nouvelles valeurs observees.", "No reliable candidates to prepare. Keep narrowing the list with newly observed values.")
+            : KE_TXT("Checkpoint pret: %1 adresse(s) candidate(s) pour ecrire %2. Confirme l'ecriture pour appliquer.", "Checkpoint ready: %1 candidate address(es) for writing %2. Confirm the write to apply.")
                   .arg(suggestions.size())
                   .arg(checkpointValue);
     } else if (tool == "read_window_text") {
@@ -3746,7 +3747,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = m_controller.readAttachedWindowText(windowOptions);
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "window_text_observed";
-            result["message"] = QString("Inspection fenêtre : %1 fenêtre(s) lue(s). On peut s'en servir pour synchroniser la prochaine variation avant de comparer la mémoire.")
+            result["message"] = KE_TXT("Inspection fenêtre : %1 fenêtre(s) lue(s). On peut s'en servir pour synchroniser la prochaine variation avant de comparer la mémoire.", "Window inspection: read %1 window(s). We can use this to synchronize the next change before comparing memory.")
                                   .arg(actionResult.value("windowCount").toInt());
         }
     } else if (tool == "list_process_modules") {
@@ -3784,16 +3785,16 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["moduleHighlights"] = highlights;
         result["workflowStatus"] = "process_modules_listed";
         result["message"] = highlightNames.isEmpty()
-            ? QString("Modules/DLL : %1 module(s) chargés. Aucun module applicatif évident repéré automatiquement ; trie par chemin et privilégie les modules non système avant AOB/désassemblage.")
+            ? KE_TXT("Modules/DLL : %1 module(s) chargés. Aucun module applicatif évident repéré automatiquement ; trie par chemin et privilégie les modules non système avant AOB/désassemblage.", "Modules/DLLs: %1 loaded module(s). No obvious application module was identified automatically; sort by path and prioritize non-system modules before AOB/disassembly.")
                   .arg(modules.size())
-            : QString("Modules/DLL : %1 module(s) chargés. Pistes priorisées : %2. Les runtimes C++/telemetry sont ignorés dans cette sélection. Prochaine étape : si un module métier ressort, lance un scan module ciblé avec la valeur affichée ; sinon Trace UI string ou Changed Pages pour relier l'affichage XP à la source.")
+            : KE_TXT("Modules/DLL : %1 module(s) chargés. Pistes priorisées : %2. Les runtimes C++/telemetry sont ignorés dans cette sélection. Prochaine étape : si un module métier ressort, lance un scan module ciblé avec la valeur affichée ; sinon Trace UI string ou Changed Pages pour relier l'affichage XP à la source.", "Modules/DLLs: %1 loaded module(s). Priority leads: %2. C++ runtimes and telemetry modules are excluded from this selection. Next: if an application module stands out, scan that module for the displayed value; otherwise, use Trace UI string or Changed Pages to link the XP display to its source.")
                   .arg(modules.size())
                   .arg(highlightNames.join(", "));
         QVariantList recoveryActions;
         const QString traceValue = !m_controller.m_smartSearchLastObservedValue.isEmpty()
             ? m_controller.m_smartSearchLastObservedValue
             : m_controller.m_smartSearchInitialValue;
-        recoveryActions.append(QVariantMap{{"id", "open_expert"}, {"label", "Inspecter les modules"}, {"expertStep", "inspect"}});
+        recoveryActions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Inspecter les modules", "Inspect modules")}, {"expertStep", "inspect"}});
         recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}, {"value", traceValue}, {"safe", true}});
         recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}, {"safe", true}});
         result["recoveryActions"] = recoveryActions;
@@ -3806,7 +3807,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = m_controller.startChangedPagesDiff(diffOptions);
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "awaiting_observed_variation";
-            result["message"] = QString("Mode Inspecteur : snapshot lecture seule capturé (%1 blocs, %2 Mo max). Fais varier la valeur affichée, puis donne-moi l'ancienne et la nouvelle valeur pour comparer.")
+            result["message"] = KE_TXT("Mode Inspecteur : snapshot lecture seule capturé (%1 blocs, %2 Mo max). Fais varier la valeur affichée, puis donne-moi l'ancienne et la nouvelle valeur pour comparer.", "Inspector mode: read-only snapshot captured (%1 blocks, %2 MB max). Change the displayed value, then tell me the old and new values to compare.")
                                   .arg(actionResult.value("blocksCaptured").toInt())
                                   .arg(diffOptions.value("maxBytesMb").toInt());
         }
@@ -3822,9 +3823,9 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             const int hitCount = actionResult.value("hitCount", actionResult.value("hits").toList().size()).toInt();
             result["workflowStatus"] = hitCount > 0 ? "diff_hits_found" : "no_candidate";
             result["message"] = hitCount > 0
-                ? QString("Mode Inspecteur : %1 piste(s) trouvée(s) dans les pages réellement modifiées. À valider en watch ou par nouvelle variation avant toute écriture.")
+                ? KE_TXT("Mode Inspecteur : %1 piste(s) trouvée(s) dans les pages réellement modifiées. À valider en watch ou par nouvelle variation avant toute écriture.", "Inspector mode: found %1 lead(s) in pages that actually changed. Validate them with a watch or another value change before writing anything.")
                       .arg(hitCount)
-                : QString("Mode Inspecteur : aucune piste numérique directe dans les pages modifiées. On garde l'hypothèse copie UI/buffer et on évite l'écriture directe.");
+                : KE_TXT("Mode Inspecteur : aucune piste numérique directe dans les pages modifiées. On garde l'hypothèse copie UI/buffer et on évite l'écriture directe.", "Inspector mode: no direct numeric leads in the changed pages. We'll keep the UI copy/buffer hypothesis and avoid direct writes.");
         }
     } else if (tool == "start_changed_pages_session") {
         QVariantMap sessionOptions = args;
@@ -3835,7 +3836,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = m_controller.startChangedPagesSession(sessionOptions);
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "changed_pages_session_started";
-            result["message"] = QString("Session multi-round démarrée (%1 blocs, %2 Mo max). Fais varier la valeur affichée, puis donne-moi l'ancienne et la nouvelle valeur pour chaque round. Après 2-3 rounds, je te donnerai les adresses les plus stables.")
+            result["message"] = KE_TXT("Session multi-round démarrée (%1 blocs, %2 Mo max). Fais varier la valeur affichée, puis donne-moi l'ancienne et la nouvelle valeur pour chaque round. Après 2-3 rounds, je te donnerai les adresses les plus stables.", "Multi-round session started (%1 blocks, %2 MB max). Change the displayed value, then give me the old and new values for each round. After 2–3 rounds, I'll show you the most stable addresses.")
                                   .arg(actionResult.value("blocksCaptured").toInt())
                                   .arg(sessionOptions.value("maxBytesMb").toInt());
         }
@@ -3853,9 +3854,9 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             const int rounds = actionResult.value("roundsApplied").toInt();
             result["workflowStatus"] = confirmed > 0 ? "consensus_candidates_found" : "round_applied";
             result["message"] = confirmed > 0
-                ? QString("Round %1 : %2 hit(s), %3 adresse(s) confirmée(s) sur au moins 2 rounds. Les adresses stables sont candidates pour Page Guard ou write.")
+                ? KE_TXT("Round %1 : %2 hit(s), %3 adresse(s) confirmée(s) sur au moins 2 rounds. Les adresses stables sont candidates pour Page Guard ou write.", "Round %1: %2 hit(s), %3 address(es) confirmed across at least 2 rounds. Stable addresses are candidates for Page Guard or writes.")
                       .arg(rounds).arg(hitsFound).arg(confirmed)
-                : QString("Round %1 : %2 hit(s) trouvés, aucune adresse encore confirmée sur 2+ rounds. Continue à faire varier la valeur.")
+                : KE_TXT("Round %1 : %2 hit(s) trouvés, aucune adresse encore confirmée sur 2+ rounds. Continue à faire varier la valeur.", "Round %1: %2 hit(s), no addresses confirmed across 2+ rounds yet. Keep changing the value.")
                       .arg(rounds).arg(hitsFound);
             if (!actionResult.value("topEntries").isNull()) {
                 result["topEntries"] = actionResult.value("topEntries");
@@ -3871,9 +3872,9 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             const int rounds = actionResult.value("roundsApplied").toInt();
             result["workflowStatus"] = confirmed > 0 ? "consensus_candidates_found" : "no_candidate";
             result["message"] = confirmed > 0
-                ? QString("Consensus : %1 adresse(s) confirmée(s) sur %2 total (%3 éliminées, %4 rounds). Les adresses stables sont candidates pour Page Guard ou write.")
+                ? KE_TXT("Consensus : %1 adresse(s) confirmée(s) sur %2 total (%3 éliminées, %4 rounds). Les adresses stables sont candidates pour Page Guard ou write.", "Consensus: %1 address(es) confirmed out of %2 (%3 eliminated, %4 rounds). Stable addresses are candidates for Page Guard or writes.")
                       .arg(confirmed).arg(total).arg(eliminated).arg(rounds)
-                : QString("Consensus : aucune adresse confirmée sur %1 total (%2 éliminées, %3 rounds). Continue à faire varier la valeur.")
+                : KE_TXT("Consensus : aucune adresse confirmée sur %1 total (%2 éliminées, %3 rounds). Continue à faire varier la valeur.", "Consensus: no confirmed addresses out of %1 (%2 eliminated, %3 rounds). Keep changing the value.")
                       .arg(total).arg(eliminated).arg(rounds);
             if (!actionResult.value("confirmedEntries").isNull()) {
                 result["confirmedEntries"] = actionResult.value("confirmedEntries");
@@ -3888,7 +3889,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             const int confirmed = actionResult.value("entriesConfirmed").toInt();
             const int rounds = actionResult.value("roundsApplied").toInt();
             result["workflowStatus"] = "changed_pages_session_stopped";
-            result["message"] = QString("Session multi-round arrêtée. %1 round(s) effectués, %2 adresse(s) confirmée(s).")
+            result["message"] = KE_TXT("Session multi-round arrêtée. %1 round(s) effectués, %2 adresse(s) confirmée(s).", "Multi-round session stopped. %1 round(s) completed, %2 address(es) confirmed.")
                                   .arg(rounds).arg(confirmed);
             if (!actionResult.value("confirmedEntriesList").isNull()) {
                 result["confirmedEntries"] = actionResult.value("confirmedEntriesList");
@@ -3919,21 +3920,21 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
                 result["workflowStatus"] = "no_candidate";
             }
             result["message"] = stringsFound > 0
-                ? QString("Trace UI string : %1 occurrence(s) du texte \"%2\" trouvées en mémoire. Fais varier la "
+                ? KE_TXT("Trace UI string : %1 occurrence(s) du texte \"%2\" trouvées en mémoire. Fais varier la "
                           "valeur dans le jeu, puis donne-moi la nouvelle valeur affichée — je filtre les bonnes "
-                          "pistes et je cherche la source numérique derrière, automatiquement.")
+                          "pistes et je cherche la source numérique derrière, automatiquement.", "Trace UI string: found %1 occurrence(s) of \"%2\" in memory. Change the value in the game, then tell me the new displayed value — I'll automatically filter the leads and look for the numeric source behind them.")
                       .arg(stringsFound)
                       .arg(args.value("value").toString())
-                : QString("Trace UI string : le texte \"%1\" n'a pas été trouvé en mémoire. Vérifie la valeur affichée exacte, ou passe en Unknown.")
+                : KE_TXT("Trace UI string : le texte \"%1\" n'a pas été trouvé en mémoire. Vérifie la valeur affichée exacte, ou passe en Unknown.", "Trace UI string: couldn't find \"%1\" in memory. Check the exact displayed value, or switch to Unknown.")
                       .arg(args.value("value").toString());
             if (!actionResult.value("candidates").isNull()) {
                 result["uiStringCandidates"] = actionResult.value("candidates");
             }
             if (stringsFound == 0) {
                 QVariantList recoveryActions;
-                recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Scan chiffré (XOR)"}, {"value", args.value("value")}});
-                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Unknown (valeur inconnue)"}});
-                recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+                recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", KE_TXT("Scan chiffré (XOR)", "Encrypted scan (XOR)")}, {"value", args.value("value")}});
+                recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", KE_TXT("Unknown (valeur inconnue)", "Unknown (unknown value)")}});
+                recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", KE_TXT("Nouvelle recherche", "New search")}});
                 result["recoveryActions"] = recoveryActions;
             }
         }
@@ -3956,7 +3957,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString trainerValueType = args.value("valueType", "Int32").toString().trimmed();
         if (trainerAddress.isEmpty() || trainerValue.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Pour créer une feature Trainer depuis le chat, donne une adresse 0x... et la valeur à écrire.";
+            result["message"] = KE_TXT("Pour créer une feature Trainer depuis le chat, donne une adresse 0x... et la valeur à écrire.", "To create a Trainer feature from the chat, give me a 0x... address and the value to write.");
             stampIntent(&result);
             return result;
         }
@@ -3998,7 +3999,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
                     if (scan.value("success").toBool() && scan.value("matchesFound").toInt() == 1) {
                         locatorKind = "aob";
                         feature["aobPattern"] = pattern;
-                        locatorSummary = "verrouillée sur une signature AOB stable (résiste à un relaunch tant que le code/la donnée statique ne change pas de version)";
+                        locatorSummary = KE_TXT("verrouillée sur une signature AOB stable (résiste à un relaunch tant que le code/la donnée statique ne change pas de version)", "anchored to a stable AOB signature (survives a relaunch as long as the code/static data version doesn't change)");
                     }
                 }
             }
@@ -4009,7 +4010,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             if (pointerScan.value("success").toBool() && !chains.isEmpty()) {
                 locatorKind = "pointer_chain";
                 feature["pointerChain"] = chains.first();
-                locatorSummary = "ancrée via une chaîne de pointeurs (résiste à une réallocation de l'objet en mémoire, ex. nouvelle partie)";
+                locatorSummary = KE_TXT("ancrée via une chaîne de pointeurs (résiste à une réallocation de l'objet en mémoire, ex. nouvelle partie)", "anchored through a pointer chain (survives object reallocation in memory, such as starting a new game)");
             }
         }
         feature["locatorKind"] = locatorKind;
@@ -4032,7 +4033,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const int trainerId = args.value("id").toInt();
         if (trainerId <= 0) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Quelle feature Trainer veux-tu supprimer ? Donne son id, ou demande d'abord la liste du Trainer.";
+            result["message"] = KE_TXT("Quelle feature Trainer veux-tu supprimer ? Donne son id, ou demande d'abord la liste du Trainer.", "Which Trainer feature do you want to delete? Give me its ID, or ask for the Trainer list first.");
             stampIntent(&result);
             return result;
         }
@@ -4055,27 +4056,27 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString trainerId = args.value("id").toString().trimmed();
         if (!all && (trainerId.isEmpty() || trainerId.toInt() <= 0)) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Demande d'abord la liste du Trainer si tu ne connais pas l'id de la feature à "
-                + QString(restore ? "restaurer" : "activer") + ".";
+            result["message"] = KE_TXT("Demande d'abord la liste du Trainer si tu ne connais pas l'id de la feature à ", "Ask for the Trainer list first if you don't know the ID of the feature to ")
+                + QString(restore ? KE_TXT("restaurer", "restore") : KE_TXT("activer", "enable")) + ".";
             stampIntent(&result);
             return result;
         }
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = restore
-            ? "Restaure la feature Trainer à sa valeur d'origine (désactivation)."
-            : "Active la feature Trainer : écrit/fige sa valeur configurée en mémoire.";
+            ? KE_TXT("Restaure la feature Trainer à sa valeur d'origine (désactivation).", "Restores the Trainer feature to its original value (disables it).")
+            : KE_TXT("Active la feature Trainer : écrit/fige sa valeur configurée en mémoire.", "Enables the Trainer feature: writes/freezes its configured value in memory.");
         result["message"] = all
-            ? (restore ? "Restauration de tout le Trainer demandée. Confirme pour restaurer toutes les features actives."
-                       : "Activation de tout le Trainer demandée. Confirme pour appliquer toutes les features.")
-            : (restore ? QString("Restauration de la feature Trainer #%1 demandée. Confirme pour restaurer.").arg(trainerId)
-                       : QString("Activation de la feature Trainer #%1 demandée. Confirme pour appliquer.").arg(trainerId));
+            ? (restore ? KE_TXT("Restauration de tout le Trainer demandée. Confirme pour restaurer toutes les features actives.", "Full Trainer restore requested. Confirm to restore all active features.")
+                       : KE_TXT("Activation de tout le Trainer demandée. Confirme pour appliquer toutes les features.", "Full Trainer activation requested. Confirm to apply all features."))
+            : (restore ? KE_TXT("Restauration de la feature Trainer #%1 demandée. Confirme pour restaurer.", "Restore requested for Trainer feature #%1. Confirm to restore.").arg(trainerId)
+                       : KE_TXT("Activation de la feature Trainer #%1 demandée. Confirme pour appliquer.", "Activation requested for Trainer feature #%1. Confirm to apply.").arg(trainerId));
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", restore ? "trainer_restore_confirm" : "trainer_apply_confirm"},
             {"label", all
-                ? QString(restore ? "Tout restaurer" : "Tout activer")
-                : QString(restore ? "Restaurer #%1" : "Activer #%1").arg(trainerId)},
+                ? QString(restore ? KE_TXT("Tout restaurer", "Restore all") : KE_TXT("Tout activer", "Enable all"))
+                : QString(restore ? KE_TXT("Restaurer #%1", "Restore #%1") : KE_TXT("Activer #%1", "Enable #%1")).arg(trainerId)},
             {"id_target", trainerId},
             {"all", all},
             {"requiresConfirmation", true},
@@ -4092,7 +4093,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString stabilityAddress = args.value("address").toString().trimmed();
         if (stabilityAddress.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Il me faut une adresse (0x...) pour analyser si c'est un champ affiché ou une source.";
+            result["message"] = KE_TXT("Il me faut une adresse (0x...) pour analyser si c'est un champ affiché ou une source.", "I need an address (0x...) to check whether this is a display field or a source.");
             stampIntent(&result);
             return result;
         }
@@ -4102,7 +4103,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             // deja une phrase complete et actionnable -- pas besoin d'ajouter
             // de conclusion redondante ici.
             result["workflowStatus"] = "field_stability_analyzed";
-            result["message"] = QString("Analyse de %1 : %2")
+            result["message"] = KE_TXT("Analyse de %1 : %2", "Analysis of %1: %2")
                 .arg(stabilityAddress, actionResult.value("rationale").toString());
         } else {
             result["message"] = actionResult.value("error").toString();
@@ -4118,7 +4119,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "auto_report_ready";
             result["message"] = actionResult.value("summary").toString().isEmpty()
-                ? "Rapport d'auto-résolution généré."
+                ? KE_TXT("Rapport d'auto-résolution généré.", "Auto-resolve report generated.")
                 : actionResult.value("summary").toString();
         } else {
             result["message"] = actionResult.value("error").toString();
@@ -4134,7 +4135,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString uiSourceValue = args.value("value").toString().trimmed();
         if (uiSourceValue.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Il me faut la valeur actuellement affichée pour analyser les sources numériques.";
+            result["message"] = KE_TXT("Il me faut la valeur actuellement affichée pour analyser les sources numériques.", "I need the currently displayed value to analyze the numeric sources.");
             stampIntent(&result);
             return result;
         }
@@ -4148,7 +4149,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             uiStringCandidate = m_controller.m_pendingUiStringCandidates.first().toMap();
         } else {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Je n'ai pas de string UI récente à analyser — lance d'abord trace_ui_string, ou donne-moi directement une adresse.";
+            result["message"] = KE_TXT("Je n'ai pas de string UI récente à analyser — lance d'abord trace_ui_string, ou donne-moi directement une adresse.", "I don't have a recent UI string to analyze — run trace_ui_string first, or give me an address directly.");
             stampIntent(&result);
             return result;
         }
@@ -4158,8 +4159,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             const int matches = actionResult.value("matchesReturned").toInt();
             result["workflowStatus"] = "ui_sources_analyzed";
             result["message"] = matches > 0
-                ? QString("Analyse des sources : %1 candidat(s) numérique(s) trouvé(s) près de la string.").arg(matches)
-                : "Analyse des sources : aucun candidat numérique trouvé près de cette string.";
+                ? KE_TXT("Analyse des sources : %1 candidat(s) numérique(s) trouvé(s) près de la string.", "Source analysis: found %1 numeric candidate(s) near the string.").arg(matches)
+                : KE_TXT("Analyse des sources : aucun candidat numérique trouvé près de cette string.", "Source analysis: no numeric candidates found near this string.");
             if (!actionResult.value("candidates").isNull()) {
                 result["uiSourceCandidates"] = actionResult.value("candidates");
             }
@@ -4175,14 +4176,14 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString aobAddress = args.value("address").toString().trimmed();
         if (aobAddress.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Il me faut une adresse (0x...) pour générer une signature AOB.";
+            result["message"] = KE_TXT("Il me faut une adresse (0x...) pour générer une signature AOB.", "I need an address (0x...) to generate an AOB signature.");
             stampIntent(&result);
             return result;
         }
         actionResult = m_controller.generateAobSignature(aobAddress, {});
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "aob_signature_generated";
-            result["message"] = QString("Signature AOB générée pour %1 (qualité : %2) : %3")
+            result["message"] = KE_TXT("Signature AOB générée pour %1 (qualité : %2) : %3", "AOB signature generated for %1 (quality: %2): %3")
                 .arg(aobAddress, actionResult.value("signatureRisk").toString(), actionResult.value("pattern").toString());
         } else {
             result["message"] = actionResult.value("error").toString();
@@ -4196,7 +4197,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString suggestAddress = args.value("address").toString().trimmed();
         if (suggestAddress.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Il me faut une adresse (0x...) pour suggérer des patchs de code (aucune application automatique).";
+            result["message"] = KE_TXT("Il me faut une adresse (0x...) pour suggérer des patchs de code (aucune application automatique).", "I need an address (0x...) to suggest code patches (nothing is applied automatically).");
             stampIntent(&result);
             return result;
         }
@@ -4205,10 +4206,10 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             const int suggestionCount = actionResult.value("suggestions").toList().size();
             result["workflowStatus"] = "code_patches_suggested";
             result["message"] = suggestionCount > 0
-                ? QString("%1 suggestion(s) de patch pour %2 — aucune n'est appliquée, vérifie dans l'onglet AOB/Patch avant d'agir.")
+                ? KE_TXT("%1 suggestion(s) de patch pour %2 — aucune n'est appliquée, vérifie dans l'onglet AOB/Patch avant d'agir.", "%1 patch suggestion(s) for %2 — none have been applied. Review them in the AOB/Patch tab before proceeding.")
                       .arg(suggestionCount)
                       .arg(suggestAddress)
-                : QString("Aucune suggestion de patch trouvée pour %1.").arg(suggestAddress);
+                : KE_TXT("Aucune suggestion de patch trouvée pour %1.", "No patch suggestions found for %1.").arg(suggestAddress);
         } else {
             result["message"] = actionResult.value("error").toString();
         }
@@ -4219,7 +4220,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString backwardAddress = args.value("address").toString().trimmed();
         if (backwardAddress.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Il me faut une adresse (0x...) pour désassembler en arrière (lecture seule).";
+            result["message"] = KE_TXT("Il me faut une adresse (0x...) pour désassembler en arrière (lecture seule).", "I need an address (0x...) for backward disassembly (read-only).");
             stampIntent(&result);
             return result;
         }
@@ -4227,7 +4228,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         if (actionResult.value("success").toBool()) {
             const int candidateCount = actionResult.value("candidateFields").toList().size();
             result["workflowStatus"] = "disassembled_backward";
-            result["message"] = QString("Désassemblage en arrière de %1 : %2 champ(s) candidat(s) trouvé(s).")
+            result["message"] = KE_TXT("Désassemblage en arrière de %1 : %2 champ(s) candidat(s) trouvé(s).", "Backward disassembly from %1: found %2 candidate field(s).")
                 .arg(backwardAddress)
                 .arg(candidateCount);
         } else {
@@ -4249,10 +4250,10 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString fwwAddress = args.value("address").toString().trimmed();
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Attache un debugger Win32 et nécessite de faire varier la valeur en direct dans le jeu pendant la capture — pas adapté à une exécution autonome depuis le chat.";
+        result["confirmationReason"] = KE_TXT("Attache un debugger Win32 et nécessite de faire varier la valeur en direct dans le jeu pendant la capture — pas adapté à une exécution autonome depuis le chat.", "Attaches a Win32 debugger and requires you to change the value live in the game during capture — not suitable for autonomous execution from the chat.");
         result["message"] = fwwAddress.isEmpty()
-            ? "Pour capturer ce qui écrit une adresse, ouvre l'onglet Expert (section Trace UI string), coche « Debugger autorisé », clique « Écrit par » sur la source concernée, puis fais varier la valeur dans le jeu pendant la fenêtre de capture."
-            : QString("Pour capturer ce qui écrit %1, ouvre l'onglet Expert (section Trace UI string), coche « Debugger autorisé », clique « Écrit par », puis fais varier la valeur dans le jeu pendant la fenêtre de capture.").arg(fwwAddress);
+            ? KE_TXT("Pour capturer ce qui écrit une adresse, ouvre l'onglet Expert (section Trace UI string), coche « Debugger autorisé », clique « Écrit par » sur la source concernée, puis fais varier la valeur dans le jeu pendant la fenêtre de capture.", "To capture what writes to an address, open the Expert tab (Trace UI string section), check \"Debugger allowed\", click \"Written by\" on the source, then change the value in the game during the capture window.")
+            : KE_TXT("Pour capturer ce qui écrit %1, ouvre l'onglet Expert (section Trace UI string), coche « Debugger autorisé », clique « Écrit par », puis fais varier la valeur dans le jeu pendant la fenêtre de capture.", "To capture what writes to %1, open the Expert tab (Trace UI string section), check \"Debugger allowed\", click \"Written by\", then change the value in the game during the capture window.").arg(fwwAddress);
         stampIntent(&result);
         return result;
     } else if (tool == "test_candidate_fields") {
@@ -4265,8 +4266,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         // startSmartSearch. Redirige vers l'UI, meme patron que find_what_writes.
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Écrit une vraie valeur test sur la cible (restauration non garantie) et tourne environ une minute en tâche de fond — pas adapté à une exécution autonome depuis le chat.";
-        result["message"] = "Pour tester automatiquement quels champs candidats tiennent réellement, ouvre l'onglet Expert, section champ affiché/source, après un désassemblage en arrière — le bouton « Tester automatiquement » lance ce test avec un suivi visuel de la progression.";
+        result["confirmationReason"] = KE_TXT("Écrit une vraie valeur test sur la cible (restauration non garantie) et tourne environ une minute en tâche de fond — pas adapté à une exécution autonome depuis le chat.", "Writes a real test value to the target (restoration isn't guaranteed) and runs in the background for about a minute — not suitable for autonomous execution from the chat.");
+        result["message"] = KE_TXT("Pour tester automatiquement quels champs candidats tiennent réellement, ouvre l'onglet Expert, section champ affiché/source, après un désassemblage en arrière — le bouton « Tester automatiquement » lance ce test avec un suivi visuel de la progression.", "To automatically test which candidate fields actually hold their value, open the Expert tab's display field/source section after backward disassembly. The \"Test automatically\" button runs this test with visible progress.");
         stampIntent(&result);
         return result;
     } else if (tool == "write_value" || tool == "freeze_value") {
@@ -4285,23 +4286,23 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         if (writeAddress.isEmpty() || writeValue.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
             result["message"] = isFreeze
-                ? "Il me faut l'adresse (0x...) et la valeur à figer pour préparer le freeze."
-                : "Il me faut l'adresse (0x...) et la valeur pour préparer l'écriture.";
+                ? KE_TXT("Il me faut l'adresse (0x...) et la valeur à figer pour préparer le freeze.", "I need the address (0x...) and the value to freeze to prepare the freeze.")
+                : KE_TXT("Il me faut l'adresse (0x...) et la valeur pour préparer l'écriture.", "I need the address (0x...) and the value to prepare the write.");
             stampIntent(&result);
             return result;
         }
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = isFreeze
-            ? "Fige cette adresse en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite."
-            : "Cette action modifie la mémoire de la cible attachée.";
+            ? KE_TXT("Fige cette adresse en mémoire (écriture répétée). Reste actif jusqu'à désactivation explicite.", "Freezes this memory address by writing repeatedly. Stays active until explicitly disabled.")
+            : KE_TXT("Cette action modifie la mémoire de la cible attachée.", "This action modifies the attached target's memory.");
         result["message"] = isFreeze
-            ? QString("Freeze demandé : %1 (%2) à 0x%3. Confirme pour figer la valeur.").arg(writeValue, writeValueType, writeAddress)
-            : QString("Écriture demandée : %1 (%2) à 0x%3. Confirme pour appliquer.").arg(writeValue, writeValueType, writeAddress);
+            ? KE_TXT("Freeze demandé : %1 (%2) à 0x%3. Confirme pour figer la valeur.", "Freeze requested: %1 (%2) at 0x%3. Confirm to freeze the value.").arg(writeValue, writeValueType, writeAddress)
+            : KE_TXT("Écriture demandée : %1 (%2) à 0x%3. Confirme pour appliquer.", "Write requested: %1 (%2) at 0x%3. Confirm to apply.").arg(writeValue, writeValueType, writeAddress);
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", isFreeze ? "freeze_value_confirm" : "write_value_confirm"},
-            {"label", isFreeze ? QString("Figer %1").arg(writeValue) : QString("Écrire %1").arg(writeValue)},
+            {"label", isFreeze ? KE_TXT("Figer %1", "Freeze %1").arg(writeValue) : KE_TXT("Écrire %1", "Write %1").arg(writeValue)},
             {"address", writeAddress},
             {"value", writeValue},
             {"valueType", writeValueType},
@@ -4322,19 +4323,19 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString kernelValueType = args.value("valueType", "Int32").toString();
         if (kernelAddress.isEmpty() || kernelValue.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Il me faut l'adresse (0x...) et la valeur pour écrire via le driver kernel.";
+            result["message"] = KE_TXT("Il me faut l'adresse (0x...) et la valeur pour écrire via le driver kernel.", "I need the address (0x...) and the value to write through the kernel driver.");
             stampIntent(&result);
             return result;
         }
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Écriture kernel : contourne les protections mémoire usermode (VirtualProtect/PAGE_GUARD). Action irréversible sans lecture préalable de la valeur d'origine.";
-        result["message"] = QString("Écriture kernel demandée : %1 (%2) à 0x%3. Confirme pour appliquer via le driver noyau.")
+        result["confirmationReason"] = KE_TXT("Écriture kernel : contourne les protections mémoire usermode (VirtualProtect/PAGE_GUARD). Action irréversible sans lecture préalable de la valeur d'origine.", "Kernel write: bypasses user-mode memory protections (VirtualProtect/PAGE_GUARD). Can't be undone unless the original value was read first.");
+        result["message"] = KE_TXT("Écriture kernel demandée : %1 (%2) à 0x%3. Confirme pour appliquer via le driver noyau.", "Kernel write requested: %1 (%2) at 0x%3. Confirm to apply through the kernel driver.")
                                  .arg(kernelValue, kernelValueType, kernelAddress);
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", "kernel_write_targets"},
-            {"label", QString("Écrire %1 via kernel").arg(kernelValue)},
+            {"label", KE_TXT("Écrire %1 via kernel", "Write %1 through the kernel").arg(kernelValue)},
             {"address", kernelAddress},
             {"value", kernelValue},
             {"valueType", kernelValueType},
@@ -4356,15 +4357,15 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = isOff
-            ? "Désactive le speedhack et remet la vitesse perçue à la normale."
-            : "Injecte un composant dans le processus cible pour modifier la vitesse perçue du temps.";
+            ? KE_TXT("Désactive le speedhack et remet la vitesse perçue à la normale.", "Disables the speedhack and restores normal perceived speed.")
+            : KE_TXT("Injecte un composant dans le processus cible pour modifier la vitesse perçue du temps.", "Injects a component into the target process to change its perceived time speed.");
         result["message"] = isOff
-            ? "Désactivation du speedhack demandée. Confirme pour remettre la vitesse normale."
-            : QString("Speedhack demandé : facteur %1x. Confirme pour appliquer.").arg(factor);
+            ? KE_TXT("Désactivation du speedhack demandée. Confirme pour remettre la vitesse normale.", "Speedhack disable requested. Confirm to restore normal speed.")
+            : KE_TXT("Speedhack demandé : facteur %1x. Confirme pour appliquer.", "Speedhack requested: %1x multiplier. Confirm to apply.").arg(factor);
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", "speedhack_apply"},
-            {"label", isOff ? "Désactiver le speedhack" : QString("Appliquer %1x").arg(factor)},
+            {"label", isOff ? KE_TXT("Désactiver le speedhack", "Disable speedhack") : KE_TXT("Appliquer %1x", "Apply %1x").arg(factor)},
             {"factor", factor},
             {"mode", isOff ? "off" : "set"},
             {"requiresConfirmation", true},
@@ -4383,15 +4384,15 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = isOff
-            ? "Retire la règle pare-feu KillEngine posée pour ce processus."
-            : "Ajoute une règle pare-feu Windows bloquant tout le trafic entrant/sortant du processus attaché (invite UAC requise).";
+            ? KE_TXT("Retire la règle pare-feu KillEngine posée pour ce processus.", "Removes the KillEngine firewall rule for this process.")
+            : KE_TXT("Ajoute une règle pare-feu Windows bloquant tout le trafic entrant/sortant du processus attaché (invite UAC requise).", "Adds a Windows firewall rule blocking all inbound/outbound traffic for the attached process (UAC prompt required).");
         result["message"] = isOff
-            ? "Rétablissement du réseau demandé. Confirme pour retirer la règle pare-feu."
-            : "Coupure réseau demandée, pour isoler une éventuelle synchro serveur en arrière-plan. Confirme pour appliquer.";
+            ? KE_TXT("Rétablissement du réseau demandé. Confirme pour retirer la règle pare-feu.", "Network restore requested. Confirm to remove the firewall rule.")
+            : KE_TXT("Coupure réseau demandée, pour isoler une éventuelle synchro serveur en arrière-plan. Confirme pour appliquer.", "Network disconnect requested to check for possible background server sync. Confirm to apply.");
         QVariantList recoveryActions;
         recoveryActions.append(QVariantMap{
             {"id", "network_block_apply"},
-            {"label", isOff ? "Rétablir le réseau" : "Couper le réseau"},
+            {"label", isOff ? KE_TXT("Rétablir le réseau", "Restore network access") : KE_TXT("Couper le réseau", "Disconnect network")},
             {"mode", isOff ? "off" : "on"},
             {"requiresConfirmation", true},
         });
@@ -4403,7 +4404,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = m_controller.discoverProcessSaveFiles(maxResults);
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "save_files_discovered";
-            result["message"] = QString("Fichiers de sauvegarde : %1 trouvé(s) sous le package '%2'. On peut en lire un avec read_save_file_text ou inspecter LocalSettings avec inspect_local_settings.")
+            result["message"] = KE_TXT("Fichiers de sauvegarde : %1 trouvé(s) sous le package '%2'. On peut en lire un avec read_save_file_text ou inspecter LocalSettings avec inspect_local_settings.", "Save files: found %1 under package '%2'. We can read one with read_save_file_text or inspect LocalSettings with inspect_local_settings.")
                                   .arg(actionResult.value("count").toInt())
                                   .arg(actionResult.value("familyName").toString());
         }
@@ -4412,7 +4413,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = m_controller.inspectProcessLocalSettings(maxValues);
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "local_settings_inspected";
-            result["message"] = QString("LocalSettings inspecté : %1 valeur(s) lue(s) dans settings.dat. Cherche un nom ou une valeur qui correspond à l'affichage du jeu.")
+            result["message"] = KE_TXT("LocalSettings inspecté : %1 valeur(s) lue(s) dans settings.dat. Cherche un nom ou une valeur qui correspond à l'affichage du jeu.", "LocalSettings inspected: read %1 value(s) from settings.dat. Look for a name or value matching the game's display.")
                                   .arg(actionResult.value("count").toInt());
         }
     } else if (tool == "read_save_file_text") {
@@ -4422,8 +4423,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "save_file_text_read";
             result["message"] = actionResult.value("truncated").toBool()
-                ? "Fichier lu (tronqué à la taille maximale). Cherche le champ correspondant à la valeur affichée dans le texte."
-                : "Fichier lu en entier. Cherche le champ correspondant à la valeur affichée dans le texte.";
+                ? KE_TXT("Fichier lu (tronqué à la taille maximale). Cherche le champ correspondant à la valeur affichée dans le texte.", "File read (truncated at the size limit). Look in the text for the field matching the displayed value.")
+                : KE_TXT("Fichier lu en entier. Cherche le champ correspondant à la valeur affichée dans le texte.", "Entire file read. Look in the text for the field matching the displayed value.");
         }
     } else if (tool == "patch_file_bytes") {
         // PHASE 148 : bug trouve en auditant la ligne schema -- ce cas
@@ -4442,10 +4443,10 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString patchReplaceHex = args.value("replaceHex").toString().trimmed();
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Édite en place un fichier de sauvegarde réel sur disque — action non réversible automatiquement, pas d'exécution autonome depuis le chat.";
+        result["confirmationReason"] = KE_TXT("Édite en place un fichier de sauvegarde réel sur disque — action non réversible automatiquement, pas d'exécution autonome depuis le chat.", "Edits an actual save file in place on disk — can't be undone automatically and won't run autonomously from the chat.");
         result["message"] = (patchPath.isEmpty() || patchFindHex.isEmpty() || patchReplaceHex.isEmpty())
-            ? "Édition de fichier de sauvegarde demandée, mais il manque le chemin exact et/ou les séquences hex find/replace. Utilise le pipe d'automatisation ou un script Lua avec patchFileBytes une fois la séquence exacte confirmée (read_save_file_text pour vérifier le contexte avant)."
-            : QString("Édition de fichier demandée sur %1 (remplace %2 par %3). Pas d'exécution autonome depuis le chat : utilise le pipe d'automatisation ou un script Lua pour l'appliquer une fois sûr de la séquence exacte.")
+            ? KE_TXT("Édition de fichier de sauvegarde demandée, mais il manque le chemin exact et/ou les séquences hex find/replace. Utilise le pipe d'automatisation ou un script Lua avec patchFileBytes une fois la séquence exacte confirmée (read_save_file_text pour vérifier le contexte avant).", "Save file edit requested, but the exact path and/or hex find/replace sequences are missing. Use the automation pipe or a Lua script with patchFileBytes once you've confirmed the exact sequence (check the context first with read_save_file_text).")
+            : KE_TXT("Édition de fichier demandée sur %1 (remplace %2 par %3). Pas d'exécution autonome depuis le chat : utilise le pipe d'automatisation ou un script Lua pour l'appliquer une fois sûr de la séquence exacte.", "File edit requested on %1 (replace %2 with %3). This won't run autonomously from the chat: use the automation pipe or a Lua script once you're sure of the exact sequence.")
                   .arg(patchPath, patchFindHex, patchReplaceHex);
         stampIntent(&result);
         return result;
@@ -4457,8 +4458,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         if (actionResult.value("success").toBool()) {
             result["workflowStatus"] = "save_file_watch_finished";
             result["message"] = actionResult.value("changed").toBool()
-                ? QString("Le fichier a changé (%1) pendant la fenêtre d'observation.").arg(actionResult.value("changeType").toString())
-                : "Aucun changement détecté pendant la fenêtre d'observation.";
+                ? KE_TXT("Le fichier a changé (%1) pendant la fenêtre d'observation.", "The file changed (%1) during the observation window.").arg(actionResult.value("changeType").toString())
+                : KE_TXT("Aucun changement détecté pendant la fenêtre d'observation.", "No changes detected during the observation window.");
         }
     // PHASE (couverture chat modèle local, 07/09/2026) : les outils
     // ci-dessous existaient dans ai/tool_registry.cpp (donc visibles du
@@ -4476,49 +4477,49 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = m_controller.getStealthStatus();
         actionResult["success"] = true;
         result["message"] = actionResult.value("active").toBool()
-            ? QString("Mode discret actif (profil %1).").arg(actionResult.value("profile").toString())
-            : "Mode discret inactif.";
+            ? KE_TXT("Mode discret actif (profil %1).", "Stealth mode active (profile %1).").arg(actionResult.value("profile").toString())
+            : KE_TXT("Mode discret inactif.", "Stealth mode inactive.");
     } else if (tool == "get_process_network_modules") {
         actionResult = m_controller.getProcessNetworkModules();
         if (actionResult.value("success").toBool()) {
-            result["message"] = QString("%1 module(s) réseau chargé(s) par le processus attaché.").arg(actionResult.value("modules").toList().size());
+            result["message"] = KE_TXT("%1 module(s) réseau chargé(s) par le processus attaché.", "%1 network module(s) loaded by the attached process.").arg(actionResult.value("modules").toList().size());
         }
     } else if (tool == "get_http_proxy_requests") {
         actionResult = m_controller.getHttpProxyRequests();
         if (actionResult.value("success").toBool()) {
-            result["message"] = QString("%1 requête(s) HTTP interceptée(s).").arg(actionResult.value("requests").toList().size());
+            result["message"] = KE_TXT("%1 requête(s) HTTP interceptée(s).", "%1 HTTP request(s) intercepted.").arg(actionResult.value("requests").toList().size());
         }
     } else if (tool == "getWebView2InspectorStatus") {
         actionResult = m_controller.getWebView2InspectorStatus();
         if (actionResult.value("success").toBool()) {
             result["message"] = actionResult.value("connected").toBool()
-                ? QString("Inspecteur WebView2 connecté (target %1).").arg(actionResult.value("target").toString())
-                : "Inspecteur WebView2 non connecté.";
+                ? KE_TXT("Inspecteur WebView2 connecté (target %1).", "WebView2 inspector connected (target %1).").arg(actionResult.value("target").toString())
+                : KE_TXT("Inspecteur WebView2 non connecté.", "WebView2 inspector not connected.");
         }
     } else if (tool == "listWebView2CdpTargets") {
         actionResult = m_controller.listWebView2CdpTargets(args.value("browserProcessId").toInt(), {});
         if (actionResult.value("success").toBool()) {
-            result["message"] = QString("%1 target(s) CDP WebView2 trouvée(s).").arg(actionResult.value("count").toInt());
+            result["message"] = KE_TXT("%1 target(s) CDP WebView2 trouvée(s).", "Found %1 WebView2 CDP target(s).").arg(actionResult.value("count").toInt());
         }
     } else if (tool == "disconnectWebView2Inspector") {
         actionResult = m_controller.disconnectWebView2Inspector();
         if (actionResult.value("success").toBool()) {
-            result["message"] = "Inspecteur WebView2 déconnecté.";
+            result["message"] = KE_TXT("Inspecteur WebView2 déconnecté.", "WebView2 inspector disconnected.");
         }
     } else if (tool == "findWebView2DisplayedValues") {
         actionResult = m_controller.findWebView2DisplayedValues(args.value("value").toString(), {});
         if (actionResult.value("success").toBool()) {
-            result["message"] = QString("%1 correspondance(s) trouvée(s) dans le DOM pour %2.").arg(actionResult.value("count").toInt()).arg(args.value("value").toString());
+            result["message"] = KE_TXT("%1 correspondance(s) trouvée(s) dans le DOM pour %2.", "Found %1 DOM match(es) for %2.").arg(actionResult.value("count").toInt()).arg(args.value("value").toString());
         }
     } else if (tool == "findWebView2DisplayedText") {
         actionResult = m_controller.findWebView2DisplayedText(args.value("text").toString(), {});
         if (actionResult.value("success").toBool()) {
-            result["message"] = QString("%1 correspondance(s) trouvée(s) dans le DOM pour ce texte.").arg(actionResult.value("count").toInt());
+            result["message"] = KE_TXT("%1 correspondance(s) trouvée(s) dans le DOM pour ce texte.", "Found %1 DOM match(es) for this text.").arg(actionResult.value("count").toInt());
         }
     } else if (tool == "probeWebView2GlobalScope") {
         actionResult = m_controller.probeWebView2GlobalScope();
         if (actionResult.value("success").toBool()) {
-            result["message"] = "Scope JS global (window) sondé — voir l'onglet WebView2 pour le détail.";
+            result["message"] = KE_TXT("Scope JS global (window) sondé — voir l'onglet WebView2 pour le détail.", "Global JS scope (window) inspected — see the WebView2 tab for details.");
         }
     } else if (tool == "get_process_network_connections") {
         // getProcessNetworkConnectionsAsync ne bloque pas le thread GUI (la
@@ -4531,8 +4532,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         actionResult = {{"success", true}};
         m_controller.getProcessNetworkConnectionsAsync();
         result["workflowStatus"] = "network_connections_requested";
-        result["message"] = "Récupération des connexions réseau en cours (résolution DNS inverse en tâche de fond)...";
-        result["recoveryActions"] = QVariantList{QVariantMap{{"id", "open_network"}, {"label", "Ouvrir Réseau"}}};
+        result["message"] = KE_TXT("Récupération des connexions réseau en cours (résolution DNS inverse en tâche de fond)...", "Fetching network connections (reverse DNS lookup running in the background)...");
+        result["recoveryActions"] = QVariantList{QVariantMap{{"id", "open_network"}, {"label", KE_TXT("Ouvrir Réseau", "Open Network")}}};
     } else if (tool == "spoof_dns" || tool == "restore_dns") {
         const bool isRestore = (tool == "restore_dns");
         const QString domain = args.value("domain").toString().trimmed();
@@ -4540,22 +4541,22 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         if (domain.isEmpty() || (!isRestore && targetIp.isEmpty())) {
             result["actionStatus"] = "needs_clarification";
             result["message"] = isRestore
-                ? "Il me faut le domaine dont l'entrée DNS spoofée doit être retirée."
-                : "Il me faut le domaine et l'IP locale cible pour rediriger le DNS.";
+                ? KE_TXT("Il me faut le domaine dont l'entrée DNS spoofée doit être retirée.", "I need the domain whose spoofed DNS entry should be removed.")
+                : KE_TXT("Il me faut le domaine et l'IP locale cible pour rediriger le DNS.", "I need the domain and target local IP address to redirect DNS.");
             stampIntent(&result);
             return result;
         }
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = isRestore
-            ? "Retire l'entrée spoofée du fichier hosts Windows."
-            : "Redirige un domaine vers une IP locale via le fichier hosts Windows (invite UAC).";
+            ? KE_TXT("Retire l'entrée spoofée du fichier hosts Windows.", "Removes the spoofed entry from the Windows hosts file.")
+            : KE_TXT("Redirige un domaine vers une IP locale via le fichier hosts Windows (invite UAC).", "Redirects a domain to a local IP address through the Windows hosts file (UAC prompt).");
         result["message"] = isRestore
-            ? QString("Restauration DNS demandée pour %1. Confirme pour retirer l'entrée du fichier hosts.").arg(domain)
-            : QString("Redirection DNS demandée : %1 -> %2. Confirme pour appliquer.").arg(domain, targetIp);
+            ? KE_TXT("Restauration DNS demandée pour %1. Confirme pour retirer l'entrée du fichier hosts.", "DNS restore requested for %1. Confirm to remove the hosts file entry.").arg(domain)
+            : KE_TXT("Redirection DNS demandée : %1 -> %2. Confirme pour appliquer.", "DNS redirect requested: %1 -> %2. Confirm to apply.").arg(domain, targetIp);
         result["recoveryActions"] = QVariantList{QVariantMap{
             {"id", "dns_spoof_apply"},
-            {"label", isRestore ? QString("Restaurer %1").arg(domain) : QString("Rediriger %1").arg(domain)},
+            {"label", isRestore ? KE_TXT("Restaurer %1", "Restore %1").arg(domain) : KE_TXT("Rediriger %1", "Redirect %1").arg(domain)},
             {"mode", isRestore ? "restore" : "spoof"},
             {"domain", domain},
             {"targetIp", targetIp},
@@ -4570,16 +4571,16 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = isStop
-            ? "Arrête le proxy HTTP local et retire les hooks du processus attaché."
-            : "Intercepte les requêtes HTTP/HTTPS du processus attaché via injection DLL + hook WinINet/WinHTTP.";
+            ? KE_TXT("Arrête le proxy HTTP local et retire les hooks du processus attaché.", "Stops the local HTTP proxy and removes hooks from the attached process.")
+            : KE_TXT("Intercepte les requêtes HTTP/HTTPS du processus attaché via injection DLL + hook WinINet/WinHTTP.", "Intercepts the attached process's HTTP/HTTPS requests through DLL injection and WinINet/WinHTTP hooks.");
         result["message"] = isStop
-            ? "Arrêt du proxy HTTP demandé. Confirme pour arrêter."
-            : QString("Démarrage du proxy HTTP demandé (port %1%2). Confirme pour appliquer.")
+            ? KE_TXT("Arrêt du proxy HTTP demandé. Confirme pour arrêter.", "HTTP proxy stop requested. Confirm to stop.")
+            : KE_TXT("Démarrage du proxy HTTP demandé (port %1%2). Confirme pour appliquer.", "HTTP proxy start requested (port %1%2). Confirm to apply.")
                   .arg(port)
-                  .arg(interceptHttps ? ", HTTPS inclus" : "");
+                  .arg(interceptHttps ? KE_TXT(", HTTPS inclus", ", including HTTPS") : "");
         result["recoveryActions"] = QVariantList{QVariantMap{
             {"id", "http_proxy_apply"},
-            {"label", isStop ? "Arrêter le proxy HTTP" : QString("Démarrer le proxy HTTP (port %1)").arg(port)},
+            {"label", isStop ? KE_TXT("Arrêter le proxy HTTP", "Stop HTTP proxy") : KE_TXT("Démarrer le proxy HTTP (port %1)", "Start HTTP proxy (port %1)").arg(port)},
             {"mode", isStop ? "stop" : "start"},
             {"port", port},
             {"interceptHttps", interceptHttps},
@@ -4592,17 +4593,17 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         const QString newBody = args.value("newBody").toString();
         if (requestId.isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Il me faut l'identifiant de la requête HTTP interceptée à modifier (voir get_http_proxy_requests).";
+            result["message"] = KE_TXT("Il me faut l'identifiant de la requête HTTP interceptée à modifier (voir get_http_proxy_requests).", "I need the ID of the intercepted HTTP request to modify (see get_http_proxy_requests).");
             stampIntent(&result);
             return result;
         }
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Modifie le body d'une requête HTTP interceptée avant qu'elle ne soit envoyée.";
-        result["message"] = QString("Modification demandée pour la requête %1. Confirme pour appliquer.").arg(requestId);
+        result["confirmationReason"] = KE_TXT("Modifie le body d'une requête HTTP interceptée avant qu'elle ne soit envoyée.", "Modifies the body of an intercepted HTTP request before it's sent.");
+        result["message"] = KE_TXT("Modification demandée pour la requête %1. Confirme pour appliquer.", "Modification requested for request %1. Confirm to apply.").arg(requestId);
         result["recoveryActions"] = QVariantList{QVariantMap{
             {"id", "modify_http_request_apply"},
-            {"label", "Modifier la requête"},
+            {"label", KE_TXT("Modifier la requête", "Modify request")},
             {"requestId", requestId},
             {"newBody", newBody},
             {"requiresConfirmation", true},
@@ -4615,14 +4616,14 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = enabled
-            ? "Retarde artificiellement recv/WSARecv du processus attaché via injection DLL + MinHook."
-            : "Désactive le lag switch et retire le retard artificiel.";
+            ? KE_TXT("Retarde artificiellement recv/WSARecv du processus attaché via injection DLL + MinHook.", "Adds an artificial delay to recv/WSARecv in the attached process through DLL injection and MinHook.")
+            : KE_TXT("Désactive le lag switch et retire le retard artificiel.", "Disables the lag switch and removes the artificial delay.");
         result["message"] = enabled
-            ? QString("Lag switch demandé : %1 ms de retard. Confirme pour appliquer.").arg(delayMs)
-            : "Désactivation du lag switch demandée. Confirme pour appliquer.";
+            ? KE_TXT("Lag switch demandé : %1 ms de retard. Confirme pour appliquer.", "Lag switch requested: %1 ms delay. Confirm to apply.").arg(delayMs)
+            : KE_TXT("Désactivation du lag switch demandée. Confirme pour appliquer.", "Lag switch disable requested. Confirm to apply.");
         result["recoveryActions"] = QVariantList{QVariantMap{
             {"id", "lag_switch_apply"},
-            {"label", enabled ? QString("Activer le lag switch (%1 ms)").arg(delayMs) : "Désactiver le lag switch"},
+            {"label", enabled ? KE_TXT("Activer le lag switch (%1 ms)", "Enable lag switch (%1 ms)").arg(delayMs) : KE_TXT("Désactiver le lag switch", "Disable lag switch")},
             {"enabled", enabled},
             {"delayMs", delayMs},
             {"requiresConfirmation", true},
@@ -4635,14 +4636,14 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
         result["confirmationReason"] = isRestore
-            ? "Désactive le mode discret et restaure l'état original des modules activés."
-            : "Active le mode discret (anti-debug, masquage process/DLL) pour masquer KillEngine du processus attaché.";
+            ? KE_TXT("Désactive le mode discret et restaure l'état original des modules activés.", "Disables stealth mode and restores the original state of the enabled modules.")
+            : KE_TXT("Active le mode discret (anti-debug, masquage process/DLL) pour masquer KillEngine du processus attaché.", "Enables stealth mode (anti-debug, process/DLL hiding) to hide KillEngine from the attached process.");
         result["message"] = isRestore
-            ? "Désactivation du mode discret demandée. Confirme pour restaurer."
-            : QString("Activation du mode discret demandée (profil '%1'). Confirme pour appliquer.").arg(profile);
+            ? KE_TXT("Désactivation du mode discret demandée. Confirme pour restaurer.", "Stealth mode disable requested. Confirm to restore.")
+            : KE_TXT("Activation du mode discret demandée (profil '%1'). Confirme pour appliquer.", "Stealth mode activation requested (profile '%1'). Confirm to apply.").arg(profile);
         result["recoveryActions"] = QVariantList{QVariantMap{
             {"id", "stealth_mode_apply"},
-            {"label", isRestore ? "Désactiver le mode discret" : QString("Activer le mode discret (%1)").arg(profile)},
+            {"label", isRestore ? KE_TXT("Désactiver le mode discret", "Disable stealth mode") : KE_TXT("Activer le mode discret (%1)", "Enable stealth mode (%1)").arg(profile)},
             {"mode", isRestore ? "restore" : "apply"},
             {"profile", profile},
             {"requiresConfirmation", true},
@@ -4652,26 +4653,26 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
     } else if (tool == "connectWebView2Inspector") {
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Connecte l'inspecteur WebView2 à une target CDP — s'attache à un process externe.";
-        result["message"] = "Connexion à l'inspecteur WebView2 demandée. Confirme pour t'attacher (voir l'onglet WebView2 pour choisir la target).";
-        result["recoveryActions"] = QVariantList{QVariantMap{{"id", "open_webview2_inspector"}, {"label", "Ouvrir WebView2"}}};
+        result["confirmationReason"] = KE_TXT("Connecte l'inspecteur WebView2 à une target CDP — s'attache à un process externe.", "Connects the WebView2 inspector to a CDP target — attaches to an external process.");
+        result["message"] = KE_TXT("Connexion à l'inspecteur WebView2 demandée. Confirme pour t'attacher (voir l'onglet WebView2 pour choisir la target).", "WebView2 inspector connection requested. Confirm to attach (choose the target in the WebView2 tab).");
+        result["recoveryActions"] = QVariantList{QVariantMap{{"id", "open_webview2_inspector"}, {"label", KE_TXT("Ouvrir WebView2", "Open WebView2")}}};
         stampIntent(&result);
         return result;
     } else if (tool == "evaluateWebView2JavaScript") {
         const QString expression = args.value("expression").toString();
         if (expression.trimmed().isEmpty()) {
             result["actionStatus"] = "needs_clarification";
-            result["message"] = "Il me faut l'expression JavaScript à évaluer dans la target WebView2 connectée.";
+            result["message"] = KE_TXT("Il me faut l'expression JavaScript à évaluer dans la target WebView2 connectée.", "I need the JavaScript expression to evaluate in the connected WebView2 target.");
             stampIntent(&result);
             return result;
         }
         result["actionStatus"] = "requires_confirmation";
         result["requiresConfirmation"] = true;
-        result["confirmationReason"] = "Évalue une expression JavaScript arbitraire dans la target WebView2 connectée — peut lire ou modifier l'état JS.";
-        result["message"] = QString("Évaluation JS demandée : %1. Confirme pour exécuter.").arg(expression);
+        result["confirmationReason"] = KE_TXT("Évalue une expression JavaScript arbitraire dans la target WebView2 connectée — peut lire ou modifier l'état JS.", "Evaluates an arbitrary JavaScript expression in the connected WebView2 target — may read or modify JS state.");
+        result["message"] = KE_TXT("Évaluation JS demandée : %1. Confirme pour exécuter.", "JS evaluation requested: %1. Confirm to run.").arg(expression);
         result["recoveryActions"] = QVariantList{QVariantMap{
             {"id", "webview2_evaluate_apply"},
-            {"label", "Évaluer le JavaScript"},
+            {"label", KE_TXT("Évaluer le JavaScript", "Evaluate JavaScript")},
             {"expression", expression},
             {"requiresConfirmation", true},
         }};
@@ -4679,7 +4680,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         return result;
     } else {
         result["actionStatus"] = "unsupported_tool";
-        result["actionError"] = QString("Outil Smart Search non supporté: %1").arg(tool);
+        result["actionError"] = KE_TXT("Outil Smart Search non supporté: %1", "Unsupported Smart Search tool: %1").arg(tool);
         stampIntent(&result);
         return result;
     }
@@ -4705,9 +4706,9 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         result["message"] = !actionMessage.isEmpty()
             ? actionMessage
             : (actionError.isEmpty()
-                   ? QString("L'action %1 a échoué sans détail. Vérifie le processus attaché et le type de valeur.")
+                   ? KE_TXT("L'action %1 a échoué sans détail. Vérifie le processus attaché et le type de valeur.", "Action %1 failed without details. Check the attached process and value type.")
                          .arg(tool)
-                   : QString("Je voulais agir, mais l'action a échoué : %1").arg(actionError));
+                   : KE_TXT("Je voulais agir, mais l'action a échoué : %1", "I tried to run the action, but it failed: %1").arg(actionError));
     } else if (tool == "exact_scan" || tool == "exact_scan_multi_type") {
         m_controller.m_smartSearchInitialValue = args.value("value").toString();
         m_controller.m_smartSearchValueType = args.value("valueType", "Int32").toString();
@@ -4719,14 +4720,14 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         m_controller.m_smartSearchActive = count > 0;
         result["targetValue"] = m_controller.m_smartSearchTargetValue;
         const QString prefix = intent.resetContext
-            ? QString("Je repars sur une nouvelle recherche. ")
+            ? KE_TXT("Je repars sur une nouvelle recherche. ", "I'm starting a new search. ")
             : QString();
         const QString typeNote = tool == "exact_scan_multi_type"
-            ? QString(" en Auto rapide")
+            ? KE_TXT(" en Auto rapide", " in fast Auto mode")
             : QString();
         if (count > 0) {
             result["workflowStatus"] = "awaiting_value_change";
-            result["message"] = prefix + QString("J'ai trouvé %1 candidats pour %2%3. Fais bouger la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire la liste.")
+            result["message"] = prefix + KE_TXT("J'ai trouvé %1 candidats pour %2%3. Fais bouger la valeur dans le jeu, puis donne-moi la nouvelle valeur pour réduire la liste.", "I've found %1 candidates for %2%3. Change the value in the game, then tell me the new value to narrow the list down.")
                                     .arg(count)
                                     .arg(m_controller.m_smartSearchInitialValue)
                                     .arg(typeNote);
@@ -4735,14 +4736,14 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             // repli plutot que redemander une variation sur une recherche
             // qui n'a encore trouve aucun candidat.
             result["workflowStatus"] = "no_candidate";
-            result["message"] = prefix + QString("Aucun candidat pour %1%2 en scan direct. Ce n'est pas forcement une impasse : ça peut être une valeur chiffrée/obfusquée, une valeur affichée en texte plutôt qu'en mémoire brute, ou une valeur qui varie déjà.")
+            result["message"] = prefix + KE_TXT("Aucun candidat pour %1%2 en scan direct. Ce n'est pas forcement une impasse : ça peut être une valeur chiffrée/obfusquée, une valeur affichée en texte plutôt qu'en mémoire brute, ou une valeur qui varie déjà.", "No candidates for %1%2 in a direct scan. This isn't necessarily a dead end: the value may be encrypted/obfuscated, displayed as text rather than stored as a raw number, or already changing.")
                                     .arg(m_controller.m_smartSearchInitialValue)
                                     .arg(typeNote);
             QVariantList recoveryActions;
-            recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", "Scan chiffré (XOR)"}, {"value", m_controller.m_smartSearchInitialValue}});
-            recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Chercher le texte affiché"}, {"value", m_controller.m_smartSearchInitialValue}});
-            recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", "Unknown (valeur inconnue)"}});
-            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+            recoveryActions.append(QVariantMap{{"id", "try_encrypted_scan"}, {"label", KE_TXT("Scan chiffré (XOR)", "Encrypted scan (XOR)")}, {"value", m_controller.m_smartSearchInitialValue}});
+            recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Chercher le texte affiché", "Find the displayed text")}, {"value", m_controller.m_smartSearchInitialValue}});
+            recoveryActions.append(QVariantMap{{"id", "try_unknown_changed"}, {"label", KE_TXT("Unknown (valeur inconnue)", "Unknown (unknown value)")}});
+            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", KE_TXT("Nouvelle recherche", "New search")}});
             result["recoveryActions"] = recoveryActions;
         }
     } else if (tool == "next_scan" || tool == "unknown_compare") {
@@ -4763,8 +4764,8 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             m_controller.m_pendingRecoveryAction = "write_target_value";
             result["workflowStatus"] = "awaiting_new_value";
             result["message"] = QString(
-                "Il reste %1 candidat(s), c'est peu — mais je ne sais pas encore quelle valeur écrire. Donne-moi la "
-                "valeur que tu veux mettre (juste le nombre, ex: 3000).")
+                KE_TXT("Il reste %1 candidat(s), c'est peu — mais je ne sais pas encore quelle valeur écrire. Donne-moi la "
+                "valeur que tu veux mettre (juste le nombre, ex: 3000).", "Only %1 candidate(s) remain, but I don't yet know what value to write. Tell me the value you want to set (just the number, e.g. 3000)."))
                 .arg(remaining);
         } else if (withinAutoWriteRange && !m_controller.m_smartSearchTargetValue.isEmpty()) {
             auto suggestions = suggestedWritesForCandidates(
@@ -4865,30 +4866,30 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             result["activeTargetCount"] = m_controller.m_chatMemoryTargets.size();
             result["previousTargetValue"] = m_controller.m_smartSearchInitialValue;
             result["writeHistory"] = writeHistoryToVariantList(m_controller.m_autoWriteValueHistory);
-            result["rollbackNote"] = "Tu peux annuler toutes les écritures via le bouton rollback batch dans l'assistant.";
+            result["rollbackNote"] = KE_TXT("Tu peux annuler toutes les écritures via le bouton rollback batch dans l'assistant.", "You can undo all writes with the assistant's batch rollback button.");
             if (writeSuggestions.isEmpty()) {
                 result["workflowStatus"] = "auto_write_partial_or_failed";
-                result["message"] = QString("Il reste %1 candidat(s), mais le filtre anti-bruit n'a gardé aucune adresse assez fiable pour une écriture automatique.")
+                result["message"] = KE_TXT("Il reste %1 candidat(s), mais le filtre anti-bruit n'a gardé aucune adresse assez fiable pour une écriture automatique.", "%1 candidate(s) remain, but the noise filter found no addresses reliable enough for an automatic write.")
                                         .arg(remaining);
             } else if (allSuggestionsNoisy) {
                 result["message"] = QString(
-                    "Il reste %1 candidat(s), mais %2 sont déjà apparues comme fiables sur une recherche différente et "
+                    KE_TXT("Il reste %1 candidat(s), mais %2 sont déjà apparues comme fiables sur une recherche différente et "
                     "sans rapport avant — probablement du bruit (un compteur interne, pas la vraie donnée). J'ai quand "
-                    "même écrit %3 faute de meilleure piste : vérifie particulièrement bien si ça a marché.")
+                    "même écrit %3 faute de meilleure piste : vérifie particulièrement bien si ça a marché.", "%1 candidate(s) remain, but %2 already looked reliable in an earlier, unrelated search — probably noise (an internal counter, not the actual data). I've still written %3 for lack of a better lead: check especially carefully whether it worked."))
                     .arg(remaining)
                     .arg(writeSuggestions.size())
                     .arg(m_controller.m_smartSearchTargetValue);
             } else {
                 result["message"] = allWritesOk
-                                    ? QString("Il reste %1 candidat(s). J'ai écrit automatiquement %2 sur les adresses finales fiables. Je garde ces adresses actives pour les prochaines modifications.")
+                                    ? KE_TXT("Il reste %1 candidat(s). J'ai écrit automatiquement %2 sur les adresses finales fiables. Je garde ces adresses actives pour les prochaines modifications.", "%1 candidate(s) remain. I've automatically written %2 to the final reliable addresses. I'll keep these addresses active for further changes.")
                                           .arg(remaining)
                                           .arg(m_controller.m_smartSearchTargetValue)
-                                    : QString("Il reste %1 candidat(s), mais au moins une écriture automatique a échoué.")
+                                    : KE_TXT("Il reste %1 candidat(s), mais au moins une écriture automatique a échoué.", "%1 candidate(s) remain, but at least one automatic write failed.")
                                           .arg(remaining);
             }
         } else if (remaining > 1) {
             result["workflowStatus"] = "needs_more_refinement";
-            result["message"] = QString("Il reste %1 candidats. Refais varier le score, puis indique-moi la nouvelle valeur.")
+            result["message"] = KE_TXT("Il reste %1 candidats. Refais varier le score, puis indique-moi la nouvelle valeur.", "%1 candidates remain. Change the score again, then tell me the new value.")
                                     .arg(remaining);
         } else {
             result["workflowStatus"] = "no_candidate";
@@ -4896,20 +4897,20 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             const QString observedValue = args.value("value").toString().trimmed();
             const QString retryValue = observedValue.isEmpty() ? m_controller.m_smartSearchInitialValue : observedValue;
             QVariantList recoveryActions;
-            recoveryActions.append(QVariantMap{{"id", "undo_reduction"}, {"label", "Restaurer les candidats"}});
-            recoveryActions.append(QVariantMap{{"id", "try_changed"}, {"label", "Essayer changed"}});
-            recoveryActions.append(QVariantMap{{"id", "try_increased"}, {"label", "Essayer increased"}});
-            recoveryActions.append(QVariantMap{{"id", "retry_float32"}, {"label", "Rechercher en Float32"}, {"value", retryValue}, {"target", m_controller.m_smartSearchTargetValue}});
-            recoveryActions.append(QVariantMap{{"id", "retry_int64"}, {"label", "Rechercher en Int64"}, {"value", retryValue}, {"target", m_controller.m_smartSearchTargetValue}});
-            recoveryActions.append(QVariantMap{{"id", "retry_int32_x100"}, {"label", "Rechercher valeur x100"}, {"value", retryValue}, {"target", m_controller.m_smartSearchTargetValue}});
+            recoveryActions.append(QVariantMap{{"id", "undo_reduction"}, {"label", KE_TXT("Restaurer les candidats", "Restore candidates")}});
+            recoveryActions.append(QVariantMap{{"id", "try_changed"}, {"label", KE_TXT("Essayer changed", "Try changed")}});
+            recoveryActions.append(QVariantMap{{"id", "try_increased"}, {"label", KE_TXT("Essayer increased", "Try increased")}});
+            recoveryActions.append(QVariantMap{{"id", "retry_float32"}, {"label", KE_TXT("Rechercher en Float32", "Search as Float32")}, {"value", retryValue}, {"target", m_controller.m_smartSearchTargetValue}});
+            recoveryActions.append(QVariantMap{{"id", "retry_int64"}, {"label", KE_TXT("Rechercher en Int64", "Search as Int64")}, {"value", retryValue}, {"target", m_controller.m_smartSearchTargetValue}});
+            recoveryActions.append(QVariantMap{{"id", "retry_int32_x100"}, {"label", KE_TXT("Rechercher valeur x100", "Search for value x100")}, {"value", retryValue}, {"target", m_controller.m_smartSearchTargetValue}});
             recoveryActions.append(QVariantMap{{"id", "try_unknown_increased"}, {"label", "Unknown + increased"}});
-            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", "Nouvelle recherche"}});
+            recoveryActions.append(QVariantMap{{"id", "new_search"}, {"label", KE_TXT("Nouvelle recherche", "New search")}});
             result["diagnostic"] = diagnostic;
             result["observedValue"] = retryValue;
             result["recoveryActions"] = recoveryActions;
             result["message"] = diagnostic.isEmpty()
-                ? QString("Aucun candidat restant. Restaure les candidats précédents, puis essaie changed/increased ou une autre représentation.")
-                : QString("Aucun candidat restant. %1").arg(diagnostic);
+                ? KE_TXT("Aucun candidat restant. Restaure les candidats précédents, puis essaie changed/increased ou une autre représentation.", "No candidates remain. Restore the previous candidates, then try changed/increased or another representation.")
+                : KE_TXT("Aucun candidat restant. %1", "No candidates remain. %1").arg(diagnostic);
         }
     }
 
@@ -4918,7 +4919,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
         && result.value("error").toString().trimmed().isEmpty()
         && result.value("actionStatus").toString().trimmed().isEmpty()) {
         result["actionStatus"] = "needs_clarification";
-        result["message"] = "Je garde le contexte actuel. Donne-moi une valeur à chercher, une nouvelle valeur observée, ou une adresse mémoire à utiliser.";
+        result["message"] = KE_TXT("Je garde le contexte actuel. Donne-moi une valeur à chercher, une nouvelle valeur observée, ou une adresse mémoire à utiliser.", "I'll keep the current context. Give me a value to search for, a newly observed value, or a memory address to use.");
     }
 
     m_controller.appendSmartSearchDebug("smart_search_result", result);
