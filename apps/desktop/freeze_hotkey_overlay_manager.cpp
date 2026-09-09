@@ -2,6 +2,7 @@
 
 #include "debug/breakpoint_freeze.h"
 #include "logging/logger.h"
+#include "localization/localization.h"
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
 #include "scanner/scan_types.h"
@@ -99,7 +100,7 @@ QVariantMap FreezeHotkeyOverlayManager::setFreezeValue(const QString& addressHex
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -125,7 +126,7 @@ QVariantMap FreezeHotkeyOverlayManager::setFreezeValue(const QString& addressHex
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
 
@@ -137,11 +138,16 @@ QVariantMap FreezeHotkeyOverlayManager::setFreezeValue(const QString& addressHex
     }
 
     if (!m_hasAddressBeenWriteVerified(address)) {
-        result["warning"] = "Cette adresse n'a jamais été écrite avec succès avant ce freeze — "
+        result["warning"] = KE_TXT("Cette adresse n'a jamais été écrite avec succès avant ce freeze — "
                              "si c'est un candidat frais (jamais testé par une écriture simple), "
                              "certaines cibles réagissent mal à une réécriture continue non vérifiée "
                              "(jusqu'au crash observé sur une cible réelle). Teste une écriture simple "
-                             "et vérifie visuellement avant de figer, si possible.";
+                             "et vérifie visuellement avant de figer, si possible.",
+                             "This address has never been written successfully before this freeze. "
+                             "If it is a fresh candidate that has not been tested with a simple write yet, "
+                             "some targets react badly to unverified continuous rewrites "
+                             "(up to a crash observed on a real target). Try one simple write "
+                             "and check it visually before freezing, if possible.");
     }
 
     m_freeze.setEntry(address, type, killcore::scanValueToBytes(scanValue), killcore::FreezeMode::Polling);
@@ -179,13 +185,13 @@ QVariantMap FreezeHotkeyOverlayManager::registerGlobalHotkey(const QString& comb
     result["combo"] = comboText;
 
     if (!m_hotkeys) {
-        result["error"] = "Gestionnaire de hotkeys indisponible.";
+        result["error"] = KE_TXT("Gestionnaire de hotkeys indisponible.", "Hotkey manager unavailable.");
         return result;
     }
 
     const killcore::HotkeyCombo combo = killcore::HotkeyCombo::fromString(comboText);
     if (combo.keyCode == 0) {
-        result["error"] = "Combinaison invalide. Exemple: Ctrl+Alt+F1.";
+        result["error"] = KE_TXT("Combinaison invalide. Exemple: Ctrl+Alt+F1.", "Invalid combination. Example: Ctrl+Alt+F1.");
         return result;
     }
 
@@ -207,7 +213,7 @@ QVariantMap FreezeHotkeyOverlayManager::registerGlobalHotkey(const QString& comb
 
     const int id = m_hotkeys->registerHotkey(combo, action);
     if (id < 0) {
-        result["error"] = "RegisterHotKey a échoué. La combinaison est peut-être déjà utilisée.";
+        result["error"] = KE_TXT("RegisterHotKey a échoué. La combinaison est peut-être déjà utilisée.", "RegisterHotKey failed. The combination may already be in use.");
         return result;
     }
 
@@ -225,7 +231,7 @@ QVariantMap FreezeHotkeyOverlayManager::unregisterGlobalHotkey(int id) {
     result["success"] = m_hotkeys && m_hotkeys->unregisterHotkey(id);
     result["id"] = id;
     if (!result.value("success").toBool()) {
-        result["error"] = "Hotkey introuvable.";
+        result["error"] = KE_TXT("Hotkey introuvable.", "Hotkey not found.");
     }
     m_appendScanTelemetry("global_hotkey_unregistered", result);
     return result;
@@ -277,7 +283,7 @@ QVariantMap FreezeHotkeyOverlayManager::setTrainerOverlayVisible(bool visible, c
                 "QLabel { color: #c0caf5; font-family: 'Segoe UI'; font-size: 12px; }");
             auto* layout = new QVBoxLayout(overlay);
             layout->setContentsMargins(12, 10, 12, 10);
-            auto* label = new QLabel("KillEngine Trainer\nAucune feature active.", overlay);
+            auto* label = new QLabel(KE_TXT("KillEngine Trainer\nAucune feature active.", "KillEngine Trainer\nNo active features."), overlay);
             label->setTextFormat(Qt::PlainText);
             label->setWordWrap(true);
             layout->addWidget(label);
@@ -303,7 +309,7 @@ QVariantMap FreezeHotkeyOverlayManager::updateTrainerOverlay(const QVariantMap& 
     QVariantMap result;
     result["success"] = false;
     if (!m_trainerOverlay || !m_trainerOverlayLabel) {
-        result["error"] = "Overlay Trainer non initialisé.";
+        result["error"] = KE_TXT("Overlay Trainer non initialisé.", "Trainer overlay is not initialized.");
         return result;
     }
 
@@ -318,7 +324,7 @@ QVariantMap FreezeHotkeyOverlayManager::updateTrainerOverlay(const QVariantMap& 
             .arg(enabled, feature.value("name").toString(), feature.value("status").toString());
     }
     if (features.isEmpty()) {
-        lines << "Aucune feature Trainer.";
+        lines << KE_TXT("Aucune feature Trainer.", "No Trainer features.");
     }
     m_trainerOverlayLabel->setText(lines.join('\n'));
     result["success"] = true;
@@ -367,13 +373,15 @@ void FreezeHotkeyOverlayManager::applyFreezeTick() {
             info["totalDriftTicks"] = entry.totalDriftTicks;
             info["totalTicks"] = entry.totalTicks;
             info["holdRatePercent"] = holdRatePercent;
-            info["message"] = QString(
+            info["message"] = KE_TXT(
                 "Le freeze sur 0x%1 ne tient pas : la valeur repart avant chaque réécriture depuis %2 ticks d'affilée "
-                "(tenue mesurée %3%). La cible réécrit probablement plus vite que l'intervalle de polling actuel.")
+                "(tenue mesurée %3%). La cible réécrit probablement plus vite que l'intervalle de polling actuel.",
+                "The freeze on 0x%1 is not holding: the value changes back before each rewrite for %2 ticks in a row "
+                "(measured hold rate %3%). The target is probably rewriting faster than the current polling interval.")
                 .arg(addressHex)
                 .arg(entry.consecutiveDriftTicks)
                 .arg(QString::number(holdRatePercent, 'f', 0));
-            info["suggestion"] = "Passe en Freeze BP (bloque l'écriture à la source) ou lance Écrit par pour trouver l'instruction qui réécrit.";
+            info["suggestion"] = KE_TXT("Passe en Freeze BP (bloque l'écriture à la source) ou lance Écrit par pour trouver l'instruction qui réécrit.", "Switch to Freeze BP (blocks the write at the source) or run Find What Writes to locate the rewriting instruction.");
 
             m_appendScanTelemetry("freeze_poll_instability", info);
             m_freezeInstabilityDetected(info);

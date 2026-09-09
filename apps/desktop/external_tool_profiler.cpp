@@ -1,6 +1,7 @@
 #include "external_tool_profiler.h"
 
 #include "memory/memory_map.h"
+#include "localization/localization.h"
 #include "memory/memory_reader.h"
 #include "process/process_enumerator.h"
 
@@ -73,11 +74,11 @@ QVariantMap ExternalToolProfiler::captureCheckpointInternal(const QString& label
 
     const QString trimmedLabel = label.trimmed();
     if (trimmedLabel.isEmpty()) {
-        result["error"] = "Label de checkpoint requis.";
+        result["error"] = KE_TXT("Label de checkpoint requis.", "Checkpoint label required.");
         return result;
     }
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -109,7 +110,7 @@ QVariantMap ExternalToolProfiler::captureCheckpointInternal(const QString& label
             }
         }
         if (!hasFilter) {
-            result["error"] = QString("Module '%1' introuvable dans la liste courante — aucun filtre appliqué, capture élargie à tout le process.").arg(moduleFilter);
+            result["error"] = KE_TXT("Module '%1' introuvable dans la liste courante — aucun filtre appliqué, capture élargie à tout le process.", "Module '%1' not found in the current list. No filter was applied; capture expanded to the whole process.").arg(moduleFilter);
         }
     }
 
@@ -257,7 +258,7 @@ QVariantMap ExternalToolProfiler::getProfilerDiff(const QString& labelA, const Q
     result["success"] = false;
 
     if (!m_checkpoints.contains(labelA) || !m_checkpoints.contains(labelB)) {
-        result["error"] = "Les deux labels doivent correspondre à des checkpoints déjà capturés.";
+        result["error"] = KE_TXT("Les deux labels doivent correspondre à des checkpoints déjà capturés.", "Both labels must refer to checkpoints that were already captured.");
         return result;
     }
 
@@ -399,7 +400,7 @@ QVariantMap ExternalToolProfiler::recordProfilerTimelineStep(const QString& step
     if (trimmedStep.isEmpty()) {
         QVariantMap result;
         result["success"] = false;
-        result["error"] = "Nom d'étape timeline requis.";
+        result["error"] = KE_TXT("Nom d'étape timeline requis.", "Timeline step name required.");
         return result;
     }
 
