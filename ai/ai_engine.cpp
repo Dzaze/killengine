@@ -191,7 +191,8 @@ AddressToolMatch matchModuleExactScanTool(const QString& query) {
         args["targetValue"] = numbers.at(1);
     }
     return {"exact_scan_module", args,
-        "Je limite le scan exact au module/DLL indiqué au lieu de scanner tout le processus."};
+        KE_TXT("Je limite le scan exact au module/DLL indiqué au lieu de scanner tout le processus.",
+               "I'm limiting the exact scan to the specified module/DLL instead of scanning the whole process.")};
 }
 
 QVariantMap makeModuleSourcePivotResponse(const QString& stateName) {
@@ -240,7 +241,8 @@ OffMemoryToolMatch matchOffMemoryTool(const QString& q) {
     if (q.contains("localsettings") || q.contains("local settings") || q.contains("settings.dat")
         || q.contains("ruche registre") || q.contains("registre uwp") || q.contains("registry hive")) {
         return {"inspect_local_settings",
-            "J'inspecte en lecture seule la ruche LocalSettings/settings.dat du package UWP attache."};
+            KE_TXT("J'inspecte en lecture seule la ruche LocalSettings/settings.dat du package UWP attache.",
+                   "I'm inspecting the attached UWP package's LocalSettings/settings.dat hive, read-only.")};
     }
 
     // Sans chemin de fichier deja connu, "surveiller" n'est pas actionnable
@@ -249,7 +251,8 @@ OffMemoryToolMatch matchOffMemoryTool(const QString& q) {
     if (q.contains("watch fichier") || q.contains("surveille fichier") || q.contains("surveiller fichier")
         || q.contains("surveillance fichier") || q.contains("watch file") || q.contains("file watch")) {
         return {"discover_save_files",
-            "Je cherche d'abord les fichiers de sauvegarde disponibles -- tu pourras ensuite me demander de surveiller l'un d'eux."};
+            KE_TXT("Je cherche d'abord les fichiers de sauvegarde disponibles -- tu pourras ensuite me demander de surveiller l'un d'eux.",
+                   "I'm first looking for the available save files -- you can then ask me to watch one of them.")};
     }
 
     if (q.contains("fichier de sauvegarde") || q.contains("fichiers de sauvegarde")
@@ -257,7 +260,8 @@ OffMemoryToolMatch matchOffMemoryTool(const QString& q) {
         || q.contains("dans un fichier") || q.contains("save file") || q.contains("savefile")
         || q.contains("localstate")) {
         return {"discover_save_files",
-            "Je cherche les fichiers de sauvegarde/etat du processus attache sur le disque."};
+            KE_TXT("Je cherche les fichiers de sauvegarde/etat du processus attache sur le disque.",
+                   "I'm looking for the attached process's save/state files on disk.")};
     }
 
     return {};
@@ -565,17 +569,19 @@ TrainerToolMatch matchTrainerTool(const QString& query) {
     if (wantsApply) {
         return {"trainer_apply_request",
             {{"id", firstDecimalOutsideHex(q)}, {"all", q.contains("all") || q.contains("tout")}},
-            "Activation Trainer demandee: je prepare une confirmation UI, sans appeler directement le RiskGate."};
+            KE_TXT("Activation Trainer demandee: je prepare une confirmation UI, sans appeler directement le RiskGate.",
+                   "Trainer activation requested: I'm preparing a UI confirmation, without calling the RiskGate directly.")};
     }
     if (wantsRestore) {
         return {"trainer_restore_request",
             {{"id", firstDecimalOutsideHex(q)}, {"all", q.contains("all") || q.contains("tout")}},
-            "Restauration Trainer demandee: je prepare une confirmation UI, sans appeler directement le RiskGate."};
+            KE_TXT("Restauration Trainer demandee: je prepare une confirmation UI, sans appeler directement le RiskGate.",
+                   "Trainer restore requested: I'm preparing a UI confirmation, without calling the RiskGate directly.")};
     }
     if (wantsDelete) {
         return {"trainer_delete_feature",
             {{"id", firstDecimalOutsideHex(q)}},
-            "Suppression d'une feature Trainer demandee."};
+            KE_TXT("Suppression d'une feature Trainer demandee.", "Trainer feature deletion requested.")};
     }
     if (wantsCreate) {
         const QString address = firstHexAddressIn(query);
@@ -587,15 +593,18 @@ TrainerToolMatch matchTrainerTool(const QString& query) {
         args["valueType"] = q.contains("float") ? QString("Float32") : QString("Int32");
         args["name"] = "Assistant Trainer write";
         return {"trainer_create_write", args,
-            "Creation d'une feature Trainer write demandee depuis une adresse et une valeur explicites."};
+            KE_TXT("Creation d'une feature Trainer write demandee depuis une adresse et une valeur explicites.",
+                   "Trainer write feature creation requested from an explicit address and value.")};
     }
     if (wantsList) {
         return {"trainer_list_features", {},
-            "Je liste les features Trainer locales via le pont UI lecture seule."};
+            KE_TXT("Je liste les features Trainer locales via le pont UI lecture seule.",
+                   "I'm listing the local Trainer features via the read-only UI bridge.")};
     }
 
     return {"trainer_list_features", {},
-        "Demande Trainer generale: je commence par lister l'etat actuel des features."};
+        KE_TXT("Demande Trainer generale: je commence par lister l'etat actuel des features.",
+               "General Trainer request: I'm starting by listing the current state of the features.")};
 }
 
 struct FieldStabilityToolMatch {
@@ -623,8 +632,10 @@ FieldStabilityToolMatch matchFieldStabilityTool(const QString& query) {
     QVariantMap args;
     args["address"] = address;
     return {"analyze_field_stability", args,
-        "J'observe passivement les écritures sur cette adresse (aucune écriture de ma part) pour juger si "
-        "elle ressemble à un champ affiché recalculé ou à une source événementielle."};
+        KE_TXT("J'observe passivement les écritures sur cette adresse (aucune écriture de ma part) pour juger si "
+               "elle ressemble à un champ affiché recalculé ou à une source événementielle.",
+               "I'm passively observing the writes to this address (no writes of my own) to judge whether "
+               "it looks like a recomputed display field or an event-driven source.")};
 }
 
 struct WebView2ToolMatch {
@@ -683,7 +694,7 @@ WebView2ToolMatch matchWebView2Tool(const QString& query, const QVariantMap& con
 
     if (q.contains("status") || q.contains("statut") || q.contains("etat") || q.contains("état")) {
         return {"getWebView2InspectorStatus", {},
-            "Je verifie l'etat courant de l'inspecteur WebView2/CDP."};
+            KE_TXT("Je verifie l'etat courant de l'inspecteur WebView2/CDP.", "I'm checking the current state of the WebView2/CDP inspector.")};
     }
 
     const int browserProcessId = webView2PidFromQueryOrContext(query, context);
@@ -692,52 +703,58 @@ WebView2ToolMatch matchWebView2Tool(const QString& query, const QVariantMap& con
         || q.contains("target") || q.contains("targets") || q.contains("/msedge")
         || q.contains("json")) {
         return {"listWebView2CdpTargets", pidArgs,
-            "Je liste d'abord les targets CDP WebView2 disponibles avant toute connexion."};
+            KE_TXT("Je liste d'abord les targets CDP WebView2 disponibles avant toute connexion.",
+                   "I'm first listing the available WebView2 CDP targets before connecting.")};
     }
 
     if (q.contains("disconnect") || q.contains("deconnect") || q.contains("déconnect")) {
         return {"disconnectWebView2Inspector", {},
-            "Je deconnecte l'inspecteur WebView2/CDP courant."};
+            KE_TXT("Je deconnecte l'inspecteur WebView2/CDP courant.", "I'm disconnecting the current WebView2/CDP inspector.")};
     }
 
     if (q.contains("connect") || q.contains("attache") || q.contains("attach")
         || q.contains("branche")) {
         if (browserProcessId <= 0 && !q.contains("websocketdebuggerurl")) {
             return {"listWebView2CdpTargets", pidArgs,
-                "Avant de connecter WebView2, je liste les targets CDP disponibles pour choisir le bon PID/target."};
+                KE_TXT("Avant de connecter WebView2, je liste les targets CDP disponibles pour choisir le bon PID/target.",
+                       "Before connecting to WebView2, I'm listing the available CDP targets to pick the right PID/target.")};
         }
         return {"connectWebView2Inspector", pidArgs,
-            "Je prepare la connexion a une target WebView2/CDP ; cette action passe par le RiskGate."};
+            KE_TXT("Je prepare la connexion a une target WebView2/CDP ; cette action passe par le RiskGate.",
+                   "I'm preparing the connection to a WebView2/CDP target; this action goes through the RiskGate.")};
     }
 
     if (q.contains("sonde") || q.contains("sonder") || q.contains("reconnaissance")
         || q.contains("globales") || q.contains("quelles fonctions") || q.contains("quelles variables")
         || q.contains("qu'est-ce qui est disponible") || q.contains("quoi evaluer") || q.contains("quoi évaluer")) {
         return {"probeWebView2GlobalScope", {},
-            "Je sonde le scope JS global de la target connectee pour voir ce qui est disponible avant de deviner du JS a l'aveugle."};
+            KE_TXT("Je sonde le scope JS global de la target connectee pour voir ce qui est disponible avant de deviner du JS a l'aveugle.",
+                   "I'm probing the connected target's global JS scope to see what's available before guessing at JS blindly.")};
     }
 
     const QString expression = javascriptExpressionFromQuery(query);
     if (!expression.isEmpty()) {
         return {"evaluateWebView2JavaScript", {{"expression", expression}},
-            "J'evalue le JavaScript demande dans la target WebView2 connectee ; cette action passe par le RiskGate."};
+            KE_TXT("J'evalue le JavaScript demande dans la target WebView2 connectee ; cette action passe par le RiskGate.",
+                   "I'm evaluating the requested JavaScript in the connected WebView2 target; this action goes through the RiskGate.")};
     }
 
     if ((q.contains("valeur") || q.contains("value")) && !decimalNumbersFromQuery(query).isEmpty()) {
         return {"findWebView2DisplayedValues", {{"value", decimalNumbersFromQuery(query).first()}},
-            "Je cherche cette valeur affichee dans le DOM WebView2 connecte."};
+            KE_TXT("Je cherche cette valeur affichee dans le DOM WebView2 connecte.", "I'm searching for this displayed value in the connected WebView2 DOM.")};
     }
 
     if (q.contains("texte") || q.contains("text") || q.contains("dom")) {
         const QString text = firstQuotedText(query);
         if (!text.isEmpty()) {
             return {"findWebView2DisplayedText", {{"text", text}},
-                "Je cherche ce texte dans le DOM WebView2 connecte."};
+                KE_TXT("Je cherche ce texte dans le DOM WebView2 connecte.", "I'm searching for this text in the connected WebView2 DOM.")};
         }
     }
 
     return {"listWebView2CdpTargets", pidArgs,
-        "Demande WebView2/CDP detectee : je commence par lister les targets disponibles."};
+        KE_TXT("Demande WebView2/CDP detectee : je commence par lister les targets disponibles.",
+               "WebView2/CDP request detected: I'm starting by listing the available targets.")};
 }
 
 struct AutoReportToolMatch {
@@ -763,7 +780,8 @@ AutoReportToolMatch matchAutoReportTool(const QString& query) {
         return {};
     }
     return {"get_auto_report",
-        "Je résume le contexte, la stratégie recommandée et les événements récents (lecture seule)."};
+        KE_TXT("Je résume le contexte, la stratégie recommandée et les événements récents (lecture seule).",
+               "I'm summarizing the context, the recommended strategy, and recent events (read-only).")};
 }
 
 struct UiSourcesToolMatch {
@@ -795,7 +813,8 @@ UiSourcesToolMatch matchUiSourcesTool(const QString& query) {
         args["address"] = address;
     }
     return {"analyze_ui_sources", args,
-        "Je cherche les sources numériques probables près de la dernière string UI localisée (lecture seule)."};
+        KE_TXT("Je cherche les sources numériques probables près de la dernière string UI localisée (lecture seule).",
+               "I'm looking for probable numeric sources near the last located UI string (read-only).")};
 }
 
 // PHASE 140 : generate_aob/suggest_patch/disassemble_backward -- les 3 restants
@@ -810,7 +829,7 @@ AddressToolMatch matchGenerateAobTool(const QString& query) {
     if (!address.isEmpty()) {
         args["address"] = address;
     }
-    return {"generate_aob", args, "Je génère une signature AOB pour cette instruction (lecture seule)."};
+    return {"generate_aob", args, KE_TXT("Je génère une signature AOB pour cette instruction (lecture seule).", "I'm generating an AOB signature for this instruction (read-only).")};
 }
 
 AddressToolMatch matchSuggestPatchTool(const QString& query) {
@@ -823,7 +842,8 @@ AddressToolMatch matchSuggestPatchTool(const QString& query) {
         args["address"] = address;
     }
     return {"suggest_patch", args,
-        "Je suggère des patchs de code possibles pour cette instruction, sans en appliquer aucun."};
+        KE_TXT("Je suggère des patchs de code possibles pour cette instruction, sans en appliquer aucun.",
+               "I'm suggesting possible code patches for this instruction, without applying any of them.")};
 }
 
 AddressToolMatch matchDisassembleBackwardTool(const QString& query) {
@@ -836,7 +856,8 @@ AddressToolMatch matchDisassembleBackwardTool(const QString& query) {
         args["address"] = address;
     }
     return {"disassemble_backward", args,
-        "Je désassemble en arrière depuis cette instruction pour repérer les champs sources candidats (lecture seule)."};
+        KE_TXT("Je désassemble en arrière depuis cette instruction pour repérer les champs sources candidats (lecture seule).",
+               "I'm disassembling backward from this instruction to spot candidate source fields (read-only).")};
 }
 
 // PHASE 140 : find_what_writes/test_candidate_fields -- contrairement aux 3
@@ -1195,7 +1216,7 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
         if (topic == "freeze_flickers") {
             if (const auto stabilityMatch = matchFieldStabilityTool(query); !stabilityMatch.tool.isEmpty()) {
                 QVariantMap result = makeToolCall(stabilityMatch.tool, stabilityMatch.args,
-                    "D'après le playbook d'enquête (freeze qui clignote) : " + stabilityMatch.rationale);
+                    KE_TXT("D'après le playbook d'enquête (freeze qui clignote) : ", "From the investigation playbook (flickering freeze): ") + stabilityMatch.rationale);
                 result["aiBackend"] = "deterministic_investigation_playbook_autochain";
                 result["investigationTopic"] = topic;
                 return result;
@@ -1203,7 +1224,7 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
         } else if (topic == "save_file_or_uwp") {
             if (const auto offMemoryMatch = matchOffMemoryTool(q); !offMemoryMatch.tool.isEmpty()) {
                 QVariantMap result = makeToolCall(offMemoryMatch.tool, {},
-                    "D'après le playbook d'enquête (valeur en sauvegarde/UWP) : " + offMemoryMatch.rationale);
+                    KE_TXT("D'après le playbook d'enquête (valeur en sauvegarde/UWP) : ", "From the investigation playbook (value in a save file/UWP): ") + offMemoryMatch.rationale);
                 result["aiBackend"] = "deterministic_investigation_playbook_autochain";
                 result["investigationTopic"] = topic;
                 return result;
@@ -1223,19 +1244,22 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
         }
         if (wantsModuleExplorationWithoutValue(q) && decimalNumbersFromQuery(query).isEmpty()) {
             QVariantMap result = makeToolCall("list_process_modules", {},
-                "Tu demandes une cible de gameplay dans les DLL/modules sans valeur affichée exploitable : je liste d'abord les modules chargés, puis il faudra donner l'XP visible ou passer par Trace UI string/Changed Pages.");
+                KE_TXT("Tu demandes une cible de gameplay dans les DLL/modules sans valeur affichée exploitable : je liste d'abord les modules chargés, puis il faudra donner l'XP visible ou passer par Trace UI string/Changed Pages.",
+                       "You're asking for a gameplay target in the DLLs/modules without a usable displayed value: I'm first listing the loaded modules, then you'll need to give the visible XP or go through Trace UI string/Changed Pages."));
             result["aiBackend"] = "deterministic_module_listing_fastpath";
             return result;
         }
         if (context.value("scanActive", false).toBool() && wantsModuleSourcePivot(q)) {
             QVariantMap result = makeToolCall("list_process_modules", {},
-                "Je liste les modules/DLL charges pour identifier le module applicatif avant de poursuivre vers AOB/desassemblage ou Trace UI string/Changed Pages.");
+                KE_TXT("Je liste les modules/DLL charges pour identifier le module applicatif avant de poursuivre vers AOB/desassemblage ou Trace UI string/Changed Pages.",
+                       "I'm listing the loaded modules/DLLs to identify the application module before moving on to AOB/disassembly or Trace UI string/Changed Pages."));
             result["aiBackend"] = "deterministic_module_listing_fastpath";
             return result;
         }
         if (wantsProcessModuleListing(q)) {
             QVariantMap result = makeToolCall("list_process_modules", {},
-                "Je liste les modules/DLL charges par le processus attache (lecture seule).");
+                KE_TXT("Je liste les modules/DLL charges par le processus attache (lecture seule).",
+                       "I'm listing the modules/DLLs loaded by the attached process (read-only)."));
             result["aiBackend"] = "deterministic_module_listing_fastpath";
             return result;
         }
@@ -1413,14 +1437,14 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
     if (q.contains("unknown") || q.contains("inconnue")) {
         if (q.contains("capture") || q.contains("initial")) {
             m_stateMachine.setState(AIState::WaitingForUserChange);
-            return makeToolCall("unknown_capture", {}, "Capture initiale pour valeur inconnue.");
+            return makeToolCall("unknown_capture", {}, KE_TXT("Capture initiale pour valeur inconnue.", "Initial capture for an unknown value."));
         }
 
         QString mode = "changed";
         if (q.contains("augment") || q.contains("increased")) mode = "increased";
         if (q.contains("diminu") || q.contains("decreased")) mode = "decreased";
         if (q.contains("pareil") || q.contains("unchanged")) mode = "unchanged";
-        return makeToolCall("unknown_compare", {{"mode", mode}, {"valueType", inferValueType(query)}}, "Comparaison unknown initial value.");
+        return makeToolCall("unknown_compare", {{"mode", mode}, {"valueType", inferValueType(query)}}, KE_TXT("Comparaison unknown initial value.", "Unknown initial value comparison."));
     }
 
     if (q.contains("next") || q.contains("changed") || q.contains("change") ||
@@ -1433,7 +1457,7 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
         if (q.contains("decreased") || q.contains("diminu")) mode = "decreased";
         if (q.contains("unchanged") || q.contains("inchang")) mode = "unchanged";
         m_stateMachine.setState(AIState::Refining);
-        return makeToolCall("next_scan", {{"mode", mode}, {"value", firstNumber(query)}}, "Réduction des candidats.");
+        return makeToolCall("next_scan", {{"mode", mode}, {"value", firstNumber(query)}}, KE_TXT("Réduction des candidats.", "Reducing the candidates."));
     }
 
     if ((q.contains("freeze") || q.contains("geler")) && !hasNegatedFreezeInstruction(q)) {
@@ -1442,7 +1466,7 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
             {"valueType", inferValueType(query)},
             {"value", firstNumber(query)},
             {"enabled", true},
-        }, "Freeze demandé par l'utilisateur.");
+        }, KE_TXT("Freeze demandé par l'utilisateur.", "Freeze requested by the user."));
     }
 
     // Demande explicite du kernel avant le check d'ecriture generique
@@ -1454,7 +1478,7 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
             {"address", firstHexAddress(query)},
             {"valueType", inferValueType(query)},
             {"value", firstNumber(query)},
-        }, "Écriture kernel demandée explicitement par l'utilisateur.");
+        }, KE_TXT("Écriture kernel demandée explicitement par l'utilisateur.", "Kernel write explicitly requested by the user."));
     }
 
     // Speedhack : placé avant les checks génériques ci-dessous pour la même
@@ -1470,10 +1494,10 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
         const bool wantsFast = q.contains("accélér") || q.contains("acceler") || q.contains("speed up") || q.contains("speedup");
         const bool wantsSpeedGeneric = q.contains("vitesse") || q.contains("speed");
         if (wantsSpeedOff) {
-            return makeToolCall("speedhack_set", {{"mode", "off"}}, "Désactivation du speedhack demandée.");
+            return makeToolCall("speedhack_set", {{"mode", "off"}}, KE_TXT("Désactivation du speedhack demandée.", "Speedhack deactivation requested."));
         }
         if (wantsPause) {
-            return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", 0.0}}, "Pause du temps demandée (speedhack).");
+            return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", 0.0}}, KE_TXT("Pause du temps demandée (speedhack).", "Time pause requested (speedhack)."));
         }
         if (wantsSlow || wantsFast || wantsSpeedGeneric) {
             double factor = wantsSlow ? 0.5 : 2.0;
@@ -1481,7 +1505,7 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
             const double parsed = firstNumber(query).toDouble(&parsedOk);
             if (parsedOk && parsed > 0.0) factor = parsed;
             return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", factor}},
-                wantsSlow ? "Ralentissement demandé (speedhack)." : "Accélération demandée (speedhack).");
+                wantsSlow ? KE_TXT("Ralentissement demandé (speedhack).", "Slowdown requested (speedhack).") : KE_TXT("Accélération demandée (speedhack).", "Speed-up requested (speedhack)."));
         }
     }
 
@@ -1502,54 +1526,54 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
                 || q.contains("block network") || q.contains("cut network")
                 || q.contains("block the network"));
         if (wantsNetworkOff) {
-            return makeToolCall("block_process_network", {{"mode", "off"}}, "Rétablissement du réseau demandé.");
+            return makeToolCall("block_process_network", {{"mode", "off"}}, KE_TXT("Rétablissement du réseau demandé.", "Network restoration requested."));
         }
         if (wantsNetworkOn) {
-            return makeToolCall("block_process_network", {{"mode", "on"}}, "Coupure réseau demandée par l'utilisateur.");
+            return makeToolCall("block_process_network", {{"mode", "on"}}, KE_TXT("Coupure réseau demandée par l'utilisateur.", "Network cut requested by the user."));
         }
     }
 
     // Réseau — outils de diagnostic (lecture seule, exécutés directement)
     if (q.contains("connexion") || q.contains("connection") || q.contains("tcp") || q.contains("udp") || q.contains("network connection")) {
-        return makeToolCall("get_process_network_connections", {}, "Liste des connexions réseau demandée.");
+        return makeToolCall("get_process_network_connections", {}, KE_TXT("Liste des connexions réseau demandée.", "Network connections list requested."));
     }
     if (q.contains("module réseau") || q.contains("network module") || q.contains("dll réseau") || q.contains("network dll") || q.contains("wininet") || q.contains("winhttp") || q.contains("ws2_32")) {
-        return makeToolCall("get_process_network_modules", {}, "Liste des modules réseau demandée.");
+        return makeToolCall("get_process_network_modules", {}, KE_TXT("Liste des modules réseau demandée.", "Network modules list requested."));
     }
 
     // Réseau — Proxy HTTP
     if (q.contains("proxy http") || q.contains("http proxy") || q.contains("intercept") || q.contains("requete http") || q.contains("http request")) {
         if (q.contains("stop") || q.contains("arrête") || q.contains("arrete") || q.contains("coupe")) {
-            return makeToolCall("stop_http_proxy", {}, "Arrêt du proxy HTTP demandé.");
+            return makeToolCall("stop_http_proxy", {}, KE_TXT("Arrêt du proxy HTTP demandé.", "HTTP proxy stop requested."));
         }
         if (q.contains("start") || q.contains("démarre") || q.contains("demarre") || q.contains("active") || q.contains("lance")) {
             QVariantMap args;
             args["port"] = 8080;
             args["interceptHttps"] = q.contains("https");
-            return makeToolCall("start_http_proxy", args, "Démarrage du proxy HTTP demandé.");
+            return makeToolCall("start_http_proxy", args, KE_TXT("Démarrage du proxy HTTP demandé.", "HTTP proxy start requested."));
         }
         if (q.contains("liste") || q.contains("list") || q.contains("voir") || q.contains("affiche")) {
-            return makeToolCall("get_http_proxy_requests", {}, "Liste des requêtes interceptées demandée.");
+            return makeToolCall("get_http_proxy_requests", {}, KE_TXT("Liste des requêtes interceptées demandée.", "Intercepted requests list requested."));
         }
         if (q.contains("modif") || q.contains("change") || q.contains("edit")) {
-            return makeToolCall("modify_http_request", {{"requestId", ""}, {"newBody", ""}}, "Modification de requête HTTP demandée (préciser requestId et body).");
+            return makeToolCall("modify_http_request", {{"requestId", ""}, {"newBody", ""}}, KE_TXT("Modification de requête HTTP demandée (préciser requestId et body).", "HTTP request modification requested (specify requestId and body)."));
         }
     }
 
     // Réseau — Spoof DNS
     if (q.contains("spoof dns") || q.contains("dns spoof") || q.contains("redirige dns") || q.contains("redirect dns") || q.contains("hosts file")) {
         if (q.contains("retir") || q.contains("restor") || q.contains("supprim") || q.contains("remove")) {
-            return makeToolCall("restore_dns", {{"domain", ""}}, "Restauration DNS demandée (préciser le domaine).");
+            return makeToolCall("restore_dns", {{"domain", ""}}, KE_TXT("Restauration DNS demandée (préciser le domaine).", "DNS restore requested (specify the domain)."));
         }
-        return makeToolCall("spoof_dns", {{"domain", ""}, {"targetIp", "127.0.0.1"}}, "Spoof DNS demandé (préciser le domaine et l'IP cible).");
+        return makeToolCall("spoof_dns", {{"domain", ""}, {"targetIp", "127.0.0.1"}}, KE_TXT("Spoof DNS demandé (préciser le domaine et l'IP cible).", "DNS spoof requested (specify the domain and target IP)."));
     }
 
     // Réseau — Lag switch
     if (q.contains("lag switch") || q.contains("lagswitch") || q.contains("retard") || q.contains("delay network") || q.contains("slow network") || q.contains("network lag")) {
         if (q.contains("stop") || q.contains("arrête") || q.contains("arrete") || q.contains("désactive") || q.contains("desactive")) {
-            return makeToolCall("set_lag_switch", {{"enabled", false}, {"delayMs", 0}}, "Désactivation du lag switch demandée.");
+            return makeToolCall("set_lag_switch", {{"enabled", false}, {"delayMs", 0}}, KE_TXT("Désactivation du lag switch demandée.", "Lag switch deactivation requested."));
         }
-        return makeToolCall("set_lag_switch", {{"enabled", true}, {"delayMs", 1000}}, "Activation du lag switch demandée (délai par défaut 1000ms).");
+        return makeToolCall("set_lag_switch", {{"enabled", true}, {"delayMs", 1000}}, KE_TXT("Activation du lag switch demandée (délai par défaut 1000ms).", "Lag switch activation requested (default delay 1000ms)."));
     }
 
     if (q.contains("write") || q.contains("écri") || q.contains("mettre")) {
@@ -1557,7 +1581,7 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
             {"address", firstHexAddress(query)},
             {"valueType", inferValueType(query)},
             {"value", firstNumber(query)},
-        }, "Écriture mémoire demandée.");
+        }, KE_TXT("Écriture mémoire demandée.", "Memory write requested."));
     }
 
     const QString value = firstNumber(query);
@@ -1631,7 +1655,8 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     }
     if (wantsModuleExplorationWithoutValue(q) && numbers.isEmpty()) {
         return makeToolCall("list_process_modules", {},
-            "Tu demandes une cible de gameplay dans les DLL/modules sans valeur affichée exploitable : je liste d'abord les modules chargés, puis il faudra donner l'XP visible ou passer par Trace UI string/Changed Pages.");
+            KE_TXT("Tu demandes une cible de gameplay dans les DLL/modules sans valeur affichée exploitable : je liste d'abord les modules chargés, puis il faudra donner l'XP visible ou passer par Trace UI string/Changed Pages.",
+                   "You're asking for a gameplay target in the DLLs/modules without a usable displayed value: I'm first listing the loaded modules, then you'll need to give the visible XP or go through Trace UI string/Changed Pages."));
     }
     if (const auto webView2Match = matchWebView2Tool(query, context); !webView2Match.tool.isEmpty()) {
         return makeToolCall(webView2Match.tool, webView2Match.args, webView2Match.rationale);
@@ -1668,7 +1693,8 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             return makeToolCall("finish_changed_pages_diff", {
                 {"previousValue", numbers.at(0)},
                 {"currentValue", numbers.at(1)},
-            }, "Mode Inspecteur: je compare les pages modifiees entre l'ancienne et la nouvelle valeur affichee.");
+            }, KE_TXT("Mode Inspecteur: je compare les pages modifiees entre l'ancienne et la nouvelle valeur affichee.",
+                      "Inspector mode: I'm comparing the modified pages between the old and new displayed value."));
         }
 
         if (q.contains("fenetre") || q.contains("fenêtre") || q.contains("window") || q.contains("uwp") || q.contains("store")) {
@@ -1678,11 +1704,13 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
                 args["includeAllVisible"] = true;
             }
             return makeToolCall("read_window_text", args,
-                "Mode Inspecteur: je verifie la fenetre visible pour synchroniser l'observation.");
+                KE_TXT("Mode Inspecteur: je verifie la fenetre visible pour synchroniser l'observation.",
+                       "Inspector mode: I'm checking the visible window to synchronize the observation."));
         }
 
         return makeToolCall("start_changed_pages_diff", {},
-            "Mode Inspecteur: je capture un snapshot lecture seule avant la prochaine variation.");
+            KE_TXT("Mode Inspecteur: je capture un snapshot lecture seule avant la prochaine variation.",
+                   "Inspector mode: I'm capturing a read-only snapshot before the next change."));
     }
 
     if (scanActive && wantsModuleSourcePivot(q)) {
@@ -1692,21 +1720,23 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     // Recherche active + nouvelle valeur observee => reduction plutot que nouveau scan.
     if (scanActive && !value.isEmpty()) {
         m_stateMachine.setState(AIState::Refining);
-        return makeToolCall("next_scan", {{"mode", "exact"}, {"value", value}}, "Une recherche est deja active: je reduis les candidats avec la nouvelle valeur observee.");
+        return makeToolCall("next_scan", {{"mode", "exact"}, {"value", value}}, KE_TXT("Une recherche est deja active: je reduis les candidats avec la nouvelle valeur observee.", "A search is already active: I'm narrowing down the candidates with the newly observed value."));
     }
 
     // Recherche active + variation decrite sans valeur => next_scan increased/decreased/changed.
     if (scanActive && value.isEmpty() && describesVariation) {
         m_stateMachine.setState(AIState::Refining);
         return makeToolCall("next_scan", {{"mode", variationMode(q)}},
-            "Variation decrite pendant une recherche active: je reduis les candidats par comparaison.");
+            KE_TXT("Variation decrite pendant une recherche active: je reduis les candidats par comparaison.",
+                   "Variation described during an active search: I'm narrowing down the candidates by comparison."));
     }
 
     // Snapshot unknown capture + variation decrite => unknown_compare.
     if (unknownSnapshotActive && value.isEmpty() && describesVariation) {
         m_stateMachine.setState(AIState::Refining);
         return makeToolCall("unknown_compare", {{"mode", variationMode(q)}, {"valueType", "Auto"}},
-            "Snapshot unknown actif: je compare avec la variation decrite.");
+            KE_TXT("Snapshot unknown actif: je compare avec la variation decrite.",
+                   "Unknown snapshot active: I'm comparing against the described variation."));
     }
 
     // Intentions speciales valorisees avant le scan brut.
@@ -1716,7 +1746,7 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             {"valueType", inferValueType(query)},
             {"value", value},
             {"enabled", true},
-        }, "Freeze demande par l'utilisateur.");
+        }, KE_TXT("Freeze demande par l'utilisateur.", "Freeze requested by the user."));
     }
     const bool wantsKernel = q.contains("kernel") || q.contains("noyau");
     if (wantsKernel && (q.contains("write") || q.contains("mettre")) && !value.isEmpty()) {
@@ -1724,7 +1754,7 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             {"address", firstHexAddress(query)},
             {"valueType", inferValueType(query)},
             {"value", value},
-        }, "Ecriture kernel demandee explicitement par l'utilisateur.");
+        }, KE_TXT("Ecriture kernel demandee explicitement par l'utilisateur.", "Kernel write explicitly requested by the user."));
     }
     // Speedhack : place avant les checks generiques ci-dessous, meme raison
     // que wantsKernel plus haut.
@@ -1738,10 +1768,10 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         const bool wantsFast = q.contains("accélér") || q.contains("acceler") || q.contains("speed up") || q.contains("speedup");
         const bool wantsSpeedGeneric = q.contains("vitesse") || q.contains("speed");
         if (wantsSpeedOff) {
-            return makeToolCall("speedhack_set", {{"mode", "off"}}, "Desactivation du speedhack demandee.");
+            return makeToolCall("speedhack_set", {{"mode", "off"}}, KE_TXT("Desactivation du speedhack demandee.", "Speedhack deactivation requested."));
         }
         if (wantsPause) {
-            return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", 0.0}}, "Pause du temps demandee (speedhack).");
+            return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", 0.0}}, KE_TXT("Pause du temps demandee (speedhack).", "Time pause requested (speedhack)."));
         }
         if (wantsSlow || wantsFast || wantsSpeedGeneric) {
             double factor = wantsSlow ? 0.5 : 2.0;
@@ -1749,7 +1779,7 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             const double parsed = value.toDouble(&parsedOk);
             if (parsedOk && parsed > 0.0) factor = parsed;
             return makeToolCall("speedhack_set", {{"mode", "set"}, {"factor", factor}},
-                wantsSlow ? "Ralentissement demande (speedhack)." : "Acceleration demandee (speedhack).");
+                wantsSlow ? KE_TXT("Ralentissement demande (speedhack).", "Slowdown requested (speedhack).") : KE_TXT("Acceleration demandee (speedhack).", "Speed-up requested (speedhack)."));
         }
     }
     // PHASE 148 : block_process_network, meme raison que wantsKernel plus haut.
@@ -1765,51 +1795,51 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
                 || q.contains("block network") || q.contains("cut network")
                 || q.contains("block the network"));
         if (wantsNetworkOff) {
-            return makeToolCall("block_process_network", {{"mode", "off"}}, "Retablissement du reseau demande.");
+            return makeToolCall("block_process_network", {{"mode", "off"}}, KE_TXT("Retablissement du reseau demande.", "Network restoration requested."));
         }
         if (wantsNetworkOn) {
-            return makeToolCall("block_process_network", {{"mode", "on"}}, "Coupure reseau demandee par l'utilisateur.");
+            return makeToolCall("block_process_network", {{"mode", "on"}}, KE_TXT("Coupure reseau demandee par l'utilisateur.", "Network cut requested by the user."));
         }
     }
 
     // Réseau — outils de diagnostic (lecture seule)
     if (q.contains("connexion") || q.contains("connection") || q.contains("tcp") || q.contains("udp") || q.contains("network connection")) {
-        return makeToolCall("get_process_network_connections", {}, "Liste des connexions reseau demandee.");
+        return makeToolCall("get_process_network_connections", {}, KE_TXT("Liste des connexions reseau demandee.", "Network connections list requested."));
     }
     if (q.contains("module reseau") || q.contains("network module") || q.contains("dll reseau") || q.contains("network dll") || q.contains("wininet") || q.contains("winhttp") || q.contains("ws2_32")) {
-        return makeToolCall("get_process_network_modules", {}, "Liste des modules reseau demandee.");
+        return makeToolCall("get_process_network_modules", {}, KE_TXT("Liste des modules reseau demandee.", "Network modules list requested."));
     }
 
     // Réseau — Proxy HTTP
     if (q.contains("proxy http") || q.contains("http proxy") || q.contains("intercept") || q.contains("requete http") || q.contains("http request")) {
         if (q.contains("stop") || q.contains("arrete") || q.contains("coupe")) {
-            return makeToolCall("stop_http_proxy", {}, "Arret du proxy HTTP demande.");
+            return makeToolCall("stop_http_proxy", {}, KE_TXT("Arret du proxy HTTP demande.", "HTTP proxy stop requested."));
         }
         if (q.contains("start") || q.contains("demarre") || q.contains("active") || q.contains("lance")) {
             QVariantMap args;
             args["port"] = 8080;
             args["interceptHttps"] = q.contains("https");
-            return makeToolCall("start_http_proxy", args, "Demarrage du proxy HTTP demande.");
+            return makeToolCall("start_http_proxy", args, KE_TXT("Demarrage du proxy HTTP demande.", "HTTP proxy start requested."));
         }
         if (q.contains("liste") || q.contains("list") || q.contains("voir") || q.contains("affiche")) {
-            return makeToolCall("get_http_proxy_requests", {}, "Liste des requetes interceptees demandee.");
+            return makeToolCall("get_http_proxy_requests", {}, KE_TXT("Liste des requetes interceptees demandee.", "Intercepted requests list requested."));
         }
     }
 
     // Réseau — Spoof DNS
     if (q.contains("spoof dns") || q.contains("dns spoof") || q.contains("redirige dns") || q.contains("redirect dns") || q.contains("hosts file")) {
         if (q.contains("retir") || q.contains("restor") || q.contains("supprim") || q.contains("remove")) {
-            return makeToolCall("restore_dns", {{"domain", ""}}, "Restauration DNS demandee (preciser le domaine).");
+            return makeToolCall("restore_dns", {{"domain", ""}}, KE_TXT("Restauration DNS demandee (preciser le domaine).", "DNS restore requested (specify the domain)."));
         }
-        return makeToolCall("spoof_dns", {{"domain", ""}, {"targetIp", "127.0.0.1"}}, "Spoof DNS demande (preciser le domaine et l'IP cible).");
+        return makeToolCall("spoof_dns", {{"domain", ""}, {"targetIp", "127.0.0.1"}}, KE_TXT("Spoof DNS demande (preciser le domaine et l'IP cible).", "DNS spoof requested (specify the domain and target IP)."));
     }
 
     // Réseau — Lag switch
     if (q.contains("lag switch") || q.contains("lagswitch") || q.contains("retard") || q.contains("delay network") || q.contains("slow network") || q.contains("network lag")) {
         if (q.contains("stop") || q.contains("arrete") || q.contains("desactive")) {
-            return makeToolCall("set_lag_switch", {{"enabled", false}, {"delayMs", 0}}, "Desactivation du lag switch demandee.");
+            return makeToolCall("set_lag_switch", {{"enabled", false}, {"delayMs", 0}}, KE_TXT("Desactivation du lag switch demandee.", "Lag switch deactivation requested."));
         }
-        return makeToolCall("set_lag_switch", {{"enabled", true}, {"delayMs", 1000}}, "Activation du lag switch demandee (delai par defaut 1000ms).");
+        return makeToolCall("set_lag_switch", {{"enabled", true}, {"delayMs", 1000}}, KE_TXT("Activation du lag switch demandee (delai par defaut 1000ms).", "Lag switch activation requested (default delay 1000ms)."));
     }
 
     // PHASE 271 : Mode discret / Stealth mode - fast-paths explicites
@@ -1828,13 +1858,13 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
                 || ((q.contains("active") || q.contains("enable"))
                     && (q.contains("mode discret") || q.contains("stealth"))));
         if (wantsStealthOff) {
-            return makeToolCall("restore_stealth_mode", {}, "Désactivation du mode discret demandée.");
+            return makeToolCall("restore_stealth_mode", {}, KE_TXT("Désactivation du mode discret demandée.", "Stealth mode deactivation requested."));
         }
         if (wantsStealthOn) {
             QString profile = "default";
             if (q.contains("sc2") || q.contains("starcraft")) profile = "sc2";
             else if (q.contains("minimal")) profile = "minimal";
-            return makeToolCall("apply_stealth_mode", {{"profile", profile}}, "Activation du mode discret demandée.");
+            return makeToolCall("apply_stealth_mode", {{"profile", profile}}, KE_TXT("Activation du mode discret demandée.", "Stealth mode activation requested."));
         }
     }
     if ((q.contains("write") || q.contains("mettre")) && !value.isEmpty()) {
@@ -1842,7 +1872,7 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             {"address", firstHexAddress(query)},
             {"valueType", inferValueType(query)},
             {"value", value},
-        }, "Ecriture memoire demandee.");
+        }, KE_TXT("Ecriture memoire demandee.", "Memory write requested."));
     }
 
     // Ecriture de la cible sans nouvelle valeur + peu de candidats =>
@@ -1852,7 +1882,8 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         && value.isEmpty() && scanActive && candidateCount > 0 && candidateCount <= 10
         && !contextTargetValue.isEmpty()) {
         return makeToolCall("prepare_write_checkpoint", {{"value", contextTargetValue}},
-            "Peu de candidats et valeur cible connue: je prepare le checkpoint d'ecriture (sans ecrire).");
+            KE_TXT("Peu de candidats et valeur cible connue: je prepare le checkpoint d'ecriture (sans ecrire).",
+                   "Few candidates and a known target value: I'm preparing the write checkpoint (without writing)."));
     }
 
     // Signalement d'echec: proposer une alternative adaptee plutot que refaire pareil.
@@ -1882,16 +1913,16 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         || (q.contains("diminue") && value.isEmpty() && !scanActive)) {
         if (q.contains("capture") || q.contains("initial") || value.isEmpty()) {
             m_stateMachine.setState(AIState::WaitingForUserChange);
-            return makeToolCall("unknown_capture", {}, "Capture initiale pour valeur inconnue.");
+            return makeToolCall("unknown_capture", {}, KE_TXT("Capture initiale pour valeur inconnue.", "Initial capture for an unknown value."));
         }
         QString mode = "changed";
         if (q.contains("augment") || q.contains("increased")) mode = "increased";
         if (q.contains("diminu") || q.contains("decreased")) mode = "decreased";
-        return makeToolCall("unknown_compare", {{"mode", mode}, {"valueType", "Auto"}}, "Comparaison unknown initial value.");
+        return makeToolCall("unknown_compare", {{"mode", mode}, {"valueType", "Auto"}}, KE_TXT("Comparaison unknown initial value.", "Unknown initial value comparison."));
     }
     // Valeur affichee a l'ecran introuvable en numerique.
     if ((q.contains("affich") || q.contains("texte")) && !value.isEmpty()) {
-        return makeToolCall("trace_ui_string", {{"value", value}}, "Valeur affichee a l'ecran: je cherche la string UI puis ses sources.");
+        return makeToolCall("trace_ui_string", {{"value", value}}, KE_TXT("Valeur affichee a l'ecran: je cherche la string UI puis ses sources.", "Value displayed on screen: I'm searching for the UI string and then its sources."));
     }
     // Valeur potentiellement chiffree/obfusquee.
     if ((q.contains("chiffr") || q.contains("obfusqu") || q.contains("crypt") || q.contains("xor")) && !value.isEmpty()) {
@@ -1900,13 +1931,13 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         args["valueType"] = inferValueType(query);
         args["mode"] = "xor";
         args["keySearchBits"] = 16;
-        return makeToolCall("encrypted_scan", args, "Valeur possiblement chiffree: scan XOR/Add/Sub borne.");
+        return makeToolCall("encrypted_scan", args, KE_TXT("Valeur possiblement chiffree: scan XOR/Add/Sub borne.", "Possibly encrypted value: bounded XOR/Add/Sub scan."));
     }
 
     if (!value.isEmpty()) {
         if (scanActive && candidateCount > 0) {
             m_stateMachine.setState(AIState::Refining);
-            return makeToolCall("next_scan", {{"mode", "exact"}, {"value", value}}, "Recherche active avec candidats: reduction avec la nouvelle valeur.");
+            return makeToolCall("next_scan", {{"mode", "exact"}, {"value", value}}, KE_TXT("Recherche active avec candidats: reduction avec la nouvelle valeur.", "Active search with candidates: narrowing down with the new value."));
         }
         m_stateMachine.setState(AIState::FirstScanRunning);
         return makeToolCall("exact_scan", {{"value", value}, {"valueType", inferValueType(query)}}, KE_TXT("Premier scan exact depuis une valeur detectee.", "First exact scan from a detected value."));
