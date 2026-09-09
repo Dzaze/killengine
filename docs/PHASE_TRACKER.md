@@ -47,6 +47,12 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## Journal actif
 
+### Localisation du chat IA — L9/L10 récupérés et mergés (09/09/2026, Codex + Claude)
+
+**Suite immédiate de l'entrée ci-dessous.** Codex a terminé sa moitié du troisième round (`save_file_investigator.cpp` L9 + `kernel_driver_manager.cpp` L10, ~21 et ~19 chaînes) dans son worktree séparé, mais **a atteint sa limite d'usage avant de committer**. Claude a vérifié le travail (grep de contrôle : aucune chaîne FR nue restante hors `KE_TXT`, seuls les logs `KE_LOG_WARN()` internes restent en français, ce qui est correct — jamais affichés à l'utilisateur), buildé et testé dans le worktree (**468/468**), puis committé au nom de Codex (`0285496`) et mergé sans conflit sur `main` (fichiers disjoints des L8/L11b de Claude). Rebuild + **469/469 tests** sur `main` fusionné. Vérifié en live via le pipe d'automatisation : `discoverProcessSaveFiles`/`readMemoryKernel` sans processus attaché → `"No process attached."` (anglais) / `"Aucun processus attaché."` (français). Worktree et branche temporaires supprimés après merge.
+
+**Chantier de localisation du chat IA : L1 à L11b tous clos** (sauf L11 profil/pointer chains, à cribler, et L12 le reste). Voir `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` pour le détail.
+
 ### Localisation du chat IA — troisième round, L8/L11b clos (09/09/2026, Codex + Claude)
 
 **Suite de l'entrée ci-dessous.** Troisième round de travail parallèle : Codex sur **L9+L10** (`apps/desktop/save_file_investigator.cpp` + `apps/desktop/kernel_driver_manager.cpp`, worktree git séparé `../killengine-codex-l9l10`, leçon du round 1 appliquée à nouveau) pendant que Claude faisait **L8+L11b** (`apps/desktop/code_patch_manager.cpp` + `ai/investigation_notebook_planner.cpp`) dans le dossier principal — quatre fichiers disjoints, aucun risque de collision.
