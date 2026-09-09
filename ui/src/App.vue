@@ -25,6 +25,7 @@ const store = useAppStore()
 const { locale } = useI18n()
 
 const currentView = computed(() => {
+  if (store.activeView === 'assistant') return AssistantView
   if (store.activeView === 'process') return ProcessView
   if (store.activeView === 'investigation') return InvestigationView
   if (store.activeView === 'memory') return MemoryView
@@ -42,7 +43,7 @@ const currentView = computed(() => {
   if (store.activeView === 'lexicon') return LexiconView
   if (store.activeView === 'modules') return ModulesView
   if (store.activeView === 'settings') return SettingsView
-  return AssistantView
+  return ProcessView
 })
 
 // Sépare une éventuelle mise en garde "⚠ ..." de la fin du detail du risk-modal

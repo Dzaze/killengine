@@ -75,11 +75,11 @@ onUnmounted(() => {
 })
 
 // PHASE (08/09/2026, goulot d'etranglement) : amorce le serveur llama.cpp
-// local et son cache_prompt des l'ouverture du panneau Assistant, pas au
-// boot de l'app (l'init reste volontairement paresseuse cote backend, voir
-// ai/ai_engine.cpp) -- evite que le tout premier vrai message utilisateur
-// paie le cout de demarrage a froid (~90s au pire). Ignore si le backend
-// externe (Claude) est actif : rien a rechauffer localement dans ce cas.
+// local et son cache_prompt seulement quand l'utilisateur ouvre le panneau
+// Assistant. L'app demarre sur une vue legere, donc l'init IA reste
+// volontairement paresseuse cote backend (voir ai/ai_engine.cpp) sans faire
+// payer le cout de demarrage a froid a l'ouverture de KillEngine. Ignore si
+// le backend externe (Claude) est actif : rien a rechauffer localement dans ce cas.
 async function triggerLocalAiWarmup() {
   if (localAiWarmupRequested) return
   localAiWarmupRequested = true
@@ -94,8 +94,7 @@ async function triggerLocalAiWarmup() {
 }
 
 onMounted(() => {
-  // AssistantView est la vue par defaut (store.activeView initial = 'assistant',
-  // voir stores/app.ts) : elle monte AVANT que backend.connect() (QWebChannel,
+  // AssistantView peut etre ouverte avant que backend.connect() (QWebChannel,
   // lance depuis App.vue) ait fini -- backend.getController() jetterait donc
   // une exception silencieuse ici si on l'appelait tout de suite. On attend
   // l'evenement de connexion effective plutot que de deviner un delai.

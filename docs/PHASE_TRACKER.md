@@ -47,6 +47,14 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## Journal actif
 
+### UX/perf démarrage — vue initiale légère avant préchauffage IA local (09/09/2026, Codex)
+
+**Quoi** : `ui/src/stores/app.ts` démarre maintenant sur `activeView = 'process'` au lieu de `assistant`. `ui/src/App.vue` route explicitement `assistant` vers `AssistantView`, mais utilise `ProcessView` comme fallback sûr. `ui/src/views/AssistantView.vue` garde le warmup llama.cpp à l'ouverture réelle du panneau Assistant et ses commentaires décrivent le nouveau contrat.
+
+**Pourquoi** : retour propriétaire du 09/09/2026 — ouvrir KillEngine directement sur Assistant montait la vue Assistant au démarrage, donc déclenchait le préchauffage IA local via `warmupLocalAiModel()` dès la connexion WebChannel. Même si l'appel rend vite la main au JS, le warmup peut amorcer llama.cpp/cache_prompt et consommer CPU/disque pendant le démarrage. L'app s'ouvre désormais sur Processus, une vue légère et cohérente avec la première action utilisateur (attacher une cible), sans perdre le préchauffage utile quand Assistant est ouvert volontairement.
+
+**Comment vérifié** : `scripts/build.ps1` OK. `cd ui && npm run type-check` OK, `cd ui && npm run build` OK (avertissement Vite habituel sur la taille du chunk principal). Scan mojibake sur les fichiers touchés : rien. `scripts/check-line-endings.ps1` report-only : fichiers touchés en LF, cohérent avec leur état existant. `build/bin/killengine_unit_tests.exe` lancé : 461/469 passent, 8 échecs dans `AIEngineContextualFallbackTest` liés aux modifications non commitées préexistantes de `ai/ai_engine.cpp` / `apps/desktop/smart_search_manager.cpp` (chantier reconnaissance EN), indépendants de ce patch frontend — le runner C++ ne charge pas `ui/src`.
+
 ### Localisation du chat IA — L12 résiduel clos, chantier entièrement terminé (09/09/2026, Codex)
 
 **Suite de l'entrée ci-dessous.** Dernier round : Codex a recriblé les 4 fichiers restants de L12 (`settings_diagnostics_manager.cpp`, `automation_pipe_server.cpp`, `claude_backend_client.cpp`, `clr_inspector_bridge.cpp`) au lieu de prendre pour acquis leur classement "non visible chat" de l'audit initial (commit `05c0cd5`).

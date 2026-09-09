@@ -98,7 +98,7 @@ export interface WatchedAddress {
 
 export const useAppStore = defineStore('app', () => {
   // State
-  const activeView = ref<AppView>('assistant')
+  const activeView = ref<AppView>('process')
   // PHASE 120-B : etape Expert demandee par un bouton de recommandation
   // chat (recoveryActions), consommee une seule fois par ExpertView au
   // montage puis remise a null -- ne change jamais activeStep pour une
