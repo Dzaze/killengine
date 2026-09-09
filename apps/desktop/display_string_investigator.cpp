@@ -1,5 +1,7 @@
 #include "display_string_investigator.h"
 
+#include "localization/localization.h"
+
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
 #include "scanner/display_value_tracker.h"
@@ -158,7 +160,7 @@ QVariantMap UiStringInvestigator::scanUiStrings(const QString& value, const QVar
 
     const QString needleText = value.trimmed();
     if (needleText.isEmpty()) {
-        result["error"] = "Valeur texte vide.";
+        result["error"] = KE_TXT("Valeur texte vide.", "Empty text value.");
         m_appendScanTelemetry("ui_string_scan", {
             {"success", false},
             {"error", result.value("error")},
@@ -167,7 +169,7 @@ QVariantMap UiStringInvestigator::scanUiStrings(const QString& value, const QVar
         return result;
     }
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         m_appendScanTelemetry("ui_string_scan", {
             {"success", false},
             {"error", result.value("error")},
@@ -201,7 +203,7 @@ QVariantMap UiStringInvestigator::scanUiStrings(const QString& value, const QVar
         }
     }
     if (patterns.isEmpty()) {
-        result["error"] = "Aucun encodage texte sélectionné.";
+        result["error"] = KE_TXT("Aucun encodage texte sélectionné.", "No text encoding selected.");
         m_appendScanTelemetry("ui_string_scan", {
             {"success", false},
             {"error", result.value("error")},
@@ -351,7 +353,7 @@ QVariantMap UiStringInvestigator::trackUiStringCandidates(const QVariantList& ca
 
     const QString needleText = value.trimmed();
     if (needleText.isEmpty()) {
-        result["error"] = "Nouvelle valeur texte vide.";
+        result["error"] = KE_TXT("Nouvelle valeur texte vide.", "Empty new text value.");
         m_appendScanTelemetry("ui_string_track", {
             {"success", false},
             {"error", result.value("error")},
@@ -361,7 +363,7 @@ QVariantMap UiStringInvestigator::trackUiStringCandidates(const QVariantList& ca
         return result;
     }
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         m_appendScanTelemetry("ui_string_track", {
             {"success", false},
             {"error", result.value("error")},
@@ -517,7 +519,7 @@ QVariantMap UiStringInvestigator::analyzeUiStringSources(
 
     const QString rawValue = value.trimmed();
     if (rawValue.isEmpty()) {
-        result["error"] = "Valeur source vide.";
+        result["error"] = KE_TXT("Valeur source vide.", "Empty source value.");
         m_appendScanTelemetry("ui_string_sources_analyze", {
             {"success", false},
             {"error", result.value("error")},
@@ -526,7 +528,7 @@ QVariantMap UiStringInvestigator::analyzeUiStringSources(
         return result;
     }
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         m_appendScanTelemetry("ui_string_sources_analyze", {
             {"success", false},
             {"error", result.value("error")},
@@ -537,7 +539,7 @@ QVariantMap UiStringInvestigator::analyzeUiStringSources(
 
     uint64_t stringAddress = 0;
     if (!parseHexAddress(stringCandidate.value("address").toString(), &stringAddress)) {
-        result["error"] = "Adresse string invalide.";
+        result["error"] = KE_TXT("Adresse string invalide.", "Invalid string address.");
         m_appendScanTelemetry("ui_string_sources_analyze", {
             {"success", false},
             {"error", result.value("error")},
@@ -555,7 +557,7 @@ QVariantMap UiStringInvestigator::analyzeUiStringSources(
     const auto regions = killcore::MemoryMap::snapshot(m_handle);
     const killcore::MemoryRegion* region = findRegionContaining(regions, stringAddress);
     if (!region || !region->readable || region->guarded || region->size == 0) {
-        result["error"] = "Région de la string illisible.";
+        result["error"] = KE_TXT("Région de la string illisible.", "Unreadable string region.");
         m_appendScanTelemetry("ui_string_sources_analyze", {
             {"success", false},
             {"error", result.value("error")},
@@ -574,7 +576,7 @@ QVariantMap UiStringInvestigator::analyzeUiStringSources(
     const uint64_t requestedEnd = stringAddress + static_cast<uint64_t>(stringLength) + static_cast<uint64_t>(radius);
     const uint64_t windowEnd = std::min(regionEnd, requestedEnd);
     if (windowEnd <= windowStart) {
-        result["error"] = "Fenêtre d'analyse vide.";
+        result["error"] = KE_TXT("Fenêtre d'analyse vide.", "Empty analysis window.");
         m_appendScanTelemetry("ui_string_sources_analyze", {
             {"success", false},
             {"error", result.value("error")},
@@ -689,17 +691,17 @@ QVariantMap UiStringInvestigator::scanMemoryWindow(
 
     const QString rawValue = value.trimmed();
     if (rawValue.isEmpty()) {
-        result["error"] = "Valeur cible vide.";
+        result["error"] = KE_TXT("Valeur cible vide.", "Empty target value.");
         return result;
     }
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t anchorAddress = 0;
     if (!parseHexAddress(addressHex, &anchorAddress)) {
-        result["error"] = "Adresse ancre invalide.";
+        result["error"] = KE_TXT("Adresse ancre invalide.", "Invalid anchor address.");
         return result;
     }
 
@@ -711,7 +713,7 @@ QVariantMap UiStringInvestigator::scanMemoryWindow(
     const auto regions = killcore::MemoryMap::snapshot(m_handle);
     const killcore::MemoryRegion* region = findRegionContaining(regions, anchorAddress);
     if (!region || !region->readable || region->guarded || region->size == 0) {
-        result["error"] = "Région autour de l'adresse ancre illisible.";
+        result["error"] = KE_TXT("Région autour de l'adresse ancre illisible.", "Unreadable region around the anchor address.");
         return result;
     }
 
@@ -723,7 +725,7 @@ QVariantMap UiStringInvestigator::scanMemoryWindow(
     const uint64_t requestedEnd = anchorAddress + static_cast<uint64_t>(radius);
     const uint64_t windowEnd = std::min(regionEnd, requestedEnd);
     if (windowEnd <= windowStart) {
-        result["error"] = "Fenêtre d'analyse vide.";
+        result["error"] = KE_TXT("Fenêtre d'analyse vide.", "Empty analysis window.");
         return result;
     }
 
@@ -788,7 +790,7 @@ QVariantMap UiStringInvestigator::trackUiStringSources(const QVariantList& sourc
 
     const QString rawValue = value.trimmed();
     if (rawValue.isEmpty()) {
-        result["error"] = "Nouvelle valeur source vide.";
+        result["error"] = KE_TXT("Nouvelle valeur source vide.", "Empty new source value.");
         m_appendScanTelemetry("ui_string_sources_track", {
             {"success", false},
             {"error", result.value("error")},
@@ -798,7 +800,7 @@ QVariantMap UiStringInvestigator::trackUiStringSources(const QVariantList& sourc
         return result;
     }
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         m_appendScanTelemetry("ui_string_sources_track", {
             {"success", false},
             {"error", result.value("error")},
@@ -902,7 +904,7 @@ QVariantMap UiStringInvestigator::inspectUiStringOrigins(
     timer.start();
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         m_appendScanTelemetry("ui_string_origins_inspect", {
             {"success", false},
             {"error", result.value("error")},
@@ -911,7 +913,7 @@ QVariantMap UiStringInvestigator::inspectUiStringOrigins(
         return result;
     }
     if (stringCandidates.isEmpty()) {
-        result["error"] = "Aucune string à inspecter.";
+        result["error"] = KE_TXT("Aucune string à inspecter.", "No string to inspect.");
         m_appendScanTelemetry("ui_string_origins_inspect", {
             {"success", false},
             {"error", result.value("error")},
@@ -930,7 +932,7 @@ QVariantMap UiStringInvestigator::inspectUiStringOrigins(
         }
     }
     if (addresses.isEmpty()) {
-        result["error"] = "Aucune adresse string valide.";
+        result["error"] = KE_TXT("Aucune adresse string valide.", "No valid string address.");
         m_appendScanTelemetry("ui_string_origins_inspect", {
             {"success", false},
             {"error", result.value("error")},
@@ -1109,7 +1111,7 @@ QVariantMap UiStringInvestigator::startUiStringInvestigation(
     result["windows"] = 0;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -1166,7 +1168,7 @@ QVariantMap UiStringInvestigator::startUiStringInvestigation(
     }
 
     if (requests.isEmpty()) {
-        result["error"] = "Aucune string/source à observer.";
+        result["error"] = KE_TXT("Aucune string/source à observer.", "No string/source to observe.");
         return result;
     }
 
@@ -1275,7 +1277,7 @@ QVariantMap UiStringInvestigator::startUiStringInvestigation(
     result["probeUnreadable"] = probeUnreadable;
     result["unreadable"] = unreadable;
     result["radiusBytes"] = radius;
-    result["error"] = result.value("success").toBool() ? QString() : QString("Aucune fenêtre lisible capturée.");
+    result["error"] = result.value("success").toBool() ? QString() : QString(KE_TXT("Aucune fenêtre lisible capturée.", "No readable window captured."));
     m_appendScanTelemetry("ui_string_investigation_start", {
         {"success", result.value("success")},
         {"stringCandidates", stringCandidates.size()},
@@ -1303,12 +1305,12 @@ QVariantMap UiStringInvestigator::finishUiStringInvestigation(const QVariantMap&
     result["changes"] = changes;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     auto& investigationWindows = m_windows;
     if (investigationWindows.isEmpty()) {
-        result["error"] = "Aucune enquête live active.";
+        result["error"] = KE_TXT("Aucune enquête live active.", "No active live investigation.");
         return result;
     }
 
@@ -1499,7 +1501,7 @@ QVariantMap UiStringInvestigator::startChangedPagesDiff(const QVariantMap& optio
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -1584,7 +1586,7 @@ QVariantMap UiStringInvestigator::startChangedPagesDiff(const QVariantMap& optio
     result["privateOnly"] = privateOnly;
     result["includeImage"] = includeImage;
     result["writableOnly"] = writableOnly;
-    result["error"] = blocks.isEmpty() ? "Aucun bloc private/RW lisible capturé." : QString();
+    result["error"] = blocks.isEmpty() ? KE_TXT("Aucun bloc private/RW lisible capturé.", "No readable private/RW block captured.") : QString();
     m_appendScanTelemetry("changed_pages_diff_start", result);
     return result;
 }
@@ -1599,20 +1601,20 @@ QVariantMap UiStringInvestigator::finishChangedPagesDiff(
     result["hits"] = hits;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     auto& blocks = m_changedPagesDiffBlocks;
     if (blocks.isEmpty()) {
-        result["error"] = "Aucun diff de pages actif.";
+        result["error"] = KE_TXT("Aucun diff de pages actif.", "No active page diff.");
         return result;
     }
 
     const QString prev = previousValue.trimmed();
     const QString cur = currentValue.trimmed();
     if (prev.isEmpty() || cur.isEmpty()) {
-        result["error"] = "Valeurs précédente/actuelle requises.";
+        result["error"] = KE_TXT("Valeurs précédente/actuelle requises.", "Previous/current values required.");
         return result;
     }
 
@@ -1809,7 +1811,7 @@ QVariantMap UiStringInvestigator::startChangedPagesSession(const QVariantMap& op
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -1867,22 +1869,22 @@ QVariantMap UiStringInvestigator::applyChangedPagesRound(
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (!m_changedPagesSessionActive) {
-        result["error"] = "Aucune session changed-pages active.";
+        result["error"] = KE_TXT("Aucune session changed-pages active.", "No active changed-pages session.");
         return result;
     }
 
     const QString prev = previousValue.trimmed();
     const QString cur = currentValue.trimmed();
     if (prev.isEmpty() || cur.isEmpty()) {
-        result["error"] = "Valeurs précédente/actuelle requises.";
+        result["error"] = KE_TXT("Valeurs précédente/actuelle requises.", "Previous/current values required.");
         return result;
     }
     if (m_changedPagesDiffBlocks.isEmpty()) {
-        result["error"] = "Aucun bloc restant dans la session (pages devenues illisibles ou capture consommée). Relance startChangedPagesSession.";
+        result["error"] = KE_TXT("Aucun bloc restant dans la session (pages devenues illisibles ou capture consommée). Relance startChangedPagesSession.", "No block remaining in the session (pages became unreadable or the capture was consumed). Restart startChangedPagesSession.");
         return result;
     }
 

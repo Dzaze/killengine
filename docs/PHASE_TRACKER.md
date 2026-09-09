@@ -47,6 +47,10 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## Journal actif
 
+### Localisation du chat IA — L7 clos (09/09/2026, Claude)
+
+**Suite de l'entrée ci-dessous.** `apps/desktop/display_string_investigator.cpp` (Trace UI string, analyse des sources numériques, changed-pages diff) traduit FR/EN. Cette fois le premier balayage large a suffi — la double vérification (leçon de L6) n'a trouvé qu'une seule chaîne de plus à la deuxième passe. Build complet + **468/468 tests**. Vérifié en live via le pipe d'automatisation (`scanUiStrings` sans processus attaché → `"No process attached."`).
+
 ### Localisation du chat IA — L6 clos (09/09/2026, Claude)
 
 **Suite de l'entrée ci-dessous.** `apps/desktop/debug_feature_manager.cpp` (find_what_writes, page guard, breakpoints in-process/matériel, speedhack) traduit FR/EN.
