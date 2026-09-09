@@ -8,6 +8,7 @@ Historique détaillé : `docs/PHASE_TRACKER_HISTORY.md`
 Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
 Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
+Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## État courant
 
@@ -45,6 +46,25 @@ Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 - Sinon, aucune validation générique en attente : le chantier WebView2/CDP (WEBVIEW-A à F) est clos. UWP-STATE-1 est désormais validé en conditions réelles (03/09/2026, sur `Notepad.exe`) ; seule son application concrète à Solitaire XP reste explicitement ouverte (ligne ci-dessus).
 
 ## Journal actif
+
+### Message auto_resolve reformulé + chantier de localisation du chat IA documenté (08/09/2026, Claude)
+
+**Retour terrain propriétaire** en testant le fix de gel ci-dessous en conditions réelles : le message d'échec d'`auto_resolve` sans valeur numérique ("Aucune valeur numérique détectée.") sonnait comme un rejet sec plutôt que comme une clarification utile. Deux corrections :
+
+1. **`apps/desktop/smart_search_manager.cpp::startAutoResolve`** : le message reconnaît maintenant explicitement la demande de l'utilisateur — `"Je comprends que tu veux modifier « %1 », mais il me faut au moins la valeur actuelle affichée à l'écran pour démarrer (par exemple : « 500 vers 9999 »)."` au lieu de la phrase générique précédente.
+2. **Bug générique trouvé au passage** (même fichier, ~L4685-4692) : quand un outil échoue, le dispatch chat écrasait systématiquement le `message` convivial déjà préparé par l'outil (ex: celui ci-dessus) par un wrapper robotique `"Je voulais agir, mais l'action a échoué : %1"` construit sur le champ `error` brut. Corrigé pour préférer le `message` de l'outil quand il existe, ne retombant sur le wrapper générique que si l'outil n'en a pas fourni. Bénéficie potentiellement à TOUS les outils qui préparent déjà un message d'échec ciblé, pas seulement `auto_resolve`.
+
+**Découverte en creusant la demande du propriétaire** ("et en anglais aussi si l'utilisateur choisit le mode anglais") : **aucun message généré par le backend C++ n'est aujourd'hui localisable** — tout le texte affiché dans le chat est en dur en français, sans lien avec la langue choisie côté UI (qui a bien son propre système i18n, mais seulement pour les labels statiques des templates Vue). Décision du propriétaire : lancer le chantier de localisation complète. Scope documenté dans `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`.
+
+**Suite le même jour : chantier staffé, démarré, puis mis en pause pour replanification après une découverte d'ampleur.**
+- **L1 (fondation) livré et testé** : `core/localization/localization.{h,cpp}`, macro `KE_TXT(fr, en)` lisant `QSettings "ui/language"`. Bonus trouvé en testant : `tests/unit/test_main.cpp` ne configurait aucun `QCoreApplication`/org+app name, donc `QSettings()` ne pouvait jamais persister quoi que ce soit dans les tests (masqué jusqu'ici, les tests QSettings existants avaient toujours une variable d'env en filet de sécurité) — corrigé via un `::testing::Environment` global. 468/468 tests passent.
+- **`ai/ai_engine.cpp` (L3) partiellement traduit** : playbook d'enquête entier (struct `Entry` restructurée, 9 entrées × 7 champs), `recoveryActionsForTopic`, et toutes les affectations `message`/`rationale`/`error` directes.
+- **Ampleur réelle découverte bien plus grande que l'audit initial** : le premier audit (~960, basé sur les affectations `["message"] =` etc.) ratait un pattern massif — des chaînes françaises passées en **argument de fonction** plutôt qu'affectées (ex: `makeToolCall(tool, args, "rationale FR")`, **87 occurrences rien que dans `ai_engine.cpp`**). Deuxième audit (lignes contenant du texte français accentué, tous fichiers) : **~1234 lignes**, donc probablement **1200-2000+ chaînes réelles** sur l'ensemble du backend, pas ~960. `smart_search_manager.cpp` (le plus gros, 371 lignes détectées) n'a même pas encore été ouvert. `apps/desktop/claude_chat_manager.cpp` (98 lignes, backend Claude) était totalement absent du scope initial.
+- **Propriétaire consulté sur la suite** : décision de **mettre en pause pour replanifier** plutôt que de continuer à traduire à la main fichier par fichier vu l'ampleur. `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` mis à jour avec l'audit corrigé, le statut détaillé de ce qui est fait/pas fait, et une recommandation (prioriser par fréquence réelle d'apparition dans le chat plutôt que par ordre de fichier ; cribler chaque nouveau fichier pour un pattern type `makeToolCall` avant de s'engager).
+
+**Comment vérifié** : build complet + 468/468 tests unitaires après chaque étape (fix de message, L1, traduction partielle L3) — aucune régression, aucun test cassé par les changements de texte (aucun test n'asserte un texte exact modifié).
+
+**Reste ouvert** : `ai_engine.cpp` (~83 rationales `makeToolCall` restantes), tout `smart_search_manager.cpp` (L2, pas commencé), `claude_chat_manager.cpp` (L2b, pas dans le scope initial), et le reste des fichiers listés dans la roadmap. Chantier permanent à faible priorité désormais, façon `docs/REFACTOR_ROADMAP.md` — pas un blocage pour d'autres phases produit.
 
 ### Modèle local — 3 des 5 pistes du goulot d'étranglement fermées + warmup livré + bug de gel total trouvé ET corrigé (08/09/2026, Claude)
 

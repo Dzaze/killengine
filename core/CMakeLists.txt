@@ -17,6 +17,11 @@ target_link_libraries(killcore_logging PUBLIC Qt6::Core)
 # Les sous-modules seront ajoutés au fur et à mesure des phases
 # ---------------------------------------------------------------------------
 add_library(killcore STATIC
+    # PHASE (08/09/2026, docs/AI_CHAT_LOCALIZATION_ROADMAP.md, L1) —
+    # localisation legere du texte genere par le backend (chat/IA).
+    localization/localization.h
+    localization/localization.cpp
+
     # Process
     process/process_enumerator.cpp
     process/process_handle.cpp

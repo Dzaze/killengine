@@ -10,6 +10,7 @@ add_executable(killengine_unit_tests
     unit/test_ui_string_tracker.cpp
     unit/test_aob_scanner.cpp
     unit/test_logger.cpp
+    unit/test_localization.cpp
     unit/test_candidate_store.cpp
     unit/test_ai_tools.cpp
     unit/test_anthropic_tool_schema.cpp

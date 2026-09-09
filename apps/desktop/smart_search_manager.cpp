@@ -2203,8 +2203,14 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
 
     const QStringList numbers = numbersFromText(trimmed);
     if (numbers.isEmpty()) {
+        // PHASE (08/09/2026, retour terrain proprietaire) : reformule pour
+        // reconnaitre explicitement l'objectif de l'utilisateur (evite un
+        // message qui sonne comme un rejet sec type "action a echoue :
+        // Aucune valeur numerique detectee").
         result["error"] = "Aucune valeur numérique détectée.";
-        result["message"] = "J'ai besoin au minimum d'une valeur actuelle pour démarrer le plan.";
+        result["message"] = QString(
+            "Je comprends que tu veux modifier « %1 », mais il me faut au moins la valeur actuelle affichée à l'écran pour démarrer (par exemple : « 500 vers 9999 »).")
+            .arg(trimmed);
         return result;
     }
 
@@ -4684,12 +4690,24 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
 
     if (!actionResult.value("success").toBool()) {
         const QString actionError = actionResult.value("error").toString().trimmed();
+        // PHASE (08/09/2026) : certains outils (ex: startAutoResolve, voir
+        // "Aucune valeur numérique détectée.") préparent déjà un "message"
+        // convivial et actionnable ("j'ai besoin d'une valeur, exemple...")
+        // pour ce cas d'échec précis -- ce wrapper générique l'écrasait
+        // systématiquement par une reformulation robotique de l'erreur brute
+        // (retour terrain propriétaire : le message affiché à l'utilisateur
+        // sonnait comme "action a échoué : Aucune valeur numérique détectée"
+        // au lieu d'expliquer clairement ce qui manque). Priorité au message
+        // de l'outil quand il existe.
+        const QString actionMessage = actionResult.value("message").toString().trimmed();
         result["workflowStatus"] = "action_failed";
         result["error"] = actionError;
-        result["message"] = actionError.isEmpty()
-            ? QString("L'action %1 a échoué sans détail. Vérifie le processus attaché et le type de valeur.")
-                  .arg(tool)
-            : QString("Je voulais agir, mais l'action a échoué : %1").arg(actionError);
+        result["message"] = !actionMessage.isEmpty()
+            ? actionMessage
+            : (actionError.isEmpty()
+                   ? QString("L'action %1 a échoué sans détail. Vérifie le processus attaché et le type de valeur.")
+                         .arg(tool)
+                   : QString("Je voulais agir, mais l'action a échoué : %1").arg(actionError));
     } else if (tool == "exact_scan" || tool == "exact_scan_multi_type") {
         m_controller.m_smartSearchInitialValue = args.value("value").toString();
         m_controller.m_smartSearchValueType = args.value("valueType", "Int32").toString();

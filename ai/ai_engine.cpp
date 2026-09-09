@@ -2,6 +2,7 @@
 #include "investigation_notebook_planner.h"
 #include "intent_contract.h"
 #include "query_text_utils.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #include <QCoreApplication>
@@ -197,13 +198,16 @@ QVariantMap makeModuleSourcePivotResponse(const QString& stateName) {
     QVariantMap result;
     result["status"] = "needs_clarification";
     result["actionStatus"] = "not_executed";
-    result["message"] = "D'accord, on arrête de réduire en exact/increased : tu demandes un pivot vers les DLL/modules et la vraie source XP. "
-                        "Liste d'abord les modules du processus, repère le module applicatif Solitaire/WebView pertinent, puis utilise AOB/désassemblage ou Trace UI string/Changed Pages pour relier l'affichage XP à la source.";
+    result["message"] = KE_TXT(
+        "D'accord, on arrête de réduire en exact/increased : tu demandes un pivot vers les DLL/modules et la vraie source XP. "
+        "Liste d'abord les modules du processus, repère le module applicatif Solitaire/WebView pertinent, puis utilise AOB/désassemblage ou Trace UI string/Changed Pages pour relier l'affichage XP à la source.",
+        "Okay, stopping the exact/increased reduction: you're asking to pivot toward the DLLs/modules and the real XP source. "
+        "First list the process modules, spot the relevant Solitaire/WebView application module, then use AOB/disassembly or Trace UI string/Changed Pages to link the XP display to its source.");
     result["state"] = stateName;
     QVariantList recoveryActions;
-    recoveryActions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert"}, {"expertStep", "inspect"}});
-    recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}});
-    recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}});
+    recoveryActions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Ouvrir Expert", "Open Expert")}, {"expertStep", "inspect"}});
+    recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Trace UI string", "Trace UI string")}});
+    recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", KE_TXT("Changed Pages", "Changed Pages")}});
     result["recoveryActions"] = recoveryActions;
     return result;
 }
@@ -281,150 +285,226 @@ OffMemoryToolMatch matchOffMemoryTool(const QString& q) {
 QVariantList recoveryActionsForTopic(const QString& topic) {
     QVariantList actions;
     if (topic == "simple_visible_value") {
-        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert pour lancer le scan"}, {"expertStep", "find"}});
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Ouvrir Expert pour lancer le scan", "Open Expert to start the scan")}, {"expertStep", "find"}});
     } else if (topic == "displayed_value_not_found") {
-        actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Lancer Trace UI string"}});
+        actions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Lancer Trace UI string", "Launch Trace UI string")}});
     } else if (topic == "unstable_address") {
-        actions.append(QVariantMap{{"id", "open_pointer_scan"}, {"label", "Ouvrir Expert, section Pointeurs"}});
+        actions.append(QVariantMap{{"id", "open_pointer_scan"}, {"label", KE_TXT("Ouvrir Expert, section Pointeurs", "Open Expert, Pointers section")}});
     } else if (topic == "freeze_flickers") {
-        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert pour analyser la stabilité du champ"}, {"expertStep", "inspect"}});
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Ouvrir Expert pour analyser la stabilité du champ", "Open Expert to analyze field stability")}, {"expertStep", "inspect"}});
     } else if (topic == "code_patch_request") {
-        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert pour générer l'AOB"}, {"expertStep", "persist"}});
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Ouvrir Expert pour générer l'AOB", "Open Expert to generate the AOB")}, {"expertStep", "persist"}});
     } else if (topic == "what_writes_value") {
         actions.append(QVariantMap{
-            {"id", "open_expert"}, {"label", "Ouvrir Expert pour lancer Écrit par"},
+            {"id", "open_expert"}, {"label", KE_TXT("Ouvrir Expert pour lancer Écrit par", "Open Expert to launch What writes")},
             {"expertStep", "find"}, {"expertAnchor", "expert-anchor-find-what-writes"}});
     } else if (topic == "save_file_or_uwp") {
-        actions.append(QVariantMap{{"id", "open_expert"}, {"label", "Ouvrir Expert, section fichiers de sauvegarde"}, {"expertStep", "inspect"}});
+        actions.append(QVariantMap{{"id", "open_expert"}, {"label", KE_TXT("Ouvrir Expert, section fichiers de sauvegarde", "Open Expert, save files section")}, {"expertStep", "inspect"}});
     } else if (topic == "managed_runtime_pointer_chain") {
-        actions.append(QVariantMap{{"id", "open_clr_inspector"}, {"label", "Ouvrir CLR Inspector"}});
+        actions.append(QVariantMap{{"id", "open_clr_inspector"}, {"label", KE_TXT("Ouvrir CLR Inspector", "Open CLR Inspector")}});
     }
     return actions;
 }
 
 QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
+    // PHASE (08/09/2026, docs/AI_CHAT_LOCALIZATION_ROADMAP.md, L3) : chaque
+    // champ porte desormais une paire {fr, en} au lieu d'un seul const char*
+    // -- localizedText() choisit la bonne variante au moment de construire le
+    // message final (voir `pick` plus bas), sans toucher a la structure des
+    // 9 entrees (une par sujet reconnu + le fallback generique).
+    struct Text { const char* fr; const char* en; };
     struct Entry {
-        const char* title;
-        const char* hypotheses;
-        const char* tool;
-        const char* prerequisites;
-        const char* risk;
-        const char* nextAction;
-        const char* fallback;
+        Text title;
+        Text hypotheses;
+        Text tool;
+        Text prerequisites;
+        Text risk;
+        Text nextAction;
+        Text fallback;
     };
 
     Entry entry{
-        "Enquête guidée",
-        "Symptôme reconnu, mais il manque encore une cible actionnable.",
-        "Consulter le playbook d'enquête.",
-        "Décrire la valeur, l'adresse ou le contexte observé.",
-        "Aucun : cette réponse est strictement lecture seule.",
-        "Suivre le plan proposé avant toute action à risque.",
-        "Donner une valeur, une adresse ou une observation plus précise."
+        {"Enquête guidée", "Guided investigation"},
+        {"Symptôme reconnu, mais il manque encore une cible actionnable.",
+         "Symptom recognized, but an actionable target is still missing."},
+        {"Consulter le playbook d'enquête.", "Consult the investigation playbook."},
+        {"Décrire la valeur, l'adresse ou le contexte observé.",
+         "Describe the value, address, or context observed."},
+        {"Aucun : cette réponse est strictement lecture seule.",
+         "None: this response is strictly read-only."},
+        {"Suivre le plan proposé avant toute action à risque.",
+         "Follow the proposed plan before any risky action."},
+        {"Donner une valeur, une adresse ou une observation plus précise.",
+         "Provide a more precise value, address, or observation."}
     };
 
     if (topic == "simple_visible_value") {
         entry = {
-            "Valeur numérique simple visible",
-            "La valeur est peut-être stockée telle quelle en mémoire, sans obfuscation ni recalcul d'affichage.",
-            "Commencer par exact_scan, puis réduire avec next_scan quand la valeur change.",
-            "Processus attaché et valeur actuellement visible à l'écran.",
-            "Aucun pour le scan : lecture seule. Seule une écriture ou un freeze ultérieur demandera confirmation.",
-            "Donne la valeur affichée actuelle, puis fais-la changer pour réduire les candidats.",
-            "Si le scan exact ne converge pas, passer au chemin valeur affichée introuvable / Trace UI string."
+            {"Valeur numérique simple visible", "Simple visible numeric value"},
+            {"La valeur est peut-être stockée telle quelle en mémoire, sans obfuscation ni recalcul d'affichage.",
+             "The value may be stored as-is in memory, without obfuscation or display recomputation."},
+            {"Commencer par exact_scan, puis réduire avec next_scan quand la valeur change.",
+             "Start with exact_scan, then narrow down with next_scan when the value changes."},
+            {"Processus attaché et valeur actuellement visible à l'écran.",
+             "Process attached and value currently visible on screen."},
+            {"Aucun pour le scan : lecture seule. Seule une écriture ou un freeze ultérieur demandera confirmation.",
+             "None for scanning: read-only. Only a later write or freeze will require confirmation."},
+            {"Donne la valeur affichée actuelle, puis fais-la changer pour réduire les candidats.",
+             "Give the currently displayed value, then change it to narrow down the candidates."},
+            {"Si le scan exact ne converge pas, passer au chemin valeur affichée introuvable / Trace UI string.",
+             "If the exact scan doesn't converge, switch to the 'displayed value not found' path / Trace UI string."}
         };
     } else if (topic == "displayed_value_not_found") {
         entry = {
-            "Valeur affichée introuvable",
-            "La valeur peut être une string UI, une copie d'affichage, ou une représentation transformée.",
-            "Utiliser Trace UI string, puis analyser les sources numériques autour des strings suivies.",
-            "Valeur visible à l'écran sous forme de texte lisible.",
-            "Aucun pour Trace UI string / analyse des sources : lecture seule.",
-            "Confirme la valeur affichée exacte, puis observe son évolution avant toute écriture.",
-            "Si aucune source fiable n'apparaît, escalader vers 'qui écrit cette valeur' avec confirmation debugger."
+            {"Valeur affichée introuvable", "Displayed value not found"},
+            {"La valeur peut être une string UI, une copie d'affichage, ou une représentation transformée.",
+             "The value may be a UI string, a display copy, or a transformed representation."},
+            {"Utiliser Trace UI string, puis analyser les sources numériques autour des strings suivies.",
+             "Use Trace UI string, then analyze the numeric sources around the tracked strings."},
+            {"Valeur visible à l'écran sous forme de texte lisible.",
+             "Value visible on screen as readable text."},
+            {"Aucun pour Trace UI string / analyse des sources : lecture seule.",
+             "None for Trace UI string / source analysis: read-only."},
+            {"Confirme la valeur affichée exacte, puis observe son évolution avant toute écriture.",
+             "Confirm the exact displayed value, then observe how it changes before any write."},
+            {"Si aucune source fiable n'apparaît, escalader vers 'qui écrit cette valeur' avec confirmation debugger.",
+             "If no reliable source appears, escalate to 'what writes this value' with debugger confirmation."}
         };
     } else if (topic == "unstable_address") {
         entry = {
-            "Adresse instable au redémarrage",
-            "L'adresse absolue est probablement invalidée par l'ASLR ou par une réallocation d'objet.",
-            "Transformer la trouvaille en locator Trainer : AOB pour du code, pointer chain pour une donnée.",
-            "Adresse déjà validée comme correcte dans la session actuelle.",
-            "Aucun pour générer/chercher un locator ; ne pas promettre de stabilité si seul absolute fonctionne.",
-            "Stabilise l'adresse via AOB ou pointer chain avant d'en faire une feature Trainer durable.",
-            "Si rien n'est unique/stable, garder absolute en indiquant clairement que ça ne survivra probablement pas."
+            {"Adresse instable au redémarrage", "Address unstable across restarts"},
+            {"L'adresse absolue est probablement invalidée par l'ASLR ou par une réallocation d'objet.",
+             "The absolute address is probably invalidated by ASLR or an object reallocation."},
+            {"Transformer la trouvaille en locator Trainer : AOB pour du code, pointer chain pour une donnée.",
+             "Turn the finding into a Trainer locator: AOB for code, pointer chain for data."},
+            {"Adresse déjà validée comme correcte dans la session actuelle.",
+             "Address already validated as correct in the current session."},
+            {"Aucun pour générer/chercher un locator ; ne pas promettre de stabilité si seul absolute fonctionne.",
+             "None for generating/searching a locator; don't promise stability if only the absolute address works."},
+            {"Stabilise l'adresse via AOB ou pointer chain avant d'en faire une feature Trainer durable.",
+             "Stabilize the address via AOB or pointer chain before turning it into a lasting Trainer feature."},
+            {"Si rien n'est unique/stable, garder absolute en indiquant clairement que ça ne survivra probablement pas.",
+             "If nothing is unique/stable, keep the absolute address while clearly noting it likely won't survive."}
         };
     } else if (topic == "freeze_flickers") {
         entry = {
-            "Freeze qui clignote",
-            "La cible peut réécrire plus vite que le polling, ou l'adresse peut être un champ affiché dérivé.",
-            "Analyser la stabilité du champ avant d'envisager un freeze breakpoint matériel.",
-            "Adresse candidate déjà identifiée.",
-            "Analyse de stabilité : lecture seule. Freeze BP : debugger, confirmation obligatoire.",
-            "Vérifie d'abord si l'adresse est une vraie source ou seulement un affichage recalculé.",
-            "Si c'est un affichage dérivé, chercher l'origine de l'écriture plutôt que freezer cette copie."
+            {"Freeze qui clignote", "Flickering freeze"},
+            {"La cible peut réécrire plus vite que le polling, ou l'adresse peut être un champ affiché dérivé.",
+             "The target may rewrite faster than the polling rate, or the address may be a derived display field."},
+            {"Analyser la stabilité du champ avant d'envisager un freeze breakpoint matériel.",
+             "Analyze the field's stability before considering a hardware breakpoint freeze."},
+            {"Adresse candidate déjà identifiée.", "Candidate address already identified."},
+            {"Analyse de stabilité : lecture seule. Freeze BP : debugger, confirmation obligatoire.",
+             "Stability analysis: read-only. Freeze BP: debugger, confirmation required."},
+            {"Vérifie d'abord si l'adresse est une vraie source ou seulement un affichage recalculé.",
+             "First check whether the address is a real source or just a recomputed display."},
+            {"Si c'est un affichage dérivé, chercher l'origine de l'écriture plutôt que freezer cette copie.",
+             "If it's a derived display, look for the write's origin rather than freezing this copy."}
         };
     } else if (topic == "code_patch_request") {
         entry = {
-            "Patch de code demandé",
-            "L'objectif touche probablement une instruction machine plutôt qu'une simple donnée.",
-            "Si l'adresse vient d'un hit 'Écrit par' : désassembler en arrière D'ABORD (le RIP capturé pointe sur "
-            "l'instruction suivante, pas l'écriture elle-même — sémantique standard d'un breakpoint matériel), "
-            "PUIS générer une AOB sur la vraie instruction trouvée, puis suggérer un patch.",
-            "Adresse de code valide. Si elle vient d'un hit 'Écrit par' : c'est le RIP capturé, pas encore l'adresse "
-            "réelle de l'instruction à patcher — désassembler en arrière d'abord pour la retrouver.",
-            "Élevé pour l'application réelle : patch=confirmation humaine, jamais auto-exécuté depuis le chat.",
-            "Ne jamais générer d'AOB directement sur un RIP brut issu d'un hit 'Écrit par' : localise d'abord la "
-            "vraie instruction d'écriture, vérifie l'unicité de la signature, puis applique seulement depuis "
-            "Expert/Trainer après confirmation.",
-            "Si la signature est ambiguë ou bloquée par l'environnement, revenir à un write/freeze moins invasif."
+            {"Patch de code demandé", "Code patch requested"},
+            {"L'objectif touche probablement une instruction machine plutôt qu'une simple donnée.",
+             "The goal likely involves a machine instruction rather than a simple piece of data."},
+            {"Si l'adresse vient d'un hit 'Écrit par' : désassembler en arrière D'ABORD (le RIP capturé pointe sur "
+             "l'instruction suivante, pas l'écriture elle-même — sémantique standard d'un breakpoint matériel), "
+             "PUIS générer une AOB sur la vraie instruction trouvée, puis suggérer un patch.",
+             "If the address comes from a 'What writes' hit: disassemble backward FIRST (the captured RIP points to "
+             "the following instruction, not the write itself — standard hardware breakpoint semantics), THEN "
+             "generate an AOB on the actual instruction found, then suggest a patch."},
+            {"Adresse de code valide. Si elle vient d'un hit 'Écrit par' : c'est le RIP capturé, pas encore l'adresse "
+             "réelle de l'instruction à patcher — désassembler en arrière d'abord pour la retrouver.",
+             "Valid code address. If it comes from a 'What writes' hit: it's the captured RIP, not yet the actual "
+             "address of the instruction to patch — disassemble backward first to find it."},
+            {"Élevé pour l'application réelle : patch=confirmation humaine, jamais auto-exécuté depuis le chat.",
+             "High for actually applying it: patching requires human confirmation, never auto-executed from chat."},
+            {"Ne jamais générer d'AOB directement sur un RIP brut issu d'un hit 'Écrit par' : localise d'abord la "
+             "vraie instruction d'écriture, vérifie l'unicité de la signature, puis applique seulement depuis "
+             "Expert/Trainer après confirmation.",
+             "Never generate an AOB directly on a raw RIP from a 'What writes' hit: first locate the actual write "
+             "instruction, verify the signature is unique, then only apply it from Expert/Trainer after confirmation."},
+            {"Si la signature est ambiguë ou bloquée par l'environnement, revenir à un write/freeze moins invasif.",
+             "If the signature is ambiguous or blocked by the environment, fall back to a less invasive write/freeze."}
         };
     } else if (topic == "what_writes_value") {
         entry = {
-            "Comprendre qui écrit une valeur",
-            "Plusieurs sites de code peuvent écrire la même adresse ; il faut identifier la vraie source gameplay.",
-            "Utiliser 'Écrit par' / find_what_writes depuis l'UI Expert, avec confirmation.",
-            "Adresse stable déjà connue, pas un slot trop chaud ou générique. Si tu n'as pas encore d'adresse : "
-            "fais d'abord un scan classique (donne-moi la valeur affichée à l'écran) pour en trouver une et la "
-            "sélectionner comme candidat — 'Écrit par' ne peut rien capturer sans ça.",
-            "Debugger : peut perturber la cible, confirmation obligatoire.",
-            "Si tu as déjà une adresse : prépare-la, lance la capture confirmée, puis interagis avec le jeu pendant "
-            "la fenêtre. Sinon : commence par le scan décrit ci-dessus, reviens ensuite avec l'adresse trouvée.",
-            "Si aucun hit n'apparaît, élargir la fenêtre ou revérifier que l'adresse est bien stable."
+            {"Comprendre qui écrit une valeur", "Understand what writes a value"},
+            {"Plusieurs sites de code peuvent écrire la même adresse ; il faut identifier la vraie source gameplay.",
+             "Multiple code sites can write to the same address; the real gameplay source needs to be identified."},
+            {"Utiliser 'Écrit par' / find_what_writes depuis l'UI Expert, avec confirmation.",
+             "Use 'What writes' / find_what_writes from the Expert UI, with confirmation."},
+            {"Adresse stable déjà connue, pas un slot trop chaud ou générique. Si tu n'as pas encore d'adresse : "
+             "fais d'abord un scan classique (donne-moi la valeur affichée à l'écran) pour en trouver une et la "
+             "sélectionner comme candidat — 'Écrit par' ne peut rien capturer sans ça.",
+             "A stable address already known, not an overly hot or generic slot. If you don't have an address yet: "
+             "first run a regular scan (give me the value displayed on screen) to find one and select it as a "
+             "candidate — 'What writes' can't capture anything without that."},
+            {"Debugger : peut perturber la cible, confirmation obligatoire.",
+             "Debugger: can disturb the target, confirmation required."},
+            {"Si tu as déjà une adresse : prépare-la, lance la capture confirmée, puis interagis avec le jeu pendant "
+             "la fenêtre. Sinon : commence par le scan décrit ci-dessus, reviens ensuite avec l'adresse trouvée.",
+             "If you already have an address: prepare it, launch the confirmed capture, then interact with the game "
+             "during the window. Otherwise: start with the scan described above, then come back with the address "
+             "you found."},
+            {"Si aucun hit n'apparaît, élargir la fenêtre ou revérifier que l'adresse est bien stable.",
+             "If no hit appears, widen the window or double-check that the address is actually stable."}
         };
     } else if (topic == "save_file_or_uwp") {
         entry = {
-            "Valeur dans sauvegarde ou LocalSettings",
-            "La valeur peut vivre sur disque ou dans une ruche UWP plutôt qu'en RAM exploitable.",
-            "Découvrir les fichiers de sauvegarde, lire le texte, inspecter LocalSettings, puis comparer avant/après.",
-            "Jeu avec fichier de sauvegarde identifiable ou processus UWP attaché.",
-            "Lecture seule pour inspection. Toute écriture disque nécessite une action explicite séparée.",
-            "Compare un état avant/après une action utilisateur pour isoler le champ modifié.",
-            "Si une source plus autoritaire réécrit le fichier, il faudra un protocole d'enquête plus large hors 120-A."
+            {"Valeur dans sauvegarde ou LocalSettings", "Value in a save file or LocalSettings"},
+            {"La valeur peut vivre sur disque ou dans une ruche UWP plutôt qu'en RAM exploitable.",
+             "The value may live on disk or in a UWP hive rather than in exploitable RAM."},
+            {"Découvrir les fichiers de sauvegarde, lire le texte, inspecter LocalSettings, puis comparer avant/après.",
+             "Discover save files, read the text, inspect LocalSettings, then compare before/after."},
+            {"Jeu avec fichier de sauvegarde identifiable ou processus UWP attaché.",
+             "Game with an identifiable save file, or a UWP process attached."},
+            {"Lecture seule pour inspection. Toute écriture disque nécessite une action explicite séparée.",
+             "Read-only for inspection. Any disk write requires a separate, explicit action."},
+            {"Compare un état avant/après une action utilisateur pour isoler le champ modifié.",
+             "Compare a before/after state around a user action to isolate the modified field."},
+            {"Si une source plus autoritaire réécrit le fichier, il faudra un protocole d'enquête plus large hors 120-A.",
+             "If a more authoritative source rewrites the file, a broader investigation protocol beyond 120-A will be needed."}
         };
     } else if (topic == "managed_runtime_pointer_chain") {
         entry = {
-            "Cible sur runtime managé (.NET/Mono) — scan de pointeurs natif aveugle",
-            "Le processus charge coreclr.dll/clrjit.dll (ou mono*.dll) : les données de gameplay vivent sur un tas géré "
-            "par le GC, pas dans les sections .data/.bss d'un module PE natif. Un scanPointerChains, même borné serré, "
-            "ne trouvera structurellement aucune chaîne depuis un module natif — signe distinctif : réponse rapide "
-            "mais chainCount:0, quel que soit le module d'ancrage essayé.",
-            "Basculer sur le CLR Inspector : attachClrInspector, puis chercher l'objet par type/valeur de champ "
-            "(findClrObjectsByType/findClrObjectsByFieldValue) et descendre la hiérarchie des champs (readClrObject) "
-            "jusqu'au champ primitif, plutôt que de deviner une adresse brute.",
-            "Cible confirmée managée (getProcessModules montre coreclr.dll/clrjit.dll ou mono*.dll) ; CLR Inspector attaché au bon PID.",
-            "Aucun pour attachClrInspector/findClrObjectsBy*/readClrObject : lecture seule. writeClrPrimitivePath demande une confirmation comme toute écriture classique.",
-            "Ne pas répéter scanPointerChains avec des bornes toujours plus larges sur ce type de cible : un résultat "
-            "vide et rapide est déjà le signal qu'il faut changer d'outil. Si le type de premier niveau n'a pas le "
-            "champ attendu, chercher un mot-clé de domaine plus large (le studio range parfois la donnée sur un objet conteneur).",
-            "Si aucun mot-clé de domaine ne donne de type candidat, élargir avec des synonymes techniques du genre de "
-            "jeu concerné."
+            {"Cible sur runtime managé (.NET/Mono) — scan de pointeurs natif aveugle",
+             "Target on a managed runtime (.NET/Mono) — blind native pointer scan"},
+            {"Le processus charge coreclr.dll/clrjit.dll (ou mono*.dll) : les données de gameplay vivent sur un tas géré "
+             "par le GC, pas dans les sections .data/.bss d'un module PE natif. Un scanPointerChains, même borné serré, "
+             "ne trouvera structurellement aucune chaîne depuis un module natif — signe distinctif : réponse rapide "
+             "mais chainCount:0, quel que soit le module d'ancrage essayé.",
+             "The process loads coreclr.dll/clrjit.dll (or mono*.dll): gameplay data lives on a GC-managed heap, not "
+             "in a native PE module's .data/.bss sections. A scanPointerChains, even tightly bounded, will "
+             "structurally never find a chain from a native module — telltale sign: a fast response but "
+             "chainCount:0, regardless of which anchor module is tried."},
+            {"Basculer sur le CLR Inspector : attachClrInspector, puis chercher l'objet par type/valeur de champ "
+             "(findClrObjectsByType/findClrObjectsByFieldValue) et descendre la hiérarchie des champs (readClrObject) "
+             "jusqu'au champ primitif, plutôt que de deviner une adresse brute.",
+             "Switch to the CLR Inspector: attachClrInspector, then search for the object by type/field value "
+             "(findClrObjectsByType/findClrObjectsByFieldValue) and walk down the field hierarchy (readClrObject) to "
+             "the primitive field, instead of guessing a raw address."},
+            {"Cible confirmée managée (getProcessModules montre coreclr.dll/clrjit.dll ou mono*.dll) ; CLR Inspector attaché au bon PID.",
+             "Target confirmed as managed (getProcessModules shows coreclr.dll/clrjit.dll or mono*.dll); CLR Inspector attached to the right PID."},
+            {"Aucun pour attachClrInspector/findClrObjectsBy*/readClrObject : lecture seule. writeClrPrimitivePath demande une confirmation comme toute écriture classique.",
+             "None for attachClrInspector/findClrObjectsBy*/readClrObject: read-only. writeClrPrimitivePath requires confirmation like any regular write."},
+            {"Ne pas répéter scanPointerChains avec des bornes toujours plus larges sur ce type de cible : un résultat "
+             "vide et rapide est déjà le signal qu'il faut changer d'outil. Si le type de premier niveau n'a pas le "
+             "champ attendu, chercher un mot-clé de domaine plus large (le studio range parfois la donnée sur un objet conteneur).",
+             "Don't keep repeating scanPointerChains with ever-wider bounds on this kind of target: a fast, empty "
+             "result is already the signal to switch tools. If the top-level type doesn't have the expected field, "
+             "try a broader domain keyword (the studio sometimes stores the data on a container object)."},
+            {"Si aucun mot-clé de domaine ne donne de type candidat, élargir avec des synonymes techniques du genre de "
+             "jeu concerné.",
+             "If no domain keyword yields a candidate type, widen the search with technical synonyms for the game's genre."}
         };
     }
+
+    auto pick = [](const Text& t) { return killcore::localizedText(QString::fromUtf8(t.fr), QString::fromUtf8(t.en)); };
 
     QVariantMap result;
     result["status"] = "needs_clarification";
     result["actionStatus"] = "not_executed";
-    result["message"] = QString(
+    result["message"] = KE_TXT(
         "D'après ma méthode d'enquête intégrée, je traiterais ça comme : %1\n\n"
         "Hypothèses : %2\n"
         "Outil conseillé : %3\n"
@@ -432,14 +512,22 @@ QVariantMap makeInvestigationPlaybookResponse(const QString& topic) {
         "Risque : %5\n"
         "Prochaine action humaine : %6\n"
         "Fallback : %7\n\n"
-        "Je n'exécute rien automatiquement depuis cette réponse : pas d'action lancée toute seule, pas de contournement de la confirmation.")
-        .arg(QString::fromUtf8(entry.title),
-             QString::fromUtf8(entry.hypotheses),
-             QString::fromUtf8(entry.tool),
-             QString::fromUtf8(entry.prerequisites),
-             QString::fromUtf8(entry.risk),
-             QString::fromUtf8(entry.nextAction),
-             QString::fromUtf8(entry.fallback));
+        "Je n'exécute rien automatiquement depuis cette réponse : pas d'action lancée toute seule, pas de contournement de la confirmation.",
+        "Based on my built-in investigation method, I'd treat this as: %1\n\n"
+        "Hypotheses: %2\n"
+        "Recommended tool: %3\n"
+        "Prerequisites: %4\n"
+        "Risk: %5\n"
+        "Next human action: %6\n"
+        "Fallback: %7\n\n"
+        "I'm not executing anything automatically from this response: no action launched on its own, no bypassing confirmation.")
+        .arg(pick(entry.title),
+             pick(entry.hypotheses),
+             pick(entry.tool),
+             pick(entry.prerequisites),
+             pick(entry.risk),
+             pick(entry.nextAction),
+             pick(entry.fallback));
     result["investigationTopic"] = topic;
     result["source"] = "docs/INVESTIGATION_PLAYBOOK.md";
     result["state"] = "Idle";
@@ -905,7 +993,7 @@ QVariantMap AIEngine::processIntent(const QString& query) {
     if (!m_ready) {
         QVariantMap result;
         result["status"] = "not_ready";
-        result["message"] = "AIEngine is not initialized.";
+        result["message"] = KE_TXT("Moteur IA non initialisé.", "AI engine not initialized.");
         return result;
     }
 
@@ -943,7 +1031,7 @@ QVariantMap AIEngine::processIntent(const QString& query) {
         result["targetValue"] = "";
         result["addresses"] = QVariantList{};
         result["confidence"] = 0.9;
-        result["missing"] = "Tu veux le passer à quelle valeur ?";
+        result["missing"] = KE_TXT("Tu veux le passer à quelle valeur ?", "What value do you want to set it to?");
         result["message"] = result["missing"];
         result["aiBackend"] = "deterministic_guard";
         return result;
@@ -979,7 +1067,7 @@ QVariantMap AIEngine::processIntent(const QString& query) {
             intent["error"] = error;
             if (!valid && intent.value("message").toString().isEmpty()) {
                 intent["message"] = intent.value("missing").toString().isEmpty()
-                    ? QString("Je dois préciser l'intention avant d'agir.")
+                    ? KE_TXT("Je dois préciser l'intention avant d'agir.", "I need to clarify the intent before acting.")
                     : intent.value("missing").toString();
             }
             return intent;
@@ -1004,7 +1092,7 @@ QVariantMap AIEngine::proposeInvestigationNotebookPlan(const QString& symptom, c
     if (!m_ready) {
         QVariantMap result;
         result["success"] = false;
-        result["error"] = "AIEngine is not initialized.";
+        result["error"] = KE_TXT("Moteur IA non initialisé.", "AI engine not initialized.");
         result["source"] = "not_ready";
         result["modelUsed"] = false;
         return result;
@@ -1012,7 +1100,7 @@ QVariantMap AIEngine::proposeInvestigationNotebookPlan(const QString& symptom, c
     if (trimmed.isEmpty()) {
         QVariantMap result;
         result["success"] = false;
-        result["error"] = "Symptome vide.";
+        result["error"] = KE_TXT("Symptôme vide.", "Empty symptom.");
         result["source"] = "validation";
         result["modelUsed"] = false;
         return result;
@@ -1060,7 +1148,7 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
     if (!m_ready) {
         QVariantMap result;
         result["status"] = "not_ready";
-        result["message"] = "AIEngine is not initialized.";
+        result["message"] = KE_TXT("Moteur IA non initialisé.", "AI engine not initialized.");
         return result;
     }
 
@@ -1075,9 +1163,11 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
     if (looksLikePureSocialQuery(query)) {
         QVariantMap result;
         result["status"] = "needs_clarification";
-        result["message"] =
+        result["message"] = KE_TXT(
             "Salut ! Dis-moi ce que tu veux chercher ou comprendre : une valeur affichée, une adresse, "
-            "un freeze, un trainer, un script Lua, ou une investigation plus guidée.";
+            "un freeze, un trainer, un script Lua, ou une investigation plus guidée.",
+            "Hi! Tell me what you want to find or understand: a displayed value, an address, "
+            "a freeze, a trainer, a Lua script, or a more guided investigation.");
         result["state"] = m_stateMachine.currentStateName();
         result["aiBackend"] = "deterministic_social_guard";
         return result;
@@ -1223,7 +1313,7 @@ QVariantMap AIEngine::processQuery(const QString& query, const QVariantMap& cont
             result["status"] = m_validator.validate(call, &error) ? "tool_call" : "invalid_tool_call";
             result["tool"] = call.value("tool").toString();
             result["args"] = call.value("args").toMap();
-            result["rationale"] = "Plan généré par le modèle local llama.cpp/Qwen.";
+            result["rationale"] = KE_TXT("Plan généré par le modèle local llama.cpp/Qwen.", "Plan generated by the local llama.cpp/Qwen model.");
             result["state"] = m_stateMachine.currentStateName();
             result["aiBackend"] = backend.isEmpty() ? QString("llama.cpp") : backend;
             result["error"] = error;
@@ -1298,11 +1388,11 @@ QVariantMap AIEngine::deterministicIntent(const QString& query) {
     } else if (q.contains("passe") || q.contains("passer") || q.contains("mets") || q.contains("met ")
                || q.contains("veux") || q.contains("voudrais") || q.contains("augmente") || q.contains("remplace")) {
         result["status"] = "needs_clarification";
-        result["missing"] = "Tu veux le passer à quelle valeur ?";
+        result["missing"] = KE_TXT("Tu veux le passer à quelle valeur ?", "What value do you want to set it to?");
         result["message"] = result["missing"];
     } else {
         result["status"] = "needs_clarification";
-        result["missing"] = "Quelle valeur veux-tu chercher ?";
+        result["missing"] = KE_TXT("Quelle valeur veux-tu chercher ?", "What value do you want to search for?");
         result["message"] = result["missing"];
     }
 
@@ -1311,7 +1401,7 @@ QVariantMap AIEngine::deterministicIntent(const QString& query) {
         result["status"] = "needs_clarification";
         result["error"] = error;
         result["message"] = result.value("missing").toString().isEmpty()
-            ? QString("Il manque une information pour continuer.")
+            ? KE_TXT("Il manque une information pour continuer.", "Some information is missing to continue.")
             : result.value("missing").toString();
     }
     return result;
@@ -1473,12 +1563,12 @@ QVariantMap AIEngine::deterministicPlan(const QString& query) {
     const QString value = firstNumber(query);
     if (!value.isEmpty()) {
         m_stateMachine.setState(AIState::FirstScanRunning);
-        return makeToolCall("exact_scan", {{"value", value}, {"valueType", inferValueType(query)}}, "Premier scan exact depuis une valeur détectée.");
+        return makeToolCall("exact_scan", {{"value", value}, {"valueType", inferValueType(query)}}, KE_TXT("Premier scan exact depuis une valeur détectée.", "First exact scan from a detected value."));
     }
 
     QVariantMap result;
     result["status"] = "needs_clarification";
-    result["message"] = "Je n'ai pas trouvé de valeur ou d'action claire.";
+    result["message"] = KE_TXT("Je n'ai pas trouvé de valeur ou d'action claire.", "I couldn't find a clear value or action.");
     result["state"] = m_stateMachine.currentStateName();
     result["availableTools"] = m_registry.availableTools();
     return result;
@@ -1501,7 +1591,7 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
     if (!processAttached) {
         QVariantMap result;
         result["status"] = "needs_clarification";
-        result["message"] = "Attache d'abord un processus dans l'onglet Processus, puis relance ta recherche.";
+        result["message"] = KE_TXT("Attache d'abord un processus dans l'onglet Processus, puis relance ta recherche.", "First attach a process in the Process tab, then run your search again.");
         result["state"] = m_stateMachine.currentStateName();
         return result;
     }
@@ -1515,12 +1605,15 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         QVariantMap result;
         result["status"] = "needs_clarification";
         result["actionStatus"] = "not_executed";
-        result["message"] = "Pour une valeur affichée, il me faut d'abord le nombre exact visible à l'écran. "
-                            "Ensuite je peux chercher le texte affiché (Trace UI string) ou capturer les pages modifiées avant/après une variation (Changed Pages), sans écrire ni freezer.";
+        result["message"] = KE_TXT(
+            "Pour une valeur affichée, il me faut d'abord le nombre exact visible à l'écran. "
+            "Ensuite je peux chercher le texte affiché (Trace UI string) ou capturer les pages modifiées avant/après une variation (Changed Pages), sans écrire ni freezer.",
+            "For a displayed value, I first need the exact number visible on screen. "
+            "Then I can search for the displayed text (Trace UI string) or capture the modified pages before/after a change (Changed Pages), without writing or freezing anything.");
         result["state"] = m_stateMachine.currentStateName();
         QVariantList recoveryActions;
-        recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", "Trace UI string"}});
-        recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", "Changed Pages"}});
+        recoveryActions.append(QVariantMap{{"id", "trace_ui_string"}, {"label", KE_TXT("Trace UI string", "Trace UI string")}});
+        recoveryActions.append(QVariantMap{{"id", "start_changed_pages_diff"}, {"label", KE_TXT("Changed Pages", "Changed Pages")}});
         result["recoveryActions"] = recoveryActions;
         return result;
     }
@@ -1769,12 +1862,16 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
         if (!contextInitialValue.isEmpty()
             && (lastOutcome == "failed" || lastTurn.value("tool").toString() == "exact_scan")) {
             return makeToolCall("exact_scan_multi_type", {{"value", contextInitialValue}},
-                "Les dernieres adresses ne marchent pas: je relance en multi-type pour couvrir d'autres representations.");
+                KE_TXT("Les dernieres adresses ne marchent pas: je relance en multi-type pour couvrir d'autres representations.",
+                       "The last addresses don't work: I'm restarting in multi-type to cover other representations."));
         }
         QVariantMap result;
         result["status"] = "needs_clarification";
-        result["message"] = "Compris, ces adresses ne sont pas les bonnes. Donne-moi une valeur observee pour relancer "
-                            "en multi-type, ou decris la valeur (affichee a l'ecran, chiffree, inconnue...).";
+        result["message"] = KE_TXT(
+            "Compris, ces adresses ne sont pas les bonnes. Donne-moi une valeur observee pour relancer "
+            "en multi-type, ou decris la valeur (affichee a l'ecran, chiffree, inconnue...).",
+            "Got it, those addresses aren't the right ones. Give me an observed value to restart "
+            "in multi-type, or describe the value (displayed on screen, encrypted, unknown...).");
         result["state"] = m_stateMachine.currentStateName();
         return result;
     }
@@ -1812,17 +1909,19 @@ QVariantMap AIEngine::deterministicPlanWithContext(const QString& query, const Q
             return makeToolCall("next_scan", {{"mode", "exact"}, {"value", value}}, "Recherche active avec candidats: reduction avec la nouvelle valeur.");
         }
         m_stateMachine.setState(AIState::FirstScanRunning);
-        return makeToolCall("exact_scan", {{"value", value}, {"valueType", inferValueType(query)}}, "Premier scan exact depuis une valeur detectee.");
+        return makeToolCall("exact_scan", {{"value", value}, {"valueType", inferValueType(query)}}, KE_TXT("Premier scan exact depuis une valeur detectee.", "First exact scan from a detected value."));
     }
 
     // Aucune valeur: objectifs complets ou guidance plutot que message brut.
     if (q.contains("trouve") || q.contains("cherche") || q.contains("objectif") || q.contains("guide")) {
-        return makeToolCall("auto_resolve", {{"query", query}}, "Objectif complet sans valeur directe: mini-boucle safe Auto.");
+        return makeToolCall("auto_resolve", {{"query", query}}, KE_TXT("Objectif complet sans valeur directe: mini-boucle safe Auto.", "Full goal without a direct value: safe Auto mini-loop."));
     }
 
     QVariantMap result;
     result["status"] = "needs_clarification";
-    result["message"] = "Je n'ai pas trouve de valeur ou d'action claire. Donne-moi la valeur affichee (ex: 41250), decris ce que tu cherches (ca augmente quand...), ou colle une adresse 0x....";
+    result["message"] = KE_TXT(
+        "Je n'ai pas trouve de valeur ou d'action claire. Donne-moi la valeur affichee (ex: 41250), decris ce que tu cherches (ca augmente quand...), ou colle une adresse 0x....",
+        "I couldn't find a clear value or action. Give me the displayed value (e.g. 41250), describe what you're looking for (it increases when...), or paste a 0x... address.");
     result["state"] = m_stateMachine.currentStateName();
     result["availableTools"] = m_registry.availableTools();
     return result;
