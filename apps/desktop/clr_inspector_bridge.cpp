@@ -5,6 +5,7 @@
 #endif
 
 #include "inject/dll_injector.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "memory/memory_reader.h"
 #include "patch/instruction_patch_suggester.h"
@@ -109,9 +110,11 @@ bool ClrInspectorBridge::ensureClrInspectorStarted(QString* error) {
     const QString executable = findClrInspectorExecutable();
     if (executable.isEmpty()) {
         if (error) {
-            *error = QStringLiteral(
+            *error = KE_TXT(
                 "KillEngineClrInspector.exe introuvable. Construis le helper avec "
-                "scripts/build-clr-inspector.ps1 -Configuration Release avant d'utiliser l'inspecteur CLR.");
+                "scripts/build-clr-inspector.ps1 -Configuration Release avant d'utiliser l'inspecteur CLR.",
+                "KillEngineClrInspector.exe not found. Build the helper with "
+                "scripts/build-clr-inspector.ps1 -Configuration Release before using the CLR Inspector.");
         }
         return false;
     }
@@ -125,7 +128,8 @@ bool ClrInspectorBridge::ensureClrInspectorStarted(QString* error) {
     m_process->start();
     if (!m_process->waitForStarted(3000)) {
         if (error) {
-            *error = QStringLiteral("Impossible de demarrer KillEngineClrInspector.exe : %1")
+            *error = KE_TXT("Impossible de demarrer KillEngineClrInspector.exe : %1",
+                            "Unable to start KillEngineClrInspector.exe: %1")
                 .arg(m_process->errorString());
         }
         m_process.reset();
@@ -177,7 +181,8 @@ QVariantMap ClrInspectorBridge::callClrInspectorRpc(const QString& method, const
         }
         const DWORD err = GetLastError();
         if (err != ERROR_PIPE_BUSY && err != ERROR_FILE_NOT_FOUND) {
-            result["error"] = QStringLiteral("Ouverture du pipe ClrMD echouee (error=%1).").arg(err);
+            result["error"] = KE_TXT("Ouverture du pipe ClrMD echouee (error=%1).",
+                                     "Couldn't open the ClrMD pipe (error=%1).").arg(err);
             return result;
         }
         const int remainingMs = timeoutMs - static_cast<int>(connectTimer.elapsed());
@@ -188,7 +193,8 @@ QVariantMap ClrInspectorBridge::callClrInspectorRpc(const QString& method, const
     }
 
     if (pipe == INVALID_HANDLE_VALUE) {
-        result["error"] = QStringLiteral("Pipe ClrMD indisponible : timeout sur %1").arg(pipePath);
+        result["error"] = KE_TXT("Pipe ClrMD indisponible : timeout sur %1",
+                                 "ClrMD pipe unavailable: timeout on %1").arg(pipePath);
         return result;
     }
 
@@ -197,7 +203,8 @@ QVariantMap ClrInspectorBridge::callClrInspectorRpc(const QString& method, const
         || written != static_cast<DWORD>(requestBytes.size())) {
         const DWORD err = GetLastError();
         CloseHandle(pipe);
-        result["error"] = QStringLiteral("Ecriture vers le pipe ClrMD echouee (error=%1).").arg(err);
+        result["error"] = KE_TXT("Ecriture vers le pipe ClrMD echouee (error=%1).",
+                                 "Couldn't write to the ClrMD pipe (error=%1).").arg(err);
         return result;
     }
 
@@ -227,12 +234,14 @@ QVariantMap ClrInspectorBridge::callClrInspectorRpc(const QString& method, const
             break;
         }
         CloseHandle(pipe);
-        result["error"] = QStringLiteral("Lecture du pipe ClrMD echouee (error=%1).").arg(err);
+        result["error"] = KE_TXT("Lecture du pipe ClrMD echouee (error=%1).",
+                                 "Couldn't read from the ClrMD pipe (error=%1).").arg(err);
         return result;
     }
     CloseHandle(pipe);
 #else
-    result["error"] = QStringLiteral("Inspecteur CLR disponible uniquement sur Windows pour l'instant.");
+    result["error"] = KE_TXT("Inspecteur CLR disponible uniquement sur Windows pour l'instant.",
+                             "CLR Inspector is only available on Windows for now.");
     return result;
 #endif
 
@@ -243,14 +252,15 @@ QVariantMap ClrInspectorBridge::callClrInspectorRpc(const QString& method, const
     }
 
     if (responseLine.isEmpty()) {
-        result["error"] = QStringLiteral("Pas de reponse du helper ClrMD.");
+        result["error"] = KE_TXT("Pas de reponse du helper ClrMD.", "No response from the ClrMD helper.");
         return result;
     }
 
     QJsonParseError parseError;
     const QJsonDocument responseDoc = QJsonDocument::fromJson(responseLine, &parseError);
     if (parseError.error != QJsonParseError::NoError || !responseDoc.isObject()) {
-        result["error"] = QStringLiteral("Reponse ClrMD JSON invalide : %1").arg(parseError.errorString());
+        result["error"] = KE_TXT("Reponse ClrMD JSON invalide : %1",
+                                 "Invalid ClrMD JSON response: %1").arg(parseError.errorString());
         result["raw"] = QString::fromUtf8(responseLine);
         return result;
     }
@@ -338,7 +348,8 @@ QVariantMap ClrInspectorBridge::findClrObjectsByFieldValue(const QString& typeSu
     const QString field = fieldName.trimmed();
     const QString value = expectedValue.trimmed();
     if (typeFilter.isEmpty() || field.isEmpty() || value.isEmpty()) {
-        return {{"success", false}, {"error", QStringLiteral("Type, champ et valeur requis pour le locator CLR.")}};
+        return {{"success", false}, {"error", KE_TXT("Type, champ et valeur requis pour le locator CLR.",
+                                                     "Type, field and value are required for the CLR locator.")}};
     }
     const int boundedMax = std::clamp(maxResults, 1, 200);
     QVariantMap response = callClrInspectorRpc(QStringLiteral("findObjectsByFieldValue"), {typeFilter, field, value, boundedMax}, 20000);
@@ -365,7 +376,8 @@ QVariantMap ClrInspectorBridge::writeClrPrimitiveField(const QString& objectAddr
     const QString field = fieldName.trimmed();
     const QString text = value.trimmed();
     if (address.isEmpty() || field.isEmpty() || text.isEmpty()) {
-        return {{"success", false}, {"error", QStringLiteral("Adresse objet, champ et valeur requis.")}};
+        return {{"success", false}, {"error", KE_TXT("Adresse objet, champ et valeur requis.",
+                                                     "Object address, field and value are required.")}};
     }
 
     QVariantMap response = callClrInspectorRpc(QStringLiteral("writePrimitiveField"), {address, field, text}, 10000);

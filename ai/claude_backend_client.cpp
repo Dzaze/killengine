@@ -1,6 +1,7 @@
 #include "claude_backend_client.h"
 
 #include "anthropic_messages.h"
+#include "localization/localization.h"
 
 #include <QEventLoop>
 #include <QJsonDocument>
@@ -50,7 +51,8 @@ QByteArray ClaudeBackendClient::defaultHttpPost(const QString& apiKey, const QJs
         reply->deleteLater();
         ok = false;
         httpStatus = 0;
-        errorMessage = "Délai dépassé en attendant l'API Anthropic (60s).";
+        errorMessage = KE_TXT("Délai dépassé en attendant l'API Anthropic (60s).",
+                              "Timed out waiting for the Anthropic API (60s).");
         return {};
     }
     timer.stop();
@@ -85,7 +87,7 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
 
     if (apiKey.trimmed().isEmpty()) {
         result["success"] = false;
-        result["error"] = "Clé API Claude manquante.";
+        result["error"] = KE_TXT("Clé API Claude manquante.", "Claude API key is missing.");
         return result;
     }
 
@@ -122,7 +124,7 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
                 m_conversationHistory.removeLast();
             }
             result["success"] = false;
-            result["error"] = QString("Erreur réseau: %1").arg(networkError);
+            result["error"] = KE_TXT("Erreur réseau: %1", "Network error: %1").arg(networkError);
             result["toolCallsExecuted"] = toolCallsExecuted;
             result["requestCount"] = m_requestCount;
             result["conversationReset"] = conversationWasReset;
@@ -163,7 +165,8 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
                 toolResult = executor(toolUse.name, toolUse.input);
             } else {
                 toolResult["success"] = false;
-                toolResult["error"] = "Aucun exécuteur d'outil configuré côté KillEngine.";
+                toolResult["error"] = KE_TXT("Aucun exécuteur d'outil configuré côté KillEngine.",
+                                             "No KillEngine tool executor is configured.");
             }
             ++toolCallsExecuted;
             const bool isError = !toolResult.value("success", true).toBool();
@@ -173,7 +176,8 @@ QVariantMap ClaudeBackendClient::sendMessage(const QString& apiKey,
     }
 
     result["success"] = false;
-    result["error"] = QString("Boucle d'appels d'outils non terminée après %1 tours.").arg(maxToolTurns);
+    result["error"] = KE_TXT("Boucle d'appels d'outils non terminée après %1 tours.",
+                             "Tool-call loop did not finish after %1 turns.").arg(maxToolTurns);
     result["toolCallsExecuted"] = toolCallsExecuted;
     result["requestCount"] = m_requestCount;
     result["conversationReset"] = conversationWasReset;
