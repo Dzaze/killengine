@@ -48,6 +48,17 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — premier round (U19/U1/U2 clos), (09/09/2026, Codex + Claude)
+
+**Suite de l'entrée ci-dessous.** Premier round de travail parallèle sur `docs/FRONTEND_LOCALIZATION_ROADMAP.md` : Codex sur U19 (`PanelIntro.vue`) + U2 (`ProcessView.vue`) dans un worktree séparé (`../killengine-codex-ui-u19-u2`), Claude sur U1 (`AssistantView.vue`) dans le dossier principal — fichiers disjoints, aucune collision.
+
+- **U1** (Claude) : en commençant à traduire `AssistantView.vue`, découverte que le fichier fait en réalité 2115 lignes, pas ~25 chaînes de template — son `<script setup>` contient **68 appels `store.pushMessage('assistant', "texte français")`**, une troisième poche de texte non traduit (ni backend C++, ni template statique) que l'audit initial (scan `<template>` uniquement) avait manquée. Roadmap élargie en conséquence (nouveaux candidats U20-U22 pour les stores `app.ts`/`assistantSmartSearch.ts`/`writeFreeze.ts` qui ont le même pattern). 216 clés `assistant.*` ajoutées, couvrant template + script (`pushMessage`, `workflowLabel`, `safeStepLabel`, `confidenceFor`, etc.).
+- **U2 + U19** (Codex) : 22 clés `process.*` (namespace existant réutilisé) + 4 clés `common.panelIntro.*`. Vérifié par Claude après merge (pas juste le rapport de Codex) : type-check + build OK, balayage de contrôle sans chaîne française oubliée, aucune valeur FR/EN suspecte identique (les 4 trouvées sont des termes techniques partagés légitimes).
+
+**Comment vérifié** : `npm run type-check` + `npm run build` OK des deux côtés avant merge, merge sans conflit (`git merge --no-edit`), puis **vérification visuelle réelle via CDP** (`Page.captureScreenshot` + `Runtime.evaluate` pour cliquer la nav et basculer Paramètres > Langue, voir [[killengine_cdp_screenshot_technique]]) sur l'état fusionné — captures FR et EN comparées. **Bug de process trouvé en vérifiant** : `scripts/build.ps1` ne reconstruit jamais le frontend (empaquette `ui/dist` tel quel) ; le premier passage de vérification après merge montrait donc à tort `ProcessView.vue` toujours en français, car le `ui/dist` du dossier principal restait celui de mon tout premier `npm run build` (avant le merge de Codex). Diagnostiqué en quelques minutes, corrigé en relançant `npm run build` sur l'état fusionné, règle ajoutée à la roadmap pour ne pas refaire cette erreur au prochain round. Après correction : capture confirmée entièrement traduite (nav, filtre, mode d'accès, bannière d'aide). 469/469 tests C++ (sanity check, aucun fichier C++ touché ce round). Worktree et branche temporaires supprimés après merge.
+
+**Reste ouvert** : U3 (Expert + 16 sous-panneaux, le plus gros morceau) et U4-U22, voir `docs/FRONTEND_LOCALIZATION_ROADMAP.md`.
+
 ### Nouveau chantier : localisation de l'interface Vue, staffé (09/09/2026, Claude)
 
 **Suite de l'entrée ci-dessous** ("donc un anglais peut parler avec le chat sans problème ?"). Réponse allait au-delà du chat : audit complémentaire (agent Explore, lecture seule, 39 fichiers `.vue`) révèle que **le texte statique des pages elles-mêmes** (menus, boutons, libellés, placeholders, bannières d'aide) reste très majoritairement en français même en mode UI anglais — problème distinct et bien plus large que celui du chat.
