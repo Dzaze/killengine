@@ -12,17 +12,17 @@ defineProps<{
 </script>
 
 <template>
-  <section class="panel-intro" aria-label="À propos de ce panneau">
+  <section class="panel-intro" :aria-label="$t('common.panelIntro.ariaLabel')">
     <div class="intro-item">
-      <span class="intro-label">C'est quoi ?</span>
+      <span class="intro-label">{{ $t('common.panelIntro.what') }}</span>
       <p>{{ what }}</p>
     </div>
     <div class="intro-item">
-      <span class="intro-label">À quoi ça sert ?</span>
+      <span class="intro-label">{{ $t('common.panelIntro.purpose') }}</span>
       <p>{{ purpose }}</p>
     </div>
     <div class="intro-item">
-      <span class="intro-label">Comment l'utiliser ?</span>
+      <span class="intro-label">{{ $t('common.panelIntro.how') }}</span>
       <p>{{ how }}</p>
     </div>
   </section>

@@ -2,6 +2,14 @@
   "app": {
     "attached": "Attached"
   },
+  "common": {
+    "panelIntro": {
+      "ariaLabel": "About this panel",
+      "what": "What is it?",
+      "purpose": "What is it for?",
+      "how": "How to use it"
+    }
+  },
   "process": {
     "select": "Select a process",
     "refresh": "Refresh",
@@ -11,7 +19,40 @@
     "windowOnly": "Windows only",
     "hasWindow": "window",
     "noModules": "No accessible modules",
-    "noProcesses": "No processes found"
+    "noProcesses": "No processes found",
+    "intro": {
+      "what": "The list of currently running Windows processes.",
+      "purpose": "Choose and attach the program you want to inspect or modify — required before any other action in KillEngine.",
+      "how": "Find the process in the list (or refresh it), click it, then click Attach."
+    },
+    "filterPlaceholder": "Filter...",
+    "moduleCount": "{count} modules",
+    "selectedProcess": "Selected: {name} · PID {pid}",
+    "fallbackProcess": "process",
+    "kernelStatus": {
+      "notTested": "Not tested",
+      "ready": "Driver ready",
+      "probeOnly": "Probe only",
+      "notLoaded": "Driver not loaded"
+    },
+    "accessMode": {
+      "preAttachHint": "Memory access mode selected before attaching.",
+      "title": "Memory access mode",
+      "standard": "Standard",
+      "standardDescription": "Usermode read/write",
+      "kernel": "Kernel",
+      "kernelReadyHint": "The process attaches normally; interactive reads/writes will use the kernel driver.",
+      "kernelWarningHint": "You can still attach, but kernel reads/writes will refuse to run until the driver is ready."
+    },
+    "kernelActions": {
+      "testTitle": "Checks whether KillEngineKernel is loaded and exposes kernel memory access.",
+      "testing": "Testing...",
+      "test": "Test driver",
+      "startTitle": "Starts the KillEngineKernel Windows service if it is installed but stopped. Requires KillEngine to be running as administrator.",
+      "loading": "Loading...",
+      "loaded": "Driver loaded",
+      "load": "Load driver"
+    }
   },
   "memory": {
     "title": "Memory map",
