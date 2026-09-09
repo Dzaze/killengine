@@ -47,6 +47,19 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## Journal actif
 
+### Localisation du chat IA — deuxième round, L2b/L4/L5 clos (09/09/2026, Codex + Claude)
+
+**Suite de l'entrée ci-dessous.** Le propriétaire a demandé un deuxième round de travail parallèle sur ce même chantier.
+
+**Leçon du premier round appliquée** : cette fois, Codex a travaillé dans un **worktree git séparé** (`../killengine-codex-l2b`, créé via `git worktree add`) au lieu de partager le dossier de travail principal — élimine complètement le risque de collision de branche identifié la dernière fois.
+
+- **Codex → L2b** (`apps/desktop/claude_chat_manager.cpp`, backend IA externe Claude) : 51 occurrences localisées (audit initial : 98 lignes accentuées, prompt système inclus dans le total mais le prompt lui-même reste non traduit, comme pour le modèle local).
+- **Claude → L4 + L5** (`apps/desktop/scanning_core_manager.cpp` + `apps/desktop/write_freeze_core_manager.cpp`, dans le dossier principal) : ~65 et ~30 chaînes traitées. Même surprise que sur L3 : le grep accentué initial (44/22 lignes) ratait un nombre important de chaînes courtes sans accent (`"Type invalide."`, `"Adresse invalide."`, `"Mode invalide."`...), repérées via une recherche plus large par mot capitalisé. **Bug d'auto-correction trouvé et corrigé en cours de route** : un `replace_all` a matché un fragment de texte déjà à l'intérieur d'un appel `KE_TXT()` déjà traduit, produisant un `KE_TXT(KE_TXT(...), ...)` imbriqué invalide sur 2 lignes — repéré immédiatement par une revérification systématique après coup, corrigé avant le build.
+
+**Intégration** : un seul conflit de fusion, sur `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` lui-même (les deux branches avaient édité le même tableau) — résolu à la main (fusion des deux mises à jour de statut), aucun conflit de code (fichiers disjoints). Build complet + **468/468 tests** sur `main` fusionné. Worktree et branche temporaires de Codex supprimés après fusion.
+
+**Chantier de localisation du chat IA : L1, L2, L2b, L3, L4, L5 tous clos.** Le cœur du chat (Assistant local ET backend Claude externe) plus les outils de scan/write/freeze sont intégralement bilingues FR/EN. Reste ouvert : L6-L12 (voir `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`), toujours en chantier permanent à faible priorité.
+
 ### Localisation du chat IA — L1/L2/L3 clos, fusionné et poussé (09/09/2026, Codex + Claude)
 
 **Suite et clôture de l'entrée ci-dessous** (chantier repris après la pause/replanification du 08/09/2026, sur décision explicite du propriétaire de le staffer en parallèle avec Codex).
