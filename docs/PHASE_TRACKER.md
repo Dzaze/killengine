@@ -47,6 +47,18 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## Journal actif
 
+### Localisation du chat IA — L12 résiduel clos, chantier entièrement terminé (09/09/2026, Codex)
+
+**Suite de l'entrée ci-dessous.** Dernier round : Codex a recriblé les 4 fichiers restants de L12 (`settings_diagnostics_manager.cpp`, `automation_pipe_server.cpp`, `claude_backend_client.cpp`, `clr_inspector_bridge.cpp`) au lieu de prendre pour acquis leur classement "non visible chat" de l'audit initial (commit `05c0cd5`).
+
+- `settings_diagnostics_manager.cpp` et `automation_pipe_server.cpp` : classement confirmé (panneau Settings/diagnostics et pipe dev, aucune fonction dispatchée depuis le chat/IA) — 0 chaîne traduite, à raison.
+- `ai/claude_backend_client.cpp` : confirmé chat-visible (backend Claude externe) — 5 chaînes traduites (timeout Anthropic, clé API manquante, erreur réseau, exécuteur d'outil manquant, boucle tool-call non terminée).
+- `apps/desktop/clr_inspector_bridge.cpp` : partiellement chat-visible — `findClrObjectsByFieldValue`/`writeClrPrimitiveField` (appelées depuis `smart_search_manager.cpp`, le locator CLR du dispatch chat) et le pipe RPC ClrMD partagé (`callClrInspectorRpc`, utilisé par toutes les fonctions CLR) traduits, 11 chaînes. **Vérifié par Claude avant merge** : un premier grep de contrôle a fait remonter 14 chaînes non traduites dans le même fichier (`callClrInstanceMethod`, `findClrGcRootPath`, `generateClrObjectReport`, `disassembleClrMethod`) — recherche exhaustive des appelants dans `smart_search_manager.cpp`/`ai_engine.cpp`/`claude_chat_manager.cpp::executeTool` : zéro, seul `ui/src/views/ClrInspectorView.vue` (panneau CLR Inspector dédié) les appelle. Crible de Codex confirmé correct, pas un oubli.
+
+**Comment vérifié** : build complet + **469/469 tests**, refaits indépendamment dans le worktree de Codex puis sur `main` après fast-forward merge (aucun conflit). Vérifié en live via le pipe d'automatisation dans les deux langues : `findClrObjectsByFieldValue`/`writeClrPrimitiveField` avec arguments vides → `"Type, field and value are required for the CLR locator."`/`"Object address, field and value are required."` en anglais puis leurs équivalents français après rebascule. Worktree et branche temporaires supprimés après merge.
+
+**Chantier de localisation du chat IA entièrement clos** (L1 à L12, plus le nettoyage du code mort découvert au passage). Tout le texte affiché dans le chat — Assistant local ET backend Claude externe — est bilingue FR/EN. Voir `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` pour le détail complet.
+
 ### Nettoyage code mort : duplicata smart search dans application_controller.cpp (09/09/2026, Codex)
 
 **Suite directe de la découverte faite pendant le crible de L12** (voir entrée ci-dessous) : `classifySmartSearchIntent`, `confidenceLabel`, `flagNoisyCandidates`, `suggestedWritesForCandidates`, `noCandidateDiagnosticMessage`, `profileTargetGroupName`/`normalizedProfileText`, `loadCandidateHistory`/`appendCandidateHistory`, `processHasActiveRemoteConnections` (les deux variantes `#ifdef`), tous les matchers `looksLikeXxx` associés, et les types `SmartSearchIntentKind`/`SmartSearchIntent`/`smartSearchIntentKindToString` — supprimés d'`apps/desktop/application_controller.cpp` (**601 lignes**, commit `f8ede77`). C'était une copie dupliquée jamais appelée de la logique déjà déplacée et localisée (L2) dans `apps/desktop/smart_search_manager.cpp`, oubliée lors d'un refactor antérieur.
