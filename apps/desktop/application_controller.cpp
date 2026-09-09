@@ -51,6 +51,7 @@
 #include "inject/lag_switch.h"
 #include "inject/http_proxy.h"
 #include "profiles/ghidra_bridge.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
@@ -284,21 +285,22 @@ LuaScriptRunOutcome runLuaScriptProcess(const QString& scriptText, const QVarian
 
     const QString trimmedScript = scriptText.trimmed();
     if (trimmedScript.isEmpty()) {
-        outcome.error = "Script Lua vide.";
+        outcome.error = KE_TXT("Script Lua vide.", "Empty Lua script.");
         return outcome;
     }
 
     const QString luaPath = findLuaExecutable(options.value("luaPath").toString());
     outcome.luaPath = luaPath;
     if (luaPath.isEmpty()) {
-        outcome.error = "Aucun interpréteur Lua trouvé. Place lua.exe dans runtime\\lua à côté de KillEngine.exe, ajoute Lua au PATH, ou renseigne options.luaPath.";
+        outcome.error = KE_TXT("Aucun interpréteur Lua trouvé. Place lua.exe dans runtime\\lua à côté de KillEngine.exe, ajoute Lua au PATH, ou renseigne options.luaPath.",
+                                "No Lua interpreter found. Place lua.exe in runtime\\lua next to KillEngine.exe, add Lua to PATH, or set options.luaPath.");
         return outcome;
     }
 
     QTemporaryFile scriptFile(QDir::temp().filePath("killengine-lua-XXXXXX.lua"));
     scriptFile.setAutoRemove(true);
     if (!scriptFile.open()) {
-        outcome.error = QStringLiteral("Impossible de créer le script temporaire Lua : %1").arg(scriptFile.errorString());
+        outcome.error = KE_TXT("Impossible de créer le script temporaire Lua : %1", "Unable to create the temporary Lua script: %1").arg(scriptFile.errorString());
         return outcome;
     }
     scriptFile.write(scriptText.toUtf8());
@@ -333,7 +335,7 @@ LuaScriptRunOutcome runLuaScriptProcess(const QString& scriptText, const QVarian
     const int timeoutMs = std::clamp(options.value("timeoutMs", 10000).toInt(), 1000, 120000);
     process.start();
     if (!process.waitForStarted(3000)) {
-        outcome.error = QStringLiteral("Impossible de démarrer Lua : %1").arg(process.errorString());
+        outcome.error = KE_TXT("Impossible de démarrer Lua : %1", "Unable to start Lua: %1").arg(process.errorString());
         return outcome;
     }
     outcome.started = true;
@@ -366,10 +368,10 @@ LuaScriptRunOutcome runLuaScriptProcess(const QString& scriptText, const QVarian
     outcome.success = finished && process.exitStatus() == QProcess::NormalExit && outcome.exitCode == 0;
     if (!outcome.success) {
         outcome.error = outcome.cancelled
-            ? QStringLiteral("Script Lua annulé.")
+            ? KE_TXT("Script Lua annulé.", "Lua script cancelled.")
             : outcome.timedOut
-            ? QStringLiteral("Script Lua interrompu après timeout (%1 ms).").arg(timeoutMs)
-            : QStringLiteral("Script Lua terminé avec le code %1.").arg(outcome.exitCode);
+            ? KE_TXT("Script Lua interrompu après timeout (%1 ms).", "Lua script interrupted after timeout (%1 ms).").arg(timeoutMs)
+            : KE_TXT("Script Lua terminé avec le code %1.", "Lua script finished with code %1.").arg(outcome.exitCode);
     }
     return outcome;
 }
@@ -2139,11 +2141,15 @@ void ApplicationController::detectStableCandidateGroup(
             }
             (*result)["stableGroupCycles"] = m_stableCandidateGroupCycles;
             (*result)["stableGroupAddresses"] = stableAddresses;
-            (*result)["stableGroupHint"] = QString(
+            (*result)["stableGroupHint"] = KE_TXT(
                 "%1 candidat(s) restent identiques depuis %2 cycles de next scan — "
                 "probablement des copies redondantes de la même valeur. Une écriture "
                 "isolée sur un seul risque d'être annulée silencieusement ; essaie "
-                "writeMemoryValuesAtomic() pour les écrire tous en même temps.")
+                "writeMemoryValuesAtomic() pour les écrire tous en même temps.",
+                "%1 candidate(s) have stayed identical for %2 next-scan cycles — "
+                "probably redundant copies of the same value. Writing to just one "
+                "risks being silently overwritten; try "
+                "writeMemoryValuesAtomic() to write them all at once.")
                 .arg(currentGroup.size())
                 .arg(m_stableCandidateGroupCycles);
         }
@@ -2261,18 +2267,18 @@ QVariantMap ApplicationController::resolveSymbolAddress(const QString& moduleNam
     result["function"] = functionName;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (moduleName.trimmed().isEmpty() || functionName.trimmed().isEmpty()) {
-        result["error"] = "Module et fonction requis.";
+        result["error"] = KE_TXT("Module et fonction requis.", "Module and function required.");
         return result;
     }
 
     uint64_t address = 0;
     QString error;
     if (!killcore::resolveRemoteExportAddress(m_handle, moduleName, functionName, &address, &error)) {
-        result["error"] = error.isEmpty() ? "Résolution de symbole échouée." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Résolution de symbole échouée.", "Symbol resolution failed.") : error;
         return result;
     }
 
@@ -2290,18 +2296,18 @@ QVariantMap ApplicationController::listModuleExports(const QString& moduleName, 
     result["names"] = namesList;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (moduleName.trimmed().isEmpty()) {
-        result["error"] = "Module requis.";
+        result["error"] = KE_TXT("Module requis.", "Module required.");
         return result;
     }
 
     QStringList names;
     QString error;
     if (!killcore::listRemoteExportNames(m_handle, moduleName, filterSubstring, maxNames, &names, &error)) {
-        result["error"] = error.isEmpty() ? "Listage des exports échoué." : error;
+        result["error"] = error.isEmpty() ? KE_TXT("Listage des exports échoué.", "Failed to list exports.") : error;
         return result;
     }
 
@@ -2359,7 +2365,7 @@ bool ApplicationController::attachProcess(int pid) {
 
     if (!m_handle.open(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly)) {
         KE_LOG_ERROR() << "Failed to open process PID " << pid;
-        emit errorOccurred("Accès insuffisant au processus.");
+        emit errorOccurred(KE_TXT("Accès insuffisant au processus.", "Insufficient access to the process."));
         return false;
     }
 
@@ -2501,7 +2507,7 @@ QVariantList ApplicationController::filterAutoWriteSuggestionsByRegion(
         QVariantMap suggestion = item.toMap();
         uint64_t address = 0;
         if (!parseHexAddress(suggestion.value("address").toString(), &address)) {
-            suggestion["noiseFilterReason"] = "Adresse invalide.";
+            suggestion["noiseFilterReason"] = KE_TXT("Adresse invalide.", "Invalid address.");
             if (rejected) rejected->append(suggestion);
             continue;
         }
@@ -2518,7 +2524,7 @@ QVariantList ApplicationController::filterAutoWriteSuggestionsByRegion(
         }
 
         if (!foundRegion) {
-            suggestion["noiseFilterReason"] = "Région mémoire introuvable.";
+            suggestion["noiseFilterReason"] = KE_TXT("Région mémoire introuvable.", "Memory region not found.");
             if (rejected) rejected->append(suggestion);
             continue;
         }
@@ -2532,7 +2538,7 @@ QVariantList ApplicationController::filterAutoWriteSuggestionsByRegion(
         const bool relevantType = matchedRegion.type == killcore::MemoryType::Private
             || matchedRegion.type == killcore::MemoryType::Mapped;
         if (!matchedRegion.readable || !matchedRegion.writable || matchedRegion.guarded || !relevantType) {
-            suggestion["noiseFilterReason"] = "Région peu pertinente pour une valeur de jeu.";
+            suggestion["noiseFilterReason"] = KE_TXT("Région peu pertinente pour une valeur de jeu.", "Region not relevant for a game value.");
             if (rejected) rejected->append(suggestion);
             continue;
         }
@@ -2575,7 +2581,7 @@ QVariantMap ApplicationController::readMemoryPreview(const QString& addressHex, 
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -2586,7 +2592,7 @@ QVariantMap ApplicationController::readMemoryPreview(const QString& addressHex, 
     }
     const uint64_t address = normalized.toULongLong(&ok, 16);
     if (!ok || address == 0) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -2609,7 +2615,7 @@ QVariantMap ApplicationController::readMemoryBlock(const QString& addressHex, in
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -2620,7 +2626,7 @@ QVariantMap ApplicationController::readMemoryBlock(const QString& addressHex, in
     }
     const uint64_t address = normalized.toULongLong(&ok, 16);
     if (!ok || address == 0) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -2645,7 +2651,7 @@ QVariantMap ApplicationController::analyzeStructureMemory(const QString& address
     result["fields"] = fields;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -2656,7 +2662,7 @@ QVariantMap ApplicationController::analyzeStructureMemory(const QString& address
     }
     const uint64_t address = normalized.toULongLong(&ok, 16);
     if (!ok || address == 0) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -2738,7 +2744,7 @@ QVariantMap ApplicationController::inferStructureInstanceDelta(
         !parseHexAddress(fieldAddressAHex, &fieldA) ||
         !parseHexAddress(baseAddressBHex, &baseB) ||
         !parseHexAddress(fieldAddressBHex, &fieldB)) {
-        result["error"] = QStringLiteral("Adresses invalides.");
+        result["error"] = KE_TXT("Adresses invalides.", "Invalid addresses.");
         return result;
     }
 
@@ -2792,7 +2798,7 @@ QVariantMap ApplicationController::findStructureInstancesAsync(const QVariantMap
     started["success"] = false;
 
     if (!m_handle.isValid()) {
-        started["error"] = QStringLiteral("Aucun processus attaché.");
+        started["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return started;
     }
 
@@ -2824,7 +2830,7 @@ QVariantMap ApplicationController::findStructureInstancesAsync(const QVariantMap
     }
 
     if (tmpl.fields.isEmpty()) {
-        started["error"] = QStringLiteral("Template vide — aucun champ à matcher.");
+        started["error"] = KE_TXT("Template vide — aucun champ à matcher.", "Empty template — no field to match.");
         return started;
     }
 
@@ -3103,13 +3109,13 @@ QVariantMap ApplicationController::analyzeFieldStability(const QString& addressH
     result["address"] = addressHex;
 
     if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -3160,7 +3166,8 @@ QVariantMap ApplicationController::analyzeFieldStability(const QString& addressH
     result["meanIntervalMs"] = classification.meanIntervalMs;
     result["intervalCoefficientOfVariation"] = classification.intervalCoefficientOfVariation;
     result["rationale"] = classification.rationale;
-    result["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture (lecture seule, aucune écriture).";
+    result["warning"] = KE_TXT("Cette fonction attache KillEngine comme debugger au processus cible pendant la capture (lecture seule, aucune écriture).",
+                                "This function attaches KillEngine as a debugger to the target process during capture (read-only, no writes).");
     return result;
 }
 
@@ -3179,7 +3186,7 @@ QVariantMap ApplicationController::readAttachedWindowText(const QVariantMap& opt
     result["windows"] = windows;
 
     if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -3208,7 +3215,7 @@ QVariantMap ApplicationController::readAttachedWindowText(const QVariantMap& opt
     Q_UNUSED(options);
     Q_UNUSED(includeAllVisible);
     Q_UNUSED(titleContains);
-    result["error"] = "Lecture de texte de fenêtre disponible seulement sous Windows.";
+    result["error"] = KE_TXT("Lecture de texte de fenêtre disponible seulement sous Windows.", "Window text reading is only available on Windows.");
 #endif
 
     appendScanTelemetry("attached_window_text_read", {
@@ -3226,7 +3233,7 @@ QVariantMap ApplicationController::readUiAutomationTree(const QVariantMap& optio
     result["elements"] = elements;
 
     if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -3265,7 +3272,8 @@ QVariantMap ApplicationController::readUiAutomationTree(const QVariantMap& optio
         }
     }
     if (!targetHwnd) {
-        result["error"] = "Aucune fenêtre visible trouvée pour ce processus (essaie hwndHex explicite ou ajuste titleContains).";
+        result["error"] = KE_TXT("Aucune fenêtre visible trouvée pour ce processus (essaie hwndHex explicite ou ajuste titleContains).",
+                                  "No visible window found for this process (try an explicit hwndHex or adjust titleContains).");
         return result;
     }
 
@@ -3280,7 +3288,7 @@ QVariantMap ApplicationController::readUiAutomationTree(const QVariantMap& optio
     const bool comInitializedHere = SUCCEEDED(initHr);
     const bool comUsable = comInitializedHere || initHr == RPC_E_CHANGED_MODE;
     if (!comUsable) {
-        result["error"] = QStringLiteral("CoInitializeEx a échoué (0x%1).").arg(static_cast<uint32_t>(initHr), 0, 16);
+        result["error"] = KE_TXT("CoInitializeEx a échoué (0x%1).", "CoInitializeEx failed (0x%1).").arg(static_cast<uint32_t>(initHr), 0, 16);
         return result;
     }
 
@@ -3295,7 +3303,7 @@ QVariantMap ApplicationController::readUiAutomationTree(const QVariantMap& optio
                                    __uuidof(IUIAutomation), &automation);
     if (FAILED(hr) || !automation) {
         cleanupCom();
-        result["error"] = QStringLiteral("CoCreateInstance(CUIAutomation) a échoué (0x%1).").arg(static_cast<uint32_t>(hr), 0, 16);
+        result["error"] = KE_TXT("CoCreateInstance(CUIAutomation) a échoué (0x%1).", "CoCreateInstance(CUIAutomation) failed (0x%1).").arg(static_cast<uint32_t>(hr), 0, 16);
         return result;
     }
 
@@ -3303,7 +3311,7 @@ QVariantMap ApplicationController::readUiAutomationTree(const QVariantMap& optio
     hr = automation->ElementFromHandle(targetHwnd, &root);
     if (FAILED(hr) || !root) {
         cleanupCom();
-        result["error"] = QStringLiteral("ElementFromHandle (UIA) a échoué pour cette fenêtre (0x%1).").arg(static_cast<uint32_t>(hr), 0, 16);
+        result["error"] = KE_TXT("ElementFromHandle (UIA) a échoué pour cette fenêtre (0x%1).", "ElementFromHandle (UIA) failed for this window (0x%1).").arg(static_cast<uint32_t>(hr), 0, 16);
         return result;
     }
 
@@ -3326,7 +3334,8 @@ QVariantMap ApplicationController::readUiAutomationTree(const QVariantMap& optio
     result["findAllHr"] = QStringLiteral("0x%1").arg(static_cast<uint32_t>(hr), 0, 16);
     if (FAILED(hr) || !found) {
         cleanupCom();
-        result["error"] = "FindAll (UIA) a échoué -- la cible ne repond peut-etre pas a l'arbre d'accessibilite.";
+        result["error"] = KE_TXT("FindAll (UIA) a échoué -- la cible ne repond peut-etre pas a l'arbre d'accessibilite.",
+                                  "FindAll (UIA) failed -- the target may not be responding to the accessibility tree.");
         return result;
     }
 
@@ -3394,7 +3403,7 @@ QVariantMap ApplicationController::readUiAutomationTree(const QVariantMap& optio
     result["hwnd"] = QString::number(reinterpret_cast<quintptr>(targetHwnd), 16).toUpper();
 #else
     Q_UNUSED(options);
-    result["error"] = "Lecture UI Automation disponible seulement sous Windows.";
+    result["error"] = KE_TXT("Lecture UI Automation disponible seulement sous Windows.", "UI Automation reading is only available on Windows.");
 #endif
 
     return result;
@@ -3572,39 +3581,39 @@ QVariantMap ApplicationController::writeMemoryHex(const QString& addressHex, con
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     // Parser la chaine hex : accepte "48 8B 00", "488B00", "48 8b 00"
     QString cleaned = hexString.simplified().remove(' ').remove('\t').remove('\n').remove('\r').remove(',');
     if (cleaned.size() % 2 != 0) {
-        result["error"] = "Chaine hexadecimale invalide : nombre impair de caracteres.";
+        result["error"] = KE_TXT("Chaine hexadecimale invalide : nombre impair de caracteres.", "Invalid hexadecimal string: odd number of characters.");
         return result;
     }
     if (cleaned.isEmpty()) {
-        result["error"] = "Chaine hexadecimale vide.";
+        result["error"] = KE_TXT("Chaine hexadecimale vide.", "Empty hexadecimal string.");
         return result;
     }
     if (cleaned.size() > 4096) {
-        result["error"] = "Chaine hexadecimale trop longue (max 2048 octets).";
+        result["error"] = KE_TXT("Chaine hexadecimale trop longue (max 2048 octets).", "Hexadecimal string too long (max 2048 bytes).");
         return result;
     }
     const QByteArray bytes = QByteArray::fromHex(cleaned.toLatin1());
     if (bytes.isEmpty()) {
-        result["error"] = "Chaine hexadecimale invalide.";
+        result["error"] = KE_TXT("Chaine hexadecimale invalide.", "Invalid hexadecimal string.");
         return result;
     }
 
     killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid), killcore::ProcessAccess::ReadWrite);
     if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus en écriture.", "Unable to open the process for writing.");
         return result;
     }
 
@@ -3633,13 +3642,13 @@ QVariantMap ApplicationController::dumpMemoryRegion(const QString& addressHex, i
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -3759,22 +3768,22 @@ QVariantMap ApplicationController::testCandidateFieldsAsync(
     result["started"] = false;
 
     if (m_candidateFieldTestInProgress) {
-        result["error"] = "Un test de champs candidats est déjà en cours.";
+        result["error"] = KE_TXT("Un test de champs candidats est déjà en cours.", "A candidate field test is already running.");
         return result;
     }
     if (!m_attached || !m_handle.isValid() || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t writeInstructionAddress = 0;
     if (!parseHexAddress(writeInstructionAddressHex, &writeInstructionAddress)) {
-        result["error"] = "Adresse d'instruction invalide.";
+        result["error"] = KE_TXT("Adresse d'instruction invalide.", "Invalid instruction address.");
         return result;
     }
     uint64_t knownWriteTargetAddress = 0;
     if (!parseHexAddress(knownWriteTargetAddressHex, &knownWriteTargetAddress)) {
-        result["error"] = "Adresse écrite connue invalide.";
+        result["error"] = KE_TXT("Adresse écrite connue invalide.", "Invalid known written address.");
         return result;
     }
 
@@ -3788,11 +3797,11 @@ QVariantMap ApplicationController::testCandidateFieldsAsync(
     killcore::MemoryReader windowReader(m_handle);
     const auto windowRead = windowReader.readChunked(start, static_cast<size_t>(targetOffsetInWindow + trailingBytes), 4096);
     if (!windowRead.success && windowRead.bytesRead == 0) {
-        result["error"] = windowRead.errorMessage.isEmpty() ? QString("Lecture mémoire impossible.") : windowRead.errorMessage;
+        result["error"] = windowRead.errorMessage.isEmpty() ? KE_TXT("Lecture mémoire impossible.", "Unable to read memory.") : windowRead.errorMessage;
         return result;
     }
     if (targetOffsetInWindow > windowRead.data.size()) {
-        result["error"] = "Lecture mémoire trop courte pour atteindre l'adresse cible.";
+        result["error"] = KE_TXT("Lecture mémoire trop courte pour atteindre l'adresse cible.", "Memory read too short to reach the target address.");
         return result;
     }
 
@@ -3804,8 +3813,10 @@ QVariantMap ApplicationController::testCandidateFieldsAsync(
 
     auto resolved = killcore::resolveCandidateFieldAddresses(backward.instructions, knownWriteTargetAddress);
     if (resolved.isEmpty()) {
-        result["error"] = "Aucun champ candidat résolvable (registre de base différent de celui de l'instruction "
-                           "d'écriture, ou aucun champ mémoire simple en amont).";
+        result["error"] = KE_TXT("Aucun champ candidat résolvable (registre de base différent de celui de l'instruction "
+                                  "d'écriture, ou aucun champ mémoire simple en amont).",
+                                  "No resolvable candidate field (base register differs from the write "
+                                  "instruction's, or no simple memory field upstream).");
         return result;
     }
     // resolveCandidateFieldAddresses() rend les candidats dans l'ordre d'execution :
@@ -3840,7 +3851,7 @@ QVariantMap ApplicationController::testCandidateFieldsAsync(
                 outcome["memDisplacement"] = static_cast<qlonglong>(candidate.memDisplacement);
                 outcome["valueType"] = killcore::valueTypeToString(candidate.inferredType);
                 outcome["verdict"] = "error";
-                outcome["error"] = "Impossible d'ouvrir le processus en écriture.";
+                outcome["error"] = KE_TXT("Impossible d'ouvrir le processus en écriture.", "Unable to open the process for writing.");
                 outcomes.append(outcome);
             }
         } else {
@@ -3862,7 +3873,7 @@ QVariantMap ApplicationController::testCandidateFieldsAsync(
                 const auto originalRead = reader.read(candidate.address, typeSize);
                 if ((!originalRead.success && !originalRead.partial) || originalRead.bytesRead != typeSize) {
                     outcome["verdict"] = "error";
-                    outcome["error"] = "Lecture de la valeur d'origine impossible.";
+                    outcome["error"] = KE_TXT("Lecture de la valeur d'origine impossible.", "Unable to read the original value.");
                     outcomes.append(outcome);
                     continue;
                 }
@@ -3873,7 +3884,7 @@ QVariantMap ApplicationController::testCandidateFieldsAsync(
                 const auto probeWrite = writer.write(candidate.address, testBytes, true);
                 if (!probeWrite.success || !probeWrite.verified) {
                     outcome["verdict"] = "error";
-                    outcome["error"] = probeWrite.errorMessage.isEmpty() ? "Écriture test impossible." : probeWrite.errorMessage;
+                    outcome["error"] = probeWrite.errorMessage.isEmpty() ? KE_TXT("Écriture test impossible.", "Unable to write test value.") : probeWrite.errorMessage;
                     outcomes.append(outcome);
                     continue;
                 }
@@ -3910,7 +3921,8 @@ QVariantMap ApplicationController::testCandidateFieldsAsync(
                 const bool restored = restore.success && restore.verified;
                 outcome["restored"] = restored;
                 if (!restored) {
-                    outcome["error"] = "Valeur test écrite mais restauration échouée — vérifie manuellement cette adresse.";
+                    outcome["error"] = KE_TXT("Valeur test écrite mais restauration échouée — vérifie manuellement cette adresse.",
+                                               "Test value written but restore failed — check this address manually.");
                 }
 
                 outcomes.append(outcome);
@@ -3942,9 +3954,11 @@ QVariantMap ApplicationController::testCandidateFieldsAsync(
     result["started"] = true;
     result["requestId"] = requestId;
     result["candidateCount"] = resolved.size();
-    result["warning"] = QString(
+    result["warning"] = KE_TXT(
         "Écrit une valeur test transitoire sur chaque champ candidat (jusqu'à %1s par champ), "
-        "puis restaure systématiquement la valeur d'origine.")
+        "puis restaure systématiquement la valeur d'origine.",
+        "Writes a transient test value to each candidate field (up to %1s per field), "
+        "then always restores the original value.")
         .arg(kCandidateTestTicks * kCandidateTestIntervalMs / 1000);
     return result;
 }
@@ -3953,7 +3967,7 @@ QVariantMap ApplicationController::cancelCandidateFieldTest() {
     QVariantMap result;
     result["success"] = false;
     if (!m_candidateFieldTestInProgress || !m_activeCandidateFieldTestCancellation) {
-        result["error"] = "Aucun test de champs candidats actif à annuler.";
+        result["error"] = KE_TXT("Aucun test de champs candidats actif à annuler.", "No active candidate field test to cancel.");
         return result;
     }
     m_activeCandidateFieldTestCancellation->cancel();
@@ -3971,11 +3985,11 @@ QVariantMap ApplicationController::injectDllIntoProcess(const QString& dllPath) 
     result["dllPath"] = dllPath;
 
     if (!m_attached || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (dllPath.trimmed().isEmpty()) {
-        result["error"] = "Chemin DLL vide.";
+        result["error"] = KE_TXT("Chemin DLL vide.", "Empty DLL path.");
         return result;
     }
 
@@ -4023,34 +4037,37 @@ QVariantMap ApplicationController::forceWriteInstructionValue(
     result["success"] = false;
 
     if (!m_attached || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (memBaseRegister.trimmed().isEmpty()) {
-        result["error"] = "Cette instruction n'a pas de destination mémoire exploitable (adressage indexé ou RIP-relatif, non supporté).";
+        result["error"] = KE_TXT("Cette instruction n'a pas de destination mémoire exploitable (adressage indexé ou RIP-relatif, non supporté).",
+                                  "This instruction has no usable memory destination (indexed or RIP-relative addressing, not supported).");
         return result;
     }
     if (instructionLength < 5) {
-        result["error"] = QString("Instruction trop courte (%1 octet(s)) pour y poser un saut de redirection (5 minimum).").arg(instructionLength);
+        result["error"] = KE_TXT("Instruction trop courte (%1 octet(s)) pour y poser un saut de redirection (5 minimum).",
+                                  "Instruction too short (%1 byte(s)) to place a redirect jump (5 minimum).").arg(instructionLength);
         return result;
     }
 
     uint64_t rip = 0;
     if (!parseHexAddress(ripHex, &rip)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
     // encodeMemImmMov (core/scripting/auto_assembler.cpp) n'ecrit qu'un
     // immediat 32 bits (dword) : memes limites que "Forcer une valeur".
     if (type == killcore::ValueType::Int64 || type == killcore::ValueType::UInt64
         || type == killcore::ValueType::Float32 || type == killcore::ValueType::Float64) {
-        result["error"] = "Seuls les types entiers jusqu'à 32 bits sont supportés pour forcer une valeur ici.";
+        result["error"] = KE_TXT("Seuls les types entiers jusqu'à 32 bits sont supportés pour forcer une valeur ici.",
+                                  "Only integer types up to 32 bits are supported to force a value here.");
         return result;
     }
     killcore::ScanValue scanValue;
@@ -4075,7 +4092,8 @@ QVariantMap ApplicationController::forceWriteInstructionValue(
         }
     }
     if (moduleName.isEmpty()) {
-        result["error"] = "Impossible de déterminer le module contenant cette adresse (mémoire allouée dynamiquement, hors d'un module chargé ?).";
+        result["error"] = KE_TXT("Impossible de déterminer le module contenant cette adresse (mémoire allouée dynamiquement, hors d'un module chargé ?).",
+                                  "Unable to determine the module containing this address (dynamically allocated memory, outside a loaded module?).");
         return result;
     }
 
@@ -4226,7 +4244,7 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
     QVariantMap actionResult;
     actionResult["success"] = allWritesOk;
     actionResult["remaining"] = static_cast<qulonglong>(writeState.lastTargetCount());
-    actionResult["error"] = allWritesOk ? QString() : QString("Au moins une réécriture a échoué.");
+    actionResult["error"] = allWritesOk ? QString() : KE_TXT("Au moins une réécriture a échoué.", "At least one write failed.");
 
     result["actionResult"] = actionResult;
     result["suggestedWrites"] = suggestions;
@@ -4237,12 +4255,15 @@ QVariantMap ApplicationController::rewriteLastAutoWriteTargets(const QString& va
     result["activeTargetCount"] = writeState.chatTargetCount();
     result["previousTargetValue"] = previousTargetValue;
     result["writeHistory"] = writeHistoryToVariantList(m_autoWriteValueHistory);
-    result["rollbackNote"] = "Tu peux annuler cette réécriture via le bouton rollback batch dans l'assistant.";
+    result["rollbackNote"] = KE_TXT("Tu peux annuler cette réécriture via le bouton rollback batch dans l'assistant.",
+                                     "You can undo this rewrite via the batch rollback button in the assistant.");
     result["message"] = allWritesOk
-        ? QString("J'ai repris les %1 dernière(s) adresse(s) auto-écrite(s) et j'ai mis %2 dessus. Je garde ces adresses actives pour les prochaines modifications.")
+        ? KE_TXT("J'ai repris les %1 dernière(s) adresse(s) auto-écrite(s) et j'ai mis %2 dessus. Je garde ces adresses actives pour les prochaines modifications.",
+                 "I reused the last %1 auto-written address(es) and set %2 on them. I'm keeping these addresses active for the next changes.")
               .arg(writeState.lastTargetCount())
               .arg(value)
-        : QString("J'ai repris les dernières adresses auto-écrites, mais au moins une réécriture vers %1 a échoué.")
+        : KE_TXT("J'ai repris les dernières adresses auto-écrites, mais au moins une réécriture vers %1 a échoué.",
+                 "I reused the last auto-written addresses, but at least one write to %1 failed.")
               .arg(value);
     return result;
 }
@@ -4473,9 +4494,9 @@ QVariantMap ApplicationController::requestWindowsDefenderExclusionAsync() {
             const DWORD err = GetLastError();
             if (err == ERROR_CANCELLED) {
                 result["cancelled"] = true;
-                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+                result["error"] = KE_TXT("Invite d'élévation refusée par l'utilisateur.", "The user declined the elevation prompt.");
             } else {
-                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+                result["error"] = KE_TXT("Impossible de lancer PowerShell élevé (error=%1).", "Unable to launch elevated PowerShell (error=%1).").arg(err);
             }
             KE_LOG_WARN() << "requestWindowsDefenderExclusionAsync: ShellExecuteExW failed, error=" << err;
         } else if (sei.hProcess) {
@@ -4485,9 +4506,11 @@ QVariantMap ApplicationController::requestWindowsDefenderExclusionAsync() {
             CloseHandle(sei.hProcess);
             result["success"] = (exitCode == 0);
             if (exitCode != 0) {
-                result["error"] = QStringLiteral(
+                result["error"] = KE_TXT(
                     "Add-MpPreference a échoué (code %1) — l'exclusion est peut-être gérée de façon centralisée "
-                    "par une politique d'entreprise (Tamper Protection) et ne peut pas être modifiée localement.")
+                    "par une politique d'entreprise (Tamper Protection) et ne peut pas être modifiée localement.",
+                    "Add-MpPreference failed (code %1) — the exclusion may be centrally managed "
+                    "by an enterprise policy (Tamper Protection) and cannot be changed locally.")
                     .arg(exitCode);
             }
         } else {
@@ -4509,7 +4532,7 @@ QVariantMap ApplicationController::requestWindowsDefenderExclusionAsync() {
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return started;
@@ -4541,14 +4564,14 @@ QVariantMap ApplicationController::blockProcessNetworkAsync() {
     started["cancelled"] = false;
 
     if (!m_attached || m_pid <= 0) {
-        started["error"] = "Aucun processus attaché.";
+        started["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return started;
     }
 
 #ifdef Q_OS_WIN
     const QString exePath = QDir::toNativeSeparators(m_handle.executablePath());
     if (exePath.isEmpty()) {
-        started["error"] = "Chemin de l'exécutable introuvable pour le processus attaché.";
+        started["error"] = KE_TXT("Chemin de l'exécutable introuvable pour le processus attaché.", "Executable path not found for the attached process.");
         return started;
     }
     const QString ruleToken = sanitizeFirewallRuleToken(QFileInfo(exePath).fileName());
@@ -4590,9 +4613,9 @@ QVariantMap ApplicationController::blockProcessNetworkAsync() {
             const DWORD err = GetLastError();
             if (err == ERROR_CANCELLED) {
                 result["cancelled"] = true;
-                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+                result["error"] = KE_TXT("Invite d'élévation refusée par l'utilisateur.", "The user declined the elevation prompt.");
             } else {
-                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+                result["error"] = KE_TXT("Impossible de lancer PowerShell élevé (error=%1).", "Unable to launch elevated PowerShell (error=%1).").arg(err);
             }
             KE_LOG_WARN() << "blockProcessNetworkAsync: ShellExecuteExW failed, error=" << err;
         } else if (sei.hProcess) {
@@ -4602,7 +4625,7 @@ QVariantMap ApplicationController::blockProcessNetworkAsync() {
             CloseHandle(sei.hProcess);
             result["success"] = (exitCode == 0);
             if (exitCode != 0) {
-                result["error"] = QStringLiteral("New-NetFirewallRule a échoué (code %1).").arg(exitCode);
+                result["error"] = KE_TXT("New-NetFirewallRule a échoué (code %1).", "New-NetFirewallRule failed (code %1).").arg(exitCode);
             }
         } else {
             // Pas de handle de process a attendre -- best-effort, meme logique
@@ -4633,7 +4656,7 @@ QVariantMap ApplicationController::blockProcessNetworkAsync() {
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return started;
@@ -4654,7 +4677,7 @@ QVariantMap ApplicationController::unblockProcessNetworkAsync() {
         }
     }
     if (ruleToken.isEmpty()) {
-        started["error"] = "Aucune règle de blocage réseau KillEngine connue à retirer.";
+        started["error"] = KE_TXT("Aucune règle de blocage réseau KillEngine connue à retirer.", "No known KillEngine network block rule to remove.");
         return started;
     }
 
@@ -4690,9 +4713,9 @@ QVariantMap ApplicationController::unblockProcessNetworkAsync() {
             const DWORD err = GetLastError();
             if (err == ERROR_CANCELLED) {
                 result["cancelled"] = true;
-                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+                result["error"] = KE_TXT("Invite d'élévation refusée par l'utilisateur.", "The user declined the elevation prompt.");
             } else {
-                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+                result["error"] = KE_TXT("Impossible de lancer PowerShell élevé (error=%1).", "Unable to launch elevated PowerShell (error=%1).").arg(err);
             }
             KE_LOG_WARN() << "unblockProcessNetworkAsync: ShellExecuteExW failed, error=" << err;
         } else if (sei.hProcess) {
@@ -4702,7 +4725,7 @@ QVariantMap ApplicationController::unblockProcessNetworkAsync() {
             CloseHandle(sei.hProcess);
             result["success"] = (exitCode == 0);
             if (exitCode != 0) {
-                result["error"] = QStringLiteral("Remove-NetFirewallRule a échoué (code %1).").arg(exitCode);
+                result["error"] = KE_TXT("Remove-NetFirewallRule a échoué (code %1).", "Remove-NetFirewallRule failed (code %1).").arg(exitCode);
             }
         } else {
             result["success"] = true;
@@ -4724,7 +4747,7 @@ QVariantMap ApplicationController::unblockProcessNetworkAsync() {
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return started;
@@ -4765,7 +4788,7 @@ QVariantMap ApplicationController::getProcessNetworkBlockStatus() const {
         result["ruleName"] = ruleOut;
         result["exePath"] = exePath;
     } else {
-        result["error"] = "Impossible d'interroger le pare-feu (timeout).";
+        result["error"] = KE_TXT("Impossible d'interroger le pare-feu (timeout).", "Unable to query the firewall (timeout).");
         check.kill();
     }
 #endif
@@ -4949,7 +4972,7 @@ QVariantMap ApplicationController::getProcessNetworkConnectionsAsync() {
     started["success"] = false;
 
     if (!m_attached || m_pid <= 0) {
-        started["error"] = "Aucun processus attaché.";
+        started["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return started;
     }
 
@@ -5049,7 +5072,7 @@ QVariantMap ApplicationController::getProcessNetworkConnectionsAsync() {
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return started;
@@ -5061,14 +5084,14 @@ QVariantMap ApplicationController::getProcessNetworkModules() {
     result["modules"] = QVariantList();
 
     if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
 #ifdef Q_OS_WIN
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, static_cast<DWORD>(m_pid));
     if (!hProcess) {
-        result["error"] = "Impossible d'ouvrir le processus.";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus.", "Unable to open the process.");
         return result;
     }
 
@@ -5076,7 +5099,7 @@ QVariantMap ApplicationController::getProcessNetworkModules() {
     DWORD cbNeeded = 0;
     if (!EnumProcessModules(hProcess, modules, sizeof(modules), &cbNeeded)) {
         CloseHandle(hProcess);
-        result["error"] = "EnumProcessModules échoué.";
+        result["error"] = KE_TXT("EnumProcessModules échoué.", "EnumProcessModules failed.");
         return result;
     }
 
@@ -5111,7 +5134,7 @@ QVariantMap ApplicationController::getProcessNetworkModules() {
     result["success"] = true;
     result["modules"] = dllList;
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    result["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return result;
@@ -5125,7 +5148,7 @@ QVariantMap ApplicationController::startHttpProxyAsync(int port, bool interceptH
     QVariantMap started;
     started["success"] = false;
     if (!m_attached || m_pid <= 0) {
-        started["error"] = "Aucun processus attaché.";
+        started["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return started;
     }
 
@@ -5135,7 +5158,7 @@ QVariantMap ApplicationController::startHttpProxyAsync(int port, bool interceptH
     }
 
     if (m_httpProxySession->isActive()) {
-        started["error"] = "Un proxy HTTP est déjà actif.";
+        started["error"] = KE_TXT("Un proxy HTTP est déjà actif.", "An HTTP proxy is already active.");
         return started;
     }
 
@@ -5143,7 +5166,7 @@ QVariantMap ApplicationController::startHttpProxyAsync(int port, bool interceptH
     const QString handlerPath = QCoreApplication::applicationDirPath()
         + QStringLiteral("/KillEngineHttpProxyHandler.dll");
     if (!QFile::exists(handlerPath)) {
-        started["error"] = "Handler proxy HTTP introuvable: " + handlerPath;
+        started["error"] = KE_TXT("Handler proxy HTTP introuvable: ", "HTTP proxy handler not found: ") + handlerPath;
         return started;
     }
 
@@ -5184,7 +5207,7 @@ QVariantMap ApplicationController::startHttpProxyAsync(int port, bool interceptH
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return started;
@@ -5195,7 +5218,7 @@ QVariantMap ApplicationController::stopHttpProxyAsync() {
     started["success"] = false;
 
     if (!m_httpProxySession || !m_httpProxySession->isActive()) {
-        started["error"] = "Aucun proxy HTTP actif.";
+        started["error"] = KE_TXT("Aucun proxy HTTP actif.", "No active HTTP proxy.");
         return started;
     }
 
@@ -5221,7 +5244,7 @@ QVariantMap ApplicationController::stopHttpProxyAsync() {
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return started;
@@ -5233,7 +5256,7 @@ QVariantMap ApplicationController::getHttpProxyRequests() {
     result["requests"] = QVariantList();
 
     if (!m_httpProxySession || !m_httpProxySession->isActive()) {
-        result["error"] = "Aucun proxy HTTP actif.";
+        result["error"] = KE_TXT("Aucun proxy HTTP actif.", "No active HTTP proxy.");
         return result;
     }
 
@@ -5260,7 +5283,7 @@ QVariantMap ApplicationController::modifyHttpRequest(const QString& requestId, c
     result["success"] = false;
 
     if (!m_httpProxySession || !m_httpProxySession->isActive()) {
-        result["error"] = "Aucun proxy HTTP actif.";
+        result["error"] = KE_TXT("Aucun proxy HTTP actif.", "No active HTTP proxy.");
         return result;
     }
 
@@ -5268,7 +5291,7 @@ QVariantMap ApplicationController::modifyHttpRequest(const QString& requestId, c
     bool ok = false;
     int index = requestId.toInt(&ok);
     if (!ok || index < 0) {
-        result["error"] = "Index de requête invalide.";
+        result["error"] = KE_TXT("Index de requête invalide.", "Invalid request index.");
         return result;
     }
 
@@ -5276,7 +5299,7 @@ QVariantMap ApplicationController::modifyHttpRequest(const QString& requestId, c
         result["success"] = true;
         KE_LOG_INFO() << "modifyHttpRequest: index=" << index;
     } else {
-        result["error"] = "Impossible de modifier cette requête (déjà envoyée ou index invalide).";
+        result["error"] = KE_TXT("Impossible de modifier cette requête (déjà envoyée ou index invalide).", "Unable to modify this request (already sent or invalid index).");
     }
 
     return result;
@@ -5305,7 +5328,7 @@ QVariantMap ApplicationController::spoofDnsAsync(const QString& domain, const QS
     QVariantMap started;
     started["success"] = false;
     if (domain.isEmpty() || targetIp.isEmpty()) {
-        started["error"] = "Domaine et IP cible requis.";
+        started["error"] = KE_TXT("Domaine et IP cible requis.", "Domain and target IP required.");
         return started;
     }
 
@@ -5350,9 +5373,9 @@ QVariantMap ApplicationController::spoofDnsAsync(const QString& domain, const QS
             const DWORD err = GetLastError();
             if (err == ERROR_CANCELLED) {
                 result["cancelled"] = true;
-                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+                result["error"] = KE_TXT("Invite d'élévation refusée par l'utilisateur.", "The user declined the elevation prompt.");
             } else {
-                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+                result["error"] = KE_TXT("Impossible de lancer PowerShell élevé (error=%1).", "Unable to launch elevated PowerShell (error=%1).").arg(err);
             }
         } else if (sei.hProcess) {
             WaitForSingleObject(sei.hProcess, 15000);
@@ -5366,7 +5389,7 @@ QVariantMap ApplicationController::spoofDnsAsync(const QString& domain, const QS
                 result["targetIp"] = targetIp;
                 result["action"] = "added";
             } else {
-                result["error"] = QStringLiteral("PowerShell a échoué (code %1).").arg(exitCode);
+                result["error"] = KE_TXT("PowerShell a échoué (code %1).", "PowerShell failed (code %1).").arg(exitCode);
             }
         } else {
             result["success"] = true; // Best-effort
@@ -5388,7 +5411,7 @@ QVariantMap ApplicationController::spoofDnsAsync(const QString& domain, const QS
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return started;
@@ -5398,7 +5421,7 @@ QVariantMap ApplicationController::restoreDnsAsync(const QString& domain) {
     QVariantMap started;
     started["success"] = false;
     if (domain.isEmpty()) {
-        started["error"] = "Domaine requis.";
+        started["error"] = KE_TXT("Domaine requis.", "Domain required.");
         return started;
     }
 
@@ -5435,9 +5458,9 @@ QVariantMap ApplicationController::restoreDnsAsync(const QString& domain) {
             const DWORD err = GetLastError();
             if (err == ERROR_CANCELLED) {
                 result["cancelled"] = true;
-                result["error"] = "Invite d'élévation refusée par l'utilisateur.";
+                result["error"] = KE_TXT("Invite d'élévation refusée par l'utilisateur.", "The user declined the elevation prompt.");
             } else {
-                result["error"] = QStringLiteral("Impossible de lancer PowerShell élevé (error=%1).").arg(err);
+                result["error"] = KE_TXT("Impossible de lancer PowerShell élevé (error=%1).", "Unable to launch elevated PowerShell (error=%1).").arg(err);
             }
         } else if (sei.hProcess) {
             WaitForSingleObject(sei.hProcess, 15000);
@@ -5450,7 +5473,7 @@ QVariantMap ApplicationController::restoreDnsAsync(const QString& domain) {
                 result["domain"] = domain;
                 result["action"] = "removed";
             } else {
-                result["error"] = QStringLiteral("PowerShell a échoué (code %1).").arg(exitCode);
+                result["error"] = KE_TXT("PowerShell a échoué (code %1).", "PowerShell failed (code %1).").arg(exitCode);
             }
         } else {
             result["success"] = true; // Best-effort
@@ -5470,7 +5493,7 @@ QVariantMap ApplicationController::restoreDnsAsync(const QString& domain) {
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = "Fonctionnalité Windows uniquement.";
+    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return started;
@@ -5484,11 +5507,11 @@ QVariantMap ApplicationController::setLagSwitchAsync(bool enabled, int delayMs) 
     QVariantMap result;
     result["success"] = false;
     if (!m_attached || m_pid <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (delayMs < 0 || delayMs > 10000) {
-        result["error"] = "Délai invalide (0-10000 ms).";
+        result["error"] = KE_TXT("Délai invalide (0-10000 ms).", "Invalid delay (0-10000 ms).");
         return result;
     }
 
@@ -5507,7 +5530,7 @@ QVariantMap ApplicationController::setLagSwitchAsync(bool enabled, int delayMs) 
         const QString handlerPath = QCoreApplication::applicationDirPath()
             + QStringLiteral("/KillEngineLagSwitchHandler.dll");
         if (!QFile::exists(handlerPath)) {
-            result["error"] = "Handler lag switch introuvable: " + handlerPath;
+            result["error"] = KE_TXT("Handler lag switch introuvable: ", "Lag switch handler not found: ") + handlerPath;
             return result;
         }
 
@@ -5580,7 +5603,7 @@ QVariantMap ApplicationController::setLagSwitchAsync(bool enabled, int delayMs) 
     KE_LOG_INFO() << "setLagSwitchAsync: enabled=" << enabled << " delayMs=" << delayMs
                   << " success=" << result.value("success").toBool();
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    result["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
 
     return result;
@@ -5894,7 +5917,7 @@ QVariantMap ApplicationController::enableWebView2CdpDebugFlag() {
     result[QStringLiteral("value")] = kWebView2DebugFlagValue;
     KE_LOG_INFO() << "enableWebView2CdpDebugFlag: variable posee, relance des cibles WebView2 requise.";
 #else
-    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+    result[QStringLiteral("error")] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
     return result;
 }
@@ -5910,7 +5933,7 @@ QVariantMap ApplicationController::disableWebView2CdpDebugFlag() {
     result[QStringLiteral("success")] = true;
     KE_LOG_INFO() << "disableWebView2CdpDebugFlag: variable retiree.";
 #else
-    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+    result[QStringLiteral("error")] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
     return result;
 }
@@ -5925,7 +5948,7 @@ QVariantMap ApplicationController::getWebView2CdpDebugFlagStatus() const {
     result[QStringLiteral("value")] = value;
 #else
     result[QStringLiteral("success")] = false;
-    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+    result[QStringLiteral("error")] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
     return result;
 }
@@ -5958,7 +5981,7 @@ QVariantMap ApplicationController::getWebView2SystemPrepStatus() const {
         output.compare(QStringLiteral("Installed"), Qt::CaseInsensitive) == 0;
 #else
     result[QStringLiteral("success")] = false;
-    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+    result[QStringLiteral("error")] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
     return result;
 }
@@ -5994,9 +6017,9 @@ QVariantMap ApplicationController::installWebView2DeveloperModeCapability() {
         const DWORD err = GetLastError();
         if (err == ERROR_CANCELLED) {
             result[QStringLiteral("cancelled")] = true;
-            result[QStringLiteral("error")] = QStringLiteral("Invite UAC refusée par l'utilisateur.");
+            result[QStringLiteral("error")] = KE_TXT("Invite UAC refusée par l'utilisateur.", "The UAC prompt was declined by the user.");
         } else {
-            result[QStringLiteral("error")] = QStringLiteral("ShellExecuteExW a échoué (code %1).").arg(err);
+            result[QStringLiteral("error")] = KE_TXT("ShellExecuteExW a échoué (code %1).", "ShellExecuteExW failed (code %1).").arg(err);
         }
         return result;
     }
@@ -6004,13 +6027,16 @@ QVariantMap ApplicationController::installWebView2DeveloperModeCapability() {
         CloseHandle(sei.hProcess);
     }
     result[QStringLiteral("success")] = true;
-    result[QStringLiteral("message")] = QStringLiteral(
+    result[QStringLiteral("message")] = KE_TXT(
         "Installation lancée dans une fenêtre PowerShell élevée. Peut prendre plusieurs minutes et rester "
         "silencieuse : suivre l'état dans Paramètres > Système > Fonctionnalités facultatives > Historique, "
-        "ou relancer un diagnostic ici une fois terminé.");
+        "ou relancer un diagnostic ici une fois terminé.",
+        "Installation started in an elevated PowerShell window. It may take several minutes and stay "
+        "silent: check progress in Settings > System > Optional Features > History, "
+        "or rerun a diagnostic here once finished.");
     KE_LOG_INFO() << "installWebView2DeveloperModeCapability: installation lancée (async, UAC affiché).";
 #else
-    result[QStringLiteral("error")] = QStringLiteral("Fonctionnalité Windows uniquement.");
+    result[QStringLiteral("error")] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
     return result;
 }
@@ -6159,19 +6185,19 @@ QVariantMap ApplicationController::writeMemoryValueKernel(const QString& address
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
 
@@ -6200,11 +6226,12 @@ QVariantMap ApplicationController::writeMemoryValueKernel(const QString& address
         KE_LOG_INFO() << "writeMemoryValueKernel: pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString()
                       << " bytesWritten=" << data.size();
     } else {
-        result["error"] = "Écriture kernel échouée (driver non chargé/non connecté, adresse invalide côté cible, ou accès refusé).";
+        result["error"] = KE_TXT("Écriture kernel échouée (driver non chargé/non connecté, adresse invalide côté cible, ou accès refusé).",
+                                  "Kernel write failed (driver not loaded/connected, invalid target address, or access denied).");
         KE_LOG_WARN() << "writeMemoryValueKernel: échec pid=" << m_handle.pid() << " address=0x" << QString::number(address, 16).toStdString();
     }
 #else
-    result["error"] = "Fonctionnalité Windows uniquement.";
+    result["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
 #endif
     return result;
 }
@@ -6830,7 +6857,7 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
     QVariantMap result;
     result["success"] = false;
     result["blocked"] = true;
-    result["error"] = QStringLiteral("Aucun processus attaché.");
+    result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
 
     if (!m_handle.isValid()) {
         return result;
@@ -7377,8 +7404,10 @@ QVariantMap ApplicationController::getLuaScriptingStatus() const {
     // resterait affiche a tort apres activation via le toggle.
     result["automationPipeOptIn"] = m_automationPipeManager->isRunning();
     result["message"] = luaPath.isEmpty()
-        ? QStringLiteral("Aucun interpréteur Lua trouvé dans runtime/lua, lua, le dossier de l'application ou le PATH.")
-        : QStringLiteral("Lua externe prêt. Les appels KillEngine passent par le pipe d'automatisation local.");
+        ? KE_TXT("Aucun interpréteur Lua trouvé dans runtime/lua, lua, le dossier de l'application ou le PATH.",
+                 "No Lua interpreter found in runtime/lua, lua, the application folder, or PATH.")
+        : KE_TXT("Lua externe prêt. Les appels KillEngine passent par le pipe d'automatisation local.",
+                 "External Lua ready. KillEngine calls go through the local automation pipe.");
     return result;
 }
 
@@ -7419,11 +7448,11 @@ QVariantMap ApplicationController::executeLuaScriptAsync(const QString& scriptTe
     result["started"] = false;
 
     if (m_luaScriptInProgress) {
-        result["error"] = "Un script Lua est déjà en cours d'exécution.";
+        result["error"] = KE_TXT("Un script Lua est déjà en cours d'exécution.", "A Lua script is already running.");
         return result;
     }
     if (scriptText.trimmed().isEmpty()) {
-        result["error"] = "Script Lua vide.";
+        result["error"] = KE_TXT("Script Lua vide.", "Empty Lua script.");
         return result;
     }
 
@@ -7480,7 +7509,7 @@ QVariantMap ApplicationController::cancelLuaScriptExecution() {
     QVariantMap result;
     result["success"] = false;
     if (!m_luaScriptInProgress || !m_activeLuaScriptCancellation) {
-        result["error"] = "Aucun script Lua actif à annuler.";
+        result["error"] = KE_TXT("Aucun script Lua actif à annuler.", "No active Lua script to cancel.");
         return result;
     }
 
@@ -7523,7 +7552,7 @@ QVariantMap ApplicationController::startMemoryHeatmap(const QString& addressHex,
     result["success"] = false;
 
     if (!m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -7533,7 +7562,7 @@ QVariantMap ApplicationController::startMemoryHeatmap(const QString& addressHex,
         bool ok = false;
         const quint64 minAddress = trimmedAddress.toULongLong(&ok, 16);
         if (!ok) {
-            result["error"] = "Adresse de base invalide (attendu hexadécimal, ex. 7ff600000000).";
+            result["error"] = KE_TXT("Adresse de base invalide (attendu hexadécimal, ex. 7ff600000000).", "Invalid base address (expected hexadecimal, e.g. 7ff600000000).");
             return result;
         }
         mergedOptions["minAddress"] = static_cast<qulonglong>(minAddress);
@@ -7543,7 +7572,7 @@ QVariantMap ApplicationController::startMemoryHeatmap(const QString& addressHex,
     const bool started = m_memoryHeatmapManager->startHeatmapCollection(nativeHandle, mergedOptions);
     result["success"] = started;
     if (!started) {
-        result["error"] = "Impossible de démarrer la collecte heatmap (déjà en cours ?).";
+        result["error"] = KE_TXT("Impossible de démarrer la collecte heatmap (déjà en cours ?).", "Unable to start heatmap collection (already running?).");
     }
     return result;
 }
@@ -7577,7 +7606,7 @@ QVariantMap ApplicationController::addTimelineAddress(const QString& addressHex,
     QVariantMap result;
     result["success"] = m_memoryTimelineManager->addAddress(addressHex, valueSize);
     if (!result["success"].toBool()) {
-        result["error"] = "Adresse invalide (attendu hexadécimal, ex. 7ff600000000).";
+        result["error"] = KE_TXT("Adresse invalide (attendu hexadécimal, ex. 7ff600000000).", "Invalid address (expected hexadecimal, e.g. 7ff600000000).");
     }
     return result;
 }
@@ -7629,14 +7658,14 @@ QVariantMap ApplicationController::startTimelineCollection() {
     QVariantMap result;
     if (!m_handle.isValid()) {
         result["success"] = false;
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     m_memoryTimelineManager->setProcessHandle(m_handle.rawHandle());
     const bool started = m_memoryTimelineManager->startCollection();
     result["success"] = started;
     if (!started) {
-        result["error"] = "Impossible de démarrer (aucune adresse surveillée, ou collecte déjà en cours ?).";
+        result["error"] = KE_TXT("Impossible de démarrer (aucune adresse surveillée, ou collecte déjà en cours ?).", "Unable to start (no watched address, or collection already running?).");
     }
     return result;
 }
@@ -7693,7 +7722,7 @@ QVariantMap ApplicationController::exportTimelineToJson() {
     result["success"] = m_memoryTimelineManager->exportToJson(filePath);
     result["filepath"] = filePath;
     if (!result["success"].toBool()) {
-        result["error"] = "Échec de l'export JSON.";
+        result["error"] = KE_TXT("Échec de l'export JSON.", "JSON export failed.");
     }
     return result;
 }
@@ -7706,7 +7735,7 @@ QVariantMap ApplicationController::exportTimelineToCsv() {
     result["success"] = m_memoryTimelineManager->exportToCsv(filePath);
     result["filepath"] = filePath;
     if (!result["success"].toBool()) {
-        result["error"] = "Échec de l'export CSV.";
+        result["error"] = KE_TXT("Échec de l'export CSV.", "CSV export failed.");
     }
     return result;
 }
@@ -7887,11 +7916,11 @@ QVariantMap ApplicationController::callVueStoreAction(const QString& action, con
     result["action"] = action;
 
     if (!allowedVueStoreActions().contains(action)) {
-        result["error"] = "Action non autorisee (liste blanche C++ callVueStoreAction) : " + action;
+        result["error"] = KE_TXT("Action non autorisee (liste blanche C++ callVueStoreAction) : ", "Action not authorized (C++ callVueStoreAction whitelist): ") + action;
         return result;
     }
     if (!m_webEnginePage) {
-        result["error"] = "QWebEnginePage non initialisee (setWebEnginePage jamais appele).";
+        result["error"] = KE_TXT("QWebEnginePage non initialisee (setWebEnginePage jamais appele).", "QWebEnginePage not initialized (setWebEnginePage never called).");
         return result;
     }
 
@@ -7954,7 +7983,8 @@ QVariantMap ApplicationController::callVueStoreAction(const QString& action, con
     state->loop = nullptr;
 
     if (!state->finished) {
-        result["error"] = "Timeout (5s) en attendant la reponse JS -- la page a-t-elle bien fini de charger le store ?";
+        result["error"] = KE_TXT("Timeout (5s) en attendant la reponse JS -- la page a-t-elle bien fini de charger le store ?",
+                                  "Timeout (5s) waiting for the JS response -- has the page finished loading the store?");
         return result;
     }
 
@@ -7964,7 +7994,7 @@ QVariantMap ApplicationController::callVueStoreAction(const QString& action, con
     if (jsSuccess) {
         result["result"] = jsMap.value("result");
     } else {
-        result["error"] = jsMap.value("error", "Erreur JS inconnue (reponse non reconnue).").toString();
+        result["error"] = jsMap.value("error", KE_TXT("Erreur JS inconnue (reponse non reconnue).", "Unknown JS error (unrecognized response).")).toString();
     }
     return result;
 }
@@ -8026,12 +8056,12 @@ QVariantMap ApplicationController::applyStealthMode(const QString& profile) {
     QVariantMap result;
     if (!m_attached) {
         result["success"] = false;
-        result["error"] = "Not attached to a process";
+        result["error"] = KE_TXT("Aucun processus attaché.", "Not attached to a process.");
         return result;
     }
     if (m_stealthActive) {
         result["success"] = false;
-        result["error"] = "Stealth mode already active (profile: " + m_stealthProfile + ")";
+        result["error"] = KE_TXT("Mode stealth déjà actif (profil : ", "Stealth mode already active (profile: ") + m_stealthProfile + ")";
         return result;
     }
 
@@ -8049,7 +8079,7 @@ QVariantMap ApplicationController::applyStealthMode(const QString& profile) {
         processMask = true;
     } else {
         result["success"] = false;
-        result["error"] = "Unknown profile: " + profile + ". Supported: sc2, default, minimal";
+        result["error"] = KE_TXT("Profil inconnu : ", "Unknown profile: ") + profile + KE_TXT(". Profils supportés : sc2, default, minimal", ". Supported: sc2, default, minimal");
         return result;
     }
 
@@ -8097,7 +8127,7 @@ QVariantMap ApplicationController::applyStealthMode(const QString& profile) {
         {"dllMask", m_stealthDllMaskActive}
     };
     if (!m_stealthActive) {
-        result["error"] = "No stealth modules activated";
+        result["error"] = KE_TXT("Aucun module stealth activé.", "No stealth modules activated.");
     }
     if (!errors.isEmpty()) {
         result["warnings"] = errors;
@@ -8110,7 +8140,7 @@ QVariantMap ApplicationController::restoreStealthMode() {
     QVariantMap result;
     if (!m_stealthActive) {
         result["success"] = false;
-        result["error"] = "Stealth mode is not active";
+        result["error"] = KE_TXT("Mode stealth non actif.", "Stealth mode is not active.");
         return result;
     }
 
@@ -8158,7 +8188,7 @@ QVariantMap ApplicationController::analyzeStealthRisk() const {
     QVariantMap result;
     if (!m_attached) {
         result["success"] = false;
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
