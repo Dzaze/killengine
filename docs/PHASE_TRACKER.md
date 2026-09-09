@@ -47,6 +47,14 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## Journal actif
 
+### Localisation du chat IA — L6 clos (09/09/2026, Claude)
+
+**Suite de l'entrée ci-dessous.** `apps/desktop/debug_feature_manager.cpp` (find_what_writes, page guard, breakpoints in-process/matériel, speedhack) traduit FR/EN.
+
+**Leçon confirmée une troisième fois** : le premier balayage (grep large, capitalisé) a raté ~10-15 chaînes malgré une recherche déjà plus large que le simple grep accentué du tout premier round — notamment 5 occurrences identiques de "Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS)." dispersées dans le fichier, jamais remontées par la première passe. Une **deuxième passe de vérification systématique après la première traduction** (pas juste "j'ai traduit ce que le grep a trouvé") a permis de les rattraper. Documenté dans la roadmap comme règle à suivre pour L7+ : toujours refaire un balayage de contrôle après la première passe, jamais s'arrêter au premier résultat de grep.
+
+Build complet + **468/468 tests**. Vérifié en live via le pipe d'automatisation (`setSpeedhackFactor` sans speedhack actif → `"No active speedhack."`).
+
 ### Localisation du chat IA — deuxième round, L2b/L4/L5 clos (09/09/2026, Codex + Claude)
 
 **Suite de l'entrée ci-dessous.** Le propriétaire a demandé un deuxième round de travail parallèle sur ce même chantier.

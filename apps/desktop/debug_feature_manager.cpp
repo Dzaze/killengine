@@ -5,6 +5,7 @@
 #include "debug/page_guard.h"
 #include "debug/speedhack.h"
 #include "inject/api_hook.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "memory/memory_reader.h"
 #include "process/process_handle.h"
@@ -74,12 +75,17 @@ QVariantMap inProcessBreakpointHitToVariant(const killcore::InProcessBreakpointH
 
 QString codeReadProtectionHint(uint32_t errorCode) {
     if (errorCode == 299) {
-        return QStringLiteral(
+        return KE_TXT(
             "Le code de ce module semble protégé contre la lecture externe "
             "(fréquent sur les exécutables Microsoft Store/UWP signés). "
             "Génération de signature/patch impossible sur cette instruction — "
             "essaie Freeze ou une écriture groupée sur la donnée plutôt qu'un "
-            "patch du code.");
+            "patch du code.",
+            "This module's code appears protected against external reads "
+            "(common on signed Microsoft Store/UWP executables). "
+            "Cannot generate a signature/patch for this instruction — "
+            "try Freeze or a batched write on the data instead of a "
+            "code patch.");
     }
     return QString();
 }
@@ -259,13 +265,13 @@ QVariantMap DebugFeatureManager::findWhatWrites(const QString& addressHex, const
     result["address"] = addressHex;
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -316,9 +322,9 @@ QVariantMap DebugFeatureManager::findWhatWrites(const QString& addressHex, const
     result["size"] = sizeBytes;
     result["timeoutMs"] = timeoutMs;
     result["maxHits"] = maxHitsInt;
-    result["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.";
+    result["warning"] = KE_TXT("Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.", "This function attaches KillEngine as a debugger to the target process during the capture.");
     result["error"] = hits.isEmpty()
-        ? "Aucune écriture capturée pendant la fenêtre d'observation."
+        ? KE_TXT("Aucune écriture capturée pendant la fenêtre d'observation.", "No write captured during the observation window.")
         : QString();
     return result;
 }
@@ -329,13 +335,13 @@ QVariantMap DebugFeatureManager::findWhatAccesses(const QString& addressHex, con
     result["address"] = addressHex;
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -386,11 +392,15 @@ QVariantMap DebugFeatureManager::findWhatAccesses(const QString& addressHex, con
     result["size"] = sizeBytes;
     result["timeoutMs"] = timeoutMs;
     result["maxHits"] = maxHitsInt;
-    result["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture. "
-                         "Capture lecture ET écriture (contrairement à findWhatWrites) : peut révéler une "
-                         "instruction de vérification/comparaison distincte de celle qui écrit.";
+    result["warning"] = KE_TXT(
+        "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture. "
+        "Capture lecture ET écriture (contrairement à findWhatWrites) : peut révéler une "
+        "instruction de vérification/comparaison distincte de celle qui écrit.",
+        "This function attaches KillEngine as a debugger to the target process during the capture. "
+        "Captures reads AND writes (unlike findWhatWrites): may reveal a check/comparison "
+        "instruction distinct from the one that writes.");
     result["error"] = hits.isEmpty()
-        ? "Aucun accès capturé pendant la fenêtre d'observation."
+        ? KE_TXT("Aucun accès capturé pendant la fenêtre d'observation.", "No access captured during the observation window.")
         : QString();
     return result;
 }
@@ -401,13 +411,13 @@ QVariantMap DebugFeatureManager::findWhatExecutes(const QString& instructionAddr
     result["address"] = instructionAddressHex;
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(instructionAddressHex, &address)) {
-        result["error"] = "Adresse d'instruction invalide.";
+        result["error"] = KE_TXT("Adresse d'instruction invalide.", "Invalid instruction address.");
         return result;
     }
 
@@ -435,10 +445,13 @@ QVariantMap DebugFeatureManager::findWhatExecutes(const QString& instructionAddr
     result["hitCount"] = hitList.size();
     result["timeoutMs"] = timeoutMs;
     result["maxHits"] = maxHitsInt;
-    result["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture. "
-                         "Break on execute : aucune ecriture ni patch, les hits exposent les registres runtime.";
+    result["warning"] = KE_TXT(
+        "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture. "
+        "Break on execute : aucune ecriture ni patch, les hits exposent les registres runtime.",
+        "This function attaches KillEngine as a debugger to the target process during the capture. "
+        "Break on execute: no write or patch, hits expose the runtime registers.");
     result["error"] = hits.isEmpty()
-        ? "Aucune exécution capturée pendant la fenêtre d'observation."
+        ? KE_TXT("Aucune exécution capturée pendant la fenêtre d'observation.", "No execution captured during the observation window.")
         : QString();
     m_appendScanTelemetry("find_what_executes", {
         {"success", true},
@@ -457,17 +470,17 @@ QVariantMap DebugFeatureManager::findWhatWritesAsync(const QString& addressHex, 
     result["address"] = addressHex;
 
     if (m_findWhatWritesInProgress) {
-        result["error"] = "Une capture Find What Writes est déjà en cours.";
+        result["error"] = KE_TXT("Une capture Find What Writes est déjà en cours.", "A Find What Writes capture is already in progress.");
         return result;
     }
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -544,11 +557,11 @@ QVariantMap DebugFeatureManager::findWhatWritesAsync(const QString& addressHex, 
             finished["timeoutMs"] = timeoutMs;
             finished["maxHits"] = maxHitsInt;
             finished["cancelled"] = cancelled;
-            finished["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.";
+            finished["warning"] = KE_TXT("Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.", "This function attaches KillEngine as a debugger to the target process during the capture.");
             finished["error"] = cancelled
-                ? "Capture Find What Writes annulée."
+                ? KE_TXT("Capture Find What Writes annulée.", "Find What Writes capture cancelled.")
                 : hits.isEmpty()
-                ? "Aucune écriture capturée pendant la fenêtre d'observation."
+                ? KE_TXT("Aucune écriture capturée pendant la fenêtre d'observation.", "No write captured during the observation window.")
                 : QString();
 
             self->m_findWhatWritesInProgress = false;
@@ -571,7 +584,7 @@ QVariantMap DebugFeatureManager::cancelFindWhatWrites() {
     QVariantMap result;
     result["success"] = false;
     if (!m_findWhatWritesInProgress || !m_activeDebugCancellation) {
-        result["error"] = "Aucune capture Find What Writes active à annuler.";
+        result["error"] = KE_TXT("Aucune capture Find What Writes active à annuler.", "No active Find What Writes capture to cancel.");
         return result;
     }
 
@@ -588,23 +601,23 @@ QVariantMap DebugFeatureManager::startPageGuardWatchAsync(const QString& address
     result["address"] = addressHex;
 
     if (m_pageGuardWatchInProgress) {
-        result["error"] = "Une capture Page Guard est déjà en cours.";
+        result["error"] = KE_TXT("Une capture Page Guard est déjà en cours.", "A Page Guard capture is already in progress.");
         return result;
     }
     if (!m_isAttached() || m_pid() <= 0 || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     const QString handlerPath = resolvePageGuardHandlerPath();
     if (handlerPath.isEmpty()) {
-        result["error"] = "KillEnginePageGuardHandler.dll introuvable à côté de KillEngine.exe.";
+        result["error"] = KE_TXT("KillEnginePageGuardHandler.dll introuvable à côté de KillEngine.exe.", "KillEnginePageGuardHandler.dll not found next to KillEngine.exe.");
         return result;
     }
 
@@ -650,7 +663,7 @@ QVariantMap DebugFeatureManager::startPageGuardWatchAsync(const QString& address
                 finished["address"] = requestedAddress;
                 finished["hits"] = QVariantList();
                 finished["hitCount"] = 0;
-                finished["error"] = "Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).";
+                finished["error"] = KE_TXT("Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).", "Could not open the process with the rights required for injection (PROCESS_ALL_ACCESS).");
                 self->m_pageGuardWatchInProgress = false;
                 self->m_activePageGuardSession.reset();
                 self->m_pageGuardWatchFinished(finished);
@@ -692,11 +705,11 @@ QVariantMap DebugFeatureManager::startPageGuardWatchAsync(const QString& address
             finished["timeoutMs"] = config.timeoutMs;
             finished["maxHits"] = static_cast<int>(config.maxHits);
             finished["timedOut"] = pageResult.timedOut;
-            finished["warning"] = "Capture par PAGE_GUARD (sans canal de debug Win32) : moins précise qu'un hardware breakpoint (granularité page de 4 Ko, hits rapprochés potentiellement fusionnés).";
+            finished["warning"] = KE_TXT("Capture par PAGE_GUARD (sans canal de debug Win32) : moins précise qu'un hardware breakpoint (granularité page de 4 Ko, hits rapprochés potentiellement fusionnés).", "Capture via PAGE_GUARD (no Win32 debug channel): less precise than a hardware breakpoint (4 KB page granularity, closely-spaced hits potentially merged).");
             finished["error"] = !pageResult.success
                 ? pageResult.error
                 : pageResult.hits.isEmpty()
-                ? "Aucun accès capturé pendant la fenêtre d'observation."
+                ? KE_TXT("Aucun accès capturé pendant la fenêtre d'observation.", "No access captured during the observation window.")
                 : QString();
 
             self->m_pageGuardWatchInProgress = false;
@@ -724,7 +737,7 @@ QVariantMap DebugFeatureManager::cancelPageGuardWatch() {
     QVariantMap result;
     result["success"] = false;
     if (!m_pageGuardWatchInProgress || !m_activePageGuardSession) {
-        result["error"] = "Aucune capture Page Guard active à annuler.";
+        result["error"] = KE_TXT("Aucune capture Page Guard active à annuler.", "No active Page Guard capture to cancel.");
         return result;
     }
 
@@ -745,23 +758,23 @@ QVariantMap DebugFeatureManager::startInProcessBreakpointWatchAsync(const QStrin
     result["address"] = addressHex;
 
     if (m_inProcessBreakpointWatchInProgress) {
-        result["error"] = "Une capture breakpoint in-process est déjà en cours.";
+        result["error"] = KE_TXT("Une capture breakpoint in-process est déjà en cours.", "An in-process breakpoint capture is already in progress.");
         return result;
     }
     if (!m_isAttached() || m_pid() <= 0 || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     const QString handlerPath = resolveInProcessBreakpointHandlerPath();
     if (handlerPath.isEmpty()) {
-        result["error"] = "KillEngineInProcessBreakpointHandler.dll introuvable à côté de KillEngine.exe.";
+        result["error"] = KE_TXT("KillEngineInProcessBreakpointHandler.dll introuvable à côté de KillEngine.exe.", "KillEngineInProcessBreakpointHandler.dll not found next to KillEngine.exe.");
         return result;
     }
 
@@ -811,7 +824,7 @@ QVariantMap DebugFeatureManager::startInProcessBreakpointWatchAsync(const QStrin
                 finished["address"] = requestedAddress;
                 finished["hits"] = QVariantList();
                 finished["hitCount"] = 0;
-                finished["error"] = "Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).";
+                finished["error"] = KE_TXT("Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).", "Could not open the process with the rights required for injection (PROCESS_ALL_ACCESS).");
                 self->m_inProcessBreakpointWatchInProgress = false;
                 self->m_activeInProcessBreakpointSession.reset();
                 self->m_inProcessBreakpointWatchFinished(finished);
@@ -849,15 +862,20 @@ QVariantMap DebugFeatureManager::startInProcessBreakpointWatchAsync(const QStrin
             finished["timedOut"] = captureResult.timedOut;
             finished["existingThreadsArmed"] = captureResult.existingThreadsArmed;
             finished["warning"] = config.armExistingThreads
-                ? QString("Threads préexistantes armées en plus de l'installation: %1.").arg(captureResult.existingThreadsArmed)
-                : "Seules les threads créées après l'injection sont couvertes — "
-                  "une écriture qui vient d'une thread déjà active au moment de "
-                  "l'installation peut ne pas être capturée. Passe armExistingThreads=true, "
-                  "ou réessaie, ou utilise Find What Writes (débogueur externe).";
+                ? KE_TXT("Threads préexistantes armées en plus de l'installation: %1.", "Pre-existing threads armed in addition to the install: %1.").arg(captureResult.existingThreadsArmed)
+                : KE_TXT(
+                      "Seules les threads créées après l'injection sont couvertes — "
+                      "une écriture qui vient d'une thread déjà active au moment de "
+                      "l'installation peut ne pas être capturée. Passe armExistingThreads=true, "
+                      "ou réessaie, ou utilise Find What Writes (débogueur externe).",
+                      "Only threads created after the injection are covered — "
+                      "a write coming from a thread already active at the time of "
+                      "the install may not be captured. Pass armExistingThreads=true, "
+                      "retry, or use Find What Writes (external debugger).");
             finished["error"] = !captureResult.success
                 ? captureResult.error
                 : captureResult.hits.isEmpty()
-                ? "Aucune écriture capturée pendant la fenêtre d'observation."
+                ? KE_TXT("Aucune écriture capturée pendant la fenêtre d'observation.", "No write captured during the observation window.")
                 : QString();
 
             self->m_inProcessBreakpointWatchInProgress = false;
@@ -898,23 +916,23 @@ QVariantMap DebugFeatureManager::startInProcessExecuteWatch(const QString& instr
     result["address"] = instructionAddressHex;
 
     if (m_inProcessBreakpointWatchInProgress) {
-        result["error"] = "Une capture breakpoint in-process est déjà en cours.";
+        result["error"] = KE_TXT("Une capture breakpoint in-process est déjà en cours.", "An in-process breakpoint capture is already in progress.");
         return result;
     }
     if (!m_isAttached() || m_pid() <= 0 || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(instructionAddressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     const QString handlerPath = resolveInProcessBreakpointHandlerPath();
     if (handlerPath.isEmpty()) {
-        result["error"] = "KillEngineInProcessBreakpointHandler.dll introuvable à côté de KillEngine.exe.";
+        result["error"] = KE_TXT("KillEngineInProcessBreakpointHandler.dll introuvable à côté de KillEngine.exe.", "KillEngineInProcessBreakpointHandler.dll not found next to KillEngine.exe.");
         return result;
     }
 
@@ -930,7 +948,7 @@ QVariantMap DebugFeatureManager::startInProcessExecuteWatch(const QString& instr
 
     killcore::ProcessHandle ownedHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::AllAccess);
     if (!ownedHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).", "Could not open the process with the rights required for injection (PROCESS_ALL_ACCESS).");
         return result;
     }
 
@@ -962,7 +980,7 @@ QVariantMap DebugFeatureManager::startInProcessExecuteWatch(const QString& instr
     result["error"] = !captureResult.success
         ? captureResult.error
         : captureResult.hits.isEmpty()
-        ? "Aucune exécution capturée pendant la fenêtre d'observation."
+        ? KE_TXT("Aucune exécution capturée pendant la fenêtre d'observation.", "No execution captured during the observation window.")
         : QString();
     return result;
 }
@@ -971,7 +989,7 @@ QVariantMap DebugFeatureManager::cancelInProcessBreakpointWatch() {
     QVariantMap result;
     result["success"] = false;
     if (!m_inProcessBreakpointWatchInProgress || !m_activeInProcessBreakpointSession) {
-        result["error"] = "Aucune capture breakpoint in-process active à annuler.";
+        result["error"] = KE_TXT("Aucune capture breakpoint in-process active à annuler.", "No active in-process breakpoint capture to cancel.");
         return result;
     }
 
@@ -988,23 +1006,23 @@ QVariantMap DebugFeatureManager::startInProcessBreakpointFreeze(const QString& a
     result["mode"] = "inprocess";
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (m_inProcessBreakpointFreezeSession && m_inProcessBreakpointFreezeSession->isFreezing()) {
-        result["error"] = "Un freeze breakpoint in-process est déjà actif — arrête-le avant d'en démarrer un autre.";
+        result["error"] = KE_TXT("Un freeze breakpoint in-process est déjà actif — arrête-le avant d'en démarrer un autre.", "An in-process breakpoint freeze is already active — stop it before starting another one.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
 
@@ -1017,19 +1035,19 @@ QVariantMap DebugFeatureManager::startInProcessBreakpointFreeze(const QString& a
 
     const QByteArray frozenBytes = killcore::scanValueToBytes(scanValue);
     if (frozenBytes.size() > 8) {
-        result["error"] = "Type trop large pour un freeze breakpoint in-process (8 octets maximum).";
+        result["error"] = KE_TXT("Type trop large pour un freeze breakpoint in-process (8 octets maximum).", "Type too large for an in-process breakpoint freeze (8 bytes maximum).");
         return result;
     }
 
     const QString handlerPath = resolveInProcessBreakpointHandlerPath();
     if (handlerPath.isEmpty()) {
-        result["error"] = "KillEngineInProcessBreakpointHandler.dll introuvable à côté de KillEngine.exe.";
+        result["error"] = KE_TXT("KillEngineInProcessBreakpointHandler.dll introuvable à côté de KillEngine.exe.", "KillEngineInProcessBreakpointHandler.dll not found next to KillEngine.exe.");
         return result;
     }
 
     killcore::ProcessHandle ownedHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::AllAccess);
     if (!ownedHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).", "Could not open the process with the rights required for injection (PROCESS_ALL_ACCESS).");
         return result;
     }
 
@@ -1045,11 +1063,17 @@ QVariantMap DebugFeatureManager::startInProcessBreakpointFreeze(const QString& a
     result["success"] = true;
     result["enabled"] = true;
     result["armedThreadCount"] = session->freezeStats().armedThreadCount;
-    result["warning"] = "Seules les threads créées après l'injection sont couvertes pour l'instant — "
-                         "si l'écriture vient d'une thread déjà active au moment de l'installation, "
-                         "le freeze peut ne pas tenir. Si ça ne tient pas, réessaie (une nouvelle "
-                         "injection réarme la thread appelante) ou utilise le freeze par breakpoint "
-                         "externe classique.";
+    result["warning"] = KE_TXT(
+        "Seules les threads créées après l'injection sont couvertes pour l'instant — "
+        "si l'écriture vient d'une thread déjà active au moment de l'installation, "
+        "le freeze peut ne pas tenir. Si ça ne tient pas, réessaie (une nouvelle "
+        "injection réarme la thread appelante) ou utilise le freeze par breakpoint "
+        "externe classique.",
+        "Only threads created after the injection are covered for now — "
+        "if the write comes from a thread already active at the time of the install, "
+        "the freeze may not hold. If it doesn't hold, retry (a new "
+        "injection re-arms the calling thread) or use the classic "
+        "external breakpoint freeze instead.");
     KE_LOG_INFO() << "startInProcessBreakpointFreeze(address=0x" << std::hex << address << std::dec
                   << ", type=" << valueType.toStdString() << ", value=" << value.toStdString() << ")";
     return result;
@@ -1096,23 +1120,23 @@ QVariantMap DebugFeatureManager::startSpeedhack(double factor) {
     result["success"] = false;
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (m_speedhackSession && m_speedhackSession->isActive()) {
-        result["error"] = "Un speedhack est déjà actif — change le facteur au lieu d'en redémarrer un.";
+        result["error"] = KE_TXT("Un speedhack est déjà actif — change le facteur au lieu d'en redémarrer un.", "A speedhack is already active — change the factor instead of restarting one.");
         return result;
     }
 
     const QString handlerPath = resolveSpeedhackHandlerPath();
     if (handlerPath.isEmpty()) {
-        result["error"] = "KillEngineSpeedhackHandler.dll introuvable à côté de KillEngine.exe.";
+        result["error"] = KE_TXT("KillEngineSpeedhackHandler.dll introuvable à côté de KillEngine.exe.", "KillEngineSpeedhackHandler.dll not found next to KillEngine.exe.");
         return result;
     }
 
     killcore::ProcessHandle ownedHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::AllAccess);
     if (!ownedHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).", "Could not open the process with the rights required for injection (PROCESS_ALL_ACCESS).");
         return result;
     }
 
@@ -1139,11 +1163,11 @@ QVariantMap DebugFeatureManager::setSpeedhackFactor(double factor) {
     result["success"] = false;
 
     if (!m_speedhackSession || !m_speedhackSession->isActive()) {
-        result["error"] = "Aucun speedhack actif.";
+        result["error"] = KE_TXT("Aucun speedhack actif.", "No active speedhack.");
         return result;
     }
     if (!m_speedhackSession->setFactor(factor)) {
-        result["error"] = "Échec du réglage du facteur.";
+        result["error"] = KE_TXT("Échec du réglage du facteur.", "Failed to set the factor.");
         return result;
     }
 
@@ -1193,17 +1217,17 @@ QVariantMap DebugFeatureManager::startApiHook(const QString& moduleName, const Q
     result["success"] = false;
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (m_apiHookSession && m_apiHookSession->isActive()) {
-        result["error"] = "Une interception est deja active - arrete-la avant d en demarrer une autre.";
+        result["error"] = KE_TXT("Une interception est deja active - arrete-la avant d en demarrer une autre.", "An interception is already active - stop it before starting another one.");
         return result;
     }
 
     const QString handlerPath = resolveApiHookHandlerPath();
     if (handlerPath.isEmpty()) {
-        result["error"] = "KillEngineApiHookHandler.dll introuvable a cote de KillEngine.exe.";
+        result["error"] = KE_TXT("KillEngineApiHookHandler.dll introuvable a cote de KillEngine.exe.", "KillEngineApiHookHandler.dll not found next to KillEngine.exe.");
         return result;
     }
 
@@ -1274,17 +1298,17 @@ QVariantMap DebugFeatureManager::findWhatAccessesAsync(const QString& addressHex
     result["address"] = addressHex;
 
     if (m_findWhatAccessesInProgress || m_findWhatWritesInProgress) {
-        result["error"] = "Une capture debugger est deja en cours.";
+        result["error"] = KE_TXT("Une capture debugger est deja en cours.", "A debugger capture is already in progress.");
         return result;
     }
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -1361,11 +1385,11 @@ QVariantMap DebugFeatureManager::findWhatAccessesAsync(const QString& addressHex
             finished["timeoutMs"] = timeoutMs;
             finished["maxHits"] = maxHitsInt;
             finished["cancelled"] = cancelled;
-            finished["warning"] = "Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.";
+            finished["warning"] = KE_TXT("Cette fonction attache KillEngine comme debugger au processus cible pendant la capture.", "This function attaches KillEngine as a debugger to the target process during the capture.");
             finished["error"] = cancelled
-                ? "Capture Find What Accesses annulee."
+                ? KE_TXT("Capture Find What Accesses annulee.", "Find What Accesses capture cancelled.")
                 : hits.isEmpty()
-                ? "Aucun acces capture pendant la fenetre d'observation."
+                ? KE_TXT("Aucun acces capture pendant la fenetre d'observation.", "No access captured during the observation window.")
                 : QString();
 
             self->m_findWhatAccessesInProgress = false;
@@ -1390,13 +1414,13 @@ QVariantMap DebugFeatureManager::disassembleBackward(const QString& addressHex, 
     result["address"] = addressHex;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -1413,12 +1437,12 @@ QVariantMap DebugFeatureManager::disassembleBackward(const QString& addressHex, 
             result["error"] = hint;
             result["codeReadProtected"] = true;
         } else {
-            result["error"] = read.errorMessage.isEmpty() ? QString("Lecture mémoire impossible.") : read.errorMessage;
+            result["error"] = read.errorMessage.isEmpty() ? KE_TXT("Lecture mémoire impossible.", "Memory read failed.") : read.errorMessage;
         }
         return result;
     }
     if (targetOffsetInWindow > read.data.size()) {
-        result["error"] = "Lecture mémoire trop courte pour atteindre l'adresse cible.";
+        result["error"] = KE_TXT("Lecture mémoire trop courte pour atteindre l'adresse cible.", "Memory read too short to reach the target address.");
         return result;
     }
 
@@ -1454,7 +1478,7 @@ QVariantMap DebugFeatureManager::disassembleBackward(const QString& addressHex, 
 
     result["instructions"] = instructions;
     result["candidateFields"] = candidateFields;
-    result["warning"] = "Désassemblage en arrière expérimental (lecture seule). Vérifie toujours les champs candidats avant d'écrire dessus.";
+    result["warning"] = KE_TXT("Désassemblage en arrière expérimental (lecture seule). Vérifie toujours les champs candidats avant d'écrire dessus.", "Experimental backward disassembly (read-only). Always verify the candidate fields before writing to them.");
     m_appendScanTelemetry("disassemble_backward", result);
     return result;
 }
@@ -1466,19 +1490,19 @@ QVariantMap DebugFeatureManager::freezeWithBreakpoint(const QString& addressHex,
     result["mode"] = "breakpoint";
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
 
@@ -1497,7 +1521,7 @@ QVariantMap DebugFeatureManager::freezeWithBreakpoint(const QString& addressHex,
         case 8:
             break;
         default:
-            result["error"] = "Taille de valeur incompatible avec un hardware breakpoint.";
+            result["error"] = KE_TXT("Taille de valeur incompatible avec un hardware breakpoint.", "Value size incompatible with a hardware breakpoint.");
             return result;
     }
 
@@ -1535,7 +1559,7 @@ QVariantMap DebugFeatureManager::activateBreakpointFreezeFor(
         m_freeze.remove(address);
         restartBreakpointFreezeFromRegistry(mode);
         result["error"] = restartError.isEmpty()
-            ? "Impossible d'activer le freeze par hardware breakpoint. Vérifie les privilèges debug et la cible."
+            ? KE_TXT("Impossible d'activer le freeze par hardware breakpoint. Vérifie les privilèges debug et la cible.", "Could not activate the hardware breakpoint freeze. Check the debug privileges and the target.")
             : restartError;
     }
     return result;
@@ -1548,13 +1572,13 @@ QVariantMap DebugFeatureManager::escalatePollingFreezeToBreakpoint(const QString
     result["mode"] = "breakpoint";
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -1566,7 +1590,7 @@ QVariantMap DebugFeatureManager::escalatePollingFreezeToBreakpoint(const QString
         }
     }
     if (!pollingEntry) {
-        result["error"] = "Aucun freeze polling actif sur cette adresse (déjà arrêté ou déjà en Freeze BP ?).";
+        result["error"] = KE_TXT("Aucun freeze polling actif sur cette adresse (déjà arrêté ou déjà en Freeze BP ?).", "No active polling freeze on this address (already stopped, or already in Freeze BP?).");
         return result;
     }
 
@@ -1627,7 +1651,7 @@ QVariantMap DebugFeatureManager::getBreakpointFreezeStats() const {
 
 bool DebugFeatureManager::restartBreakpointFreezeFromRegistry(killcore::BreakpointFreezeMode mode, QString* error) {
     if (!m_isAttached() || m_pid() <= 0) {
-        if (error) *error = "Aucun processus attaché.";
+        if (error) *error = KE_TXT("Aucun processus attaché.", "No process attached.");
         return false;
     }
 
@@ -1640,7 +1664,7 @@ bool DebugFeatureManager::restartBreakpointFreezeFromRegistry(killcore::Breakpoi
     }
 
     if (entries.size() > 4) {
-        if (error) *error = "Un hardware breakpoint ne peut surveiller que 4 adresses simultanées (DR0-DR3).";
+        if (error) *error = KE_TXT("Un hardware breakpoint ne peut surveiller que 4 adresses simultanées (DR0-DR3).", "A hardware breakpoint can only watch 4 addresses at once (DR0-DR3).");
         return false;
     }
 
@@ -1656,7 +1680,7 @@ bool DebugFeatureManager::restartBreakpointFreezeFromRegistry(killcore::Breakpoi
             case 4: config.size = killcore::BreakpointSize::DWord; break;
             case 8: config.size = killcore::BreakpointSize::QWord; break;
             default:
-                if (error) *error = "Taille de valeur incompatible avec un hardware breakpoint.";
+                if (error) *error = KE_TXT("Taille de valeur incompatible avec un hardware breakpoint.", "Value size incompatible with a hardware breakpoint.");
                 return false;
         }
         configs.append(config);
@@ -1667,7 +1691,7 @@ bool DebugFeatureManager::restartBreakpointFreezeFromRegistry(killcore::Breakpoi
     }
 
     if (!m_breakpointFreeze->startMulti(static_cast<uint32_t>(m_pid()), configs)) {
-        if (error) *error = "Impossible d'activer la session hardware breakpoint.";
+        if (error) *error = KE_TXT("Impossible d'activer la session hardware breakpoint.", "Could not activate the hardware breakpoint session.");
         return false;
     }
 
@@ -1680,13 +1704,13 @@ QVariantMap DebugFeatureManager::validatePageStability(const QString& addressHex
     result["stable"] = false;
 
     if (!m_isAttached() || m_pid() <= 0 || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -1716,7 +1740,7 @@ QVariantMap DebugFeatureManager::validatePageStability(const QString& addressHex
         result["readCount"] = readCount;
         result["unreadable"] = unreadable;
         result["changeCount"] = 0;
-        result["reason"] = QString("Page illisible lors de %1/%2 lectures.").arg(unreadable).arg(readCount);
+        result["reason"] = KE_TXT("Page illisible lors de %1/%2 lectures.", "Page unreadable during %1/%2 reads.").arg(unreadable).arg(readCount);
         result["success"] = true;
         return result;
     }
@@ -1735,8 +1759,8 @@ QVariantMap DebugFeatureManager::validatePageStability(const QString& addressHex
     result["unreadable"] = 0;
     result["changeCount"] = changeCount;
     result["reason"] = stable
-        ? QString("Page stable sur %1 lectures (aucune variation détectée).").arg(readCount)
-        : QString("Page instable : %1 variation(s) sur %2 lectures.").arg(changeCount).arg(readCount);
+        ? KE_TXT("Page stable sur %1 lectures (aucune variation détectée).", "Page stable across %1 reads (no variation detected).").arg(readCount)
+        : KE_TXT("Page instable : %1 variation(s) sur %2 lectures.", "Page unstable: %1 variation(s) across %2 reads.").arg(changeCount).arg(readCount);
     return result;
 }
 
