@@ -9,6 +9,7 @@ Roadmap power-up : `docs/POWER_UP_ROADMAP.md`
 Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
+Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.md`
 
 ## État courant
 
@@ -46,6 +47,16 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 - Sinon, aucune validation générique en attente : le chantier WebView2/CDP (WEBVIEW-A à F) est clos. UWP-STATE-1 est désormais validé en conditions réelles (03/09/2026, sur `Notepad.exe`) ; seule son application concrète à Solitaire XP reste explicitement ouverte (ligne ci-dessus).
 
 ## Journal actif
+
+### Nouveau chantier : localisation de l'interface Vue, staffé (09/09/2026, Claude)
+
+**Suite de l'entrée ci-dessous** ("donc un anglais peut parler avec le chat sans problème ?"). Réponse allait au-delà du chat : audit complémentaire (agent Explore, lecture seule, 39 fichiers `.vue`) révèle que **le texte statique des pages elles-mêmes** (menus, boutons, libellés, placeholders, bannières d'aide) reste très majoritairement en français même en mode UI anglais — problème distinct et bien plus large que celui du chat.
+
+**Constat** : `ui/src/i18n/locales/fr.json`/`en.json` existent et sont parfaitement synchronisés (624 clés chacun), mais `$t(...)` n'est utilisé que 210 fois dans les templates, concentré dans 4 fichiers sur 39. **21 fichiers sur 39 n'utilisent `$t()` nulle part**, et **37 sur 39 contiennent du texte français codé en dur** (603 lignes trouvées par l'audit, sous-compte réel). Deux mécanismes d'aide coexistent et ne doivent pas être confondus : `PanelIntro.vue` (bannière `what=`/`purpose=`/`how=`, entièrement hors i18n) et `InfoDot.vue` + dictionnaire `help.*` (déjà câblé et fonctionnel, ne pas y toucher).
+
+**Décision du propriétaire** : staffer ce chantier comme celui du chat IA (roadmap dédiée, découpage fichier par fichier, travail au fil des sessions avec agents en parallèle). Document créé : `docs/FRONTEND_LOCALIZATION_ROADMAP.md` — candidats U1-U19 priorisés par fréquence d'usage réelle (Assistant/Process en premier, Expert + ses 16 sous-panneaux en gros morceau à répartir, résidus de fichiers déjà partiellement traduits en dernier). Contrairement au chantier backend, pas de suite de tests unitaires pour vérifier une traduction frontend : la vérification se fait par `npm run type-check`/`npm run build` + contrôle visuel réel (CDP screenshot ou lancement app), jamais juste une compilation propre.
+
+**Pas encore staffé à un agent** : ce round s'arrête à la découverte + la feuille de route, aucune traduction commencée.
 
 ### Localisation du chat IA — reconnaissance des intentions rendue bilingue FR/EN (09/09/2026, Claude)
 
