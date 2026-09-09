@@ -1,6 +1,7 @@
 #include "lua_repl_manager.h"
 
 #include "lua_runtime_locator.h"
+#include "localization/localization.h"
 #include "scripting/lua_repl_protocol.h"
 
 #include <QCoreApplication>
@@ -54,24 +55,24 @@ QVariantMap LuaReplManager::start(const QVariantMap& options) {
     result["success"] = false;
 
     if (m_running.load()) {
-        result["error"] = "Un REPL Lua est déjà en cours — appelle stopLuaRepl() d'abord.";
+        result["error"] = KE_TXT("Un REPL Lua est déjà en cours — appelle stopLuaRepl() d'abord.", "A Lua REPL is already running. Call stopLuaRepl() first.");
         return result;
     }
 
     const QString luaPath = findLuaExecutable(options.value("luaPath").toString());
     if (luaPath.isEmpty()) {
-        result["error"] = "Aucun interpréteur Lua trouvé. Place lua.exe dans runtime\\lua à côté de KillEngine.exe, ajoute Lua au PATH, ou renseigne options.luaPath.";
+        result["error"] = KE_TXT("Aucun interpréteur Lua trouvé. Place lua.exe dans runtime\\lua à côté de KillEngine.exe, ajoute Lua au PATH, ou renseigne options.luaPath.", "No Lua interpreter found. Put lua.exe in runtime\\lua next to KillEngine.exe, add Lua to PATH, or set options.luaPath.");
         return result;
     }
     const QString helperPath = findKillEngineLuaHelper();
     if (helperPath.isEmpty()) {
-        result["error"] = "scripts/killengine.lua introuvable — le REPL a besoin du module ke.*.";
+        result["error"] = KE_TXT("scripts/killengine.lua introuvable — le REPL a besoin du module ke.*.", "scripts/killengine.lua not found. The REPL needs the ke.* module.");
         return result;
     }
     const QString helperDir = QFileInfo(helperPath).absolutePath();
     const QString driverPath = QDir(helperDir).filePath("killengine_repl_driver.lua");
     if (!QFileInfo::exists(driverPath)) {
-        result["error"] = QString("Driver REPL introuvable : %1").arg(driverPath);
+        result["error"] = KE_TXT("Driver REPL introuvable : %1", "REPL driver not found: %1").arg(driverPath);
         return result;
     }
 
@@ -110,7 +111,7 @@ QVariantMap LuaReplManager::start(const QVariantMap& options) {
             m_cv.notify_all();
             m_worker.join();
         }
-        result["error"] = "Le process Lua REPL n'a pas démarré (voir stderr/logs).";
+        result["error"] = KE_TXT("Le process Lua REPL n'a pas démarré (voir stderr/logs).", "The Lua REPL process did not start (see stderr/logs).");
         return result;
     }
 
@@ -126,7 +127,7 @@ QVariantMap LuaReplManager::sendLine(const QString& line) {
     QVariantMap result;
     if (!m_running.load()) {
         result["success"] = false;
-        result["error"] = "REPL non démarré — appelle startLuaRepl d'abord.";
+        result["error"] = KE_TXT("REPL non démarré — appelle startLuaRepl d'abord.", "REPL is not running. Call startLuaRepl first.");
         return result;
     }
 
@@ -193,7 +194,7 @@ QVariantMap LuaReplManager::completions(const QString& prefix) const {
     const QString helperPath = m_helperPath.isEmpty() ? findKillEngineLuaHelper() : m_helperPath;
     if (helperPath.isEmpty()) {
         result["success"] = false;
-        result["error"] = "scripts/killengine.lua introuvable.";
+        result["error"] = KE_TXT("scripts/killengine.lua introuvable.", "scripts/killengine.lua not found.");
         return result;
     }
     const QString source = readFileText(helperPath);
@@ -275,7 +276,7 @@ void LuaReplManager::workerLoop(QString luaPath, QString driverPath, QString hel
             HistoryEntry entry;
             entry.requestId = job.first;
             entry.line = job.second;
-            entry.error = "Process Lua REPL non actif (terminé de façon inattendue).";
+            entry.error = KE_TXT("Process Lua REPL non actif (terminé de façon inattendue).", "Lua REPL process is not active (it ended unexpectedly).");
             entry.finished = true;
             entry.startedAtMs = startedAt;
             entry.finishedAtMs = startedAt;
@@ -326,8 +327,8 @@ void LuaReplManager::workerLoop(QString luaPath, QString driverPath, QString hel
             output = QString::fromUtf8(stdoutBuffer);
             stdoutBuffer.clear();
             error = process.state() != QProcess::Running
-                ? "Process Lua REPL terminé de façon inattendue pendant l'exécution de cette ligne."
-                : QString("Timeout (%1 ms) en attendant la sortie de cette ligne.").arg(lineTimeoutMs);
+                ? KE_TXT("Process Lua REPL terminé de façon inattendue pendant l'exécution de cette ligne.", "Lua REPL process ended unexpectedly while running this line.")
+                : KE_TXT("Timeout (%1 ms) en attendant la sortie de cette ligne.", "Timeout (%1 ms) while waiting for this line's output.").arg(lineTimeoutMs);
         }
 
         const QByteArray stderrBytes = process.readAllStandardError();

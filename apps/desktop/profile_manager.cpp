@@ -3,6 +3,7 @@
 #include "application_controller.h"
 #include "code_patch_manager.h"
 #include "logging/logger.h"
+#include "localization/localization.h"
 #include "memory/memory_reader.h"
 #include "patch/aob_scanner.h"
 #include "patch/code_patch.h"
@@ -110,19 +111,19 @@ QVariantMap ProfileManager::saveProfileTarget(
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
 
@@ -193,7 +194,7 @@ QVariantMap ProfileManager::saveProfileTarget(
     result["offset"] = QString::number(locator.offset, 16);
     result["targetCount"] = profile.targets.size();
     if (!saved) {
-        result["error"] = "Échec de la sauvegarde du profil.";
+        result["error"] = KE_TXT("Échec de la sauvegarde du profil.", "Couldn't save the profile.");
     }
 
     return result;
@@ -1678,13 +1679,13 @@ QVariantMap ProfileManager::scanPointerChains(
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attache.", "No process attached.");
         return result;
     }
 
     uint64_t targetAddress = 0;
     if (!parseHexAddress(addressHex, &targetAddress)) {
-        result["error"] = "Adresse cible invalide.";
+        result["error"] = KE_TXT("Adresse cible invalide.", "Invalid target address.");
         return result;
     }
 
