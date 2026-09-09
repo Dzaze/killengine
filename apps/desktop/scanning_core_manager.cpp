@@ -2,6 +2,8 @@
 
 #include "application_controller.h"
 
+#include "localization/localization.h"
+
 #include "candidates/candidate_store.h"
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
@@ -450,7 +452,7 @@ bool matchCandidateExactVariant(
         if (candidateTargetBytes.isEmpty()) {
             if (error) {
                 *error = targetError.isEmpty()
-                    ? QString("Impossible de construire la valeur cible pour un candidat.")
+                    ? KE_TXT("Impossible de construire la valeur cible pour un candidat.", "Could not build the target value for a candidate.")
                     : targetError;
             }
             return false;
@@ -484,7 +486,7 @@ bool matchCandidateExactVariant(
     if (fallbackBytes.isEmpty()) {
         if (error) {
             *error = parseError.isEmpty()
-                ? QString("Impossible de construire la valeur cible pour un candidat.")
+                ? KE_TXT("Impossible de construire la valeur cible pour un candidat.", "Could not build the target value for a candidate.")
                 : parseError;
         }
         return false;
@@ -589,12 +591,12 @@ QString noCandidateDiagnosticMessage(const QVariantMap& actionResult, const QStr
 
     QStringList parts;
     if (tool == "next_scan") {
-        parts.append(QString("J'ai comparé %1 adresse(s).").arg(checked));
+        parts.append(KE_TXT("J'ai comparé %1 adresse(s).", "I compared %1 address(es).").arg(checked));
         if (unreadable > 0) {
-            parts.append(QString("%1 adresse(s) étaient illisibles.").arg(unreadable));
+            parts.append(KE_TXT("%1 adresse(s) étaient illisibles.", "%1 address(es) were unreadable.").arg(unreadable));
         }
     } else {
-        parts.append(QString("La comparaison unknown a parcouru %1 octet(s).").arg(checked));
+        parts.append(KE_TXT("La comparaison unknown a parcouru %1 octet(s).", "The unknown comparison scanned %1 byte(s).").arg(checked));
     }
 
     QStringList sampleTexts;
@@ -616,17 +618,19 @@ QString noCandidateDiagnosticMessage(const QVariantMap& actionResult, const QStr
                                    .arg(sample.value("previousNumber").toString())
                                    .arg(sample.value("currentNumber").toString()));
         } else {
-            sampleTexts.append(QString("0x%1 : illisible").arg(address));
+            sampleTexts.append(KE_TXT("0x%1 : illisible", "0x%1: unreadable").arg(address));
         }
     }
     if (!sampleTexts.isEmpty()) {
-        parts.append(QString("Exemples : %1.").arg(sampleTexts.join(", ")));
+        parts.append(KE_TXT("Exemples : %1.", "Examples: %1.").arg(sampleTexts.join(", ")));
     }
     if (readableSamples > 0 && unchangedSamples == readableSamples) {
-        parts.append("Les exemples n'ont pas bougé : la première recherche a probablement capturé des copies, une valeur miroir, ou une représentation qui ne suit pas la valeur affichée.");
+        parts.append(KE_TXT("Les exemples n'ont pas bougé : la première recherche a probablement capturé des copies, une valeur miroir, ou une représentation qui ne suit pas la valeur affichée.",
+                             "The examples haven't moved: the first search probably captured copies, a mirrored value, or a representation that doesn't follow the displayed value."));
     }
 
-    parts.append("Restaure la réduction précédente, puis essaie une réduction changed/increased ou une nouvelle recherche en Float32 / valeur x100.");
+    parts.append(KE_TXT("Restaure la réduction précédente, puis essaie une réduction changed/increased ou une nouvelle recherche en Float32 / valeur x100.",
+                         "Restore the previous reduction, then try a changed/increased reduction or a new search in Float32 / x100 value."));
     return parts.join(' ');
 }
 
@@ -708,14 +712,14 @@ QVariantMap ScanningCoreManager::startExactScan(const QString& value, const QStr
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         result["matches"] = matches;
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type de valeur invalide.";
+        result["error"] = KE_TXT("Type de valeur invalide.", "Invalid value type.");
         result["matches"] = matches;
         return result;
     }
@@ -802,7 +806,7 @@ QVariantMap ScanningCoreManager::startExactScanMultiType(const QString& value, c
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         result["matches"] = matches;
         return result;
     }
@@ -814,7 +818,7 @@ QVariantMap ScanningCoreManager::startExactScanMultiType(const QString& value, c
         && !smartAuto
         && normalizedType.compare("Auto", Qt::CaseInsensitive) != 0;
     if (explicitTypeGiven && !killcore::parseValueType(normalizedType, &explicitType)) {
-        result["error"] = "Type de valeur invalide.";
+        result["error"] = KE_TXT("Type de valeur invalide.", "Invalid value type.");
         result["matches"] = matches;
         return result;
     }
@@ -823,7 +827,7 @@ QVariantMap ScanningCoreManager::startExactScanMultiType(const QString& value, c
         ? smartAutoScanVariants(value)
         : killcore::generateScanVariants(value, explicitType, explicitTypeGiven);
     if (valueVariants.isEmpty()) {
-        result["error"] = QString("Impossible de parser '%1' comme valeur numérique.").arg(value);
+        result["error"] = KE_TXT("Impossible de parser '%1' comme valeur numérique.", "Could not parse '%1' as a numeric value.").arg(value);
         result["matches"] = matches;
         return result;
     }
@@ -938,14 +942,14 @@ QVariantMap ScanningCoreManager::startExactScanExpert(
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         result["matches"] = matches;
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type de valeur invalide.";
+        result["error"] = KE_TXT("Type de valeur invalide.", "Invalid value type.");
         result["matches"] = matches;
         return result;
     }
@@ -968,7 +972,7 @@ QVariantMap ScanningCoreManager::startExactScanExpert(
             if (parseHexAddress(startText, &startAddress)) {
                 options.startAddress = startAddress;
             } else {
-                result["error"] = "Adresse de début invalide.";
+                result["error"] = KE_TXT("Adresse de début invalide.", "Invalid start address.");
                 result["matches"] = matches;
                 return result;
             }
@@ -981,7 +985,7 @@ QVariantMap ScanningCoreManager::startExactScanExpert(
             if (parseHexAddress(stopText, &stopAddress)) {
                 options.stopAddress = stopAddress;
             } else {
-                result["error"] = "Adresse de fin invalide.";
+                result["error"] = KE_TXT("Adresse de fin invalide.", "Invalid end address.");
                 result["matches"] = matches;
                 return result;
             }
@@ -990,7 +994,7 @@ QVariantMap ScanningCoreManager::startExactScanExpert(
     if (options.startAddress != 0
         && options.stopAddress != 0
         && options.stopAddress <= options.startAddress) {
-        result["error"] = "La fin de plage doit être supérieure au début.";
+        result["error"] = KE_TXT("La fin de plage doit être supérieure au début.", "The range end must be greater than the start.");
         result["matches"] = matches;
         return result;
     }
@@ -1090,13 +1094,13 @@ QVariantMap ScanningCoreManager::scanEncryptedValue(const QString& value, const 
     result["matches"] = matches;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide pour scan chiffré.";
+        result["error"] = KE_TXT("Type invalide pour scan chiffré.", "Invalid type for encrypted scan.");
         return result;
     }
 
@@ -1109,7 +1113,7 @@ QVariantMap ScanningCoreManager::scanEncryptedValue(const QString& value, const 
 
     uint64_t displayValue = 0;
     if (type == killcore::ValueType::Float32 || type == killcore::ValueType::Float64) {
-        result["error"] = "Le scan chiffré v1 supporte seulement les types entiers.";
+        result["error"] = KE_TXT("Le scan chiffré v1 supporte seulement les types entiers.", "Encrypted scan v1 only supports integer types.");
         return result;
     }
     const QByteArray displayBytes = killcore::scanValueToBytes(displayScanValue);
@@ -1124,7 +1128,7 @@ QVariantMap ScanningCoreManager::scanEncryptedValue(const QString& value, const 
     } else if (modeText == "not") {
         encryptedMode = killcore::EncryptedScanMode::NotBits;
     } else if (modeText != "xor") {
-        result["error"] = "Mode chiffré invalide. Utilise xor, add, sub ou not.";
+        result["error"] = KE_TXT("Mode chiffré invalide. Utilise xor, add, sub ou not.", "Invalid encrypted mode. Use xor, add, sub, or not.");
         return result;
     }
 
@@ -1139,7 +1143,7 @@ QVariantMap ScanningCoreManager::scanEncryptedValue(const QString& value, const 
         : optionsMap.value("key", 0).toULongLong(&keyOk);
     const int keySearchBits = std::clamp(optionsMap.value("keySearchBits", 0).toInt(), 0, 32);
     if (!keyOk && keySearchBits == 0 && encryptedMode != killcore::EncryptedScanMode::NotBits) {
-        result["error"] = "Clé invalide.";
+        result["error"] = KE_TXT("Clé invalide.", "Invalid key.");
         return result;
     }
 
@@ -1277,19 +1281,19 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
     result["started"] = false;
 
     if (m_controller.m_scanInProgress) {
-        result["error"] = "Un scan est déjà en cours.";
+        result["error"] = KE_TXT("Un scan est déjà en cours.", "A scan is already in progress.");
         return result;
     }
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         result["matches"] = matches;
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type de valeur invalide.";
+        result["error"] = KE_TXT("Type de valeur invalide.", "Invalid value type.");
         result["matches"] = matches;
         return result;
     }
@@ -1308,7 +1312,7 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
         if (!startText.isEmpty()) {
             uint64_t startAddress = 0;
             if (!parseHexAddress(startText, &startAddress)) {
-                result["error"] = "Adresse de début invalide.";
+                result["error"] = KE_TXT("Adresse de début invalide.", "Invalid start address.");
                 result["matches"] = matches;
                 return result;
             }
@@ -1320,7 +1324,7 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
         if (!stopText.isEmpty()) {
             uint64_t stopAddress = 0;
             if (!parseHexAddress(stopText, &stopAddress)) {
-                result["error"] = "Adresse de fin invalide.";
+                result["error"] = KE_TXT("Adresse de fin invalide.", "Invalid end address.");
                 result["matches"] = matches;
                 return result;
             }
@@ -1330,7 +1334,7 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
     if (options.startAddress != 0
         && options.stopAddress != 0
         && options.stopAddress <= options.startAddress) {
-        result["error"] = "La fin de plage doit être supérieure au début.";
+        result["error"] = KE_TXT("La fin de plage doit être supérieure au début.", "The range end must be greater than the start.");
         result["matches"] = matches;
         return result;
     }
@@ -1380,7 +1384,7 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         if (!workerHandle.isValid()) {
             scan.success = false;
-            scan.errorMessage = "Impossible d'ouvrir le processus dans le worker de scan.";
+            scan.errorMessage = KE_TXT("Impossible d'ouvrir le processus dans le worker de scan.", "Could not open the process in the scan worker.");
         } else {
             killcore::ScanEngine scanner(workerHandle);
             scan = scanner.exactScan(scanValue, options, cancellation.get());
@@ -1495,7 +1499,7 @@ QVariantMap ScanningCoreManager::cancelActiveScan() {
     QVariantMap result;
     result["success"] = false;
     if (!m_controller.m_scanInProgress || !m_controller.m_activeScanCancellation) {
-        result["error"] = "Aucun scan actif à annuler.";
+        result["error"] = KE_TXT("Aucun scan actif à annuler.", "No active scan to cancel.");
         return result;
     }
     m_controller.m_activeScanCancellation->cancel();
@@ -1512,28 +1516,28 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
     result["started"] = false;
 
     if (m_controller.m_scanInProgress) {
-        result["error"] = "Un scan est déjà en cours.";
+        result["error"] = KE_TXT("Un scan est déjà en cours.", "A scan is already in progress.");
         return result;
     }
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     auto& candidates = scanState().candidates();
     if (candidates.isEmpty()) {
-        result["error"] = "Aucun candidat à filtrer. Lance d'abord un scan exact.";
+        result["error"] = KE_TXT("Aucun candidat à filtrer. Lance d'abord un scan exact.", "No candidates to filter. Run an exact scan first.");
         return result;
     }
 
     killcore::NextScanMode scanMode;
     if (!killcore::parseNextScanMode(mode, &scanMode)) {
-        result["error"] = "Mode de next scan invalide.";
+        result["error"] = KE_TXT("Mode de next scan invalide.", "Invalid next scan mode.");
         return result;
     }
 
     killcore::Candidate firstCandidate;
     if (!candidates.firstCandidate(&firstCandidate)) {
-        result["error"] = "Impossible de lire le premier candidat.";
+        result["error"] = KE_TXT("Impossible de lire le premier candidat.", "Could not read the first candidate.");
         return result;
     }
 
@@ -1542,14 +1546,14 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
     const auto candidateThreshold = candidates.fileBackedThreshold();
     double targetNumber = 0.0;
     if (scanMode == killcore::NextScanMode::Exact && value.trimmed().isEmpty()) {
-        result["error"] = "Valeur requise pour un next scan exact.";
+        result["error"] = KE_TXT("Valeur requise pour un next scan exact.", "A value is required for an exact next scan.");
         return result;
     }
     if (scanMode == killcore::NextScanMode::Delta) {
         bool ok = false;
         targetNumber = value.trimmed().replace(',', '.').toDouble(&ok);
         if (!ok) {
-            result["error"] = "Valeur delta invalide.";
+            result["error"] = KE_TXT("Valeur delta invalide.", "Invalid delta value.");
             return result;
         }
     }
@@ -1571,12 +1575,15 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
             rangeMax = parts[1].trimmed().replace(',', '.').toDouble(&okMax);
         }
         if (!okMin || !okMax) {
-            result["error"] = "Plage invalide. Utilise le format \"min,max\" (ex. 50,100). "
-                               "Le séparateur '-' n'est pas supporté (ambigu avec un nombre négatif).";
+            result["error"] = KE_TXT(
+                "Plage invalide. Utilise le format \"min,max\" (ex. 50,100). "
+                "Le séparateur '-' n'est pas supporté (ambigu avec un nombre négatif).",
+                "Invalid range. Use the \"min,max\" format (e.g. 50,100). "
+                "The '-' separator isn't supported (ambiguous with a negative number).");
             return result;
         }
         if (rangeMin > rangeMax) {
-            result["error"] = "Plage invalide : min doit être ≤ max.";
+            result["error"] = KE_TXT("Plage invalide : min doit être ≤ max.", "Invalid range: min must be ≤ max.");
             return result;
         }
     }
@@ -1633,7 +1640,7 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
         if (!error.isEmpty()) {
             // error already set
         } else if (!workerHandle.isValid()) {
-            error = "Impossible d'ouvrir le processus dans le worker de next scan.";
+            error = KE_TXT("Impossible d'ouvrir le processus dans le worker de next scan.", "Could not open the process in the next scan worker.");
         } else {
             killcore::MemoryReader reader(workerHandle);
             QString streamError;
@@ -1644,7 +1651,7 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
             const bool completed = killcore::CandidateStore::forEachCandidate(candidateSnapshot, [&](const killcore::Candidate& candidate) {
                 if (cancellation->isCancelled()) {
                     cancelled = true;
-                    error = "Next scan annulé.";
+                    error = KE_TXT("Next scan annulé.", "Next scan cancelled.");
                     return false;
                 }
 
@@ -1682,7 +1689,7 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
                         keep = matchCandidateExactVariant(value, candidate, current, &updatedCandidate, &targetError);
                         if (!targetError.isEmpty()) {
                             error = targetError.isEmpty()
-                                ? "Impossible de construire la valeur cible pour un candidat."
+                                ? KE_TXT("Impossible de construire la valeur cible pour un candidat.", "Could not build the target value for a candidate.")
                                 : targetError;
                             return false;
                         }
@@ -1744,7 +1751,7 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
             }, &streamError);
 
             if (!completed && error.isEmpty()) {
-                error = streamError.isEmpty() ? "Next scan interrompu." : streamError;
+                error = streamError.isEmpty() ? KE_TXT("Next scan interrompu.", "Next scan interrupted.") : streamError;
             }
             if (error.isEmpty() && streamOutput && !survivors.finishFileBackedReplacement(&error)) {
                 // error filled by finishFileBackedReplacement
@@ -1765,7 +1772,7 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
             if (!cancelled && finishError.isEmpty()) {
                 QString undoError;
                 if (!self->rememberCandidatesForUndo(&undoError)) {
-                    finishError = undoError.isEmpty() ? "Impossible de préparer l'annulation du next scan." : undoError;
+                    finishError = undoError.isEmpty() ? KE_TXT("Impossible de préparer l'annulation du next scan.", "Could not prepare the next scan's cancellation.") : undoError;
                 } else {
                     if (streamOutput) {
                         self->scanState().candidates() = std::move(survivors);
@@ -1878,19 +1885,19 @@ QVariantMap ScanningCoreManager::nextScan(const QString& mode, const QString& va
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     auto& candidates = scanState().candidates();
     if (candidates.isEmpty()) {
-        result["error"] = "Aucun candidat à filtrer. Lance d'abord un scan exact.";
+        result["error"] = KE_TXT("Aucun candidat à filtrer. Lance d'abord un scan exact.", "No candidates to filter. Run an exact scan first.");
         return result;
     }
 
     killcore::NextScanMode scanMode;
     if (!killcore::parseNextScanMode(mode, &scanMode)) {
-        result["error"] = "Mode de next scan invalide.";
+        result["error"] = KE_TXT("Mode de next scan invalide.", "Invalid next scan mode.");
         return result;
     }
 
@@ -1898,14 +1905,14 @@ QVariantMap ScanningCoreManager::nextScan(const QString& mode, const QString& va
     const auto firstCandidateType = candidates.candidates().first().type;
 
     if (scanMode == killcore::NextScanMode::Exact && value.trimmed().isEmpty()) {
-        result["error"] = "Valeur requise pour un next scan exact.";
+        result["error"] = KE_TXT("Valeur requise pour un next scan exact.", "A value is required for an exact next scan.");
         return result;
     }
     if (scanMode == killcore::NextScanMode::Delta) {
         bool ok = false;
         targetNumber = value.trimmed().replace(',', '.').toDouble(&ok);
         if (!ok) {
-            result["error"] = "Valeur delta invalide.";
+            result["error"] = KE_TXT("Valeur delta invalide.", "Invalid delta value.");
             return result;
         }
     }
@@ -1928,12 +1935,15 @@ QVariantMap ScanningCoreManager::nextScan(const QString& mode, const QString& va
             rangeMax = parts[1].trimmed().replace(',', '.').toDouble(&okMax);
         }
         if (!okMin || !okMax) {
-            result["error"] = "Plage invalide. Utilise le format \"min,max\" (ex. 50,100). "
-                               "Le séparateur '-' n'est pas supporté (ambigu avec un nombre négatif).";
+            result["error"] = KE_TXT(
+                "Plage invalide. Utilise le format \"min,max\" (ex. 50,100). "
+                "Le séparateur '-' n'est pas supporté (ambigu avec un nombre négatif).",
+                "Invalid range. Use the \"min,max\" format (e.g. 50,100). "
+                "The '-' separator isn't supported (ambiguous with a negative number).");
             return result;
         }
         if (rangeMin > rangeMax) {
-            result["error"] = "Plage invalide : min doit être ≤ max.";
+            result["error"] = KE_TXT("Plage invalide : min doit être ≤ max.", "Invalid range: min must be ≤ max.");
             return result;
         }
     }
@@ -1991,7 +2001,7 @@ QVariantMap ScanningCoreManager::nextScan(const QString& mode, const QString& va
                 keep = matchCandidateExactVariant(value, candidate, current, &updatedCandidate, &targetError);
                 if (!targetError.isEmpty()) {
                     result["error"] = targetError.isEmpty()
-                        ? "Impossible de construire la valeur cible pour un candidat."
+                        ? KE_TXT("Impossible de construire la valeur cible pour un candidat.", "Could not build the target value for a candidate.")
                         : targetError;
                     emit scanProgress(100);
                     return result;
@@ -2048,7 +2058,7 @@ QVariantMap ScanningCoreManager::nextScan(const QString& mode, const QString& va
 
     QString undoError;
     if (!rememberCandidatesForUndo(&undoError)) {
-        result["error"] = undoError.isEmpty() ? "Impossible de préparer l'annulation du next scan." : undoError;
+        result["error"] = undoError.isEmpty() ? KE_TXT("Impossible de préparer l'annulation du next scan.", "Could not prepare the next scan's cancellation.") : undoError;
         emit scanProgress(100);
         return result;
     }
@@ -2095,12 +2105,12 @@ QVariantMap ScanningCoreManager::undoCandidateScan() {
     result["count"] = static_cast<qulonglong>(candidates.size());
 
     if (m_controller.m_scanInProgress) {
-        result["error"] = "Impossible de restaurer pendant un scan actif.";
+        result["error"] = KE_TXT("Impossible de restaurer pendant un scan actif.", "Cannot restore while a scan is active.");
         return result;
     }
 
     if (!m_controller.m_hasPreviousCandidates || previousCandidates.isEmpty()) {
-        result["error"] = "Aucune réduction précédente à restaurer.";
+        result["error"] = KE_TXT("Aucune réduction précédente à restaurer.", "No previous reduction to restore.");
         return result;
     }
 
@@ -2199,7 +2209,7 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotWithOptions(const QVarian
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -2254,11 +2264,11 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
     result["started"] = false;
 
     if (m_controller.m_scanInProgress) {
-        result["error"] = "Un scan est déjà en cours.";
+        result["error"] = KE_TXT("Un scan est déjà en cours.", "A scan is already in progress.");
         return result;
     }
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -2309,7 +2319,7 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
         killcore::SnapshotResult snapshot;
         if (!workerHandle.isValid()) {
             snapshot.success = false;
-            snapshot.errorMessage = "Impossible d'ouvrir le processus dans le worker unknown.";
+            snapshot.errorMessage = KE_TXT("Impossible d'ouvrir le processus dans le worker unknown.", "Could not open the process in the unknown worker.");
         } else {
             snapshot = snapshotStore.capture(workerHandle, maxSnapshotBytes, cancellation.get(), options);
         }
@@ -2404,13 +2414,13 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::NextScanMode scanMode;
     if (!killcore::parseNextScanMode(mode, &scanMode)) {
-        result["error"] = "Mode invalide.";
+        result["error"] = KE_TXT("Mode invalide.", "Invalid mode.");
         return result;
     }
     double displayedDelta = 0.0;
@@ -2418,7 +2428,7 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
         bool ok = false;
         displayedDelta = deltaValue.trimmed().replace(',', '.').toDouble(&ok);
         if (!ok) {
-            result["error"] = "Valeur delta requise et invalide pour un unknown scan en mode delta.";
+            result["error"] = KE_TXT("Valeur delta requise et invalide pour un unknown scan en mode delta.", "A delta value is required and invalid for an unknown scan in delta mode.");
             return result;
         }
     }
@@ -2436,7 +2446,7 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
     }
 
     if (snapshotStore.isEmpty()) {
-        result["error"] = "Aucun snapshot unknown capturé.";
+        result["error"] = KE_TXT("Aucun snapshot unknown capturé.", "No unknown snapshot captured.");
         return result;
     }
     emit scanStarted();
@@ -2459,7 +2469,7 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
     const auto compareTypes = autoType ? unknownAutoValueTypes() : QList<killcore::ValueType>{};
     killcore::ValueType singleType;
     if (!autoType && !killcore::parseValueType(valueType, &singleType)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         emit scanProgress(100);
         return result;
     }
@@ -2558,8 +2568,11 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
         }
     }
     if (!truncatedTypes.isEmpty() && compareError.isEmpty()) {
-        compareError = QString("Limite de %1 candidats/type atteinte pour : %2. Tous les types ont ete testes ; "
-                                "raffine avec changed/increased/decreased pour reduire.")
+        compareError = KE_TXT(
+            "Limite de %1 candidats/type atteinte pour : %2. Tous les types ont ete testes ; "
+            "raffine avec changed/increased/decreased pour reduire.",
+            "Limit of %1 candidates/type reached for: %2. All types have been tested; "
+            "refine with changed/increased/decreased to narrow down.")
                             .arg(perTypeCap)
                             .arg(truncatedTypes.join(", "));
     }
@@ -2567,7 +2580,7 @@ QVariantMap ScanningCoreManager::unknownNextScan(const QString& mode, const QStr
 
     QString undoError;
     if (!candidates.isEmpty() && !rememberCandidatesForUndo(&undoError)) {
-        result["error"] = undoError.isEmpty() ? "Impossible de préparer l'annulation de la comparaison." : undoError;
+        result["error"] = undoError.isEmpty() ? KE_TXT("Impossible de préparer l'annulation de la comparaison.", "Could not prepare the comparison's cancellation.") : undoError;
         emit scanProgress(100);
         return result;
     }
@@ -2598,17 +2611,17 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
     result["started"] = false;
 
     if (m_controller.m_scanInProgress) {
-        result["error"] = "Un scan est déjà en cours.";
+        result["error"] = KE_TXT("Un scan est déjà en cours.", "A scan is already in progress.");
         return result;
     }
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::NextScanMode scanMode;
     if (!killcore::parseNextScanMode(mode, &scanMode)) {
-        result["error"] = "Mode invalide.";
+        result["error"] = KE_TXT("Mode invalide.", "Invalid mode.");
         return result;
     }
     double displayedDelta = 0.0;
@@ -2616,7 +2629,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
         bool ok = false;
         displayedDelta = deltaValue.trimmed().replace(',', '.').toDouble(&ok);
         if (!ok) {
-            result["error"] = "Valeur delta requise et invalide pour un unknown scan en mode delta.";
+            result["error"] = KE_TXT("Valeur delta requise et invalide pour un unknown scan en mode delta.", "A delta value is required and invalid for an unknown scan in delta mode.");
             return result;
         }
     }
@@ -2664,7 +2677,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
     }
 
     if (snapshotStore.isEmpty()) {
-        result["error"] = "Aucun snapshot unknown capturé.";
+        result["error"] = KE_TXT("Aucun snapshot unknown capturé.", "No unknown snapshot captured.");
         return result;
     }
     const QString normalizedValueType = valueType.trimmed();
@@ -2673,7 +2686,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
         || normalizedValueType.isEmpty();
     killcore::ValueType singleType = killcore::ValueType::Int32;
     if (!autoType && !killcore::parseValueType(valueType, &singleType)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
     const auto typesToRun = autoType ? unknownAutoValueTypes() : QList<killcore::ValueType>{singleType};
@@ -2701,7 +2714,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         if (!workerHandle.isValid()) {
             compareSuccess = false;
-            compareError = "Impossible d'ouvrir le processus dans le worker unknown.";
+            compareError = KE_TXT("Impossible d'ouvrir le processus dans le worker unknown.", "Could not open the process in the unknown worker.");
         } else if (self) {
             // Compare "Unknown" : relit toute la mémoire capturée par le
             // snapshot, une fois par type testé (jusqu'à 6 en mode Auto) —
@@ -2815,8 +2828,11 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
                 }
             }
             if (!truncatedTypes.isEmpty() && compareError.isEmpty()) {
-                compareError = QString("Limite de %1 candidats/type atteinte pour : %2. Tous les types ont ete testes ; "
-                                        "raffine avec changed/increased/decreased pour reduire.")
+                compareError = KE_TXT(
+                    "Limite de %1 candidats/type atteinte pour : %2. Tous les types ont ete testes ; "
+                    "raffine avec changed/increased/decreased pour reduire.",
+                    "Limit of %1 candidates/type reached for: %2. All types have been tested; "
+                    "refine with changed/increased/decreased to narrow down.")
                                     .arg(perTypeCap)
                                     .arg(truncatedTypes.join(", "));
             }
@@ -2841,7 +2857,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
                 if (!candidates.isEmpty() && !self->rememberCandidatesForUndo(&undoError)) {
                     finishSuccess = false;
                     finishError = undoError.isEmpty()
-                        ? "Impossible de préparer l'annulation de la comparaison."
+                        ? KE_TXT("Impossible de préparer l'annulation de la comparaison.", "Could not prepare the comparison's cancellation.")
                         : undoError;
                 } else {
                     candidates.replaceCandidates(unknownCandidates);
@@ -2918,7 +2934,7 @@ QVariantMap ScanningCoreManager::scanGroupScan(const QVariantList& entriesList, 
     result["matches"] = matches;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -2928,7 +2944,7 @@ QVariantMap ScanningCoreManager::scanGroupScan(const QVariantList& entriesList, 
     groupOptions.maxDistance = std::clamp(optionsMap.value("maxDistance", 256).toInt(), 4, 4096);
 
     if (entriesList.isEmpty()) {
-        result["error"] = "Aucune entree pour le scan groupe.";
+        result["error"] = KE_TXT("Aucune entree pour le scan groupe.", "No entry for the group scan.");
         return result;
     }
 
@@ -2938,14 +2954,14 @@ QVariantMap ScanningCoreManager::scanGroupScan(const QVariantList& entriesList, 
 
         const QString typeText = entryMap.value("type", "Int32").toString();
         if (!killcore::parseValueType(typeText, &entry.type)) {
-            result["error"] = QString("Type invalide pour une entree du scan groupe : %1").arg(typeText);
+            result["error"] = KE_TXT("Type invalide pour une entree du scan groupe : %1", "Invalid type for a group scan entry: %1").arg(typeText);
             return result;
         }
 
         bool offsetOk = false;
         entry.offset = entryMap.value("offset").toLongLong(&offsetOk);
         if (!offsetOk) {
-            result["error"] = "Offset invalide pour une entree du scan groupe.";
+            result["error"] = KE_TXT("Offset invalide pour une entree du scan groupe.", "Invalid offset for a group scan entry.");
             return result;
         }
 

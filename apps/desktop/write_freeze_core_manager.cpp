@@ -1,5 +1,7 @@
 #include "write_freeze_core_manager.h"
 
+#include "localization/localization.h"
+
 #include "memory/memory_reader.h"
 #include "memory/memory_writer.h"
 #include "process/process_suspend.h"
@@ -145,13 +147,13 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValue(const QString& addressHex, 
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
 
@@ -164,7 +166,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValue(const QString& addressHex, 
 
     killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::ReadWrite);
     if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus en écriture.", "Could not open the process for writing.");
         return result;
     }
 
@@ -191,22 +193,22 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesAtomic(const QVariantList& 
     result["success"] = false;
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (targets.isEmpty()) {
-        result["error"] = "Aucune cible à écrire.";
+        result["error"] = KE_TXT("Aucune cible à écrire.", "No target to write.");
         return result;
     }
     constexpr int kMaxAtomicTargets = 32;
     if (targets.size() > kMaxAtomicTargets) {
-        result["error"] = QString("Trop de cibles pour une écriture groupée (%1 maximum).").arg(kMaxAtomicTargets);
+        result["error"] = KE_TXT("Trop de cibles pour une écriture groupée (%1 maximum).", "Too many targets for a batched write (%1 maximum).").arg(kMaxAtomicTargets);
         return result;
     }
 
     killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::ReadWrite);
     if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus en écriture.", "Could not open the process for writing.");
         return result;
     }
 
@@ -231,11 +233,11 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesAtomic(const QVariantList& 
         killcore::ScanValue scanValue;
         QString parseError;
         if (!parseHexAddress(addressHex, &address)) {
-            parseError = "Adresse invalide.";
+            parseError = KE_TXT("Adresse invalide.", "Invalid address.");
         } else if (!killcore::parseValueType(typeName, &type)) {
-            parseError = "Type invalide.";
+            parseError = KE_TXT("Type invalide.", "Invalid type.");
         } else if (!killcore::parseScanValue(valueText, type, &scanValue, &parseError) && parseError.isEmpty()) {
-            parseError = "Valeur invalide.";
+            parseError = KE_TXT("Valeur invalide.", "Invalid value.");
         }
         if (!parseError.isEmpty()) {
             QVariantMap errEntry;
@@ -249,7 +251,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesAtomic(const QVariantList& 
     }
 
     if (parsed.isEmpty()) {
-        result["error"] = "Aucune cible valide à écrire.";
+        result["error"] = KE_TXT("Aucune cible valide à écrire.", "No valid target to write.");
         result["parseErrors"] = parseErrors;
         return result;
     }
@@ -318,7 +320,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesWithVariants(const QVariant
 
     const QString rawValue = value.trimmed();
     if (targets.isEmpty()) {
-        result["error"] = "Aucune cible à écrire.";
+        result["error"] = KE_TXT("Aucune cible à écrire.", "No target to write.");
         m_appendScanTelemetry("ui_string_sources_write", {
             {"success", false},
             {"error", result.value("error")},
@@ -328,7 +330,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesWithVariants(const QVariant
         return result;
     }
     if (rawValue.isEmpty()) {
-        result["error"] = "Valeur vide.";
+        result["error"] = KE_TXT("Valeur vide.", "Empty value.");
         m_appendScanTelemetry("ui_string_sources_write", {
             {"success", false},
             {"error", result.value("error")},
@@ -340,7 +342,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesWithVariants(const QVariant
 
     killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::ReadWrite);
     if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus en écriture.", "Could not open the process for writing.");
         m_appendScanTelemetry("ui_string_sources_write", {
             {"success", false},
             {"error", result.value("error")},
@@ -373,7 +375,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesWithVariants(const QVariant
 
         uint64_t address = 0;
         if (!parseHexAddress(addressHex, &address)) {
-            writeResult["error"] = "Adresse invalide.";
+            writeResult["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
             allWritesOk = false;
             writeResults.append(writeResult);
             continue;
@@ -381,7 +383,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesWithVariants(const QVariant
 
         killcore::ValueType type;
         if (!killcore::parseValueType(typeName, &type)) {
-            writeResult["error"] = "Type invalide.";
+            writeResult["error"] = KE_TXT("Type invalide.", "Invalid type.");
             allWritesOk = false;
             writeResults.append(writeResult);
             continue;
@@ -390,7 +392,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesWithVariants(const QVariant
         QString parseError;
         const QByteArray targetBytes = killcore::targetBytesForTypeAndVariant(rawValue, type, variantLabel, &parseError);
         if (targetBytes.isEmpty()) {
-            writeResult["error"] = parseError.isEmpty() ? QString("Valeur incompatible avec cette variante.") : parseError;
+            writeResult["error"] = parseError.isEmpty() ? KE_TXT("Valeur incompatible avec cette variante.", "Value incompatible with this variant.") : parseError;
             allWritesOk = false;
             writeResults.append(writeResult);
             continue;
@@ -429,7 +431,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValuesWithVariants(const QVariant
     result["results"] = writeResults;
     result["error"] = allWritesOk
         ? QString()
-        : QString("Écriture partielle: %1/%2 réussie(s).").arg(written).arg(targets.size());
+        : KE_TXT("Écriture partielle: %1/%2 réussie(s).", "Partial write: %1/%2 succeeded.").arg(written).arg(targets.size());
     QVariantList samples;
     for (int i = 0; i < std::min<int>(writeResults.size(), 16); ++i) {
         const QVariantMap write = writeResults.at(i).toMap();
@@ -476,13 +478,13 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValueConfirmed(
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
 
@@ -495,7 +497,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValueConfirmed(
 
     killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::ReadWrite);
     if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus en écriture.", "Could not open the process for writing.");
         return result;
     }
 
@@ -508,7 +510,7 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValueConfirmed(
 
     if (!temporaryWrite.success || !temporaryWrite.verified) {
         result["error"] = temporaryWrite.errorMessage.isEmpty()
-            ? "La confirmation temporaire de l'adresse a échoué."
+            ? KE_TXT("La confirmation temporaire de l'adresse a échoué.", "The address's temporary confirmation failed.")
             : temporaryWrite.errorMessage;
         return result;
     }
@@ -520,12 +522,12 @@ QVariantMap WriteFreezeCoreManager::writeMemoryValueConfirmed(
         result["restoreProtectionChanged"] = restore.protectionChanged;
         if (!restore.success || !restore.verified) {
             result["error"] = restore.errorMessage.isEmpty()
-                ? "La restauration après confirmation temporaire a échoué."
+                ? KE_TXT("La restauration après confirmation temporaire a échoué.", "The restore after temporary confirmation failed.")
                 : restore.errorMessage;
             return result;
         }
     } else {
-        result["error"] = "Impossible de restaurer l'ancienne valeur après confirmation.";
+        result["error"] = KE_TXT("Impossible de restaurer l'ancienne valeur après confirmation.", "Could not restore the previous value after confirmation.");
         return result;
     }
 
@@ -557,13 +559,13 @@ QVariantMap WriteFreezeCoreManager::rollbackLastWriteBatch() {
     if (m_lastBatchStartIndex < 0
         || m_lastBatchEndIndex <= m_lastBatchStartIndex
         || m_lastBatchStartIndex >= m_autoWriteState().writeHistorySize()) {
-        result["error"] = "Aucun batch d'écritures automatiques à restaurer.";
+        result["error"] = KE_TXT("Aucun batch d'écritures automatiques à restaurer.", "No batch of automatic writes to restore.");
         return result;
     }
 
     killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::ReadWrite);
     if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus en écriture.", "Could not open the process for writing.");
         return result;
     }
 
@@ -605,7 +607,7 @@ QVariantMap WriteFreezeCoreManager::rollbackLastWriteBatch() {
     result["rolledBack"] = rolled;
     result["total"] = total;
     result["restoredWrites"] = restoredWrites;
-    result["error"] = (rolled == total) ? QString() : QString("Seulement %1/%2 restaurées.").arg(rolled).arg(total);
+    result["error"] = (rolled == total) ? QString() : KE_TXT("Seulement %1/%2 restaurées.", "Only %1/%2 restored.").arg(rolled).arg(total);
     return result;
 }
 
@@ -614,13 +616,13 @@ QVariantMap WriteFreezeCoreManager::rollbackLastWrite() {
     result["success"] = false;
 
     if (m_lastWriteAddress == 0 || m_lastWritePreviousValue.isEmpty()) {
-        result["error"] = "Aucune écriture à restaurer.";
+        result["error"] = KE_TXT("Aucune écriture à restaurer.", "No write to restore.");
         return result;
     }
 
     killcore::ProcessHandle writeHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::ReadWrite);
     if (!writeHandle.isValid()) {
-        result["error"] = "Impossible d'ouvrir le processus en écriture.";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus en écriture.", "Could not open the process for writing.");
         return result;
     }
 
@@ -693,12 +695,16 @@ void WriteFreezeCoreManager::applyWriteWatchTick() {
             QVariantMap info;
             info["address"] = addressHex;
             info["type"] = killcore::valueTypeToString(entry.type);
-            info["message"] = QString(
+            info["message"] = KE_TXT(
                 "La valeur écrite à 0x%1 a déjà changé toute seule, quelques secondes après l'écriture — quelque "
                 "chose la recalcule ou la réécrit depuis une source que tu n'as pas encore trouvée. Une simple "
-                "écriture directe ne suffira pas ici.")
+                "écriture directe ne suffira pas ici.",
+                "The value written at 0x%1 has already changed on its own, just a few seconds after the write — "
+                "something is recomputing or rewriting it from a source you haven't found yet. A simple direct "
+                "write won't be enough here.")
                 .arg(addressHex);
-            info["suggestion"] = "Capture l'instruction qui écrit dessus pour trouver la vraie source, ou pose un freeze si tu veux juste bloquer cette valeur.";
+            info["suggestion"] = KE_TXT("Capture l'instruction qui écrit dessus pour trouver la vraie source, ou pose un freeze si tu veux juste bloquer cette valeur.",
+                                         "Capture the instruction that writes to it to find the real source, or set a freeze if you just want to lock this value.");
             m_appendScanTelemetry("write_did_not_hold", info);
             m_writeDidNotHold(info);
             m_writeWatchEntries.removeAt(i);
