@@ -43,6 +43,15 @@ TEST(InvestigationNotebookPlannerTest, ExtractsJsonPlanFromModelOutput) {
     EXPECT_TRUE(parsed.contains("nextTest"));
 }
 
+TEST(InvestigationNotebookPlannerTest, ExtractJsonPlanDoesNotHangOnUnterminatedJsonAtStart) {
+    QString error;
+    const QVariantMap parsed = extractInvestigationNotebookPlanJson(
+        "{\"hypotheses\":[{\"description\":\"Copie UI\"}]", &error);
+
+    EXPECT_TRUE(parsed.isEmpty());
+    EXPECT_FALSE(error.isEmpty());
+}
+
 TEST(InvestigationNotebookPlannerTest, NormalizeDropsModelScoresAndKeepsTextOnlyHypotheses) {
     QVariantMap proposal;
     QVariantMap scoredHypothesis;

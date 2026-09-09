@@ -1,5 +1,7 @@
 #include "investigation_notebook_planner.h"
 
+#include "localization/localization.h"
+
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
@@ -93,51 +95,67 @@ QVariantMap fallbackNextTest(const QString& symptom) {
     QVariantMap next;
     next["risk"] = "safe";
     next["preconditions"] = QStringList{
-        "Processus cible attaché",
-        "Valeur affichée actuelle connue",
+        KE_TXT("Processus cible attaché", "Target process attached"),
+        KE_TXT("Valeur affichée actuelle connue", "Current displayed value known"),
     };
 
     if ((q.contains("affich") || q.contains("display") || q.contains("écran") || q.contains("ecran"))
         && (q.contains("trouve pas") || q.contains("introuvable") || q.contains("rien") || q.contains("not found"))) {
-        next["title"] = "Tracer la valeur affichée puis analyser ses sources numériques";
+        next["title"] = KE_TXT("Tracer la valeur affichée puis analyser ses sources numériques",
+                                "Trace the displayed value then analyze its numeric sources");
         next["tool"] = "scan_ui_strings";
-        next["expectedIfTrue"] = "Une chaîne affichée ou une source numérique proche suit la valeur observée.";
-        next["expectedIfFalse"] = "La valeur n'est probablement pas stockée sous forme texte lisible dans les pages scannées.";
-        next["rationale"] = "Le symptôme parle d'une valeur visible que les scans numériques classiques ne retrouvent pas.";
+        next["expectedIfTrue"] = KE_TXT("Une chaîne affichée ou une source numérique proche suit la valeur observée.",
+                                         "A displayed string or a nearby numeric source follows the observed value.");
+        next["expectedIfFalse"] = KE_TXT("La valeur n'est probablement pas stockée sous forme texte lisible dans les pages scannées.",
+                                          "The value is probably not stored as readable text in the scanned pages.");
+        next["rationale"] = KE_TXT("Le symptôme parle d'une valeur visible que les scans numériques classiques ne retrouvent pas.",
+                                    "The symptom describes a visible value that classic numeric scans don't find.");
         return next;
     }
 
     if (q.contains("freeze") || q.contains("fige") || q.contains("gèle") || q.contains("gele")
         || q.contains("réécrit") || q.contains("reecrit") || q.contains("revient") || q.contains("clignote")) {
-        next["title"] = "Observer le rythme d'écriture du champ avant tout freeze plus agressif";
+        next["title"] = KE_TXT("Observer le rythme d'écriture du champ avant tout freeze plus agressif",
+                                "Observe the field's write rate before any more aggressive freeze");
         next["tool"] = "analyze_field_stability";
         next["risk"] = "debug";
         next["preconditions"] = QStringList{
-            "Adresse candidate sélectionnée",
-            "Cible autorisée à être attachée en debugger",
-            "Fenêtre courte pendant laquelle la valeur varie",
+            KE_TXT("Adresse candidate sélectionnée", "Candidate address selected"),
+            KE_TXT("Cible autorisée à être attachée en debugger", "Target allowed to be attached as a debugger"),
+            KE_TXT("Fenêtre courte pendant laquelle la valeur varie", "Short window during which the value changes"),
         };
-        next["expectedIfTrue"] = "Une instruction dominante réécrit vite le champ, ce qui oriente vers Freeze BP ou recherche de source.";
-        next["expectedIfFalse"] = "Le champ semble événementiel ou l'adresse testée n'est pas celle qui se fait réécrire.";
-        next["rationale"] = "Le symptôme indique une valeur qui ne tient pas après écriture.";
+        next["expectedIfTrue"] = KE_TXT("Une instruction dominante réécrit vite le champ, ce qui oriente vers Freeze BP ou recherche de source.",
+                                         "A dominant instruction rewrites the field quickly, pointing toward Freeze BP or source search.");
+        next["expectedIfFalse"] = KE_TXT("Le champ semble événementiel ou l'adresse testée n'est pas celle qui se fait réécrire.",
+                                          "The field looks event-driven, or the tested address isn't the one being rewritten.");
+        next["rationale"] = KE_TXT("Le symptôme indique une valeur qui ne tient pas après écriture.",
+                                    "The symptom indicates a value that doesn't stick after being written.");
         return next;
     }
 
     if (q.contains("sauvegarde") || q.contains("save file") || q.contains("disque") || q.contains("uwp")
         || q.contains("localstate") || q.contains("cache")) {
-        next["title"] = "Découvrir les fichiers d'état probables avant de surveiller les changements";
+        next["title"] = KE_TXT("Découvrir les fichiers d'état probables avant de surveiller les changements",
+                                "Discover likely state files before monitoring changes");
         next["tool"] = "discover_save_files";
-        next["expectedIfTrue"] = "Un fichier récent ou LocalSettings bouge avec la valeur observée.";
-        next["expectedIfFalse"] = "Le problème est plus probablement en mémoire vive ou dans un cache interne.";
-        next["rationale"] = "Le symptôme mentionne une persistance ou un cache hors mémoire.";
+        next["expectedIfTrue"] = KE_TXT("Un fichier récent ou LocalSettings bouge avec la valeur observée.",
+                                         "A recent file or LocalSettings changes along with the observed value.");
+        next["expectedIfFalse"] = KE_TXT("Le problème est plus probablement en mémoire vive ou dans un cache interne.",
+                                          "The issue is more likely in live memory or an internal cache.");
+        next["rationale"] = KE_TXT("Le symptôme mentionne une persistance ou un cache hors mémoire.",
+                                    "The symptom mentions persistence or an off-memory cache.");
         return next;
     }
 
-    next["title"] = "Démarrer par un scan exact multi-type puis réduire après variation contrôlée";
+    next["title"] = KE_TXT("Démarrer par un scan exact multi-type puis réduire après variation contrôlée",
+                            "Start with a multi-type exact scan then narrow after a controlled change");
     next["tool"] = "exact_scan_multi_type";
-    next["expectedIfTrue"] = "Les candidats se réduisent quand la valeur change de manière contrôlée.";
-    next["expectedIfFalse"] = "Basculer vers Unknown initial value ou Trace UI string selon ce qui est observable.";
-    next["rationale"] = "Le symptôme ne donne pas encore assez d'indice pour privilégier une enquête spécialisée.";
+    next["expectedIfTrue"] = KE_TXT("Les candidats se réduisent quand la valeur change de manière contrôlée.",
+                                     "Candidates narrow down when the value changes in a controlled way.");
+    next["expectedIfFalse"] = KE_TXT("Basculer vers Unknown initial value ou Trace UI string selon ce qui est observable.",
+                                      "Switch to Unknown initial value or Trace UI string depending on what's observable.");
+    next["rationale"] = KE_TXT("Le symptôme ne donne pas encore assez d'indice pour privilégier une enquête spécialisée.",
+                                "The symptom doesn't yet give enough clues to favor a specialized investigation.");
     return next;
 }
 
@@ -195,6 +213,9 @@ QVariantMap extractInvestigationNotebookPlanJson(const QString& text, QString* e
                 lastError = QString("Model output JSON parse failed: %1.").arg(parseError.errorString());
             }
         }
+        if (start == 0) {
+            break;
+        }
         start = text.lastIndexOf('{', start - 1);
     }
 
@@ -241,15 +262,20 @@ QVariantMap normalizeInvestigationNotebookPlan(const QVariantMap& proposal, cons
 QVariantMap makeFallbackInvestigationNotebookPlan(const QString& symptom, const QString& source) {
     const QString q = symptom.toLower();
     QStringList hypotheses;
-    hypotheses << "La valeur affichée est une copie UI recalculée depuis une source interne plus stable.";
-    hypotheses << "La vraie source numérique existe ailleurs en mémoire, avec une représentation différente ou proche d'une chaîne affichée.";
+    hypotheses << KE_TXT("La valeur affichée est une copie UI recalculée depuis une source interne plus stable.",
+                          "The displayed value is a UI copy recomputed from a more stable internal source.");
+    hypotheses << KE_TXT("La vraie source numérique existe ailleurs en mémoire, avec une représentation différente ou proche d'une chaîne affichée.",
+                          "The real numeric source exists elsewhere in memory, with a different representation or near a displayed string.");
 
     if (q.contains("sauvegarde") || q.contains("save") || q.contains("disque") || q.contains("cache") || q.contains("uwp")) {
-        hypotheses << "La valeur persistante est restaurée depuis un fichier d'état, LocalSettings ou un cache hors mémoire.";
+        hypotheses << KE_TXT("La valeur persistante est restaurée depuis un fichier d'état, LocalSettings ou un cache hors mémoire.",
+                              "The persistent value is restored from a state file, LocalSettings, or an off-memory cache.");
     } else if (q.contains("freeze") || q.contains("fige") || q.contains("revient") || q.contains("clignote")) {
-        hypotheses << "Une instruction de la cible réécrit périodiquement le champ après l'écriture externe.";
+        hypotheses << KE_TXT("Une instruction de la cible réécrit périodiquement le champ après l'écriture externe.",
+                              "An instruction in the target periodically rewrites the field after the external write.");
     } else {
-        hypotheses << "Le scan initial est trop étroit et doit être élargi en multi-type ou Unknown initial value.";
+        hypotheses << KE_TXT("Le scan initial est trop étroit et doit être élargi en multi-type ou Unknown initial value.",
+                              "The initial scan is too narrow and should be widened to multi-type or Unknown initial value.");
     }
 
     QVariantMap result;
@@ -258,7 +284,8 @@ QVariantMap makeFallbackInvestigationNotebookPlan(const QString& symptom, const 
     result["modelUsed"] = false;
     result["hypotheses"] = hypotheses;
     result["nextTest"] = fallbackNextTest(symptom);
-    result["summary"] = "Plan de repli déterministe, utilisé quand le modèle local n'est pas disponible.";
+    result["summary"] = KE_TXT("Plan de repli déterministe, utilisé quand le modèle local n'est pas disponible.",
+                                "Deterministic fallback plan, used when the local model is unavailable.");
     return result;
 }
 

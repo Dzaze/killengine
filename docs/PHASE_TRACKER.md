@@ -47,6 +47,16 @@ Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 
 ## Journal actif
 
+### Localisation du chat IA — troisième round, L8/L11b clos (09/09/2026, Codex + Claude)
+
+**Suite de l'entrée ci-dessous.** Troisième round de travail parallèle : Codex sur **L9+L10** (`apps/desktop/save_file_investigator.cpp` + `apps/desktop/kernel_driver_manager.cpp`, worktree git séparé `../killengine-codex-l9l10`, leçon du round 1 appliquée à nouveau) pendant que Claude faisait **L8+L11b** (`apps/desktop/code_patch_manager.cpp` + `ai/investigation_notebook_planner.cpp`) dans le dossier principal — quatre fichiers disjoints, aucun risque de collision.
+
+- **L8** (`code_patch_manager.cpp`) : ~19 chaînes traduites — erreurs adresse/patch/hook invalides, hint de protection lecture UWP/Store, avertissements de signature AOB, échecs auto-assembler.
+- **L11b** (`ai/investigation_notebook_planner.cpp`) : ~24 chaînes traduites — hypothèses et `nextTest` (`title`/`preconditions`/`expectedIfTrue`/`expectedIfFalse`/`rationale`) du plan d'enquête déterministe (`fallbackNextTest`, `makeFallbackInvestigationNotebookPlan`). Le prompt envoyé au modèle local (`buildInvestigationNotebookPlanPrompt`) reste volontairement en français — même principe que `formatReminder` dans `ai_engine.cpp` : instruction interne au modèle, jamais affichée à l'utilisateur.
+- **Bug trouvé au passage, même famille que le bug de gel corrigé plus tôt dans `llama_runtime.cpp`** : `extractInvestigationNotebookPlanJson` contenait la même boucle infinie potentielle (`text.lastIndexOf('{', start - 1)` qui redémarre la recherche depuis la fin de la chaîne quand `start == 0`, au lieu de s'arrêter). Corrigée avec le même correctif (`if (start == 0) break;`), test de non-régression ajouté (`ExtractJsonPlanDoesNotHangOnUnterminatedJsonAtStart`).
+
+**Comment vérifié** : build complet (`scripts/build.ps1`) + **469/469 tests** (468 + 1 nouveau test de non-régression). Vérifié en live via le pipe d'automatisation : `KillEngine.exe` lancé avec `KILLENGINE_AUTOMATION_PIPE=1`, langue basculée en anglais (`saveSettings`), `scanAobPattern` sans processus attaché → `"No process attached."` ; `proposeInvestigationNotebookPlan` en mode déterministe (`useModel:false`) → hypothèses et `nextTest` intégralement en anglais, puis en français après rebascule de la langue. Processus arrêté après test.
+
 ### Localisation du chat IA — L7 clos (09/09/2026, Claude)
 
 **Suite de l'entrée ci-dessous.** `apps/desktop/display_string_investigator.cpp` (Trace UI string, analyse des sources numériques, changed-pages diff) traduit FR/EN. Cette fois le premier balayage large a suffi — la double vérification (leçon de L6) n'a trouvé qu'une seule chaîne de plus à la deuxième passe. Build complet + **468/468 tests**. Vérifié en live via le pipe d'automatisation (`scanUiStrings` sans processus attaché → `"No process attached."`).

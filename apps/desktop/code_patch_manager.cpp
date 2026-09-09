@@ -1,6 +1,7 @@
 #include "code_patch_manager.h"
 
 #include "inject/function_hook.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "memory/memory_reader.h"
 #include "patch/aob_scanner.h"
@@ -33,12 +34,17 @@ QVariantMap aobPatternQualityToVariantMap(const killcore::AobPatternQuality& qua
 
 QString codeReadProtectionHint(uint32_t errorCode) {
     if (errorCode == 299) {
-        return QStringLiteral(
+        return KE_TXT(
             "Le code de ce module semble protégé contre la lecture externe "
             "(fréquent sur les exécutables Microsoft Store/UWP signés). "
             "Génération de signature/patch impossible sur cette instruction — "
             "essaie Freeze ou une écriture groupée sur la donnée plutôt qu'un "
-            "patch du code.");
+            "patch du code.",
+            "This module's code appears protected against external reads "
+            "(common on signed Microsoft Store/UWP executables). "
+            "Signature/patch generation is not possible for this instruction — "
+            "try Freeze or a group write on the data instead of a "
+            "code patch.");
     }
     return QString();
 }
@@ -91,7 +97,7 @@ QVariantMap CodePatchManager::scanAobPattern(const QString& patternText, const Q
     result["pattern"] = patternText;
 
     if (!m_isAttached() || m_pid() <= 0) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -110,15 +116,15 @@ QVariantMap CodePatchManager::scanAobPattern(const QString& patternText, const Q
     const QString startText = optionsMap.value("startAddress").toString().trimmed();
     const QString stopText = optionsMap.value("stopAddress").toString().trimmed();
     if (!startText.isEmpty() && !parseHexAddress(startText, &options.startAddress)) {
-        result["error"] = "Adresse de début invalide.";
+        result["error"] = KE_TXT("Adresse de début invalide.", "Invalid start address.");
         return result;
     }
     if (!stopText.isEmpty() && !parseHexAddress(stopText, &options.stopAddress)) {
-        result["error"] = "Adresse de fin invalide.";
+        result["error"] = KE_TXT("Adresse de fin invalide.", "Invalid end address.");
         return result;
     }
     if (options.startAddress > 0 && options.stopAddress > 0 && options.startAddress >= options.stopAddress) {
-        result["error"] = "La plage AOB est invalide.";
+        result["error"] = KE_TXT("La plage AOB est invalide.", "The AOB range is invalid.");
         return result;
     }
 
@@ -171,13 +177,13 @@ QVariantMap CodePatchManager::generateAobSignature(const QString& addressHex, co
     result["address"] = addressHex;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -195,7 +201,7 @@ QVariantMap CodePatchManager::generateAobSignature(const QString& addressHex, co
             result["error"] = hint;
             result["codeReadProtected"] = true;
         } else {
-            result["error"] = read.errorMessage.isEmpty() ? QString("Lecture des octets d'instruction impossible.") : read.errorMessage;
+            result["error"] = read.errorMessage.isEmpty() ? KE_TXT("Lecture des octets d'instruction impossible.", "Unable to read instruction bytes.") : read.errorMessage;
         }
         return result;
     }
@@ -226,7 +232,8 @@ QVariantMap CodePatchManager::generateAobSignature(const QString& addressHex, co
     result["module"] = moduleInfo.value("module");
     result["moduleOffset"] = moduleInfo.value("moduleOffset");
     result["error"] = read.errorMessage;
-    result["warning"] = QString("Signature exacte brute. %1 Elle peut nécessiter des wildcards si l'instruction contient offsets/relocations.").arg(quality.warning);
+    result["warning"] = KE_TXT("Signature exacte brute. %1 Elle peut nécessiter des wildcards si l'instruction contient offsets/relocations.",
+                                "Raw exact signature. %1 It may need wildcards if the instruction contains offsets/relocations.").arg(quality.warning);
     m_appendScanTelemetry("aob_signature", result);
     return result;
 }
@@ -238,17 +245,18 @@ QVariantMap CodePatchManager::applyCodePatch(const QString& addressHex, const QS
     result["patchBytes"] = bytesText;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
     if (m_activeCodePatches.contains(address)) {
-        result["error"] = "Un patch actif existe déjà à cette adresse. Restaure-le avant d'en appliquer un autre.";
+        result["error"] = KE_TXT("Un patch actif existe déjà à cette adresse. Restaure-le avant d'en appliquer un autre.",
+                                  "An active patch already exists at this address. Restore it before applying another one.");
         result["active"] = true;
         return result;
     }
@@ -259,7 +267,8 @@ QVariantMap CodePatchManager::applyCodePatch(const QString& addressHex, const QS
         return result;
     }
     if (patch.bytes.size() > 64) {
-        result["error"] = "Patch trop long pour cette version expérimentale (64 bytes maximum).";
+        result["error"] = KE_TXT("Patch trop long pour cette version expérimentale (64 bytes maximum).",
+                                  "Patch too long for this experimental version (64 bytes maximum).");
         return result;
     }
 
@@ -294,13 +303,13 @@ QVariantMap CodePatchManager::suggestCodePatches(const QString& addressHex, cons
     result["address"] = addressHex;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -313,7 +322,7 @@ QVariantMap CodePatchManager::suggestCodePatches(const QString& addressHex, cons
             result["error"] = hint;
             result["codeReadProtected"] = true;
         } else {
-            result["error"] = read.errorMessage.isEmpty() ? QString("Lecture instruction impossible.") : read.errorMessage;
+            result["error"] = read.errorMessage.isEmpty() ? KE_TXT("Lecture instruction impossible.", "Unable to read instruction.") : read.errorMessage;
         }
         return result;
     }
@@ -362,7 +371,8 @@ QVariantMap CodePatchManager::suggestCodePatches(const QString& addressHex, cons
 
     result["success"] = true;
     result["suggestions"] = suggestions;
-    result["warning"] = "Décodage x64 ciblé et expérimental. Vérifie toujours les bytes avant d'appliquer.";
+    result["warning"] = KE_TXT("Décodage x64 ciblé et expérimental. Vérifie toujours les bytes avant d'appliquer.",
+                                "Targeted, experimental x64 decoding. Always check the bytes before applying.");
     m_appendScanTelemetry("aob_patch_suggest", result);
     return result;
 }
@@ -373,19 +383,19 @@ QVariantMap CodePatchManager::restoreCodePatch(const QString& addressHex) {
     result["address"] = addressHex;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     const auto it = m_activeCodePatches.constFind(address);
     if (it == m_activeCodePatches.constEnd()) {
-        result["error"] = "Aucun patch actif connu à cette adresse.";
+        result["error"] = KE_TXT("Aucun patch actif connu à cette adresse.", "No known active patch at this address.");
         result["active"] = false;
         return result;
     }
@@ -416,18 +426,19 @@ QVariantMap CodePatchManager::installFunctionHook(const QString& targetAddressHe
     result["hookAddress"] = hookAddressHex;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t targetAddress = 0;
     uint64_t hookAddress = 0;
     if (!parseHexAddress(targetAddressHex, &targetAddress) || !parseHexAddress(hookAddressHex, &hookAddress)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
     if (m_activeFunctionHooks.contains(targetAddress)) {
-        result["error"] = "Un hook actif existe déjà sur cette adresse. Retire-le avant d'en installer un autre.";
+        result["error"] = KE_TXT("Un hook actif existe déjà sur cette adresse. Retire-le avant d'en installer un autre.",
+                                  "An active hook already exists at this address. Remove it before installing another one.");
         result["active"] = true;
         return result;
     }
@@ -460,19 +471,19 @@ QVariantMap CodePatchManager::removeFunctionHook(const QString& targetAddressHex
     result["targetAddress"] = targetAddressHex;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t targetAddress = 0;
     if (!parseHexAddress(targetAddressHex, &targetAddress)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
     const auto it = m_activeFunctionHooks.constFind(targetAddress);
     if (it == m_activeFunctionHooks.constEnd()) {
-        result["error"] = "Aucun hook actif connu à cette adresse.";
+        result["error"] = KE_TXT("Aucun hook actif connu à cette adresse.", "No known active hook at this address.");
         result["active"] = false;
         return result;
     }
@@ -580,7 +591,7 @@ QVariantMap CodePatchManager::executeAutoAssemblerScript(const QString& scriptTe
     result["success"] = false;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -591,7 +602,8 @@ QVariantMap CodePatchManager::executeAutoAssemblerScript(const QString& scriptTe
         return result;
     }
     if (m_lastAutoAsmResult.has_value()) {
-        result["error"] = "Un script auto-assembler est déjà actif. Restaure-le avant d'en exécuter un autre.";
+        result["error"] = KE_TXT("Un script auto-assembler est déjà actif. Restaure-le avant d'en exécuter un autre.",
+                                  "An auto-assembler script is already active. Restore it before running another one.");
         result["active"] = true;
         return result;
     }
@@ -633,11 +645,11 @@ QVariantMap CodePatchManager::restoreAutoAssemblerScript() {
     result["success"] = false;
 
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
     if (!m_lastAutoAsmResult.has_value()) {
-        result["error"] = "Aucun script auto-assembler actif à restaurer.";
+        result["error"] = KE_TXT("Aucun script auto-assembler actif à restaurer.", "No active auto-assembler script to restore.");
         result["active"] = false;
         return result;
     }
@@ -655,7 +667,7 @@ QVariantMap CodePatchManager::restoreAutoAssemblerScript() {
         result["active"] = false;
         KE_LOG_WARN() << "Auto-assembler script restored.";
     } else {
-        result["error"] = "Échec de la restauration du script auto-assembler.";
+        result["error"] = KE_TXT("Échec de la restauration du script auto-assembler.", "Failed to restore the auto-assembler script.");
         result["active"] = true;
     }
 
