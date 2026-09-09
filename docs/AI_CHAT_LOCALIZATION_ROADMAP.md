@@ -3,7 +3,7 @@
 
 # KillEngine — Feuille de route de localisation du chat IA
 
-> Chantier **staffé, L1/L2/L3 clos** (09/09/2026, travail parallèle Codex + Claude). Voir `docs/PHASE_TRACKER.md` pour le pont vers cette feuille de route et la règle d'usage des roadmaps.
+> Chantier **staffé, L1/L2/L2b/L3 clos** (09/09/2026, travail parallèle Codex + Claude). Voir `docs/PHASE_TRACKER.md` pour le pont vers cette feuille de route et la règle d'usage des roadmaps.
 
 ## Origine (08/09/2026)
 
@@ -95,7 +95,7 @@ Compte tenu du volume réel (1200-2000+ chaînes, pas ~960), traduire à la main
 ## Décisions déjà prises
 
 1. **Mécanisme de traduction côté C++ — tranché et livré (L1)** : `KE_TXT(fr, en)` (macro, `core/localization/localization.h`), pas de fichiers `.ts` Qt Linguist (trop lourd pour du texte avec interpolation `.arg()`). Pour les structures de données littérales (ex: le playbook d'enquête, `Entry` dans `ai_engine.cpp`), chaque champ devient une paire `{fr, en}` plutôt qu'un seul `const char*`, choisie au point de consommation via `killcore::localizedText(...)`.
-2. **Backend Claude externe** : toujours à vérifier — pas fait.
+2. **Backend Claude externe** : textes déterministes de `claude_chat_manager.cpp` localisés (L2b, 09/09/2026). Le prompt système reste interne et inchangé ; la langue du texte libre généré par Claude reste à vérifier en live.
 3. **Ordre de priorité** : confirmé, `ai_engine.cpp` (L3) avant `smart_search_manager.cpp` (L2) — en cours, voir "Progrès" ci-dessus.
 4. **Granularité de migration** : confirmé fichier par fichier façon `docs/REFACTOR_ROADMAP.md`. **Mise à jour post-audit corrigé** : vu l'ampleur réelle, prévoir aussi un découpage PAR PATTERN à l'intérieur d'un même fichier (ex: dans `ai_engine.cpp`, "affectations directes" et "arguments `makeToolCall`" ont été deux passes distinctes) plutôt que de viser un fichier "fini" en une fois.
 
@@ -106,7 +106,7 @@ Compte tenu du volume réel (1200-2000+ chaînes, pas ~960), traduire à la main
 | [x] L1 | Fondation : helper de traduction + lecture `ui/language` | `core/localization/localization.{h,cpp}` | — | **Bloquant** | **Fait, testé (08/09/2026)** |
 | [x] L3 | Coordination modèle (intents, retries, rejets, playbook d'enquête, fallback déterministe) | `ai/ai_engine.cpp` | 188 (affectations + playbook + ~84 rationales `makeToolCall`) | **Haute** | **Fait, testé (09/09/2026)** |
 | [x] L2 | Dispatch chat/IA (auto_resolve, exact_scan, next_scan, erreurs génériques) | `apps/desktop/smart_search_manager.cpp` | **411 occurrences traitées** (audit initial : 371 lignes accentuées) | **Haute** — cœur de la demande initiale | **Fait, testé (09/09/2026)** |
-| [ ] L2b | Backend IA externe (Claude) — chat | `apps/desktop/claude_chat_manager.cpp` | **98 — absent du 1ᵉʳ audit, à ajouter au périmètre** | Haute (même famille que L2/L3) | Pas commencé, pas encore dans le scope initial |
+| [x] L2b | Backend IA externe (Claude) — chat | `apps/desktop/claude_chat_manager.cpp` | **51 occurrences traitées** (audit initial : 98 lignes accentuées, prompt système inclus) | Haute (même famille que L2/L3) | **Fait, testé (09/09/2026)** |
 | [ ] L4 | Outils scan (exact/next/unknown/groupe/chiffré) | `apps/desktop/scanning_core_manager.cpp` | 44 | Moyenne | Pas commencé |
 | [ ] L5 | Write/freeze | `apps/desktop/write_freeze_core_manager.cpp` | 22 | Moyenne | Pas commencé |
 | [ ] L6 | Debug/breakpoints/speedhack (`find_what_writes` etc.) | `apps/desktop/debug_feature_manager.cpp` | 65 | Moyenne | Pas commencé |
@@ -118,10 +118,18 @@ Compte tenu du volume réel (1200-2000+ chaînes, pas ~960), traduire à la main
 | [ ] L11b | Investigation notebook planner | `ai/investigation_notebook_planner.cpp` | 40 — absent du 1ᵉʳ audit | Basse-moyenne | Pas commencé |
 | [ ] L12 | Reste (`application_controller.cpp` — 235, `settings_diagnostics_manager.cpp`, `freeze_hotkey_overlay_manager.cpp`, `lua_repl_manager.cpp`, `automation_pipe_server.cpp`, `claude_backend_client.cpp`, `external_tool_profiler.cpp`, `clr_inspector_bridge.cpp`...) — à cribler pour isoler le sous-ensemble réellement visible en chat vs panneaux dédiés déjà couverts par l'i18n statique | multiple | ~330 cumulés | Basse / à évaluer si nécessaire du tout | Pas commencé |
 
-**Ordre recommandé (mis à jour le 09/09/2026)** : L1, L2 et L3 clos — le cœur du chat (Assistant local) est intégralement bilingue FR/EN. L2 a été confié à Codex sur demande explicite du propriétaire pendant que Claude finissait L3 (`ai_engine.cpp`), les deux fusionnés sans conflit (fichiers disjoints). **Prochaine priorité : L2b (backend Claude externe, `claude_chat_manager.cpp`)** — même famille que L2/L3, absent du scope initial. L4-L10/L11b peuvent être pris en parallèle par agent une fois L2b clos (même logique de partitionnement que `docs/REFACTOR_ROADMAP.md`) — **cribler chaque fichier avec la commande grep de la section "Recommandation" avant de s'engager**, pour ne pas revivre la surprise `makeToolCall`. L11/L12 à ré-évaluer une fois L2-L10 clos : possible qu'une bonne partie de leur contenu ne soit jamais montrée dans le chat.
+**Ordre recommandé (mis à jour le 09/09/2026)** : L1, L2 et L3 clos — le cœur du chat (Assistant local) est intégralement bilingue FR/EN. L2 a été confié à Codex sur demande explicite du propriétaire pendant que Claude finissait L3 (`ai_engine.cpp`), les deux fusionnés sans conflit (fichiers disjoints). **L2b est également clos** (backend Claude externe, `claude_chat_manager.cpp`, 51 occurrences localisées ; prompt système interne inchangé). L4-L10/L11b peuvent désormais être pris en parallèle par agent (même logique de partitionnement que `docs/REFACTOR_ROADMAP.md`) — **cribler chaque fichier avec la commande grep de la section "Recommandation" avant de s'engager**, pour ne pas revivre la surprise `makeToolCall`. L11/L12 à ré-évaluer une fois L2-L10 clos : possible qu'une bonne partie de leur contenu ne soit jamais montrée dans le chat.
 
 ### Validation L2 — 09/09/2026 (Codex)
 
 **Diagnostic → correctif** : le dispatcher construisait ses textes en français indépendamment de `ui/language`. Les 411 sites utilisent maintenant la fondation L1, y compris les arguments de fonctions, les messages multilignes et les fragments de phrases. Aucun identifiant d’outil, clé JSON, mot-clé de reconnaissance ou chemin de confirmation/exécution n’a changé. Les textes reçus des autres managers restent dans le périmètre de leurs lots respectifs.
 
 **Tests → validation** : `scripts/build.ps1` réussi ; `build/bin/killengine_unit_tests.exe` : **468/468**. Vérification statique des placeholders sur les 411 paires et comparaison des tokens C++ après restitution de la branche française : identiques à la base, hors constructeurs `QString` devenus redondants. Le grep accentué brut retourne encore **370 lignes** (le français est conservé dans `KE_TXT`) ; après exclusion des macros, les **44 lignes restantes** sont exclusivement des mots-clés de reconnaissance et des commentaires, aucun texte français affiché oublié. Audit supplémentaire des chaînes sans accent effectué. UTF-8 sans BOM et CRLF du fichier C++ conservés ; aucun mojibake introduit ; rapport global de fins de ligne exécuté, anomalies historiques hors périmètre conservées. Pas de validation visuelle live du chat. `docs/PHASE_TRACKER.md` laissé au propriétaire, selon sa demande.
+
+### Validation L2b — 09/09/2026 (Codex)
+
+**Diagnostic → correctif** : 51 occurrences localisées via `KE_TXT` dans `claude_chat_manager.cpp` : erreurs de clé API/backend, délais dépassés, erreurs des outils et de scan, confirmations write/freeze/kernel/speedhack/réseau/HTTP/DNS/stealth/WebView2 et fragment « Arrêt du freeze ». Les arguments de `makeErrorResult` et `requestConfirmation`, les chaînes multilignes et les textes sans accents sont inclus. `kSystemPrompt` reste strictement inchangé : instruction interne au modèle, hors périmètre de traduction. Les erreurs renvoyées par les autres managers et le texte libre généré par Claude restent dans leurs périmètres respectifs.
+
+**Audit** : grep accentué brut = **98 lignes** ; après exclusion des 51 macros, les **37 lignes restantes** appartiennent exclusivement à `kSystemPrompt`. Aucun texte français affichable oublié dans ce fichier. Placeholders identiques pour chaque paire ; restitution des branches françaises et comparaison des tokens C++ avec la base : identiques, hors constructeurs `QString` redondants. Encodage UTF-8 sans BOM et fins de ligne du worktree conservés. `docs/PHASE_TRACKER.md` laissé au propriétaire selon sa demande.
+
+**Tests → validation** : configuration propre puis `scripts/build.ps1` réussi (307 étapes) dans le worktree isolé `agent/ai-chat-localization-l2b` ; `build/bin/killengine_unit_tests.exe` : **468/468 tests passent**. `git diff --check` propre ; contrôle global des fins de ligne : 448/448 fichiers CRLF ; scan mojibake : uniquement les exemples historiques documentés. Le worktree neuf ne contient pas les exécutables llama ni les poids GGUF (avertissements de staging du modèle local, sans échec du build). Pas de requête réelle à l’API Anthropic ni de validation visuelle live du chat.

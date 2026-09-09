@@ -3,6 +3,7 @@
 #include "application_controller.h"
 
 #include "anthropic_tool_schema.h"
+#include "localization/localization.h"
 #include "security/dpapi_key_store.h"
 #include "tool_registry.h"
 
@@ -101,13 +102,13 @@ ClaudeChatManager::ClaudeChatManager(ApplicationController* controller)
 
 QVariantMap ClaudeChatManager::setApiKey(const QString& apiKey) {
     if (apiKey.trimmed().isEmpty()) {
-        return makeErrorResult("Clé API vide.");
+        return makeErrorResult(KE_TXT("Clé API vide.", "The API key is empty."));
     }
     bool ok = false;
     QString errorMessage;
     const QByteArray encrypted = killcore::DpapiKeyStore::encrypt(apiKey.trimmed().toUtf8(), &ok, &errorMessage);
     if (!ok) {
-        return makeErrorResult(QString("Échec du chiffrement de la clé: %1").arg(errorMessage));
+        return makeErrorResult(KE_TXT("Échec du chiffrement de la clé: %1", "Couldn't encrypt the API key: %1").arg(errorMessage));
     }
     QSettings settings;
     settings.setValue("ai/externalApiKeyBlob", encrypted);
@@ -138,7 +139,7 @@ QString ClaudeChatManager::decryptedApiKey(bool* ok, QString* errorMessage) cons
     const QByteArray encrypted = settings.value("ai/externalApiKeyBlob").toByteArray();
     if (encrypted.isEmpty()) {
         if (ok) *ok = false;
-        if (errorMessage) *errorMessage = "Aucune clé API Claude enregistrée.";
+        if (errorMessage) *errorMessage = KE_TXT("Aucune clé API Claude enregistrée.", "No Claude API key saved.");
         return {};
     }
 
@@ -147,7 +148,7 @@ QString ClaudeChatManager::decryptedApiKey(bool* ok, QString* errorMessage) cons
     const QByteArray plain = killcore::DpapiKeyStore::decrypt(encrypted, &decryptOk, &decryptError);
     if (!decryptOk) {
         if (ok) *ok = false;
-        if (errorMessage) *errorMessage = QString("Échec du déchiffrement de la clé: %1").arg(decryptError);
+        if (errorMessage) *errorMessage = KE_TXT("Échec du déchiffrement de la clé: %1", "Couldn't decrypt the API key: %1").arg(decryptError);
         return {};
     }
 
@@ -157,7 +158,7 @@ QString ClaudeChatManager::decryptedApiKey(bool* ok, QString* errorMessage) cons
 
 QVariantMap ClaudeChatManager::setActiveBackend(const QString& backend) {
     if (backend != "local" && backend != "claude") {
-        return makeErrorResult(QString("Backend inconnu: '%1' (attendu 'local' ou 'claude').").arg(backend));
+        return makeErrorResult(KE_TXT("Backend inconnu: '%1' (attendu 'local' ou 'claude').", "Unknown backend: '%1' (expected 'local' or 'claude').").arg(backend));
     }
     QSettings settings;
     settings.setValue("ai/activeBackend", backend);
@@ -218,7 +219,7 @@ QVariantMap ClaudeChatManager::waitForFrontendAction(const QString& kind, QVaria
     }
 
     m_pending.remove(pendingId);
-    return makeErrorResult("Délai dépassé en attendant une action utilisateur dans l'interface KillEngine.");
+    return makeErrorResult(KE_TXT("Délai dépassé en attendant une action utilisateur dans l'interface KillEngine.", "Timed out waiting for a user action in the KillEngine interface."));
 }
 
 QVariantMap ClaudeChatManager::waitForControllerSignal(void (ApplicationController::*signal)(const QVariantMap&), int timeoutMs) {
@@ -241,7 +242,7 @@ QVariantMap ClaudeChatManager::waitForControllerSignal(void (ApplicationControll
     QObject::disconnect(connection);
 
     if (!done) {
-        return makeErrorResult("Délai dépassé en attendant la fin de l'opération asynchrone.");
+        return makeErrorResult(KE_TXT("Délai dépassé en attendant la fin de l'opération asynchrone.", "Timed out waiting for the background operation to finish."));
     }
     return captured;
 }
@@ -287,10 +288,10 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
     // ------------------------------------------------------------------
     if (tool == "find_what_writes" || tool == "test_candidate_fields" || tool == "patch_file_bytes") {
         return makeErrorResult(
-            "Cette action nécessite l'interface KillEngine (onglet Expert) et ne peut pas s'exécuter de façon "
+            KE_TXT("Cette action nécessite l'interface KillEngine (onglet Expert) et ne peut pas s'exécuter de façon "
             "autonome depuis un backend IA externe : elle attache un debugger en tâche de fond ou édite un "
             "fichier réel sans confirmation cliquable équivalente. Explique à l'utilisateur comment le faire "
-            "manuellement dans l'UI plutôt que de retenter cet outil.");
+            "manuellement dans l'UI plutôt que de retenter cet outil.", "This action requires the KillEngine interface (Expert tab) and can't run autonomously from an external AI backend: it attaches a debugger in the background or edits an actual file without an equivalent confirmation button. Explain how to do this manually in the UI instead of retrying this tool."));
     }
     if (tool == "prepare_write_checkpoint") {
         // Prepare des suggestions depuis la liste de candidats de scan
@@ -300,8 +301,8 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         // Q_INVOKABLE independant. write_value connait deja l'adresse et la
         // valeur explicitement, utilisable directement a la place.
         return makeErrorResult(
-            "Cet outil dépend de l'historique de scan interne au modèle local, non disponible depuis ce "
-            "backend. Utilise directement write_value avec l'adresse et la valeur déjà identifiées.");
+            KE_TXT("Cet outil dépend de l'historique de scan interne au modèle local, non disponible depuis ce "
+            "backend. Utilise directement write_value avec l'adresse et la valeur déjà identifiées.", "This tool depends on the local model's internal scan history, which isn't available from this backend. Use write_value directly with the address and value already identified."));
     }
 
     // ------------------------------------------------------------------
@@ -316,11 +317,11 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
             // rappel d'exact_scan reussir la fois suivante.
             m_scanActive = false;
             return makeErrorResult(
-                "Un scan est déjà actif avec des candidats en mémoire depuis un précédent exact_scan. "
+                KE_TXT("Un scan est déjà actif avec des candidats en mémoire depuis un précédent exact_scan. "
                 "Si l'objectif est de réduire cette liste avec la nouvelle valeur observée, utilise next_scan "
                 "(mode=\"exact\", value=...) à la place -- rappeler exact_scan redémarre un scan complet et "
                 "perd toute la réduction déjà faite. Si tu veux vraiment abandonner cette recherche et en "
-                "démarrer une toute nouvelle, tu peux rappeler exact_scan.");
+                "démarrer une toute nouvelle, tu peux rappeler exact_scan.", "A scan is already active with candidates in memory from an earlier exact_scan. To narrow this list down with the newly observed value, use next_scan (mode=\"exact\", value=...) instead — calling exact_scan again restarts the entire scan and discards all refinement so far. If you really want to abandon this search and start a new one, you can call exact_scan again."));
         }
         const QVariantMap result = m_controller->startExactScan(args.value("value").toString(), args.value("valueType").toString());
         if (result.value("success").toBool()) {
@@ -332,9 +333,9 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         if (m_scanActive) {
             m_scanActive = false;
             return makeErrorResult(
-                "Un scan est déjà actif avec des candidats en mémoire. Si l'objectif est de réduire cette "
+                KE_TXT("Un scan est déjà actif avec des candidats en mémoire. Si l'objectif est de réduire cette "
                 "liste, utilise next_scan (mode=\"exact\", value=...) à la place. Si tu veux vraiment "
-                "démarrer une toute nouvelle recherche, tu peux rappeler exact_scan_multi_type.");
+                "démarrer une toute nouvelle recherche, tu peux rappeler exact_scan_multi_type.", "A scan is already active with candidates in memory. To narrow this list down, use next_scan (mode=\"exact\", value=...) instead. If you really want to start a new search, you can call exact_scan_multi_type again."));
         }
         const QVariantMap result = m_controller->startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
         if (result.value("success").toBool()) {
@@ -346,9 +347,9 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         if (m_scanActive) {
             m_scanActive = false;
             return makeErrorResult(
-                "Un scan est déjà actif avec des candidats en mémoire. Si l'objectif est de réduire cette "
+                KE_TXT("Un scan est déjà actif avec des candidats en mémoire. Si l'objectif est de réduire cette "
                 "liste, utilise next_scan (mode=\"exact\", value=...) à la place. Si tu veux vraiment "
-                "démarrer une toute nouvelle recherche, tu peux rappeler exact_scan_module.");
+                "démarrer une toute nouvelle recherche, tu peux rappeler exact_scan_module.", "A scan is already active with candidates in memory. To narrow this list down, use next_scan (mode=\"exact\", value=...) instead. If you really want to start a new search, you can call exact_scan_module again."));
         }
         // Reproduit la resolution de module de SmartSearchManager (meme
         // recherche insensible a la casse, exacte puis partielle) via
@@ -368,7 +369,7 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
             }
         }
         if (matched.isEmpty()) {
-            return makeErrorResult(QString("Module '%1' introuvable dans le processus attaché.").arg(requestedModule));
+            return makeErrorResult(KE_TXT("Module '%1' introuvable dans le processus attaché.", "Module '%1' not found in the attached process.").arg(requestedModule));
         }
         const qulonglong base = matched.value("baseAddress").toULongLong();
         const qulonglong size = matched.value("size").toULongLong();
@@ -598,12 +599,12 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         const QString value = trimmedHex(args, "value");
         const QString valueType = args.value("valueType", "Int32").toString();
         if (address.isEmpty() || value.isEmpty()) {
-            return makeErrorResult("Adresse et valeur requises pour écrire en mémoire.");
+            return makeErrorResult(KE_TXT("Adresse et valeur requises pour écrire en mémoire.", "I need an address and a value to write to memory."));
         }
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            QString("Écriture mémoire demandée par le backend Claude : %1 (%2) à 0x%3.").arg(value, valueType, address));
+            KE_TXT("Écriture mémoire demandée par le backend Claude : %1 (%2) à 0x%3.", "Claude requests a memory write: %1 (%2) at 0x%3.").arg(value, valueType, address));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Écriture refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Écriture refusée par l'utilisateur (confirmation non accordée).", "Write declined by the user (confirmation not granted)."));
         }
         return m_controller->writeMemoryValue(address, valueType, value);
     }
@@ -613,13 +614,13 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         const QString valueType = args.value("valueType", "Int32").toString();
         const bool enabled = args.value("enabled").toBool();
         if (address.isEmpty() || value.isEmpty()) {
-            return makeErrorResult("Adresse et valeur requises pour figer une valeur.");
+            return makeErrorResult(KE_TXT("Adresse et valeur requises pour figer une valeur.", "I need an address and a value to freeze."));
         }
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            QString("%1 demandé par le backend Claude : %2 (%3) à 0x%4.")
-                .arg(enabled ? "Freeze" : "Arrêt du freeze", value, valueType, address));
+            KE_TXT("%1 demandé par le backend Claude : %2 (%3) à 0x%4.", "Claude requests %1: %2 (%3) at 0x%4.")
+                .arg(enabled ? "Freeze" : KE_TXT("Arrêt du freeze", "Stop freeze"), value, valueType, address));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Freeze refusé par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Freeze refusé par l'utilisateur (confirmation non accordée).", "Freeze declined by the user (confirmation not granted)."));
         }
         return m_controller->setFreezeValue(address, valueType, value, enabled);
     }
@@ -628,13 +629,13 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         const QString value = trimmedHex(args, "value");
         const QString valueType = args.value("valueType", "Int32").toString();
         if (address.isEmpty() || value.isEmpty()) {
-            return makeErrorResult("Adresse et valeur requises pour écrire via le driver kernel.");
+            return makeErrorResult(KE_TXT("Adresse et valeur requises pour écrire via le driver kernel.", "I need an address and a value to write through the kernel driver."));
         }
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            QString("Écriture KERNEL demandée par le backend Claude : %1 (%2) à 0x%3 — contourne les protections mémoire usermode.")
+            KE_TXT("Écriture KERNEL demandée par le backend Claude : %1 (%2) à 0x%3 — contourne les protections mémoire usermode.", "Claude requests a KERNEL write: %1 (%2) at 0x%3 — bypasses user-mode memory protections.")
                 .arg(value, valueType, address));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Écriture kernel refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Écriture kernel refusée par l'utilisateur (confirmation non accordée).", "Kernel write declined by the user (confirmation not granted)."));
         }
         return m_controller->writeMemoryValueKernel(address, valueType, value);
     }
@@ -643,10 +644,10 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         const bool isOff = (mode == "off" || mode == "stop");
         const double factor = args.value("factor", 1.0).toDouble();
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            isOff ? "Désactivation du speedhack demandée par le backend Claude."
-                  : QString("Speedhack demandé par le backend Claude : facteur %1x.").arg(factor));
+            isOff ? KE_TXT("Désactivation du speedhack demandée par le backend Claude.", "Claude requests disabling the speedhack.")
+                  : KE_TXT("Speedhack demandé par le backend Claude : facteur %1x.", "Claude requests a speedhack: %1x multiplier.").arg(factor));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Speedhack refusé par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Speedhack refusé par l'utilisateur (confirmation non accordée).", "Speedhack declined by the user (confirmation not granted)."));
         }
         if (isOff) {
             return m_controller->stopSpeedhack();
@@ -662,10 +663,10 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         const QString mode = args.value("mode", "on").toString().trimmed().toLower();
         const bool isOff = (mode == "off" || mode == "stop" || mode == "unblock");
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            isOff ? "Rétablissement du réseau demandé par le backend Claude."
-                  : "Coupure réseau demandée par le backend Claude (règle pare-feu, invite UAC).");
+            isOff ? KE_TXT("Rétablissement du réseau demandé par le backend Claude.", "Claude requests restoring network access.")
+                  : KE_TXT("Coupure réseau demandée par le backend Claude (règle pare-feu, invite UAC).", "Claude requests disconnecting the network (firewall rule, UAC prompt)."));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Action réseau refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Action réseau refusée par l'utilisateur (confirmation non accordée).", "Network action declined by the user (confirmation not granted)."));
         }
         if (isOff) {
             m_controller->unblockProcessNetworkAsync();
@@ -675,42 +676,42 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         return waitForControllerSignal(&ApplicationController::processNetworkBlockFinished);
     }
     if (tool == "start_http_proxy") {
-        const QVariantMap confirmation = requestConfirmation(tool, args, "Démarrage d'un proxy HTTP local (injection DLL) demandé par le backend Claude.");
+        const QVariantMap confirmation = requestConfirmation(tool, args, KE_TXT("Démarrage d'un proxy HTTP local (injection DLL) demandé par le backend Claude.", "Claude requests starting a local HTTP proxy (DLL injection)."));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Démarrage du proxy HTTP refusé par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Démarrage du proxy HTTP refusé par l'utilisateur (confirmation non accordée).", "HTTP proxy start declined by the user (confirmation not granted)."));
         }
         m_controller->startHttpProxyAsync(args.value("port").toInt(), args.value("interceptHttps").toBool());
         return waitForControllerSignal(&ApplicationController::httpProxyStartFinished);
     }
     if (tool == "stop_http_proxy") {
-        const QVariantMap confirmation = requestConfirmation(tool, args, "Arrêt du proxy HTTP demandé par le backend Claude.");
+        const QVariantMap confirmation = requestConfirmation(tool, args, KE_TXT("Arrêt du proxy HTTP demandé par le backend Claude.", "Claude requests stopping the HTTP proxy."));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Arrêt du proxy HTTP refusé par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Arrêt du proxy HTTP refusé par l'utilisateur (confirmation non accordée).", "HTTP proxy stop declined by the user (confirmation not granted)."));
         }
         m_controller->stopHttpProxyAsync();
         return waitForControllerSignal(&ApplicationController::httpProxyStopFinished);
     }
     if (tool == "modify_http_request") {
-        const QVariantMap confirmation = requestConfirmation(tool, args, "Modification d'une requête HTTP interceptée demandée par le backend Claude.");
+        const QVariantMap confirmation = requestConfirmation(tool, args, KE_TXT("Modification d'une requête HTTP interceptée demandée par le backend Claude.", "Claude requests modifying an intercepted HTTP request."));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Modification refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Modification refusée par l'utilisateur (confirmation non accordée).", "Modification declined by the user (confirmation not granted)."));
         }
         return m_controller->modifyHttpRequest(args.value("requestId").toString(), args.value("newBody").toString());
     }
     if (tool == "spoof_dns") {
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            QString("Redirection DNS demandée par le backend Claude : %1 -> %2.").arg(args.value("domain").toString(), args.value("targetIp").toString()));
+            KE_TXT("Redirection DNS demandée par le backend Claude : %1 -> %2.", "Claude requests a DNS redirect: %1 -> %2.").arg(args.value("domain").toString(), args.value("targetIp").toString()));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Redirection DNS refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Redirection DNS refusée par l'utilisateur (confirmation non accordée).", "DNS redirect declined by the user (confirmation not granted)."));
         }
         m_controller->spoofDnsAsync(args.value("domain").toString(), args.value("targetIp").toString());
         return waitForControllerSignal(&ApplicationController::dnsSpoofFinished);
     }
     if (tool == "restore_dns") {
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            QString("Suppression de la redirection DNS demandée par le backend Claude : %1.").arg(args.value("domain").toString()));
+            KE_TXT("Suppression de la redirection DNS demandée par le backend Claude : %1.", "Claude requests removing the DNS redirect: %1.").arg(args.value("domain").toString()));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Restauration DNS refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Restauration DNS refusée par l'utilisateur (confirmation non accordée).", "DNS restore declined by the user (confirmation not granted)."));
         }
         m_controller->restoreDnsAsync(args.value("domain").toString());
         return waitForControllerSignal(&ApplicationController::dnsRestoreFinished);
@@ -719,10 +720,10 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
         const bool enabled = args.value("enabled").toBool();
         const int delayMs = args.value("delayMs").toInt();
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            enabled ? QString("Lag switch demandé par le backend Claude : %1 ms de retard réseau.").arg(delayMs)
-                    : "Désactivation du lag switch demandée par le backend Claude.");
+            enabled ? KE_TXT("Lag switch demandé par le backend Claude : %1 ms de retard réseau.", "Claude requests a lag switch: %1 ms network delay.").arg(delayMs)
+                    : KE_TXT("Désactivation du lag switch demandée par le backend Claude.", "Claude requests disabling the lag switch."));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Lag switch refusé par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Lag switch refusé par l'utilisateur (confirmation non accordée).", "Lag switch declined by the user (confirmation not granted)."));
         }
         m_controller->setLagSwitchAsync(enabled, delayMs);
         return waitForControllerSignal(&ApplicationController::lagSwitchFinished);
@@ -730,35 +731,35 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
     if (tool == "apply_stealth_mode") {
         const QString profile = args.value("profile", "default").toString();
         const QVariantMap confirmation = requestConfirmation(tool, args,
-            QString("Activation du mode discret demandée par le backend Claude (profil '%1').").arg(profile));
+            KE_TXT("Activation du mode discret demandée par le backend Claude (profil '%1').", "Claude requests enabling stealth mode (profile '%1').").arg(profile));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Mode discret refusé par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Mode discret refusé par l'utilisateur (confirmation non accordée).", "Stealth mode declined by the user (confirmation not granted)."));
         }
         return m_controller->applyStealthMode(profile);
     }
     if (tool == "restore_stealth_mode") {
-        const QVariantMap confirmation = requestConfirmation(tool, args, "Désactivation du mode discret demandée par le backend Claude.");
+        const QVariantMap confirmation = requestConfirmation(tool, args, KE_TXT("Désactivation du mode discret demandée par le backend Claude.", "Claude requests disabling stealth mode."));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Désactivation refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Désactivation refusée par l'utilisateur (confirmation non accordée).", "Deactivation declined by the user (confirmation not granted)."));
         }
         return m_controller->restoreStealthMode();
     }
     if (tool == "connectWebView2Inspector") {
-        const QVariantMap confirmation = requestConfirmation(tool, args, "Connexion à une target WebView2/CDP demandée par le backend Claude (s'attache à un process externe).");
+        const QVariantMap confirmation = requestConfirmation(tool, args, KE_TXT("Connexion à une target WebView2/CDP demandée par le backend Claude (s'attache à un process externe).", "Claude requests connecting to a WebView2/CDP target (attaches to an external process)."));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Connexion WebView2 refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Connexion WebView2 refusée par l'utilisateur (confirmation non accordée).", "WebView2 connection declined by the user (confirmation not granted)."));
         }
         return m_controller->connectWebView2Inspector(args.value("browserProcessId").toInt(), {});
     }
     if (tool == "evaluateWebView2JavaScript") {
-        const QVariantMap confirmation = requestConfirmation(tool, args, "Évaluation de JavaScript arbitraire dans la target WebView2 connectée, demandée par le backend Claude.");
+        const QVariantMap confirmation = requestConfirmation(tool, args, KE_TXT("Évaluation de JavaScript arbitraire dans la target WebView2 connectée, demandée par le backend Claude.", "Claude requests evaluating arbitrary JavaScript in the connected WebView2 target."));
         if (!confirmation.value("approved").toBool()) {
-            return makeErrorResult("Évaluation JavaScript refusée par l'utilisateur (confirmation non accordée).");
+            return makeErrorResult(KE_TXT("Évaluation JavaScript refusée par l'utilisateur (confirmation non accordée).", "JavaScript evaluation declined by the user (confirmation not granted)."));
         }
         return m_controller->evaluateWebView2JavaScript(args.value("expression").toString(), {});
     }
 
-    return makeErrorResult(QString("Outil inconnu côté backend Claude: %1").arg(tool));
+    return makeErrorResult(KE_TXT("Outil inconnu côté backend Claude: %1", "Unknown tool in the Claude backend: %1").arg(tool));
 }
 
 } // namespace killengine
