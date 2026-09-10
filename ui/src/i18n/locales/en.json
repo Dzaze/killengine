@@ -2254,5 +2254,109 @@
     "injectionHintEnd": "— treated as an injection write, confirmation required.",
     "title": "Speedhack",
     "pause": "Pause (0x)"
+  },
+  "trainer": {
+    "title": "Trainer",
+    "subtitle": "Turn discoveries into persistent, reversible toggles.",
+    "actions": {
+      "overlayOff": "Overlay OFF",
+      "overlayOn": "Overlay ON",
+      "refreshOverlay": "Refresh overlay",
+      "applyAll": "Apply all",
+      "restoreAll": "Restore all",
+      "saveProject": "Save project",
+      "exportJson": "Export JSON",
+      "exportMd": "Export MD",
+      "remove": "Remove",
+      "on": "ON",
+      "off": "OFF",
+      "saveProfile": "Save profile",
+      "hotkey": "Hotkey",
+      "removeHotkey": "Remove hotkey",
+      "delete": "Delete",
+      "copy": "Copy",
+      "close": "Close"
+    },
+    "intro": {
+      "what": "Trainer features are persistent shortcuts for toggling a freeze or a write in one click.",
+      "purpose": "Turn a discovery into a reusable button, WeMod/Cheat Engine style, instead of repeating the search every session.",
+      "how": "Create a feature from Assistant or Expert, then toggle it here, through the overlay, or with hotkeys without running the search again."
+    },
+    "overlay": {
+      "hotkeyHint": "Hotkey to show/hide the overlay without alt-tabbing:",
+      "hotkeyPlaceholder": "Ctrl+Alt+F2",
+      "registerHotkey": "Overlay hotkey"
+    },
+    "presets": {
+      "prompt": "No address yet? Common scenarios:"
+    },
+    "builder": {
+      "title": "Create a feature",
+      "namePlaceholder": "Name: Minerals, HP lock...",
+      "addressPlaceholder": "Address without 0x",
+      "typePlaceholder": "Type",
+      "valuePlaceholder": "Value",
+      "patchBytesPlaceholder": "Patch bytes: 90 90",
+      "fromSelection": "From selection",
+      "create": "Create",
+      "patchRelayTitle": "PHASE 122 fallback: used only if the direct code patch fails with ERROR_ACCESS_DENIED.",
+      "patchRelayAvailable": "Patch relay available",
+      "dependsOnHint": "Depends on (optional, e.g. \"God Mode\" depends on \"Infinite HP\" + \"Infinite Mana\") :"
+    },
+    "actionTypes": {
+      "write": "Write",
+      "freezePolling": "Polling freeze",
+      "freezeBreakpoint": "Breakpoint freeze",
+      "patch": "Code patch",
+      "clrWrite": "CLR write"
+    },
+    "checkpoints": {
+      "title": "From Investigation checkpoints",
+      "bookmark": "Bookmark",
+      "createFeature": "Create feature"
+    },
+    "features": {
+      "title": "Features",
+      "count": "{shown} / {count} feature(s)",
+      "searchPlaceholder": "Search name, address, hotkey...",
+      "empty": "No Trainer features yet. Create one from a selection or an investigation.",
+      "viaIdentity": "via {field}={value}",
+      "dependsOn": "Depends on: {names}",
+      "signatureDetails": "fixed {fixedBytes} · wildcards {wildcardBytes}",
+      "dependenciesLabel": "Dependencies",
+      "hotkeyPlaceholder": "Ctrl+Alt+F1",
+      "noFilterMatch": "No feature matches these filters."
+    },
+    "filters": {
+      "allActions": "All actions",
+      "allStatuses": "All statuses",
+      "allProcesses": "All processes"
+    },
+    "statuses": {
+      "idle": "idle",
+      "active": "active",
+      "error": "error",
+      "ambiguous": "ambiguous"
+    },
+    "pointerChain": {
+      "scanInProgress": "Scan in progress...",
+      "regenerate": "Regenerate chain",
+      "generate": "Generate chain",
+      "absoluteTitle": "Raw address: generates a stable pointer chain (module base + offsets) so the feature survives memory reallocations such as a game restart or a new match. Read-only scan for a few seconds.",
+      "refreshTitle": "Run the scan again to refresh the saved pointer chain. Read-only scan for a few seconds.",
+      "locatorTitle": "pointer_chain locator: {module}+{baseOffset} → [{offsets}] (resolved again on every activation)"
+    },
+    "warnings": {
+      "weakAob": "AOB is too weak ({score}/100, {fixedBytes} fixed byte(s)): regenerate a longer signature before activation or save the profile.",
+      "ambiguousFeature": "Ambiguous feature: inspect the signature or regenerate a more specific AOB before activation.",
+      "errorFeature": "Feature is in error: fix it before activation.",
+      "incompletePatch": "Incomplete patch: missing bytes.",
+      "missingAob": "Missing AOB: save a stable signature before activation.",
+      "incompleteClrLocator": "Incomplete CLR locator."
+    },
+    "export": {
+      "title": "Trainer export",
+      "copied": "Export copied."
+    }
   }
 }
