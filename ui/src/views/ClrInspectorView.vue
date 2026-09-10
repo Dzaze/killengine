@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 import type { ClrFieldInfo, ClrPathWriteOperation } from '@/services/backend'
 
 const store = useAppStore()
+const { t } = useI18n()
 const manualAddress = ref('')
 const fieldWriteValues = ref<Record<string, string>>({})
 const pathWritePath = ref('')
@@ -39,32 +41,32 @@ const clrReady = computed(() => Boolean(store.clrInspectorStatus?.running && sto
 
 const guideSteps = computed(() => [
   {
-    label: '1. Processus',
-    text: store.isAttached ? store.processName : 'Choisir une cible',
+    label: t('clrInspector.guide.step1Label'),
+    text: store.isAttached ? store.processName : t('clrInspector.guide.chooseTarget'),
     done: store.isAttached,
     active: !store.isAttached,
   },
   {
-    label: '2. CLR',
-    text: clrReady.value ? 'Session attachée' : 'Attacher le helper',
+    label: t('clrInspector.guide.step2Label'),
+    text: clrReady.value ? t('clrInspector.guide.sessionAttached') : t('clrInspector.guide.attachHelper'),
     done: clrReady.value,
     active: store.isAttached && !clrReady.value,
   },
   {
-    label: '3. Objets',
-    text: store.clrObjects.length > 0 ? `${store.clrObjects.length} objet(s)` : 'Lister le heap',
+    label: t('clrInspector.guide.step3Label'),
+    text: store.clrObjects.length > 0 ? t('clrInspector.guide.objectCount', { count: store.clrObjects.length }) : t('clrInspector.guide.listHeap'),
     done: store.clrObjects.length > 0,
     active: clrReady.value && store.clrObjects.length === 0,
   },
   {
-    label: '4. Action',
-    text: store.clrSelectedObject ? 'Lire, locator, écrire' : 'Sélectionner un objet',
+    label: t('clrInspector.guide.step4Label'),
+    text: store.clrSelectedObject ? t('clrInspector.guide.readLocatorWrite') : t('clrInspector.guide.selectObject'),
     done: Boolean(store.clrSelectedObject),
     active: store.clrObjects.length > 0 && !store.clrSelectedObject,
   },
 ])
 
-const selectedTypeLabel = computed(() => store.clrSelectedObject?.typeName ?? 'objet CLR')
+const selectedTypeLabel = computed(() => store.clrSelectedObject?.typeName ?? t('clrInspector.defaultTypeLabel'))
 const pathExamples = ['Self.Health', 'Inventory.Items[0].Value', 'Inventory.QuickSlots[1].Value']
 
 const objectFields = computed<ClrFieldInfo[]>(() => {
@@ -227,28 +229,32 @@ function generateSelectedObjectReport() {
 const clrObjectReportText = computed(() => {
   const report = store.clrObjectReportResult
   if (!report) return ''
-  if (!report.success) return `Erreur : ${report.error ?? 'inconnue'}`
+  if (!report.success) return t('clrInspector.report.error', { error: report.error ?? t('clrInspector.report.unknownError') })
 
   const lines: string[] = []
-  lines.push(`Rapport d'objet — ${report.rootTypeName ?? '?'} @ ${report.rootAddress ?? '?'}`)
-  lines.push(`Généré : ${report.generatedAtUtc ?? '?'} — ${report.nodeCount ?? 0} nœud(s), profondeur max ${report.maxDepth ?? '?'}, ${report.elapsedMs ?? 0} ms`)
+  lines.push(t('clrInspector.report.reportHeader', { type: report.rootTypeName ?? '?', address: report.rootAddress ?? '?' }))
+  lines.push(t('clrInspector.report.generatedLine', { date: report.generatedAtUtc ?? '?', nodeCount: report.nodeCount ?? 0, maxDepth: report.maxDepth ?? '?', ms: report.elapsedMs ?? 0 }))
   if (report.truncated) {
     const reasons = [
-      report.truncatedByDepth ? 'profondeur' : null,
-      report.truncatedByNodes ? 'nombre de nœuds' : null,
-      report.truncatedByTime ? 'budget de temps' : null,
+      report.truncatedByDepth ? t('clrInspector.report.truncatedByDepth') : null,
+      report.truncatedByNodes ? t('clrInspector.report.truncatedByNodes') : null,
+      report.truncatedByTime ? t('clrInspector.report.truncatedByTime') : null,
     ].filter(Boolean).join(', ')
-    lines.push(`⚠ Rapport tronqué (limite atteinte : ${reasons}) — le graphe réel est plus grand que ce qui est affiché.`)
+    lines.push(t('clrInspector.report.truncatedWarning', { reasons }))
   }
   lines.push('')
 
   if (report.gcRootChain) {
     const chain = report.gcRootChain
-    lines.push('Chemin depuis un GC root :')
+    lines.push(t('clrInspector.report.gcRootChainHeader'))
     lines.push(
       chain.success
-        ? `  ${chain.rootKind ?? '?'} → ${(chain.path ?? []).map(step => `${step.fieldName ?? (step.index !== null && step.index !== undefined ? `[${step.index}]` : step.kind)}`).join(' → ')} → (racine du rapport)${chain.shortestPathGuaranteed ? '' : ' (premier chemin trouvé, pas garanti le plus court)'}`
-        : `  Introuvable : ${chain.message ?? chain.error ?? 'inconnu'}`,
+        ? t('clrInspector.report.gcRootChainLine', {
+          rootKind: chain.rootKind ?? '?',
+          path: (chain.path ?? []).map(step => `${step.fieldName ?? (step.index !== null && step.index !== undefined ? `[${step.index}]` : step.kind)}`).join(' → '),
+          shortestGuarantee: chain.shortestPathGuaranteed ? '' : t('clrInspector.report.notShortestGuaranteed'),
+        })
+        : t('clrInspector.report.gcRootChainNotFound', { message: chain.message ?? chain.error ?? t('clrInspector.report.unknownValue') }),
     )
     lines.push('')
   }
@@ -256,10 +262,10 @@ const clrObjectReportText = computed(() => {
   for (const entry of report.nodes ?? []) {
     const indent = '  '.repeat(entry.depth)
     const viaInfo = entry.discoveredVia
-    let via = ' (racine)'
+    let via = t('clrInspector.report.rootSuffix')
     if (viaInfo) {
       const label = viaInfo.fieldName ?? (viaInfo.index !== null && viaInfo.index !== undefined ? `[${viaInfo.index}]` : viaInfo.kind)
-      via = ` (via ${label})`
+      via = t('clrInspector.report.viaSuffix', { label })
     }
     lines.push(`${indent}• ${entry.node?.typeName ?? '?'} @ ${entry.address}${via}`)
     for (const [name, value] of Object.entries(entry.node?.fields ?? {})) {
@@ -353,39 +359,39 @@ onMounted(() => {
   <div class="clr-view">
     <div class="header">
       <div>
-        <h1>Inspecteur CLR</h1>
-        <p>{{ store.isAttached ? store.processName : 'Aucun processus attaché' }}</p>
+        <h1>{{ $t('clrInspector.title') }}</h1>
+        <p>{{ store.isAttached ? store.processName : $t('clrInspector.noProcess') }}</p>
       </div>
       <div class="header-actions">
         <button class="btn btn-secondary" :disabled="store.clrInspectorBusy" @click="store.refreshClrInspectorStatus()">
-          Statut
+          {{ $t('clrInspector.status') }}
         </button>
         <button class="btn btn-secondary" :disabled="store.clrInspectorBusy" @click="store.shutdownClrInspector()">
-          Stop helper
+          {{ $t('clrInspector.stopHelper') }}
         </button>
       </div>
     </div>
 
     <PanelIntro
-      what="Un explorateur spécialisé pour les jeux et logiciels .NET : il lit les objets gérés par le moteur CLR plutôt que la mémoire brute."
-      purpose="Trouver et modifier facilement les vraies données du jeu (joueur, vie, inventaire...) quand la cible est un programme .NET — sans deviner d'adresses."
-      how="Attache un processus .NET, clique Attacher CLR, liste les Objets avec un filtre de type (ex. Player), puis Lis un objet pour voir et modifier ses champs."
+      :what="$t('clrInspector.intro.what')"
+      :purpose="$t('clrInspector.intro.purpose')"
+      :how="$t('clrInspector.intro.how')"
     />
 
     <div v-if="!store.isAttached" class="empty-state">
-      <strong>Aucune cible active</strong>
-      <p>Choisis d'abord un processus .NET/CoreCLR autorisé. L'inspecteur CLR n'agit que sur le processus attaché.</p>
-      <button class="btn btn-primary" aria-label="Ouvrir la vue Processus pour choisir une cible" @click="store.activeView = 'process'">
-        Aller à Processus
+      <strong>{{ $t('clrInspector.noActiveTarget') }}</strong>
+      <p>{{ $t('clrInspector.noActiveTargetBody') }}</p>
+      <button class="btn btn-primary" :aria-label="$t('clrInspector.goToProcessAriaLabel')" @click="store.activeView = 'process'">
+        {{ $t('clrInspector.goToProcess') }}
       </button>
     </div>
 
     <template v-else>
-      <section class="novice-guide" aria-label="Parcours guidé CLR">
+      <section class="novice-guide" :aria-label="$t('clrInspector.guide.ariaLabel')">
         <div class="guide-head">
           <div>
-            <span>Parcours guidé</span>
-            <strong>{{ clrReady ? 'CLR prêt' : 'Démarre par Attacher CLR' }}</strong>
+            <span>{{ $t('clrInspector.guide.label') }}</span>
+            <strong>{{ clrReady ? $t('clrInspector.guide.ready') : $t('clrInspector.guide.start') }}</strong>
           </div>
           <InfoDot topic="clrGuide" align="right" />
         </div>
@@ -403,60 +409,60 @@ onMounted(() => {
 
       <section class="status-band">
         <div>
-          <span>Helper</span>
+          <span>{{ $t('clrInspector.statusBand.helper') }}</span>
           <strong :class="{ ok: store.clrInspectorStatus?.running, warn: !store.clrInspectorStatus?.available }">
-            {{ store.clrInspectorStatus?.running ? 'actif' : (store.clrInspectorStatus?.available ? 'prêt' : 'introuvable') }}
+            {{ store.clrInspectorStatus?.running ? $t('clrInspector.statusBand.active') : (store.clrInspectorStatus?.available ? $t('clrInspector.statusBand.ready') : $t('clrInspector.statusBand.notFound')) }}
           </strong>
         </div>
         <div>
-          <span>PID</span>
+          <span>{{ $t('clrInspector.statusBand.pid') }}</span>
           <strong>{{ store.clrInspectorStatus?.pid || '-' }}</strong>
         </div>
         <div>
-          <span>Pipe</span>
+          <span>{{ $t('clrInspector.statusBand.pipe') }}</span>
           <code>{{ store.clrInspectorStatus?.pipeName || '-' }}</code>
         </div>
       </section>
 
       <section class="toolbar">
         <label class="field-label">
-          <span>Filtre type<InfoDot topic="clrAttach" /></span>
-          <input v-model="store.clrTypeFilter" class="type-input" placeholder="Ex. KillEngine.ClrTestTarget" />
+          <span>{{ $t('clrInspector.toolbar.typeFilterLabel') }}<InfoDot topic="clrAttach" /></span>
+          <input v-model="store.clrTypeFilter" class="type-input" :placeholder="$t('clrInspector.toolbar.typeFilterPlaceholder')" />
         </label>
         <button
           class="btn btn-primary"
           :disabled="store.clrInspectorBusy"
-          title="Lance le helper ClrMD et l'attache au processus courant."
+          :title="$t('clrInspector.toolbar.attachTitle')"
           @click="store.attachClrInspector()"
         >
-          Attacher CLR
+          {{ $t('clrInspector.toolbar.attach') }}
         </button>
         <button
           class="btn btn-secondary"
           :disabled="store.clrInspectorBusy || !clrReady"
-          title="Liste les objets managés dont le nom de type contient le filtre."
+          :title="$t('clrInspector.toolbar.objectsTitle')"
           @click="store.findClrObjects()"
         >
-          Objets
+          {{ $t('clrInspector.toolbar.objects') }}
         </button>
         <button
           class="btn btn-secondary"
           :disabled="store.clrInspectorBusy || !clrReady"
-          title="Affiche les racines GC visibles par ClrMD."
+          :title="$t('clrInspector.toolbar.rootsTitle')"
           @click="store.enumerateClrRoots()"
         >
-          Roots
+          {{ $t('clrInspector.toolbar.roots') }}
         </button>
         <button
           class="btn btn-secondary"
           :disabled="store.clrInspectorBusy || !clrReady"
-          title="À utiliser après un GC ou une grosse mutation côté cible pour forcer ClrMD à relire l'état courant."
+          :title="$t('clrInspector.toolbar.flushTitle')"
           @click="store.flushClrInspectorCache()"
         >
-          Flush GC cache
+          {{ $t('clrInspector.toolbar.flush') }}
         </button>
         <button class="btn btn-secondary" :disabled="store.clrInspectorBusy" @click="store.detachClrInspector()">
-          Détacher CLR
+          {{ $t('clrInspector.toolbar.detach') }}
         </button>
       </section>
 
@@ -467,31 +473,31 @@ onMounted(() => {
 
       <div class="manual-read">
         <label class="field-label">
-          <span>Lire une adresse connue<InfoDot topic="clrManualRead" /></span>
-          <input v-model="manualAddress" class="type-input" placeholder="Ex. 0x2476e00acd8" @keyup.enter="readManualObject" />
+          <span>{{ $t('clrInspector.manualRead.label') }}<InfoDot topic="clrManualRead" /></span>
+          <input v-model="manualAddress" class="type-input" :placeholder="$t('clrInspector.manualRead.placeholder')" @keyup.enter="readManualObject" />
         </label>
         <button
           class="btn btn-secondary"
           :disabled="store.clrInspectorBusy || !manualAddress.trim()"
-          aria-label="Lire l'objet CLR à l'adresse saisie"
+          :aria-label="$t('clrInspector.manualRead.ariaLabel')"
           @click="readManualObject"
         >
-          Lire adresse
+          {{ $t('clrInspector.manualRead.button') }}
         </button>
       </div>
 
       <section class="locator-panel">
         <div class="locator-head">
           <div>
-            <span>Locator stable</span>
-            <strong>Retrouver un objet par identité</strong>
+            <span>{{ $t('clrInspector.locator.label') }}</span>
+            <strong>{{ $t('clrInspector.locator.title') }}</strong>
           </div>
           <div class="locator-head-actions">
             <InfoDot topic="clrLocator" align="right" />
-            <button class="mini-btn" type="button" @click="useDefaultClrTarget">Exemple cible test</button>
+            <button class="mini-btn" type="button" @click="useDefaultClrTarget">{{ $t('clrInspector.locator.exampleTarget') }}</button>
             <label class="wizard-mode-toggle">
               <input v-model="locatorWizardAdvanced" type="checkbox" />
-              <span>Mode avancé (texte libre)</span>
+              <span>{{ $t('clrInspector.locator.advancedMode') }}</span>
             </label>
           </div>
         </div>
@@ -499,30 +505,29 @@ onMounted(() => {
         <template v-if="!locatorWizardAdvanced">
           <ol class="wizard-steps">
             <li :class="{ done: locatorWizardStep > 1, active: locatorWizardStep === 1 }">
-              <span>1. Objet</span>
-              <strong>{{ store.clrSelectedObject ? store.clrSelectedObject.typeName : 'À choisir' }}</strong>
+              <span>{{ $t('clrInspector.locator.step1') }}</span>
+              <strong>{{ store.clrSelectedObject ? store.clrSelectedObject.typeName : $t('clrInspector.locator.toChoose') }}</strong>
             </li>
             <li :class="{ done: locatorWizardStep > 2, active: locatorWizardStep === 2 }">
-              <span>2. Champ</span>
-              <strong>{{ locatorWizardStep > 1 && locatorField ? locatorField : 'À choisir' }}</strong>
+              <span>{{ $t('clrInspector.locator.step2') }}</span>
+              <strong>{{ locatorWizardStep > 1 && locatorField ? locatorField : $t('clrInspector.locator.toChoose') }}</strong>
             </li>
             <li :class="{ active: locatorWizardStep === 3 }">
-              <span>3. Retrouver</span>
-              <strong>{{ locatorWizardStep === 3 ? 'Prêt' : 'En attente' }}</strong>
+              <span>{{ $t('clrInspector.locator.step3') }}</span>
+              <strong>{{ locatorWizardStep === 3 ? $t('clrInspector.locator.ready') : $t('clrInspector.locator.waiting') }}</strong>
             </li>
           </ol>
 
           <div v-if="locatorWizardStep === 1" class="wizard-step">
             <p class="wizard-hint">
-              Choisis un objet représentatif du type que tu veux cibler plus tard (ex. le joueur, l'inventaire).
-              Si la liste est vide, renseigne un filtre de type dans la barre du haut puis clique Objets.
+              {{ $t('clrInspector.locator.step1Hint') }}
             </p>
             <div v-if="store.clrObjects.length" class="table-wrap wizard-object-list">
               <table>
                 <thead>
                   <tr>
-                    <th>Adresse</th>
-                    <th>Type</th>
+                    <th>{{ $t('clrInspector.locator.addressColumn') }}</th>
+                    <th>{{ $t('clrInspector.locator.typeColumn') }}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -532,20 +537,19 @@ onMounted(() => {
                     <td>{{ obj.typeName }}</td>
                     <td>
                       <button class="mini-btn" :disabled="store.clrInspectorBusy" @click="chooseWizardObject(obj.address)">
-                        Choisir
+                        {{ $t('clrInspector.locator.choose') }}
                       </button>
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <p v-else class="panel-hint">Aucun objet listé pour l'instant.</p>
+            <p v-else class="panel-hint">{{ $t('clrInspector.locator.noObjectListed') }}</p>
           </div>
 
           <div v-else-if="locatorWizardStep === 2" class="wizard-step">
             <p class="wizard-hint">
-              Objet choisi : <strong>{{ store.clrSelectedObject?.typeName }}</strong> @ <code>{{ store.clrSelectedObject?.address }}</code>.
-              Choisis un champ stable (nom, identifiant...) — évite un champ qui change souvent (score, minuteur), il ferait échouer la relocalisation plus tard.
+              {{ $t('clrInspector.locator.step2Hint', { type: store.clrSelectedObject?.typeName, address: store.clrSelectedObject?.address }) }}
             </p>
             <div v-if="wizardLocatorCandidateFields.length" class="wizard-field-chips">
               <button
@@ -559,40 +563,40 @@ onMounted(() => {
               </button>
             </div>
             <p v-else class="panel-hint">
-              Aucun champ simple (texte/nombre/booléen) trouvé sur cet objet — reviens à l'étape 1 et choisis un autre objet, ou passe en mode avancé.
+              {{ $t('clrInspector.locator.noSimpleField') }}
             </p>
-            <button class="mini-btn" type="button" @click="restartLocatorWizard">← Changer d'objet</button>
+            <button class="mini-btn" type="button" @click="restartLocatorWizard">{{ $t('clrInspector.locator.changeObject') }}</button>
           </div>
 
           <div v-else class="wizard-step">
-            <p class="wizard-hint">Locator prêt à utiliser.</p>
+            <p class="wizard-hint">{{ $t('clrInspector.locator.step3Ready') }}</p>
             <div class="wizard-summary">
               <div class="wizard-summary-item">
-                <span>Type</span>
+                <span>{{ $t('clrInspector.locator.typeLabel') }}</span>
                 <strong>{{ locatorType }}</strong>
               </div>
               <div class="wizard-summary-item">
-                <span>Champ</span>
+                <span>{{ $t('clrInspector.locator.fieldLabel') }}</span>
                 <strong>{{ locatorField }}</strong>
               </div>
               <label class="field-label compact-label">
-                <span>Valeur</span>
+                <span>{{ $t('clrInspector.locator.valueLabel') }}</span>
                 <input v-model="locatorValue" class="locator-small-input" @keyup.enter="runFieldLocator" />
               </label>
               <label class="field-label count-label">
-                <span>Max</span>
+                <span>{{ $t('clrInspector.locator.maxLabel') }}</span>
                 <input v-model.number="locatorMaxResults" class="locator-count-input" type="number" min="1" max="200" />
               </label>
             </div>
             <div class="wizard-step-actions">
-              <button class="mini-btn" type="button" @click="locatorWizardStep = 2">← Changer de champ</button>
+              <button class="mini-btn" type="button" @click="locatorWizardStep = 2">{{ $t('clrInspector.locator.changeField') }}</button>
               <button
                 class="btn btn-secondary"
                 :disabled="store.clrInspectorBusy || !locatorType.trim() || !locatorField.trim() || !locatorValue.trim()"
-                aria-label="Retrouver les objets CLR qui correspondent au locator"
+                :aria-label="$t('clrInspector.locator.findAriaLabel')"
                 @click="runFieldLocator"
               >
-                Retrouver
+                {{ $t('clrInspector.locator.find') }}
               </button>
             </div>
           </div>
@@ -600,42 +604,40 @@ onMounted(() => {
 
         <div v-else class="locator-inputs">
           <label class="field-label">
-            <span>Type</span>
-            <input v-model="locatorType" class="type-input" placeholder="Ex. KillEngine.ClrTestTarget.Player" />
+            <span>{{ $t('clrInspector.locator.typeLabel') }}</span>
+            <input v-model="locatorType" class="type-input" :placeholder="$t('clrInspector.locator.typePlaceholderAdvanced')" />
           </label>
           <label class="field-label compact-label">
-            <span>Champ identité</span>
-            <input v-model="locatorField" class="locator-small-input" placeholder="Ex. Name" />
+            <span>{{ $t('clrInspector.readObject.locatorFieldPlaceholder') }}</span>
+            <input v-model="locatorField" class="locator-small-input" :placeholder="$t('clrInspector.locator.identityFieldPlaceholder')" />
           </label>
           <label class="field-label compact-label">
-            <span>Valeur</span>
-            <input v-model="locatorValue" class="locator-small-input" placeholder="Ex. TestSubject" @keyup.enter="runFieldLocator" />
+            <span>{{ $t('clrInspector.locator.valueLabel') }}</span>
+            <input v-model="locatorValue" class="locator-small-input" :placeholder="$t('clrInspector.locator.valuePlaceholderAdvanced')" @keyup.enter="runFieldLocator" />
           </label>
           <label class="field-label count-label">
-            <span>Max</span>
+            <span>{{ $t('clrInspector.locator.maxLabel') }}</span>
             <input v-model.number="locatorMaxResults" class="locator-count-input" type="number" min="1" max="200" />
           </label>
           <button
             class="btn btn-secondary"
             :disabled="store.clrInspectorBusy || !locatorType.trim() || !locatorField.trim() || !locatorValue.trim()"
-            aria-label="Retrouver les objets CLR qui correspondent au locator"
+            :aria-label="$t('clrInspector.locator.findAriaLabel')"
             @click="runFieldLocator"
           >
-            Retrouver
+            {{ $t('clrInspector.locator.find') }}
           </button>
         </div>
         <div v-if="store.clrFieldLocatorResult" class="locator-results">
           <span>
-            {{ store.clrFieldLocatorResult.matchesReturned }} match(es),
-            {{ store.clrFieldLocatorResult.typeMatches }} objet(s) du type,
-            {{ store.clrFieldLocatorResult.scannedObjects }} scanné(s)
+            {{ $t('clrInspector.locator.resultsSummary', { returned: store.clrFieldLocatorResult.matchesReturned, typeMatches: store.clrFieldLocatorResult.typeMatches, scanned: store.clrFieldLocatorResult.scannedObjects }) }}
           </span>
           <button
             v-for="match in store.clrFieldLocatorResult.matches"
             :key="match.address"
             class="locator-match"
             :disabled="store.clrInspectorBusy"
-            :aria-label="`Lire l'objet ${match.typeName} à l'adresse ${match.address}`"
+            :aria-label="$t('clrInspector.locator.readObjectAriaLabel', { type: match.typeName, address: match.address })"
             @click="store.readClrObject(match.address)"
           >
             {{ match.typeName }} @ {{ match.address }}
@@ -646,19 +648,19 @@ onMounted(() => {
       <div class="content-grid">
         <section class="panel">
           <div class="panel-head">
-            <h2>Objets</h2>
+            <h2>{{ $t('clrInspector.objectsPanel.title') }}</h2>
             <span>{{ store.clrObjects.length }}</span>
           </div>
           <div v-if="clrReady && store.clrObjects.length === 0" class="panel-hint">
-            Lance `Objets` avec un filtre court, puis clique `Lire` sur une ligne.
+            {{ $t('clrInspector.objectsPanel.hint') }}
           </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Adresse</th>
-                  <th>Type</th>
-                  <th>Taille</th>
+                  <th>{{ $t('clrInspector.objectsPanel.addressColumn') }}</th>
+                  <th>{{ $t('clrInspector.objectsPanel.typeColumn') }}</th>
+                  <th>{{ $t('clrInspector.objectsPanel.sizeColumn') }}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -669,12 +671,12 @@ onMounted(() => {
                   <td>{{ obj.size ?? '-' }}</td>
                   <td>
                     <button class="mini-btn" :disabled="store.clrInspectorBusy" @click="store.readClrObject(obj.address)">
-                      Lire
+                      {{ $t('clrInspector.objectsPanel.read') }}
                     </button>
                   </td>
                 </tr>
                 <tr v-if="store.clrObjects.length === 0">
-                  <td colspan="4" class="empty-row">Aucun objet listé pour l'instant.</td>
+                  <td colspan="4" class="empty-row">{{ $t('clrInspector.objectsPanel.noObjectListed') }}</td>
                 </tr>
               </tbody>
             </table>
@@ -683,9 +685,9 @@ onMounted(() => {
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Objet lu</h2>
+            <h2>{{ $t('clrInspector.readObject.title') }}</h2>
             <div class="panel-head-actions">
-              <span>{{ objectFields.length }} champs</span>
+              <span>{{ $t('clrInspector.readObject.fieldCount', { count: objectFields.length }) }}</span>
               <InfoDot topic="clrFieldTable" align="right" />
             </div>
           </div>
@@ -694,11 +696,11 @@ onMounted(() => {
             <strong>{{ store.clrSelectedObject.typeName }}</strong>
           </div>
           <div v-else class="panel-hint">
-            Sélectionne un objet dans la liste ou colle une adresse CLR connue.
+            {{ $t('clrInspector.readObject.hintSelect') }}
           </div>
           <div v-if="store.clrSelectedObject" class="path-write">
             <div class="path-write-head">
-              <span>Chemin symbolique depuis {{ selectedTypeLabel }}<InfoDot topic="clrPathWrite" align="right" /></span>
+              <span>{{ $t('clrInspector.readObject.pathWriteLabel', { type: selectedTypeLabel }) }}<InfoDot topic="clrPathWrite" align="right" /></span>
               <div class="path-examples">
                 <button
                   v-for="example in pathExamples"
@@ -713,57 +715,57 @@ onMounted(() => {
             </div>
             <label class="locator-toggle">
               <input v-model="useLocatorForWrite" type="checkbox" />
-              <span>Utiliser un locator au lieu d'une adresse (relocalise l'objet via type/champ/valeur juste avant d'écrire — résiste à un déplacement par GC)</span>
+              <span>{{ $t('clrInspector.readObject.useLocatorInstead') }}</span>
             </label>
             <div v-if="useLocatorForWrite" class="locator-write-inputs">
-              <input v-model="locatorType" class="type-input" placeholder="Type (ex. KillEngine.ClrTestTarget.Player)" aria-label="Type CLR du locator d'écriture" />
-              <input v-model="locatorField" class="locator-small-input" placeholder="Champ identité" aria-label="Champ identité du locator d'écriture" />
-              <input v-model="locatorValue" class="locator-small-input" placeholder="Valeur identité" aria-label="Valeur identité du locator d'écriture" />
+              <input v-model="locatorType" class="type-input" :placeholder="$t('clrInspector.readObject.locatorTypePlaceholder')" :aria-label="$t('clrInspector.readObject.locatorTypeAriaLabel')" />
+              <input v-model="locatorField" class="locator-small-input" :placeholder="$t('clrInspector.readObject.locatorFieldPlaceholder')" :aria-label="$t('clrInspector.readObject.locatorFieldAriaLabel')" />
+              <input v-model="locatorValue" class="locator-small-input" :placeholder="$t('clrInspector.readObject.locatorValuePlaceholder')" :aria-label="$t('clrInspector.readObject.locatorValueAriaLabel')" />
             </div>
             <input
               v-model="pathWritePath"
               class="path-input"
-              placeholder="Champ ou chemin"
-              aria-label="Chemin CLR symbolique"
+              :placeholder="$t('clrInspector.readObject.pathPlaceholder')"
+              :aria-label="$t('clrInspector.readObject.pathAriaLabel')"
               @keyup.enter="writePath"
             />
             <input
               v-model="pathWriteValue"
               class="path-value-input"
-              placeholder="Valeur"
-              aria-label="Nouvelle valeur du champ CLR"
+              :placeholder="$t('clrInspector.readObject.valuePlaceholder')"
+              :aria-label="$t('clrInspector.readObject.valueAriaLabel')"
               @keyup.enter="writePath"
             />
             <button
               class="btn btn-secondary"
               :disabled="store.clrInspectorBusy || !pathWritePath.trim() || !pathWriteValue.trim() || (useLocatorForWrite && (!locatorType.trim() || !locatorField.trim() || !locatorValue.trim()))"
-              title="Écrit uniquement un champ primitif feuille atteint par ce chemin."
+              :title="$t('clrInspector.readObject.writePathTitle')"
               @click="writePath"
             >
-              Écrire chemin
+              {{ $t('clrInspector.readObject.writePath') }}
             </button>
             <div class="batch-write">
               <label class="field-label">
-                <span>Transaction multi-champs<InfoDot topic="clrBatchWrite" align="right" /></span>
+                <span>{{ $t('clrInspector.readObject.batchLabel') }}<InfoDot topic="clrBatchWrite" align="right" /></span>
                 <textarea
                   v-model="batchWriteText"
                   class="batch-input"
                   rows="3"
                   placeholder="Health=100&#10;Stats.Rank=7&#10;Inventory.Currencies[gold]=4125"
-                  aria-label="Operations de transaction CLR, une ligne chemin egal valeur"
+                  :aria-label="$t('clrInspector.readObject.batchAriaLabel')"
                 ></textarea>
               </label>
               <label v-if="!useLocatorForWrite" class="locator-toggle batch-suspend-toggle">
                 <input v-model="suspendDuringBatch" type="checkbox" />
-                <span>Suspendre le process pendant la transaction (plus sûr, plus risqué — suspend toutes les threads cible, best-effort contre un deadlock)</span>
+                <span>{{ $t('clrInspector.readObject.suspendDuringBatch') }}</span>
               </label>
               <button
                 class="btn btn-secondary"
                 :disabled="store.clrInspectorBusy || parseBatchOperations().length === 0 || (useLocatorForWrite && (!locatorType.trim() || !locatorField.trim() || !locatorValue.trim()))"
-                title="Applique les lignes dans l'ordre et tente un rollback si une opération échoue."
+                :title="$t('clrInspector.readObject.batchApplyTitle')"
                 @click="writeBatch"
               >
-                Transaction
+                {{ $t('clrInspector.readObject.batchApply') }}
               </button>
             </div>
           </div>
@@ -771,8 +773,8 @@ onMounted(() => {
           <div v-if="store.clrSelectedObject" class="setter-call warning-band">
             <div class="setter-call-head">
               <div>
-                <strong>Appeler un setter (action avancée — injecte du code)</strong>
-                <span>Contrairement aux écritures ci-dessus (mémoire passive), ceci exécute réellement le vrai setter C# dans le processus attaché.</span>
+                <strong>{{ $t('clrInspector.setter.callTitle') }}</strong>
+                <span>{{ $t('clrInspector.setter.callDescription') }}</span>
               </div>
               <InfoDot topic="clrCallSetter" align="right" />
             </div>
@@ -780,32 +782,32 @@ onMounted(() => {
               <input
                 v-model="callMethodName"
                 class="path-input"
-                placeholder="Propriété ou méthode (ex. Health, set_Health)"
-                aria-label="Nom du setter CLR à appeler"
+                :placeholder="$t('clrInspector.setter.namePlaceholder')"
+                :aria-label="$t('clrInspector.setter.nameAriaLabel')"
                 @keyup.enter="callInstanceMethod"
               />
               <input
                 v-model="callMethodValue"
                 class="path-value-input"
-                placeholder="Valeur, ou 0x... pour un paramètre objet/string existant"
-                aria-label="Valeur du paramètre du setter CLR"
+                :placeholder="$t('clrInspector.setter.valuePlaceholder')"
+                :aria-label="$t('clrInspector.setter.valueAriaLabel')"
                 @keyup.enter="callInstanceMethod"
               />
               <button
                 class="btn btn-danger"
                 :disabled="store.clrInspectorBusy || !callMethodName.trim()"
-                title="Résout l'adresse native déjà JITtée puis appelle réellement ce setter par injection shellcode."
+                :title="$t('clrInspector.setter.callButtonTitle')"
                 @click="callInstanceMethod"
               >
-                Appeler
+                {{ $t('clrInspector.setter.call') }}
               </button>
             </div>
             <div v-if="store.clrCallMethodResult" class="setter-call-result" :class="{ ok: store.clrCallMethodResult.success, err: !store.clrCallMethodResult.success }">
               <template v-if="store.clrCallMethodResult.success">
                 <strong>{{ store.clrCallMethodResult.methodName }}</strong>
                 <code>{{ store.clrCallMethodResult.nativeCodeAddress }}</code>
-                <span v-if="store.clrCallMethodResult.parameterIsReferenceType">paramètre : référence (adresse existante)</span>
-                <span>vérifié : {{ store.clrCallMethodResult.verified ? 'oui' : 'non' }}</span>
+                <span v-if="store.clrCallMethodResult.parameterIsReferenceType">{{ $t('clrInspector.setter.referenceParameter') }}</span>
+                <span>{{ $t('clrInspector.setter.verified', { value: store.clrCallMethodResult.verified ? $t('clrInspector.setter.yes') : $t('clrInspector.setter.no') }) }}</span>
               </template>
               <template v-else>
                 {{ store.clrCallMethodResult.error }}
@@ -816,8 +818,8 @@ onMounted(() => {
           <div v-if="store.clrSelectedObject" class="setter-call">
             <div class="setter-call-head">
               <div>
-                <strong>Désassembler ce setter (lecture seule)</strong>
-                <span>Résout l'adresse native déjà JITtée puis désassemble en avant — aucune exécution, contrairement au panneau ci-dessus.</span>
+                <strong>{{ $t('clrInspector.disassemble.title') }}</strong>
+                <span>{{ $t('clrInspector.disassemble.description') }}</span>
               </div>
               <InfoDot topic="clrDisassemble" align="right" />
             </div>
@@ -825,8 +827,8 @@ onMounted(() => {
               <input
                 v-model="disassembleMethodName"
                 class="path-input"
-                placeholder="Propriété ou méthode (ex. Vitality, set_Vitality)"
-                aria-label="Nom de la méthode CLR à désassembler"
+                :placeholder="$t('clrInspector.disassemble.namePlaceholder')"
+                :aria-label="$t('clrInspector.disassemble.nameAriaLabel')"
                 @keyup.enter="disassembleSelectedMethod"
               />
               <input
@@ -835,22 +837,22 @@ onMounted(() => {
                 min="1"
                 max="64"
                 class="path-value-input"
-                aria-label="Nombre d'instructions à désassembler"
+                :aria-label="$t('clrInspector.disassemble.countAriaLabel')"
               />
               <button
                 class="btn btn-secondary"
                 :disabled="store.clrInspectorBusy || !disassembleMethodName.trim()"
-                title="Résout l'adresse native déjà JITtée puis désassemble en avant (lecture seule)."
+                :title="$t('clrInspector.disassemble.buttonTitle')"
                 @click="disassembleSelectedMethod"
               >
-                Désassembler
+                {{ $t('clrInspector.disassemble.button') }}
               </button>
             </div>
             <div v-if="store.clrDisassembleResult" class="setter-call-result" :class="{ ok: store.clrDisassembleResult.success, err: !store.clrDisassembleResult.success }">
               <template v-if="store.clrDisassembleResult.success">
                 <strong>{{ store.clrDisassembleResult.methodName }}</strong>
                 <code>{{ store.clrDisassembleResult.nativeCodeAddress }}</code>
-                <span>{{ store.clrDisassembleResult.returnedInstructionCount }} instruction(s){{ store.clrDisassembleResult.truncated ? ' (tronqué)' : '' }}</span>
+                <span>{{ $t('clrInspector.disassemble.instructionCount', { count: store.clrDisassembleResult.returnedInstructionCount, truncated: store.clrDisassembleResult.truncated ? $t('clrInspector.disassemble.truncatedSuffix') : '' }) }}</span>
               </template>
               <template v-else>
                 {{ store.clrDisassembleResult.error }}
@@ -860,9 +862,9 @@ onMounted(() => {
               <table>
                 <thead>
                   <tr>
-                    <th>Adresse</th>
-                    <th>Octets</th>
-                    <th>Instruction</th>
+                    <th>{{ $t('clrInspector.disassemble.addressColumn') }}</th>
+                    <th>{{ $t('clrInspector.disassemble.bytesColumn') }}</th>
+                    <th>{{ $t('clrInspector.disassemble.instructionColumn') }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -879,8 +881,8 @@ onMounted(() => {
           <div v-if="store.clrSelectedObject" class="setter-call">
             <div class="setter-call-head">
               <div>
-                <strong>Générer un rapport</strong>
-                <span>Exporte cet objet et son graphe atteignable (champs, collections, chemin GCRoot) en un document texte — pratique pour sauvegarder ou partager sans tout re-naviguer en live.</span>
+                <strong>{{ $t('clrInspector.report.title') }}</strong>
+                <span>{{ $t('clrInspector.report.description') }}</span>
               </div>
               <InfoDot topic="clrReport" align="right" />
             </div>
@@ -891,8 +893,8 @@ onMounted(() => {
                 min="1"
                 max="6"
                 class="path-value-input"
-                aria-label="Profondeur maximale du rapport"
-                title="Profondeur maximale (1-6, défaut 3)"
+                :aria-label="$t('clrInspector.report.maxDepthAriaLabel')"
+                :title="$t('clrInspector.report.maxDepthTitle')"
               />
               <input
                 v-model.number="reportMaxNodes"
@@ -900,26 +902,26 @@ onMounted(() => {
                 min="1"
                 max="300"
                 class="path-value-input"
-                aria-label="Nombre maximal de nœuds du rapport"
-                title="Nombre maximal de nœuds (1-300, défaut 50)"
+                :aria-label="$t('clrInspector.report.maxNodesAriaLabel')"
+                :title="$t('clrInspector.report.maxNodesTitle')"
               />
               <label class="locator-toggle">
                 <input v-model="reportIncludeGcRootChain" type="checkbox" />
-                Inclure le chemin GC root
+                {{ $t('clrInspector.report.includeGcRootChain') }}
               </label>
               <button
                 class="btn btn-secondary"
                 :disabled="store.clrInspectorBusy"
-                title="Génère le rapport (lecture seule, aucune écriture)."
+                :title="$t('clrInspector.report.generateButtonTitle')"
                 @click="generateSelectedObjectReport"
               >
-                Générer
+                {{ $t('clrInspector.report.generate') }}
               </button>
             </div>
             <div v-if="store.clrObjectReportResult" class="setter-call-result" :class="{ ok: store.clrObjectReportResult.success, err: !store.clrObjectReportResult.success }">
               <template v-if="store.clrObjectReportResult.success">
-                <strong>{{ store.clrObjectReportResult.nodeCount }} nœud(s)</strong>
-                <span>{{ store.clrObjectReportResult.elapsedMs }} ms{{ store.clrObjectReportResult.truncated ? ' — tronqué' : '' }}</span>
+                <strong>{{ $t('clrInspector.report.nodeCount', { count: store.clrObjectReportResult.nodeCount }) }}</strong>
+                <span>{{ $t('clrInspector.report.elapsed', { ms: store.clrObjectReportResult.elapsedMs, truncated: store.clrObjectReportResult.truncated ? $t('clrInspector.report.truncatedSuffix') : '' }) }}</span>
               </template>
               <template v-else>
                 {{ store.clrObjectReportResult.error }}
@@ -932,10 +934,10 @@ onMounted(() => {
             <table>
               <thead>
                 <tr>
-                  <th>Champ</th>
-                  <th>Kind</th>
-                  <th>Adresse</th>
-                  <th>Valeur</th>
+                  <th>{{ $t('clrInspector.fieldTable.fieldColumn') }}</th>
+                  <th>{{ $t('clrInspector.fieldTable.kindColumn') }}</th>
+                  <th>{{ $t('clrInspector.fieldTable.addressColumn') }}</th>
+                  <th>{{ $t('clrInspector.fieldTable.valueColumn') }}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -955,7 +957,7 @@ onMounted(() => {
                       :disabled="store.clrInspectorBusy"
                       @click="store.readClrObject(refAddress(field.value))"
                     >
-                      Lire
+                      {{ $t('clrInspector.fieldTable.read') }}
                     </button>
                     <template v-else-if="field.writable">
                       <input
@@ -967,33 +969,33 @@ onMounted(() => {
                       <button
                         class="mini-btn"
                         :disabled="store.clrInspectorBusy || !fieldWriteValues[writeKey(field)]?.trim()"
-                        :aria-label="`Écrire le champ CLR ${field.name}`"
+                        :aria-label="$t('clrInspector.fieldTable.writeAriaLabel', { name: field.name })"
                         @click="writeField(field)"
                       >
-                        Écrire
+                        {{ $t('clrInspector.fieldTable.write') }}
                       </button>
                       <button
                         class="mini-btn"
                         :disabled="store.clrInspectorBusy || !locatorType.trim() || !locatorField.trim() || !locatorValue.trim()"
-                        :aria-label="`Créer une feature Trainer pour le champ CLR ${field.name}`"
+                        :aria-label="$t('clrInspector.fieldTable.createTrainerAriaLabel', { name: field.name })"
                         @click="createTrainerFeature(field)"
                       >
-                        Trainer
+                        {{ $t('clrInspector.fieldTable.trainer') }}
                       </button>
                     </template>
                     <button
                       v-if="canUseAsLocator(field)"
                       class="mini-btn"
                       :disabled="store.clrInspectorBusy"
-                      :aria-label="`Utiliser le champ ${field.name} comme locator CLR`"
+                      :aria-label="$t('clrInspector.fieldTable.useAsLocatorAriaLabel', { name: field.name })"
                       @click="useFieldAsLocator(field)"
                     >
-                      Locator
+                      {{ $t('clrInspector.fieldTable.locator') }}
                     </button>
                   </td>
                 </tr>
                 <tr v-if="objectFields.length === 0">
-                  <td colspan="5" class="empty-row">Aucun objet sélectionné.</td>
+                  <td colspan="5" class="empty-row">{{ $t('clrInspector.fieldTable.noObjectSelected') }}</td>
                 </tr>
               </tbody>
             </table>
@@ -1003,7 +1005,7 @@ onMounted(() => {
 
       <section class="panel roots-panel">
         <div class="panel-head">
-          <h2>GC roots</h2>
+          <h2>{{ $t('clrInspector.gcRoots.title') }}</h2>
           <div class="panel-head-actions">
             <span>{{ store.clrRoots.length }}</span>
             <InfoDot topic="clrRootsTable" align="right" />
@@ -1013,10 +1015,10 @@ onMounted(() => {
           <table>
             <thead>
               <tr>
-                <th>Root</th>
-                <th>Kind</th>
-                <th>Objet</th>
-                <th>Type objet</th>
+                <th>{{ $t('clrInspector.gcRoots.rootColumn') }}</th>
+                <th>{{ $t('clrInspector.gcRoots.kindColumn') }}</th>
+                <th>{{ $t('clrInspector.gcRoots.objectColumn') }}</th>
+                <th>{{ $t('clrInspector.gcRoots.objectTypeColumn') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -1027,7 +1029,7 @@ onMounted(() => {
                 <td>{{ root.objectTypeName }}</td>
               </tr>
               <tr v-if="store.clrRoots.length === 0">
-                <td colspan="4" class="empty-row">Aucune root chargée.</td>
+                <td colspan="4" class="empty-row">{{ $t('clrInspector.gcRoots.noRootLoaded') }}</td>
               </tr>
             </tbody>
           </table>
@@ -1035,38 +1037,38 @@ onMounted(() => {
 
         <div class="gcroot-path">
           <div class="panel-head">
-            <h3>Chemin root → objet (exploratoire)</h3>
+            <h3>{{ $t('clrInspector.gcRoots.pathTitle') }}</h3>
             <InfoDot topic="clrGcRootPath" align="right" />
           </div>
           <div class="setter-call-inputs">
             <input
               v-model="gcRootTargetAddress"
               class="path-input"
-              placeholder="Adresse objet cible (0x...)"
-              aria-label="Adresse de l'objet cible pour le chemin GC root"
+              :placeholder="$t('clrInspector.gcRoots.targetAddressPlaceholder')"
+              :aria-label="$t('clrInspector.gcRoots.targetAddressAriaLabel')"
               @keyup.enter="findGcRootPath"
             />
             <button
               class="btn btn-secondary"
               :disabled="store.clrInspectorBusy || !store.clrSelectedObject"
-              title="Utilise l'adresse de l'objet actuellement sélectionné."
+              :title="$t('clrInspector.gcRoots.useSelectedObjectTitle')"
               @click="useSelectedObjectAsGcRootTarget"
             >
-              Objet sélectionné
+              {{ $t('clrInspector.gcRoots.useSelectedObject') }}
             </button>
             <button
               class="btn btn-secondary"
               :disabled="store.clrInspectorBusy || !(gcRootTargetAddress.trim() || store.clrSelectedObject)"
               @click="findGcRootPath"
             >
-              Retrouver le chemin
+              {{ $t('clrInspector.gcRoots.findPath') }}
             </button>
           </div>
           <div v-if="store.clrGcRootPathResult" class="setter-call-result" :class="{ ok: store.clrGcRootPathResult.success, err: !store.clrGcRootPathResult.success }">
             <template v-if="store.clrGcRootPathResult.success">
               <strong>{{ store.clrGcRootPathResult.rootKind }}</strong>
               <code>{{ store.clrGcRootPathResult.rootObjectAddress }}</code>
-              <span>{{ store.clrGcRootPathResult.depth }} saut(s), {{ store.clrGcRootPathResult.nodesVisited }} nœud(s) visité(s)</span>
+              <span>{{ $t('clrInspector.gcRoots.hops', { depth: store.clrGcRootPathResult.depth, nodesVisited: store.clrGcRootPathResult.nodesVisited }) }}</span>
             </template>
             <template v-else>
               {{ store.clrGcRootPathResult.message || store.clrGcRootPathResult.error }}
@@ -1076,7 +1078,7 @@ onMounted(() => {
             <li>
               <code>{{ store.clrGcRootPathResult.rootObjectAddress }}</code>
               <span>{{ store.clrGcRootPathResult.rootObjectTypeName }}</span>
-              <em>(objet du root {{ store.clrGcRootPathResult.rootKind }})</em>
+              <em>{{ $t('clrInspector.gcRoots.rootObjectSuffix', { kind: store.clrGcRootPathResult.rootKind }) }}</em>
             </li>
             <li v-for="(step, index) in store.clrGcRootPathResult.path" :key="index">
               <span class="step-hop">
