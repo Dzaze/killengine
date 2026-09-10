@@ -68,7 +68,7 @@ L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** d
 | [x] U3o | └ `WritePanel.vue` | `ui/src/components/expert/WritePanel.vue` | 38 clés `write.*` (namespace existant étendu) | Non (idem) → complet | Basse | **Fait, testé (10/09/2026, Codex)** |
 | [x] U3p | └ `GroupScanPanel.vue` | `ui/src/components/expert/GroupScanPanel.vue` | 15 clés `groupScanPanel.*` | Non → complet | Basse | **Fait, testé (10/09/2026, Codex)** |
 | [x] U3q | └ `ActionLogPanel.vue` | `ui/src/components/expert/ActionLogPanel.vue` | 2 clés `actionLogPanel.*` | Non → complet | Basse | **Fait, testé (10/09/2026, Codex)** |
-| [ ] U4 | Investigation (carnet d'hypothèses, timeline) | `ui/src/views/InvestigationView.vue` | ~40 | Non | Haute | Pas commencé |
+| [x] U4 | Investigation (carnet d'hypothèses, timeline) | `ui/src/views/InvestigationView.vue` | 107 clés `investigation.*` ajoutées (template + script : `statusLabel`, `checkpointDetail`, `checkpointKindLabel`, `checkpointRiskLabel`, `statusText`, etc.) | Non → complet | Haute | **Fait, testé (10/09/2026, Claude)** |
 | [ ] U5 | Réglages | `ui/src/views/SettingsView.vue` | ~100 | Non | Haute | Pas commencé |
 | [ ] U5a | └ `AssistantToolsPanel.vue` (sous-panneau Réglages) | `ui/src/components/settings/AssistantToolsPanel.vue` | ~10 | Non | Basse | Pas commencé |
 | [ ] U6 | Trainer | `ui/src/views/TrainerView.vue` | ~20 | Non | Moyenne-haute | Pas commencé |
@@ -121,6 +121,15 @@ Deuxième round de travail parallèle : Codex sur les 17 sous-panneaux `componen
 - **Leçon de méthode** : la vérification visuelle CDP doit couvrir explicitement le changement de langue sur des éléments transverses (statut sidebar, labels de boutons dynamiques calculés dans des composables/stores), pas seulement le contenu statique des templates des fichiers modifiés — un agent qui vérifie "son" fichier ne verra pas un bug qui vit dans un fichier partagé en amont.
 - **Nouveau pattern de code établi** : pour traduire du texte généré dans un fichier `.ts` hors composant (composable top-level, store Pinia), utiliser `import { i18n } from '@/i18n'` puis `i18n.global.t(...)` — `useI18n()` de vue-i18n ne fonctionne que dans un contexte `setup()`. Ce pattern sera réutilisable pour U20-U22 (stores `app.ts`/`assistantSmartSearch.ts`/`writeFreeze.ts`).
 - Validations complètes après merge + gap fixes : `npm run type-check` OK, `npm run build` OK, suite de tests C++ **469/469 OK** (aucun changement C++ ce round, vérification de non-régression), vérification visuelle CDP FR et EN en direct avec attache réelle sur `KillEngineTestTarget.exe` (nav, scan, write/freeze, AOB, injection, pointeurs, journal actions).
+
+## Progrès (10/09/2026) — U4 clos (InvestigationView.vue)
+
+Troisième round, solo cette fois (pas de travail parallèle avec Codex sur ce round). 107 clés `investigation.*` ajoutées, couvrant le template ET le `<script setup>` (fonctions `statusLabel`, `checkpointTitle`, `checkpointDetail`, `checkpointKindLabel`, `checkpointScoreLabel`, `checkpointRiskLabel`, `statusText`, `bestNextAction`, `notebookSections` — toutes retournaient des chaînes françaises en dur consommées ensuite par le template).
+
+- Vérifié avant de commencer que le fichier ne suivait pas le pattern piège d'U1 (`AssistantView.vue`) : aucun appel `pushMessage`, ~45 lignes de texte français réel (accents), conforme à l'estimation de l'audit initial (~40) — pas de surprise de périmètre cette fois.
+- **Vérification visuelle réelle particulièrement complète** : contrairement aux vérifications précédentes de ce chantier (qui tombaient souvent sur l'état vide "aucune enquête"), une vraie session d'enquête active était présente au moment du test (137 étapes, objectif `777777`, process `KillEngineTestTarget.exe`) — a permis de vérifier en conditions réelles la timeline, les filtres, le rapport IA, "Meilleure prochaine action"/"Best next action", et les sections UWP/Archives, en FR puis en EN.
+- **Distinction importante confirmée en vérifiant** : le contenu généré par le backend C++ (résumé du rapport IA "0 candidat(s), 0 cible(s) active(s)...", titres/détails des étapes de la timeline "Risque confirmé: Activer...") reste en français dans les deux langues de l'UI — attendu et hors périmètre de ce chantier (règle n°6 de la méthode, ce texte relève de `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` ou est simplement hors périmètre), pas un oubli.
+- Validations : `npm run type-check` OK, `npm run build` OK, 111 références de clés uniques toutes résolues des deux côtés par script, suite C++ 469/469 (sanity check, aucun changement C++), vérification visuelle CDP FR et EN complète (en-tête, 2 bannières PanelIntro, carnet d'hypothèses, résumé, rapport IA, meilleure action, timeline + filtres, hypothèses/checkpoints, état UWP, archives).
 
 ## Règle d'usage
 

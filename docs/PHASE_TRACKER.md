@@ -48,6 +48,16 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — troisième round (U4 clos : InvestigationView.vue), (10/09/2026, Claude)
+
+**Suite de l'entrée ci-dessous.** Troisième round, solo cette fois. `ui/src/views/InvestigationView.vue` (carnet d'hypothèses, timeline d'enquête, checkpoints, rapport IA, export, snapshot UWP, archives) : 107 clés `investigation.*` ajoutées, couvrant le template ET le `<script setup>` (fonctions `statusLabel`, `checkpointTitle`, `checkpointDetail`, `checkpointKindLabel`, `checkpointScoreLabel`, `checkpointRiskLabel`, `statusText`, `bestNextAction`, `notebookSections`, qui retournaient toutes des chaînes françaises en dur).
+
+**Vérification live particulièrement instructive** : une vraie session d'enquête active était présente au moment du test (137 étapes, objectif `777777`, process `KillEngineTestTarget.exe` attaché), ce qui a permis de vérifier en conditions réelles bien plus que l'état vide habituel — timeline avec filtres, rapport IA, "Meilleure prochaine action", sections UWP/Archives, en FR puis en EN. Confirmé au passage : le contenu généré par le backend C++ (résumé du rapport IA, titres/détails des étapes de timeline) reste délibérément en français dans les deux langues de l'UI — hors périmètre de ce chantier (texte dynamique backend, pas template statique), pas un oubli.
+
+**Comment vérifié** : `npm run type-check` + `npm run build` OK, 111 références de clés uniques toutes résolues des deux côtés par script, suite C++ **469/469 OK** (sanity check, aucun changement C++), vérification visuelle CDP FR et EN complète (en-tête, 2 bannières d'aide, carnet d'hypothèses, résumé, rapport IA, meilleure action, timeline + filtres, hypothèses/checkpoints, état UWP, archives).
+
+**Reste ouvert** : U5-U22, voir `docs/FRONTEND_LOCALIZATION_ROADMAP.md`.
+
 ### Localisation de l'interface Vue — deuxième round (U3 clos entièrement : vue principale + 17 sous-panneaux), (10/09/2026, Codex + Claude)
 
 **Suite de l'entrée ci-dessous.** Deuxième round de travail parallèle sur `docs/FRONTEND_LOCALIZATION_ROADMAP.md` : Codex sur les 17 sous-panneaux `ui/src/components/expert/*.vue` (U3a-U3q) dans un worktree séparé (`../killengine-codex-ui-u3-panels`), Claude sur `ui/src/views/ExpertView.vue` (U3 lui-même, 212 clés `expert.*`) dans le dossier principal — fichiers `.vue` disjoints entre les deux lots, mais **les deux ont modifié `fr.json`/`en.json`** en parallèle (chacun ajoutant ses propres namespaces), provoquant cette fois un vrai conflit git sur ces deux fichiers au merge (contrairement au round précédent). Résolu par un merge JSON programmatique (union récursive des deux arborescences plutôt qu'une résolution manuelle des marqueurs de conflit) : script Node.js `deepMerge`, vérifié ensuite par script (32 namespaces top-level après merge, comptes de clés FR/EN identiques par namespace, JSON valide des deux côtés, 1442 clés terminales de chaque côté) — aucune clé perdue.
