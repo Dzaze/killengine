@@ -26,7 +26,7 @@ function formatNumber(n: unknown) {
         <RiskBadge level="code" />
       </div>
       <span v-if="findWhatAccessesResult?.hitCount">
-        {{ formatNumber(findWhatAccessesResult.hitCount) }} accès capturé(s)
+        {{ $t('findWhatAccesses.capturedCount', { count: formatNumber(findWhatAccessesResult.hitCount) }) }}
       </span>
     </div>
 

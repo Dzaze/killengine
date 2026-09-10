@@ -11,7 +11,7 @@ const store = useAppStore()
   <section class="panel region-context">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Région active</h2>
+        <h2>{{ $t('regionPanel.title') }}</h2>
         <InfoDot topic="regionContext" />
         <RiskBadge level="read" />
       </div>

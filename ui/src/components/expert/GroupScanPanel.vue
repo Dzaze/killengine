@@ -18,27 +18,27 @@ defineProps<{
   <section class="panel">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Scan groupe</h2>
+        <h2>{{ $t('groupScanPanel.title') }}</h2>
         <InfoDot topic="groupScan" />
         <RiskBadge level="read" />
       </div>
-      <span>{{ store.groupScanResult ? store.groupScanResult.matchesFound + ' structure(s)' : 'valeurs voisines' }}</span>
+      <span>{{ store.groupScanResult ? $t('groupScanPanel.structureCount', { count: store.groupScanResult.matchesFound }) : $t('groupScanPanel.neighborValues') }}</span>
     </div>
-    <p class="hint">Cherche N valeurs avec offsets fixes connus (ex: HP=100 a +0, Mana=50 a +4). Trouve la base de la structure.</p>
+    <p class="hint">{{ $t('groupScanPanel.hint') }}</p>
     <div class="group-scan-entries">
       <div v-for="(entry, index) in store.groupScanEntries" :key="index" class="group-scan-row">
         <input v-model="entry.offset" class="input-mini" type="text" placeholder="0" spellcheck="false" />
         <select v-model="entry.type" class="input-mini">
           <option v-for="t in valueTypeOptions" :key="t" :value="t">{{ t }}</option>
         </select>
-        <input v-model="entry.value" class="input-mini grow" type="text" placeholder="valeur" spellcheck="false" />
+        <input v-model="entry.value" class="input-mini grow" type="text" :placeholder="$t('groupScanPanel.valuePlaceholder')" spellcheck="false" />
         <button class="btn btn-secondary compact" type="button" :disabled="store.groupScanEntries.length <= 2" @click="store.removeGroupScanEntry(index)">x</button>
       </div>
     </div>
     <div class="row-actions">
-      <button class="btn btn-secondary compact" type="button" @click="store.addGroupScanEntry()">+ valeur</button>
-      <button class="btn btn-secondary compact" type="button" @click="store.clearGroupScanEntries()">Reset</button>
-      <label class="hint">distance max</label>
+      <button class="btn btn-secondary compact" type="button" @click="store.addGroupScanEntry()">{{ $t('groupScanPanel.addValue') }}</button>
+      <button class="btn btn-secondary compact" type="button" @click="store.clearGroupScanEntries()">{{ $t('groupScanPanel.reset') }}</button>
+      <label class="hint">{{ $t('groupScanPanel.maxDistance') }}</label>
       <input v-model.number="store.groupScanMaxDistance" class="input-mini" type="number" min="4" max="4096" />
       <button
         class="btn btn-primary compact"
@@ -47,25 +47,25 @@ defineProps<{
         @click="store.doGroupScan()"
       >
         <span v-if="store.groupScanBusy" class="btn-spinner" aria-hidden="true"></span>
-        <span>{{ store.groupScanBusy ? 'Scan...' : 'Scanner groupe' }}</span>
+        <span>{{ store.groupScanBusy ? $t('groupScanPanel.scanning') : $t('groupScanPanel.scan') }}</span>
       </button>
     </div>
     <div v-if="store.groupScanResult" class="metrics">
-      <span>Trouves: {{ store.groupScanResult.matchesFound }}</span>
-      <span v-if="store.groupScanResult.partial">Partiel</span>
-      <span v-if="store.groupScanResult.elapsedMs">Temps: {{ store.groupScanResult.elapsedMs }} ms</span>
+      <span>{{ $t('groupScanPanel.found', { count: store.groupScanResult.matchesFound }) }}</span>
+      <span v-if="store.groupScanResult.partial">{{ $t('groupScanPanel.partial') }}</span>
+      <span v-if="store.groupScanResult.elapsedMs">{{ $t('groupScanPanel.elapsedMs', { ms: store.groupScanResult.elapsedMs }) }}</span>
     </div>
     <div v-if="store.groupScanResult?.matches?.length" class="group-scan-results">
       <div v-for="match in store.groupScanResult.matches.slice(0, 20)" :key="match.address" class="group-scan-result-row">
         <code>0x{{ match.address }}</code>
         <span>{{ match.variantLabel }}</span>
         <span v-if="match.confidence" class="hint">{{ Math.round(match.confidence * 100) }}%</span>
-        <button class="btn btn-secondary compact" type="button" @click="store.addAddressToWatch(match.address, match.type)">Watch</button>
+        <button class="btn btn-secondary compact" type="button" @click="store.addAddressToWatch(match.address, match.type)">{{ $t('groupScanPanel.watch') }}</button>
       </div>
     </div>
     <p v-if="store.groupScanResult?.error" class="error">{{ store.groupScanResult.error }}</p>
     <p v-if="findWhatAccessesResult" :class="findWhatAccessesResult.success ? 'hint' : 'error'">
-      Lu par : {{ findWhatAccessesResult.hitCount ?? 0 }} acces - {{ findWhatAccessesResult.error ?? '' }}
+      {{ $t('groupScanPanel.readBy', { count: findWhatAccessesResult.hitCount ?? 0, error: findWhatAccessesResult.error ?? '' }) }}
     </p>
   </section>
 </template>

@@ -29,23 +29,21 @@ const {
   <section class="panel pointer-chain-panel risk-read">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Pointer Chains <span class="hint-inline">(jeux modernes / applications dynamiques)</span></h2>
+        <h2>{{ $t('pointerChainScan.title') }} <span class="hint-inline">{{ $t('pointerChainScan.subtitle') }}</span></h2>
         <InfoDot topic="pointerChains" />
         <RiskBadge level="read" />
       </div>
-      <span v-if="pointerScanResult">{{ formatNumber(pointerScanResult.chainCount) }} chaine(s)</span>
+      <span v-if="pointerScanResult">{{ $t('pointerChainScan.chainCount', { count: formatNumber(pointerScanResult.chainCount) }) }}</span>
     </div>
     <p class="panel-hint">{{ $t('help.pointerChains.when') }}</p>
     <p class="hint">
-      Pour les jeux modernes et applications avec allocations dynamiques, les ressources changent souvent d'adresse.
-      Trouve d'abord l'adresse avec un scan normal, puis utilise le scanner de pointeurs pour
-      decouvrir une chaine stable qui survivra aux redemarrages.
+      {{ $t('pointerChainScan.hint') }}
     </p>
     <div class="controls pointer-chain-controls">
       <input
         v-model="pointerScanAddress"
         class="input"
-        placeholder="Adresse cible (0x...)"
+        :placeholder="$t('pointerChainScan.targetAddressPlaceholder')"
         :disabled="store.scanBusy || !store.isAttached"
       />
       <select v-model="pointerScanValueType" class="input select">
@@ -57,8 +55,8 @@ const {
         min="1"
         max="5"
         class="input"
-        placeholder="Profondeur"
-        title="Nombre de niveaux de dereferencement"
+        :placeholder="$t('pointerChainScan.depthPlaceholder')"
+        :title="$t('pointerChainScan.depthTitle')"
       />
       <input
         v-model.number="pointerScanMaxOffset"
@@ -66,8 +64,8 @@ const {
         min="0"
         step="16"
         class="input"
-        placeholder="Offset max"
-        title="Offset maximum entre pointeur et cible"
+        :placeholder="$t('pointerChainScan.maxOffsetPlaceholder')"
+        :title="$t('pointerChainScan.maxOffsetTitle')"
       />
       <button
         class="btn btn-primary"
@@ -75,15 +73,15 @@ const {
         @click="runPointerScan()"
       >
         <span v-if="pointerScanBusy" class="btn-spinner" aria-hidden="true"></span>
-        <span>{{ pointerScanBusy ? 'Scan...' : 'Scanner les pointeurs' }}</span>
+        <span>{{ pointerScanBusy ? $t('pointerChainScan.scanning') : $t('pointerChainScan.scanPointers') }}</span>
       </button>
     </div>
     <div v-if="pointerScanResult" class="metrics">
-      <span>Chaines: {{ formatNumber(pointerScanResult.chainCount) }}</span>
-      <span>Pointeurs scannes: {{ formatNumber(pointerScanResult.pointersScanned) }}</span>
-      <span>Bytes: {{ formatBytes(pointerScanResult.bytesScanned) }}</span>
-      <span v-if="pointerScanResult.elapsedMs">Temps: {{ formatNumber(pointerScanResult.elapsedMs) }} ms</span>
-      <span v-if="pointerScanResult.partial">Resultat partiel</span>
+      <span>{{ $t('pointerChainScan.chains', { count: formatNumber(pointerScanResult.chainCount) }) }}</span>
+      <span>{{ $t('pointerChainScan.pointersScanned', { count: formatNumber(pointerScanResult.pointersScanned) }) }}</span>
+      <span>{{ $t('pointerChainScan.bytes', { bytes: formatBytes(pointerScanResult.bytesScanned) }) }}</span>
+      <span v-if="pointerScanResult.elapsedMs">{{ $t('pointerChainScan.elapsedMs', { ms: formatNumber(pointerScanResult.elapsedMs) }) }}</span>
+      <span v-if="pointerScanResult.partial">{{ $t('pointerChainScan.partialResult') }}</span>
     </div>
     <div v-if="pointerScanResult?.chains?.length" class="pointer-chain-list">
       <div
@@ -101,43 +99,43 @@ const {
         </label>
         <div class="pointer-chain-info">
           <strong>{{ chain.label }}</strong>
-          <span class="chain-depth">profondeur {{ chain.depth }}</span>
+          <span class="chain-depth">{{ $t('pointerChainScan.depthValue', { depth: chain.depth }) }}</span>
         </div>
         <div class="pointer-chain-actions">
           <button class="btn btn-secondary compact" @click="testPointerChain(chain)">
-            Tester
+            {{ $t('pointerChainScan.test') }}
           </button>
           <button
             class="btn btn-secondary compact"
             @click="usePointerChainAsCandidate(chain)"
           >
-            Utiliser
+            {{ $t('pointerChainScan.use') }}
           </button>
           <button
             class="btn btn-primary compact"
             @click="savePointerChain(chain)"
           >
-            Sauver profil
+            {{ $t('pointerChainScan.saveProfile') }}
           </button>
           <button
             class="btn btn-secondary compact"
             @click="bookmarkPointerChain(chain)"
           >
-            Note
+            {{ $t('pointerChainScan.note') }}
           </button>
           <button
             class="btn btn-secondary compact"
-            title="Surveille cette chaine en live (adresse re-resolue a chaque cycle) dans le panneau Watch chaines de pointeurs."
+            :title="$t('pointerChainScan.watchTitle')"
             @click="watchPointerChain(chain)"
           >
-            Watch
+            {{ $t('pointerChainScan.watch') }}
           </button>
         </div>
       </div>
     </div>
     <p v-if="pointerScanResult?.error" class="error">{{ pointerScanResult.error }}</p>
     <p v-if="pointerResolveResult" class="hint">
-      Resolution : {{ pointerResolveResult.success ? 'OK 0x' + pointerResolveResult.finalAddress : 'ECHEC ' + pointerResolveResult.error }}
+      {{ pointerResolveResult.success ? $t('pointerChainScan.resolutionOk', { address: pointerResolveResult.finalAddress }) : $t('pointerChainScan.resolutionFail', { error: pointerResolveResult.error }) }}
     </p>
   </section>
 </template>

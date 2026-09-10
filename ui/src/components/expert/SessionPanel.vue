@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore, type SessionEntry, type SessionGroup } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import RiskBadge from '@/components/expert/RiskBadge.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 const selectedIds = ref<Set<string>>(new Set())
 const entries = computed(() => store.sessionEntries)
@@ -14,7 +16,7 @@ const selectedCount = computed(() => selectedIds.value.size)
 function kindLabel(kind: SessionEntry['kind']): string {
   if (kind === 'freeze_breakpoint') return 'Freeze BP'
   if (kind === 'freeze_polling') return 'Freeze'
-  return 'Écriture'
+  return t('sessionPanel.kind.write')
 }
 
 function createdAtLabel(value: string): string {
@@ -65,11 +67,11 @@ function removeSelectedFromGroup(group: SessionGroup) {
 }
 
 function promoteEntry(entry: SessionEntry) {
-  void store.promoteSessionEntryToTrainer(entry.id, entry.label || `Session 0x${entry.address}`)
+  void store.promoteSessionEntryToTrainer(entry.id, entry.label || t('sessionPanel.defaultEntryLabel', { address: entry.address }))
 }
 
 function promoteGroup(group: SessionGroup) {
-  void store.promoteSessionGroupToTrainer(group.id, group.name || 'Groupe session')
+  void store.promoteSessionGroupToTrainer(group.id, group.name || t('sessionPanel.defaultGroupName'))
 }
 
 // PHASE 166 : deposer une entree (liste plate ou chip d'un autre groupe) sur
@@ -104,25 +106,25 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
   <section class="panel">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Session active</h2>
-        <InfoDot text="Adresses suivies pendant le process attaché : freezes actifs et écritures récentes. La liste et les groupes sont vidés au prochain attach ou detach." />
+        <h2>{{ $t('sessionPanel.title') }}</h2>
+        <InfoDot :text="$t('sessionPanel.info')" />
         <RiskBadge level="write" />
       </div>
-      <span>{{ entries.length }} entrée(s)</span>
+      <span>{{ $t('sessionPanel.entryCount', { count: entries.length }) }}</span>
     </div>
 
     <div v-if="entries.length === 0" class="session-empty">
-      Aucun freeze ou écriture récente dans cette session.
+      {{ $t('sessionPanel.empty') }}
     </div>
 
     <template v-else>
       <div class="session-toolbar">
-        <span>{{ selectedCount }} sélectionnée(s)</span>
+        <span>{{ $t('sessionPanel.selectedCount', { count: selectedCount }) }}</span>
         <button class="btn compact btn-secondary" type="button" :disabled="selectedCount < 2" @click="createGroupFromSelection">
-          Grouper la sélection
+          {{ $t('sessionPanel.groupSelection') }}
         </button>
         <button class="btn compact btn-primary" type="button" :disabled="selectedCount === 0" @click="clearSelection">
-          Désélectionner
+          {{ $t('sessionPanel.clearSelection') }}
         </button>
       </div>
 
@@ -141,11 +143,11 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
             <input
               class="input session-group-name"
               :value="group.name"
-              placeholder="Nom du groupe"
+              :placeholder="$t('sessionPanel.groupNamePlaceholder')"
               @input="store.updateSessionGroupName(group.id, ($event.target as HTMLInputElement).value)"
             />
-            <span>{{ group.memberIds.length }} membre(s)</span>
-            <span>{{ groupActiveCount(group) }} actif(s)</span>
+            <span>{{ $t('sessionPanel.memberCount', { count: group.memberIds.length }) }}</span>
+            <span>{{ $t('sessionPanel.activeCount', { count: groupActiveCount(group) }) }}</span>
           </div>
 
           <div class="session-group-members">
@@ -155,7 +157,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
               class="session-chip"
               :class="{ disabled: !entry.enabled }"
               draggable="true"
-              title="Glisse vers un autre groupe pour la deplacer."
+              :title="$t('sessionPanel.dragTitle')"
               @dragstart="handleEntryDragStart($event, entry.id)"
             >
               0x{{ entry.address }}
@@ -169,7 +171,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
               :disabled="groupActiveCount(group) === 0"
               @click="store.disableSessionGroup(group.id)"
             >
-              Arrêter groupe
+              {{ $t('sessionPanel.stopGroup') }}
             </button>
             <button
               class="btn compact btn-primary"
@@ -177,10 +179,10 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
               :disabled="selectedMembersInGroup(group).length === 0"
               @click="removeSelectedFromGroup(group)"
             >
-              Retirer du groupe
+              {{ $t('sessionPanel.removeFromGroup') }}
             </button>
             <button class="btn compact btn-primary" type="button" @click="store.removeSessionGroup(group.id)">
-              Supprimer
+              {{ $t('sessionPanel.delete') }}
             </button>
             <button
               class="btn compact btn-secondary"
@@ -188,7 +190,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
               :disabled="store.isSessionPromotionBusy(group.id)"
               @click="promoteGroup(group)"
             >
-              {{ store.isSessionPromotionBusy(group.id) ? 'Promotion...' : 'Promouvoir en Trainer' }}
+              {{ store.isSessionPromotionBusy(group.id) ? $t('sessionPanel.promoting') : $t('sessionPanel.promoteTrainer') }}
             </button>
           </div>
         </div>
@@ -203,7 +205,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
           draggable="true"
           @dragstart="handleEntryDragStart($event, entry.id)"
         >
-          <label class="session-select" :aria-label="`Sélectionner 0x${entry.address}`">
+          <label class="session-select" :aria-label="$t('sessionPanel.selectAddressAria', { address: entry.address })">
             <input type="checkbox" :checked="isSelected(entry.id)" @change="setSelected(entry.id, ($event.target as HTMLInputElement).checked)" />
           </label>
 
@@ -217,12 +219,12 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
           <input
             class="input session-label"
             :value="entry.label"
-            placeholder="Note session"
+            :placeholder="$t('sessionPanel.notePlaceholder')"
             @input="store.updateSessionEntryLabel(entry.id, ($event.target as HTMLInputElement).value)"
           />
 
           <div class="session-actions">
-            <span v-if="store.hasFreezeInstability(entry.address)" class="session-warning">Instable</span>
+            <span v-if="store.hasFreezeInstability(entry.address)" class="session-warning">{{ $t('sessionPanel.unstable') }}</span>
             <button
               class="btn compact"
               :class="entry.enabled ? 'btn-secondary' : 'btn-primary'"
@@ -230,7 +232,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
               :disabled="!entry.enabled || entry.kind === 'write'"
               @click="store.disableSessionEntry(entry.id)"
             >
-              {{ entry.enabled ? 'Arrêter' : 'Arrêté' }}
+              {{ entry.enabled ? $t('sessionPanel.stop') : $t('sessionPanel.stopped') }}
             </button>
             <button
               class="btn compact btn-secondary"
@@ -238,7 +240,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
               :disabled="store.isSessionPromotionBusy(entry.id)"
               @click="promoteEntry(entry)"
             >
-              {{ store.isSessionPromotionBusy(entry.id) ? 'Promotion...' : 'Promouvoir en Trainer' }}
+              {{ store.isSessionPromotionBusy(entry.id) ? $t('sessionPanel.promoting') : $t('sessionPanel.promoteTrainer') }}
             </button>
           </div>
         </div>

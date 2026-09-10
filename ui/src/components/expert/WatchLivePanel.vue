@@ -10,18 +10,18 @@ const store = useAppStore()
   <section class="panel">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Watch live</h2>
+        <h2>{{ $t('watchLivePanel.title') }}</h2>
         <InfoDot topic="watchLive" />
         <RiskBadge level="read" />
       </div>
-      <span>{{ store.watchedAddresses.length }} adresse(s) · {{ store.watchLiveReadLimit }}/cycle</span>
+      <span>{{ $t('watchLivePanel.addressCount', { count: store.watchedAddresses.length, limit: store.watchLiveReadLimit }) }}</span>
       <button
         class="btn btn-secondary compact"
         type="button"
         :disabled="store.watchedAddresses.length === 0"
         @click="store.refreshWatchedAddresses()"
       >
-        Rafraîchir
+        {{ $t('watchLivePanel.refresh') }}
       </button>
       <button
         class="btn btn-secondary compact"
@@ -29,7 +29,7 @@ const store = useAppStore()
         :disabled="store.watchedAddresses.length === 0"
         @click="store.setWatchLiveEnabled(!store.watchLiveEnabled)"
       >
-        {{ store.watchLiveEnabled ? 'Arrêter' : 'Démarrer' }}
+        {{ store.watchLiveEnabled ? $t('watchLivePanel.stop') : $t('watchLivePanel.start') }}
       </button>
       <button
         class="btn btn-secondary compact"
@@ -37,18 +37,18 @@ const store = useAppStore()
         :disabled="store.watchedAddresses.length === 0"
         @click="store.clearWatchedAddresses()"
       >
-        Vider
+        {{ $t('watchLivePanel.clear') }}
       </button>
     </div>
-    <div v-if="store.watchedAddresses.length === 0" class="hint">Sélectionne un candidat ou clique Watch pour surveiller une adresse.</div>
+    <div v-if="store.watchedAddresses.length === 0" class="hint">{{ $t('watchLivePanel.empty') }}</div>
     <div v-else class="watch-list">
       <div v-for="item in store.watchedAddresses" :key="item.address" class="watch-row" :class="{ changed: item.changed }">
         <code>0x{{ item.address }}</code>
         <span>{{ item.type }}</span>
         <strong>{{ item.value || '-' }}</strong>
-        <span v-if="item.previousValue">avant: {{ item.previousValue }}</span>
+        <span v-if="item.previousValue">{{ $t('watchLivePanel.previousValue', { value: item.previousValue }) }}</span>
         <span>{{ item.updatedAt }}</span>
-        <button class="btn btn-secondary compact" @click="store.removeAddressFromWatch(item.address)">Retirer</button>
+        <button class="btn btn-secondary compact" @click="store.removeAddressFromWatch(item.address)">{{ $t('watchLivePanel.remove') }}</button>
       </div>
     </div>
   </section>

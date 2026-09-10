@@ -2,10 +2,12 @@
 import { onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
+import { useI18n } from 'vue-i18n'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import RiskBadge from '@/components/expert/RiskBadge.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 const busy = ref(false)
 const result = ref<Record<string, unknown> | null>(null)
@@ -21,7 +23,7 @@ async function runAutoDissect() {
   // Utiliser le template sélectionné ou le dernier sauvegardé
   const template = store.structureTemplates[store.structureTemplates.length - 1]
   if (!template) {
-    result.value = { success: false, error: 'Aucun template de structure disponible. Sauvegarde d\'abord un template dans l\'onglet Structure.' }
+    result.value = { success: false, error: t('autoDissect.noTemplateError') }
     return
   }
 
@@ -31,7 +33,7 @@ async function runAutoDissect() {
     const controller = backend.getController()
     if (!controller.findStructureInstancesAsync) {
       busy.value = false
-      result.value = { success: false, error: 'findStructureInstancesAsync non disponible dans ce backend.' }
+      result.value = { success: false, error: t('autoDissect.backendUnavailable') }
       return
     }
     const templateJson: Record<string, unknown> = {
@@ -45,7 +47,7 @@ async function runAutoDissect() {
     const started = await controller.findStructureInstancesAsync(templateJson)
     if (!started?.started) {
       busy.value = false
-      result.value = started ?? { success: false, error: 'Réponse backend absente.' }
+      result.value = started ?? { success: false, error: t('autoDissect.missingBackendResponse') }
     }
   } catch (e) {
     busy.value = false
@@ -71,7 +73,7 @@ onMounted(() => {
         <RiskBadge level="read" />
       </div>
       <span v-if="result?.instanceCount">
-        {{ result.instanceCount }} instance(s) trouvée(s)
+        {{ $t('autoDissect.instanceCount', { count: result.instanceCount }) }}
       </span>
     </div>
 
@@ -93,7 +95,7 @@ onMounted(() => {
         :disabled="busy || store.structureTemplates.length === 0"
         @click="runAutoDissect()"
       >
-        {{ busy ? 'Scan...' : $t('autoDissect.scan') }}
+        {{ busy ? $t('autoDissect.scanning') : $t('autoDissect.scan') }}
       </button>
     </div>
 

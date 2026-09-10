@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import RiskBadge from '@/components/expert/RiskBadge.vue'
@@ -7,18 +8,19 @@ import { formatBytes, formatNumber } from '@/utils/format'
 import { valueTypeOptions } from '@/utils/valueTypes'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0) > 0)
 const unknownGuideReady = computed(() => Boolean(store.unknownSnapshotResult?.success) || hasCandidateContext.value)
 
 const unknownGuideActions = [
-  { mode: 'increased', label: 'ça augmente' },
-  { mode: 'decreased', label: 'ça diminue' },
-  { mode: 'unchanged', label: 'stable' },
-  { mode: 'changed', label: 'ça change' },
+  { mode: 'increased', labelKey: 'unknown.increased' },
+  { mode: 'decreased', labelKey: 'unknown.decreased' },
+  { mode: 'unchanged', labelKey: 'unknown.stable' },
+  { mode: 'changed', labelKey: 'unknown.changed' },
 ] as const
 const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096]
-const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
+const unknownDepthLabel = (mb: number) => (mb === -1 ? t('unknown.auto') : t('unknown.megabytes', { mb }))
 </script>
 
 <template>
@@ -33,30 +35,30 @@ const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
     <p class="panel-hint">{{ $t('help.unknown.when') }}</p>
     <div class="controls unknown-controls">
       <select v-model="store.unknownScanType" class="input select" :disabled="store.scanBusy">
-        <option value="Auto">Auto (multi-type)</option>
+        <option value="Auto">{{ $t('unknown.autoMultiType') }}</option>
         <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
       </select>
       <label class="checkbox-label compact-toggle">
         <input v-model="store.unknownWritableOnly" type="checkbox" :disabled="store.scanBusy" />
-        <span>Writable only</span>
+        <span>{{ $t('unknown.writableOnly') }}</span>
       </label>
       <label class="checkbox-label compact-toggle">
         <input v-model="store.unknownCopyOnWriteOnly" type="checkbox" :disabled="store.scanBusy || !store.unknownWritableOnly" />
-        <span>Copy-on-write</span>
+        <span>{{ $t('unknown.copyOnWrite') }}</span>
       </label>
       <label class="compact-select">
-        <span>Profondeur</span>
+        <span>{{ $t('unknown.depth') }}</span>
         <select v-model.number="store.settingUnknownSnapshotMaxMb" class="input select" :disabled="store.scanBusy">
           <option v-for="mb in unknownSnapshotPresets" :key="mb" :value="mb">{{ unknownDepthLabel(mb) }}</option>
         </select>
       </label>
       <button class="btn btn-primary" :disabled="store.scanBusy" @click="store.captureUnknownSnapshot()">
         <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
-        <span>{{ store.scanBusy ? 'Capture...' : $t('unknown.capture') }}</span>
+        <span>{{ store.scanBusy ? $t('unknown.capturing') : $t('unknown.capture') }}</span>
       </button>
     </div>
     <p class="hint unknown-guide-warning">
-      ⚠️ Avant de cliquer : as-tu bien fait l'action dans le jeu ? "Ça augmente/diminue/change" doit suivre un vrai changement, "stable" doit suivre l'absence de changement. Cliquer le mauvais bouton peut faire tomber tes candidats à 0 d'un coup — utilise "Restaurer réduction" (panneau Scan suivant, un peu plus haut) si ça arrive.
+      {{ $t('unknown.warningBeforeClick') }}
     </p>
     <div class="unknown-guide">
       <button
@@ -68,18 +70,18 @@ const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
         :disabled="store.scanBusy || !unknownGuideReady"
         @click="store.runUnknownGuideStep(action.mode)"
       >
-        {{ action.label }}
+        {{ $t(action.labelKey) }}
       </button>
     </div>
     <div v-if="store.unknownSnapshotResult || store.unknownNextScanResult" class="metrics">
       <span v-if="store.unknownSnapshotResult">{{ $t('unknown.regions') }}: {{ formatNumber(store.unknownSnapshotResult.regionsCaptured) }}</span>
       <span v-if="store.unknownSnapshotResult">{{ $t('unknown.bytes') }}: {{ formatNumber(store.unknownSnapshotResult.bytesCaptured) }}</span>
-      <span v-if="store.unknownSnapshotResult?.captureLimitBytes">Limite: {{ formatBytes(store.unknownSnapshotResult.captureLimitBytes) }}</span>
-      <span v-if="store.unknownSnapshotResult?.captureLimitReached" class="warning-text">limite atteinte</span>
-      <span v-if="store.unknownSnapshotResult?.compressedBytes !== undefined">Compressé: {{ formatBytes(store.unknownSnapshotResult.compressedBytes) }}</span>
-      <span v-if="store.unknownSnapshotResult?.mappedStorage">Stockage fichier temporaire</span>
-      <span v-if="store.unknownSnapshotResult?.writableOnly">Writable only</span>
-      <span v-if="store.unknownSnapshotResult?.copyOnWriteOnly">Copy-on-write</span>
+      <span v-if="store.unknownSnapshotResult?.captureLimitBytes">{{ $t('unknown.limit', { bytes: formatBytes(store.unknownSnapshotResult.captureLimitBytes) }) }}</span>
+      <span v-if="store.unknownSnapshotResult?.captureLimitReached" class="warning-text">{{ $t('unknown.limitReached') }}</span>
+      <span v-if="store.unknownSnapshotResult?.compressedBytes !== undefined">{{ $t('unknown.compressed', { bytes: formatBytes(store.unknownSnapshotResult.compressedBytes) }) }}</span>
+      <span v-if="store.unknownSnapshotResult?.mappedStorage">{{ $t('unknown.tempFileStorage') }}</span>
+      <span v-if="store.unknownSnapshotResult?.writableOnly">{{ $t('unknown.writableOnly') }}</span>
+      <span v-if="store.unknownSnapshotResult?.copyOnWriteOnly">{{ $t('unknown.copyOnWrite') }}</span>
       <span v-if="store.unknownNextScanResult">{{ $t('scan.matches') }}: {{ formatNumber(store.unknownNextScanResult.matchesFound) }}</span>
       <span v-if="store.unknownNextScanResult">{{ $t('scan.stored') }}: {{ formatNumber(store.unknownNextScanResult.stored) }}</span>
     </div>
@@ -90,18 +92,17 @@ const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
     </div>
     <div v-if="store.unknownSnapshotResult?.captureLimitReached" class="warning depth-warning">
       <p>
-        <strong>Capture limitée</strong> : seulement {{ formatBytes(store.unknownSnapshotResult.bytesCaptured) }} capturés sur une limite de {{ formatBytes(store.unknownSnapshotResult.captureLimitBytes) }}.
+        <strong>{{ $t('unknown.limitedCaptureTitle') }}</strong>{{ $t('unknown.limitedCaptureBody', { captured: formatBytes(store.unknownSnapshotResult.bytesCaptured), limit: formatBytes(store.unknownSnapshotResult.captureLimitBytes) }) }}
       </p>
       <p v-if="(store.unknownSnapshotResult.relevantBytes ?? 0) > (store.unknownSnapshotResult.bytesCaptured ?? 0)">
-        Mémoire pertinente totale : {{ formatBytes(store.unknownSnapshotResult.relevantBytes) }}.
-        Tu ne couvres que {{ (((store.unknownSnapshotResult.bytesCaptured ?? 0) / (store.unknownSnapshotResult.relevantBytes ?? 1)) * 100).toFixed(1) }}% — la ressource est probablement dans les {{ (100 - (((store.unknownSnapshotResult.bytesCaptured ?? 0) / (store.unknownSnapshotResult.relevantBytes ?? 1)) * 100)).toFixed(0) }}% manquants.
+        {{ $t('unknown.relevantMemoryCoverage', { total: formatBytes(store.unknownSnapshotResult.relevantBytes), covered: (((store.unknownSnapshotResult.bytesCaptured ?? 0) / (store.unknownSnapshotResult.relevantBytes ?? 1)) * 100).toFixed(1), missing: (100 - (((store.unknownSnapshotResult.bytesCaptured ?? 0) / (store.unknownSnapshotResult.relevantBytes ?? 1)) * 100)).toFixed(0) }) }}
       </p>
       <p v-if="(store.unknownSnapshotResult.suggestedDepthMb ?? 0) > 0">
-        <strong>Recommandation</strong> : passe la profondeur à <strong>{{ store.unknownSnapshotResult.suggestedDepthMb }} Mo</strong> (ou <strong>Auto</strong>) puis refais la capture.
+        <strong>{{ $t('unknown.recommendationTitle') }}</strong>{{ $t('unknown.recommendationBody', { depth: store.unknownSnapshotResult.suggestedDepthMb }) }}
       </p>
     </div>
     <div v-else-if="store.unknownSnapshotResult?.autoDepthApplied && (store.unknownSnapshotResult.suggestedDepthMb ?? 0) > 0" class="hint depth-info">
-      Mode Auto : profondeur calculée à {{ store.unknownSnapshotResult.suggestedDepthMb }} Mo pour {{ formatBytes(store.unknownSnapshotResult.relevantBytes) }} de mémoire pertinente.
+      {{ $t('unknown.autoDepthApplied', { depth: store.unknownSnapshotResult.suggestedDepthMb, bytes: formatBytes(store.unknownSnapshotResult.relevantBytes) }) }}
     </div>
     <div v-if="store.unknownGuideSteps.length > 0" class="unknown-timeline">
       <div
@@ -116,7 +117,7 @@ const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
       </div>
     </div>
     <p class="hint">
-      Capture d'abord, fais varier la ressource, puis indique comment elle a bougé. Stable sert surtout après une première réduction.
+      {{ $t('unknown.footerHint') }}
     </p>
   </section>
 </template>

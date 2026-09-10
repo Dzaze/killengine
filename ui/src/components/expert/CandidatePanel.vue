@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { backend } from '@/services/backend'
 import { useAppStore } from '@/stores/app'
 import { useExpertWriteSelection } from '@/composables/useExpertWriteSelection'
@@ -8,14 +9,15 @@ import { findWhatWritesSizeForType } from '@/utils/valueTypes'
 import InfoDot from './InfoDot.vue'
 import RiskBadge from './RiskBadge.vue'
 
-const fieldStabilityVerdictLabels: Record<string, string> = {
-  likely_derived_display: 'Probablement affiché/recalculé',
-  likely_event_driven: 'Probablement source événementielle',
-  no_writes_observed: 'Aucune écriture observée',
-  insufficient_data: 'Données insuffisantes',
+const fieldStabilityVerdictLabelKeys: Record<string, string> = {
+  likely_derived_display: 'candidatePanel.stability.likelyDerivedDisplay',
+  likely_event_driven: 'candidatePanel.stability.likelyEventDriven',
+  no_writes_observed: 'candidatePanel.stability.noWritesObserved',
+  insufficient_data: 'candidatePanel.stability.insufficientData',
 }
 
 const store = useAppStore()
+const { t } = useI18n()
 const {
   selectedCandidateAddresses,
   currentPageCandidates,
@@ -72,7 +74,7 @@ async function analyzeCandidateStability(address: string, type: string) {
   try {
     const controller = backend.getController()
     if (!controller.analyzeFieldStability) {
-      fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: false, error: 'analyzeFieldStability non exposé par ce backend.' } }
+      fieldStabilityByAddress.value = { ...fieldStabilityByAddress.value, [address]: { busy: false, error: t('candidatePanel.stability.backendUnavailable') } }
       return
     }
     const result = await controller.analyzeFieldStability(address, { size: findWhatWritesSizeForType(type) })
@@ -85,12 +87,12 @@ async function analyzeCandidateStability(address: string, type: string) {
 function fieldStabilityLabel(address: string): string {
   const entry = fieldStabilityByAddress.value[address]
   if (!entry) return ''
-  if (entry.busy) return 'Analyse...'
-  if (entry.error) return `Erreur: ${entry.error}`
+  if (entry.busy) return t('candidatePanel.stability.analyzing')
+  if (entry.error) return t('candidatePanel.stability.error', { error: entry.error })
   const result = entry.result
-  if (!result?.success) return String(result?.error || 'Échec')
+  if (!result?.success) return String(result?.error || t('candidatePanel.stability.failure'))
   const verdict = String(result.verdict || '')
-  return fieldStabilityVerdictLabels[verdict] || verdict
+  return fieldStabilityVerdictLabelKeys[verdict] ? t(fieldStabilityVerdictLabelKeys[verdict]) : verdict
 }
 </script>
 
@@ -98,11 +100,11 @@ function fieldStabilityLabel(address: string): string {
   <section class="panel risk-read">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Candidats</h2>
+        <h2>{{ $t('candidatePanel.title') }}</h2>
         <InfoDot topic="candidates" />
         <RiskBadge level="read" />
       </div>
-      <span>{{ formatNumber(store.candidatePage?.totalCount) }} · {{ selectedCandidateAddresses.length }} sélectionné(s)</span>
+      <span>{{ $t('candidatePanel.selectionSummary', { total: formatNumber(store.candidatePage?.totalCount), selected: selectedCandidateAddresses.length }) }}</span>
     </div>
     <p class="panel-hint">{{ $t('help.candidates.when') }}</p>
     <div class="candidate-toolbar">
@@ -125,55 +127,55 @@ function fieldStabilityLabel(address: string): string {
     </div>
     <div class="selection-toolbar">
       <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="toggleCurrentPageSelection()">
-        Sélection page
+        {{ $t('candidatePanel.selectPage') }}
       </button>
       <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="clearCandidateSelection()">
-        Effacer
+        {{ $t('candidatePanel.clear') }}
       </button>
       <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0" @click="useSelectedCandidatesInAssistant()">
-        Utiliser sélection
+        {{ $t('candidatePanel.useSelection') }}
       </button>
       <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length === 0 || !store.writeValue.trim()" @click="writeSelectedCandidates()">
-        {{ store.kernelMemoryModeActive ? 'Écrire via kernel' : 'Écrire sur sélection' }}
+        {{ store.kernelMemoryModeActive ? $t('candidatePanel.writeViaKernel') : $t('candidatePanel.writeSelection') }}
       </button>
       <button class="btn btn-primary compact" :disabled="selectedCandidateAddresses.length < 2 || !store.writeValue.trim()" @click="writeSelectedCandidatesAtomic()">
-        Écrire ensemble (atomique)
+        {{ $t('candidatePanel.writeAtomic') }}
       </button>
       <InfoDot topic="writeAtomic" align="right" />
       <button
         v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess && !store.kernelMemoryModeActive"
         class="btn btn-secondary compact"
-        :title="`Contourne les protections mémoire usermode — pour une adresse qui refuse de tenir une écriture normale (ex: instabilité/compteur animé).`"
+        :title="$t('candidatePanel.writeKernelTitle')"
         :disabled="selectedCandidateAddresses.length !== 1 || !store.writeValue.trim()"
         @click="writeSelectedCandidateKernel()"
       >
-        Écrire via kernel
+        {{ $t('candidatePanel.writeViaKernel') }}
       </button>
       <InfoDot topic="writeKernel" align="right" />
       <button class="btn btn-secondary compact" :disabled="store.candidatePage?.displaySuppressed || currentPageCandidates.length === 0" @click="watchCurrentCandidatePage()">
-        Watch page
+        {{ $t('candidatePanel.watchPage') }}
       </button>
       <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="watchSelectedCandidates()">
-        Watch sélection
+        {{ $t('candidatePanel.watchSelection') }}
       </button>
     </div>
     <div class="page-info">
       {{ store.candidatePage ? store.candidatePage.pageIndex + 1 : 1 }} / {{ candidatePageTotal }}
     </div>
     <div v-if="store.candidatePage" class="metrics candidate-storage">
-      <span>{{ store.candidatePage.fileBacked ? 'Stockage fichier' : 'Stockage RAM' }}</span>
-      <span>Fichier: {{ formatBytes(store.candidatePage.candidateStoreBytes) }}</span>
-      <span>RAM estimée: {{ formatBytes(store.candidatePage.candidateStoreMemoryBytes) }}</span>
+      <span>{{ store.candidatePage.fileBacked ? $t('candidatePanel.fileStorage') : $t('candidatePanel.ramStorage') }}</span>
+      <span>{{ $t('candidatePanel.fileBytes', { bytes: formatBytes(store.candidatePage.candidateStoreBytes) }) }}</span>
+      <span>{{ $t('candidatePanel.estimatedRam', { bytes: formatBytes(store.candidatePage.candidateStoreMemoryBytes) }) }}</span>
     </div>
     <div
       v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess"
       class="kernel-escalation-guide"
     >
-      <strong>Kernel prêt</strong>
-      <span>Sélectionne 1 candidat, lis/écris via kernel, puis relis. Si la valeur revient, ce n’est probablement pas un blocage d’écriture : lance Écrit par puis Tester automatiquement.</span>
+      <strong>{{ $t('candidatePanel.kernelReady') }}</strong>
+      <span>{{ $t('candidatePanel.kernelReadyHint') }}</span>
     </div>
     <div v-if="store.candidatePage?.displaySuppressed" class="candidate-suppressed">
-      {{ formatNumber(store.candidatePage.totalCount) }} candidats trouvés. Réduis avec un next scan ou filtre une adresse pour afficher une page.
+      {{ $t('candidatePanel.displaySuppressed', { count: formatNumber(store.candidatePage.totalCount) }) }}
     </div>
     <p v-if="store.nextScanResult?.stableGroupHint" class="hint stable-group-hint">
       {{ store.nextScanResult.stableGroupHint }}
@@ -209,40 +211,40 @@ function fieldStabilityLabel(address: string): string {
           <span
             v-if="match.writeVerified"
             class="write-verified-badge"
-            title="Cette adresse a déjà reçu une écriture confirmée avec succès — contrairement à un candidat juste stable au scan, celui-ci a été prouvé écrivable."
+            :title="$t('candidatePanel.writeVerifiedTitle')"
           >
-            ✓ écrit
+            {{ $t('candidatePanel.written') }}
           </span>
           <span class="visual-state">{{ store.candidateVisualState(match) }}</span>
-          <span v-if="store.watchedAddresses.some((item) => item.address === match.address)" class="live-dot">watch</span>
+          <span v-if="store.watchedAddresses.some((item) => item.address === match.address)" class="live-dot">{{ $t('candidatePanel.watchBadge') }}</span>
         </div>
         <div class="candidate-value" :class="{ error: candidateReadError(match.address) }" :title="candidateReadError(match.address) || match.lastValueHex">
-          <span>Valeur</span>
+          <span>{{ $t('candidatePanel.value') }}</span>
           <strong>{{ candidateCurrentValue(match.address) }}</strong>
         </div>
         <div class="candidate-actions">
           <button class="btn btn-secondary compact" @click="useCandidateInAssistant(match.address, match.type)">
-            Utiliser
+            {{ $t('candidatePanel.use') }}
           </button>
           <button class="btn btn-secondary compact" @click="watchOrRefreshCandidate(match.address, match.type)">
-            {{ watchedCandidate(match.address) ? 'Rafraîchir' : 'Watch' }}
+            {{ watchedCandidate(match.address) ? $t('candidatePanel.refresh') : $t('candidatePanel.watch') }}
           </button>
           <button class="btn btn-secondary compact" @click="freezeCandidateCurrent(match.address, match.type)">
-            Freeze actuel
+            {{ $t('candidatePanel.freezeCurrent') }}
           </button>
           <button
             class="btn btn-secondary compact"
             :disabled="fieldStabilityByAddress[match.address]?.busy"
-            title="Observe brièvement (lecture seule) le rythme des écritures pour juger si ce champ est probablement affiché/recalculé ou une source événementielle — utile avant de figer/patcher."
+            :title="$t('candidatePanel.stabilityTitle')"
             @click="analyzeCandidateStability(match.address, match.type)"
           >
-            Stabilité
+            {{ $t('candidatePanel.stabilityButton') }}
           </button>
           <button class="btn btn-secondary compact" @click="store.keepCandidate(match.address)">
-            Garder
+            {{ $t('candidatePanel.keep') }}
           </button>
           <button class="btn btn-secondary compact" @click="store.ignoreCandidate(match.address)">
-            Ignorer
+            {{ $t('candidatePanel.ignore') }}
           </button>
         </div>
         <div v-if="fieldStabilityLabel(match.address)" class="candidate-stability-result">
