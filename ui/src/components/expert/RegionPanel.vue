@@ -18,10 +18,10 @@ const store = useAppStore()
       <span>{{ formatBytes(store.expertRegionSize) }}</span>
     </div>
     <div class="metrics">
-      <span>Début: {{ store.expertStartAddress || '-' }}</span>
-      <span>Fin: {{ store.expertStopAddress || '-' }}</span>
-      <span>Protection: {{ store.expertRegionProtection || '-' }}</span>
-      <span>État: {{ store.expertRegionState || '-' }}</span>
+      <span>{{ $t('regionPanel.start') }}: {{ store.expertStartAddress || '-' }}</span>
+      <span>{{ $t('regionPanel.end') }}: {{ store.expertStopAddress || '-' }}</span>
+      <span>{{ $t('regionPanel.protection') }}: {{ store.expertRegionProtection || '-' }}</span>
+      <span>{{ $t('regionPanel.state') }}: {{ store.expertRegionState || '-' }}</span>
       <span>Type: {{ store.expertRegionType || '-' }}</span>
     </div>
   </section>

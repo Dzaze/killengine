@@ -1467,7 +1467,11 @@
     "remove": "Remove"
   },
   "regionPanel": {
-    "title": "Active region"
+    "title": "Active region",
+    "start": "Start",
+    "end": "End",
+    "protection": "Protection",
+    "state": "State"
   },
   "saveFilesPanel": {
     "title": "Save files",
@@ -1486,7 +1490,8 @@
     "patch": "Patch",
     "patched": "Patched: {count} occurrence(s)",
     "inspecting": "Inspecting...",
-    "inspectLocalSettings": "Inspect LocalSettings"
+    "inspectLocalSettings": "Inspect LocalSettings",
+    "noLikelyFileFound": "No likely save file found."
   },
   "sessionPanel": {
     "title": "Session",

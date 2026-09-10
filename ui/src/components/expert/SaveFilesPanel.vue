@@ -64,7 +64,7 @@ function readSaveFileFromExpert(path: string) {
       </button>
     </div>
     <div v-else-if="store.saveFileDiscoveryResult?.success" class="empty compact">
-      Aucun fichier de sauvegarde probable trouvé.
+      {{ $t('saveFilesPanel.noLikelyFileFound') }}
     </div>
     <div v-if="store.saveFileTextBusy || store.selectedSaveFileText" class="save-file-preview">
       <div class="source-list-title">

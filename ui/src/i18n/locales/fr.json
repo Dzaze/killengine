@@ -1467,7 +1467,11 @@
     "remove": "Retirer"
   },
   "regionPanel": {
-    "title": "Région active"
+    "title": "Région active",
+    "start": "Début",
+    "end": "Fin",
+    "protection": "Protection",
+    "state": "État"
   },
   "saveFilesPanel": {
     "title": "Fichiers de sauvegarde",
@@ -1486,7 +1490,8 @@
     "patch": "Patcher",
     "patched": "Patché : {count} occurrence(s)",
     "inspecting": "Inspection...",
-    "inspectLocalSettings": "Inspecter LocalSettings"
+    "inspectLocalSettings": "Inspecter LocalSettings",
+    "noLikelyFileFound": "Aucun fichier de sauvegarde probable trouvé."
   },
   "sessionPanel": {
     "title": "Session",
