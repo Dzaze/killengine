@@ -48,6 +48,20 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — septième et huitième rounds (U22, puis U10/U15/U16/U17 clos, Claude + Codex)
+
+**Suite des entrées ci-dessous.** Audit initial très sous-estimé pour les 3 stores restants (U20/U21/U22 : `app.ts` ~5 lignes prévues contre 328 réelles, `assistantSmartSearch.ts` ~20 contre 109, `writeFreeze.ts` ~6 contre 124). Décision propriétaire (10/09/2026) face à cet écart : Codex prend les résidus `.vue` bien calibrés (U10/U15/U16/U17), Claude prend `writeFreeze.ts` (le plus petit des 3 stores), les deux en parallèle dans des worktrees séparés — puis nouveau point avec le propriétaire avant `app.ts`/`assistantSmartSearch.ts`.
+
+**U22** (Claude, `ui/src/stores/writeFreeze.ts`) : 129 clés `writeFreezeStore.*` (126 au premier passage + 3 trouvées au balayage de contrôle). Réutilise le pattern `import { i18n } from '@/i18n'; const { t } = i18n.global` établi pour les fichiers `.ts` hors composant. Couvre écriture/gel/checkpoint : avertissements de sécurité, plan d'action de checkpoint, écritures multi-adresses/variantes/atomiques, rollback simple et batch, gel normal/breakpoint/escalade, replay d'historique. 129/129 clés résolues dans les deux locales, `help.*` non touché, `npm run type-check`/`build` OK, suite C++ 469/469 OK (aucun C++ modifié). Commit `dfc78bb`. Vérification live du cycle écriture→confirmation partiellement abandonnée (deux champs `placeholder="Valeur"` ambigus + faux positif regex `/confirmer|oui|ok/i` sur "Bo**ok**mark") — repose sur la vérification statique exhaustive à la place.
+
+**U10/U15/U16/U17** (Codex, `MemoryView.vue`/`NetworkView.vue`/`ModulesView.vue`/`WebView2InspectorView.vue`) : 98 clés au total (35+27+33+3), tous namespaces résiduels déjà existants réutilisés correctement. Guide EDR de `ModulesView.vue` étoffé côté FR/EN avec un nouveau bloc "Si le script échoue". Vérification indépendante par Claude avant merge (cf. [[feedback_verify_dont_trust_agent_build_claims]]) : diff des 4 fichiers relu intégralement, 272 références de clés toutes résolues, `help.*` byte-identique, build indépendant OK — **aucun gap trouvé**, quatrième round consécutif sans oubli côté Codex. Résidu confirmé hors périmètre : titres/descriptions du catalogue de modules ("Privilège SeDebugName" etc.) restent en français même en anglais, viennent de `apps/desktop/application_controller.cpp` (backend C++), pas du frontend.
+
+**Merge** : conflit git attendu sur les JSON de locale, mais résolu automatiquement par `git merge --no-ff` (stratégie `ort`) sans script manuel cette fois — première fois sur ce chantier.
+
+**Comment vérifié** : `npm run type-check` + `npm run build` OK sur l'état fusionné, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète (Mémoire : scan réel avec candidats trouvés ; Réseau, Modules avec guide EDR déroulé, WebView2 Inspector). Worktrees et branches temporaires supprimés après merge.
+
+**Reste ouvert** : seuls U20 (`app.ts`) et U21 (`assistantSmartSearch.ts`) sur toute la roadmap — voir `docs/FRONTEND_LOCALIZATION_ROADMAP.md`.
+
 ### Localisation de l'interface Vue — sixième round (U9/U11/U12/U13 clos, Codex + Claude)
 
 **Suite de l'entrée ci-dessous.** Claude sur U9 (`ClrInspectorView.vue`) dans le dossier principal, Codex sur U11/U12/U13 (`MemoryHeatmapView.vue`/`MemoryTimelineView.vue`/`PatternLearningView.vue`) dans un worktree séparé (`../killengine-codex-ui-u11-u12-u13`) — fichiers disjoints.
@@ -1248,3 +1262,24 @@ Root cause : `kPebLdrOffset` (ligne 29 de `core/inject/dll_mask.cpp`) était dé
 **Comment vérifier** : à implémenter. Validation attendue : `cd ui && npm run type-check`, `cd ui && npm run build`, puis vérification visuelle FR/EN que le switch apparaît bien près du logo en haut de la sidebar, change réellement la langue globale, reste synchronisé avec le réglage existant dans `SettingsView.vue`, et ne casse pas le layout aux largeurs de fenêtre courantes.
 
 **Fichiers probables** : `ui/src/App.vue`, `ui/src/stores/app.ts` si besoin de réutiliser l'état existant, `ui/src/views/SettingsView.vue` seulement si le switch des paramètres doit être factorisé, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json` si de nouveaux libellés sont ajoutés.
+
+### MODULES-EDR-COPY — Explication stricte FR/EN des exclusions EDR et réactivation antivirus (à faire)
+
+**Quoi** : renforcer le texte utilisateur de la section `Modules > Environnement de test > Exclusion EDR / Defender` en français **et** en anglais. Le panneau doit expliquer clairement pourquoi KillEngine peut déclencher Defender/EDR pendant certains tests légitimes : injection de code, `VirtualAllocEx`, `WriteProcessMemory`, `CreateRemoteThread`, débogage/hardware breakpoints, accès mémoire privilégié et driver kernel ressemblent volontairement aux mêmes primitives que des outils offensifs. Il faut aussi distinguer les options : exclusion ciblée du dossier KillEngine/build, désactivation temporaire de certaines protections seulement si nécessaire, et retour à l'état sécurisé après la session.
+
+**Pourquoi** : retour propriétaire avec capture UI — le texte actuel est trop vague. L'utilisateur final doit comprendre que l'exclusion/désactivation n'est pas une optimisation magique ni un contournement opaque, mais un compromis de test local : elle sert à éviter que l'EDR bloque, ralentisse, mette en quarantaine ou coupe en plein milieu les composants de KillEngine pendant l'analyse d'un process contrôlé. Expliquer aussi **pourquoi on désactive parfois temporairement** certaines protections : elles interceptent volontairement les mêmes primitives bas niveau que KillEngine doit utiliser pour fonctionner (`VirtualAllocEx`, `WriteProcessMemory`, `CreateRemoteThread`, attachement debugger, driver kernel), parce que ces primitives peuvent aussi être utilisées par des malwares. KillEngine n'est pas un malware pour autant : l'alerte vient du type d'opération observé, pas nécessairement de l'intention du programme. Le panneau doit donc donner ce contexte, puis insister sur la règle de sécurité : faire une exception aussi ciblée et temporaire que possible, ne jamais laisser l'antivirus désactivé par oubli, puis réactiver Defender/Tamper Protection/protections temps réel après avoir fini d'utiliser KillEngine.
+
+**Exigences UX/copy** :
+- texte bilingue via i18n (`fr.json`/`en.json`), même niveau de précision dans les deux langues ;
+- wording concret et pédagogique, pas alarmiste : expliquer les primitives détectées et pourquoi elles sont nécessaires à KillEngine ;
+- avertissement visible dans le guide EDR : **réactiver les protections après usage** et redémarrer si Windows le demande ;
+- préciser que l'exclusion doit viser le dossier d'installation/build de KillEngine, pas tout le disque ni le dossier utilisateur complet ;
+- conserver les actions existantes (`Vérifier`, ajout d'exclusion, guide manuel, réactivation Defender) mais améliorer les libellés, hints et étapes ;
+- si un bouton automatise une exclusion ou une désactivation, rappeler juste avant l'action ce qui va être modifié et comment revenir en arrière ;
+- si les scripts automatiques échouent selon la version de Windows, les droits administrateur ou Tamper Protection, afficher un chemin manuel honnête : inviter l'utilisateur à se renseigner sur la procédure adaptée à sa machine plutôt que de masquer l'échec. Proposer des recherches concrètes du type `Windows Defender ajouter exclusion dossier`, `désactiver temporairement protection en temps réel Windows Security`, `désactiver Tamper Protection Windows Defender`, `Add-MpPreference ExclusionPath PowerShell`, ou leurs équivalents anglais `Windows Defender add folder exclusion`, `temporarily disable real-time protection Windows Security`, `disable Tamper Protection Windows Defender`. L'objectif est d'éviter de maintenir une procédure fragile pour chaque variante de Windows tout en donnant à l'utilisateur final les bons mots-clés et le bon contexte.
+
+**Comment vérifier** : à implémenter. Validation attendue : `cd ui && npm run type-check`, `cd ui && npm run build`, vérification visuelle FR/EN de la section Modules/EDR, confirmation que les textes changent bien avec le switch de langue, et smoke-test que les boutons existants restent câblés aux mêmes actions.
+
+**Fichiers probables** : `ui/src/views/ModulesView.vue`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json` ; éventuellement `ui/src/stores/app.ts` ou `ui/src/services/backend.ts` seulement si les confirmations/action labels doivent être enrichis côté store/backend.
+
+
