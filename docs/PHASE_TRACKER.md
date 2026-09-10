@@ -48,6 +48,25 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — dixième round, chantier TERMINÉ (U21 clos, Codex + corrections Claude)
+
+**Suite de l'entrée ci-dessous.** Dernier candidat de toute la roadmap `docs/FRONTEND_LOCALIZATION_ROADMAP.md`. Codex a traduit `ui/src/stores/assistantSmartSearch.ts` (160 clés `assistantSmartSearchStore.*`) dans un worktree séparé, en parallèle du U20 de Claude sur `app.ts`.
+
+**Vérification indépendante par Claude avant merge** (cf. [[feedback_verify_dont_trust_agent_build_claims]]) a trouvé et corrigé deux problèmes réels avant de fusionner :
+
+1. **`workflowPresets` non traduit** — le résidu documenté depuis U1 ("cartes d'exemple en français, candidat U21 pas encore traité") n'était plus hors périmètre puisque ce round EST ce fichier ; Codex avait laissé les 9 presets en français. Corrigé : `ref` → `computed()` (comme `PATTERN_TYPE_NAMES` déjà fait par Codex plus tôt), 36 nouvelles clés.
+2. **Bug fonctionnel dépendant de la langue** — `candidateVisualState()` traduit servait aussi de nom de classe CSS (`candidate-${state}`), mais la feuille de style avait ses sélecteurs câblés sur les mots français d'origine (`.candidate-gardé`, `.candidate-très-probable`). Passer en anglais aurait cassé tout le code couleur de la liste de candidats. Corrigé en séparant un slug stable (CSS) d'un libellé traduit (affichage) dans `assistantSmartSearch.ts`, `app.ts`, `CandidatePanel.vue` et `ExpertView.vue`. Un motif de détection interne (`doSearch()`) qui ne reconnaissait que le français a aussi dû être complété en anglais, puisque les commandes qu'il détecte viennent d'être traduites.
+
+**Vérification** : 160/160 clés résolues dans les deux locales, `help.*` intact, `npm run type-check`/`build` OK, suite C++ **469/469 OK**. CDP FR/EN : presets de l'écran d'accueil Assistant, cycle attache → scan → "Keep" confirmant que la classe CSS reste stable pendant que le libellé bascule de langue.
+
+**Résidu hors périmètre repéré** : `scanStatusText` dans `ui/src/stores/scanning.ts` (`'Scan terminé.'`/`'Scan annulé.'`) — fichier jamais couvert par cette roadmap, noté pour un futur chantier.
+
+**Merge** : conflit attendu sur les JSON de locale, résolu par le merge programmatique habituel (3238 clés terminales de chaque côté).
+
+**Commits** : `503d341` (Codex) → `2251660` (corrections Claude) → `059afd3` (companion fix main) → `3d4a439` (merge).
+
+**Chantier de localisation frontend TERMINÉ** : les 22 candidats (U1-U22) de `docs/FRONTEND_LOCALIZATION_ROADMAP.md` sont tous clos. Résidus restants délibérément hors périmètre (documentés au fil des rounds) : `application_controller.cpp` (backend C++, catalogue de modules), `scanning.ts` (ci-dessus), motifs de détection d'intention bilingues (incluent volontairement du français pour l'entrée libre utilisateur).
+
 ### Localisation de l'interface Vue — neuvième round (U20 clos, Claude, en parallèle de Codex sur U21)
 
 **Suite de l'entrée ci-dessous.** Décision propriétaire de traiter les deux gros stores restants en parallèle : Claude sur `app.ts` (U20) dans le dossier principal, Codex sur `assistantSmartSearch.ts` (U21) dans un worktree séparé (`../killengine-codex-ui-u21`).
