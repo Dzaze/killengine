@@ -48,6 +48,18 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — U8/U14/U18 clos par Codex, merge et vérification (10/09/2026, Codex + Claude)
+
+**Suite immédiate de l'entrée ci-dessous.** Codex a livré son lot (commit `2363a20` sur `agent/ui-localization-u8-u14-u18`) : U8 `ScriptingView.vue` (42 clés `scripting.*`), U14 `SpeedhackView.vue` (20 clés `speedhack.*`), U18 `LexiconView.vue` (1 clé `lexicon.description`, namespace existant réutilisé). Auto-vérifié par Codex : type-check, build, `scripts/configure.ps1`+`scripts/build.ps1`, suite C++ 469/469, vérification visuelle CDP FR/EN, scan mojibake/EOL.
+
+**Vérification indépendante par Claude avant merge** (cf. [[feedback_verify_dont_trust_agent_build_claims]]) : diff des 3 fichiers relu intégralement, comptes de clés par namespace vérifiés par script (fr/en identiques partout), 66 références de clés uniques toutes résolues, `help.*` confirmé byte-identique (non touché), build indépendant dans le worktree de Codex avant merge. **Aucun gap trouvé** — contrairement aux deux rounds précédents avec Codex, ce lot de fichiers plus petits n'a laissé aucune chaîne oubliée.
+
+**Merge** : conflit git attendu sur `fr.json`/`en.json` (même branche de départ que le `settings.*` de Claude ci-dessus) — résolu par le même merge JSON programmatique (union récursive, zéro perte, 1904 clés terminales de chaque côté après fusion).
+
+**Comment vérifié après merge** : `npm run type-check` + `npm run build` OK, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète pour les 3 vues (Lua, Speedhack, Lexique) sur l'état fusionné. Worktree et branche temporaires supprimés après merge.
+
+**Reste ouvert** : U6, U7, U9-U13, U15-U17, U20-U22, voir `docs/FRONTEND_LOCALIZATION_ROADMAP.md`.
+
 ### Localisation de l'interface Vue — quatrième round (U5 clos : SettingsView.vue, en parallèle avec Codex sur U8/U14/U18), (10/09/2026, Claude + Codex)
 
 **Suite de l'entrée ci-dessous.** Quatrième round de travail parallèle : Claude sur `ui/src/views/SettingsView.vue` (U5) dans le dossier principal — le plus gros fichier de vue traité jusqu'ici hors Expert (2092 lignes, 21 sections) — pendant que Codex traite U8 (`ScriptingView.vue`), U14 (`SpeedhackView.vue`) et U18 (`LexiconView.vue`) dans un worktree séparé (`../killengine-codex-ui-u8-u14-u18`), fichiers disjoints.

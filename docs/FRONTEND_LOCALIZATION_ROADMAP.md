@@ -73,17 +73,17 @@ L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** d
 | [ ] U5a | └ `AssistantToolsPanel.vue` (sous-panneau Réglages) | `ui/src/components/settings/AssistantToolsPanel.vue` | ~10 | Non | Basse | Pas commencé |
 | [ ] U6 | Trainer | `ui/src/views/TrainerView.vue` | ~20 | Non | Moyenne-haute | Pas commencé |
 | [ ] U7 | Profils | `ui/src/views/ProfileView.vue` | ~10 | Non | Moyenne | Pas commencé |
-| [ ] U8 | Scripting (Lua) | `ui/src/views/ScriptingView.vue` | ~15 | Non | Moyenne | Pas commencé |
+| [x] U8 | Scripting (Lua) | `ui/src/views/ScriptingView.vue` | 42 clés `scripting.*` ajoutées | Non → complet | Moyenne | **Fait, testé (10/09/2026, Codex)** |
 | [ ] U9 | CLR Inspector | `ui/src/views/ClrInspectorView.vue` | ~25 | Non | Moyenne | Pas commencé |
 | [ ] U10 | Mémoire (hex viewer) — reste | `ui/src/views/MemoryView.vue` | ~13 restants (18 `$t()` déjà en place) | Partiel | Basse | Pas commencé |
 | [ ] U11 | Memory Heatmap | `ui/src/views/MemoryHeatmapView.vue` | ~20 | Non | Basse-moyenne | Pas commencé |
 | [ ] U12 | Memory Timeline | `ui/src/views/MemoryTimelineView.vue` | ~15 | Non | Basse-moyenne | Pas commencé |
 | [ ] U13 | Pattern Learning | `ui/src/views/PatternLearningView.vue` | ~20 | Non | Basse | Pas commencé |
-| [ ] U14 | Speedhack | `ui/src/views/SpeedhackView.vue` | ~8 | Non | Basse-moyenne | Pas commencé |
+| [x] U14 | Speedhack | `ui/src/views/SpeedhackView.vue` | 20 clés `speedhack.*` ajoutées | Non → complet | Basse-moyenne | **Fait, testé (10/09/2026, Codex)** |
 | [ ] U15 | Réseau — reste | `ui/src/views/NetworkView.vue` | ~15 restants (51 `$t()` déjà en place) | Partiel | Basse | Pas commencé |
 | [ ] U16 | Modules — reste (guide EDR notamment) | `ui/src/views/ModulesView.vue` | ~12 restants (41 `$t()` déjà en place) | Partiel | Basse | Pas commencé |
 | [ ] U17 | WebView2 Inspector — reste | `ui/src/views/WebView2InspectorView.vue` | ~3 (bannière intro) | Partiel (19 `$t()` déjà en place) | Basse | Pas commencé |
-| [ ] U18 | Lexique | `ui/src/views/LexiconView.vue` | 1 | Non | Basse | Pas commencé |
+| [x] U18 | Lexique | `ui/src/views/LexiconView.vue` | 1 clé `lexicon.description` ajoutée (namespace `lexicon` déjà existant réutilisé) | Non → complet | Basse | **Fait, testé (10/09/2026, Codex)** |
 | [x] U19 | `PanelIntro.vue` (partagé par toutes les vues) | `ui/src/components/common/PanelIntro.vue` | 4 clés `common.panelIntro.*` (les 3 labels + `aria-label`) | Non → complet | **Bloquant léger** — voir note | **Fait, testé (09/09/2026, Codex)** |
 | [ ] U20 | Store `app.ts` — messages `pushMessage` | `ui/src/stores/app.ts` | ~5 | Non | Moyenne | Pas commencé |
 | [ ] U21 | Store `assistantSmartSearch.ts` — messages `pushMessage` | `ui/src/stores/assistantSmartSearch.ts` | ~20 | Non | Moyenne-haute — même famille que U1 | Pas commencé |
@@ -138,6 +138,20 @@ Quatrième round : Claude sur `SettingsView.vue` (U5, le plus gros fichier de vu
 - **U5** : 278 clés `settings.*` ajoutées, fichier de 2092 lignes couvrant 21 sections (Interface, Scan, Stockage temporaire, IA locale, Backend IA externe, Workspace IA/Trainer, État, Diagnostic, Compatibilité antivirus, Driver kernel avec son parcours pédagogique en 4 étapes, Mode Automation, Mode Stealth, Débogage CDP WebView2, Préparer l'inspection WebView2, Log principal, Événements Smart Search, Session). Script ET template traduits : `runtimeRows`, `kernelCapabilityLabel`, `kernelLearningSteps`, `formatBytes` (unités Go/Mo/Ko/o), `eventSummary`, messages de statut export/import.
 - **Piège de méthode rencontré et corrigé en cours de route** : deux phrases avaient un mot mis en gras au milieu (`<strong>Mode Automation</strong>`, `<strong>tous les hôtes WebView2...</strong>`) — la première tentative a interpolé une clé `$t()` avec un paramètre vide puis `.split()` sur le résultat pour extraire préfixe/suffixe côté template, un bricolage fragile. Corrigé en clés préfixe/suffixe dédiées (`xxxPrefix`/`xxxSuffix`) dès que remarqué — pattern à réutiliser directement la prochaine fois qu'une traduction a besoin d'un mot en gras au milieu d'une phrase, plutôt que de repasser par le bricolage `.split()`.
 - Validations : `npm run type-check` OK, `npm run build` OK, 278 références de clés uniques toutes résolues des deux côtés par script, suite C++ 469/469 (sanity check), vérification visuelle CDP FR et EN complète (5 captures par langue, du haut de page jusqu'au bas — Interface/Scan/Stockage jusqu'à Session en passant par IA locale, Workspace, Driver kernel, Stealth, WebView2, Log).
+
+## Progrès (10/09/2026) — U8, U14, U18 clos (Codex, en parallèle du round U5)
+
+Résultat du lot confié à Codex pendant que Claude traitait U5 (`SettingsView.vue`) — voir l'entrée ci-dessus. 3 petits fichiers disjoints traités en un commit (`2363a20`) :
+
+- **U8** (`ScriptingView.vue`) : 42 clés `scripting.*` — template + script (`statusLabel` computed).
+- **U14** (`SpeedhackView.vue`) : 20 clés `speedhack.*` — template + script (`statusLabel` computed).
+- **U18** (`LexiconView.vue`) : 1 clé `lexicon.description` ajoutée, namespace `lexicon` déjà existant réutilisé (seule chaîne restante hors du système i18n).
+
+**Vérification indépendante par Claude avant merge** (cf. [[feedback_verify_dont_trust_agent_build_claims]]) : diff complet des 3 fichiers `.vue` relu ligne par ligne, comptes de clés par namespace vérifiés par script (fr/en identiques : scripting 42/42, speedhack 20/20, lexicon.description présent des deux côtés), 66 références de clés uniques toutes résolues des deux côtés, `help.*` confirmé byte-identique (non touché), `npm run type-check` + `npm run build` OK dans le worktree de Codex avant merge. **Aucun gap trouvé cette fois** — contrairement aux deux rounds précédents avec Codex (U2/U19 et U3), ce lot de fichiers plus petits et plus simples n'a laissé aucune chaîne oubliée.
+
+**Merge** : conflit git attendu sur `fr.json`/`en.json` (Codex avait ajouté `scripting.*`/`speedhack.*`/`lexicon.description` sur la même branche de départ que le `settings.*` de Claude) — résolu par le même merge JSON programmatique que les rounds précédents (union récursive, zéro perte, vérifié : 1904 clés terminales de chaque côté après fusion).
+
+**Comment vérifié après merge** : `npm run type-check` + `npm run build` OK sur l'état fusionné, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète pour les 3 vues (Lua, Speedhack, Lexique) sur l'état fusionné. Worktree et branche temporaires supprimés après merge.
 
 ## Règle d'usage
 
