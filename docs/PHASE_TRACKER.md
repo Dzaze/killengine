@@ -48,6 +48,20 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — cinquième round (U6/U7 clos, Codex + Claude)
+
+**Suite de l'entrée ci-dessous.** Codex sur U6 (`TrainerView.vue`) dans un worktree séparé (`../killengine-codex-ui-u6`), Claude sur U7 (`ProfileView.vue`) dans le dossier principal — fichiers disjoints.
+
+**U7** (Claude) : audit initial très sous-estimé (~10 chaînes prévues contre 130 lignes de texte français réel sur un fichier de 1776 lignes) — profils/cibles (avec champs CLR)/vérification pointer-map après redémarrage/pont Ghidra/patchs trainer. 169 clés `profile.*`, couvrant ~90 messages de statut construits dynamiquement côté script avec des préfixes ✓/✗/⚠ gardés littéraux (seul le corps traduit).
+
+**U6** (Codex) : 76 clés `trainer.*`. Vérification indépendante par Claude avant merge (cf. [[feedback_verify_dont_trust_agent_build_claims]]) : diff relu intégralement, comptes fr/en identiques, 76 références de clés toutes résolues, `help.*` byte-identique, build indépendant OK — **aucun gap trouvé**, deuxième round consécutif sans oubli après U8/U14/U18. Résidu confirmé hors périmètre : les boutons de scénarios ("Argent / Or" etc.) restent en français en anglais, viennent de `store.workflowPresets` (candidat U21 non traité), pas un oubli.
+
+**Merge** : conflit git attendu sur les JSON de locale, résolu par le même merge programmatique que les rounds précédents (union récursive, zéro perte, 2155 clés terminales de chaque côté).
+
+**Comment vérifié** : `npm run type-check` + `npm run build` OK, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète pour les deux vues sur données réelles (2 profils dont un avec patch actif ; 1 feature Trainer réelle). Worktree et branche temporaires supprimés après merge.
+
+**Reste ouvert** : U9-U13, U15-U17, U20-U22, voir `docs/FRONTEND_LOCALIZATION_ROADMAP.md`.
+
 ### Localisation de l'interface Vue — U8/U14/U18 clos par Codex, merge et vérification (10/09/2026, Codex + Claude)
 
 **Suite immédiate de l'entrée ci-dessous.** Codex a livré son lot (commit `2363a20` sur `agent/ui-localization-u8-u14-u18`) : U8 `ScriptingView.vue` (42 clés `scripting.*`), U14 `SpeedhackView.vue` (20 clés `speedhack.*`), U18 `LexiconView.vue` (1 clé `lexicon.description`, namespace existant réutilisé). Auto-vérifié par Codex : type-check, build, `scripts/configure.ps1`+`scripts/build.ps1`, suite C++ 469/469, vérification visuelle CDP FR/EN, scan mojibake/EOL.

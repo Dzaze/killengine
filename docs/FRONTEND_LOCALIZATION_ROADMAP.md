@@ -71,8 +71,8 @@ L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** d
 | [x] U4 | Investigation (carnet d'hypothèses, timeline) | `ui/src/views/InvestigationView.vue` | 107 clés `investigation.*` ajoutées (template + script : `statusLabel`, `checkpointDetail`, `checkpointKindLabel`, `checkpointRiskLabel`, `statusText`, etc.) | Non → complet | Haute | **Fait, testé (10/09/2026, Claude)** |
 | [x] U5 | Réglages | `ui/src/views/SettingsView.vue` | 278 clés `settings.*` ajoutées (fichier de 2092 lignes ; couvre 21 sections : interface, scan, stockage temporaire, IA locale, backend IA externe, workspace IA/Trainer, état, diagnostic, antivirus, driver kernel, Automation, Stealth, WebView2 CDP x2, log, événements Smart Search, session) | Non → complet | Haute | **Fait, testé (10/09/2026, Claude)** |
 | [ ] U5a | └ `AssistantToolsPanel.vue` (sous-panneau Réglages) | `ui/src/components/settings/AssistantToolsPanel.vue` | ~10 | Non | Basse | Pas commencé |
-| [ ] U6 | Trainer | `ui/src/views/TrainerView.vue` | ~20 | Non | Moyenne-haute | Pas commencé |
-| [ ] U7 | Profils | `ui/src/views/ProfileView.vue` | ~10 | Non | Moyenne | Pas commencé |
+| [x] U6 | Trainer | `ui/src/views/TrainerView.vue` | 76 clés `trainer.*` ajoutées | Non → complet | Moyenne-haute | **Fait, testé (10/09/2026, Codex)** |
+| [x] U7 | Profils | `ui/src/views/ProfileView.vue` | 169 clés `profile.*` ajoutées (audit initial sous-estimé : 130 lignes FR réelles, pas ~10 — profils/cibles/patchs trainer/pont Ghidra/pointer maps) | Non → complet | Moyenne | **Fait, testé (10/09/2026, Claude)** |
 | [x] U8 | Scripting (Lua) | `ui/src/views/ScriptingView.vue` | 42 clés `scripting.*` ajoutées | Non → complet | Moyenne | **Fait, testé (10/09/2026, Codex)** |
 | [ ] U9 | CLR Inspector | `ui/src/views/ClrInspectorView.vue` | ~25 | Non | Moyenne | Pas commencé |
 | [ ] U10 | Mémoire (hex viewer) — reste | `ui/src/views/MemoryView.vue` | ~13 restants (18 `$t()` déjà en place) | Partiel | Basse | Pas commencé |
@@ -152,6 +152,16 @@ Résultat du lot confié à Codex pendant que Claude traitait U5 (`SettingsView.
 **Merge** : conflit git attendu sur `fr.json`/`en.json` (Codex avait ajouté `scripting.*`/`speedhack.*`/`lexicon.description` sur la même branche de départ que le `settings.*` de Claude) — résolu par le même merge JSON programmatique que les rounds précédents (union récursive, zéro perte, vérifié : 1904 clés terminales de chaque côté après fusion).
 
 **Comment vérifié après merge** : `npm run type-check` + `npm run build` OK sur l'état fusionné, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète pour les 3 vues (Lua, Speedhack, Lexique) sur l'état fusionné. Worktree et branche temporaires supprimés après merge.
+
+## Progrès (10/09/2026) — U6 et U7 clos (cinquième round, Codex + Claude)
+
+Cinquième round : Codex sur U6 (`TrainerView.vue`) dans un worktree séparé (`../killengine-codex-ui-u6`), Claude sur U7 (`ProfileView.vue`) dans le dossier principal — fichiers disjoints.
+
+- **U7** (Claude) : audit initial sous-estimait fortement le périmètre (~10 chaînes estimées contre 130 lignes de texte français réel) — fichier de 1776 lignes avec ~90 messages de statut construits dynamiquement côté script (`String.raw`/template literals avec préfixes ✓/✗/⚠). 169 clés `profile.*` ajoutées ; les icônes de préfixe restent des littéraux JS, seul le corps du message est traduit (ex. `'⚠ ' + t('profile.selectOrCreateProfileFirst')`).
+- **U6** (Codex) : 76 clés `trainer.*` ajoutées. Vérification indépendante par Claude avant merge (cf. [[feedback_verify_dont_trust_agent_build_claims]]) : diff relu intégralement, comptes de clés fr/en identiques (76/76), 76 références de clés toutes résolues, `help.*` byte-identique (non touché), build indépendant OK dans le worktree — **aucun gap trouvé**, deuxième round consécutif sans oubli après U8/U14/U18.
+- **Résidu confirmé hors périmètre lors de la vérification live** : les boutons de scénarios ("Argent / Or", "Vie / PV", "Score / Niveau", "Munitions") restent en français même en anglais dans TrainerView.vue — proviennent de `store.workflowPresets` (candidat U21, pas encore traité), pas un oubli de Codex. Même résidu déjà documenté lors du round U1.
+- **Merge** : conflit git attendu sur `fr.json`/`en.json` (même branche de départ que le `profile.*` de Claude) — résolu par le même merge JSON programmatique (union récursive, zéro perte, 2155 clés terminales de chaque côté après fusion).
+- **Comment vérifié** : `npm run type-check` + `npm run build` OK sur l'état fusionné, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète pour les deux vues (ProfileView avec 2 profils réels dont un avec patch actif, TrainerView avec une feature réelle). Worktree et branche temporaires supprimés après merge.
 
 ## Règle d'usage
 
