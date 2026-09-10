@@ -2539,5 +2539,234 @@
       "title": "Trainer export",
       "copied": "Export copied."
     }
+  },
+  "memoryHeatmap": {
+    "title": "Memory Heatmap",
+    "noProcessAttached": "No process attached",
+    "intro": {
+      "what": "A memory access heatmap showing which regions of the attached process are read or written most often.",
+      "purpose": "Quickly spot active zones, such as game state that keeps changing, across the memory space without starting from a specific address.",
+      "how": "Start collection, optionally with a start address to bound the scan, let it run for a few seconds while the game is active, then inspect the busiest regions."
+    },
+    "empty": {
+      "attachPrompt": "Attach an authorized process first to observe its memory accesses.",
+      "goToProcess": "Go to Process",
+      "collectingNoRegion": "Collection is running — no active region yet."
+    },
+    "config": {
+      "startAddress": "Start address (optional)",
+      "startAddressPlaceholder": "7ff600000000",
+      "regionSize": "Region size",
+      "regionSizePage": "4096 (page)",
+      "regionSize64k": "65536 (64 KB)",
+      "regionSize1m": "1048576 (1 MB)",
+      "samplingInterval": "Sampling interval (ms)",
+      "reads": "Reads",
+      "writes": "Writes"
+    },
+    "actions": {
+      "collecting": "Collecting…",
+      "start": "Start",
+      "stop": "Stop",
+      "refresh": "Refresh"
+    },
+    "stats": {
+      "trackedRegions": "Tracked regions",
+      "activeRegions": "Active regions",
+      "totalAccesses": "Total accesses",
+      "writes": "Writes",
+      "reads": "Reads",
+      "averageIntensity": "Average intensity"
+    },
+    "topRegions": {
+      "title": "Most active regions ({count})"
+    },
+    "table": {
+      "address": "Address",
+      "size": "Size",
+      "intensity": "Intensity",
+      "reads": "Reads",
+      "writes": "Writes",
+      "accesses": "Accesses"
+    },
+    "units": {
+      "mb": "{value} MB",
+      "kb": "{value} KB",
+      "bytes": "{count} B"
+    }
+  },
+  "memoryTimeline": {
+    "intro": {
+      "what": "A timeline viewer for memory values, showing how watched addresses change over time.",
+      "purpose": "Spot cycles such as timers or animations, separate volatile addresses from stable ones, and watch how a value evolves while the game is running.",
+      "how": "Add one or more addresses, start collection, then select an address to view its curve. Pattern detection, behavior profiles, prediction, correlations, and text reports are available from the quick analysis area."
+    },
+    "config": {
+      "title": "Configuration",
+      "samplingInterval": "Sampling interval (ms)",
+      "maxDuration": "Max duration (ms)",
+      "trackOnlyChanges": "Track changes only"
+    },
+    "addresses": {
+      "title": "Watched addresses ({count})",
+      "add": "Add",
+      "addressPlaceholder": "0x...",
+      "int32Bytes": "Int32 (4 bytes)",
+      "int64Bytes": "Int64 (8 bytes)",
+      "int16Bytes": "Int16 (2 bytes)",
+      "byteSize": "Byte (1 byte)"
+    },
+    "actions": {
+      "collecting": "Collecting...",
+      "start": "Start",
+      "stop": "Stop",
+      "clearAll": "Clear all",
+      "exportJson": "Export JSON"
+    },
+    "status": {
+      "starting": "Starting..."
+    },
+    "logs": {
+      "addressAlreadyWatched": "Address already watched",
+      "exported": "Timeline exported"
+    },
+    "stats": {
+      "title": "Statistics",
+      "collectedPoints": "Collected points",
+      "addresses": "Addresses"
+    },
+    "series": {
+      "changes": "Changes:",
+      "volatility": "Volatility:",
+      "averageInterval": "Average interval:"
+    },
+    "patterns": {
+      "title": "Detected patterns",
+      "analyze": "Analyze",
+      "none": "No significant pattern detected"
+    },
+    "patternTypes": {
+      "unknown": "Unknown",
+      "constant": "Constant",
+      "step": "Step",
+      "linear": "Linear",
+      "cyclic": "Cyclic",
+      "random": "Random",
+      "correlated": "Correlated",
+      "antiCheat": "Anti-cheat"
+    },
+    "quickActions": {
+      "title": "Quick actions",
+      "findVolatile": "Find volatile",
+      "findStable": "Find stable",
+      "behaviorProfile": "Behavior profile",
+      "prediction": "Prediction",
+      "correlations": "Correlations",
+      "textReport": "Text report"
+    },
+    "quickResults": {
+      "volatile": "Volatile: {address}",
+      "stable": "Stable: {address}",
+      "changesPerSecond": "Changes/sec: {value}",
+      "regularity": "Regularity: {percent}%",
+      "burst": "Burst: {value}",
+      "changeProbability": "Change probability: {percent}%",
+      "predictedValue": "Predicted value: {value}",
+      "timeLag": ", lag {ms}ms",
+      "aLeadsB": " (A leads B)",
+      "noCorrelations": "No correlation found (requires at least 2 watched addresses with data)",
+      "reportUnavailable": "Report unavailable"
+    },
+    "common": {
+      "yes": "Yes",
+      "no": "No"
+    },
+    "chart": {
+      "title": "Timeline - {address}",
+      "time": "t: {ms} ms",
+      "value": "value: {value}"
+    }
+  },
+  "patternLearning": {
+    "title": "Pattern Learning",
+    "subtitle": "Reusable memory pattern classification and per-game profiles.",
+    "intro": {
+      "what": "Automatically classifies a history of observed values such as counters, health, flags, timers, or coordinates, and detects the game engine from loaded modules.",
+      "purpose": "Reuse what already worked for a game, such as known offsets and resolution paths, instead of starting from scratch every session.",
+      "how": "Detect the engine from the attached process modules, classify a pasted value history, or load/create a profile by game name."
+    },
+    "patternTypes": {
+      "unknown": "Unknown",
+      "resourceCounter": "Resource counter",
+      "healthPoints": "Health points",
+      "stateFlag": "State flag",
+      "timer": "Timer",
+      "coordinate": "Coordinate",
+      "uiReference": "UI reference",
+      "noise": "Noise"
+    },
+    "stats": {
+      "title": "Statistics",
+      "knownGames": "Known games",
+      "engineSignatures": "Engine signatures",
+      "patternRules": "Pattern rules"
+    },
+    "engine": {
+      "title": "Engine detection",
+      "attachedModules": "{count} module(s) loaded for {process}",
+      "noProcess": "No process attached — detection will use an empty module list.",
+      "detecting": "Detecting…",
+      "detect": "Detect engine"
+    },
+    "labels": {
+      "engine": "Engine",
+      "version": "Version",
+      "confidence": "Confidence",
+      "signature": "Signature",
+      "address": "Address",
+      "type": "Type",
+      "game": "Game",
+      "executable": "Executable",
+      "sessions": "Sessions"
+    },
+    "classification": {
+      "title": "Classify a value history",
+      "addressPlaceholder": "7ff600001234",
+      "valuesLabel": "Values (comma-separated)",
+      "valuesPlaceholder": "100, 98, 95, 90, 85",
+      "classifying": "Classifying…",
+      "classify": "Classify",
+      "suggestedType": "Suggested type",
+      "suggestedScale": "{type} (scale {scale})",
+      "noResult": "No result yet."
+    },
+    "profiles": {
+      "title": "Game profiles ({count})",
+      "empty": "No saved profile.",
+      "gameNamePlaceholder": "Game name",
+      "executablePlaceholder": "Executable (optional)",
+      "createEmpty": "Create empty profile"
+    },
+    "actions": {
+      "load": "Load",
+      "delete": "Delete",
+      "refresh": "Refresh"
+    },
+    "table": {
+      "name": "Name",
+      "offset": "Offset",
+      "address": "Address",
+      "type": "Type",
+      "scale": "Scale",
+      "stability": "Stability"
+    },
+    "suggestions": {
+      "title": "Suggestions",
+      "patternType": "Pattern type",
+      "count": "Count",
+      "searching": "Searching…",
+      "run": "Suggestions",
+      "none": "No suggestion yet."
+    }
   }
 }

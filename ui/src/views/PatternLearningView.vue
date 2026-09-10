@@ -7,21 +7,23 @@
 // voir docs/PHASE_TRACKER.md "ANALYSE-CLINE-1"/"PATTERN-LEARNING-1" pour ce
 // qui reste hors scope (clustering, suivi temps réel).
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
-const PATTERN_TYPE_NAMES = [
-  'Inconnu',
-  'Compteur de ressource',
-  'Points de vie',
-  'Drapeau d’état',
-  'Timer',
-  'Coordonnée',
-  'Référence UI',
-  'Bruit',
-]
+const PATTERN_TYPE_NAMES = computed(() => [
+  t('patternLearning.patternTypes.unknown'),
+  t('patternLearning.patternTypes.resourceCounter'),
+  t('patternLearning.patternTypes.healthPoints'),
+  t('patternLearning.patternTypes.stateFlag'),
+  t('patternLearning.patternTypes.timer'),
+  t('patternLearning.patternTypes.coordinate'),
+  t('patternLearning.patternTypes.uiReference'),
+  t('patternLearning.patternTypes.noise'),
+])
 
 const statistics = ref<Record<string, unknown>>({})
 
@@ -156,68 +158,68 @@ onMounted(() => {
   <div class="pattern-learning-view">
     <div class="header">
       <div>
-        <h1>Pattern Learning</h1>
-        <p>Classification de patterns mémoire et profils par jeu réutilisables.</p>
+        <h1>{{ $t('patternLearning.title') }}</h1>
+        <p>{{ $t('patternLearning.subtitle') }}</p>
       </div>
     </div>
 
     <PanelIntro
-      what="Classe automatiquement un historique de valeurs observées (compteur, santé, drapeau, timer, coordonnée...) et détecte le moteur de jeu (Unity/Unreal/Godot) à partir des modules chargés."
-      purpose="Réutiliser ce qui a déjà marché sur un jeu (offsets connus, chemins de résolution) plutôt que de repartir de zéro à chaque session."
-      how="Détecte le moteur depuis les modules du process attaché, classe un historique de valeurs collé à la main, ou charge/crée un profil par nom de jeu."
+      :what="$t('patternLearning.intro.what')"
+      :purpose="$t('patternLearning.intro.purpose')"
+      :how="$t('patternLearning.intro.how')"
     />
 
     <section class="panel">
-      <h3>Statistiques</h3>
+      <h3>{{ $t('patternLearning.stats.title') }}</h3>
       <div class="stats-row">
-        <div class="stat"><span class="stat-label">Jeux connus</span><span class="stat-value">{{ statistics.knownGames ?? '—' }}</span></div>
-        <div class="stat"><span class="stat-label">Signatures moteur</span><span class="stat-value">{{ statistics.engineSignaturesLoaded ?? '—' }}</span></div>
-        <div class="stat"><span class="stat-label">Règles de pattern</span><span class="stat-value">{{ statistics.patternRulesLoaded ?? '—' }}</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('patternLearning.stats.knownGames') }}</span><span class="stat-value">{{ statistics.knownGames ?? '—' }}</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('patternLearning.stats.engineSignatures') }}</span><span class="stat-value">{{ statistics.engineSignaturesLoaded ?? '—' }}</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('patternLearning.stats.patternRules') }}</span><span class="stat-value">{{ statistics.patternRulesLoaded ?? '—' }}</span></div>
       </div>
     </section>
 
     <section class="panel">
-      <h3>Détection de moteur</h3>
+      <h3>{{ $t('patternLearning.engine.title') }}</h3>
       <p class="hint">
-        {{ store.isAttached ? `${store.processModules.length} module(s) chargé(s) sur ${store.processName}` : 'Aucun processus attaché — la détection utilisera une liste de modules vide.' }}
+        {{ store.isAttached ? $t('patternLearning.engine.attachedModules', { count: store.processModules.length, process: store.processName }) : $t('patternLearning.engine.noProcess') }}
       </p>
       <button class="btn btn-secondary" :disabled="detecting" @click="runDetectEngine">
-        {{ detecting ? 'Détection…' : 'Détecter le moteur' }}
+        {{ detecting ? $t('patternLearning.engine.detecting') : $t('patternLearning.engine.detect') }}
       </button>
       <div v-if="detectionResult" class="result-box">
-        <div><span class="k">Moteur</span><span class="v">{{ detectionResult.typeName }}</span></div>
-        <div v-if="detectionResult.version"><span class="k">Version</span><span class="v">{{ detectionResult.version }}</span></div>
-        <div><span class="k">Confiance</span><span class="v">{{ (Number(detectionResult.confidence) * 100).toFixed(0) }}%</span></div>
-        <div v-if="detectionResult.signature"><span class="k">Signature</span><span class="v mono">{{ detectionResult.signature }}</span></div>
+        <div><span class="k">{{ $t('patternLearning.labels.engine') }}</span><span class="v">{{ detectionResult.typeName }}</span></div>
+        <div v-if="detectionResult.version"><span class="k">{{ $t('patternLearning.labels.version') }}</span><span class="v">{{ detectionResult.version }}</span></div>
+        <div><span class="k">{{ $t('patternLearning.labels.confidence') }}</span><span class="v">{{ (Number(detectionResult.confidence) * 100).toFixed(0) }}%</span></div>
+        <div v-if="detectionResult.signature"><span class="k">{{ $t('patternLearning.labels.signature') }}</span><span class="v mono">{{ detectionResult.signature }}</span></div>
       </div>
     </section>
 
     <section class="panel">
-      <h3>Classifier un historique de valeurs</h3>
+      <h3>{{ $t('patternLearning.classification.title') }}</h3>
       <div class="field-row">
-        <label>Adresse</label>
-        <input v-model="classifyAddress" placeholder="7ff600001234" />
+        <label>{{ $t('patternLearning.labels.address') }}</label>
+        <input v-model="classifyAddress" :placeholder="$t('patternLearning.classification.addressPlaceholder')" />
       </div>
       <div class="field-row">
-        <label>Valeurs (séparées par des virgules)</label>
-        <input v-model="classifyValues" placeholder="100, 98, 95, 90, 85" />
+        <label>{{ $t('patternLearning.classification.valuesLabel') }}</label>
+        <input v-model="classifyValues" :placeholder="$t('patternLearning.classification.valuesPlaceholder')" />
       </div>
       <button class="btn btn-secondary" :disabled="classifying" @click="runClassify">
-        {{ classifying ? 'Classification…' : 'Classifier' }}
+        {{ classifying ? $t('patternLearning.classification.classifying') : $t('patternLearning.classification.classify') }}
       </button>
       <div v-if="classification" class="result-box">
-        <div><span class="k">Type</span><span class="v">{{ classification.typeName }}</span></div>
-        <div><span class="k">Confiance</span><span class="v">{{ (Number(classification.confidence) * 100).toFixed(0) }}%</span></div>
-        <div v-if="classification.suggestedValueType"><span class="k">Type suggéré</span><span class="v">{{ classification.suggestedValueType }} (échelle {{ classification.suggestedScale }})</span></div>
+        <div><span class="k">{{ $t('patternLearning.labels.type') }}</span><span class="v">{{ classification.typeName }}</span></div>
+        <div><span class="k">{{ $t('patternLearning.labels.confidence') }}</span><span class="v">{{ (Number(classification.confidence) * 100).toFixed(0) }}%</span></div>
+        <div v-if="classification.suggestedValueType"><span class="k">{{ $t('patternLearning.classification.suggestedType') }}</span><span class="v">{{ $t('patternLearning.classification.suggestedScale', { type: classification.suggestedValueType, scale: classification.suggestedScale }) }}</span></div>
         <ul v-if="classificationReasoning.length > 0" class="reasoning">
           <li v-for="(reason, i) in classificationReasoning" :key="i">{{ reason }}</li>
         </ul>
       </div>
-      <div v-else-if="classifying === false && classifyAddress" class="hint">Aucun résultat pour l'instant.</div>
+      <div v-else-if="classifying === false && classifyAddress" class="hint">{{ $t('patternLearning.classification.noResult') }}</div>
     </section>
 
     <section class="panel">
-      <h3>Profils de jeu ({{ knownGames.length }})</h3>
+      <h3>{{ $t('patternLearning.profiles.title', { count: knownGames.length }) }}</h3>
       <div class="profile-list">
         <button
           v-for="game in knownGames"
@@ -228,22 +230,22 @@ onMounted(() => {
         >
           {{ game }}
         </button>
-        <span v-if="knownGames.length === 0" class="hint">Aucun profil enregistré.</span>
+        <span v-if="knownGames.length === 0" class="hint">{{ $t('patternLearning.profiles.empty') }}</span>
       </div>
       <div class="actions-row">
-        <button class="btn btn-secondary" :disabled="!selectedGame || profileBusy" @click="loadSelectedProfile">Charger</button>
-        <button class="btn btn-secondary" :disabled="!selectedGame || profileBusy" @click="deleteSelectedProfile">Supprimer</button>
-        <button class="btn btn-secondary compact" @click="refreshGames">Rafraîchir</button>
+        <button class="btn btn-secondary" :disabled="!selectedGame || profileBusy" @click="loadSelectedProfile">{{ $t('patternLearning.actions.load') }}</button>
+        <button class="btn btn-secondary" :disabled="!selectedGame || profileBusy" @click="deleteSelectedProfile">{{ $t('patternLearning.actions.delete') }}</button>
+        <button class="btn btn-secondary compact" @click="refreshGames">{{ $t('patternLearning.actions.refresh') }}</button>
       </div>
 
       <div v-if="loadedProfile" class="result-box">
-        <div><span class="k">Jeu</span><span class="v">{{ loadedProfile.gameName }}</span></div>
-        <div v-if="loadedProfile.executableName"><span class="k">Exécutable</span><span class="v">{{ loadedProfile.executableName }}</span></div>
-        <div><span class="k">Moteur</span><span class="v">{{ loadedProfile.engineTypeName }} {{ loadedProfile.engineVersion }}</span></div>
-        <div><span class="k">Sessions</span><span class="v">{{ loadedProfile.sessionCount ?? 0 }}</span></div>
+        <div><span class="k">{{ $t('patternLearning.labels.game') }}</span><span class="v">{{ loadedProfile.gameName }}</span></div>
+        <div v-if="loadedProfile.executableName"><span class="k">{{ $t('patternLearning.labels.executable') }}</span><span class="v">{{ loadedProfile.executableName }}</span></div>
+        <div><span class="k">{{ $t('patternLearning.labels.engine') }}</span><span class="v">{{ loadedProfile.engineTypeName }} {{ loadedProfile.engineVersion }}</span></div>
+        <div><span class="k">{{ $t('patternLearning.labels.sessions') }}</span><span class="v">{{ loadedProfile.sessionCount ?? 0 }}</span></div>
         <div v-if="profileKnownOffsets.length > 0" class="table-wrap">
           <table>
-            <thead><tr><th>Nom</th><th>Offset</th><th>Type</th><th>Échelle</th><th>Stabilité</th></tr></thead>
+            <thead><tr><th>{{ $t('patternLearning.table.name') }}</th><th>{{ $t('patternLearning.table.offset') }}</th><th>{{ $t('patternLearning.table.type') }}</th><th>{{ $t('patternLearning.table.scale') }}</th><th>{{ $t('patternLearning.table.stability') }}</th></tr></thead>
             <tbody>
               <tr v-for="(offset, i) in profileKnownOffsets" :key="i">
                 <td>{{ offset.name }}</td>
@@ -258,34 +260,34 @@ onMounted(() => {
       </div>
 
       <div class="create-row">
-        <input v-model="newGameName" placeholder="Nom du jeu" />
-        <input v-model="newExecutableName" placeholder="Exécutable (optionnel)" />
-        <button class="btn btn-secondary compact" :disabled="!newGameName.trim() || profileBusy" @click="createProfile">Créer profil vide</button>
+        <input v-model="newGameName" :placeholder="$t('patternLearning.profiles.gameNamePlaceholder')" />
+        <input v-model="newExecutableName" :placeholder="$t('patternLearning.profiles.executablePlaceholder')" />
+        <button class="btn btn-secondary compact" :disabled="!newGameName.trim() || profileBusy" @click="createProfile">{{ $t('patternLearning.profiles.createEmpty') }}</button>
       </div>
     </section>
 
     <section class="panel">
-      <h3>Suggestions</h3>
+      <h3>{{ $t('patternLearning.suggestions.title') }}</h3>
       <div class="field-row">
-        <label>Jeu</label>
-        <input v-model="suggestGameName" placeholder="Nom du jeu" />
+        <label>{{ $t('patternLearning.labels.game') }}</label>
+        <input v-model="suggestGameName" :placeholder="$t('patternLearning.profiles.gameNamePlaceholder')" />
       </div>
       <div class="field-row">
-        <label>Type de pattern</label>
+        <label>{{ $t('patternLearning.suggestions.patternType') }}</label>
         <select v-model.number="suggestPatternType">
           <option v-for="(name, idx) in PATTERN_TYPE_NAMES" :key="idx" :value="idx">{{ name }}</option>
         </select>
       </div>
       <div class="field-row">
-        <label>Nombre</label>
+        <label>{{ $t('patternLearning.suggestions.count') }}</label>
         <input v-model.number="suggestCount" type="number" min="1" max="20" />
       </div>
       <button class="btn btn-secondary" :disabled="!suggestGameName.trim() || suggesting" @click="runSuggestions">
-        {{ suggesting ? 'Recherche…' : 'Suggestions' }}
+        {{ suggesting ? $t('patternLearning.suggestions.searching') : $t('patternLearning.suggestions.run') }}
       </button>
       <div v-if="suggestions.length > 0" class="table-wrap">
         <table>
-          <thead><tr><th>Nom</th><th>Adresse</th><th>Type</th><th>Échelle</th><th>Stabilité</th></tr></thead>
+          <thead><tr><th>{{ $t('patternLearning.table.name') }}</th><th>{{ $t('patternLearning.table.address') }}</th><th>{{ $t('patternLearning.table.type') }}</th><th>{{ $t('patternLearning.table.scale') }}</th><th>{{ $t('patternLearning.table.stability') }}</th></tr></thead>
           <tbody>
             <tr v-for="(s, i) in suggestions" :key="i">
               <td>{{ s.name }}</td>
@@ -297,7 +299,7 @@ onMounted(() => {
           </tbody>
         </table>
       </div>
-      <div v-else-if="suggesting === false && suggestGameName" class="hint">Aucune suggestion pour l'instant.</div>
+      <div v-else-if="suggesting === false && suggestGameName" class="hint">{{ $t('patternLearning.suggestions.none') }}</div>
     </section>
   </div>
 </template>

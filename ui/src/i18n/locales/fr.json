@@ -2539,5 +2539,234 @@
       "title": "Export Trainer",
       "copied": "Export copié."
     }
+  },
+  "memoryHeatmap": {
+    "title": "Memory Heatmap",
+    "noProcessAttached": "Aucun processus attaché",
+    "intro": {
+      "what": "Une carte d'intensité d'accès mémoire — quelles régions du process attaché sont lues/écrites le plus souvent.",
+      "purpose": "Repérer rapidement les zones actives (état de jeu qui bouge en continu) parmi tout l'espace mémoire, sans poser d'adresse précise au départ.",
+      "how": "Démarre la collecte (adresse de départ optionnelle pour borner le scan), laisse tourner quelques secondes pendant que le jeu joue, puis regarde les régions les plus actives."
+    },
+    "empty": {
+      "attachPrompt": "Attache d'abord un processus autorisé pour observer ses accès mémoire.",
+      "goToProcess": "Aller à Processus",
+      "collectingNoRegion": "Collecte en cours — aucune région active pour l'instant."
+    },
+    "config": {
+      "startAddress": "Adresse de départ (optionnel)",
+      "startAddressPlaceholder": "7ff600000000",
+      "regionSize": "Taille de région",
+      "regionSizePage": "4096 (page)",
+      "regionSize64k": "65536 (64 Ko)",
+      "regionSize1m": "1048576 (1 Mo)",
+      "samplingInterval": "Intervalle d'échantillonnage (ms)",
+      "reads": "Lectures",
+      "writes": "Écritures"
+    },
+    "actions": {
+      "collecting": "Collecte en cours…",
+      "start": "Démarrer",
+      "stop": "Arrêter",
+      "refresh": "Rafraîchir"
+    },
+    "stats": {
+      "trackedRegions": "Régions suivies",
+      "activeRegions": "Régions actives",
+      "totalAccesses": "Accès totaux",
+      "writes": "Écritures",
+      "reads": "Lectures",
+      "averageIntensity": "Intensité moyenne"
+    },
+    "topRegions": {
+      "title": "Régions les plus actives ({count})"
+    },
+    "table": {
+      "address": "Adresse",
+      "size": "Taille",
+      "intensity": "Intensité",
+      "reads": "Lectures",
+      "writes": "Écritures",
+      "accesses": "Accès"
+    },
+    "units": {
+      "mb": "{value} Mo",
+      "kb": "{value} Ko",
+      "bytes": "{count} o"
+    }
+  },
+  "memoryTimeline": {
+    "intro": {
+      "what": "Un visualiseur de l'évolution temporelle des valeurs mémoire — courbe de valeur au fil du temps pour un ensemble d'adresses surveillées.",
+      "purpose": "Repérer des cycles (timers, animations), des adresses volatiles vs stables, et suivre visuellement comment une valeur évolue pendant que le jeu tourne.",
+      "how": "Ajoute une ou plusieurs adresses, démarre la collecte, puis sélectionne une adresse pour voir sa courbe. Détection de patterns, profil comportemental, prédiction, corrélations entre adresses et rapport texte disponibles depuis l'onglet Analyse rapide."
+    },
+    "config": {
+      "title": "Configuration",
+      "samplingInterval": "Intervalle d'échantillonnage (ms)",
+      "maxDuration": "Durée max (ms)",
+      "trackOnlyChanges": "Ne tracker que les changements"
+    },
+    "addresses": {
+      "title": "Adresses à surveiller ({count})",
+      "add": "Ajouter",
+      "addressPlaceholder": "0x...",
+      "int32Bytes": "Int32 (4 octets)",
+      "int64Bytes": "Int64 (8 octets)",
+      "int16Bytes": "Int16 (2 octets)",
+      "byteSize": "Byte (1 octet)"
+    },
+    "actions": {
+      "collecting": "Collecte en cours...",
+      "start": "Démarrer",
+      "stop": "Arrêter",
+      "clearAll": "Tout effacer",
+      "exportJson": "Exporter JSON"
+    },
+    "status": {
+      "starting": "Démarrage..."
+    },
+    "logs": {
+      "addressAlreadyWatched": "Adresse déjà surveillée",
+      "exported": "Timeline exportée"
+    },
+    "stats": {
+      "title": "Statistiques",
+      "collectedPoints": "Points collectés",
+      "addresses": "Adresses"
+    },
+    "series": {
+      "changes": "Changements:",
+      "volatility": "Volatilité:",
+      "averageInterval": "Intervalle moyen:"
+    },
+    "patterns": {
+      "title": "Patterns détectés",
+      "analyze": "Analyser",
+      "none": "Aucun pattern significatif détecté"
+    },
+    "patternTypes": {
+      "unknown": "Inconnu",
+      "constant": "Constant",
+      "step": "Step",
+      "linear": "Linéaire",
+      "cyclic": "Cyclique",
+      "random": "Aléatoire",
+      "correlated": "Corrélé",
+      "antiCheat": "Anti-cheat"
+    },
+    "quickActions": {
+      "title": "Actions rapides",
+      "findVolatile": "Trouver volatiles",
+      "findStable": "Trouver stables",
+      "behaviorProfile": "Profil comportemental",
+      "prediction": "Prédiction",
+      "correlations": "Corrélations",
+      "textReport": "Rapport texte"
+    },
+    "quickResults": {
+      "volatile": "Volatile: {address}",
+      "stable": "Stable: {address}",
+      "changesPerSecond": "Changes/sec: {value}",
+      "regularity": "Régularité: {percent}%",
+      "burst": "Burst: {value}",
+      "changeProbability": "Probabilité de changement: {percent}%",
+      "predictedValue": "Valeur prédite: {value}",
+      "timeLag": ", décalage {ms}ms",
+      "aLeadsB": " (A mène B)",
+      "noCorrelations": "Aucune corrélation trouvée (au moins 2 adresses surveillées avec des données requises)",
+      "reportUnavailable": "Rapport non disponible"
+    },
+    "common": {
+      "yes": "Oui",
+      "no": "Non"
+    },
+    "chart": {
+      "title": "Timeline - {address}",
+      "time": "t : {ms} ms",
+      "value": "valeur : {value}"
+    }
+  },
+  "patternLearning": {
+    "title": "Pattern Learning",
+    "subtitle": "Classification de patterns mémoire et profils par jeu réutilisables.",
+    "intro": {
+      "what": "Classe automatiquement un historique de valeurs observées (compteur, santé, drapeau, timer, coordonnée...) et détecte le moteur de jeu (Unity/Unreal/Godot) à partir des modules chargés.",
+      "purpose": "Réutiliser ce qui a déjà marché sur un jeu (offsets connus, chemins de résolution) plutôt que de repartir de zéro à chaque session.",
+      "how": "Détecte le moteur depuis les modules du process attaché, classe un historique de valeurs collé à la main, ou charge/crée un profil par nom de jeu."
+    },
+    "patternTypes": {
+      "unknown": "Inconnu",
+      "resourceCounter": "Compteur de ressource",
+      "healthPoints": "Points de vie",
+      "stateFlag": "Drapeau d’état",
+      "timer": "Timer",
+      "coordinate": "Coordonnée",
+      "uiReference": "Référence UI",
+      "noise": "Bruit"
+    },
+    "stats": {
+      "title": "Statistiques",
+      "knownGames": "Jeux connus",
+      "engineSignatures": "Signatures moteur",
+      "patternRules": "Règles de pattern"
+    },
+    "engine": {
+      "title": "Détection de moteur",
+      "attachedModules": "{count} module(s) chargé(s) sur {process}",
+      "noProcess": "Aucun processus attaché — la détection utilisera une liste de modules vide.",
+      "detecting": "Détection…",
+      "detect": "Détecter le moteur"
+    },
+    "labels": {
+      "engine": "Moteur",
+      "version": "Version",
+      "confidence": "Confiance",
+      "signature": "Signature",
+      "address": "Adresse",
+      "type": "Type",
+      "game": "Jeu",
+      "executable": "Exécutable",
+      "sessions": "Sessions"
+    },
+    "classification": {
+      "title": "Classifier un historique de valeurs",
+      "addressPlaceholder": "7ff600001234",
+      "valuesLabel": "Valeurs (séparées par des virgules)",
+      "valuesPlaceholder": "100, 98, 95, 90, 85",
+      "classifying": "Classification…",
+      "classify": "Classifier",
+      "suggestedType": "Type suggéré",
+      "suggestedScale": "{type} (échelle {scale})",
+      "noResult": "Aucun résultat pour l'instant."
+    },
+    "profiles": {
+      "title": "Profils de jeu ({count})",
+      "empty": "Aucun profil enregistré.",
+      "gameNamePlaceholder": "Nom du jeu",
+      "executablePlaceholder": "Exécutable (optionnel)",
+      "createEmpty": "Créer profil vide"
+    },
+    "actions": {
+      "load": "Charger",
+      "delete": "Supprimer",
+      "refresh": "Rafraîchir"
+    },
+    "table": {
+      "name": "Nom",
+      "offset": "Offset",
+      "address": "Adresse",
+      "type": "Type",
+      "scale": "Échelle",
+      "stability": "Stabilité"
+    },
+    "suggestions": {
+      "title": "Suggestions",
+      "patternType": "Type de pattern",
+      "count": "Nombre",
+      "searching": "Recherche…",
+      "run": "Suggestions",
+      "none": "Aucune suggestion pour l'instant."
+    }
   }
 }

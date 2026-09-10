@@ -6,10 +6,12 @@
 // pilotable uniquement via le pipe d'automatisation. Voir
 // docs/PHASE_TRACKER.md "ANALYSE-CLINE-1".
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 const minAddress = ref('')
 const regionSize = ref(4096)
@@ -92,9 +94,9 @@ async function stop() {
 
 function formatBytes(size: unknown): string {
   const n = Number(size ?? 0)
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} Mo`
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} Ko`
-  return `${n} o`
+  if (n >= 1024 * 1024) return t('memoryHeatmap.units.mb', { value: (n / (1024 * 1024)).toFixed(1) })
+  if (n >= 1024) return t('memoryHeatmap.units.kb', { value: (n / 1024).toFixed(1) })
+  return t('memoryHeatmap.units.bytes', { count: n })
 }
 
 function intensityPercent(value: unknown): number {
@@ -116,74 +118,74 @@ onUnmounted(() => {
   <div class="memory-heatmap-view">
     <div class="header">
       <div>
-        <h1>Memory Heatmap</h1>
-        <p>{{ store.isAttached ? store.processName : 'Aucun processus attaché' }}</p>
+        <h1>{{ $t('memoryHeatmap.title') }}</h1>
+        <p>{{ store.isAttached ? store.processName : $t('memoryHeatmap.noProcessAttached') }}</p>
       </div>
     </div>
 
     <PanelIntro
-      what="Une carte d'intensité d'accès mémoire — quelles régions du process attaché sont lues/écrites le plus souvent."
-      purpose="Repérer rapidement les zones actives (état de jeu qui bouge en continu) parmi tout l'espace mémoire, sans poser d'adresse précise au départ."
-      how="Démarre la collecte (adresse de départ optionnelle pour borner le scan), laisse tourner quelques secondes pendant que le jeu joue, puis regarde les régions les plus actives."
+      :what="$t('memoryHeatmap.intro.what')"
+      :purpose="$t('memoryHeatmap.intro.purpose')"
+      :how="$t('memoryHeatmap.intro.how')"
     />
 
     <div v-if="!store.isAttached" class="empty-state">
-      <p>Attache d'abord un processus autorisé pour observer ses accès mémoire.</p>
-      <button class="btn btn-secondary" @click="store.activeView = 'process'">Aller à Processus</button>
+      <p>{{ $t('memoryHeatmap.empty.attachPrompt') }}</p>
+      <button class="btn btn-secondary" @click="store.activeView = 'process'">{{ $t('memoryHeatmap.empty.goToProcess') }}</button>
     </div>
 
     <template v-else>
       <section class="panel config-panel">
         <div class="field-row">
-          <label>Adresse de départ (optionnel)</label>
-          <input v-model="minAddress" placeholder="7ff600000000" :disabled="isCollecting" />
+          <label>{{ $t('memoryHeatmap.config.startAddress') }}</label>
+          <input v-model="minAddress" :placeholder="$t('memoryHeatmap.config.startAddressPlaceholder')" :disabled="isCollecting" />
         </div>
         <div class="field-row">
-          <label>Taille de région</label>
+          <label>{{ $t('memoryHeatmap.config.regionSize') }}</label>
           <select v-model.number="regionSize" :disabled="isCollecting">
-            <option :value="4096">4096 (page)</option>
-            <option :value="65536">65536 (64 Ko)</option>
-            <option :value="1048576">1048576 (1 Mo)</option>
+            <option :value="4096">{{ $t('memoryHeatmap.config.regionSizePage') }}</option>
+            <option :value="65536">{{ $t('memoryHeatmap.config.regionSize64k') }}</option>
+            <option :value="1048576">{{ $t('memoryHeatmap.config.regionSize1m') }}</option>
           </select>
         </div>
         <div class="field-row">
-          <label>Intervalle d'échantillonnage (ms)</label>
+          <label>{{ $t('memoryHeatmap.config.samplingInterval') }}</label>
           <input v-model.number="samplingIntervalMs" type="number" min="10" max="5000" :disabled="isCollecting" />
         </div>
         <div class="field-row checkbox">
-          <label><input v-model="trackReads" type="checkbox" :disabled="isCollecting" /> Lectures</label>
-          <label><input v-model="trackWrites" type="checkbox" :disabled="isCollecting" /> Écritures</label>
+          <label><input v-model="trackReads" type="checkbox" :disabled="isCollecting" /> {{ $t('memoryHeatmap.config.reads') }}</label>
+          <label><input v-model="trackWrites" type="checkbox" :disabled="isCollecting" /> {{ $t('memoryHeatmap.config.writes') }}</label>
         </div>
         <div class="actions-row">
           <button class="btn btn-primary" :disabled="busy || isCollecting" @click="start">
-            {{ isCollecting ? 'Collecte en cours…' : 'Démarrer' }}
+            {{ isCollecting ? $t('memoryHeatmap.actions.collecting') : $t('memoryHeatmap.actions.start') }}
           </button>
-          <button class="btn btn-secondary" :disabled="busy || !isCollecting" @click="stop">Arrêter</button>
-          <button class="btn btn-secondary compact" :disabled="busy" @click="refresh">Rafraîchir</button>
+          <button class="btn btn-secondary" :disabled="busy || !isCollecting" @click="stop">{{ $t('memoryHeatmap.actions.stop') }}</button>
+          <button class="btn btn-secondary compact" :disabled="busy" @click="refresh">{{ $t('memoryHeatmap.actions.refresh') }}</button>
         </div>
       </section>
 
       <section v-if="hasStats" class="panel stats-panel">
-        <div class="stat"><span class="stat-label">Régions suivies</span><span class="stat-value">{{ stats.totalRegions ?? 0 }}</span></div>
-        <div class="stat"><span class="stat-label">Régions actives</span><span class="stat-value">{{ stats.activeRegions ?? 0 }}</span></div>
-        <div class="stat"><span class="stat-label">Accès totaux</span><span class="stat-value">{{ stats.totalAccesses ?? 0 }}</span></div>
-        <div class="stat"><span class="stat-label">Écritures</span><span class="stat-value">{{ stats.totalWrites ?? 0 }}</span></div>
-        <div class="stat"><span class="stat-label">Lectures</span><span class="stat-value">{{ stats.totalReads ?? 0 }}</span></div>
-        <div class="stat"><span class="stat-label">Intensité moyenne</span><span class="stat-value">{{ intensityPercent(stats.averageIntensity) }}%</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('memoryHeatmap.stats.trackedRegions') }}</span><span class="stat-value">{{ stats.totalRegions ?? 0 }}</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('memoryHeatmap.stats.activeRegions') }}</span><span class="stat-value">{{ stats.activeRegions ?? 0 }}</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('memoryHeatmap.stats.totalAccesses') }}</span><span class="stat-value">{{ stats.totalAccesses ?? 0 }}</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('memoryHeatmap.stats.writes') }}</span><span class="stat-value">{{ stats.totalWrites ?? 0 }}</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('memoryHeatmap.stats.reads') }}</span><span class="stat-value">{{ stats.totalReads ?? 0 }}</span></div>
+        <div class="stat"><span class="stat-label">{{ $t('memoryHeatmap.stats.averageIntensity') }}</span><span class="stat-value">{{ intensityPercent(stats.averageIntensity) }}%</span></div>
       </section>
 
       <section v-if="topRegions.length > 0" class="panel">
-        <h3>Régions les plus actives ({{ topRegions.length }})</h3>
+        <h3>{{ $t('memoryHeatmap.topRegions.title', { count: topRegions.length }) }}</h3>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Adresse</th>
-                <th>Taille</th>
-                <th>Intensité</th>
-                <th>Lectures</th>
-                <th>Écritures</th>
-                <th>Accès</th>
+                <th>{{ $t('memoryHeatmap.table.address') }}</th>
+                <th>{{ $t('memoryHeatmap.table.size') }}</th>
+                <th>{{ $t('memoryHeatmap.table.intensity') }}</th>
+                <th>{{ $t('memoryHeatmap.table.reads') }}</th>
+                <th>{{ $t('memoryHeatmap.table.writes') }}</th>
+                <th>{{ $t('memoryHeatmap.table.accesses') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -206,7 +208,7 @@ onUnmounted(() => {
       </section>
 
       <section v-else-if="isCollecting" class="panel empty-hint">
-        <p>Collecte en cours — aucune région active pour l'instant.</p>
+        <p>{{ $t('memoryHeatmap.empty.collectingNoRegion') }}</p>
       </section>
     </template>
   </div>
