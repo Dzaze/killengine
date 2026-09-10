@@ -225,28 +225,28 @@ watch(
 
     <div v-if="store.showOnboarding" class="risk-backdrop" role="presentation">
       <section class="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
-        <h2 id="onboarding-title">Bienvenue dans KillEngine</h2>
-        <p class="onboarding-intro">Trois choses à savoir pour démarrer :</p>
+        <h2 id="onboarding-title">{{ $t('app.onboarding.title') }}</h2>
+        <p class="onboarding-intro">{{ $t('app.onboarding.intro') }}</p>
         <ol class="onboarding-steps">
           <li>
-            <strong>Attache un processus.</strong>
-            Onglet Processus, choisis l'application que tu veux analyser.
+            <strong>{{ $t('app.onboarding.step1Title') }}</strong>
+            {{ $t('app.onboarding.step1Detail') }}
           </li>
           <li>
-            <strong>Décris ce que tu cherches à l'Assistant.</strong>
-            Une valeur affichée à l'écran suffit — pas besoin de connaître les types de données ou les scans.
+            <strong>{{ $t('app.onboarding.step2Title') }}</strong>
+            {{ $t('app.onboarding.step2Detail') }}
           </li>
           <li>
-            <strong>Transforme une trouvaille en Trainer.</strong>
-            Une fois une valeur confirmée, sauvegarde-la comme feature réutilisable avec un raccourci clavier.
+            <strong>{{ $t('app.onboarding.step3Title') }}</strong>
+            {{ $t('app.onboarding.step3Detail') }}
           </li>
         </ol>
         <div class="onboarding-actions">
           <button type="button" class="risk-btn secondary" @click="store.openUserGuide()">
-            Guide complet
+            {{ $t('app.onboarding.fullGuide') }}
           </button>
           <button type="button" class="risk-btn primary" @click="store.dismissOnboarding()">
-            Commencer
+            {{ $t('app.onboarding.start') }}
           </button>
         </div>
       </section>
@@ -261,7 +261,7 @@ watch(
         <p class="risk-detail">{{ riskDialogDetailParts.text }}</p>
         <p v-if="riskDialogDetailParts.warning" class="risk-detail-highlight">{{ riskDialogDetailParts.warning }}</p>
         <p class="risk-warning">
-          Cette action modifie ou observe activement un processus local. Confirme uniquement si tu contrôles ce processus et acceptes le risque.
+          {{ $t('app.riskGate.genericWarning') }}
         </p>
         <label v-if="store.riskDialog.rememberKey" class="risk-remember">
           <input v-model="store.riskDialog.rememberChoice" type="checkbox" />
@@ -269,10 +269,10 @@ watch(
         </label>
         <div class="risk-actions">
           <button type="button" class="risk-btn secondary" @click="store.resolveRiskDialog(false)">
-            Annuler
+            {{ $t('app.riskGate.cancel') }}
           </button>
           <button type="button" class="risk-btn primary" @click="store.resolveRiskDialog(true)">
-            Confirmer
+            {{ $t('app.riskGate.confirm') }}
           </button>
         </div>
       </section>

@@ -97,6 +97,8 @@ export interface WatchedAddress {
   updatedAt: string
 }
 
+const { t } = i18n.global
+
 export const useAppStore = defineStore('app', () => {
   // State
   const activeView = ref<AppView>('process')
@@ -678,7 +680,6 @@ export const useAppStore = defineStore('app', () => {
 
   // Getters
   const statusText = computed(() => {
-    const { t } = i18n.global
     if (!isConnected.value) return t('common.status.disconnected')
     if (!isAttached.value) return t('common.status.ready')
     return t('common.status.attached', { name: processName.value })
@@ -756,12 +757,12 @@ export const useAppStore = defineStore('app', () => {
       }
       addActionLog(
         'freeze',
-        result.success === true ? 'Session freeze désactivé' : 'Session freeze échoué',
+        result.success === true ? t('appStore.session.freezeDisabled') : t('appStore.session.freezeFailed'),
         `0x${entry.address}. ${String(result.error ?? '')}`.trim(),
         result.success === true ? 'success' : 'error',
       )
     } catch (e) {
-      addActionLog('freeze', 'Session freeze échoué', String(e), 'error')
+      addActionLog('freeze', t('appStore.session.freezeFailed'), String(e), 'error')
     }
   }
 
@@ -895,13 +896,13 @@ export const useAppStore = defineStore('app', () => {
                 trainerSafe: quality?.trainerSafe,
                 signatureMatches: 1,
               },
-              label: `AOB unique (${score}/100, ${fixedBytes} octets fixes)`,
+              label: t('appStore.session.locator.aobUnique', { score, fixedBytes }),
               warning: '',
             }
           }
         }
       } catch (e) {
-        addActionLog('trainer', 'Promotion Session : AOB ignoré', String(e), 'warning')
+        addActionLog('trainer', t('appStore.session.locator.aobIgnored'), String(e), 'warning')
       }
     }
 
@@ -919,36 +920,36 @@ export const useAppStore = defineStore('app', () => {
               locatorKind: 'pointer_chain',
               pointerChain: bestChain,
             },
-            label: `Pointer chain ${bestChain.module}+${bestChain.baseOffset}`,
+            label: t('appStore.session.locator.pointerChain', { module: bestChain.module, offset: bestChain.baseOffset }),
             warning: '',
           }
         }
       } catch (e) {
-        addActionLog('trainer', 'Promotion Session : pointer chain ignorée', String(e), 'warning')
+        addActionLog('trainer', t('appStore.session.locator.pointerChainIgnored'), String(e), 'warning')
       }
     }
 
     return {
       featureInput: { locatorKind: 'absolute' },
-      label: 'Adresse absolue',
-      warning: 'Aucun locator AOB unique ni pointer chain stable trouvé : cette feature ne survivra probablement pas à un relaunch ou à un changement de scène.',
+      label: t('appStore.session.locator.absoluteAddress'),
+      warning: t('appStore.session.locator.noStableLocatorWarning'),
     }
   }
 
   async function promoteSessionEntryToTrainer(entryId: string, name?: string): Promise<SessionPromotionResult> {
     const entry = sessionEntries.value.find((candidate) => candidate.id === entryId)
-    if (!entry) return { success: false, featureIds: [], message: 'Entrée session introuvable.', warnings: [] }
+    if (!entry) return { success: false, featureIds: [], message: t('appStore.session.entryNotFound'), warnings: [] }
     setSessionPromotionBusy(entryId, true)
     try {
       const value = await sessionTrainerValue(entry)
       if (!value) {
-        const message = `Valeur live illisible pour 0x${entry.address}.`
-        addActionLog('trainer', 'Promotion Session refusée', message, 'warning')
+        const message = t('appStore.session.liveValueUnreadable', { address: entry.address })
+        addActionLog('trainer', t('appStore.session.promotionRefused'), message, 'warning')
         return { success: false, featureIds: [], message, warnings: [] }
       }
       const locator = await resolveSessionTrainerLocator(entry)
       const feature = createTrainerFeature({
-        name: name?.trim() || entry.label.trim() || `Session 0x${entry.address}`,
+        name: name?.trim() || entry.label.trim() || t('appStore.session.defaultName', { address: entry.address }),
         action: sessionTrainerAction(entry),
         address: entry.address,
         valueType: entry.valueType,
@@ -956,21 +957,21 @@ export const useAppStore = defineStore('app', () => {
         ...locator.featureInput,
       })
       if (!feature) {
-        return { success: false, featureIds: [], message: 'Création Trainer refusée.', warnings: locator.warning ? [locator.warning] : [] }
+        return { success: false, featureIds: [], message: t('appStore.session.trainerCreationRefused'), warnings: locator.warning ? [locator.warning] : [] }
       }
       const detail = locator.warning
         ? `${locator.label}. ${locator.warning}`
         : `${locator.label}.`
-      addActionLog('trainer', `Session promue: ${feature.name}`, detail, locator.warning ? 'warning' : 'success')
+      addActionLog('trainer', t('appStore.session.entryPromoted', { name: feature.name }), detail, locator.warning ? 'warning' : 'success')
       return {
         success: true,
         featureIds: [feature.id],
-        message: `${feature.name} créée (${locator.label}).`,
+        message: t('appStore.session.entryCreatedMessage', { name: feature.name, label: locator.label }),
         warnings: locator.warning ? [locator.warning] : [],
       }
     } catch (e) {
       const message = String(e)
-      addActionLog('trainer', 'Promotion Session échouée', message, 'error')
+      addActionLog('trainer', t('appStore.session.promotionFailed'), message, 'error')
       return { success: false, featureIds: [], message, warnings: [] }
     } finally {
       setSessionPromotionBusy(entryId, false)
@@ -979,7 +980,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function promoteSessionGroupToTrainer(groupId: string, name?: string): Promise<SessionPromotionResult> {
     const group = sessionGroups.value.find((candidate) => candidate.id === groupId)
-    if (!group) return { success: false, featureIds: [], message: 'Groupe session introuvable.', warnings: [] }
+    if (!group) return { success: false, featureIds: [], message: t('appStore.session.groupNotFound'), warnings: [] }
     setSessionPromotionBusy(groupId, true)
     const featureIds: number[] = []
     const warnings: string[] = []
@@ -987,16 +988,16 @@ export const useAppStore = defineStore('app', () => {
       for (const memberId of group.memberIds) {
         const entry = sessionEntries.value.find((candidate) => candidate.id === memberId)
         if (!entry) continue
-        const entryName = `${name?.trim() || group.name || 'Groupe session'} · ${entry.label.trim() || `0x${entry.address}`}`
+        const entryName = `${name?.trim() || group.name || t('appStore.session.defaultGroupName')} · ${entry.label.trim() || `0x${entry.address}`}`
         const result = await promoteSessionEntryToTrainer(memberId, entryName)
         featureIds.push(...result.featureIds)
         warnings.push(...result.warnings)
       }
       const success = featureIds.length > 0
       const message = success
-        ? `${featureIds.length} feature(s) Trainer créée(s) depuis ${group.name}.`
-        : `Aucune feature Trainer créée depuis ${group.name}.`
-      addActionLog('trainer', success ? 'Groupe Session promu' : 'Promotion groupe échouée', message, success ? (warnings.length ? 'warning' : 'success') : 'error')
+        ? t('appStore.session.groupFeaturesCreated', { count: featureIds.length, group: group.name })
+        : t('appStore.session.groupNoFeaturesCreated', { group: group.name })
+      addActionLog('trainer', success ? t('appStore.session.groupPromoted') : t('appStore.session.groupPromotionFailed'), message, success ? (warnings.length ? 'warning' : 'success') : 'error')
       return { success, featureIds, message, warnings }
     } finally {
       setSessionPromotionBusy(groupId, false)
@@ -1063,7 +1064,7 @@ export const useAppStore = defineStore('app', () => {
   function restoreInvestigationFromArchive(id: number) {
     const restored = investigationStore.restoreInvestigationFromArchive(id)
     if (restored && activeInvestigation.value) {
-      addActionLog('investigation', 'Archive restaurée', activeInvestigation.value.objective, 'success')
+      addActionLog('investigation', t('appStore.investigation.archiveRestored'), activeInvestigation.value.objective, 'success')
     }
     return restored
   }
@@ -1074,7 +1075,7 @@ export const useAppStore = defineStore('app', () => {
 
   function exportInvestigationMarkdown(): string {
     const run = activeInvestigation.value
-    if (!run) return '# Investigation\n\nAucune investigation active.\n'
+    if (!run) return t('appStore.investigation.markdown.noActiveInvestigation')
     const report = autoResolveReport.value
     const nextBestAction = report?.nextBestAction && typeof report.nextBestAction === 'object'
       ? report.nextBestAction as Record<string, unknown>
@@ -1084,48 +1085,49 @@ export const useAppStore = defineStore('app', () => {
       .slice(0, 5)
     const topActionPlans = topCheckpoints.map((checkpoint) => buildCheckpointActionPlan(checkpoint))
     const guardrails = Array.isArray(report?.guardrails) ? report.guardrails.slice(0, 8) : []
+    const notDetermined = t('appStore.investigation.markdown.notDetermined')
     const lines = [
       `# ${run.title}`,
       '',
-      `Objectif: ${run.objective}`,
-      `Processus: ${run.processName || 'non attache'}`,
-      `Statut: ${run.status}`,
+      t('appStore.investigation.markdown.objective', { value: run.objective }),
+      t('appStore.investigation.markdown.process', { value: run.processName || t('appStore.investigation.markdown.notAttached') }),
+      t('appStore.investigation.markdown.status', { value: run.status }),
       '',
-      '## Strategie',
-      String(run.preferredStrategy?.label ?? 'Non determinee'),
+      `## ${t('appStore.investigation.markdown.strategyTitle')}`,
+      String(run.preferredStrategy?.label ?? notDetermined),
       '',
-      '## Meilleure Prochaine Action',
+      `## ${t('appStore.investigation.markdown.bestNextActionTitle')}`,
       nextBestAction
-        ? `${String(nextBestAction.label ?? nextBestAction.id ?? 'Action')} (${String(nextBestAction.risk ?? 'safe')}${nextBestAction.confidence !== undefined ? `, confiance ${String(nextBestAction.confidence)}/100` : ''})`
-        : String(run.checkpoints[0]?.label ?? run.hypotheses[0]?.label ?? 'Non determinee'),
+        ? `${String(nextBestAction.label ?? nextBestAction.id ?? t('appStore.investigation.markdown.actionFallback'))} (${String(nextBestAction.risk ?? 'safe')}${nextBestAction.confidence !== undefined ? `, ${t('appStore.investigation.markdown.confidence', { value: String(nextBestAction.confidence) })}` : ''})`
+        : String(run.checkpoints[0]?.label ?? run.hypotheses[0]?.label ?? notDetermined),
       nextBestAction ? String(nextBestAction.reason ?? '') : String(run.checkpoints[0]?.reason ?? run.summary ?? ''),
       '',
-      '## Etapes',
+      `## ${t('appStore.investigation.markdown.stepsTitle')}`,
       ...run.steps.slice().reverse().map((step) => `- [${step.status}] ${step.title} - ${step.detail}`),
       '',
-      '## Checkpoints',
+      `## ${t('appStore.investigation.markdown.checkpointsTitle')}`,
       ...run.checkpoints.map((checkpoint) => `- ${String(checkpoint.label ?? checkpoint.address ?? checkpoint.id ?? 'checkpoint')} (${String(checkpoint.kind ?? 'checkpoint')}${checkpoint.confidenceLabel ? `, ${String(checkpoint.confidenceLabel)}` : ''})`),
       '',
-      '## Top 5 Checkpoints Scores',
+      `## ${t('appStore.investigation.markdown.top5Title')}`,
       ...(topCheckpoints.length > 0
-        ? topCheckpoints.map((checkpoint, index) => `${index + 1}. ${String(checkpoint.label ?? checkpoint.address ?? 'checkpoint')} - ${String(checkpoint.kind ?? 'checkpoint')} - ${String(checkpoint.confidenceLabel ?? `score ${Number(checkpoint.confidenceScore ?? 0)}/100`)} - ${checkpoint.requiresConfirmation === true ? 'confirmation requise' : 'safe'}`)
-        : ['Aucun checkpoint score.']),
+        ? topCheckpoints.map((checkpoint, index) => `${index + 1}. ${String(checkpoint.label ?? checkpoint.address ?? 'checkpoint')} - ${String(checkpoint.kind ?? 'checkpoint')} - ${String(checkpoint.confidenceLabel ?? t('appStore.investigation.markdown.scoreOutOf100', { value: Number(checkpoint.confidenceScore ?? 0) }))} - ${checkpoint.requiresConfirmation === true ? t('appStore.investigation.markdown.confirmationRequired') : 'safe'}`)
+        : [t('appStore.investigation.markdown.noScoredCheckpoint')]),
       '',
-      '## Plans D Action Checkpoints',
+      `## ${t('appStore.investigation.markdown.actionPlansTitle')}`,
       ...(topActionPlans.length > 0
-        ? topActionPlans.map((plan, index) => `${index + 1}. ${plan.label} - ${plan.safeCount} safe / ${plan.riskyCount} confirmation - ${plan.actions.filter((action) => action.enabled).map((action) => `${action.label}(${action.risk})`).join(', ') || 'aucune action active'}`)
-        : ['Aucun plan d action.']),
+        ? topActionPlans.map((plan, index) => `${index + 1}. ${plan.label} - ${plan.safeCount} safe / ${plan.riskyCount} confirmation - ${plan.actions.filter((action) => action.enabled).map((action) => `${action.label}(${action.risk})`).join(', ') || t('appStore.investigation.markdown.noActiveAction')}`)
+        : [t('appStore.investigation.markdown.noActionPlan')]),
       '',
-      '## Garde-fous Actifs',
+      `## ${t('appStore.investigation.markdown.guardrailsTitle')}`,
       ...(guardrails.length > 0
         ? guardrails.map((guardrail) => `- ${String(guardrail.label ?? guardrail.id ?? 'guardrail')} (${String(guardrail.risk ?? 'risk')})`)
-        : ['Aucun garde-fou remonte.']),
+        : [t('appStore.investigation.markdown.noGuardrail')]),
       '',
-      '## Bilan Auto',
-      `Etapes safe: ${run.steps.filter((step) => step.risk === 'safe' && step.status === 'success').length}`,
-      `Checkpoints actionnables: ${run.checkpoints.length}`,
-      `Meilleure piste: ${String(run.checkpoints[0]?.label ?? run.hypotheses[0]?.label ?? 'non determinee')}`,
-      `Prochaine etape: ${String(run.hypotheses[0]?.nextAction ?? run.checkpoints[0]?.reason ?? run.summary ?? 'continuer la reduction ou valider un checkpoint')}`,
+      `## ${t('appStore.investigation.markdown.autoSummaryTitle')}`,
+      t('appStore.investigation.markdown.safeSteps', { value: run.steps.filter((step) => step.risk === 'safe' && step.status === 'success').length }),
+      t('appStore.investigation.markdown.actionableCheckpoints', { value: run.checkpoints.length }),
+      t('appStore.investigation.markdown.bestLead', { value: String(run.checkpoints[0]?.label ?? run.hypotheses[0]?.label ?? notDetermined) }),
+      t('appStore.investigation.markdown.nextStep', { value: String(run.hypotheses[0]?.nextAction ?? run.checkpoints[0]?.reason ?? run.summary ?? t('appStore.investigation.markdown.continueOrValidate')) }),
       '',
     ]
     return lines.join('\n')
@@ -1167,15 +1169,15 @@ export const useAppStore = defineStore('app', () => {
   function useWorkspaceBookmarkAsWriteTarget(id: number) {
     const bookmark = workspaceBookmarks.value.find((item) => item.id === id)
     if (!bookmark?.address) {
-      addActionLog('workspace', 'Bookmark inutilisable', 'Adresse manquante pour remplir Write / Freeze.', 'warning')
+      addActionLog('workspace', t('appStore.bookmark.unusable'), t('appStore.bookmark.missingAddress'), 'warning')
       return false
     }
     selectedCandidateAddress.value = bookmark.address
     if (bookmark.type) exactScanType.value = bookmark.type
     if (bookmark.value !== undefined) writeValue.value = bookmark.value
-    addActionLog('workspace', `Bookmark chargé: ${bookmark.label}`, `Write / Freeze préparé sur 0x${bookmark.address}.`, 'success')
+    addActionLog('workspace', t('appStore.bookmark.loaded', { label: bookmark.label }), t('appStore.bookmark.writeFreezePrepared', { address: bookmark.address }), 'success')
     addInvestigationStep({
-      title: 'Bookmark chargé dans Write / Freeze',
+      title: t('appStore.bookmark.loadedIntoWriteFreeze'),
       detail: `${bookmark.label} · 0x${bookmark.address} · ${bookmark.type || exactScanType.value}`,
       status: 'success',
       tool: 'useWorkspaceBookmarkAsWriteTarget',
@@ -1200,7 +1202,7 @@ export const useAppStore = defineStore('app', () => {
         : address
           ? 'address'
           : 'note'
-    const label = String(checkpoint.label ?? checkpoint.name ?? checkpoint.address ?? checkpoint.id ?? 'Checkpoint').trim() || 'Checkpoint'
+    const label = String(checkpoint.label ?? checkpoint.name ?? checkpoint.address ?? checkpoint.id ?? t('appStore.bookmark.defaultCheckpointLabel')).trim() || t('appStore.bookmark.defaultCheckpointLabel')
     const score = Number(checkpoint.confidenceScore ?? payload.confidenceScore ?? 0)
     const reason = String(checkpoint.reason ?? payload.reason ?? '').trim()
     const value = String(checkpoint.value ?? checkpoint.targetValue ?? payload.value ?? '').trim()
@@ -1213,8 +1215,8 @@ export const useAppStore = defineStore('app', () => {
       value: value || undefined,
       note: [
         reason,
-        score > 0 ? `score ${score}/100` : '',
-        checkpoint.requiresConfirmation === true ? 'confirmation requise' : 'safe',
+        score > 0 ? t('appStore.bookmark.scoreNote', { score }) : '',
+        checkpoint.requiresConfirmation === true ? t('appStore.bookmark.confirmationRequiredNote') : t('appStore.bookmark.safeNote'),
       ].filter(Boolean).join(' · '),
       payload: {
         ...payload,
@@ -1232,7 +1234,7 @@ export const useAppStore = defineStore('app', () => {
       },
     })
     addInvestigationStep({
-      title: 'Bookmark créé depuis checkpoint',
+      title: t('appStore.bookmark.createdFromCheckpoint'),
       detail: `${bookmark.label} · ${bookmark.address ? `0x${bookmark.address}` : bookmark.kind} · ${bookmark.type || '-'}`,
       status: 'success',
       tool: 'createWorkspaceBookmarkFromCheckpoint',
@@ -1278,8 +1280,8 @@ export const useAppStore = defineStore('app', () => {
   async function enableAutomationMode() {
     const accepted = await confirmRiskAction(
       'injection',
-      'Activer le mode Automation',
-      "Autorise le pipe d'automatisation local (utilisé par le scripting Lua ke.call(...) et par tout agent/outil externe sur cette machine) à exécuter des lectures/écritures mémoire SANS confirmation par action, tant que le mode reste actif.",
+      t('appStore.automation.enableTitle'),
+      t('appStore.automation.enableDesc'),
     )
     if (!accepted) return null
     return automationPipeStore.enableAutomationMode()
@@ -1302,7 +1304,7 @@ export const useAppStore = defineStore('app', () => {
     webView2CdpDebugFlagBusy.value = true
     try {
       const result = await backend.getController().getWebView2CdpDebugFlagStatus?.()
-      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
     } finally {
       webView2CdpDebugFlagBusy.value = false
     }
@@ -1311,14 +1313,14 @@ export const useAppStore = defineStore('app', () => {
   async function enableWebView2CdpDebugFlag() {
     const accepted = await confirmRiskAction(
       'debug',
-      'Activer le débogage CDP WebView2',
-      "Force TOUS les hôtes WebView2 du user Windows courant (pas seulement une cible précise) à exposer un port de débogage CDP (--remote-debugging-port=9333) à leur PROCHAIN lancement — nécessaire pour inspecter l'état JavaScript d'une app WebView2/Electron/CEF non packagée (les apps Store/UWP passent par une autre voie, voir le diagnostic ci-dessous). Désactivable à tout moment.",
+      t('appStore.webview2Cdp.enableTitle'),
+      t('appStore.webview2Cdp.enableDesc'),
     )
     if (!accepted) return null
     webView2CdpDebugFlagBusy.value = true
     try {
       const result = await backend.getController().enableWebView2CdpDebugFlag?.()
-      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
       return result ?? null
     } finally {
       webView2CdpDebugFlagBusy.value = false
@@ -1329,7 +1331,7 @@ export const useAppStore = defineStore('app', () => {
     webView2CdpDebugFlagBusy.value = true
     try {
       const result = await backend.getController().disableWebView2CdpDebugFlag?.()
-      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      webView2CdpDebugFlagStatus.value = result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
       return result ?? null
     } finally {
       webView2CdpDebugFlagBusy.value = false
@@ -1368,7 +1370,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await backend.getController().setExternalAiApiKey?.(apiKey)
       if (!result?.success) {
-        externalAiError.value = String(result?.error ?? 'Échec de l\'enregistrement de la clé.')
+        externalAiError.value = String(result?.error ?? t('appStore.externalAi.saveKeyFailed'))
       }
       await refreshExternalAiStatus()
       return result ?? null
@@ -1392,8 +1394,8 @@ export const useAppStore = defineStore('app', () => {
     if (target === 'claude') {
       const accepted = await confirmRiskAction(
         'injection',
-        'Activer le backend IA externe (Claude)',
-        "Bascule le chat Assistant vers un backend externe (API Claude, clé personnelle) pour les tâches qui demandent un raisonnement plus profond. Dès qu'il est actif, le contexte des appels d'outils (adresses mémoire, nom du process, parfois le nom du jeu ciblé, éventuellement des extraits de code désassemblé) part vers un tiers (Anthropic) à chaque requête. Chaque outil sensible (écriture mémoire, kernel, réseau, stealth...) reste soumis à une confirmation RiskGate séparée avant exécution. Désactivable à tout moment (repasse au modèle local embarqué).",
+        t('appStore.externalAi.enableTitle'),
+        t('appStore.externalAi.enableDesc'),
       )
       if (!accepted) return null
     }
@@ -1402,7 +1404,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await backend.getController().setActiveAiBackend?.(target)
       if (!result?.success) {
-        externalAiError.value = String(result?.error ?? 'Échec du changement de backend.')
+        externalAiError.value = String(result?.error ?? t('appStore.externalAi.switchFailed'))
       }
       await refreshExternalAiStatus()
       return result ?? null
@@ -1438,8 +1440,8 @@ export const useAppStore = defineStore('app', () => {
   async function applyStealthMode(profile: string) {
     const accepted = await confirmRiskAction(
       'debug',
-      `Activer le mode Stealth (profil "${profile}")`,
-      "Modifie le process attaché : hooks anti-anti-debug (IsDebuggerPresent/CheckRemoteDebuggerPresent/NtQueryInformationProcess), masquage du nom de process KillEngine et/ou masquage des DLLs injectées, selon le profil choisi. Désactivable à tout moment via restoreStealthMode.",
+      t('appStore.stealth.enableTitle', { profile }),
+      t('appStore.stealth.enableDesc'),
     )
     if (!accepted) return null
     stealthBusy.value = true
@@ -1449,10 +1451,10 @@ export const useAppStore = defineStore('app', () => {
       if (result && !result.success) {
         const details = Array.isArray(result.warnings) && result.warnings.length > 0
           ? result.warnings.join('\n')
-          : (result.error ?? 'Erreur inconnue')
-        pushMessage('assistant', `Mode Stealth (${profile}) — échec :\n${details}`)
+          : (result.error ?? t('appStore.stealth.unknownError'))
+        pushMessage('assistant', t('appStore.stealth.failedMessage', { profile, details }))
       } else if (result && result.success && Array.isArray(result.warnings) && result.warnings.length > 0) {
-        pushMessage('assistant', `Mode Stealth (${profile}) actif avec avertissements :\n${result.warnings.join('\n')}`)
+        pushMessage('assistant', t('appStore.stealth.activeWithWarningsMessage', { profile, warnings: result.warnings.join('\n') }))
       }
       return result ?? null
     } finally {
@@ -1475,7 +1477,7 @@ export const useAppStore = defineStore('app', () => {
     stealthBusy.value = true
     try {
       const result = await backend.getController().analyzeStealthRisk?.()
-      stealthRiskAnalysis.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      stealthRiskAnalysis.value = result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
       return result ?? null
     } finally {
       stealthBusy.value = false
@@ -1503,7 +1505,7 @@ export const useAppStore = defineStore('app', () => {
     webView2SystemPrepBusy.value = true
     try {
       const result = await backend.getController().getWebView2SystemPrepStatus?.()
-      webView2SystemPrepStatus.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      webView2SystemPrepStatus.value = result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
     } finally {
       webView2SystemPrepBusy.value = false
     }
@@ -1512,15 +1514,15 @@ export const useAppStore = defineStore('app', () => {
   async function installWebView2DeveloperModeCapability() {
     const accepted = await confirmRiskAction(
       'debug',
-      "Installer la capacité Windows « Mode développeur »",
-      "Lance Add-WindowsCapability avec une invite UAC visible pour installer Tools.DeveloperMode.Core — prérequis pour activer le Portail d'appareil Windows, nécessaire à l'inspection CDP des apps UWP/Store (ex: apps du Microsoft Store). Ne débloque PAS le port CDP direct des apps Store (restriction AppContainer séparée, toujours présente). Peut prendre plusieurs minutes et rester silencieux : suivre l'état dans Paramètres Windows ou relancer ce diagnostic ensuite.",
+      t('appStore.webview2Prep.installCapabilityTitle'),
+      t('appStore.webview2Prep.installCapabilityDesc'),
     )
     if (!accepted) return null
     webView2SystemPrepBusy.value = true
     webView2CapabilityInstallResult.value = null
     try {
       const result = await backend.getController().installWebView2DeveloperModeCapability?.()
-      webView2CapabilityInstallResult.value = result ?? { success: false, error: 'Réponse backend absente.' }
+      webView2CapabilityInstallResult.value = result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
       return result ?? null
     } finally {
       webView2SystemPrepBusy.value = false
@@ -1545,7 +1547,7 @@ export const useAppStore = defineStore('app', () => {
       moduleCatalog.value = result?.modules ?? []
     } catch (e) {
       moduleCatalog.value = []
-      addActionLog('modules', 'Catalogue modules', String(e), 'error')
+      addActionLog('modules', t('appStore.modules.catalogTitle'), String(e), 'error')
     } finally {
       moduleCatalogBusy.value = false
     }
@@ -1554,15 +1556,15 @@ export const useAppStore = defineStore('app', () => {
   async function installModule(moduleId: string) {
     if (moduleInstallBusy.value) return null
     const labels: Record<string, string> = {
-      lua_runtime: 'Installer le runtime Lua externe',
-      ai_model: 'Télécharger le modèle IA embarqué (GGUF)',
-      clr_inspector: 'Compiler l’inspecteur CLR',
-      kernel_driver: 'Installer le driver noyau',
+      lua_runtime: t('appStore.modules.installLuaRuntime'),
+      ai_model: t('appStore.modules.installAiModel'),
+      clr_inspector: t('appStore.modules.installClrInspector'),
+      kernel_driver: t('appStore.modules.installKernelDriver'),
     }
     const accepted = await confirmRiskAction(
       'debug',
-      labels[moduleId] ?? `Installer le module ${moduleId}`,
-      'Lance le script d’installation correspondant (PowerShell local, téléchargement réseau ou invite UAC visible). Peut prendre plusieurs minutes ; la progression est affichée dans la vue Modules.',
+      labels[moduleId] ?? t('appStore.modules.installGeneric', { moduleId }),
+      t('appStore.modules.installDesc'),
     )
     if (!accepted) return null
     moduleInstallBusy.value = true
@@ -1573,7 +1575,7 @@ export const useAppStore = defineStore('app', () => {
       const controller = backend.getController()
       const started = await controller.installModule?.(moduleId, {})
       if (!started?.started) {
-        moduleInstallResult.value = started ?? { success: false, error: 'Réponse backend absente.' }
+        moduleInstallResult.value = started ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
         return moduleInstallResult.value
       }
       // kernel_driver : lancé élevé et détaché, pas de signal de fin attendu.
@@ -1583,7 +1585,7 @@ export const useAppStore = defineStore('app', () => {
       }
       const finishedSignal = controller.moduleInstallFinished
       if (!finishedSignal) {
-        moduleInstallResult.value = { success: false, error: 'Signal moduleInstallFinished absent.' }
+        moduleInstallResult.value = { success: false, error: t('appStore.modules.finishedSignalMissing') }
         return moduleInstallResult.value
       }
       const requestId = Number(started.requestId ?? 0)
@@ -1594,7 +1596,7 @@ export const useAppStore = defineStore('app', () => {
           settled = true
           finishedSignal.disconnect?.(handler)
           moduleInstallBusy.value = false
-          moduleInstallResult.value = { success: false, error: 'Timeout client en attente de l’installation.' }
+          moduleInstallResult.value = { success: false, error: t('appStore.modules.installTimeout') }
           resolve()
         }, 30 * 60 * 1000)
         const handler = (payload: Record<string, unknown>) => {
@@ -1617,24 +1619,24 @@ export const useAppStore = defineStore('app', () => {
 
   async function cancelModuleInstall() {
     const result = await backend.getController().cancelModuleInstall?.()
-    return result ?? { success: false, error: 'Réponse backend absente.' }
+    return result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
   }
 
   async function executeCheckpointFindWhatWrites(checkpoint: Record<string, unknown>) {
     const address = checkpointAddress(checkpoint)
     const type = checkpointType(checkpoint)
     if (!address) {
-      addActionLog('checkpoint', 'Debugger impossible', 'Adresse manquante.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.debuggerImpossible'), t('appStore.checkpoint.missingAddress'), 'warning')
       return null
     }
     const sizeByType: Record<string, number> = {
       Int8: 1, UInt8: 1, Int16: 2, UInt16: 2, Int32: 4, UInt32: 4, Float32: 4, Int64: 8, UInt64: 8, Float64: 8,
     }
     const size = sizeByType[type] ?? 4
-    if (!await confirmRiskAction('debug', 'Checkpoint Find What Writes', `0x${address}, taille ${size}, fenêtre 5000 ms.`)) return null
+    if (!await confirmRiskAction('debug', t('appStore.checkpoint.findWhatWritesTitle'), t('appStore.checkpoint.findWhatWritesDesc', { address, size }))) return null
     const controller = backend.getController()
     if (!controller.findWhatWrites) {
-      addActionLog('checkpoint', 'Find What Writes indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.findWhatWritesUnavailable'), t('appStore.checkpoint.backendNotExposed'), 'warning')
       return null
     }
     try {
@@ -1656,8 +1658,8 @@ export const useAppStore = defineStore('app', () => {
         saveInvestigations()
       }
       addInvestigationStep({
-        title: hits.length > 0 ? 'Find What Writes capturé' : 'Find What Writes sans hit',
-        detail: `${hits.length} hit(s) pour 0x${address}.`,
+        title: hits.length > 0 ? t('appStore.checkpoint.findWhatWritesCapturedTitle') : t('appStore.checkpoint.findWhatWritesEmptyTitle'),
+        detail: t('appStore.checkpoint.findWhatWritesDetail', { count: hits.length, address }),
         status: hits.length > 0 ? 'checkpoint' : 'warning',
         tool: 'findWhatWrites',
         risk: 'debug',
@@ -1666,7 +1668,7 @@ export const useAppStore = defineStore('app', () => {
       logAiAudit('checkpoint_find_writes_executed', { address, type, size, hitCount: hits.length, success: result.success === true })
       return result
     } catch (e) {
-      addActionLog('checkpoint', 'Find What Writes échoué', String(e), 'error')
+      addActionLog('checkpoint', t('appStore.checkpoint.findWhatWritesFailed'), String(e), 'error')
       return null
     }
   }
@@ -1674,13 +1676,13 @@ export const useAppStore = defineStore('app', () => {
   async function executeCheckpointDisassembleBackward(checkpoint: Record<string, unknown>) {
     const address = checkpointAddress(checkpoint)
     if (!address) {
-      addActionLog('checkpoint', 'Désassemblage impossible', 'Adresse RIP manquante.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.disassembleImpossible'), t('appStore.checkpoint.missingRipAddress'), 'warning')
       return null
     }
-    if (!await confirmRiskAction('patch', 'Désassembler en amont', `Lire les octets avant l'instruction 0x${address} et reconstruire les instructions précédentes (lecture seule).`)) return null
+    if (!await confirmRiskAction('patch', t('appStore.checkpoint.disassembleBackwardTitle'), t('appStore.checkpoint.disassembleBackwardDesc', { address }))) return null
     const controller = backend.getController()
     if (!controller.disassembleBackward) {
-      addActionLog('checkpoint', 'Désassemblage indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.disassembleUnavailable'), t('appStore.checkpoint.backendNotExposed'), 'warning')
       return null
     }
     try {
@@ -1690,7 +1692,7 @@ export const useAppStore = defineStore('app', () => {
         activeInvestigation.value.checkpoints = [
           ...candidates.slice(0, 6).map((field) => ({
             kind: 'candidate_field',
-            label: `Champ candidat [${field.memBaseRegister}+0x${(field.memDisplacement ?? 0).toString(16)}]`,
+            label: t('appStore.checkpoint.candidateFieldLabel', { register: field.memBaseRegister, offset: (field.memDisplacement ?? 0).toString(16) }),
             address: field.address,
             sourceAddress: address,
             requiresConfirmation: true,
@@ -1700,8 +1702,8 @@ export const useAppStore = defineStore('app', () => {
         saveInvestigations()
       }
       addInvestigationStep({
-        title: candidates.length > 0 ? 'Désassemblage en amont : champs candidats trouvés' : 'Désassemblage en amont sans champ candidat',
-        detail: `${candidates.length} champ(s) candidat(s) pour RIP 0x${address}.`,
+        title: candidates.length > 0 ? t('appStore.checkpoint.disassembleBackwardFoundTitle') : t('appStore.checkpoint.disassembleBackwardEmptyTitle'),
+        detail: t('appStore.checkpoint.candidateCountForRip', { count: candidates.length, address }),
         status: candidates.length > 0 ? 'checkpoint' : 'warning',
         tool: 'disassembleBackward',
         risk: 'patch',
@@ -1710,7 +1712,7 @@ export const useAppStore = defineStore('app', () => {
       logAiAudit('checkpoint_disassemble_backward_executed', { address, candidateCount: candidates.length, success: result.success === true })
       return result
     } catch (e) {
-      addActionLog('checkpoint', 'Désassemblage en amont échoué', String(e), 'error')
+      addActionLog('checkpoint', t('appStore.checkpoint.disassembleBackwardFailed'), String(e), 'error')
       return null
     }
   }
@@ -1724,21 +1726,20 @@ export const useAppStore = defineStore('app', () => {
   // mémoire réellement écrite, connue depuis findWhatWrites).
   async function executeCandidateFieldTest(writeInstructionAddressHex: string, knownWriteTargetAddressHex: string) {
     if (!writeInstructionAddressHex || !knownWriteTargetAddressHex) {
-      addActionLog('checkpoint', 'Test de champs candidats impossible', 'Adresse RIP ou adresse écrite manquante.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.candidateTestImpossible'), t('appStore.checkpoint.missingRipOrWriteAddress'), 'warning')
       return null
     }
     if (!await confirmRiskAction(
       'write',
-      'Tester les champs candidats',
-      `Écrit une valeur test transitoire sur chaque champ candidat trouvé avant 0x${writeInstructionAddressHex}, `
-      + 'attend quelques secondes, puis restaure systématiquement la valeur d\'origine.',
+      t('appStore.checkpoint.candidateTestTitle'),
+      t('appStore.checkpoint.candidateTestDesc', { address: writeInstructionAddressHex }),
     )) return null
 
     const controller = backend.getController()
     const testCandidateFieldsAsync = controller.testCandidateFieldsAsync
     const candidateFieldTestFinished = controller.candidateFieldTestFinished
     if (!testCandidateFieldsAsync || !candidateFieldTestFinished) {
-      addActionLog('checkpoint', 'Test de champs candidats indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.candidateTestUnavailable'), t('appStore.checkpoint.backendNotExposed'), 'warning')
       return null
     }
 
@@ -1750,7 +1751,7 @@ export const useAppStore = defineStore('app', () => {
         const timeout = window.setTimeout(() => {
           settled = true
           candidateFieldTestFinished.disconnect?.(handler)
-          resolve({ success: false, error: 'Timeout du test de champs candidats.' })
+          resolve({ success: false, error: t('appStore.checkpoint.candidateTestTimeout') })
         }, 75000)
 
         const handler = (payload: CandidateFieldTestResult) => {
@@ -1772,7 +1773,7 @@ export const useAppStore = defineStore('app', () => {
             settled = true
             window.clearTimeout(timeout)
             candidateFieldTestFinished.disconnect?.(handler)
-            resolve({ success: false, error: String(start.error ?? 'Impossible de démarrer le test de champs candidats.') })
+            resolve({ success: false, error: String(start.error ?? t('appStore.checkpoint.candidateTestStartFailed')) })
             return
           }
           requestId = Number(start.requestId)
@@ -1795,12 +1796,12 @@ export const useAppStore = defineStore('app', () => {
         activeInvestigation.value.checkpoints = [
           ...holding.map((field) => ({
             kind: 'candidate_field_verdict',
-            label: `Champ testé [${field.memBaseRegister}+0x${(field.memDisplacement ?? 0).toString(16)}] : tient`,
+            label: t('appStore.checkpoint.candidateFieldHoldsLabel', { register: field.memBaseRegister, offset: (field.memDisplacement ?? 0).toString(16) }),
             address: field.address,
             sourceAddress: writeInstructionAddressHex,
             valueType: field.valueType,
             confidenceScore: 95,
-            confidenceLabel: `Testé empiriquement : tient ${field.ticksSurvived ?? 0} sondage(s)`,
+            confidenceLabel: t('appStore.checkpoint.empiricallyTestedLabel', { count: field.ticksSurvived ?? 0 }),
             requiresConfirmation: true,
           })),
           ...activeInvestigation.value.checkpoints,
@@ -1808,8 +1809,8 @@ export const useAppStore = defineStore('app', () => {
         saveInvestigations()
       }
       addInvestigationStep({
-        title: holding.length > 0 ? 'Test de champs candidats : source trouvée' : 'Test de champs candidats : rien ne tient',
-        detail: `${outcomes.length} champ(s) testé(s), ${holding.length} tien(nen)t.`,
+        title: holding.length > 0 ? t('appStore.checkpoint.candidateTestFoundTitle') : t('appStore.checkpoint.candidateTestEmptyTitle'),
+        detail: t('appStore.checkpoint.candidateTestDetail', { tested: outcomes.length, holding: holding.length }),
         status: holding.length > 0 ? 'checkpoint' : 'warning',
         tool: 'testCandidateFields',
         risk: 'write',
@@ -1824,7 +1825,7 @@ export const useAppStore = defineStore('app', () => {
       })
       return result
     } catch (e) {
-      addActionLog('checkpoint', 'Test de champs candidats échoué', String(e), 'error')
+      addActionLog('checkpoint', t('appStore.checkpoint.candidateTestFailed'), String(e), 'error')
       return null
     }
   }
@@ -1841,7 +1842,7 @@ export const useAppStore = defineStore('app', () => {
   // Roadmap section B - interception de fonctions. Gate confirmRiskAction
   // ICI (pas encore extrait de app.ts) avant de déléguer à speedhackStore.
   async function startApiHook() {
-    if (!await confirmRiskAction('injection', 'Intercepter '+apiHookModuleName.value+'!'+apiHookFunctionName.value, `Injecte un composant MinHook dans le processus cible pour intercepter les appels à ${apiHookModuleName.value}!${apiHookFunctionName.value}.`)) return null
+    if (!await confirmRiskAction('injection', t('appStore.speedhack.interceptTitle', { module: apiHookModuleName.value, fn: apiHookFunctionName.value }), t('appStore.speedhack.interceptDesc', { module: apiHookModuleName.value, fn: apiHookFunctionName.value }))) return null
     return speedhackStore.startApiHook()
   }
 
@@ -1854,7 +1855,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function startSpeedhack(factor: number) {
-    if (!await confirmRiskAction('injection', 'Activer le speedhack', `Injecte un composant dans le processus cible pour modifier la vitesse perçue du temps (facteur ${factor}x).`)) return null
+    if (!await confirmRiskAction('injection', t('appStore.speedhack.enableTitle'), t('appStore.speedhack.enableDesc', { factor }))) return null
     const result = await speedhackStore.startSpeedhack(factor)
     logAiAudit('speedhack_start_executed', { factor, success: result?.success === true })
     return result
@@ -1876,7 +1877,7 @@ export const useAppStore = defineStore('app', () => {
   // simple lecture/écriture mémoire. Gate confirmRiskAction ICI avant de
   // déléguer à speedhackStore.
   async function blockProcessNetwork() {
-    if (!await confirmRiskAction('injection', 'Couper le réseau du processus', `Ajoute une règle pare-feu Windows bloquant tout le trafic entrant/sortant de ${processName.value || 'ce processus'} (invite UAC requise).`)) return null
+    if (!await confirmRiskAction('injection', t('appStore.network.blockProcessTitle'), t('appStore.network.blockProcessDesc', { name: processName.value || t('appStore.network.thisProcessFallback') }))) return null
     const result = await speedhackStore.blockProcessNetwork(processName.value)
     logAiAudit('network_block_executed', { success: result?.success === true })
     return result
@@ -1895,13 +1896,13 @@ export const useAppStore = defineStore('app', () => {
   async function prepareCheckpointAob(checkpoint: Record<string, unknown>) {
     const address = checkpointAddress(checkpoint)
     if (!address) {
-      addActionLog('checkpoint', 'AOB impossible', 'Adresse instruction manquante.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.aobImpossible'), t('appStore.checkpoint.missingInstructionAddress'), 'warning')
       return null
     }
-    if (!await confirmRiskAction('patch', 'Checkpoint AOB/patch', `Lire l'instruction 0x${address}, générer une signature et proposer des patchs sans application.`)) return null
+    if (!await confirmRiskAction('patch', t('appStore.checkpoint.aobPatchTitle'), t('appStore.checkpoint.aobPatchDesc', { address }))) return null
     const controller = backend.getController()
     if (!controller.generateAobSignature || !controller.suggestCodePatches) {
-      addActionLog('checkpoint', 'AOB indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.aobUnavailable'), t('appStore.checkpoint.backendNotExposed'), 'warning')
       return null
     }
     try {
@@ -1914,7 +1915,7 @@ export const useAppStore = defineStore('app', () => {
             const patchRecord = patch as unknown as Record<string, unknown>
             return {
               kind: 'code_patch_suggestion',
-              label: String(patchRecord.label ?? `Patch 0x${address}`),
+              label: String(patchRecord.label ?? t('appStore.checkpoint.patchLabel', { address })),
               address,
               patchBytes: String(patchRecord.patchBytes ?? patchRecord.bytesText ?? ''),
               risk: String(patchRecord.risk ?? patchRecord.riskLevel ?? 'medium'),
@@ -1924,7 +1925,7 @@ export const useAppStore = defineStore('app', () => {
           }),
           {
             kind: 'aob_signature',
-            label: `Signature AOB 0x${address}`,
+            label: t('appStore.checkpoint.aobSignatureLabel', { address }),
             address,
             aobPattern: signature.pattern,
             module: signature.module,
@@ -1936,8 +1937,8 @@ export const useAppStore = defineStore('app', () => {
         saveInvestigations()
       }
       addInvestigationStep({
-        title: 'AOB/patch préparé',
-        detail: `${patchSuggestions.length} suggestion(s), signature ${String(signature.pattern ?? '').slice(0, 80)}.`,
+        title: t('appStore.checkpoint.aobPreparedTitle'),
+        detail: t('appStore.checkpoint.aobPreparedDetail', { count: patchSuggestions.length, pattern: String(signature.pattern ?? '').slice(0, 80) }),
         status: patchSuggestions.length > 0 ? 'checkpoint' : 'warning',
         tool: 'generateAobSignature/suggestCodePatches',
         risk: 'patch',
@@ -1953,7 +1954,7 @@ export const useAppStore = defineStore('app', () => {
       })
       return { signature, suggestions }
     } catch (e) {
-      addActionLog('checkpoint', 'AOB échoué', String(e), 'error')
+      addActionLog('checkpoint', t('appStore.checkpoint.aobFailed'), String(e), 'error')
       return null
     }
   }
@@ -1962,23 +1963,23 @@ export const useAppStore = defineStore('app', () => {
     const address = checkpointAddress(checkpoint)
     const trimmedValue = value.trim()
     if (!address || !trimmedValue) {
-      addActionLog('checkpoint', 'Forcer valeur impossible', 'RIP ou valeur manquante.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.forceValueImpossible'), t('appStore.checkpoint.missingRipOrValue'), 'warning')
       return null
     }
     const controller = backend.getController()
     if (!controller.suggestCodePatches || !controller.forceWriteInstructionValue) {
-      addActionLog('checkpoint', 'Forcer valeur indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('appStore.checkpoint.forceValueUnavailable'), t('appStore.checkpoint.backendNotExposed'), 'warning')
       return null
     }
     try {
       const suggestions = await controller.suggestCodePatches(address, { maxBytes: 16 })
       const memBaseRegister = String(suggestions.memBaseRegister ?? '').trim()
       if (!memBaseRegister) {
-        addActionLog('checkpoint', 'Forcer valeur impossible', 'Instruction sans destination mémoire exploitable (adressage indexé ou RIP-relatif).', 'warning')
+        addActionLog('checkpoint', t('appStore.checkpoint.forceValueImpossible'), t('appStore.checkpoint.noExploitableMemoryTarget'), 'warning')
         return null
       }
       const type = checkpointType(checkpoint)
-      if (!await confirmRiskAction('patch', 'Checkpoint forcer valeur (hook)', `Installer un trampoline sur RIP 0x${address} pour forcer ${type} = ${trimmedValue}.`)) return null
+      if (!await confirmRiskAction('patch', t('appStore.checkpoint.forceValueHookTitle'), t('appStore.checkpoint.forceValueHookDesc', { address, type, value: trimmedValue }))) return null
       const result = await controller.forceWriteInstructionValue(
         address,
         Number(suggestions.instructionLength ?? 0),
@@ -1989,13 +1990,13 @@ export const useAppStore = defineStore('app', () => {
       )
       addActionLog(
         'checkpoint',
-        result.success === true ? 'Forcer valeur (hook) OK' : 'Forcer valeur (hook) échoué',
+        result.success === true ? t('appStore.checkpoint.forceValueHookOk') : t('appStore.checkpoint.forceValueHookFailed'),
         String(result.error || `0x${address} ${type} = ${trimmedValue}`),
         result.success === true ? 'success' : 'error',
       )
       addInvestigationStep({
-        title: result.success === true ? 'Checkpoint forcer valeur exécuté' : 'Checkpoint forcer valeur échoué',
-        detail: String(result.error || `0x${address} ${type} = ${trimmedValue} (trampoline)`),
+        title: result.success === true ? t('appStore.checkpoint.forceValueExecutedTitle') : t('appStore.checkpoint.forceValueFailedTitle'),
+        detail: String(result.error || t('appStore.checkpoint.forceValueTrampolineDetail', { address, type, value: trimmedValue })),
         status: result.success === true ? 'success' : 'error',
         tool: 'forceWriteInstructionValue',
         risk: 'patch',
@@ -2010,7 +2011,7 @@ export const useAppStore = defineStore('app', () => {
       })
       return result
     } catch (e) {
-      addActionLog('checkpoint', 'Forcer valeur (hook) échoué', String(e), 'error')
+      addActionLog('checkpoint', t('appStore.checkpoint.forceValueHookFailed'), String(e), 'error')
       return null
     }
   }
@@ -2118,16 +2119,16 @@ export const useAppStore = defineStore('app', () => {
           freezeInstabilityVersion.value += 1
           pushMessage(
             'assistant',
-            String(info.message ?? `Le freeze sur 0x${address} ne tient pas.`) + ' ' + String(info.suggestion ?? ''),
+            String(info.message ?? t('appStore.signals.freezeDoesNotHold', { address })) + ' ' + String(info.suggestion ?? ''),
             {
               recoveryActions: [
                 {
                   id: 'escalate_freeze_bp',
-                  label: 'Passer en Freeze BP',
+                  label: t('appStore.signals.escalateToFreezeBp'),
                   address,
                   requiresConfirmation: true,
                 },
-                { id: 'open_expert', label: 'Ouvrir Expert' },
+                { id: 'open_expert', label: t('appStore.signals.openExpert') },
               ],
             },
           )
@@ -2145,16 +2146,16 @@ export const useAppStore = defineStore('app', () => {
           const type = String(info.type ?? 'Int32')
           pushMessage(
             'assistant',
-            String(info.message ?? `La valeur écrite à 0x${address} a changé toute seule.`) + ' ' + String(info.suggestion ?? ''),
+            String(info.message ?? t('appStore.signals.valueChangedByItself', { address })) + ' ' + String(info.suggestion ?? ''),
             {
               recoveryActions: [
                 {
                   id: 'find_what_writes_targets',
-                  label: 'Capturer qui écrit dessus',
+                  label: t('appStore.signals.captureWhoWrites'),
                   address,
                   type,
                 },
-                { id: 'open_expert', label: 'Ouvrir Expert' },
+                { id: 'open_expert', label: t('appStore.signals.openExpert') },
               ],
             },
           )
@@ -2165,14 +2166,14 @@ export const useAppStore = defineStore('app', () => {
         // EDR test : le processus cible a été tué par l'EDR pendant le test
         controller.processKilledByEdr?.connect((info) => {
           const pid = Number(info.pid ?? 0)
-          const name = String(info.processName ?? 'inconnu')
+          const name = String(info.processName ?? t('appStore.signals.unknownProcessName'))
           pushMessage(
             'assistant',
-            `⚠️ L'EDR a tué le processus cible "${name}" (PID ${pid}) pendant le test EDR. C'est une signature claire que l'EDR est actif. Ajoute une exclusion PowerShell pour éviter ce comportement.`,
+            t('appStore.signals.edrKilledProcess', { name, pid }),
             {
               recoveryActions: [
-                { id: 'add_edr_exclusion', label: 'Ajouter exclusion Defender' },
-                { id: 'open_expert', label: 'Ouvrir Expert' },
+                { id: 'add_edr_exclusion', label: t('appStore.signals.addDefenderExclusion') },
+                { id: 'open_expert', label: t('appStore.signals.openExpert') },
               ],
             },
           )
@@ -2272,8 +2273,8 @@ export const useAppStore = defineStore('app', () => {
 
           if (kind === 'confirm_and_execute_in_cpp') {
             const risk = (request.risk as Parameters<typeof confirmRiskAction>[0]) ?? 'injection'
-            const description = String(request.description ?? 'Action demandée par le backend Claude.')
-            const approved = await confirmRiskAction(risk, 'Confirmation backend Claude', description)
+            const description = String(request.description ?? t('appStore.claudeAction.defaultDescription'))
+            const approved = await confirmRiskAction(risk, t('appStore.claudeAction.confirmTitle'), description)
             await controller.resolveClaudePendingAction?.(pendingId, { approved })
             return
           }
@@ -2298,7 +2299,7 @@ export const useAppStore = defineStore('app', () => {
           if (kind === 'trainer_create_write') {
             const locator = (request.locator as Record<string, unknown>) ?? {}
             const feature = trainerStore.createTrainerFeature({
-              name: 'Assistant Claude Trainer write',
+              name: t('appStore.claudeAction.trainerWriteFeatureName'),
               action: 'write',
               address: String(args.address ?? ''),
               valueType: String(args.valueType ?? 'Int32'),
@@ -2309,7 +2310,7 @@ export const useAppStore = defineStore('app', () => {
             })
             await controller.resolveClaudePendingAction?.(pendingId, {
               success: !!feature,
-              error: feature ? undefined : 'Adresse manquante ou feature refusée.',
+              error: feature ? undefined : t('appStore.claudeAction.missingAddressOrRefused'),
               feature: feature ? { id: feature.id, name: feature.name, locatorKind: feature.locatorKind } : undefined,
             })
             return
@@ -2342,7 +2343,7 @@ export const useAppStore = defineStore('app', () => {
 
           await controller.resolveClaudePendingAction?.(pendingId, {
             success: false,
-            error: `Type d'action inconnu côté frontend: ${kind}`,
+            error: t('appStore.claudeAction.unknownActionType', { kind }),
           })
         })
         backendClaudePendingActionSignalConnected = true
@@ -2394,7 +2395,7 @@ export const useAppStore = defineStore('app', () => {
       const result = await backend.getController().requestWindowsDefenderExclusionAsync?.()
       if (!result?.started) {
         defenderExclusionBusy.value = false
-        defenderExclusionResult.value = result ?? { success: false, error: 'Réponse backend absente.' }
+        defenderExclusionResult.value = result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
       }
     } catch (e) {
       defenderExclusionBusy.value = false
@@ -2438,7 +2439,7 @@ export const useAppStore = defineStore('app', () => {
   // ce store (voir confirmRiskAction), pas comme un simple 'write'. Gate
   // gardé ICI avant de déléguer à kernelDriverStore.
   async function writeMemoryKernel(addressHex: string, hexBytes: string) {
-    if (!await confirmRiskAction('injection', 'Écriture mémoire via driver noyau', `0x${addressHex} = ${hexBytes.trim()} (contourne les protections mémoire usermode).`)) return
+    if (!await confirmRiskAction('injection', t('appStore.kernel.writeTitle'), t('appStore.kernel.writeDesc', { address: addressHex, bytes: hexBytes.trim() }))) return
     const result = await kernelDriverStore.writeMemoryKernel(addressHex, hexBytes)
     if (result) {
       logAiAudit('kernel_memory_write', { address: addressHex, bytes: hexBytes, success: result.success })
@@ -2450,10 +2451,10 @@ export const useAppStore = defineStore('app', () => {
     memoryAccessMode.value = mode
     addActionLog(
       'memory_access_mode',
-      mode === 'kernel' ? 'Mode mémoire kernel' : 'Mode mémoire standard',
+      mode === 'kernel' ? t('appStore.kernel.modeKernelTitle') : t('appStore.kernel.modeStandardTitle'),
       mode === 'kernel'
-        ? 'Les lectures/écritures interactives utiliseront le driver quand il est disponible.'
-        : 'Les lectures/écritures interactives utiliseront les API usermode.',
+        ? t('appStore.kernel.modeKernelDetail')
+        : t('appStore.kernel.modeStandardDetail'),
       'info',
     )
   }
@@ -2463,7 +2464,7 @@ export const useAppStore = defineStore('app', () => {
       success: false,
       verified: false,
       bytesWritten: 0,
-      error: 'Mode Kernel actif, mais le driver ne fournit pas Accès mémoire kernel. Repasse en Standard ou teste le driver dans Paramètres.',
+      error: t('appStore.kernel.driverAccessUnavailable'),
     }
   }
 
@@ -2493,7 +2494,7 @@ export const useAppStore = defineStore('app', () => {
           cancelled: false,
           bytesRead: 0,
           requestedBytes: size,
-          error: 'Mode Kernel actif, mais la lecture kernel est indisponible. Repasse en Standard ou teste le driver dans Paramètres.',
+          error: t('appStore.kernel.readUnavailable'),
           hex: '',
         }
       }
@@ -2516,14 +2517,14 @@ export const useAppStore = defineStore('app', () => {
     const controller = backend.getController()
     if (kernelMemoryModeActive.value) {
       if (!kernelMemoryReady.value || !controller.writeMemoryKernel) {
-        return { success: false, error: 'Mode Kernel actif, mais écriture kernel indisponible.' }
+        return { success: false, error: t('appStore.kernel.hexWriteUnavailable') }
       }
       const result = await controller.writeMemoryKernel(addressHex, hexString)
       kernelMemoryWriteResult.value = result
       return result as unknown as Record<string, unknown>
     }
     if (!controller.writeMemoryHex) {
-      return { success: false, error: 'writeMemoryHex non disponible dans ce backend.' }
+      return { success: false, error: t('appStore.kernel.writeMemoryHexUnavailable') }
     }
     return controller.writeMemoryHex(addressHex, hexString)
   }
@@ -2543,7 +2544,7 @@ export const useAppStore = defineStore('app', () => {
         success: false,
         available: false,
         helperAvailable: false,
-        message: 'Scripting Lua non exposé par ce backend.',
+        message: t('appStore.lua.scriptingNotExposed'),
       }
       return
     }
@@ -2561,7 +2562,7 @@ export const useAppStore = defineStore('app', () => {
 
   function logLuaScriptOutcome(payload: LuaScriptRunResult) {
     const ok = payload.success === true
-    const label = ok ? 'Script Lua exécuté' : (payload.cancelled ? 'Script Lua annulé' : 'Script Lua échoué')
+    const label = ok ? t('appStore.lua.scriptExecuted') : (payload.cancelled ? t('appStore.lua.scriptCancelled') : t('appStore.lua.scriptFailed'))
     addActionLog(
       'lua_script',
       label,
@@ -2575,8 +2576,8 @@ export const useAppStore = defineStore('app', () => {
     if (!script.trim() || luaScriptBusy.value) return
     if (!await confirmRiskAction(
       'injection',
-      'Exécution script Lua',
-      'Le script peut appeler le pipe d’automatisation KillEngine et déclencher les actions exposées par le backend.',
+      t('appStore.lua.executeScriptTitle'),
+      t('appStore.lua.executeScriptDesc'),
     )) return
 
     const controller = backend.getController()
@@ -2601,7 +2602,7 @@ export const useAppStore = defineStore('app', () => {
           finishedSignal.disconnect?.(handler)
           luaScriptBusy.value = false
           luaScriptRequestId.value = null
-          luaScriptResult.value = { success: false, error: 'Timeout client en attente du script Lua.' }
+          luaScriptResult.value = { success: false, error: t('appStore.lua.scriptTimeout') }
           logLuaScriptOutcome(luaScriptResult.value)
           resolve()
         }, luaScriptTimeoutMs.value + 5000)
@@ -2630,7 +2631,7 @@ export const useAppStore = defineStore('app', () => {
             window.clearTimeout(watchdog)
             finishedSignal.disconnect?.(handler)
             luaScriptBusy.value = false
-            luaScriptResult.value = { success: false, error: String(start.error ?? 'Impossible de démarrer le script Lua.') }
+            luaScriptResult.value = { success: false, error: String(start.error ?? t('appStore.lua.scriptStartFailed')) }
             logLuaScriptOutcome(luaScriptResult.value)
             resolve()
             return
@@ -2656,7 +2657,7 @@ export const useAppStore = defineStore('app', () => {
     }
 
     if (!controller.executeLuaScript) {
-      luaScriptResult.value = { success: false, error: 'Exécution Lua non exposée par ce backend.' }
+      luaScriptResult.value = { success: false, error: t('appStore.lua.executeNotExposed') }
       return
     }
 
@@ -2666,7 +2667,7 @@ export const useAppStore = defineStore('app', () => {
       logLuaScriptOutcome(luaScriptResult.value)
     } catch (e) {
       luaScriptResult.value = { success: false, error: String(e) }
-      addActionLog('lua_script', 'Script Lua échoué', String(e), 'error')
+      addActionLog('lua_script', t('appStore.lua.scriptFailed'), String(e), 'error')
     } finally {
       luaScriptBusy.value = false
     }
@@ -2675,16 +2676,16 @@ export const useAppStore = defineStore('app', () => {
   async function cancelLuaScriptExecution() {
     const controller = backend.getController()
     if (!controller.cancelLuaScriptExecution) {
-      addActionLog('lua_script', 'Annulation indisponible', 'cancelLuaScriptExecution absent du backend.', 'warning')
+      addActionLog('lua_script', t('appStore.lua.cancelUnavailable'), t('appStore.lua.cancelFunctionMissing'), 'warning')
       return
     }
     try {
       const result = await controller.cancelLuaScriptExecution()
       if (result.success !== true) {
-        addActionLog('lua_script', 'Annulation impossible', String(result.error ?? ''), 'warning')
+        addActionLog('lua_script', t('appStore.lua.cancelImpossible'), String(result.error ?? ''), 'warning')
       }
     } catch (e) {
-      addActionLog('lua_script', 'Annulation impossible', String(e), 'warning')
+      addActionLog('lua_script', t('appStore.lua.cancelImpossible'), String(e), 'warning')
     }
   }
 
@@ -2692,13 +2693,13 @@ export const useAppStore = defineStore('app', () => {
     if (luaReplActive.value) return
     if (!await confirmRiskAction(
       'injection',
-      'Démarrer le REPL Lua',
-      'Une fois démarré, chaque ligne envoyée peut appeler le pipe d’automatisation KillEngine et déclencher les actions exposées par le backend — pas de confirmation supplémentaire par ligne.',
+      t('appStore.lua.startReplTitle'),
+      t('appStore.lua.startReplDesc'),
     )) return
 
     const controller = backend.getController()
     if (!controller.startLuaRepl) {
-      luaReplStartResult.value = { success: false, error: 'Live Lua REPL non exposé par ce backend.' }
+      luaReplStartResult.value = { success: false, error: t('appStore.lua.replNotExposed') }
       return
     }
     try {
@@ -2710,14 +2711,14 @@ export const useAppStore = defineStore('app', () => {
       luaReplActive.value = result.success === true
       luaReplHistory.value = []
       if (luaReplActive.value) {
-        addActionLog('lua_repl', 'REPL Lua démarré', String(result.luaPath ?? ''), 'success')
+        addActionLog('lua_repl', t('appStore.lua.replStarted'), String(result.luaPath ?? ''), 'success')
         void refreshLuaReplCompletions('')
       } else {
-        addActionLog('lua_repl', 'REPL Lua non démarré', String(result.error ?? ''), 'error')
+        addActionLog('lua_repl', t('appStore.lua.replNotStarted'), String(result.error ?? ''), 'error')
       }
     } catch (e) {
       luaReplStartResult.value = { success: false, error: String(e) }
-      addActionLog('lua_repl', 'REPL Lua non démarré', String(e), 'error')
+      addActionLog('lua_repl', t('appStore.lua.replNotStarted'), String(e), 'error')
     }
   }
 
@@ -2727,7 +2728,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       await controller.stopLuaRepl()
     } catch (e) {
-      addActionLog('lua_repl', 'Arrêt REPL Lua échoué', String(e), 'warning')
+      addActionLog('lua_repl', t('appStore.lua.replStopFailed'), String(e), 'warning')
     } finally {
       luaReplActive.value = false
       luaReplBusy.value = false
@@ -2756,7 +2757,7 @@ export const useAppStore = defineStore('app', () => {
 
     const controller = backend.getController()
     if (!controller.sendLuaReplLine) {
-      addActionLog('lua_repl', 'REPL Lua indisponible', 'sendLuaReplLine absent du backend.', 'error')
+      addActionLog('lua_repl', t('appStore.lua.replUnavailable'), t('appStore.lua.replLineFunctionMissing'), 'error')
       return
     }
 
@@ -2787,7 +2788,7 @@ export const useAppStore = defineStore('app', () => {
 
       const watchdog = window.setTimeout(() => {
         if (settled) return
-        pendingEntry.error = 'Timeout client en attente de cette ligne.'
+        pendingEntry.error = t('appStore.lua.replLineTimeout')
         finish({})
       }, timeoutMs)
 
@@ -2807,7 +2808,7 @@ export const useAppStore = defineStore('app', () => {
       controller.sendLuaReplLine!(line).then(async (start) => {
         if (settled) return
         if (start.success !== true || start.started !== true) {
-          pendingEntry.error = String(start.error ?? 'Impossible d’envoyer cette ligne.')
+          pendingEntry.error = String(start.error ?? t('appStore.lua.replLineSendFailed'))
           finish({})
           return
         }
@@ -2867,11 +2868,11 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.addTimelineAddress(addressHex, valueSize)
       if (result.success !== true) {
-        addActionLog('memory_timeline', 'Adresse timeline refusée', String(result.error ?? addressHex), 'warning')
+        addActionLog('memory_timeline', t('appStore.timeline.addressRefused'), String(result.error ?? addressHex), 'warning')
       }
       return result.success === true
     } catch (e) {
-      addActionLog('memory_timeline', 'Adresse timeline refusée', String(e), 'error')
+      addActionLog('memory_timeline', t('appStore.timeline.addressRefused'), String(e), 'error')
       return false
     }
   }
@@ -2882,7 +2883,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       await controller.removeTimelineAddress(addressHex)
     } catch (e) {
-      addActionLog('memory_timeline', 'Suppression adresse timeline échouée', String(e), 'warning')
+      addActionLog('memory_timeline', t('appStore.timeline.addressRemoveFailed'), String(e), 'warning')
     }
   }
 
@@ -2908,7 +2909,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       await controller.setTimelineConfig(config)
     } catch (e) {
-      addActionLog('memory_timeline', 'Configuration timeline échouée', String(e), 'warning')
+      addActionLog('memory_timeline', t('appStore.timeline.configFailed'), String(e), 'warning')
     }
   }
 
@@ -2918,11 +2919,11 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.startTimelineCollection()
       if (result.success !== true) {
-        addActionLog('memory_timeline', 'Collecte timeline non démarrée', String(result.error ?? ''), 'warning')
+        addActionLog('memory_timeline', t('appStore.timeline.collectionNotStarted'), String(result.error ?? ''), 'warning')
       }
       return result.success === true
     } catch (e) {
-      addActionLog('memory_timeline', 'Collecte timeline non démarrée', String(e), 'error')
+      addActionLog('memory_timeline', t('appStore.timeline.collectionNotStarted'), String(e), 'error')
       return false
     }
   }
@@ -2933,7 +2934,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       await controller.stopTimelineCollection()
     } catch (e) {
-      addActionLog('memory_timeline', 'Arrêt collecte timeline échoué', String(e), 'warning')
+      addActionLog('memory_timeline', t('appStore.timeline.collectionStopFailed'), String(e), 'warning')
     }
   }
 
@@ -2954,12 +2955,12 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.detectTimelinePatterns(addressHex)
       if (result.success !== true) {
-        addActionLog('memory_timeline', 'Détection de patterns non disponible', String(result.error ?? ''), 'warning')
+        addActionLog('memory_timeline', t('appStore.timeline.patternDetectionUnavailable'), String(result.error ?? ''), 'warning')
         return []
       }
       return (result.patterns as Array<Record<string, unknown>>) ?? []
     } catch (e) {
-      addActionLog('memory_timeline', 'Détection de patterns non disponible', String(e), 'error')
+      addActionLog('memory_timeline', t('appStore.timeline.patternDetectionUnavailable'), String(e), 'error')
       return []
     }
   }
@@ -2993,12 +2994,12 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.analyzeTimelineBehavior(addressHex)
       if (result.success !== true) {
-        addActionLog('memory_timeline', 'Profil comportemental non disponible', String(result.error ?? ''), 'warning')
+        addActionLog('memory_timeline', t('appStore.timeline.behaviorProfileUnavailable'), String(result.error ?? ''), 'warning')
         return fallback
       }
       return result
     } catch (e) {
-      addActionLog('memory_timeline', 'Profil comportemental non disponible', String(e), 'error')
+      addActionLog('memory_timeline', t('appStore.timeline.behaviorProfileUnavailable'), String(e), 'error')
       return fallback
     }
   }
@@ -3010,12 +3011,12 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.predictTimelineNextValue(addressHex)
       if (result.success !== true) {
-        addActionLog('memory_timeline', 'Prédiction non disponible', String(result.error ?? ''), 'warning')
+        addActionLog('memory_timeline', t('appStore.timeline.predictionUnavailable'), String(result.error ?? ''), 'warning')
         return fallback
       }
       return result
     } catch (e) {
-      addActionLog('memory_timeline', 'Prédiction non disponible', String(e), 'error')
+      addActionLog('memory_timeline', t('appStore.timeline.predictionUnavailable'), String(e), 'error')
       return fallback
     }
   }
@@ -3026,12 +3027,12 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.findTimelineCorrelations()
       if (result.success !== true) {
-        addActionLog('memory_timeline', 'Recherche de corrélations non disponible', String(result.error ?? ''), 'warning')
+        addActionLog('memory_timeline', t('appStore.timeline.correlationsUnavailable'), String(result.error ?? ''), 'warning')
         return []
       }
       return (result.correlations as Array<Record<string, unknown>>) ?? []
     } catch (e) {
-      addActionLog('memory_timeline', 'Recherche de corrélations non disponible', String(e), 'error')
+      addActionLog('memory_timeline', t('appStore.timeline.correlationsUnavailable'), String(e), 'error')
       return []
     }
   }
@@ -3042,12 +3043,12 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.generateTimelineReport()
       if (result.success !== true) {
-        addActionLog('memory_timeline', 'Génération de rapport non disponible', String(result.error ?? ''), 'warning')
+        addActionLog('memory_timeline', t('appStore.timeline.reportGenerationUnavailable'), String(result.error ?? ''), 'warning')
         return null
       }
       return (result.report as string) ?? null
     } catch (e) {
-      addActionLog('memory_timeline', 'Génération de rapport non disponible', String(e), 'error')
+      addActionLog('memory_timeline', t('appStore.timeline.reportGenerationUnavailable'), String(e), 'error')
       return null
     }
   }
@@ -3059,7 +3060,7 @@ export const useAppStore = defineStore('app', () => {
       const result = await controller.exportTimelineToJson()
       return result.success === true ? String(result.filepath ?? '') : null
     } catch (e) {
-      addActionLog('memory_timeline', 'Export timeline échoué', String(e), 'error')
+      addActionLog('memory_timeline', t('appStore.timeline.exportFailed'), String(e), 'error')
       return null
     }
   }
@@ -3074,11 +3075,11 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.startMemoryHeatmap(addressHex, options)
       if (result.success !== true) {
-        addActionLog('memory_heatmap', 'Heatmap non démarrée', String(result.error ?? ''), 'warning')
+        addActionLog('memory_heatmap', t('appStore.heatmap.notStarted'), String(result.error ?? ''), 'warning')
       }
       return result.success === true
     } catch (e) {
-      addActionLog('memory_heatmap', 'Heatmap non démarrée', String(e), 'error')
+      addActionLog('memory_heatmap', t('appStore.heatmap.notStarted'), String(e), 'error')
       return false
     }
   }
@@ -3089,7 +3090,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       return await controller.stopMemoryHeatmap()
     } catch (e) {
-      addActionLog('memory_heatmap', 'Arrêt heatmap échoué', String(e), 'warning')
+      addActionLog('memory_heatmap', t('appStore.heatmap.stopFailed'), String(e), 'warning')
       return null
     }
   }
@@ -3138,7 +3139,7 @@ export const useAppStore = defineStore('app', () => {
       const result = await controller.detectGameEngine(moduleNames, {})
       return Object.keys(result).length > 0 ? result : null
     } catch (e) {
-      addActionLog('pattern_learning', 'Détection de moteur échouée', String(e), 'warning')
+      addActionLog('pattern_learning', t('appStore.patternLearning.engineDetectionFailed'), String(e), 'warning')
       return null
     }
   }
@@ -3154,7 +3155,7 @@ export const useAppStore = defineStore('app', () => {
       const result = await controller.classifyMemoryPattern(addressHex, valueHistory, timestamps)
       return Object.keys(result).length > 0 ? result : null
     } catch (e) {
-      addActionLog('pattern_learning', 'Classification échouée', String(e), 'warning')
+      addActionLog('pattern_learning', t('appStore.patternLearning.classificationFailed'), String(e), 'warning')
       return null
     }
   }
@@ -3166,7 +3167,7 @@ export const useAppStore = defineStore('app', () => {
       const result = await controller.loadGameProfile(gameName)
       return Object.keys(result).length > 0 ? result : null
     } catch (e) {
-      addActionLog('pattern_learning', 'Chargement du profil échoué', String(e), 'warning')
+      addActionLog('pattern_learning', t('appStore.patternLearning.profileLoadFailed'), String(e), 'warning')
       return null
     }
   }
@@ -3177,11 +3178,11 @@ export const useAppStore = defineStore('app', () => {
     try {
       const ok = await controller.saveGameProfile(profile)
       if (!ok) {
-        addActionLog('pattern_learning', 'Sauvegarde du profil échouée', String(profile.gameName ?? ''), 'warning')
+        addActionLog('pattern_learning', t('appStore.patternLearning.profileSaveFailed'), String(profile.gameName ?? ''), 'warning')
       }
       return ok
     } catch (e) {
-      addActionLog('pattern_learning', 'Sauvegarde du profil échouée', String(e), 'error')
+      addActionLog('pattern_learning', t('appStore.patternLearning.profileSaveFailed'), String(e), 'error')
       return false
     }
   }
@@ -3202,7 +3203,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       return await controller.deleteGameProfile(gameName)
     } catch (e) {
-      addActionLog('pattern_learning', 'Suppression du profil échouée', String(e), 'warning')
+      addActionLog('pattern_learning', t('appStore.patternLearning.profileDeleteFailed'), String(e), 'warning')
       return false
     }
   }
@@ -3251,17 +3252,17 @@ export const useAppStore = defineStore('app', () => {
     if (!script.trim() || !name) return
     const controller = backend.getController()
     if (!controller.saveProfileLuaScript) {
-      luaScriptSaveResult.value = { success: false, error: 'Sauvegarde Lua non exposée par ce backend.' }
+      luaScriptSaveResult.value = { success: false, error: t('appStore.lua.saveNotExposed') }
       return
     }
     try {
       luaScriptSaveResult.value = await controller.saveProfileLuaScript(luaProfileName(), name, script, {})
       const ok = luaScriptSaveResult.value.success === true
-      addActionLog('lua_script', ok ? 'Script Lua sauvegardé' : 'Sauvegarde script Lua échouée', String(luaScriptSaveResult.value.error ?? name), ok ? 'success' : 'error')
+      addActionLog('lua_script', ok ? t('appStore.lua.scriptSaved') : t('appStore.lua.scriptSaveFailed'), String(luaScriptSaveResult.value.error ?? name), ok ? 'success' : 'error')
       if (ok) await refreshSavedLuaScripts()
     } catch (e) {
       luaScriptSaveResult.value = { success: false, error: String(e) }
-      addActionLog('lua_script', 'Sauvegarde script Lua échouée', String(e), 'error')
+      addActionLog('lua_script', t('appStore.lua.scriptSaveFailed'), String(e), 'error')
     }
   }
 
@@ -3270,7 +3271,7 @@ export const useAppStore = defineStore('app', () => {
     if (!entry) return
     luaScriptText.value = String(entry.scriptText ?? '')
     luaScriptSaveName.value = name
-    addActionLog('lua_script', `Script "${name}" chargé`, '', 'success')
+    addActionLog('lua_script', t('appStore.lua.scriptLoaded', { name }), '', 'success')
   }
 
   async function deleteSavedLuaScript(name: string) {
@@ -3279,10 +3280,10 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.deleteProfileLuaScript(luaProfileName(), name)
       const ok = result.success === true
-      addActionLog('lua_script', ok ? `Script "${name}" supprimé` : `Suppression "${name}" échouée`, String(result.error ?? ''), ok ? 'success' : 'error')
+      addActionLog('lua_script', ok ? t('appStore.lua.scriptDeleted', { name }) : t('appStore.lua.scriptDeleteFailed', { name }), String(result.error ?? ''), ok ? 'success' : 'error')
       if (ok) await refreshSavedLuaScripts()
     } catch (e) {
-      addActionLog('lua_script', `Suppression "${name}" échouée`, String(e), 'error')
+      addActionLog('lua_script', t('appStore.lua.scriptDeleteFailed', { name }), String(e), 'error')
     }
   }
 
@@ -3297,10 +3298,10 @@ export const useAppStore = defineStore('app', () => {
         processName.value = proc?.name ?? `PID ${pid}`
         addActionLog(
           'attach',
-          `Attach ${processName.value}`,
+          t('appStore.attach.title', { name: processName.value }),
           mode === 'kernel'
-            ? 'Process attaché avec mode mémoire Kernel actif pour les lectures/écritures interactives.'
-            : 'Process attaché avec mode mémoire Standard.',
+            ? t('appStore.attach.kernelModeDetail')
+            : t('appStore.attach.standardModeDetail'),
           'success',
         )
       }
@@ -3351,7 +3352,7 @@ export const useAppStore = defineStore('app', () => {
     const field = fieldName.trim()
     const text = value.trim()
     if (!address || !field || !text) return
-    if (!await confirmRiskAction('write', 'Écriture champ CLR', `${address}.${field} = ${text}. Champ primitif managé dans le processus attaché.`)) return
+    if (!await confirmRiskAction('write', t('appStore.clr.writeFieldTitle'), t('appStore.clr.writeFieldDesc', { address, field, value: text }))) return
     return clrInspectorStore.writeClrPrimitiveField(address, field, text)
   }
 
@@ -3360,7 +3361,7 @@ export const useAppStore = defineStore('app', () => {
     const pathText = path.trim()
     const text = value.trim()
     if (!address || !pathText || !text) return
-    if (!await confirmRiskAction('write', 'Écriture chemin CLR', `${address}.${pathText} = ${text}. Chemin symbolique managé dans le processus attaché.`)) return
+    if (!await confirmRiskAction('write', t('appStore.clr.writePathTitle'), t('appStore.clr.writePathDesc', { address, path: pathText, value: text }))) return
     return clrInspectorStore.writeClrPrimitivePath(address, pathText, text)
   }
 
@@ -3372,7 +3373,7 @@ export const useAppStore = defineStore('app', () => {
       .slice(0, 32)
     if (!address || sanitized.length === 0) return
     const preview = sanitized.map((operation) => `${operation.path} = ${operation.value}`).join(', ')
-    if (!await confirmRiskAction('write', 'Transaction CLR', `${address}: ${preview}. Rollback tenté si une écriture échoue.`)) return
+    if (!await confirmRiskAction('write', t('appStore.clr.transactionTitle'), t('appStore.clr.transactionDesc', { address, preview }))) return
     return clrInspectorStore.writeClrPrimitivePathBatch(address, sanitized)
   }
 
@@ -3383,7 +3384,7 @@ export const useAppStore = defineStore('app', () => {
     const pathText = path.trim()
     const text = value.trim()
     if (!type || !idField || !idValue || !pathText || !text) return
-    if (!await confirmRiskAction('write', 'Écriture chemin CLR par locator', `${type} (${idField}=${idValue}).${pathText} = ${text}. Objet relocalisé juste avant l'écriture (résistant à un déplacement GC).`)) return
+    if (!await confirmRiskAction('write', t('appStore.clr.writePathByLocatorTitle'), t('appStore.clr.writePathByLocatorDesc', { type, idField, idValue, path: pathText, value: text }))) return
     return clrInspectorStore.writeClrPrimitivePathByLocator(type, idField, idValue, pathText, text)
   }
 
@@ -3397,7 +3398,7 @@ export const useAppStore = defineStore('app', () => {
       .slice(0, 32)
     if (!type || !idField || !idValue || sanitized.length === 0) return
     const preview = sanitized.map((operation) => `${operation.path} = ${operation.value}`).join(', ')
-    if (!await confirmRiskAction('write', 'Transaction CLR par locator', `${type} (${idField}=${idValue}): ${preview}. Objet relocalisé juste avant l'écriture, rollback tenté si une opération échoue.`)) return
+    if (!await confirmRiskAction('write', t('appStore.clr.transactionByLocatorTitle'), t('appStore.clr.transactionByLocatorDesc', { type, idField, idValue, preview }))) return
     return clrInspectorStore.writeClrPrimitivePathBatchByLocator(type, idField, idValue, sanitized)
   }
 
@@ -3409,7 +3410,7 @@ export const useAppStore = defineStore('app', () => {
       .slice(0, 32)
     if (!address || sanitized.length === 0) return
     const preview = sanitized.map((operation) => `${operation.path} = ${operation.value}`).join(', ')
-    if (!await confirmRiskAction('write', 'Transaction CLR atomique (process suspendu)', `${address}: ${preview}. Suspend TOUTES les threads du processus attaché pendant l'écriture -- best-effort, pas une garantie absolue d'absence de deadlock.`)) return
+    if (!await confirmRiskAction('write', t('appStore.clr.atomicTransactionTitle'), t('appStore.clr.atomicTransactionDesc', { address, preview }))) return
     return clrInspectorStore.writeClrPrimitivePathBatchAtomic(address, sanitized)
   }
 
@@ -3422,7 +3423,7 @@ export const useAppStore = defineStore('app', () => {
     // injecte et EXECUTE du code dans le processus cible (shellcode + thread
     // distant), pas une ecriture memoire passive. Meme gate 'injection' que
     // injectDllIntoProcess/installFunctionHook/le speedhack.
-    if (!await confirmRiskAction('injection', 'Appeler un setter CLR', `${address}.${method}(${text || '<0 argument>'}). Injecte et exécute réellement le setter dans le processus attaché.`)) return
+    if (!await confirmRiskAction('injection', t('appStore.clr.callSetterTitle'), t('appStore.clr.callSetterDesc', { address, method, argument: text || t('appStore.clr.noArgumentFallback') }))) return
     return clrInspectorStore.callClrInstanceMethod(address, method, text, valueType.trim())
   }
 
@@ -3462,10 +3463,10 @@ export const useAppStore = defineStore('app', () => {
       selectedSaveFilePath.value = ''
       addActionLog(
         'save_files',
-        result.success ? 'Fichiers de sauvegarde découverts' : 'Découverte sauvegardes échouée',
+        result.success ? t('appStore.saveFiles.discoveredTitle') : t('appStore.saveFiles.discoveryFailed'),
         result.success
-          ? `${discoveredSaveFiles.value.length} fichier(s)${discoveredSaveFilesFamilyName.value ? ` · ${discoveredSaveFilesFamilyName.value}` : ''}.`
-          : (result.error ?? 'Erreur inconnue.'),
+          ? t('appStore.saveFiles.discoveredDetail', { count: discoveredSaveFiles.value.length, family: discoveredSaveFilesFamilyName.value ? ` · ${discoveredSaveFilesFamilyName.value}` : '' })
+          : (result.error ?? t('appStore.errors.unknown')),
         result.success ? 'success' : 'warning',
       )
       return result
@@ -3477,7 +3478,7 @@ export const useAppStore = defineStore('app', () => {
       selectedSaveFileText.value = null
       selectedSaveFilePath.value = ''
       console.error('[KillEngine] Failed to discover process save files:', e)
-      addActionLog('save_files', 'Découverte sauvegardes échouée', String(e), 'error')
+      addActionLog('save_files', t('appStore.saveFiles.discoveryFailed'), String(e), 'error')
       return result
     } finally {
       saveFilesBusy.value = false
@@ -3492,8 +3493,8 @@ export const useAppStore = defineStore('app', () => {
       saveFileSnapshotDiff.value = null
       addActionLog(
         'save_files',
-        'Snapshot "avant" pris',
-        `${saveFileSnapshotBefore.value.length} fichier(s)${result.familyName ? ` · ${result.familyName}` : ''}.`,
+        t('appStore.saveFiles.snapshotBeforeTitle'),
+        t('appStore.saveFiles.discoveredDetail', { count: saveFileSnapshotBefore.value.length, family: result.familyName ? ` · ${result.familyName}` : '' }),
         result.success ? 'success' : 'warning',
       )
       return result
@@ -3510,8 +3511,8 @@ export const useAppStore = defineStore('app', () => {
       saveFileSnapshotDiff.value = null
       addActionLog(
         'save_files',
-        'Snapshot "après" pris',
-        `${saveFileSnapshotAfter.value.length} fichier(s)${result.familyName ? ` · ${result.familyName}` : ''}.`,
+        t('appStore.saveFiles.snapshotAfterTitle'),
+        t('appStore.saveFiles.discoveredDetail', { count: saveFileSnapshotAfter.value.length, family: result.familyName ? ` · ${result.familyName}` : '' }),
         result.success ? 'success' : 'warning',
       )
       return result
@@ -3528,14 +3529,14 @@ export const useAppStore = defineStore('app', () => {
         saveFileSnapshotBefore.value,
         saveFileSnapshotAfter.value,
       )
-      const finalResult: SaveFileSnapshotDiffResult = result ?? { success: false, error: 'Méthode non disponible' }
+      const finalResult: SaveFileSnapshotDiffResult = result ?? { success: false, error: t('appStore.saveFiles.methodUnavailable') }
       saveFileSnapshotDiff.value = finalResult
       addActionLog(
         'save_files',
-        finalResult.success ? 'Comparaison des snapshots terminée' : 'Comparaison échouée',
+        finalResult.success ? t('appStore.saveFiles.comparisonDoneTitle') : t('appStore.saveFiles.comparisonFailed'),
         finalResult.success
-          ? `${finalResult.addedCount ?? 0} ajouté(s), ${finalResult.removedCount ?? 0} supprimé(s), ${finalResult.modifiedCount ?? 0} modifié(s).`
-          : (finalResult.error ?? 'Erreur inconnue.'),
+          ? t('appStore.saveFiles.comparisonDetail', { added: finalResult.addedCount ?? 0, removed: finalResult.removedCount ?? 0, modified: finalResult.modifiedCount ?? 0 })
+          : (finalResult.error ?? t('appStore.errors.unknown')),
         finalResult.success ? 'success' : 'warning',
       )
       return finalResult
@@ -3547,7 +3548,7 @@ export const useAppStore = defineStore('app', () => {
   async function readSaveFileText(path: string, maxBytes = 65536) {
     const trimmedPath = path.trim()
     if (!trimmedPath) {
-      const result = { success: false, path, text: '', truncated: false, error: 'Chemin vide.' }
+      const result = { success: false, path, text: '', truncated: false, error: t('appStore.saveFiles.emptyPath') }
       selectedSaveFileText.value = result
       return result
     }
@@ -3559,8 +3560,8 @@ export const useAppStore = defineStore('app', () => {
       selectedSaveFileText.value = result
       addActionLog(
         'save_files',
-        result.success ? 'Fichier de sauvegarde lu' : 'Lecture sauvegarde échouée',
-        result.success ? `${trimmedPath}${result.truncated ? ' · tronqué' : ''}` : (result.error ?? 'Erreur inconnue.'),
+        result.success ? t('appStore.saveFiles.fileReadTitle') : t('appStore.saveFiles.fileReadFailed'),
+        result.success ? `${trimmedPath}${result.truncated ? ` · ${t('appStore.saveFiles.truncated')}` : ''}` : (result.error ?? t('appStore.errors.unknown')),
         result.success ? 'success' : 'warning',
       )
       return result
@@ -3568,7 +3569,7 @@ export const useAppStore = defineStore('app', () => {
       const result = { success: false, path: trimmedPath, text: '', truncated: false, error: String(e) }
       selectedSaveFileText.value = result
       console.error('[KillEngine] Failed to read process save file text:', e)
-      addActionLog('save_files', 'Lecture sauvegarde échouée', String(e), 'error')
+      addActionLog('save_files', t('appStore.saveFiles.fileReadFailed'), String(e), 'error')
       return result
     } finally {
       saveFileTextBusy.value = false
@@ -3582,10 +3583,10 @@ export const useAppStore = defineStore('app', () => {
       localSettingsResult.value = result
       addActionLog(
         'save_files',
-        result.success ? 'LocalSettings inspecté' : 'Inspection LocalSettings échouée',
+        result.success ? t('appStore.saveFiles.localSettingsInspectedTitle') : t('appStore.saveFiles.localSettingsInspectFailed'),
         result.success
-          ? `${result.count ?? result.values.length} valeur(s)${result.familyName ? ` · ${result.familyName}` : ''}.`
-          : (result.error ?? 'Erreur inconnue.'),
+          ? t('appStore.saveFiles.localSettingsDetail', { count: result.count ?? result.values.length, family: result.familyName ? ` · ${result.familyName}` : '' })
+          : (result.error ?? t('appStore.errors.unknown')),
         result.success ? 'success' : 'warning',
       )
       return result
@@ -3593,7 +3594,7 @@ export const useAppStore = defineStore('app', () => {
       const result = { success: false, values: [], error: String(e) }
       localSettingsResult.value = result
       console.error('[KillEngine] Failed to inspect process LocalSettings:', e)
-      addActionLog('save_files', 'Inspection LocalSettings échouée', String(e), 'error')
+      addActionLog('save_files', t('appStore.saveFiles.localSettingsInspectFailed'), String(e), 'error')
       return result
     } finally {
       localSettingsBusy.value = false
@@ -3609,7 +3610,7 @@ export const useAppStore = defineStore('app', () => {
     const options = { timeoutMs }
 
     if (!asyncFn || !finishedSignal) {
-      addActionLog('save_files', 'Surveillance fichier indisponible', 'startSaveFileWatchAsync absent du backend.', 'warning')
+      addActionLog('save_files', t('appStore.saveFiles.watchUnavailable'), t('appStore.saveFiles.watchFunctionMissing'), 'warning')
       return
     }
 
@@ -3629,7 +3630,7 @@ export const useAppStore = defineStore('app', () => {
         const ok = payload.changed === true
         addActionLog(
           'save_files',
-          ok ? 'Changement détecté' : (payload.cancelled ? 'Surveillance annulée' : 'Aucun changement avant timeout'),
+          ok ? t('appStore.saveFiles.changeDetected') : (payload.cancelled ? t('appStore.saveFiles.watchCancelled') : t('appStore.saveFiles.noChangeBeforeTimeout')),
           `${trimmedPath}${payload.changeType ? ` · ${String(payload.changeType)}` : ''}`,
           ok ? 'success' : 'warning',
         )
@@ -3651,8 +3652,8 @@ export const useAppStore = defineStore('app', () => {
           settled = true
           finishedSignal.disconnect?.(handler)
           saveFileWatchBusy.value = false
-          saveFileWatchResult.value = { success: false, error: String(start.error ?? 'Impossible de démarrer la surveillance.') }
-          addActionLog('save_files', 'Surveillance fichier échouée', String(start.error ?? ''), 'error')
+          saveFileWatchResult.value = { success: false, error: String(start.error ?? t('appStore.saveFiles.watchStartFailed')) }
+          addActionLog('save_files', t('appStore.saveFiles.watchFailed'), String(start.error ?? ''), 'error')
           resolve()
           return
         }
@@ -3667,7 +3668,7 @@ export const useAppStore = defineStore('app', () => {
         finishedSignal.disconnect?.(handler)
         saveFileWatchBusy.value = false
         saveFileWatchResult.value = { success: false, error: String(e) }
-        addActionLog('save_files', 'Surveillance fichier échouée', String(e), 'error')
+        addActionLog('save_files', t('appStore.saveFiles.watchFailed'), String(e), 'error')
         resolve()
       })
     })
@@ -3679,10 +3680,10 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.cancelSaveFileWatch()
       if (result.success !== true) {
-        addActionLog('save_files', 'Annulation surveillance impossible', String(result.error ?? ''), 'warning')
+        addActionLog('save_files', t('appStore.saveFiles.cancelWatchImpossible'), String(result.error ?? ''), 'warning')
       }
     } catch (e) {
-      addActionLog('save_files', 'Annulation surveillance impossible', String(e), 'warning')
+      addActionLog('save_files', t('appStore.saveFiles.cancelWatchImpossible'), String(e), 'warning')
     }
   }
 
@@ -3691,13 +3692,13 @@ export const useAppStore = defineStore('app', () => {
     if (!trimmedPath || !findHex.trim() || !replaceHex.trim()) return
     if (!await confirmRiskAction(
       'patch',
-      'Édition d\'octets dans un fichier de sauvegarde',
-      `Remplace la séquence "${findHex.trim()}" par "${replaceHex.trim()}" dans ${trimmedPath}. Refusé si la séquence n'apparaît pas exactement une fois ou si la longueur diffère.`,
+      t('appStore.saveFiles.patchBytesTitle'),
+      t('appStore.saveFiles.patchBytesDesc', { find: findHex.trim(), replace: replaceHex.trim(), path: trimmedPath }),
     )) return
 
     const controller = backend.getController()
     if (!controller.patchProcessSaveFileBytes) {
-      saveFilePatchResult.value = { success: false, error: 'Édition de fichier non exposée par ce backend.' }
+      saveFilePatchResult.value = { success: false, error: t('appStore.saveFiles.patchNotExposed') }
       return
     }
     saveFilePatchBusy.value = true
@@ -3706,15 +3707,15 @@ export const useAppStore = defineStore('app', () => {
       saveFilePatchResult.value = result
       addActionLog(
         'save_files',
-        result.success ? 'Fichier patché' : 'Patch fichier échoué',
-        result.success ? `${trimmedPath} (${result.occurrencesFound ?? 1} occurrence)` : (result.error ?? 'Erreur inconnue.'),
+        result.success ? t('appStore.saveFiles.patchedTitle') : t('appStore.saveFiles.patchFailed'),
+        result.success ? t('appStore.saveFiles.patchedDetail', { path: trimmedPath, count: result.occurrencesFound ?? 1 }) : (result.error ?? t('appStore.errors.unknown')),
         result.success ? 'success' : 'error',
       )
       return result
     } catch (e) {
       const result = { success: false, error: String(e) }
       saveFilePatchResult.value = result
-      addActionLog('save_files', 'Patch fichier échoué', String(e), 'error')
+      addActionLog('save_files', t('appStore.saveFiles.patchFailed'), String(e), 'error')
       return result
     } finally {
       saveFilePatchBusy.value = false
@@ -3747,10 +3748,10 @@ export const useAppStore = defineStore('app', () => {
       memoryPreview.value = await readMemoryPreviewByMode(addressHex, size)
       addActionLog(
         'memory_preview',
-        `Aperçu mémoire 0x${normalizedAddress}`,
+        t('appStore.memory.previewTitle', { address: normalizedAddress }),
         memoryPreview.value.success
-          ? `${memoryPreview.value.bytesRead}/${memoryPreview.value.requestedBytes} octets lus.`
-          : memoryPreview.value.error || 'Lecture sans donnée.',
+          ? t('appStore.memory.previewBytesRead', { read: memoryPreview.value.bytesRead, requested: memoryPreview.value.requestedBytes })
+          : memoryPreview.value.error || t('appStore.memory.previewNoData'),
         memoryPreview.value.success ? 'success' : 'warning',
       )
     } catch (e) {
@@ -3763,7 +3764,7 @@ export const useAppStore = defineStore('app', () => {
         error: String(e),
         hex: '',
       }
-      addActionLog('memory_preview', `Aperçu mémoire 0x${normalizedAddress}`, String(e), 'error')
+      addActionLog('memory_preview', t('appStore.memory.previewTitle', { address: normalizedAddress }), String(e), 'error')
     } finally {
       memoryPreviewLoading.value = false
     }
@@ -3779,7 +3780,7 @@ export const useAppStore = defineStore('app', () => {
         cancelled: false,
         bytesRead: 0,
         requestedBytes: hexViewerPageSize.value,
-        error: 'readMemoryBlock non disponible dans ce backend.',
+        error: t('appStore.memory.readMemoryBlockUnavailable'),
         hex: '',
       }
       return
@@ -3960,7 +3961,7 @@ export const useAppStore = defineStore('app', () => {
         diagnosticFolderOpened.value = Boolean(result.folderOpened ?? false)
         diagnosticOpenFolderError.value = String(result.openFolderError ?? '')
       } else {
-        diagnosticExportError.value = String(result.error ?? 'Export diagnostic impossible.')
+        diagnosticExportError.value = String(result.error ?? t('appStore.diagnostics.exportImpossible'))
       }
       return result
     } catch (e) {
@@ -3982,7 +3983,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function clearTemporaryStorage() {
-    if (scanBusy.value) return { success: false, error: 'Un scan est actif.' }
+    if (scanBusy.value) return { success: false, error: t('appStore.cleanup.scanActive') }
     try {
       temporaryStorageCleanupResult.value = await backend.getController().clearTemporaryStorage()
       await refreshTemporaryStorageStatus()
@@ -3993,18 +3994,18 @@ export const useAppStore = defineStore('app', () => {
       unknownSnapshotResult.value = null
       unknownNextScanResult.value = null
       unknownGuideSteps.value = []
-      scanStatusText.value = String(temporaryStorageCleanupResult.value.message ?? 'Stockage temporaire nettoyé.')
+      scanStatusText.value = String(temporaryStorageCleanupResult.value.message ?? t('appStore.cleanup.temporaryStorageCleaned'))
       addActionLog(
         'cleanup',
-        'Temporaire nettoyé',
-        `${String(temporaryStorageCleanupResult.value.removedFileCount ?? 0)} fichier(s), ${String(temporaryStorageCleanupResult.value.removedBytes ?? 0)} octet(s).`,
+        t('appStore.cleanup.temporaryCleanedTitle'),
+        t('appStore.cleanup.temporaryCleanedDetail', { files: String(temporaryStorageCleanupResult.value.removedFileCount ?? 0), bytes: String(temporaryStorageCleanupResult.value.removedBytes ?? 0) }),
         temporaryStorageCleanupResult.value.success === true ? 'success' : 'warning',
       )
       return temporaryStorageCleanupResult.value
     } catch (e) {
       temporaryStorageCleanupResult.value = { success: false, error: String(e) }
       temporaryStorageError.value = String(e)
-      addActionLog('cleanup', 'Nettoyage temporaire échoué', String(e), 'error')
+      addActionLog('cleanup', t('appStore.cleanup.cleanupFailed'), String(e), 'error')
       return temporaryStorageCleanupResult.value
     }
   }
@@ -4132,7 +4133,7 @@ export const useAppStore = defineStore('app', () => {
     activeView.value = 'expert'
     addActionLog(
       'navigation',
-      `Région ouverte en Expert 0x${address}`,
+      t('appStore.navigation.regionOpenedInExpert', { address }),
       `${expertRegionProtection.value || '?'} · ${expertRegionState.value || '?'} · ${expertRegionType.value || '?'}.`,
       'info',
     )
@@ -4172,31 +4173,31 @@ export const useAppStore = defineStore('app', () => {
     const integer = Number.isInteger(numberValue)
     const results: Array<Record<string, unknown>> = []
     if (integer && numberValue >= 0 && numberValue <= 255) {
-      results.push({ type: 'UInt8', confidence: 'faible', reason: 'petite valeur compacte possible' })
+      results.push({ type: 'UInt8', confidence: t('appStore.typeInference.confidenceLow'), reason: t('appStore.typeInference.reasonSmallCompactValue') })
     }
     if (integer && numberValue >= -128 && numberValue <= 127) {
-      results.push({ type: 'Int8', confidence: 'faible', reason: 'petite valeur signée compacte possible' })
+      results.push({ type: 'Int8', confidence: t('appStore.typeInference.confidenceLow'), reason: t('appStore.typeInference.reasonSmallSignedCompactValue') })
     }
     if (integer && numberValue >= 0 && numberValue <= 65535) {
-      results.push({ type: 'UInt16', confidence: 'moyenne', reason: 'ressource compacte possible' })
+      results.push({ type: 'UInt16', confidence: t('appStore.typeInference.confidenceMedium'), reason: t('appStore.typeInference.reasonCompactResource') })
     }
     if (integer && numberValue >= -32768 && numberValue <= 32767) {
-      results.push({ type: 'Int16', confidence: 'moyenne', reason: 'entier court possible' })
+      results.push({ type: 'Int16', confidence: t('appStore.typeInference.confidenceMedium'), reason: t('appStore.typeInference.reasonShortInteger') })
     }
     if (integer && numberValue >= -2147483648 && numberValue <= 2147483647) {
-      results.push({ type: 'Int32', confidence: 'élevée', reason: 'entier courant dans les jeux' })
+      results.push({ type: 'Int32', confidence: t('appStore.typeInference.confidenceHigh'), reason: t('appStore.typeInference.reasonCommonGameInteger') })
     }
     if (integer && numberValue >= 0 && numberValue <= 4294967295) {
-      results.push({ type: 'UInt32', confidence: 'élevée', reason: 'entier non signé courant pour ressources' })
+      results.push({ type: 'UInt32', confidence: t('appStore.typeInference.confidenceHigh'), reason: t('appStore.typeInference.reasonCommonUnsignedResource') })
     }
-    if (integer) results.push({ type: 'Int64', confidence: 'moyenne', reason: 'entier large possible' })
-    if (integer && numberValue >= 0) results.push({ type: 'UInt64', confidence: 'faible', reason: 'entier non signé large possible' })
-    results.push({ type: 'Float32', confidence: integer ? 'moyenne' : 'élevée', reason: 'valeur affichée parfois stockée en float' })
-    results.push({ type: 'Float64', confidence: 'faible', reason: 'moins fréquent, utile pour jeux/outils spécifiques' })
+    if (integer) results.push({ type: 'Int64', confidence: t('appStore.typeInference.confidenceMedium'), reason: t('appStore.typeInference.reasonLargeInteger') })
+    if (integer && numberValue >= 0) results.push({ type: 'UInt64', confidence: t('appStore.typeInference.confidenceLow'), reason: t('appStore.typeInference.reasonLargeUnsignedInteger') })
+    results.push({ type: 'Float32', confidence: integer ? t('appStore.typeInference.confidenceMedium') : t('appStore.typeInference.confidenceHigh'), reason: t('appStore.typeInference.reasonDisplayedValueOftenFloat') })
+    results.push({ type: 'Float64', confidence: t('appStore.typeInference.confidenceLow'), reason: t('appStore.typeInference.reasonLessCommonSpecificTools') })
     for (const scale of [10, 100, 1000, 4096, 65536]) {
       const scaled = numberValue * scale
       if (integer && Math.abs(scaled) <= 2147483647) {
-        results.push({ type: `Int32 x${scale}`, confidence: scale >= 4096 ? 'moyenne' : 'moyenne', reason: `valeur affichée ${value}, stock possible ${scaled}` })
+        results.push({ type: `Int32 x${scale}`, confidence: t('appStore.typeInference.confidenceMedium'), reason: t('appStore.typeInference.reasonScaledStorage', { value, scaled }) })
       }
     }
     return results
@@ -4243,7 +4244,7 @@ export const useAppStore = defineStore('app', () => {
       addAddressToWatch(target.address, target.type ?? exactScanType.value)
       if (watchedAddresses.value.length > before) added += 1
     }
-    addActionLog('watch', `${boundedTargets.length} adresse(s) envoyée(s) au live`, `${added} nouvelle(s), limite ${limit}.`, 'info')
+    addActionLog('watch', t('appStore.watch.addressesSentToLive', { count: boundedTargets.length }), t('appStore.watch.addressesSentDetail', { added, limit }), 'info')
   }
 
   function removeAddressFromWatch(address: string) {
@@ -4253,7 +4254,7 @@ export const useAppStore = defineStore('app', () => {
 
   function clearWatchedAddresses() {
     watchedAddresses.value = []
-    addActionLog('watch', 'Watch live vidé', 'Toutes les adresses surveillées ont été retirées.', 'info')
+    addActionLog('watch', t('appStore.watch.liveCleared'), t('appStore.watch.allAddressesRemoved'), 'info')
   }
 
   async function refreshWatchedAddress(address: string): Promise<WatchedAddress | null> {
@@ -4301,18 +4302,18 @@ export const useAppStore = defineStore('app', () => {
         void refreshWatchedAddresses()
       }, 1000)
     }
-    addActionLog('watch', enabled ? 'Watch live activé' : 'Watch live arrêté', `${watchedAddresses.value.length} adresse(s).`, enabled ? 'success' : 'info')
+    addActionLog('watch', enabled ? t('appStore.watch.liveEnabled') : t('appStore.watch.liveStopped'), t('appStore.watch.addressCount', { count: watchedAddresses.value.length }), enabled ? 'success' : 'info')
   }
 
   async function injectDll() {
     const path = injectDllPath.value.trim()
     if (!path) return
-    if (!await confirmRiskAction('injection', 'Injection DLL', `Injecter "${path}" dans le processus attaché via CreateRemoteThread + LoadLibraryW.`)) return
+    if (!await confirmRiskAction('injection', t('appStore.injection.dllTitle'), t('appStore.injection.dllDesc', { path }))) return
 
     const controller = backend.getController()
     if (!controller.injectDllIntoProcess) {
-      injectionResult.value = { success: false, error: 'Injection DLL non exposée par ce backend.' }
-      addActionLog('injection', 'Injection DLL indisponible', injectionResult.value.error as string, 'warning')
+      injectionResult.value = { success: false, error: t('appStore.injection.dllNotExposed') }
+      addActionLog('injection', t('appStore.injection.dllUnavailable'), injectionResult.value.error as string, 'warning')
       return
     }
 
@@ -4320,10 +4321,10 @@ export const useAppStore = defineStore('app', () => {
     try {
       injectionResult.value = await controller.injectDllIntoProcess(path)
       const ok = injectionResult.value.success === true
-      addActionLog('injection', ok ? 'DLL injectée' : 'Injection DLL échouée', `${path}. ${String(injectionResult.value.error ?? '')}`.trim(), ok ? 'success' : 'error')
+      addActionLog('injection', ok ? t('appStore.injection.dllInjected') : t('appStore.injection.dllFailed'), `${path}. ${String(injectionResult.value.error ?? '')}`.trim(), ok ? 'success' : 'error')
     } catch (e) {
       injectionResult.value = { success: false, error: String(e) }
-      addActionLog('injection', 'Injection DLL échouée', String(e), 'error')
+      addActionLog('injection', t('appStore.injection.dllFailed'), String(e), 'error')
     } finally {
       injectionBusy.value = false
     }
@@ -4333,12 +4334,12 @@ export const useAppStore = defineStore('app', () => {
     const target = hookTargetAddress.value.trim()
     const hook = hookFunctionAddress.value.trim()
     if (!target || !hook) return
-    if (!await confirmRiskAction('injection', 'Installation hook', `Installer un inline hook sur 0x${target} -> 0x${hook}. Intercepte tous les appels à cette fonction.`)) return
+    if (!await confirmRiskAction('injection', t('appStore.injection.hookInstallTitle'), t('appStore.injection.hookInstallDesc', { target, hook }))) return
 
     const controller = backend.getController()
     if (!controller.installFunctionHook) {
-      activeFunctionHook.value = { success: false, error: 'Hooking non exposé par ce backend.' }
-      addActionLog('injection', 'Hook indisponible', activeFunctionHook.value.error as string, 'warning')
+      activeFunctionHook.value = { success: false, error: t('appStore.injection.hookingNotExposed') }
+      addActionLog('injection', t('appStore.injection.hookUnavailable'), activeFunctionHook.value.error as string, 'warning')
       return
     }
 
@@ -4346,10 +4347,10 @@ export const useAppStore = defineStore('app', () => {
     try {
       activeFunctionHook.value = await controller.installFunctionHook(target, hook)
       const ok = activeFunctionHook.value.success === true
-      addActionLog('injection', ok ? 'Hook installé' : 'Installation hook échouée', `0x${target} -> 0x${hook}. ${String(activeFunctionHook.value.error ?? '')}`.trim(), ok ? 'success' : 'error')
+      addActionLog('injection', ok ? t('appStore.injection.hookInstalled') : t('appStore.injection.hookInstallFailed'), `0x${target} -> 0x${hook}. ${String(activeFunctionHook.value.error ?? '')}`.trim(), ok ? 'success' : 'error')
     } catch (e) {
       activeFunctionHook.value = { success: false, error: String(e) }
-      addActionLog('injection', 'Installation hook échouée', String(e), 'error')
+      addActionLog('injection', t('appStore.injection.hookInstallFailed'), String(e), 'error')
     } finally {
       injectionBusy.value = false
     }
@@ -4361,7 +4362,7 @@ export const useAppStore = defineStore('app', () => {
 
     const controller = backend.getController()
     if (!controller.removeFunctionHook) {
-      addActionLog('injection', 'Retrait hook indisponible', 'removeFunctionHook absent du backend.', 'warning')
+      addActionLog('injection', t('appStore.injection.hookRemoveUnavailable'), t('appStore.injection.hookRemoveFunctionMissing'), 'warning')
       return
     }
 
@@ -4370,9 +4371,9 @@ export const useAppStore = defineStore('app', () => {
       const result = await controller.removeFunctionHook(target)
       const ok = result.success === true
       if (ok) activeFunctionHook.value = null
-      addActionLog('injection', ok ? 'Hook retiré' : 'Retrait hook échoué', `0x${target}. ${String(result.error ?? '')}`.trim(), ok ? 'success' : 'error')
+      addActionLog('injection', ok ? t('appStore.injection.hookRemoved') : t('appStore.injection.hookRemoveFailed'), `0x${target}. ${String(result.error ?? '')}`.trim(), ok ? 'success' : 'error')
     } catch (e) {
-      addActionLog('injection', 'Retrait hook échoué', String(e), 'error')
+      addActionLog('injection', t('appStore.injection.hookRemoveFailed'), String(e), 'error')
     } finally {
       injectionBusy.value = false
     }
@@ -4385,7 +4386,7 @@ export const useAppStore = defineStore('app', () => {
 
     const controller = backend.getController()
     if (!controller.resolveSymbolAddress) {
-      symbolResolveResult.value = { success: false, error: 'Résolution de symbole non exposée par ce backend.' }
+      symbolResolveResult.value = { success: false, error: t('appStore.injection.symbolResolveNotExposed') }
       return
     }
 
@@ -4397,13 +4398,13 @@ export const useAppStore = defineStore('app', () => {
         : String(symbolResolveResult.value.error ?? '')
       addActionLog(
         'injection',
-        ok ? 'Symbole résolu' : 'Résolution de symbole échouée',
+        ok ? t('appStore.injection.symbolResolved') : t('appStore.injection.symbolResolveFailed'),
         `${moduleName}!${functionName} ${detail}`.trim(),
         ok ? 'success' : 'warning',
       )
     } catch (e) {
       symbolResolveResult.value = { success: false, error: String(e) }
-      addActionLog('injection', 'Résolution de symbole échouée', String(e), 'error')
+      addActionLog('injection', t('appStore.injection.symbolResolveFailed'), String(e), 'error')
     }
   }
 
@@ -4419,7 +4420,7 @@ export const useAppStore = defineStore('app', () => {
     if (!script.trim()) return
     const controller = backend.getController()
     if (!controller.parseAutoAssemblerScript) {
-      autoAsmPreview.value = { success: false, parseError: 'Aperçu auto-assembler non exposé par ce backend.' }
+      autoAsmPreview.value = { success: false, parseError: t('appStore.autoAsm.previewNotExposed') }
       return
     }
     autoAsmPreview.value = await controller.parseAutoAssemblerScript(script)
@@ -4428,12 +4429,12 @@ export const useAppStore = defineStore('app', () => {
   async function executeAutoAsmScript() {
     const script = autoAsmScriptText.value
     if (!script.trim()) return
-    if (!await confirmRiskAction('injection', 'Exécution script auto-assembler', 'Alloue de la mémoire et patche le processus attaché avec le code compilé du script. Vérifie l\'aperçu avant de confirmer.')) return
+    if (!await confirmRiskAction('injection', t('appStore.autoAsm.executeTitle'), t('appStore.autoAsm.executeDesc'))) return
 
     const controller = backend.getController()
     if (!controller.executeAutoAssemblerScript) {
-      autoAsmResult.value = { success: false, error: 'Exécution auto-assembler non exposée par ce backend.' }
-      addActionLog('injection', 'Auto-assembler indisponible', autoAsmResult.value.error as string, 'warning')
+      autoAsmResult.value = { success: false, error: t('appStore.autoAsm.executeNotExposed') }
+      addActionLog('injection', t('appStore.autoAsm.unavailable'), autoAsmResult.value.error as string, 'warning')
       return
     }
 
@@ -4441,10 +4442,10 @@ export const useAppStore = defineStore('app', () => {
     try {
       autoAsmResult.value = await controller.executeAutoAssemblerScript(script)
       const ok = autoAsmResult.value.success === true
-      addActionLog('injection', ok ? 'Script auto-assembler exécuté' : 'Exécution script échouée', String(autoAsmResult.value.error ?? ''), ok ? 'success' : 'error')
+      addActionLog('injection', ok ? t('appStore.autoAsm.executed') : t('appStore.autoAsm.executeFailed'), String(autoAsmResult.value.error ?? ''), ok ? 'success' : 'error')
     } catch (e) {
       autoAsmResult.value = { success: false, error: String(e) }
-      addActionLog('injection', 'Exécution script échouée', String(e), 'error')
+      addActionLog('injection', t('appStore.autoAsm.executeFailed'), String(e), 'error')
     } finally {
       injectionBusy.value = false
     }
@@ -4453,7 +4454,7 @@ export const useAppStore = defineStore('app', () => {
   async function restoreAutoAsmScript() {
     const controller = backend.getController()
     if (!controller.restoreAutoAssemblerScript) {
-      addActionLog('injection', 'Restauration auto-assembler indisponible', 'restoreAutoAssemblerScript absent du backend.', 'warning')
+      addActionLog('injection', t('appStore.autoAsm.restoreUnavailable'), t('appStore.autoAsm.restoreFunctionMissing'), 'warning')
       return
     }
 
@@ -4462,9 +4463,9 @@ export const useAppStore = defineStore('app', () => {
       const result = await controller.restoreAutoAssemblerScript()
       const ok = result.success === true
       if (ok) autoAsmResult.value = null
-      addActionLog('injection', ok ? 'Script auto-assembler restauré' : 'Restauration script échouée', String(result.error ?? ''), ok ? 'success' : 'error')
+      addActionLog('injection', ok ? t('appStore.autoAsm.restored') : t('appStore.autoAsm.restoreFailed'), String(result.error ?? ''), ok ? 'success' : 'error')
     } catch (e) {
-      addActionLog('injection', 'Restauration script échouée', String(e), 'error')
+      addActionLog('injection', t('appStore.autoAsm.restoreFailed'), String(e), 'error')
     } finally {
       injectionBusy.value = false
     }
@@ -4499,35 +4500,35 @@ export const useAppStore = defineStore('app', () => {
     if (!script.trim() || !name) return
     const controller = backend.getController()
     if (!controller.saveProfileAutoAsmScript) {
-      autoAsmSaveResult.value = { success: false, error: 'Sauvegarde auto-assembler non exposée par ce backend.' }
+      autoAsmSaveResult.value = { success: false, error: t('appStore.autoAsm.saveNotExposed') }
       return
     }
     try {
       autoAsmSaveResult.value = await controller.saveProfileAutoAsmScript(autoAsmProfileName(), name, script, {})
       const ok = autoAsmSaveResult.value.success === true
-      addActionLog('injection', ok ? 'Script auto-assembler sauvegardé' : 'Sauvegarde script échouée', String(autoAsmSaveResult.value.error ?? name), ok ? 'success' : 'error')
+      addActionLog('injection', ok ? t('appStore.autoAsm.saved') : t('appStore.autoAsm.saveFailed'), String(autoAsmSaveResult.value.error ?? name), ok ? 'success' : 'error')
       if (ok) await refreshSavedAutoAsmScripts()
     } catch (e) {
       autoAsmSaveResult.value = { success: false, error: String(e) }
-      addActionLog('injection', 'Sauvegarde script échouée', String(e), 'error')
+      addActionLog('injection', t('appStore.autoAsm.saveFailed'), String(e), 'error')
     }
   }
 
   async function applySavedAutoAsmScript(name: string) {
-    if (!await confirmRiskAction('injection', 'Exécution script sauvegardé', `Alloue de la mémoire et patche le processus attaché avec le script "${name}".`)) return
+    if (!await confirmRiskAction('injection', t('appStore.autoAsm.applySavedTitle'), t('appStore.autoAsm.applySavedDesc', { name }))) return
     const controller = backend.getController()
     if (!controller.applyProfileAutoAsmScript) {
-      autoAsmResult.value = { success: false, error: 'Exécution auto-assembler non exposée par ce backend.' }
+      autoAsmResult.value = { success: false, error: t('appStore.autoAsm.executeNotExposed') }
       return
     }
     injectionBusy.value = true
     try {
       autoAsmResult.value = await controller.applyProfileAutoAsmScript(autoAsmProfileName(), name)
       const ok = autoAsmResult.value.success === true
-      addActionLog('injection', ok ? `Script "${name}" exécuté` : `Exécution "${name}" échouée`, String(autoAsmResult.value.error ?? ''), ok ? 'success' : 'error')
+      addActionLog('injection', ok ? t('appStore.autoAsm.namedExecuted', { name }) : t('appStore.autoAsm.namedExecuteFailed', { name }), String(autoAsmResult.value.error ?? ''), ok ? 'success' : 'error')
     } catch (e) {
       autoAsmResult.value = { success: false, error: String(e) }
-      addActionLog('injection', `Exécution "${name}" échouée`, String(e), 'error')
+      addActionLog('injection', t('appStore.autoAsm.namedExecuteFailed', { name }), String(e), 'error')
     } finally {
       injectionBusy.value = false
     }
@@ -4539,10 +4540,10 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await controller.deleteProfileAutoAsmScript(autoAsmProfileName(), name)
       const ok = result.success === true
-      addActionLog('injection', ok ? `Script "${name}" supprimé` : `Suppression "${name}" échouée`, String(result.error ?? ''), ok ? 'success' : 'error')
+      addActionLog('injection', ok ? t('appStore.autoAsm.namedDeleted', { name }) : t('appStore.autoAsm.namedDeleteFailed', { name }), String(result.error ?? ''), ok ? 'success' : 'error')
       if (ok) await refreshSavedAutoAsmScripts()
     } catch (e) {
-      addActionLog('injection', `Suppression "${name}" échouée`, String(e), 'error')
+      addActionLog('injection', t('appStore.autoAsm.namedDeleteFailed', { name }), String(e), 'error')
     }
   }
 
@@ -4590,7 +4591,7 @@ export const useAppStore = defineStore('app', () => {
       dispatch(action: string, args: unknown[]) {
         const fn = automationBridgeActions[action]
         if (typeof fn !== 'function') {
-          throw new Error(`Action non autorisée (bridge JS) : ${action}`)
+          throw new Error(t('appStore.automationBridge.unauthorizedAction', { action }))
         }
         riskGateStore.automationPipeDispatchDepth += 1
         try {
