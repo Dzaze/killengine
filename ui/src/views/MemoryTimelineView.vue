@@ -1,17 +1,17 @@
 <template>
   <div class="memory-timeline-view">
     <PanelIntro
-      what="Un visualiseur de l'évolution temporelle des valeurs mémoire — courbe de valeur au fil du temps pour un ensemble d'adresses surveillées."
-      purpose="Repérer des cycles (timers, animations), des adresses volatiles vs stables, et suivre visuellement comment une valeur évolue pendant que le jeu tourne."
-      how="Ajoute une ou plusieurs adresses, démarre la collecte, puis sélectionne une adresse pour voir sa courbe. Détection de patterns, profil comportemental, prédiction, corrélations entre adresses et rapport texte disponibles depuis l'onglet Analyse rapide."
+      :what="$t('memoryTimeline.intro.what')"
+      :purpose="$t('memoryTimeline.intro.purpose')"
+      :how="$t('memoryTimeline.intro.how')"
     />
 
     <!-- Configuration Panel -->
     <div class="config-panel">
-      <h3>Configuration</h3>
+      <h3>{{ $t('memoryTimeline.config.title') }}</h3>
       <div class="config-grid">
         <div class="config-item">
-          <label>Intervalle d'échantillonnage (ms)</label>
+          <label>{{ $t('memoryTimeline.config.samplingInterval') }}</label>
           <input
             v-model.number="config.samplingIntervalMs"
             type="number"
@@ -21,7 +21,7 @@
           />
         </div>
         <div class="config-item">
-          <label>Durée max (ms)</label>
+          <label>{{ $t('memoryTimeline.config.maxDuration') }}</label>
           <input
             v-model.number="config.maxDurationMs"
             type="number"
@@ -37,7 +37,7 @@
               type="checkbox"
               :disabled="isCollecting"
             />
-            Ne tracker que les changements
+            {{ $t('memoryTimeline.config.trackOnlyChanges') }}
           </label>
         </div>
       </div>
@@ -45,20 +45,20 @@
 
     <!-- Address Management -->
     <div class="address-panel">
-      <h3>Adresses à surveiller ({{ watchedAddresses.length }})</h3>
+      <h3>{{ $t('memoryTimeline.addresses.title', { count: watchedAddresses.length }) }}</h3>
       <div class="address-input">
         <input
           v-model="newAddress"
-          placeholder="0x..."
+          :placeholder="$t('memoryTimeline.addresses.addressPlaceholder')"
           @keyup.enter="addAddress"
         />
         <select v-model="newAddressSize">
-          <option :value="4">Int32 (4 bytes)</option>
-          <option :value="8">Int64 (8 bytes)</option>
-          <option :value="2">Int16 (2 bytes)</option>
-          <option :value="1">Byte (1 byte)</option>
+          <option :value="4">{{ $t('memoryTimeline.addresses.int32Bytes') }}</option>
+          <option :value="8">{{ $t('memoryTimeline.addresses.int64Bytes') }}</option>
+          <option :value="2">{{ $t('memoryTimeline.addresses.int16Bytes') }}</option>
+          <option :value="1">{{ $t('memoryTimeline.addresses.byteSize') }}</option>
         </select>
-        <button @click="addAddress" :disabled="!newAddress">Ajouter</button>
+        <button @click="addAddress" :disabled="!newAddress">{{ $t('memoryTimeline.addresses.add') }}</button>
       </div>
       
       <div class="address-list">
@@ -82,17 +82,17 @@
         @click="startCollection"
         :disabled="isCollecting || watchedAddresses.length === 0"
       >
-        {{ isCollecting ? 'Collecte en cours...' : 'Démarrer' }}
+        {{ isCollecting ? $t('memoryTimeline.actions.collecting') : $t('memoryTimeline.actions.start') }}
       </button>
       <button
         class="btn-secondary"
         @click="stopCollection"
         :disabled="!isCollecting"
       >
-        Arrêter
+        {{ $t('memoryTimeline.actions.stop') }}
       </button>
-      <button class="btn-secondary" @click="clearAll">Tout effacer</button>
-      <button class="btn-secondary" @click="exportData">Exporter JSON</button>
+      <button class="btn-secondary" @click="clearAll">{{ $t('memoryTimeline.actions.clearAll') }}</button>
+      <button class="btn-secondary" @click="exportData">{{ $t('memoryTimeline.actions.exportJson') }}</button>
     </div>
 
     <!-- Progress -->
@@ -105,14 +105,14 @@
 
     <!-- Stats Panel -->
     <div v-if="stats.watchedAddressCount > 0" class="stats-panel">
-      <h3>Statistiques</h3>
+      <h3>{{ $t('memoryTimeline.stats.title') }}</h3>
       <div class="stats-grid">
         <div class="stat-item">
-          <span class="stat-label">Points collectés</span>
+          <span class="stat-label">{{ $t('memoryTimeline.stats.collectedPoints') }}</span>
           <span class="stat-value">{{ stats.totalDataPoints }}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">Adresses</span>
+          <span class="stat-label">{{ $t('memoryTimeline.stats.addresses') }}</span>
           <span class="stat-value">{{ stats.watchedAddressCount }}</span>
         </div>
       </div>
@@ -120,27 +120,27 @@
 
     <!-- Timeline Chart -->
     <div v-if="selectedSeries" class="chart-panel">
-      <h3>Timeline - {{ selectedAddress }}</h3>
+      <h3>{{ $t('memoryTimeline.chart.title', { address: selectedAddress }) }}</h3>
       <div class="chart-container" ref="chartContainer">
         <canvas ref="timelineCanvas" @mousemove="onChartHover" @mouseleave="onChartLeave"></canvas>
         <div v-if="hoverData" class="chart-tooltip" :style="tooltipStyle">
-          <div>t: {{ hoverData.timestampMs }}ms</div>
-          <div>val: {{ hoverData.valueHex }}</div>
+          <div>{{ $t('memoryTimeline.chart.time', { ms: hoverData.timestampMs }) }}</div>
+          <div>{{ $t('memoryTimeline.chart.value', { value: hoverData.valueHex }) }}</div>
         </div>
       </div>
       
       <!-- Series Stats -->
       <div class="series-stats">
         <div class="stat">
-          <span class="label">Changements:</span>
+          <span class="label">{{ $t('memoryTimeline.series.changes') }}</span>
           <span class="value">{{ selectedSeries.changeCount }}</span>
         </div>
         <div class="stat">
-          <span class="label">Volatilité:</span>
+          <span class="label">{{ $t('memoryTimeline.series.volatility') }}</span>
           <span class="value" :class="volatilityClass">{{ (selectedSeries.volatilityScore * 100).toFixed(1) }}%</span>
         </div>
         <div class="stat">
-          <span class="label">Intervalle moyen:</span>
+          <span class="label">{{ $t('memoryTimeline.series.averageInterval') }}</span>
           <span class="value">{{ selectedSeries.averageIntervalMs.toFixed(0) }}ms</span>
         </div>
       </div>
@@ -148,8 +148,8 @@
 
     <!-- Pattern Detection -->
     <div v-if="selectedAddress" class="patterns-panel">
-      <h3>Patterns détectés</h3>
-      <button class="btn-small" @click="detectPatterns">Analyser</button>
+      <h3>{{ $t('memoryTimeline.patterns.title') }}</h3>
+      <button class="btn-small" @click="detectPatterns">{{ $t('memoryTimeline.patterns.analyze') }}</button>
       <div v-if="patterns.length > 0" class="patterns-list">
         <div
           v-for="(pattern, idx) in patterns"
@@ -163,20 +163,20 @@
         </div>
       </div>
       <div v-else-if="analyzed" class="no-patterns">
-        Aucun pattern significatif détecté
+        {{ $t('memoryTimeline.patterns.none') }}
       </div>
     </div>
 
     <!-- Quick Actions -->
     <div class="quick-actions">
-      <h3>Actions rapides</h3>
+      <h3>{{ $t('memoryTimeline.quickActions.title') }}</h3>
       <div class="action-buttons">
-        <button @click="findVolatile">Trouver volatiles</button>
-        <button @click="findStable">Trouver stables</button>
-        <button @click="analyzeBehavior">Profil comportemental</button>
-        <button @click="predictNext">Prédiction</button>
-        <button @click="findCorrelations">Corrélations</button>
-        <button @click="generateReport">Rapport texte</button>
+        <button @click="findVolatile">{{ $t('memoryTimeline.quickActions.findVolatile') }}</button>
+        <button @click="findStable">{{ $t('memoryTimeline.quickActions.findStable') }}</button>
+        <button @click="analyzeBehavior">{{ $t('memoryTimeline.quickActions.behaviorProfile') }}</button>
+        <button @click="predictNext">{{ $t('memoryTimeline.quickActions.prediction') }}</button>
+        <button @click="findCorrelations">{{ $t('memoryTimeline.quickActions.correlations') }}</button>
+        <button @click="generateReport">{{ $t('memoryTimeline.quickActions.textReport') }}</button>
       </div>
       
       <!-- Results -->
@@ -195,10 +195,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import PanelIntro from '../components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 // State
 const config = ref({
@@ -231,19 +233,18 @@ const hoverData = ref<any>(null)
 const tooltipStyle = ref({})
 
 // Pattern type names
-const patternTypeNames: Record<number, string> = {
-  0: 'Inconnu',
-  1: 'Constant',
-  2: 'Step',
-  3: 'Linéaire',
-  4: 'Cyclique',
-  5: 'Aléatoire',
-  6: 'Corrélé',
-  7: 'Anti-cheat'
-}
-
 function getPatternTypeName(type: number): string {
-  return patternTypeNames[type] || 'Inconnu'
+  const patternTypeNames: Record<number, string> = {
+    0: t('memoryTimeline.patternTypes.unknown'),
+    1: t('memoryTimeline.patternTypes.constant'),
+    2: t('memoryTimeline.patternTypes.step'),
+    3: t('memoryTimeline.patternTypes.linear'),
+    4: t('memoryTimeline.patternTypes.cyclic'),
+    5: t('memoryTimeline.patternTypes.random'),
+    6: t('memoryTimeline.patternTypes.correlated'),
+    7: t('memoryTimeline.patternTypes.antiCheat')
+  }
+  return patternTypeNames[type] || t('memoryTimeline.patternTypes.unknown')
 }
 
 const volatilityClass = computed(() => {
@@ -265,7 +266,7 @@ async function addAddress() {
   }
   
   if (watchedAddresses.value.includes(addr)) {
-    store.addActionLog('memory_timeline', 'Adresse déjà surveillée', addr, 'warning')
+    store.addActionLog('memory_timeline', t('memoryTimeline.logs.addressAlreadyWatched'), addr, 'warning')
     return
   }
   
@@ -304,7 +305,7 @@ async function startCollection() {
   if (success) {
     isCollecting.value = true
     progressPercent.value = 0
-    progressStatus.value = 'Démarrage...'
+    progressStatus.value = t('memoryTimeline.status.starting')
   }
 }
 
@@ -325,7 +326,7 @@ function clearAll() {
 async function exportData() {
   const filepath = await store.exportTimelineToJson()
   if (filepath) {
-    store.addActionLog('memory_timeline', 'Timeline exportée', filepath, 'success')
+    store.addActionLog('memory_timeline', t('memoryTimeline.logs.exported'), filepath, 'success')
   }
 }
 
@@ -337,21 +338,21 @@ async function detectPatterns() {
 
 async function findVolatile() {
   const addresses = await store.findVolatileTimelineAddresses(0.5)
-  quickResults.value = addresses.map((a: string) => `Volatile: ${a}`)
+  quickResults.value = addresses.map((a: string) => t('memoryTimeline.quickResults.volatile', { address: a }))
 }
 
 async function findStable() {
   const addresses = await store.findStableTimelineAddresses(5000)
-  quickResults.value = addresses.map((a: string) => `Stable: ${a}`)
+  quickResults.value = addresses.map((a: string) => t('memoryTimeline.quickResults.stable', { address: a }))
 }
 
 async function analyzeBehavior() {
   if (!selectedAddress.value) return
   const profile = await store.analyzeTimelineBehavior(selectedAddress.value)
   quickResults.value = [
-    `Changes/sec: ${Number(profile.changesPerSecond).toFixed(2)}`,
-    `Régularité: ${(Number(profile.regularityScore) * 100).toFixed(0)}%`,
-    `Burst: ${profile.hasBurstBehavior ? 'Oui' : 'Non'}`
+    t('memoryTimeline.quickResults.changesPerSecond', { value: Number(profile.changesPerSecond).toFixed(2) }),
+    t('memoryTimeline.quickResults.regularity', { percent: (Number(profile.regularityScore) * 100).toFixed(0) }),
+    t('memoryTimeline.quickResults.burst', { value: profile.hasBurstBehavior ? t('memoryTimeline.common.yes') : t('memoryTimeline.common.no') })
   ]
 }
 
@@ -359,8 +360,8 @@ async function predictNext() {
   if (!selectedAddress.value) return
   const prediction = await store.predictTimelineNextValue(selectedAddress.value)
   quickResults.value = [
-    `Probabilité de changement: ${(Number(prediction.changeProbability) * 100).toFixed(1)}%`,
-    `Valeur prédite: ${String(prediction.predictedValueHex)}`
+    t('memoryTimeline.quickResults.changeProbability', { percent: (Number(prediction.changeProbability) * 100).toFixed(1) }),
+    t('memoryTimeline.quickResults.predictedValue', { value: String(prediction.predictedValueHex) })
   ]
 }
 
@@ -369,14 +370,14 @@ async function findCorrelations() {
   quickResults.value = correlations.length > 0
     ? correlations.map((c: any) =>
         `${c.addressA} ↔ ${c.addressB} : r=${Number(c.pearsonCoefficient).toFixed(2)}` +
-        (c.timeLagMs ? `, décalage ${Number(c.timeLagMs).toFixed(0)}ms` : '') +
-        (c.isLeading ? ' (A mène B)' : ''))
-    : ['Aucune corrélation trouvée (au moins 2 adresses surveillées avec des données requises)']
+        (c.timeLagMs ? t('memoryTimeline.quickResults.timeLag', { ms: Number(c.timeLagMs).toFixed(0) }) : '') +
+        (c.isLeading ? t('memoryTimeline.quickResults.aLeadsB') : ''))
+    : [t('memoryTimeline.quickResults.noCorrelations')]
 }
 
 async function generateReport() {
   const report = await store.generateTimelineReport()
-  quickResults.value = report ? report.split('\n').filter(line => line.trim() !== '') : ['Rapport non disponible']
+  quickResults.value = report ? report.split('\n').filter(line => line.trim() !== '') : [t('memoryTimeline.quickResults.reportUnavailable')]
 }
 
 // Chart drawing
