@@ -557,6 +557,7 @@ export const useAppStore = defineStore('app', () => {
     keepCandidate,
     ignoreCandidate,
     candidateVisualState,
+    candidateVisualStateLabel,
   } = assistantSmartSearchStore
   configureAssistantSmartSearchContext({
     activeView,
@@ -5171,6 +5172,7 @@ export const useAppStore = defineStore('app', () => {
     keepCandidate,
     ignoreCandidate,
     candidateVisualState,
+    candidateVisualStateLabel,
     writeSelectedValue,
     writeSelectedAddresses,
     writeSelectedTargets,

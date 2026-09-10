@@ -185,7 +185,7 @@ function fieldStabilityLabel(address: string): string {
         v-for="match in displayedCandidates"
         :key="match.address"
         class="candidate-row"
-        :class="[`candidate-${store.candidateVisualState(match).replace(' ', '-')}`]"
+        :class="[`candidate-${store.candidateVisualState(match)}`]"
       >
         <label class="candidate-check">
           <input
@@ -215,7 +215,7 @@ function fieldStabilityLabel(address: string): string {
           >
             {{ $t('candidatePanel.written') }}
           </span>
-          <span class="visual-state">{{ store.candidateVisualState(match) }}</span>
+          <span class="visual-state">{{ store.candidateVisualStateLabel(match) }}</span>
           <span v-if="store.watchedAddresses.some((item) => item.address === match.address)" class="live-dot">{{ $t('candidatePanel.watchBadge') }}</span>
         </div>
         <div class="candidate-value" :class="{ error: candidateReadError(match.address) }" :title="candidateReadError(match.address) || match.lastValueHex">
@@ -389,20 +389,20 @@ function fieldStabilityLabel(address: string): string {
   padding-left: 36px;
 }
 
-.candidate-très-probable {
+.candidate-very-likely {
   border-color: color-mix(in srgb, var(--success) 35%, var(--border));
 }
 
-.candidate-à-vérifier {
+.candidate-to-verify {
   border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
 }
 
-.candidate-faible,
-.candidate-ignoré {
+.candidate-weak,
+.candidate-ignored {
   opacity: 0.65;
 }
 
-.candidate-gardé {
+.candidate-kept {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 

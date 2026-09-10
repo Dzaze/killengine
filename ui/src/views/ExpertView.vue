@@ -4306,20 +4306,20 @@ onMounted(() => {
   padding-left: 36px;
 }
 
-.candidate-très-probable {
+.candidate-very-likely {
   border-color: color-mix(in srgb, var(--success) 35%, var(--border));
 }
 
-.candidate-à-vérifier {
+.candidate-to-verify {
   border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
 }
 
-.candidate-faible,
-.candidate-ignoré {
+.candidate-weak,
+.candidate-ignored {
   opacity: 0.65;
 }
 
-.candidate-gardé {
+.candidate-kept {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
