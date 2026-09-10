@@ -37,9 +37,12 @@ import {
   type MemoryWriteResult,
   type MemoryWriteTarget,
 } from '@/services/backend'
+import { i18n } from '@/i18n'
 import { useActionLogStore } from './actionLog'
 import { useInvestigationStore } from './investigation'
 import { useScanningStore } from './scanning'
+
+const { t } = i18n.global
 
 export interface RuntimeActionPlanItem {
   id: 'watch' | 'write' | 'freeze_polling' | 'find_writes' | 'aob_patch' | 'force_value' | 'bookmark' | 'trainer'
@@ -127,15 +130,15 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
     if (!address) return
     const region = deps().regionForAddress(address)
     if (!region) {
-      writeSafetyWarning.value = 'Région inconnue : actualise la carte mémoire avant écriture.'
+      writeSafetyWarning.value = t('writeFreezeStore.unknownRegion')
       return
     }
     if (region.writable !== true) {
-      writeSafetyWarning.value = `Attention : la région 0x${region.baseAddress} n'est pas marquée writable (${region.protection ?? '?'}).`
+      writeSafetyWarning.value = t('writeFreezeStore.notWritable', { address: region.baseAddress, protection: region.protection ?? '?' })
       return
     }
     if (String(region.state ?? '').toLowerCase() !== 'committed') {
-      writeSafetyWarning.value = `Attention : état mémoire ${String(region.state ?? '?')}, écriture risquée.`
+      writeSafetyWarning.value = t('writeFreezeStore.notCommitted', { state: String(region.state ?? '?') })
     }
   }
 
@@ -171,62 +174,62 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
         label: 'Watch',
         risk: 'safe',
         enabled: hasAddress && !isCode,
-        reason: hasAddress && !isCode ? 'Surveiller la valeur live sans écrire.' : 'Réservé aux checkpoints mémoire avec adresse.',
+        reason: hasAddress && !isCode ? t('writeFreezeStore.reasonWatchEnabled') : t('writeFreezeStore.reasonWatchDisabled'),
       },
       {
         id: 'write',
-        label: 'Préparer write',
+        label: t('writeFreezeStore.planPrepareWriteLabel'),
         risk: 'write',
         enabled: hasWritableValue,
-        reason: hasWritableValue ? 'Tester la valeur sous confirmation explicite.' : 'Adresse mémoire et valeur cible requises.',
+        reason: hasWritableValue ? t('writeFreezeStore.reasonWriteEnabled') : t('writeFreezeStore.reasonNeedsAddressValue'),
       },
       {
         id: 'freeze_polling',
         label: 'Freeze',
         risk: 'write',
         enabled: hasWritableValue,
-        reason: hasWritableValue ? 'Stabiliser par freeze polling sous confirmation.' : 'Adresse mémoire et valeur cible requises.',
+        reason: hasWritableValue ? t('writeFreezeStore.reasonFreezeEnabled') : t('writeFreezeStore.reasonNeedsAddressValue'),
       },
       {
         id: 'find_writes',
         label: 'Find What Writes',
         risk: 'debug',
         enabled: hasAddress && !isCode,
-        reason: hasAddress && !isCode ? 'Capturer l’instruction qui modifie cette adresse.' : 'Le debugger part d’une adresse mémoire, pas d’un RIP déjà capturé.',
+        reason: hasAddress && !isCode ? t('writeFreezeStore.reasonFindWritesEnabled') : t('writeFreezeStore.reasonFindWritesDisabled'),
       },
       {
         id: 'aob_patch',
         label: 'AOB/Patch',
         risk: 'patch',
         enabled: hasCodeTarget,
-        reason: hasCodeTarget ? 'Générer une signature et proposer un patch réversible.' : 'Nécessite un RIP, une signature ou une source code.',
+        reason: hasCodeTarget ? t('writeFreezeStore.reasonAobEnabled') : t('writeFreezeStore.reasonAobDisabled'),
       },
       {
         id: 'force_value',
-        label: 'Forcer valeur (hook)',
+        label: t('writeFreezeStore.planForceValueLabel'),
         risk: 'patch',
         enabled: kind === 'code_writer' && hasAddress,
         reason: kind === 'code_writer' && hasAddress
-          ? 'Installer un trampoline sur ce RIP pour forcer une valeur, même si la source est un registre.'
-          : 'Réservé aux checkpoints Find What Writes (RIP capturé).',
+          ? t('writeFreezeStore.reasonForceValueEnabled')
+          : t('writeFreezeStore.reasonForceValueDisabled'),
       },
       {
         id: 'bookmark',
         label: 'Bookmark',
         risk: 'safe',
         enabled: true,
-        reason: 'Conserver la piste dans le workspace avec ses preuves.',
+        reason: t('writeFreezeStore.reasonBookmark'),
       },
       {
         id: 'trainer',
-        label: 'Créer Trainer',
+        label: t('writeFreezeStore.planTrainerLabel'),
         risk: isCode ? 'patch' : 'write',
         enabled: hasAddress,
-        reason: hasAddress ? 'Transformer la piste en feature réutilisable.' : 'Une feature Trainer nécessite une adresse ou signature.',
+        reason: hasAddress ? t('writeFreezeStore.reasonTrainerEnabled') : t('writeFreezeStore.reasonTrainerDisabled'),
       },
     ]
     return {
-      label: String(checkpoint.label ?? checkpoint.name ?? checkpoint.address ?? checkpoint.id ?? 'Checkpoint'),
+      label: String(checkpoint.label ?? checkpoint.name ?? checkpoint.address ?? checkpoint.id ?? t('writeFreezeStore.defaultCheckpointLabel')),
       address,
       type,
       value,
@@ -243,13 +246,13 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
     const type = checkpointType(checkpoint)
     const value = checkpointValue(checkpoint)
     if (!address || !value.trim()) {
-      addActionLog('checkpoint', 'Checkpoint incomplet', 'Adresse ou valeur manquante.', 'warning')
+      addActionLog('checkpoint', t('writeFreezeStore.incompleteCheckpointTitle'), t('writeFreezeStore.missingAddressOrValue'), 'warning')
       return null
     }
-    const title = freeze ? 'Checkpoint freeze polling' : 'Checkpoint écriture'
+    const title = freeze ? t('writeFreezeStore.freezePollingTitle') : t('writeFreezeStore.checkpointWriteTitle')
     const kernelActive = deps().kernelMemoryModeActive.value === true
     const risk: RiskLevel = !freeze && kernelActive ? 'injection' : 'write'
-    const route = !freeze && kernelActive ? ' via driver kernel' : ''
+    const route = !freeze && kernelActive ? t('writeFreezeStore.viaKernelDriverSuffix') : ''
     if (!await deps().confirmRiskAction(risk, title, `0x${address} ${type} = ${value}${route}.`)) return null
 
     try {
@@ -264,12 +267,12 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       }
       addActionLog(
         'checkpoint',
-        result.success === true ? `${title} OK` : `${title} échoué`,
+        result.success === true ? t('writeFreezeStore.titleOk', { title }) : t('writeFreezeStore.titleFailed', { title }),
         String(result.error || `0x${address}`),
         result.success === true ? 'success' : 'error',
       )
       addInvestigationStep({
-        title: result.success === true ? `${title} exécuté` : `${title} échoué`,
+        title: result.success === true ? t('writeFreezeStore.titleExecuted', { title }) : t('writeFreezeStore.titleFailed', { title }),
         detail: String(result.error || `0x${address} ${type} = ${value}`),
         status: result.success === true ? 'success' : 'error',
         tool: freeze ? 'setFreezeValue' : (kernelActive ? 'writeMemoryValueKernel' : 'writeMemoryValue'),
@@ -285,7 +288,7 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       })
       return result
     } catch (e) {
-      addActionLog('checkpoint', `${title} échoué`, String(e), 'error')
+      addActionLog('checkpoint', t('writeFreezeStore.titleFailed', { title }), String(e), 'error')
       return null
     }
   }
@@ -295,13 +298,13 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
     const type = checkpointType(checkpoint)
     const value = checkpointValue(checkpoint)
     if (!address || !value.trim()) {
-      addActionLog('checkpoint', 'Écriture kernel impossible', 'Adresse ou valeur manquante.', 'warning')
+      addActionLog('checkpoint', t('writeFreezeStore.kernelWriteImpossibleTitle'), t('writeFreezeStore.missingAddressOrValue'), 'warning')
       return null
     }
-    if (!await deps().confirmRiskAction('injection', 'Écriture mémoire via driver noyau', `0x${address} ${type} = ${value} (contourne les protections mémoire usermode).`)) return null
+    if (!await deps().confirmRiskAction('injection', t('writeFreezeStore.kernelWriteTitle'), `0x${address} ${type} = ${value}${t('writeFreezeStore.kernelBypassSuffix')}`)) return null
     const controller = backend.getController()
     if (!controller.writeMemoryValueKernel) {
-      addActionLog('checkpoint', 'Écriture kernel indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('writeFreezeStore.kernelWriteUnavailableTitle'), t('writeFreezeStore.backendNotExposed'), 'warning')
       return null
     }
     try {
@@ -310,12 +313,12 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       if (result.success === true) deps().addAddressToWatch(address, type)
       addActionLog(
         'checkpoint',
-        result.success === true ? 'Écriture kernel OK' : 'Écriture kernel échouée',
+        result.success === true ? t('writeFreezeStore.kernelWriteOkTitle') : t('writeFreezeStore.kernelWriteFailedTitle'),
         String(result.error || `0x${address}`),
         result.success === true ? 'success' : 'error',
       )
       addInvestigationStep({
-        title: result.success === true ? 'Écriture kernel exécutée' : 'Écriture kernel échouée',
+        title: result.success === true ? t('writeFreezeStore.kernelWriteExecutedTitle') : t('writeFreezeStore.kernelWriteFailedTitle'),
         detail: String(result.error || `0x${address} ${type} = ${value} via driver noyau`),
         status: result.success === true ? 'success' : 'error',
         tool: 'writeMemoryValueKernel',
@@ -331,23 +334,23 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       })
       return result
     } catch (e) {
-      addActionLog('checkpoint', 'Écriture kernel échouée', String(e), 'error')
+      addActionLog('checkpoint', t('writeFreezeStore.kernelWriteFailedTitle'), String(e), 'error')
       return null
     }
   }
 
   async function writeSelectedAddresses(addresses: string[], type: string, value: string) {
     if (addresses.length === 0) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Aucune adresse sélectionnée.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.noAddressSelected') }
       return
     }
     if (!value.trim()) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.enterValueToWrite') }
       return
     }
     const kernelActive = deps().kernelMemoryModeActive.value === true
     const risk: RiskLevel = kernelActive ? 'injection' : 'write'
-    if (!await deps().confirmRiskAction(risk, 'Ecriture memoire multiple', `${addresses.length} adresse(s), type ${type}, valeur ${value}${kernelActive ? ' via driver kernel' : ''}.`)) return
+    if (!await deps().confirmRiskAction(risk, t('writeFreezeStore.multiWriteTitle'), t('writeFreezeStore.multiWriteDetail', { count: addresses.length, type, value, kernelSuffix: kernelActive ? t('writeFreezeStore.viaKernelDriverSuffix') : '' }))) return
     try {
       const results: MemoryWriteResult[] = []
       for (const address of addresses) {
@@ -356,28 +359,28 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       }
       writeResult.value = results[results.length - 1]
       scanStatusText.value = results.every((r) => r.success)
-        ? `${results.length} adresse(s) écrite(s).`
-        : `Écriture partielle: ${results.filter((r) => r.success).length}/${results.length} réussie(s).`
-      addActionLog('write', `Écriture multiple ${value}`, `${results.filter((r) => r.success).length}/${results.length} réussie(s)${kernelActive ? ' via kernel' : ''}.`, results.every((r) => r.success) ? 'success' : 'warning')
+        ? t('writeFreezeStore.addressesWritten', { count: results.length })
+        : t('writeFreezeStore.partialWrite', { done: results.filter((r) => r.success).length, total: results.length })
+      addActionLog('write', t('writeFreezeStore.multiWriteLogTitle', { value }), t('writeFreezeStore.multiWriteLogDetail', { done: results.filter((r) => r.success).length, total: results.length, kernelSuffix: kernelActive ? ' via kernel' : '' }), results.every((r) => r.success) ? 'success' : 'warning')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
-      scanStatusText.value = 'Écriture multiple échouée.'
-      addActionLog('write', 'Écriture multiple échouée', String(e), 'error')
+      scanStatusText.value = t('writeFreezeStore.multiWriteFailedTitle')
+      addActionLog('write', t('writeFreezeStore.multiWriteFailedTitle'), String(e), 'error')
     }
   }
 
   async function writeSelectedTargets(targets: MemoryWriteTarget[], value: string) {
     if (targets.length === 0) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Aucune cible sélectionnée.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.noTargetSelected') }
       return
     }
     if (!value.trim()) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.enterValueToWrite') }
       return
     }
     const kernelActive = deps().kernelMemoryModeActive.value === true
     const risk: RiskLevel = kernelActive ? 'injection' : 'write'
-    if (!await deps().confirmRiskAction(risk, 'Ecriture memoire avec variants', `${targets.length} cible(s), valeur affichee ${value}${kernelActive ? ' via driver kernel' : ''}.`)) return
+    if (!await deps().confirmRiskAction(risk, t('writeFreezeStore.variantsWriteTitle'), t('writeFreezeStore.variantsWriteDetail', { count: targets.length, value, kernelSuffix: kernelActive ? t('writeFreezeStore.viaKernelDriverSuffix') : '' }))) return
     try {
       const controller = backend.getController()
       if (kernelActive) {
@@ -393,13 +396,13 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
           written,
           total: targets.length,
           results,
-          error: written === targets.length ? '' : `Écriture kernel partielle: ${written}/${targets.length}.`,
+          error: written === targets.length ? '' : t('writeFreezeStore.kernelPartialWrite', { done: written, total: targets.length }),
         } as MemoryWriteBatchResult
         scanStatusText.value = written === targets.length
-          ? `${written} adresse(s) écrite(s) via kernel.`
-          : `Écriture kernel partielle: ${written}/${targets.length} réussie(s).`
+          ? t('writeFreezeStore.addressesWrittenViaKernel', { count: written })
+          : t('writeFreezeStore.kernelPartialWriteSuffix', { done: written, total: targets.length })
         for (const target of targets) deps().addAddressToWatch(target.address, target.type)
-        addActionLog('write', `Écriture auto kernel ${value}`, `${written}/${targets.length} réussie(s).`, written === targets.length ? 'success' : 'warning')
+        addActionLog('write', t('writeFreezeStore.autoKernelWriteLogTitle', { value }), t('writeFreezeStore.autoKernelWriteLogDetail', { done: written, total: targets.length }), written === targets.length ? 'success' : 'warning')
         return
       }
       if (controller.writeMemoryValuesWithVariants) {
@@ -407,19 +410,19 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
         writeResult.value = result
         const written = result.written ?? result.results?.filter((r) => r.success).length ?? 0
         scanStatusText.value = result.success
-          ? `${written} adresse(s) écrite(s) avec encodage auto.`
-          : `Écriture auto partielle: ${written}/${targets.length} réussie(s).`
+          ? t('writeFreezeStore.addressesWrittenAutoEncoding', { count: written })
+          : t('writeFreezeStore.autoWritePartial', { done: written, total: targets.length })
         for (const target of targets) {
           deps().addAddressToWatch(target.address, target.type)
         }
-        addActionLog('write', `Écriture auto ${value}`, `${written}/${targets.length} réussie(s).`, result.success ? 'success' : 'warning')
+        addActionLog('write', t('writeFreezeStore.autoWriteLogTitle', { value }), t('writeFreezeStore.autoWriteLogDetail', { done: written, total: targets.length }), result.success ? 'success' : 'warning')
         return
       }
       await writeSelectedAddresses(targets.map((target) => target.address), targets[0]?.type ?? exactScanType.value, value)
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
-      scanStatusText.value = 'Écriture auto échouée.'
-      addActionLog('write', 'Écriture auto échouée', String(e), 'error')
+      scanStatusText.value = t('writeFreezeStore.autoWriteFailedTitle')
+      addActionLog('write', t('writeFreezeStore.autoWriteFailedTitle'), String(e), 'error')
     }
   }
 
@@ -430,17 +433,17 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
   // redondantes d'une même valeur et resynchronisent une écriture isolée.
   async function writeSelectedAtomic(addresses: string[], type: string, value: string) {
     if (addresses.length === 0) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Aucune adresse sélectionnée.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.noAddressSelected') }
       return
     }
     if (!value.trim()) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.enterValueToWrite') }
       return
     }
-    if (!await deps().confirmRiskAction('write', 'Écriture atomique multi-adresses', `${addresses.length} adresse(s) en même temps (threads de la cible suspendues), type ${type}, valeur ${value}.`)) return
+    if (!await deps().confirmRiskAction('write', t('writeFreezeStore.atomicWriteTitle'), t('writeFreezeStore.atomicWriteDetail', { count: addresses.length, type, value }))) return
     const controller = backend.getController()
     if (!controller.writeMemoryValuesAtomic) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Écriture atomique indisponible sur ce backend.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.atomicWriteUnavailable') }
       return
     }
     try {
@@ -449,16 +452,16 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       writeResult.value = result
       const written = result.written ?? result.results?.filter((r) => r.success).length ?? 0
       scanStatusText.value = result.success
-        ? `${written} adresse(s) écrite(s) ensemble (atomique).`
-        : `Écriture atomique partielle: ${written}/${addresses.length} réussie(s).`
+        ? t('writeFreezeStore.addressesWrittenAtomic', { count: written })
+        : t('writeFreezeStore.atomicPartial', { done: written, total: addresses.length })
       for (const address of addresses) {
         deps().addAddressToWatch(address, type)
       }
-      addActionLog('write', `Écriture atomique ${value}`, `${written}/${addresses.length} réussie(s), ${result.suspendedThreadCount ?? 0} thread(s) suspendue(s).`, result.success ? 'success' : 'warning')
+      addActionLog('write', t('writeFreezeStore.atomicWriteLogTitle', { value }), t('writeFreezeStore.atomicWriteLogDetail', { done: written, total: addresses.length, suspended: result.suspendedThreadCount ?? 0 }), result.success ? 'success' : 'warning')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
-      scanStatusText.value = 'Écriture atomique échouée.'
-      addActionLog('write', 'Écriture atomique échouée', String(e), 'error')
+      scanStatusText.value = t('writeFreezeStore.atomicWriteFailedTitle')
+      addActionLog('write', t('writeFreezeStore.atomicWriteFailedTitle'), String(e), 'error')
     }
   }
 
@@ -482,8 +485,10 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       if (result.success && result.bestChain) {
         deps().pushMessage(
           'assistant',
-          `🔗 J'ai trouvé une chaîne de pointeurs stable pour 0x${addressHex} (${result.message ?? 'profondeur ' + (result.bestChain.depth ?? '?')}). ` +
-            `Elle survivra à un redémarrage du jeu — ouvre Expert > Write et clique "Sauvegarder dans un profil" pour la garder.`,
+          t('writeFreezeStore.stableLocatorFoundMessage', {
+            address: addressHex,
+            detail: result.message ?? t('writeFreezeStore.depthFallback', { depth: result.bestChain.depth ?? '?' }),
+          }),
         )
       }
     } catch {
@@ -496,28 +501,33 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
     // clique Écrire, rien ne se passe, aucun indice pourquoi. Message explicite
     // à la place, affiché au même endroit que les autres erreurs d'écriture.
     if (!selectedCandidateAddress.value) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Aucune adresse sélectionnée : clique une adresse dans Candidats avant d\'écrire.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.noAddressSelectedHint') }
       return
     }
     if (!writeValue.value.trim()) {
-      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: 'Entre une valeur à écrire avant de cliquer sur Écrire.' }
+      writeResult.value = { success: false, verified: false, bytesWritten: 0, error: t('writeFreezeStore.enterValueBeforeWrite') }
       return
     }
     updateWriteSafetyWarning()
     if (writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
-      addActionLog('write_guard', 'Écriture bloquée', writeSafetyWarning.value, 'warning')
+      addActionLog('write_guard', t('writeFreezeStore.writeBlockedTitle'), writeSafetyWarning.value, 'warning')
       return
     }
     const kernelActive = deps().kernelMemoryModeActive.value === true
     const risk: RiskLevel = kernelActive ? 'injection' : 'write'
-    if (!await deps().confirmRiskAction(risk, 'Ecriture memoire', `0x${selectedCandidateAddress.value} ${exactScanType.value} = ${writeValue.value}${kernelActive ? ' via driver kernel' : ''}.`)) return
+    if (!await deps().confirmRiskAction(risk, t('writeFreezeStore.singleWriteTitle'), t('writeFreezeStore.singleWriteDetail', { address: selectedCandidateAddress.value, type: exactScanType.value, value: writeValue.value, kernelSuffix: kernelActive ? t('writeFreezeStore.viaKernelDriverSuffix') : '' }))) return
     try {
       writeResult.value = await deps().writeMemoryValueByMode(selectedCandidateAddress.value, exactScanType.value, writeValue.value)
       deps().addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
       addActionLog(
         'write',
-        `Écriture 0x${selectedCandidateAddress.value}`,
-        `${exactScanType.value} = ${writeValue.value}${kernelActive ? ' via kernel' : ''}${writeSafetyWarning.value ? ` · ${writeSafetyWarning.value}` : ''}.`,
+        t('writeFreezeStore.singleWriteLogTitle', { address: selectedCandidateAddress.value }),
+        t('writeFreezeStore.singleWriteLogDetail', {
+          type: exactScanType.value,
+          value: writeValue.value,
+          kernelSuffix: kernelActive ? ' via kernel' : '',
+          warningSuffix: writeSafetyWarning.value ? ` · ${writeSafetyWarning.value}` : '',
+        }),
         writeResult.value.success ? 'success' : 'error',
       )
       if (writeResult.value.success && writeResult.value.verified) {
@@ -525,17 +535,17 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       }
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
-      addActionLog('write', `Écriture échouée 0x${selectedCandidateAddress.value}`, String(e), 'error')
+      addActionLog('write', t('writeFreezeStore.singleWriteFailedLogTitle', { address: selectedCandidateAddress.value }), String(e), 'error')
     }
   }
 
   async function rollbackLastWrite() {
     try {
       writeResult.value = await backend.getController().rollbackLastWrite()
-      addActionLog('rollback', 'Rollback dernière écriture', writeResult.value.success ? 'Adresse restaurée.' : writeResult.value.error, writeResult.value.success ? 'success' : 'warning')
+      addActionLog('rollback', t('writeFreezeStore.rollbackLastTitle'), writeResult.value.success ? t('writeFreezeStore.addressRestored') : writeResult.value.error, writeResult.value.success ? 'success' : 'warning')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e) }
-      addActionLog('rollback', 'Rollback échoué', String(e), 'error')
+      addActionLog('rollback', t('writeFreezeStore.rollbackFailedTitle'), String(e), 'error')
     }
   }
 
@@ -547,19 +557,19 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
           .map((item: unknown) => {
             const record = item as Record<string, unknown>
             const prefix = record.success === true ? '✓' : '✗'
-            return `${prefix} 0x${record.address}: ${String(record.from ?? '?')} -> ${String(record.to ?? '?')}`
+            return t('writeFreezeStore.rollbackBatchLine', { prefix, address: record.address, from: String(record.from ?? '?'), to: String(record.to ?? '?') })
           })
           .join('\n')
         : ''
       deps().pushMessage('assistant', result.success
-        ? `Rollback batch réussi : ${result.rolledBack}/${result.total} écritures restaurées.${restored ? `\n${restored}` : ''}`
-        : `Rollback batch partiel : ${String(result.rolledBack ?? 0)}/${String(result.total ?? 0)} restaurées.${restored ? `\n${restored}` : ''}`)
-      addActionLog('rollback', 'Rollback batch', `${String(result.rolledBack ?? 0)}/${String(result.total ?? 0)} restaurée(s).`, result.success ? 'success' : 'warning')
+        ? t('writeFreezeStore.rollbackBatchSuccessMessage', { rolledBack: result.rolledBack, total: result.total, restored: restored ? `\n${restored}` : '' })
+        : t('writeFreezeStore.rollbackBatchPartialMessage', { rolledBack: String(result.rolledBack ?? 0), total: String(result.total ?? 0), restored: restored ? `\n${restored}` : '' }))
+      addActionLog('rollback', t('writeFreezeStore.rollbackBatchTitle'), t('writeFreezeStore.rollbackBatchDetail', { rolledBack: String(result.rolledBack ?? 0), total: String(result.total ?? 0) }), result.success ? 'success' : 'warning')
       await deps().refreshActiveChatMemoryTargets()
       await deps().refreshSmartSearchContext()
       return result
     } catch (e) {
-      deps().pushMessage('assistant', 'Rollback batch échoué : ' + String(e), { isError: true })
+      deps().pushMessage('assistant', t('writeFreezeStore.rollbackBatchFailedMessage', { error: String(e) }), { isError: true })
       return { success: false, error: String(e) }
     }
   }
@@ -579,20 +589,20 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
         success: false,
         verified: false,
         bytesWritten: 0,
-        error: watched?.error || 'Valeur actuelle illisible.',
+        error: watched?.error || t('writeFreezeStore.currentValueUnreadable'),
         enabled: freezeEnabled.value,
       }
-      addActionLog('freeze', `Freeze impossible 0x${normalized}`, writeResult.value.error, 'error')
+      addActionLog('freeze', t('writeFreezeStore.freezeImpossibleTitle', { address: normalized }), writeResult.value.error, 'error')
       return
     }
 
     writeValue.value = currentValue
     updateWriteSafetyWarning()
     if (writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
-      addActionLog('write_guard', 'Freeze bloqué', writeSafetyWarning.value, 'warning')
+      addActionLog('write_guard', t('writeFreezeStore.freezeBlockedTitle'), writeSafetyWarning.value, 'warning')
       return
     }
-    if (!await deps().confirmRiskAction('write', 'Freeze memoire', `0x${normalized} ${type} = ${currentValue}.`)) return
+    if (!await deps().confirmRiskAction('write', t('writeFreezeStore.freezeMemTitle'), t('writeFreezeStore.freezeMemDetail', { address: normalized, type, value: currentValue }))) return
 
     try {
       writeResult.value = await backend
@@ -605,13 +615,13 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       }
       addActionLog(
         'freeze',
-        writeResult.value.success ? 'Freeze actuel activé' : 'Freeze actuel échoué',
-        `0x${normalized} ${type} = ${currentValue}.`,
+        writeResult.value.success ? t('writeFreezeStore.freezeCurrentActivatedTitle') : t('writeFreezeStore.freezeCurrentFailedTitle'),
+        t('writeFreezeStore.freezeMemDetail', { address: normalized, type, value: currentValue }),
         writeResult.value.success ? 'success' : 'error',
       )
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: freezeEnabled.value }
-      addActionLog('freeze', `Freeze échoué 0x${normalized}`, String(e), 'error')
+      addActionLog('freeze', t('writeFreezeStore.freezeFailedTitle', { address: normalized }), String(e), 'error')
     }
   }
 
@@ -620,10 +630,10 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
     const nextState = !freezeEnabled.value
     updateWriteSafetyWarning()
     if (nextState && writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
-      addActionLog('write_guard', 'Freeze bloqué', writeSafetyWarning.value, 'warning')
+      addActionLog('write_guard', t('writeFreezeStore.freezeBlockedTitle'), writeSafetyWarning.value, 'warning')
       return
     }
-    if (nextState && !await deps().confirmRiskAction('write', 'Freeze memoire', `0x${selectedCandidateAddress.value} ${exactScanType.value} = ${writeValue.value}.`)) return
+    if (nextState && !await deps().confirmRiskAction('write', t('writeFreezeStore.freezeMemTitle'), t('writeFreezeStore.freezeMemDetail', { address: selectedCandidateAddress.value, type: exactScanType.value, value: writeValue.value }))) return
     try {
       writeResult.value = await backend
         .getController()
@@ -633,10 +643,10 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
         deps().addAddressToWatch(selectedCandidateAddress.value, exactScanType.value)
         deps().upsertSessionEntry(selectedCandidateAddress.value, exactScanType.value, 'freeze_polling', nextState)
       }
-      addActionLog('freeze', nextState ? 'Freeze activé' : 'Freeze arrêté', `0x${selectedCandidateAddress.value} = ${writeValue.value}.`, writeResult.value.success ? 'success' : 'error')
+      addActionLog('freeze', nextState ? t('writeFreezeStore.freezeActivatedTitle') : t('writeFreezeStore.freezeStoppedTitle'), `0x${selectedCandidateAddress.value} = ${writeValue.value}.`, writeResult.value.success ? 'success' : 'error')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: freezeEnabled.value }
-      addActionLog('freeze', 'Freeze échoué', String(e), 'error')
+      addActionLog('freeze', t('writeFreezeStore.freezeGenericFailedTitle'), String(e), 'error')
     }
   }
 
@@ -644,10 +654,10 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
     if (!selectedCandidateAddress.value || !writeValue.value.trim()) return
     updateWriteSafetyWarning()
     if (writeSafetyWarning.value && !writeSafetyAcknowledged.value) {
-      addActionLog('write_guard', 'Freeze BP bloqué', writeSafetyWarning.value, 'warning')
+      addActionLog('write_guard', t('writeFreezeStore.freezeBpBlockedTitle'), writeSafetyWarning.value, 'warning')
       return
     }
-    if (!await deps().confirmRiskAction('debug', 'Freeze par hardware breakpoint', `0x${selectedCandidateAddress.value} ${exactScanType.value} = ${writeValue.value}. Debug registers/attach requis.`)) return
+    if (!await deps().confirmRiskAction('debug', t('writeFreezeStore.freezeBpTitle'), t('writeFreezeStore.freezeBpDetail', { address: selectedCandidateAddress.value, type: exactScanType.value, value: writeValue.value }))) return
 
     const controller = backend.getController()
     if (!controller.freezeWithBreakpoint) {
@@ -655,10 +665,10 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
         success: false,
         verified: false,
         bytesWritten: 0,
-        error: 'Freeze par breakpoint non exposé par ce backend.',
+        error: t('writeFreezeStore.freezeBpUnavailable'),
         enabled: breakpointFreezeEnabled.value,
       }
-      addActionLog('freeze', 'Freeze BP indisponible', writeResult.value.error, 'warning')
+      addActionLog('freeze', t('writeFreezeStore.freezeBpUnavailableTitle'), writeResult.value.error, 'warning')
       return
     }
 
@@ -676,13 +686,13 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       }
       addActionLog(
         'freeze',
-        breakpointFreezeEnabled.value ? 'Freeze BP activé' : 'Freeze BP échoué',
+        breakpointFreezeEnabled.value ? t('writeFreezeStore.freezeBpActivatedTitle') : t('writeFreezeStore.freezeBpFailedTitle'),
         `0x${selectedCandidateAddress.value} = ${writeValue.value}.`,
         breakpointFreezeEnabled.value ? 'success' : 'error',
       )
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: breakpointFreezeEnabled.value }
-      addActionLog('freeze', 'Freeze BP échoué', String(e), 'error')
+      addActionLog('freeze', t('writeFreezeStore.freezeBpFailedTitle'), String(e), 'error')
     }
   }
 
@@ -692,12 +702,12 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
   // backend reutilise directement la FreezeEntry polling existante.
   async function escalateFreezeToBreakpoint(address: string) {
     if (!address.trim()) return
-    if (!await deps().confirmRiskAction('debug', 'Freeze par hardware breakpoint', `0x${address} : le freeze polling ne tient pas, passage en Freeze BP. Debug registers/attach requis.`)) return
+    if (!await deps().confirmRiskAction('debug', t('writeFreezeStore.freezeBpTitle'), t('writeFreezeStore.freezeBpEscalateDetail', { address }))) return
 
     const controller = backend.getController()
     if (!controller.escalatePollingFreezeToBreakpoint) {
-      deps().pushMessage('assistant', 'Freeze par breakpoint non exposé par ce backend.')
-      addActionLog('freeze', 'Freeze BP indisponible', 'escalatePollingFreezeToBreakpoint absent du backend.', 'warning')
+      deps().pushMessage('assistant', t('writeFreezeStore.freezeBpUnavailable'))
+      addActionLog('freeze', t('writeFreezeStore.freezeBpUnavailableTitle'), t('writeFreezeStore.escalateUnavailableDetail'), 'warning')
       return
     }
 
@@ -714,19 +724,19 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       }
       addActionLog(
         'freeze',
-        ok ? 'Freeze BP activé (escalade)' : 'Freeze BP échoué (escalade)',
+        ok ? t('writeFreezeStore.freezeBpActivatedEscalateTitle') : t('writeFreezeStore.freezeBpFailedEscalateTitle'),
         `0x${address}. ${String(result.error ?? '')}`.trim(),
         ok ? 'success' : 'error',
       )
       deps().pushMessage(
         'assistant',
         ok
-          ? `Freeze BP actif sur 0x${address} : l'écriture est maintenant bloquée à la source, ça devrait tenir même si la cible réécrit vite.`
-          : `Échec du passage en Freeze BP sur 0x${address}${result.error ? ` : ${String(result.error)}` : '.'}`,
+          ? t('writeFreezeStore.freezeBpActiveMessage', { address })
+          : t('writeFreezeStore.freezeBpEscalateFailedMessage', { address, errorSuffix: result.error ? ` : ${String(result.error)}` : '.' }),
       )
     } catch (e) {
-      addActionLog('freeze', 'Freeze BP échoué (escalade)', String(e), 'error')
-      deps().pushMessage('assistant', `Échec du passage en Freeze BP sur 0x${address} : ${String(e)}`)
+      addActionLog('freeze', t('writeFreezeStore.freezeBpFailedEscalateTitle'), String(e), 'error')
+      deps().pushMessage('assistant', t('writeFreezeStore.freezeBpEscalateFailedMessageException', { address, error: String(e) }))
     }
   }
 
@@ -737,7 +747,7 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
         success: false,
         verified: false,
         bytesWritten: 0,
-        error: 'Arrêt du freeze par breakpoint non exposé par ce backend.',
+        error: t('writeFreezeStore.freezeBpStopUnavailable'),
         enabled: breakpointFreezeEnabled.value,
       }
       return
@@ -750,10 +760,10 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       }
       const hits = writeResult.value.hits !== undefined ? ` hits=${writeResult.value.hits}` : ''
       const rewrites = writeResult.value.rewrites !== undefined ? ` rewrites=${writeResult.value.rewrites}` : ''
-      addActionLog('freeze', 'Freeze BP arrêté', `${hits}${rewrites}`.trim() || 'Session arrêtée.', writeResult.value.success ? 'success' : 'warning')
+      addActionLog('freeze', t('writeFreezeStore.freezeBpStoppedTitle'), `${hits}${rewrites}`.trim() || t('writeFreezeStore.sessionStopped'), writeResult.value.success ? 'success' : 'warning')
     } catch (e) {
       writeResult.value = { success: false, verified: false, bytesWritten: 0, error: String(e), enabled: breakpointFreezeEnabled.value }
-      addActionLog('freeze', 'Arrêt Freeze BP échoué', String(e), 'error')
+      addActionLog('freeze', t('writeFreezeStore.freezeBpStopFailedTitle'), String(e), 'error')
     }
   }
 
@@ -765,15 +775,15 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
       const result = await backend.getController().setFreezeInterval(clamped)
       freezeIntervalResult.value = result
       if (result.success === false) {
-        addActionLog('freeze', 'Intervalle freeze refusé', String(result.error ?? 'Erreur inconnue.'), 'warning')
+        addActionLog('freeze', t('writeFreezeStore.freezeIntervalRefusedTitle'), String(result.error ?? t('writeFreezeStore.unknownError')), 'warning')
         return
       }
       const applied = Math.round(Number(result.intervalMs ?? clamped))
       if (Number.isFinite(applied)) freezeIntervalMs.value = applied
-      addActionLog('freeze', 'Intervalle freeze', `${freezeIntervalMs.value} ms.`, 'success')
+      addActionLog('freeze', t('writeFreezeStore.freezeIntervalTitle'), t('writeFreezeStore.freezeIntervalDetail', { ms: freezeIntervalMs.value }), 'success')
     } catch (e) {
       freezeIntervalResult.value = { success: false, error: String(e) }
-      addActionLog('freeze', 'Intervalle freeze échoué', String(e), 'error')
+      addActionLog('freeze', t('writeFreezeStore.freezeIntervalFailedTitle'), String(e), 'error')
     }
   }
 
@@ -792,21 +802,21 @@ export const useWriteFreezeStore = defineStore('writeFreeze', () => {
   async function replayWriteHistorySequence() {
     const controller = backend.getController()
     if (!controller.replayWriteHistorySequence) {
-      addActionLog('write-history', 'Replay indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('write-history', t('writeFreezeStore.replayUnavailableTitle'), t('writeFreezeStore.backendNotExposed'), 'warning')
       return null
     }
-    if (!await deps().confirmRiskAction('write', 'Rejouer la séquence d\'écritures', `Rejouer ${writeHistorySequence.value.length} écriture(s) confirmée(s) dans l'ordre pour ce processus.`)) return null
+    if (!await deps().confirmRiskAction('write', t('writeFreezeStore.replaySequenceConfirmTitle'), t('writeFreezeStore.replaySequenceConfirmDetail', { count: writeHistorySequence.value.length }))) return null
     try {
       const result = await controller.replayWriteHistorySequence()
       addActionLog(
         'write-history',
-        result.success ? 'Replay terminé' : 'Replay échoué',
-        `${result.replayedCount ?? 0} rejouée(s), ${result.skippedCount ?? 0} ignorée(s), ${result.failedCount ?? 0} échouée(s).`,
+        result.success ? t('writeFreezeStore.replayDoneTitle') : t('writeFreezeStore.replayFailedTitle'),
+        t('writeFreezeStore.replayDetail', { replayed: result.replayedCount ?? 0, skipped: result.skippedCount ?? 0, failed: result.failedCount ?? 0 }),
         result.success ? 'success' : 'warning',
       )
       return result
     } catch (e) {
-      addActionLog('write-history', 'Replay échoué', String(e), 'error')
+      addActionLog('write-history', t('writeFreezeStore.replayFailedTitle'), String(e), 'error')
       return null
     }
   }
