@@ -48,6 +48,20 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — neuvième round (U20 clos, Claude, en parallèle de Codex sur U21)
+
+**Suite de l'entrée ci-dessous.** Décision propriétaire de traiter les deux gros stores restants en parallèle : Claude sur `app.ts` (U20) dans le dossier principal, Codex sur `assistantSmartSearch.ts` (U21) dans un worktree séparé (`../killengine-codex-ui-u21`).
+
+**U20** (Claude, `ui/src/stores/app.ts`) : audit initial très sous-estimé (~5 lignes prévues contre 206 lignes FR réelles hors commentaires, fichier de 5218 lignes). 336 clés `appStore.*` — session/promotion Trainer, bookmarks, Automation/WebView2 CDP/IA externe/Stealth, catalogue modules, pipeline checkpoint complet (Find What Writes, désassemblage, test de champs candidats, AOB/patch, forcer valeur), signaux backend, driver kernel, scripting Lua, export Markdown investigation, save-files, injection/hooking/auto-assembler, raisons d'inférence de type. 339/339 références de clés résolues, `help.*` intact, `npm run type-check`/`build` OK, suite C++ 469/469 OK (aucun C++ touché).
+
+**Trouvaille corrigée en bonus (hors périmètre U20, forte visibilité)** : la modale RiskGate partagée et l'onboarding premier lancement dans `App.vue` restaient codées en dur en français quel que soit la langue — repéré en testant le dialogue de confirmation d'injection DLL (titre/description app.ts corrects, mais coquille générique + boutons "Annuler"/"Confirmer" toujours FR). Corrigé (26 clés `app.onboarding.*`/`app.riskGate.*`), vérifié live FR/EN — ce dialogue apparaît sur chaque action à risque de l'app.
+
+**Résidu confirmé hors périmètre** : catalogue de modules (`ModulesView.vue`) vient de `apps/desktop/application_controller.cpp` (backend C++), pas de `app.ts` — même conclusion qu'au round précédent.
+
+**Commit** : `f488bbc`.
+
+**Reste ouvert** : U21 (`assistantSmartSearch.ts`, en cours chez Codex en parallèle) — dernier candidat de toute la roadmap.
+
 ### Localisation de l'interface Vue — septième et huitième rounds (U22, puis U10/U15/U16/U17 clos, Claude + Codex)
 
 **Suite des entrées ci-dessous.** Audit initial très sous-estimé pour les 3 stores restants (U20/U21/U22 : `app.ts` ~5 lignes prévues contre 328 réelles, `assistantSmartSearch.ts` ~20 contre 109, `writeFreeze.ts` ~6 contre 124). Décision propriétaire (10/09/2026) face à cet écart : Codex prend les résidus `.vue` bien calibrés (U10/U15/U16/U17), Claude prend `writeFreeze.ts` (le plus petit des 3 stores), les deux en parallèle dans des worktrees séparés — puis nouveau point avec le propriétaire avant `app.ts`/`assistantSmartSearch.ts`.
