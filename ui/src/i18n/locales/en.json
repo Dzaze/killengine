@@ -483,7 +483,8 @@
         "term": "XOR",
         "definition": "A simple logical operation sometimes used by programs to slightly mask a value in memory (e.g. storing value XOR key instead of the raw value) to throw off a direct scan. A value \"XOR-obfuscated\" won't be found by a plain exact scan on the displayed number."
       }
-    }
+    },
+    "description": "The technical terms used in KillEngine, explained plainly."
   },
   "findWhatAccesses": {
     "title": "Find what accesses",
@@ -2179,5 +2180,79 @@
     "webview2CdpHintPrefix": "Forces `--remote-debugging-port=9333` on",
     "webview2CdpHintSuffix": "on their next launch — needed for KillEngine to inspect the JavaScript state of an unpackaged WebView2/Electron/CEF app (Store/UWP goes through another path, see the diagnostic below). Broad and persistent scope until disabled.",
     "variableSetLabel": "Variable set:"
+  },
+  "scripting": {
+    "noProcess": "No process attached",
+    "statusButton": "Status",
+    "run": "Run",
+    "runRunning": "Running...",
+    "intro": {
+      "what": "A Lua script editor — a small, straightforward programming language that runs outside the interface.",
+      "purpose": "Automate repeated actions (attach, scan, write, verify) with one command instead of clicking through every step.",
+      "how": "Write or load a script, then click Run; the result appears below in stdout/stderr. ke.call(...) calls drive KillEngine and require KillEngine to be launched with KILLENGINE_AUTOMATION_PIPE=1."
+    },
+    "status": {
+      "notTested": "not tested",
+      "luaMissing": "Lua not found",
+      "helperMissing": "helper not found",
+      "ready": "ready"
+    },
+    "automationPipeWarningStart": "Calls to",
+    "automationPipeWarningMiddle": "require the automation pipe to be active: enable \"Automation Mode\" in Settings, or launch KillEngine with",
+    "saveNamePlaceholder": "Script name (to save it)",
+    "saveToProfile": "Save to profile",
+    "savedCount": "Saved ({count} script(s) in this profile)",
+    "savedScripts": "Saved scripts",
+    "loading": "Loading...",
+    "refresh": "Refresh",
+    "noSavedScripts": "No scripts saved for this profile.",
+    "load": "Load",
+    "delete": "Delete",
+    "error": "Error",
+    "start": "Start",
+    "stop": "Stop",
+    "replHintStart": "A persistent Lua process: variables and",
+    "replHintEnd": "stay available from one line to the next, unlike \"Run\" above, which starts a fresh process every time.",
+    "replEmpty": "Type a line below and press Enter to run it.",
+    "send": "Send",
+    "title": "Lua",
+    "runtime": "Runtime",
+    "lua": "Lua",
+    "helper": "Helper",
+    "pipe": "Pipe",
+    "script": "Script",
+    "timeout": "Timeout",
+    "ms": "ms",
+    "stdout": "stdout",
+    "stderr": "stderr",
+    "exitCode": "exit {code}",
+    "replTitle": "Interactive REPL",
+    "replPlaceholder": "ke.ping('hello') / 1+1 / local x = 5"
+  },
+  "speedhack": {
+    "noProcess": "No process attached",
+    "intro": {
+      "what": "Speedhack: artificially speeds up or slows down how the attached process perceives time.",
+      "purpose": "Skip through loading faster, slow down an enemy that moves too quickly — without touching game memory.",
+      "how": "Attach a process, choose a speed factor, and apply it."
+    },
+    "status": {
+      "unknown": "Unknown",
+      "installFailed": "Install failed",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "attachPrompt": "Attach an authorized process first to speed up or slow down the time it perceives.",
+    "goToProcess": "Go to Process",
+    "statusLabel": "Status:",
+    "activeFactor": "Active factor:",
+    "installError": "No time function could be hooked in this target.",
+    "pauseTitle": "Freezes the target's perceived clock — animations and timers do not advance while it is active.",
+    "disable": "Disable",
+    "enable": "Enable",
+    "injectionHintStart": "Injects a component into the target that hooks its time functions (QueryPerformanceCounter,",
+    "injectionHintEnd": "— treated as an injection write, confirmation required.",
+    "title": "Speedhack",
+    "pause": "Pause (0x)"
   }
 }

@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { useI18n } from 'vue-i18n'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 const presets = [0.25, 0.5, 1, 2, 4, 10]
 
 const isActive = computed(() => store.speedhackStatus?.active === true)
 const statusLabel = computed(() => {
-  if (!store.speedhackStatus) return 'Inconnu'
-  if (store.speedhackStatus.installError) return 'Échec install'
-  return isActive.value ? 'Actif' : 'Inactif'
+  if (!store.speedhackStatus) return t('speedhack.status.unknown')
+  if (store.speedhackStatus.installError) return t('speedhack.status.installFailed')
+  return isActive.value ? t('speedhack.status.active') : t('speedhack.status.inactive')
 })
 
 function onSliderInput(event: Event) {
@@ -49,29 +51,29 @@ onMounted(() => {
   <div class="speedhack-view">
     <div class="header">
       <div>
-        <h1>Speedhack</h1>
-        <p>{{ store.isAttached ? store.processName : 'Aucun processus attaché' }}</p>
+        <h1>{{ $t('speedhack.title') }}</h1>
+        <p>{{ store.isAttached ? store.processName : $t('speedhack.noProcess') }}</p>
       </div>
       <InfoDot topic="speedhack" align="right" />
     </div>
 
     <PanelIntro
-      what="Le speedhack : accélère ou ralentit artificiellement la perception du temps par le processus attaché."
-      purpose="Passer un chargement plus vite, ralentir un ennemi trop rapide — sans toucher à la mémoire du jeu."
-      how="Attache un processus, choisis un facteur de vitesse et applique-le."
+      :what="$t('speedhack.intro.what')"
+      :purpose="$t('speedhack.intro.purpose')"
+      :how="$t('speedhack.intro.how')"
     />
 
     <div v-if="!store.isAttached" class="empty-state">
-      <p>Attache d'abord un processus autorisé pour accélérer ou ralentir le temps qu'il perçoit.</p>
-      <button class="btn btn-secondary" @click="store.activeView = 'process'">Aller à Processus</button>
+      <p>{{ $t('speedhack.attachPrompt') }}</p>
+      <button class="btn btn-secondary" @click="store.activeView = 'process'">{{ $t('speedhack.goToProcess') }}</button>
     </div>
 
     <template v-else>
       <section class="status-band">
-        <span>Statut : <strong>{{ statusLabel }}</strong></span>
-        <span>Facteur actif : <strong>{{ (store.speedhackStatus?.factor ?? 1).toFixed(2) }}x</strong></span>
+        <span>{{ $t('speedhack.statusLabel') }} <strong>{{ statusLabel }}</strong></span>
+        <span>{{ $t('speedhack.activeFactor') }} <strong>{{ (store.speedhackStatus?.factor ?? 1).toFixed(2) }}x</strong></span>
         <span v-if="store.speedhackStatus?.installError" class="error">
-          Aucune fonction de temps n'a pu être hookée dans cette cible.
+          {{ $t('speedhack.installError') }}
         </span>
       </section>
 
@@ -104,10 +106,10 @@ onMounted(() => {
           <button
             class="btn btn-secondary compact"
             :class="{ active: store.speedhackFactor === 0 }"
-            title="Gèle l'horloge perçue par la cible — aucune animation/minuteur ne progresse tant que c'est actif."
+            :title="$t('speedhack.pauseTitle')"
             @click="applyPreset(0)"
           >
-            Pause (0x)
+            {{ $t('speedhack.pause') }}
           </button>
         </div>
 
@@ -118,11 +120,11 @@ onMounted(() => {
             :disabled="store.speedhackBusy"
             @click="toggle"
           >
-            {{ isActive ? 'Désactiver' : 'Activer' }}
+            {{ isActive ? $t('speedhack.disable') : $t('speedhack.enable') }}
           </button>
           <span class="hint">
-            Injecte un composant dans la cible qui hooke ses fonctions de temps (QueryPerformanceCounter,
-            GetTickCount, timeGetTime) — traité comme une écriture par injection, confirmation requise.
+            {{ $t('speedhack.injectionHintStart') }}
+            GetTickCount, timeGetTime) {{ $t('speedhack.injectionHintEnd') }}
           </span>
         </div>
       </section>
