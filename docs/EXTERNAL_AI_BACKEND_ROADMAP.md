@@ -93,6 +93,32 @@ extraits de code désassemblé) part vers un tiers. Ça doit être :
    backend Claude échoue, l'utilisateur doit le savoir clairement, pas basculer
    sans prévenir sur le modèle local en lui faisant croire qu'il a toujours le
    backend puissant actif.
+7. **Choix utilisateur du modèle local et structure d'installation claire** —
+   KillEngine propose par défaut un modèle embarqué léger (`Qwen3.5-2B` en
+   `GGUF Q4_K_M`) parce qu'il doit tourner sur de petites machines, hors ligne
+   et sans coût par requête. Ce défaut ne doit pas devenir une prison :
+   l'utilisateur avancé doit pouvoir installer un modèle local plus lourd/plus
+   capable si sa machine le permet, tant qu'il respecte le layout attendu dans
+   le dossier d'installation de KillEngine (`model/<nom_ia>/MODEL_MANIFEST.json`
+   pour les agents, poids partagés sous `model/qwen/*.gguf`, ou override GGUF
+   explicite réservé aux cas avancés). L'autre option reste le backend cloud
+   Claude via clé API : plus puissant pour le raisonnement long, mais dépendant
+   d'une clé valide et de crédits/coûts côté fournisseur, contrairement aux
+   modèles locaux. L'UI et la documentation doivent donc présenter trois choix
+   lisibles : local recommandé léger, local personnalisé plus lourd, ou Claude
+   cloud payant/à crédits.
+8. **Expliquer le pilotage externe par pipe près du choix de modèle** — dans la
+   même zone UI où l'utilisateur choisit le modèle local léger, un modèle local
+   personnalisé ou Claude cloud, ajouter une explication localisée FR/EN indiquant
+   que KillEngine peut aussi être piloté par le pipe d'automatisation JSON-RPC
+   depuis VS Code et des extensions/agents IA externes. Le texte doit clarifier
+   que ce mode ne passe pas par la vue Assistant ni par le modèle local embarqué :
+   un outil externe peut déclencher des actions KillEngine via la surface pipe déjà
+   exposée, utile pour les workflows développeur, tests automatisés, scripts et
+   agents IA plus spécialisés. À formuler de façon rassurante : c'est un mode de
+   contrôle avancé explicite, pas un remplacement du chat intégré ; il respecte les
+   mêmes frontières de capacités exposées par KillEngine et doit rester décrit en
+   français ou en anglais selon la langue choisie dans l'application.
 
 ## Découpage en tâches d'implémentation (06/09/2026)
 

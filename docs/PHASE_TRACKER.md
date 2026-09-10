@@ -471,7 +471,9 @@ Côté frontend, 7 nouveaux gestionnaires de `recoveryActions` dans `ui/src/view
 
 **Comment vérifié** : `npm run type-check`/`npm run build` OK, build C++ complet + 454/454 tests OK. **Pas de vérification visuelle live** (CDP `QTWEBENGINE_REMOTE_DEBUGGING`) cette passe — outillage websocket non disponible immédiatement dans l'environnement de la session, jugé disproportionné à installer pour ce seul contrôle vu que les classes CSS réutilisées sont déjà éprouvées ailleurs dans le même fichier. Reste un point à vérifier d'un coup d'œil (rapide) avant de considérer T5 totalement clos.
 
-**Reste ouvert** : T6 (vérification terrain avec une vraie clé API Anthropic) est désormais la seule tâche restante du chantier.
+**Reste ouvert** : T6 (vérification terrain avec une vraie clé API Anthropic) est désormais la seule tâche restante du chantier historique.
+
+**Ajout roadmap demandé par le propriétaire (10/09/2026)** : dans la zone de choix du modèle IA, prévoir un texte explicatif localisé FR/EN sur le pilotage de KillEngine par pipe d'automatisation depuis VS Code et des extensions/agents IA externes. Le but est que l'utilisateur comprenne qu'il peut piloter l'application autrement que par la vue Assistant ou par le modèle local embarqué : le pipe JSON-RPC expose une surface de contrôle avancée pour workflows développeur, scripts, tests automatisés et agents IA spécialisés. Détail ajouté dans `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`, décision 8.
 
 ### EXTERNAL-AI-BACKEND T4 — ToolExecutor réel, pont de confirmation, câblage complet (07/09/2026, Claude)
 
