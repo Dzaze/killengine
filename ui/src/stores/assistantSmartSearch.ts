@@ -16,7 +16,7 @@
  * ecriture memoire mode standard/kernel et ajout au Watch live.
  */
 import { defineStore, storeToRefs } from 'pinia'
-import { nextTick, ref, type Ref } from 'vue'
+import { computed, nextTick, ref, type Ref } from 'vue'
 import {
   backend,
   type ChatMemoryTargetsResult,
@@ -189,108 +189,108 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
   }
 
   const pendingAssistantAction = ref('')
-  const workflowPresets = ref<WorkflowPreset[]>([
+  const workflowPresets = computed<WorkflowPreset[]>(() => [
     {
       id: 'exact-value',
-      title: 'Valeur directe',
-      description: 'Quand tu connais la valeur actuelle et la valeur cible.',
-      prompt: 'Valeur actuelle 100, objectif 9999',
+      title: t('assistantSmartSearchStore.presets.exactValue.title'),
+      description: t('assistantSmartSearchStore.presets.exactValue.description'),
+      prompt: t('assistantSmartSearchStore.presets.exactValue.prompt'),
       startView: 'assistant',
       mode: 'auto',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Auto lance un scan exact puis prépare un checkpoint si peu de candidats restent.',
+      nextStep: t('assistantSmartSearchStore.presets.exactValue.nextStep'),
     },
     {
       id: 'unknown-change',
-      title: 'Valeur inconnue',
-      description: 'Quand tu sais seulement que la valeur augmente, diminue ou change.',
-      prompt: 'Je ne connais pas la valeur exacte, aide-moi à la retrouver avec une recherche unknown',
+      title: t('assistantSmartSearchStore.presets.unknownChange.title'),
+      description: t('assistantSmartSearchStore.presets.unknownChange.description'),
+      prompt: t('assistantSmartSearchStore.presets.unknownChange.prompt'),
       startView: 'assistant',
       mode: 'auto',
       valueType: 'Auto',
       risk: 'safe',
-      nextStep: 'Auto prépare une capture unknown, puis attend ton observation suivante.',
+      nextStep: t('assistantSmartSearchStore.presets.unknownChange.nextStep'),
     },
     {
       id: 'display-trace',
-      title: 'Valeur affichée introuvable',
-      description: 'Quand le scan numérique ne trouve rien mais le texte est visible à l’écran.',
-      prompt: 'La valeur affichée existe mais le scan exact ne trouve rien, lance Trace UI string',
+      title: t('assistantSmartSearchStore.presets.displayTrace.title'),
+      description: t('assistantSmartSearchStore.presets.displayTrace.description'),
+      prompt: t('assistantSmartSearchStore.presets.displayTrace.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Expert ouvre Trace UI string pour chercher texte, sources numériques et backrefs.',
+      nextStep: t('assistantSmartSearchStore.presets.displayTrace.nextStep'),
     },
     {
       id: 'stable-trainer',
-      title: 'Transformer en trainer',
-      description: 'Quand une adresse ou signature semble fiable et doit devenir un toggle.',
-      prompt: 'Transforme la trouvaille confirmée en feature Trainer réutilisable',
+      title: t('assistantSmartSearchStore.presets.stableTrainer.title'),
+      description: t('assistantSmartSearchStore.presets.stableTrainer.description'),
+      prompt: t('assistantSmartSearchStore.presets.stableTrainer.prompt'),
       startView: 'trainer',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'write',
-      nextStep: 'Trainer prépare une feature locale avec confirmation avant écriture, freeze ou patch.',
+      nextStep: t('assistantSmartSearchStore.presets.stableTrainer.nextStep'),
     },
     {
       id: 'code-investigation',
-      title: 'Qui écrit cette valeur',
-      description: 'Quand il faut comprendre quelle instruction modifie une adresse confirmée.',
-      prompt: 'Adresse confirmée : trouver ce qui écrit dessus puis proposer une signature AOB',
+      title: t('assistantSmartSearchStore.presets.codeInvestigation.title'),
+      description: t('assistantSmartSearchStore.presets.codeInvestigation.description'),
+      prompt: t('assistantSmartSearchStore.presets.codeInvestigation.prompt'),
       startView: 'investigation',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'debug',
-      nextStep: 'Investigation garde le checkpoint; Expert lance Find What Writes uniquement après confirmation.',
+      nextStep: t('assistantSmartSearchStore.presets.codeInvestigation.nextStep'),
     },
     // Scénarios courants Expert/Trainer (finition commerciale) : mêmes champs
     // que les presets Assistant ci-dessus, réutilisent applyWorkflowPreset()
     // tel quel — juste des données, pas un nouveau mécanisme.
     {
       id: 'scenario-money',
-      title: 'Argent / Or',
-      description: 'Ressource principale du jeu (pièces, or, crédits...).',
-      prompt: 'Je cherche l\'argent ou l\'or, valeur affichée à l\'écran',
+      title: t('assistantSmartSearchStore.presets.scenarioMoney.title'),
+      description: t('assistantSmartSearchStore.presets.scenarioMoney.description'),
+      prompt: t('assistantSmartSearchStore.presets.scenarioMoney.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Lance un scan exact avec la valeur affichée dans le panneau Scan exact.',
+      nextStep: t('assistantSmartSearchStore.presets.scenarioMoney.nextStep'),
     },
     {
       id: 'scenario-health',
-      title: 'Vie / PV',
-      description: 'Points de vie ou de santé du joueur.',
-      prompt: 'Je cherche les points de vie (HP), valeur affichée à l\'écran',
+      title: t('assistantSmartSearchStore.presets.scenarioHealth.title'),
+      description: t('assistantSmartSearchStore.presets.scenarioHealth.description'),
+      prompt: t('assistantSmartSearchStore.presets.scenarioHealth.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Lance un scan exact avec la valeur affichée, fais varier la vie en jeu puis réduis.',
+      nextStep: t('assistantSmartSearchStore.presets.scenarioHealth.nextStep'),
     },
     {
       id: 'scenario-score',
-      title: 'Score / Niveau',
-      description: 'Score, expérience ou niveau du joueur.',
-      prompt: 'Je cherche le score ou le niveau, valeur affichée à l\'écran',
+      title: t('assistantSmartSearchStore.presets.scenarioScore.title'),
+      description: t('assistantSmartSearchStore.presets.scenarioScore.description'),
+      prompt: t('assistantSmartSearchStore.presets.scenarioScore.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Lance un scan exact, ou passe en Unknown si la valeur change en continu.',
+      nextStep: t('assistantSmartSearchStore.presets.scenarioScore.nextStep'),
     },
     {
       id: 'scenario-ammo',
-      title: 'Munitions',
-      description: 'Compteur de munitions ou de ressources consommables.',
-      prompt: 'Je cherche les munitions, valeur affichée à l\'écran',
+      title: t('assistantSmartSearchStore.presets.scenarioAmmo.title'),
+      description: t('assistantSmartSearchStore.presets.scenarioAmmo.description'),
+      prompt: t('assistantSmartSearchStore.presets.scenarioAmmo.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Lance un scan exact, tire une fois en jeu puis réduis avec la nouvelle valeur.',
+      nextStep: t('assistantSmartSearchStore.presets.scenarioAmmo.nextStep'),
     },
   ])
   const lastWorkflowPresetId = ref('')
@@ -841,7 +841,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     // startSmartSearch, qui ne saurait pas quoi faire de ce texte libre.
     if (pendingAssistantAction.value === 'encrypted_scan') {
       pendingAssistantAction.value = ''
-      if (!/nouvelle recherche|oublie|annule|rollback|abandonne|laisse tomber/i.test(query)) {
+      if (!/nouvelle recherche|new search|oublie|forget|annule|cancel|rollback|abandonne|give up|laisse tomber|drop it/i.test(query)) {
         pushMessage('user', query)
         searchQuery.value = ''
         await runAutoEncryptedScan(query)
@@ -1045,7 +1045,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     }
 
     pushMessage('user', `Auto: ${query}`)
-    startInvestigation(query, 'Auto Resolve')
+    startInvestigation(query, t('assistantSmartSearchStore.autoResolve.investigationTitle'))
     addInvestigationStep({
       title: t('assistantSmartSearchStore.autoResolve.userObjective'),
       detail: query,
@@ -1618,17 +1618,30 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     addActionLog('candidate', t('assistantSmartSearchStore.candidate.ignoredTitle', { address: normalized }), t('assistantSmartSearchStore.candidate.hiddenLocal'), 'warning')
   }
 
+  // Slug stable (non traduit) utilisé comme classe CSS par CandidatePanel.vue
+  // (.candidate-kept/.candidate-ignored/...) -- séparé du libellé affiché pour
+  // que le style ne dépende pas de la langue active.
   function candidateVisualState(candidate: Record<string, unknown>): string {
     const address = String(candidate.address ?? '').replace(/^0x/i, '')
-    if (keptCandidateAddresses.value.includes(address)) return t('assistantSmartSearchStore.candidate.stateKept')
-    if (ignoredCandidateAddresses.value.includes(address)) return t('assistantSmartSearchStore.candidate.stateIgnored')
+    if (keptCandidateAddresses.value.includes(address)) return 'kept'
+    if (ignoredCandidateAddresses.value.includes(address)) return 'ignored'
     const confidence = Number(candidate.confidence ?? Number.NaN)
     if (Number.isFinite(confidence)) {
-      if (confidence >= 0.8) return t('assistantSmartSearchStore.candidate.stateVeryLikely')
-      if (confidence >= 0.5) return t('assistantSmartSearchStore.candidate.stateToVerify')
-      return t('assistantSmartSearchStore.candidate.stateWeak')
+      if (confidence >= 0.8) return 'very-likely'
+      if (confidence >= 0.5) return 'to-verify'
+      return 'weak'
     }
     return 'standard'
+  }
+
+  function candidateVisualStateLabel(candidate: Record<string, unknown>): string {
+    const state = candidateVisualState(candidate)
+    if (state === 'kept') return t('assistantSmartSearchStore.candidate.stateKept')
+    if (state === 'ignored') return t('assistantSmartSearchStore.candidate.stateIgnored')
+    if (state === 'very-likely') return t('assistantSmartSearchStore.candidate.stateVeryLikely')
+    if (state === 'to-verify') return t('assistantSmartSearchStore.candidate.stateToVerify')
+    if (state === 'weak') return t('assistantSmartSearchStore.candidate.stateWeak')
+    return t('assistantSmartSearchStore.candidate.stateStandard')
   }
 
   return {
@@ -1680,5 +1693,6 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     keepCandidate,
     ignoreCandidate,
     candidateVisualState,
+    candidateVisualStateLabel,
   }
 })

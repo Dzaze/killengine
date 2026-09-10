@@ -3338,7 +3338,8 @@
       "checkpointConfirmation": "Checkpoint confirmation",
       "confirmationRequired": "Confirmation utilisateur requise.",
       "errorTitle": "Erreur Auto Resolve",
-      "errorMessage": "Erreur auto-résolution : {error}"
+      "errorMessage": "Erreur auto-résolution : {error}",
+      "investigationTitle": "Auto-résolution"
     },
     "commands": {
       "useMemories": "j'utilise ces mémoires {addresses}",
@@ -3399,7 +3400,64 @@
       "stateIgnored": "ignoré",
       "stateVeryLikely": "très probable",
       "stateToVerify": "à vérifier",
-      "stateWeak": "faible"
+      "stateWeak": "faible",
+      "stateStandard": "standard"
+    },
+    "presets": {
+      "exactValue": {
+        "title": "Valeur directe",
+        "description": "Quand tu connais la valeur actuelle et la valeur cible.",
+        "prompt": "Valeur actuelle 100, objectif 9999",
+        "nextStep": "Auto lance un scan exact puis prépare un checkpoint si peu de candidats restent."
+      },
+      "unknownChange": {
+        "title": "Valeur inconnue",
+        "description": "Quand tu sais seulement que la valeur augmente, diminue ou change.",
+        "prompt": "Je ne connais pas la valeur exacte, aide-moi à la retrouver avec une recherche unknown",
+        "nextStep": "Auto prépare une capture unknown, puis attend ton observation suivante."
+      },
+      "displayTrace": {
+        "title": "Valeur affichée introuvable",
+        "description": "Quand le scan numérique ne trouve rien mais le texte est visible à l’écran.",
+        "prompt": "La valeur affichée existe mais le scan exact ne trouve rien, lance Trace UI string",
+        "nextStep": "Expert ouvre Trace UI string pour chercher texte, sources numériques et backrefs."
+      },
+      "stableTrainer": {
+        "title": "Transformer en trainer",
+        "description": "Quand une adresse ou signature semble fiable et doit devenir un toggle.",
+        "prompt": "Transforme la trouvaille confirmée en feature Trainer réutilisable",
+        "nextStep": "Trainer prépare une feature locale avec confirmation avant écriture, freeze ou patch."
+      },
+      "codeInvestigation": {
+        "title": "Qui écrit cette valeur",
+        "description": "Quand il faut comprendre quelle instruction modifie une adresse confirmée.",
+        "prompt": "Adresse confirmée : trouver ce qui écrit dessus puis proposer une signature AOB",
+        "nextStep": "Investigation garde le checkpoint; Expert lance Find What Writes uniquement après confirmation."
+      },
+      "scenarioMoney": {
+        "title": "Argent / Or",
+        "description": "Ressource principale du jeu (pièces, or, crédits...).",
+        "prompt": "Je cherche l'argent ou l'or, valeur affichée à l'écran",
+        "nextStep": "Lance un scan exact avec la valeur affichée dans le panneau Scan exact."
+      },
+      "scenarioHealth": {
+        "title": "Vie / PV",
+        "description": "Points de vie ou de santé du joueur.",
+        "prompt": "Je cherche les points de vie (HP), valeur affichée à l'écran",
+        "nextStep": "Lance un scan exact avec la valeur affichée, fais varier la vie en jeu puis réduis."
+      },
+      "scenarioScore": {
+        "title": "Score / Niveau",
+        "description": "Score, expérience ou niveau du joueur.",
+        "prompt": "Je cherche le score ou le niveau, valeur affichée à l'écran",
+        "nextStep": "Lance un scan exact, ou passe en Unknown si la valeur change en continu."
+      },
+      "scenarioAmmo": {
+        "title": "Munitions",
+        "description": "Compteur de munitions ou de ressources consommables.",
+        "prompt": "Je cherche les munitions, valeur affichée à l'écran",
+        "nextStep": "Lance un scan exact, tire une fois en jeu puis réduis avec la nouvelle valeur."
+      }
     }
   }
 }

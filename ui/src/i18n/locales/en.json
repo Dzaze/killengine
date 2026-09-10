@@ -3338,7 +3338,8 @@
       "checkpointConfirmation": "Checkpoint confirmation",
       "confirmationRequired": "User confirmation required.",
       "errorTitle": "Auto Resolve error",
-      "errorMessage": "Auto Resolve error: {error}"
+      "errorMessage": "Auto Resolve error: {error}",
+      "investigationTitle": "Auto Resolve"
     },
     "commands": {
       "useMemories": "use these memories {addresses}",
@@ -3399,7 +3400,64 @@
       "stateIgnored": "ignored",
       "stateVeryLikely": "very likely",
       "stateToVerify": "to verify",
-      "stateWeak": "weak"
+      "stateWeak": "weak",
+      "stateStandard": "standard"
+    },
+    "presets": {
+      "exactValue": {
+        "title": "Direct value",
+        "description": "When you know the current value and the target value.",
+        "prompt": "Current value 100, target 9999",
+        "nextStep": "Auto starts an exact scan then prepares a checkpoint if few candidates remain."
+      },
+      "unknownChange": {
+        "title": "Unknown value",
+        "description": "When you only know the value increases, decreases, or changes.",
+        "prompt": "I do not know the exact value, help me find it with an unknown search",
+        "nextStep": "Auto prepares an unknown capture, then waits for your next observation."
+      },
+      "displayTrace": {
+        "title": "Displayed value not found",
+        "description": "When the numeric scan finds nothing but the text is visible on screen.",
+        "prompt": "The displayed value exists but the exact scan finds nothing, run Trace UI string",
+        "nextStep": "Expert opens Trace UI string to search for text, numeric sources, and backrefs."
+      },
+      "stableTrainer": {
+        "title": "Turn into a trainer",
+        "description": "When an address or signature seems reliable and should become a toggle.",
+        "prompt": "Turn the confirmed finding into a reusable Trainer feature",
+        "nextStep": "Trainer prepares a local feature with confirmation before writing, freezing, or patching."
+      },
+      "codeInvestigation": {
+        "title": "Who writes this value",
+        "description": "When you need to understand which instruction modifies a confirmed address.",
+        "prompt": "Confirmed address: find what writes to it then suggest an AOB signature",
+        "nextStep": "Investigation keeps the checkpoint; Expert runs Find What Writes only after confirmation."
+      },
+      "scenarioMoney": {
+        "title": "Money / Gold",
+        "description": "The game's main resource (coins, gold, credits...).",
+        "prompt": "I am looking for money or gold, value shown on screen",
+        "nextStep": "Run an exact scan with the displayed value in the Exact Scan panel."
+      },
+      "scenarioHealth": {
+        "title": "Health / HP",
+        "description": "The player's health or hit points.",
+        "prompt": "I am looking for health points (HP), value shown on screen",
+        "nextStep": "Run an exact scan with the displayed value, change health in-game, then narrow down."
+      },
+      "scenarioScore": {
+        "title": "Score / Level",
+        "description": "The player's score, experience, or level.",
+        "prompt": "I am looking for the score or level, value shown on screen",
+        "nextStep": "Run an exact scan, or switch to Unknown if the value keeps changing."
+      },
+      "scenarioAmmo": {
+        "title": "Ammo",
+        "description": "Ammo counter or consumable resources.",
+        "prompt": "I am looking for ammo, value shown on screen",
+        "nextStep": "Run an exact scan, fire once in-game, then narrow down with the new value."
+      }
     }
   }
 }
