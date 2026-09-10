@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore, type TrainerFeature } from '@/stores/app'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 const name = ref('')
 const action = ref<'write' | 'freeze_polling' | 'freeze_breakpoint' | 'patch' | 'clr_write'>('write')
 const address = ref('')
@@ -155,17 +157,17 @@ function featureQualityWarning(feature: TrainerFeature): string {
   const score = Number(quality.score ?? 0)
   const fixedBytes = Number(quality.fixedBytes ?? 0)
   if (fixedBytes < 3 || score < 35) {
-    return `AOB trop faible (${score}/100, ${fixedBytes} octet(s) fixe(s)) : regenere une signature plus longue avant activation ou sauvegarde profil.`
+    return t('trainer.warnings.weakAob', { score, fixedBytes })
   }
   return String(quality.warning ?? '')
 }
 
 function featureWarning(feature: TrainerFeature): string {
-  if (feature.status === 'ambiguous') return 'Feature ambiguë : inspecte la signature ou régénère un AOB plus spécifique avant activation.'
-  if (feature.status === 'error') return feature.lastError || 'Feature en erreur : corrige-la avant activation.'
-  if (feature.action === 'patch' && !feature.patchBytes?.trim()) return 'Patch incomplet : bytes manquants.'
-  if (feature.action === 'patch' && feature.locatorKind === 'aob' && !feature.aobPattern?.trim()) return 'AOB manquant : sauvegarde une signature stable avant activation.'
-  if (feature.action === 'clr_write' && (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName)) return 'Locator CLR incomplet.'
+  if (feature.status === 'ambiguous') return t('trainer.warnings.ambiguousFeature')
+  if (feature.status === 'error') return feature.lastError || t('trainer.warnings.errorFeature')
+  if (feature.action === 'patch' && !feature.patchBytes?.trim()) return t('trainer.warnings.incompletePatch')
+  if (feature.action === 'patch' && feature.locatorKind === 'aob' && !feature.aobPattern?.trim()) return t('trainer.warnings.missingAob')
+  if (feature.action === 'clr_write' && (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName)) return t('trainer.warnings.incompleteClrLocator')
   const qualityWarning = featureQualityWarning(feature)
   if (qualityWarning) return qualityWarning
   return ''
@@ -197,15 +199,15 @@ async function generatePointerChain(feature: TrainerFeature) {
 }
 
 function pointerChainButtonLabel(feature: TrainerFeature): string {
-  if (pointerChainBusyId.value === feature.id) return 'Scan en cours...'
-  return feature.locatorKind === 'pointer_chain' ? 'Re-générer chaîne' : 'Générer chaîne'
+  if (pointerChainBusyId.value === feature.id) return t('trainer.pointerChain.scanInProgress')
+  return feature.locatorKind === 'pointer_chain' ? t('trainer.pointerChain.regenerate') : t('trainer.pointerChain.generate')
 }
 
 function pointerChainTitle(feature: TrainerFeature): string {
   if (feature.locatorKind === 'absolute') {
-    return 'Adresse brute : génère une chaîne de pointeurs stable (base de module + offsets) pour que la feature survit aux réallocations mémoire (redémarrage du jeu, nouvelle partie). Scan lecture seule de quelques secondes.'
+    return t('trainer.pointerChain.absoluteTitle')
   }
-  return 'Relance le scan pour actualiser la chaîne de pointeurs sauvegardée. Scan lecture seule de quelques secondes.'
+  return t('trainer.pointerChain.refreshTitle')
 }
 
 function showTrainerExport() {
@@ -219,7 +221,7 @@ function showTrainerMarkdownExport() {
 async function copyTrainerExport() {
   if (!exportText.value) return
   await navigator.clipboard?.writeText(exportText.value)
-  exportStatus.value = 'Export copié.'
+  exportStatus.value = t('trainer.export.copied')
 }
 </script>
 
@@ -227,43 +229,43 @@ async function copyTrainerExport() {
   <div class="trainer-view">
     <header class="topbar">
       <div>
-        <h1>Trainer</h1>
-        <p>Transforme les trouvailles en toggles persistants et reversibles.</p>
+        <h1>{{ $t('trainer.title') }}</h1>
+        <p>{{ $t('trainer.subtitle') }}</p>
       </div>
       <div class="actions">
         <button class="btn" @click="store.setTrainerOverlay(!store.trainerOverlayVisible)">
-          {{ store.trainerOverlayVisible ? 'Overlay OFF' : 'Overlay ON' }}
+          {{ store.trainerOverlayVisible ? $t('trainer.actions.overlayOff') : $t('trainer.actions.overlayOn') }}
         </button>
-        <button class="btn" :disabled="!store.trainerOverlayVisible" @click="store.refreshTrainerOverlay()">Refresh overlay</button>
-        <button class="btn" :disabled="store.trainerBusy || store.trainerFeatures.length === 0" @click="store.applyAllTrainerFeatures()">Apply all</button>
-        <button class="btn" :disabled="store.trainerBusy || store.trainerFeatures.length === 0" @click="store.restoreAllTrainerFeatures()">Restore all</button>
-        <button class="btn" :disabled="store.trainerFeatures.length === 0" @click="store.saveCurrentWorkspaceProject()">Sauver projet</button>
-        <button class="btn" :disabled="store.trainerFeatures.length === 0" @click="showTrainerExport()">Exporter JSON</button>
-        <button class="btn" :disabled="store.trainerFeatures.length === 0" @click="showTrainerMarkdownExport()">Exporter MD</button>
+        <button class="btn" :disabled="!store.trainerOverlayVisible" @click="store.refreshTrainerOverlay()">{{ $t('trainer.actions.refreshOverlay') }}</button>
+        <button class="btn" :disabled="store.trainerBusy || store.trainerFeatures.length === 0" @click="store.applyAllTrainerFeatures()">{{ $t('trainer.actions.applyAll') }}</button>
+        <button class="btn" :disabled="store.trainerBusy || store.trainerFeatures.length === 0" @click="store.restoreAllTrainerFeatures()">{{ $t('trainer.actions.restoreAll') }}</button>
+        <button class="btn" :disabled="store.trainerFeatures.length === 0" @click="store.saveCurrentWorkspaceProject()">{{ $t('trainer.actions.saveProject') }}</button>
+        <button class="btn" :disabled="store.trainerFeatures.length === 0" @click="showTrainerExport()">{{ $t('trainer.actions.exportJson') }}</button>
+        <button class="btn" :disabled="store.trainerFeatures.length === 0" @click="showTrainerMarkdownExport()">{{ $t('trainer.actions.exportMd') }}</button>
       </div>
     </header>
 
     <PanelIntro
-      what="Les features Trainer : des raccourcis persistants pour activer/désactiver un freeze ou une écriture d'un coup."
-      purpose="Transformer une trouvaille en bouton réutilisable (façon WeMod/Cheat Engine), au lieu de refaire la recherche à chaque partie."
-      how="Crée une feature depuis l'Assistant ou Expert, puis active/désactive-la ici (ou via l'overlay et les raccourcis clavier) sans repasser par une recherche."
+      :what="$t('trainer.intro.what')"
+      :purpose="$t('trainer.intro.purpose')"
+      :how="$t('trainer.intro.how')"
     />
 
     <p v-if="store.trainerOverlayStatus" class="hotkey-status">{{ store.trainerOverlayStatus }}</p>
     <div class="overlay-hotkey-row">
-      <span class="hint">Hotkey pour afficher/masquer l'overlay sans alt-tab :</span>
+      <span class="hint">{{ $t('trainer.overlay.hotkeyHint') }}</span>
       <input
         :value="overlayHotkeyValue()"
         class="input hotkey-input"
-        placeholder="Ctrl+Alt+F2"
+        :placeholder="$t('trainer.overlay.hotkeyPlaceholder')"
         @input="overlayHotkeyDraft = ($event.target as HTMLInputElement).value"
       />
-      <button class="btn" :disabled="!overlayHotkeyValue().trim()" @click="store.registerOverlayHotkey(overlayHotkeyValue())">Hotkey overlay</button>
-      <button class="btn" :disabled="!store.trainerOverlayHotkeyId" @click="store.unregisterOverlayHotkey()">Retirer</button>
+      <button class="btn" :disabled="!overlayHotkeyValue().trim()" @click="store.registerOverlayHotkey(overlayHotkeyValue())">{{ $t('trainer.overlay.registerHotkey') }}</button>
+      <button class="btn" :disabled="!store.trainerOverlayHotkeyId" @click="store.unregisterOverlayHotkey()">{{ $t('trainer.actions.remove') }}</button>
     </div>
 
     <div class="preset-row">
-      <span class="hint preset-row-label">Pas encore d'adresse ? Scénarios courants :</span>
+      <span class="hint preset-row-label">{{ $t('trainer.presets.prompt') }}</span>
       <button
         v-for="preset in scenarioPresets"
         :key="preset.id"
@@ -276,27 +278,27 @@ async function copyTrainerExport() {
     </div>
 
     <section class="builder panel">
-      <h2>Créer une feature</h2>
+      <h2>{{ $t('trainer.builder.title') }}</h2>
       <div class="form">
-        <input v-model="name" class="input" placeholder="Nom: Minéraux, HP lock..." />
+        <input v-model="name" class="input" :placeholder="$t('trainer.builder.namePlaceholder')" />
         <select v-model="action" class="input">
-          <option value="write">Write</option>
-          <option value="freeze_polling">Freeze polling</option>
-          <option value="freeze_breakpoint">Freeze BP</option>
-          <option value="patch">Patch code</option>
+          <option value="write">{{ $t('trainer.actionTypes.write') }}</option>
+          <option value="freeze_polling">{{ $t('trainer.actionTypes.freezePolling') }}</option>
+          <option value="freeze_breakpoint">{{ $t('trainer.actionTypes.freezeBreakpoint') }}</option>
+          <option value="patch">{{ $t('trainer.actionTypes.patch') }}</option>
         </select>
-        <input v-model="address" class="input mono" placeholder="Adresse sans 0x" />
-        <input v-model="valueType" class="input" placeholder="Type" />
-        <input v-if="action !== 'patch'" v-model="value" class="input" placeholder="Valeur" />
-        <input v-else v-model="patchBytes" class="input mono" placeholder="Bytes patch: 90 90" />
-        <button class="btn" @click="fillFromSelection()">Depuis sélection</button>
-        <button class="btn primary" :disabled="!address.trim()" @click="createFeature()">Créer</button>
+        <input v-model="address" class="input mono" :placeholder="$t('trainer.builder.addressPlaceholder')" />
+        <input v-model="valueType" class="input" :placeholder="$t('trainer.builder.typePlaceholder')" />
+        <input v-if="action !== 'patch'" v-model="value" class="input" :placeholder="$t('trainer.builder.valuePlaceholder')" />
+        <input v-else v-model="patchBytes" class="input mono" :placeholder="$t('trainer.builder.patchBytesPlaceholder')" />
+        <button class="btn" @click="fillFromSelection()">{{ $t('trainer.builder.fromSelection') }}</button>
+        <button class="btn primary" :disabled="!address.trim()" @click="createFeature()">{{ $t('trainer.builder.create') }}</button>
       </div>
-      <div v-if="action === 'patch'" class="patch-relay-note" title="Fallback PHASE 122 : utilisé seulement si le patch code direct échoue en ERROR_ACCESS_DENIED.">
-        Relais patch disponible
+      <div v-if="action === 'patch'" class="patch-relay-note" :title="$t('trainer.builder.patchRelayTitle')">
+        {{ $t('trainer.builder.patchRelayAvailable') }}
       </div>
       <div v-if="store.trainerFeatures.length > 0" class="depends-on-row">
-        <span class="hint">Dépend de (optionnel, ex: "God Mode" dépend de "Infinite HP" + "Infinite Mana") :</span>
+        <span class="hint">{{ $t('trainer.builder.dependsOnHint') }}</span>
         <select v-model="dependsOn" class="input depends-on-select" multiple>
           <option v-for="feature in store.trainerFeatures" :key="feature.id" :value="feature.id">{{ feature.name }}</option>
         </select>
@@ -304,7 +306,7 @@ async function copyTrainerExport() {
     </section>
 
     <section v-if="checkpoints.length > 0" class="panel">
-      <h2>Depuis checkpoints Investigation</h2>
+      <h2>{{ $t('trainer.checkpoints.title') }}</h2>
       <div class="checkpoint-list">
         <article v-for="item in checkpoints" :key="String(item.id ?? item.address ?? item.label)" class="checkpoint">
           <strong>{{ item.label ?? item.address ?? item.id }}</strong>
@@ -320,8 +322,8 @@ async function copyTrainerExport() {
             </span>
           </div>
           <div class="checkpoint-actions">
-            <button class="btn" :title="checkpointPlanReason(item, 'bookmark')" @click="bookmarkCheckpoint(item)">Bookmark</button>
-            <button class="btn" :disabled="!checkpointPlan(item).actions.find((entry) => entry.id === 'trainer')?.enabled" :title="checkpointPlanReason(item, 'trainer')" @click="createFromCheckpoint(item)">Créer feature</button>
+            <button class="btn" :title="checkpointPlanReason(item, 'bookmark')" @click="bookmarkCheckpoint(item)">{{ $t('trainer.checkpoints.bookmark') }}</button>
+            <button class="btn" :disabled="!checkpointPlan(item).actions.find((entry) => entry.id === 'trainer')?.enabled" :title="checkpointPlanReason(item, 'trainer')" @click="createFromCheckpoint(item)">{{ $t('trainer.checkpoints.createFeature') }}</button>
           </div>
         </article>
       </div>
@@ -329,32 +331,32 @@ async function copyTrainerExport() {
 
     <section class="panel">
       <div class="section-head">
-        <h2>Features</h2>
-        <span>{{ filteredFeatures.length }} / {{ store.trainerFeatures.length }} feature(s)</span>
+        <h2>{{ $t('trainer.features.title') }}</h2>
+        <span>{{ $t('trainer.features.count', { shown: filteredFeatures.length, count: store.trainerFeatures.length }) }}</span>
       </div>
       <div class="filters">
-        <input v-model="searchFilter" class="input filter-input" placeholder="Chercher nom, adresse, hotkey..." />
+        <input v-model="searchFilter" class="input filter-input" :placeholder="$t('trainer.features.searchPlaceholder')" />
         <select v-model="actionFilter" class="input filter-input">
-          <option value="all">Toutes actions</option>
-          <option value="write">write</option>
-          <option value="freeze_polling">freeze_polling</option>
-          <option value="freeze_breakpoint">freeze_breakpoint</option>
-          <option value="patch">patch</option>
-          <option value="clr_write">clr_write</option>
+          <option value="all">{{ $t('trainer.filters.allActions') }}</option>
+          <option value="write">{{ $t('trainer.actionTypes.write') }}</option>
+          <option value="freeze_polling">{{ $t('trainer.actionTypes.freezePolling') }}</option>
+          <option value="freeze_breakpoint">{{ $t('trainer.actionTypes.freezeBreakpoint') }}</option>
+          <option value="patch">{{ $t('trainer.actionTypes.patch') }}</option>
+          <option value="clr_write">{{ $t('trainer.actionTypes.clrWrite') }}</option>
         </select>
         <select v-model="statusFilter" class="input filter-input">
-          <option value="all">Tous statuts</option>
-          <option value="idle">idle</option>
-          <option value="active">active</option>
-          <option value="error">error</option>
-          <option value="ambiguous">ambiguous</option>
+          <option value="all">{{ $t('trainer.filters.allStatuses') }}</option>
+          <option value="idle">{{ $t('trainer.statuses.idle') }}</option>
+          <option value="active">{{ $t('trainer.statuses.active') }}</option>
+          <option value="error">{{ $t('trainer.statuses.error') }}</option>
+          <option value="ambiguous">{{ $t('trainer.statuses.ambiguous') }}</option>
         </select>
         <select v-model="processFilter" class="input filter-input">
-          <option value="all">Tous processus</option>
+          <option value="all">{{ $t('trainer.filters.allProcesses') }}</option>
           <option v-for="process in processOptions" :key="process" :value="process">{{ process }}</option>
         </select>
       </div>
-      <div v-if="store.trainerFeatures.length === 0" class="empty">Aucune feature Trainer. Crée-en une depuis une sélection ou une investigation.</div>
+      <div v-if="store.trainerFeatures.length === 0" class="empty">{{ $t('trainer.features.empty') }}</div>
       <article v-for="feature in filteredFeatures" :key="feature.id" class="feature">
         <div class="feature-main">
           <strong>{{ feature.name }}</strong>
@@ -364,15 +366,15 @@ async function copyTrainerExport() {
           </span>
           <span v-else class="mono">0x{{ feature.address }}</span>
           <span v-if="feature.locatorKind === 'clr_field'">
-            via {{ feature.clrIdentityField }}={{ feature.clrIdentityValue }}
+            {{ $t('trainer.features.viaIdentity', { field: feature.clrIdentityField, value: feature.clrIdentityValue }) }}
           </span>
           <span>{{ feature.action }} · {{ feature.valueType }} {{ feature.value || feature.patchBytes }}</span>
           <span v-if="feature.hotkey" class="hotkey-chip">{{ feature.hotkey }}</span>
-          <span v-if="dependencyNames(feature)" class="depends-on-chip" :title="dependencyNames(feature)">Dépend de : {{ dependencyNames(feature) }}</span>
+          <span v-if="dependencyNames(feature)" class="depends-on-chip" :title="dependencyNames(feature)">{{ $t('trainer.features.dependsOn', { names: dependencyNames(feature) }) }}</span>
           <span
             v-if="feature.pointerChain"
             class="pointer-chain-chip mono"
-            :title="`Locator pointer_chain : ${feature.pointerChain.module}+${feature.pointerChain.baseOffset} → [${feature.pointerChain.offsets.join(', ')}] (re-résolue à chaque activation)`"
+            :title="$t('trainer.pointerChain.locatorTitle', { module: feature.pointerChain.module, baseOffset: feature.pointerChain.baseOffset, offsets: feature.pointerChain.offsets.join(', ') })"
           >
             {{ feature.pointerChain.module }}+{{ feature.pointerChain.baseOffset }} → [{{ feature.pointerChain.offsets.join(', ') }}]
           </span>
@@ -381,7 +383,7 @@ async function copyTrainerExport() {
             AOB {{ featureSignatureQuality(feature)?.level }} · {{ featureSignatureQuality(feature)?.score }}/100
           </span>
           <span v-if="featureSignatureQuality(feature)" class="quality-detail">
-            fixes {{ featureSignatureQuality(feature)?.fixedBytes ?? 0 }} · wildcards {{ featureSignatureQuality(feature)?.wildcardBytes ?? 0 }}
+            {{ $t('trainer.features.signatureDetails', { fixedBytes: featureSignatureQuality(feature)?.fixedBytes ?? 0, wildcardBytes: featureSignatureQuality(feature)?.wildcardBytes ?? 0 }) }}
           </span>
           <p v-if="featureWarning(feature)" class="feature-warning">{{ featureWarning(feature) }}</p>
           <p v-if="feature.lastError">{{ feature.lastError }}</p>
@@ -391,7 +393,7 @@ async function copyTrainerExport() {
             </span>
           </div>
           <label v-if="dependencyCandidates(feature).length > 0" class="feature-dependencies-editor">
-            <span>Dépendances</span>
+            <span>{{ $t('trainer.features.dependenciesLabel') }}</span>
             <select
               class="input depends-on-select"
               multiple
@@ -405,9 +407,9 @@ async function copyTrainerExport() {
           </label>
         </div>
         <div class="feature-actions">
-          <button class="btn" :disabled="store.trainerBusy || feature.enabled || featureBlocked(feature)" @click="store.applyTrainerFeature(feature.id)">ON</button>
-          <button class="btn" :disabled="store.trainerBusy || !feature.enabled" @click="store.restoreTrainerFeature(feature.id)">OFF</button>
-          <button class="btn" :disabled="store.trainerBusy || featureBlocked(feature)" @click="store.saveTrainerFeatureToProfile(feature.id)">Sauver profil</button>
+          <button class="btn" :disabled="store.trainerBusy || feature.enabled || featureBlocked(feature)" @click="store.applyTrainerFeature(feature.id)">{{ $t('trainer.actions.on') }}</button>
+          <button class="btn" :disabled="store.trainerBusy || !feature.enabled" @click="store.restoreTrainerFeature(feature.id)">{{ $t('trainer.actions.off') }}</button>
+          <button class="btn" :disabled="store.trainerBusy || featureBlocked(feature)" @click="store.saveTrainerFeatureToProfile(feature.id)">{{ $t('trainer.actions.saveProfile') }}</button>
           <button
             v-if="feature.locatorKind !== 'clr_field'"
             class="btn"
@@ -418,24 +420,24 @@ async function copyTrainerExport() {
           <input
             :value="hotkeyDraft(feature)"
             class="input hotkey-input"
-            placeholder="Ctrl+Alt+F1"
+            :placeholder="$t('trainer.features.hotkeyPlaceholder')"
             @input="hotkeyDrafts[feature.id] = ($event.target as HTMLInputElement).value"
           />
-          <button class="btn" :disabled="store.trainerBusy || !hotkeyDraft(feature).trim()" @click="saveHotkey(feature)">Hotkey</button>
-          <button class="btn" :disabled="store.trainerBusy || !feature.hotkeyId" @click="store.unregisterTrainerFeatureHotkey(feature.id)">Retirer hotkey</button>
-          <button class="btn danger" :disabled="store.trainerBusy" @click="store.deleteTrainerFeature(feature.id)">Supprimer</button>
+          <button class="btn" :disabled="store.trainerBusy || !hotkeyDraft(feature).trim()" @click="saveHotkey(feature)">{{ $t('trainer.actions.hotkey') }}</button>
+          <button class="btn" :disabled="store.trainerBusy || !feature.hotkeyId" @click="store.unregisterTrainerFeatureHotkey(feature.id)">{{ $t('trainer.actions.removeHotkey') }}</button>
+          <button class="btn danger" :disabled="store.trainerBusy" @click="store.deleteTrainerFeature(feature.id)">{{ $t('trainer.actions.delete') }}</button>
         </div>
       </article>
-      <p v-if="store.trainerFeatures.length > 0 && filteredFeatures.length === 0" class="empty">Aucune feature ne correspond aux filtres.</p>
+      <p v-if="store.trainerFeatures.length > 0 && filteredFeatures.length === 0" class="empty">{{ $t('trainer.features.noFilterMatch') }}</p>
       <p v-if="store.trainerHotkeyStatus" class="hotkey-status">{{ store.trainerHotkeyStatus }}</p>
     </section>
 
     <section v-if="exportText" class="panel export">
       <div class="section-head">
-        <h2>Export Trainer</h2>
+        <h2>{{ $t('trainer.export.title') }}</h2>
         <div class="actions">
-          <button class="btn" @click="copyTrainerExport()">Copier</button>
-          <button class="btn" @click="exportText = ''">Fermer</button>
+          <button class="btn" @click="copyTrainerExport()">{{ $t('trainer.actions.copy') }}</button>
+          <button class="btn" @click="exportText = ''">{{ $t('trainer.actions.close') }}</button>
         </div>
       </div>
       <p v-if="exportStatus" class="hotkey-status">{{ exportStatus }}</p>

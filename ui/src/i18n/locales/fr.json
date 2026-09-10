@@ -2435,5 +2435,109 @@
       "activationFailed": "Activation échouée: {name}"
     },
     "targetsTitleFallback": "cibles"
+  },
+  "trainer": {
+    "title": "Trainer",
+    "subtitle": "Transforme les trouvailles en toggles persistants et réversibles.",
+    "actions": {
+      "overlayOff": "Overlay OFF",
+      "overlayOn": "Overlay ON",
+      "refreshOverlay": "Rafraîchir overlay",
+      "applyAll": "Tout appliquer",
+      "restoreAll": "Tout restaurer",
+      "saveProject": "Sauver projet",
+      "exportJson": "Exporter JSON",
+      "exportMd": "Exporter MD",
+      "remove": "Retirer",
+      "on": "ON",
+      "off": "OFF",
+      "saveProfile": "Sauver profil",
+      "hotkey": "Hotkey",
+      "removeHotkey": "Retirer hotkey",
+      "delete": "Supprimer",
+      "copy": "Copier",
+      "close": "Fermer"
+    },
+    "intro": {
+      "what": "Les features Trainer : des raccourcis persistants pour activer/désactiver un freeze ou une écriture d'un coup.",
+      "purpose": "Transformer une trouvaille en bouton réutilisable (façon WeMod/Cheat Engine), au lieu de refaire la recherche à chaque partie.",
+      "how": "Crée une feature depuis l'Assistant ou Expert, puis active/désactive-la ici (ou via l'overlay et les raccourcis clavier) sans repasser par une recherche."
+    },
+    "overlay": {
+      "hotkeyHint": "Hotkey pour afficher/masquer l'overlay sans alt-tab :",
+      "hotkeyPlaceholder": "Ctrl+Alt+F2",
+      "registerHotkey": "Hotkey overlay"
+    },
+    "presets": {
+      "prompt": "Pas encore d'adresse ? Scénarios courants :"
+    },
+    "builder": {
+      "title": "Créer une feature",
+      "namePlaceholder": "Nom: Minéraux, HP lock...",
+      "addressPlaceholder": "Adresse sans 0x",
+      "typePlaceholder": "Type",
+      "valuePlaceholder": "Valeur",
+      "patchBytesPlaceholder": "Bytes patch: 90 90",
+      "fromSelection": "Depuis sélection",
+      "create": "Créer",
+      "patchRelayTitle": "Fallback PHASE 122 : utilisé seulement si le patch code direct échoue en ERROR_ACCESS_DENIED.",
+      "patchRelayAvailable": "Relais patch disponible",
+      "dependsOnHint": "Dépend de (optionnel, ex: \"God Mode\" dépend de \"Infinite HP\" + \"Infinite Mana\") :"
+    },
+    "actionTypes": {
+      "write": "Write",
+      "freezePolling": "Freeze polling",
+      "freezeBreakpoint": "Freeze BP",
+      "patch": "Patch code",
+      "clrWrite": "clr_write"
+    },
+    "checkpoints": {
+      "title": "Depuis checkpoints Investigation",
+      "bookmark": "Bookmark",
+      "createFeature": "Créer feature"
+    },
+    "features": {
+      "title": "Features",
+      "count": "{shown} / {count} feature(s)",
+      "searchPlaceholder": "Chercher nom, adresse, hotkey...",
+      "empty": "Aucune feature Trainer. Crée-en une depuis une sélection ou une investigation.",
+      "viaIdentity": "via {field}={value}",
+      "dependsOn": "Dépend de : {names}",
+      "signatureDetails": "fixes {fixedBytes} · wildcards {wildcardBytes}",
+      "dependenciesLabel": "Dépendances",
+      "hotkeyPlaceholder": "Ctrl+Alt+F1",
+      "noFilterMatch": "Aucune feature ne correspond aux filtres."
+    },
+    "filters": {
+      "allActions": "Toutes actions",
+      "allStatuses": "Tous statuts",
+      "allProcesses": "Tous processus"
+    },
+    "statuses": {
+      "idle": "idle",
+      "active": "active",
+      "error": "error",
+      "ambiguous": "ambiguous"
+    },
+    "pointerChain": {
+      "scanInProgress": "Scan en cours...",
+      "regenerate": "Re-générer chaîne",
+      "generate": "Générer chaîne",
+      "absoluteTitle": "Adresse brute : génère une chaîne de pointeurs stable (base de module + offsets) pour que la feature survive aux réallocations mémoire (redémarrage du jeu, nouvelle partie). Scan lecture seule de quelques secondes.",
+      "refreshTitle": "Relance le scan pour actualiser la chaîne de pointeurs sauvegardée. Scan lecture seule de quelques secondes.",
+      "locatorTitle": "Locator pointer_chain : {module}+{baseOffset} → [{offsets}] (re-résolue à chaque activation)"
+    },
+    "warnings": {
+      "weakAob": "AOB trop faible ({score}/100, {fixedBytes} octet(s) fixe(s)) : régénère une signature plus longue avant activation ou sauvegarde profil.",
+      "ambiguousFeature": "Feature ambiguë : inspecte la signature ou régénère un AOB plus spécifique avant activation.",
+      "errorFeature": "Feature en erreur : corrige-la avant activation.",
+      "incompletePatch": "Patch incomplet : bytes manquants.",
+      "missingAob": "AOB manquant : sauvegarde une signature stable avant activation.",
+      "incompleteClrLocator": "Locator CLR incomplet."
+    },
+    "export": {
+      "title": "Export Trainer",
+      "copied": "Export copié."
+    }
   }
 }
