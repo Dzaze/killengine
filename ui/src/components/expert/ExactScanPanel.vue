@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import RiskBadge from '@/components/expert/RiskBadge.vue'
@@ -11,9 +12,10 @@ const props = defineProps<{
 }>()
 
 const store = useAppStore()
+const { t } = useI18n()
 
 const hasCandidateContext = computed(() => (store.candidatePage?.totalCount ?? 0) > 0)
-const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau scan' : 'Premier scan')
+const exactScanButtonLabel = computed(() => hasCandidateContext.value ? t('exactScan.newScan') : t('exactScan.firstScan'))
 </script>
 
 <template>
@@ -27,7 +29,7 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau
       <div class="panel-actions">
         <span v-if="store.exactScanResult?.partial">{{ $t('scan.partial') }}</span>
         <button class="btn btn-secondary compact" type="button" :disabled="store.scanBusy" @click="props.onStartNewScan()">
-          Nouveau scan
+          {{ $t('exactScan.newScan') }}
         </button>
       </div>
     </div>
@@ -41,12 +43,12 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau
         @keyup.enter="store.doExactScan()"
       />
       <select v-model="store.exactScanType" class="input select" :disabled="store.scanBusy">
-        <option value="Auto">Auto (multi-type)</option>
+        <option value="Auto">{{ $t('exactScan.autoMultiType') }}</option>
         <option v-for="type in valueTypeOptions" :key="type">{{ type }}</option>
       </select>
       <button class="btn btn-primary" :disabled="!store.exactScanValue.trim() || store.scanBusy" @click="store.doExactScan()">
         <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
-        <span>{{ store.scanBusy ? 'Scan...' : exactScanButtonLabel }}</span>
+        <span>{{ store.scanBusy ? $t('exactScan.scanning') : exactScanButtonLabel }}</span>
       </button>
     </div>
     <div v-if="store.inferredExactTypes.length > 0" class="type-suggestions">
@@ -67,7 +69,7 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau
     <div class="expert-toggle">
       <label class="checkbox-label">
         <input type="checkbox" v-model="store.expertModeEnabled" />
-        Mode Expert (filtres avancés)
+        {{ $t('exactScan.expertMode') }}
       </label>
     </div>
     <div v-if="store.expertModeEnabled" class="expert-filters">
@@ -75,12 +77,12 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau
         <input
           v-model="store.expertStartAddress"
           class="input"
-          placeholder="Adresse début (0x...)"
+          :placeholder="$t('exactScan.startAddressPlaceholder')"
         />
         <input
           v-model="store.expertStopAddress"
           class="input"
-          placeholder="Adresse fin (0x...)"
+          :placeholder="$t('exactScan.endAddressPlaceholder')"
         />
         <input
           v-model.number="store.expertAlignment"
@@ -88,25 +90,25 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau
           min="0"
           step="1"
           class="input"
-          placeholder="Alignement (0 = auto)"
+          :placeholder="$t('exactScan.alignmentPlaceholder')"
         />
       </div>
       <div class="expert-flags">
         <label class="checkbox-label">
           <input type="checkbox" v-model="store.expertWritableOnly" />
-          Writable uniquement
+          {{ $t('exactScan.writableOnly') }}
         </label>
         <label class="checkbox-label">
           <input type="checkbox" v-model="store.expertExecutableOnly" />
-          Exécutable uniquement
+          {{ $t('exactScan.executableOnly') }}
         </label>
         <label class="checkbox-label">
           <input type="checkbox" v-model="store.expertCopyOnWriteOnly" />
-          Copy-on-write uniquement
+          {{ $t('exactScan.copyOnWriteOnly') }}
         </label>
       </div>
       <p class="hint">
-        Astuce : laisse les champs vides pour scanner tout. Alignement 0 active le fast scan automatique.
+        {{ $t('exactScan.expertHint') }}
       </p>
     </div>
 
@@ -114,14 +116,14 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau
       <span>{{ $t('scan.matches') }}: {{ formatNumber(store.exactScanResult.matchesFound) }}</span>
       <span>{{ $t('scan.regions') }}: {{ formatNumber(store.exactScanResult.regionsScanned) }}</span>
       <span>{{ $t('scan.stored') }}: {{ formatNumber(store.exactScanResult.candidateStoreSize) }}</span>
-      <span v-if="store.exactScanResult.elapsedMs">Temps: {{ formatNumber(store.exactScanResult.elapsedMs) }} ms</span>
-      <span v-if="store.exactScanResult.bytesPerSecond">Débit: {{ formatRate(store.exactScanResult.bytesPerSecond) }}</span>
+      <span v-if="store.exactScanResult.elapsedMs">{{ $t('exactScan.elapsedMs', { ms: formatNumber(store.exactScanResult.elapsedMs) }) }}</span>
+      <span v-if="store.exactScanResult.bytesPerSecond">{{ $t('exactScan.throughput', { rate: formatRate(store.exactScanResult.bytesPerSecond) }) }}</span>
     </div>
     <p v-if="store.exactScanResult?.error" class="error">{{ store.exactScanResult.error }}</p>
     <div class="encrypted-scan-panel">
       <div class="source-list-title">
-        <strong>Scan chiffré</strong>
-        <span>XOR/Add/Sub/NOT · writable</span>
+        <strong>{{ $t('exactScan.encryptedScan') }}</strong>
+        <span>{{ $t('exactScan.encryptedHint') }}</span>
       </div>
       <div class="controls encrypted-controls">
         <select v-model="store.encryptedScanMode" class="input select compact-input" :disabled="store.scanBusy">
@@ -130,21 +132,21 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau
           <option value="sub">Sub</option>
           <option value="not">NOT</option>
         </select>
-        <input v-model="store.encryptedScanKey" class="input compact-input" placeholder="clé 0x42" :disabled="store.scanBusy || store.encryptedScanMode === 'not'" />
+        <input v-model="store.encryptedScanKey" class="input compact-input" :placeholder="$t('exactScan.keyPlaceholder')" :disabled="store.scanBusy || store.encryptedScanMode === 'not'" />
         <select v-model.number="store.encryptedScanKeySearchBits" class="input select compact-input" :disabled="store.scanBusy || store.encryptedScanMode === 'not'">
-          <option :value="0">clé fixe</option>
-          <option :value="8">brute 8-bit</option>
-          <option :value="16">brute 16-bit</option>
+          <option :value="0">{{ $t('exactScan.fixedKey') }}</option>
+          <option :value="8">{{ $t('exactScan.brute8') }}</option>
+          <option :value="16">{{ $t('exactScan.brute16') }}</option>
         </select>
         <button class="btn btn-primary compact" type="button" :disabled="!store.exactScanValue.trim() || store.scanBusy" @click="store.doEncryptedScan()">
-          Scanner
+          {{ $t('exactScan.scanEncrypted') }}
         </button>
       </div>
       <div v-if="store.encryptedScanResult" class="metrics">
-        <span>Matches: {{ formatNumber(store.encryptedScanResult.matchesFound) }}</span>
-        <span>Régions: {{ formatNumber(store.encryptedScanResult.regionsScanned) }}</span>
-        <span>Lu: {{ formatBytes(store.encryptedScanResult.bytesScanned) }}</span>
-        <span v-if="store.encryptedScanResult.partial">partiel</span>
+        <span>{{ $t('exactScan.matches', { count: formatNumber(store.encryptedScanResult.matchesFound) }) }}</span>
+        <span>{{ $t('exactScan.regions', { count: formatNumber(store.encryptedScanResult.regionsScanned) }) }}</span>
+        <span>{{ $t('exactScan.readBytes', { bytes: formatBytes(store.encryptedScanResult.bytesScanned) }) }}</span>
+        <span v-if="store.encryptedScanResult.partial">{{ $t('exactScan.partial') }}</span>
       </div>
       <p v-if="store.encryptedScanResult?.error" class="error">{{ store.encryptedScanResult.error }}</p>
       <div v-if="store.encryptedScanResult?.matches.length" class="encrypted-result-list">
@@ -152,8 +154,8 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? 'Nouveau
           <code>0x{{ match.address }}</code>
           <span>{{ match.type }}</span>
           <span>{{ match.variantLabel || '-' }}</span>
-          <button class="btn btn-secondary compact" type="button" @click="store.selectCandidate(match.address, match.type)">Utiliser</button>
-          <button class="btn btn-secondary compact" type="button" @click="store.addAddressToWatch(match.address, match.type)">Watch</button>
+          <button class="btn btn-secondary compact" type="button" @click="store.selectCandidate(match.address, match.type)">{{ $t('exactScan.use') }}</button>
+          <button class="btn btn-secondary compact" type="button" @click="store.addAddressToWatch(match.address, match.type)">{{ $t('exactScan.watch') }}</button>
         </div>
       </div>
     </div>

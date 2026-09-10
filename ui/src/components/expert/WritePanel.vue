@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { backend, type StableLocatorSuggestion } from '@/services/backend'
+import { useI18n } from 'vue-i18n'
 import { useExpertPointerChain } from '@/composables/useExpertPointerChain'
 import { useExpertWriteSelection } from '@/composables/useExpertWriteSelection'
 import { useAppStore } from '@/stores/app'
@@ -10,6 +11,7 @@ import InfoDot from './InfoDot.vue'
 import RiskBadge from './RiskBadge.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 const {
   selectedCandidateAddresses,
   writePanelRef,
@@ -68,7 +70,7 @@ async function suggestStableLocator(addressHex: string) {
     if (controller.suggestStableLocatorForAddress) {
       stableLocatorResult.value = await controller.suggestStableLocatorForAddress(addressHex, {})
     } else {
-      stableLocatorResult.value = { success: false, chainCount: 0, error: 'Methode backend indisponible (mock mode).' }
+      stableLocatorResult.value = { success: false, chainCount: 0, error: t('write.stableLocator.backendUnavailable') }
     }
   } catch (e) {
     stableLocatorResult.value = { success: false, chainCount: 0, error: String(e) }
@@ -94,14 +96,14 @@ function saveStableLocator() {
         <RiskBadge level="write" />
       </div>
       <div class="panel-title-actions">
-        <span v-if="store.writeResult">{{ store.writeResult.success ? 'OK' : 'FAIL' }}</span>
+        <span v-if="store.writeResult">{{ store.writeResult.success ? $t('write.statusOk') : $t('write.statusFail') }}</span>
       </div>
     </div>
     <p class="panel-hint">{{ $t('help.write.when') }}</p>
     <div class="controls write-controls">
       <div v-if="hasSelectedWriteTargets" class="input multi-target-summary" :title="selectedCandidateAddresses.map((address) => `0x${address}`).join(', ')">
         <strong>{{ writeTargetLabel }}</strong>
-        <button class="inline-clear" type="button" @click="clearCandidateSelection()">manuel</button>
+        <button class="inline-clear" type="button" @click="clearCandidateSelection()">{{ $t('write.manual') }}</button>
       </div>
       <input
         v-else
@@ -122,7 +124,7 @@ function saveStableLocator() {
         {{ $t('write.rollback') }}
       </button>
       <label class="freeze-interval-control">
-        <span>Freeze</span>
+        <span>{{ $t('write.freezeInterval') }}</span>
         <select
           v-model.number="store.freezeIntervalMs"
           class="input select"
@@ -137,28 +139,28 @@ function saveStableLocator() {
       <button
         class="btn btn-secondary"
         :disabled="hasSelectedWriteTargets || store.breakpointFreezeEnabled || !store.canWriteSelectedValue"
-        title="Hardware breakpoint: intercepte les écritures et réécrit immédiatement la valeur."
+        :title="$t('write.freezeBpTitle')"
         @click="store.startBreakpointFreeze()"
       >
-        Freeze BP
+        {{ $t('write.freezeBp') }}
       </button>
       <InfoDot topic="freezeBp" align="right" />
       <button
         class="btn btn-secondary"
         :disabled="!store.breakpointFreezeEnabled"
-        title="Arrêter le freeze par hardware breakpoint."
+        :title="$t('write.stopBpTitle')"
         @click="store.stopBreakpointFreeze()"
       >
-        Stop BP
+        {{ $t('write.stopBp') }}
       </button>
       <span v-if="store.breakpointFreezeEnabled && breakpointFreezeStats" class="bp-live-stats" :class="{ warning: breakpointFreezeStats.healthy === false }">
-        {{ formatNumber(Number(breakpointFreezeStats.hits ?? 0)) }} hits · {{ formatNumber(Number(breakpointFreezeStats.rewrites ?? 0)) }} corrigé(s)<template v-if="Number(breakpointFreezeStats.errors ?? 0) > 0"> · {{ formatNumber(Number(breakpointFreezeStats.errors ?? 0)) }} erreur(s)</template>
+        {{ $t('write.bpStats', { hits: formatNumber(Number(breakpointFreezeStats.hits ?? 0)), rewrites: formatNumber(Number(breakpointFreezeStats.rewrites ?? 0)) }) }}<template v-if="Number(breakpointFreezeStats.errors ?? 0) > 0"> · {{ $t('write.bpErrors', { count: formatNumber(Number(breakpointFreezeStats.errors ?? 0)) }) }}</template>
       </span>
     </div>
     <div v-if="hasSelectedWriteTargets" class="write-plan">
       <div class="write-plan-title">
-        <strong>Plan d'écriture</strong>
-        <span>{{ writePlan.length }} cible(s) · valeur affichée {{ store.writeValue.trim() || '-' }}</span>
+        <strong>{{ $t('write.planTitle') }}</strong>
+        <span>{{ $t('write.planSummary', { count: writePlan.length, value: store.writeValue.trim() || '-' }) }}</span>
       </div>
       <div class="write-plan-list">
         <div v-for="target in writePlan.slice(0, 12)" :key="`${target.address}:${target.mode}`" class="write-plan-row">
@@ -167,26 +169,26 @@ function saveStableLocator() {
           <strong>{{ target.encodedValue }}</strong>
         </div>
       </div>
-      <span v-if="writePlan.length > 12" class="muted">+ {{ writePlan.length - 12 }} autre(s) cible(s) avec le même calcul automatique.</span>
+      <span v-if="writePlan.length > 12" class="muted">{{ $t('write.moreTargets', { count: writePlan.length - 12 }) }}</span>
     </div>
     <div v-if="store.writeSafetyWarning" class="write-safety">
       <p class="warning">{{ store.writeSafetyWarning }}</p>
       <label class="safety-ack">
         <input v-model="store.writeSafetyAcknowledged" type="checkbox" />
-        Je confirme cette écriture mémoire
+        {{ $t('write.confirmMemoryWrite') }}
       </label>
     </div>
     <div v-if="store.writeResult || store.freezeIntervalResult" class="metrics">
       <span v-if="store.writeResult">{{ store.writeResult.bytesWritten }} B</span>
-      <span v-if="store.writeResult?.written !== undefined">Écrites: {{ formatNumber(store.writeResult.written) }}/{{ formatNumber(store.writeResult.total) }}</span>
+      <span v-if="store.writeResult?.written !== undefined">{{ $t('write.writtenCount', { written: formatNumber(store.writeResult.written), total: formatNumber(store.writeResult.total) }) }}</span>
       <span v-if="store.writeResult?.protectionChanged">VirtualProtectEx{{ store.writeResult.protectionChangedCount ? `: ${formatNumber(store.writeResult.protectionChangedCount)}` : '' }}</span>
       <span v-if="store.writeResult?.verified">{{ $t('write.verified') }}</span>
-      <span v-if="store.writeResult?.enabled !== undefined">freeze: {{ store.writeResult.enabled ? 'on' : 'off' }}</span>
-      <span v-if="store.writeResult?.mode === 'breakpoint'">BP: {{ store.breakpointFreezeEnabled ? 'on' : 'off' }}</span>
-      <span v-if="store.writeResult?.rewrites !== undefined">rewrites: {{ formatNumber(store.writeResult.rewrites) }}</span>
-      <span v-if="store.freezeIntervalResult">intervalle: {{ store.freezeIntervalMs }} ms</span>
-      <span v-if="store.writeResult?.suspendedThreadCount !== undefined" title="Threads du processus cible suspendues pendant l'écriture atomique">
-        threads suspendues: {{ formatNumber(store.writeResult.suspendedThreadCount) }}
+      <span v-if="store.writeResult?.enabled !== undefined">{{ $t('write.freezeStatus', { status: store.writeResult.enabled ? $t('write.on') : $t('write.off') }) }}</span>
+      <span v-if="store.writeResult?.mode === 'breakpoint'">{{ $t('write.bpStatus', { status: store.breakpointFreezeEnabled ? $t('write.on') : $t('write.off') }) }}</span>
+      <span v-if="store.writeResult?.rewrites !== undefined">{{ $t('write.rewrites', { count: formatNumber(store.writeResult.rewrites) }) }}</span>
+      <span v-if="store.freezeIntervalResult">{{ $t('write.intervalMs', { ms: store.freezeIntervalMs }) }}</span>
+      <span v-if="store.writeResult?.suspendedThreadCount !== undefined" :title="$t('write.suspendedThreadsTitle')">
+        {{ $t('write.suspendedThreads', { count: formatNumber(store.writeResult.suspendedThreadCount) }) }}
       </span>
     </div>
     <p v-if="store.writeResult?.error" class="error">{{ store.writeResult.error }}</p>
@@ -202,28 +204,28 @@ function saveStableLocator() {
         @click="suggestStableLocator(store.selectedCandidateAddress)"
       >
         <span v-if="stableLocatorBusy" class="btn-spinner" aria-hidden="true"></span>
-        <span>{{ stableLocatorBusy ? 'Recherche...' : 'Stabiliser cette adresse' }}</span>
+        <span>{{ stableLocatorBusy ? $t('write.stableLocator.searching') : $t('write.stableLocator.button') }}</span>
       </button>
-      <InfoDot text="Cherche une chaîne de pointeurs stable (module + offsets) vers l'adresse qui vient d'être écrite, pour qu'elle survive à un redémarrage du processus cible. Lecture seule, bornée." />
+      <InfoDot :text="$t('write.stableLocator.info')" />
       <span v-if="stableLocatorResult && stableLocatorForAddress === store.selectedCandidateAddress" class="stable-locator-result">
         <template v-if="stableLocatorResult.success && stableLocatorResult.bestChain">
           <span class="hint">{{ stableLocatorResult.message }}</span>
           <button class="btn btn-secondary compact" type="button" @click="saveStableLocator()">
-            Sauvegarder dans un profil
+            {{ $t('write.stableLocator.saveProfile') }}
           </button>
         </template>
         <template v-else-if="stableLocatorResult.success">
           <span class="hint">{{ stableLocatorResult.message }}</span>
         </template>
         <template v-else>
-          <span class="hint">{{ stableLocatorResult.error || 'Recherche indisponible.' }}</span>
+          <span class="hint">{{ stableLocatorResult.error || $t('write.stableLocator.unavailable') }}</span>
         </template>
       </span>
     </div>
     <div v-if="writeFailures.length" class="write-fail-list">
       <div class="source-list-title">
-        <strong>Échecs d'écriture</strong>
-        <span>{{ formatNumber(writeFailures.length) }} fail(s)</span>
+        <strong>{{ $t('write.failuresTitle') }}</strong>
+        <span>{{ $t('write.failureCount', { count: formatNumber(writeFailures.length) }) }}</span>
       </div>
       <div v-for="failure in writeFailures.slice(0, 16)" :key="`${failure.address}:${failure.type}:${failure.variantLabel}`" class="write-fail-row">
         <code>0x{{ failure.address || '-' }}</code>

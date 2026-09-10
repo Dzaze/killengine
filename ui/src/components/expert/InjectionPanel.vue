@@ -17,151 +17,145 @@ onMounted(() => {
   <section class="panel">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Injection / Hooking / Auto-assembler</h2>
+        <h2>{{ $t('injectionPanel.title') }}</h2>
         <InfoDot topic="injection" />
         <RiskBadge level="code" />
       </div>
-      <span>Outils Expert manuels — confirmation requise à chaque action</span>
+      <span>{{ $t('injectionPanel.manualTools') }}</span>
     </div>
     <p class="hint">
-      Modifie activement le processus cible. Chaque action ci-dessous demande une confirmation explicite,
-      et n'est possible que si le niveau de risque Auto est réglé sur Trainer dans Paramètres.
+      {{ $t('injectionPanel.mainHint') }}
     </p>
 
     <div class="injection-block">
-      <h3>Injection DLL</h3>
+      <h3>{{ $t('injectionPanel.dllTitle') }}</h3>
       <div class="controls injection-controls">
         <input
           v-model="store.injectDllPath"
           class="input"
-          placeholder="Chemin absolu de la DLL"
+          :placeholder="$t('injectionPanel.dllPathPlaceholder')"
           :disabled="store.injectionBusy"
           @keyup.enter="store.injectDll()"
         />
         <button class="btn btn-primary compact" type="button" :disabled="store.injectionBusy || !store.injectDllPath.trim()" @click="store.injectDll()">
-          Injecter
+          {{ $t('injectionPanel.inject') }}
         </button>
       </div>
       <p v-if="store.injectionResult" :class="store.injectionResult.success ? 'hint' : 'error'">
-        {{ store.injectionResult.success ? `Injectée, base 0x${store.injectionResult.moduleBase}` : store.injectionResult.error }}
+        {{ store.injectionResult.success ? $t('injectionPanel.injectedBase', { base: store.injectionResult.moduleBase }) : store.injectionResult.error }}
       </p>
     </div>
 
     <div class="injection-block">
-      <h3>Inline hook <InfoDot topic="inlineHook" /></h3>
+      <h3>{{ $t('injectionPanel.inlineHookTitle') }} <InfoDot topic="inlineHook" /></h3>
       <div class="symbol-resolve-row">
-        <input v-model="store.symbolModuleName" class="input" placeholder="Module (ex. kernel32.dll)" :disabled="store.injectionBusy" />
-        <input v-model="store.symbolFunctionName" class="input" placeholder="Fonction (ex. CreateFileW)" :disabled="store.injectionBusy" @keyup.enter="store.resolveSymbol()" />
+        <input v-model="store.symbolModuleName" class="input" :placeholder="$t('injectionPanel.modulePlaceholder')" :disabled="store.injectionBusy" />
+        <input v-model="store.symbolFunctionName" class="input" :placeholder="$t('injectionPanel.functionPlaceholder')" :disabled="store.injectionBusy" @keyup.enter="store.resolveSymbol()" />
         <button
           class="btn btn-secondary compact"
           type="button"
           :disabled="store.injectionBusy || !store.symbolModuleName.trim() || !store.symbolFunctionName.trim()"
           @click="store.resolveSymbol()"
         >
-          Résoudre
+          {{ $t('injectionPanel.resolve') }}
         </button>
       </div>
       <p v-if="store.symbolResolveResult" :class="store.symbolResolveResult.success ? 'hint' : 'error'">
         <template v-if="store.symbolResolveResult.success">
           {{ store.symbolModuleName }}!{{ store.symbolFunctionName }} = 0x{{ store.symbolResolveResult.address }}
           <button class="btn btn-secondary compact" type="button" @click="store.applyResolvedSymbolToHookTarget()">
-            Utiliser comme cible
+            {{ $t('injectionPanel.useAsTarget') }}
           </button>
         </template>
         <template v-else>{{ store.symbolResolveResult.error }}</template>
       </p>
       <div class="controls injection-controls">
-        <input v-model="store.hookTargetAddress" class="input" placeholder="Adresse cible (0x...)" :disabled="store.injectionBusy" />
-        <input v-model="store.hookFunctionAddress" class="input" placeholder="Adresse hook (0x...)" :disabled="store.injectionBusy" />
+        <input v-model="store.hookTargetAddress" class="input" :placeholder="$t('injectionPanel.targetAddressPlaceholder')" :disabled="store.injectionBusy" />
+        <input v-model="store.hookFunctionAddress" class="input" :placeholder="$t('injectionPanel.hookAddressPlaceholder')" :disabled="store.injectionBusy" />
       </div>
       <div class="row-actions">
         <button class="btn btn-primary compact" type="button" :disabled="store.injectionBusy || !store.hookTargetAddress.trim() || !store.hookFunctionAddress.trim()" @click="store.installHook()">
-          Installer hook
+          {{ $t('injectionPanel.installHook') }}
         </button>
         <button class="btn btn-secondary compact" type="button" :disabled="store.injectionBusy || !store.hookTargetAddress.trim()" @click="store.removeHook()">
-          Retirer hook
+          {{ $t('injectionPanel.removeHook') }}
         </button>
       </div>
       <p v-if="store.activeFunctionHook" :class="store.activeFunctionHook.success ? 'hint' : 'error'">
-        {{ store.activeFunctionHook.success ? `Hook actif, trampoline 0x${store.activeFunctionHook.trampolineAddress}` : store.activeFunctionHook.error }}
+        {{ store.activeFunctionHook.success ? $t('injectionPanel.hookActive', { address: store.activeFunctionHook.trampolineAddress }) : store.activeFunctionHook.error }}
       </p>
     </div>
 
     <div class="injection-block api-hook-block">
-      <h3>Interception de fonctions (MinHook) <InfoDot topic="apiHook" /></h3>
+      <h3>{{ $t('injectionPanel.apiHookTitle') }} <InfoDot topic="apiHook" /></h3>
       <p class="hint">
-        Injecte un composant qui pose un inline hook MinHook sur module!fonction dans le processus cible.
-        Mode Compter : interception passive (compteur d appels, l original reste appelé) pour confirmer qu une fonction
-        est réellement utilisée avant de patcher. Mode Forcer retour : la fonction retourne la valeur donnée sans
-        s exécuter (QA/simulation de pannes) — adapté aux retours entier/pointeur/bool uniquement.
+        {{ $t('injectionPanel.apiHookHint') }}
       </p>
       <div class="symbol-resolve-row">
-        <input v-model="store.apiHookModuleName" class="input" placeholder="Module (ex. kernel32.dll)" :disabled="store.apiHookBusy" />
-        <input v-model="store.apiHookFunctionName" class="input" placeholder="Fonction (ex. Sleep)" :disabled="store.apiHookBusy" @keyup.enter="store.startApiHook()" />
+        <input v-model="store.apiHookModuleName" class="input" :placeholder="$t('injectionPanel.modulePlaceholder')" :disabled="store.apiHookBusy" />
+        <input v-model="store.apiHookFunctionName" class="input" :placeholder="$t('injectionPanel.functionSleepPlaceholder')" :disabled="store.apiHookBusy" @keyup.enter="store.startApiHook()" />
       </div>
       <div class="controls injection-controls">
         <label class="api-hook-mode">
-          <input type="radio" :value="0" v-model="store.apiHookMode" :disabled="store.apiHookBusy" /> Compter
+          <input type="radio" :value="0" v-model="store.apiHookMode" :disabled="store.apiHookBusy" /> {{ $t('injectionPanel.countMode') }}
         </label>
         <label class="api-hook-mode">
-          <input type="radio" :value="1" v-model="store.apiHookMode" :disabled="store.apiHookBusy" /> Forcer retour
+          <input type="radio" :value="1" v-model="store.apiHookMode" :disabled="store.apiHookBusy" /> {{ $t('injectionPanel.forceReturnMode') }}
         </label>
-        <input v-if="store.apiHookMode === 1" v-model.number="store.apiHookForcedReturn" type="number" class="input" placeholder="Valeur de retour forcée" :disabled="store.apiHookBusy" />
+        <input v-if="store.apiHookMode === 1" v-model.number="store.apiHookForcedReturn" type="number" class="input" :placeholder="$t('injectionPanel.forcedReturnPlaceholder')" :disabled="store.apiHookBusy" />
       </div>
       <div class="row-actions">
         <button class="btn btn-primary compact" type="button" :disabled="store.apiHookBusy || !store.apiHookModuleName.trim() || !store.apiHookFunctionName.trim()" @click="store.startApiHook()">
-          Intercepter
+          {{ $t('injectionPanel.intercept') }}
         </button>
         <button class="btn btn-secondary compact" type="button" :disabled="store.apiHookBusy || !store.apiHookStatus?.active" @click="store.stopApiHook()">
-          Retirer
+          {{ $t('injectionPanel.remove') }}
         </button>
       </div>
       <p v-if="store.apiHookStatus" :class="store.apiHookStatus.success ? 'hint' : 'error'">
-        {{ store.apiHookStatus.active ? `Actif, ${store.apiHookStatus.callCount ?? 0} appel(s) intercepté(s)` : (store.apiHookStatus.error || 'Inactif') }}
+        {{ store.apiHookStatus.active ? $t('injectionPanel.apiHookActive', { count: store.apiHookStatus.callCount ?? 0 }) : (store.apiHookStatus.error || $t('injectionPanel.inactive')) }}
       </p>
     </div>
 
     <div class="injection-block">
-      <h3>Script auto-assembler</h3>
+      <h3>{{ $t('injectionPanel.autoAsmTitle') }}</h3>
       <p class="hint">
-        Sous-ensemble volontairement borné : nop/ret/int3/db/jmp/call/je/jne, <code>mov [registre+déplacement], immédiat</code>,
-        blocs <code>"nom:"</code> (lié à un <code>alloc()</code>) et <code>"module.exe"+offset:</code> (site existant, pattern
-        Cheat Engine classique — voir le bouton "Forcer valeur (hook)" sur une capture Écrit par pour un raccourci qui
-        génère ce script automatiquement, sans avoir à l'écrire à la main). Adressage indexé/RIP-relatif et le reste des
-        mnémoniques refusés proprement plutôt que mal exécutés.
+        {{ $t('injectionPanel.autoAsmHintPrefix') }} <code>{{ $t('injectionPanel.autoAsmMovExample') }}</code>,
+        {{ $t('injectionPanel.autoAsmHintMiddle') }} <code>{{ $t('injectionPanel.autoAsmLabelExample') }}</code> (<code>alloc()</code>) {{ $t('injectionPanel.autoAsmHintAnd') }} <code>"module.exe"+offset:</code>.
+        {{ $t('injectionPanel.autoAsmHintSuffix') }}
       </p>
       <textarea
         v-model="store.autoAsmScriptText"
         class="input autoasm-textarea"
         rows="6"
-        placeholder="alloc(newmem, 256)&#10;label(returnhere)&#10;&#10;newmem:&#10;mov [rax+8], 9999&#10;jmp returnhere&#10;&#10;&quot;monjeu.exe&quot;+0x12345:&#10;jmp newmem&#10;nop&#10;returnhere:"
+        :placeholder="$t('injectionPanel.autoAsmPlaceholder')"
         :disabled="store.injectionBusy"
       ></textarea>
       <div class="row-actions">
         <button class="btn btn-secondary compact" type="button" :disabled="!store.autoAsmScriptText.trim()" @click="store.previewAutoAsmScript()">
-          Aperçu
+          {{ $t('injectionPanel.preview') }}
         </button>
         <button class="btn btn-primary compact" type="button" :disabled="store.injectionBusy || !store.autoAsmScriptText.trim()" @click="store.executeAutoAsmScript()">
-          Exécuter
+          {{ $t('injectionPanel.execute') }}
         </button>
         <button class="btn btn-secondary compact" type="button" :disabled="store.injectionBusy || !store.autoAsmResult" @click="store.restoreAutoAsmScript()">
-          Restaurer
+          {{ $t('injectionPanel.restore') }}
         </button>
       </div>
       <div v-if="store.autoAsmPreview" class="metrics">
-        <span>{{ store.autoAsmPreview.parseSuccess ? `${store.autoAsmPreview.instructionCount} instruction(s) reconnue(s)` : `Erreur ligne ${store.autoAsmPreview.parseErrorLine}: ${store.autoAsmPreview.parseError}` }}</span>
-        <span v-if="store.autoAsmPreview.compileSuccess">Bytes compilés: {{ store.autoAsmPreview.compiledBytes }}</span>
-        <span v-else-if="store.autoAsmPreview.compileError">Compilation: {{ store.autoAsmPreview.compileError }}</span>
+        <span>{{ store.autoAsmPreview.parseSuccess ? $t('injectionPanel.instructionsRecognized', { count: store.autoAsmPreview.instructionCount }) : $t('injectionPanel.parseError', { line: store.autoAsmPreview.parseErrorLine, error: store.autoAsmPreview.parseError }) }}</span>
+        <span v-if="store.autoAsmPreview.compileSuccess">{{ $t('injectionPanel.compiledBytes', { bytes: store.autoAsmPreview.compiledBytes }) }}</span>
+        <span v-else-if="store.autoAsmPreview.compileError">{{ $t('injectionPanel.compilationError', { error: store.autoAsmPreview.compileError }) }}</span>
       </div>
       <p v-if="store.autoAsmResult" :class="store.autoAsmResult.success ? 'hint' : 'error'">
-        {{ store.autoAsmResult.success ? `Actif, patch à 0x${store.autoAsmResult.patchAddress}` : store.autoAsmResult.error }}
+        {{ store.autoAsmResult.success ? $t('injectionPanel.patchActive', { address: store.autoAsmResult.patchAddress }) : store.autoAsmResult.error }}
       </p>
 
       <div class="autoasm-save-row">
         <input
           v-model="store.autoAsmScriptName"
           class="input"
-          placeholder="Nom du script (pour le sauvegarder)"
+          :placeholder="$t('injectionPanel.scriptNamePlaceholder')"
           :disabled="store.injectionBusy"
         />
         <button
@@ -170,32 +164,32 @@ onMounted(() => {
           :disabled="store.injectionBusy || !store.autoAsmScriptText.trim() || !store.autoAsmScriptName.trim()"
           @click="store.saveAutoAsmScript()"
         >
-          Sauvegarder dans le profil
+          {{ $t('injectionPanel.saveToProfile') }}
         </button>
       </div>
       <p v-if="store.autoAsmSaveResult" :class="store.autoAsmSaveResult.success ? 'hint' : 'error'">
-        {{ store.autoAsmSaveResult.success ? `Sauvegardé (${store.autoAsmSaveResult.scriptCount} script(s) dans ce profil)` : store.autoAsmSaveResult.error }}
+        {{ store.autoAsmSaveResult.success ? $t('injectionPanel.savedScriptCount', { count: store.autoAsmSaveResult.scriptCount }) : store.autoAsmSaveResult.error }}
       </p>
 
       <div class="autoasm-saved-list">
         <div class="autoasm-saved-header">
-          <h4>Scripts sauvegardés</h4>
+          <h4>{{ $t('injectionPanel.savedScripts') }}</h4>
           <button class="btn btn-secondary compact" type="button" :disabled="store.autoAsmSavedScriptsBusy" @click="store.refreshSavedAutoAsmScripts()">
-            {{ store.autoAsmSavedScriptsBusy ? 'Chargement...' : 'Rafraîchir' }}
+            {{ store.autoAsmSavedScriptsBusy ? $t('injectionPanel.loading') : $t('injectionPanel.refresh') }}
           </button>
         </div>
-        <p v-if="!store.autoAsmSavedScripts.length" class="hint">Aucun script sauvegardé pour ce profil.</p>
+        <p v-if="!store.autoAsmSavedScripts.length" class="hint">{{ $t('injectionPanel.noSavedScripts') }}</p>
         <div v-for="saved in store.autoAsmSavedScripts" :key="String(saved.name)" class="autoasm-saved-entry">
           <span class="autoasm-saved-name">{{ saved.name }}</span>
           <div class="row-actions">
             <button class="btn btn-secondary compact" type="button" @click="store.autoAsmScriptText = String(saved.scriptText ?? '')">
-              Charger
+              {{ $t('injectionPanel.load') }}
             </button>
             <button class="btn btn-primary compact" type="button" :disabled="store.injectionBusy" @click="store.applySavedAutoAsmScript(String(saved.name))">
-              Exécuter
+              {{ $t('injectionPanel.execute') }}
             </button>
             <button class="btn btn-secondary compact" type="button" @click="store.deleteSavedAutoAsmScript(String(saved.name))">
-              Supprimer
+              {{ $t('injectionPanel.delete') }}
             </button>
           </div>
         </div>

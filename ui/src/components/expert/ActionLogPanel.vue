@@ -10,11 +10,11 @@ const store = useAppStore()
   <section class="panel">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Journal utilisateur</h2>
+        <h2>{{ $t('actionLogPanel.title') }}</h2>
         <InfoDot topic="journal" />
         <RiskBadge level="read" />
       </div>
-      <span>{{ store.actionLog.length }} entrée(s)</span>
+      <span>{{ $t('actionLogPanel.entryCount', { count: store.actionLog.length }) }}</span>
     </div>
     <div class="action-log">
       <div v-for="entry in store.actionLog.slice(0, 18)" :key="entry.id" class="action-entry" :class="entry.status">

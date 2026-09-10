@@ -40,20 +40,20 @@ const rangeMax = computed({
         class="btn btn-secondary compact"
         type="button"
         :disabled="store.scanBusy"
-        title="Restaure les candidats d'avant la dernière réduction (utile même si la réduction est tombée à 0)."
+        :title="$t('nextScanPanel.restoreTitle')"
         @click="store.undoCandidateScan()"
       >
-        Restaurer réduction
+        {{ $t('nextScanPanel.restoreReduction') }}
       </button>
     </div>
     <p class="hint">{{ $t('scan.nextScanHint') }}</p>
-    <p v-if="!hasCandidateContext" class="hint">Lance d'abord une recherche (bouton « Chercher ») pour avoir des candidats à réduire ici.</p>
+    <p v-if="!hasCandidateContext" class="hint">{{ $t('nextScanPanel.noCandidateContext') }}</p>
     <div class="controls next-controls">
       <select
         v-model="store.nextScanMode"
         class="input select"
         :disabled="store.scanBusy || !hasCandidateContext"
-        :title="!hasCandidateContext ? 'Lance d\'abord une recherche pour avoir des candidats.' : ''"
+        :title="!hasCandidateContext ? $t('nextScanPanel.needCandidatesTitle') : ''"
       >
         <option value="exact">{{ $t('scan.modeExact') }}</option>
         <option value="changed">{{ $t('scan.modeChanged') }}</option>
@@ -84,26 +84,26 @@ const rangeMax = computed({
         v-model="store.nextScanValue"
         :disabled="store.scanBusy || !hasCandidateContext || (store.nextScanMode !== 'exact' && store.nextScanMode !== 'delta')"
         :placeholder="$t('scan.nextValue')"
-        :title="!hasCandidateContext ? 'Lance d\'abord une recherche pour avoir des candidats.' : ''"
+        :title="!hasCandidateContext ? $t('nextScanPanel.needCandidatesTitle') : ''"
         class="input"
         @keyup.enter="store.doNextScan()"
       />
       <button
         class="btn btn-primary"
         :disabled="store.scanBusy || !hasCandidateContext"
-        :title="!hasCandidateContext ? 'Lance d\'abord une recherche pour avoir des candidats à réduire.' : ''"
+        :title="!hasCandidateContext ? $t('nextScanPanel.needCandidatesToReduceTitle') : ''"
         @click="store.doNextScan()"
       >
         <span v-if="store.scanBusy" class="btn-spinner" aria-hidden="true"></span>
-        <span>{{ store.scanBusy ? 'Scan...' : $t('scan.nextScan') }}</span>
+        <span>{{ store.scanBusy ? $t('nextScanPanel.scanning') : $t('scan.nextScan') }}</span>
       </button>
     </div>
     <div v-if="store.nextScanResult" class="metrics">
       <span>{{ $t('scan.remaining') }}: {{ formatNumber(store.nextScanResult.remaining) }}</span>
       <span>{{ $t('scan.checked') }}: {{ formatNumber(store.nextScanResult.checked) }}</span>
       <span>{{ $t('scan.unreadable') }}: {{ formatNumber(store.nextScanResult.unreadable) }}</span>
-      <span v-if="store.nextScanResult.elapsedMs">Temps: {{ formatNumber(store.nextScanResult.elapsedMs) }} ms</span>
-      <span v-if="store.nextScanResult.candidatesPerSecond">Débit: {{ formatRate(store.nextScanResult.candidatesPerSecond) }}</span>
+      <span v-if="store.nextScanResult.elapsedMs">{{ $t('nextScanPanel.elapsedMs', { ms: formatNumber(store.nextScanResult.elapsedMs) }) }}</span>
+      <span v-if="store.nextScanResult.candidatesPerSecond">{{ $t('nextScanPanel.throughput', { rate: formatRate(store.nextScanResult.candidatesPerSecond) }) }}</span>
     </div>
     <p v-if="store.nextScanResult?.error" class="error">{{ store.nextScanResult.error }}</p>
   </section>

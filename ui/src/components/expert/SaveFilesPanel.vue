@@ -29,7 +29,7 @@ function readSaveFileFromExpert(path: string) {
   <section class="panel save-file-panel risk-read">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Fichiers de sauvegarde</h2>
+        <h2>{{ $t('saveFilesPanel.title') }}</h2>
         <RiskBadge level="read" />
       </div>
       <span v-if="store.discoveredSaveFiles.length > 0">{{ formatNumber(store.discoveredSaveFiles.length) }} fichier(s)</span>
@@ -42,7 +42,7 @@ function readSaveFileFromExpert(path: string) {
         @click="discoverSaveFilesFromExpert()"
       >
         <span v-if="store.saveFilesBusy" class="btn-spinner" aria-hidden="true"></span>
-        {{ store.saveFilesBusy ? 'Découverte...' : 'Découvrir les fichiers de sauvegarde' }}
+        {{ store.saveFilesBusy ? $t('saveFilesPanel.discovering') : $t('saveFilesPanel.discover') }}
       </button>
       <span v-if="store.discoveredSaveFilesFamilyName">{{ store.discoveredSaveFilesFamilyName }}</span>
     </div>
@@ -64,12 +64,12 @@ function readSaveFileFromExpert(path: string) {
       </button>
     </div>
     <div v-else-if="store.saveFileDiscoveryResult?.success" class="empty compact">
-      Aucun fichier de sauvegarde probable trouvé.
+      {{ $t('saveFilesPanel.noLikelyFileFound') }}
     </div>
     <div v-if="store.saveFileTextBusy || store.selectedSaveFileText" class="save-file-preview">
       <div class="source-list-title">
-        <strong>{{ store.saveFileTextBusy ? 'Lecture...' : saveFileName(store.selectedSaveFileText?.path || store.selectedSaveFilePath) }}</strong>
-        <span v-if="store.selectedSaveFileText?.truncated" class="warning-text">aperçu tronqué à 64 Ko</span>
+        <strong>{{ store.saveFileTextBusy ? $t('saveFilesPanel.reading') : saveFileName(store.selectedSaveFileText?.path || store.selectedSaveFilePath) }}</strong>
+        <span v-if="store.selectedSaveFileText?.truncated" class="warning-text">{{ $t('saveFilesPanel.previewTruncated') }}</span>
       </div>
       <p v-if="store.selectedSaveFileText?.error" class="error">{{ store.selectedSaveFileText.error }}</p>
       <textarea
@@ -87,7 +87,7 @@ function readSaveFileFromExpert(path: string) {
           @click="store.watchSelectedSaveFile(store.selectedSaveFilePath, 8000)"
         >
           <span v-if="store.saveFileWatchBusy" class="btn-spinner" aria-hidden="true"></span>
-          {{ store.saveFileWatchBusy ? 'Surveillance (8s)...' : 'Surveiller ce fichier' }}
+          {{ store.saveFileWatchBusy ? $t('saveFilesPanel.watching') : $t('saveFilesPanel.watchFile') }}
         </button>
         <button
           v-if="store.saveFileWatchBusy"
@@ -99,25 +99,25 @@ function readSaveFileFromExpert(path: string) {
         </button>
         <span v-if="store.saveFileWatchResult && !store.saveFileWatchBusy" :class="store.saveFileWatchResult.changed ? 'hint' : 'warning-text'">
           {{ store.saveFileWatchResult.changed
-            ? `Changement détecté (${store.saveFileWatchResult.changeType ?? '?'})`
-            : (store.saveFileWatchResult.cancelled ? 'Surveillance annulée' : (store.saveFileWatchResult.error ?? 'Aucun changement avant timeout')) }}
+            ? $t('saveFilesPanel.changeDetected', { type: store.saveFileWatchResult.changeType ?? '?' })
+            : (store.saveFileWatchResult.cancelled ? $t('saveFilesPanel.watchCancelled') : (store.saveFileWatchResult.error ?? $t('saveFilesPanel.noChangeTimeout'))) }}
         </span>
       </div>
 
       <div class="save-file-patch-row">
-        <input v-model="store.saveFilePatchFindHex" class="input" placeholder="Octets à trouver (hex, ex: 35 38)" />
-        <input v-model="store.saveFilePatchReplaceHex" class="input" placeholder="Octets de remplacement (même longueur)" />
+        <input v-model="store.saveFilePatchFindHex" class="input" :placeholder="$t('saveFilesPanel.findBytesPlaceholder')" />
+        <input v-model="store.saveFilePatchReplaceHex" class="input" :placeholder="$t('saveFilesPanel.replaceBytesPlaceholder')" />
         <button
           class="btn btn-danger compact"
           type="button"
           :disabled="store.saveFilePatchBusy || !store.saveFilePatchFindHex.trim() || !store.saveFilePatchReplaceHex.trim()"
           @click="store.patchSelectedSaveFileBytes(store.selectedSaveFilePath, store.saveFilePatchFindHex, store.saveFilePatchReplaceHex)"
         >
-          {{ store.saveFilePatchBusy ? 'Patch...' : 'Patcher' }}
+          {{ store.saveFilePatchBusy ? $t('saveFilesPanel.patching') : $t('saveFilesPanel.patch') }}
         </button>
       </div>
       <p v-if="store.saveFilePatchResult" :class="store.saveFilePatchResult.success ? 'hint' : 'error'">
-        {{ store.saveFilePatchResult.success ? `Patché (${store.saveFilePatchResult.occurrencesFound ?? 1} occurrence).` : store.saveFilePatchResult.error }}
+        {{ store.saveFilePatchResult.success ? $t('saveFilesPanel.patched', { count: store.saveFilePatchResult.occurrencesFound ?? 1 }) : store.saveFilePatchResult.error }}
       </p>
     </div>
 
@@ -130,7 +130,7 @@ function readSaveFileFromExpert(path: string) {
           @click="store.inspectLocalSettings(200)"
         >
           <span v-if="store.localSettingsBusy" class="btn-spinner" aria-hidden="true"></span>
-          {{ store.localSettingsBusy ? 'Inspection...' : 'Inspecter LocalSettings' }}
+          {{ store.localSettingsBusy ? $t('saveFilesPanel.inspecting') : $t('saveFilesPanel.inspectLocalSettings') }}
         </button>
         <span v-if="store.localSettingsResult?.count !== undefined">{{ store.localSettingsResult.count }} valeur(s)</span>
       </div>

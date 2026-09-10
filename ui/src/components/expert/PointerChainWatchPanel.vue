@@ -43,11 +43,11 @@ async function addManualExpression() {
   <section class="panel">
     <div class="panel-title">
       <div class="panel-heading">
-        <h2>Watch expressions <span class="hint-inline">(chaines de pointeurs live)</span></h2>
+        <h2>{{ $t('pointerChainWatchPanel.title') }} <span class="hint-inline">{{ $t('pointerChainWatchPanel.subtitle') }}</span></h2>
         <InfoDot topic="watchPointerChains" />
         <RiskBadge level="read" />
       </div>
-      <span>{{ store.watchedPointerChains.length }} chaine(s)</span>
+      <span>{{ $t('pointerChainWatchPanel.chainCount', { count: store.watchedPointerChains.length }) }}</span>
       <button
         class="btn compact"
         :class="store.watchedPointerChainsLiveEnabled ? 'btn-primary' : 'btn-secondary'"
@@ -55,29 +55,27 @@ async function addManualExpression() {
         :disabled="store.watchedPointerChains.length === 0"
         @click="store.setWatchedPointerChainsLiveEnabled(!store.watchedPointerChainsLiveEnabled)"
       >
-        {{ store.watchedPointerChainsLiveEnabled ? 'Live ON' : 'Live OFF' }}
+        {{ store.watchedPointerChainsLiveEnabled ? $t('pointerChainWatchPanel.liveOn') : $t('pointerChainWatchPanel.liveOff') }}
       </button>
-      <button class="btn btn-secondary compact" type="button" :disabled="store.watchedPointerChains.length === 0" @click="store.refreshWatchedPointerChains()">Rafraichir</button>
-      <button class="btn btn-secondary compact" type="button" :disabled="store.watchedPointerChains.length === 0" @click="store.clearWatchedPointerChains()">Vider</button>
+      <button class="btn btn-secondary compact" type="button" :disabled="store.watchedPointerChains.length === 0" @click="store.refreshWatchedPointerChains()">{{ $t('pointerChainWatchPanel.refresh') }}</button>
+      <button class="btn btn-secondary compact" type="button" :disabled="store.watchedPointerChains.length === 0" @click="store.clearWatchedPointerChains()">{{ $t('pointerChainWatchPanel.clear') }}</button>
     </div>
     <p class="hint">
-      Suit en live une adresse derriere un pointeur (ex: <code>module+0x18 -> +0x4</code>) sans avoir a re-resoudre la chaine
-      a la main a chaque fois. Ajoute une chaine testee depuis le panneau Pointer Chains (bouton "Watch"), ou saisis-en une
-      directement ci-dessous. Active "Live" pour une re-resolution + relecture automatique toutes les secondes.
+      {{ $t('pointerChainWatchPanel.hintPrefix') }} <code>module+0x18 -> +0x4</code> {{ $t('pointerChainWatchPanel.hintSuffix') }}
     </p>
     <div class="controls watch-expr-controls">
-      <input v-model="manualLabel" class="input" placeholder="Libelle (optionnel)" :disabled="manualBusy" />
-      <input v-model="manualModule" class="input" placeholder="Module (ex: game.exe)" :disabled="manualBusy" />
-      <input v-model="manualBaseOffset" class="input" placeholder="Offset de base (0x...)" :disabled="manualBusy" />
-      <input v-model="manualOffsets" class="input" placeholder="Offsets suivants (0x18, 0x4, ...)" :disabled="manualBusy" />
+      <input v-model="manualLabel" class="input" :placeholder="$t('pointerChainWatchPanel.labelPlaceholder')" :disabled="manualBusy" />
+      <input v-model="manualModule" class="input" :placeholder="$t('pointerChainWatchPanel.modulePlaceholder')" :disabled="manualBusy" />
+      <input v-model="manualBaseOffset" class="input" :placeholder="$t('pointerChainWatchPanel.baseOffsetPlaceholder')" :disabled="manualBusy" />
+      <input v-model="manualOffsets" class="input" :placeholder="$t('pointerChainWatchPanel.offsetsPlaceholder')" :disabled="manualBusy" />
       <select v-model="manualType" class="input select">
         <option v-for="t in valueTypeOptions" :key="t" :value="t">{{ t }}</option>
       </select>
       <button class="btn btn-primary compact" type="button" :disabled="manualBusy || !manualModule.trim() || !manualBaseOffset.trim()" @click="addManualExpression()">
-        + Watch
+        {{ $t('pointerChainWatchPanel.addWatch') }}
       </button>
     </div>
-    <div v-if="store.watchedPointerChains.length === 0" class="hint">Aucune expression surveillee pour l'instant.</div>
+    <div v-if="store.watchedPointerChains.length === 0" class="hint">{{ $t('pointerChainWatchPanel.empty') }}</div>
     <div v-else class="watch-list">
       <div v-for="chain in store.watchedPointerChains" :key="chain.id" class="watch-row" :class="{ changed: chain.changed }">
         <strong>{{ chain.label }}</strong>
@@ -85,7 +83,7 @@ async function addManualExpression() {
         <span>{{ chain.type }}</span>
         <strong>{{ chain.value }}</strong>
         <span v-if="chain.error" class="error">{{ chain.error }}</span>
-        <button class="btn btn-secondary compact" type="button" @click="store.removeWatchedPointerChain(chain.id)">x</button>
+        <button class="btn btn-secondary compact" type="button" @click="store.removeWatchedPointerChain(chain.id)">{{ $t('pointerChainWatchPanel.remove') }}</button>
       </div>
     </div>
   </section>
