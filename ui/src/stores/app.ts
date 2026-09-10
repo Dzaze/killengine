@@ -1,5 +1,6 @@
 import { defineStore, storeToRefs } from 'pinia'
 import { ref, computed } from 'vue'
+import { i18n } from '@/i18n'
 import {
   backend,
   type AutoResolveReportResult,
@@ -677,9 +678,10 @@ export const useAppStore = defineStore('app', () => {
 
   // Getters
   const statusText = computed(() => {
-    if (!isConnected.value) return 'Déconnecté'
-    if (!isAttached.value) return 'Prêt'
-    return `Attaché: ${processName.value}`
+    const { t } = i18n.global
+    if (!isConnected.value) return t('common.status.disconnected')
+    if (!isAttached.value) return t('common.status.ready')
+    return t('common.status.attached', { name: processName.value })
   })
 
   function nowTime(): string {

@@ -8,6 +8,11 @@
       "what": "C'est quoi ?",
       "purpose": "À quoi ça sert ?",
       "how": "Comment l'utiliser ?"
+    },
+    "status": {
+      "disconnected": "Déconnecté",
+      "ready": "Prêt",
+      "attached": "Attaché: {name}"
     }
   },
   "process": {
@@ -1429,7 +1434,13 @@
     "writtenBy": "Écrit par",
     "writtenByGuardDetail": "Dès qu'une instruction est capturée, la signature AOB et les suggestions de patch se génèrent automatiquement ci-dessous (lecture seule) — sauvegarder en Trainer ou patcher reste toujours un clic manuel séparé.",
     "writtenByGuardText": "attache le debugger Windows au processus pendant la capture. À utiliser sur une cible de test ou solo, puis fais varier la valeur pendant la fenêtre choisie.",
-    "writtenByNoDebugger": "Écrit par (sans debugger)"
+    "writtenByNoDebugger": "Écrit par (sans debugger)",
+    "writeButton": "Écrire",
+    "writeButtonCount": "Écrire {count}",
+    "selectedAddressesLabel": "{count} adresse(s) sélectionnée(s) · {typeNote}{suffix}",
+    "typeNoteAutoSource": "source auto",
+    "typeNoteChosenType": "type choisi",
+    "someOffPageSuffix": " · certaines hors page"
   },
   "aobSignature": {
     "title": "Signatures AOB",
@@ -1482,7 +1493,8 @@
     "profileStatus": "Profil : {status}",
     "read": "Lire",
     "patch": "Patch",
-    "note": "Note"
+    "note": "Note",
+    "bytesCount": "{count} o"
   },
   "autoDissect": {
     "title": "Auto Dissect",
@@ -1707,7 +1719,10 @@
     "patched": "Patché : {count} occurrence(s)",
     "inspecting": "Inspection...",
     "inspectLocalSettings": "Inspecter LocalSettings",
-    "noLikelyFileFound": "Aucun fichier de sauvegarde probable trouvé."
+    "noLikelyFileFound": "Aucun fichier de sauvegarde probable trouvé.",
+    "cancel": "Annuler",
+    "fileCount": "{count} fichier(s)",
+    "valueCount": "{count} valeur(s)"
   },
   "sessionPanel": {
     "title": "Session",

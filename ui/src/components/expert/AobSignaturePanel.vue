@@ -94,7 +94,7 @@ const {
     <div v-if="aobSignatureResult" class="metrics">
       <span>{{ $t('aobSignature.signatureStatus', { status: aobSignatureResult.success ? $t('aobSignature.ok') : $t('aobSignature.fail') }) }}</span>
       <span v-if="aobSignatureResult.module">{{ aobSignatureResult.module }} +0x{{ aobSignatureResult.moduleOffset }}</span>
-      <span v-if="aobSignatureResult.patternBytes">{{ formatNumber(aobSignatureResult.patternBytes) }} o</span>
+      <span v-if="aobSignatureResult.patternBytes">{{ $t('aobSignature.bytesCount', { count: formatNumber(aobSignatureResult.patternBytes) }) }}</span>
       <span v-if="aobSignatureResult.signatureQuality" :class="`quality-${aobSignatureResult.signatureQuality.level}`">
         {{ $t('aobSignature.quality', { level: aobSignatureResult.signatureQuality.level, score: aobSignatureResult.signatureQuality.score }) }}
       </span>
@@ -156,7 +156,7 @@ const {
     <p v-if="aobStabilizeResult?.error" class="error">{{ aobStabilizeResult.error }}</p>
     <div v-if="codePatchSuggestionResult" class="metrics">
       <span>{{ $t('aobSignature.instructionStatus', { status: codePatchSuggestionResult.success ? $t('aobSignature.ok') : $t('aobSignature.fail') }) }}</span>
-      <span v-if="codePatchSuggestionResult.instructionLength">{{ formatNumber(codePatchSuggestionResult.instructionLength) }} o</span>
+      <span v-if="codePatchSuggestionResult.instructionLength">{{ $t('aobSignature.bytesCount', { count: formatNumber(codePatchSuggestionResult.instructionLength) }) }}</span>
       <span v-if="codePatchSuggestionResult.mnemonicHint">{{ codePatchSuggestionResult.mnemonicHint }}</span>
       <span v-if="codePatchSuggestionResult.category">{{ codePatchSuggestionResult.category }}</span>
       <span v-if="codePatchSuggestionResult.decoder">{{ codePatchSuggestionResult.decoder }}</span>
@@ -199,7 +199,7 @@ const {
     <p v-if="codePatchSuggestionResult?.error" class="error">{{ codePatchSuggestionResult.error }}</p>
     <div v-if="codePatchResult" class="metrics">
       <span>{{ $t('aobSignature.patchStatus', { status: codePatchResult.success ? $t('aobSignature.ok') : $t('aobSignature.fail') }) }}</span>
-      <span v-if="codePatchResult.bytesWritten">{{ formatNumber(codePatchResult.bytesWritten) }} o</span>
+      <span v-if="codePatchResult.bytesWritten">{{ $t('aobSignature.bytesCount', { count: formatNumber(codePatchResult.bytesWritten) }) }}</span>
       <span v-if="codePatchResult.verified">{{ $t('aobSignature.verified') }}</span>
       <span v-if="codePatchResult.protectionChanged" :title="$t('aobSignature.protectionChangedTitle')">{{ $t('aobSignature.virtualProtectRelay') }}</span>
       <span v-if="codePatchResult.active">{{ $t('aobSignature.active') }}</span>

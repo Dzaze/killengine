@@ -32,7 +32,7 @@ function readSaveFileFromExpert(path: string) {
         <h2>{{ $t('saveFilesPanel.title') }}</h2>
         <RiskBadge level="read" />
       </div>
-      <span v-if="store.discoveredSaveFiles.length > 0">{{ formatNumber(store.discoveredSaveFiles.length) }} fichier(s)</span>
+      <span v-if="store.discoveredSaveFiles.length > 0">{{ $t('saveFilesPanel.fileCount', { count: formatNumber(store.discoveredSaveFiles.length) }) }}</span>
     </div>
     <div class="panel-actions save-file-actions">
       <button
@@ -95,7 +95,7 @@ function readSaveFileFromExpert(path: string) {
           type="button"
           @click="store.cancelSaveFileWatchAction()"
         >
-          Annuler
+          {{ $t('saveFilesPanel.cancel') }}
         </button>
         <span v-if="store.saveFileWatchResult && !store.saveFileWatchBusy" :class="store.saveFileWatchResult.changed ? 'hint' : 'warning-text'">
           {{ store.saveFileWatchResult.changed
@@ -132,7 +132,7 @@ function readSaveFileFromExpert(path: string) {
           <span v-if="store.localSettingsBusy" class="btn-spinner" aria-hidden="true"></span>
           {{ store.localSettingsBusy ? $t('saveFilesPanel.inspecting') : $t('saveFilesPanel.inspectLocalSettings') }}
         </button>
-        <span v-if="store.localSettingsResult?.count !== undefined">{{ store.localSettingsResult.count }} valeur(s)</span>
+        <span v-if="store.localSettingsResult?.count !== undefined">{{ $t('saveFilesPanel.valueCount', { count: store.localSettingsResult.count }) }}</span>
       </div>
       <p v-if="store.localSettingsResult?.error" class="error">{{ store.localSettingsResult.error }}</p>
       <div v-if="store.localSettingsResult?.values?.length" class="save-file-list local-settings-list">

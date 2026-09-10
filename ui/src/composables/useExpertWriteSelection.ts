@@ -1,6 +1,9 @@
 import { computed, nextTick, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { i18n } from '@/i18n'
 import type { MemoryWriteTarget } from '@/services/backend'
+
+const { t } = i18n.global
 
 const selectedCandidateAddresses = ref<string[]>([])
 const selectedWriteTargetOverrides = ref<Record<string, MemoryWriteTarget>>({})
@@ -62,15 +65,16 @@ export function useExpertWriteSelection() {
     const knownCount = selectedCandidateRecords.value.length
     const typeNote = selectedCandidateTypes.value.length === 1
       ? selectedCandidateTypes.value[0]
-      : (selectedWriteHasVariants.value ? 'auto source' : 'type choisi')
-    return `${selectedCandidateAddresses.value.length} adresse(s) sélectionnée(s) · ${typeNote}${knownCount < selectedCandidateAddresses.value.length ? ' · certaines hors page' : ''}`
+      : (selectedWriteHasVariants.value ? t('expert.typeNoteAutoSource') : t('expert.typeNoteChosenType'))
+    const suffix = knownCount < selectedCandidateAddresses.value.length ? t('expert.someOffPageSuffix') : ''
+    return t('expert.selectedAddressesLabel', { count: selectedCandidateAddresses.value.length, typeNote, suffix })
   })
   const canWriteFromPanel = computed(() => hasSelectedWriteTargets.value
     ? Boolean(store.writeValue.trim())
     : store.canWriteSelectedValue)
   const writeButtonLabel = computed(() => hasSelectedWriteTargets.value
-    ? `Écrire ${selectedCandidateAddresses.value.length}`
-    : 'Écrire')
+    ? t('expert.writeButtonCount', { count: selectedCandidateAddresses.value.length })
+    : t('expert.writeButton'))
 
   function setSelectedWriteTargets(targets: MemoryWriteTarget[]) {
     selectedCandidateAddresses.value = targets.map((target) => target.address)
