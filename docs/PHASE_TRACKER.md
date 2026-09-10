@@ -48,6 +48,20 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — sixième round (U9/U11/U12/U13 clos, Codex + Claude)
+
+**Suite de l'entrée ci-dessous.** Claude sur U9 (`ClrInspectorView.vue`) dans le dossier principal, Codex sur U11/U12/U13 (`MemoryHeatmapView.vue`/`MemoryTimelineView.vue`/`PatternLearningView.vue`) dans un worktree séparé (`../killengine-codex-ui-u11-u12-u13`) — fichiers disjoints.
+
+**U9** (Claude) : audit initial très sous-estimé (~25 chaînes prévues contre 93 lignes de texte français réel, fichier de 1805 lignes) — parcours guidé, toolbar, locator stable (wizard + mode avancé), table d'objets, écriture par chemin/locator/transaction, appel de setter, désassemblage, génération de rapport (computed générateur de texte avec rendu GC-root-chain), GC roots. 186 clés `clrInspector.*`, beaucoup d'attributs title/aria-label/placeholder en plus du texte visible.
+
+**U11/U12/U13** (Codex) : 159 clés (37+62+60). Vérification indépendante par Claude avant merge (cf. [[feedback_verify_dont_trust_agent_build_claims]]) : diff relu intégralement (conversion notable de `PATTERN_TYPE_NAMES` d'un tableau statique en `computed()` pour la réactivité — bonne pratique), comptes fr/en identiques, 159 références de clés toutes résolues, `help.*` byte-identique, build indépendant OK — **aucun gap trouvé**, troisième round consécutif sans oubli côté Codex (après U8/U14/U18 et U6).
+
+**Merge** : conflit git attendu sur les JSON de locale, résolu par le même merge programmatique (union récursive, zéro perte, 2499 clés terminales de chaque côté).
+
+**Comment vérifié** : `npm run type-check` + `npm run build` OK, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète pour les 4 vues avec un vrai processus attaché (CLR Inspector avec attache réelle du helper ClrMD ; Pattern Learning avec détection de moteur réelle ; Heatmap/Timeline avec panneaux de config/stats).
+
+**Reste ouvert** : U10, U15-U17, U20-U22, voir `docs/FRONTEND_LOCALIZATION_ROADMAP.md`.
+
 ### Localisation de l'interface Vue — cinquième round (U6/U7 clos, Codex + Claude)
 
 **Suite de l'entrée ci-dessous.** Codex sur U6 (`TrainerView.vue`) dans un worktree séparé (`../killengine-codex-ui-u6`), Claude sur U7 (`ProfileView.vue`) dans le dossier principal — fichiers disjoints.
@@ -1224,3 +1238,13 @@ Root cause : `kPebLdrOffset` (ligne 29 de `core/inject/dll_mask.cpp`) était dé
 **Comment vérifié** : build + tests pas encore lancés (seuls Codex/Claude sont habilités) — à faire : `.\scripts\build.ps1` puis `cd ui && npm run type-check` + `cd ui && npm run build`. Validation manuelle attendue : le panneau Auto-dissect apparaît dans l'étape "Inspecter" d'Expert, scanne la mémoire avec le dernier template sauvegardé, affiche une table d'instances avec adresses/confiance/valeurs.
 
 **Fichiers concernés** : `core/scanner/auto_dissect.h` (nouveau), `core/scanner/auto_dissect.cpp` (nouveau), `core/CMakeLists.txt`, `apps/desktop/application_controller.h`, `apps/desktop/application_controller.cpp`, `ui/src/components/expert/AutoDissectPanel.vue` (nouveau), `ui/src/views/ExpertView.vue`, `ui/src/services/backend.ts`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`, `ui/src/services/assistantTools.ts`.
+
+### UX-LANG-SIDEBAR — Switch FR/EN visible dans l'en-tête de la barre gauche (à faire)
+
+**Quoi** : déplacer ou dupliquer le sélecteur de langue global `FR` / `EN` actuellement caché dans `Paramètres` vers le haut de la sidebar, près du logo `KillEngine` montré par le propriétaire. Prévoir un léger ajustement d'espacement si nécessaire pour que le logo, le nom et le switch restent lisibles sans tasser la navigation.
+
+**Pourquoi** : retour propriétaire — le chantier de localisation frontend rend la langue plus importante qu'avant, mais le switch est trop difficile à trouver dans le menu Paramètres. La langue doit être accessible dès l'ouverture de l'app, au même niveau qu'une commande globale, surtout pour tester rapidement FR/EN pendant les rounds de localisation.
+
+**Comment vérifier** : à implémenter. Validation attendue : `cd ui && npm run type-check`, `cd ui && npm run build`, puis vérification visuelle FR/EN que le switch apparaît bien près du logo en haut de la sidebar, change réellement la langue globale, reste synchronisé avec le réglage existant dans `SettingsView.vue`, et ne casse pas le layout aux largeurs de fenêtre courantes.
+
+**Fichiers probables** : `ui/src/App.vue`, `ui/src/stores/app.ts` si besoin de réutiliser l'état existant, `ui/src/views/SettingsView.vue` seulement si le switch des paramètres doit être factorisé, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json` si de nouveaux libellés sont ajoutés.

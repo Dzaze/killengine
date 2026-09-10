@@ -74,11 +74,11 @@ L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** d
 | [x] U6 | Trainer | `ui/src/views/TrainerView.vue` | 76 clés `trainer.*` ajoutées | Non → complet | Moyenne-haute | **Fait, testé (10/09/2026, Codex)** |
 | [x] U7 | Profils | `ui/src/views/ProfileView.vue` | 169 clés `profile.*` ajoutées (audit initial sous-estimé : 130 lignes FR réelles, pas ~10 — profils/cibles/patchs trainer/pont Ghidra/pointer maps) | Non → complet | Moyenne | **Fait, testé (10/09/2026, Claude)** |
 | [x] U8 | Scripting (Lua) | `ui/src/views/ScriptingView.vue` | 42 clés `scripting.*` ajoutées | Non → complet | Moyenne | **Fait, testé (10/09/2026, Codex)** |
-| [ ] U9 | CLR Inspector | `ui/src/views/ClrInspectorView.vue` | ~25 | Non | Moyenne | Pas commencé |
+| [x] U9 | CLR Inspector | `ui/src/views/ClrInspectorView.vue` | 186 clés `clrInspector.*` ajoutées (audit initial sous-estimé : 93 lignes FR réelles sur un fichier de 1805 lignes, beaucoup d'attributs `title`/`aria-label`/`placeholder`) | Non → complet | Moyenne | **Fait, testé (10/09/2026, Claude)** |
 | [ ] U10 | Mémoire (hex viewer) — reste | `ui/src/views/MemoryView.vue` | ~13 restants (18 `$t()` déjà en place) | Partiel | Basse | Pas commencé |
-| [ ] U11 | Memory Heatmap | `ui/src/views/MemoryHeatmapView.vue` | ~20 | Non | Basse-moyenne | Pas commencé |
-| [ ] U12 | Memory Timeline | `ui/src/views/MemoryTimelineView.vue` | ~15 | Non | Basse-moyenne | Pas commencé |
-| [ ] U13 | Pattern Learning | `ui/src/views/PatternLearningView.vue` | ~20 | Non | Basse | Pas commencé |
+| [x] U11 | Memory Heatmap | `ui/src/views/MemoryHeatmapView.vue` | 37 clés `memoryHeatmap.*` ajoutées | Non → complet | Basse-moyenne | **Fait, testé (10/09/2026, Codex)** |
+| [x] U12 | Memory Timeline | `ui/src/views/MemoryTimelineView.vue` | 62 clés `memoryTimeline.*` ajoutées | Non → complet | Basse-moyenne | **Fait, testé (10/09/2026, Codex)** |
+| [x] U13 | Pattern Learning | `ui/src/views/PatternLearningView.vue` | 60 clés `patternLearning.*` ajoutées | Non → complet | Basse | **Fait, testé (10/09/2026, Codex)** |
 | [x] U14 | Speedhack | `ui/src/views/SpeedhackView.vue` | 20 clés `speedhack.*` ajoutées | Non → complet | Basse-moyenne | **Fait, testé (10/09/2026, Codex)** |
 | [ ] U15 | Réseau — reste | `ui/src/views/NetworkView.vue` | ~15 restants (51 `$t()` déjà en place) | Partiel | Basse | Pas commencé |
 | [ ] U16 | Modules — reste (guide EDR notamment) | `ui/src/views/ModulesView.vue` | ~12 restants (41 `$t()` déjà en place) | Partiel | Basse | Pas commencé |
@@ -162,6 +162,15 @@ Cinquième round : Codex sur U6 (`TrainerView.vue`) dans un worktree séparé (`
 - **Résidu confirmé hors périmètre lors de la vérification live** : les boutons de scénarios ("Argent / Or", "Vie / PV", "Score / Niveau", "Munitions") restent en français même en anglais dans TrainerView.vue — proviennent de `store.workflowPresets` (candidat U21, pas encore traité), pas un oubli de Codex. Même résidu déjà documenté lors du round U1.
 - **Merge** : conflit git attendu sur `fr.json`/`en.json` (même branche de départ que le `profile.*` de Claude) — résolu par le même merge JSON programmatique (union récursive, zéro perte, 2155 clés terminales de chaque côté après fusion).
 - **Comment vérifié** : `npm run type-check` + `npm run build` OK sur l'état fusionné, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète pour les deux vues (ProfileView avec 2 profils réels dont un avec patch actif, TrainerView avec une feature réelle). Worktree et branche temporaires supprimés après merge.
+
+## Progrès (10/09/2026) — U9, U11, U12, U13 clos (sixième round, Codex + Claude)
+
+Sixième round : Claude sur U9 (`ClrInspectorView.vue`) dans le dossier principal, Codex sur U11/U12/U13 (`MemoryHeatmapView.vue`/`MemoryTimelineView.vue`/`PatternLearningView.vue`) dans un worktree séparé (`../killengine-codex-ui-u11-u12-u13`) — fichiers disjoints.
+
+- **U9** (Claude) : audit initial sous-estimé (~25 chaînes prévues contre 93 lignes de texte français réel sur un fichier de 1805 lignes) — parcours guidé en 4 étapes, toolbar d'attache, locator stable (assistant guidé + mode texte libre avancé), table d'objets, écriture par chemin symbolique/locator/transaction multi-champs, appel de setter (injection), désassemblage de méthode, génération de rapport d'objet (le computed générateur de texte de rapport avec rendu de chaîne GC-root inclus), et exploration des GC roots. 186 clés `clrInspector.*`, avec un nombre important d'attributs `title`/`aria-label`/`placeholder` en plus du texte visible.
+- **U11/U12/U13** (Codex) : 159 clés au total (37+62+60). Vérification indépendante par Claude avant merge (cf. [[feedback_verify_dont_trust_agent_build_claims]]) : diff des 3 fichiers relu intégralement (y compris la conversion de `PATTERN_TYPE_NAMES` d'un tableau statique en `computed()` pour la réactivité de traduction — bonne pratique repérée), comptes fr/en identiques (37/37, 62/62, 60/60), 159 références de clés toutes résolues, `help.*` byte-identique, build indépendant OK — **aucun gap trouvé**, troisième round consécutif sans oubli côté Codex.
+- **Merge** : conflit git attendu sur les JSON de locale, résolu par le même merge JSON programmatique (union récursive, zéro perte, 2499 clés terminales de chaque côté après fusion).
+- **Comment vérifié** : `npm run type-check` + `npm run build` OK, suite C++ **469/469 OK**, vérification visuelle CDP FR et EN complète pour les 4 vues avec un vrai processus attaché (CLR Inspector : parcours guidé complet avec attache réelle du helper ClrMD ; Pattern Learning : détection de moteur réelle sur modules chargés ; Heatmap/Timeline : panneaux de configuration et statistiques). Worktree et branche temporaires supprimés après merge.
 
 ## Règle d'usage
 
