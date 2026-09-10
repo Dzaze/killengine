@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { useI18n } from 'vue-i18n'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 const statusLabel = computed(() => {
-  if (!store.luaScriptingStatus) return 'non testé'
-  if (!store.luaScriptingStatus.available) return 'lua introuvable'
-  if (!store.luaScriptingStatus.helperAvailable) return 'helper introuvable'
-  return 'prêt'
+  if (!store.luaScriptingStatus) return t('scripting.status.notTested')
+  if (!store.luaScriptingStatus.available) return t('scripting.status.luaMissing')
+  if (!store.luaScriptingStatus.helperAvailable) return t('scripting.status.helperMissing')
+  return t('scripting.status.ready')
 })
 
 const canRun = computed(() =>
@@ -29,19 +31,19 @@ onMounted(() => {
   <div class="scripting-view">
     <div class="header">
       <div>
-        <h1>Lua</h1>
-        <p>{{ store.isAttached ? store.processName : 'Aucun processus attaché' }}</p>
+        <h1>{{ $t('scripting.title') }}</h1>
+        <p>{{ store.isAttached ? store.processName : $t('scripting.noProcess') }}</p>
       </div>
       <div class="header-actions">
         <button class="btn btn-secondary" :disabled="store.luaScriptBusy" @click="store.refreshLuaScriptingStatus()">
-          Statut
+          {{ $t('scripting.statusButton') }}
         </button>
         <button
           class="btn btn-primary"
           :disabled="!canRun"
           @click="store.executeLuaScript()"
         >
-          {{ store.luaScriptBusy ? 'Exécution...' : 'Exécuter' }}
+          {{ store.luaScriptBusy ? $t('scripting.runRunning') : $t('scripting.run') }}
         </button>
         <button class="btn btn-danger" :disabled="!store.luaScriptBusy" @click="store.cancelLuaScriptExecution()">
           Stop
@@ -50,28 +52,28 @@ onMounted(() => {
     </div>
 
     <PanelIntro
-      what="Un éditeur de scripts Lua — un petit langage de programmation simple, exécuté en dehors de l'interface."
-      purpose="Automatiser des actions répétitives (attacher, scanner, écrire, vérifier) en une seule commande au lieu de cliquer partout à chaque fois."
-      how="Écris ou charge un script puis clique Exécuter ; le résultat s'affiche en bas dans stdout/stderr. Les appels ke.call(...) pilotent KillEngine et demandent KillEngine lancé avec KILLENGINE_AUTOMATION_PIPE=1."
+      :what="$t('scripting.intro.what')"
+      :purpose="$t('scripting.intro.purpose')"
+      :how="$t('scripting.intro.how')"
     />
 
     <section class="status-band">
       <div>
-        <span>Runtime</span>
+        <span>{{ $t('scripting.runtime') }}</span>
         <strong :class="{ ok: store.luaScriptingStatus?.available, warn: !store.luaScriptingStatus?.available }">
           {{ statusLabel }}
         </strong>
       </div>
       <div>
-        <span>Lua</span>
+        <span>{{ $t('scripting.lua') }}</span>
         <code>{{ store.luaScriptingStatus?.luaPath || '-' }}</code>
       </div>
       <div>
-        <span>Helper</span>
+        <span>{{ $t('scripting.helper') }}</span>
         <code>{{ store.luaScriptingStatus?.helperPath || '-' }}</code>
       </div>
       <div>
-        <span>Pipe</span>
+        <span>{{ $t('scripting.pipe') }}</span>
         <code>{{ store.luaScriptingStatus?.pipeName || 'KillEngineAutomationPipe' }}</code>
       </div>
     </section>
@@ -80,16 +82,16 @@ onMounted(() => {
       {{ store.luaScriptingStatus?.error || store.luaScriptingStatus?.message }}
     </div>
     <div v-if="store.luaScriptingStatus?.automationPipeOptIn === false" class="alert warning">
-      Les appels <code>ke.call(...)</code> nécessitent le pipe d'automatisation actif : active "Mode Automation" dans
-      Paramètres, ou lance KillEngine avec <code>KILLENGINE_AUTOMATION_PIPE=1</code>.
+      {{ $t('scripting.automationPipeWarningStart') }} <code>ke.call(...)</code> {{ $t('scripting.automationPipeWarningMiddle') }}
+      <code>KILLENGINE_AUTOMATION_PIPE=1</code>.
     </div>
     <section class="editor-shell">
       <div class="editor-head">
-        <h2>Script</h2>
+        <h2>{{ $t('scripting.script') }}</h2>
         <label>
-          Timeout
+          {{ $t('scripting.timeout') }}
           <input v-model.number="store.luaScriptTimeoutMs" class="small-input" type="number" min="1000" max="120000" step="1000" />
-          ms
+          {{ $t('scripting.ms') }}
         </label>
       </div>
       <textarea
@@ -103,34 +105,34 @@ onMounted(() => {
       <div class="saved-scripts-save-row">
         <input
           v-model="store.luaScriptSaveName"
-          class="input"
-          placeholder="Nom du script (pour le sauvegarder)"
+        class="input"
+          :placeholder="$t('scripting.saveNamePlaceholder')"
           :disabled="store.luaScriptBusy"
         />
         <button class="btn btn-secondary compact" type="button" :disabled="!canSave" @click="store.saveLuaScript()">
-          Sauvegarder dans le profil
+          {{ $t('scripting.saveToProfile') }}
         </button>
       </div>
       <p v-if="store.luaScriptSaveResult" :class="store.luaScriptSaveResult.success ? 'hint' : 'error'">
-        {{ store.luaScriptSaveResult.success ? `Sauvegardé (${store.luaScriptSaveResult.scriptCount} script(s) dans ce profil)` : store.luaScriptSaveResult.error }}
+        {{ store.luaScriptSaveResult.success ? $t('scripting.savedCount', { count: store.luaScriptSaveResult.scriptCount }) : store.luaScriptSaveResult.error }}
       </p>
 
       <div class="saved-scripts-list">
         <div class="saved-scripts-header">
-          <h4>Scripts sauvegardés</h4>
+          <h4>{{ $t('scripting.savedScripts') }}</h4>
           <button class="btn btn-secondary compact" type="button" :disabled="store.luaSavedScriptsBusy" @click="store.refreshSavedLuaScripts()">
-            {{ store.luaSavedScriptsBusy ? 'Chargement...' : 'Rafraîchir' }}
+            {{ store.luaSavedScriptsBusy ? $t('scripting.loading') : $t('scripting.refresh') }}
           </button>
         </div>
-        <p v-if="!store.luaSavedScripts.length" class="hint">Aucun script sauvegardé pour ce profil.</p>
+        <p v-if="!store.luaSavedScripts.length" class="hint">{{ $t('scripting.noSavedScripts') }}</p>
         <div v-for="saved in store.luaSavedScripts" :key="String(saved.name)" class="saved-scripts-entry">
           <span class="saved-scripts-name">{{ saved.name }}</span>
           <div class="saved-scripts-actions">
             <button class="btn btn-secondary compact" type="button" @click="store.loadSavedLuaScript(String(saved.name))">
-              Charger
+              {{ $t('scripting.load') }}
             </button>
             <button class="btn btn-secondary compact" type="button" @click="store.deleteSavedLuaScript(String(saved.name))">
-              Supprimer
+              {{ $t('scripting.delete') }}
             </button>
           </div>
         </div>
@@ -140,16 +142,16 @@ onMounted(() => {
     <section class="output-grid">
       <div class="panel">
         <div class="panel-head">
-          <h2>stdout</h2>
-          <span v-if="store.luaScriptResult">exit {{ store.luaScriptResult.exitCode ?? '-' }}</span>
+          <h2>{{ $t('scripting.stdout') }}</h2>
+          <span v-if="store.luaScriptResult">{{ $t('scripting.exitCode', { code: store.luaScriptResult.exitCode ?? '-' }) }}</span>
         </div>
         <pre>{{ store.luaScriptResult?.stdout || '' }}</pre>
       </div>
       <div class="panel">
         <div class="panel-head">
-          <h2>stderr</h2>
+          <h2>{{ $t('scripting.stderr') }}</h2>
           <span :class="{ errorText: store.luaScriptResult && !store.luaScriptResult.success }">
-            {{ store.luaScriptResult?.success === true ? 'OK' : (store.luaScriptResult ? 'Erreur' : '') }}
+            {{ store.luaScriptResult?.success === true ? 'OK' : (store.luaScriptResult ? $t('scripting.error') : '') }}
           </span>
         </div>
         <pre>{{ store.luaScriptResult?.stderr || store.luaScriptResult?.error || '' }}</pre>
@@ -158,7 +160,7 @@ onMounted(() => {
 
     <section class="repl-shell">
       <div class="editor-head">
-        <h2>REPL interactif</h2>
+        <h2>{{ $t('scripting.replTitle') }}</h2>
         <div class="header-actions">
           <button
             v-if="!store.luaReplActive"
@@ -167,23 +169,22 @@ onMounted(() => {
             :disabled="store.luaScriptingStatus?.available !== true"
             @click="store.startLuaReplSession()"
           >
-            Démarrer
+            {{ $t('scripting.start') }}
           </button>
           <button v-else class="btn btn-danger compact" type="button" @click="store.stopLuaReplSession()">
-            Arrêter
+            {{ $t('scripting.stop') }}
           </button>
         </div>
       </div>
       <p class="hint">
-        Un process Lua gardé vivant : les variables et <code>require("killengine")</code> persistent d'une ligne à
-        l'autre, contrairement à "Exécuter" ci-dessus qui relance un process à chaque fois.
+        {{ $t('scripting.replHintStart') }} <code>require("killengine")</code> {{ $t('scripting.replHintEnd') }}
       </p>
       <p v-if="store.luaReplStartResult && store.luaReplStartResult.success === false" class="error">
         {{ store.luaReplStartResult.error }}
       </p>
 
       <div v-if="store.luaReplActive" class="repl-transcript">
-        <p v-if="!store.luaReplHistory.length" class="hint">Tape une ligne ci-dessous et Entrée pour l'exécuter.</p>
+        <p v-if="!store.luaReplHistory.length" class="hint">{{ $t('scripting.replEmpty') }}</p>
         <div v-for="entry in store.luaReplHistory" :key="entry.requestId + '-' + entry.line" class="repl-entry">
           <div class="repl-entry-line">&gt; {{ entry.line }}</div>
           <pre v-if="entry.output" class="repl-entry-output">{{ entry.output }}</pre>
@@ -198,7 +199,7 @@ onMounted(() => {
           v-model="store.luaReplInput"
           class="input repl-input"
           list="lua-repl-completions"
-          placeholder="ke.ping('hello') / 1+1 / local x = 5"
+          :placeholder="$t('scripting.replPlaceholder')"
           :disabled="store.luaReplBusy"
           spellcheck="false"
           @keydown.enter="store.sendLuaReplLine()"
@@ -209,7 +210,7 @@ onMounted(() => {
           <option v-for="name in store.luaReplCompletions" :key="name" :value="name" />
         </datalist>
         <button class="btn btn-secondary compact" type="button" :disabled="store.luaReplBusy || !store.luaReplInput.trim()" @click="store.sendLuaReplLine()">
-          {{ store.luaReplBusy ? '...' : 'Envoyer' }}
+          {{ store.luaReplBusy ? '...' : $t('scripting.send') }}
         </button>
       </div>
     </section>

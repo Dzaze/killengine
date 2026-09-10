@@ -483,7 +483,8 @@
         "term": "XOR",
         "definition": "Une opération logique simple parfois utilisée par les programmes pour masquer légèrement une valeur en mémoire (ex: stocker valeur XOR clé au lieu de la valeur brute) afin de gêner un scan direct. Une valeur \"obfusquée en XOR\" ne se trouve pas par un scan exact classique sur la valeur affichée."
       }
-    }
+    },
+    "description": "Les termes techniques employés dans KillEngine, expliqués simplement."
   },
   "findWhatAccesses": {
     "title": "Lu par",
@@ -1900,5 +1901,79 @@
     "archiveStepsCount": "{status} · {count} etape(s)",
     "restore": "Restaurer",
     "noArchive": "Aucune archive."
+  },
+  "scripting": {
+    "noProcess": "Aucun processus attaché",
+    "statusButton": "Statut",
+    "run": "Exécuter",
+    "runRunning": "Exécution...",
+    "intro": {
+      "what": "Un éditeur de scripts Lua — un petit langage de programmation simple, exécuté en dehors de l'interface.",
+      "purpose": "Automatiser des actions répétitives (attacher, scanner, écrire, vérifier) en une seule commande au lieu de cliquer partout à chaque fois.",
+      "how": "Écris ou charge un script puis clique Exécuter ; le résultat s'affiche en bas dans stdout/stderr. Les appels ke.call(...) pilotent KillEngine et demandent KillEngine lancé avec KILLENGINE_AUTOMATION_PIPE=1."
+    },
+    "status": {
+      "notTested": "non testé",
+      "luaMissing": "lua introuvable",
+      "helperMissing": "helper introuvable",
+      "ready": "prêt"
+    },
+    "automationPipeWarningStart": "Les appels",
+    "automationPipeWarningMiddle": "nécessitent le pipe d'automatisation actif : active \"Mode Automation\" dans Paramètres, ou lance KillEngine avec",
+    "saveNamePlaceholder": "Nom du script (pour le sauvegarder)",
+    "saveToProfile": "Sauvegarder dans le profil",
+    "savedCount": "Sauvegardé ({count} script(s) dans ce profil)",
+    "savedScripts": "Scripts sauvegardés",
+    "loading": "Chargement...",
+    "refresh": "Rafraîchir",
+    "noSavedScripts": "Aucun script sauvegardé pour ce profil.",
+    "load": "Charger",
+    "delete": "Supprimer",
+    "error": "Erreur",
+    "start": "Démarrer",
+    "stop": "Arrêter",
+    "replHintStart": "Un process Lua gardé vivant : les variables et",
+    "replHintEnd": "persistent d’une ligne à l’autre, contrairement à \"Exécuter\" ci-dessus qui relance un process à chaque fois.",
+    "replEmpty": "Tape une ligne ci-dessous et Entrée pour l'exécuter.",
+    "send": "Envoyer",
+    "title": "Lua",
+    "runtime": "Runtime",
+    "lua": "Lua",
+    "helper": "Helper",
+    "pipe": "Pipe",
+    "script": "Script",
+    "timeout": "Timeout",
+    "ms": "ms",
+    "stdout": "stdout",
+    "stderr": "stderr",
+    "exitCode": "exit {code}",
+    "replTitle": "REPL interactif",
+    "replPlaceholder": "ke.ping('hello') / 1+1 / local x = 5"
+  },
+  "speedhack": {
+    "noProcess": "Aucun processus attaché",
+    "intro": {
+      "what": "Le speedhack : accélère ou ralentit artificiellement la perception du temps par le processus attaché.",
+      "purpose": "Passer un chargement plus vite, ralentir un ennemi trop rapide — sans toucher à la mémoire du jeu.",
+      "how": "Attache un processus, choisis un facteur de vitesse et applique-le."
+    },
+    "status": {
+      "unknown": "Inconnu",
+      "installFailed": "Échec install",
+      "active": "Actif",
+      "inactive": "Inactif"
+    },
+    "attachPrompt": "Attache d'abord un processus autorisé pour accélérer ou ralentir le temps qu'il perçoit.",
+    "goToProcess": "Aller à Processus",
+    "statusLabel": "Statut :",
+    "activeFactor": "Facteur actif :",
+    "installError": "Aucune fonction de temps n'a pu être hookée dans cette cible.",
+    "pauseTitle": "Gèle l'horloge perçue par la cible — aucune animation/minuteur ne progresse tant que c'est actif.",
+    "disable": "Désactiver",
+    "enable": "Activer",
+    "injectionHintStart": "Injecte un composant dans la cible qui hooke ses fonctions de temps (QueryPerformanceCounter,",
+    "injectionHintEnd": "— traité comme une écriture par injection, confirmation requise.",
+    "title": "Speedhack",
+    "pause": "Pause (0x)"
   }
 }

@@ -42,7 +42,7 @@ const groupedTerms = computed(() => {
     <div class="header">
       <div>
         <h1>{{ $t('nav.lexicon') }}</h1>
-        <p>Les termes techniques employés dans KillEngine, expliqués simplement.</p>
+        <p>{{ $t('lexicon.description') }}</p>
       </div>
     </div>
 
