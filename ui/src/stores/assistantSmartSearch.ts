@@ -16,7 +16,7 @@
  * ecriture memoire mode standard/kernel et ajout au Watch live.
  */
 import { defineStore, storeToRefs } from 'pinia'
-import { nextTick, ref, type Ref } from 'vue'
+import { computed, nextTick, ref, type Ref } from 'vue'
 import {
   backend,
   type ChatMemoryTargetsResult,
@@ -37,6 +37,9 @@ import { useInvestigationStore, type InvestigationStep } from './investigation'
 import { useScanningStore } from './scanning'
 import { useTrainerStore, type TrainerFeature } from './trainer'
 import { useWriteFreezeStore } from './writeFreeze'
+import { i18n } from '@/i18n'
+
+const { t } = i18n.global
 
 export type AssistantView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'modules' | 'settings'
 
@@ -186,108 +189,108 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
   }
 
   const pendingAssistantAction = ref('')
-  const workflowPresets = ref<WorkflowPreset[]>([
+  const workflowPresets = computed<WorkflowPreset[]>(() => [
     {
       id: 'exact-value',
-      title: 'Valeur directe',
-      description: 'Quand tu connais la valeur actuelle et la valeur cible.',
-      prompt: 'Valeur actuelle 100, objectif 9999',
+      title: t('assistantSmartSearchStore.presets.exactValue.title'),
+      description: t('assistantSmartSearchStore.presets.exactValue.description'),
+      prompt: t('assistantSmartSearchStore.presets.exactValue.prompt'),
       startView: 'assistant',
       mode: 'auto',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Auto lance un scan exact puis prépare un checkpoint si peu de candidats restent.',
+      nextStep: t('assistantSmartSearchStore.presets.exactValue.nextStep'),
     },
     {
       id: 'unknown-change',
-      title: 'Valeur inconnue',
-      description: 'Quand tu sais seulement que la valeur augmente, diminue ou change.',
-      prompt: 'Je ne connais pas la valeur exacte, aide-moi à la retrouver avec une recherche unknown',
+      title: t('assistantSmartSearchStore.presets.unknownChange.title'),
+      description: t('assistantSmartSearchStore.presets.unknownChange.description'),
+      prompt: t('assistantSmartSearchStore.presets.unknownChange.prompt'),
       startView: 'assistant',
       mode: 'auto',
       valueType: 'Auto',
       risk: 'safe',
-      nextStep: 'Auto prépare une capture unknown, puis attend ton observation suivante.',
+      nextStep: t('assistantSmartSearchStore.presets.unknownChange.nextStep'),
     },
     {
       id: 'display-trace',
-      title: 'Valeur affichée introuvable',
-      description: 'Quand le scan numérique ne trouve rien mais le texte est visible à l’écran.',
-      prompt: 'La valeur affichée existe mais le scan exact ne trouve rien, lance Trace UI string',
+      title: t('assistantSmartSearchStore.presets.displayTrace.title'),
+      description: t('assistantSmartSearchStore.presets.displayTrace.description'),
+      prompt: t('assistantSmartSearchStore.presets.displayTrace.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Expert ouvre Trace UI string pour chercher texte, sources numériques et backrefs.',
+      nextStep: t('assistantSmartSearchStore.presets.displayTrace.nextStep'),
     },
     {
       id: 'stable-trainer',
-      title: 'Transformer en trainer',
-      description: 'Quand une adresse ou signature semble fiable et doit devenir un toggle.',
-      prompt: 'Transforme la trouvaille confirmée en feature Trainer réutilisable',
+      title: t('assistantSmartSearchStore.presets.stableTrainer.title'),
+      description: t('assistantSmartSearchStore.presets.stableTrainer.description'),
+      prompt: t('assistantSmartSearchStore.presets.stableTrainer.prompt'),
       startView: 'trainer',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'write',
-      nextStep: 'Trainer prépare une feature locale avec confirmation avant écriture, freeze ou patch.',
+      nextStep: t('assistantSmartSearchStore.presets.stableTrainer.nextStep'),
     },
     {
       id: 'code-investigation',
-      title: 'Qui écrit cette valeur',
-      description: 'Quand il faut comprendre quelle instruction modifie une adresse confirmée.',
-      prompt: 'Adresse confirmée : trouver ce qui écrit dessus puis proposer une signature AOB',
+      title: t('assistantSmartSearchStore.presets.codeInvestigation.title'),
+      description: t('assistantSmartSearchStore.presets.codeInvestigation.description'),
+      prompt: t('assistantSmartSearchStore.presets.codeInvestigation.prompt'),
       startView: 'investigation',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'debug',
-      nextStep: 'Investigation garde le checkpoint; Expert lance Find What Writes uniquement après confirmation.',
+      nextStep: t('assistantSmartSearchStore.presets.codeInvestigation.nextStep'),
     },
     // Scénarios courants Expert/Trainer (finition commerciale) : mêmes champs
     // que les presets Assistant ci-dessus, réutilisent applyWorkflowPreset()
     // tel quel — juste des données, pas un nouveau mécanisme.
     {
       id: 'scenario-money',
-      title: 'Argent / Or',
-      description: 'Ressource principale du jeu (pièces, or, crédits...).',
-      prompt: 'Je cherche l\'argent ou l\'or, valeur affichée à l\'écran',
+      title: t('assistantSmartSearchStore.presets.scenarioMoney.title'),
+      description: t('assistantSmartSearchStore.presets.scenarioMoney.description'),
+      prompt: t('assistantSmartSearchStore.presets.scenarioMoney.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Lance un scan exact avec la valeur affichée dans le panneau Scan exact.',
+      nextStep: t('assistantSmartSearchStore.presets.scenarioMoney.nextStep'),
     },
     {
       id: 'scenario-health',
-      title: 'Vie / PV',
-      description: 'Points de vie ou de santé du joueur.',
-      prompt: 'Je cherche les points de vie (HP), valeur affichée à l\'écran',
+      title: t('assistantSmartSearchStore.presets.scenarioHealth.title'),
+      description: t('assistantSmartSearchStore.presets.scenarioHealth.description'),
+      prompt: t('assistantSmartSearchStore.presets.scenarioHealth.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Lance un scan exact avec la valeur affichée, fais varier la vie en jeu puis réduis.',
+      nextStep: t('assistantSmartSearchStore.presets.scenarioHealth.nextStep'),
     },
     {
       id: 'scenario-score',
-      title: 'Score / Niveau',
-      description: 'Score, expérience ou niveau du joueur.',
-      prompt: 'Je cherche le score ou le niveau, valeur affichée à l\'écran',
+      title: t('assistantSmartSearchStore.presets.scenarioScore.title'),
+      description: t('assistantSmartSearchStore.presets.scenarioScore.description'),
+      prompt: t('assistantSmartSearchStore.presets.scenarioScore.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Lance un scan exact, ou passe en Unknown si la valeur change en continu.',
+      nextStep: t('assistantSmartSearchStore.presets.scenarioScore.nextStep'),
     },
     {
       id: 'scenario-ammo',
-      title: 'Munitions',
-      description: 'Compteur de munitions ou de ressources consommables.',
-      prompt: 'Je cherche les munitions, valeur affichée à l\'écran',
+      title: t('assistantSmartSearchStore.presets.scenarioAmmo.title'),
+      description: t('assistantSmartSearchStore.presets.scenarioAmmo.description'),
+      prompt: t('assistantSmartSearchStore.presets.scenarioAmmo.prompt'),
       startView: 'expert',
       mode: 'manual',
       valueType: 'Int32',
       risk: 'safe',
-      nextStep: 'Lance un scan exact, tire une fois en jeu puis réduis avec la nouvelle valeur.',
+      nextStep: t('assistantSmartSearchStore.presets.scenarioAmmo.nextStep'),
     },
   ])
   const lastWorkflowPresetId = ref('')
@@ -350,13 +353,13 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
   }
 
   function addInvestigationStep(step: Omit<InvestigationStep, 'id' | 'time'>) {
-    investigationStore.addInvestigationStep(step, searchQuery.value || 'Investigation manuelle', processName.value)
+    investigationStore.addInvestigationStep(step, searchQuery.value || t('assistantSmartSearchStore.investigation.manualFallback'), processName.value)
   }
 
   function applyWorkflowPreset(id: string) {
     const preset = workflowPresets.value.find((item) => item.id === id)
     if (!preset) {
-      addActionLog('workflow', 'Preset introuvable', id, 'warning')
+      addActionLog('workflow', t('assistantSmartSearchStore.workflow.presetMissing'), id, 'warning')
       return null
     }
     lastWorkflowPresetId.value = preset.id
@@ -366,11 +369,11 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       else exactScanType.value = preset.valueType
     }
     if (!activeInvestigation.value) {
-      startInvestigation(preset.prompt, `Preset: ${preset.title}`)
+      startInvestigation(preset.prompt, t('assistantSmartSearchStore.workflow.presetTitle', { title: preset.title }))
     }
     addInvestigationStep({
-      title: `Preset chargé: ${preset.title}`,
-      detail: `${preset.description} Prochaine étape: ${preset.nextStep}`,
+      title: t('assistantSmartSearchStore.workflow.presetLoadedTitle', { title: preset.title }),
+      detail: t('assistantSmartSearchStore.workflow.presetLoadedDetail', { description: preset.description, nextStep: preset.nextStep }),
       status: 'planned',
       tool: 'applyWorkflowPreset',
       risk: preset.risk,
@@ -381,9 +384,9 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         startView: preset.startView,
       },
     })
-    pushMessage('assistant', `Preset chargé: ${preset.title}. ${preset.nextStep}`)
+    pushMessage('assistant', t('assistantSmartSearchStore.workflow.presetLoadedMessage', { title: preset.title, nextStep: preset.nextStep }))
     activeView.value = preset.startView
-    addActionLog('workflow', `Preset chargé: ${preset.title}`, preset.nextStep, 'success')
+    addActionLog('workflow', t('assistantSmartSearchStore.workflow.presetLoadedTitle', { title: preset.title }), preset.nextStep, 'success')
     return preset
   }
 
@@ -438,9 +441,9 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
   async function resetWorkflow() {
     try {
       const result = await backend.getController().clearScanContext()
-      addActionLog('scan', 'Nouveau scan', String(result.message ?? 'Contexte de scan vidé.'), 'success')
+      addActionLog('scan', t('assistantSmartSearchStore.scan.newScan'), String(result.message ?? t('assistantSmartSearchStore.scan.contextCleared')), 'success')
     } catch (e) {
-      addActionLog('scan', 'Nouveau scan local', `Backend non purgé : ${String(e)}`, 'warning')
+      addActionLog('scan', t('assistantSmartSearchStore.scan.localNewScan'), t('assistantSmartSearchStore.scan.backendNotCleared', { error: String(e) }), 'warning')
     }
     workflowStatus.value = 'idle'
     targetValueGuided.value = ''
@@ -454,7 +457,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     unknownSnapshotResult.value = null
     unknownNextScanResult.value = null
     nextScanValue.value = ''
-    scanStatusText.value = 'Nouveau scan prêt.'
+    scanStatusText.value = t('assistantSmartSearchStore.scan.ready')
     setScanProgress(0)
 
     // Avant : "Nouveau scan" ne vidait que le candidate store côté guidé, en
@@ -489,18 +492,18 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
 
   async function doGuidedChange() {
     // Bouton "J'ai changé" - invite l'utilisateur à donner la nouvelle valeur.
-    pushMessage('assistant', 'Parfait ! Donne-moi maintenant la nouvelle valeur affichée dans le jeu.')
+    pushMessage('assistant', t('assistantSmartSearchStore.guidedChange.askNewValue'))
     workflowStatus.value = 'awaiting_new_value'
   }
 
   async function clearAutoResolveMemory(allProcesses = false) {
     const controller = backend.getController()
     if (!controller.clearAutoResolveMemory) {
-      addActionLog('ai_memory', 'Mémoire Auto indisponible', 'Backend non exposé.', 'warning')
-      return { success: false, error: 'Backend non exposé.' }
+      addActionLog('ai_memory', t('assistantSmartSearchStore.autoMemory.unavailableTitle'), t('assistantSmartSearchStore.errors.backendNotExposed'), 'warning')
+      return { success: false, error: t('assistantSmartSearchStore.errors.backendNotExposed') }
     }
     const result = await controller.clearAutoResolveMemory(allProcesses)
-    addActionLog('ai_memory', 'Mémoire Auto vidée', String(result.message ?? ''), result.success === false ? 'warning' : 'success')
+    addActionLog('ai_memory', t('assistantSmartSearchStore.autoMemory.clearedTitle'), String(result.message ?? ''), result.success === false ? 'warning' : 'success')
     return result
   }
 
@@ -518,15 +521,15 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
   async function confirmChatMemoryWrite(value: string) {
     const controller = backend.getController()
     if (!controller.confirmChatMemoryWrite) {
-      addActionLog('checkpoint', 'Écriture chat indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('assistantSmartSearchStore.chatWrite.unavailable'), t('assistantSmartSearchStore.errors.backendNotExposed'), 'warning')
       return null
     }
     try {
       const result = await controller.confirmChatMemoryWrite(value)
-      addActionLog('checkpoint', result.success === true ? 'Écriture chat OK' : 'Écriture chat échouée', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      addActionLog('checkpoint', result.success === true ? t('assistantSmartSearchStore.chatWrite.ok') : t('assistantSmartSearchStore.chatWrite.failed'), String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
       addInvestigationStep({
-        title: result.success === true ? 'Écriture chat exécutée' : 'Écriture chat échouée',
-        detail: String(result.message ?? result.error ?? `valeur = ${value}`),
+        title: result.success === true ? t('assistantSmartSearchStore.chatWrite.executed') : t('assistantSmartSearchStore.chatWrite.failed'),
+        detail: String(result.message ?? result.error ?? t('assistantSmartSearchStore.common.valueEquals', { value })),
         status: result.success === true ? 'success' : 'error',
         tool: 'confirmChatMemoryWrite',
         risk: 'write',
@@ -534,7 +537,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       })
       return result
     } catch (e) {
-      addActionLog('checkpoint', 'Écriture chat échouée', String(e), 'error')
+      addActionLog('checkpoint', t('assistantSmartSearchStore.chatWrite.failed'), String(e), 'error')
       return null
     }
   }
@@ -542,15 +545,15 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
   async function confirmChatMemoryFreeze(value: string) {
     const controller = backend.getController()
     if (!controller.confirmChatMemoryFreeze) {
-      addActionLog('checkpoint', 'Freeze chat indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('assistantSmartSearchStore.chatFreeze.unavailable'), t('assistantSmartSearchStore.errors.backendNotExposed'), 'warning')
       return null
     }
     try {
       const result = await controller.confirmChatMemoryFreeze(value)
-      addActionLog('checkpoint', result.success === true ? 'Freeze chat OK' : 'Freeze chat échoué', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      addActionLog('checkpoint', result.success === true ? t('assistantSmartSearchStore.chatFreeze.ok') : t('assistantSmartSearchStore.chatFreeze.failed'), String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
       addInvestigationStep({
-        title: result.success === true ? 'Freeze chat exécuté' : 'Freeze chat échoué',
-        detail: String(result.message ?? result.error ?? `valeur = ${value}`),
+        title: result.success === true ? t('assistantSmartSearchStore.chatFreeze.executed') : t('assistantSmartSearchStore.chatFreeze.failed'),
+        detail: String(result.message ?? result.error ?? t('assistantSmartSearchStore.common.valueEquals', { value })),
         status: result.success === true ? 'success' : 'error',
         tool: 'confirmChatMemoryFreeze',
         risk: 'write',
@@ -558,7 +561,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       })
       return result
     } catch (e) {
-      addActionLog('checkpoint', 'Freeze chat échoué', String(e), 'error')
+      addActionLog('checkpoint', t('assistantSmartSearchStore.chatFreeze.failed'), String(e), 'error')
       return null
     }
   }
@@ -566,15 +569,15 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
   async function confirmRewriteLastAutoWrite(value: string) {
     const controller = backend.getController()
     if (!controller.confirmRewriteLastAutoWrite) {
-      addActionLog('checkpoint', 'Réécriture chat indisponible', 'Backend non exposé.', 'warning')
+      addActionLog('checkpoint', t('assistantSmartSearchStore.chatRewrite.unavailable'), t('assistantSmartSearchStore.errors.backendNotExposed'), 'warning')
       return null
     }
     try {
       const result = await controller.confirmRewriteLastAutoWrite(value)
-      addActionLog('checkpoint', result.success === true ? 'Réécriture chat OK' : 'Réécriture chat échouée', String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
+      addActionLog('checkpoint', result.success === true ? t('assistantSmartSearchStore.chatRewrite.ok') : t('assistantSmartSearchStore.chatRewrite.failed'), String(result.message ?? result.error ?? ''), result.success === true ? 'success' : 'error')
       addInvestigationStep({
-        title: result.success === true ? 'Réécriture chat exécutée' : 'Réécriture chat échouée',
-        detail: String(result.message ?? result.error ?? `valeur = ${value}`),
+        title: result.success === true ? t('assistantSmartSearchStore.chatRewrite.executed') : t('assistantSmartSearchStore.chatRewrite.failed'),
+        detail: String(result.message ?? result.error ?? t('assistantSmartSearchStore.common.valueEquals', { value })),
         status: result.success === true ? 'success' : 'error',
         tool: 'confirmRewriteLastAutoWrite',
         risk: 'write',
@@ -582,7 +585,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       })
       return result
     } catch (e) {
-      addActionLog('checkpoint', 'Réécriture chat échouée', String(e), 'error')
+      addActionLog('checkpoint', t('assistantSmartSearchStore.chatRewrite.failed'), String(e), 'error')
       return null
     }
   }
@@ -625,10 +628,10 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       const result = await backend.getController().clearActiveChatMemoryTargets()
       activeChatMemoryTargets.value = []
       await refreshSmartSearchContext()
-      pushMessage('assistant', `J'ai oublié ${String(result.cleared ?? 0)} adresse(s) mémoire active(s).`)
+      pushMessage('assistant', t('assistantSmartSearchStore.memoryTargets.cleared', { count: String(result.cleared ?? 0) }))
       return result
     } catch (e) {
-      pushMessage('assistant', "Impossible d'oublier les adresses mémoire : " + String(e), { isError: true })
+      pushMessage('assistant', t('assistantSmartSearchStore.memoryTargets.clearFailed', { error: String(e) }), { isError: true })
       return { success: false, error: String(e), count: 0, targets: [] }
     }
   }
@@ -678,7 +681,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     activeInvestigation.value.checkpoints = [
       ...scored.slice(0, 8).map(({ match, score }) => ({
         kind: 'encrypted_hit',
-        label: `Scan chiffre 0x${String(match.address ?? '').replace(/^0x/i, '')}`,
+        label: t('assistantSmartSearchStore.checkpoints.encryptedScanLabel', { address: String(match.address ?? '').replace(/^0x/i, '') }),
         address: String(match.address ?? '').replace(/^0x/i, ''),
         type: String(match.type ?? 'Int32'),
         value,
@@ -715,7 +718,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         confidenceScore: score,
         confidenceLabel: `score ${score}/100`,
         requiresConfirmation: false,
-        reason: 'String affichee candidate; analyser les sources numeriques avant toute ecriture.',
+        reason: t('assistantSmartSearchStore.checkpoints.uiStringReason'),
       })),
       ...activeInvestigation.value.checkpoints,
     ].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)).slice(0, 12)
@@ -773,8 +776,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         ...activeInvestigation.value.checkpoints,
       ].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)).slice(0, 12)
       addInvestigationStep({
-        title: 'Sources UI auto analysées',
-        detail: `${autoUiStringSources.value.length} source(s) numérique(s) depuis Trace UI fallback.`,
+        title: t('assistantSmartSearchStore.uiSources.autoAnalyzedTitle'),
+        detail: t('assistantSmartSearchStore.uiSources.autoAnalyzedDetail', { count: autoUiStringSources.value.length }),
         status: 'checkpoint',
         tool: 'analyzeUiStringSources',
         risk: 'safe',
@@ -799,18 +802,18 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       const type = String(best.variantLabel ?? best.type ?? '')
       const score = Math.round(Number(best.score ?? 0) * 100)
       const reasons = Array.isArray(best.reasons) ? best.reasons.map(String).join(' · ') : ''
-      lines.push(`Meilleure piste actuelle : 0x${address} (${type}) · score ${score}%.`)
-      if (reasons) lines.push(`Pourquoi : ${reasons}.`)
-      lines.push('Prochaine action recommandée : Watch cette piste, puis lance Écrit par si elle suit bien la valeur affichée.')
+      lines.push(t('assistantSmartSearchStore.investigation.bestCandidate', { address, type, score }))
+      if (reasons) lines.push(t('assistantSmartSearchStore.investigation.why', { reasons }))
+      lines.push(t('assistantSmartSearchStore.investigation.nextActionWatch'))
     } else {
-      lines.push("Je n'ai pas encore de piste scorée. Lance Trace UI string, puis Analyser sources ou Démarrer enquête.")
+      lines.push(t('assistantSmartSearchStore.investigation.noScoredCandidate'))
     }
 
     const hitCount = Number(report.debugger?.hitCount ?? 0)
     if (hitCount > 0) {
-      lines.push(`${hitCount} hit(s) debugger capturé(s) : tu peux analyser le RIP puis stabiliser l'AOB avant de sauver le trainer.`)
+      lines.push(t('assistantSmartSearchStore.investigation.debuggerHits', { count: hitCount }))
     } else if (report.debugger?.cancelled) {
-      lines.push('La dernière capture debugger a été annulée.')
+      lines.push(t('assistantSmartSearchStore.investigation.debuggerCancelled'))
     }
 
     const matchesFound = Number(report.aob?.matchesFound ?? Number.NaN)
@@ -818,10 +821,10 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       const weakQuality = Number(report.aob?.weakQualityCount ?? 0)
       const blockedTrainer = Number(report.aob?.trainerBlockedCount ?? 0)
       if (weakQuality > 0 || blockedTrainer > 0) {
-        lines.push(`AOB : ${weakQuality} signature(s) faible(s), ${blockedTrainer} blocage(s) Trainer. Stabilise avant de sauver/appliquer.`)
-      } else if (matchesFound === 1) lines.push('AOB : signature unique et qualité acceptable, bonne candidate pour un patch trainer.')
-      else if (matchesFound > 1) lines.push(`AOB : ${matchesFound} matches, il faut stabiliser avant de patcher.`)
-      else lines.push('AOB : aucune signature exploitable pour le moment.')
+        lines.push(t('assistantSmartSearchStore.investigation.aobWeak', { weakQuality, blockedTrainer }))
+      } else if (matchesFound === 1) lines.push(t('assistantSmartSearchStore.investigation.aobUnique'))
+      else if (matchesFound > 1) lines.push(t('assistantSmartSearchStore.investigation.aobMultiple', { count: matchesFound }))
+      else lines.push(t('assistantSmartSearchStore.investigation.aobNone'))
     }
 
     return lines.join('\n')
@@ -838,7 +841,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     // startSmartSearch, qui ne saurait pas quoi faire de ce texte libre.
     if (pendingAssistantAction.value === 'encrypted_scan') {
       pendingAssistantAction.value = ''
-      if (!/nouvelle recherche|oublie|annule|rollback|abandonne|laisse tomber/i.test(query)) {
+      if (!/nouvelle recherche|new search|oublie|forget|annule|cancel|rollback|abandonne|give up|laisse tomber|drop it/i.test(query)) {
         pushMessage('user', query)
         searchQuery.value = ''
         await runAutoEncryptedScan(query)
@@ -853,13 +856,13 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     if (localInvestigationReply) {
       pushMessage('assistant', localInvestigationReply, {
         intent: 'InvestigationReport',
-        intentRationale: "L'utilisateur demande une décision sur l'enquête mémoire courante.",
+        intentRationale: t('assistantSmartSearchStore.intentRationale.investigationDecision'),
       })
       searchQuery.value = ''
       return
     }
 
-    const thinkingMessage = pushMessage('assistant', 'Je vais rechercher ça en mémoire...', { isThinking: true })
+    const thinkingMessage = pushMessage('assistant', t('assistantSmartSearchStore.search.thinking'), { isThinking: true })
     searchQuery.value = ''
     isSearching.value = true
     await letChatRenderBeforeBackendWork()
@@ -882,8 +885,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         const features = getTrainerFeaturesSnapshot()
         result.workflowStatus = 'trainer_features_listed'
         result.message = features.length === 0
-          ? 'Trainer : aucune feature locale pour le moment.'
-          : `Trainer : ${features.length} feature(s) locale(s) trouvée(s). Tu peux en créer une nouvelle ou en gérer l'activation dans l'onglet Trainer.`
+          ? t('assistantSmartSearchStore.trainer.noFeatures')
+          : t('assistantSmartSearchStore.trainer.featuresFound', { count: features.length })
       } else if (pendingAction === 'trainer_create_write') {
         const pendingFeature = (result.pendingFeature ?? {}) as Partial<TrainerFeature>
         const created = createTrainerFeature(pendingFeature)
@@ -893,18 +896,18 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         const locatorSummary = String(result.locatorSummary ?? '')
         if (!created) {
           result.workflowStatus = 'trainer_feature_create_failed'
-          result.message = "Trainer : je n'ai pas pu créer la feature (adresse manquante ou invalide)."
+          result.message = t('assistantSmartSearchStore.trainer.createFailed')
         } else {
           result.workflowStatus = 'trainer_feature_created'
           result.message = created.locatorKind === 'absolute'
-            ? `Trainer : feature write créée pour ${address} (${valueType} = ${value}), mais aucun locator résilient trouvé — elle reste en adresse absolue brute et ne survivra probablement pas à un relaunch ou un changement de scène du process cible. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.`
-            : `Trainer : feature write créée pour ${address} (${valueType} = ${value}), ${locatorSummary}. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.`
+            ? t('assistantSmartSearchStore.trainer.createdAbsolute', { address, valueType, value })
+            : t('assistantSmartSearchStore.trainer.createdWithLocator', { address, valueType, value, locatorSummary })
         }
       } else if (pendingAction === 'trainer_delete_feature') {
         const trainerId = Number(result.pendingTrainerId ?? 0)
         deleteTrainerFeature(trainerId)
         result.workflowStatus = 'trainer_feature_deleted'
-        result.message = `Trainer : suppression demandée pour la feature #${trainerId}.`
+        result.message = t('assistantSmartSearchStore.trainer.deleteRequested', { id: trainerId })
       }
 
       searchResult.value = result.message ?? JSON.stringify(result, null, 2)
@@ -1015,17 +1018,17 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         ?? result.error
         ?? result.actionError
         ?? actionResultError
-        ?? "Je n'ai pas assez d'informations pour agir. Donne-moi une valeur à chercher ou une adresse à utiliser.",
+        ?? t('assistantSmartSearchStore.search.notEnoughInfo'),
       ).trim()
       updateMessage(
         thinkingMessage.id,
-        assistantText || "Je n'ai pas assez d'informations pour agir. Donne-moi une valeur à chercher ou une adresse à utiliser.",
+        assistantText || t('assistantSmartSearchStore.search.notEnoughInfo'),
         { ...extras, isThinking: false },
       )
       await refreshActiveChatMemoryTargets()
       await refreshSmartSearchContext()
     } catch (e) {
-      updateMessage(thinkingMessage.id, 'Erreur de recherche : ' + String(e), { isThinking: false, isError: true })
+      updateMessage(thinkingMessage.id, t('assistantSmartSearchStore.search.error', { error: String(e) }), { isThinking: false, isError: true })
     } finally {
       isSearching.value = false
     }
@@ -1037,20 +1040,20 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
 
     const controller = backend.getController()
     if (!controller.startAutoResolve) {
-      pushMessage('assistant', 'Auto-résolution non exposée par ce backend.', { isError: true })
+      pushMessage('assistant', t('assistantSmartSearchStore.autoResolve.unavailable'), { isError: true })
       return
     }
 
     pushMessage('user', `Auto: ${query}`)
-    startInvestigation(query, 'Auto Resolve')
+    startInvestigation(query, t('assistantSmartSearchStore.autoResolve.investigationTitle'))
     addInvestigationStep({
-      title: 'Objectif utilisateur',
+      title: t('assistantSmartSearchStore.autoResolve.userObjective'),
       detail: query,
       status: 'running',
       tool: 'startAutoResolve',
       risk: 'safe',
     })
-    const thinkingMessage = pushMessage('assistant', 'Je prépare un plan auto et je lance la première action sûre...', { isThinking: true })
+    const thinkingMessage = pushMessage('assistant', t('assistantSmartSearchStore.autoResolve.thinking'), { isThinking: true })
     searchQuery.value = ''
     isSearching.value = true
     await letChatRenderBeforeBackendWork()
@@ -1106,7 +1109,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       if (Array.isArray(result.executedSafeSteps)) {
         for (const step of result.executedSafeSteps.slice(0, 5) as Array<Record<string, unknown>>) {
           addInvestigationStep({
-            title: `Auto safe: ${String(step.tool ?? 'outil')}`,
+            title: t('assistantSmartSearchStore.autoResolve.safeStepTitle', { tool: String(step.tool ?? t('assistantSmartSearchStore.autoResolve.toolFallback')) }),
             detail: String(step.detail ?? step.status ?? ''),
             status: String(step.status ?? '') === 'error' ? 'warning' : 'success',
             tool: String(step.tool ?? 'auto_safe_action'),
@@ -1116,8 +1119,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         }
       } else if (result.firstAction) {
         addInvestigationStep({
-          title: String(result.safeAction ?? result.actionStatus ?? 'Action safe executee'),
-          detail: `${candidatePage.value?.totalCount ?? extractCandidateCount(result) ?? 0} candidat(s)`,
+          title: String(result.safeAction ?? result.actionStatus ?? t('assistantSmartSearchStore.autoResolve.safeActionExecuted')),
+          detail: t('assistantSmartSearchStore.autoResolve.candidateCount', { count: candidatePage.value?.totalCount ?? extractCandidateCount(result) ?? 0 }),
           status: result.success === false ? 'warning' : 'success',
           tool: String(result.safeAction ?? 'auto_safe_action'),
           risk: 'safe',
@@ -1137,7 +1140,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       const planLines = Array.isArray(result.plan)
         ? result.plan.slice(0, 6).map((step, index) => {
             const row = step as Record<string, unknown>
-            return `${index + 1}. ${String(row.description ?? row.type ?? 'Étape')}`
+            return `${index + 1}. ${String(row.description ?? row.type ?? t('assistantSmartSearchStore.autoResolve.stepFallback'))}`
           })
         : []
       const executedSafeSteps = Array.isArray(result.executedSafeSteps)
@@ -1169,7 +1172,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         mergedActions.push(action)
       }
       const nextBestHint = nextBestAction
-        ? `Priorité assistant: ${String(nextBestAction.label ?? nextBestAction.id)}${Number.isFinite(Number(nextBestAction.confidence)) ? ` (${Number(nextBestAction.confidence)}/100)` : ''} — ${String(nextBestAction.reason ?? '')}`
+        ? t('assistantSmartSearchStore.autoResolve.nextBestHint', { label: String(nextBestAction.label ?? nextBestAction.id), confidence: Number.isFinite(Number(nextBestAction.confidence)) ? ` (${Number(nextBestAction.confidence)}/100)` : '', reason: String(nextBestAction.reason ?? '') })
         : ''
       const reportSummary = String(contextReport.summary ?? '').trim()
       const learnedProfile = typeof contextReport.learnedProfile === 'object' && contextReport.learnedProfile !== null
@@ -1178,7 +1181,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       const learnedStarts = Number(learnedProfile.starts ?? 0)
       const learnedNoCandidate = Number(learnedProfile.noCandidateCount ?? 0)
       const learnedHint = learnedStarts > 0
-        ? `Mémoire jeu: ${learnedStarts} passe(s) Auto, ${learnedNoCandidate} sans candidat.`
+        ? t('assistantSmartSearchStore.autoResolve.learnedHint', { starts: learnedStarts, noCandidate: learnedNoCandidate })
         : ''
       const preferredStrategy = typeof contextReport.preferredStrategy === 'object' && contextReport.preferredStrategy !== null
         ? contextReport.preferredStrategy as Record<string, unknown>
@@ -1187,24 +1190,24 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       const strategyScore = Number(preferredStrategy.score ?? Number.NaN)
       const strategyReason = String(preferredStrategy.reason ?? '').trim()
       const strategyHint = strategyLabel
-        ? `Stratégie: ${strategyLabel}${Number.isFinite(strategyScore) ? ` (${strategyScore})` : ''}${strategyReason ? ` — ${strategyReason}` : ''}`
+        ? t('assistantSmartSearchStore.autoResolve.strategyHint', { label: strategyLabel, score: Number.isFinite(strategyScore) ? ` (${strategyScore})` : '', reason: strategyReason ? ` — ${strategyReason}` : '' })
         : ''
       const insightHint = telemetryInsights.length > 0
-        ? `Signal telemetry: ${String(telemetryInsights[0].label ?? telemetryInsights[0].id)} — ${String(telemetryInsights[0].nextAction ?? telemetryInsights[0].reason ?? '')}`
+        ? t('assistantSmartSearchStore.autoResolve.telemetryHint', { label: String(telemetryInsights[0].label ?? telemetryInsights[0].id), nextAction: String(telemetryInsights[0].nextAction ?? telemetryInsights[0].reason ?? '') })
         : ''
       const displayValueHint = displayValueReport.enabled === true
-        ? `Rapport valeurs affichées: ${String(displayValueReport.recommendation ?? 'Trace UI string puis sources numeriques confirmees.')}`
+        ? t('assistantSmartSearchStore.autoResolve.displayValueHint', { recommendation: String(displayValueReport.recommendation ?? t('assistantSmartSearchStore.autoResolve.displayValueFallback')) })
         : ''
 
-      const baseMessage = String(result.message ?? result.error ?? 'Plan auto généré.').trim()
+      const baseMessage = String(result.message ?? result.error ?? t('assistantSmartSearchStore.autoResolve.planGenerated')).trim()
       const messageParts = [baseMessage]
       if (nextBestHint) messageParts.push(nextBestHint)
-      if (reportSummary) messageParts.push(`Contexte: ${reportSummary}`)
+      if (reportSummary) messageParts.push(t('assistantSmartSearchStore.autoResolve.context', { summary: reportSummary }))
       if (learnedHint) messageParts.push(learnedHint)
       if (strategyHint) messageParts.push(strategyHint)
       if (insightHint) messageParts.push(insightHint)
       if (displayValueHint) messageParts.push(displayValueHint)
-      if (planLines.length > 0) messageParts.push(`Plan:\n${planLines.join('\n')}`)
+      if (planLines.length > 0) messageParts.push(t('assistantSmartSearchStore.autoResolve.plan', { plan: planLines.join('\n') }))
       const message = messageParts.join('\n\n')
 
       updateMessage(thinkingMessage.id, message, {
@@ -1216,12 +1219,12 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         recoveryActions: mergedActions,
         executedSafeSteps,
         intent: 'AutoResolve',
-        intentRationale: 'Planification proactive avec exécution des actions sûres uniquement.',
+        intentRationale: t('assistantSmartSearchStore.intentRationale.autoResolvePlan'),
       })
       if (result.requiresConfirmation) {
         addInvestigationStep({
-          title: 'Checkpoint confirmation',
-          detail: String(result.confirmationReason ?? 'Confirmation utilisateur requise.'),
+          title: t('assistantSmartSearchStore.autoResolve.checkpointConfirmation'),
+          detail: String(result.confirmationReason ?? t('assistantSmartSearchStore.autoResolve.confirmationRequired')),
           status: 'checkpoint',
           risk: 'write',
           payload: result as Record<string, unknown>,
@@ -1230,13 +1233,13 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       await refreshSmartSearchContext()
     } catch (e) {
       addInvestigationStep({
-        title: 'Erreur Auto Resolve',
+        title: t('assistantSmartSearchStore.autoResolve.errorTitle'),
         detail: String(e),
         status: 'error',
         tool: 'startAutoResolve',
         risk: 'safe',
       })
-      updateMessage(thinkingMessage.id, 'Erreur auto-résolution : ' + String(e), { isThinking: false, isError: true })
+      updateMessage(thinkingMessage.id, t('assistantSmartSearchStore.autoResolve.errorMessage', { error: String(e) }), { isThinking: false, isError: true })
     } finally {
       isSearching.value = false
     }
@@ -1244,7 +1247,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
 
   async function startNewSearchContext() {
     if (isSearching.value) return
-    searchQuery.value = 'nouvelle recherche'
+    searchQuery.value = t('assistantSmartSearchStore.commands.newSearchEmpty')
     await doSearch()
   }
 
@@ -1254,14 +1257,14 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       .filter(Boolean)
       .map((address) => address.startsWith('0x') ? address : `0x${address}`)
     if (addresses.length === 0 || isSearching.value) return
-    searchQuery.value = `j'utilise ces mémoires ${addresses.join(' ')}`
+    searchQuery.value = t('assistantSmartSearchStore.commands.useMemories', { addresses: addresses.join(' ') })
     await doSearch()
   }
 
   async function searchValueElsewhere(value: string) {
     const trimmed = value.trim()
     if (!trimmed || isSearching.value) return
-    searchQuery.value = `nouvelle recherche ${trimmed}`
+    searchQuery.value = t('assistantSmartSearchStore.commands.newSearch', { value: trimmed })
     await doSearch()
   }
 
@@ -1272,10 +1275,10 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     exactScanValue.value = trimmed
     exactScanType.value = type
     searchQuery.value = targetText
-      ? `nouvelle recherche ${trimmed} en ${type} cible ${targetText}`
-      : `nouvelle recherche ${trimmed} en ${type}`
+      ? t('assistantSmartSearchStore.commands.newSearchTypedTarget', { value: trimmed, type, target: targetText })
+      : t('assistantSmartSearchStore.commands.newSearchTyped', { value: trimmed, type })
     await doSearch()
-    addActionLog('assistant', `Recherche Assistant en ${type}`, targetText ? `${trimmed} -> ${targetText}` : trimmed, 'info')
+    addActionLog('assistant', t('assistantSmartSearchStore.search.assistantSearchByType', { type }), targetText ? `${trimmed} -> ${targetText}` : trimmed, 'info')
   }
 
   async function testSingleSuggestedAddress(suggestion: Record<string, unknown>) {
@@ -1285,17 +1288,17 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     if (!address || !value || isSearching.value) return
 
     const normalizedAddress = address.startsWith('0x') ? address.slice(2) : address
-    pushMessage('user', `tester uniquement 0x${normalizedAddress} avec ${value}`)
+    pushMessage('user', t('assistantSmartSearchStore.commands.testOnlyAddress', { address: normalizedAddress, value }))
     try {
       const result = await writeMemoryValueByMode(normalizedAddress, type, value)
       writeResult.value = result
       pushMessage('assistant',
         result.success
-          ? `J'ai écrit ${value} uniquement sur 0x${normalizedAddress}${kernelMemoryModeActive.value ? ' via le driver kernel' : ''}. Vérifie dans le jeu si c'est la bonne adresse.`
-          : `L'écriture sur 0x${normalizedAddress} a échoué : ${result.error}`,
+          ? t(kernelMemoryModeActive.value ? 'assistantSmartSearchStore.singleWrite.okKernel' : 'assistantSmartSearchStore.singleWrite.ok', { value, address: normalizedAddress })
+          : t('assistantSmartSearchStore.singleWrite.failed', { address: normalizedAddress, error: result.error }),
         { isError: !result.success })
     } catch (e) {
-      pushMessage('assistant', `L'écriture sur 0x${normalizedAddress} a échoué : ${String(e)}`, { isError: true })
+      pushMessage('assistant', t('assistantSmartSearchStore.singleWrite.failed', { address: normalizedAddress, error: String(e) }), { isError: true })
     }
   }
 
@@ -1307,8 +1310,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     encryptedScanKey.value = '0'
     encryptedScanKeySearchBits.value = 16
     addInvestigationStep({
-      title: 'Scan chiffre guide',
-      detail: `XOR/Add/Sub/NOT 16-bit borne depuis la valeur ${trimmed}.`,
+      title: t('assistantSmartSearchStore.encryptedScan.guideTitle'),
+      detail: t('assistantSmartSearchStore.encryptedScan.guideDetail', { value: trimmed }),
       status: 'running',
       tool: 'scanEncryptedValue',
       risk: 'safe',
@@ -1349,8 +1352,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     }
     promoteEncryptedMatchesToCheckpoints(trimmed, matches)
     addInvestigationStep({
-      title: 'Scan chiffre termine',
-      detail: `${encryptedScanResult.value?.matchesFound ?? 0} match(es), ${encryptedScanResult.value?.matchesReturned ?? 0} retourne(s).`,
+      title: t('assistantSmartSearchStore.encryptedScan.finishedTitle'),
+      detail: t('assistantSmartSearchStore.encryptedScan.finishedDetail', { matchesFound: encryptedScanResult.value?.matchesFound ?? 0, matchesReturned: encryptedScanResult.value?.matchesReturned ?? 0 }),
       status: encryptedScanResult.value?.success ? 'success' : 'warning',
       tool: 'scanEncryptedValue',
       risk: 'safe',
@@ -1359,8 +1362,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     pushMessage(
       'assistant',
       encryptedScanResult.value?.success
-        ? `Scan chiffré guidé terminé : ${encryptedScanResult.value.matchesFound} match(es).`
-        : `Scan chiffré guidé sans résultat exploitable : ${encryptedScanResult.value?.error ?? 'aucun match'}.`,
+        ? t('assistantSmartSearchStore.encryptedScan.messageOk', { count: encryptedScanResult.value.matchesFound })
+        : t('assistantSmartSearchStore.encryptedScan.messageNoResult', { error: encryptedScanResult.value?.error ?? t('assistantSmartSearchStore.common.noMatch') }),
       { isError: encryptedScanResult.value?.success === false },
     )
   }
@@ -1370,13 +1373,13 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     if (!trimmed || scanBusy.value) return
     const controller = backend.getController()
     if (!controller.scanUiStrings) {
-      pushMessage('assistant', 'Trace UI string non exposé par ce backend.', { isError: true })
+      pushMessage('assistant', t('assistantSmartSearchStore.traceUi.unavailable'), { isError: true })
       return
     }
     scanBusy.value = true
     addInvestigationStep({
-      title: 'Trace UI string guide',
-      detail: `Recherche de la valeur affichee "${trimmed}" en ASCII/UTF-16.`,
+      title: t('assistantSmartSearchStore.traceUi.guideTitle'),
+      detail: t('assistantSmartSearchStore.traceUi.guideDetail', { value: trimmed }),
       status: 'running',
       tool: 'scanUiStrings',
       risk: 'safe',
@@ -1396,8 +1399,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
           matches: tracked.survivors,
         }
         addInvestigationStep({
-          title: 'Trace UI tracking',
-          detail: `${tracked.survivors.length} string(s) suivie(s) vers "${trimmed}".`,
+          title: t('assistantSmartSearchStore.traceUi.trackingTitle'),
+          detail: t('assistantSmartSearchStore.traceUi.trackingDetail', { count: tracked.survivors.length, value: trimmed }),
           status: tracked.success ? 'success' : 'warning',
           tool: 'trackUiStringCandidates',
           risk: 'safe',
@@ -1444,8 +1447,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         candidates: autoUiStringSources.value,
       }
       addInvestigationStep({
-        title: 'Trace UI string termine',
-        detail: `${autoUiStringScanResult.value.matchesFound} string(s), ${autoUiStringSources.value.length} source(s) numerique(s).`,
+        title: t('assistantSmartSearchStore.traceUi.finishedTitle'),
+        detail: t('assistantSmartSearchStore.traceUi.finishedDetail', { strings: autoUiStringScanResult.value.matchesFound, sources: autoUiStringSources.value.length }),
         status: autoUiStringScanResult.value.success ? 'success' : 'warning',
         tool: 'scanUiStrings',
         risk: 'safe',
@@ -1468,8 +1471,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
         activeInvestigation.value.hypotheses = [
           {
             id: 'trace_ui_sources',
-            label: 'Sources numeriques proches des strings UI',
-            reason: `${autoUiStringSources.value.length} source(s) trouvee(s); tester par petits lots avant freeze.`,
+            label: t('assistantSmartSearchStore.traceUi.sourcesHypothesisLabel'),
+            reason: t('assistantSmartSearchStore.traceUi.sourcesHypothesisReason', { count: autoUiStringSources.value.length }),
             safe: false,
             requiresConfirmation: true,
           },
@@ -1480,8 +1483,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       pushMessage(
         'assistant',
         autoUiStringScanResult.value.success
-          ? `Trace UI string a trouvé ${autoUiStringScanResult.value.matchesFound} string(s) et ${autoUiStringSources.value.length} source(s) numérique(s). Les meilleures sources sont dans Investigation/Trainer.`
-          : `Trace UI string n'a pas donné de piste exploitable : ${autoUiStringScanResult.value.error || 'aucun match'}.`,
+          ? t('assistantSmartSearchStore.traceUi.messageOk', { strings: autoUiStringScanResult.value.matchesFound, sources: autoUiStringSources.value.length })
+          : t('assistantSmartSearchStore.traceUi.messageNoResult', { error: autoUiStringScanResult.value.error || t('assistantSmartSearchStore.common.noMatch') }),
         { isError: autoUiStringScanResult.value.success === false },
       )
     } catch (e) {
@@ -1504,7 +1507,7 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
       }
       autoUiStringSources.value = []
       addInvestigationStep({
-        title: 'Trace UI string echoue',
+        title: t('assistantSmartSearchStore.traceUi.failedTitle'),
         detail: String(e),
         status: 'error',
         tool: 'scanUiStrings',
@@ -1521,16 +1524,16 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
 
     if (!unknownSnapshotResult.value?.success) {
       addInvestigationStep({
-        title: 'Unknown Auto capture',
-        detail: 'Aucun snapshot actif : capture initiale avant observation.',
+        title: t('assistantSmartSearchStore.unknown.captureTitle'),
+        detail: t('assistantSmartSearchStore.unknown.captureDetail'),
         status: 'running',
         tool: 'captureUnknownSnapshotAsync',
         risk: 'safe',
       })
       await captureUnknownSnapshot()
       const message = unknownSnapshotResult.value?.success
-        ? 'Snapshot Unknown capturé. Fais varier la valeur dans le processus, puis donne-moi la nouvelle observation pour que je lance increased/decreased/changed/stable.'
-        : `Capture Unknown impossible : ${unknownSnapshotResult.value?.error ?? 'erreur inconnue'}.`
+        ? t('assistantSmartSearchStore.unknown.captureOk')
+        : t('assistantSmartSearchStore.unknown.captureFailed', { error: unknownSnapshotResult.value?.error ?? t('assistantSmartSearchStore.common.unknownError') })
       if (thinkingMessageId !== undefined) {
         updateMessage(thinkingMessageId, message, { isThinking: false, isError: unknownSnapshotResult.value?.success !== true })
       } else {
@@ -1541,8 +1544,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
 
     const mode = inferUnknownModeFromObservation(trimmed)
     addInvestigationStep({
-      title: 'Unknown Auto comparaison',
-      detail: `Observation "${trimmed}" -> mode ${mode}.`,
+      title: t('assistantSmartSearchStore.unknown.compareTitle'),
+      detail: t('assistantSmartSearchStore.unknown.compareDetail', { observation: trimmed, mode }),
       status: 'running',
       tool: 'unknownNextScanAsync',
       risk: 'safe',
@@ -1570,10 +1573,10 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
 
     const status = unknownNextScanResult.value?.error ? 'error' : total <= 25 && total > 0 ? 'checkpoint' : 'success'
     addInvestigationStep({
-      title: 'Unknown Auto terminé',
+      title: t('assistantSmartSearchStore.unknown.finishedTitle'),
       detail: total > 0
-        ? `${total} candidat(s) après ${mode}.${total <= 25 ? ' Checkpoints prêts.' : ' Continue avec une autre variation.'}`
-        : `Aucun candidat après ${mode}.`,
+        ? t(total <= 25 ? 'assistantSmartSearchStore.unknown.finishedDetailCheckpoint' : 'assistantSmartSearchStore.unknown.finishedDetailContinue', { count: total, mode })
+        : t('assistantSmartSearchStore.unknown.noCandidateAfter', { mode }),
       status,
       tool: 'unknownNextScanAsync',
       risk: 'safe',
@@ -1587,8 +1590,8 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     })
 
     const message = total > 0
-      ? `Unknown ${mode} terminé : ${total} candidat(s). ${total <= 25 ? 'J’ai préparé des checkpoints dans Investigation pour tester/freeze sous confirmation.' : 'Fais encore varier la valeur et redonne-moi la nouvelle observation.'}`
-      : `Unknown ${mode} n’a rien gardé. Prochaine piste : Trace UI string ou scan chiffré borné.`
+      ? t(total <= 25 ? 'assistantSmartSearchStore.unknown.messageCheckpoint' : 'assistantSmartSearchStore.unknown.messageContinue', { count: total, mode })
+      : t('assistantSmartSearchStore.unknown.messageNoCandidate', { mode })
     if (thinkingMessageId !== undefined) {
       updateMessage(thinkingMessageId, message, { isThinking: false, isError: Boolean(unknownNextScanResult.value?.error), candidateCount: total })
     } else {
@@ -1605,27 +1608,40 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     candidateFilter.value = normalized
     candidatePageIndex.value = 0
     void refreshCandidates()
-    addActionLog('candidate', `Candidat gardé 0x${normalized}`, 'Filtre appliqué sur cette adresse.', 'success')
+    addActionLog('candidate', t('assistantSmartSearchStore.candidate.keptTitle', { address: normalized }), t('assistantSmartSearchStore.candidate.filterApplied'), 'success')
   }
 
   function ignoreCandidate(address: string) {
     const normalized = address.trim().replace(/^0x/i, '')
     ignoredCandidateAddresses.value = Array.from(new Set([...ignoredCandidateAddresses.value, normalized]))
     keptCandidateAddresses.value = keptCandidateAddresses.value.filter((item) => item !== normalized)
-    addActionLog('candidate', `Candidat ignoré 0x${normalized}`, 'Masqué dans la comparaison visuelle locale.', 'warning')
+    addActionLog('candidate', t('assistantSmartSearchStore.candidate.ignoredTitle', { address: normalized }), t('assistantSmartSearchStore.candidate.hiddenLocal'), 'warning')
   }
 
+  // Slug stable (non traduit) utilisé comme classe CSS par CandidatePanel.vue
+  // (.candidate-kept/.candidate-ignored/...) -- séparé du libellé affiché pour
+  // que le style ne dépende pas de la langue active.
   function candidateVisualState(candidate: Record<string, unknown>): string {
     const address = String(candidate.address ?? '').replace(/^0x/i, '')
-    if (keptCandidateAddresses.value.includes(address)) return 'gardé'
-    if (ignoredCandidateAddresses.value.includes(address)) return 'ignoré'
+    if (keptCandidateAddresses.value.includes(address)) return 'kept'
+    if (ignoredCandidateAddresses.value.includes(address)) return 'ignored'
     const confidence = Number(candidate.confidence ?? Number.NaN)
     if (Number.isFinite(confidence)) {
-      if (confidence >= 0.8) return 'très probable'
-      if (confidence >= 0.5) return 'à vérifier'
-      return 'faible'
+      if (confidence >= 0.8) return 'very-likely'
+      if (confidence >= 0.5) return 'to-verify'
+      return 'weak'
     }
     return 'standard'
+  }
+
+  function candidateVisualStateLabel(candidate: Record<string, unknown>): string {
+    const state = candidateVisualState(candidate)
+    if (state === 'kept') return t('assistantSmartSearchStore.candidate.stateKept')
+    if (state === 'ignored') return t('assistantSmartSearchStore.candidate.stateIgnored')
+    if (state === 'very-likely') return t('assistantSmartSearchStore.candidate.stateVeryLikely')
+    if (state === 'to-verify') return t('assistantSmartSearchStore.candidate.stateToVerify')
+    if (state === 'weak') return t('assistantSmartSearchStore.candidate.stateWeak')
+    return t('assistantSmartSearchStore.candidate.stateStandard')
   }
 
   return {
@@ -1677,5 +1693,6 @@ export const useAssistantSmartSearchStore = defineStore('assistantSmartSearch', 
     keepCandidate,
     ignoreCandidate,
     candidateVisualState,
+    candidateVisualStateLabel,
   }
 })
