@@ -255,7 +255,8 @@
     "speedhack": "Speedhack",
     "network": "Network",
     "lexicon": "Glossary",
-    "modules": "Modules"
+    "modules": "Modules",
+    "languageSwitchLabel": "Interface language"
   },
   "modules": {
     "intro": "Optional KillEngine dependencies: installed/missing status and in-UI installation (local scripts, network download, UAC prompt). Install missing modules before exporting the package to another machine.",
@@ -289,6 +290,13 @@
       "dependencies": "Dependencies",
       "testEnv": "Test Environment",
       "stealth": "Security / Stealth"
+    },
+    "catalog": {
+      "edrExclusion": {
+        "title": "EDR / Defender compatibility",
+        "description": "KillEngine uses remote memory allocation and cross-process write primitives (VirtualAllocEx/WriteProcessMemory/CreateRemoteThread) — exactly what antivirus/EDR software (including Microsoft Defender for Endpoint) watches for to detect malware. A block here doesn't mean something is wrong: it's expected for this legitimate memory-debugging use. This diagnostic checks whether the EDR is actually blocking injection on the attached process, and offers a targeted, reversible exclusion (build/bin folder only) if needed.",
+        "detailClickCheck": "Click \"Check\" to run the test on the attached process."
+      }
     },
     "edr": {
       "check": "Check",

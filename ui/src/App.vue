@@ -80,6 +80,11 @@ watch(
         <span class="logo-text">KillEngine</span>
       </div>
 
+      <div class="lang-switch" role="group" :aria-label="$t('nav.languageSwitchLabel')">
+        <button :class="{ active: store.appLanguage === 'fr' }" @click="store.appLanguage = 'fr'">FR</button>
+        <button :class="{ active: store.appLanguage === 'en' }" @click="store.appLanguage = 'en'">EN</button>
+      </div>
+
       <nav class="nav">
         <button
           class="nav-item"
@@ -351,6 +356,37 @@ body {
   font-weight: 700;
   color: #9fbdff;
   text-shadow: 0 0 18px rgba(122, 162, 247, 0.32);
+}
+
+.lang-switch {
+  display: flex;
+  gap: 4px;
+  padding: 10px 16px 14px;
+  border-bottom: 1px solid rgba(125, 142, 255, 0.14);
+}
+
+.lang-switch button {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid rgba(125, 142, 255, 0.24);
+  border-radius: 6px;
+  background: transparent;
+  color: #7580b3;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.lang-switch button:hover {
+  color: #c7d2ff;
+  border-color: rgba(125, 142, 255, 0.42);
+}
+
+.lang-switch button.active {
+  background: rgba(122, 162, 247, 0.18);
+  color: #9fbdff;
+  border-color: rgba(122, 162, 247, 0.5);
 }
 
 .nav {

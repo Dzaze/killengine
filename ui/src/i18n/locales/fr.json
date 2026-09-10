@@ -255,7 +255,8 @@
     "speedhack": "Speedhack",
     "network": "Réseau",
     "lexicon": "Lexique",
-    "modules": "Modules"
+    "modules": "Modules",
+    "languageSwitchLabel": "Langue de l'interface"
   },
   "modules": {
     "intro": "Dépendances optionnelles de KillEngine : statut installé/manquant et installation depuis l'UI (scripts locaux, téléchargement réseau, invite UAC). Pensez à installer les modules manquants avant d'exporter le package sur une autre machine.",
@@ -289,6 +290,13 @@
       "dependencies": "Dépendances",
       "testEnv": "Environnement de test",
       "stealth": "Sécurité / Stealth"
+    },
+    "catalog": {
+      "edrExclusion": {
+        "title": "Compatibilité EDR / Defender",
+        "description": "KillEngine utilise des primitives d'allocation mémoire distante et d'écriture dans un autre processus (VirtualAllocEx/WriteProcessMemory/CreateRemoteThread) — exactement ce que les antivirus/EDR (dont Microsoft Defender for Endpoint) surveillent pour détecter des malwares. Un blocage ici ne signifie pas que quelque chose ne va pas : c'est attendu pour cet usage légitime de débogage mémoire. Ce diagnostic vérifie si l'EDR bloque réellement l'injection sur le processus attaché, et propose une exclusion ciblée (dossier build/bin uniquement, réversible) si besoin.",
+        "detailClickCheck": "Clique sur « Vérifier » pour lancer le test sur le processus attaché."
+      }
     },
     "edr": {
       "check": "Vérifier",
