@@ -12,8 +12,8 @@ const riskGate = useRiskGateStore()
 const statusLabel = (status: string) => {
   if (status === 'ok') return t('modules.status.ok')
   if (status === 'missing') return t('modules.status.missing')
-  if (status === 'provisional') return 'Testé — résultat provisoire'
-  if (status === 'blocked') return 'Attention : blocage présent'
+  if (status === 'provisional') return t('modules.status.provisional')
+  if (status === 'blocked') return t('modules.status.blocked')
   return status
 }
 
@@ -63,15 +63,17 @@ function stealthResultText(result: Record<string, unknown> | null): string {
 
   const parts: string[] = []
   if (result.restored) {
-    parts.push('Stealth restauré.')
+    parts.push(t('modules.stealth.restored'))
   } else if (result.profile) {
     const count = typeof result.modulesActivated === 'number' ? result.modulesActivated : undefined
-    parts.push(`Stealth actif (profil : ${String(result.profile)}${count !== undefined ? `, ${count} module(s) activé(s)` : ''}).`)
+    parts.push(count !== undefined
+      ? t('modules.stealth.activeWithCount', { profile: String(result.profile), count })
+      : t('modules.stealth.active', { profile: String(result.profile) }))
   } else if (result.success) {
-    parts.push('Opération réussie.')
+    parts.push(t('modules.status.operationSuccess'))
   }
   if (Array.isArray(result.warnings) && result.warnings.length > 0) {
-    parts.push(`Avertissement(s) : ${result.warnings.join(', ')}`)
+    parts.push(t('modules.status.warnings', { warnings: result.warnings.join(', ') }))
   }
   return parts.join(' ')
 }
@@ -110,7 +112,7 @@ async function toggleDefenderDisabled() {
     const result = await backend.getController().setWindowsDefenderDisabledAsync?.(next)
     if (!result?.started) {
       // Échec immédiat (mock, ou erreur avant même de lancer le thread) — pas de signal à attendre.
-      defenderDisableResult.value = result ?? { error: 'Réponse backend absente.' }
+      defenderDisableResult.value = result ?? { error: t('modules.errors.backendMissing') }
       defenderDisableBusy.value = false
     }
   } catch (e) {
@@ -132,7 +134,7 @@ async function toggleBehaviorMonitoringDisabled() {
   try {
     const result = await backend.getController().setDefenderBehaviorMonitoringDisabledAsync?.(next)
     if (!result?.started) {
-      behaviorMonitoringResult.value = result ?? { error: 'Réponse backend absente.' }
+      behaviorMonitoringResult.value = result ?? { error: t('modules.errors.backendMissing') }
       behaviorMonitoringBusy.value = false
     }
   } catch (e) {
@@ -186,7 +188,7 @@ async function runEdrCheck() {
   edrResult.value = null
   try {
     const result = await backend.getController().checkEdrBlocking?.()
-    edrResult.value = result ?? { error: 'Réponse backend absente.' }
+    edrResult.value = result ?? { error: t('modules.errors.backendMissing') }
   } catch (e) {
     edrResult.value = { success: false, error: String(e) }
   } finally {
@@ -200,7 +202,7 @@ async function runDebugPrivCheck() {
   debugPrivResult.value = null
   try {
     const result = await backend.getController().checkDebugPrivilege?.()
-    debugPrivResult.value = result ?? { error: 'Réponse backend absente.' }
+    debugPrivResult.value = result ?? { error: t('modules.errors.backendMissing') }
   } catch (e) {
     debugPrivResult.value = { success: false, error: String(e) }
   } finally {
@@ -222,7 +224,7 @@ function moduleEffectiveStatus(mod: { id: string; status: string }) {
 async function handleInstall(modId: string) {
   if (modId === 'edr_exclusion') {
     if (!store.isAttached) {
-      edrResult.value = { success: false, error: 'Aucun processus attaché — impossible de tester.' }
+      edrResult.value = { success: false, error: t('modules.errors.attachProcessToTest') }
       return
     }
     const accepted = await riskGate.confirmRiskAction('debug', t('modules.edr.confirmTitle'), t('modules.edr.confirmDesc'))
@@ -235,7 +237,7 @@ async function handleInstall(modId: string) {
         try {
           const result = await backend.getController().addEdrExclusionAsync?.('')
           if (!result?.started) {
-            edrResult.value = result ?? { error: 'Réponse backend absente.' }
+            edrResult.value = result ?? { error: t('modules.errors.backendMissing') }
             edrBusy.value = false
           }
           // sinon : edrExclusionAddedFinished (voir onMounted) mettra à jour edrResult + edrBusy
@@ -256,7 +258,7 @@ async function handleInstall(modId: string) {
     debugPrivResult.value = null
     try {
       const result = await backend.getController().enableDebugPrivilege?.()
-      debugPrivResult.value = result ?? { error: 'Réponse backend absente.' }
+      debugPrivResult.value = result ?? { error: t('modules.errors.backendMissing') }
     } catch (e) {
       debugPrivResult.value = { success: false, error: String(e) }
     } finally {
@@ -327,7 +329,7 @@ async function handleInstall(modId: string) {
       const ownerPid = parseInt(handleHiderOwnerPid.value, 10)
       const handleValue = parseInt(handleHiderHandleValue.value, 16) || parseInt(handleHiderHandleValue.value, 10)
       const result = await backend.getController().hideHandle?.(ownerPid, handleValue)
-      handleHiderResult.value = result ?? { error: 'Réponse backend absente.' }
+      handleHiderResult.value = result ?? { error: t('modules.errors.backendMissing') }
     } catch (e) {
       handleHiderResult.value = { success: false, error: String(e) }
     } finally {
@@ -432,7 +434,7 @@ onMounted(() => {
               v-if="mod.id === 'edr_exclusion' && !edrBusy"
               class="btn btn-secondary check-btn"
               :disabled="!store.isAttached"
-              :title="!store.isAttached ? 'Attache un processus pour tester' : ''"
+              :title="!store.isAttached ? $t('modules.edr.attachToTest') : ''"
               @click="runEdrCheck()"
             >
               {{ $t('modules.edr.check') }}
@@ -451,34 +453,38 @@ onMounted(() => {
 
         <!-- Guide EDR / Tamper Protection -->
         <div v-if="mod.id === 'edr_exclusion'" class="edr-guide">
-          <p class="guide-title">📖 Guide de résolution EDR</p>
+          <p class="guide-title">📖 {{ $t('modules.edr.guide.title') }}</p>
           <div class="guide-step">
-            <strong>Étape 1 — Exclusion PowerShell (recommandé, fonctionne toujours)</strong>
-            <p>Ajoute le dossier de build aux exclusions Defender. C'est la méthode la plus fiable car elle n'est pas bloquée par Tamper Protection.</p>
-            <p class="guide-action">Clique sur <strong>"Ajouter exclusion"</strong> ci-dessous, ou lance manuellement :</p>
+            <strong>{{ $t('modules.edr.guide.step1Title') }}</strong>
+            <p>{{ $t('modules.edr.guide.step1Desc') }}</p>
+            <p class="guide-action">{{ $t('modules.edr.guide.step1ActionPrefix') }} <strong>{{ $t('modules.edr.addExclusion') }}</strong> {{ $t('modules.edr.guide.step1ActionSuffix') }}</p>
             <pre class="manual-code">powershell -Command "Add-MpPreference -ExclusionPath '{{ buildDir }}'"</pre>
           </div>
           <div class="guide-step">
-            <strong>Étape 2 — Désactiver Tamper Protection (si tu veux les clés registre)</strong>
-            <p>Les clés registre de désactivation de Defender sont bloquées par Tamper Protection. Pour les écrire :</p>
+            <strong>{{ $t('modules.edr.guide.step2Title') }}</strong>
+            <p>{{ $t('modules.edr.guide.step2Desc') }}</p>
             <ol class="guide-list">
-              <li>Ouvre <strong>Windows Security</strong> → Protection contre les virus et menaces</li>
-              <li>Clique sur <strong>Paramètres de protection contre les menaces</strong></li>
-              <li>Désactive <strong>Tamper Protection</strong></li>
-              <li>Clique sur <strong>"Désactiver Defender"</strong> ci-dessous</li>
-              <li><strong>Redémarre Windows</strong> pour que les modifications prennent effet</li>
+              <li>{{ $t('modules.edr.guide.step2List1Prefix') }} <strong>Windows Security</strong> {{ $t('modules.edr.guide.step2List1Suffix') }}</li>
+              <li>{{ $t('modules.edr.guide.step2List2Prefix') }} <strong>{{ $t('modules.edr.guide.threatSettings') }}</strong></li>
+              <li>{{ $t('modules.edr.guide.step2List3Prefix') }} <strong>Tamper Protection</strong></li>
+              <li>{{ $t('modules.edr.guide.step2List4Prefix') }} <strong>{{ $t('modules.edr.execute') }}</strong> {{ $t('modules.edr.guide.step2List4Suffix') }}</li>
+              <li><strong>{{ $t('modules.edr.guide.restartWindows') }}</strong> {{ $t('modules.edr.guide.step2List5Suffix') }}</li>
             </ol>
           </div>
           <div class="guide-step">
-            <strong>Étape 3 — Réactiver Defender après tes tests</strong>
-            <p>Quand tu as fini tes tests, réactive Defender pour la sécurité de ta machine :</p>
-            <p class="guide-action">Clique sur <strong>"Réactiver Defender"</strong> ci-dessous, puis redémarre Windows.</p>
+            <strong>{{ $t('modules.edr.guide.step3Title') }}</strong>
+            <p>{{ $t('modules.edr.guide.step3Desc') }}</p>
+            <p class="guide-action">{{ $t('modules.edr.guide.step3ActionPrefix') }} <strong>{{ $t('modules.edr.reactivate') }}</strong> {{ $t('modules.edr.guide.step3ActionSuffix') }}</p>
+          </div>
+          <div class="guide-step">
+            <strong>{{ $t('modules.edr.guide.manualSearchTitle') }}</strong>
+            <p>{{ $t('modules.edr.guide.manualSearchDesc') }}</p>
           </div>
         </div>
 
         <!-- Résultats de diagnostic -->
         <div v-if="mod.id === 'edr_exclusion' && edrResult" class="diag-result" :class="edrResult.blocked ? 'blocked' : (edrResult.provisional ? 'provisional' : 'ok')">
-          <p v-if="edrResult.attemptCount" class="attempt-count">Tentative {{ edrResult.attemptCount }}</p>
+          <p v-if="edrResult.attemptCount" class="attempt-count">{{ $t('modules.edr.attempt', { count: edrResult.attemptCount }) }}</p>
           <p>{{ String(edrResult.message ?? edrResult.error ?? '') }}</p>
           <div v-if="edrResult.blocked || edrResult.provisional" class="edr-fix-actions">
             <button

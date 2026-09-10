@@ -71,7 +71,54 @@
     "executable": "Executable",
     "all": "All",
     "preview": "Preview",
-    "moduleFilterPlaceholder": "Filter by module (e.g. ntdll)..."
+    "moduleFilterPlaceholder": "Filter by module (e.g. ntdll)...",
+    "intro": {
+      "what": "The raw memory map for the attached process: regions, permissions, and modules.",
+      "purpose": "Manually inspect where code, data, and heap memory live for advanced work or diagnostics.",
+      "how": "Attach a process, then click Refresh to load the current memory map."
+    },
+    "actions": {
+      "copy": "Copy",
+      "scanAround": "Scan around",
+      "openExpert": "Open in Expert",
+      "cancel": "Cancel",
+      "edit": "Edit"
+    },
+    "hexEdit": {
+      "riskTitle": "Hex edit",
+      "riskDetail": "Write raw bytes at 0x{address}.",
+      "riskDetailKernel": "Write raw bytes at 0x{address} through the kernel driver.",
+      "open": "Edit hex",
+      "close": "Close hex",
+      "writing": "Writing...",
+      "write": "Write",
+      "writeBytes": "Write bytes",
+      "restore": "Restore",
+      "writeOk": "Write OK ({count} bytes)"
+    },
+    "hexViewer": {
+      "title": "Hex view",
+      "jumpPlaceholder": "Go to (0x...)",
+      "go": "Go",
+      "prevPage": "← Prev page",
+      "nextPage": "Next page →",
+      "close": "Close",
+      "address": "Address",
+      "bytes": "Bytes"
+    },
+    "dump": {
+      "running": "Dumping...",
+      "action": "Dump",
+      "size": "Dump size",
+      "ok": "Dump OK: {path}"
+    },
+    "loading": "Reading memory...",
+    "loadingShort": "Reading...",
+    "noReadableData": "No readable data at this address.",
+    "errors": {
+      "dumpUnavailable": "dumpMemoryRegion is not available in this backend.",
+      "failure": "Failed"
+    }
   },
   "search": {
     "title": "What do you want to find?",
@@ -203,7 +250,11 @@
     "cancel": "Cancel",
     "status": {
       "ok": "installed",
-      "missing": "missing"
+      "missing": "missing",
+      "provisional": "Tested — provisional result",
+      "blocked": "Warning: blockage detected",
+      "operationSuccess": "Operation succeeded.",
+      "warnings": "Warning(s): {warnings}"
     },
     "install": {
       "lua": "Install",
@@ -251,7 +302,33 @@
       "confirmDisableBehaviorDesc": "Disables only Windows Defender's behavior monitoring via the registry (UAC elevation required) — less aggressive than a full disable. ⚠ A restart is required for the change to take effect.",
       "confirmReenableBehaviorTitle": "Re-enable behavior monitoring",
       "confirmReenableBehaviorDesc": "Removes the registry override disabling behavior monitoring (UAC elevation required). ⚠ A restart is required for protection to actually be restored.",
-      "manualWarning": "⚠ These changes reduce your system's protection. Re-enable them after your test sessions."
+      "manualWarning": "Re-enable Defender/real-time protection after your tests. These commands are for a controlled diagnostic session, not for leaving the machine unprotected.",
+      "attachToTest": "Attach a process to test",
+      "attempt": "Attempt {count}",
+      "guide": {
+        "title": "EDR troubleshooting guide",
+        "step1Title": "Step 1 — Targeted PowerShell exclusion (recommended)",
+        "step1Desc": "KillEngine uses low-level primitives that Defender/EDR also watches for malware: remote memory allocation, writes into a process, remote threads, debugger attach, and the kernel driver. A targeted exclusion for the KillEngine folder avoids blocks during your tests without turning off protection for the whole machine.",
+        "step1ActionPrefix": "Click",
+        "step1ActionSuffix": "below, or run manually:",
+        "step2Title": "Step 2 — Temporary disable only if needed",
+        "step2Desc": "If the exclusion is not enough, Tamper Protection can prevent scripts from changing Defender settings. In that case, temporarily disable the relevant protection, run your test, then turn it back on.",
+        "step2List1Prefix": "Open",
+        "step2List1Suffix": "→ Virus & threat protection",
+        "step2List2Prefix": "Click",
+        "threatSettings": "Virus & threat protection settings",
+        "step2List3Prefix": "Temporarily disable",
+        "step2List4Prefix": "Click",
+        "step2List4Suffix": "below only for the duration of the test",
+        "restartWindows": "Restart Windows",
+        "step2List5Suffix": "if Windows asks for it to apply the changes",
+        "step3Title": "Step 3 — Re-enable Defender after your tests",
+        "step3Desc": "When you are done using KillEngine, turn Defender/Tamper Protection/real-time protection back on. Do not leave antivirus disabled by accident.",
+        "step3ActionPrefix": "Click",
+        "step3ActionSuffix": "below, then restart Windows if asked.",
+        "manualSearchTitle": "If the script fails",
+        "manualSearchDesc": "Windows behavior changes with version, admin rights, and Tamper Protection. If automation fails, look up the procedure for your machine with these terms: Windows Defender add folder exclusion, temporarily disable real-time protection Windows Security, disable Tamper Protection Windows Defender, Add-MpPreference ExclusionPath PowerShell."
+      }
     },
     "debugPriv": {
       "check": "Check",
@@ -267,7 +344,14 @@
     },
     "stealth": {
       "confirmTitle": "Apply SC2 Stealth Profile",
-      "confirmDesc": "Apply the SC2 stealth profile (PEB anti-debug + process mask + dll mask) to the attached process. This makes KillEngine more discreet."
+      "confirmDesc": "Apply the SC2 stealth profile (PEB anti-debug + process mask + dll mask) to the attached process. This makes KillEngine more discreet.",
+      "restored": "Stealth restored.",
+      "active": "Stealth active (profile: {profile}).",
+      "activeWithCount": "Stealth active (profile: {profile}, {count} module(s) enabled)."
+    },
+    "errors": {
+      "backendMissing": "Backend response missing.",
+      "attachProcessToTest": "No process attached — cannot test."
     }
   },
   "webview2": {
@@ -337,6 +421,11 @@
       "error": "JS context probe failed.",
       "success": "JS context probe finished.",
       "explore": "Explore"
+    },
+    "intro": {
+      "what": "An explorer for JavaScript state in hybrid native/web apps (WebView2, Electron, CEF). It talks to the JS engine through Chrome DevTools Protocol instead of raw memory.",
+      "purpose": "Find and modify the real data displayed by an embedded web interface (score, text, JS variables) when classic memory scanning only finds engine noise (V8/Blink).",
+      "how": "List the CDP targets available for a process, connect to the right target, then evaluate JavaScript or search for a displayed value/text."
     }
   },
   "lexicon": {
@@ -513,7 +602,13 @@
       "lastRefresh": "Last refresh",
       "dnsResolving": "DNS resolving...",
       "totalLabel": "connections",
-      "establishedLabel": "active"
+      "establishedLabel": "active",
+      "stopLiveTitle": "Stop live refresh",
+      "startLiveTitle": "Start live refresh (2s)",
+      "totalPrefix": "Total:",
+      "activePrefix": "Active:",
+      "allProtocols": "All protocols",
+      "allStates": "All states"
     },
     "modules": {
       "title": "Loaded network modules",
@@ -545,7 +640,12 @@
       "responseBody": "Response body",
       "modify": "Modify",
       "apply": "Apply",
-      "editorPlaceholder": "New body JSON..."
+      "editorPlaceholder": "New body JSON...",
+      "purpose": "Intercept and modify the game HTTP/HTTPS requests in real time.",
+      "how": "Start the proxy on a local port, then select a request to modify its body.",
+      "starting": "Starting...",
+      "stopping": "Stopping...",
+      "modified": "modified"
     },
     "dnsSpoof": {
       "title": "DNS Spoof",
@@ -555,7 +655,10 @@
       "add": "Add entry",
       "remove": "Remove",
       "entries": "Active entries",
-      "noEntries": "No active entries."
+      "noEntries": "No active entries.",
+      "purpose": "Test a game offline mode by redirecting a domain to localhost.",
+      "how": "Enter a domain and target IP, then add the entry (UAC required).",
+      "adding": "Adding..."
     },
     "lagSwitch": {
       "title": "Lag switch",
@@ -565,7 +668,11 @@
       "enable": "Enable lag switch",
       "disable": "Disable",
       "active": "Lag active",
-      "inactive": "Lag inactive"
+      "inactive": "Lag inactive",
+      "purpose": "Test how the game tolerates a slow or cut network.",
+      "how": "Choose a delay in ms and enable the lag switch.",
+      "changing": "Changing...",
+      "activeDetail": "Lag active (+{delay} ms on recv/WSARecv)"
     },
     "block": {
       "title": "Network block",
@@ -574,8 +681,17 @@
       "blocked": "Network blocked",
       "unblocked": "Network normal",
       "toggle": "Block network",
-      "toggleRestore": "Restore network"
-    }
+      "toggleRestore": "Restore network",
+      "unknown": "Unknown",
+      "purpose": "Check whether an unstable memory value comes from background server sync rather than a purely local recalculation.",
+      "how": "Enable/disable network blocking and watch whether the value stabilizes.",
+      "target": "Target:",
+      "uacHint": "Triggers a UAC prompt (Windows elevation), never silently. The rule stays installed even after detaching the process; use “Restore network” to remove it."
+    },
+    "introPurpose": "Diagnose whether an unstable memory value comes from server sync, intercept/modify HTTP traffic, or test network tolerance.",
+    "introHow": "Attach a process, inspect its network connections and DLLs, then use the action tools when needed.",
+    "emptyDetail": "Attach an authorized process first to analyze or control its network traffic.",
+    "goToProcess": "Go to Process"
   },
   "help": {
     "label": {

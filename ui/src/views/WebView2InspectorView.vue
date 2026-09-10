@@ -124,9 +124,9 @@ function handleReset() {
 <template>
   <div class="webview2-inspector-view">
     <PanelIntro
-      what="Un explorateur pour l'état JavaScript des apps hybrides natif+web (WebView2, Electron, CEF) : il interroge le moteur JS via le protocole Chrome DevTools plutôt que la mémoire brute."
-      purpose="Trouver et modifier les vraies données affichées par une interface web embarquée (score, texte, variables JS) quand le scan mémoire classique ne trouve que du bruit moteur (V8/Blink)."
-      how="Liste les targets CDP disponibles pour un process, connecte-toi à la bonne target, puis évalue du JavaScript ou cherche une valeur/un texte affiché."
+      :what="$t('webview2.intro.what')"
+      :purpose="$t('webview2.intro.purpose')"
+      :how="$t('webview2.intro.how')"
     />
 
     <!-- Statut et contrôles principaux -->

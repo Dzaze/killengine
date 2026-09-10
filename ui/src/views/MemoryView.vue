@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 const filter = ref<'all' | 'committed' | 'readable' | 'writable' | 'executable'>('all')
 // Edition hex inline : ecriture de bytes bruts depuis l'inspecteur memoire
 const hexEditMode = ref(false)
@@ -81,7 +83,13 @@ function startHexEdit() {
 async function applyHexEdit() {
   if (!store.memoryPreviewAddress || !hexEditValue.value.trim()) return
   const risk = store.kernelMemoryModeActive ? 'injection' : 'write'
-  if (!await store.confirmRiskAction(risk, 'Edition hex', 'Ecriture de bytes bruts a 0x' + store.memoryPreviewAddress + (store.kernelMemoryModeActive ? ' via driver kernel.' : '.'))) {
+  if (!await store.confirmRiskAction(
+    risk,
+    t('memory.hexEdit.riskTitle'),
+    store.kernelMemoryModeActive
+      ? t('memory.hexEdit.riskDetailKernel', { address: store.memoryPreviewAddress })
+      : t('memory.hexEdit.riskDetail', { address: store.memoryPreviewAddress }),
+  )) {
     return
   }
   hexEditBusy.value = true
@@ -113,7 +121,7 @@ async function dumpPreviewRegion() {
   try {
     const controller = backend.getController()
     if (!controller.dumpMemoryRegion) {
-      dumpResult.value = { success: false, error: 'dumpMemoryRegion non disponible dans ce backend.' }
+      dumpResult.value = { success: false, error: t('memory.errors.dumpUnavailable') }
       return
     }
     dumpResult.value = await controller.dumpMemoryRegion(
@@ -156,7 +164,13 @@ async function applyRowEdit() {
   if (!hexViewerRowEditAddress.value || !hexViewerRowEditValue.value.trim()) return
   const address = hexViewerRowEditAddress.value
   const risk = store.kernelMemoryModeActive ? 'injection' : 'write'
-  if (!await store.confirmRiskAction(risk, 'Edition hex', 'Ecriture de bytes bruts a 0x' + address + (store.kernelMemoryModeActive ? ' via driver kernel.' : '.'))) {
+  if (!await store.confirmRiskAction(
+    risk,
+    t('memory.hexEdit.riskTitle'),
+    store.kernelMemoryModeActive
+      ? t('memory.hexEdit.riskDetailKernel', { address })
+      : t('memory.hexEdit.riskDetail', { address }),
+  )) {
     return
   }
   hexViewerRowBusy.value = true
@@ -208,9 +222,9 @@ onMounted(() => {
     </div>
 
     <PanelIntro
-      what="La carte mémoire brute du processus attaché (régions, permissions, modules)."
-      purpose="Explorer manuellement où se trouvent le code, les données et le tas, pour un usage avancé ou de diagnostic."
-      how="Attache un processus puis clique Rafraîchir pour charger la carte mémoire actuelle."
+      :what="$t('memory.intro.what')"
+      :purpose="$t('memory.intro.purpose')"
+      :how="$t('memory.intro.how')"
     />
 
     <div v-if="!store.isAttached" class="empty-state">
@@ -289,7 +303,7 @@ onMounted(() => {
               type="button"
               @click="copyPreviewAddress()"
             >
-              Copier
+              {{ $t('memory.actions.copy') }}
             </button>
             <button
               v-if="store.memoryPreviewAddress"
@@ -298,7 +312,7 @@ onMounted(() => {
               :disabled="!store.exactScanValue.trim()"
               @click="scanAroundPreview()"
             >
-              Scanner autour
+              {{ $t('memory.actions.scanAround') }}
             </button>
             <button
               v-if="store.selectedMemoryRegion"
@@ -306,7 +320,7 @@ onMounted(() => {
               type="button"
               @click="openRegionInExpert(store.selectedMemoryRegion)"
             >
-              Basculer en expert
+              {{ $t('memory.actions.openExpert') }}
             </button>
               <button
                 v-if="store.memoryPreviewAddress"
@@ -314,7 +328,7 @@ onMounted(() => {
                 type="button"
                 @click="startHexEdit()"
               >
-                {{ hexEditMode ? 'Fermer hex' : 'Editer hex' }}
+                {{ hexEditMode ? $t('memory.hexEdit.close') : $t('memory.hexEdit.open') }}
               </button>
               <button
                 v-if="store.memoryPreviewAddress"
@@ -322,7 +336,7 @@ onMounted(() => {
                 type="button"
                 @click="openHexViewer()"
               >
-                Vue hexadécimale
+                {{ $t('memory.hexViewer.title') }}
               </button>
               <button
                 v-if="store.memoryPreviewAddress"
@@ -331,7 +345,7 @@ onMounted(() => {
                 :disabled="dumpBusy"
                 @click="dumpPreviewRegion()"
               >
-                {{ dumpBusy ? 'Dump...' : 'Dump' }}
+                {{ dumpBusy ? $t('memory.dump.running') : $t('memory.dump.action') }}
               </button>
           </div>
           <div v-if="hexEditMode" class="hex-edit-row">
@@ -348,7 +362,7 @@ onMounted(() => {
               :disabled="hexEditBusy || !hexEditValue.trim()"
               @click="applyHexEdit()"
             >
-              {{ hexEditBusy ? 'Ecriture...' : 'Ecrire bytes' }}
+              {{ hexEditBusy ? $t('memory.hexEdit.writing') : $t('memory.hexEdit.writeBytes') }}
             </button>
             <button
               v-if="lastWrittenHex"
@@ -357,14 +371,14 @@ onMounted(() => {
               :disabled="hexEditBusy"
               @click="restoreLastHexEdit()"
             >
-              Restaurer
+              {{ $t('memory.hexEdit.restore') }}
             </button>
           </div>
           <p v-if="hexEditResult" :class="hexEditResult.success ? 'hex-result-ok' : 'hex-result-err'">
-            {{ hexEditResult.success ? 'Ecriture OK (' + (hexEditResult.bytesWritten ?? 0) + ' octets)' : String(hexEditResult.error ?? 'Echec') }}
+            {{ hexEditResult.success ? $t('memory.hexEdit.writeOk', { count: hexEditResult.bytesWritten ?? 0 }) : String(hexEditResult.error ?? $t('memory.errors.failure')) }}
           </p>
           <div class="dump-row">
-            <label class="dump-label">Taille dump</label>
+            <label class="dump-label">{{ $t('memory.dump.size') }}</label>
             <select v-model.number="dumpSize" class="dump-select">
               <option :value="256">256 B</option>
               <option :value="1024">1 KB</option>
@@ -373,12 +387,12 @@ onMounted(() => {
               <option :value="1048576">1 MB</option>
             </select>
             <p v-if="dumpResult" :class="dumpResult.success ? 'hex-result-ok' : 'hex-result-err'">
-              {{ dumpResult.success ? 'Dump OK : ' + String(dumpResult.filePath ?? '') : String(dumpResult.error ?? 'Echec') }}
+              {{ dumpResult.success ? $t('memory.dump.ok', { path: String(dumpResult.filePath ?? '') }) : String(dumpResult.error ?? $t('memory.errors.failure')) }}
             </p>
           </div>
         </div>
         <div v-if="store.memoryPreviewLoading" class="preview-loading">
-          Lecture de la mémoire...
+          {{ $t('memory.loading') }}
         </div>
         <div v-else-if="store.memoryPreview?.hex" class="preview-grid">
           <pre>{{ store.memoryPreview.hex }}</pre>
@@ -397,27 +411,27 @@ onMounted(() => {
           </div>
         </div>
         <p v-else-if="store.memoryPreview?.error">{{ store.memoryPreview.error }}</p>
-        <p v-else>Aucune donnée lisible à cette adresse.</p>
+        <p v-else>{{ $t('memory.noReadableData') }}</p>
       </div>
 
       <div v-if="store.hexViewerOpen" class="hex-viewer-panel">
         <div class="hex-viewer-toolbar">
-          <strong>Vue hexadécimale</strong>
+          <strong>{{ $t('memory.hexViewer.title') }}</strong>
           <code>0x{{ store.hexViewerAddress }}</code>
           <input
             v-model="hexViewerJumpAddress"
             class="hex-edit-input hex-viewer-jump-input"
             type="text"
-            placeholder="Aller à (0x...)"
+            :placeholder="$t('memory.hexViewer.jumpPlaceholder')"
             spellcheck="false"
             @keyup.enter="hexViewerJump()"
           />
-          <button class="preview-action-btn" type="button" @click="hexViewerJump()">Aller</button>
+          <button class="preview-action-btn" type="button" @click="hexViewerJump()">{{ $t('memory.hexViewer.go') }}</button>
           <button class="preview-action-btn" type="button" :disabled="store.hexViewerLoading" @click="hexViewerPrevPage()">
-            ← Page préc.
+            {{ $t('memory.hexViewer.prevPage') }}
           </button>
           <button class="preview-action-btn" type="button" :disabled="store.hexViewerLoading" @click="hexViewerNextPage()">
-            Page suiv. →
+            {{ $t('memory.hexViewer.nextPage') }}
           </button>
           <select
             class="dump-select"
@@ -429,14 +443,14 @@ onMounted(() => {
             <option :value="4096">4 KB</option>
             <option :value="16384">16 KB</option>
           </select>
-          <button class="preview-action-btn" type="button" @click="store.closeHexViewer()">Fermer</button>
+          <button class="preview-action-btn" type="button" @click="store.closeHexViewer()">{{ $t('memory.hexViewer.close') }}</button>
         </div>
-        <div v-if="store.hexViewerLoading" class="preview-loading">Lecture de la mémoire...</div>
+        <div v-if="store.hexViewerLoading" class="preview-loading">{{ $t('memory.loading') }}</div>
         <p v-else-if="store.hexViewerData && !store.hexViewerData.success">{{ store.hexViewerData.error }}</p>
         <div v-else class="hex-viewer-grid">
           <div class="hex-viewer-header-row">
-            <span class="hv-address">Adresse</span>
-            <span class="hv-bytes">Octets</span>
+            <span class="hv-address">{{ $t('memory.hexViewer.address') }}</span>
+            <span class="hv-bytes">{{ $t('memory.hexViewer.bytes') }}</span>
             <span class="hv-ascii">ASCII</span>
             <span class="hv-edit"></span>
           </div>
@@ -445,7 +459,7 @@ onMounted(() => {
             <span class="hv-bytes">{{ row.bytes.join(' ') }}</span>
             <span class="hv-ascii">{{ row.ascii }}</span>
             <button class="hv-edit-btn" type="button" @click="startRowEdit(row)">
-              {{ hexViewerRowEditAddress === row.address ? 'Annuler' : 'Éditer' }}
+              {{ hexViewerRowEditAddress === row.address ? $t('memory.actions.cancel') : $t('memory.actions.edit') }}
             </button>
             <div v-if="hexViewerRowEditAddress === row.address" class="hex-edit-row hv-edit-form">
               <input
@@ -460,13 +474,13 @@ onMounted(() => {
                 :disabled="hexViewerRowBusy"
                 @click="applyRowEdit()"
               >
-                {{ hexViewerRowBusy ? 'Écriture...' : 'Écrire' }}
+                {{ hexViewerRowBusy ? $t('memory.hexEdit.writing') : $t('memory.hexEdit.write') }}
               </button>
             </div>
           </div>
         </div>
         <p v-if="hexViewerRowResult" :class="hexViewerRowResult.success ? 'hex-result-ok' : 'hex-result-err'">
-          {{ hexViewerRowResult.success ? 'Écriture OK (' + (hexViewerRowResult.bytesWritten ?? 0) + ' octets)' : String(hexViewerRowResult.error ?? 'Échec') }}
+          {{ hexViewerRowResult.success ? $t('memory.hexEdit.writeOk', { count: hexViewerRowResult.bytesWritten ?? 0 }) : String(hexViewerRowResult.error ?? $t('memory.errors.failure')) }}
         </p>
       </div>
 
@@ -485,7 +499,7 @@ onMounted(() => {
               :disabled="!region.readable || (store.memoryPreviewLoading && store.memoryPreviewAddress === region.baseAddress)"
               @click="store.selectedMemoryRegion = region; previewRegion(region.baseAddress)"
             >
-              {{ store.memoryPreviewLoading && store.memoryPreviewAddress === region.baseAddress ? 'Lecture...' : $t('memory.preview') }}
+              {{ store.memoryPreviewLoading && store.memoryPreviewAddress === region.baseAddress ? $t('memory.loadingShort') : $t('memory.preview') }}
             </button>
             <button
               class="preview-btn expert-btn"

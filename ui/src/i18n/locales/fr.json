@@ -71,7 +71,54 @@
     "executable": "Exécutable",
     "all": "Tout",
     "preview": "Aperçu",
-    "moduleFilterPlaceholder": "Filtrer par module (ex: ntdll)..."
+    "moduleFilterPlaceholder": "Filtrer par module (ex: ntdll)...",
+    "intro": {
+      "what": "La carte mémoire brute du processus attaché : régions, permissions et modules.",
+      "purpose": "Explorer manuellement où se trouvent le code, les données et le tas, pour un usage avancé ou de diagnostic.",
+      "how": "Attache un processus puis clique sur Rafraîchir pour charger la carte mémoire actuelle."
+    },
+    "actions": {
+      "copy": "Copier",
+      "scanAround": "Scanner autour",
+      "openExpert": "Basculer en expert",
+      "cancel": "Annuler",
+      "edit": "Éditer"
+    },
+    "hexEdit": {
+      "riskTitle": "Édition hex",
+      "riskDetail": "Écriture de bytes bruts à 0x{address}.",
+      "riskDetailKernel": "Écriture de bytes bruts à 0x{address} via driver kernel.",
+      "open": "Éditer hex",
+      "close": "Fermer hex",
+      "writing": "Écriture...",
+      "write": "Écrire",
+      "writeBytes": "Écrire bytes",
+      "restore": "Restaurer",
+      "writeOk": "Écriture OK ({count} octets)"
+    },
+    "hexViewer": {
+      "title": "Vue hexadécimale",
+      "jumpPlaceholder": "Aller à (0x...)",
+      "go": "Aller",
+      "prevPage": "← Page préc.",
+      "nextPage": "Page suiv. →",
+      "close": "Fermer",
+      "address": "Adresse",
+      "bytes": "Octets"
+    },
+    "dump": {
+      "running": "Dump...",
+      "action": "Dump",
+      "size": "Taille dump",
+      "ok": "Dump OK : {path}"
+    },
+    "loading": "Lecture de la mémoire...",
+    "loadingShort": "Lecture...",
+    "noReadableData": "Aucune donnée lisible à cette adresse.",
+    "errors": {
+      "dumpUnavailable": "dumpMemoryRegion non disponible dans ce backend.",
+      "failure": "Échec"
+    }
   },
   "search": {
     "title": "Que veux-tu trouver ?",
@@ -203,7 +250,11 @@
     "cancel": "Annuler",
     "status": {
       "ok": "installé",
-      "missing": "manquant"
+      "missing": "manquant",
+      "provisional": "Testé — résultat provisoire",
+      "blocked": "Attention : blocage présent",
+      "operationSuccess": "Opération réussie.",
+      "warnings": "Avertissement(s) : {warnings}"
     },
     "install": {
       "lua": "Installer",
@@ -251,7 +302,33 @@
       "confirmDisableBehaviorDesc": "Désactive uniquement la surveillance comportementale de Windows Defender via le registre (élévation UAC requise) — moins agressif qu'une désactivation complète. ⚠ Un redémarrage est nécessaire pour que le changement prenne effet.",
       "confirmReenableBehaviorTitle": "Réactiver la surveillance comportementale",
       "confirmReenableBehaviorDesc": "Retire la désactivation registre de la surveillance comportementale (élévation UAC requise). ⚠ Un redémarrage est nécessaire pour que la protection soit réellement rétablie.",
-      "manualWarning": "⚠ Ces modifications réduisent la protection de votre système. Réactivez-les après vos sessions de test."
+      "manualWarning": "Réactive Defender/protection temps réel après tes tests. Ces commandes existent pour une session de diagnostic contrôlée, pas pour laisser la machine sans protection.",
+      "attachToTest": "Attache un processus pour tester",
+      "attempt": "Tentative {count}",
+      "guide": {
+        "title": "Guide de résolution EDR",
+        "step1Title": "Étape 1 — Exclusion PowerShell ciblée (recommandé)",
+        "step1Desc": "KillEngine utilise des primitives bas niveau que Defender/EDR surveille aussi pour les malwares : allocation mémoire distante, écriture dans un process, thread distant, debugger et driver kernel. Une exclusion ciblée du dossier KillEngine évite les blocages pendant tes tests sans couper toute la protection de la machine.",
+        "step1ActionPrefix": "Clique sur",
+        "step1ActionSuffix": "ci-dessous, ou lance manuellement :",
+        "step2Title": "Étape 2 — Désactivation temporaire seulement si nécessaire",
+        "step2Desc": "Si l'exclusion ne suffit pas, Tamper Protection peut empêcher les scripts de modifier les réglages Defender. Dans ce cas, désactive temporairement la protection concernée, fais ton test, puis réactive-la.",
+        "step2List1Prefix": "Ouvre",
+        "step2List1Suffix": "→ Protection contre les virus et menaces",
+        "step2List2Prefix": "Clique sur",
+        "threatSettings": "Paramètres de protection contre les menaces",
+        "step2List3Prefix": "Désactive temporairement",
+        "step2List4Prefix": "Clique sur",
+        "step2List4Suffix": "ci-dessous seulement le temps du test",
+        "restartWindows": "Redémarre Windows",
+        "step2List5Suffix": "si Windows le demande pour appliquer les modifications",
+        "step3Title": "Étape 3 — Réactiver Defender après tes tests",
+        "step3Desc": "Quand tu as fini d'utiliser KillEngine, remets Defender/Tamper Protection/protection temps réel en place. Ne laisse pas l'antivirus désactivé par oubli.",
+        "step3ActionPrefix": "Clique sur",
+        "step3ActionSuffix": "ci-dessous, puis redémarre Windows si demandé.",
+        "manualSearchTitle": "Si le script échoue",
+        "manualSearchDesc": "Windows change selon les versions, les droits admin et Tamper Protection. Si l'automatisation échoue, cherche la procédure adaptée avec ces mots-clés : Windows Defender ajouter exclusion dossier, désactiver temporairement protection en temps réel Windows Security, désactiver Tamper Protection Windows Defender, Add-MpPreference ExclusionPath PowerShell."
+      }
     },
     "debugPriv": {
       "check": "Vérifier",
@@ -267,7 +344,14 @@
     },
     "stealth": {
       "confirmTitle": "Appliquer le profil Stealth SC2",
-      "confirmDesc": "Appliquer le profil stealth SC2 (anti-debug PEB + process mask + dll mask) sur le processus attaché. Cela rend KillEngine plus discret."
+      "confirmDesc": "Appliquer le profil stealth SC2 (anti-debug PEB + process mask + dll mask) sur le processus attaché. Cela rend KillEngine plus discret.",
+      "restored": "Stealth restauré.",
+      "active": "Stealth actif (profil : {profile}).",
+      "activeWithCount": "Stealth actif (profil : {profile}, {count} module(s) activé(s))."
+    },
+    "errors": {
+      "backendMissing": "Réponse backend absente.",
+      "attachProcessToTest": "Aucun processus attaché — impossible de tester."
     }
   },
   "webview2": {
@@ -337,6 +421,11 @@
       "error": "Échec du sondage du contexte JS.",
       "success": "Sondage du contexte JS terminé.",
       "explore": "Explorer"
+    },
+    "intro": {
+      "what": "Un explorateur pour l'état JavaScript des apps hybrides natif+web (WebView2, Electron, CEF) : il interroge le moteur JS via le protocole Chrome DevTools plutôt que la mémoire brute.",
+      "purpose": "Trouver et modifier les vraies données affichées par une interface web embarquée (score, texte, variables JS) quand le scan mémoire classique ne trouve que du bruit moteur (V8/Blink).",
+      "how": "Liste les targets CDP disponibles pour un process, connecte-toi à la bonne target, puis évalue du JavaScript ou cherche une valeur/un texte affiché."
     }
   },
   "lexicon": {
@@ -513,7 +602,13 @@
       "lastRefresh": "Dernier refresh",
       "dnsResolving": "Résolution DNS...",
       "totalLabel": "connexions",
-      "establishedLabel": "actives"
+      "establishedLabel": "actives",
+      "stopLiveTitle": "Arrêter le refresh live",
+      "startLiveTitle": "Démarrer le refresh live (2s)",
+      "totalPrefix": "Total :",
+      "activePrefix": "Actives :",
+      "allProtocols": "Tous protocoles",
+      "allStates": "Tous états"
     },
     "modules": {
       "title": "Modules réseau chargés",
@@ -545,7 +640,12 @@
       "responseBody": "Body réponse",
       "modify": "Modifier",
       "apply": "Appliquer",
-      "editorPlaceholder": "Nouveau body JSON..."
+      "editorPlaceholder": "Nouveau body JSON...",
+      "purpose": "Intercepter et modifier les requêtes HTTP/HTTPS du jeu en temps réel.",
+      "how": "Démarre le proxy sur un port local, puis sélectionne une requête pour modifier son body.",
+      "starting": "Démarrage...",
+      "stopping": "Arrêt...",
+      "modified": "modifié"
     },
     "dnsSpoof": {
       "title": "Spoof DNS",
@@ -555,7 +655,10 @@
       "add": "Ajouter l'entrée",
       "remove": "Retirer",
       "entries": "Entrées actives",
-      "noEntries": "Aucune entrée active."
+      "noEntries": "Aucune entrée active.",
+      "purpose": "Tester le mode offline d'un jeu en redirigeant un domaine vers localhost.",
+      "how": "Entre un domaine et une IP cible, puis ajoute l'entrée (UAC requis).",
+      "adding": "Ajout..."
     },
     "lagSwitch": {
       "title": "Lag switch",
@@ -565,7 +668,11 @@
       "enable": "Activer le lag switch",
       "disable": "Désactiver",
       "active": "Lag actif",
-      "inactive": "Lag inactif"
+      "inactive": "Lag inactif",
+      "purpose": "Tester la tolérance du jeu à un réseau lent ou coupé.",
+      "how": "Choisis un délai en ms et active le lag switch.",
+      "changing": "Changement...",
+      "activeDetail": "Lag actif (+{delay} ms sur recv/WSARecv)"
     },
     "block": {
       "title": "Blocage réseau",
@@ -574,8 +681,17 @@
       "blocked": "Réseau coupé",
       "unblocked": "Réseau normal",
       "toggle": "Couper le réseau",
-      "toggleRestore": "Rétablir le réseau"
-    }
+      "toggleRestore": "Rétablir le réseau",
+      "unknown": "Inconnu",
+      "purpose": "Vérifier si une valeur mémoire instable vient d'une synchro serveur en arrière-plan plutôt que d'un recalcul purement local.",
+      "how": "Active/désactive le blocage réseau et observe si la valeur se stabilise.",
+      "target": "Cible :",
+      "uacHint": "Déclenche une invite UAC (élévation Windows), jamais silencieuse. La règle reste posée même après avoir détaché le processus ; utilise « Rétablir le réseau » pour la retirer."
+    },
+    "introPurpose": "Diagnostiquer si une valeur mémoire instable vient d'une synchronisation serveur, intercepter/modifier le trafic HTTP, ou tester la tolérance réseau.",
+    "introHow": "Attache un processus, observe les connexions et DLL réseau, puis utilise les outils d'action si nécessaire.",
+    "emptyDetail": "Attache d'abord un processus autorisé pour analyser ou contrôler son trafic réseau.",
+    "goToProcess": "Aller à Processus"
   },
   "help": {
     "label": {
