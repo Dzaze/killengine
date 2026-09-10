@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
 import type { ClrFieldInfo } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 interface ProfileEntry {
   name: string
@@ -142,7 +144,7 @@ const trainerPatchSummary = computed(() => {
 
 function profileTargetGroupName(name: string): string {
   const normalized = name.trim().toLowerCase().replace(/\s+\d+$/, '').trim()
-  return normalized || 'cibles'
+  return normalized || t('profile.targetsTitleFallback')
 }
 
 function canUseAsClrIdentity(field: ClrFieldInfo): boolean {
@@ -224,15 +226,15 @@ async function selectProfile(name: string) {
 
 async function saveCurrentTarget() {
   if (!selectedProfile.value) {
-    statusMessage.value = '⚠ Sélectionne ou crée d\'abord un profil.'
+    statusMessage.value = '⚠ ' + t('profile.selectOrCreateProfileFirst')
     return
   }
   if (profileSaveTargets.value.length === 0) {
-    statusMessage.value = '⚠ Sélectionne d\'abord une adresse ou termine une recherche dans l\'Assistant.'
+    statusMessage.value = '⚠ ' + t('profile.selectAddressOrFinishSearch')
     return
   }
   if (!newTargetName.value.trim()) {
-    statusMessage.value = '⚠ Donne un nom à la cible.'
+    statusMessage.value = '⚠ ' + t('profile.giveTargetName')
     return
   }
 
@@ -253,42 +255,42 @@ async function saveCurrentTarget() {
       )
       results.push(result)
       if (!result.success) {
-        statusMessage.value = '✗ ' + (result.error ?? `Erreur de sauvegarde pour ${targetName}.`)
+        statusMessage.value = '✗ ' + (result.error ?? t('profile.saveErrorFor', { name: targetName }))
         return
       }
     }
 
     if (results.every((result) => result.success)) {
       statusMessage.value = targets.length === 1
-        ? `✓ Cible "${baseName}" sauvegardée dans "${selectedProfile.value}" (${results[0].locator}).`
-        : `✓ ${targets.length} adresses sauvegardées dans "${selectedProfile.value}" sous "${baseName} 1", "${baseName} 2"...`
+        ? '✓ ' + t('profile.targetSaved', { name: baseName, profile: selectedProfile.value, locator: results[0].locator })
+        : '✓ ' + t('profile.addressesSaved', { count: targets.length, profile: selectedProfile.value, name: baseName })
       newTargetName.value = ''
       newTargetDescription.value = ''
       await selectProfile(selectedProfile.value)
       await refreshProfiles()
     }
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   }
 }
 
 async function saveCurrentClrFieldTarget() {
   if (!selectedProfile.value) {
-    statusMessage.value = '⚠ Sélectionne ou crée d\'abord un profil.'
+    statusMessage.value = '⚠ ' + t('profile.selectOrCreateProfileFirst')
     return
   }
   if (!store.clrSelectedObject) {
-    statusMessage.value = '⚠ Lis d\'abord un objet dans la vue CLR.'
+    statusMessage.value = '⚠ ' + t('profile.readClrObjectFirst')
     return
   }
   if (!newTargetName.value.trim()) {
-    statusMessage.value = '⚠ Donne un nom à la cible.'
+    statusMessage.value = '⚠ ' + t('profile.giveTargetName')
     return
   }
 
   const controller = backend.getController()
   if (!controller.saveClrFieldProfileTarget) {
-    statusMessage.value = '✗ Sauvegarde de cible CLR indisponible côté backend.'
+    statusMessage.value = '✗ ' + t('profile.clrSaveUnavailable')
     return
   }
 
@@ -304,16 +306,16 @@ async function saveCurrentClrFieldTarget() {
       newTargetDescription.value.trim(),
     )
     if (result.success) {
-      statusMessage.value = `✓ Cible CLR "${newTargetName.value.trim()}" sauvegardée (${result.locator}).`
+      statusMessage.value = '✓ ' + t('profile.clrTargetSaved', { name: newTargetName.value.trim(), locator: result.locator })
       newTargetName.value = ''
       newTargetDescription.value = ''
       await selectProfile(selectedProfile.value)
       await refreshProfiles()
     } else {
-      statusMessage.value = '✗ ' + (result.error ?? 'Sauvegarde CLR impossible.')
+      statusMessage.value = '✗ ' + (result.error ?? t('profile.clrSaveImpossible'))
     }
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   }
 }
 
@@ -323,7 +325,7 @@ async function createNewProfile() {
   selectedProfile.value = name
   profileTargets.value = []
   profileInfo.value = { gameName: name, executableName: store.processName }
-  statusMessage.value = `Profil "${name}" prêt. Sauvegarde une cible pour créer le fichier.`
+  statusMessage.value = t('profile.profileReadyCreateFile', { name })
   newProfileName.value = ''
 }
 
@@ -333,16 +335,16 @@ async function activateTarget(targetName: string) {
     const result = await backend.getController().activateProfileTarget(selectedProfile.value, targetName)
     resolveResult.value = result
     if (result.success) {
-      statusMessage.value = `✓ "${targetName}" activé pour l'Assistant à l'adresse 0x${result.address}`
-      store.addActionLog('profile', `Cible activée: ${targetName}`, `Profil "${selectedProfile.value}", adresse 0x${result.address}.`, 'success')
+      statusMessage.value = '✓ ' + t('profile.targetActivated', { name: targetName, address: result.address })
+      store.addActionLog('profile', t('profile.log.targetActivated', { name: targetName }), t('profile.log.targetActivatedDetail', { profile: selectedProfile.value, address: result.address }), 'success')
     } else {
-      const detail = result.error ? String(result.error) : 'Activation impossible.'
+      const detail = result.error ? String(result.error) : t('profile.activationImpossible')
       statusMessage.value = '✗ ' + detail
-      store.addActionLog('profile', `Activation refusée: ${targetName}`, detail, 'warning')
+      store.addActionLog('profile', t('profile.log.activationRefused', { name: targetName }), detail, 'warning')
     }
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
-    store.addActionLog('profile', `Activation échouée: ${targetName}`, String(e), 'error')
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
+    store.addActionLog('profile', t('profile.log.activationFailed', { name: targetName }), String(e), 'error')
   }
 }
 
@@ -353,19 +355,19 @@ async function verifyTarget(target: ProfileTargetEntry) {
     targetResolveStates.value = { ...targetResolveStates.value, [target.name]: result }
     resolveResult.value = result
     statusMessage.value = result.success
-      ? `✓ "${target.name}" résolu à 0x${result.address}.`
-      : `✗ "${target.name}" introuvable : ${result.error ?? 'résolution impossible.'}`
+      ? '✓ ' + t('profile.targetVerified', { name: target.name, address: result.address })
+      : '✗ ' + t('profile.targetNotFound', { name: target.name, error: result.error ?? t('profile.resolutionImpossible') })
   } catch (e) {
     const result = { success: false, error: String(e) }
     targetResolveStates.value = { ...targetResolveStates.value, [target.name]: result }
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   }
 }
 
 function targetResolutionLabel(target: ProfileTargetEntry): string {
   const state = targetResolveStates.value[target.name]
-  if (!state) return 'à vérifier'
-  return state.success ? `résolu 0x${state.address}` : 'introuvable'
+  if (!state) return t('profile.toVerify')
+  return state.success ? t('profile.resolvedAt', { address: state.address }) : t('profile.notFoundStatus')
 }
 
 function targetResolutionClass(target: ProfileTargetEntry): string {
@@ -399,7 +401,7 @@ async function comparePointerMap() {
   try {
     const controller = backend.getController()
     if (!controller.comparePointerMapAcrossRestart) {
-      pointerMapCompareResult.value = { success: false, error: 'Vérification groupée non exposée par ce backend.' }
+      pointerMapCompareResult.value = { success: false, error: t('profile.groupCompareUnavailable') }
       return
     }
     pointerMapCompareResult.value = await controller.comparePointerMapAcrossRestart(selectedProfile.value)
@@ -416,7 +418,7 @@ async function exportGhidraBridge() {
   try {
     const controller = backend.getController()
     if (!controller.exportGhidraArtifacts) {
-      ghidraBridgeResult.value = { success: false, error: 'Export Ghidra non exposé par ce backend.' }
+      ghidraBridgeResult.value = { success: false, error: t('profile.ghidraExportUnavailable') }
       return
     }
     const result = await controller.exportGhidraArtifacts(selectedProfile.value)
@@ -436,7 +438,7 @@ async function importGhidraSymbols() {
   try {
     const controller = backend.getController()
     if (!controller.importGhidraSymbols) {
-      ghidraBridgeResult.value = { success: false, error: 'Import Ghidra non exposé par ce backend.' }
+      ghidraBridgeResult.value = { success: false, error: t('profile.ghidraImportUnavailable') }
       return
     }
     const result = await controller.importGhidraSymbols(selectedProfile.value, ghidraImportText.value)
@@ -457,7 +459,7 @@ async function exportPointerMap() {
   try {
     const controller = backend.getController()
     if (!controller.exportPointerMap) {
-      pointerMapTransferResult.value = { success: false, error: 'Export pointer map non exposé par ce backend.' }
+      pointerMapTransferResult.value = { success: false, error: t('profile.pointerMapExportUnavailable') }
       return
     }
     const result = await controller.exportPointerMap(selectedProfile.value)
@@ -476,7 +478,7 @@ async function importPointerMap() {
   try {
     const controller = backend.getController()
     if (!controller.importPointerMap) {
-      pointerMapTransferResult.value = { success: false, error: 'Import pointer map non exposé par ce backend.' }
+      pointerMapTransferResult.value = { success: false, error: t('profile.pointerMapImportUnavailable') }
       return
     }
     const result = await controller.importPointerMap(selectedProfile.value, pointerMapImportText.value, {
@@ -495,7 +497,7 @@ async function importPointerMap() {
 
 async function repairTargetWithCurrentAddress(target: ProfileTargetEntry) {
   if (!selectedProfile.value || !store.selectedCandidateAddress) {
-    statusMessage.value = '⚠ Sélectionne une adresse dans Expert avant de réparer cette cible.'
+    statusMessage.value = '⚠ ' + t('profile.selectAddressBeforeRepair')
     return
   }
   try {
@@ -504,17 +506,17 @@ async function repairTargetWithCurrentAddress(target: ProfileTargetEntry) {
       target.name,
       store.selectedCandidateAddress,
       target.type,
-      target.description || 'Réparé depuis l’adresse courante.',
+      target.description || t('profile.repairedFromCurrentAddress'),
     )
     if (result.success) {
-      statusMessage.value = `✓ "${target.name}" réparé avec 0x${store.selectedCandidateAddress}.`
+      statusMessage.value = '✓ ' + t('profile.targetRepaired', { name: target.name, address: store.selectedCandidateAddress })
       await selectProfile(selectedProfile.value)
       await verifyTarget(target)
     } else {
-      statusMessage.value = '✗ ' + (result.error ?? 'Réparation impossible.')
+      statusMessage.value = '✗ ' + (result.error ?? t('profile.repairImpossible'))
     }
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   }
 }
 
@@ -527,21 +529,21 @@ async function activateAllTargets() {
     try {
       const result = await backend.getController().activateProfileTarget(selectedProfile.value, target.name)
       if (!result.success) {
-        statusMessage.value = '✗ ' + (result.error ?? `Activation impossible pour ${target.name}.`)
+        statusMessage.value = '✗ ' + (result.error ?? t('profile.activationImpossibleFor', { name: target.name }))
         return
       }
       activated += 1
       resolveResult.value = result
     } catch (e) {
-      statusMessage.value = '✗ Erreur : ' + String(e)
+      statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
       return
     }
   }
 
   const skipped = profileTargets.value.length - activatableTargets.length
-  statusMessage.value = skipped > 0
-    ? `✓ ${activated} cible(s) activée(s) pour l'Assistant. ${skipped} cible(s) CLR restent utilisables via Écrire.`
-    : `✓ ${activated} cible(s) activée(s) pour l'Assistant.`
+  statusMessage.value = '✓ ' + (skipped > 0
+    ? t('profile.targetsActivatedForAssistant', { count: activated, skipped })
+    : t('profile.targetsActivatedForAssistantSimple', { count: activated }))
 }
 
 async function activateTargetGroup(group: ProfileTargetGroup) {
@@ -553,22 +555,22 @@ async function activateTargetGroup(group: ProfileTargetGroup) {
     try {
       const result = await backend.getController().activateProfileTarget(selectedProfile.value, target.name)
       if (!result.success) {
-        statusMessage.value = '✗ ' + (result.error ?? `Activation impossible pour ${target.name}.`)
+        statusMessage.value = '✗ ' + (result.error ?? t('profile.activationImpossibleFor', { name: target.name }))
         return
       }
       activated += 1
       resolveResult.value = result
     } catch (e) {
-      statusMessage.value = '✗ Erreur : ' + String(e)
+      statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
       return
     }
   }
 
   await store.refreshSmartSearchContext()
   const skipped = group.targets.length - activatableTargets.length
-  statusMessage.value = skipped > 0
-    ? `✓ Groupe "${group.name}" prêt dans l'Assistant (${activated} cible(s)). ${skipped} cible(s) CLR restent utilisables via Écrire.`
-    : `✓ Groupe "${group.name}" prêt dans l'Assistant (${activated} cible(s)).`
+  statusMessage.value = '✓ ' + (skipped > 0
+    ? t('profile.groupReadyInAssistant', { name: group.name, count: activated, skipped })
+    : t('profile.groupReadyInAssistantSimple', { name: group.name, count: activated }))
 }
 
 async function writeProfileTarget(target: ProfileTargetEntry) {
@@ -579,7 +581,7 @@ async function writeProfileTarget(target: ProfileTargetEntry) {
     const resolved = await backend.getController().resolveProfileTarget(selectedProfile.value, target.name)
     resolveResult.value = resolved
     if (!resolved.success) {
-      statusMessage.value = '✗ ' + (resolved.error ?? `Adresse introuvable pour ${target.name}.`)
+      statusMessage.value = '✗ ' + (resolved.error ?? t('profile.addressNotFoundFor', { name: target.name }))
       return
     }
 
@@ -587,13 +589,13 @@ async function writeProfileTarget(target: ProfileTargetEntry) {
       ? await store.writeClrPrimitiveField(String(resolved.address ?? ''), String(resolved.clrFieldName ?? target.clrFieldName ?? ''), value)
       : await store.writeMemoryValueByMode(String(resolved.address ?? ''), target.type, value)
     if (write?.success) {
-      statusMessage.value = `✓ "${target.name}" écrit à ${value} sur 0x${resolved.address}.`
+      statusMessage.value = '✓ ' + t('profile.targetWritten', { name: target.name, value, address: resolved.address })
       await store.refreshSmartSearchContext()
     } else {
-      statusMessage.value = '✗ ' + (write?.error || `Écriture impossible pour ${target.name}.`)
+      statusMessage.value = '✗ ' + (write?.error || t('profile.writeImpossibleFor', { name: target.name }))
     }
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   }
 }
 
@@ -610,45 +612,45 @@ async function deleteSelectedProfile() {
   try {
     const ok = await backend.getController().deleteProfile(selectedProfile.value)
     if (ok) {
-      statusMessage.value = `Profil "${selectedProfile.value}" supprimé.`
+      statusMessage.value = t('profile.profileDeleted', { name: selectedProfile.value })
       selectedProfile.value = ''
       localStorage.removeItem(lastProfileStorageKey)
       profileTargets.value = []
       profilePatches.value = []
       await refreshProfiles()
     } else {
-      statusMessage.value = '✗ Échec de la suppression.'
+      statusMessage.value = '✗ ' + t('profile.deleteFailed')
     }
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   }
 }
 
 async function applyProfilePatch(patch: ProfilePatchEntry) {
   if (!selectedProfile.value || !patch.name) return
   if (!patchCanApply(patch)) {
-    statusMessage.value = patchStates.value[patch.name]
-      ? `⚠ Patch "${patch.name}" non applicable dans son état actuel (${patchStateLabel(patch)}).`
+    statusMessage.value = '⚠ ' + (patchStates.value[patch.name]
+      ? t('profile.patchNotApplicableState', { name: patch.name, state: patchStateLabel(patch) })
       : (patchQualityBlocksTrainer(patch)
-        ? `⚠ Patch "${patch.name}" bloqué : ${patchQualityBlockReason(patch)}.`
-        : `⚠ Vérifie l'état de "${patch.name}" avant application.`)
+        ? t('profile.patchBlocked', { name: patch.name, reason: patchQualityBlockReason(patch) })
+        : t('profile.checkStateBeforeApply', { name: patch.name })))
     return
   }
   trainerBusy.value = true
   try {
     const controller = backend.getController()
     if (!controller.applyProfileCodePatch) {
-      statusMessage.value = '✗ Fonction patch profil indisponible.'
+      statusMessage.value = '✗ ' + t('profile.patchFunctionUnavailable')
       return
     }
     const result = await controller.applyProfileCodePatch(selectedProfile.value, patch.name)
     patchStates.value = { ...patchStates.value, [patch.name]: { ...result, active: Boolean(result.success || result.active) } }
     statusMessage.value = result.success
-      ? `✓ Patch "${patch.name}" appliqué à 0x${result.matchedAddress ?? result.address ?? ''}.`
-        + (result.executableVersionMismatch ? ` ⚠ ${String(result.executableVersionWarning ?? '')}` : '')
-      : '✗ ' + (result.error ?? `Patch "${patch.name}" impossible.`)
+      ? '✓ ' + t('profile.patchApplied', { name: patch.name, address: result.matchedAddress ?? result.address ?? '' })
+        + (result.executableVersionMismatch ? ' ⚠' + t('profile.versionMismatchWarning', { warning: String(result.executableVersionWarning ?? '') }) : '')
+      : '✗ ' + (result.error ?? t('profile.patchImpossible', { name: patch.name }))
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   } finally {
     trainerBusy.value = false
   }
@@ -657,25 +659,25 @@ async function applyProfilePatch(patch: ProfilePatchEntry) {
 async function restoreProfilePatch(patch: ProfilePatchEntry) {
   if (!selectedProfile.value || !patch.name) return
   if (!patchCanRestore(patch)) {
-    statusMessage.value = patchStates.value[patch.name]
-      ? `⚠ Patch "${patch.name}" non actif, restauration inutile.`
-      : `⚠ Vérifie l'état de "${patch.name}" avant restauration.`
+    statusMessage.value = '⚠ ' + (patchStates.value[patch.name]
+      ? t('profile.patchNotActive', { name: patch.name })
+      : t('profile.checkStateBeforeRestore', { name: patch.name }))
     return
   }
   trainerBusy.value = true
   try {
     const controller = backend.getController()
     if (!controller.restoreProfileCodePatch) {
-      statusMessage.value = '✗ Fonction restauration patch indisponible.'
+      statusMessage.value = '✗ ' + t('profile.restoreFunctionUnavailable')
       return
     }
     const result = await controller.restoreProfileCodePatch(selectedProfile.value, patch.name)
     patchStates.value = { ...patchStates.value, [patch.name]: { ...result, active: result.success ? false : Boolean(result.active) } }
     statusMessage.value = result.success
-      ? `✓ Patch "${patch.name}" restauré.`
-      : '✗ ' + (result.error ?? `Restauration "${patch.name}" impossible.`)
+      ? '✓ ' + t('profile.patchRestored', { name: patch.name })
+      : '✗ ' + (result.error ?? t('profile.restoreImpossibleFor', { name: patch.name }))
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   } finally {
     trainerBusy.value = false
   }
@@ -683,15 +685,15 @@ async function restoreProfilePatch(patch: ProfilePatchEntry) {
 
 function patchStateLabel(patch: ProfilePatchEntry): string {
   const state = patchStates.value[patch.name]
-  if (!state) return 'prêt'
+  if (!state) return t('profile.ready')
   const status = String(state.status ?? '')
-  if (status === 'original') return 'original'
-  if (status === 'active') return 'actif'
-  if (status === 'ambiguous') return 'ambigu'
-  if (status === 'missing') return 'introuvable'
-  if (status === 'invalid') return 'invalide'
-  if (state.active === true) return 'actif'
-  if (state.active === false && state.success) return 'restauré'
+  if (status === 'original') return t('profile.original')
+  if (status === 'active') return t('profile.active')
+  if (status === 'ambiguous') return t('profile.ambiguous')
+  if (status === 'missing') return t('profile.notFound')
+  if (status === 'invalid') return t('profile.invalid')
+  if (state.active === true) return t('profile.active')
+  if (state.active === false && state.success) return t('profile.restored')
   return state.success ? 'ok' : 'fail'
 }
 
@@ -710,11 +712,11 @@ function patchStateClass(patch: ProfilePatchEntry): string {
 
 function patchStateDetail(patch: ProfilePatchEntry): string {
   const state = patchStates.value[patch.name]
-  if (!state) return 'Vérification requise avant application.'
+  if (!state) return t('profile.checkRequiredBeforeApply')
   const parts = [
     state.matchedAddress ? `0x${state.matchedAddress}` : '',
-    state.originalMatches !== undefined ? `original ${state.originalMatches}` : '',
-    state.patchedMatches !== undefined ? `patché ${state.patchedMatches}` : '',
+    state.originalMatches !== undefined ? t('profile.originalMatchesLabel', { count: state.originalMatches }) : '',
+    state.patchedMatches !== undefined ? t('profile.patchedMatchesLabel', { count: state.patchedMatches }) : '',
     state.error ? String(state.error) : '',
   ].filter(Boolean)
   return parts.join(' · ')
@@ -728,7 +730,7 @@ function patchQualityBlocksTrainer(patch: ProfilePatchEntry): boolean {
 
 function patchQualityBlockReason(patch: ProfilePatchEntry): string {
   if (!patchQualityBlocksTrainer(patch)) return ''
-  return `qualité AOB insuffisante (${patch.signatureScore ?? 0}/100, ${patch.signatureFixedBytes ?? 0} fixe(s))`
+  return t('profile.insufficientAobQuality', { score: patch.signatureScore ?? 0, fixed: patch.signatureFixedBytes ?? 0 })
 }
 
 function patchCanApply(patch: ProfilePatchEntry): boolean {
@@ -760,7 +762,7 @@ async function inspectProfilePatches() {
   try {
     const controller = backend.getController()
     if (!controller.inspectProfileCodePatches) {
-      statusMessage.value = '✗ Inspection trainer indisponible.'
+      statusMessage.value = '✗ ' + t('profile.inspectionUnavailable')
       return
     }
     const result = await controller.inspectProfileCodePatches(selectedProfile.value)
@@ -771,10 +773,10 @@ async function inspectProfilePatches() {
     }
     patchStates.value = nextStates
     statusMessage.value = result.success
-      ? `✓ État trainer: ${result.active} actif(s), ${result.original} original(aux), ${result.ambiguous} ambigu(s).`
-      : '✗ ' + (String(result.error ?? 'Inspection trainer incomplète.'))
+      ? '✓ ' + t('profile.trainerState', { active: result.active, original: result.original, ambiguous: result.ambiguous })
+      : '✗ ' + (String(result.error ?? t('profile.inspectionIncomplete')))
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   } finally {
     trainerBusy.value = false
   }
@@ -783,18 +785,18 @@ async function inspectProfilePatches() {
 async function applyAllProfilePatches() {
   if (!selectedProfile.value || profilePatches.value.length === 0) return
   if (!trainerPatchSummary.value.canApplyAll) {
-    statusMessage.value = trainerPatchSummary.value.inspected
+    statusMessage.value = '⚠ ' + (trainerPatchSummary.value.inspected
       ? (trainerPatchSummary.value.unsafeQuality > 0
-        ? `⚠ Application globale bloquée : ${trainerPatchSummary.value.unsafeQuality} patch(s) ont une qualité AOB insuffisante.`
-        : '⚠ Application globale bloquée : au moins un patch est ambigu, introuvable ou invalide.')
-      : '⚠ Vérifie d’abord l’état trainer avant d’appliquer le lot.'
+        ? t('profile.globalApplyBlockedQuality', { count: trainerPatchSummary.value.unsafeQuality })
+        : t('profile.globalApplyBlockedState'))
+      : t('profile.checkTrainerStateFirst'))
     return
   }
   trainerBusy.value = true
   try {
     const controller = backend.getController()
     if (!controller.applyAllProfileCodePatches) {
-      statusMessage.value = '✗ Fonction trainer profil indisponible.'
+      statusMessage.value = '✗ ' + t('profile.trainerFunctionUnavailable')
       return
     }
     const result = await controller.applyAllProfileCodePatches(selectedProfile.value)
@@ -805,10 +807,10 @@ async function applyAllProfilePatches() {
     }
     patchStates.value = nextStates
     statusMessage.value = result.success
-      ? `✓ ${result.applied}/${result.total} patch(s) appliqué(s), ${result.alreadyActive ?? 0} déjà actif(s).`
-      : '✗ ' + (String(result.error ?? 'Application trainer partielle.'))
+      ? '✓ ' + t('profile.patchesApplied', { applied: result.applied, total: result.total, alreadyActive: result.alreadyActive ?? 0 })
+      : '✗ ' + (String(result.error ?? t('profile.trainerApplyPartial')))
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   } finally {
     trainerBusy.value = false
   }
@@ -820,7 +822,7 @@ async function restoreAllProfilePatches() {
   try {
     const controller = backend.getController()
     if (!controller.restoreAllProfileCodePatches) {
-      statusMessage.value = '✗ Fonction restauration trainer indisponible.'
+      statusMessage.value = '✗ ' + t('profile.restoreTrainerFunctionUnavailable')
       return
     }
     const result = await controller.restoreAllProfileCodePatches(selectedProfile.value)
@@ -831,10 +833,10 @@ async function restoreAllProfilePatches() {
     }
     patchStates.value = nextStates
     statusMessage.value = result.success
-      ? `✓ ${result.restored} patch(s) restauré(s), ${result.alreadyInactive} déjà inactif(s).`
-      : '✗ ' + (String(result.error ?? 'Restauration trainer partielle.'))
+      ? '✓ ' + t('profile.patchesRestored', { restored: result.restored, alreadyInactive: result.alreadyInactive })
+      : '✗ ' + (String(result.error ?? t('profile.trainerRestorePartial')))
   } catch (e) {
-    statusMessage.value = '✗ Erreur : ' + String(e)
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   } finally {
     trainerBusy.value = false
   }
@@ -848,25 +850,25 @@ onMounted(() => {
 <template>
   <div class="profile-view">
     <div class="header">
-      <h1>Profils</h1>
-      <button class="btn btn-secondary" @click="refreshProfiles">↻ Rafraîchir</button>
+      <h1>{{ $t('profile.title') }}</h1>
+      <button class="btn btn-secondary" @click="refreshProfiles">↻ {{ $t('profile.refresh') }}</button>
     </div>
 
     <PanelIntro
-      what="Les profils sauvegardés par jeu : adresses, patchs et scripts prêts à réutiliser."
-      purpose="Réactiver en un clic des cibles déjà trouvées lors d'une session précédente, sans refaire toute une recherche."
-      how="Choisis ou crée un profil, sauvegarde une adresse trouvée dans l'Assistant, puis réutilise-la (Vérifier, Utiliser, Écrire) à la prochaine session."
+      :what="$t('profile.intro.what')"
+      :purpose="$t('profile.intro.purpose')"
+      :how="$t('profile.intro.how')"
     />
 
     <div v-if="!store.isAttached" class="warn-box">
-      <p>⚠ Attache un processus pour utiliser les profils.</p>
-      <button class="btn btn-secondary" @click="store.activeView = 'process'">Aller à Processus</button>
+      <p>⚠ {{ $t('profile.attachPrompt') }}</p>
+      <button class="btn btn-secondary" @click="store.activeView = 'process'">{{ $t('profile.goToProcess') }}</button>
     </div>
 
     <!-- Liste des profils -->
     <div class="section">
-      <h2>Profils enregistrés</h2>
-      <div v-if="profiles.length === 0" class="empty">Aucun profil enregistré.</div>
+      <h2>{{ $t('profile.registeredProfilesTitle') }}</h2>
+      <div v-if="profiles.length === 0" class="empty">{{ $t('profile.noProfileRegistered') }}</div>
       <div v-else class="profile-list">
         <div
           v-for="p in profiles"
@@ -878,8 +880,8 @@ onMounted(() => {
           <div class="profile-name">{{ p.gameName ?? p.name }}</div>
           <div class="profile-meta">
             <span v-if="p.executableName">{{ p.executableName }}</span>
-            <span v-if="p.targetCount !== undefined">{{ p.targetCount }} cible(s)</span>
-            <span v-if="p.patchCount !== undefined">{{ p.patchCount }} patch(s)</span>
+            <span v-if="p.targetCount !== undefined">{{ $t('profile.targetCount', { count: p.targetCount }) }}</span>
+            <span v-if="p.patchCount !== undefined">{{ $t('profile.patchCount', { count: p.patchCount }) }}</span>
           </div>
         </div>
       </div>
@@ -887,16 +889,16 @@ onMounted(() => {
 
     <!-- Créer un nouveau profil -->
     <div class="section">
-      <h2>Créer un profil</h2>
+      <h2>{{ $t('profile.createProfileTitle') }}</h2>
       <div class="create-row">
         <input
           v-model="newProfileName"
-          placeholder="Nom du profil (ex: Mon Jeu)"
+          :placeholder="$t('profile.profileNamePlaceholder')"
           class="scan-input"
           @keyup.enter="createNewProfile()"
         />
         <button class="btn btn-secondary" :disabled="!newProfileName.trim()" @click="createNewProfile()">
-          Créer
+          {{ $t('profile.create') }}
         </button>
       </div>
     </div>
@@ -907,60 +909,60 @@ onMounted(() => {
 
       <!-- Sauvegarder une cible -->
       <div class="save-target-box">
-        <h3>Sauvegarder la cible courante</h3>
+        <h3>{{ $t('profile.saveCurrentTargetTitle') }}</h3>
         <p class="hint">
           <template v-if="profileSaveTargets.length === 1">
-            Adresse : <code>{{ profileSaveTargets[0].address }}</code>
-            · Type : <code>{{ profileSaveTargets[0].type }}</code>
+            {{ $t('profile.addressLabel') }} <code>{{ profileSaveTargets[0].address }}</code>
+            {{ $t('profile.typeLabel') }} <code>{{ profileSaveTargets[0].type }}</code>
           </template>
           <template v-else-if="profileSaveTargets.length > 1">
-            Lot final : <code>{{ profileSaveTargets.length }} adresses</code>
-            · Type : <code>{{ profileSaveTargets[0].type }}</code>
+            {{ $t('profile.batchLabel') }} <code>{{ $t('profile.addressesCount', { count: profileSaveTargets.length }) }}</code>
+            {{ $t('profile.typeLabel') }} <code>{{ profileSaveTargets[0].type }}</code>
           </template>
           <template v-else>
-            Adresse : <code>(aucune)</code>
+            {{ $t('profile.addressLabel') }} <code>{{ $t('profile.noneAddress') }}</code>
           </template>
         </p>
         <div class="save-row">
-          <input v-model="newTargetName" placeholder="Nom cible (ex: Money)" class="scan-input" />
-          <input v-model="newTargetDescription" placeholder="Description (optionnel)" class="scan-input" />
+          <input v-model="newTargetName" :placeholder="$t('profile.targetNamePlaceholder')" class="scan-input" />
+          <input v-model="newTargetDescription" :placeholder="$t('profile.descriptionPlaceholder')" class="scan-input" />
           <button
             class="btn btn-primary"
             :disabled="profileSaveTargets.length === 0 || !newTargetName.trim()"
             @click="saveCurrentTarget()"
           >
-            {{ profileSaveTargets.length > 1 ? 'Sauvegarder le lot' : 'Sauvegarder' }}
+            {{ profileSaveTargets.length > 1 ? $t('profile.saveBatch') : $t('profile.save') }}
           </button>
         </div>
       </div>
 
       <div v-if="store.clrSelectedObject" class="save-target-box">
-        <h3>Sauvegarder un champ CLR</h3>
+        <h3>{{ $t('profile.saveClrFieldTitle') }}</h3>
         <p class="hint">
-          Objet : <code>{{ store.clrSelectedObject.typeName }}</code>
-          · adresse actuelle : <code>{{ store.clrSelectedObject.address }}</code>
+          {{ $t('profile.objectLabel') }} <code>{{ store.clrSelectedObject.typeName }}</code>
+          {{ $t('profile.currentAddressLabel') }} <code>{{ store.clrSelectedObject.address }}</code>
         </p>
         <div class="save-row">
           <select v-model="clrProfileIdentityField" class="scan-input" @change="selectClrIdentityField(clrProfileIdentityField)">
-            <option value="">Champ identité</option>
+            <option value="">{{ $t('profile.identityFieldOption') }}</option>
             <option v-for="field in clrIdentityFields" :key="`id-${field.name}`" :value="field.name">
               {{ field.name }} = {{ field.value }}
             </option>
           </select>
-          <input v-model="clrProfileIdentityValue" placeholder="Valeur identité" class="scan-input" />
+          <input v-model="clrProfileIdentityValue" :placeholder="$t('profile.identityValuePlaceholder')" class="scan-input" />
           <select v-model="clrProfileTargetField" class="scan-input" @change="selectClrTargetField(clrProfileTargetField)">
-            <option value="">Champ à écrire</option>
+            <option value="">{{ $t('profile.targetFieldOption') }}</option>
             <option v-for="field in clrWritableFields" :key="`target-${field.name}`" :value="field.name">
-              {{ field.name }} ({{ field.elementType ?? field.typeName ?? 'primitive' }})
+              {{ field.name }} ({{ field.elementType ?? field.typeName ?? $t('profile.primitiveFallback') }})
             </option>
           </select>
-          <input v-model="clrProfileValueType" placeholder="Type écriture" class="scan-input" />
+          <input v-model="clrProfileValueType" :placeholder="$t('profile.writeTypePlaceholder')" class="scan-input" />
           <button
             class="btn btn-primary"
             :disabled="!canSaveClrProfileTarget"
             @click="saveCurrentClrFieldTarget()"
           >
-            Sauvegarder CLR
+            {{ $t('profile.saveClr') }}
           </button>
         </div>
       </div>
@@ -968,14 +970,14 @@ onMounted(() => {
       <!-- Cibles du profil -->
       <div v-if="profileTargets.length > 0" class="targets-list">
         <div class="targets-header">
-          <h3>Cibles ({{ profileTargets.length }})</h3>
-          <button class="btn btn-secondary btn-sm" @click="activateAllTargets()">Utiliser tout</button>
+          <h3>{{ $t('profile.targetsTitle', { count: profileTargets.length }) }}</h3>
+          <button class="btn btn-secondary btn-sm" @click="activateAllTargets()">{{ $t('profile.useAll') }}</button>
         </div>
         <div v-for="group in groupedProfileTargets" :key="group.name" class="target-group">
           <div class="target-group-header">
             <strong>{{ group.name }}</strong>
-            <span>{{ group.targets.length }} cible(s)</span>
-            <button class="btn btn-secondary btn-sm" @click="activateTargetGroup(group)">Utiliser le groupe</button>
+            <span>{{ $t('profile.targetCount', { count: group.targets.length }) }}</span>
+            <button class="btn btn-secondary btn-sm" @click="activateTargetGroup(group)">{{ $t('profile.useGroup') }}</button>
           </div>
           <div v-for="t in group.targets" :key="t.name" class="target-row">
             <div class="target-info">
@@ -988,25 +990,25 @@ onMounted(() => {
               <span class="target-resolution" :class="targetResolutionClass(t)">
                 {{ targetResolutionLabel(t) }}
               </span>
-              <button class="btn btn-secondary btn-sm" @click="verifyTarget(t)">Vérifier</button>
+              <button class="btn btn-secondary btn-sm" @click="verifyTarget(t)">{{ $t('profile.verify') }}</button>
               <button
                 class="btn btn-secondary btn-sm"
                 :disabled="!store.selectedCandidateAddress || t.locatorKind === 'clr_field'"
                 @click="repairTargetWithCurrentAddress(t)"
               >
-                Réparer
+                {{ $t('profile.repair') }}
               </button>
               <button
                 class="btn btn-secondary btn-sm"
                 :disabled="t.locatorKind === 'clr_field'"
                 @click="activateTarget(t.name)"
               >
-                Utiliser
+                {{ $t('profile.use') }}
               </button>
               <input
                 v-model="targetWriteValues[t.name]"
                 class="target-write-input"
-                placeholder="Valeur"
+                :placeholder="$t('profile.valuePlaceholder')"
                 @keyup.enter="writeProfileTarget(t)"
               />
               <button
@@ -1014,13 +1016,13 @@ onMounted(() => {
                 :disabled="!targetWriteValues[t.name]?.trim()"
                 @click="writeProfileTarget(t)"
               >
-                Écrire
+                {{ $t('profile.write') }}
               </button>
             </div>
             <div v-if="t.description" class="target-desc">{{ t.description }}</div>
-            <div v-if="t.dependsOn?.length" class="target-desc">Dépend de : {{ t.dependsOn.join(', ') }}</div>
+            <div v-if="t.dependsOn?.length" class="target-desc">{{ $t('profile.dependsOn', { list: t.dependsOn.join(', ') }) }}</div>
             <div v-if="t.ghidraSymbol || t.ghidraNote" class="target-desc">
-              Ghidra : {{ t.ghidraSymbol || 'symbole non nommé' }}{{ t.ghidraNote ? ` · ${t.ghidraNote}` : '' }}
+              {{ $t('profile.ghidraLabel', { symbol: t.ghidraSymbol || $t('profile.unnamedSymbol'), note: t.ghidraNote ? ` · ${t.ghidraNote}` : '' }) }}
             </div>
           </div>
         </div>
@@ -1029,23 +1031,22 @@ onMounted(() => {
       <!-- Roadmap section L — Pointer maps : diagnostic groupé après redémarrage -->
       <div v-if="selectedProfile" class="targets-list pointer-map-box">
         <div class="targets-header">
-          <h3>Vérifier après redémarrage</h3>
+          <h3>{{ $t('profile.verifyAfterRestartTitle') }}</h3>
           <button class="btn btn-secondary btn-sm" :disabled="pointerMapCompareBusy" @click="comparePointerMap()">
-            {{ pointerMapCompareBusy ? 'Vérification...' : 'Vérifier toutes les cibles' }}
+            {{ pointerMapCompareBusy ? $t('profile.verifying') : $t('profile.verifyAllTargets') }}
           </button>
         </div>
         <p class="hint">
-          Résout toutes les cibles du profil d'un coup sur le processus attaché — utile après un redémarrage du jeu
-          (nouvelle base ASLR) pour voir immédiatement quelles chaînes restent valides.
+          {{ $t('profile.verifyAfterRestartHint') }}
         </p>
         <p v-if="pointerMapCompareResult && !pointerMapCompareResult.success" class="error">
           {{ pointerMapCompareResult.error }}
         </p>
         <template v-if="pointerMapResults.length > 0">
           <p class="hint">
-            {{ pointerMapCompareResult?.validCount }} valide(s) · {{ pointerMapCompareResult?.invalidCount }} invalide(s)
+            {{ $t('profile.validInvalidCount', { valid: pointerMapCompareResult?.validCount, invalid: pointerMapCompareResult?.invalidCount }) }}
             <template v-if="Number(pointerMapCompareResult?.unsupportedCount ?? 0) > 0">
-              · {{ pointerMapCompareResult?.unsupportedCount }} non supportée(s)
+              {{ $t('profile.unsupportedCount', { count: pointerMapCompareResult?.unsupportedCount }) }}
             </template>
           </p>
           <div v-for="entry in pointerMapResults" :key="String(entry.targetName)" class="target-row">
@@ -1058,48 +1059,48 @@ onMounted(() => {
                 class="target-resolution"
                 :class="{ ok: entry.status === 'valid', fail: entry.status === 'invalid', unsupported: entry.status === 'unsupported' }"
               >
-                {{ entry.status === 'valid' ? `résolu 0x${entry.address}` : entry.status === 'unsupported' ? 'non supporté' : 'introuvable' }}
+                {{ entry.status === 'valid' ? $t('profile.resolvedAt', { address: entry.address }) : entry.status === 'unsupported' ? $t('profile.unsupportedStatus') : $t('profile.notFoundStatus') }}
               </span>
-              <span v-if="entry.previousAddress" class="target-locator">précédent : 0x{{ entry.previousAddress }}</span>
+              <span v-if="entry.previousAddress" class="target-locator">{{ $t('profile.previousAddress', { address: entry.previousAddress }) }}</span>
             </div>
           </div>
         </template>
         <div class="pointer-map-transfer">
           <div class="transfer-actions">
             <button class="btn btn-secondary btn-sm" :disabled="pointerMapTransferBusy" @click="exportPointerMap()">
-              {{ pointerMapTransferBusy ? 'Export...' : 'Exporter JSON' }}
+              {{ pointerMapTransferBusy ? $t('profile.exporting') : $t('profile.exportJson') }}
             </button>
             <label class="replace-toggle">
               <input v-model="pointerMapReplaceExisting" type="checkbox" />
-              Remplacer les doublons
+              {{ $t('profile.replaceDuplicates') }}
             </label>
             <button
               class="btn btn-primary btn-sm"
               :disabled="pointerMapTransferBusy || !pointerMapImportText.trim()"
               @click="importPointerMap()"
             >
-              Importer
+              {{ $t('profile.import') }}
             </button>
           </div>
           <textarea
             v-model="pointerMapExportText"
             class="pointer-map-textarea"
             readonly
-            placeholder="Export JSON des chaînes de pointeurs du profil"
+            :placeholder="$t('profile.pointerMapExportPlaceholder')"
           ></textarea>
           <textarea
             v-model="pointerMapImportText"
             class="pointer-map-textarea"
-            placeholder="Coller une pointer map JSON à fusionner dans ce profil"
+            :placeholder="$t('profile.pointerMapImportPlaceholder')"
           ></textarea>
           <p v-if="pointerMapTransferResult" :class="pointerMapTransferResult.success ? 'hint' : 'error'">
             <template v-if="pointerMapTransferResult.success">
-              {{ pointerMapTransferResult.imported ?? pointerMapTransferResult.targetCount ?? 0 }} importée(s)
+              {{ $t('profile.importedCount', { count: pointerMapTransferResult.imported ?? pointerMapTransferResult.targetCount ?? 0 }) }}
               <template v-if="Number(pointerMapTransferResult.replaced ?? 0) > 0">
-                · {{ pointerMapTransferResult.replaced }} remplacée(s)
+                {{ $t('profile.replacedCount', { count: pointerMapTransferResult.replaced }) }}
               </template>
               <template v-if="Number(pointerMapTransferResult.skipped ?? 0) > 0">
-                · {{ pointerMapTransferResult.skipped }} ignorée(s)
+                {{ $t('profile.skippedCount', { count: pointerMapTransferResult.skipped }) }}
               </template>
             </template>
             <template v-else>{{ pointerMapTransferResult.error }}</template>
@@ -1109,32 +1110,32 @@ onMounted(() => {
 
       <div v-if="selectedProfile" class="targets-list ghidra-bridge-box">
         <div class="targets-header">
-          <h3>Pont Ghidra</h3>
+          <h3>{{ $t('profile.ghidraBridgeTitle') }}</h3>
           <button class="btn btn-secondary btn-sm" :disabled="ghidraBridgeBusy" @click="exportGhidraBridge()">
-            {{ ghidraBridgeBusy ? 'Export...' : 'Exporter artefacts' }}
+            {{ ghidraBridgeBusy ? $t('profile.exporting') : $t('profile.exportArtifacts') }}
           </button>
         </div>
         <p class="hint">
-          Exporte les offsets, AOB et notes du profil vers Ghidra, puis importe des symboles Ghidra au format JSON
-          <span class="mono">symbols[]</span> ou CSV <span class="mono">module,offset,name,comment</span>.
+          {{ $t('profile.ghidraBridgeHintPart1') }}
+          <span class="mono">symbols[]</span> {{ $t('profile.ghidraBridgeHintPart2') }} <span class="mono">module,offset,name,comment</span>{{ $t('profile.ghidraBridgeHintPart3') }}
         </p>
         <div class="ghidra-grid">
           <textarea
             v-model="ghidraExportJson"
             class="pointer-map-textarea"
             readonly
-            placeholder="JSON KillEngine -> Ghidra"
+            :placeholder="$t('profile.ghidraJsonPlaceholder')"
           ></textarea>
           <textarea
             v-model="ghidraExportScript"
             class="pointer-map-textarea"
             readonly
-            placeholder="Script Python Ghidra généré"
+            :placeholder="$t('profile.ghidraScriptPlaceholder')"
           ></textarea>
           <textarea
             v-model="ghidraImportText"
             class="pointer-map-textarea ghidra-import-text"
-            placeholder="Coller ici un export Ghidra JSON/CSV : module,offset,name,comment"
+            :placeholder="$t('profile.ghidraImportPlaceholder')"
           ></textarea>
         </div>
         <div class="transfer-actions">
@@ -1143,19 +1144,19 @@ onMounted(() => {
             :disabled="ghidraBridgeBusy || !ghidraImportText.trim()"
             @click="importGhidraSymbols()"
           >
-            Importer symboles
+            {{ $t('profile.importSymbols') }}
           </button>
           <span v-if="ghidraBridgeResult" :class="ghidraBridgeResult.success ? 'hint' : 'error'">
             <template v-if="ghidraBridgeResult.success">
-              {{ ghidraBridgeResult.artifactCount ?? ghidraBridgeResult.symbolsRead ?? 0 }} lu(s)
+              {{ $t('profile.readCount', { count: ghidraBridgeResult.artifactCount ?? ghidraBridgeResult.symbolsRead ?? 0 }) }}
               <template v-if="Number(ghidraBridgeResult.targetsUpdated ?? 0) > 0">
-                · {{ ghidraBridgeResult.targetsUpdated }} cible(s)
+                {{ $t('profile.targetsUpdatedCount', { count: ghidraBridgeResult.targetsUpdated }) }}
               </template>
               <template v-if="Number(ghidraBridgeResult.patchesUpdated ?? 0) > 0">
-                · {{ ghidraBridgeResult.patchesUpdated }} patch(s)
+                {{ $t('profile.patchesUpdatedCount', { count: ghidraBridgeResult.patchesUpdated }) }}
               </template>
               <template v-if="Number(ghidraBridgeResult.unmatched ?? 0) > 0">
-                · {{ ghidraBridgeResult.unmatched }} sans correspondance
+                {{ $t('profile.unmatchedCount', { count: ghidraBridgeResult.unmatched }) }}
               </template>
             </template>
             <template v-else>{{ ghidraBridgeResult.error }}</template>
@@ -1165,22 +1166,22 @@ onMounted(() => {
 
       <div v-if="profilePatches.length > 0" class="patches-list">
         <div class="targets-header">
-          <h3>Patchs trainer ({{ profilePatches.length }})</h3>
+          <h3>{{ $t('profile.trainerPatchesTitle', { count: profilePatches.length }) }}</h3>
           <div class="trainer-actions">
-            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy" @click="inspectProfilePatches()">Vérifier état</button>
-            <button class="btn btn-primary btn-sm" :disabled="trainerBusy || !trainerPatchSummary.canApplyAll" @click="applyAllProfilePatches()">Tout appliquer</button>
-            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy || !trainerPatchSummary.inspected" @click="restoreAllProfilePatches()">Tout restaurer</button>
+            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy" @click="inspectProfilePatches()">{{ $t('profile.checkState') }}</button>
+            <button class="btn btn-primary btn-sm" :disabled="trainerBusy || !trainerPatchSummary.canApplyAll" @click="applyAllProfilePatches()">{{ $t('profile.applyAll') }}</button>
+            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy || !trainerPatchSummary.inspected" @click="restoreAllProfilePatches()">{{ $t('profile.restoreAll') }}</button>
           </div>
         </div>
         <div class="trainer-summary" :class="{ armed: trainerPatchSummary.canApplyAll, blocked: trainerPatchSummary.inspected && (trainerPatchSummary.risky > 0 || trainerPatchSummary.unsafeQuality > 0) }">
-          <strong>{{ trainerPatchSummary.inspected ? 'Trainer vérifié' : 'Inspection requise' }}</strong>
-          <span>original {{ trainerPatchSummary.original }}</span>
-          <span>actif {{ trainerPatchSummary.active }}</span>
-          <span>ambigu {{ trainerPatchSummary.ambiguous }}</span>
-          <span>introuvable {{ trainerPatchSummary.missing }}</span>
-          <span>invalide {{ trainerPatchSummary.invalid }}</span>
-          <span>qualité faible {{ trainerPatchSummary.unsafeQuality }}</span>
-          <span title="Fallback PHASE 122 disponible pour apply/restore des patchs code si la voie directe échoue en ERROR_ACCESS_DENIED.">relais patch prêt</span>
+          <strong>{{ trainerPatchSummary.inspected ? $t('profile.trainerVerified') : $t('profile.inspectionRequired') }}</strong>
+          <span>{{ $t('profile.originalCount', { count: trainerPatchSummary.original }) }}</span>
+          <span>{{ $t('profile.activeCount', { count: trainerPatchSummary.active }) }}</span>
+          <span>{{ $t('profile.ambiguousCount', { count: trainerPatchSummary.ambiguous }) }}</span>
+          <span>{{ $t('profile.missingCount', { count: trainerPatchSummary.missing }) }}</span>
+          <span>{{ $t('profile.invalidCount', { count: trainerPatchSummary.invalid }) }}</span>
+          <span>{{ $t('profile.lowQualityCount', { count: trainerPatchSummary.unsafeQuality }) }}</span>
+          <span :title="$t('profile.relayReadyTitle')">{{ $t('profile.relayReady') }}</span>
         </div>
         <div v-for="patch in profilePatches" :key="patch.name" class="patch-row">
           <div class="patch-info">
@@ -1192,14 +1193,14 @@ onMounted(() => {
               :class="`quality-${patch.signatureLevel}`"
               :title="patch.signatureWarning"
             >
-              AOB {{ patch.signatureLevel }} · {{ patch.signatureScore ?? 0 }}/100
+              {{ $t('profile.aobQualityScore', { level: patch.signatureLevel, score: patch.signatureScore ?? 0 }) }}
             </span>
             <span v-if="patch.signatureFixedBytes !== undefined" class="target-locator">
-              fixes {{ patch.signatureFixedBytes }} / wildcards {{ patch.signatureWildcardBytes ?? 0 }}
+              {{ $t('profile.fixedWildcards', { fixed: patch.signatureFixedBytes, wildcards: patch.signatureWildcardBytes ?? 0 }) }}
             </span>
             <span class="target-resolution" :class="patchStateClass(patch)">{{ patchStateLabel(patch) }}</span>
             <span v-if="patch.module" class="target-locator">{{ patch.module }} +0x{{ patch.moduleOffset }}</span>
-            <span v-if="patch.ghidraSymbol" class="patch-risk">Ghidra {{ patch.ghidraSymbol }}</span>
+            <span v-if="patch.ghidraSymbol" class="patch-risk">{{ $t('profile.ghidraSymbolLabel', { symbol: patch.ghidraSymbol }) }}</span>
           </div>
           <div class="target-actions">
             <label class="patch-toggle" :class="{ active: patchCanRestore(patch), disabled: trainerBusy || (!patchCanApply(patch) && !patchCanRestore(patch)) }">
@@ -1211,25 +1212,25 @@ onMounted(() => {
               />
               <span>{{ patchCanRestore(patch) ? 'ON' : 'OFF' }}</span>
             </label>
-            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy || !patchCanRestore(patch)" @click="restoreProfilePatch(patch)">Restaurer</button>
+            <button class="btn btn-secondary btn-sm" :disabled="trainerBusy || !patchCanRestore(patch)" @click="restoreProfilePatch(patch)">{{ $t('profile.restore') }}</button>
           </div>
           <div class="patch-state-detail">{{ patchStateDetail(patch) }}</div>
           <div v-if="patch.disassembly" class="target-desc">{{ patch.disassembly }}</div>
-          <div v-if="patch.aobPattern" class="target-desc">AOB: {{ patch.aobPattern }}</div>
-          <div v-if="patch.patchBytes" class="target-desc">Patch: {{ patch.patchBytes }}</div>
+          <div v-if="patch.aobPattern" class="target-desc">{{ $t('profile.aobPrefix') }} {{ patch.aobPattern }}</div>
+          <div v-if="patch.patchBytes" class="target-desc">{{ $t('profile.patchPrefix') }} {{ patch.patchBytes }}</div>
           <div v-if="patch.description" class="target-desc">{{ patch.description }}</div>
         </div>
       </div>
 
       <!-- Résultat de résolution -->
       <div v-if="resolveResult" class="resolve-box" :class="resolveResult.success ? 'ok' : 'fail'">
-        <span v-if="resolveResult.success">✓ Prêt dans l'Assistant : 0x{{ resolveResult.address }}</span>
+        <span v-if="resolveResult.success">✓ {{ $t('profile.readyInAssistant', { address: resolveResult.address }) }}</span>
         <span v-else>✗ {{ resolveResult.error }}</span>
       </div>
 
       <!-- Supprimer -->
       <button class="btn btn-danger" @click="deleteSelectedProfile()">
-        🗑 Supprimer ce profil
+        🗑 {{ $t('profile.deleteProfile') }}
       </button>
     </div>
 
