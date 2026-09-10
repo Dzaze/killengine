@@ -1,7 +1,10 @@
 import { ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { i18n } from '@/i18n'
 import { backend, type PointerChainInfo, type PointerChainResolveResult, type PointerScanResult } from '@/services/backend'
 import { cleanTrainerName } from '@/utils/format'
+
+const { t } = i18n.global
 
 // État module-scope (singleton) : partagé entre PointerChainPanel.vue et le
 // panneau Write encore inline dans ExpertView.vue (saveStableLocator() y
@@ -35,7 +38,7 @@ export function useExpertPointerChain() {
         })
         pointerScanResult.value = result
       } else {
-        pointerScanResult.value = { success: false, error: 'Methode backend indisponible (mock mode).' }
+        pointerScanResult.value = { success: false, error: t('expertPointerChain.backendMethodUnavailableMock') }
       }
     } catch (e) {
       pointerScanResult.value = { success: false, error: String(e) }
@@ -66,9 +69,9 @@ export function useExpertPointerChain() {
   }
 
   async function savePointerChain(chain: PointerChainInfo) {
-    const profileName = window.prompt('Nom du profil :', cleanTrainerName(store.processName || 'Jeu cible', 'Jeu cible'))
+    const profileName = window.prompt(t('expertPointerChain.profileNamePrompt'), cleanTrainerName(store.processName || t('expertPointerChain.defaultProcessName'), t('expertPointerChain.defaultProcessName')))
     if (!profileName) return
-    const targetName = window.prompt('Nom de la cible :', 'Ressource')
+    const targetName = window.prompt(t('expertPointerChain.targetNamePrompt'), t('expertPointerChain.defaultTargetName'))
     if (!targetName) return
     try {
       const controller = backend.getController()
@@ -78,14 +81,14 @@ export function useExpertPointerChain() {
           targetName,
           chain,
           pointerScanValueType.value,
-          'Chaine de pointeurs auto-detectee',
+          t('expertPointerChain.autoDetectedPointerChain'),
         )
         if (!result.success) {
-          window.alert('Erreur sauvegarde profil : ' + (result.error ?? 'inconnue'))
+          window.alert(t('expertPointerChain.saveProfileError', { error: result.error ?? t('expertPointerChain.unknownError') }))
         }
       }
     } catch (e) {
-      window.alert('Erreur : ' + String(e))
+      window.alert(t('expertPointerChain.genericError', { error: String(e) }))
     }
   }
 
@@ -93,7 +96,7 @@ export function useExpertPointerChain() {
     await store.addWatchedPointerChain(
       { module: chain.module, baseOffset: chain.baseOffset, offsets: chain.offsets },
       pointerScanValueType.value,
-      chain.label || `Chaine 0x${pointerScanAddress.value}`,
+      chain.label || t('expertPointerChain.chainAt', { address: pointerScanAddress.value }),
     )
   }
 
@@ -103,7 +106,7 @@ export function useExpertPointerChain() {
       label: chain.label || `Pointer chain ${chain.depth}`,
       address: pointerScanAddress.value,
       type: pointerScanValueType.value,
-      note: `profondeur ${chain.depth}`,
+      note: t('expertPointerChain.depthNote', { depth: chain.depth }),
       payload: {
         chain,
         targetAddress: pointerScanAddress.value,

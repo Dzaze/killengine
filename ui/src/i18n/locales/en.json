@@ -3882,5 +3882,707 @@
         "nextStep": "Run an exact scan, fire once in-game, then narrow down with the new value."
       }
     }
+  },
+  "assistantToolsPanel": {
+    "title": "Assistant Tools",
+    "toolCount": "{count} tools",
+    "riskPrefix": "risk",
+    "hintPrefix": "The Assistant can never self-approve a risky action: write, freeze, patch, or debugger tools require explicit confirmation in the interface. The tools",
+    "hintAnd": "and",
+    "hintSuffix": "always redirect to the Expert view (the \"Written by\" button, Write / Save files panel) without autonomous execution.",
+    "fullListSummary": "Full list by category",
+    "investigationModeHint": "The full investigation mode (PHASE 120 — Assistant reasoning mode that chains tools) is deliberately deferred to the end of the roadmap: nothing here activates or replaces it.",
+    "stats": {
+      "directTitle": "Direct execution",
+      "directDetail": "Read/analysis only, no writes.",
+      "confirmTitle": "UI confirmation required",
+      "confirmDetail": "The Assistant prepares, you confirm (RiskGate).",
+      "redirectTitle": "Redirected to the UI",
+      "redirectDetail": "Never executed from the chat."
+    },
+    "execution": {
+      "directLabel": "Direct",
+      "confirmLabel": "UI confirmation",
+      "redirectLabel": "Redirected to UI",
+      "directTitle": "Executed directly by the chat — read/analysis only, no writes.",
+      "confirmTitle": "The Assistant prepares the action; a confirmation click (RiskGate) is still required.",
+      "redirectTitle": "Never executed from the chat — always redirected to the right UI panel."
+    },
+    "categories": {
+      "scanMemory": "Memory scan",
+      "writeFreeze": "Write / Freeze",
+      "debugPatch": "Debug / Patch",
+      "injectionKernel": "Injection / Kernel",
+      "network": "Network",
+      "stealth": "Stealth",
+      "saveFilesUwp": "Save files / UWP",
+      "trainer": "Trainer",
+      "webview2Cdp": "WebView2 / CDP"
+    },
+    "tools": {
+      "auto_resolve": {
+        "summary": "Plans and runs a bounded safe mini-loop (scan, narrowing, fallbacks)."
+      },
+      "get_auto_report": {
+        "summary": "Summarizes context, telemetry, and the recommended next action."
+      },
+      "exact_scan": {
+        "summary": "Exact scan on the attached process."
+      },
+      "exact_scan_module": {
+        "summary": "Exact scan bounded to one specific loaded module/DLL."
+      },
+      "exact_scan_multi_type": {
+        "summary": "Multi-type exact scan when the memory representation is unknown."
+      },
+      "next_scan": {
+        "summary": "Narrows down existing candidates after a change."
+      },
+      "get_candidates": {
+        "summary": "Lists the current candidates (address, type, value, confidence) once the list is narrowed down.",
+        "note": "The only honest way to get a real address — next_scan/exact_scan only return a count. Added on 2026-09-08 after a field test where, without this tool, the assistant restarted a full scan instead of answering."
+      },
+      "encrypted_scan": {
+        "summary": "Bounded encrypted scan (XOR/Add/Sub/NOT)."
+      },
+      "trace_ui_string": {
+        "summary": "Searches for the displayed value in ASCII/UTF-16 (UI strings)."
+      },
+      "analyze_ui_sources": {
+        "summary": "Analyzes numeric sources near UI strings."
+      },
+      "read_window_text": {
+        "summary": "Observes the process's window titles/text."
+      },
+      "list_process_modules": {
+        "summary": "Lists the DLLs/modules loaded by the attached process."
+      },
+      "start_changed_pages_diff": {
+        "summary": "Bounded snapshot of writable pages before a change."
+      },
+      "finish_changed_pages_diff": {
+        "summary": "Compares the snapshot and looks for changed encodings."
+      },
+      "unknown_capture": {
+        "summary": "Captures a bounded initial unknown snapshot."
+      },
+      "unknown_compare": {
+        "summary": "Compares the unknown snapshot after a change."
+      },
+      "prepare_write_checkpoint": {
+        "summary": "Prepares candidates for writing, without writing.",
+        "note": "Depends on the local model's internal scan history — not available from the Claude backend (use write_value directly, address and value already known)."
+      },
+      "write_value": {
+        "summary": "Writes a typed value to an address."
+      },
+      "freeze_value": {
+        "summary": "Enables or disables a freeze."
+      },
+      "find_what_writes": {
+        "summary": "Captures the instruction that writes to an address.",
+        "note": "Attaches a debugger and requires a live change → the \"Written by\" button in the Expert view. Never executed from the chat, regardless of backend."
+      },
+      "analyze_field_stability": {
+        "summary": "Classifies the write pattern: recalculated displayed field vs. real source."
+      },
+      "generate_aob": {
+        "summary": "Generates an AOB signature from an instruction address."
+      },
+      "suggest_patch": {
+        "summary": "Suggests code patches without applying them."
+      },
+      "disassemble_backward": {
+        "summary": "Disassembles backward from a RIP to spot source fields."
+      },
+      "test_candidate_fields": {
+        "summary": "Tests which candidate fields actually hold.",
+        "note": "Actually writes a test value (~1 min in the background) → Expert view. Never executed from the chat, regardless of backend."
+      },
+      "kernel_write": {
+        "summary": "Writes via the kernel driver (bypasses usermode protections)."
+      },
+      "speedhack_set": {
+        "summary": "Speeds up, slows down, or resets the process's speed."
+      },
+      "block_process_network": {
+        "summary": "Blocks or restores the process's network (firewall)."
+      },
+      "get_process_network_connections": {
+        "summary": "Lists the process's active TCP/UDP connections, with DNS resolution.",
+        "note": "Asynchronous (reverse DNS resolution runs in the background) — the final result appears in the Network panel, not immediately in the chat."
+      },
+      "get_process_network_modules": {
+        "summary": "Lists loaded network DLL modules (wininet, winhttp, ws2_32...)."
+      },
+      "start_http_proxy": {
+        "summary": "Intercepts the target process's HTTP/HTTPS requests."
+      },
+      "stop_http_proxy": {
+        "summary": "Stops the active HTTP proxy and removes the hooks."
+      },
+      "get_http_proxy_requests": {
+        "summary": "Lists the HTTP requests intercepted by the active proxy."
+      },
+      "modify_http_request": {
+        "summary": "Modifies the body of an intercepted HTTP request before it is sent."
+      },
+      "spoof_dns": {
+        "summary": "Redirects a domain to a local IP via the hosts file."
+      },
+      "restore_dns": {
+        "summary": "Removes the spoofed DNS entry from the hosts file."
+      },
+      "set_lag_switch": {
+        "summary": "Delays the target process's recv/WSARecv functions."
+      },
+      "apply_stealth_mode": {
+        "summary": "Enables stealth mode (anti-debug, process/DLL masking)."
+      },
+      "restore_stealth_mode": {
+        "summary": "Disables stealth mode and restores the original state."
+      },
+      "get_stealth_status": {
+        "summary": "Returns the current stealth mode state (active, profile, modules)."
+      },
+      "discover_save_files": {
+        "summary": "Looks for the process's likely save files (UWP)."
+      },
+      "inspect_local_settings": {
+        "summary": "Inspects UWP LocalSettings in read-only mode."
+      },
+      "read_save_file_text": {
+        "summary": "Reads the bounded text content of a save file."
+      },
+      "patch_file_bytes": {
+        "summary": "Edits bytes in a save file.",
+        "note": "Actual disk write → never executed from the chat (PHASE 148), redirects to the Save files panel in the Expert view. True regardless of backend."
+      },
+      "watch_save_file": {
+        "summary": "Watches a file until it changes or times out."
+      },
+      "trainer_list_features": {
+        "summary": "Lists the local Trainer features."
+      },
+      "trainer_create_write": {
+        "summary": "Creates a Trainer write feature without enabling it."
+      },
+      "trainer_delete_feature": {
+        "summary": "Deletes a Trainer feature by id."
+      },
+      "trainer_apply_request": {
+        "summary": "Prepares a Trainer activation request.",
+        "note": "Confirmation is given in the Trainer tab (local model) or via the RiskGate click triggered by the Claude backend."
+      },
+      "trainer_restore_request": {
+        "summary": "Prepares a Trainer restore request.",
+        "note": "Confirmation is given in the Trainer tab (local model) or via the RiskGate click triggered by the Claude backend."
+      },
+      "getWebView2InspectorStatus": {
+        "summary": "Returns the state of the WebView2/CDP inspector (connected, endpoint, target)."
+      },
+      "listWebView2CdpTargets": {
+        "summary": "Lists the WebView2 CDP targets available for a given browser process."
+      },
+      "connectWebView2Inspector": {
+        "summary": "Connects the inspector to a CDP target.",
+        "note": "Attaches to an external process. The Claude backend connects to it directly after confirmation; the local model redirects to the WebView2 tab to choose the target manually."
+      },
+      "disconnectWebView2Inspector": {
+        "summary": "Disconnects the current WebView2/CDP inspector."
+      },
+      "evaluateWebView2JavaScript": {
+        "summary": "Evaluates an arbitrary JavaScript expression in the connected target.",
+        "note": "Can read or modify JS state depending on the code provided. Requires an already-connected target (connectWebView2Inspector or the WebView2 tab)."
+      },
+      "findWebView2DisplayedValues": {
+        "summary": "Searches for a displayed numeric value in the connected target's DOM."
+      },
+      "findWebView2DisplayedText": {
+        "summary": "Searches for displayed text in the connected target's DOM."
+      },
+      "probeWebView2GlobalScope": {
+        "summary": "Probes the connected target's global JS scope (window)."
+      }
+    }
+  },
+  "automationPipeStore": {
+    "backendNotExposed": "Backend not exposed.",
+    "disableFailed": "Disabling failed",
+    "disabled": "Automation mode disabled",
+    "enableFailed": "Enabling failed",
+    "enabled": "Automation mode enabled",
+    "unavailable": "Automation mode unavailable"
+  },
+  "settingsStore": {
+    "aiStatusNotExposed": "AI status not exposed by this backend.",
+    "aiStatusUnavailable": "AI status unavailable.",
+    "filePickerNotExposed": "File picker not exposed by this backend.",
+    "loadFailed": "Could not load settings: {error}",
+    "saveFailed": "Could not save: {error}",
+    "saved": "Settings saved."
+  },
+  "trainerStore": {
+    "activateFeatureTitle": "Enable Trainer feature: {name}",
+    "allLocalFeaturesRemoved": "All local features have been removed.",
+    "aobNotUnique": "AOB not unique ({count} match(es)). Regenerate a more specific signature.",
+    "aobResolutionImpossible": "AOB resolution impossible.",
+    "aobScanNotExposed": "AOB scan not exposed by this backend.",
+    "aobTooWeak": "AOB too weak ({score}/100, {fixedBytes} fixed byte(s)).",
+    "bookmarkNoAddress": "Bookmark with no address.",
+    "clrFeatureRefused": "CLR feature refused",
+    "clrObjectNotFound": "CLR object not found.",
+    "clrProfileSaveNotExposed": "CLR profile save not exposed by this backend.",
+    "defaultFeatureName": "Feature 0x{address}",
+    "defaultFieldName": "field",
+    "dependencies": {
+      "activationInterrupted": "Activation interrupted",
+      "applyAllInterrupted": "Apply all interrupted",
+      "cycle": "Dependency cycle detected between: {names}.",
+      "invalidOrder": "Invalid dependency order.",
+      "missingDependency": "\"{featureName}\" depends on a feature that was not found (id {depId}).",
+      "rejected": "Dependencies refused: {name}",
+      "restoreAllInterrupted": "Restore all interrupted",
+      "restoreInterrupted": "Restore interrupted"
+    },
+    "dependenciesNotSaved": "Target saved, dependencies not saved: {error}",
+    "dependencyNotFound": "Dependency not found: {ids}.",
+    "dependencyPersistenceNotExposed": "Trainer dependency persistence not exposed by this backend.",
+    "featureActivated": "Feature activated: {name}",
+    "featureBlocked": "Feature blocked: {name}",
+    "featureCreated": "Feature created: {name}",
+    "featureCreatedFromBookmark": "Trainer feature created from bookmark",
+    "featureFailed": "Feature failed: {name}",
+    "featureNotFound": "Feature not found.",
+    "featureRefused": "Feature refused",
+    "featureRestored": "Feature restored: {name}",
+    "freezeBpNotExposed": "Freeze BP not exposed by this backend.",
+    "hotkeyRefused": "Hotkey refused.",
+    "hotkeyRegistered": "Hotkey registered: {hotkey}",
+    "hotkeyUnavailable": "Hotkey unavailable",
+    "hotkeysNotExposed": "Global hotkeys not exposed by this backend.",
+    "incompleteClrLocator": "Incomplete CLR locator.",
+    "markdown": {
+      "address": "Address",
+      "aobQuality": "AOB quality",
+      "dependsOn": "Depends on",
+      "exportedAt": "Export: {value}",
+      "featureCount": "Features: {value}",
+      "history": "History",
+      "lastError": "Last error",
+      "noLocalFeature": "No local Trainer feature.",
+      "none": "none",
+      "notAttached": "not attached",
+      "process": "Process: {value}",
+      "status": "Status",
+      "type": "Type",
+      "valueOrPatch": "Value/patch"
+    },
+    "missingAddress": "Missing address.",
+    "missingAob": "Missing AOB: save a stable signature before enabling.",
+    "missingPointerChain": "Missing pointer chain: generate it before enabling.",
+    "missingPointerChainShort": "Missing pointer chain.",
+    "noDependency": "no dependency",
+    "noStableChainFound": "No stable chain found for this address.",
+    "overlayHidden": "Overlay hidden.",
+    "overlayHiddenTitle": "Trainer overlay hidden",
+    "overlayHotkeyRefused": "Overlay hotkey refused.",
+    "overlayHotkeyRefusedTitle": "Overlay hotkey refused",
+    "overlayHotkeyRegistered": "Overlay hotkey registered: {hotkey}",
+    "overlayHotkeyRegisteredTitle": "Overlay hotkey registered",
+    "overlayHotkeyRemoved": "Overlay hotkey removed",
+    "overlayHotkeyUnavailable": "Overlay hotkey unavailable",
+    "overlayNotExposed": "Trainer overlay not exposed by this backend.",
+    "overlayNotUpdated": "Overlay not updated.",
+    "overlayRefused": "Overlay refused.",
+    "overlayShown": "Overlay shown.",
+    "overlayShownTitle": "Trainer overlay shown",
+    "overlayUnavailable": "Overlay unavailable",
+    "overlayUpdated": "Overlay updated.",
+    "patchCodeNotExposed": "Code patch not exposed by this backend.",
+    "patchIncomplete": "Incomplete patch: missing bytes.",
+    "patchProfileSaveNotExposed": "Patch profile save not exposed by this backend.",
+    "pointerChainGenerated": "Pointer chain generated: {name}",
+    "pointerChainGeneratedDetail": "{module}+{offset} → [{offsets}] ({count} candidate(s))",
+    "pointerChainNotFound": "Pointer chain not found: {name}",
+    "pointerChainResolutionImpossible": "Could not resolve the pointer chain.",
+    "pointerChainResolutionNotExposed": "Pointer chain resolution not exposed by this backend.",
+    "pointerChainSaveNotExposed": "Pointer chain save not exposed by this backend.",
+    "pointerChainUnavailable": "Pointer chain unavailable: {name}",
+    "profileSaveBlocked": "Profile save blocked: {name}",
+    "profileSaveFailed": "Profile save failed: {name}",
+    "profileSaveFailedShort": "Profile save failed.",
+    "profileSaved": "Profile saved: {name}",
+    "restoreFailed": "Restore failed: {name}",
+    "restoreFeatureTitle": "Restore Trainer feature: {name}",
+    "restorePatchNotExposed": "Restore patch not exposed by this backend.",
+    "scanPointerChainsNotExposed": "scanPointerChains not exposed by this backend.",
+    "trainerCleared": "Trainer cleared",
+    "trainerHotkeyRefused": "Trainer hotkey refused",
+    "trainerHotkeyRegistered": "Trainer hotkey registered",
+    "trainerHotkeyRemoved": "Trainer hotkey removed",
+    "unknownError": "unknown error",
+    "writePrimitiveFieldNotExposed": "writePrimitiveField not exposed by this backend."
+  },
+  "kernelDriverStore": {
+    "bytesRead": "{count} byte(s) read via the kernel driver.",
+    "bytesWritten": "{count} byte(s) written via the kernel driver.",
+    "driverStarted": "Kernel driver started",
+    "driverUnavailable": "Kernel driver unavailable",
+    "probeNotExposed": "Kernel driver probe not exposed by this backend.",
+    "readFailedTitle": "Kernel read failed 0x{address}",
+    "readNotExposed": "Kernel read not exposed by this backend.",
+    "readTitle": "Kernel read 0x{address}",
+    "startNotExposed": "Kernel driver startup not exposed by this backend.",
+    "writeFailedTitle": "Kernel write failed 0x{address}",
+    "writeNotExposed": "Kernel write not exposed by this backend.",
+    "writeTitle": "Kernel write 0x{address}"
+  },
+  "riskGateStore": {
+    "confirmed": "Confirmed: {title}",
+    "pipeAutoConfirmed": "Pipe auto-confirmed: {title}",
+    "refused": "Refused: {title}",
+    "rememberSpeedhack": "Don't ask again for speedhack during this session",
+    "rememberedConfirmation": "Remembered confirmation: {title}",
+    "riskConfirmed": "Risk confirmed: {title}",
+    "riskRefused": "Risk refused: {title}"
+  },
+  "webView2InspectorStore": {
+    "connectFailed": "Connection failed",
+    "connectUnavailable": "Method connectWebView2Inspector not available",
+    "disconnectFailed": "Disconnection failed",
+    "disconnectUnavailable": "Method disconnectWebView2Inspector not available",
+    "emptyScript": "Empty script",
+    "evaluateFailed": "Evaluation failed",
+    "evaluateUnavailable": "Method evaluateWebView2JavaScript not available",
+    "findTextUnavailable": "Method findWebView2DisplayedText not available",
+    "findValuesUnavailable": "Method findWebView2DisplayedValues not available",
+    "listTargetsFailed": "Failed to list targets",
+    "listTargetsUnavailable": "Method listWebView2CdpTargets not available",
+    "methodUnavailable": "Method not available",
+    "noTargetSelected": "No target selected",
+    "probeFailed": "Global scope probe failed",
+    "probeUnavailable": "Method probeWebView2GlobalScope not available",
+    "searchFailed": "Search failed"
+  },
+  "workspaceItemsStore": {
+    "allLocalBookmarksRemoved": "All local bookmarks have been removed.",
+    "allLocalTemplatesRemoved": "All local templates have been removed.",
+    "bookmarkAdded": "Bookmark added: {label}",
+    "bookmarkDeleted": "Bookmark deleted",
+    "bookmarkUpdated": "Bookmark updated: {label}",
+    "bookmarksCleared": "Bookmarks cleared",
+    "defaultBookmarkLabel": "Bookmark",
+    "defaultStructureName": "Structure 0x{address}",
+    "fieldCount": "{count} field(s).",
+    "noExploitableField": "No usable typed field.",
+    "templateDeleted": "Template deleted",
+    "templateRefused": "Template refused",
+    "templateSaved": "Template saved: {name}",
+    "templatesCleared": "Templates cleared"
+  },
+  "workspaceSessionStore": {
+    "addChainError": "Error adding chain",
+    "allLocalProjectsRemoved": "All local projects have been removed.",
+    "chainCount": "{count} chain(s).",
+    "chainNotResolved": "Chain not resolved",
+    "defaultChainLabel": "Chain #{id}",
+    "importedCounts": "{features} feature(s), {templates} template(s), {bookmarks} bookmark(s), {archives} archive(s), {audits} audit(s).",
+    "importedCountsDetailed": "{features} feature(s), {templates} template(s), {bookmarks} bookmark(s), {archives} archive(s), {audits} audit(s), settings={hasSettings}, preset={preset}.",
+    "liveWatchEnabled": "Live watch expressions enabled",
+    "liveWatchStopped": "Live watch expressions stopped",
+    "markdown": {
+      "active": "Active: {value}",
+      "activeSteps": "Active steps: {value}",
+      "archives": "Archives: {value}",
+      "auditTitle": "Audit",
+      "autoReportTitle": "Auto Report",
+      "availablePresetsTitle": "Available Presets",
+      "bookmarks": "Bookmarks: {value}",
+      "confirmationRequired": "confirmation required",
+      "diagnosticsTitle": "Diagnostics",
+      "entries": "Entries: {value}",
+      "export": "Export: {value}",
+      "features": "Features: {value}",
+      "localAi": "Local AI: {value}",
+      "noAutoReportLoaded": "No Auto report loaded.",
+      "none": "none",
+      "notAttached": "not attached",
+      "notDetermined": "not determined",
+      "preset": "Preset: {value}",
+      "process": "Process: {value}",
+      "quality": "quality {level}{score}",
+      "strategy": "Strategy: {value}",
+      "structuresTitle": "Structures",
+      "summary": "Summary: {value}",
+      "templateLine": "- {name}: {count} field(s), base 0x{address}",
+      "templates": "Templates: {value}",
+      "unavailable": "unavailable",
+      "value": "value {value}",
+      "version": "Version: {value}",
+      "workflow": "Workflow: {value}"
+    },
+    "no": "no",
+    "projectCounts": "{features} feature(s), {templates} template(s).",
+    "projectDeleted": "Project deleted",
+    "projectLoaded": "Project loaded: {name}",
+    "projectLoadedDetail": "{name} · {features} feature(s), {templates} template(s), {bookmarks} bookmark(s), {audits} audit(s).",
+    "projectNotFound": "Project not found.",
+    "projectSaved": "Project saved: {name}",
+    "projectsCleared": "Projects cleared",
+    "resolutionImpossible": "Could not resolve.",
+    "workspaceImported": "Workspace imported",
+    "workspaceProjectLoaded": "Workspace project loaded",
+    "yes": "yes"
+  },
+  "clrInspectorStore": {
+    "atomicOperationsApplied": "{count} operation(s) applied, {threads} thread(s) suspended during the write.",
+    "atomicTransactionApplied": "Atomic CLR transaction applied",
+    "atomicTransactionFailed": "Atomic CLR transaction failed",
+    "attachFailed": "CLR attach failed.",
+    "attachRefused": "CLR inspector refused",
+    "attached": "CLR inspector attached",
+    "callMethodNotExposed": "callClrInstanceMethod not exposed by this backend.",
+    "disassembleFailed": "CLR disassembly failed",
+    "disassembleNotExposed": "disassembleClrMethod not exposed by this backend.",
+    "enumerateRootsNotExposed": "enumerateRoots not exposed by this backend.",
+    "fieldWritten": "CLR field written",
+    "findByFieldValueNotExposed": "findObjectsByFieldValue not exposed by this backend.",
+    "findByTypeNotExposed": "findObjectsByType not exposed by this backend.",
+    "findGcRootPathNotExposed": "findClrGcRootPath not exposed by this backend.",
+    "flushCacheNotExposed": "flushCachedData not exposed by this backend.",
+    "gcRootPathDetail": "{kind} → {depth} hop(s) → {address}",
+    "gcRootPathFound": "GC root path found",
+    "gcRootPathNotFound": "GC root path not found",
+    "generateReportNotExposed": "generateClrObjectReport not exposed by this backend.",
+    "incompleteLocator": "Incomplete CLR locator.",
+    "inspectorNotExposed": "CLR inspector not exposed by this backend.",
+    "locatorExecuted": "CLR locator executed",
+    "locatorFailed": "CLR locator failed",
+    "locatorMatches": "{count} match(es) for {type}.{field} = {value}.",
+    "methodDisassembled": "CLR method disassembled",
+    "methodDisassembledDetail": "{method} @ {address} ({count} instruction(s))",
+    "no": "no",
+    "operationsApplied": "{count} operation(s) applied.",
+    "operationsAppliedAt": "{count} operation(s) applied @ {address}.",
+    "pathWritten": "CLR path written",
+    "pathWrittenLocator": "CLR path written (locator)",
+    "readObjectNotExposed": "readObject not exposed by this backend.",
+    "reportGenerated": "CLR object report generated",
+    "reportGeneratedDetail": "{type} @ {address} — {count} node(s){truncated}",
+    "reportGenerationFailed": "CLR report generation failed",
+    "rollbackOk": "Rollback OK.",
+    "setterCallFailed": "CLR setter call failed",
+    "setterCalled": "CLR setter called",
+    "setterCalledDetail": "{method} @ {address} (verified: {verified})",
+    "transactionApplied": "CLR transaction applied",
+    "transactionAppliedLocator": "CLR transaction applied (locator)",
+    "transactionByLocatorFailed": "CLR transaction by locator failed",
+    "transactionFailed": "CLR transaction failed",
+    "truncated": "(truncated)",
+    "writeFieldFailed": "CLR field write failed",
+    "writeFieldNotExposed": "writePrimitiveField not exposed by this backend.",
+    "writePathBatchAtomicNotExposed": "writeClrPrimitivePathBatchAtomic not exposed by this backend.",
+    "writePathBatchByLocatorNotExposed": "writeClrPrimitivePathBatchByLocator not exposed by this backend.",
+    "writePathBatchNotExposed": "writePrimitivePathBatch not exposed by this backend.",
+    "writePathByLocatorFailed": "CLR path write by locator failed",
+    "writePathByLocatorNotExposed": "writeClrPrimitivePathByLocator not exposed by this backend.",
+    "writePathFailed": "CLR path write failed",
+    "writePathNotExposed": "writePrimitivePath not exposed by this backend.",
+    "yes": "yes"
+  },
+  "networkStore": {
+    "dnsRestored": "DNS restored: {domain}",
+    "dnsSpoofFailed": "DNS spoof failed",
+    "dnsSpoofed": "DNS spoofed: {domain} → {targetIp}",
+    "httpProxyFailed": "HTTP proxy failed",
+    "httpProxyStarted": "HTTP proxy started",
+    "httpProxyStopped": "HTTP proxy stopped",
+    "httpRequestModified": "HTTP request modified",
+    "lagSwitchDelayDetail": "+{ms}ms on recv/WSARecv",
+    "lagSwitchDisabled": "Lag switch disabled",
+    "lagSwitchEnabled": "Lag switch enabled",
+    "lagSwitchFailed": "Lag switch failed",
+    "unknownReason": "unknown reason"
+  },
+  "scanningStore": {
+    "addressSelected": "Address selected 0x{address}",
+    "beforeAfterCandidates": "{before} -> {after} candidate(s).",
+    "cancellationImpossible": "Cancellation impossible: {error}",
+    "cancellationRequested": "Cancellation requested...",
+    "candidateCountDetail": "{count} candidate(s).",
+    "candidatesAndRegions": "{count} candidate(s), {regions} region(s).",
+    "captureDetail": "{regions} region(s), {bytes} byte(s) / limit {limit}.{limitReached}{writableOnly}",
+    "captureFirstUnknownImage": "Capture an unknown image first before comparing.",
+    "captureFirstUnknownValue": "Capture an unknown value first.",
+    "captureLabel": "capture",
+    "captureRefused": "Capture refused.",
+    "encryptedScanFailed": "Encrypted scan failed.",
+    "encryptedScanFailedTitle": "Encrypted scan failed",
+    "encryptedScanFinished": "Encrypted scan finished.",
+    "encryptedScanFinishedTitle": "Encrypted scan finished",
+    "encryptedScanNotExposed": "Encrypted scan not exposed by this backend.",
+    "encryptedScanRunning": "Encrypted scan running...",
+    "encryptedScanTitle": "Encrypted scan {mode} {value}",
+    "encryptedScanUnavailable": "Encrypted scan unavailable",
+    "exact": "exact",
+    "exactScanCancelledTitle": "Exact scan cancelled",
+    "exactScanFailedTitle": "Exact scan failed",
+    "exactScanFinishedTitle": "Exact scan finished",
+    "exactScanRunning": "Exact scan running...",
+    "expertFiltersActive": "expert filters active",
+    "foundAndStored": "{found} found, {stored} stored.",
+    "groupScanFailedTitle": "Group scan failed",
+    "groupScanFinishedDetail": "{count} structure(s) found.",
+    "groupScanFinishedTitle": "Group scan finished",
+    "groupScanNeedTwoValues": "Enter at least 2 values with their offsets.",
+    "groupScanNotExposed": "Group scan not exposed by this backend.",
+    "groupScanRunning": "Group scan running...",
+    "groupScanTitle": "Group scan ({count} values)",
+    "groupScanUnavailable": "Group scan unavailable",
+    "guidedUnknownRefused": "Guided unknown refused",
+    "limitReached": "Limit reached.",
+    "loadingCandidates": "Loading candidates...",
+    "matchesAndRegions": "{count} match(es), {regions} region(s).",
+    "modeChanged": "it changes",
+    "modeDecreased": "it decreases",
+    "modeIncreased": "it increases",
+    "modeUnchanged": "stable",
+    "multiType": "multi-type",
+    "multiTypeScanRunning": "Multi-type scan running...",
+    "narrowingCandidates": "Narrowing down candidates...",
+    "narrowingNotRestored": "Narrowing not restored",
+    "narrowingRestored": "Narrowing restored: {count} candidate(s).",
+    "narrowingRestoredTitle": "Narrowing restored",
+    "nextScanCancelledTitle": "Next scan cancelled",
+    "nextScanFailed": "Next scan failed.",
+    "nextScanFailedTitle": "Next scan failed",
+    "nextScanFinished": "Next scan finished.",
+    "nextScanFinishedTitle": "Next scan finished",
+    "nextScanRefused": "Next scan refused",
+    "nextScanTitle": "Next scan {mode}",
+    "noCandidateToNarrow": "No candidate to narrow down. Run a first scan first.",
+    "noExplicitValue": "No explicit value.",
+    "noNarrowingToRestore": "No narrowing to restore.",
+    "operationCancelled": "Operation cancelled.",
+    "refreshingCandidates": "Refreshing candidates...",
+    "regionsDetail": "{count} region(s).",
+    "remainingCandidates": "{count} candidate(s) remaining.",
+    "restoreImpossible": "Restore impossible.",
+    "scanCancelled": "Scan cancelled.",
+    "scanFailed": "Scan failed.",
+    "scanFinished": "Scan finished.",
+    "scanTitle": "Scan {kind} {value}",
+    "snapshotCaptured": "Snapshot captured.",
+    "unknownCapture": "Unknown capture",
+    "unknownCaptureFailed": "Unknown capture failed.",
+    "unknownCaptureRunning": "Unknown capture running...",
+    "unknownComparisonFailed": "Unknown comparison failed.",
+    "unknownComparisonFailedTitle": "Unknown comparison failed",
+    "unknownComparisonFinished": "Unknown comparison finished.",
+    "unknownComparisonFinishedTitle": "Unknown comparison finished",
+    "unknownComparisonRefused": "Unknown comparison refused",
+    "unknownComparisonRunning": "Unknown comparison running...",
+    "unknownComparisonTitle": "Unknown comparison {mode}",
+    "unknownRefiningRunning": "Unknown refining {mode}...",
+    "unknownRefiningTitle": "Unknown refining {mode}",
+    "unknownSnapshotCaptured": "Unknown snapshot captured",
+    "valueDetail": "Value {value}."
+  },
+  "speedhackStore": {
+    "backendNotExposed": "Backend not exposed.",
+    "count": "count",
+    "factorDetail": "Factor {factor}x.",
+    "factorSettingFailed": "Factor setting failed",
+    "firewallRuleRemoved": "Firewall rule removed.",
+    "forceReturn": "force return",
+    "hookRemoved": "Hook removed.",
+    "interceptActive": "Interception active",
+    "interceptActiveDetail": "{module}!{fn}, mode {mode}.",
+    "interceptCallCount": "{count} call(s) intercepted in total.",
+    "interceptFailed": "Interception failed",
+    "interceptRemoveFailed": "Removing the interception failed",
+    "interceptRemoved": "Interception removed",
+    "interceptUnavailable": "Interception unavailable",
+    "networkBlockCancelled": "Network block cancelled",
+    "networkBlockFailed": "Network block failed",
+    "networkBlockUnavailable": "Network block unavailable",
+    "networkCut": "Network cut",
+    "networkCutDetail": "{exe} isolated from the network.",
+    "networkRestoreCancelled": "Network restore cancelled",
+    "networkRestoreFailed": "Network restore failed",
+    "networkRestored": "Network restored",
+    "networkStatusUnavailable": "Network status unavailable",
+    "speedRestored": "Speed reset to normal.",
+    "speedhackDisabled": "Speedhack disabled",
+    "speedhackEnabled": "Speedhack enabled",
+    "speedhackFailed": "Speedhack failed",
+    "speedhackStopFailed": "Stopping speedhack failed",
+    "speedhackUnavailable": "Speedhack unavailable",
+    "statusUnavailable": "Speedhack status unavailable",
+    "uacRefused": "UAC prompt refused.",
+    "unknownReason": "unknown reason"
+  },
+  "expertAobFlow": {
+    "backendMethodUnavailable": "Backend method unavailable.",
+    "noUniqueSignature": "No unique signature. Best lead: {count} match(es).",
+    "noUsableSignatureGenerated": "No usable signature generated.",
+    "autoScanSkippedWeakSignature": "Signature too weak to launch the scan automatically (too few fixed bytes on this single instruction — high risk of multiple matches). The pattern is pre-filled below: widen it (more context around the instruction) or click \"Scan AOB\" if you want to try anyway.",
+    "insufficientInstructionBytes": "Not enough instruction bytes to apply the value.",
+    "invalidOverrideValue": "Invalid value (expected a decimal integer or 0x hexadecimal).",
+    "overrideValueOutOfRange": "Value out of range for a {size} byte(s) field (truncated to 0x{truncated}). Fix the value if this wasn't intended.",
+    "signatureTooWeak": "AOB signature too weak ({score}/100, {fixedBytes} fixed byte(s)). Lengthen the signature or regenerate a more stable AOB.",
+    "patchCodeTitle": "Patch code",
+    "patchCodeDesc": "Address 0x{address}, bytes {bytes}.",
+    "incompleteAnalysis": "Incomplete analysis: patch, address, or stable AOB missing.",
+    "patchFromFindWhatWrites": "Patch from Find What Writes",
+    "suggestionLabel": "Suggestion: {label}",
+    "observedTarget": "Observed target: 0x{address}",
+    "signatureNotFound": "AOB signature not found: adjust the pattern before saving the trainer.",
+    "signatureNotUnique": "AOB signature not unique ({count} matches): save blocked to avoid a dangerous patch."
+  },
+  "expertPointerChain": {
+    "backendMethodUnavailableMock": "Backend method unavailable (mock mode).",
+    "profileNamePrompt": "Profile name:",
+    "targetNamePrompt": "Target name:",
+    "defaultProcessName": "Target game",
+    "defaultTargetName": "Resource",
+    "autoDetectedPointerChain": "Auto-detected pointer chain",
+    "saveProfileError": "Profile save error: {error}",
+    "unknownError": "unknown",
+    "genericError": "Error: {error}",
+    "chainAt": "Chain 0x{address}",
+    "depthNote": "depth {depth}"
+  },
+  "actionLogStore": {
+    "markdown": {
+      "export": "Export",
+      "process": "Process",
+      "notAttached": "not attached",
+      "entries": "Entries"
+    }
+  },
+  "investigationStore": {
+    "autoTitle": "Auto Investigation",
+    "manualObjective": "Manual investigation",
+    "displayValueReportLabel": "Displayed values report",
+    "displayValueReportReason": "Trace UI string and numeric sources before debugging.",
+    "priorityLabel": "Priority: {label}",
+    "actionFallback": "action",
+    "plannedStep": "Planned step"
+  },
+  "main": {
+    "fatalErrorBanner": "⚠ KillEngine display error ({info}): {message} — details in the console (Ctrl+Shift+J / F12).",
+    "fatalErrorBannerClose": "Close"
+  },
+  "backendService": {
+    "cannotStartScan": "Could not start the async scan.",
+    "cannotStartNextScan": "Could not start the async next scan.",
+    "cannotStartUnknownCapture": "Could not start the async unknown capture.",
+    "cannotStartUnknownComparison": "Could not start the async unknown comparison.",
+    "scanTimeout": "Async scan timeout.",
+    "nextScanTimeout": "Async next scan timeout.",
+    "unknownCaptureTimeout": "Async unknown capture timeout.",
+    "unknownComparisonTimeout": "Async unknown comparison timeout."
   }
 }

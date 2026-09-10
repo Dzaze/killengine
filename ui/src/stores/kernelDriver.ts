@@ -12,6 +12,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import {
   backend,
   type KernelDriverStatus,
@@ -19,6 +20,8 @@ import {
   type KernelMemoryWriteResult,
 } from '@/services/backend'
 import { useActionLogStore } from './actionLog'
+
+const { t } = i18n.global
 
 export const useKernelDriverStore = defineStore('kernelDriver', () => {
   const actionLogStore = useActionLogStore()
@@ -39,7 +42,7 @@ export const useKernelDriverStore = defineStore('kernelDriver', () => {
       const controller = backend.getController()
       if (!controller.probeKernelDriver) {
         kernelDriverStatus.value = null
-        kernelDriverStatusError.value = 'Probe driver noyau non exposé par ce backend.'
+        kernelDriverStatusError.value = t('kernelDriverStore.probeNotExposed')
         return
       }
       kernelDriverStatus.value = await controller.probeKernelDriver()
@@ -57,13 +60,13 @@ export const useKernelDriverStore = defineStore('kernelDriver', () => {
     try {
       const controller = backend.getController()
       if (!controller.startKernelDriver) {
-        kernelDriverStatusError.value = 'Démarrage driver noyau non exposé par ce backend.'
+        kernelDriverStatusError.value = t('kernelDriverStore.startNotExposed')
         return
       }
       kernelDriverStatus.value = await controller.startKernelDriver()
       actionLogStore.addActionLog(
         'kernel_driver',
-        kernelDriverStatus.value.success ? 'Driver kernel démarré' : 'Driver kernel indisponible',
+        kernelDriverStatus.value.success ? t('kernelDriverStore.driverStarted') : t('kernelDriverStore.driverUnavailable'),
         kernelDriverStatus.value.message || kernelDriverStatus.value.error || '',
         kernelDriverStatus.value.success ? 'success' : 'warning',
       )
@@ -80,15 +83,15 @@ export const useKernelDriverStore = defineStore('kernelDriver', () => {
     try {
       const controller = backend.getController()
       if (!controller.readMemoryKernel) {
-        kernelMemoryReadResult.value = { success: false, error: 'Lecture kernel non exposée par ce backend.' }
+        kernelMemoryReadResult.value = { success: false, error: t('kernelDriverStore.readNotExposed') }
         return
       }
       kernelMemoryReadResult.value = await controller.readMemoryKernel(addressHex, size)
       actionLogStore.addActionLog(
         'kernel_read',
-        kernelMemoryReadResult.value.success ? `Lecture kernel 0x${addressHex}` : `Lecture kernel échouée 0x${addressHex}`,
+        kernelMemoryReadResult.value.success ? t('kernelDriverStore.readTitle', { address: addressHex }) : t('kernelDriverStore.readFailedTitle', { address: addressHex }),
         kernelMemoryReadResult.value.success
-          ? `${kernelMemoryReadResult.value.bytesRead} octet(s) lus via le driver noyau.`
+          ? t('kernelDriverStore.bytesRead', { count: kernelMemoryReadResult.value.bytesRead })
           : (kernelMemoryReadResult.value.error ?? ''),
         kernelMemoryReadResult.value.success ? 'success' : 'error',
       )
@@ -107,15 +110,15 @@ export const useKernelDriverStore = defineStore('kernelDriver', () => {
     try {
       const controller = backend.getController()
       if (!controller.writeMemoryKernel) {
-        kernelMemoryWriteResult.value = { success: false, error: 'Écriture kernel non exposée par ce backend.' }
+        kernelMemoryWriteResult.value = { success: false, error: t('kernelDriverStore.writeNotExposed') }
         return
       }
       kernelMemoryWriteResult.value = await controller.writeMemoryKernel(addressHex, hexBytes)
       actionLogStore.addActionLog(
         'kernel_write',
-        kernelMemoryWriteResult.value.success ? `Écriture kernel 0x${addressHex}` : `Écriture kernel échouée 0x${addressHex}`,
+        kernelMemoryWriteResult.value.success ? t('kernelDriverStore.writeTitle', { address: addressHex }) : t('kernelDriverStore.writeFailedTitle', { address: addressHex }),
         kernelMemoryWriteResult.value.success
-          ? `${kernelMemoryWriteResult.value.bytesWritten} octet(s) écrits via le driver noyau.`
+          ? t('kernelDriverStore.bytesWritten', { count: kernelMemoryWriteResult.value.bytesWritten })
           : (kernelMemoryWriteResult.value.error ?? ''),
         kernelMemoryWriteResult.value.success ? 'success' : 'error',
       )

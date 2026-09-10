@@ -3,8 +3,11 @@
  * Extrait de app.ts, PHASE réseau unifiée, 05/09/2026.
  */
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import { backend, type NetworkConnection, type NetworkModule, type HttpProxyRequest } from '@/services/backend'
 import { useActionLogStore } from '@/stores/actionLog'
+
+const { t } = i18n.global
 
 export interface DnsSpoofEntry {
   domain: string
@@ -141,11 +144,11 @@ export function useNetworkStore() {
       const result = await controller.startHttpProxyAsync?.(httpProxyPort.value, httpProxyInterceptHttps.value)
       if (!result?.started) {
         httpProxyBusy.value = false
-        actionLogStore.addActionLog('http_proxy', 'Proxy HTTP échoué', result?.error ?? 'raison inconnue', 'error')
+        actionLogStore.addActionLog('http_proxy', t('networkStore.httpProxyFailed'), result?.error ?? t('networkStore.unknownReason'), 'error')
       }
     } catch (e) {
       httpProxyBusy.value = false
-      actionLogStore.addActionLog('http_proxy', 'Proxy HTTP échoué', String(e), 'error')
+      actionLogStore.addActionLog('http_proxy', t('networkStore.httpProxyFailed'), String(e), 'error')
     }
   }
 
@@ -154,9 +157,9 @@ export function useNetworkStore() {
     if (result.success) {
       httpProxyActive.value = true
       startHttpProxyPolling()
-      actionLogStore.addActionLog('http_proxy', 'Proxy HTTP démarré', `Port ${result.port ?? httpProxyPort.value}`, 'success')
+      actionLogStore.addActionLog('http_proxy', t('networkStore.httpProxyStarted'), `Port ${result.port ?? httpProxyPort.value}`, 'success')
     } else {
-      actionLogStore.addActionLog('http_proxy', 'Proxy HTTP échoué', String(result.error ?? 'raison inconnue'), 'error')
+      actionLogStore.addActionLog('http_proxy', t('networkStore.httpProxyFailed'), String(result.error ?? t('networkStore.unknownReason')), 'error')
     }
   }
 
@@ -179,7 +182,7 @@ export function useNetworkStore() {
       httpProxyActive.value = false
       httpProxyRequests.value = []
       stopHttpProxyPolling()
-      actionLogStore.addActionLog('http_proxy', 'Proxy HTTP arrêté', '', 'success')
+      actionLogStore.addActionLog('http_proxy', t('networkStore.httpProxyStopped'), '', 'success')
     }
   }
 
@@ -201,7 +204,7 @@ export function useNetworkStore() {
         httpRequestBodyEditor.value = ''
         selectedHttpRequest.value = null
         await refreshHttpProxyRequests()
-        actionLogStore.addActionLog('http_proxy', 'Requête HTTP modifiée', '', 'success')
+        actionLogStore.addActionLog('http_proxy', t('networkStore.httpRequestModified'), '', 'success')
       }
     } finally {
       httpProxyBusy.value = false
@@ -222,11 +225,11 @@ export function useNetworkStore() {
       const result = await controller.spoofDnsAsync?.(dnsSpoofDomain.value, dnsSpoofTargetIp.value)
       if (!result?.started) {
         dnsSpoofBusy.value = false
-        actionLogStore.addActionLog('dns_spoof', 'Spoof DNS échoué', result?.error ?? 'raison inconnue', 'error')
+        actionLogStore.addActionLog('dns_spoof', t('networkStore.dnsSpoofFailed'), result?.error ?? t('networkStore.unknownReason'), 'error')
       }
     } catch (e) {
       dnsSpoofBusy.value = false
-      actionLogStore.addActionLog('dns_spoof', 'Spoof DNS échoué', String(e), 'error')
+      actionLogStore.addActionLog('dns_spoof', t('networkStore.dnsSpoofFailed'), String(e), 'error')
     }
   }
 
@@ -236,10 +239,10 @@ export function useNetworkStore() {
     const targetIp = String(result.targetIp ?? '')
     if (result.success) {
       dnsSpoofEntries.value.push({ domain, targetIp })
-      actionLogStore.addActionLog('dns_spoof', `DNS spoofé: ${domain} → ${targetIp}`, '', 'success')
+      actionLogStore.addActionLog('dns_spoof', t('networkStore.dnsSpoofed', { domain, targetIp }), '', 'success')
       if (dnsSpoofDomain.value === domain) dnsSpoofDomain.value = ''
     } else {
-      actionLogStore.addActionLog('dns_spoof', 'Spoof DNS échoué', String(result.error ?? 'raison inconnue'), 'error')
+      actionLogStore.addActionLog('dns_spoof', t('networkStore.dnsSpoofFailed'), String(result.error ?? t('networkStore.unknownReason')), 'error')
     }
   }
 
@@ -261,7 +264,7 @@ export function useNetworkStore() {
     const domain = String(result.domain ?? '')
     if (result.success) {
       dnsSpoofEntries.value = dnsSpoofEntries.value.filter(e => e.domain !== domain)
-      actionLogStore.addActionLog('dns_spoof', `DNS restauré: ${domain}`, '', 'success')
+      actionLogStore.addActionLog('dns_spoof', t('networkStore.dnsRestored', { domain }), '', 'success')
     }
   }
 
@@ -278,11 +281,11 @@ export function useNetworkStore() {
       const result = await controller.setLagSwitchAsync?.(enabled, lagSwitchDelayMs.value)
       if (!result?.started) {
         lagSwitchBusy.value = false
-        actionLogStore.addActionLog('lag_switch', 'Lag switch échoué', result?.error ?? 'raison inconnue', 'error')
+        actionLogStore.addActionLog('lag_switch', t('networkStore.lagSwitchFailed'), result?.error ?? t('networkStore.unknownReason'), 'error')
       }
     } catch (e) {
       lagSwitchBusy.value = false
-      actionLogStore.addActionLog('lag_switch', 'Lag switch échoué', String(e), 'error')
+      actionLogStore.addActionLog('lag_switch', t('networkStore.lagSwitchFailed'), String(e), 'error')
     }
   }
 
@@ -293,12 +296,12 @@ export function useNetworkStore() {
       lagSwitchActive.value = active
       actionLogStore.addActionLog(
         'lag_switch',
-        active ? 'Lag switch activé' : 'Lag switch désactivé',
-        active ? `+${lagSwitchDelayMs.value}ms sur recv/WSARecv` : '',
+        active ? t('networkStore.lagSwitchEnabled') : t('networkStore.lagSwitchDisabled'),
+        active ? t('networkStore.lagSwitchDelayDetail', { ms: lagSwitchDelayMs.value }) : '',
         active ? 'warning' : 'success'
       )
     } else {
-      actionLogStore.addActionLog('lag_switch', 'Lag switch échoué', String(result.error ?? 'raison inconnue'), 'error')
+      actionLogStore.addActionLog('lag_switch', t('networkStore.lagSwitchFailed'), String(result.error ?? t('networkStore.unknownReason')), 'error')
     }
   }
 

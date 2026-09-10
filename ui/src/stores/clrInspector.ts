@@ -15,6 +15,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import {
   backend,
   type ClrCallInstanceMethodResult,
@@ -30,6 +31,8 @@ import {
   type ClrRpcResult,
 } from '@/services/backend'
 import { useActionLogStore } from './actionLog'
+
+const { t } = i18n.global
 
 export const useClrInspectorStore = defineStore('clrInspector', () => {
   const actionLogStore = useActionLogStore()
@@ -52,7 +55,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const controller = backend.getController()
     if (!controller.getClrInspectorStatus) {
       clrInspectorStatus.value = null
-      clrInspectorError.value = 'Inspecteur CLR non exposé par ce backend.'
+      clrInspectorError.value = t('clrInspectorStore.inspectorNotExposed')
       return
     }
     try {
@@ -67,7 +70,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
   async function attachClrInspector() {
     const controller = backend.getController()
     if (!controller.attachClrInspector) {
-      clrLastResult.value = { success: false, error: 'Inspecteur CLR non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.inspectorNotExposed') }
       return
     }
     clrInspectorBusy.value = true
@@ -75,10 +78,10 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     try {
       const result = await controller.attachClrInspector()
       clrLastResult.value = result
-      clrInspectorError.value = result.success ? '' : (result.error ?? 'Attache CLR échouée.')
+      clrInspectorError.value = result.success ? '' : (result.error ?? t('clrInspectorStore.attachFailed'))
       actionLogStore.addActionLog(
         'clr_inspector',
-        result.success ? 'Inspecteur CLR attaché' : 'Inspecteur CLR refusé',
+        result.success ? t('clrInspectorStore.attached') : t('clrInspectorStore.attachRefused'),
         result.success ? `PID ${clrInspectorStatus.value?.pid ?? ''}` : clrInspectorError.value,
         result.success ? 'success' : 'warning',
       )
@@ -124,7 +127,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
   async function flushClrInspectorCache() {
     const controller = backend.getController()
     if (!controller.flushClrInspectorCache) {
-      clrLastResult.value = { success: false, error: 'flushCachedData non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.flushCacheNotExposed') }
       return
     }
     clrInspectorBusy.value = true
@@ -139,7 +142,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
   async function findClrObjects(typeSubstring = clrTypeFilter.value) {
     const controller = backend.getController()
     if (!controller.findClrObjectsByType) {
-      clrLastResult.value = { success: false, error: 'findObjectsByType non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.findByTypeNotExposed') }
       return
     }
     clrInspectorBusy.value = true
@@ -164,11 +167,11 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const field = fieldName.trim()
     const value = expectedValue.trim()
     if (!controller.findClrObjectsByFieldValue) {
-      clrLastResult.value = { success: false, error: 'findObjectsByFieldValue non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.findByFieldValueNotExposed') }
       clrInspectorError.value = clrLastResult.value.error ?? ''
       return clrLastResult.value
     }
-    if (!typeFilter || !field || !value) return { success: false, error: 'Locator CLR incomplet.' }
+    if (!typeFilter || !field || !value) return { success: false, error: t('clrInspectorStore.incompleteLocator') }
 
     clrInspectorBusy.value = true
     clrInspectorError.value = ''
@@ -180,9 +183,9 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrInspectorError.value = result.success ? '' : (result.error ?? '')
       actionLogStore.addActionLog(
         'clr_inspector',
-        result.success ? 'Locator CLR exécuté' : 'Locator CLR échoué',
+        result.success ? t('clrInspectorStore.locatorExecuted') : t('clrInspectorStore.locatorFailed'),
         result.success
-          ? `${clrFieldLocatorResult.value?.matchesReturned ?? 0} match(es) pour ${typeFilter}.${field} = ${value}.`
+          ? t('clrInspectorStore.locatorMatches', { count: clrFieldLocatorResult.value?.matchesReturned ?? 0, type: typeFilter, field, value })
           : (result.error ?? ''),
         result.success ? 'success' : 'warning',
       )
@@ -200,7 +203,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
   async function readClrObject(addressHex: string) {
     const controller = backend.getController()
     if (!controller.readClrObject) {
-      clrLastResult.value = { success: false, error: 'readObject non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.readObjectNotExposed') }
       return
     }
     clrInspectorBusy.value = true
@@ -221,7 +224,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const field = fieldName.trim()
     const text = value.trim()
     if (!controller.writeClrPrimitiveField) {
-      clrLastResult.value = { success: false, error: 'writePrimitiveField non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.writeFieldNotExposed') }
       clrInspectorError.value = clrLastResult.value.error ?? ''
       return
     }
@@ -235,7 +238,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       const writeResult = result.result as Record<string, unknown> | undefined
       actionLogStore.addActionLog(
         'clr_inspector',
-        result.success ? 'Champ CLR écrit' : 'Écriture champ CLR échouée',
+        result.success ? t('clrInspectorStore.fieldWritten') : t('clrInspectorStore.writeFieldFailed'),
         result.success
           ? `${field} @ ${String(writeResult?.fieldAddress ?? address)} = ${String(writeResult?.value ?? text)}`
           : (result.error ?? ''),
@@ -248,7 +251,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     } catch (e) {
       clrLastResult.value = { success: false, error: String(e) }
       clrInspectorError.value = String(e)
-      actionLogStore.addActionLog('clr_inspector', 'Écriture champ CLR échouée', String(e), 'error')
+      actionLogStore.addActionLog('clr_inspector', t('clrInspectorStore.writeFieldFailed'), String(e), 'error')
       return clrLastResult.value
     } finally {
       clrInspectorBusy.value = false
@@ -261,7 +264,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const pathText = path.trim()
     const text = value.trim()
     if (!controller.writeClrPrimitivePath) {
-      clrLastResult.value = { success: false, error: 'writePrimitivePath non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.writePathNotExposed') }
       clrInspectorError.value = clrLastResult.value.error ?? ''
       return
     }
@@ -275,7 +278,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       const writeResult = result.result as Record<string, unknown> | undefined
       actionLogStore.addActionLog(
         'clr_inspector',
-        result.success ? 'Chemin CLR écrit' : 'Écriture chemin CLR échouée',
+        result.success ? t('clrInspectorStore.pathWritten') : t('clrInspectorStore.writePathFailed'),
         result.success
           ? `${pathText} @ ${String(writeResult?.fieldAddress ?? address)} = ${String(writeResult?.value ?? text)}`
           : (result.error ?? ''),
@@ -288,7 +291,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     } catch (e) {
       clrLastResult.value = { success: false, error: String(e) }
       clrInspectorError.value = String(e)
-      actionLogStore.addActionLog('clr_inspector', 'Écriture chemin CLR échouée', String(e), 'error')
+      actionLogStore.addActionLog('clr_inspector', t('clrInspectorStore.writePathFailed'), String(e), 'error')
       return clrLastResult.value
     } finally {
       clrInspectorBusy.value = false
@@ -303,7 +306,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       .filter((operation) => operation.path && operation.value)
       .slice(0, 32)
     if (!controller.writeClrPrimitivePathBatch) {
-      clrLastResult.value = { success: false, error: 'writePrimitivePathBatch non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.writePathBatchNotExposed') }
       clrInspectorError.value = clrLastResult.value.error ?? ''
       return
     }
@@ -318,10 +321,10 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrInspectorError.value = result.success && innerSuccess ? '' : String(inner?.error ?? result.error ?? '')
       actionLogStore.addActionLog(
         'clr_inspector',
-        result.success && innerSuccess ? 'Transaction CLR appliquée' : 'Transaction CLR échouée',
+        result.success && innerSuccess ? t('clrInspectorStore.transactionApplied') : t('clrInspectorStore.transactionFailed'),
         result.success && innerSuccess
-          ? `${sanitized.length} opération(s) appliquée(s).`
-          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ' Rollback OK.' : ''}`,
+          ? t('clrInspectorStore.operationsApplied', { count: sanitized.length })
+          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ` ${t('clrInspectorStore.rollbackOk')}` : ''}`,
         result.success && innerSuccess ? 'success' : 'error',
       )
       if (result.success) {
@@ -331,7 +334,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     } catch (e) {
       clrLastResult.value = { success: false, error: String(e) }
       clrInspectorError.value = String(e)
-      actionLogStore.addActionLog('clr_inspector', 'Transaction CLR échouée', String(e), 'error')
+      actionLogStore.addActionLog('clr_inspector', t('clrInspectorStore.transactionFailed'), String(e), 'error')
       return clrLastResult.value
     } finally {
       clrInspectorBusy.value = false
@@ -346,7 +349,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const pathText = path.trim()
     const text = value.trim()
     if (!controller.writeClrPrimitivePathByLocator) {
-      clrLastResult.value = { success: false, error: 'writeClrPrimitivePathByLocator non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.writePathByLocatorNotExposed') }
       clrInspectorError.value = clrLastResult.value.error ?? ''
       return
     }
@@ -360,7 +363,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       const writeResult = result.result as Record<string, unknown> | undefined
       actionLogStore.addActionLog(
         'clr_inspector',
-        result.success ? 'Chemin CLR écrit (locator)' : 'Écriture chemin CLR par locator échouée',
+        result.success ? t('clrInspectorStore.pathWrittenLocator') : t('clrInspectorStore.writePathByLocatorFailed'),
         result.success
           ? `${pathText} @ ${String(writeResult?.resolvedAddress ?? '?')} = ${String(writeResult?.value ?? text)}`
           : (result.error ?? ''),
@@ -374,7 +377,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     } catch (e) {
       clrLastResult.value = { success: false, error: String(e) }
       clrInspectorError.value = String(e)
-      actionLogStore.addActionLog('clr_inspector', 'Écriture chemin CLR par locator échouée', String(e), 'error')
+      actionLogStore.addActionLog('clr_inspector', t('clrInspectorStore.writePathByLocatorFailed'), String(e), 'error')
       return clrLastResult.value
     } finally {
       clrInspectorBusy.value = false
@@ -391,7 +394,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       .filter((operation) => operation.path && operation.value)
       .slice(0, 32)
     if (!controller.writeClrPrimitivePathBatchByLocator) {
-      clrLastResult.value = { success: false, error: 'writeClrPrimitivePathBatchByLocator non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.writePathBatchByLocatorNotExposed') }
       clrInspectorError.value = clrLastResult.value.error ?? ''
       return
     }
@@ -406,10 +409,10 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrInspectorError.value = result.success && innerSuccess ? '' : String(inner?.error ?? result.error ?? '')
       actionLogStore.addActionLog(
         'clr_inspector',
-        result.success && innerSuccess ? 'Transaction CLR appliquée (locator)' : 'Transaction CLR par locator échouée',
+        result.success && innerSuccess ? t('clrInspectorStore.transactionAppliedLocator') : t('clrInspectorStore.transactionByLocatorFailed'),
         result.success && innerSuccess
-          ? `${sanitized.length} opération(s) appliquée(s) @ ${String(inner?.resolvedAddress ?? '?')}.`
-          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ' Rollback OK.' : ''}`,
+          ? t('clrInspectorStore.operationsAppliedAt', { count: sanitized.length, address: String(inner?.resolvedAddress ?? '?') })
+          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ` ${t('clrInspectorStore.rollbackOk')}` : ''}`,
         result.success && innerSuccess ? 'success' : 'error',
       )
       const resolvedAddress = inner?.resolvedAddress as string | undefined
@@ -420,7 +423,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     } catch (e) {
       clrLastResult.value = { success: false, error: String(e) }
       clrInspectorError.value = String(e)
-      actionLogStore.addActionLog('clr_inspector', 'Transaction CLR par locator échouée', String(e), 'error')
+      actionLogStore.addActionLog('clr_inspector', t('clrInspectorStore.transactionByLocatorFailed'), String(e), 'error')
       return clrLastResult.value
     } finally {
       clrInspectorBusy.value = false
@@ -435,7 +438,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       .filter((operation) => operation.path && operation.value)
       .slice(0, 32)
     if (!controller.writeClrPrimitivePathBatchAtomic) {
-      clrLastResult.value = { success: false, error: 'writeClrPrimitivePathBatchAtomic non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.writePathBatchAtomicNotExposed') }
       clrInspectorError.value = clrLastResult.value.error ?? ''
       return
     }
@@ -450,10 +453,10 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrInspectorError.value = result.success && innerSuccess ? '' : String(inner?.error ?? result.error ?? '')
       actionLogStore.addActionLog(
         'clr_inspector',
-        result.success && innerSuccess ? 'Transaction CLR atomique appliquée' : 'Transaction CLR atomique échouée',
+        result.success && innerSuccess ? t('clrInspectorStore.atomicTransactionApplied') : t('clrInspectorStore.atomicTransactionFailed'),
         result.success && innerSuccess
-          ? `${sanitized.length} opération(s) appliquée(s), ${String(inner?.suspendedThreadCount ?? 0)} thread(s) suspendue(s) pendant l'écriture.`
-          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ' Rollback OK.' : ''}`,
+          ? t('clrInspectorStore.atomicOperationsApplied', { count: sanitized.length, threads: String(inner?.suspendedThreadCount ?? 0) })
+          : `${String(inner?.error ?? result.error ?? '')}${inner?.rolledBack === true ? ` ${t('clrInspectorStore.rollbackOk')}` : ''}`,
         result.success && innerSuccess ? 'success' : 'error',
       )
       if (result.success) {
@@ -463,7 +466,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     } catch (e) {
       clrLastResult.value = { success: false, error: String(e) }
       clrInspectorError.value = String(e)
-      actionLogStore.addActionLog('clr_inspector', 'Transaction CLR atomique échouée', String(e), 'error')
+      actionLogStore.addActionLog('clr_inspector', t('clrInspectorStore.atomicTransactionFailed'), String(e), 'error')
       return clrLastResult.value
     } finally {
       clrInspectorBusy.value = false
@@ -476,7 +479,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const method = methodName.trim()
     const text = valueText.trim()
     if (!controller.callClrInstanceMethod) {
-      clrCallMethodResult.value = { success: false, error: 'callClrInstanceMethod non exposé par ce backend.' }
+      clrCallMethodResult.value = { success: false, error: t('clrInspectorStore.callMethodNotExposed') }
       clrInspectorError.value = clrCallMethodResult.value.error ?? ''
       return
     }
@@ -494,9 +497,9 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrInspectorError.value = innerSuccess ? '' : (clrCallMethodResult.value?.error ?? result.error ?? '')
       actionLogStore.addActionLog(
         'clr_inspector',
-        innerSuccess ? 'Setter CLR appelé' : 'Appel de setter CLR échoué',
+        innerSuccess ? t('clrInspectorStore.setterCalled') : t('clrInspectorStore.setterCallFailed'),
         innerSuccess
-          ? `${clrCallMethodResult.value?.methodName ?? method} @ ${clrCallMethodResult.value?.nativeCodeAddress ?? '?'} (vérifié: ${clrCallMethodResult.value?.verified ? 'oui' : 'non'})`
+          ? t('clrInspectorStore.setterCalledDetail', { method: clrCallMethodResult.value?.methodName ?? method, address: clrCallMethodResult.value?.nativeCodeAddress ?? '?', verified: clrCallMethodResult.value?.verified ? t('clrInspectorStore.yes') : t('clrInspectorStore.no') })
           : (clrCallMethodResult.value?.error ?? result.error ?? ''),
         innerSuccess ? 'success' : 'error',
       )
@@ -508,7 +511,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrLastResult.value = { success: false, error: String(e) }
       clrCallMethodResult.value = { success: false, error: String(e) }
       clrInspectorError.value = String(e)
-      actionLogStore.addActionLog('clr_inspector', 'Appel de setter CLR échoué', String(e), 'error')
+      actionLogStore.addActionLog('clr_inspector', t('clrInspectorStore.setterCallFailed'), String(e), 'error')
       return clrLastResult.value
     } finally {
       clrInspectorBusy.value = false
@@ -518,7 +521,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
   async function enumerateClrRoots(typeSubstring = clrTypeFilter.value) {
     const controller = backend.getController()
     if (!controller.enumerateClrRoots) {
-      clrLastResult.value = { success: false, error: 'enumerateRoots non exposé par ce backend.' }
+      clrLastResult.value = { success: false, error: t('clrInspectorStore.enumerateRootsNotExposed') }
       return
     }
     clrInspectorBusy.value = true
@@ -536,7 +539,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const controller = backend.getController()
     const address = targetObjectAddressHex.trim()
     if (!controller.findClrGcRootPath) {
-      clrGcRootPathResult.value = { success: false, error: 'findClrGcRootPath non exposé par ce backend.' }
+      clrGcRootPathResult.value = { success: false, error: t('clrInspectorStore.findGcRootPathNotExposed') }
       clrInspectorError.value = clrGcRootPathResult.value.error ?? ''
       return
     }
@@ -554,9 +557,9 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrInspectorError.value = innerSuccess ? '' : (clrGcRootPathResult.value?.error ?? clrGcRootPathResult.value?.message ?? result.error ?? '')
       actionLogStore.addActionLog(
         'clr_inspector',
-        innerSuccess ? 'Chemin GC root trouvé' : 'Chemin GC root introuvable',
+        innerSuccess ? t('clrInspectorStore.gcRootPathFound') : t('clrInspectorStore.gcRootPathNotFound'),
         innerSuccess
-          ? `${clrGcRootPathResult.value?.rootKind ?? '?'} → ${clrGcRootPathResult.value?.depth ?? 0} saut(s) → ${address}`
+          ? t('clrInspectorStore.gcRootPathDetail', { kind: clrGcRootPathResult.value?.rootKind ?? '?', depth: clrGcRootPathResult.value?.depth ?? 0, address })
           : (clrGcRootPathResult.value?.message ?? clrGcRootPathResult.value?.error ?? result.error ?? ''),
         innerSuccess ? 'success' : 'error',
       )
@@ -576,7 +579,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const address = objectAddressHex.trim()
     const method = methodName.trim()
     if (!controller.disassembleClrMethod) {
-      clrDisassembleResult.value = { success: false, error: 'disassembleClrMethod non exposé par ce backend.' }
+      clrDisassembleResult.value = { success: false, error: t('clrInspectorStore.disassembleNotExposed') }
       clrInspectorError.value = clrDisassembleResult.value.error ?? ''
       return
     }
@@ -594,9 +597,9 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrInspectorError.value = innerSuccess ? '' : (clrDisassembleResult.value?.error ?? result.error ?? '')
       actionLogStore.addActionLog(
         'clr_inspector',
-        innerSuccess ? 'Méthode CLR désassemblée' : 'Désassemblage CLR échoué',
+        innerSuccess ? t('clrInspectorStore.methodDisassembled') : t('clrInspectorStore.disassembleFailed'),
         innerSuccess
-          ? `${clrDisassembleResult.value?.methodName ?? method} @ ${clrDisassembleResult.value?.nativeCodeAddress ?? '?'} (${clrDisassembleResult.value?.returnedInstructionCount ?? 0} instruction(s))`
+          ? t('clrInspectorStore.methodDisassembledDetail', { method: clrDisassembleResult.value?.methodName ?? method, address: clrDisassembleResult.value?.nativeCodeAddress ?? '?', count: clrDisassembleResult.value?.returnedInstructionCount ?? 0 })
           : (clrDisassembleResult.value?.error ?? result.error ?? ''),
         innerSuccess ? 'success' : 'error',
       )
@@ -615,7 +618,7 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
     const controller = backend.getController()
     const address = objectAddressHex.trim()
     if (!controller.generateClrObjectReport) {
-      clrObjectReportResult.value = { success: false, error: 'generateClrObjectReport non exposé par ce backend.' }
+      clrObjectReportResult.value = { success: false, error: t('clrInspectorStore.generateReportNotExposed') }
       clrInspectorError.value = clrObjectReportResult.value.error ?? ''
       return
     }
@@ -633,9 +636,9 @@ export const useClrInspectorStore = defineStore('clrInspector', () => {
       clrInspectorError.value = innerSuccess ? '' : (clrObjectReportResult.value?.error ?? result.error ?? '')
       actionLogStore.addActionLog(
         'clr_inspector',
-        innerSuccess ? 'Rapport d\'objet CLR généré' : 'Génération du rapport CLR échouée',
+        innerSuccess ? t('clrInspectorStore.reportGenerated') : t('clrInspectorStore.reportGenerationFailed'),
         innerSuccess
-          ? `${clrObjectReportResult.value?.rootTypeName ?? '?'} @ ${address} — ${clrObjectReportResult.value?.nodeCount ?? 0} nœud(s)${clrObjectReportResult.value?.truncated ? ' (tronqué)' : ''}`
+          ? t('clrInspectorStore.reportGeneratedDetail', { type: clrObjectReportResult.value?.rootTypeName ?? '?', address, count: clrObjectReportResult.value?.nodeCount ?? 0, truncated: clrObjectReportResult.value?.truncated ? ` ${t('clrInspectorStore.truncated')}` : '' })
           : (clrObjectReportResult.value?.error ?? result.error ?? ''),
         innerSuccess ? 'success' : 'error',
       )

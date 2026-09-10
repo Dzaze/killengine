@@ -15,7 +15,10 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import { useActionLogStore } from './actionLog'
+
+const { t } = i18n.global
 
 export interface StructureTemplateField {
   offset: number
@@ -97,7 +100,7 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
       .filter((field) => Number.isFinite(field.offset) && field.type.trim())
       .slice(0, 256)
     if (fields.length === 0) {
-      actionLogStore.addActionLog('structure', 'Template refusé', 'Aucun champ typé exploitable.', 'warning')
+      actionLogStore.addActionLog('structure', t('workspaceItemsStore.templateRefused'), t('workspaceItemsStore.noExploitableField'), 'warning')
       return null
     }
 
@@ -105,7 +108,7 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     const now = new Date().toISOString()
     const template: StructureTemplate = {
       id: structureTemplateIdCounter.value,
-      name: String(input.name ?? `Structure 0x${input.baseAddress}`).trim() || `Structure 0x${input.baseAddress}`,
+      name: String(input.name ?? t('workspaceItemsStore.defaultStructureName', { address: input.baseAddress })).trim() || t('workspaceItemsStore.defaultStructureName', { address: input.baseAddress }),
       processName: processNameValue,
       baseAddress: input.baseAddress.replace(/^0x/i, '').toUpperCase(),
       size: Math.max(0, Math.round(input.size)),
@@ -117,7 +120,7 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     structureTemplates.value.unshift(template)
     structureTemplates.value = structureTemplates.value.slice(0, 100)
     saveStructureTemplates()
-    actionLogStore.addActionLog('structure', `Template sauvegardé: ${template.name}`, `${template.fieldCount} champ(s).`, 'success')
+    actionLogStore.addActionLog('structure', t('workspaceItemsStore.templateSaved', { name: template.name }), t('workspaceItemsStore.fieldCount', { count: template.fieldCount }), 'success')
     return template
   }
 
@@ -126,14 +129,14 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     structureTemplates.value = structureTemplates.value.filter((item) => item.id !== id)
     if (structureTemplates.value.length !== before) {
       saveStructureTemplates()
-      actionLogStore.addActionLog('structure', 'Template supprimé', `id=${id}`, 'warning')
+      actionLogStore.addActionLog('structure', t('workspaceItemsStore.templateDeleted'), `id=${id}`, 'warning')
     }
   }
 
   function clearStructureTemplates() {
     structureTemplates.value = []
     saveStructureTemplates()
-    actionLogStore.addActionLog('structure', 'Templates vidés', 'Tous les templates locaux ont été supprimés.', 'warning')
+    actionLogStore.addActionLog('structure', t('workspaceItemsStore.templatesCleared'), t('workspaceItemsStore.allLocalTemplatesRemoved'), 'warning')
   }
 
   function saveWorkspaceBookmarks() {
@@ -166,7 +169,7 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     const bookmark: WorkspaceBookmark = {
       id: workspaceBookmarkIdCounter.value,
       kind: input.kind ?? 'address',
-      label: String(input.label ?? input.address ?? 'Bookmark').trim() || 'Bookmark',
+      label: String(input.label ?? input.address ?? t('workspaceItemsStore.defaultBookmarkLabel')).trim() || t('workspaceItemsStore.defaultBookmarkLabel'),
       processName: String(input.processName ?? processNameValue),
       address: input.address ? String(input.address).replace(/^0x/i, '').toUpperCase() : undefined,
       type: input.type ? String(input.type) : undefined,
@@ -179,7 +182,7 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     workspaceBookmarks.value.unshift(bookmark)
     workspaceBookmarks.value = workspaceBookmarks.value.slice(0, 500)
     saveWorkspaceBookmarks()
-    actionLogStore.addActionLog('workspace', `Bookmark ajouté: ${bookmark.label}`, bookmark.address ? `0x${bookmark.address}` : bookmark.note, 'success')
+    actionLogStore.addActionLog('workspace', t('workspaceItemsStore.bookmarkAdded', { label: bookmark.label }), bookmark.address ? `0x${bookmark.address}` : bookmark.note, 'success')
     return bookmark
   }
 
@@ -198,7 +201,7 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     bookmark.payload = input.payload !== undefined ? input.payload : bookmark.payload
     bookmark.updatedAt = new Date().toISOString()
     saveWorkspaceBookmarks()
-    actionLogStore.addActionLog('workspace', `Bookmark modifié: ${bookmark.label}`, bookmark.address ? `0x${bookmark.address}` : bookmark.note, 'success')
+    actionLogStore.addActionLog('workspace', t('workspaceItemsStore.bookmarkUpdated', { label: bookmark.label }), bookmark.address ? `0x${bookmark.address}` : bookmark.note, 'success')
     return bookmark
   }
 
@@ -207,14 +210,14 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     workspaceBookmarks.value = workspaceBookmarks.value.filter((item) => item.id !== id)
     if (workspaceBookmarks.value.length !== before) {
       saveWorkspaceBookmarks()
-      actionLogStore.addActionLog('workspace', 'Bookmark supprimé', `id=${id}`, 'warning')
+      actionLogStore.addActionLog('workspace', t('workspaceItemsStore.bookmarkDeleted'), `id=${id}`, 'warning')
     }
   }
 
   function clearWorkspaceBookmarks() {
     workspaceBookmarks.value = []
     saveWorkspaceBookmarks()
-    actionLogStore.addActionLog('workspace', 'Bookmarks vidés', 'Tous les bookmarks locaux ont été supprimés.', 'warning')
+    actionLogStore.addActionLog('workspace', t('workspaceItemsStore.bookmarksCleared'), t('workspaceItemsStore.allLocalBookmarksRemoved'), 'warning')
   }
 
   return {

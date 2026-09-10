@@ -1,5 +1,6 @@
 import { nextTick, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { i18n } from '@/i18n'
 import {
   backend,
   type AobScanResult,
@@ -11,6 +12,8 @@ import {
   type CodePatchSuggestionResult,
 } from '@/services/backend'
 import { cleanTrainerName, formatNumber } from '@/utils/format'
+
+const { t } = i18n.global
 
 function appStore() {
   return useAppStore()
@@ -72,7 +75,7 @@ async function scanAobSignature() {
   try {
     const controller = backend.getController()
     if (!controller.scanAobPattern) {
-      aobResult.value = { success: false, matches: [], error: 'Methode backend indisponible.' }
+      aobResult.value = { success: false, matches: [], error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
     aobResult.value = await controller.scanAobPattern(pattern, {
@@ -90,7 +93,7 @@ async function scanAobSignature() {
 async function scanAobPatternCandidate(pattern: string, maxResults = 1000): Promise<AobScanResult> {
   const controller = backend.getController()
   if (!controller.scanAobPattern) {
-    return { success: false, matches: [], error: 'Methode backend indisponible.' }
+    return { success: false, matches: [], error: t('expertAobFlow.backendMethodUnavailable') }
   }
   return controller.scanAobPattern(pattern, {
     executableOnly: aobExecutableOnly.value,
@@ -107,7 +110,7 @@ async function stabilizeSelectedAobSignature() {
   try {
     const controller = backend.getController()
     if (!controller.generateAobSignature) {
-      aobStabilizeResult.value = { success: false, error: 'Methode backend indisponible.' }
+      aobStabilizeResult.value = { success: false, error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
 
@@ -157,8 +160,8 @@ async function stabilizeSelectedAobSignature() {
       matchesFound,
       tested,
       error: best && matchesFound !== 1
-        ? `Aucune signature unique. Meilleure piste: ${formatNumber(matchesFound)} match(es).`
-        : (!best ? 'Aucune signature exploitable générée.' : ''),
+        ? t('expertAobFlow.noUniqueSignature', { count: formatNumber(matchesFound) })
+        : (!best ? t('expertAobFlow.noUsableSignatureGenerated') : ''),
     }
   } catch (e) {
     aobStabilizeResult.value = { success: false, error: String(e) }
@@ -186,7 +189,7 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
   try {
     const controller = backend.getController()
     if (!controller.generateAobSignature) {
-      aobSignatureResult.value = { success: false, error: 'Methode backend indisponible.' }
+      aobSignatureResult.value = { success: false, error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
     const result = await controller.generateAobSignature(rip, {
@@ -213,16 +216,14 @@ async function generateAobSignatureFromHit(hit: Record<string, unknown>) {
         stablePatternIsWeak = suggestionResult.signatureQuality?.level === 'weak'
       }
     } else {
-      codePatchSuggestionResult.value = { success: false, suggestions: [], error: 'Methode backend indisponible.' }
+      codePatchSuggestionResult.value = { success: false, suggestions: [], error: t('expertAobFlow.backendMethodUnavailable') }
     }
     if (!aobPattern.value.trim() && result.success && result.pattern) {
       aobPattern.value = result.pattern
     }
     if (aobPattern.value.trim()) {
       if (stablePatternIsWeak) {
-        aobAutoScanSkippedReason.value =
-          "Signature trop faible pour lancer le scan automatiquement (peu d'octets fixes sur cette seule instruction — risque élevé de multi-match). " +
-          'Le pattern est pré-rempli ci-dessous : élargis-le (plus de contexte autour de l\'instruction) ou clique "Scanner AOB" si tu veux quand même essayer.'
+        aobAutoScanSkippedReason.value = t('expertAobFlow.autoScanSkippedWeakSignature')
       } else {
         await scanAobSignature()
       }
@@ -247,7 +248,7 @@ async function disassembleBackwardFromHit(hit: Record<string, unknown>) {
   try {
     const controller = backend.getController()
     if (!controller.disassembleBackward) {
-      disassembleBackwardResult.value = { success: false, error: 'Methode backend indisponible.' }
+      disassembleBackwardResult.value = { success: false, error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
     disassembleBackwardResult.value = await controller.disassembleBackward(rip, {})
@@ -397,12 +398,12 @@ function applyValueOverrideSuggestion() {
   const originalHex = (codePatchSuggestionResult.value?.bytes || suggestion.bytesText).replace(/\s+/g, '')
   const originalBytes = originalHex.match(/../g)?.map((byte) => parseInt(byte, 16)) ?? []
   if (originalBytes.length < suggestion.valueOffset + suggestion.valueSize) {
-    valueOverrideError.value = "Bytes d'instruction insuffisants pour appliquer la valeur."
+    valueOverrideError.value = t('expertAobFlow.insufficientInstructionBytes')
     return
   }
   const parsed = parseValueOverrideInput(valueOverrideInput.value)
   if (parsed === null) {
-    valueOverrideError.value = 'Valeur invalide (entier décimal ou 0x hexadécimal attendu).'
+    valueOverrideError.value = t('expertAobFlow.invalidOverrideValue')
     return
   }
   // Tronque a la largeur du champ immediat (modulo 2^(size*8), les BigInt
@@ -416,7 +417,7 @@ function applyValueOverrideSuggestion() {
   const minSigned = -(1n << (widthBits - 1n))
   const maxUnsigned = (1n << widthBits) - 1n
   if (parsed < minSigned || parsed > maxUnsigned) {
-    valueOverrideError.value = `Valeur hors plage pour un champ de ${suggestion.valueSize} octet(s) (tronquée à 0x${truncated.toString(16)}). Corrige la valeur si ce n'est pas voulu.`
+    valueOverrideError.value = t('expertAobFlow.overrideValueOutOfRange', { size: suggestion.valueSize, truncated: truncated.toString(16) })
   }
   const patched = [...originalBytes]
   for (let i = 0; i < suggestion.valueSize; ++i) {
@@ -440,7 +441,7 @@ async function applyForceHookValue() {
   try {
     const controller = backend.getController()
     if (!controller.forceWriteInstructionValue) {
-      forceHookResult.value = { success: false, error: 'Méthode backend indisponible.' }
+      forceHookResult.value = { success: false, error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
     forceHookResult.value = await controller.forceWriteInstructionValue(
@@ -485,7 +486,7 @@ function aobQualityBlocksTrainer() {
   const score = Number(quality.score ?? 0)
   const fixedBytes = Number(quality.fixedBytes ?? 0)
   if (fixedBytes < 3 || score < 35) {
-    return `Signature AOB trop faible (${score}/100, ${fixedBytes} octet(s) fixe(s)). Allonge la signature ou régénère une AOB plus stable.`
+    return t('expertAobFlow.signatureTooWeak', { score, fixedBytes })
   }
   return ''
 }
@@ -501,7 +502,7 @@ async function suggestSelectedCodePatches() {
   try {
     const controller = backend.getController()
     if (!controller.suggestCodePatches) {
-      codePatchSuggestionResult.value = { success: false, suggestions: [], error: 'Methode backend indisponible.' }
+      codePatchSuggestionResult.value = { success: false, suggestions: [], error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
     const result = await controller.suggestCodePatches(address, { maxBytes: 16 })
@@ -524,13 +525,13 @@ async function applySelectedCodePatch() {
   const address = codePatchAddress.value.trim()
   const bytes = codePatchBytes.value.trim()
   if (!address || !bytes) return
-  if (!await appStore().confirmRiskAction('patch', 'Patch code', `Adresse 0x${address.replace(/^0x/i, '')}, bytes ${bytes}.`)) return
+  if (!await appStore().confirmRiskAction('patch', t('expertAobFlow.patchCodeTitle'), t('expertAobFlow.patchCodeDesc', { address: address.replace(/^0x/i, ''), bytes }))) return
   codePatchBusy.value = true
   codePatchResult.value = null
   try {
     const controller = backend.getController()
     if (!controller.applyCodePatch) {
-      codePatchResult.value = { success: false, error: 'Methode backend indisponible.' }
+      codePatchResult.value = { success: false, error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
     codePatchResult.value = await controller.applyCodePatch(address, bytes, { verify: true })
@@ -549,7 +550,7 @@ async function restoreSelectedCodePatch() {
   try {
     const controller = backend.getController()
     if (!controller.restoreCodePatch) {
-      codePatchResult.value = { success: false, error: 'Methode backend indisponible.' }
+      codePatchResult.value = { success: false, error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
     codePatchResult.value = await controller.restoreCodePatch(address)
@@ -583,7 +584,7 @@ async function saveSelectedCodePatchProfile() {
   try {
     const controller = backend.getController()
     if (!controller.saveProfileCodePatch) {
-      codePatchProfileResult.value = { success: false, error: 'Methode backend indisponible.' }
+      codePatchProfileResult.value = { success: false, error: t('expertAobFlow.backendMethodUnavailable') }
       return
     }
     codePatchProfileResult.value = await controller.saveProfileCodePatch(
@@ -622,7 +623,7 @@ async function saveTrainerPatchFromHit(hit: Record<string, unknown>) {
     if (!patchBytes || !pattern || !codePatchAddress.value.trim()) {
       codePatchProfileResult.value = {
         success: false,
-        error: 'Analyse incomplète : patch, adresse ou AOB stable manquant.',
+        error: t('expertAobFlow.incompleteAnalysis'),
       }
       return
     }
@@ -636,9 +637,9 @@ async function saveTrainerPatchFromHit(hit: Record<string, unknown>) {
     if (!codePatchProfileDescription.value.trim()) {
       const suggestion = selectedPatchSuggestion()
       codePatchProfileDescription.value = [
-        codePatchSuggestionResult.value?.disassembly || 'Patch issu Find What Writes',
-        suggestion?.label ? `Suggestion: ${suggestion.label}` : '',
-        hit.address ? `Cible observée: 0x${hit.address}` : '',
+        codePatchSuggestionResult.value?.disassembly || t('expertAobFlow.patchFromFindWhatWrites'),
+        suggestion?.label ? t('expertAobFlow.suggestionLabel', { label: suggestion.label }) : '',
+        hit.address ? t('expertAobFlow.observedTarget', { address: hit.address }) : '',
       ].filter(Boolean).join(' | ')
     }
 
@@ -659,8 +660,8 @@ async function saveTrainerPatchFromHit(hit: Record<string, unknown>) {
         profileName: codePatchProfileName.value.trim(),
         patchName: codePatchProfilePatchName.value.trim(),
         error: matchesFound === 0
-          ? 'Signature AOB introuvable : ajuste le pattern avant de sauver le trainer.'
-          : `Signature AOB non unique (${formatNumber(matchesFound)} matches) : sauvegarde bloquée pour éviter un patch dangereux.`,
+          ? t('expertAobFlow.signatureNotFound')
+          : t('expertAobFlow.signatureNotUnique', { count: formatNumber(matchesFound) }),
       }
       return
     }

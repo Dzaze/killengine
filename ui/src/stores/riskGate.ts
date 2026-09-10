@@ -18,9 +18,12 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import type { InvestigationStep } from './investigation'
 import { useActionLogStore } from './actionLog'
 import { useInvestigationStore } from './investigation'
+
+const { t } = i18n.global
 
 export interface RiskDialogState {
   open: boolean
@@ -52,12 +55,13 @@ export const useRiskGateStore = defineStore('riskGate', () => {
     title: string,
     detail: string,
     onAudit?: (event: string, payload: Record<string, unknown>) => void,
+    rememberKeyInput?: 'speedhack',
   ): Promise<boolean> {
     if (automationPipeDispatchDepth.value > 0) {
-      actionLogStore.addActionLog('risk_gate', `Pipe auto-confirmé: ${title}`, detail, 'success')
+      actionLogStore.addActionLog('risk_gate', t('riskGateStore.pipeAutoConfirmed', { title }), detail, 'success')
       onAudit?.('risk_pipe_bypass', { risk, title, detail })
       investigationStore.addInvestigationStep({
-        title: `Pipe auto-confirmé: ${title}`,
+        title: t('riskGateStore.pipeAutoConfirmed', { title }),
         detail,
         status: 'checkpoint',
         risk,
@@ -66,9 +70,9 @@ export const useRiskGateStore = defineStore('riskGate', () => {
       })
       return true
     }
-    const rememberKey = title === 'Activer le speedhack' ? 'speedhack' : undefined
+    const rememberKey = rememberKeyInput
     if (rememberKey && mutedRiskConfirmations.value[rememberKey]) {
-      actionLogStore.addActionLog('risk_gate', `Confirmation mémorisée: ${title}`, detail, 'info')
+      actionLogStore.addActionLog('risk_gate', t('riskGateStore.rememberedConfirmation', { title }), detail, 'info')
       onAudit?.('risk_muted_accept', { risk, title, detail, rememberKey })
       return true
     }
@@ -84,13 +88,13 @@ export const useRiskGateStore = defineStore('riskGate', () => {
         detail,
         rememberKey,
         rememberChoice: false,
-        rememberLabel: rememberKey === 'speedhack' ? 'Ne plus redemander pour le speedhack pendant cette session' : undefined,
+        rememberLabel: rememberKey === 'speedhack' ? t('riskGateStore.rememberSpeedhack') : undefined,
       }
     })
-    actionLogStore.addActionLog('risk_gate', accepted ? `Confirmé: ${title}` : `Refusé: ${title}`, detail, accepted ? 'success' : 'warning')
+    actionLogStore.addActionLog('risk_gate', accepted ? t('riskGateStore.confirmed', { title }) : t('riskGateStore.refused', { title }), detail, accepted ? 'success' : 'warning')
     onAudit?.(accepted ? 'risk_confirmed' : 'risk_refused', { risk, title, detail })
     investigationStore.addInvestigationStep({
-      title: accepted ? `Risque confirmé: ${title}` : `Risque refusé: ${title}`,
+      title: accepted ? t('riskGateStore.riskConfirmed', { title }) : t('riskGateStore.riskRefused', { title }),
       detail,
       status: accepted ? 'checkpoint' : 'warning',
       risk,

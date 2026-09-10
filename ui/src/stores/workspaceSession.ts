@@ -22,6 +22,7 @@
  */
 import { defineStore, storeToRefs } from 'pinia'
 import { ref, type Ref } from 'vue'
+import { i18n } from '@/i18n'
 import {
   backend,
   type AppSettings,
@@ -37,6 +38,8 @@ import {
   type WorkspaceBookmark,
 } from './workspaceItems'
 import { useSettingsStore } from './settings'
+
+const { t } = i18n.global
 
 export interface WorkspaceProject {
   id: number
@@ -233,13 +236,13 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     const details = [
       bookmark.address ? `0x${bookmark.address}` : '',
       bookmark.type ? `type ${bookmark.type}` : '',
-      bookmark.value !== undefined ? `valeur ${bookmark.value}` : '',
+      bookmark.value !== undefined ? t('workspaceSessionStore.markdown.value', { value: bookmark.value }) : '',
       payload.confidenceLabel ? String(payload.confidenceLabel) : '',
       Number(payload.confidenceScore ?? 0) > 0 ? `score ${String(payload.confidenceScore)}/100` : '',
-      payload.requiresConfirmation === true ? 'confirmation requise' : '',
+      payload.requiresConfirmation === true ? t('workspaceSessionStore.markdown.confirmationRequired') : '',
       payload.aobPattern ? `AOB ${String(payload.aobPattern).slice(0, 80)}` : '',
       payload.patchBytes ? `patch ${String(payload.patchBytes).slice(0, 40)}` : '',
-      payload.signatureLevel ? `qualite ${String(payload.signatureLevel)}${payload.signatureScore ? ` ${String(payload.signatureScore)}/100` : ''}` : '',
+      payload.signatureLevel ? t('workspaceSessionStore.markdown.quality', { level: String(payload.signatureLevel), score: payload.signatureScore ? ` ${String(payload.signatureScore)}/100` : '' }) : '',
       payload.signatureMatches !== undefined ? `${String(payload.signatureMatches)} match(es)` : '',
     ].filter(Boolean)
     return `- ${bookmark.kind} ${bookmark.label}${details.length > 0 ? ` - ${details.join(' · ')}` : ''}${bookmark.note ? ` - ${bookmark.note}` : ''}`
@@ -251,32 +254,32 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     const lines = [
       '# KillEngine Workspace',
       '',
-      `Export: ${new Date().toISOString()}`,
-      `Version: ${d.version.value}`,
-      `Processus: ${d.processName.value || 'non attache'}`,
-      `Workflow: ${d.workflowStatus.value}`,
-      `Preset: ${d.lastWorkflowPresetId.value || 'aucun'}`,
-      `IA locale: ${aiModelStatus.value?.ready ? 'llama.cpp' : 'indisponible'}`,
+      t('workspaceSessionStore.markdown.export', { value: new Date().toISOString() }),
+      t('workspaceSessionStore.markdown.version', { value: d.version.value }),
+      t('workspaceSessionStore.markdown.process', { value: d.processName.value || t('workspaceSessionStore.markdown.notAttached') }),
+      t('workspaceSessionStore.markdown.workflow', { value: d.workflowStatus.value }),
+      t('workspaceSessionStore.markdown.preset', { value: d.lastWorkflowPresetId.value || t('workspaceSessionStore.markdown.none') }),
+      t('workspaceSessionStore.markdown.localAi', { value: aiModelStatus.value?.ready ? 'llama.cpp' : t('workspaceSessionStore.markdown.unavailable') }),
       '',
-      '## Presets Disponibles',
+      `## ${t('workspaceSessionStore.markdown.availablePresetsTitle')}`,
       '',
       ...d.workflowPresets.value.map((preset) => `- ${preset.title}: ${preset.mode} / ${preset.risk} - ${preset.nextStep}`),
       '',
       '## Investigation',
       '',
-      `Active: ${activeInvestigation.value ? activeInvestigation.value.objective : 'aucune'}`,
-      `Etapes actives: ${activeInvestigation.value?.steps.length ?? 0}`,
-      `Archives: ${investigationArchive.value.length}`,
+      t('workspaceSessionStore.markdown.active', { value: activeInvestigation.value ? activeInvestigation.value.objective : t('workspaceSessionStore.markdown.none') }),
+      t('workspaceSessionStore.markdown.activeSteps', { value: activeInvestigation.value?.steps.length ?? 0 }),
+      t('workspaceSessionStore.markdown.archives', { value: investigationArchive.value.length }),
       '',
       '## Trainer',
       '',
-      `Features: ${trainerFeatures.value.length}`,
+      t('workspaceSessionStore.markdown.features', { value: trainerFeatures.value.length }),
       ...trainerFeatures.value.slice(0, 12).map((feature) => `- ${feature.name}: ${feature.action} 0x${feature.address} (${feature.status})`),
       '',
-      '## Structures',
+      `## ${t('workspaceSessionStore.markdown.structuresTitle')}`,
       '',
-      `Templates: ${structureTemplates.value.length}`,
-      ...structureTemplates.value.slice(0, 12).map((template) => `- ${template.name}: ${template.fieldCount} champ(s), base 0x${template.baseAddress}`),
+      t('workspaceSessionStore.markdown.templates', { value: structureTemplates.value.length }),
+      ...structureTemplates.value.slice(0, 12).map((template) => t('workspaceSessionStore.markdown.templateLine', { name: template.name, count: template.fieldCount, address: template.baseAddress })),
       ...structureTemplates.value.slice(0, 5).flatMap((template) => [
         '',
         `### ${template.name}`,
@@ -287,22 +290,22 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
       '',
       '## Bookmarks',
       '',
-      `Bookmarks: ${workspaceBookmarks.value.length}`,
+      t('workspaceSessionStore.markdown.bookmarks', { value: workspaceBookmarks.value.length }),
       ...workspaceBookmarks.value.slice(0, 20).map((bookmark) => workspaceBookmarkMarkdownLine(bookmark)),
       '',
-      '## Audit',
+      `## ${t('workspaceSessionStore.markdown.auditTitle')}`,
       '',
-      `Entrées: ${actionLog.value.length}`,
+      t('workspaceSessionStore.markdown.entries', { value: actionLog.value.length }),
       ...actionLog.value.slice(0, 30).map((entry) => `- ${entry.time} [${entry.status}] ${entry.kind} - ${entry.title}${entry.detail ? `: ${entry.detail}` : ''}`),
       '',
-      '## Rapport Auto',
+      `## ${t('workspaceSessionStore.markdown.autoReportTitle')}`,
       '',
       report
-        ? `Strategie: ${String(report.preferredStrategy?.label ?? 'non determinee')}`
-        : 'Aucun rapport Auto charge.',
-      report?.summary ? `Résumé: ${report.summary}` : '',
+        ? t('workspaceSessionStore.markdown.strategy', { value: String(report.preferredStrategy?.label ?? t('workspaceSessionStore.markdown.notDetermined')) })
+        : t('workspaceSessionStore.markdown.noAutoReportLoaded'),
+      report?.summary ? t('workspaceSessionStore.markdown.summary', { value: report.summary }) : '',
       '',
-      '## Diagnostics',
+      `## ${t('workspaceSessionStore.markdown.diagnosticsTitle')}`,
       '',
       `Log: ${d.logFilePath.value || '-'}`,
       `Smart Search JSONL: ${d.smartSearchDebugFilePath.value || '-'}`,
@@ -430,13 +433,13 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
 
     addActionLog(
       'workspace',
-      'Workspace importé',
-      `${preview.trainerFeatureCount} feature(s), ${preview.structureTemplateCount} template(s), ${preview.bookmarkCount} bookmark(s), ${preview.archiveCount} archive(s), ${preview.auditCount ?? 0} audit(s).`,
+      t('workspaceSessionStore.workspaceImported'),
+      t('workspaceSessionStore.importedCounts', { features: preview.trainerFeatureCount, templates: preview.structureTemplateCount, bookmarks: preview.bookmarkCount, archives: preview.archiveCount, audits: preview.auditCount ?? 0 }),
       'success',
     )
     addInvestigationStep({
-      title: 'Workspace importé',
-      detail: `${preview.trainerFeatureCount} feature(s), ${preview.structureTemplateCount} template(s), ${preview.bookmarkCount} bookmark(s), ${preview.archiveCount} archive(s), ${preview.auditCount ?? 0} audit(s), settings=${preview.hasSettings ? 'oui' : 'non'}, preset=${String(preview.lastPresetId || '-')}.`,
+      title: t('workspaceSessionStore.workspaceImported'),
+      detail: t('workspaceSessionStore.importedCountsDetailed', { features: preview.trainerFeatureCount, templates: preview.structureTemplateCount, bookmarks: preview.bookmarkCount, archives: preview.archiveCount, audits: preview.auditCount ?? 0, hasSettings: preview.hasSettings ? t('workspaceSessionStore.yes') : t('workspaceSessionStore.no'), preset: String(preview.lastPresetId || '-') }),
       status: 'success',
       tool: 'importWorkspaceJson',
       risk: 'safe',
@@ -472,19 +475,19 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     workspaceProjects.value.unshift(project)
     workspaceProjects.value = workspaceProjects.value.slice(0, 50)
     saveWorkspaceProjects()
-    addActionLog('workspace', `Projet sauvegardé: ${project.name}`, `${project.trainerFeatureCount} feature(s), ${project.structureTemplateCount} template(s).`, 'success')
+    addActionLog('workspace', t('workspaceSessionStore.projectSaved', { name: project.name }), t('workspaceSessionStore.projectCounts', { features: project.trainerFeatureCount, templates: project.structureTemplateCount }), 'success')
     return project
   }
 
   function loadWorkspaceProject(id: number) {
     const project = workspaceProjects.value.find((item) => item.id === id)
-    if (!project) return { success: false, error: 'Projet introuvable.' }
+    if (!project) return { success: false, error: t('workspaceSessionStore.projectNotFound') }
     const result = importWorkspaceJson(project.snapshotJson)
     if (result.success === true) {
-      addActionLog('workspace', `Projet chargé: ${project.name}`, project.processName || '-', 'success')
+      addActionLog('workspace', t('workspaceSessionStore.projectLoaded', { name: project.name }), project.processName || '-', 'success')
       addInvestigationStep({
-        title: 'Projet workspace chargé',
-        detail: `${project.name} · ${project.trainerFeatureCount} feature(s), ${project.structureTemplateCount} template(s), ${project.bookmarkCount} bookmark(s), ${project.auditCount ?? 0} audit(s).`,
+        title: t('workspaceSessionStore.workspaceProjectLoaded'),
+        detail: t('workspaceSessionStore.projectLoadedDetail', { name: project.name, features: project.trainerFeatureCount, templates: project.structureTemplateCount, bookmarks: project.bookmarkCount, audits: project.auditCount ?? 0 }),
         status: 'success',
         tool: 'loadWorkspaceProject',
         risk: 'safe',
@@ -499,14 +502,14 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     workspaceProjects.value = workspaceProjects.value.filter((item) => item.id !== id)
     if (workspaceProjects.value.length !== before) {
       saveWorkspaceProjects()
-      addActionLog('workspace', 'Projet supprimé', `id=${id}`, 'warning')
+      addActionLog('workspace', t('workspaceSessionStore.projectDeleted'), `id=${id}`, 'warning')
     }
   }
 
   function clearWorkspaceProjects() {
     workspaceProjects.value = []
     saveWorkspaceProjects()
-    addActionLog('workspace', 'Projets vidés', 'Tous les projets locaux ont été supprimés.', 'warning')
+    addActionLog('workspace', t('workspaceSessionStore.projectsCleared'), t('workspaceSessionStore.allLocalProjectsRemoved'), 'warning')
   }
 
   // ---- Watch pointer chain (P1) : suit une chaine de pointeurs en live ----
@@ -521,13 +524,13 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     try {
       const resolve = await controller.resolvePointerChain(chain)
       if (!resolve.success || !resolve.finalAddress) {
-        addActionLog('watch', 'Chaîne non résolue', resolve.error ?? 'Résolution impossible.', 'warning')
+        addActionLog('watch', t('workspaceSessionStore.chainNotResolved'), resolve.error ?? t('workspaceSessionStore.resolutionImpossible'), 'warning')
         return null
       }
       const normalized = resolve.finalAddress.replace(/^0x/i, '')
       const entry: WatchedPointerChain = {
         id: nextWatchedChainId++,
-        label: label || `Chaîne #${nextWatchedChainId - 1}`,
+        label: label || t('workspaceSessionStore.defaultChainLabel', { id: nextWatchedChainId - 1 }),
         chain: { ...chain },
         type,
         finalAddress: normalized,
@@ -541,7 +544,7 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
       await refreshWatchedPointerChain(entry.id)
       return entry
     } catch (e) {
-      addActionLog('watch', 'Erreur ajout chaîne', String(e), 'error')
+      addActionLog('watch', t('workspaceSessionStore.addChainError'), String(e), 'error')
       return null
     }
   }
@@ -557,7 +560,7 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
         if (resolve.success && resolve.finalAddress) {
           entry.finalAddress = resolve.finalAddress.replace(/^0x/i, '')
         } else if (!resolve.success) {
-          entry.error = resolve.error ?? 'Résolution impossible.'
+          entry.error = resolve.error ?? t('workspaceSessionStore.resolutionImpossible')
         }
       }
       const d = deps()
@@ -606,8 +609,8 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     }
     addActionLog(
       'watch',
-      enabled ? 'Watch expressions live activé' : 'Watch expressions live arrêté',
-      `${watchedPointerChains.value.length} chaîne(s).`,
+      enabled ? t('workspaceSessionStore.liveWatchEnabled') : t('workspaceSessionStore.liveWatchStopped'),
+      t('workspaceSessionStore.chainCount', { count: watchedPointerChains.value.length }),
       enabled ? 'success' : 'info',
     )
   }

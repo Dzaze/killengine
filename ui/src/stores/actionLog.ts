@@ -10,6 +10,9 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
+
+const { t } = i18n.global
 
 export interface UserActionLogEntry {
   id: number
@@ -92,9 +95,9 @@ export const useActionLogStore = defineStore('actionLog', () => {
     const lines = [
       '# KillEngine Audit Log',
       '',
-      `Export: ${new Date().toISOString()}`,
-      `Processus: ${processNameValue || 'non attache'}`,
-      `Entrées: ${actionLog.value.length}`,
+      `${t('actionLogStore.markdown.export')}: ${new Date().toISOString()}`,
+      `${t('actionLogStore.markdown.process')}: ${processNameValue || t('actionLogStore.markdown.notAttached')}`,
+      `${t('actionLogStore.markdown.entries')}: ${actionLog.value.length}`,
       '',
       ...actionLog.value.slice(0, 200).map((entry) =>
         `- ${entry.time} [${entry.status}] ${entry.kind} - ${entry.title}${entry.detail ? `: ${entry.detail}` : ''}`,

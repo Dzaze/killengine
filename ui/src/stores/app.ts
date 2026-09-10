@@ -1257,8 +1257,9 @@ export const useAppStore = defineStore('app', () => {
     risk: NonNullable<InvestigationStep['risk']>,
     title: string,
     detail: string,
+    rememberKey?: 'speedhack',
   ): Promise<boolean> {
-    return riskGateStore.confirmRiskAction(risk, title, detail, logAiAudit)
+    return riskGateStore.confirmRiskAction(risk, title, detail, logAiAudit, rememberKey)
   }
 
   function resolveRiskDialog(accepted: boolean) {
@@ -1856,7 +1857,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function startSpeedhack(factor: number) {
-    if (!await confirmRiskAction('injection', t('appStore.speedhack.enableTitle'), t('appStore.speedhack.enableDesc', { factor }))) return null
+    if (!await confirmRiskAction('injection', t('appStore.speedhack.enableTitle'), t('appStore.speedhack.enableDesc', { factor }), 'speedhack')) return null
     const result = await speedhackStore.startSpeedhack(factor)
     logAiAudit('speedhack_start_executed', { factor, success: result?.success === true })
     return result

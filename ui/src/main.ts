@@ -5,6 +5,7 @@ import { i18n } from './i18n'
 import './assets/main.css'
 
 const app = createApp(App)
+const { t } = i18n.global
 
 // Sécurité anti "vue vide silencieuse" : toute erreur de rendu (ex: TDZ,
 // computed cassé) doit être visible immédiatement dans l'UI et la console.
@@ -29,10 +30,10 @@ function showFatalErrorBanner(err: unknown, info: string) {
     'white-space:pre-wrap',
     'word-break:break-word',
   ].join(';')
-  banner.textContent = `⚠ Erreur d'affichage KillEngine (${info}) : ${String(err instanceof Error ? err.message : err)} — détails dans la console (Ctrl+Shift+J / F12).`
+  banner.textContent = t('main.fatalErrorBanner', { info, message: String(err instanceof Error ? err.message : err) })
 
   const close = document.createElement('button')
-  close.textContent = 'Fermer'
+  close.textContent = t('main.fatalErrorBannerClose')
   close.style.cssText = 'margin-left:12px;border:1px solid #10121a;background:transparent;color:#10121a;cursor:pointer;border-radius:4px;padding:2px 8px;font-weight:600'
   close.addEventListener('click', () => banner.remove())
   banner.appendChild(close)

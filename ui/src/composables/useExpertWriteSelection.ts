@@ -95,8 +95,7 @@ export function useExpertWriteSelection() {
 
   function useCandidateInAssistant(address: string, type: string) {
     store.selectCandidate(address, type)
-    store.searchQuery = `j'utilise la mémoire 0x${address}`
-    void store.doSearch()
+    void store.useSuggestedAddresses([{ address }])
   }
 
   function isCandidateSelected(address: string) {
@@ -149,9 +148,7 @@ export function useExpertWriteSelection() {
 
   function useSelectedCandidatesInAssistant() {
     if (selectedCandidateAddresses.value.length === 0) return
-    const addresses = selectedCandidateAddresses.value.map((address) => `0x${address}`).join(' ')
-    store.searchQuery = `j'utilise ces mémoires ${addresses}`
-    void store.doSearch()
+    void store.useSuggestedAddresses(selectedCandidateAddresses.value.map((address) => ({ address })))
   }
 
   function writeSelectedCandidates() {

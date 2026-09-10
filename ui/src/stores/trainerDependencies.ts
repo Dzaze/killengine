@@ -17,7 +17,13 @@ export interface TrainerFeatureLike {
 export interface ResolveOrderResult {
   success: boolean
   order: number[]
-  error?: string
+  /**
+   * Module volontairement sans dépendance i18n (pur, testable via node) --
+   * le message d'erreur affichable est reconstruit côté appelant (trainer.ts)
+   * à partir de errorCode/errorParams via t('trainerStore.dependencies.*').
+   */
+  errorCode?: 'missingDependency' | 'cycle'
+  errorParams?: { featureName?: string, depId?: number, names?: string }
 }
 
 /**
@@ -44,7 +50,7 @@ export function resolveTrainerFeatureOrder(
     closure.add(id)
     for (const depId of feature.dependsOn ?? []) {
       if (!byId.has(depId)) {
-        return { success: false, order: [], error: `"${feature.name}" dépend d'une feature introuvable (id ${depId}).` }
+        return { success: false, order: [], errorCode: 'missingDependency', errorParams: { featureName: feature.name, depId } }
       }
       if (!closure.has(depId)) stack.push(depId)
     }
@@ -80,7 +86,7 @@ export function resolveTrainerFeatureOrder(
   if (order.length !== closure.size) {
     const cyclic = [...closure].filter((id) => (inDegree.get(id) ?? 0) > 0)
     const names = cyclic.map((id) => byId.get(id)?.name ?? `#${id}`).join(', ')
-    return { success: false, order: [], error: `Cycle de dépendances détecté entre : ${names}.` }
+    return { success: false, order: [], errorCode: 'cycle', errorParams: { names } }
   }
 
   return { success: true, order }

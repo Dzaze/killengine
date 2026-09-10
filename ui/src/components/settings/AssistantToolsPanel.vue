@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   assistantTools,
   ASSISTANT_TOOLS_SNAPSHOT,
   type AssistantTool,
   type AssistantToolExecution,
 } from '@/services/assistantTools'
+
+const { t } = useI18n()
 
 /** Totaux par mode d'exécution — dérivés de la liste, jamais codés en dur. */
 const executionCounts = computed(() => {
@@ -30,17 +33,29 @@ const toolsByCategory = computed(() => {
   return categories
 })
 
-const executionLabels: Record<AssistantToolExecution, string> = {
-  direct: 'Direct',
-  confirm: 'Confirmation UI',
-  redirect: 'Redirigé UI',
+function categoryLabel(category: string): string {
+  return t('assistantToolsPanel.categories.' + category)
 }
 
-const executionTitles: Record<AssistantToolExecution, string> = {
-  direct: 'Exécuté directement par le chat — lecture/analyse seule, aucune écriture.',
-  confirm: 'L\'Assistant prépare l\'action ; un clic de confirmation (RiskGate) reste obligatoire.',
-  redirect: 'Jamais exécuté depuis le chat — toujours redirigé vers le bon panneau de l\'UI.',
+function toolSummary(tool: AssistantTool): string {
+  return t('assistantToolsPanel.tools.' + tool.name + '.summary')
 }
+
+function toolNote(tool: AssistantTool): string {
+  return t('assistantToolsPanel.tools.' + tool.name + '.note')
+}
+
+const executionLabels = computed<Record<AssistantToolExecution, string>>(() => ({
+  direct: t('assistantToolsPanel.execution.directLabel'),
+  confirm: t('assistantToolsPanel.execution.confirmLabel'),
+  redirect: t('assistantToolsPanel.execution.redirectLabel'),
+}))
+
+const executionTitles = computed<Record<AssistantToolExecution, string>>(() => ({
+  direct: t('assistantToolsPanel.execution.directTitle'),
+  confirm: t('assistantToolsPanel.execution.confirmTitle'),
+  redirect: t('assistantToolsPanel.execution.redirectTitle'),
+}))
 
 const riskLabels: Record<string, string> = {
   safe: 'safe',
@@ -55,61 +70,58 @@ const riskLabels: Record<string, string> = {
 <template>
   <section class="panel">
     <div class="panel-title">
-      <h2>Outils Assistant</h2>
+      <h2>{{ $t('assistantToolsPanel.title') }}</h2>
       <div class="panel-actions">
         <span class="status-pill" :class="snapshotDrift ? 'warn' : 'ok'">
-          {{ assistantTools.length }} outils
+          {{ $t('assistantToolsPanel.toolCount', { count: assistantTools.length }) }}
         </span>
       </div>
     </div>
 
     <div class="tools-stats-grid">
       <div class="tool-stat-cell">
-        <span>Exécution directe</span>
+        <span>{{ $t('assistantToolsPanel.stats.directTitle') }}</span>
         <strong class="stat-direct">{{ executionCounts.direct }}</strong>
-        <em>Lecture/analyse seule, aucune écriture.</em>
+        <em>{{ $t('assistantToolsPanel.stats.directDetail') }}</em>
       </div>
       <div class="tool-stat-cell">
-        <span>Confirmation UI requise</span>
+        <span>{{ $t('assistantToolsPanel.stats.confirmTitle') }}</span>
         <strong class="stat-confirm">{{ executionCounts.confirm }}</strong>
-        <em>L'Assistant prépare, tu confirmes (RiskGate).</em>
+        <em>{{ $t('assistantToolsPanel.stats.confirmDetail') }}</em>
       </div>
       <div class="tool-stat-cell">
-        <span>Redirigés vers l'UI</span>
+        <span>{{ $t('assistantToolsPanel.stats.redirectTitle') }}</span>
         <strong class="stat-redirect">{{ executionCounts.redirect }}</strong>
-        <em>Jamais exécutés depuis le chat.</em>
+        <em>{{ $t('assistantToolsPanel.stats.redirectDetail') }}</em>
       </div>
     </div>
 
     <p class="hint">
-      L'Assistant ne peut jamais auto-approuver une action risquée : les outils d'écriture,
-      freeze, patch ou debugger demandent une confirmation explicite dans l'interface.
-      Les outils <code>find_what_writes</code>, <code>test_candidate_fields</code> et
-      <code>patch_file_bytes</code> redirigent toujours vers la vue Expert (bouton « Écrit par »,
-      panneau Write / Fichiers de sauvegarde) sans exécution autonome.
+      {{ $t('assistantToolsPanel.hintPrefix') }}
+      <code>find_what_writes</code>, <code>test_candidate_fields</code> {{ $t('assistantToolsPanel.hintAnd') }}
+      <code>patch_file_bytes</code> {{ $t('assistantToolsPanel.hintSuffix') }}
     </p>
 
     <details class="tools-details">
-      <summary>Liste complète par catégorie</summary>
+      <summary>{{ $t('assistantToolsPanel.fullListSummary') }}</summary>
       <div v-for="group in toolsByCategory" :key="group.label" class="tool-category">
-        <strong>{{ group.label }}</strong>
+        <strong>{{ categoryLabel(group.label) }}</strong>
         <div v-for="tool in group.tools" :key="tool.name" class="tool-row">
           <span class="tool-exec-badge" :class="tool.execution" :title="executionTitles[tool.execution]">
             {{ executionLabels[tool.execution] }}
           </span>
           <div class="tool-info">
             <code>{{ tool.name }}</code>
-            <span class="tool-risk">risque&nbsp;: {{ riskLabels[tool.risk] }}</span>
-            <span class="tool-summary">{{ tool.summary }}</span>
-            <span v-if="tool.note" class="tool-note">{{ tool.note }}</span>
+            <span class="tool-risk">{{ $t('assistantToolsPanel.riskPrefix') }}&nbsp;: {{ riskLabels[tool.risk] }}</span>
+            <span class="tool-summary">{{ toolSummary(tool) }}</span>
+            <span v-if="tool.hasNote" class="tool-note">{{ toolNote(tool) }}</span>
           </div>
         </div>
       </div>
     </details>
 
     <p class="hint">
-      Le mode enquête complet (PHASE 120 — Assistant mode réflexion qui chaîne les outils)
-      est volontairement repoussé en fin de roadmap : rien ici ne l'active ni ne le remplace.
+      {{ $t('assistantToolsPanel.investigationModeHint') }}
     </p>
   </section>
 </template>

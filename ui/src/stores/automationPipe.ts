@@ -8,8 +8,11 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import { backend } from '@/services/backend'
 import { useActionLogStore } from './actionLog'
+
+const { t } = i18n.global
 
 export const useAutomationPipeStore = defineStore('automationPipe', () => {
   const actionLogStore = useActionLogStore()
@@ -30,16 +33,16 @@ export const useAutomationPipeStore = defineStore('automationPipe', () => {
   async function enableAutomationMode() {
     const controller = backend.getController()
     if (!controller.enableAutomationMode) {
-      actionLogStore.addActionLog('automation', 'Mode Automation indisponible', 'Backend non exposé.', 'warning')
+      actionLogStore.addActionLog('automation', t('automationPipeStore.unavailable'), t('automationPipeStore.backendNotExposed'), 'warning')
       return null
     }
     try {
       const result = await controller.enableAutomationMode()
       automationPipeStatus.value = result
-      actionLogStore.addActionLog('automation', result.success === true ? 'Mode Automation activé' : 'Activation échouée', String(result.error ?? ''), result.success === true ? 'success' : 'error')
+      actionLogStore.addActionLog('automation', result.success === true ? t('automationPipeStore.enabled') : t('automationPipeStore.enableFailed'), String(result.error ?? ''), result.success === true ? 'success' : 'error')
       return result
     } catch (e) {
-      actionLogStore.addActionLog('automation', 'Activation échouée', String(e), 'error')
+      actionLogStore.addActionLog('automation', t('automationPipeStore.enableFailed'), String(e), 'error')
       return null
     }
   }
@@ -47,16 +50,16 @@ export const useAutomationPipeStore = defineStore('automationPipe', () => {
   async function disableAutomationMode() {
     const controller = backend.getController()
     if (!controller.disableAutomationMode) {
-      actionLogStore.addActionLog('automation', 'Mode Automation indisponible', 'Backend non exposé.', 'warning')
+      actionLogStore.addActionLog('automation', t('automationPipeStore.unavailable'), t('automationPipeStore.backendNotExposed'), 'warning')
       return null
     }
     try {
       const result = await controller.disableAutomationMode()
       automationPipeStatus.value = result
-      actionLogStore.addActionLog('automation', 'Mode Automation désactivé', '', 'success')
+      actionLogStore.addActionLog('automation', t('automationPipeStore.disabled'), '', 'success')
       return result
     } catch (e) {
-      actionLogStore.addActionLog('automation', 'Désactivation échouée', String(e), 'error')
+      actionLogStore.addActionLog('automation', t('automationPipeStore.disableFailed'), String(e), 'error')
       return null
     }
   }

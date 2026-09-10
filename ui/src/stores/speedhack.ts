@@ -12,6 +12,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import {
   backend,
   type ApiHookStatus,
@@ -19,6 +20,8 @@ import {
   type SpeedhackStatus,
 } from '@/services/backend'
 import { useActionLogStore } from './actionLog'
+
+const { t } = i18n.global
 
 export const useSpeedhackStore = defineStore('speedhack', () => {
   const actionLogStore = useActionLogStore()
@@ -44,7 +47,7 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
       if (status.active) speedhackFactor.value = status.factor
       return status
     } catch (e) {
-      actionLogStore.addActionLog('speedhack', 'Statut speedhack indisponible', String(e), 'warning')
+      actionLogStore.addActionLog('speedhack', t('speedhackStore.statusUnavailable'), String(e), 'warning')
       return null
     }
   }
@@ -58,7 +61,7 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
   async function startApiHook() {
     const controller = backend.getController()
     if (!controller.startApiHookAsync) {
-      actionLogStore.addActionLog('injection', 'Interception indisponible', 'Backend non exposé.', 'warning')
+      actionLogStore.addActionLog('injection', t('speedhackStore.interceptUnavailable'), t('speedhackStore.backendNotExposed'), 'warning')
       return null
     }
     apiHookBusy.value = true
@@ -66,12 +69,12 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
       const result = await controller.startApiHookAsync(apiHookModuleName.value, apiHookFunctionName.value, apiHookMode.value, apiHookForcedReturn.value)
       if (!result?.started) {
         apiHookBusy.value = false
-        actionLogStore.addActionLog('injection', 'Interception échouée', result?.error || 'raison inconnue', 'error')
+        actionLogStore.addActionLog('injection', t('speedhackStore.interceptFailed'), result?.error || t('speedhackStore.unknownReason'), 'error')
       }
       return result
     } catch (e) {
       apiHookBusy.value = false
-      actionLogStore.addActionLog('injection', 'Interception échouée', String(e), 'error')
+      actionLogStore.addActionLog('injection', t('speedhackStore.interceptFailed'), String(e), 'error')
       return null
     }
   }
@@ -80,9 +83,9 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     apiHookBusy.value = false
     apiHookStatus.value = result
     if (result.success) {
-      actionLogStore.addActionLog('injection', 'Interception active', `${apiHookModuleName.value}!${apiHookFunctionName.value}, mode ${apiHookMode.value === 1 ? 'forcer retour' : 'compter'}.`, 'success')
+      actionLogStore.addActionLog('injection', t('speedhackStore.interceptActive'), t('speedhackStore.interceptActiveDetail', { module: apiHookModuleName.value, fn: apiHookFunctionName.value, mode: apiHookMode.value === 1 ? t('speedhackStore.forceReturn') : t('speedhackStore.count') }), 'success')
     } else {
-      actionLogStore.addActionLog('injection', 'Interception échouée', result.error || 'raison inconnue', 'error')
+      actionLogStore.addActionLog('injection', t('speedhackStore.interceptFailed'), result.error || t('speedhackStore.unknownReason'), 'error')
     }
   }
 
@@ -92,18 +95,18 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     try {
       const result = await controller.stopApiHookAsync()
       if (!result?.started) {
-        actionLogStore.addActionLog('injection', 'Retrait de l interception échoué', result?.error || 'raison inconnue', 'error')
+        actionLogStore.addActionLog('injection', t('speedhackStore.interceptRemoveFailed'), result?.error || t('speedhackStore.unknownReason'), 'error')
       }
       return result
     } catch (e) {
-      actionLogStore.addActionLog('injection', 'Retrait de l interception échoué', String(e), 'error')
+      actionLogStore.addActionLog('injection', t('speedhackStore.interceptRemoveFailed'), String(e), 'error')
       return null
     }
   }
 
   function onApiHookStopFinished(result: ApiHookStatus) {
     apiHookStatus.value = result
-    actionLogStore.addActionLog('injection', 'Interception retirée', result.finalCallCount !== undefined ? `${result.finalCallCount} appel(s) intercepté(s) au total.` : 'Hook retiré.', 'success')
+    actionLogStore.addActionLog('injection', t('speedhackStore.interceptRemoved'), result.finalCallCount !== undefined ? t('speedhackStore.interceptCallCount', { count: result.finalCallCount }) : t('speedhackStore.hookRemoved'), 'success')
   }
 
   async function refreshApiHookStatus() {
@@ -126,7 +129,7 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
   async function startSpeedhack(factor: number) {
     const controller = backend.getController()
     if (!controller.startSpeedhackAsync) {
-      actionLogStore.addActionLog('speedhack', 'Speedhack indisponible', 'Backend non exposé.', 'warning')
+      actionLogStore.addActionLog('speedhack', t('speedhackStore.speedhackUnavailable'), t('speedhackStore.backendNotExposed'), 'warning')
       return null
     }
     speedhackBusy.value = true
@@ -134,12 +137,12 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
       const result = await controller.startSpeedhackAsync(factor)
       if (!result?.started) {
         speedhackBusy.value = false
-        actionLogStore.addActionLog('speedhack', 'Speedhack échoué', result?.error || 'raison inconnue', 'error')
+        actionLogStore.addActionLog('speedhack', t('speedhackStore.speedhackFailed'), result?.error || t('speedhackStore.unknownReason'), 'error')
       }
       return result
     } catch (e) {
       speedhackBusy.value = false
-      actionLogStore.addActionLog('speedhack', 'Speedhack échoué', String(e), 'error')
+      actionLogStore.addActionLog('speedhack', t('speedhackStore.speedhackFailed'), String(e), 'error')
       return null
     }
   }
@@ -149,9 +152,9 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     speedhackStatus.value = result
     if (result.success) {
       speedhackFactor.value = result.factor
-      actionLogStore.addActionLog('speedhack', 'Speedhack activé', `Facteur ${result.factor}x.`, 'success')
+      actionLogStore.addActionLog('speedhack', t('speedhackStore.speedhackEnabled'), t('speedhackStore.factorDetail', { factor: result.factor }), 'success')
     } else {
-      actionLogStore.addActionLog('speedhack', 'Speedhack échoué', result.error || 'raison inconnue', 'error')
+      actionLogStore.addActionLog('speedhack', t('speedhackStore.speedhackFailed'), result.error || t('speedhackStore.unknownReason'), 'error')
     }
   }
 
@@ -169,7 +172,7 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
       if (result.success) speedhackFactor.value = factor
       return result
     } catch (e) {
-      actionLogStore.addActionLog('speedhack', 'Réglage du facteur échoué', String(e), 'error')
+      actionLogStore.addActionLog('speedhack', t('speedhackStore.factorSettingFailed'), String(e), 'error')
       return null
     }
   }
@@ -181,10 +184,10 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
       const result = await controller.stopSpeedhack()
       speedhackStatus.value = result
       speedhackFactor.value = 1.0
-      actionLogStore.addActionLog('speedhack', 'Speedhack désactivé', 'Vitesse remise à la normale.', 'success')
+      actionLogStore.addActionLog('speedhack', t('speedhackStore.speedhackDisabled'), t('speedhackStore.speedRestored'), 'success')
       return result
     } catch (e) {
-      actionLogStore.addActionLog('speedhack', 'Arrêt du speedhack échoué', String(e), 'error')
+      actionLogStore.addActionLog('speedhack', t('speedhackStore.speedhackStopFailed'), String(e), 'error')
       return null
     }
   }
@@ -201,7 +204,7 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
   async function blockProcessNetwork(processNameValue = '') {
     const controller = backend.getController()
     if (!controller.blockProcessNetworkAsync) {
-      actionLogStore.addActionLog('network_block', 'Blocage réseau indisponible', 'Backend non exposé.', 'warning')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkBlockUnavailable'), t('speedhackStore.backendNotExposed'), 'warning')
       return null
     }
     _pendingBlockProcessName = processNameValue
@@ -210,12 +213,12 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
       const result = await controller.blockProcessNetworkAsync()
       if (!result?.started) {
         networkBlockBusy.value = false
-        actionLogStore.addActionLog('network_block', 'Blocage réseau échoué', result?.error || 'raison inconnue', 'error')
+        actionLogStore.addActionLog('network_block', t('speedhackStore.networkBlockFailed'), result?.error || t('speedhackStore.unknownReason'), 'error')
       }
       return result
     } catch (e) {
       networkBlockBusy.value = false
-      actionLogStore.addActionLog('network_block', 'Blocage réseau échoué', String(e), 'error')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkBlockFailed'), String(e), 'error')
       return null
     }
   }
@@ -224,11 +227,11 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     networkBlockBusy.value = false
     networkBlockStatus.value = { ...result, blocked: result.success ? true : networkBlockStatus.value?.blocked ?? false }
     if (result.success) {
-      actionLogStore.addActionLog('network_block', 'Réseau coupé', `${result.exePath ?? _pendingBlockProcessName} isolé du réseau.`, 'success')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkCut'), t('speedhackStore.networkCutDetail', { exe: result.exePath ?? _pendingBlockProcessName }), 'success')
     } else if (result.cancelled) {
-      actionLogStore.addActionLog('network_block', 'Blocage réseau annulé', 'Invite UAC refusée.', 'warning')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkBlockCancelled'), t('speedhackStore.uacRefused'), 'warning')
     } else {
-      actionLogStore.addActionLog('network_block', 'Blocage réseau échoué', result.error || 'raison inconnue', 'error')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkBlockFailed'), result.error || t('speedhackStore.unknownReason'), 'error')
     }
   }
 
@@ -240,12 +243,12 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
       const result = await controller.unblockProcessNetworkAsync()
       if (!result?.started) {
         networkBlockBusy.value = false
-        actionLogStore.addActionLog('network_block', 'Rétablissement réseau échoué', result?.error || 'raison inconnue', 'error')
+        actionLogStore.addActionLog('network_block', t('speedhackStore.networkRestoreFailed'), result?.error || t('speedhackStore.unknownReason'), 'error')
       }
       return result
     } catch (e) {
       networkBlockBusy.value = false
-      actionLogStore.addActionLog('network_block', 'Rétablissement réseau échoué', String(e), 'error')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkRestoreFailed'), String(e), 'error')
       return null
     }
   }
@@ -254,11 +257,11 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     networkBlockBusy.value = false
     if (result.success) {
       networkBlockStatus.value = { ...result, blocked: false }
-      actionLogStore.addActionLog('network_block', 'Réseau rétabli', 'Règle pare-feu retirée.', 'success')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkRestored'), t('speedhackStore.firewallRuleRemoved'), 'success')
     } else if (result.cancelled) {
-      actionLogStore.addActionLog('network_block', 'Rétablissement réseau annulé', 'Invite UAC refusée.', 'warning')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkRestoreCancelled'), t('speedhackStore.uacRefused'), 'warning')
     } else {
-      actionLogStore.addActionLog('network_block', 'Rétablissement réseau échoué', result.error || 'raison inconnue', 'error')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkRestoreFailed'), result.error || t('speedhackStore.unknownReason'), 'error')
     }
   }
 
@@ -270,7 +273,7 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
       networkBlockStatus.value = status
       return status
     } catch (e) {
-      actionLogStore.addActionLog('network_block', 'Statut réseau indisponible', String(e), 'warning')
+      actionLogStore.addActionLog('network_block', t('speedhackStore.networkStatusUnavailable'), String(e), 'warning')
       return null
     }
   }

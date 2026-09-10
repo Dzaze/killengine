@@ -12,6 +12,9 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
+
+const { t } = i18n.global
 
 export interface InvestigationStep {
   id: number
@@ -85,7 +88,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     }
   }
 
-  function startInvestigation(objective: string, title = 'Investigation Auto', processNameValue = '') {
+  function startInvestigation(objective: string, title = t('investigationStore.autoTitle'), processNameValue = '') {
     if (activeInvestigation.value) {
       investigationArchive.value.unshift({
         ...activeInvestigation.value,
@@ -114,7 +117,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
 
   function addInvestigationStep(
     step: Omit<InvestigationStep, 'id' | 'time'>,
-    fallbackObjective = 'Investigation manuelle',
+    fallbackObjective = t('investigationStore.manualObjective'),
     processNameValue = '',
   ) {
     if (!activeInvestigation.value) {
@@ -158,8 +161,8 @@ export const useInvestigationStore = defineStore('investigation', () => {
     const displayValueHypothesis = displayValueReport.enabled === true
       ? [{
           id: 'display_value_report',
-          label: 'Rapport valeurs affichees',
-          reason: String(displayValueReport.recommendation ?? 'Trace UI string et sources numeriques avant debugger.'),
+          label: t('investigationStore.displayValueReportLabel'),
+          reason: String(displayValueReport.recommendation ?? t('investigationStore.displayValueReportReason')),
           safe: true,
           traceUiSourceCount: displayValueReport.traceUiSourceCount,
           globalValueHits: displayValueReport.globalValueHits,
@@ -175,7 +178,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     activeInvestigation.value.preferredStrategy = preferredStrategy
     activeInvestigation.value.summary = String(result.message ?? result.error ?? '').trim()
     activeInvestigation.value.hypotheses = [
-      ...(nextBestAction ? [{ ...nextBestAction, id: 'next_best_action', label: `Priorité: ${String(nextBestAction.label ?? nextBestAction.id ?? 'action')}` }] : []),
+      ...(nextBestAction ? [{ ...nextBestAction, id: 'next_best_action', label: t('investigationStore.priorityLabel', { label: String(nextBestAction.label ?? nextBestAction.id ?? t('investigationStore.actionFallback')) }) }] : []),
       ...displayValueHypothesis,
       ...telemetryInsights,
       ...recommendations,
@@ -189,7 +192,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     if (plan.length > 0 && activeInvestigation.value.steps.length === 0) {
       for (const item of plan.slice().reverse()) {
         addInvestigationStep({
-          title: String(item.description ?? item.type ?? 'Etape planifiee'),
+          title: String(item.description ?? item.type ?? t('investigationStore.plannedStep')),
           detail: String(item.type ?? 'planned'),
           status: 'planned',
           tool: String(item.type ?? ''),

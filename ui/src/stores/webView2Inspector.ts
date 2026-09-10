@@ -5,7 +5,10 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { i18n } from '@/i18n'
 import { backend, type WebView2InspectorStatus, type WebView2CdpTarget, type WebView2EvaluateResult, type WebView2FindResult, type WebView2GlobalScopeResult } from '@/services/backend'
+
+const { t } = i18n.global
 
 export interface WebView2InspectorState {
   isConnecting: boolean
@@ -56,7 +59,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   async function refreshStatus(): Promise<WebView2InspectorStatus> {
     const controller = backend.getController()
     if (!controller?.getWebView2InspectorStatus) {
-      return { success: false, error: 'Méthode non disponible', connected: false }
+      return { success: false, error: t('webView2InspectorStore.methodUnavailable'), connected: false }
     }
 
     try {
@@ -73,7 +76,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   async function listTargets(): Promise<WebView2CdpTarget[]> {
     const controller = backend.getController()
     if (!controller?.listWebView2CdpTargets) {
-      error.value = 'Méthode listWebView2CdpTargets non disponible'
+      error.value = t('webView2InspectorStore.listTargetsUnavailable')
       return []
     }
 
@@ -88,7 +91,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
         targets.value = result.targets
         return result.targets
       } else {
-        error.value = result.error || 'Échec de la liste des targets'
+        error.value = result.error || t('webView2InspectorStore.listTargetsFailed')
         return []
       }
     } catch (e) {
@@ -101,13 +104,13 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   async function connect(targetId?: string): Promise<boolean> {
     const controller = backend.getController()
     if (!controller?.connectWebView2Inspector) {
-      error.value = 'Méthode connectWebView2Inspector non disponible'
+      error.value = t('webView2InspectorStore.connectUnavailable')
       return false
     }
 
     const target = targetId || selectedTargetId.value
     if (!target) {
-      error.value = 'Aucun target sélectionné'
+      error.value = t('webView2InspectorStore.noTargetSelected')
       return false
     }
 
@@ -126,7 +129,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
         selectedTargetId.value = target
         return true
       } else {
-        error.value = result.error || 'Échec de la connexion'
+        error.value = result.error || t('webView2InspectorStore.connectFailed')
         return false
       }
     } catch (e) {
@@ -141,7 +144,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   async function disconnect(): Promise<boolean> {
     const controller = backend.getController()
     if (!controller?.disconnectWebView2Inspector) {
-      error.value = 'Méthode disconnectWebView2Inspector non disponible'
+      error.value = t('webView2InspectorStore.disconnectUnavailable')
       return false
     }
 
@@ -154,7 +157,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
         findResults.value = []
         return true
       } else {
-        error.value = result.error || 'Échec de la déconnexion'
+        error.value = result.error || t('webView2InspectorStore.disconnectFailed')
         return false
       }
     } catch (e) {
@@ -167,13 +170,13 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   async function evaluateJavaScript(script?: string): Promise<WebView2EvaluateResult | null> {
     const controller = backend.getController()
     if (!controller?.evaluateWebView2JavaScript) {
-      error.value = 'Méthode evaluateWebView2JavaScript non disponible'
+      error.value = t('webView2InspectorStore.evaluateUnavailable')
       return null
     }
 
     const code = script || evaluateScript.value
     if (!code.trim()) {
-      error.value = 'Script vide'
+      error.value = t('webView2InspectorStore.emptyScript')
       return null
     }
 
@@ -184,7 +187,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
       const result = await controller.evaluateWebView2JavaScript(code, {})
       evaluateResult.value = result
       if (!result.success) {
-        error.value = result.error || 'Échec de l\'évaluation'
+        error.value = result.error || t('webView2InspectorStore.evaluateFailed')
         // La connexion CDP peut avoir ete coupee depuis (ex: la target
         // WebView2 a ete detruite/recreee par l'app cible entre la connexion
         // et cet appel) sans que le frontend en soit informe - resynchronise
@@ -205,7 +208,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   async function probeGlobalScope(): Promise<WebView2GlobalScopeResult | null> {
     const controller = backend.getController()
     if (!controller?.probeWebView2GlobalScope) {
-      error.value = 'Méthode probeWebView2GlobalScope non disponible'
+      error.value = t('webView2InspectorStore.probeUnavailable')
       return null
     }
 
@@ -216,7 +219,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
       const result = await controller.probeWebView2GlobalScope()
       globalScopeResult.value = result
       if (!result.success) {
-        error.value = result.error || 'Échec du sondage du scope global'
+        error.value = result.error || t('webView2InspectorStore.probeFailed')
         await refreshStatus()
       }
       return result
@@ -232,7 +235,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   async function findDisplayedValues(value: string, options?: Record<string, unknown>): Promise<WebView2FindResult[]> {
     const controller = backend.getController()
     if (!controller?.findWebView2DisplayedValues) {
-      error.value = 'Méthode findWebView2DisplayedValues non disponible'
+      error.value = t('webView2InspectorStore.findValuesUnavailable')
       return []
     }
 
@@ -245,7 +248,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
         findResults.value = result.matches
         return result.matches
       } else {
-        error.value = result.error || 'Échec de la recherche'
+        error.value = result.error || t('webView2InspectorStore.searchFailed')
         await refreshStatus()
         return []
       }
@@ -261,7 +264,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
   async function findDisplayedText(text: string, options?: Record<string, unknown>): Promise<WebView2FindResult[]> {
     const controller = backend.getController()
     if (!controller?.findWebView2DisplayedText) {
-      error.value = 'Méthode findWebView2DisplayedText non disponible'
+      error.value = t('webView2InspectorStore.findTextUnavailable')
       return []
     }
 
@@ -274,7 +277,7 @@ export const useWebView2InspectorStore = defineStore('webView2Inspector', () => 
         findResults.value = result.matches
         return result.matches
       } else {
-        error.value = result.error || 'Échec de la recherche'
+        error.value = result.error || t('webView2InspectorStore.searchFailed')
         await refreshStatus()
         return []
       }

@@ -26,6 +26,7 @@
  */
 import { defineStore, storeToRefs } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import {
   backend,
   type AobPatternQuality,
@@ -36,6 +37,7 @@ import {
   collectTrainerFeatureDependents,
   cleanupDependsOnAfterDelete,
   isToggleableTrainerAction,
+  type ResolveOrderResult,
 } from './trainerDependencies'
 import { useActionLogStore } from './actionLog'
 import { useInvestigationStore } from './investigation'
@@ -43,6 +45,18 @@ import { useClrInspectorStore } from './clrInspector'
 import { useScanningStore } from './scanning'
 import { useWriteFreezeStore } from './writeFreeze'
 import { useWorkspaceItemsStore } from './workspaceItems'
+
+const { t } = i18n.global
+
+function resolveOrderErrorMessage(result: ResolveOrderResult): string {
+  if (result.errorCode === 'missingDependency') {
+    return t('trainerStore.dependencies.missingDependency', { featureName: result.errorParams?.featureName ?? '', depId: result.errorParams?.depId ?? '' })
+  }
+  if (result.errorCode === 'cycle') {
+    return t('trainerStore.dependencies.cycle', { names: result.errorParams?.names ?? '' })
+  }
+  return t('trainerStore.dependencies.invalidOrder')
+}
 
 export interface TrainerFeature {
   id: number
@@ -174,7 +188,7 @@ export const useTrainerStore = defineStore('trainer', () => {
   function createTrainerFeatureFromBookmark(id: number, action: TrainerFeature['action'] = 'write') {
     const bookmark = workspaceBookmarks.value.find((item) => item.id === id)
     if (!bookmark?.address) {
-      addActionLog('trainer', 'Feature refusée', 'Bookmark sans adresse.', 'warning')
+      addActionLog('trainer', t('trainerStore.featureRefused'), t('trainerStore.bookmarkNoAddress'), 'warning')
       return null
     }
     const patchBytes = String(bookmark.payload?.patchBytes ?? '').trim()
@@ -204,7 +218,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     })
     if (feature) {
       addInvestigationStep({
-        title: 'Feature Trainer créée depuis bookmark',
+        title: t('trainerStore.featureCreatedFromBookmark'),
         detail: `${feature.name} · ${feature.action} · 0x${feature.address}`,
         status: 'success',
         tool: 'createTrainerFeatureFromBookmark',
@@ -221,8 +235,8 @@ export const useTrainerStore = defineStore('trainer', () => {
     if (!feature || !trimmed) return
     const controller = backend.getController()
     if (!controller.registerGlobalHotkey) {
-      trainerHotkeyStatus.value = 'Hotkeys globales non exposées par ce backend.'
-      addActionLog('hotkey', 'Hotkey indisponible', trainerHotkeyStatus.value, 'warning')
+      trainerHotkeyStatus.value = t('trainerStore.hotkeysNotExposed')
+      addActionLog('hotkey', t('trainerStore.hotkeyUnavailable'), trainerHotkeyStatus.value, 'warning')
       return
     }
     if (feature.hotkeyId && controller.unregisterGlobalHotkey) {
@@ -240,14 +254,14 @@ export const useTrainerStore = defineStore('trainer', () => {
       feature.hotkeyId = Number(result.id)
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'hotkey_register', 'success', feature.hotkey)
-      trainerHotkeyStatus.value = `Hotkey enregistrée: ${feature.hotkey}`
+      trainerHotkeyStatus.value = t('trainerStore.hotkeyRegistered', { hotkey: feature.hotkey })
       saveTrainerFeatures()
-      addActionLog('hotkey', 'Hotkey Trainer enregistrée', `${feature.hotkey} -> ${feature.name}`, 'success')
+      addActionLog('hotkey', t('trainerStore.trainerHotkeyRegistered'), `${feature.hotkey} -> ${feature.name}`, 'success')
     } else {
-      trainerHotkeyStatus.value = String(result.error ?? 'Hotkey refusée.')
+      trainerHotkeyStatus.value = String(result.error ?? t('trainerStore.hotkeyRefused'))
       addTrainerFeatureHistory(feature, 'hotkey_register', 'warning', trainerHotkeyStatus.value)
       saveTrainerFeatures()
-      addActionLog('hotkey', 'Hotkey Trainer refusée', trainerHotkeyStatus.value, 'warning')
+      addActionLog('hotkey', t('trainerStore.trainerHotkeyRefused'), trainerHotkeyStatus.value, 'warning')
     }
   }
 
@@ -263,7 +277,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     feature.updatedAt = new Date().toISOString()
     addTrainerFeatureHistory(feature, 'hotkey_unregister', 'success', feature.name)
     saveTrainerFeatures()
-    addActionLog('hotkey', 'Hotkey Trainer supprimée', feature.name, 'success')
+    addActionLog('hotkey', t('trainerStore.trainerHotkeyRemoved'), feature.name, 'success')
   }
 
   async function handleGlobalHotkey(event: Record<string, unknown>) {
@@ -288,8 +302,8 @@ export const useTrainerStore = defineStore('trainer', () => {
     if (!trimmed) return
     const controller = backend.getController()
     if (!controller.registerGlobalHotkey) {
-      trainerOverlayStatus.value = 'Hotkeys globales non exposées par ce backend.'
-      addActionLog('hotkey', 'Hotkey overlay indisponible', trainerOverlayStatus.value, 'warning')
+      trainerOverlayStatus.value = t('trainerStore.hotkeysNotExposed')
+      addActionLog('hotkey', t('trainerStore.overlayHotkeyUnavailable'), trainerOverlayStatus.value, 'warning')
       return
     }
     if (trainerOverlayHotkeyId.value && controller.unregisterGlobalHotkey) {
@@ -302,12 +316,12 @@ export const useTrainerStore = defineStore('trainer', () => {
     if (result.success === true) {
       trainerOverlayHotkey.value = String(result.combo ?? trimmed)
       trainerOverlayHotkeyId.value = Number(result.id)
-      trainerOverlayStatus.value = `Hotkey overlay enregistrée: ${trainerOverlayHotkey.value}`
+      trainerOverlayStatus.value = t('trainerStore.overlayHotkeyRegistered', { hotkey: trainerOverlayHotkey.value })
       saveOverlayHotkey()
-      addActionLog('hotkey', 'Hotkey overlay enregistrée', trainerOverlayStatus.value, 'success')
+      addActionLog('hotkey', t('trainerStore.overlayHotkeyRegisteredTitle'), trainerOverlayStatus.value, 'success')
     } else {
-      trainerOverlayStatus.value = String(result.error ?? 'Hotkey overlay refusée.')
-      addActionLog('hotkey', 'Hotkey overlay refusée', trainerOverlayStatus.value, 'warning')
+      trainerOverlayStatus.value = String(result.error ?? t('trainerStore.overlayHotkeyRefused'))
+      addActionLog('hotkey', t('trainerStore.overlayHotkeyRefusedTitle'), trainerOverlayStatus.value, 'warning')
     }
   }
 
@@ -319,7 +333,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     trainerOverlayHotkey.value = ''
     trainerOverlayHotkeyId.value = undefined
     saveOverlayHotkey()
-    addActionLog('hotkey', 'Hotkey overlay supprimée', '', 'success')
+    addActionLog('hotkey', t('trainerStore.overlayHotkeyRemoved'), '', 'success')
   }
 
   async function reregisterPersistedHotkeys() {
@@ -352,20 +366,20 @@ export const useTrainerStore = defineStore('trainer', () => {
         hotkey: feature.hotkey,
       })),
     })
-    trainerOverlayStatus.value = result.success === true ? 'Overlay mis à jour.' : String(result.error ?? 'Overlay non mis à jour.')
+    trainerOverlayStatus.value = result.success === true ? t('trainerStore.overlayUpdated') : String(result.error ?? t('trainerStore.overlayNotUpdated'))
   }
 
   async function setTrainerOverlay(visible: boolean) {
     const controller = backend.getController()
     if (!controller.setTrainerOverlayVisible) {
-      trainerOverlayStatus.value = 'Overlay Trainer non exposé par ce backend.'
-      addActionLog('overlay', 'Overlay indisponible', trainerOverlayStatus.value, 'warning')
+      trainerOverlayStatus.value = t('trainerStore.overlayNotExposed')
+      addActionLog('overlay', t('trainerStore.overlayUnavailable'), trainerOverlayStatus.value, 'warning')
       return
     }
     const result = await controller.setTrainerOverlayVisible(visible, { x: 24, y: 24, width: 340, height: 180 })
     trainerOverlayVisible.value = result.success === true ? visible : trainerOverlayVisible.value
-    trainerOverlayStatus.value = result.success === true ? (visible ? 'Overlay affiché.' : 'Overlay masqué.') : String(result.error ?? 'Overlay refusé.')
-    addActionLog('overlay', visible ? 'Overlay Trainer affiché' : 'Overlay Trainer masqué', trainerOverlayStatus.value, result.success === true ? 'success' : 'warning')
+    trainerOverlayStatus.value = result.success === true ? (visible ? t('trainerStore.overlayShown') : t('trainerStore.overlayHidden')) : String(result.error ?? t('trainerStore.overlayRefused'))
+    addActionLog('overlay', visible ? t('trainerStore.overlayShownTitle') : t('trainerStore.overlayHiddenTitle'), trainerOverlayStatus.value, result.success === true ? 'success' : 'warning')
     if (visible) await refreshTrainerOverlay()
   }
 
@@ -390,11 +404,11 @@ export const useTrainerStore = defineStore('trainer', () => {
     const address = String(input.address ?? selectedCandidateAddress.value ?? '').replace(/^0x/i, '').trim()
     const isClrFeature = input.action === 'clr_write' || input.locatorKind === 'clr_field'
     if (!address && !isClrFeature) {
-      addActionLog('trainer', 'Feature refusée', 'Adresse manquante.', 'warning')
+      addActionLog('trainer', t('trainerStore.featureRefused'), t('trainerStore.missingAddress'), 'warning')
       return null
     }
     if (isClrFeature && (!String(input.clrTypeSubstring ?? '').trim() || !String(input.clrIdentityField ?? '').trim() || !String(input.clrIdentityValue ?? '').trim() || !String(input.clrFieldName ?? '').trim())) {
-      addActionLog('trainer', 'Feature CLR refusée', 'Locator CLR incomplet.', 'warning')
+      addActionLog('trainer', t('trainerStore.clrFeatureRefused'), t('trainerStore.incompleteClrLocator'), 'warning')
       return null
     }
     trainerFeatureIdCounter.value += 1
@@ -407,7 +421,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     const signatureFixedRatio = Number(signatureQuality?.fixedRatio ?? input.signatureFixedRatio ?? 0)
     const feature: TrainerFeature = {
       id: trainerFeatureIdCounter.value,
-      name: String(input.name ?? (isClrFeature ? `CLR ${input.clrFieldName ?? 'field'}` : `Feature 0x${address}`)).trim() || (isClrFeature ? `CLR ${input.clrFieldName ?? 'field'}` : `Feature 0x${address}`),
+      name: String(input.name ?? (isClrFeature ? `CLR ${input.clrFieldName ?? t('trainerStore.defaultFieldName')}` : t('trainerStore.defaultFeatureName', { address }))).trim() || (isClrFeature ? `CLR ${input.clrFieldName ?? t('trainerStore.defaultFieldName')}` : t('trainerStore.defaultFeatureName', { address })),
       processName: String(input.processName ?? deps().processName.value),
       action: input.action ?? 'write',
       locatorKind: input.locatorKind ?? (isClrFeature ? 'clr_field' : 'absolute'),
@@ -455,7 +469,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     trainerFeatures.value.unshift(feature)
     saveTrainerFeatures()
     void refreshTrainerOverlay()
-    addActionLog('trainer', `Feature créée: ${feature.name}`, `${feature.action} ${locationText}.`, 'success')
+    addActionLog('trainer', t('trainerStore.featureCreated', { name: feature.name }), `${feature.action} ${locationText}.`, 'success')
     return feature
   }
 
@@ -531,21 +545,21 @@ export const useTrainerStore = defineStore('trainer', () => {
   // car resolveTrainerFeatureAddress ci-dessous re-resout desormais l'AOB pour ces actions
   // aussi, pas seulement pour patch.
   function trainerFeaturePatchBlockReason(feature: TrainerFeature): string {
-    if (feature.action === 'patch' && !feature.patchBytes?.trim()) return 'Patch incomplet : bytes manquants.'
+    if (feature.action === 'patch' && !feature.patchBytes?.trim()) return t('trainerStore.patchIncomplete')
     if (feature.locatorKind === 'pointer_chain') {
       if (!feature.pointerChain || feature.pointerChain.offsets.length === 0) {
-        return 'Chaîne de pointeurs manquante : génère-la avant d\'activer.'
+        return t('trainerStore.missingPointerChain')
       }
       return ''
     }
     if (feature.locatorKind !== 'aob') return ''
-    if (!feature.aobPattern?.trim()) return 'AOB manquant : sauvegarde une signature stable avant activation.'
+    if (!feature.aobPattern?.trim()) return t('trainerStore.missingAob')
     const quality = trainerFeatureSignatureQuality(feature)
     if (!quality) return ''
     const score = Number(quality.score ?? 0)
     const fixedBytes = Number(quality.fixedBytes ?? 0)
     if (fixedBytes < 3 || score < 35) {
-      return `AOB trop faible (${score}/100, ${fixedBytes} octet(s) fixe(s)).`
+      return t('trainerStore.aobTooWeak', { score, fixedBytes })
     }
     return ''
   }
@@ -563,15 +577,15 @@ export const useTrainerStore = defineStore('trainer', () => {
   // d'une partie a l'autre (voir docs/PHASE_TRACKER.md PHASE 162, memoire vampire_survivors_health_freeze).
   async function resolveTrainerFeaturePointerChain(feature: TrainerFeature): Promise<{ address: string, error: string }> {
     if (!feature.pointerChain || feature.pointerChain.offsets.length === 0) {
-      return { address: '', error: 'Chaîne de pointeurs manquante.' }
+      return { address: '', error: t('trainerStore.missingPointerChainShort') }
     }
     const controller = backend.getController()
     if (!controller.resolvePointerChain) {
-      return { address: '', error: 'Résolution pointer chain non exposée par ce backend.' }
+      return { address: '', error: t('trainerStore.pointerChainResolutionNotExposed') }
     }
     const resolve = await controller.resolvePointerChain(feature.pointerChain)
     if (!resolve.success || !resolve.finalAddress) {
-      return { address: '', error: resolve.error || 'Résolution de la chaîne de pointeurs impossible.' }
+      return { address: '', error: resolve.error || t('trainerStore.pointerChainResolutionImpossible') }
     }
     return { address: String(resolve.finalAddress).replace(/^0x/i, '').toUpperCase(), error: '' }
   }
@@ -585,7 +599,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     }
     const controller = backend.getController()
     if (!controller.scanAobPattern) {
-      return { address: '', error: 'Scan AOB non expose par ce backend.' }
+      return { address: '', error: t('trainerStore.aobScanNotExposed') }
     }
     // PHASE 160 : executableOnly reste vrai pour 'patch' (cible forcement du code),
     // mais doit etre desactive pour write/freeze_polling/freeze_breakpoint — une donnee
@@ -611,10 +625,10 @@ export const useTrainerStore = defineStore('trainer', () => {
     }
     feature.signatureMatches = Number(scan.matchesFound ?? scan.matches?.length ?? 0)
     if (scan.success !== true) {
-      return { address: '', error: scan.error || 'Resolution AOB impossible.' }
+      return { address: '', error: scan.error || t('trainerStore.aobResolutionImpossible') }
     }
     if (feature.signatureMatches !== 1 || !scan.matches?.[0]?.address) {
-      return { address: '', error: `AOB non unique (${feature.signatureMatches} match(es)). Regénère une signature plus spécifique.` }
+      return { address: '', error: t('trainerStore.aobNotUnique', { count: feature.signatureMatches }) }
     }
     return { address: String(scan.matches[0].address).replace(/^0x/i, '').toUpperCase(), error: '' }
   }
@@ -629,7 +643,7 @@ export const useTrainerStore = defineStore('trainer', () => {
       feature.lastError = blocked
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'apply_blocked', 'warning', blocked)
-      addActionLog('trainer', `Feature bloquée: ${feature.name}`, blocked, 'warning')
+      addActionLog('trainer', t('trainerStore.featureBlocked', { name: feature.name }), blocked, 'warning')
       return false
     }
     // PHASE 160 : re-resoudre l'adresse AVANT confirmRiskAction (pas seulement pour 'patch'
@@ -644,7 +658,7 @@ export const useTrainerStore = defineStore('trainer', () => {
         feature.lastError = resolved.error
         feature.updatedAt = new Date().toISOString()
         addTrainerFeatureHistory(feature, 'apply_blocked', 'error', resolved.error)
-        addActionLog('trainer', `Feature bloquée: ${feature.name}`, resolved.error, 'error')
+        addActionLog('trainer', t('trainerStore.featureBlocked', { name: feature.name }), resolved.error, 'error')
         return false
       }
       resolvedAddress = resolved.address
@@ -655,7 +669,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     const riskDetail = feature.locatorKind === 'clr_field'
       ? `${feature.action} ${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue} -> ${feature.value}`
       : `${feature.action} 0x${resolvedAddress} ${feature.valueType} ${feature.value || feature.patchBytes || ''}${feature.action === 'write' && kernelActive ? ' via driver kernel' : ''}`
-    if (!await deps().confirmRiskAction(trainerRisk, `Activer feature Trainer: ${feature.name}`, riskDetail)) return false
+    if (!await deps().confirmRiskAction(trainerRisk, t('trainerStore.activateFeatureTitle', { name: feature.name }), riskDetail)) return false
 
     try {
       const controller = backend.getController()
@@ -663,14 +677,14 @@ export const useTrainerStore = defineStore('trainer', () => {
       let error = ''
       if (feature.action === 'clr_write') {
         if (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName) {
-          error = 'Locator CLR incomplet.'
+          error = t('trainerStore.incompleteClrLocator')
         } else {
           const locator = await clrInspectorStore.findClrObjectsByFieldValue(feature.clrTypeSubstring, feature.clrIdentityField, feature.clrIdentityValue, 1)
           const match = clrFieldLocatorResult.value?.matches?.[0]
           if (!locator?.success || !match?.address) {
-            error = locator?.error ?? 'Objet CLR introuvable.'
+            error = locator?.error ?? t('trainerStore.clrObjectNotFound')
           } else if (!controller.writeClrPrimitiveField) {
-            error = 'writePrimitiveField non exposé par ce backend.'
+            error = t('trainerStore.writePrimitiveFieldNotExposed')
           } else {
             const write = await controller.writeClrPrimitiveField(match.address, feature.clrFieldName, feature.value)
             ok = write?.success === true
@@ -688,7 +702,7 @@ export const useTrainerStore = defineStore('trainer', () => {
         error = result.error ?? ''
       } else if (feature.action === 'freeze_breakpoint') {
         if (!controller.freezeWithBreakpoint) {
-          error = 'Freeze BP non expose par ce backend.'
+          error = t('trainerStore.freezeBpNotExposed')
         } else {
           const result = await controller.freezeWithBreakpoint(resolvedAddress, feature.valueType, feature.value, { mode: 'rewrite' })
           ok = result.success === true
@@ -696,7 +710,7 @@ export const useTrainerStore = defineStore('trainer', () => {
         }
       } else if (feature.action === 'patch') {
         if (!controller.applyCodePatch) {
-          error = 'Patch code non expose par ce backend.'
+          error = t('trainerStore.patchCodeNotExposed')
         } else {
           const result = await controller.applyCodePatch(resolvedAddress, feature.patchBytes ?? '', { verify: true })
           ok = result.success === true
@@ -711,14 +725,14 @@ export const useTrainerStore = defineStore('trainer', () => {
         ? (error || `${feature.clrFieldName} @ 0x${feature.address}`)
         : (error || `0x${feature.address}`)
       addTrainerFeatureHistory(feature, 'apply', ok ? 'success' : 'error', detail)
-      addActionLog('trainer', ok ? `Feature activée: ${feature.name}` : `Feature échouée: ${feature.name}`, detail, ok ? 'success' : 'error')
+      addActionLog('trainer', ok ? t('trainerStore.featureActivated', { name: feature.name }) : t('trainerStore.featureFailed', { name: feature.name }), detail, ok ? 'success' : 'error')
       return ok
     } catch (e) {
       feature.status = 'error'
       feature.lastError = String(e)
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'apply', 'error', String(e))
-      addActionLog('trainer', `Feature échouée: ${feature.name}`, String(e), 'error')
+      addActionLog('trainer', t('trainerStore.featureFailed', { name: feature.name }), String(e), 'error')
       return false
     }
   }
@@ -733,7 +747,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     if (!feature) return false
     const controller = backend.getController()
     if (!controller.scanPointerChains) {
-      addActionLog('trainer', `Chaîne de pointeurs indisponible: ${feature.name}`, 'scanPointerChains non exposé par ce backend.', 'warning')
+      addActionLog('trainer', t('trainerStore.pointerChainUnavailable', { name: feature.name }), t('trainerStore.scanPointerChainsNotExposed'), 'warning')
       return false
     }
     const scan = await controller.scanPointerChains(feature.address, {
@@ -742,7 +756,7 @@ export const useTrainerStore = defineStore('trainer', () => {
       onlyModuleBase: true,
     })
     if (!scan.success || !scan.chains || scan.chains.length === 0) {
-      addActionLog('trainer', `Chaîne de pointeurs introuvable: ${feature.name}`, scan.error || 'Aucune chaîne stable trouvée pour cette adresse.', 'warning')
+      addActionLog('trainer', t('trainerStore.pointerChainNotFound', { name: feature.name }), scan.error || t('trainerStore.noStableChainFound'), 'warning')
       return false
     }
     const best = scan.chains[0]
@@ -750,7 +764,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     feature.locatorKind = 'pointer_chain'
     feature.updatedAt = new Date().toISOString()
     addTrainerFeatureHistory(feature, 'pointer_chain_generated', 'success', `${best.module}+${best.baseOffset} → [${best.offsets.join(', ')}]`)
-    addActionLog('trainer', `Chaîne de pointeurs générée: ${feature.name}`, `${best.module}+${best.baseOffset} → [${best.offsets.join(', ')}] (${scan.chains.length} candidate(s))`, 'success')
+    addActionLog('trainer', t('trainerStore.pointerChainGenerated', { name: feature.name }), t('trainerStore.pointerChainGeneratedDetail', { module: best.module, offset: best.baseOffset, offsets: best.offsets.join(', '), count: scan.chains.length }), 'success')
     saveTrainerFeatures()
     return true
   }
@@ -760,7 +774,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     if (!feature || trainerBusy.value) return
     const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, [id])
     if (!resolved.success) {
-      addActionLog('trainer', 'Activation interrompue', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
+      addActionLog('trainer', t('trainerStore.dependencies.activationInterrupted'), resolveOrderErrorMessage(resolved), 'error')
       return
     }
 
@@ -783,7 +797,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     const feature = trainerFeatures.value.find((item) => item.id === id)
     if (!feature) return false
     if (!feature.enabled) return true
-    if (!await deps().confirmRiskAction(feature.action === 'patch' ? 'patch' : 'write', `Restaurer feature Trainer: ${feature.name}`, `${feature.action} 0x${feature.address}.`)) return false
+    if (!await deps().confirmRiskAction(feature.action === 'patch' ? 'patch' : 'write', t('trainerStore.restoreFeatureTitle', { name: feature.name }), `${feature.action} 0x${feature.address}.`)) return false
 
     try {
       const controller = backend.getController()
@@ -806,7 +820,7 @@ export const useTrainerStore = defineStore('trainer', () => {
           error = result.error ?? ''
         } else {
           ok = false
-          error = 'Restore patch non expose par ce backend.'
+          error = t('trainerStore.restorePatchNotExposed')
         }
       }
       feature.enabled = false
@@ -814,14 +828,14 @@ export const useTrainerStore = defineStore('trainer', () => {
       feature.lastError = error
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'restore', ok ? 'success' : 'warning', error || `0x${feature.address}`)
-      addActionLog('trainer', ok ? `Feature restaurée: ${feature.name}` : `Restauration échouée: ${feature.name}`, error || `0x${feature.address}`, ok ? 'success' : 'warning')
+      addActionLog('trainer', ok ? t('trainerStore.featureRestored', { name: feature.name }) : t('trainerStore.restoreFailed', { name: feature.name }), error || `0x${feature.address}`, ok ? 'success' : 'warning')
       return ok
     } catch (e) {
       feature.status = 'error'
       feature.lastError = String(e)
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'restore', 'error', String(e))
-      addActionLog('trainer', `Restauration échouée: ${feature.name}`, String(e), 'error')
+      addActionLog('trainer', t('trainerStore.restoreFailed', { name: feature.name }), String(e), 'error')
       return false
     }
   }
@@ -832,7 +846,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     const restoreIds = collectTrainerFeatureDependents(trainerFeatures.value, [id]).filter((featureId) => trainerFeatures.value.some((item) => item.id === featureId && item.enabled))
     const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, restoreIds)
     if (!resolved.success) {
-      addActionLog('trainer', 'Restauration interrompue', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
+      addActionLog('trainer', t('trainerStore.dependencies.restoreInterrupted'), resolveOrderErrorMessage(resolved), 'error')
       return
     }
     const restoreSet = new Set(restoreIds)
@@ -865,10 +879,10 @@ export const useTrainerStore = defineStore('trainer', () => {
       let result: Record<string, unknown>
       if (feature.action === 'clr_write') {
         if (!controller.saveClrFieldProfileTarget) {
-          throw new Error('Sauvegarde profil CLR non exposee par ce backend.')
+          throw new Error(t('trainerStore.clrProfileSaveNotExposed'))
         }
         if (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName) {
-          throw new Error('Locator CLR incomplet.')
+          throw new Error(t('trainerStore.incompleteClrLocator'))
         }
         result = await controller.saveClrFieldProfileTarget(
           profileName,
@@ -888,11 +902,11 @@ export const useTrainerStore = defineStore('trainer', () => {
           feature.updatedAt = new Date().toISOString()
           addTrainerFeatureHistory(feature, 'save_profile_blocked', 'warning', blocked)
           saveTrainerFeatures()
-          addActionLog('trainer', `Sauvegarde profil bloquée: ${feature.name}`, blocked, 'warning')
+          addActionLog('trainer', t('trainerStore.profileSaveBlocked', { name: feature.name }), blocked, 'warning')
           return
         }
         if (!controller.saveProfileCodePatch) {
-          throw new Error('Sauvegarde patch profil non exposee par ce backend.')
+          throw new Error(t('trainerStore.patchProfileSaveNotExposed'))
         }
         result = await controller.saveProfileCodePatch(
           profileName,
@@ -919,7 +933,7 @@ export const useTrainerStore = defineStore('trainer', () => {
         )
       } else if (feature.locatorKind === 'pointer_chain' && feature.pointerChain) {
         if (!controller.savePointerChainProfileTarget) {
-          throw new Error('Sauvegarde pointer chain non exposee par ce backend.')
+          throw new Error(t('trainerStore.pointerChainSaveNotExposed'))
         }
         result = await controller.savePointerChainProfileTarget(
           profileName,
@@ -943,7 +957,7 @@ export const useTrainerStore = defineStore('trainer', () => {
           .filter((dependencyName, index, all) => dependencyName.length > 0 && all.indexOf(dependencyName) === index)
         if (!controller.setProfileTargetDependencies) {
           if (dependencyNames.length > 0) {
-            throw new Error('Persistance des dépendances Trainer non exposee par ce backend.')
+            throw new Error(t('trainerStore.dependencyPersistenceNotExposed'))
           }
         } else {
           const dependencyResult = await controller.setProfileTargetDependencies(profileName, feature.name, dependencyNames)
@@ -951,24 +965,24 @@ export const useTrainerStore = defineStore('trainer', () => {
             result = {
               ...result,
               success: false,
-              error: `Cible sauvegardee, dependances non sauvegardees : ${String(dependencyResult.error ?? 'erreur inconnue')}`,
+              error: t('trainerStore.dependenciesNotSaved', { error: String(dependencyResult.error ?? t('trainerStore.unknownError')) }),
             }
           }
         }
       }
       feature.updatedAt = new Date().toISOString()
-      feature.lastError = result.success === false ? String(result.error ?? 'Sauvegarde profil echouee.') : ''
+      feature.lastError = result.success === false ? String(result.error ?? t('trainerStore.profileSaveFailedShort')) : ''
       if (result.success === false) feature.status = 'error'
       addTrainerFeatureHistory(feature, 'save_profile', result.success === false ? 'warning' : 'success', `${profileName} · ${feature.lastError || 'OK'}`)
       saveTrainerFeatures()
-      addActionLog('trainer', `Profil sauvegarde: ${feature.name}`, `${profileName} · ${feature.lastError || 'OK'}`, result.success === false ? 'warning' : 'success')
+      addActionLog('trainer', t('trainerStore.profileSaved', { name: feature.name }), `${profileName} · ${feature.lastError || 'OK'}`, result.success === false ? 'warning' : 'success')
     } catch (e) {
       feature.status = 'error'
       feature.lastError = String(e)
       feature.updatedAt = new Date().toISOString()
       addTrainerFeatureHistory(feature, 'save_profile', 'error', String(e))
       saveTrainerFeatures()
-      addActionLog('trainer', `Sauvegarde profil echouee: ${feature.name}`, String(e), 'error')
+      addActionLog('trainer', t('trainerStore.profileSaveFailed', { name: feature.name }), String(e), 'error')
     }
   }
 
@@ -977,7 +991,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     if (targetIds.length === 0) return
     const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, targetIds)
     if (!resolved.success) {
-      addActionLog('trainer', 'Apply all interrompu', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
+      addActionLog('trainer', t('trainerStore.dependencies.applyAllInterrupted'), resolveOrderErrorMessage(resolved), 'error')
       return
     }
     for (const id of resolved.order) {
@@ -1001,7 +1015,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     if (targetIds.length === 0) return
     const resolved = resolveTrainerFeatureOrder(trainerFeatures.value, targetIds)
     if (!resolved.success) {
-      addActionLog('trainer', 'Restore all interrompu', resolved.error ?? 'Ordre de dépendances invalide.', 'error')
+      addActionLog('trainer', t('trainerStore.dependencies.restoreAllInterrupted'), resolveOrderErrorMessage(resolved), 'error')
       return
     }
     for (const id of [...resolved.order].reverse()) {
@@ -1049,7 +1063,7 @@ export const useTrainerStore = defineStore('trainer', () => {
   function updateTrainerFeatureDependencies(id: number, dependencyIds: number[]) {
     const feature = trainerFeatures.value.find((item) => item.id === id)
     if (!feature) {
-      return { success: false, error: 'Feature introuvable.' }
+      return { success: false, error: t('trainerStore.featureNotFound') }
     }
     const cleanDependencies = dependencyIds
       .filter((dependencyId) => Number.isFinite(dependencyId) && dependencyId !== id)
@@ -1057,7 +1071,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     const existingIds = new Set(trainerFeatures.value.map((item) => item.id))
     const missing = cleanDependencies.filter((dependencyId) => !existingIds.has(dependencyId))
     if (missing.length > 0) {
-      return { success: false, error: `Dépendance introuvable : ${missing.join(', ')}.` }
+      return { success: false, error: t('trainerStore.dependencyNotFound', { ids: missing.join(', ') }) }
     }
 
     const candidateFeatures = trainerFeatures.value.map((item) => (
@@ -1067,15 +1081,16 @@ export const useTrainerStore = defineStore('trainer', () => {
     ))
     const orderCheck = resolveTrainerFeatureOrder(candidateFeatures, candidateFeatures.map((item) => item.id))
     if (!orderCheck.success) {
-      addActionLog('trainer', `Dépendances refusées: ${feature.name}`, orderCheck.error ?? 'Cycle détecté.', 'warning')
-      return { success: false, error: orderCheck.error ?? 'Cycle de dépendances détecté.' }
+      const message = resolveOrderErrorMessage(orderCheck)
+      addActionLog('trainer', t('trainerStore.dependencies.rejected', { name: feature.name }), message, 'warning')
+      return { success: false, error: message }
     }
 
     feature.dependsOn = cleanDependencies.length > 0 ? cleanDependencies : undefined
     feature.updatedAt = new Date().toISOString()
     const detail = cleanDependencies.length > 0
       ? cleanDependencies.map((dependencyId) => trainerFeatures.value.find((item) => item.id === dependencyId)?.name ?? `#${dependencyId}`).join(', ')
-      : 'aucune dépendance'
+      : t('trainerStore.noDependency')
     addTrainerFeatureHistory(feature, 'dependencies_update', 'info', detail)
     saveTrainerFeatures()
     void refreshTrainerOverlay()
@@ -1086,7 +1101,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     trainerFeatures.value = []
     saveTrainerFeatures()
     void refreshTrainerOverlay()
-    addActionLog('trainer', 'Trainer vidé', 'Toutes les features locales ont été supprimées.', 'warning')
+    addActionLog('trainer', t('trainerStore.trainerCleared'), t('trainerStore.allLocalFeaturesRemoved'), 'warning')
   }
 
   function exportTrainerFeaturesJson(): string {
@@ -1102,13 +1117,13 @@ export const useTrainerStore = defineStore('trainer', () => {
     const lines = [
       '# Trainer Features',
       '',
-      `Export: ${new Date().toISOString()}`,
-      `Processus: ${deps().processName.value || 'non attache'}`,
-      `Features: ${trainerFeatures.value.length}`,
+      t('trainerStore.markdown.exportedAt', { value: new Date().toISOString() }),
+      t('trainerStore.markdown.process', { value: deps().processName.value || t('trainerStore.markdown.notAttached') }),
+      t('trainerStore.markdown.featureCount', { value: trainerFeatures.value.length }),
       '',
     ]
     if (trainerFeatures.value.length === 0) {
-      lines.push('Aucune feature Trainer locale.')
+      lines.push(t('trainerStore.markdown.noLocalFeature'))
       return lines.join('\n')
     }
 
@@ -1117,26 +1132,26 @@ export const useTrainerStore = defineStore('trainer', () => {
         `## ${feature.name}`,
         '',
         `- Action: ${feature.action}`,
-        `- Statut: ${feature.status}${feature.enabled ? ' / active' : ''}`,
-        `- Processus: ${feature.processName || '-'}`,
+        `- ${t('trainerStore.markdown.status')}: ${feature.status}${feature.enabled ? ' / active' : ''}`,
+        `- ${t('trainerStore.markdown.process')}: ${feature.processName || '-'}`,
         `- Locator: ${feature.locatorKind}`,
-        `- Adresse: ${feature.address ? `0x${feature.address}` : '-'}`,
+        `- ${t('trainerStore.markdown.address')}: ${feature.address ? `0x${feature.address}` : '-'}`,
         feature.locatorKind === 'clr_field'
           ? `- CLR: ${feature.clrTypeSubstring}.${feature.clrFieldName} via ${feature.clrIdentityField}=${feature.clrIdentityValue}`
           : '',
         feature.locatorKind === 'pointer_chain' && feature.pointerChain
           ? `- Pointer: ${feature.pointerChain.module}+${feature.pointerChain.baseOffset} ${feature.pointerChain.offsets?.join(' -> ') ?? ''}`
           : '',
-        `- Type: ${feature.valueType}`,
-        `- Valeur/patch: ${feature.value || feature.patchBytes || '-'}`,
-        `- Dépend de: ${feature.dependsOn?.length ? feature.dependsOn.map((id) => trainerFeatures.value.find((item) => item.id === id)?.name ?? `#${id}`).join(', ') : '-'}`,
+        `- ${t('trainerStore.markdown.type')}: ${feature.valueType}`,
+        `- ${t('trainerStore.markdown.valueOrPatch')}: ${feature.value || feature.patchBytes || '-'}`,
+        `- ${t('trainerStore.markdown.dependsOn')}: ${feature.dependsOn?.length ? feature.dependsOn.map((id) => trainerFeatures.value.find((item) => item.id === id)?.name ?? `#${id}`).join(', ') : '-'}`,
         `- Hotkey: ${feature.hotkey || '-'}`,
-        `- AOB qualite: ${feature.signatureLevel || '-'}${feature.signatureScore !== undefined ? ` (${feature.signatureScore}/100)` : ''}`,
-        `- Derniere erreur: ${feature.lastError || '-'}`,
-        '- Historique:',
+        `- ${t('trainerStore.markdown.aobQuality')}: ${feature.signatureLevel || '-'}${feature.signatureScore !== undefined ? ` (${feature.signatureScore}/100)` : ''}`,
+        `- ${t('trainerStore.markdown.lastError')}: ${feature.lastError || '-'}`,
+        `- ${t('trainerStore.markdown.history')}:`,
         ...(feature.history?.length
           ? feature.history.slice(0, 8).map((item) => `  - ${item.time} [${item.status}] ${item.action}: ${item.detail}`)
-          : ['  - aucun']),
+          : [`  - ${t('trainerStore.markdown.none')}`]),
         '',
       )
     }

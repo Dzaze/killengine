@@ -28,6 +28,7 @@
  */
 import { defineStore, storeToRefs } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import {
   backend,
   type CandidatePage,
@@ -40,6 +41,8 @@ import {
 } from '@/services/backend'
 import { useActionLogStore } from './actionLog'
 import { useSettingsStore } from './settings'
+
+const { t } = i18n.global
 
 interface GroupScanEntryInput {
   offset: number
@@ -144,10 +147,10 @@ export const useScanningStore = defineStore('scanning', () => {
   }
 
   function unknownModeLabel(mode: string): string {
-    if (mode === 'increased') return 'ça augmente'
-    if (mode === 'decreased') return 'ça diminue'
-    if (mode === 'unchanged') return 'stable'
-    if (mode === 'changed') return 'ça change'
+    if (mode === 'increased') return t('scanningStore.modeIncreased')
+    if (mode === 'decreased') return t('scanningStore.modeDecreased')
+    if (mode === 'unchanged') return t('scanningStore.modeUnchanged')
+    if (mode === 'changed') return t('scanningStore.modeChanged')
     return mode
   }
 
@@ -217,8 +220,8 @@ export const useScanningStore = defineStore('scanning', () => {
     try {
       scanBusy.value = true
       setScanProgress(0)
-      scanStatusText.value = isAutoType ? 'Scan multi-type en cours...' : 'Scan exact en cours...'
-      addActionLog('scan', `Scan ${isAutoType ? 'multi-type' : 'exact'} ${exactScanValue.value}`, `${exactScanType.value}${hasExpertFilter ? ' · filtres expert actifs' : ''}.`, 'info')
+      scanStatusText.value = isAutoType ? t('scanningStore.multiTypeScanRunning') : t('scanningStore.exactScanRunning')
+      addActionLog('scan', t('scanningStore.scanTitle', { kind: isAutoType ? t('scanningStore.multiType') : t('scanningStore.exact'), value: exactScanValue.value }), `${exactScanType.value}${hasExpertFilter ? ` · ${t('scanningStore.expertFiltersActive')}` : ''}.`, 'info')
 
       if (isAutoType) {
         const controller = backend.getController()
@@ -253,14 +256,14 @@ export const useScanningStore = defineStore('scanning', () => {
       }
       setScanProgress(Math.max(scanProgressPercent.value, 95))
       candidatePageIndex.value = 0
-      scanStatusText.value = 'Chargement des candidats...'
+      scanStatusText.value = t('scanningStore.loadingCandidates')
       await refreshCandidates()
       setScanProgress(100)
-      scanStatusText.value = exactScanResult.value.cancelled ? 'Scan annulé.' : 'Scan terminé.'
+      scanStatusText.value = exactScanResult.value.cancelled ? t('scanningStore.scanCancelled') : t('scanningStore.scanFinished')
       addActionLog(
         'scan',
-        exactScanResult.value.cancelled ? 'Scan exact annulé' : 'Scan exact terminé',
-        `${exactScanResult.value.candidateStoreSize} candidat(s), ${exactScanResult.value.regionsScanned} région(s).`,
+        exactScanResult.value.cancelled ? t('scanningStore.exactScanCancelledTitle') : t('scanningStore.exactScanFinishedTitle'),
+        t('scanningStore.candidatesAndRegions', { count: exactScanResult.value.candidateStoreSize, regions: exactScanResult.value.regionsScanned }),
         exactScanResult.value.success ? 'success' : 'warning',
       )
     } catch (e) {
@@ -276,8 +279,8 @@ export const useScanningStore = defineStore('scanning', () => {
         matches: [],
         candidateStoreSize: 0,
       }
-      scanStatusText.value = 'Scan échoué.'
-      addActionLog('scan', 'Scan exact échoué', String(e), 'error')
+      scanStatusText.value = t('scanningStore.scanFailed')
+      addActionLog('scan', t('scanningStore.exactScanFailedTitle'), String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -290,9 +293,9 @@ export const useScanningStore = defineStore('scanning', () => {
       groupScanResult.value = {
         success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
         matchesFound: 0, matchesReturned: 0,
-        error: 'Scan groupe non exposé par ce backend.', matches: [],
+        error: t('scanningStore.groupScanNotExposed'), matches: [],
       }
-      addActionLog('scan', 'Scan groupe indisponible', groupScanResult.value.error, 'warning')
+      addActionLog('scan', t('scanningStore.groupScanUnavailable'), groupScanResult.value.error, 'warning')
       return
     }
     const entries = groupScanEntries.value
@@ -302,7 +305,7 @@ export const useScanningStore = defineStore('scanning', () => {
       groupScanResult.value = {
         success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
         matchesFound: 0, matchesReturned: 0,
-        error: 'Renseigne au moins 2 valeurs avec leurs offsets.', matches: [],
+        error: t('scanningStore.groupScanNeedTwoValues'), matches: [],
       }
       return
     }
@@ -311,8 +314,8 @@ export const useScanningStore = defineStore('scanning', () => {
       scanBusy.value = true
       groupScanBusy.value = true
       setScanProgress(0)
-      scanStatusText.value = 'Scan groupe en cours...'
-      addActionLog('scan', `Scan groupe (${entries.length} valeurs)`, entries.map((e) => `+${e.offset}:${e.value}`).join(' '), 'info')
+      scanStatusText.value = t('scanningStore.groupScanRunning')
+      addActionLog('scan', t('scanningStore.groupScanTitle', { count: entries.length }), entries.map((e) => `+${e.offset}:${e.value}`).join(' '), 'info')
       groupScanResult.value = await controller.scanGroupScan(entries, {
         maxDistance: groupScanMaxDistance.value,
         maxResults: 1000,
@@ -323,16 +326,16 @@ export const useScanningStore = defineStore('scanning', () => {
       })
       setScanProgress(1)
       if (groupScanResult.value.success) {
-        addActionLog('scan', 'Scan groupe terminé', `${groupScanResult.value.matchesFound} structure(s) trouvée(s).`, 'success')
+        addActionLog('scan', t('scanningStore.groupScanFinishedTitle'), t('scanningStore.groupScanFinishedDetail', { count: groupScanResult.value.matchesFound }), 'success')
       } else {
-        addActionLog('scan', 'Scan groupe échoué', groupScanResult.value.error, 'error')
+        addActionLog('scan', t('scanningStore.groupScanFailedTitle'), groupScanResult.value.error, 'error')
       }
     } catch (e) {
       groupScanResult.value = {
         success: false, partial: false, regionsScanned: 0, bytesScanned: 0,
         matchesFound: 0, matchesReturned: 0, error: String(e), matches: [],
       }
-      addActionLog('scan', 'Scan groupe échoué', String(e), 'error')
+      addActionLog('scan', t('scanningStore.groupScanFailedTitle'), String(e), 'error')
     } finally {
       scanBusy.value = false
       groupScanBusy.value = false
@@ -368,18 +371,18 @@ export const useScanningStore = defineStore('scanning', () => {
         bytesScanned: 0,
         matchesFound: 0,
         matchesReturned: 0,
-        error: 'Scan chiffré non exposé par ce backend.',
+        error: t('scanningStore.encryptedScanNotExposed'),
         matches: [],
       }
-      addActionLog('scan', 'Scan chiffré indisponible', encryptedScanResult.value.error, 'warning')
+      addActionLog('scan', t('scanningStore.encryptedScanUnavailable'), encryptedScanResult.value.error, 'warning')
       return
     }
 
     try {
       scanBusy.value = true
       setScanProgress(0)
-      scanStatusText.value = 'Scan chiffré en cours...'
-      addActionLog('scan', `Scan chiffré ${encryptedScanMode.value.toUpperCase()} ${exactScanValue.value}`, `${exactScanType.value}.`, 'info')
+      scanStatusText.value = t('scanningStore.encryptedScanRunning')
+      addActionLog('scan', t('scanningStore.encryptedScanTitle', { mode: encryptedScanMode.value.toUpperCase(), value: exactScanValue.value }), `${exactScanType.value}.`, 'info')
       encryptedScanResult.value = await controller.scanEncryptedValue(
         exactScanValue.value,
         exactScanType.value === 'Auto' ? 'Int32' : exactScanType.value,
@@ -397,11 +400,11 @@ export const useScanningStore = defineStore('scanning', () => {
         },
       )
       setScanProgress(100)
-      scanStatusText.value = encryptedScanResult.value.success ? 'Scan chiffré terminé.' : 'Scan chiffré échoué.'
+      scanStatusText.value = encryptedScanResult.value.success ? t('scanningStore.encryptedScanFinished') : t('scanningStore.encryptedScanFailed')
       addActionLog(
         'scan',
-        encryptedScanResult.value.success ? 'Scan chiffré terminé' : 'Scan chiffré échoué',
-        `${encryptedScanResult.value.matchesFound} match(es), ${encryptedScanResult.value.regionsScanned} région(s).`,
+        encryptedScanResult.value.success ? t('scanningStore.encryptedScanFinishedTitle') : t('scanningStore.encryptedScanFailedTitle'),
+        t('scanningStore.matchesAndRegions', { count: encryptedScanResult.value.matchesFound, regions: encryptedScanResult.value.regionsScanned }),
         encryptedScanResult.value.success ? 'success' : 'warning',
       )
     } catch (e) {
@@ -415,8 +418,8 @@ export const useScanningStore = defineStore('scanning', () => {
         error: String(e),
         matches: [],
       }
-      scanStatusText.value = 'Scan chiffré échoué.'
-      addActionLog('scan', 'Scan chiffré échoué', String(e), 'error')
+      scanStatusText.value = t('scanningStore.encryptedScanFailed')
+      addActionLog('scan', t('scanningStore.encryptedScanFailedTitle'), String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -425,7 +428,7 @@ export const useScanningStore = defineStore('scanning', () => {
   async function doNextScan() {
     if (scanBusy.value) return
     if ((candidatePage.value?.totalCount ?? 0) <= 0) {
-      scanStatusText.value = 'Aucun candidat à réduire. Lance d’abord un premier scan.'
+      scanStatusText.value = t('scanningStore.noCandidateToNarrow')
       nextScanResult.value = {
         success: false,
         checked: 0,
@@ -433,25 +436,25 @@ export const useScanningStore = defineStore('scanning', () => {
         remaining: 0,
         error: scanStatusText.value,
       }
-      addActionLog('scan', 'Next scan refusé', scanStatusText.value, 'warning')
+      addActionLog('scan', t('scanningStore.nextScanRefused'), scanStatusText.value, 'warning')
       return
     }
     try {
       scanBusy.value = true
       setScanProgress(0)
-      scanStatusText.value = 'Réduction des candidats...'
-      addActionLog('scan', `Next scan ${nextScanMode.value}`, nextScanValue.value ? `Valeur ${nextScanValue.value}.` : 'Sans valeur explicite.', 'info')
+      scanStatusText.value = t('scanningStore.narrowingCandidates')
+      addActionLog('scan', t('scanningStore.nextScanTitle', { mode: nextScanMode.value }), nextScanValue.value ? t('scanningStore.valueDetail', { value: nextScanValue.value }) : t('scanningStore.noExplicitValue'), 'info')
       nextScanResult.value = await backend.startNextScanAsync(nextScanMode.value, nextScanValue.value)
       setScanProgress(Math.max(scanProgressPercent.value, 95))
       candidatePageIndex.value = 0
-      scanStatusText.value = 'Actualisation des candidats...'
+      scanStatusText.value = t('scanningStore.refreshingCandidates')
       await refreshCandidates()
       setScanProgress(100)
-      scanStatusText.value = nextScanResult.value.cancelled ? 'Scan annulé.' : 'Next scan terminé.'
+      scanStatusText.value = nextScanResult.value.cancelled ? t('scanningStore.scanCancelled') : t('scanningStore.nextScanFinished')
       addActionLog(
         'scan',
-        nextScanResult.value.cancelled ? 'Next scan annulé' : 'Next scan terminé',
-        `${nextScanResult.value.remaining} candidat(s) restant(s).`,
+        nextScanResult.value.cancelled ? t('scanningStore.nextScanCancelledTitle') : t('scanningStore.nextScanFinishedTitle'),
+        t('scanningStore.remainingCandidates', { count: nextScanResult.value.remaining }),
         nextScanResult.value.success ? 'success' : 'warning',
       )
     } catch (e) {
@@ -463,8 +466,8 @@ export const useScanningStore = defineStore('scanning', () => {
         remaining: 0,
         error: String(e),
       }
-      scanStatusText.value = 'Next scan échoué.'
-      addActionLog('scan', 'Next scan échoué', String(e), 'error')
+      scanStatusText.value = t('scanningStore.nextScanFailed')
+      addActionLog('scan', t('scanningStore.nextScanFailedTitle'), String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -477,11 +480,11 @@ export const useScanningStore = defineStore('scanning', () => {
       if (undoCandidateScanResult.value.success) {
         candidatePageIndex.value = 0
         await refreshCandidates()
-        scanStatusText.value = `Réduction restaurée : ${undoCandidateScanResult.value.count} candidat(s).`
-        addActionLog('rollback', 'Réduction restaurée', `${undoCandidateScanResult.value.count} candidat(s).`, 'success')
+        scanStatusText.value = t('scanningStore.narrowingRestored', { count: undoCandidateScanResult.value.count })
+        addActionLog('rollback', t('scanningStore.narrowingRestoredTitle'), t('scanningStore.candidateCountDetail', { count: undoCandidateScanResult.value.count }), 'success')
       } else {
-        scanStatusText.value = undoCandidateScanResult.value.error || 'Aucune réduction à restaurer.'
-        addActionLog('rollback', 'Réduction non restaurée', scanStatusText.value, 'warning')
+        scanStatusText.value = undoCandidateScanResult.value.error || t('scanningStore.noNarrowingToRestore')
+        addActionLog('rollback', t('scanningStore.narrowingNotRestored'), scanStatusText.value, 'warning')
       }
       return undoCandidateScanResult.value
     } catch (e) {
@@ -491,22 +494,22 @@ export const useScanningStore = defineStore('scanning', () => {
         count: candidatePage.value?.totalCount ?? 0,
         error: String(e),
       }
-      scanStatusText.value = 'Restauration impossible.'
-      addActionLog('rollback', 'Restauration impossible', String(e), 'error')
+      scanStatusText.value = t('scanningStore.restoreImpossible')
+      addActionLog('rollback', t('scanningStore.restoreImpossible'), String(e), 'error')
       return undoCandidateScanResult.value
     }
   }
 
   async function cancelActiveScan() {
     if (!scanBusy.value) return
-    scanStatusText.value = 'Annulation demandée...'
+    scanStatusText.value = t('scanningStore.cancellationRequested')
     try {
       const result = await backend.cancelActiveScan()
       if (result.success !== true && result.error) {
         scanStatusText.value = String(result.error)
       }
     } catch (e) {
-      scanStatusText.value = 'Annulation impossible : ' + String(e)
+      scanStatusText.value = t('scanningStore.cancellationImpossible', { error: String(e) })
     }
   }
 
@@ -515,15 +518,15 @@ export const useScanningStore = defineStore('scanning', () => {
     try {
       scanBusy.value = true
       scanProgressPercent.value = 15
-      scanStatusText.value = 'Capture unknown en cours...'
-      addActionLog('scan', 'Capture unknown', `${unknownScanType.value}.`, 'info')
+      scanStatusText.value = t('scanningStore.unknownCaptureRunning')
+      addActionLog('scan', t('scanningStore.unknownCapture'), `${unknownScanType.value}.`, 'info')
       unknownSnapshotResult.value = await backend.captureUnknownSnapshotAsync({
         writableOnly: unknownWritableOnly.value,
         copyOnWriteOnly: unknownWritableOnly.value && unknownCopyOnWriteOnly.value,
         unknownSnapshotMaxMb: settingUnknownSnapshotMaxMb.value,
       })
       scanProgressPercent.value = 100
-      scanStatusText.value = unknownSnapshotResult.value.cancelled ? 'Scan annulé.' : 'Snapshot capturé.'
+      scanStatusText.value = unknownSnapshotResult.value.cancelled ? t('scanningStore.scanCancelled') : t('scanningStore.snapshotCaptured')
       candidatePage.value = null
       candidatePageIndex.value = 0
       nextScanResult.value = null
@@ -533,15 +536,15 @@ export const useScanningStore = defineStore('scanning', () => {
       autoUnknownAwaitingObservation.value = unknownSnapshotResult.value.success === true
       pushUnknownGuideStep({
         mode: 'capture',
-        label: 'capture',
+        label: t('scanningStore.captureLabel'),
         beforeCount: 0,
         afterCount: 0,
         status: unknownSnapshotResult.value.success ? 'capture' : 'error',
         detail: unknownSnapshotResult.value.success
-          ? `${unknownSnapshotResult.value.regionsCaptured} région(s), ${unknownSnapshotResult.value.bytesCaptured} octet(s) / limite ${unknownSnapshotResult.value.captureLimitBytes ?? 0}.${unknownSnapshotResult.value.captureLimitReached ? ' Limite atteinte.' : ''}${unknownSnapshotResult.value.writableOnly ? ' Writable only.' : ''}`
-          : unknownSnapshotResult.value.error || 'Capture refusée.',
+          ? t('scanningStore.captureDetail', { regions: unknownSnapshotResult.value.regionsCaptured, bytes: unknownSnapshotResult.value.bytesCaptured, limit: unknownSnapshotResult.value.captureLimitBytes ?? 0, limitReached: unknownSnapshotResult.value.captureLimitReached ? ` ${t('scanningStore.limitReached')}` : '', writableOnly: unknownSnapshotResult.value.writableOnly ? ' Writable only.' : '' })
+          : unknownSnapshotResult.value.error || t('scanningStore.captureRefused'),
       })
-      addActionLog('scan', 'Snapshot unknown capturé', `${unknownSnapshotResult.value.regionsCaptured} région(s).`, 'success')
+      addActionLog('scan', t('scanningStore.unknownSnapshotCaptured'), t('scanningStore.regionsDetail', { count: unknownSnapshotResult.value.regionsCaptured }), 'success')
     } catch (e) {
       unknownSnapshotResult.value = {
         success: false,
@@ -552,16 +555,16 @@ export const useScanningStore = defineStore('scanning', () => {
         bytesCaptured: 0,
         error: String(e),
       }
-      scanStatusText.value = 'Capture unknown échouée.'
+      scanStatusText.value = t('scanningStore.unknownCaptureFailed')
       pushUnknownGuideStep({
         mode: 'capture',
-        label: 'capture',
+        label: t('scanningStore.captureLabel'),
         beforeCount: 0,
         afterCount: 0,
         status: 'error',
         detail: String(e),
       })
-      addActionLog('scan', 'Capture unknown échouée', String(e), 'error')
+      addActionLog('scan', t('scanningStore.unknownCaptureFailed'), String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -570,7 +573,7 @@ export const useScanningStore = defineStore('scanning', () => {
   async function doUnknownNextScan() {
     if (scanBusy.value) return
     if (!unknownSnapshotResult.value?.success) {
-      scanStatusText.value = 'Capture d’abord une image unknown avant de comparer.'
+      scanStatusText.value = t('scanningStore.captureFirstUnknownImage')
       unknownNextScanResult.value = {
         success: false,
         partial: false,
@@ -580,7 +583,7 @@ export const useScanningStore = defineStore('scanning', () => {
         stored: 0,
         error: scanStatusText.value,
       }
-      addActionLog('scan', 'Comparaison unknown refusée', scanStatusText.value, 'warning')
+      addActionLog('scan', t('scanningStore.unknownComparisonRefused'), scanStatusText.value, 'warning')
       return
     }
     try {
@@ -589,22 +592,22 @@ export const useScanningStore = defineStore('scanning', () => {
       const candidateCount = candidatePage.value?.totalCount ?? 0
       const isRefine = candidateCount > 0
       scanStatusText.value = isRefine
-        ? `Raffinage unknown ${unknownScanMode.value}...`
-        : 'Comparaison unknown en cours...'
+        ? t('scanningStore.unknownRefiningRunning', { mode: unknownScanMode.value })
+        : t('scanningStore.unknownComparisonRunning')
       addActionLog(
         'scan',
-        isRefine ? `Raffinage unknown ${unknownScanMode.value}` : `Comparaison unknown ${unknownScanMode.value}`,
-        isRefine ? `${candidateCount} candidat(s).` : unknownScanType.value,
+        isRefine ? t('scanningStore.unknownRefiningTitle', { mode: unknownScanMode.value }) : t('scanningStore.unknownComparisonTitle', { mode: unknownScanMode.value }),
+        isRefine ? t('scanningStore.candidateCountDetail', { count: candidateCount }) : unknownScanType.value,
         'info',
       )
       unknownNextScanResult.value = await backend.unknownNextScanAsync(unknownScanMode.value, unknownScanType.value)
       scanProgressPercent.value = 85
       candidatePageIndex.value = 0
-      scanStatusText.value = 'Actualisation des candidats...'
+      scanStatusText.value = t('scanningStore.refreshingCandidates')
       await refreshCandidates()
       scanProgressPercent.value = 100
-      scanStatusText.value = unknownNextScanResult.value.cancelled ? 'Scan annulé.' : 'Comparaison unknown terminée.'
-      addActionLog('scan', 'Comparaison unknown terminée', `${unknownNextScanResult.value.stored} candidat(s).`, 'success')
+      scanStatusText.value = unknownNextScanResult.value.cancelled ? t('scanningStore.scanCancelled') : t('scanningStore.unknownComparisonFinished')
+      addActionLog('scan', t('scanningStore.unknownComparisonFinishedTitle'), t('scanningStore.candidateCountDetail', { count: unknownNextScanResult.value.stored }), 'success')
     } catch (e) {
       unknownNextScanResult.value = {
         success: false,
@@ -615,8 +618,8 @@ export const useScanningStore = defineStore('scanning', () => {
         stored: 0,
         error: String(e),
       }
-      scanStatusText.value = 'Comparaison unknown échouée.'
-      addActionLog('scan', 'Comparaison unknown échouée', String(e), 'error')
+      scanStatusText.value = t('scanningStore.unknownComparisonFailed')
+      addActionLog('scan', t('scanningStore.unknownComparisonFailedTitle'), String(e), 'error')
     } finally {
       scanBusy.value = false
     }
@@ -625,8 +628,8 @@ export const useScanningStore = defineStore('scanning', () => {
   async function runUnknownGuideStep(mode: 'increased' | 'decreased' | 'unchanged' | 'changed') {
     if (scanBusy.value) return
     if (!unknownSnapshotResult.value?.success && (candidatePage.value?.totalCount ?? 0) <= 0) {
-      scanStatusText.value = 'Capture d’abord une valeur unknown.'
-      addActionLog('scan', 'Unknown guidé refusé', scanStatusText.value, 'warning')
+      scanStatusText.value = t('scanningStore.captureFirstUnknownValue')
+      addActionLog('scan', t('scanningStore.guidedUnknownRefused'), scanStatusText.value, 'warning')
       pushUnknownGuideStep({
         mode,
         label: unknownModeLabel(mode),
@@ -653,10 +656,10 @@ export const useScanningStore = defineStore('scanning', () => {
     const detail = error
       ? String(error)
       : cancelled
-        ? 'Opération annulée.'
+        ? t('scanningStore.operationCancelled')
         : usedRefine
-          ? `${beforeCount} -> ${afterCount} candidat(s).`
-          : `${formatCount(unknownNextScanResult.value?.matchesFound)} trouvé(s), ${afterCount} stocké(s).`
+          ? t('scanningStore.beforeAfterCandidates', { before: beforeCount, after: afterCount })
+          : t('scanningStore.foundAndStored', { found: formatCount(unknownNextScanResult.value?.matchesFound), stored: afterCount })
 
     pushUnknownGuideStep({
       mode,
@@ -673,7 +676,7 @@ export const useScanningStore = defineStore('scanning', () => {
     selectedCandidateAddress.value = address
     exactScanType.value = type
     notifyCandidateForWatch?.(address, type)
-    addActionLog('select', `Adresse sélectionnée 0x${address}`, `Type ${type}.`, 'info')
+    addActionLog('select', t('scanningStore.addressSelected', { address }), `Type ${type}.`, 'info')
   }
 
   async function nextCandidatePage() {

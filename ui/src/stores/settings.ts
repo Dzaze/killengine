@@ -10,7 +10,10 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/i18n'
 import { backend, type AppSettings, type AiModelStatus } from '@/services/backend'
+
+const { t } = i18n.global
 
 export const useSettingsStore = defineStore('settings', () => {
   const settingsLoaded = ref(false)
@@ -81,12 +84,12 @@ export const useSettingsStore = defineStore('settings', () => {
       const controller = backend.getController()
       if (!controller.getAiModelStatus) {
         aiModelStatus.value = null
-        aiModelStatusError.value = 'Statut IA non exposé par ce backend.'
+        aiModelStatusError.value = t('settingsStore.aiStatusNotExposed')
         return null
       }
       const status = await controller.getAiModelStatus()
       aiModelStatus.value = status
-      aiModelStatusError.value = status.success === false ? String(status.error ?? status.message ?? 'Statut IA indisponible.') : ''
+      aiModelStatusError.value = status.success === false ? String(status.error ?? status.message ?? t('settingsStore.aiStatusUnavailable')) : ''
       return status
     } catch (e) {
       aiModelStatus.value = null
@@ -106,7 +109,7 @@ export const useSettingsStore = defineStore('settings', () => {
       await refreshAiModelStatus()
       return settings
     } catch (e) {
-      settingsStatus.value = 'Impossible de charger les paramètres : ' + String(e)
+      settingsStatus.value = t('settingsStore.loadFailed', { error: String(e) })
       return null
     }
   }
@@ -114,7 +117,7 @@ export const useSettingsStore = defineStore('settings', () => {
   async function browseForModel() {
     const controller = backend.getController()
     if (!controller.browseForModelFile) {
-      aiModelStatusError.value = 'Sélecteur de fichier non exposé par ce backend.'
+      aiModelStatusError.value = t('settingsStore.filePickerNotExposed')
       return
     }
     const result = await controller.browseForModelFile()
@@ -129,12 +132,12 @@ export const useSettingsStore = defineStore('settings', () => {
       const saved = await backend.getController().saveSettings(currentSettings())
       applySettings(saved, onApplied)
       settingsLoaded.value = true
-      settingsStatus.value = 'Paramètres sauvegardés.'
+      settingsStatus.value = t('settingsStore.saved')
       await onSaved?.()
       await refreshAiModelStatus()
       return saved
     } catch (e) {
-      settingsStatus.value = 'Sauvegarde impossible : ' + String(e)
+      settingsStatus.value = t('settingsStore.saveFailed', { error: String(e) })
       return null
     } finally {
       settingsSaving.value = false

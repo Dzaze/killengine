@@ -5,6 +5,10 @@
  * Fournit une API TypeScript typée pour appeler les méthodes C++.
  */
 
+import { i18n } from '@/i18n'
+
+const { t } = i18n.global
+
 export interface ProcessInfo {
   pid: number
   name: string
@@ -2006,7 +2010,7 @@ class BackendService {
           bytesScanned: 0,
           matchesFound: 0,
           matchesReturned: 0,
-          error: 'Timeout du scan async.',
+          error: t('backendService.scanTimeout'),
           matches: [],
           candidateStoreSize: 0,
         })
@@ -2040,7 +2044,7 @@ class BackendService {
             bytesScanned: 0,
             matchesFound: 0,
             matchesReturned: 0,
-            error: String(start.error ?? 'Impossible de démarrer le scan async.'),
+            error: String(start.error ?? t('backendService.cannotStartScan')),
             matches: [],
             candidateStoreSize: 0,
           })
@@ -2093,7 +2097,7 @@ class BackendService {
           checked: 0,
           unreadable: 0,
           remaining: 0,
-          error: 'Timeout du next scan async.',
+          error: t('backendService.nextScanTimeout'),
         })
       }, 10 * 60 * 1000)
 
@@ -2123,7 +2127,7 @@ class BackendService {
             checked: 0,
             unreadable: 0,
             remaining: 0,
-            error: String(start.error ?? 'Impossible de démarrer le next scan async.'),
+            error: String(start.error ?? t('backendService.cannotStartNextScan')),
           })
           return
         }
@@ -2172,7 +2176,7 @@ class BackendService {
         regionsCaptured: 0,
         regionsSkipped: 0,
         bytesCaptured: 0,
-        error: String(start.error ?? 'Impossible de démarrer la capture unknown async.'),
+        error: String(start.error ?? t('backendService.cannotStartUnknownCapture')),
       }
     }
 
@@ -2188,7 +2192,7 @@ class BackendService {
           regionsCaptured: 0,
           regionsSkipped: 0,
           bytesCaptured: 0,
-          error: 'Timeout de la capture unknown async.',
+          error: t('backendService.unknownCaptureTimeout'),
         })
       }, 10 * 60 * 1000)
 
@@ -2234,7 +2238,7 @@ class BackendService {
         checkedBytes: 0,
         matchesFound: 0,
         stored: 0,
-        error: String(start.error ?? 'Impossible de démarrer la comparaison unknown async.'),
+        error: String(start.error ?? t('backendService.cannotStartUnknownComparison')),
       }
     }
 
@@ -2250,7 +2254,7 @@ class BackendService {
           checkedBytes: 0,
           matchesFound: 0,
           stored: 0,
-          error: 'Timeout de la comparaison unknown async.',
+          error: t('backendService.unknownComparisonTimeout'),
         })
       }, 10 * 60 * 1000)
 
