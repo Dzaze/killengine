@@ -50,7 +50,7 @@ L'audit a remonté un piège : il existe **deux mécanismes d'aide séparés** d
 | --- | --- | --- | --- | --- | --- | --- |
 | [x] U1 | Assistant (vue principale du chat) — template + script (`pushMessage`, `workflowLabel`, `safeStepLabel`, etc.) | `ui/src/views/AssistantView.vue` | 216 clés `assistant.*` ajoutées (template + les 68 `pushMessage` + `workflowLabel`/`safeStepLabel`/`confidenceFor`/etc. du script) | Non → complet | **Haute** — vue la plus utilisée | **Fait, testé (09/09/2026, Claude)** |
 | [x] U2 | Processus (attache, mode d'accès mémoire) | `ui/src/views/ProcessView.vue` | 22 clés `process.*` ajoutées (namespace existant réutilisé), intro + filtre + mode d'accès + actions driver kernel | Non → complet | **Haute** — première vue vue par un nouvel utilisateur (démarrage) | **Fait, testé (09/09/2026, Codex)** |
-| [ ] U3 | Mode Expert — vue principale | `ui/src/views/ExpertView.vue` | ~150 (le plus gros fichier) | Non | Haute | Pas commencé |
+| [x] U3 | Mode Expert — vue principale | `ui/src/views/ExpertView.vue` | 212 clés `expert.*` ajoutées (fichier de 4675 lignes, mais ~150-160 lignes de texte réel comme estimé — le reste est de la logique TS) | Non → complet | Haute | **Fait, testé (10/09/2026, Claude)** |
 | [ ] U3a | └ `AobSignaturePanel.vue` | `ui/src/components/expert/AobSignaturePanel.vue` | ~15 | Non (aide InfoDot oui, template non) | Moyenne | Pas commencé |
 | [ ] U3b | └ `AutoDissectPanel.vue` | `ui/src/components/expert/AutoDissectPanel.vue` | ~1 | Non | Basse | Pas commencé |
 | [ ] U3c | └ `CandidatePanel.vue` | `ui/src/components/expert/CandidatePanel.vue` | ~15 | Non (idem) | Moyenne | Pas commencé |

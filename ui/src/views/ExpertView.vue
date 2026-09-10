@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import {
   backend,
@@ -42,6 +43,7 @@ import { useExpertAobFlow } from '@/composables/useExpertAobFlow'
 import { formatNumber, formatBytes } from '@/utils/format'
 import { findWhatWritesSizeForType } from '@/utils/valueTypes'
 
+const { t } = useI18n()
 const store = useAppStore()
 const {
   selectedCandidateAddresses,
@@ -222,7 +224,7 @@ async function toggleUiStringLiveInvestigation() {
     uiStringInvestigationFinishResult.value = null
     try {
       if (!controller.startUiStringInvestigation) {
-        uiStringInvestigationStartResult.value = { success: false, windows: 0, error: 'Methode backend indisponible (mock mode).' }
+        uiStringInvestigationStartResult.value = { success: false, windows: 0, error: t('expert.backendUnavailableMock') }
         return
       }
       const result = await controller.startUiStringInvestigation(strings, sources, {
@@ -256,7 +258,7 @@ async function toggleUiStringLiveInvestigation() {
         changedBytes: 0,
         changesFound: 0,
         changes: [],
-        error: 'Methode backend indisponible (mock mode).',
+        error: t('expert.backendUnavailableMock'),
       }
       return
     }
@@ -348,7 +350,7 @@ async function scanUiStrings() {
         regionsScanned: 0,
         bytesScanned: 0,
         matches: [],
-        error: 'Methode backend indisponible (mock mode).',
+        error: t('expert.backendUnavailableMock'),
       }
       uiStringCandidates.value = []
       return
@@ -388,7 +390,7 @@ async function trackUiStrings() {
   try {
     const controller = backend.getController()
     if (!controller.trackUiStringCandidates) {
-      uiStringTrackResult.value = { success: false, checked: 0, unreadable: 0, remaining: 0, survivors: [], error: 'Methode backend indisponible (mock mode).' }
+      uiStringTrackResult.value = { success: false, checked: 0, unreadable: 0, remaining: 0, survivors: [], error: t('expert.backendUnavailableMock') }
       return
     }
     const result = await controller.trackUiStringCandidates(selectedUiStringCandidates(), value)
@@ -459,7 +461,7 @@ async function analyzeStructureAroundAddress(sourceAddress: string) {
     if (controller.analyzeStructureMemory) {
       const result = await controller.analyzeStructureMemory(base.toString(16).toUpperCase(), 256)
       if (result.success !== true) {
-        structureProbeResult.value = { success: false, error: String(result.error || 'Analyse structure impossible.') }
+        structureProbeResult.value = { success: false, error: String(result.error || t('expert.structureAnalysisFailed')) }
         return
       }
       const fields = Array.isArray(result.fields) ? result.fields as Array<Record<string, unknown>> : []
@@ -472,7 +474,7 @@ async function analyzeStructureAroundAddress(sourceAddress: string) {
           if (fieldAddress === address) markerParts.push('source')
           if (targetValue !== null) {
             const numeric = Number(value)
-            if (Number.isFinite(numeric) && Math.abs(numeric - targetValue) < 0.001) markerParts.push('valeur affichée')
+            if (Number.isFinite(numeric) && Math.abs(numeric - targetValue) < 0.001) markerParts.push(t('expert.markerDisplayedValue'))
             if (Number.isFinite(numeric) && [10, 100, 1000, 4096, 65536].some((scale) => Math.trunc(numeric) === Math.trunc(targetValue * scale))) {
               markerParts.push('fixed-point')
             }
@@ -502,7 +504,7 @@ async function analyzeStructureAroundAddress(sourceAddress: string) {
 
     const preview = await store.readMemoryPreviewByMode(base.toString(16).toUpperCase(), 256)
     if (!preview.success && !preview.partial) {
-      structureProbeResult.value = { success: false, error: preview.error || 'Lecture structure impossible.' }
+      structureProbeResult.value = { success: false, error: preview.error || t('expert.structureReadFailed') }
       return
     }
     const bytes = previewHexToBytes(preview.hex)
@@ -513,8 +515,8 @@ async function analyzeStructureAroundAddress(sourceAddress: string) {
       const float32 = readFloat32Le(bytes, offset)
       const markers: string[] = []
       if (rowAddress === address) markers.push('source')
-      if (targetValue !== null && int32 === Math.trunc(targetValue)) markers.push('i32 affiché')
-      if (targetValue !== null && Math.abs(float32 - targetValue) < 0.001) markers.push('f32 affiché')
+      if (targetValue !== null && int32 === Math.trunc(targetValue)) markers.push(t('expert.markerInt32Displayed'))
+      if (targetValue !== null && Math.abs(float32 - targetValue) < 0.001) markers.push(t('expert.markerFloat32Displayed'))
       if (targetValue !== null && [10, 100, 1000, 4096, 65536].some((scale) => int32 === Math.trunc(targetValue * scale))) {
         markers.push('fixed-point')
       }
@@ -628,11 +630,11 @@ async function analyzeStructureAroundSource(candidate: UiStringSourceCandidate) 
 async function inferStructureDelta() {
   const controller = backend.getController()
   if (!controller.inferStructureInstanceDelta) {
-    structureDeltaResult.value = { success: false, error: 'Backend indisponible.' }
+    structureDeltaResult.value = { success: false, error: t('expert.backendUnavailable') }
     return
   }
   if (!structureCaptureABase.value || !structureCaptureAField.value || !structureCaptureBBase.value || !structureCaptureBField.value) {
-    structureDeltaResult.value = { success: false, error: 'Capture A/B incomplete.' }
+    structureDeltaResult.value = { success: false, error: t('expert.captureAbIncomplete') }
     return
   }
 
@@ -691,7 +693,7 @@ async function refreshUiStringLiveCandidate(candidate: UiStringCandidate) {
           current: previousState?.current ?? '',
           previous: previousState?.previous ?? '',
           changed: false,
-          error: preview.error || 'Lecture impossible.',
+          error: preview.error || t('expert.readFailed'),
           updatedAt: localNowTime(),
         },
       }
@@ -853,48 +855,48 @@ const intelligentUiCandidates = computed<IntelligentCandidate[]>(() => {
   return Array.from(merged.values()).map((source) => {
     const reasons: string[] = []
     let score = Number(source.confidence ?? 0.45)
-    reasons.push(`base ${confidencePercent(score)}%`)
+    reasons.push(t('expert.reasonBase', { percent: confidencePercent(score) }))
 
     const distance = Number(source.distanceBytes ?? Number.MAX_SAFE_INTEGER)
     if (Number.isFinite(distance) && distance <= 4096) {
       score += 0.12
-      reasons.push('proche string')
+      reasons.push(t('expert.reasonCloseString'))
     } else if (Number.isFinite(distance) && distance <= 1024 * 1024) {
       score += 0.04
-      reasons.push('même fenêtre')
+      reasons.push(t('expert.reasonSameWindow'))
     }
 
     const trackHits = Number(source.trackHits ?? 0)
     if (trackHits > 0) {
       score += Math.min(0.18, 0.06 * trackHits)
-      reasons.push(`${trackHits} suivi(s) OK`)
+      reasons.push(t('expert.reasonTrackedOk', { count: trackHits }))
     }
 
     if ((uiStringInvestigationFinishResult.value?.globalValueHits ?? []).some((hit) => sourceKey(hit) === sourceKey(source))) {
       score += 0.16
-      reasons.push('radar modifié')
+      reasons.push(t('expert.reasonRadarChanged'))
     }
 
     const watched = watchedCandidate(source.address)
     if (watched?.changed) {
       score += 0.1
-      reasons.push('watch bouge')
+      reasons.push(t('expert.reasonWatchMoves'))
     }
     if (isUiSourceSelected(source)) {
       score += 0.04
-      reasons.push('sélectionné')
+      reasons.push(t('expert.reasonSelected'))
     }
     if (debuggerTargets.has(normalizeAddress(source.address))) {
       score += 0.22
-      reasons.push('writer capturé')
+      reasons.push(t('expert.reasonWriterCaptured'))
     }
     if ((source.variantLabel || '').includes('x')) {
       score -= 0.03
-      reasons.push('encodage')
+      reasons.push(t('expert.reasonEncoding'))
     }
     if (source.type.endsWith('8')) {
       score -= 0.08
-      reasons.push('compact bruyant')
+      reasons.push(t('expert.reasonCompactNoisy'))
     }
 
     score = Math.max(0.01, Math.min(1, score))
@@ -1041,7 +1043,7 @@ async function analyzeUiStringSources(candidate?: UiStringCandidate, radiusOverr
         matchesReturned: 0,
         bytesScanned: 0,
         candidates: [],
-        error: 'Methode backend indisponible (mock mode).',
+        error: t('expert.backendUnavailableMock'),
       }
       return
     }
@@ -1112,7 +1114,7 @@ async function inspectUiStringOrigins(candidate?: UiStringCandidate) {
         regionsScanned: 0,
         targets: [],
         pointerRefs: [],
-        error: 'Methode backend indisponible (mock mode).',
+        error: t('expert.backendUnavailableMock'),
       }
       return
     }
@@ -1176,7 +1178,7 @@ async function trackUiStringSources() {
         unreadable: 0,
         remaining: 0,
         survivors: [],
-        error: 'Methode backend indisponible (mock mode).',
+        error: t('expert.backendUnavailableMock'),
       }
       return
     }
@@ -1250,7 +1252,7 @@ async function autoChainFindWhatWritesResult() {
 
 async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
   if (!findWhatWritesAcknowledged.value) {
-    findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: 'Active "Debugger autorisé" avant de lancer Écrit par.' }
+    findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: t('expert.enableDebuggerBeforeWrittenBy') }
     return
   }
   findWhatWritesBusy.value = true
@@ -1272,13 +1274,13 @@ async function findWhatWritesForSource(candidate: UiStringSourceCandidate) {
 }
 
 async function runFindWhatWrites(address: string, options: Record<string, unknown>) {
-  if (!await store.confirmRiskAction('debug', 'Find what writes', `Adresse 0x${address.replace(/^0x/i, '')}, timeout ${String(options.timeoutMs ?? '?')} ms.`)) {
+  if (!await store.confirmRiskAction('debug', 'Find what writes', t('expert.addressTimeoutDescription', { address: address.replace(/^0x/i, ''), timeout: String(options.timeoutMs ?? '?') }))) {
     return {
       success: false,
       hitCount: 0,
       hits: [],
       cancelled: true,
-      error: 'Capture debugger annulée par l’utilisateur.',
+      error: t('expert.captureCancelledByUser'),
     }
   }
   const controller = backend.getController()
@@ -1297,7 +1299,7 @@ async function runFindWhatWrites(address: string, options: Record<string, unknow
           success: false,
           hitCount: 0,
           hits: [],
-          error: 'Timeout de la capture Find What Writes.',
+          error: t('expert.timeoutFindWhatWrites'),
         })
       }, 20000)
 
@@ -1324,7 +1326,7 @@ async function runFindWhatWrites(address: string, options: Record<string, unknow
             success: false,
             hitCount: 0,
             hits: [],
-            error: String(start.error ?? 'Impossible de démarrer Find What Writes async.'),
+            error: String(start.error ?? t('expert.unableToStartFindWhatWrites')),
           })
           return
         }
@@ -1348,7 +1350,7 @@ async function runFindWhatWrites(address: string, options: Record<string, unknow
     })
   }
   if (!controller.findWhatWrites) {
-    return { success: false, hitCount: 0, hits: [], error: 'Methode backend indisponible.' }
+    return { success: false, hitCount: 0, hits: [], error: t('expert.backendUnavailable') }
   }
   return controller.findWhatWrites(address, options)
 }
@@ -1360,7 +1362,7 @@ async function cancelFindWhatWritesCapture() {
       success: false,
       hitCount: 0,
       hits: [],
-      error: 'Annulation Find What Writes indisponible côté backend.',
+      error: t('expert.cancelFindWhatWritesUnavailable'),
     }
     return
   }
@@ -1370,26 +1372,26 @@ async function cancelFindWhatWritesCapture() {
       success: false,
       hitCount: 0,
       hits: [],
-      error: String(result.error ?? 'Annulation Find What Writes impossible.'),
+      error: String(result.error ?? t('expert.cancelFindWhatWritesFailed')),
     }
   }
 }
 
 async function runPageGuardWatch(address: string, options: Record<string, unknown>) {
-  if (!await store.confirmRiskAction('injection', 'Page Guard (sans debugger)', 'Injecte un handler dans le processus cible pour surveiller 0x' + address.replace(/^0x/i, '') + ' sans passer par le canal de debug Win32.')) {
+  if (!await store.confirmRiskAction('injection', t('expert.pageGuardNoDebuggerLabel'), t('expert.pageGuardInjectDescription', { address: address.replace(/^0x/i, '') }))) {
     return {
       success: false,
       hitCount: 0,
       hits: [],
       cancelled: true,
-      error: 'Capture Page Guard annulée par l’utilisateur.',
+      error: t('expert.pageGuardCancelledByUser'),
     }
   }
   const controller = backend.getController()
   const fn = controller.startPageGuardWatchAsync
   const sig = controller.pageGuardWatchFinished
   if (!fn || !sig) {
-    return { success: false, hitCount: 0, hits: [], error: 'Page Guard non disponible dans ce backend.' }
+    return { success: false, hitCount: 0, hits: [], error: t('expert.pageGuardUnavailableBackend') }
   }
   return new Promise<Record<string, unknown>>((resolve) => {
     let requestId: number | null = null
@@ -1398,7 +1400,7 @@ async function runPageGuardWatch(address: string, options: Record<string, unknow
     const timeout = window.setTimeout(() => {
       settled = true
       sig.disconnect?.(handler)
-      resolve({ success: false, hitCount: 0, hits: [], error: 'Timeout de la capture Page Guard.' })
+      resolve({ success: false, hitCount: 0, hits: [], error: t('expert.timeoutPageGuard') })
     }, 20000)
 
     const handler = (payload: Record<string, unknown>) => {
@@ -1420,7 +1422,7 @@ async function runPageGuardWatch(address: string, options: Record<string, unknow
         settled = true
         window.clearTimeout(timeout)
         sig.disconnect?.(handler)
-        resolve({ success: false, hitCount: 0, hits: [], error: String(start.error ?? 'Impossible de démarrer Page Guard async.') })
+        resolve({ success: false, hitCount: 0, hits: [], error: String(start.error ?? t('expert.unableToStartPageGuard')) })
         return
       }
       requestId = Number(start.requestId)
@@ -1457,12 +1459,12 @@ async function pageGuardWatchForSource(candidate: UiStringSourceCandidate) {
 async function cancelPageGuardWatchCapture() {
   const controller = backend.getController()
   if (!controller.cancelPageGuardWatch) {
-    pageGuardResult.value = { success: false, hitCount: 0, hits: [], error: 'Annulation Page Guard indisponible côté backend.' }
+    pageGuardResult.value = { success: false, hitCount: 0, hits: [], error: t('expert.cancelPageGuardUnavailable') }
     return
   }
   const result = await controller.cancelPageGuardWatch()
   if (result.success !== true) {
-    pageGuardResult.value = { success: false, hitCount: 0, hits: [], error: String(result.error ?? 'Annulation Page Guard impossible.') }
+    pageGuardResult.value = { success: false, hitCount: 0, hits: [], error: String(result.error ?? t('expert.cancelPageGuardFailed')) }
   }
 }
 
@@ -1470,7 +1472,7 @@ async function cancelPageGuardWatchCapture() {
 async function startChangedPagesSession() {
   const controller = backend.getController()
   if (!controller.startChangedPagesSession) {
-    changedPagesConsensusResult.value = { success: false, error: 'Consensus multi-round indisponible côté backend.' }
+    changedPagesConsensusResult.value = { success: false, error: t('expert.consensusMultiRoundUnavailable') }
     return
   }
   changedPagesSessionBusy.value = true
@@ -1488,7 +1490,7 @@ async function startChangedPagesSession() {
 async function applyChangedPagesRound() {
   const controller = backend.getController()
   if (!controller.applyChangedPagesRound) {
-    changedPagesConsensusResult.value = { success: false, error: 'Round multi-round indisponible côté backend.' }
+    changedPagesConsensusResult.value = { success: false, error: t('expert.roundMultiRoundUnavailable') }
     return
   }
   changedPagesRoundBusy.value = true
@@ -1509,7 +1511,7 @@ async function applyChangedPagesRound() {
 async function getChangedPagesConsensus() {
   const controller = backend.getController()
   if (!controller.getChangedPagesConsensus) {
-    changedPagesConsensusResult.value = { success: false, error: 'Consensus indisponible côté backend.' }
+    changedPagesConsensusResult.value = { success: false, error: t('expert.consensusUnavailable') }
     return
   }
   try {
@@ -1523,7 +1525,7 @@ async function getChangedPagesConsensus() {
 async function stopChangedPagesSession() {
   const controller = backend.getController()
   if (!controller.stopChangedPagesSession) {
-    changedPagesConsensusResult.value = { success: false, error: 'Arrêt session indisponible côté backend.' }
+    changedPagesConsensusResult.value = { success: false, error: t('expert.stopSessionUnavailable') }
     return
   }
   try {
@@ -1538,7 +1540,7 @@ async function stopChangedPagesSession() {
 async function validatePageStability(addressHex: string) {
   const controller = backend.getController()
   if (!controller.validatePageStability) {
-    changedPagesStabilityResult.value = { success: false, error: 'Validation stabilité indisponible côté backend.' }
+    changedPagesStabilityResult.value = { success: false, error: t('expert.stabilityValidationUnavailable') }
     return
   }
   changedPagesStabilityBusy.value = true
@@ -1557,20 +1559,20 @@ const findWhatAccessesResult = ref<Record<string, unknown> | null>(null)
 const findWhatAccessesBusy = ref(false)
 
 async function runFindWhatAccesses(address: string, options: Record<string, unknown>) {
-  if (!await store.confirmRiskAction('debug', 'Find what accesses', 'Adresse 0x' + address.replace(/^0x/i, '') + ', timeout ' + String(options.timeoutMs ?? '?') + ' ms.')) {
+  if (!await store.confirmRiskAction('debug', 'Find what accesses', t('expert.addressTimeoutDescription', { address: address.replace(/^0x/i, ''), timeout: String(options.timeoutMs ?? '?') }))) {
     return {
       success: false,
       hitCount: 0,
       hits: [],
       cancelled: true,
-      error: 'Capture debugger annulee par l utilisateur.',
+      error: t('expert.captureCancelledByUser'),
     }
   }
   const controller = backend.getController()
   const fn = controller.findWhatAccessesAsync
   const sig = controller.findWhatAccessesFinished
   if (!fn || !sig) {
-    return { success: false, hitCount: 0, hits: [], error: 'Find What Accesses non disponible dans ce backend.' }
+    return { success: false, hitCount: 0, hits: [], error: t('expert.findWhatAccessesUnavailableBackend') }
   }
   return new Promise<Record<string, unknown>>((resolve) => {
     let requestId: number | null = null
@@ -1579,7 +1581,7 @@ async function runFindWhatAccesses(address: string, options: Record<string, unkn
     const timeout = window.setTimeout(() => {
       settled = true
       sig.disconnect?.(handler)
-      resolve({ success: false, hitCount: 0, hits: [], error: 'Timeout de la capture Find What Accesses.' })
+      resolve({ success: false, hitCount: 0, hits: [], error: t('expert.timeoutFindWhatAccesses') })
     }, 20000)
 
     const handler = (payload: Record<string, unknown>) => {
@@ -1601,7 +1603,7 @@ async function runFindWhatAccesses(address: string, options: Record<string, unkn
         settled = true
         window.clearTimeout(timeout)
         sig.disconnect?.(handler)
-        resolve({ success: false, hitCount: 0, hits: [], error: String(start.error ?? 'Impossible de demarrer Find What Accesses async.') })
+        resolve({ success: false, hitCount: 0, hits: [], error: String(start.error ?? t('expert.unableToStartFindWhatAccesses')) })
         return
       }
       requestId = Number(start.requestId)
@@ -1621,7 +1623,7 @@ async function runFindWhatAccesses(address: string, options: Record<string, unkn
 
 async function findWhatAccessesForSource(candidate: UiStringSourceCandidate) {
   if (!findWhatWritesAcknowledged.value) {
-    findWhatAccessesResult.value = { success: false, hitCount: 0, hits: [], error: 'Active le consentement debugger avant de lancer Lu par.' }
+    findWhatAccessesResult.value = { success: false, hitCount: 0, hits: [], error: t('expert.enableDebuggerBeforeReadBy') }
     return
   }
   findWhatAccessesBusy.value = true
@@ -1640,7 +1642,7 @@ async function findWhatAccessesForSource(candidate: UiStringSourceCandidate) {
 }
 async function findWhatWritesForUiString(candidate: UiStringCandidate) {
   if (!findWhatWritesAcknowledged.value) {
-    findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: 'Active "Debugger autorisé" avant de lancer Écrit par.' }
+    findWhatWritesResult.value = { success: false, hitCount: 0, hits: [], error: t('expert.enableDebuggerBeforeWrittenBy') }
     return
   }
   findWhatWritesBusy.value = true
@@ -1860,7 +1862,7 @@ onMounted(() => {
       </div>
       <div class="header-actions">
         <button class="btn btn-secondary" :disabled="store.scanBusy" @click="startNewScan()">
-          Nouveau scan
+          {{ $t('expert.newScan') }}
         </button>
         <button class="btn btn-secondary" @click="store.doPing()">
           {{ $t('actions.ping') }}
@@ -1869,19 +1871,19 @@ onMounted(() => {
     </div>
 
     <PanelIntro
-      what="Le mode Expert : l'ensemble des outils avancés de KillEngine (scan, AOB, pointeurs, breakpoints, patch...) réunis dans un seul panneau."
-      purpose="Piloter manuellement chaque étape d'une recherche ou d'une modification mémoire, pour un contrôle total au-delà de ce que l'Assistant automatise."
-      how="Attache un processus, puis choisis le scénario ou l'outil correspondant à ce que tu veux faire (scan, écriture, freeze, signature AOB...) — chaque section a ses propres contrôles et son InfoDot d'aide."
+      :what="$t('expert.intro.what')"
+      :purpose="$t('expert.intro.purpose')"
+      :how="$t('expert.intro.how')"
     />
 
     <div v-if="!store.isAttached" class="empty-state">
-      <p>Attache un processus pour utiliser les outils expert.</p>
-      <button class="btn btn-secondary" @click="store.activeView = 'process'">Aller à Processus</button>
+      <p>{{ $t('expert.attachToUse') }}</p>
+      <button class="btn btn-secondary" @click="store.activeView = 'process'">{{ $t('expert.goToProcess') }}</button>
     </div>
 
     <template v-else>
       <div class="preset-row">
-        <span class="hint preset-row-label">Scénarios courants :</span>
+        <span class="hint preset-row-label">{{ $t('expert.commonScenarios') }}</span>
         <button
           v-for="preset in expertScenarioPresets"
           :key="preset.id"
@@ -1904,7 +1906,7 @@ onMounted(() => {
               type="button"
               @click="store.cancelActiveScan()"
             >
-              Annuler
+              {{ $t('expert.cancel') }}
             </button>
           </div>
         </div>
@@ -1927,12 +1929,12 @@ onMounted(() => {
           <strong>{{ store.exactScanType }}</strong>
         </div>
         <div class="stat">
-          <span>Adresse</span>
+          <span>{{ $t('expert.address') }}</span>
           <strong>{{ store.selectedCandidateAddress ? `0x${store.selectedCandidateAddress}` : '-' }}</strong>
         </div>
       </div>
 
-      <nav class="workflow-steps" aria-label="Étapes du Mode Expert">
+      <nav class="workflow-steps" :aria-label="$t('expert.stepsAriaLabel')">
         <button
           v-for="step in expertSteps"
           :key="step.id"
@@ -1955,9 +1957,9 @@ onMounted(() => {
           @click="activeStep = 'all'"
         >
           <span class="workflow-step-head">
-            <span class="workflow-step-title">Tout</span>
+            <span class="workflow-step-title">{{ $t('expert.all') }}</span>
           </span>
-          <span class="workflow-step-what">Afficher les panneaux des quatre étapes en même temps.</span>
+          <span class="workflow-step-what">{{ $t('expert.showAllFourSteps') }}</span>
         </button>
       </nav>
 
@@ -1978,34 +1980,34 @@ onMounted(() => {
             <InfoDot topic="uiString" />
             <RiskBadge level="read" />
           </div>
-          <span v-if="uiStringResult">{{ formatNumber(uiStringCandidates.length) }} candidat(s)</span>
+          <span v-if="uiStringResult">{{ $t('expert.candidateCount', { count: formatNumber(uiStringCandidates.length) }) }}</span>
         </div>
         <p class="panel-hint">{{ $t('help.uiString.when') }}</p>
-        <p class="hint">Étape 1 : tape la valeur telle qu'affichée à l'écran, clique Scanner texte. Étape 2 : change cette valeur dans le jeu, tape la nouvelle valeur affichée, puis clique Scan suivant (texte) et, si tu as déjà lancé Analyser sources plus bas, Scan suivant (sources) aussi.</p>
+        <p class="hint">{{ $t('expert.traceUiStringHint') }}</p>
         <div class="controls ui-string-controls">
           <input
             v-model="uiStringValue"
             class="input"
-            placeholder="Étape 1 : texte affiché (ex: 50)"
+            :placeholder="$t('expert.step1Placeholder')"
             :disabled="uiStringBusy || store.scanBusy"
             @keyup.enter="scanUiStrings()"
           />
           <button class="btn btn-primary" :disabled="uiStringBusy || store.scanBusy || !(uiStringValue || store.exactScanValue).trim()" @click="scanUiStrings()">
             <span v-if="uiStringBusy" class="btn-spinner" aria-hidden="true"></span>
-            Scanner texte
+            {{ $t('expert.scanText') }}
           </button>
           <input
             v-model="uiStringNextValue"
             class="input"
-            placeholder="Étape 2 : nouvelle valeur affichée"
+            :placeholder="$t('expert.step2Placeholder')"
             :disabled="uiStringBusy || uiStringCandidates.length === 0"
             @keyup.enter="trackUiStrings()"
           />
           <button class="btn btn-primary" :disabled="uiStringBusy || uiStringCandidates.length === 0 || !uiStringNextValue.trim()" @click="trackUiStrings()">
-            Scan suivant (texte)
+            {{ $t('expert.nextScanText') }}
           </button>
           <button class="btn btn-primary" :disabled="uiStringBusy || uiStringSourceCandidates.length === 0 || !uiStringNextValue.trim()" @click="trackUiStringSources()">
-            Scan suivant (sources)
+            {{ $t('expert.nextScanSources') }}
           </button>
         </div>
         <div class="ui-investigation" :class="{ active: uiStringLiveInvestigation }">
@@ -2015,11 +2017,11 @@ onMounted(() => {
             <div class="scanner-core"></div>
           </div>
           <div class="investigation-copy">
-            <strong>{{ uiStringLiveInvestigation ? 'Enquête armée' : 'Enquête live prête' }}</strong>
+            <strong>{{ uiStringLiveInvestigation ? $t('expert.investigationArmed') : $t('expert.investigationLiveReady') }}</strong>
             <span>
               {{ uiStringLiveInvestigation
-                ? `Snapshot capturé. Modifie la valeur dans le jeu cible, puis clique Arrêter et comparer · ${formatNumber(uiStringInvestigationElapsed)} s`
-                : 'Démarre avant de modifier la ressource pour chercher au-delà de la simple string UI.' }}
+                ? $t('expert.snapshotCapturedHint', { seconds: formatNumber(uiStringInvestigationElapsed) })
+                : $t('expert.startBeforeModifyingHint') }}
             </span>
           </div>
           <div class="investigation-steps">
@@ -2028,44 +2030,43 @@ onMounted(() => {
             <span>backrefs</span>
           </div>
           <button class="btn compact" :class="uiStringLiveInvestigation ? 'btn-secondary' : 'btn-primary'" type="button" :disabled="uiStringBusy" @click="toggleUiStringLiveInvestigation()">
-            {{ uiStringLiveInvestigation ? 'Arrêter et comparer' : 'Démarrer enquête' }}
+            {{ uiStringLiveInvestigation ? $t('expert.stopAndCompare') : $t('expert.startInvestigation') }}
           </button>
         </div>
         <div v-if="uiStringInvestigationStartResult" class="metrics">
-          <span>Fenêtres enquête: {{ formatNumber(uiStringInvestigationStartResult.windows) }}</span>
-          <span>Capturé: {{ formatBytes(uiStringInvestigationStartResult.bytesCaptured) }}</span>
-          <span v-if="uiStringInvestigationStartResult.probeBlocks">Blocs radar: {{ formatNumber(uiStringInvestigationStartResult.probeBlocks) }}</span>
-          <span v-if="uiStringInvestigationStartResult.probeBytesCaptured">Radar: {{ formatBytes(uiStringInvestigationStartResult.probeBytesCaptured) }}</span>
-          <span v-if="uiStringInvestigationStartResult.radiusBytes">Rayon: {{ formatBytes(uiStringInvestigationStartResult.radiusBytes) }}</span>
-          <span v-if="uiStringInvestigationStartResult.unreadable">Illisibles: {{ formatNumber(uiStringInvestigationStartResult.unreadable) }}</span>
+          <span>{{ $t('expert.investigationWindows') }} {{ formatNumber(uiStringInvestigationStartResult.windows) }}</span>
+          <span>{{ $t('expert.captured') }} {{ formatBytes(uiStringInvestigationStartResult.bytesCaptured) }}</span>
+          <span v-if="uiStringInvestigationStartResult.probeBlocks">{{ $t('expert.radarBlocks') }} {{ formatNumber(uiStringInvestigationStartResult.probeBlocks) }}</span>
+          <span v-if="uiStringInvestigationStartResult.probeBytesCaptured">{{ $t('expert.radar') }} {{ formatBytes(uiStringInvestigationStartResult.probeBytesCaptured) }}</span>
+          <span v-if="uiStringInvestigationStartResult.radiusBytes">{{ $t('expert.radius') }} {{ formatBytes(uiStringInvestigationStartResult.radiusBytes) }}</span>
+          <span v-if="uiStringInvestigationStartResult.unreadable">{{ $t('expert.unreadable') }} {{ formatNumber(uiStringInvestigationStartResult.unreadable) }}</span>
         </div>
         <p v-if="uiStringInvestigationStartResult?.error" class="error">{{ uiStringInvestigationStartResult.error }}</p>
         <div v-if="uiStringInvestigationFinishResult" class="metrics">
-          <span>Changements: {{ formatNumber(uiStringInvestigationFinishResult.changesFound) }}</span>
-          <span>Octets modifiés: {{ formatNumber(uiStringInvestigationFinishResult.changedBytes) }}</span>
-          <span>Fenêtres lues: {{ formatNumber(uiStringInvestigationFinishResult.windowsChecked) }}</span>
-          <span v-if="uiStringInvestigationFinishResult.probeBlocksChanged !== undefined">Blocs modifiés: {{ formatNumber(uiStringInvestigationFinishResult.probeBlocksChanged) }}</span>
-          <span v-if="uiStringInvestigationFinishResult.globalValueHitsFound !== undefined">Valeurs radar: {{ formatNumber(uiStringInvestigationFinishResult.globalValueHitsFound) }}</span>
-          <span v-if="uiStringInvestigationFinishResult.partial" class="warning-text">résultats limités</span>
+          <span>{{ $t('expert.changes') }} {{ formatNumber(uiStringInvestigationFinishResult.changesFound) }}</span>
+          <span>{{ $t('expert.modifiedBytes') }} {{ formatNumber(uiStringInvestigationFinishResult.changedBytes) }}</span>
+          <span>{{ $t('expert.windowsRead') }} {{ formatNumber(uiStringInvestigationFinishResult.windowsChecked) }}</span>
+          <span v-if="uiStringInvestigationFinishResult.probeBlocksChanged !== undefined">{{ $t('expert.modifiedBlocks') }} {{ formatNumber(uiStringInvestigationFinishResult.probeBlocksChanged) }}</span>
+          <span v-if="uiStringInvestigationFinishResult.globalValueHitsFound !== undefined">{{ $t('expert.radarValues') }} {{ formatNumber(uiStringInvestigationFinishResult.globalValueHitsFound) }}</span>
+          <span v-if="uiStringInvestigationFinishResult.partial" class="warning-text">{{ $t('expert.limitedResults') }}</span>
         </div>
         <p v-if="uiStringInvestigationFinishResult?.error" class="error">{{ uiStringInvestigationFinishResult.error }}</p>
         <div v-if="uiStringInvestigationFinishResult && !uiStringInvestigationFinishResult.error && uiStringInvestigationFinishResult.changesFound === 0 && !(uiStringInvestigationFinishResult.globalValueHits?.length)" class="investigation-empty">
-          <strong>Aucun changement capturé dans les fenêtres suivies.</strong>
+          <strong>{{ $t('expert.noChangeCaptured') }}</strong>
           <span>
-            Ça veut dire que les strings suivies ont été relues, mais que la vraie valeur modifiée n'a pas été retrouvée dans les blocs modifiés.
-            Relance l'enquête en indiquant la nouvelle valeur affichée, puis modifie la ressource pendant que l'état est armé.
+            {{ $t('expert.noChangeCapturedDetail') }}
           </span>
         </div>
         <div v-if="uiStringInvestigationFinishResult?.globalValueHits?.length" class="investigation-hit-summary">
-          <strong>Valeurs trouvées dans des blocs modifiés</strong>
+          <strong>{{ $t('expert.valuesFoundInModifiedBlocks') }}</strong>
           <span>
-            Ces adresses sont automatiquement ajoutées et cochées dans Sources numériques. Tu peux les envoyer vers Write, puis tester une écriture/freeze.
+            {{ $t('expert.valuesFoundInModifiedBlocksDetail') }}
           </span>
         </div>
         <div v-if="uiStringInvestigationFinishResult?.changes.length" class="investigation-change-list">
           <div class="source-list-title">
-            <strong>Changements pendant l'enquête</strong>
-            <span>{{ formatNumber(uiStringInvestigationFinishResult.changes.length) }} piste(s)</span>
+            <strong>{{ $t('expert.changesDuringInvestigation') }}</strong>
+            <span>{{ $t('expert.leadCount', { count: formatNumber(uiStringInvestigationFinishResult.changes.length) }) }}</span>
           </div>
           <div
             v-for="change in uiStringInvestigationFinishResult.changes.slice(0, 80)"
@@ -2095,10 +2096,10 @@ onMounted(() => {
           </label>
           <label class="checkbox-label">
             <input v-model="uiStringBoundary" type="checkbox" :disabled="uiStringBusy" />
-            Nombre isolé
+            {{ $t('expert.isolatedNumber') }}
           </label>
           <label class="compact-select">
-            <span>Rayon sources</span>
+            <span>{{ $t('expert.sourceRadius') }}</span>
             <select v-model.number="uiStringSourceRadiusBytes" class="input select" :disabled="uiStringBusy">
               <option v-for="option in uiStringSourceRadiusOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
@@ -2107,10 +2108,10 @@ onMounted(() => {
           </label>
           <label class="checkbox-label debugger-check">
             <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />
-            Debugger autorisé
+            {{ $t('expert.debuggerAuthorized') }}
           </label>
           <label class="compact-select">
-            <span>Écrit par</span>
+            <span>{{ $t('expert.writtenBy') }}</span>
             <InfoDot topic="findWhatWrites" />
             <select v-model.number="findWhatWritesTimeoutMs" class="input select" :disabled="findWhatWritesBusy">
               <option v-for="timeout in findWhatWritesTimeoutOptions" :key="timeout" :value="timeout">
@@ -2120,49 +2121,49 @@ onMounted(() => {
           </label>
         </div>
         <p id="expert-anchor-find-what-writes" class="debugger-guard">
-          <strong>Écrit par</strong> attache le debugger Windows au processus pendant la capture. À utiliser sur une cible de test ou solo, puis fais varier la valeur pendant la fenêtre choisie.
-          Dès qu'une instruction est capturée, la signature AOB et les suggestions de patch se génèrent automatiquement ci-dessous (lecture seule) — sauvegarder en Trainer ou patcher reste toujours un clic manuel séparé.
+          <strong>{{ $t('expert.writtenBy') }}</strong> {{ $t('expert.writtenByGuardText') }}
+          {{ $t('expert.writtenByGuardDetail') }}
         </p>
         <div v-if="uiStringResult" class="metrics">
           <span>Matches: {{ formatNumber(uiStringResult.matchesFound) }}</span>
-          <span>Régions: {{ formatNumber(uiStringResult.regionsScanned) }}</span>
-          <span>Lu: {{ formatBytes(uiStringResult.bytesScanned) }}</span>
-          <span v-if="uiStringResult.partial" class="warning-text">limite atteinte</span>
+          <span>{{ $t('expert.regions') }} {{ formatNumber(uiStringResult.regionsScanned) }}</span>
+          <span>{{ $t('expert.readShort') }} {{ formatBytes(uiStringResult.bytesScanned) }}</span>
+          <span v-if="uiStringResult.partial" class="warning-text">{{ $t('expert.limitReached') }}</span>
         </div>
         <div v-if="uiStringTrackResult" class="metrics">
-          <span>Testés: {{ formatNumber(uiStringTrackResult.checked) }}</span>
-          <span>Restants: {{ formatNumber(uiStringTrackResult.remaining) }}</span>
-          <span>Illisibles: {{ formatNumber(uiStringTrackResult.unreadable) }}</span>
-          <span v-if="uiStringTrackResult.moved">Déplacés: {{ formatNumber(uiStringTrackResult.moved) }}</span>
+          <span>{{ $t('expert.tested') }} {{ formatNumber(uiStringTrackResult.checked) }}</span>
+          <span>{{ $t('expert.remaining') }} {{ formatNumber(uiStringTrackResult.remaining) }}</span>
+          <span>{{ $t('expert.unreadable') }} {{ formatNumber(uiStringTrackResult.unreadable) }}</span>
+          <span v-if="uiStringTrackResult.moved">{{ $t('expert.moved') }} {{ formatNumber(uiStringTrackResult.moved) }}</span>
         </div>
         <div v-if="uiStringSourceResult" class="metrics">
-          <span>Sources: {{ formatNumber(uiStringSourceResult.matchesReturned) }}</span>
-          <span>Fenêtres lues: {{ formatBytes(uiStringSourceResult.bytesScanned) }}</span>
-          <span v-if="uiStringSourceResult.radiusBytes">Rayon: {{ formatBytes(uiStringSourceResult.radiusBytes) }}</span>
-          <span v-if="uiStringSourceResult.partial" class="warning-text">résultats limités</span>
+          <span>{{ $t('expert.sources') }} {{ formatNumber(uiStringSourceResult.matchesReturned) }}</span>
+          <span>{{ $t('expert.windowsRead') }} {{ formatBytes(uiStringSourceResult.bytesScanned) }}</span>
+          <span v-if="uiStringSourceResult.radiusBytes">{{ $t('expert.radius') }} {{ formatBytes(uiStringSourceResult.radiusBytes) }}</span>
+          <span v-if="uiStringSourceResult.partial" class="warning-text">{{ $t('expert.limitedResults') }}</span>
         </div>
         <div v-if="uiStringSourceTrackResult" class="metrics">
-          <span>Sources testées: {{ formatNumber(uiStringSourceTrackResult.checked) }}</span>
-          <span>Sources restantes: {{ formatNumber(uiStringSourceTrackResult.remaining) }}</span>
-          <span>Illisibles: {{ formatNumber(uiStringSourceTrackResult.unreadable) }}</span>
-          <span v-if="uiStringSourceTrackResult.incompatible">Incompatibles: {{ formatNumber(uiStringSourceTrackResult.incompatible) }}</span>
+          <span>{{ $t('expert.sourcesTested') }} {{ formatNumber(uiStringSourceTrackResult.checked) }}</span>
+          <span>{{ $t('expert.sourcesRemaining') }} {{ formatNumber(uiStringSourceTrackResult.remaining) }}</span>
+          <span>{{ $t('expert.unreadable') }} {{ formatNumber(uiStringSourceTrackResult.unreadable) }}</span>
+          <span v-if="uiStringSourceTrackResult.incompatible">{{ $t('expert.incompatible') }} {{ formatNumber(uiStringSourceTrackResult.incompatible) }}</span>
         </div>
         <p v-if="uiStringResult?.error" class="error">{{ uiStringResult.error }}</p>
         <p v-if="uiStringTrackResult?.error" class="error">{{ uiStringTrackResult.error }}</p>
         <p v-if="uiStringSourceResult?.error" class="error">{{ uiStringSourceResult.error }}</p>
         <p v-if="uiStringSourceTrackResult?.error" class="error">{{ uiStringSourceTrackResult.error }}</p>
         <p v-if="uiStringCandidates.length > 0" class="hint">
-          Étape 3 (optionnelle) : clique Analyser sources pour chercher les nombres qui alimentent ce texte — ça débloque le bouton Scan suivant (sources) plus haut. Trop de résultats ? Change encore la valeur en jeu puis reclique Scan suivant (sources), ou essaie Auto origine qui enchaîne tout.
+          {{ $t('expert.step3Hint') }}
         </p>
         <div v-if="uiStringCandidates.length > 0" class="selection-toolbar">
           <button class="btn btn-secondary compact" type="button" @click="toggleAllUiStringSelection()">
-            {{ selectedUiStringAddresses.length === uiStringCandidates.length ? 'Tout décocher' : 'Tout cocher' }}
+            {{ selectedUiStringAddresses.length === uiStringCandidates.length ? $t('expert.uncheckAll') : $t('expert.checkAll') }}
           </button>
           <button class="btn btn-primary compact" type="button" :disabled="uiStringBusy" @click="analyzeUiStringSources()">
-            Analyser sources
+            {{ $t('expert.analyzeSources') }}
           </button>
           <button class="btn btn-primary compact" type="button" :disabled="uiStringBusy" @click="autoInspectUiStrings()">
-            Auto origine
+            {{ $t('expert.autoOrigin') }}
           </button>
           <button class="btn btn-secondary compact" type="button" :disabled="uiStringBusy" @click="inspectUiStringOrigins()">
             Backrefs
@@ -2173,7 +2174,7 @@ onMounted(() => {
             :disabled="uiStringBusy || uiStringCandidates.length === 0"
             @click="setUiStringTextLiveEnabled(!uiStringTextLiveEnabled)"
           >
-            {{ uiStringTextLiveEnabled ? 'Live strings stop' : 'Live strings' }}
+            {{ uiStringTextLiveEnabled ? $t('expert.liveStringsStop') : $t('expert.liveStrings') }}
           </button>
           <button
             class="btn btn-secondary compact"
@@ -2181,12 +2182,12 @@ onMounted(() => {
             :disabled="uiStringBusy || uiStringTextLiveRefreshing || uiStringCandidates.length === 0"
             @click="refreshSelectedUiStringTexts()"
           >
-            Rafraîchir strings
+            {{ $t('expert.refreshStrings') }}
           </button>
-          <span>{{ selectedUiStringAddresses.length || uiStringCandidates.length }} suivi(s) au prochain filtre</span>
-          <label class="checkbox-label debugger-check" title="Nécessaire pour utiliser Écrit par sur les candidats ci-dessous.">
+          <span>{{ $t('expert.trackedNextFilter', { count: selectedUiStringAddresses.length || uiStringCandidates.length }) }}</span>
+          <label class="checkbox-label debugger-check" :title="$t('expert.debuggerRequiredTitle')">
             <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />
-            Debugger autorisé
+            {{ $t('expert.debuggerAuthorized') }}
           </label>
         </div>
         <div v-if="uiStringCandidates.length > 0" class="ui-string-list">
@@ -2207,18 +2208,18 @@ onMounted(() => {
             <span>{{ candidate.encoding }}</span>
             <strong>{{ candidate.text }}</strong>
             <span class="ui-string-live-current">
-              actuel: {{ uiStringLiveState(candidate)?.current || '-' }}
+              {{ $t('expert.current') }} {{ uiStringLiveState(candidate)?.current || '-' }}
             </span>
             <span class="ui-string-live-previous">
-              avant: {{ uiStringLiveState(candidate)?.previous || '-' }}
+              {{ $t('expert.before') }} {{ uiStringLiveState(candidate)?.previous || '-' }}
             </span>
             <span>{{ candidate.movedFrom ? `+${formatNumber(candidate.movedDistanceBytes)} o` : (candidate.protection || '-') }}</span>
             <span>{{ candidate.memoryType || '-' }}</span>
-            <button class="btn btn-primary compact" type="button" @click="analyzeUiStringSources(candidate)">Sources</button>
-            <button class="btn btn-secondary compact" type="button" @click="inspectUiStringOrigins(candidate)">Origine</button>
-            <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">Watch octets</button>
+            <button class="btn btn-primary compact" type="button" @click="analyzeUiStringSources(candidate)">{{ $t('expert.sources') }}</button>
+            <button class="btn btn-secondary compact" type="button" @click="inspectUiStringOrigins(candidate)">{{ $t('expert.origin') }}</button>
+            <button class="btn btn-secondary compact" type="button" @click="watchUiStringCandidate(candidate)">{{ $t('expert.watchBytes') }}</button>
             <button class="btn btn-primary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForUiString(candidate)">
-              Écrit par
+              {{ $t('expert.writtenBy') }}
             </button>
             <button class="btn btn-secondary compact" type="button" @click="useUiStringCandidate(candidate)">Assistant</button>
             <span v-if="uiStringLiveState(candidate)?.error" class="error-inline">{{ uiStringLiveState(candidate)?.error }}</span>
@@ -2234,10 +2235,10 @@ onMounted(() => {
               type="button"
               @click="cancelFindWhatWritesCapture()"
             >
-              Annuler capture
+              {{ $t('expert.cancelCapture') }}
             </button>
           </div>
-          <p v-if="findWhatWritesBusy" class="hint">Capture en cours : modifie la valeur dans le jeu cible pendant {{ findWhatWritesTimeoutMs / 1000 }} seconde(s).</p>
+          <p v-if="findWhatWritesBusy" class="hint">{{ $t('expert.captureInProgress', { seconds: findWhatWritesTimeoutMs / 1000 }) }}</p>
           <p v-if="findWhatWritesResult?.error" class="error">{{ findWhatWritesResult.error }}</p>
           <div
             v-for="hit in findWhatWritesHits.slice(0, 12)"
@@ -2246,26 +2247,26 @@ onMounted(() => {
             :class="{ selected: isSelectedFindWhatWritesHit(hit) }"
           >
             <code>RIP 0x{{ hit.instructionPointer }}</code>
-            <span>cible 0x{{ hit.address }}</span>
+            <span>{{ $t('expert.targetShort') }} 0x{{ hit.address }}</span>
             <span>{{ hit.module || '-' }}</span>
             <span>+0x{{ hit.moduleOffset || '0' }}</span>
             <span>T{{ hit.threadId }}</span>
-            <span>avant {{ formatNumber(Number(hit.valueBefore ?? 0)) }}</span>
-            <strong>actuel {{ formatNumber(Number(hit.valueAfter ?? 0)) }}</strong>
+            <span>{{ $t('expert.beforeShort') }} {{ formatNumber(Number(hit.valueBefore ?? 0)) }}</span>
+            <strong>{{ $t('expert.currentShort') }} {{ formatNumber(Number(hit.valueAfter ?? 0)) }}</strong>
             <button class="btn btn-secondary compact" type="button" @click="previewFindWhatWritesHit(hit)">
-              Aperçu
+              {{ $t('expert.preview') }}
             </button>
             <button class="btn btn-secondary compact" type="button" @click="copyFindWhatWritesRip(hit)">
-              Copier
+              {{ $t('expert.copy') }}
             </button>
             <button class="btn btn-primary compact" type="button" :disabled="aobSignatureBusy" @click="generateAobSignatureFromHit(hit)">
-              Analyser
+              {{ $t('expert.analyze') }}
             </button>
             <button class="btn btn-secondary compact" type="button" :disabled="disassembleBackwardBusy" @click="disassembleBackwardFromHit(hit)">
-              Désassembler en amont
+              {{ $t('expert.disassembleBackward') }}
             </button>
             <button class="btn btn-secondary compact" type="button" :disabled="testCandidateFieldsBusy" @click="testCandidateFieldsFromHit(hit)">
-              Tester automatiquement
+              {{ $t('expert.testAutomatically') }}
             </button>
             <button
               class="btn btn-primary compact"
@@ -2280,37 +2281,37 @@ onMounted(() => {
               class="btn btn-primary compact"
               type="button"
               :disabled="forceHookBusy"
-              :title="`Force une valeur à cette adresse quelle que soit la source de l'écriture (registre ou immédiat) — installe un trampoline et redirige le site, restaurable comme un script auto-assembleur.`"
+              :title="$t('expert.forceValueHookTitle')"
               @click="selectForceHookTarget(hit)"
             >
-              Forcer valeur (hook)
+              {{ $t('expert.forceValueHook') }}
             </button>
           </div>
           <div v-if="forceHookTargetHit" class="controls value-override-controls">
             <span class="hint">
-              Force une valeur à 0x{{ forceHookTargetHit.address }} (écrite par RIP 0x{{ forceHookTargetHit.instructionPointer }}),
-              même si la source est un registre. Type utilisé : {{ store.exactScanType }} (sélecteur de type Expert).
+              {{ $t('expert.forceValueAt', { address: forceHookTargetHit.address, rip: forceHookTargetHit.instructionPointer }) }}
+              {{ $t('expert.forceValueTypeUsed', { type: store.exactScanType }) }}
             </span>
             <input
               v-model="forceHookValueInput"
               class="input"
-              placeholder="Valeur : 999"
+              :placeholder="$t('expert.valuePlaceholder')"
               :disabled="forceHookBusy"
               @keyup.enter="applyForceHookValue()"
             />
             <button class="btn btn-primary compact" type="button" :disabled="forceHookBusy || !forceHookValueInput.trim()" @click="applyForceHookValue()">
-              Appliquer
+              {{ $t('expert.apply') }}
             </button>
           </div>
           <p v-if="forceHookResult" :class="forceHookResult.success ? 'hint' : 'error'">
             {{ forceHookResult.success
-              ? `Valeur forcée : trampoline actif à 0x${forceHookResult.patchAddress}. Restaurable via le bouton "Restaurer" du panneau Injection / Auto-assembler.`
+              ? $t('expert.forceValueSuccess', { address: forceHookResult.patchAddress })
               : forceHookResult.error }}
           </p>
         </div>
         <div v-if="pageGuardResult || pageGuardBusy" class="find-writes-panel">
           <div class="source-list-title">
-            <strong>Page Guard (sans debugger)</strong>
+            <strong>Page Guard ({{ $t('expert.withoutDebugger') }})</strong>
             <span>{{ formatNumber(Number(pageGuardResult?.hitCount ?? 0)) }} hit(s)</span>
             <button
               v-if="pageGuardBusy"
@@ -2318,11 +2319,11 @@ onMounted(() => {
               type="button"
               @click="cancelPageGuardWatchCapture()"
             >
-              Annuler capture
+              {{ $t('expert.cancelCapture') }}
             </button>
           </div>
-          <p class="hint">Alternative sans debugger à "Écrit par" : utile quand un autre débogueur tient déjà le canal de debug Win32, mais moins précis (granularité page 4 Ko).</p>
-          <p v-if="pageGuardBusy" class="hint">Capture en cours : modifie la valeur dans le jeu cible pendant {{ findWhatWritesTimeoutMs / 1000 }} seconde(s).</p>
+          <p class="hint">{{ $t('expert.pageGuardAlternativeHint') }}</p>
+          <p v-if="pageGuardBusy" class="hint">{{ $t('expert.captureInProgress', { seconds: findWhatWritesTimeoutMs / 1000 }) }}</p>
           <p v-if="pageGuardResult?.warning" class="hint">{{ pageGuardResult.warning }}</p>
           <p v-if="pageGuardResult?.error" class="error">{{ pageGuardResult.error }}</p>
           <div
@@ -2331,25 +2332,25 @@ onMounted(() => {
             class="find-writes-row"
           >
             <code>RIP 0x{{ hit.instructionPointer }}</code>
-            <span>cible 0x{{ hit.address }}</span>
+            <span>{{ $t('expert.targetShort') }} 0x{{ hit.address }}</span>
             <span>{{ hit.module || '-' }}</span>
             <span>+0x{{ hit.moduleOffset || '0' }}</span>
             <span>T{{ hit.threadId }}</span>
-            <span>{{ hit.isWrite ? 'écriture' : 'lecture' }}</span>
+            <span>{{ hit.isWrite ? $t('expert.write') : $t('expert.read') }}</span>
             <button class="btn btn-secondary compact" type="button" @click="previewFindWhatWritesHit(hit)">
-              Aperçu
+              {{ $t('expert.preview') }}
             </button>
             <button class="btn btn-secondary compact" type="button" @click="copyFindWhatWritesRip(hit)">
-              Copier
+              {{ $t('expert.copy') }}
             </button>
             <button class="btn btn-primary compact" type="button" :disabled="aobSignatureBusy" @click="generateAobSignatureFromHit(hit)">
-              Analyser
+              {{ $t('expert.analyze') }}
             </button>
             <button class="btn btn-secondary compact" type="button" :disabled="disassembleBackwardBusy" @click="disassembleBackwardFromHit(hit)">
-              Désassembler en amont
+              {{ $t('expert.disassembleBackward') }}
             </button>
             <button class="btn btn-secondary compact" type="button" :disabled="testCandidateFieldsBusy" @click="testCandidateFieldsFromHit(hit)">
-              Tester automatiquement
+              {{ $t('expert.testAutomatically') }}
             </button>
             <button
               class="btn btn-primary compact"
@@ -2364,9 +2365,9 @@ onMounted(() => {
         <!-- PHASE 250 : Consensus multi-round pour Changed Pages Diff -->
         <div v-if="changedPagesSessionActive || changedPagesSessionBusy || changedPagesConsensusResult" class="find-writes-panel">
           <div class="source-list-title">
-            <strong>Consensus multi-round (Changed Pages)</strong>
+            <strong>{{ $t('expert.multiRoundConsensus') }}</strong>
             <span v-if="changedPagesConsensusResult?.roundsApplied">{{ changedPagesConsensusResult.roundsApplied }} round(s)</span>
-            <span v-if="changedPagesConsensusResult?.entriesConfirmed">{{ changedPagesConsensusResult.entriesConfirmed }} confirmé(s)</span>
+            <span v-if="changedPagesConsensusResult?.entriesConfirmed">{{ $t('expert.confirmedCount', { count: changedPagesConsensusResult.entriesConfirmed }) }}</span>
             <button
               v-if="changedPagesSessionActive"
               class="btn btn-secondary compact"
@@ -2374,41 +2375,41 @@ onMounted(() => {
               :disabled="changedPagesSessionBusy"
               @click="stopChangedPagesSession()"
             >
-              Arrêter session
+              {{ $t('expert.stopSession') }}
             </button>
           </div>
-          <p class="hint">Session multi-round : capture plusieurs snapshots de pages modifiées, accumule les hits, et classe les adresses par stabilité. Utile quand les pages deviennent illisibles entre deux captures (SC2, jeux AAA).</p>
-          <p v-if="changedPagesSessionBusy" class="hint">Session en cours...</p>
+          <p class="hint">{{ $t('expert.multiRoundSessionHint') }}</p>
+          <p v-if="changedPagesSessionBusy" class="hint">{{ $t('expert.sessionInProgress') }}</p>
           <p v-if="changedPagesConsensusResult?.error" class="error">{{ changedPagesConsensusResult.error }}</p>
           <div class="controls" style="margin-bottom: 8px;">
             <button class="btn btn-primary compact" type="button" :disabled="changedPagesSessionBusy || changedPagesSessionActive" @click="startChangedPagesSession()">
-              Démarrer session
+              {{ $t('expert.startSession') }}
             </button>
             <button class="btn btn-primary compact" type="button" :disabled="changedPagesRoundBusy || !changedPagesSessionActive" @click="applyChangedPagesRound()">
-              Appliquer round
+              {{ $t('expert.applyRound') }}
             </button>
             <button class="btn btn-secondary compact" type="button" :disabled="!changedPagesSessionActive" @click="getChangedPagesConsensus()">
-              Consensus
+              {{ $t('expert.consensus') }}
             </button>
           </div>
           <div class="controls" style="margin-bottom: 8px;">
             <input
               v-model="changedPagesRoundPreviousValue"
               class="input"
-              placeholder="Valeur avant (ex: 140)"
+              :placeholder="$t('expert.beforeValuePlaceholder')"
               :disabled="changedPagesRoundBusy || !changedPagesSessionActive"
             />
             <input
               v-model="changedPagesRoundCurrentValue"
               class="input"
-              placeholder="Valeur après (ex: 135)"
+              :placeholder="$t('expert.afterValuePlaceholder')"
               :disabled="changedPagesRoundBusy || !changedPagesSessionActive"
             />
           </div>
           <div v-if="changedPagesConsensusResult?.confirmedEntries?.length" class="consensus-entries">
             <div class="source-list-title">
-              <strong>Entrées classées</strong>
-              <span>{{ changedPagesConsensusResult.confirmedEntries.length }} adresse(s)</span>
+              <strong>{{ $t('expert.rankedEntries') }}</strong>
+              <span>{{ $t('expert.addressCount', { count: changedPagesConsensusResult.confirmedEntries.length }) }}</span>
             </div>
             <div
               v-for="(entry, index) in changedPagesConsensusResult.confirmedEntries.slice(0, 30)"
@@ -2419,34 +2420,34 @@ onMounted(() => {
               <code>0x{{ entry.address }}</code>
               <span>{{ entry.type || '-' }}</span>
               <span>{{ entry.variantLabel || '-' }}</span>
-              <span>vu {{ entry.roundsSeen }}x</span>
-              <span>confirmé {{ entry.roundsConfirmed }}x</span>
-              <span v-if="entry.staleRounds > 0" class="warning-text">stale {{ entry.staleRounds }}x</span>
-              <span v-if="entry.contradictionRounds > 0" class="error">contradiction {{ entry.contradictionRounds }}x</span>
-              <span>score {{ entry.score?.toFixed(2) }}</span>
-              <span v-if="entry.lastValueNumber !== undefined">val: {{ entry.lastValueNumber }}</span>
+              <span>{{ $t('expert.seenCount', { count: entry.roundsSeen }) }}</span>
+              <span>{{ $t('expert.confirmedTimes', { count: entry.roundsConfirmed }) }}</span>
+              <span v-if="entry.staleRounds > 0" class="warning-text">{{ $t('expert.staleTimes', { count: entry.staleRounds }) }}</span>
+              <span v-if="entry.contradictionRounds > 0" class="error">{{ $t('expert.contradictionTimes', { count: entry.contradictionRounds }) }}</span>
+              <span>{{ $t('expert.score') }} {{ entry.score?.toFixed(2) }}</span>
+              <span v-if="entry.lastValueNumber !== undefined">{{ $t('expert.valueShort') }} {{ entry.lastValueNumber }}</span>
               <button class="btn btn-secondary compact" type="button" @click="validatePageStability(entry.address)">
-                Stabilité
+                {{ $t('expert.stability') }}
               </button>
             </div>
           </div>
           <div v-if="changedPagesStabilityResult" class="stability-result" style="margin-top: 8px;">
             <p :class="changedPagesStabilityResult.stable ? 'hint' : 'error'">
-              {{ changedPagesStabilityResult.reason || 'Résultat stabilité inconnu.' }}
+              {{ changedPagesStabilityResult.reason || $t('expert.unknownStabilityResult') }}
             </p>
             <p v-if="changedPagesStabilityResult.readCount" class="hint">
-              {{ changedPagesStabilityResult.readCount }} lecture(s), {{ changedPagesStabilityResult.changeCount }} variation(s), {{ changedPagesStabilityResult.unreadable }} illisible(s).
+              {{ $t('expert.stabilitySummary', { reads: changedPagesStabilityResult.readCount, changes: changedPagesStabilityResult.changeCount, unreadable: changedPagesStabilityResult.unreadable }) }}
             </p>
           </div>
         </div>
         <div v-if="disassembleBackwardResult || disassembleBackwardBusy" class="find-writes-panel">
           <div class="source-list-title">
-            <strong>Désassembler en amont</strong>
+            <strong>{{ $t('expert.disassembleBackward') }}</strong>
             <InfoDot topic="disassembleBackward" />
-            <span v-if="disassembleBackwardResult?.instructions">{{ disassembleBackwardResult.instructions.length }} instruction(s)</span>
+            <span v-if="disassembleBackwardResult?.instructions">{{ $t('expert.instructionCount', { count: disassembleBackwardResult.instructions.length }) }}</span>
           </div>
-          <p class="hint">Instructions qui précèdent l'écriture capturée — utile pour trouver le vrai champ source (actuel/cible) d'un compteur animé, plutôt que le champ affiché.</p>
-          <p v-if="disassembleBackwardBusy" class="hint">Lecture mémoire en cours...</p>
+          <p class="hint">{{ $t('expert.disassembleBackwardHint') }}</p>
+          <p v-if="disassembleBackwardBusy" class="hint">{{ $t('expert.memoryReadInProgress') }}</p>
           <p v-if="disassembleBackwardResult?.error" class="error">{{ disassembleBackwardResult.error }}</p>
           <div
             v-for="(instr, index) in disassembleBackwardResult?.instructions ?? []"
@@ -2458,18 +2459,18 @@ onMounted(() => {
             <span>{{ instr.bytes }}</span>
             <strong>{{ instr.disassembly || instr.mnemonicHint }}</strong>
             <span v-if="instr.isCandidateField" class="quality-strong">
-              champ candidat : [{{ instr.memBaseRegister }}+0x{{ instr.memDisplacement?.toString(16) }}]
+              {{ $t('expert.candidateFieldLabel', { register: instr.memBaseRegister, offset: instr.memDisplacement?.toString(16) }) }}
             </span>
           </div>
         </div>
         <div v-if="testCandidateFieldsResult || testCandidateFieldsBusy" class="find-writes-panel">
           <div class="source-list-title">
-            <strong>Tester automatiquement</strong>
+            <strong>{{ $t('expert.testAutomatically') }}</strong>
             <InfoDot topic="testCandidateFields" />
-            <span v-if="testCandidateFieldsResult?.results">{{ testCandidateFieldsResult.results.length }} champ(s) testé(s)</span>
+            <span v-if="testCandidateFieldsResult?.results">{{ $t('expert.fieldsTestedCount', { count: testCandidateFieldsResult.results.length }) }}</span>
           </div>
-          <p class="hint">Écrit une valeur test transitoire sur chaque champ candidat, attend quelques secondes, relit, puis restaure — pour savoir lequel tient sans lire d'assembleur.</p>
-          <p v-if="testCandidateFieldsBusy" class="hint">Test en cours (peut prendre jusqu'à une minute selon le nombre de champs)...</p>
+          <p class="hint">{{ $t('expert.testCandidateFieldsHint') }}</p>
+          <p v-if="testCandidateFieldsBusy" class="hint">{{ $t('expert.testInProgress') }}</p>
           <p v-if="testCandidateFieldsResult?.error" class="error">{{ testCandidateFieldsResult.error }}</p>
           <div
             v-for="(outcome, index) in testCandidateFieldsResult?.results ?? []"
@@ -2481,52 +2482,52 @@ onMounted(() => {
             <span>[{{ outcome.memBaseRegister }}+0x{{ outcome.memDisplacement?.toString(16) }}]</span>
             <span>{{ outcome.valueType }}</span>
             <span :class="outcome.verdict === 'holds' ? 'quality-strong' : outcome.verdict === 'reverts' ? 'hint' : 'error'">
-              {{ outcome.verdict === 'holds' ? `tient (${outcome.ticksSurvived ?? 0} sondage(s))` : outcome.verdict === 'reverts' ? 'repart' : (outcome.error || 'erreur') }}
+              {{ outcome.verdict === 'holds' ? $t('expert.holdsWithTicks', { ticks: outcome.ticksSurvived ?? 0 }) : outcome.verdict === 'reverts' ? $t('expert.verdictReverts') : (outcome.error || $t('expert.verdictError')) }}
             </span>
           </div>
         </div>
         <div v-if="uiStringOriginResult" class="metrics">
           <span>Cluster: {{ uiStringOriginResult.clusterStart ? `0x${uiStringOriginResult.clusterStart}` : '-' }}</span>
-          <span>Cibles: {{ formatNumber(uiStringOriginResult.targetCount) }}</span>
+          <span>{{ $t('expert.targets') }} {{ formatNumber(uiStringOriginResult.targetCount) }}</span>
           <span>Span: {{ formatBytes(uiStringOriginResult.clusterSpanBytes) }}</span>
           <span v-if="uiStringOriginResult.commonStrideBytes">Stride: {{ formatBytes(uiStringOriginResult.commonStrideBytes) }}</span>
           <span>Backrefs: {{ formatNumber(uiStringOriginResult.pointerRefsFound) }}</span>
-          <span>Lu: {{ formatBytes(uiStringOriginResult.bytesScanned) }}</span>
+          <span>{{ $t('expert.readShort') }} {{ formatBytes(uiStringOriginResult.bytesScanned) }}</span>
         </div>
         <p v-if="uiStringOriginResult?.error" class="error">{{ uiStringOriginResult.error }}</p>
         <div v-if="uiStringOriginResult?.pointerRefs.length" class="origin-list">
           <div class="source-list-title">
-            <strong>Pointeurs vers les strings</strong>
+            <strong>{{ $t('expert.pointersToStrings') }}</strong>
             <span>{{ formatNumber(uiStringOriginResult.pointerRefs.length) }} ref(s)</span>
           </div>
           <div v-for="ref in uiStringOriginResult.pointerRefs.slice(0, 80)" :key="`${ref.address}:${ref.pointsTo}`" class="origin-row">
             <code>0x{{ ref.address }}</code>
             <span>→ 0x{{ ref.pointsTo }}</span>
-            <span>{{ ref.distanceToString ? `${formatNumber(ref.distanceToString)} o` : 'exact' }}</span>
+            <span>{{ ref.distanceToString ? `${formatNumber(ref.distanceToString)} o` : $t('expert.exact') }}</span>
             <span>{{ ref.memoryType || '-' }}</span>
             <span>{{ ref.protection || '-' }}</span>
           </div>
         </div>
         <div v-if="intelligentUiCandidates.length > 0" class="intelligence-panel">
           <div class="source-list-title">
-            <strong>Pistes intelligentes</strong>
+            <strong>{{ $t('expert.smartLeads') }}</strong>
             <span>top {{ formatNumber(Math.min(12, intelligentUiCandidates.length)) }}/{{ formatNumber(intelligentUiCandidates.length) }}</span>
             <div class="source-actions">
               <button class="btn btn-secondary compact" type="button" @click="selectTopIntelligentUiCandidates()">
-                Cocher Top IA
+                {{ $t('expert.checkTopAi') }}
               </button>
               <button class="btn btn-secondary compact" type="button" :disabled="selectedUiSourceAddresses.length === 0" @click="watchSelectedUiSources()">
-                Watch cochés
+                {{ $t('expert.watchChecked') }}
               </button>
               <button class="btn btn-primary compact" type="button" :disabled="selectedUiSourceAddresses.length === 0" @click="useSelectedUiSourcesForWrite()">
-                Write cochés
+                {{ $t('expert.writeChecked') }}
               </button>
               <button class="btn btn-secondary compact" type="button" @click="copyInvestigationReport()">
-                Copier rapport
+                {{ $t('expert.copyReport') }}
               </button>
-              <label class="checkbox-label debugger-check" title="Nécessaire pour utiliser Écrit par sur les candidats ci-dessous.">
+              <label class="checkbox-label debugger-check" :title="$t('expert.debuggerRequiredTitle')">
                 <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />
-                Debugger autorisé
+                {{ $t('expert.debuggerAuthorized') }}
               </label>
             </div>
           </div>
@@ -2541,28 +2542,28 @@ onMounted(() => {
             <span>{{ candidate.variantLabel || candidate.type }}</span>
             <span>{{ candidate.currentValue }}</span>
             <span class="intelligence-reasons">{{ candidate.reasons.join(' · ') }}</span>
-            <button class="btn btn-secondary compact" type="button" @click="selectIntelligentUiCandidate(candidate)">Cocher</button>
+            <button class="btn btn-secondary compact" type="button" @click="selectIntelligentUiCandidate(candidate)">{{ $t('expert.check') }}</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate.source)">Watch</button>
             <button class="btn btn-secondary compact" type="button" @click="analyzeStructureAroundSource(candidate.source)">Struct</button>
-            <button class="btn btn-primary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate.source)">Écrit par</button>
-            <button class="btn btn-secondary compact" type="button" :disabled="pageGuardBusy" title="Sans passer par le canal de debug Win32 (DebugActiveProcess)" @click="pageGuardWatchForSource(candidate.source)">Écrit par (sans debugger)</button>
+            <button class="btn btn-primary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate.source)">{{ $t('expert.writtenBy') }}</button>
+            <button class="btn btn-secondary compact" type="button" :disabled="pageGuardBusy" :title="$t('expert.withoutWin32DebugChannel')" @click="pageGuardWatchForSource(candidate.source)">{{ $t('expert.writtenByNoDebugger') }}</button>
           </div>
         </div>
         <div v-if="structureProbeResult" class="structure-panel">
           <div class="source-list-title">
-            <strong>Structure autour source</strong>
-            <span v-if="structureProbeResult.address">0x{{ structureProbeResult.address }} · {{ formatNumber(Number(structureProbeResult.rowCount ?? 0)) }} ligne(s)</span>
+            <strong>{{ $t('expert.structureAroundSource') }}</strong>
+            <span v-if="structureProbeResult.address">0x{{ structureProbeResult.address }} · {{ $t('expert.lineCount', { count: formatNumber(Number(structureProbeResult.rowCount ?? 0)) }) }}</span>
           </div>
           <div class="structure-actions">
             <button class="btn btn-secondary compact" type="button" :disabled="structureProbeRows.length === 0" @click="captureStructure('A')">
-              Capture A
+              {{ $t('expert.captureA') }}
             </button>
             <button class="btn btn-secondary compact" type="button" :disabled="structureProbeRows.length === 0" @click="captureStructure('B')">
-              Capture B
+              {{ $t('expert.captureB') }}
             </button>
-            <input v-model="structureTemplateName" class="input compact-input" placeholder="Nom template" />
+            <input v-model="structureTemplateName" class="input compact-input" :placeholder="$t('expert.templateNamePlaceholder')" />
             <button class="btn btn-primary compact" type="button" :disabled="structureProbeRows.length === 0" @click="saveCurrentStructureTemplate()">
-              Sauver template
+              {{ $t('expert.saveTemplate') }}
             </button>
             <button
               class="btn btn-secondary compact"
@@ -2570,7 +2571,7 @@ onMounted(() => {
               :disabled="structureDeltaBusy || !structureCaptureA || !structureCaptureB"
               @click="inferStructureDelta()"
             >
-              Delta instances
+              {{ $t('expert.instanceDelta') }}
             </button>
             <span v-if="structureCaptureAName">A: {{ structureCaptureAName }}</span>
             <span v-if="structureCaptureBName">B: {{ structureCaptureBName }}</span>
@@ -2578,9 +2579,9 @@ onMounted(() => {
           <p v-if="structureProbeResult.error" class="error">{{ structureProbeResult.error }}</p>
           <div v-if="structureDeltaResult" class="structure-delta">
             <div class="source-list-title">
-              <strong>Espacement instances</strong>
+              <strong>{{ $t('expert.instanceSpacing') }}</strong>
               <span v-if="structureDeltaResult.success">
-                stride {{ formatSignedDelta(structureDeltaResult.instanceDelta) }} · champ +0x{{ Number(structureDeltaResult.fieldOffsetA ?? 0).toString(16).toUpperCase() }}
+                {{ $t('expert.strideFieldSummary', { stride: formatSignedDelta(structureDeltaResult.instanceDelta), offset: Number(structureDeltaResult.fieldOffsetA ?? 0).toString(16).toUpperCase() }) }}
               </span>
             </div>
             <p v-if="structureDeltaResult.error" class="error">{{ structureDeltaResult.error }}</p>
@@ -2592,9 +2593,9 @@ onMounted(() => {
               :class="{ marked: candidate.inputInstance }"
             >
               <span>#{{ candidate.relativeIndex }}</span>
-              <code>base 0x{{ candidate.baseAddress }}</code>
-              <code>champ 0x{{ candidate.fieldAddress }}</code>
-              <span>{{ candidate.inputInstance ? 'capture' : 'probable' }}</span>
+              <code>{{ $t('expert.baseShort') }} 0x{{ candidate.baseAddress }}</code>
+              <code>{{ $t('expert.fieldShort') }} 0x{{ candidate.fieldAddress }}</code>
+              <span>{{ candidate.inputInstance ? $t('expert.capture') : $t('expert.probable') }}</span>
               <button
                 class="btn btn-secondary compact"
                 type="button"
@@ -2607,7 +2608,7 @@ onMounted(() => {
           <div v-if="structureDiffRows.length > 0" class="structure-diff">
             <div class="source-list-title">
               <strong>Diff A/B</strong>
-              <span>{{ formatNumber(structureDiffRows.filter((row) => row.changed).length) }} changement(s)</span>
+              <span>{{ $t('expert.changeCount', { count: formatNumber(structureDiffRows.filter((row) => row.changed).length) }) }}</span>
             </div>
             <div
               v-for="row in structureDiffRows"
@@ -2617,9 +2618,9 @@ onMounted(() => {
             >
               <code>0x{{ row.address }}</code>
               <span>{{ row.offset >= 0 ? '+' : '' }}{{ row.offset }}</span>
-              <strong>{{ row.type || 'field' }}</strong>
+              <strong>{{ row.type || $t('expert.field') }}</strong>
               <span>{{ row.beforeValue || '-' }} → {{ row.afterValue || '-' }}</span>
-              <span>{{ row.changed ? 'changé' : 'stable' }}</span>
+              <span>{{ row.changed ? $t('expert.changed') : $t('expert.stable') }}</span>
             </div>
           </div>
           <div
@@ -2647,51 +2648,51 @@ onMounted(() => {
               type="button"
               @click="bookmarkStructureRow(row)"
             >
-              Note
+              {{ $t('expert.note') }}
             </button>
           </div>
         </div>
         <div v-if="uiStringSourceCandidates.length > 0" class="source-list">
           <div class="source-list-title">
-            <strong>Sources numériques proches</strong>
-            <span>{{ formatNumber(filteredUiStringSourceCandidates.length) }}/{{ formatNumber(uiStringSourceCandidates.length) }} source(s) · {{ formatNumber(selectedUiSourceAddresses.length) }} cochée(s)</span>
+            <strong>{{ $t('expert.nearbyNumericSources') }}</strong>
+            <span>{{ $t('expert.sourcesFilterSummary', { shown: formatNumber(filteredUiStringSourceCandidates.length), total: formatNumber(uiStringSourceCandidates.length), checked: formatNumber(selectedUiSourceAddresses.length) }) }}</span>
             <div class="source-filter-bar">
               <select v-model="uiStringSourceTypeFilter" class="input select compact-input" @change="uiStringSourceBatchIndex = 0">
-                <option value="all">Tous types</option>
+                <option value="all">{{ $t('expert.allTypes') }}</option>
                 <option v-for="type in uiStringSourceTypeOptions" :key="type" :value="type">{{ type }}</option>
               </select>
               <select v-model="uiStringSourceVariantFilter" class="input select compact-input" @change="uiStringSourceBatchIndex = 0">
-                <option value="all">Tous encodages</option>
+                <option value="all">{{ $t('expert.allEncodings') }}</option>
                 <option v-for="variant in uiStringSourceVariantOptions" :key="variant" :value="variant">{{ variant }}</option>
               </select>
               <select v-model.number="uiStringSourceBatchSize" class="input select compact-input" @change="uiStringSourceBatchIndex = 0">
-                <option v-for="size in uiStringSourceBatchSizeOptions" :key="size" :value="size">{{ size }}/lot</option>
+                <option v-for="size in uiStringSourceBatchSizeOptions" :key="size" :value="size">{{ $t('expert.perBatch', { size }) }}</option>
               </select>
             </div>
             <div class="source-actions">
               <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="previousUiSourceBatch()">
-                Prec
+                {{ $t('expert.prev') }}
               </button>
               <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="selectUiSourceBatch()">
-                Lot {{ boundedUiStringSourceBatchIndex + 1 }}/{{ uiStringSourceBatchCount }}
+                {{ $t('expert.batch') }} {{ boundedUiStringSourceBatchIndex + 1 }}/{{ uiStringSourceBatchCount }}
               </button>
               <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="nextUiSourceBatch()">
-                Suiv
+                {{ $t('expert.next') }}
               </button>
               <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="selectTopUiSources()">
-                Top {{ uiStringSourceSafeSelectionLimit }}
+                {{ $t('expert.top') }} {{ uiStringSourceSafeSelectionLimit }}
               </button>
               <button class="btn btn-secondary compact" type="button" :disabled="currentUiStringSourceBatch.length === 0" @click="watchCurrentUiSourceBatch()">
-                Watch lot
+                {{ $t('expert.watchBatch') }}
               </button>
               <button class="btn btn-secondary compact" type="button" :disabled="selectedUiSourceAddresses.length === 0" @click="watchSelectedUiSources()">
-                Watch cochés
+                {{ $t('expert.watchChecked') }}
               </button>
               <button class="btn btn-secondary compact" type="button" :disabled="safeFilteredUiStringSources.length === 0" @click="selectAllUiSources()">
-                Tout cocher sûr
+                {{ $t('expert.checkAllSafe') }}
               </button>
               <button class="btn btn-secondary compact" type="button" @click="clearUiSourceSelection()">
-                Tout décocher
+                {{ $t('expert.uncheckAll') }}
               </button>
               <button
                 class="btn btn-primary compact"
@@ -2699,16 +2700,16 @@ onMounted(() => {
                 :disabled="selectedUiSourceAddresses.length === 0"
                 @click="useSelectedUiSourcesForWrite()"
               >
-                Envoyer {{ formatNumber(selectedUiSourceAddresses.length) }} vers Write
+                {{ $t('expert.sendToWrite', { count: formatNumber(selectedUiSourceAddresses.length) }) }}
               </button>
-              <label class="checkbox-label debugger-check" title="Nécessaire pour utiliser Écrit par sur les candidats ci-dessous.">
+              <label class="checkbox-label debugger-check" :title="$t('expert.debuggerRequiredTitle')">
                 <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />
-                Debugger autorisé
+                {{ $t('expert.debuggerAuthorized') }}
               </label>
             </div>
           </div>
           <p v-if="selectedUiSourceAddresses.length > 50" class="source-warning">
-            Sélection massive : écrire beaucoup d'adresses peut rendre la cible instable. Teste plutôt par petits paquets.
+            {{ $t('expert.massiveSelectionWarning') }}
           </p>
           <div
             v-for="candidate in filteredUiStringSourceCandidates"
@@ -2730,12 +2731,12 @@ onMounted(() => {
               {{ candidateCurrentValue(candidate.address) }}
             </strong>
             <span>{{ candidate.trackHits ? `${candidate.trackHits} hit(s)` : `${formatNumber(candidate.distanceBytes)} o` }}</span>
-            <button class="btn btn-primary compact" type="button" @click="useUiSourceCandidate(candidate)">Utiliser</button>
+            <button class="btn btn-primary compact" type="button" @click="useUiSourceCandidate(candidate)">{{ $t('expert.use') }}</button>
             <button class="btn btn-secondary compact" type="button" @click="watchUiSourceCandidate(candidate)">Watch</button>
             <button class="btn btn-secondary compact" type="button" @click="analyzeStructureAroundSource(candidate)">Struct</button>
             <button class="btn btn-primary compact" type="button" :disabled="findWhatWritesBusy || !findWhatWritesAcknowledged" @click="findWhatWritesForSource(candidate)">
-              Écrit par
-            </button> <button class="btn btn-secondary compact" type="button" :disabled="findWhatAccessesBusy || !findWhatWritesAcknowledged" @click="findWhatAccessesForSource(candidate)">Lu par</button>
+              {{ $t('expert.writtenBy') }}
+            </button> <button class="btn btn-secondary compact" type="button" :disabled="findWhatAccessesBusy || !findWhatWritesAcknowledged" @click="findWhatAccessesForSource(candidate)">{{ $t('expert.readBy') }}</button>
           </div>
         </div>
       </section>
