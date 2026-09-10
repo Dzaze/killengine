@@ -3225,5 +3225,181 @@
     "multiWriteLogDetail": "{done}/{total} réussie(s){kernelSuffix}.",
     "autoKernelWriteLogDetail": "{done}/{total} réussie(s).",
     "autoWriteLogDetail": "{done}/{total} réussie(s)."
+  },
+  "assistantSmartSearchStore": {
+    "common": {
+      "valueEquals": "valeur = {value}",
+      "noMatch": "aucun match",
+      "unknownError": "erreur inconnue"
+    },
+    "errors": {
+      "backendNotExposed": "Backend non exposé."
+    },
+    "workflow": {
+      "presetMissing": "Preset introuvable",
+      "presetTitle": "Preset: {title}",
+      "presetLoadedTitle": "Preset chargé: {title}",
+      "presetLoadedDetail": "{description} Prochaine étape: {nextStep}",
+      "presetLoadedMessage": "Preset chargé: {title}. {nextStep}"
+    },
+    "scan": {
+      "newScan": "Nouveau scan",
+      "contextCleared": "Contexte de scan vidé.",
+      "localNewScan": "Nouveau scan local",
+      "backendNotCleared": "Backend non purgé : {error}",
+      "ready": "Nouveau scan prêt."
+    },
+    "guidedChange": {
+      "askNewValue": "Parfait ! Donne-moi maintenant la nouvelle valeur affichée dans le jeu."
+    },
+    "autoMemory": {
+      "unavailableTitle": "Mémoire Auto indisponible",
+      "clearedTitle": "Mémoire Auto vidée"
+    },
+    "chatWrite": {
+      "unavailable": "Écriture chat indisponible",
+      "ok": "Écriture chat OK",
+      "failed": "Écriture chat échouée",
+      "executed": "Écriture chat exécutée"
+    },
+    "chatFreeze": {
+      "unavailable": "Freeze chat indisponible",
+      "ok": "Freeze chat OK",
+      "failed": "Freeze chat échoué",
+      "executed": "Freeze chat exécuté"
+    },
+    "chatRewrite": {
+      "unavailable": "Réécriture chat indisponible",
+      "ok": "Réécriture chat OK",
+      "failed": "Réécriture chat échouée",
+      "executed": "Réécriture chat exécutée"
+    },
+    "memoryTargets": {
+      "cleared": "J'ai oublié {count} adresse(s) mémoire active(s).",
+      "clearFailed": "Impossible d'oublier les adresses mémoire : {error}"
+    },
+    "checkpoints": {
+      "encryptedScanLabel": "Scan chiffré 0x{address}",
+      "uiStringReason": "String affichée candidate ; analyser les sources numériques avant toute écriture."
+    },
+    "uiSources": {
+      "autoAnalyzedTitle": "Sources UI auto analysées",
+      "autoAnalyzedDetail": "{count} source(s) numérique(s) depuis Trace UI fallback."
+    },
+    "investigation": {
+      "manualFallback": "Investigation manuelle",
+      "bestCandidate": "Meilleure piste actuelle : 0x{address} ({type}) · score {score}%.",
+      "why": "Pourquoi : {reasons}.",
+      "nextActionWatch": "Prochaine action recommandée : Watch cette piste, puis lance Écrit par si elle suit bien la valeur affichée.",
+      "noScoredCandidate": "Je n'ai pas encore de piste scorée. Lance Trace UI string, puis Analyser sources ou Démarrer enquête.",
+      "debuggerHits": "{count} hit(s) debugger capturé(s) : tu peux analyser le RIP puis stabiliser l'AOB avant de sauver le trainer.",
+      "debuggerCancelled": "La dernière capture debugger a été annulée.",
+      "aobWeak": "AOB : {weakQuality} signature(s) faible(s), {blockedTrainer} blocage(s) Trainer. Stabilise avant de sauver/appliquer.",
+      "aobUnique": "AOB : signature unique et qualité acceptable, bonne candidate pour un patch trainer.",
+      "aobMultiple": "AOB : {count} matches, il faut stabiliser avant de patcher.",
+      "aobNone": "AOB : aucune signature exploitable pour le moment."
+    },
+    "intentRationale": {
+      "investigationDecision": "L'utilisateur demande une décision sur l'enquête mémoire courante.",
+      "autoResolvePlan": "Planification proactive avec exécution des actions sûres uniquement."
+    },
+    "search": {
+      "thinking": "Je vais rechercher ça en mémoire...",
+      "notEnoughInfo": "Je n'ai pas assez d'informations pour agir. Donne-moi une valeur à chercher ou une adresse à utiliser.",
+      "error": "Erreur de recherche : {error}",
+      "assistantSearchByType": "Recherche Assistant en {type}"
+    },
+    "trainer": {
+      "noFeatures": "Trainer : aucune feature locale pour le moment.",
+      "featuresFound": "Trainer : {count} feature(s) locale(s) trouvée(s). Tu peux en créer une nouvelle ou en gérer l'activation dans l'onglet Trainer.",
+      "createFailed": "Trainer : je n'ai pas pu créer la feature (adresse manquante ou invalide).",
+      "createdAbsolute": "Trainer : feature write créée pour {address} ({valueType} = {value}), mais aucun locator résilient trouvé — elle reste en adresse absolue brute et ne survivra probablement pas à un relaunch ou un changement de scène du process cible. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.",
+      "createdWithLocator": "Trainer : feature write créée pour {address} ({valueType} = {value}), {locatorSummary}. Elle n'est pas activée automatiquement ; vérifie-la dans l'onglet Trainer avant application.",
+      "deleteRequested": "Trainer : suppression demandée pour la feature #{id}."
+    },
+    "autoResolve": {
+      "unavailable": "Auto-résolution non exposée par ce backend.",
+      "userObjective": "Objectif utilisateur",
+      "thinking": "Je prépare un plan auto et je lance la première action sûre...",
+      "safeStepTitle": "Auto safe: {tool}",
+      "toolFallback": "outil",
+      "safeActionExecuted": "Action safe exécutée",
+      "candidateCount": "{count} candidat(s)",
+      "stepFallback": "Étape",
+      "nextBestHint": "Priorité assistant: {label}{confidence} — {reason}",
+      "learnedHint": "Mémoire jeu: {starts} passe(s) Auto, {noCandidate} sans candidat.",
+      "strategyHint": "Stratégie: {label}{score}{reason}",
+      "telemetryHint": "Signal telemetry: {label} — {nextAction}",
+      "displayValueHint": "Rapport valeurs affichées: {recommendation}",
+      "displayValueFallback": "Trace UI string puis sources numériques confirmées.",
+      "planGenerated": "Plan auto généré.",
+      "context": "Contexte: {summary}",
+      "plan": "Plan:\n{plan}",
+      "checkpointConfirmation": "Checkpoint confirmation",
+      "confirmationRequired": "Confirmation utilisateur requise.",
+      "errorTitle": "Erreur Auto Resolve",
+      "errorMessage": "Erreur auto-résolution : {error}"
+    },
+    "commands": {
+      "useMemories": "j'utilise ces mémoires {addresses}",
+      "newSearch": "nouvelle recherche {value}",
+      "newSearchTyped": "nouvelle recherche {value} en {type}",
+      "newSearchTypedTarget": "nouvelle recherche {value} en {type} cible {target}",
+      "testOnlyAddress": "tester uniquement 0x{address} avec {value}",
+      "newSearchEmpty": "nouvelle recherche"
+    },
+    "singleWrite": {
+      "ok": "J'ai écrit {value} uniquement sur 0x{address}. Vérifie dans le jeu si c'est la bonne adresse.",
+      "okKernel": "J'ai écrit {value} uniquement sur 0x{address} via le driver kernel. Vérifie dans le jeu si c'est la bonne adresse.",
+      "failed": "L'écriture sur 0x{address} a échoué : {error}"
+    },
+    "encryptedScan": {
+      "guideTitle": "Scan chiffré guidé",
+      "guideDetail": "XOR/Add/Sub/NOT 16-bit borné depuis la valeur {value}.",
+      "finishedTitle": "Scan chiffré terminé",
+      "finishedDetail": "{matchesFound} match(es), {matchesReturned} retourné(s).",
+      "messageOk": "Scan chiffré guidé terminé : {count} match(es).",
+      "messageNoResult": "Scan chiffré guidé sans résultat exploitable : {error}."
+    },
+    "traceUi": {
+      "unavailable": "Trace UI string non exposé par ce backend.",
+      "guideTitle": "Trace UI string guidé",
+      "guideDetail": "Recherche de la valeur affichée \"{value}\" en ASCII/UTF-16.",
+      "trackingTitle": "Trace UI tracking",
+      "trackingDetail": "{count} string(s) suivie(s) vers \"{value}\".",
+      "finishedTitle": "Trace UI string terminé",
+      "finishedDetail": "{strings} string(s), {sources} source(s) numérique(s).",
+      "sourcesHypothesisLabel": "Sources numériques proches des strings UI",
+      "sourcesHypothesisReason": "{count} source(s) trouvée(s) ; tester par petits lots avant freeze.",
+      "messageOk": "Trace UI string a trouvé {strings} string(s) et {sources} source(s) numérique(s). Les meilleures sources sont dans Investigation/Trainer.",
+      "messageNoResult": "Trace UI string n'a pas donné de piste exploitable : {error}.",
+      "failedTitle": "Trace UI string échoué"
+    },
+    "unknown": {
+      "captureTitle": "Unknown Auto capture",
+      "captureDetail": "Aucun snapshot actif : capture initiale avant observation.",
+      "captureOk": "Snapshot Unknown capturé. Fais varier la valeur dans le processus, puis donne-moi la nouvelle observation pour que je lance increased/decreased/changed/stable.",
+      "captureFailed": "Capture Unknown impossible : {error}.",
+      "compareTitle": "Unknown Auto comparaison",
+      "compareDetail": "Observation \"{observation}\" -> mode {mode}.",
+      "finishedTitle": "Unknown Auto terminé",
+      "finishedDetailCheckpoint": "{count} candidat(s) après {mode}. Checkpoints prêts.",
+      "finishedDetailContinue": "{count} candidat(s) après {mode}. Continue avec une autre variation.",
+      "noCandidateAfter": "Aucun candidat après {mode}.",
+      "messageCheckpoint": "Unknown {mode} terminé : {count} candidat(s). J’ai préparé des checkpoints dans Investigation pour tester/freeze sous confirmation.",
+      "messageContinue": "Unknown {mode} terminé : {count} candidat(s). Fais encore varier la valeur et redonne-moi la nouvelle observation.",
+      "messageNoCandidate": "Unknown {mode} n’a rien gardé. Prochaine piste : Trace UI string ou scan chiffré borné."
+    },
+    "candidate": {
+      "keptTitle": "Candidat gardé 0x{address}",
+      "ignoredTitle": "Candidat ignoré 0x{address}",
+      "filterApplied": "Filtre appliqué sur cette adresse.",
+      "hiddenLocal": "Masqué dans la comparaison visuelle locale.",
+      "stateKept": "gardé",
+      "stateIgnored": "ignoré",
+      "stateVeryLikely": "très probable",
+      "stateToVerify": "à vérifier",
+      "stateWeak": "faible"
+    }
   }
 }

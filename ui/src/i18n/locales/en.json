@@ -3225,5 +3225,181 @@
     "multiWriteLogDetail": "{done}/{total} succeeded{kernelSuffix}.",
     "autoKernelWriteLogDetail": "{done}/{total} succeeded.",
     "autoWriteLogDetail": "{done}/{total} succeeded."
+  },
+  "assistantSmartSearchStore": {
+    "common": {
+      "valueEquals": "value = {value}",
+      "noMatch": "no match",
+      "unknownError": "unknown error"
+    },
+    "errors": {
+      "backendNotExposed": "Backend not exposed."
+    },
+    "workflow": {
+      "presetMissing": "Preset not found",
+      "presetTitle": "Preset: {title}",
+      "presetLoadedTitle": "Preset loaded: {title}",
+      "presetLoadedDetail": "{description} Next step: {nextStep}",
+      "presetLoadedMessage": "Preset loaded: {title}. {nextStep}"
+    },
+    "scan": {
+      "newScan": "New scan",
+      "contextCleared": "Scan context cleared.",
+      "localNewScan": "Local new scan",
+      "backendNotCleared": "Backend was not cleared: {error}",
+      "ready": "New scan ready."
+    },
+    "guidedChange": {
+      "askNewValue": "Perfect. Now give me the new value shown in the game."
+    },
+    "autoMemory": {
+      "unavailableTitle": "Auto memory unavailable",
+      "clearedTitle": "Auto memory cleared"
+    },
+    "chatWrite": {
+      "unavailable": "Chat write unavailable",
+      "ok": "Chat write OK",
+      "failed": "Chat write failed",
+      "executed": "Chat write executed"
+    },
+    "chatFreeze": {
+      "unavailable": "Chat freeze unavailable",
+      "ok": "Chat freeze OK",
+      "failed": "Chat freeze failed",
+      "executed": "Chat freeze executed"
+    },
+    "chatRewrite": {
+      "unavailable": "Chat rewrite unavailable",
+      "ok": "Chat rewrite OK",
+      "failed": "Chat rewrite failed",
+      "executed": "Chat rewrite executed"
+    },
+    "memoryTargets": {
+      "cleared": "I forgot {count} active memory address(es).",
+      "clearFailed": "Unable to forget memory addresses: {error}"
+    },
+    "checkpoints": {
+      "encryptedScanLabel": "Encrypted scan 0x{address}",
+      "uiStringReason": "Candidate displayed string; analyze numeric sources before writing anything."
+    },
+    "uiSources": {
+      "autoAnalyzedTitle": "Auto-analyzed UI sources",
+      "autoAnalyzedDetail": "{count} numeric source(s) from the Trace UI fallback."
+    },
+    "investigation": {
+      "manualFallback": "Manual investigation",
+      "bestCandidate": "Best current lead: 0x{address} ({type}) · score {score}%.",
+      "why": "Why: {reasons}.",
+      "nextActionWatch": "Recommended next action: watch this lead, then run What writes if it follows the displayed value.",
+      "noScoredCandidate": "I do not have a scored lead yet. Run Trace UI string, then Analyze sources or Start investigation.",
+      "debuggerHits": "{count} debugger hit(s) captured: analyze the RIP, then stabilize the AOB before saving the trainer.",
+      "debuggerCancelled": "The last debugger capture was cancelled.",
+      "aobWeak": "AOB: {weakQuality} weak signature(s), {blockedTrainer} Trainer block(s). Stabilize before saving/applying.",
+      "aobUnique": "AOB: unique signature with acceptable quality, a good candidate for a trainer patch.",
+      "aobMultiple": "AOB: {count} matches; stabilize before patching.",
+      "aobNone": "AOB: no usable signature yet."
+    },
+    "intentRationale": {
+      "investigationDecision": "The user is asking for a decision about the current memory investigation.",
+      "autoResolvePlan": "Proactive planning with only safe actions executed."
+    },
+    "search": {
+      "thinking": "I’ll search for that in memory...",
+      "notEnoughInfo": "I do not have enough information to act. Give me a value to search for or an address to use.",
+      "error": "Search error: {error}",
+      "assistantSearchByType": "Assistant search as {type}"
+    },
+    "trainer": {
+      "noFeatures": "Trainer: no local feature yet.",
+      "featuresFound": "Trainer: {count} local feature(s) found. You can create a new one or manage activation in the Trainer tab.",
+      "createFailed": "Trainer: I could not create the feature because the address is missing or invalid.",
+      "createdAbsolute": "Trainer: write feature created for {address} ({valueType} = {value}), but no resilient locator was found — it remains a raw absolute address and probably will not survive a relaunch or scene change in the target process. It is not activated automatically; verify it in the Trainer tab before applying.",
+      "createdWithLocator": "Trainer: write feature created for {address} ({valueType} = {value}), {locatorSummary}. It is not activated automatically; verify it in the Trainer tab before applying.",
+      "deleteRequested": "Trainer: deletion requested for feature #{id}."
+    },
+    "autoResolve": {
+      "unavailable": "Auto Resolve is not exposed by this backend.",
+      "userObjective": "User objective",
+      "thinking": "I’m preparing an auto plan and running the first safe action...",
+      "safeStepTitle": "Auto safe: {tool}",
+      "toolFallback": "tool",
+      "safeActionExecuted": "Safe action executed",
+      "candidateCount": "{count} candidate(s)",
+      "stepFallback": "Step",
+      "nextBestHint": "Assistant priority: {label}{confidence} — {reason}",
+      "learnedHint": "Game memory: {starts} Auto pass(es), {noCandidate} with no candidate.",
+      "strategyHint": "Strategy: {label}{score}{reason}",
+      "telemetryHint": "Telemetry signal: {label} — {nextAction}",
+      "displayValueHint": "Displayed-value report: {recommendation}",
+      "displayValueFallback": "Trace UI string, then confirmed numeric sources.",
+      "planGenerated": "Auto plan generated.",
+      "context": "Context: {summary}",
+      "plan": "Plan:\n{plan}",
+      "checkpointConfirmation": "Checkpoint confirmation",
+      "confirmationRequired": "User confirmation required.",
+      "errorTitle": "Auto Resolve error",
+      "errorMessage": "Auto Resolve error: {error}"
+    },
+    "commands": {
+      "useMemories": "use these memories {addresses}",
+      "newSearch": "new search {value}",
+      "newSearchTyped": "new search {value} as {type}",
+      "newSearchTypedTarget": "new search {value} as {type} target {target}",
+      "testOnlyAddress": "test only 0x{address} with {value}",
+      "newSearchEmpty": "new search"
+    },
+    "singleWrite": {
+      "ok": "I wrote {value} only to 0x{address}. Check in-game whether this is the right address.",
+      "okKernel": "I wrote {value} only to 0x{address} through the kernel driver. Check in-game whether this is the right address.",
+      "failed": "The write to 0x{address} failed: {error}"
+    },
+    "encryptedScan": {
+      "guideTitle": "Guided encrypted scan",
+      "guideDetail": "Bounded 16-bit XOR/Add/Sub/NOT scan from value {value}.",
+      "finishedTitle": "Encrypted scan finished",
+      "finishedDetail": "{matchesFound} match(es), {matchesReturned} returned.",
+      "messageOk": "Guided encrypted scan finished: {count} match(es).",
+      "messageNoResult": "Guided encrypted scan found no usable result: {error}."
+    },
+    "traceUi": {
+      "unavailable": "Trace UI string is not exposed by this backend.",
+      "guideTitle": "Guided Trace UI string",
+      "guideDetail": "Searching for displayed value \"{value}\" in ASCII/UTF-16.",
+      "trackingTitle": "Trace UI tracking",
+      "trackingDetail": "{count} string(s) tracked toward \"{value}\".",
+      "finishedTitle": "Trace UI string finished",
+      "finishedDetail": "{strings} string(s), {sources} numeric source(s).",
+      "sourcesHypothesisLabel": "Numeric sources near UI strings",
+      "sourcesHypothesisReason": "{count} source(s) found; test small batches before freezing.",
+      "messageOk": "Trace UI string found {strings} string(s) and {sources} numeric source(s). The best sources are in Investigation/Trainer.",
+      "messageNoResult": "Trace UI string did not produce a usable lead: {error}.",
+      "failedTitle": "Trace UI string failed"
+    },
+    "unknown": {
+      "captureTitle": "Unknown Auto capture",
+      "captureDetail": "No active snapshot: taking the initial capture before observation.",
+      "captureOk": "Unknown snapshot captured. Change the value in the process, then give me the new observation so I can run increased/decreased/changed/stable.",
+      "captureFailed": "Unknown capture failed: {error}.",
+      "compareTitle": "Unknown Auto comparison",
+      "compareDetail": "Observation \"{observation}\" -> mode {mode}.",
+      "finishedTitle": "Unknown Auto finished",
+      "finishedDetailCheckpoint": "{count} candidate(s) after {mode}. Checkpoints ready.",
+      "finishedDetailContinue": "{count} candidate(s) after {mode}. Continue with another variation.",
+      "noCandidateAfter": "No candidate after {mode}.",
+      "messageCheckpoint": "Unknown {mode} finished: {count} candidate(s). I prepared checkpoints in Investigation for testing/freezing after confirmation.",
+      "messageContinue": "Unknown {mode} finished: {count} candidate(s). Change the value again and give me the new observation.",
+      "messageNoCandidate": "Unknown {mode} kept nothing. Next lead: Trace UI string or a bounded encrypted scan."
+    },
+    "candidate": {
+      "keptTitle": "Candidate kept 0x{address}",
+      "ignoredTitle": "Candidate ignored 0x{address}",
+      "filterApplied": "Filter applied to this address.",
+      "hiddenLocal": "Hidden in the local visual comparison.",
+      "stateKept": "kept",
+      "stateIgnored": "ignored",
+      "stateVeryLikely": "very likely",
+      "stateToVerify": "to verify",
+      "stateWeak": "weak"
+    }
   }
 }
