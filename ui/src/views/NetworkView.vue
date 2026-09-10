@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
+const { t } = useI18n()
 
 // ── Blocage réseau (existant) ────────────────────────────────────
 const isNetworkBlocked = computed(() => store.networkBlockStatus?.blocked === true)
 const networkBlockStatusLabel = computed(() => {
-  if (!store.networkBlockStatus) return 'Inconnu'
-  return isNetworkBlocked.value ? 'Réseau coupé' : 'Réseau normal'
+  if (!store.networkBlockStatus) return t('network.block.unknown')
+  return isNetworkBlocked.value ? t('network.block.blocked') : t('network.block.unblocked')
 })
 
 function toggleNetworkBlock() {
@@ -87,11 +89,11 @@ const categoryIcon = (cat: string) => {
 
 const categoryLabel = (cat: string) => {
   switch (cat) {
-    case 'winsock': return 'Socket API'
-    case 'http': return 'HTTP / Web'
-    case 'dns': return 'DNS'
-    case 'crypto': return 'Chiffrement / TLS'
-    case 'system': return 'Système'
+    case 'winsock': return t('network.modules.category_winsock')
+    case 'http': return t('network.modules.category_http')
+    case 'dns': return t('network.modules.category_dns')
+    case 'crypto': return t('network.modules.category_crypto')
+    case 'system': return t('network.modules.category_system')
     default: return cat
   }
 }
@@ -135,14 +137,14 @@ watch(() => store.isAttached, (attached) => {
     </div>
 
     <PanelIntro
-      what="Analyse et contrôle du trafic réseau du processus attaché."
-      purpose="Diagnostiquer si une valeur mémoire instable vient d'une synchro serveur, intercepter/modifier le trafic HTTP, ou tester la tolérance réseau."
-      how="Attache un processus, observe les connexions et DLL réseau, puis utilise les outils d'action si nécessaire."
+      :what="$t('network.intro')"
+      :purpose="$t('network.introPurpose')"
+      :how="$t('network.introHow')"
     />
 
     <div v-if="!store.isAttached" class="empty-state">
-      <p>Attache d'abord un processus autorisé pour analyser ou contrôler son trafic réseau.</p>
-      <button class="btn btn-secondary" @click="store.activeView = 'process'">Aller à Processus</button>
+      <p>{{ $t('network.emptyDetail') }}</p>
+      <button class="btn btn-secondary" @click="store.activeView = 'process'">{{ $t('network.goToProcess') }}</button>
     </div>
 
     <template v-else>
@@ -163,7 +165,7 @@ watch(() => store.isAttached, (attached) => {
               :class="{ active: store.liveRefreshEnabled }"
               :disabled="store.networkConnectionsBusy"
               @click="toggleLiveRefresh"
-              :title="store.liveRefreshEnabled ? 'Arrêter le refresh live' : 'Démarrer le refresh live (2s)'"
+              :title="store.liveRefreshEnabled ? $t('network.connections.stopLiveTitle') : $t('network.connections.startLiveTitle')"
             >
               {{ $t('network.connections.live') }} 🔄
             </button>
@@ -171,19 +173,19 @@ watch(() => store.isAttached, (attached) => {
         </div>
 
         <div class="status-band">
-          <span>Total : <strong>{{ totalConnections }}</strong> {{ $t('network.connections.totalLabel') }}</span>
-          <span>Actives : <strong>{{ establishedConnections }}</strong> {{ $t('network.connections.establishedLabel') }}</span>
+          <span>{{ $t('network.connections.totalPrefix') }} <strong>{{ totalConnections }}</strong> {{ $t('network.connections.totalLabel') }}</span>
+          <span>{{ $t('network.connections.activePrefix') }} <strong>{{ establishedConnections }}</strong> {{ $t('network.connections.establishedLabel') }}</span>
           <span v-if="store.networkLastRefresh" class="last-refresh">{{ $t('network.connections.lastRefresh') }} : {{ store.networkLastRefresh }}</span>
         </div>
 
         <div class="filter-bar">
           <select v-model="connectionFilterProtocol" class="filter-select">
-            <option value="all">Tous protocoles</option>
+            <option value="all">{{ $t('network.connections.allProtocols') }}</option>
             <option value="tcp">TCP</option>
             <option value="udp">UDP</option>
           </select>
           <select v-model="connectionFilterState" class="filter-select">
-            <option value="all">Tous états</option>
+            <option value="all">{{ $t('network.connections.allStates') }}</option>
             <option value="ESTABLISHED">ESTABLISHED</option>
             <option value="TIME_WAIT">TIME_WAIT</option>
             <option value="CLOSE_WAIT">CLOSE_WAIT</option>
@@ -269,8 +271,8 @@ watch(() => store.isAttached, (attached) => {
         </div>
         <PanelIntro
           :what="$t('network.proxy.intro')"
-          purpose="Intercepter et modifier les requêtes HTTP/HTTPS du jeu en temps réel."
-          how="Démarre le proxy sur un port local, puis sélectionne une requête pour modifier son body."
+          :purpose="$t('network.proxy.purpose')"
+          :how="$t('network.proxy.how')"
         />
 
         <div class="action-config">
@@ -288,7 +290,7 @@ watch(() => store.isAttached, (attached) => {
             :disabled="store.httpProxyBusy"
             @click="store.startHttpProxy()"
           >
-            {{ store.httpProxyBusy ? 'Démarrage...' : $t('network.proxy.start') }}
+            {{ store.httpProxyBusy ? $t('network.proxy.starting') : $t('network.proxy.start') }}
           </button>
           <button
             v-else
@@ -296,7 +298,7 @@ watch(() => store.isAttached, (attached) => {
             :disabled="store.httpProxyBusy"
             @click="store.stopHttpProxy()"
           >
-            {{ store.httpProxyBusy ? 'Arrêt...' : $t('network.proxy.stop') }}
+            {{ store.httpProxyBusy ? $t('network.proxy.stopping') : $t('network.proxy.stop') }}
           </button>
         </div>
 
@@ -310,7 +312,7 @@ watch(() => store.isAttached, (attached) => {
             <div class="req-head">
               <span class="req-method" :class="'method-' + req.method.toLowerCase()">{{ req.method }}</span>
               <span class="req-url">{{ req.url }}</span>
-              <span v-if="req.modified" class="req-modified">✏️ modifié</span>
+              <span v-if="req.modified" class="req-modified">✏️ {{ $t('network.proxy.modified') }}</span>
             </div>
             <div v-if="store.selectedHttpRequest === req.id" class="req-editor">
               <textarea v-model="store.httpRequestBodyEditor" class="body-editor" :placeholder="$t('network.proxy.editorPlaceholder')" />
@@ -330,15 +332,15 @@ watch(() => store.isAttached, (attached) => {
         </div>
         <PanelIntro
           :what="$t('network.dnsSpoof.intro')"
-          purpose="Tester le mode offline d'un jeu en redirigeant un domaine vers localhost."
-          how="Entre un domaine et une IP cible, puis ajoute l'entrée (UAC requis)."
+          :purpose="$t('network.dnsSpoof.purpose')"
+          :how="$t('network.dnsSpoof.how')"
         />
 
         <div class="action-config">
           <input v-model="store.dnsSpoofDomain" class="input" :placeholder="$t('network.dnsSpoof.domain')" />
           <input v-model="store.dnsSpoofTargetIp" class="input" :placeholder="$t('network.dnsSpoof.targetIp')" />
           <button class="btn btn-primary" :disabled="store.dnsSpoofBusy || !store.dnsSpoofDomain.trim()" @click="store.addDnsSpoofEntry()">
-            {{ store.dnsSpoofBusy ? 'Ajout...' : $t('network.dnsSpoof.add') }}
+            {{ store.dnsSpoofBusy ? $t('network.dnsSpoof.adding') : $t('network.dnsSpoof.add') }}
           </button>
         </div>
 
@@ -364,8 +366,8 @@ watch(() => store.isAttached, (attached) => {
         </div>
         <PanelIntro
           :what="$t('network.lagSwitch.intro')"
-          purpose="Tester la tolérance du jeu à un réseau lent ou coupé."
-          how="Choisis un délai en ms et active le lag switch."
+          :purpose="$t('network.lagSwitch.purpose')"
+          :how="$t('network.lagSwitch.how')"
         />
 
         <div class="action-config">
@@ -380,12 +382,12 @@ watch(() => store.isAttached, (attached) => {
             :disabled="store.lagSwitchBusy"
             @click="store.toggleLagSwitch()"
           >
-            {{ store.lagSwitchBusy ? 'Changement...' : (store.lagSwitchActive ? $t('network.lagSwitch.disable') : $t('network.lagSwitch.enable')) }}
+            {{ store.lagSwitchBusy ? $t('network.lagSwitch.changing') : (store.lagSwitchActive ? $t('network.lagSwitch.disable') : $t('network.lagSwitch.enable')) }}
           </button>
         </div>
 
         <div v-if="store.lagSwitchActive" class="proxy-status">
-          <span class="status-dot active" /> {{ $t('network.lagSwitch.active') }} (+{{ store.lagSwitchDelayMs }}ms sur recv/WSARecv)
+          <span class="status-dot active" /> {{ $t('network.lagSwitch.activeDetail', { delay: store.lagSwitchDelayMs }) }}
         </div>
       </section>
 
@@ -396,13 +398,13 @@ watch(() => store.isAttached, (attached) => {
         </div>
         <PanelIntro
           :what="$t('network.block.intro')"
-          purpose="Vérifier si une valeur mémoire instable vient d'une synchro serveur en arrière-plan plutôt que d'un recalcul purement local."
-          how="Active/désactive le blocage réseau et observe si la valeur se stabilise."
+          :purpose="$t('network.block.purpose')"
+          :how="$t('network.block.how')"
         />
 
         <div class="status-band">
           <span>{{ $t('network.block.status') }} : <strong>{{ networkBlockStatusLabel }}</strong></span>
-          <span v-if="store.networkBlockStatus?.exePath">Cible : <strong>{{ store.networkBlockStatus.exePath }}</strong></span>
+          <span v-if="store.networkBlockStatus?.exePath">{{ $t('network.block.target') }} <strong>{{ store.networkBlockStatus.exePath }}</strong></span>
         </div>
 
         <div class="actions-row">
@@ -415,8 +417,7 @@ watch(() => store.isAttached, (attached) => {
             {{ isNetworkBlocked ? $t('network.block.toggleRestore') : $t('network.block.toggle') }}
           </button>
           <span class="hint">
-            Déclenche une invite UAC (élévation Windows) — jamais silencieux. La règle reste posée même après
-            avoir détaché le processus ; utilise "Rétablir le réseau" pour la retirer.
+            {{ $t('network.block.uacHint') }}
           </span>
         </div>
       </section>
