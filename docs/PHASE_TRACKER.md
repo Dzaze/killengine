@@ -48,6 +48,18 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 ## Journal actif
 
+### Localisation de l'interface Vue — quatrième round (U5 clos : SettingsView.vue, en parallèle avec Codex sur U8/U14/U18), (10/09/2026, Claude + Codex)
+
+**Suite de l'entrée ci-dessous.** Quatrième round de travail parallèle : Claude sur `ui/src/views/SettingsView.vue` (U5) dans le dossier principal — le plus gros fichier de vue traité jusqu'ici hors Expert (2092 lignes, 21 sections) — pendant que Codex traite U8 (`ScriptingView.vue`), U14 (`SpeedhackView.vue`) et U18 (`LexiconView.vue`) dans un worktree séparé (`../killengine-codex-ui-u8-u14-u18`), fichiers disjoints.
+
+**U5** : 278 clés `settings.*` ajoutées. Couvre le template ET le `<script setup>` (`runtimeRows`, `kernelCapabilityLabel`, `kernelLearningSteps`, `formatBytes` pour les unités Go/Mo/Ko/o, `eventSummary`, messages de statut export/import workspace). 21 sections traitées : Interface, Scan, Stockage temporaire, IA locale, Backend IA externe (Claude), Workspace IA/Trainer, État, Diagnostic, Compatibilité antivirus, Driver kernel (avec son parcours pédagogique en 4 étapes), Mode Automation, Mode Stealth, Débogage CDP WebView2, Préparer l'inspection WebView2, Log principal, Événements Smart Search, Session.
+
+**Leçon de méthode retenue** : deux phrases du fichier ont un mot mis en gras au milieu (ex: "...via le **Mode Automation** ci-dessous..."). Première tentative de traduction : interpoler une clé `$t()` avec un paramètre vide puis appeler `.split()` sur le résultat côté template pour extraire préfixe/suffixe autour du `<strong>` — un bricolage fragile repéré et corrigé en clés dédiées `xxxPrefix`/`xxxSuffix` avant de committer. Pattern à réutiliser directement pour tout futur cas similaire.
+
+**Comment vérifié** : `npm run type-check` + `npm run build` OK, 278 références de clés uniques toutes résolues des deux côtés par script, suite C++ **469/469 OK** (aucun changement C++), vérification visuelle CDP FR et EN complète en direct (5 captures par langue, du haut de page à Session en bas, couvrant chacune des 21 sections).
+
+**Reste ouvert côté Claude** : U6, U7, U9-U13, U15-U17, U20-U22 (voir `docs/FRONTEND_LOCALIZATION_ROADMAP.md`) ; côté Codex, résultat de U8/U14/U18 attendu.
+
 ### Localisation de l'interface Vue — troisième round (U4 clos : InvestigationView.vue), (10/09/2026, Claude)
 
 **Suite de l'entrée ci-dessous.** Troisième round, solo cette fois. `ui/src/views/InvestigationView.vue` (carnet d'hypothèses, timeline d'enquête, checkpoints, rapport IA, export, snapshot UWP, archives) : 107 clés `investigation.*` ajoutées, couvrant le template ET le `<script setup>` (fonctions `statusLabel`, `checkpointTitle`, `checkpointDetail`, `checkpointKindLabel`, `checkpointScoreLabel`, `checkpointRiskLabel`, `statusText`, `bestNextAction`, `notebookSections`, qui retournaient toutes des chaînes françaises en dur).

@@ -6,11 +6,11 @@ import AssistantToolsPanel from '@/components/settings/AssistantToolsPanel.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 
 const runtimeRows = computed(() => [
-  { label: 'Backend', value: store.isConnected ? 'connecté' : 'déconnecté' },
-  { label: 'Processus', value: store.isAttached ? store.processName : 'aucun' },
+  { label: t('settings.backend'), value: store.isConnected ? t('settings.connected') : t('settings.disconnected') },
+  { label: t('investigation.process'), value: store.isAttached ? store.processName : t('settings.none') },
   { label: 'Version', value: store.version },
   { label: 'Workflow', value: store.workflowStatus },
 ])
@@ -31,7 +31,7 @@ const strategyWins = computed(() => {
 const valueTypes = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Float32', 'Float64']
 const performanceModes = ['Auto', 'Eco', 'Normal', 'Performance', 'Max']
 const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096, 8192]
-const unknownDepthLabel = (mb: number) => (mb === -1 ? 'Auto' : `${mb} Mo`)
+const unknownDepthLabel = (mb: number) => (mb === -1 ? t('settings.autoLabel') : t('settings.mbLabel', { mb }))
 const externalAiApiKeyInput = ref('')
 async function saveExternalAiApiKey() {
   const result = await store.setExternalAiApiKey(externalAiApiKeyInput.value)
@@ -59,17 +59,17 @@ const kernelWriteAddress = ref('')
 const kernelWriteBytes = ref('')
 const kernelCapabilityLabel = computed(() => {
   const status = store.kernelDriverStatus
-  if (!status) return 'Non testé'
-  if (status.capabilities.processMemoryAccess) return 'Lecture/écriture prêtes'
-  if (status.status === 'connected') return 'Probe seul'
-  return 'Indisponible'
+  if (!status) return t('settings.kernelNotTested')
+  if (status.capabilities.processMemoryAccess) return t('settings.kernelReadWriteReady')
+  if (status.status === 'connected') return t('settings.kernelProbeOnly')
+  return t('settings.kernelUnavailable')
 })
-const kernelLearningSteps = [
-  { label: '1. Vérifier', detail: 'Tester le driver et confirmer Accès mémoire kernel.' },
-  { label: '2. Lire', detail: 'Relire 4/8 octets avant d’écrire pour prouver la bonne adresse.' },
-  { label: '3. Écrire', detail: 'Écrire une seule adresse, puis relire immédiatement.' },
-  { label: '4. Interpréter', detail: 'Si ça revient, chercher la source avec Écrit par.' },
-]
+const kernelLearningSteps = computed(() => [
+  { label: t('settings.kernelStep1Label'), detail: t('settings.kernelStep1Detail') },
+  { label: t('settings.kernelStep2Label'), detail: t('settings.kernelStep2Detail') },
+  { label: t('settings.kernelStep3Label'), detail: t('settings.kernelStep3Detail') },
+  { label: t('settings.kernelStep4Label'), detail: t('settings.kernelStep4Detail') },
+])
 const selectedStructureTemplate = computed(() =>
   store.structureTemplates.find((template) => template.id === selectedStructureTemplateId.value) ?? null,
 )
@@ -92,10 +92,10 @@ const visibleEmbeddedAgents = computed(() =>
 
 function formatBytes(value: number | undefined) {
   const bytes = value ?? 0
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} Go`
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} Ko`
-  return `${bytes} o`
+  if (bytes >= 1024 * 1024 * 1024) return t('settings.gbUnit', { value: (bytes / (1024 * 1024 * 1024)).toFixed(2) })
+  if (bytes >= 1024 * 1024) return t('settings.mbUnit', { value: (bytes / (1024 * 1024)).toFixed(1) })
+  if (bytes >= 1024) return t('settings.kbUnit', { value: (bytes / 1024).toFixed(1) })
+  return t('settings.bUnit', { value: bytes })
 }
 
 function eventSummary(event: Record<string, unknown>) {
@@ -104,8 +104,8 @@ function eventSummary(event: Record<string, unknown>) {
     event.tool ? `tool=${String(event.tool)}` : '',
     event.workflowStatus ? `workflow=${String(event.workflowStatus)}` : '',
     event.actionStatus ? `action=${String(event.actionStatus)}` : '',
-    event.candidateCount !== undefined ? `candidats=${String(event.candidateCount)}` : '',
-    event.targetValue ? `cible=${String(event.targetValue)}` : '',
+    event.candidateCount !== undefined ? `${t('settings.eventCandidates')}=${String(event.candidateCount)}` : '',
+    event.targetValue ? `${t('settings.eventTarget')}=${String(event.targetValue)}` : '',
   ].filter(Boolean)
   return parts.join('  ')
 }
@@ -165,24 +165,24 @@ function showAuditMarkdownExport() {
 async function copyWorkspaceExport() {
   if (!workspaceExportText.value) return
   await navigator.clipboard?.writeText(workspaceExportText.value)
-  workspaceExportStatus.value = 'Export copié.'
+  workspaceExportStatus.value = t('settings.exportCopied')
 }
 
 async function copyAuditExport() {
   if (!auditExportText.value) return
   await navigator.clipboard?.writeText(auditExportText.value)
-  auditExportStatus.value = 'Audit copié.'
+  auditExportStatus.value = t('settings.auditCopied')
 }
 
 function previewWorkspaceImport() {
   workspaceImportPreview.value = store.previewWorkspaceImport(workspaceImportText.value)
-  workspaceImportStatus.value = workspaceImportPreview.value.success === true ? 'Aperçu prêt.' : String(workspaceImportPreview.value.error ?? 'Import invalide.')
+  workspaceImportStatus.value = workspaceImportPreview.value.success === true ? t('settings.previewReady') : String(workspaceImportPreview.value.error ?? t('settings.invalidImport'))
 }
 
 function importWorkspace() {
   const result = store.importWorkspaceJson(workspaceImportText.value)
   workspaceImportPreview.value = result
-  workspaceImportStatus.value = result.success === true ? 'Workspace importé.' : String(result.error ?? 'Import refusé.')
+  workspaceImportStatus.value = result.success === true ? t('settings.workspaceImported') : String(result.error ?? t('settings.importRefused'))
   if (result.success === true) workspaceImportText.value = ''
 }
 
@@ -194,7 +194,7 @@ function saveWorkspaceProject() {
 function addManualBookmark() {
   const bookmark = store.addWorkspaceBookmark({
     kind: bookmarkAddress.value.trim() ? 'address' : 'note',
-    label: bookmarkLabel.value || bookmarkAddress.value || 'Note workspace',
+    label: bookmarkLabel.value || bookmarkAddress.value || t('settings.workspaceNoteFallback'),
     address: bookmarkAddress.value,
     type: bookmarkAddress.value.trim() ? bookmarkType.value : undefined,
     value: bookmarkValue.value,
@@ -225,24 +225,24 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <p>{{ store.statusText }}</p>
       </div>
       <button class="btn btn-secondary" @click="refreshAll">
-        Rafraîchir
+        {{ $t('settings.refresh') }}
       </button>
     </div>
 
     <PanelIntro
-      what="Les paramètres de KillEngine : langue, comportements par défaut, outils de diagnostic."
-      purpose="Ajuster l'app à tes préférences et vérifier l'état des composants (helpers, connexions) sans passer par un fichier de config."
-      how="Modifie un réglage dans la section correspondante ; les changements s'appliquent immédiatement."
+      :what="$t('settings.intro.what')"
+      :purpose="$t('settings.intro.purpose')"
+      :how="$t('settings.intro.how')"
     />
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Interface</h2>
+        <h2>{{ $t('settings.interfaceTitle') }}</h2>
       </div>
       <div class="setting-row">
         <div>
-          <strong>Langue</strong>
-          <span>{{ store.appLanguage === 'fr' ? 'Français' : 'English' }}</span>
+          <strong>{{ $t('settings.language') }}</strong>
+          <span>{{ store.appLanguage === 'fr' ? $t('settings.french') : $t('settings.english') }}</span>
         </div>
         <div class="segmented">
           <button :class="{ active: store.appLanguage === 'fr' }" @click="store.appLanguage = 'fr'">FR</button>
@@ -253,171 +253,171 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Scan</h2>
+        <h2>{{ $t('settings.scanTitle') }}</h2>
       </div>
       <div class="settings-grid">
         <label>
-          <span>Type par défaut</span>
+          <span>{{ $t('settings.defaultType') }}</span>
           <select v-model="store.settingDefaultValueType" class="input select">
             <option v-for="type in valueTypes" :key="type">{{ type }}</option>
           </select>
         </label>
         <label>
-          <span>Résultats maximum</span>
+          <span>{{ $t('settings.maxResults') }}</span>
           <input v-model.number="store.settingScanMaxResults" class="input" type="number" min="1000" max="10000000" step="1000" />
         </label>
         <label>
-          <span>Mode performance</span>
+          <span>{{ $t('settings.performanceMode') }}</span>
           <select v-model="store.settingPerformanceMode" class="input select">
             <option v-for="mode in performanceModes" :key="mode">{{ mode }}</option>
           </select>
         </label>
         <label>
-          <span>Chunk mémoire (Mo, 0 = Auto)</span>
+          <span>{{ $t('settings.scanChunk') }}</span>
           <input v-model.number="store.settingScanChunkSizeMb" class="input" type="number" min="0" max="64" step="1" />
         </label>
         <label>
-          <span>Threads max (0 = Auto)</span>
+          <span>{{ $t('settings.maxThreads') }}</span>
           <input v-model.number="store.settingScanMaxWorkerThreads" class="input" type="number" min="0" max="128" step="1" />
         </label>
         <label>
-          <span>Mémoire scan en vol (Mo, 0 = Auto)</span>
+          <span>{{ $t('settings.scanInFlightMemory') }}</span>
           <input v-model.number="store.settingScanMaxInFlightMb" class="input" type="number" min="0" max="32768" step="64" />
         </label>
         <label>
-          <span>Seuil fichier candidats</span>
+          <span>{{ $t('settings.candidateFileThreshold') }}</span>
           <input v-model.number="store.settingCandidateFileBackedThreshold" class="input" type="number" min="1" max="5000000" step="1000" />
         </label>
         <label>
-          <span>Snapshot unknown max</span>
+          <span>{{ $t('settings.unknownSnapshotMax') }}</span>
           <select v-model.number="store.settingUnknownSnapshotMaxMb" class="input select">
             <option v-for="mb in unknownSnapshotPresets" :key="mb" :value="mb">{{ unknownDepthLabel(mb) }}</option>
           </select>
         </label>
         <label class="toggle-row">
           <input v-model="store.settingFastScan" type="checkbox" />
-          <span>Fast scan par défaut</span>
+          <span>{{ $t('settings.fastScanDefault') }}</span>
         </label>
       </div>
       <p class="hint">
-        Gros process : mets le seuil fichier à 1 pour purger la RAM plus tôt. Les fichiers temporaires sont supprimés au nouveau scan ou à la fermeture.
+        {{ $t('settings.scanHint') }}
       </p>
     </section>
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Stockage temporaire</h2>
+        <h2>{{ $t('settings.tempStorageTitle') }}</h2>
         <div class="panel-actions">
           <button class="btn btn-secondary compact" :disabled="store.scanBusy" @click="store.refreshTemporaryStorageStatus()">
-            Actualiser
+            {{ $t('settings.refreshAction') }}
           </button>
           <button class="btn btn-primary compact" :disabled="store.scanBusy" @click="store.clearTemporaryStorage()">
-            Nettoyer maintenant
+            {{ $t('settings.cleanupNow') }}
           </button>
         </div>
       </div>
       <div class="runtime-grid">
         <div class="runtime-cell">
-          <span>Total</span>
+          <span>{{ $t('settings.total') }}</span>
           <strong>{{ formatBytes(store.temporaryStorageStatus?.totalBytes) }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Actif</span>
+          <span>{{ $t('settings.active') }}</span>
           <strong>{{ formatBytes(store.temporaryStorageStatus?.activeBytes) }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Orphelins</span>
+          <span>{{ $t('settings.orphans') }}</span>
           <strong>{{ store.temporaryStorageStatus?.orphanFileCount ?? 0 }} · {{ formatBytes(store.temporaryStorageStatus?.orphanBytes) }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Fichiers actifs</span>
+          <span>{{ $t('settings.activeFiles') }}</span>
           <strong>{{ store.temporaryStorageStatus?.activeFileCount ?? 0 }}</strong>
         </div>
       </div>
       <div class="path-row">
-        <span>Dossier temp</span>
+        <span>{{ $t('settings.tempFolder') }}</span>
         <code>{{ store.temporaryStorageStatus?.tempPath || '-' }}</code>
       </div>
       <div class="path-row">
-        <span>Candidats</span>
-        <code>{{ formatBytes(store.temporaryStorageStatus?.candidateBytes) }} · {{ store.temporaryStorageStatus?.candidateFileBacked ? 'fichier' : 'RAM' }}</code>
+        <span>{{ $t('settings.candidates') }}</span>
+        <code>{{ formatBytes(store.temporaryStorageStatus?.candidateBytes) }} · {{ store.temporaryStorageStatus?.candidateFileBacked ? $t('settings.fileBacked') : $t('settings.ram') }}</code>
       </div>
       <div class="path-row">
-        <span>Undo / snapshot</span>
+        <span>{{ $t('settings.undoSnapshot') }}</span>
         <code>{{ formatBytes(store.temporaryStorageStatus?.undoBytes) }} / {{ formatBytes(store.temporaryStorageStatus?.snapshotBytes) }}</code>
       </div>
       <p v-if="store.temporaryStorageCleanupResult" class="status-line">
-        {{ store.temporaryStorageCleanupResult.message || (store.temporaryStorageCleanupResult.success ? 'Nettoyage terminé.' : store.temporaryStorageCleanupResult.error) }}
+        {{ store.temporaryStorageCleanupResult.message || (store.temporaryStorageCleanupResult.success ? $t('settings.cleanupDone') : store.temporaryStorageCleanupResult.error) }}
       </p>
       <p v-if="store.temporaryStorageError" class="error">{{ store.temporaryStorageError }}</p>
       <p class="hint">
-        Le nettoyage ferme le contexte de scan courant, vide l'undo et le snapshot unknown, puis supprime les fichiers `killengine_candidates_*.kecand` et `killengine_snapshot_*.kesnap` restants.
+        {{ $t('settings.tempStorageHint') }}
       </p>
     </section>
 
     <section class="panel">
       <div class="panel-title">
-        <h2>IA locale</h2>
+        <h2>{{ $t('settings.localAiTitle') }}</h2>
         <div class="panel-actions">
           <span class="status-pill" :class="store.aiModelStatus?.ready ? 'ok' : 'warn'">
-            {{ store.aiModelStatus?.ready ? 'IA prête' : 'IA indisponible' }}
+            {{ store.aiModelStatus?.ready ? $t('settings.aiReady') : $t('settings.aiUnavailable') }}
           </span>
           <button class="btn btn-secondary compact" :disabled="store.aiModelStatusLoading" @click="store.refreshAiModelStatus()">
-            {{ store.aiModelStatusLoading ? 'Vérif...' : 'Vérifier' }}
+            {{ store.aiModelStatusLoading ? $t('settings.checking') : $t('settings.verify') }}
           </button>
         </div>
       </div>
       <div class="settings-grid">
         <label class="wide">
-          <span>Chemin personnalisé GGUF</span>
+          <span>{{ $t('settings.ggufCustomPath') }}</span>
           <div class="model-path-row">
-            <input v-model="store.settingModelPath" class="input" placeholder="Avancé : vide = modèle embarqué dans model\\qwen\\*.gguf" />
-            <button class="btn btn-secondary compact" type="button" @click="store.browseForModel()">Parcourir…</button>
+            <input v-model="store.settingModelPath" class="input" :placeholder="$t('settings.ggufPathPlaceholder')" />
+            <button class="btn btn-secondary compact" type="button" @click="store.browseForModel()">{{ $t('settings.browse') }}</button>
           </div>
         </label>
         <label>
-          <span>Threads modèle</span>
+          <span>{{ $t('settings.modelThreads') }}</span>
           <input v-model.number="store.settingModelThreads" class="input" type="number" min="1" max="32" step="1" />
         </label>
       </div>
       <div class="model-status-grid">
         <div class="runtime-cell">
-          <span>Backend</span>
+          <span>{{ $t('settings.backend') }}</span>
           <strong>{{ store.aiModelStatus?.backend || '-' }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Produit</span>
-          <strong>IA embarquée requise</strong>
+          <span>{{ $t('settings.product') }}</span>
+          <strong>{{ $t('settings.embeddedAiRequired') }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Agents IA</span>
+          <span>{{ $t('settings.aiAgents') }}</span>
           <strong>{{ store.aiModelStatus?.embeddedAgentCount ?? visibleEmbeddedAgents.length }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Modèle</span>
-          <strong>{{ store.aiModelStatus?.modelFound ? 'trouvé' : 'absent' }}</strong>
+          <span>{{ $t('settings.model') }}</span>
+          <strong>{{ store.aiModelStatus?.modelFound ? $t('settings.found') : $t('settings.notFound') }}</strong>
         </div>
         <div class="runtime-cell">
           <span>llama-cli</span>
-          <strong>{{ store.aiModelStatus?.executableFound ? 'trouvé' : 'absent' }}</strong>
+          <strong>{{ store.aiModelStatus?.executableFound ? $t('settings.found') : $t('settings.notFound') }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Threads</span>
+          <span>{{ $t('settings.threads') }}</span>
           <strong>{{ store.aiModelStatus?.threads ?? store.settingModelThreads }}</strong>
         </div>
       </div>
       <div class="path-row">
-        <span>Modèle détecté</span>
+        <span>{{ $t('settings.modelDetected') }}</span>
         <code>{{ store.aiModelStatus?.modelPath || store.settingModelPath || '-' }}</code>
       </div>
       <div class="path-row">
-        <span>Runtime actif</span>
+        <span>{{ $t('settings.activeRuntime') }}</span>
         <code>{{ store.aiModelStatus?.executablePath || '-' }}</code>
       </div>
       <div v-if="visibleEmbeddedAgents.length" class="embedded-agent-list">
-        <strong>Agents embarqués</strong>
+        <strong>{{ $t('settings.embeddedAgents') }}</strong>
         <div v-for="agent in visibleEmbeddedAgents" :key="agent.id" class="candidate-path">
-          <span :class="agent.modelFound && agent.valid ? 'ok-text' : 'dim-text'">{{ agent.modelFound && agent.valid ? 'OK' : '--' }}</span>
+          <span :class="agent.modelFound && agent.valid ? 'ok-text' : 'dim-text'">{{ agent.modelFound && agent.valid ? $t('settings.ok') : '--' }}</span>
           <code>{{ agent.displayName }} · {{ agent.role }} · {{ agent.modelPath || '-' }}</code>
         </div>
       </div>
@@ -425,58 +425,58 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       <p v-if="store.aiModelStatus?.modelError && !store.aiModelStatus?.modelFound" class="warning">{{ store.aiModelStatus.modelError }}</p>
       <p v-if="store.aiModelStatusError" class="error">{{ store.aiModelStatusError }}</p>
       <p class="hint">
-        Le produit cherche automatiquement les IA embarquées dans <code>model\&lt;nom_ia&gt;\*.gguf</code> à côté de KillEngine.exe. Le chemin personnalisé sert seulement d'override avancé.
+        {{ $t('settings.localAiHint1') }}
       </p>
       <details class="model-candidates">
-        <summary>Chemins inspectés</summary>
+        <summary>{{ $t('settings.inspectedPaths') }}</summary>
         <div class="candidate-columns">
           <div>
-            <strong>Modèles GGUF</strong>
+            <strong>{{ $t('settings.ggufModels') }}</strong>
             <div v-for="candidate in visibleModelCandidates" :key="String(candidate.path)" class="candidate-path">
-              <span :class="candidate.exists ? 'ok-text' : 'dim-text'">{{ candidate.exists ? 'OK' : '--' }}</span>
+              <span :class="candidate.exists ? 'ok-text' : 'dim-text'">{{ candidate.exists ? $t('settings.ok') : '--' }}</span>
               <code>{{ candidate.path }}</code>
             </div>
           </div>
           <div>
             <strong>llama-cli</strong>
             <div v-for="candidate in visibleExecutableCandidates" :key="String(candidate.path)" class="candidate-path">
-              <span :class="candidate.exists ? 'ok-text' : 'dim-text'">{{ candidate.exists ? 'OK' : '--' }}</span>
+              <span :class="candidate.exists ? 'ok-text' : 'dim-text'">{{ candidate.exists ? $t('settings.ok') : '--' }}</span>
               <code>{{ candidate.path }}</code>
             </div>
           </div>
         </div>
       </details>
       <p class="hint">
-        Safe autorise seulement les actions sans danger et les écritures confirmées. Expert débloque debugger/patch confirmés. Trainer prépare les actions avancées type hook/injection.
+        {{ $t('settings.localAiHint2') }}
       </p>
     </section>
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Backend IA externe (Claude)</h2>
+        <h2>{{ $t('settings.externalAiTitle') }}</h2>
         <div class="panel-actions">
           <span class="status-pill" :class="store.externalAiActiveBackend === 'claude' ? 'ok' : 'warn'">
-            {{ store.externalAiActiveBackend === 'claude' ? 'Claude actif' : 'Local actif' }}
+            {{ store.externalAiActiveBackend === 'claude' ? $t('settings.claudeActive') : $t('settings.localActive') }}
           </span>
         </div>
       </div>
       <p class="hint">
-        Optionnel, jamais activé par défaut. Bascule le chat Assistant vers l'API Claude (clé API personnelle) pour les tâches qui demandent un raisonnement plus profond que le modèle local embarqué. Dès qu'il est actif, le contexte des appels d'outils (adresses mémoire, nom du process, éventuellement du code désassemblé) part vers un tiers (Anthropic) à chaque requête. Chaque outil sensible (écriture mémoire, kernel, réseau, stealth...) reste soumis à sa propre confirmation RiskGate avant exécution — activer ce backend n'exécute rien tout seul.
+        {{ $t('settings.externalAiHint1') }}
       </p>
       <p class="hint">
-        Ce backend Claude n'est qu'une option parmi d'autres, pas une limite : tu peux tout aussi bien piloter KillEngine avec le modèle en ligne de ton choix (parfois plus permissif) via le <strong>Mode Automation</strong> ci-dessous (section "Mode Automation (avancé)") — le pipe local expose toute la surface `Q_INVOKABLE` sans restriction à n'importe quel outil/agent externe sur cette machine, par exemple une extension comme Roo Code branchée dessus. Voir <code>docs/AUTOMATION_API.md</code> pour le protocole.
+        {{ $t('settings.externalAiHint2Prefix') }} <strong>{{ $t('settings.automationModeStrong') }}</strong> {{ $t('settings.externalAiHint2Suffix') }}
       </p>
       <div class="settings-grid">
         <label>
-          <span>Backend actif</span>
+          <span>{{ $t('settings.activeBackend') }}</span>
           <select
             class="input"
             :value="store.externalAiActiveBackend"
             :disabled="store.externalAiBusy"
             @change="store.setActiveAiBackend(($event.target as HTMLSelectElement).value as 'local' | 'claude')"
           >
-            <option value="local">Local (modèle embarqué)</option>
-            <option value="claude">Claude (clé API)</option>
+            <option value="local">{{ $t('settings.localEmbeddedOption') }}</option>
+            <option value="claude">{{ $t('settings.claudeApiOption') }}</option>
           </select>
         </label>
       </div>
@@ -486,7 +486,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           class="input"
           type="password"
           autocomplete="off"
-          placeholder="Clé API Claude (sk-ant-...)"
+          :placeholder="$t('settings.claudeApiKeyPlaceholder')"
         />
         <button
           class="btn btn-secondary compact"
@@ -494,7 +494,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.externalAiBusy || !externalAiApiKeyInput.trim()"
           @click="saveExternalAiApiKey()"
         >
-          Enregistrer
+          {{ $t('settings.save') }}
         </button>
         <button
           class="btn btn-secondary compact"
@@ -502,22 +502,22 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.externalAiBusy || !store.externalAiHasApiKey"
           @click="store.clearExternalAiApiKey()"
         >
-          Supprimer
+          {{ $t('settings.remove') }}
         </button>
       </div>
       <div class="model-status-grid">
         <div class="runtime-cell">
-          <span>Clé enregistrée</span>
-          <strong>{{ store.externalAiHasApiKey ? 'oui' : 'non' }}</strong>
+          <span>{{ $t('settings.keySaved') }}</span>
+          <strong>{{ store.externalAiHasApiKey ? $t('settings.yes') : $t('settings.no') }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Requêtes cette session</span>
+          <span>{{ $t('settings.requestsThisSession') }}</span>
           <strong>{{ store.externalAiRequestCount }}</strong>
         </div>
       </div>
       <p v-if="store.externalAiError" class="error">{{ store.externalAiError }}</p>
       <p class="hint">
-        La clé est chiffrée (DPAPI Windows, liée au compte utilisateur) avant stockage — jamais en clair, jamais renvoyée par le backend une fois enregistrée. Aucune limite de requêtes imposée par KillEngine : le compteur ci-dessus est informatif seulement, le coût réel dépend de ton compte Anthropic.
+        {{ $t('settings.externalAiHint3') }}
       </p>
     </section>
 
@@ -525,66 +525,66 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Workspace IA / Trainer</h2>
+        <h2>{{ $t('settings.workspaceTitle') }}</h2>
       </div>
       <div class="runtime-grid">
         <div class="runtime-cell">
-          <span>Investigation active</span>
-          <strong>{{ store.activeInvestigation ? store.activeInvestigation.steps.length : 0 }} étape(s)</strong>
+          <span>{{ $t('settings.activeInvestigation') }}</span>
+          <strong>{{ $t('settings.stepCount', { count: store.activeInvestigation ? store.activeInvestigation.steps.length : 0 }) }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Archives Investigation</span>
+          <span>{{ $t('settings.investigationArchives') }}</span>
           <strong>{{ store.investigationArchive.length }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Features Trainer</span>
+          <span>{{ $t('settings.trainerFeatures') }}</span>
           <strong>{{ store.trainerFeatures.length }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Templates Structure</span>
+          <span>{{ $t('settings.structureTemplates') }}</span>
           <strong>{{ store.structureTemplates.length }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Bookmarks</span>
+          <span>{{ $t('settings.bookmarks') }}</span>
           <strong>{{ store.workspaceBookmarks.length }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Projets locaux</span>
+          <span>{{ $t('settings.localProjects') }}</span>
           <strong>{{ store.workspaceProjects.length }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Audit actions</span>
+          <span>{{ $t('settings.actionAudit') }}</span>
           <strong>{{ store.actionLog.length }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Processus mémoire Auto</span>
-          <strong>{{ store.processName || 'global' }}</strong>
+          <span>{{ $t('settings.autoMemoryProcess') }}</span>
+          <strong>{{ store.processName || $t('settings.globalFallback') }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Dernière stratégie</span>
+          <span>{{ $t('settings.lastStrategy') }}</span>
           <strong>{{ learnedAutoProfile.lastSuccessfulAuditEvent || '-' }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Dernière adresse</span>
+          <span>{{ $t('settings.lastAddress') }}</span>
           <strong>{{ learnedAutoProfile.lastSuccessfulAddress ? `0x${learnedAutoProfile.lastSuccessfulAddress}` : '-' }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Dernier type</span>
+          <span>{{ $t('settings.lastType') }}</span>
           <strong>{{ learnedAutoProfile.lastSuccessfulValueType || '-' }}</strong>
         </div>
         <div class="runtime-cell">
-          <span>Stratégies gagnantes</span>
+          <span>{{ $t('settings.winningStrategies') }}</span>
           <strong>{{ Object.keys(strategyWins).length }}</strong>
         </div>
       </div>
       <div class="path-row">
-        <span>Pattern AOB appris</span>
+        <span>{{ $t('settings.learnedAobPattern') }}</span>
         <code>{{ learnedAutoProfile.lastSuccessfulAobPattern || '-' }}</code>
       </div>
       <div v-if="store.rememberedPatterns.length" class="remembered-patterns">
         <div class="source-list-title">
-          <strong>Motifs mémorisés pour ce jeu</strong>
-          <span>{{ store.rememberedPatterns.length }} entrée(s)</span>
+          <strong>{{ $t('settings.rememberedPatternsTitle') }}</strong>
+          <span>{{ $t('settings.entryCount', { count: store.rememberedPatterns.length }) }}</span>
         </div>
         <div v-for="pattern in store.rememberedPatterns" :key="`${pattern.module}:${pattern.moduleOffset}`" class="remembered-pattern-row">
           <div class="remembered-pattern-label">
@@ -594,7 +594,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           <span>{{ pattern.valueType || '-' }}</span>
           <span>{{ pattern.confirmCount }}×</span>
           <span :class="pattern.resolved ? 'hint' : 'error'">
-            {{ pattern.resolved ? `0x${pattern.liveAddress}` : 'module absent (pas attaché ou jeu différent)' }}
+            {{ pattern.resolved ? `0x${pattern.liveAddress}` : $t('settings.moduleAbsent') }}
           </span>
           <button
             v-if="pattern.resolved"
@@ -602,83 +602,83 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
             type="button"
             @click="store.previewRememberedPattern(pattern)"
           >
-            Prévisualiser
+            {{ $t('settings.preview') }}
           </button>
         </div>
       </div>
       <div v-if="store.writeHistorySequence.length" class="remembered-patterns">
         <div class="source-list-title">
-          <strong>Historique d'écritures (replay)</strong>
-          <span>{{ store.writeHistorySequence.length }} entrée(s)</span>
+          <strong>{{ $t('settings.writeHistoryTitle') }}</strong>
+          <span>{{ $t('settings.entryCount', { count: store.writeHistorySequence.length }) }}</span>
         </div>
         <div v-for="(entry, index) in store.writeHistorySequence" :key="`${entry.module}:${entry.moduleOffset}:${entry.writtenAt}:${index}`" class="remembered-pattern-row">
           <code>{{ entry.module }}+0x{{ entry.moduleOffset }}</code>
           <span>{{ entry.valueType || '-' }} = {{ entry.value }}</span>
           <span :class="entry.resolved ? 'hint' : 'error'">
-            {{ entry.resolved ? `0x${entry.liveAddress}` : 'module absent (pas attaché ou jeu différent)' }}
+            {{ entry.resolved ? `0x${entry.liveAddress}` : $t('settings.moduleAbsent') }}
           </span>
         </div>
         <div class="panel-actions">
           <button class="btn btn-primary compact" type="button" @click="store.replayWriteHistorySequence()">
-            Rejouer la séquence
+            {{ $t('settings.replaySequence') }}
           </button>
           <button class="btn btn-secondary compact" type="button" @click="store.clearWriteHistorySequence()">
-            Vider l'historique
+            {{ $t('settings.clearHistory') }}
           </button>
         </div>
       </div>
       <div class="panel-actions workspace-actions">
-        <button class="btn btn-secondary compact" @click="showWorkspaceExport()">Exporter workspace JSON</button>
-        <button class="btn btn-secondary compact" @click="showWorkspaceMarkdownExport()">Exporter workspace MD</button>
-        <button class="btn btn-secondary compact" @click="showAuditJsonExport()">Exporter audit JSON</button>
-        <button class="btn btn-secondary compact" @click="showAuditMarkdownExport()">Exporter audit MD</button>
-        <button class="btn btn-secondary compact" @click="store.clearInvestigation()">Vider investigation active</button>
-        <button class="btn btn-secondary compact" @click="store.clearInvestigationArchive()">Vider archives</button>
-        <button class="btn btn-secondary compact" @click="store.clearTrainerFeatures()">Vider trainer local</button>
-        <button class="btn btn-secondary compact" @click="store.clearStructureTemplates()">Vider templates structure</button>
-        <button class="btn btn-secondary compact" @click="store.clearWorkspaceBookmarks()">Vider bookmarks</button>
-        <button class="btn btn-secondary compact" @click="store.clearWorkspaceProjects()">Vider projets</button>
-        <button class="btn btn-secondary compact" @click="store.clearActionLog()">Vider audit</button>
-        <button class="btn btn-secondary compact" @click="store.clearAutoResolveMemory(false)">Vider mémoire Auto processus</button>
-        <button class="btn btn-secondary compact danger-action" @click="store.clearAutoResolveMemory(true)">Vider mémoire Auto globale</button>
+        <button class="btn btn-secondary compact" @click="showWorkspaceExport()">{{ $t('settings.exportWorkspaceJson') }}</button>
+        <button class="btn btn-secondary compact" @click="showWorkspaceMarkdownExport()">{{ $t('settings.exportWorkspaceMd') }}</button>
+        <button class="btn btn-secondary compact" @click="showAuditJsonExport()">{{ $t('settings.exportAuditJson') }}</button>
+        <button class="btn btn-secondary compact" @click="showAuditMarkdownExport()">{{ $t('settings.exportAuditMd') }}</button>
+        <button class="btn btn-secondary compact" @click="store.clearInvestigation()">{{ $t('settings.clearActiveInvestigation') }}</button>
+        <button class="btn btn-secondary compact" @click="store.clearInvestigationArchive()">{{ $t('settings.clearArchives') }}</button>
+        <button class="btn btn-secondary compact" @click="store.clearTrainerFeatures()">{{ $t('settings.clearLocalTrainer') }}</button>
+        <button class="btn btn-secondary compact" @click="store.clearStructureTemplates()">{{ $t('settings.clearStructureTemplates') }}</button>
+        <button class="btn btn-secondary compact" @click="store.clearWorkspaceBookmarks()">{{ $t('settings.clearBookmarks') }}</button>
+        <button class="btn btn-secondary compact" @click="store.clearWorkspaceProjects()">{{ $t('settings.clearProjects') }}</button>
+        <button class="btn btn-secondary compact" @click="store.clearActionLog()">{{ $t('settings.clearAudit') }}</button>
+        <button class="btn btn-secondary compact" @click="store.clearAutoResolveMemory(false)">{{ $t('settings.clearAutoMemoryProcess') }}</button>
+        <button class="btn btn-secondary compact danger-action" @click="store.clearAutoResolveMemory(true)">{{ $t('settings.clearAutoMemoryGlobal') }}</button>
       </div>
       <p class="hint">
-        Ces actions suppriment les mémoires locales de pilotage IA et Trainer. Les profils sauvegardés via ProfileStore ne sont pas supprimés ici.
+        {{ $t('settings.workspaceActionsHint') }}
       </p>
       <div class="project-panel">
         <div class="panel-title">
-          <h3>Projets Workspace</h3>
+          <h3>{{ $t('settings.workspaceProjectsTitle') }}</h3>
           <div class="panel-actions">
-            <input v-model="workspaceProjectName" class="input project-name-input" placeholder="Nom du projet" />
-            <button class="btn btn-secondary compact" @click="saveWorkspaceProject()">Sauver projet</button>
+            <input v-model="workspaceProjectName" class="input project-name-input" :placeholder="$t('settings.projectNamePlaceholder')" />
+            <button class="btn btn-secondary compact" @click="saveWorkspaceProject()">{{ $t('settings.saveProject') }}</button>
           </div>
         </div>
-        <div v-if="store.workspaceProjects.length === 0" class="empty-line">Aucun projet local.</div>
+        <div v-if="store.workspaceProjects.length === 0" class="empty-line">{{ $t('settings.noLocalProject') }}</div>
         <div v-for="project in store.workspaceProjects.slice(0, 12)" :key="project.id" class="project-row">
           <div>
             <strong>{{ project.name }}</strong>
-            <span>{{ project.processName || '-' }} · {{ project.trainerFeatureCount }} feature(s) · {{ project.structureTemplateCount }} template(s) · {{ project.bookmarkCount }} bookmark(s) · {{ project.auditCount || 0 }} audit(s)</span>
+            <span>{{ $t('settings.projectSummary', { process: project.processName || '-', features: project.trainerFeatureCount, templates: project.structureTemplateCount, bookmarks: project.bookmarkCount, audits: project.auditCount || 0 }) }}</span>
           </div>
           <div class="panel-actions">
-            <button class="btn btn-secondary compact" @click="store.loadWorkspaceProject(project.id)">Charger</button>
-            <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceProject(project.id)">Supprimer</button>
+            <button class="btn btn-secondary compact" @click="store.loadWorkspaceProject(project.id)">{{ $t('settings.load') }}</button>
+            <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceProject(project.id)">{{ $t('settings.delete') }}</button>
           </div>
         </div>
       </div>
       <div v-if="store.workspaceBookmarks.length > 0" class="bookmark-list">
         <div class="panel-title">
-          <h3>Bookmarks / Notes</h3>
+          <h3>{{ $t('settings.bookmarksNotesTitle') }}</h3>
           <span>{{ store.workspaceBookmarks.length }}</span>
         </div>
         <div class="bookmark-create">
-          <input v-model="bookmarkLabel" class="input" placeholder="Label" />
-          <input v-model="bookmarkAddress" class="input" placeholder="Adresse hex optionnelle" />
+          <input v-model="bookmarkLabel" class="input" :placeholder="$t('settings.labelPlaceholder')" />
+          <input v-model="bookmarkAddress" class="input" :placeholder="$t('settings.addressHexOptional')" />
           <select v-model="bookmarkType" class="select">
             <option v-for="type in valueTypes" :key="type" :value="type">{{ type }}</option>
           </select>
-          <input v-model="bookmarkValue" class="input" placeholder="Valeur optionnelle" />
-          <input v-model="bookmarkNote" class="input bookmark-note-input" placeholder="Note" />
-          <button class="btn btn-secondary compact" @click="addManualBookmark()">Ajouter</button>
+          <input v-model="bookmarkValue" class="input" :placeholder="$t('settings.valueOptional')" />
+          <input v-model="bookmarkNote" class="input bookmark-note-input" :placeholder="$t('settings.notePlaceholder')" />
+          <button class="btn btn-secondary compact" @click="addManualBookmark()">{{ $t('settings.add') }}</button>
         </div>
         <div v-for="bookmark in store.workspaceBookmarks.slice(0, 20)" :key="bookmark.id" class="bookmark-row">
           <div>
@@ -686,69 +686,69 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
             <span>{{ bookmark.kind }} · {{ bookmark.address ? `0x${bookmark.address}` : '-' }} · {{ bookmark.type || '-' }} · {{ bookmark.note || '-' }}</span>
           </div>
           <div class="panel-actions">
-            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToWrite(bookmark)">Write</button>
-            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToTrainer(bookmark, 'write')">Trainer</button>
-            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToTrainer(bookmark, 'freeze_polling')">Freeze</button>
-            <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceBookmark(bookmark.id)">Supprimer</button>
+            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToWrite(bookmark)">{{ $t('settings.write') }}</button>
+            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToTrainer(bookmark, 'write')">{{ $t('settings.trainer') }}</button>
+            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToTrainer(bookmark, 'freeze_polling')">{{ $t('settings.freeze') }}</button>
+            <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceBookmark(bookmark.id)">{{ $t('settings.delete') }}</button>
           </div>
         </div>
       </div>
       <div v-else class="bookmark-list">
         <div class="panel-title">
-          <h3>Bookmarks / Notes</h3>
+          <h3>{{ $t('settings.bookmarksNotesTitle') }}</h3>
           <span>0</span>
         </div>
         <div class="bookmark-create">
-          <input v-model="bookmarkLabel" class="input" placeholder="Label" />
-          <input v-model="bookmarkAddress" class="input" placeholder="Adresse hex optionnelle" />
+          <input v-model="bookmarkLabel" class="input" :placeholder="$t('settings.labelPlaceholder')" />
+          <input v-model="bookmarkAddress" class="input" :placeholder="$t('settings.addressHexOptional')" />
           <select v-model="bookmarkType" class="select">
             <option v-for="type in valueTypes" :key="type" :value="type">{{ type }}</option>
           </select>
-          <input v-model="bookmarkValue" class="input" placeholder="Valeur optionnelle" />
-          <input v-model="bookmarkNote" class="input bookmark-note-input" placeholder="Note" />
-          <button class="btn btn-secondary compact" @click="addManualBookmark()">Ajouter</button>
+          <input v-model="bookmarkValue" class="input" :placeholder="$t('settings.valueOptional')" />
+          <input v-model="bookmarkNote" class="input bookmark-note-input" :placeholder="$t('settings.notePlaceholder')" />
+          <button class="btn btn-secondary compact" @click="addManualBookmark()">{{ $t('settings.add') }}</button>
         </div>
       </div>
       <div class="workspace-import">
         <div class="panel-title">
-          <h3>Importer workspace JSON</h3>
+          <h3>{{ $t('settings.importWorkspaceJsonTitle') }}</h3>
           <div class="panel-actions">
-            <button class="btn btn-secondary compact" :disabled="!workspaceImportText.trim()" @click="previewWorkspaceImport()">Aperçu</button>
-            <button class="btn btn-secondary compact danger-action" :disabled="workspaceImportPreview?.success !== true" @click="importWorkspace()">Importer</button>
+            <button class="btn btn-secondary compact" :disabled="!workspaceImportText.trim()" @click="previewWorkspaceImport()">{{ $t('settings.importPreviewAction') }}</button>
+            <button class="btn btn-secondary compact danger-action" :disabled="workspaceImportPreview?.success !== true" @click="importWorkspace()">{{ $t('settings.importAction') }}</button>
           </div>
         </div>
-        <textarea v-model="workspaceImportText" class="workspace-import-input" placeholder="Coller un export Workspace JSON ici" />
+        <textarea v-model="workspaceImportText" class="workspace-import-input" :placeholder="$t('settings.pasteWorkspaceExportPlaceholder')" />
         <p v-if="workspaceImportStatus" class="status-line">{{ workspaceImportStatus }}</p>
         <div v-if="workspaceImportPreview?.success === true" class="import-preview">
-          <span>Investigation active: {{ workspaceImportPreview.activeInvestigation }}</span>
-          <span>Archives: {{ workspaceImportPreview.archiveCount }}</span>
-          <span>Features: {{ workspaceImportPreview.trainerFeatureCount }}</span>
-          <span>Templates: {{ workspaceImportPreview.structureTemplateCount }}</span>
-          <span>Bookmarks: {{ workspaceImportPreview.bookmarkCount }}</span>
-          <span>Audit: {{ workspaceImportPreview.auditCount || 0 }}</span>
-          <span>Preset: {{ workspaceImportPreview.lastPresetId || '-' }}</span>
-          <span>Settings: {{ workspaceImportPreview.hasSettings ? 'oui' : 'non' }}</span>
+          <span>{{ $t('settings.importPreviewActiveInvestigation', { value: workspaceImportPreview.activeInvestigation }) }}</span>
+          <span>{{ $t('settings.importPreviewArchives', { value: workspaceImportPreview.archiveCount }) }}</span>
+          <span>{{ $t('settings.importPreviewFeatures', { value: workspaceImportPreview.trainerFeatureCount }) }}</span>
+          <span>{{ $t('settings.importPreviewTemplates', { value: workspaceImportPreview.structureTemplateCount }) }}</span>
+          <span>{{ $t('settings.importPreviewBookmarks', { value: workspaceImportPreview.bookmarkCount }) }}</span>
+          <span>{{ $t('settings.importPreviewAudit', { value: workspaceImportPreview.auditCount || 0 }) }}</span>
+          <span>{{ $t('settings.importPreviewPreset', { value: workspaceImportPreview.lastPresetId || '-' }) }}</span>
+          <span>{{ $t('settings.importPreviewSettings', { value: workspaceImportPreview.hasSettings ? $t('settings.yes') : $t('settings.no') }) }}</span>
         </div>
       </div>
       <div v-if="store.structureTemplates.length > 0" class="template-list">
         <div class="panel-title">
-          <h3>Templates Structure</h3>
+          <h3>{{ $t('settings.structureTemplates') }}</h3>
           <span>{{ store.structureTemplates.length }}</span>
         </div>
         <div v-for="template in store.structureTemplates.slice(0, 12)" :key="template.id" class="template-row">
           <div>
             <strong>{{ template.name }}</strong>
-            <span>0x{{ template.baseAddress }} · {{ template.fieldCount }} champ(s) · {{ template.processName || '-' }}</span>
+            <span>0x{{ template.baseAddress }} · {{ $t('settings.fieldCount', { count: template.fieldCount }) }} · {{ template.processName || '-' }}</span>
           </div>
           <div class="panel-actions">
-            <button class="btn btn-secondary compact" @click="selectedStructureTemplateId = template.id">Détails</button>
-            <button class="btn btn-secondary compact danger-action" @click="store.deleteStructureTemplate(template.id)">Supprimer</button>
+            <button class="btn btn-secondary compact" @click="selectedStructureTemplateId = template.id">{{ $t('settings.details') }}</button>
+            <button class="btn btn-secondary compact danger-action" @click="store.deleteStructureTemplate(template.id)">{{ $t('settings.delete') }}</button>
           </div>
         </div>
         <div v-if="selectedStructureTemplate" class="template-detail">
           <div class="panel-title">
             <h3>{{ selectedStructureTemplate.name }}</h3>
-            <button class="btn btn-secondary compact" @click="selectedStructureTemplateId = null">Fermer</button>
+            <button class="btn btn-secondary compact" @click="selectedStructureTemplateId = null">{{ $t('settings.close') }}</button>
           </div>
           <div
             v-for="field in selectedStructureTemplate.fields.slice(0, 80)"
@@ -765,10 +765,10 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       </div>
       <div v-if="workspaceExportText" class="workspace-export">
         <div class="panel-title">
-          <h3>Export workspace</h3>
+          <h3>{{ $t('settings.exportWorkspaceTitle') }}</h3>
           <div class="panel-actions">
-            <button class="btn btn-secondary compact" @click="copyWorkspaceExport()">Copier</button>
-            <button class="btn btn-secondary compact" @click="workspaceExportText = ''">Fermer</button>
+            <button class="btn btn-secondary compact" @click="copyWorkspaceExport()">{{ $t('settings.copy') }}</button>
+            <button class="btn btn-secondary compact" @click="workspaceExportText = ''">{{ $t('settings.close') }}</button>
           </div>
         </div>
         <p v-if="workspaceExportStatus" class="status-line">{{ workspaceExportStatus }}</p>
@@ -776,10 +776,10 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       </div>
       <div class="audit-panel">
         <div class="panel-title">
-          <h3>Audit actions</h3>
+          <h3>{{ $t('settings.actionAudit') }}</h3>
           <span>{{ store.actionLog.length }}</span>
         </div>
-        <div v-if="store.actionLog.length === 0" class="empty-line">Aucune action auditée.</div>
+        <div v-if="store.actionLog.length === 0" class="empty-line">{{ $t('settings.noAuditedAction') }}</div>
         <div v-for="entry in store.actionLog.slice(0, 20)" :key="entry.id" class="audit-row">
           <div>
             <strong>{{ entry.title }}</strong>
@@ -789,10 +789,10 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       </div>
       <div v-if="auditExportText" class="workspace-export">
         <div class="panel-title">
-          <h3>Export audit</h3>
+          <h3>{{ $t('settings.exportAuditTitle') }}</h3>
           <div class="panel-actions">
-            <button class="btn btn-secondary compact" @click="copyAuditExport()">Copier</button>
-            <button class="btn btn-secondary compact" @click="auditExportText = ''">Fermer</button>
+            <button class="btn btn-secondary compact" @click="copyAuditExport()">{{ $t('settings.copy') }}</button>
+            <button class="btn btn-secondary compact" @click="auditExportText = ''">{{ $t('settings.close') }}</button>
           </div>
         </div>
         <p v-if="auditExportStatus" class="status-line">{{ auditExportStatus }}</p>
@@ -802,7 +802,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>État</h2>
+        <h2>{{ $t('settings.stateTitle') }}</h2>
       </div>
       <div class="runtime-grid">
         <div v-for="row in runtimeRows" :key="row.label" class="runtime-cell">
@@ -820,47 +820,47 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Diagnostic</h2>
+        <h2>{{ $t('settings.diagnosticTitle') }}</h2>
         <div class="panel-actions">
           <button class="btn btn-secondary compact" @click="store.refreshLogTail()">
-            Logs
+            {{ $t('settings.logs') }}
           </button>
           <button class="btn btn-secondary compact" @click="store.exportDiagnostics()">
-            Exporter
+            {{ $t('settings.exportAction') }}
           </button>
         </div>
       </div>
       <div class="path-row">
-        <span>Log</span>
+        <span>{{ $t('settings.log') }}</span>
         <code>{{ store.logFilePath || '-' }}</code>
       </div>
       <div class="path-row">
-        <span>Smart Search JSON</span>
+        <span>{{ $t('settings.smartSearchJson') }}</span>
         <code>{{ store.smartSearchDebugFilePath || '-' }}</code>
       </div>
       <div class="path-row">
-        <span>Scan telemetry JSON</span>
+        <span>{{ $t('settings.scanTelemetryJson') }}</span>
         <code>{{ store.scanTelemetryFilePath || '-' }}</code>
       </div>
       <div class="setting-row inline-setting">
         <div>
-          <strong>Debug Smart Search</strong>
-          <span>{{ store.settingSmartSearchDebugEnabled ? 'activé' : 'désactivé' }}</span>
+          <strong>{{ $t('settings.debugSmartSearch') }}</strong>
+          <span>{{ store.settingSmartSearchDebugEnabled ? $t('settings.enabled') : $t('settings.disabled') }}</span>
         </div>
         <label class="toggle-row">
           <input v-model="store.settingSmartSearchDebugEnabled" type="checkbox" />
-          <span>Écrire le JSONL</span>
+          <span>{{ $t('settings.writeJsonl') }}</span>
         </label>
       </div>
       <div class="setting-row inline-setting">
         <div>
-          <strong>Événements affichés</strong>
+          <strong>{{ $t('settings.eventsDisplayed') }}</strong>
           <span>{{ store.settingSmartSearchDebugMaxEvents }}</span>
         </div>
         <input v-model.number="store.settingSmartSearchDebugMaxEvents" class="input short-input" type="number" min="5" max="200" step="5" />
       </div>
       <p v-if="store.diagnosticExportPath" class="status-line">
-        Diagnostic exporté : <code>{{ store.diagnosticExportPath }}</code>
+        {{ $t('settings.diagnosticExported') }} <code>{{ store.diagnosticExportPath }}</code>
       </p>
       <p v-if="store.diagnosticExportError" class="error">{{ store.diagnosticExportError }}</p>
       <p v-if="store.diagnosticOpenFolderError" class="warning">{{ store.diagnosticOpenFolderError }}</p>
@@ -870,13 +870,10 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Compatibilité antivirus</h2>
+        <h2>{{ $t('settings.antivirusCompatTitle') }}</h2>
       </div>
       <p class="hint">
-        Certains antivirus/EDR (ex. Microsoft Defender for Endpoint) bloquent parfois l'injection utilisée par
-        le breakpoint in-process ou le freeze avancé, en confondant cet usage légitime de débogage avec une
-        technique d'injection malveillante. Le bouton ci-dessous ouvre une invite d'élévation Windows (UAC)
-        pour ajouter une exclusion — rien ne se passe sans ta confirmation explicite dans cette invite.
+        {{ $t('settings.antivirusHint') }}
       </p>
       <div class="panel-actions">
         <button
@@ -884,14 +881,14 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.defenderExclusionBusy"
           @click="store.requestWindowsDefenderExclusion()"
         >
-          {{ store.defenderExclusionBusy ? 'En cours…' : 'Ajouter une exclusion Windows Defender' }}
+          {{ store.defenderExclusionBusy ? $t('settings.addingInProgress') : $t('settings.addDefenderExclusion') }}
         </button>
       </div>
       <p v-if="store.defenderExclusionResult?.success" class="status-line">
-        Exclusion ajoutée avec succès.
+        {{ $t('settings.exclusionAddedSuccess') }}
       </p>
       <p v-else-if="store.defenderExclusionResult?.cancelled" class="warning">
-        Invite d'élévation refusée — aucune modification effectuée.
+        {{ $t('settings.elevationRefused') }}
       </p>
       <p v-else-if="store.defenderExclusionResult?.error" class="error">
         {{ store.defenderExclusionResult.error }}
@@ -900,17 +897,15 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Driver kernel</h2>
-        <span>{{ store.kernelDriverStatus?.status ?? 'inconnu' }}</span>
+        <h2>{{ $t('settings.kernelDriverTitle') }}</h2>
+        <span>{{ store.kernelDriverStatus?.status ?? $t('settings.unknownStatus') }}</span>
       </div>
       <p class="hint">
-        Statut du driver optionnel `KillEngineKernel.sys`. Si "Accès mémoire kernel" est actif ci-dessous, la lecture
-        et l'écriture mémoire via le driver noyau sont disponibles (contourne les protections mémoire usermode
-        normales — VirtualProtect/PAGE_GUARD — via un accès ring 0, pas juste un probe de santé).
+        {{ $t('settings.kernelDriverHint') }}
       </p>
       <div class="kernel-learning">
         <div class="kernel-learning-head">
-          <strong>Parcours kernel</strong>
+          <strong>{{ $t('settings.kernelJourney') }}</strong>
           <span>{{ kernelCapabilityLabel }}</span>
         </div>
         <div class="kernel-learning-steps">
@@ -926,41 +921,41 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.kernelDriverStatusLoading"
           @click="store.refreshKernelDriverStatus()"
         >
-          {{ store.kernelDriverStatusLoading ? 'Probe…' : 'Tester le driver' }}
+          {{ store.kernelDriverStatusLoading ? $t('settings.probing') : $t('settings.testDriver') }}
         </button>
         <button
           class="btn btn-secondary compact"
           :disabled="store.kernelDriverStartLoading || store.kernelDriverStatusLoading"
-          title="Démarre le service Windows KillEngineKernel s'il est déjà installé mais arrêté. Nécessite KillEngine lancé administrateur."
+          :title="$t('settings.restartDriverTitle')"
           @click="store.startKernelDriver()"
         >
-          {{ store.kernelDriverStartLoading ? 'Démarrage…' : 'Relancer le driver' }}
+          {{ store.kernelDriverStartLoading ? $t('settings.starting') : $t('settings.restartDriver') }}
         </button>
       </div>
       <div v-if="store.kernelDriverStatus" class="settings-grid compact-grid">
         <div>
-          <strong>Device</strong>
+          <strong>{{ $t('settings.device') }}</strong>
           <span>{{ store.kernelDriverStatus.devicePath }}</span>
         </div>
         <div>
-          <strong>Message</strong>
+          <strong>{{ $t('settings.message') }}</strong>
           <span>{{ store.kernelDriverStatus.message }}</span>
         </div>
         <div>
-          <strong>Protocole</strong>
+          <strong>{{ $t('settings.protocol') }}</strong>
           <span>{{ store.kernelDriverStatus.capabilities.protocolVersion }}</span>
         </div>
         <div>
-          <strong>Health probe</strong>
-          <span>{{ store.kernelDriverStatus.capabilities.healthProbe ? 'oui' : 'non' }}</span>
+          <strong>{{ $t('settings.healthProbe') }}</strong>
+          <span>{{ store.kernelDriverStatus.capabilities.healthProbe ? $t('settings.yes') : $t('settings.no') }}</span>
         </div>
         <div>
-          <strong>Accès mémoire kernel</strong>
-          <span>{{ store.kernelDriverStatus.capabilities.processMemoryAccess ? 'oui' : 'non' }}</span>
+          <strong>{{ $t('settings.kernelMemoryAccess') }}</strong>
+          <span>{{ store.kernelDriverStatus.capabilities.processMemoryAccess ? $t('settings.yes') : $t('settings.no') }}</span>
         </div>
         <div>
-          <strong>Instrumentation privilégiée</strong>
-          <span>{{ store.kernelDriverStatus.capabilities.privilegedInstrumentation ? 'oui' : 'non' }}</span>
+          <strong>{{ $t('settings.privilegedInstrumentation') }}</strong>
+          <span>{{ store.kernelDriverStatus.capabilities.privilegedInstrumentation ? $t('settings.yes') : $t('settings.no') }}</span>
         </div>
       </div>
       <p v-if="store.kernelDriverStatusError" class="error">
@@ -968,70 +963,62 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       </p>
 
       <template v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess">
-        <h3>Lecture mémoire (kernel)</h3>
+        <h3>{{ $t('settings.kernelReadTitle') }}</h3>
         <p class="hint">
-          Lit sur le processus attaché ({{ store.isAttached ? store.processName : 'aucun' }}) via
-          <code>KeStackAttachProcess</code> côté driver — chemin distinct de la lecture usermode habituelle.
+          {{ $t('settings.kernelReadHint', { process: store.isAttached ? store.processName : $t('settings.none') }) }}
         </p>
         <div class="panel-actions">
-          <input v-model="kernelReadAddress" class="input" placeholder="Adresse hex, ex: 7FF6ABCD1000" />
+          <input v-model="kernelReadAddress" class="input" :placeholder="$t('settings.addressHexPlaceholder')" />
           <input v-model.number="kernelReadSize" class="input short-input" type="number" min="1" max="4096" step="1" />
           <button
             class="btn btn-secondary compact"
             :disabled="store.kernelMemoryReadBusy || !store.isAttached"
             @click="store.readMemoryKernel(kernelReadAddress, kernelReadSize)"
           >
-            {{ store.kernelMemoryReadBusy ? 'Lecture…' : 'Lire (kernel)' }}
+            {{ store.kernelMemoryReadBusy ? $t('settings.reading') : $t('settings.readKernel') }}
           </button>
         </div>
         <p v-if="store.kernelMemoryReadResult?.success" class="status-line">
-          {{ store.kernelMemoryReadResult.bytesRead }} octet(s) : {{ store.kernelMemoryReadResult.hex }}
+          {{ $t('settings.bytesRead', { count: store.kernelMemoryReadResult.bytesRead, hex: store.kernelMemoryReadResult.hex }) }}
         </p>
         <p v-else-if="store.kernelMemoryReadResult?.error" class="error">
           {{ store.kernelMemoryReadResult.error }}
         </p>
 
-        <h3>Écriture mémoire (kernel)</h3>
+        <h3>{{ $t('settings.kernelWriteTitle') }}</h3>
         <p class="hint">
-          Écrit directement depuis le ring 0, sans passer par les protections mémoire usermode normales — action à
-          risque équivalente à une injection, soumise à la même confirmation. Pour apprendre proprement : lis l'adresse,
-          écris une valeur témoin, relis, puis vérifie l'effet dans la cible.
+          {{ $t('settings.kernelWriteHint') }}
         </p>
         <div class="panel-actions">
-          <input v-model="kernelWriteAddress" class="input" placeholder="Adresse hex, ex: 7FF6ABCD1000" />
-          <input v-model="kernelWriteBytes" class="input" placeholder="Octets hex, ex: 90 90 90" />
+          <input v-model="kernelWriteAddress" class="input" :placeholder="$t('settings.addressHexPlaceholder')" />
+          <input v-model="kernelWriteBytes" class="input" :placeholder="$t('settings.bytesHexPlaceholder')" />
           <button
             class="btn btn-secondary compact"
             :disabled="store.kernelMemoryWriteBusy || !store.isAttached"
             @click="store.writeMemoryKernel(kernelWriteAddress, kernelWriteBytes)"
           >
-            {{ store.kernelMemoryWriteBusy ? 'Écriture…' : 'Écrire (kernel)' }}
+            {{ store.kernelMemoryWriteBusy ? $t('settings.writing') : $t('settings.writeKernel') }}
           </button>
         </div>
         <p v-if="store.kernelMemoryWriteResult?.success" class="status-line">
-          {{ store.kernelMemoryWriteResult.bytesWritten }} octet(s) écrits.
+          {{ $t('settings.bytesWritten', { count: store.kernelMemoryWriteResult.bytesWritten }) }}
         </p>
         <p v-else-if="store.kernelMemoryWriteResult?.error" class="error">
           {{ store.kernelMemoryWriteResult.error }}
         </p>
       </template>
       <p v-else class="hint">
-        Lecture/écriture mémoire via le driver noyau indisponibles : le driver doit être connecté avec la capacité
-        "Accès mémoire kernel" active (voir ci-dessus, "Tester le driver").
+        {{ $t('settings.kernelUnavailableHint') }}
       </p>
     </section>
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Mode Automation (avancé)</h2>
-        <span>{{ store.automationPipeStatus?.running ? 'Actif' : 'Inactif' }}</span>
+        <h2>{{ $t('settings.automationModeTitle') }}</h2>
+        <span>{{ store.automationPipeStatus?.running ? $t('settings.activeState') : $t('settings.inactive') }}</span>
       </div>
       <p class="hint">
-        Ouvre le pipe d'automatisation local de KillEngine (utilisé par le scripting Lua <code>ke.call(...)</code> et
-        par tout outil/agent externe sur cette machine) sans avoir à lancer KillEngine avec la variable
-        d'environnement <code>KILLENGINE_AUTOMATION_PIPE=1</code>. Réservé aux utilisateurs avancés : une fois actif,
-        les actions déclenchées via ce pipe s'exécutent immédiatement, sans confirmation par action — voir
-        <code>docs/AUTOMATION_API.md</code> pour le protocole complet et un exemple de branchement d'un agent IA.
+        {{ $t('settings.automationHint') }}
       </p>
       <div class="panel-actions">
         <button
@@ -1039,34 +1026,34 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           class="btn btn-secondary compact"
           @click="store.enableAutomationMode()"
         >
-          Activer le mode Automation
+          {{ $t('settings.enableAutomation') }}
         </button>
         <button
           v-else
           class="btn btn-secondary compact"
           @click="store.disableAutomationMode()"
         >
-          Désactiver le mode Automation
+          {{ $t('settings.disableAutomation') }}
         </button>
         <button class="btn btn-secondary compact" @click="store.refreshAutomationPipeStatus()">
-          Rafraîchir le statut
+          {{ $t('settings.refreshStatus') }}
         </button>
       </div>
       <div v-if="store.automationPipeStatus" class="settings-grid compact-grid">
         <div>
-          <strong>Pipe</strong>
+          <strong>{{ $t('settings.pipe') }}</strong>
           <span>{{ store.automationPipeStatus.pipeName }}</span>
         </div>
         <div>
-          <strong>Appels reçus</strong>
+          <strong>{{ $t('settings.callsReceived') }}</strong>
           <span>{{ store.automationPipeStatus.callCount ?? 0 }}</span>
         </div>
         <div>
-          <strong>Dernier appel</strong>
+          <strong>{{ $t('settings.lastCall') }}</strong>
           <span>{{ store.automationPipeStatus.lastMethod || '—' }}</span>
         </div>
         <div>
-          <strong>À</strong>
+          <strong>{{ $t('settings.atLabel') }}</strong>
           <span>{{ store.automationPipeStatus.lastCallAt || '—' }}</span>
         </div>
       </div>
@@ -1074,16 +1061,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Mode Stealth (avancé)</h2>
-        <span>{{ store.stealthStatus?.active ? `Actif (${store.stealthStatus.profile})` : 'Inactif' }}</span>
+        <h2>{{ $t('settings.stealthModeTitle') }}</h2>
+        <span>{{ store.stealthStatus?.active ? $t('settings.stealthActiveProfile', { profile: store.stealthStatus.profile }) : $t('settings.inactive') }}</span>
       </div>
       <p class="hint">
-        Masque l'attache KillEngine face aux mécanismes anti-debug/anti-cheat courants : hooks anti-anti-debug
-        (<code>IsDebuggerPresent</code>/<code>CheckRemoteDebuggerPresent</code>/<code>NtQueryInformationProcess</code>),
-        masquage du nom de process KillEngine, masquage des DLLs injectées. Nécessite un processus attaché.
-        « Analyser la détectabilité » scanne les modules chargés dans le processus attaché à la recherche de
-        protections connues (BattlEye, Easy Anti-Cheat, Vanguard, PunkBuster, GameGuard, Xigncode3, Denuvo, mhyprot…)
-        et recommande quoi activer — plutôt que de deviner un profil à l'aveugle.
+        {{ $t('settings.stealthHint') }}
       </p>
       <div class="panel-actions">
         <button
@@ -1091,45 +1073,45 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.stealthBusy || !store.isAttached"
           @click="store.applyStealthMode('sc2')"
         >
-          Activer « sc2 » (tout)
+          {{ $t('settings.enableSc2') }}
         </button>
         <button
           class="btn btn-secondary compact"
           :disabled="store.stealthBusy || !store.isAttached"
           @click="store.applyStealthMode('default')"
         >
-          Activer « default » (antiDebug)
+          {{ $t('settings.enableDefault') }}
         </button>
         <button
           class="btn btn-secondary compact"
           :disabled="store.stealthBusy || !store.isAttached"
           @click="store.applyStealthMode('minimal')"
         >
-          Activer « minimal » (processMask)
+          {{ $t('settings.enableMinimal') }}
         </button>
         <button
           class="btn btn-secondary compact"
           :disabled="store.stealthBusy || !store.stealthStatus?.active"
           @click="store.restoreStealthMode()"
         >
-          Restaurer / désactiver
+          {{ $t('settings.restoreDisable') }}
         </button>
         <button class="btn btn-secondary compact" :disabled="store.stealthBusy" @click="store.refreshStealthStatus()">
-          Rafraîchir le statut
+          {{ $t('settings.refreshStatus') }}
         </button>
       </div>
       <div v-if="store.stealthStatus?.modules" class="settings-grid compact-grid">
         <div>
           <strong>antiDebug</strong>
-          <span>{{ store.stealthStatus.modules.antiDebug ? 'actif' : 'inactif' }}</span>
+          <span>{{ store.stealthStatus.modules.antiDebug ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
         </div>
         <div>
           <strong>processMask</strong>
-          <span>{{ store.stealthStatus.modules.processMask ? 'actif' : 'inactif' }}</span>
+          <span>{{ store.stealthStatus.modules.processMask ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
         </div>
         <div>
           <strong>dllMask</strong>
-          <span>{{ store.stealthStatus.modules.dllMask ? 'actif' : 'inactif' }}</span>
+          <span>{{ store.stealthStatus.modules.dllMask ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
         </div>
       </div>
 
@@ -1139,17 +1121,17 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.stealthBusy || !store.isAttached"
           @click="store.analyzeStealthRisk()"
         >
-          Analyser la détectabilité
+          {{ $t('settings.analyzeDetectability') }}
         </button>
       </div>
-      <p v-if="!store.isAttached" class="hint">Attache-toi à un processus pour lancer l'analyse.</p>
+      <p v-if="!store.isAttached" class="hint">{{ $t('settings.attachToAnalyze') }}</p>
 
       <div v-if="store.stealthRiskAnalysis?.success" class="stealth-analysis">
         <div class="stealth-risk-line">
           <span class="risk-badge" :class="`risk-${store.stealthRiskAnalysis.riskLevel}`">
             {{ store.stealthRiskAnalysis.riskLevel }} — {{ store.stealthRiskAnalysis.riskScore }}/100
           </span>
-          <span class="hint">{{ store.stealthRiskAnalysis.moduleCount }} module(s) scanné(s)</span>
+          <span class="hint">{{ $t('settings.moduleScannedCount', { count: store.stealthRiskAnalysis.moduleCount }) }}</span>
         </div>
         <ul v-if="stealthThreats.length" class="stealth-threat-list">
           <li v-for="(threat, idx) in stealthThreats" :key="idx">
@@ -1165,14 +1147,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Débogage CDP WebView2 (avancé)</h2>
-        <span>{{ store.webView2CdpDebugFlagStatus?.enabled ? 'Actif' : 'Inactif' }}</span>
+        <h2>{{ $t('settings.webview2CdpTitle') }}</h2>
+        <span>{{ store.webView2CdpDebugFlagStatus?.enabled ? $t('settings.activeState') : $t('settings.inactive') }}</span>
       </div>
       <p class="hint">
-        Force <code>--remote-debugging-port=9333</code> sur <strong>tous les hôtes WebView2 du user Windows
-        courant</strong> à leur prochain lancement — nécessaire pour que KillEngine inspecte l'état JavaScript d'une
-        app WebView2/Electron/CEF non packagée (Store/UWP passe par une autre voie, voir le diagnostic ci-dessous).
-        Portée large et persistante tant que non désactivé.
+        {{ $t('settings.webview2CdpHintPrefix') }} <strong>{{ $t('settings.webview2CdpHintStrong') }}</strong> {{ $t('settings.webview2CdpHintSuffix') }}
       </p>
       <div class="panel-actions">
         <button
@@ -1181,7 +1160,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.webView2CdpDebugFlagBusy"
           @click="store.enableWebView2CdpDebugFlag()"
         >
-          Activer le débogage CDP
+          {{ $t('settings.enableCdpDebug') }}
         </button>
         <button
           v-else
@@ -1189,18 +1168,18 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.webView2CdpDebugFlagBusy"
           @click="store.disableWebView2CdpDebugFlag()"
         >
-          Désactiver le débogage CDP
+          {{ $t('settings.disableCdpDebug') }}
         </button>
         <button
           class="btn btn-secondary compact"
           :disabled="store.webView2CdpDebugFlagBusy"
           @click="store.refreshWebView2CdpDebugFlagStatus()"
         >
-          Rafraîchir le statut
+          {{ $t('settings.refreshStatus') }}
         </button>
       </div>
       <p v-if="store.webView2CdpDebugFlagStatus?.value" class="status-line">
-        Variable posée : <code>{{ store.webView2CdpDebugFlagStatus.value }}</code>
+        {{ $t('settings.variableSetLabel') }} <code>{{ store.webView2CdpDebugFlagStatus.value }}</code>
       </p>
       <p v-if="store.webView2CdpDebugFlagStatus?.error" class="error">
         {{ store.webView2CdpDebugFlagStatus.error }}
@@ -1209,14 +1188,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Préparer l'inspection WebView2 (apps Store/UWP)</h2>
-        <span>{{ store.webView2SystemPrepStatus?.capabilityInstalled ? 'Prêt' : 'À préparer' }}</span>
+        <h2>{{ $t('settings.webview2PrepTitle') }}</h2>
+        <span>{{ store.webView2SystemPrepStatus?.capabilityInstalled ? $t('settings.ready') : $t('settings.toPrepare') }}</span>
       </div>
       <p class="hint">
-        Diagnostic pour la chaîne Windows Device Portal (nécessaire pour inspecter le CDP d'apps WebView2
-        packagées Store/UWP, ex: apps du Microsoft Store) : Mode développeur Windows et capability optionnelle
-        <code>Tools.DeveloperMode.Core</code>. Ne débloque PAS le port CDP direct de ces apps (restriction
-        AppContainer séparée, toujours présente) — uniquement un prérequis pour le Portail d'appareil.
+        {{ $t('settings.webview2PrepHint') }}
       </p>
       <div class="panel-actions">
         <button
@@ -1224,23 +1200,23 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           :disabled="store.webView2SystemPrepBusy"
           @click="store.refreshWebView2SystemPrepStatus()"
         >
-          {{ store.webView2SystemPrepBusy ? 'Diagnostic…' : 'Lancer le diagnostic' }}
+          {{ store.webView2SystemPrepBusy ? $t('settings.diagnosing') : $t('settings.runDiagnostic') }}
         </button>
         <button
           class="btn btn-secondary compact"
           :disabled="store.webView2SystemPrepBusy || store.webView2SystemPrepStatus?.capabilityInstalled"
           @click="store.installWebView2DeveloperModeCapability()"
         >
-          Installer la capability (invite UAC)
+          {{ $t('settings.installCapability') }}
         </button>
       </div>
       <div v-if="store.webView2SystemPrepStatus" class="settings-grid compact-grid">
         <div>
-          <strong>Mode développeur</strong>
-          <span>{{ store.webView2SystemPrepStatus.developerModeEnabled ? 'Activé' : 'Désactivé' }}</span>
+          <strong>{{ $t('settings.developerMode') }}</strong>
+          <span>{{ store.webView2SystemPrepStatus.developerModeEnabled ? $t('settings.enabledState') : $t('settings.disabledState') }}</span>
         </div>
         <div>
-          <strong>Capability Tools.DeveloperMode.Core</strong>
+          <strong>{{ $t('settings.capabilityLabel') }}</strong>
           <span>{{ store.webView2SystemPrepStatus.capabilityState || '—' }}</span>
         </div>
       </div>
@@ -1254,27 +1230,27 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Log principal</h2>
+        <h2>{{ $t('settings.mainLogTitle') }}</h2>
         <span>{{ store.logLines.length }}</span>
       </div>
       <div v-if="store.logLines.length === 0" class="empty-line">
-        Aucun log chargé.
+        {{ $t('settings.noLogLoaded') }}
       </div>
       <pre v-else class="log-viewer">{{ store.logLines.join('\n') }}</pre>
     </section>
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Événements Smart Search</h2>
+        <h2>{{ $t('settings.smartSearchEventsTitle') }}</h2>
         <div class="panel-actions">
           <span>{{ debugEvents.length }}</span>
           <button class="btn btn-secondary compact" :disabled="debugEvents.length === 0" @click="store.clearSmartSearchDebug()">
-            Vider
+            {{ $t('settings.clear') }}
           </button>
         </div>
       </div>
       <div v-if="debugEvents.length === 0" class="empty-line">
-        Aucun événement debug enregistré.
+        {{ $t('settings.noDebugEvent') }}
       </div>
       <div v-else class="debug-list">
         <div v-for="(event, index) in debugEvents" :key="index" class="debug-row">
@@ -1293,14 +1269,14 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
-        <h2>Session</h2>
+        <h2>{{ $t('settings.sessionTitle') }}</h2>
       </div>
       <div class="actions-row">
         <button class="btn btn-primary" :disabled="store.settingsSaving" @click="saveAll">
-          {{ store.settingsSaving ? 'Sauvegarde...' : 'Sauvegarder les paramètres' }}
+          {{ store.settingsSaving ? $t('settings.saving') : $t('settings.saveSettings') }}
         </button>
         <button class="btn btn-secondary" @click="store.resetWorkflow()">
-          Réinitialiser le workflow
+          {{ $t('settings.resetWorkflow') }}
         </button>
         <button class="btn btn-secondary" :disabled="!store.isAttached" @click="store.detach()">
           {{ $t('process.detach') }}
