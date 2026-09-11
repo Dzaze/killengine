@@ -1,5 +1,7 @@
 #include "process/package_storage.h"
 
+#include "localization/localization.h"
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <appmodel.h>
@@ -30,17 +32,17 @@ bool decodeHexBytes(const QString& input, QByteArray* bytes, QString* error) {
             continue;
         }
         if (!ch.isDigit() && (ch.toLower() < QLatin1Char('a') || ch.toLower() > QLatin1Char('f'))) {
-            if (error) *error = QString("Hex invalide: caractère '%1'.").arg(ch);
+            if (error) *error = KE_TXT("Hex invalide : caractère '%1'.", "Invalid hex: character '%1'.").arg(ch);
             return false;
         }
         compact.append(ch);
     }
     if (compact.isEmpty()) {
-        if (error) *error = "Séquence hex vide.";
+        if (error) *error = KE_TXT("Séquence hex vide.", "Empty hex sequence.");
         return false;
     }
     if ((compact.size() % 2) != 0) {
-        if (error) *error = "Séquence hex invalide: nombre impair de caractères.";
+        if (error) *error = KE_TXT("Séquence hex invalide : nombre impair de caractères.", "Invalid hex sequence: odd number of characters.");
         return false;
     }
 
@@ -50,7 +52,7 @@ bool decodeHexBytes(const QString& input, QByteArray* bytes, QString* error) {
         bool ok = false;
         const int value = compact.mid(i, 2).toInt(&ok, 16);
         if (!ok || value < 0 || value > 0xFF) {
-            if (error) *error = "Séquence hex invalide.";
+            if (error) *error = KE_TXT("Séquence hex invalide.", "Invalid hex sequence.");
             return false;
         }
         decoded.append(static_cast<char>(value));
@@ -305,7 +307,7 @@ bool resolvePackageFamilyName(const ProcessHandle& process, QString* familyName,
 
 #ifdef Q_OS_WIN
     if (!process.isValid()) {
-        if (error) *error = "Process handle invalide.";
+        if (error) *error = KE_TXT("Handle de processus invalide.", "Invalid process handle.");
         return false;
     }
 
@@ -314,14 +316,16 @@ bool resolvePackageFamilyName(const ProcessHandle& process, QString* familyName,
     if (rc != ERROR_INSUFFICIENT_BUFFER || length == 0) {
         // APPMODEL_ERROR_NO_PACKAGE (15700) : process Win32 classique, pas un
         // package UWP -- pas d'erreur système, juste "rien à trouver ici".
-        if (error) *error = "Ce processus n'est pas un package UWP/AppContainer (pas de dossier LocalState associé).";
+        if (error) *error = KE_TXT("Ce processus n'est pas un package UWP/AppContainer (pas de dossier LocalState associé).",
+            "This process is not a UWP/AppContainer package (no associated LocalState folder).");
         return false;
     }
 
     std::vector<wchar_t> buffer(static_cast<size_t>(length));
     rc = GetPackageFamilyName(process.rawHandle(), &length, buffer.data());
     if (rc != ERROR_SUCCESS) {
-        if (error) *error = "GetPackageFamilyName a échoué malgré la première résolution de taille.";
+        if (error) *error = KE_TXT("GetPackageFamilyName a échoué malgré la première résolution de taille.",
+            "GetPackageFamilyName failed despite the first size resolution.");
         return false;
     }
 
@@ -329,7 +333,7 @@ bool resolvePackageFamilyName(const ProcessHandle& process, QString* familyName,
     return true;
 #else
     (void)process;
-    if (error) *error = "Non supporté sur cette plateforme.";
+    if (error) *error = KE_TXT("Non supporté sur cette plateforme.", "Not supported on this platform.");
     return false;
 #endif
 }
@@ -348,20 +352,20 @@ bool listPackageSaveFiles(
 
     const QString trimmedFamily = familyName.trimmed();
     if (trimmedFamily.isEmpty()) {
-        if (error) *error = "Package family name vide.";
+        if (error) *error = KE_TXT("Package family name vide.", "Empty package family name.");
         return false;
     }
 
     const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
     if (localAppData.isEmpty()) {
-        if (error) *error = "Variable d'environnement LOCALAPPDATA introuvable.";
+        if (error) *error = KE_TXT("Variable d'environnement LOCALAPPDATA introuvable.", "LOCALAPPDATA environment variable not found.");
         return false;
     }
 
     const QString root = packageRootForFamily(trimmedFamily);
     QDir rootDir(root);
     if (!rootDir.exists()) {
-        if (error) *error = QString("Dossier package introuvable: %1").arg(root);
+        if (error) *error = KE_TXT("Dossier package introuvable : %1", "Package folder not found: %1").arg(root);
         return false;
     }
 
@@ -415,11 +419,11 @@ bool readPackageSaveFileText(
 
     QFile file(path);
     if (!file.exists()) {
-        if (error) *error = "Fichier introuvable.";
+        if (error) *error = KE_TXT("Fichier introuvable.", "File not found.");
         return false;
     }
     if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QString("Ouverture impossible: %1").arg(file.errorString());
+        if (error) *error = KE_TXT("Ouverture impossible : %1", "Unable to open: %1").arg(file.errorString());
         return false;
     }
 
@@ -462,23 +466,24 @@ bool inspectPackageLocalSettings(
 
     const QString trimmedFamily = familyName.trimmed();
     if (trimmedFamily.isEmpty()) {
-        if (error) *error = "Package family name vide.";
+        if (error) *error = KE_TXT("Package family name vide.", "Empty package family name.");
         return false;
     }
 
     const QString root = packageRootForFamily(trimmedFamily);
     if (root.isEmpty()) {
-        if (error) *error = "Variable d'environnement LOCALAPPDATA introuvable.";
+        if (error) *error = KE_TXT("Variable d'environnement LOCALAPPDATA introuvable.", "LOCALAPPDATA environment variable not found.");
         return false;
     }
     const QString path = QDir(root).filePath("Settings/settings.dat");
     if (settingsPath) *settingsPath = path;
     if (!isPathUnderLocalPackages(path)) {
-        if (error) *error = "Chemin LocalSettings refusé : doit rester sous %LOCALAPPDATA%\\Packages\\.";
+        if (error) *error = KE_TXT("Chemin LocalSettings refusé : doit rester sous %LOCALAPPDATA%\\Packages\\.",
+            "LocalSettings path refused: must stay under %LOCALAPPDATA%\\Packages\\.");
         return false;
     }
     if (!QFileInfo::exists(path)) {
-        if (error) *error = QString("Ruche LocalSettings introuvable: %1").arg(path);
+        if (error) *error = KE_TXT("Ruche LocalSettings introuvable : %1", "LocalSettings hive not found: %1").arg(path);
         return false;
     }
 
@@ -490,7 +495,7 @@ bool inspectPackageLocalSettings(
         0,
         0);
     if (rc != ERROR_SUCCESS || !hive) {
-        if (error) *error = QString("RegLoadAppKeyW a échoué (%1) sur settings.dat.").arg(rc);
+        if (error) *error = KE_TXT("RegLoadAppKeyW a échoué (%1) sur settings.dat.", "RegLoadAppKeyW failed (%1) on settings.dat.").arg(rc);
         return false;
     }
 
@@ -499,7 +504,7 @@ bool inspectPackageLocalSettings(
     RegCloseKey(hive);
     return true;
 #else
-    if (error) *error = "Non supporté sur cette plateforme.";
+    if (error) *error = KE_TXT("Non supporté sur cette plateforme.", "Not supported on this platform.");
     return false;
 #endif
 }
@@ -513,7 +518,7 @@ bool patchPackageSaveFileBytes(
 
     if (occurrencesFound) *occurrencesFound = 0;
     if (!isPathUnderLocalPackages(path)) {
-        if (error) *error = "Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\.";
+        if (error) *error = KE_TXT("Chemin refusé : doit être sous %LOCALAPPDATA%\\Packages\\.", "Path refused: must be under %LOCALAPPDATA%\\Packages\\.");
         return false;
     }
 
@@ -521,16 +526,17 @@ bool patchPackageSaveFileBytes(
     QByteArray replaceBytes;
     QString parseError;
     if (!decodeHexBytes(findHex, &findBytes, &parseError)) {
-        if (error) *error = QString("Séquence recherchée invalide: %1").arg(parseError);
+        if (error) *error = KE_TXT("Séquence recherchée invalide : %1", "Invalid search sequence: %1").arg(parseError);
         return false;
     }
     if (!decodeHexBytes(replaceHex, &replaceBytes, &parseError)) {
-        if (error) *error = QString("Séquence de remplacement invalide: %1").arg(parseError);
+        if (error) *error = KE_TXT("Séquence de remplacement invalide : %1", "Invalid replacement sequence: %1").arg(parseError);
         return false;
     }
     if (findBytes.size() != replaceBytes.size()) {
         if (error) {
-            *error = QString("La longueur doit être identique, %1 octets vs %2 octets.")
+            *error = KE_TXT("La longueur doit être identique, %1 octets vs %2 octets.",
+                "The length must be identical, %1 bytes vs %2 bytes.")
                 .arg(findBytes.size())
                 .arg(replaceBytes.size());
         }
@@ -539,11 +545,11 @@ bool patchPackageSaveFileBytes(
 
     QFile file(path);
     if (!file.exists()) {
-        if (error) *error = "Fichier introuvable.";
+        if (error) *error = KE_TXT("Fichier introuvable.", "File not found.");
         return false;
     }
     if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QString("Ouverture impossible: %1").arg(file.errorString());
+        if (error) *error = KE_TXT("Ouverture impossible : %1", "Unable to open: %1").arg(file.errorString());
         return false;
     }
     QByteArray raw = file.readAll();
@@ -564,12 +570,13 @@ bool patchPackageSaveFileBytes(
     if (occurrencesFound) *occurrencesFound = occurrences;
 
     if (occurrences == 0) {
-        if (error) *error = "Séquence introuvable.";
+        if (error) *error = KE_TXT("Séquence introuvable.", "Sequence not found.");
         return false;
     }
     if (occurrences >= 2) {
         if (error) {
-            *error = QString("%1 occurrences trouvées, séquence pas assez spécifique -- élargis le contexte autour de la valeur à changer.")
+            *error = KE_TXT("%1 occurrences trouvées, séquence pas assez spécifique -- élargis le contexte autour de la valeur à changer.",
+                "%1 occurrences found, sequence not specific enough -- widen the context around the value to change.")
                 .arg(occurrences);
         }
         return false;
@@ -577,16 +584,16 @@ bool patchPackageSaveFileBytes(
 
     raw.replace(uniqueIndex, findBytes.size(), replaceBytes);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (error) *error = QString("Réécriture impossible: %1").arg(file.errorString());
+        if (error) *error = KE_TXT("Réécriture impossible : %1", "Unable to rewrite: %1").arg(file.errorString());
         return false;
     }
     const qint64 written = file.write(raw);
     if (written != raw.size()) {
-        if (error) *error = QString("Écriture incomplète: %1/%2 octets.").arg(written).arg(raw.size());
+        if (error) *error = KE_TXT("Écriture incomplète : %1/%2 octets.", "Incomplete write: %1/%2 bytes.").arg(written).arg(raw.size());
         return false;
     }
     if (!file.flush()) {
-        if (error) *error = QString("Flush impossible: %1").arg(file.errorString());
+        if (error) *error = KE_TXT("Flush impossible : %1", "Unable to flush: %1").arg(file.errorString());
         return false;
     }
     file.close();

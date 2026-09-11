@@ -1,4 +1,5 @@
 #include "process/file_watch.h"
+#include "localization/localization.h"
 #include "memory/memory_reader.h"
 
 #ifdef Q_OS_WIN
@@ -50,7 +51,7 @@ bool watchFileForChanges(
     const QString dirPath = QDir::toNativeSeparators(info.absolutePath());
     const QString targetName = info.fileName();
     if (dirPath.isEmpty() || targetName.isEmpty()) {
-        if (error) *error = "Chemin invalide.";
+        if (error) *error = KE_TXT("Chemin invalide.", "Invalid path.");
         return false;
     }
 
@@ -63,14 +64,14 @@ bool watchFileForChanges(
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
         nullptr);
     if (hDir == INVALID_HANDLE_VALUE) {
-        if (error) *error = QString("Ouverture du dossier parent impossible (code %1).").arg(GetLastError());
+        if (error) *error = KE_TXT("Ouverture du dossier parent impossible (code %1).", "Unable to open the parent folder (code %1).").arg(GetLastError());
         return false;
     }
 
     HANDLE hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!hEvent) {
         CloseHandle(hDir);
-        if (error) *error = "Création de l'event de surveillance impossible.";
+        if (error) *error = KE_TXT("Création de l'event de surveillance impossible.", "Unable to create the monitoring event.");
         return false;
     }
 
@@ -111,7 +112,7 @@ bool watchFileForChanges(
             &overlapped,
             nullptr);
         if (!issued) {
-            if (error) *error = QString("ReadDirectoryChangesW a échoué (code %1).").arg(GetLastError());
+            if (error) *error = KE_TXT("ReadDirectoryChangesW a échoué (code %1).", "ReadDirectoryChangesW failed (code %1).").arg(GetLastError());
             CloseHandle(hEvent);
             CloseHandle(hDir);
             return false;
@@ -153,7 +154,7 @@ bool watchFileForChanges(
             GetOverlappedResult(hDir, &overlapped, &cancelBytes, TRUE);
             continue;
         } else {
-            if (error) *error = QString("Attente de notification échouée (code %1).").arg(GetLastError());
+            if (error) *error = KE_TXT("Attente de notification échouée (code %1).", "Waiting for notification failed (code %1).").arg(GetLastError());
             DWORD cancelBytes = 0;
             CancelIoEx(hDir, &overlapped);
             GetOverlappedResult(hDir, &overlapped, &cancelBytes, TRUE);
@@ -174,7 +175,7 @@ bool watchFileForChanges(
     (void)path;
     (void)timeoutMs;
     (void)cancellation;
-    if (error) *error = "Non supporté sur cette plateforme.";
+    if (error) *error = KE_TXT("Non supporté sur cette plateforme.", "Not supported on this platform.");
     return false;
 #endif
 }

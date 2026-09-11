@@ -5,10 +5,38 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSettings>
 #include <QVector>
 #include <QUuid>
 
 namespace {
+
+// Sauvegarde/restaure "ui/language" autour du test, meme pattern que
+// test_localization.cpp/test_ai_tools.cpp/test_auto_resolver.cpp/
+// test_aob_scanner.cpp : les messages verifies ici sont desormais traduits
+// via KE_TXT (docs/BACKEND_UI_LOCALIZATION_ROADMAP.md, candidat B8, 11/09/2026).
+class ScopedUiLanguage {
+public:
+    explicit ScopedUiLanguage(const QString& language) {
+        QSettings settings;
+        m_previous = settings.value("ui/language");
+        settings.setValue("ui/language", language);
+        settings.sync();
+    }
+
+    ~ScopedUiLanguage() {
+        QSettings settings;
+        if (m_previous.isValid()) {
+            settings.setValue("ui/language", m_previous);
+        } else {
+            settings.remove("ui/language");
+        }
+        settings.sync();
+    }
+
+private:
+    QVariant m_previous;
+};
 
 class PackageStoragePatchTest : public ::testing::Test {
 protected:
@@ -51,6 +79,7 @@ protected:
 } // namespace
 
 TEST_F(PackageStoragePatchTest, RejectsDifferentDecodedLengths) {
+    ScopedUiLanguage lang("fr");
     const QString path = writeFile("value=58");
     QString error;
 
@@ -62,6 +91,7 @@ TEST_F(PackageStoragePatchTest, RejectsDifferentDecodedLengths) {
 }
 
 TEST_F(PackageStoragePatchTest, RejectsMissingSequence) {
+    ScopedUiLanguage lang("fr");
     const QString path = writeFile("value=58");
     QString error;
 
@@ -73,6 +103,7 @@ TEST_F(PackageStoragePatchTest, RejectsMissingSequence) {
 }
 
 TEST_F(PackageStoragePatchTest, RejectsAmbiguousSequence) {
+    ScopedUiLanguage lang("fr");
     const QString path = writeFile("a=58;b=58");
     QString error;
 
@@ -97,6 +128,7 @@ TEST_F(PackageStoragePatchTest, PatchesSingleOccurrenceInPlace) {
 }
 
 TEST_F(PackageStoragePatchTest, LocalSettingsReportsMissingHiveUnderPackageRoot) {
+    ScopedUiLanguage lang("fr");
     QVector<killcore::PackageLocalSettingsEntry> entries;
     QString settingsPath;
     QString error;
@@ -112,6 +144,7 @@ TEST_F(PackageStoragePatchTest, LocalSettingsReportsMissingHiveUnderPackageRoot)
 }
 
 TEST_F(PackageStoragePatchTest, LocalSettingsRejectsInvalidHiveFileCleanly) {
+    ScopedUiLanguage lang("fr");
     ASSERT_TRUE(QDir().mkpath(QDir(m_root).filePath(QStringLiteral("Settings"))));
     const QString hivePath = QDir(m_root).filePath(QStringLiteral("Settings/settings.dat"));
     QFile fakeHive(hivePath);
