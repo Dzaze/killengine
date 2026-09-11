@@ -40,6 +40,36 @@ private:
     QString m_previousEnv;
 };
 
+// Sauvegarde/restaure "ui/language" autour du test, meme pattern que
+// ScopedUiLanguage (tests/unit/test_localization.cpp) : les assertions ici
+// verifient du texte KE_TXT en dur en francais, donc elles sont fragiles a la
+// langue reellement persistee sur la machine qui execute les tests (trouve le
+// 11/09/2026 en corrigeant la persistance du switch FR/EN de la sidebar --
+// avant ce fix, "ui/language" n'etait jamais ecrit par le switch rapide donc
+// ce probleme etait invisible).
+class ScopedUiLanguage {
+public:
+    explicit ScopedUiLanguage(const QString& language) {
+        QSettings settings;
+        m_previous = settings.value("ui/language");
+        settings.setValue("ui/language", language);
+        settings.sync();
+    }
+
+    ~ScopedUiLanguage() {
+        QSettings settings;
+        if (m_previous.isValid()) {
+            settings.setValue("ui/language", m_previous);
+        } else {
+            settings.remove("ui/language");
+        }
+        settings.sync();
+    }
+
+private:
+    QVariant m_previous;
+};
+
 } // namespace
 
 TEST(AIToolValidatorTest, AcceptsExactScan) {
@@ -427,6 +457,7 @@ TEST(ModelLocatorTest, ProvidesCandidateQwenPaths) {
 
 TEST(AIEngineContextualFallbackTest, AsksToAttachProcessWhenDetached) {
     ScopedModelDisabled guard;
+    ScopedUiLanguage lang("fr");
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;
@@ -438,6 +469,7 @@ TEST(AIEngineContextualFallbackTest, AsksToAttachProcessWhenDetached) {
 
 TEST(AIEngineContextualFallbackTest, PureGreetingDoesNotAskForSearchValue) {
     ScopedModelDisabled guard;
+    ScopedUiLanguage lang("fr");
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;
@@ -452,6 +484,7 @@ TEST(AIEngineContextualFallbackTest, PureGreetingDoesNotAskForSearchValue) {
 
 TEST(AIEngineContextualFallbackTest, PureThanksDoesNotAskForSearchValue) {
     ScopedModelDisabled guard;
+    ScopedUiLanguage lang("fr");
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;
@@ -476,6 +509,7 @@ TEST(AIEngineContextualFallbackTest, GreetingWithConcreteValueStillPlansScan) {
 
 TEST(AIEngineContextualFallbackTest, InvestigationPlaybookBroadDisplayedValueIsReadOnlyPlan) {
     ScopedModelDisabled guard;
+    ScopedUiLanguage lang("fr");
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;
@@ -691,6 +725,7 @@ TEST(AIEngineContextualFallbackTest, ModuleSourcePivotDoesNotConsumeIncreasedAsN
 
 TEST(AIEngineContextualFallbackTest, ModuleXpDiscoveryWithoutValueListsModulesInsteadOfAutoResolve) {
     ScopedModelDisabled guard;
+    ScopedUiLanguage lang("fr");
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;
@@ -791,6 +826,7 @@ TEST(AIEngineContextualFallbackTest, OffMemoryFastPathRoutesWatchRequestToDiscov
 
 TEST(AIEngineContextualFallbackTest, OffMemoryFastPathStillRequiresAttachedProcess) {
     ScopedModelDisabled guard;
+    ScopedUiLanguage lang("fr");
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;
@@ -939,6 +975,7 @@ TEST(AIEngineContextualFallbackTest, TrainerFastPathRestoreRequiresUiConfirmatio
 
 TEST(AIEngineContextualFallbackTest, TrainerFastPathStillRequiresAttachedProcess) {
     ScopedModelDisabled guard;
+    ScopedUiLanguage lang("fr");
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;
@@ -1070,6 +1107,7 @@ TEST(AIEngineContextualFallbackTest, NegatedFreezeDoesNotRouteToFreezeTool) {
 
 TEST(AIEngineContextualFallbackTest, FieldStabilityFastPathStillRequiresAttachedProcess) {
     ScopedModelDisabled guard;
+    ScopedUiLanguage lang("fr");
     killai::AIEngine engine;
     ASSERT_TRUE(engine.init());
     QVariantMap context;

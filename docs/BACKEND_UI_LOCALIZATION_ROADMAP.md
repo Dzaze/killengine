@@ -45,7 +45,7 @@ Ces 4 messages viennent de `apps/desktop/profile_manager.cpp:975,992,1145,1172` 
 
 | # | Candidat | Fichier(s) | Chaînes (audit) | Priorité | Statut |
 | --- | --- | --- | --- | --- | --- |
-| [ ] B1 | Catalogue Modules (8 cartes) + flux install/téléchargement/UAC/exclusion | `apps/desktop/application_controller.cpp` (fonction `getModuleCatalog()` et alentours, ~lignes 5760-6650) | ~45 | **Haute** — page Modules, déjà partiellement vue en direct aujourd'hui (`edr_exclusion`) | Pas commencé |
+| [x] B1 | Catalogue Modules (8 cartes) + flux install/téléchargement/UAC/exclusion | `apps/desktop/application_controller.cpp` (`getModuleCatalog()`, `installModule()`, `checkEdrBlocking()`, `addEdrExclusionAsync()`, `checkDebugPrivilege()`/`enableDebugPrivilege()`), + résidus visibles trouvés en vérification live : `apps/desktop/settings_diagnostics_manager.cpp::getAiModelStatus()`, `core/kernel/kernel_driver_bridge.cpp::probe()` | ~58 chaînes traitées | **Haute** | **Fait 11/09/2026** |
 | [ ] B2 | Avertissements de qualité de signature AOB | `core/patch/aob_scanner.cpp` | 5 | **Haute** — déjà observé en direct aujourd'hui (panneau AOB Expert) | Pas commencé |
 | [ ] B3 | Profile/Trainer (sauvegarde/application de patch) + Auto Resolver (labels d'étapes + insights) + **fix du couplage `errorCode`** | `apps/desktop/profile_manager.cpp`, `ai/auto_resolver.cpp` | ~110 | **Haute-moyenne** — panneaux Profile/Trainer d'usage courant ; inclut le fix de couplage obligatoire | Pas commencé |
 | [ ] B4 | CLR Inspector (erreurs de résolution locator, setter, écriture struct) | `apps/desktop/clr_inspector_bridge.cpp` | ~50 | Moyenne | Pas commencé |
@@ -62,6 +62,18 @@ Ces 4 messages viennent de `apps/desktop/profile_manager.cpp:975,992,1145,1172` 
 2. **B3** — inclut le fix de couplage obligatoire (`errorCode`), à faire tôt pour ne pas laisser la télémétrie Auto Resolver cassée entre deux sessions si quelqu'un d'autre touche `profile_manager.cpp` entre-temps.
 3. **B4-B7** — reste des panneaux d'usage réel (CLR Inspector, stealth, kernel/DPAPI, scanner core), dans n'importe quel ordre selon disponibilité agent.
 4. **B8-B10** — résidus de fonctionnalités de niche ou petits fichiers, faible priorité, chantier permanent comme `docs/REFACTOR_ROADMAP.md`.
+
+## Progrès
+
+### 11/09/2026 — B1 clos + bug de fond découvert et corrigé
+
+B1 traité (catalogue Modules + flux install/UAC/EDR/debug privilege), ~58 chaînes migrées vers `KE_TXT`. L'override frontend `ModulesView.vue` (`moduleName`/`moduleDescription`/`moduleDetail`, ajouté le 10/09 pour contourner `edr_exclusion` sans toucher au C++) a été retiré — le backend renvoie directement le bon texte, les 3 clés i18n `modules.catalog.edrExclusion.*` correspondantes ont été supprimées des deux locales.
+
+**Découverte critique en vérification live (CDP, méthode de ce chantier — voir Décisions de méthode §4)** : le switch rapide FR/EN de la sidebar (`App.vue`, ajouté le 10/09) et les boutons FR/EN de la page Réglages ne persistaient JAMAIS `QSettings("ui/language")` — seul le bouton "Sauvegarder" complet de Réglages le faisait. Résultat : tout texte backend `KE_TXT` (déjà utilisé par le chat IA depuis le chantier clos `AI_CHAT_LOCALIZATION_ROADMAP.md`, et maintenant par B1) restait bloqué sur la dernière langue **sauvegardée**, indépendamment de la langue affichée à l'écran — un switch qui n'en était qu'à moitié un. Corrigé par une nouvelle méthode légère `ApplicationController::setUiLanguage(language)` (→ `SettingsDiagnosticsManager::setUiLanguage`, écrit uniquement `ui/language` sans toucher aux autres réglages) appelée immédiatement par le nouveau store action `switchLanguage()` (`ui/src/stores/settings.ts`), câblée à la fois sur le switch sidebar et sur les boutons de Réglages. Vérifié live : catalogue Modules bascule réellement FR→EN après ce fix (avant : restait figé en français malgré le switch).
+
+Cette découverte a aussi révélé une fragilité de test latente : 8 tests de `tests/unit/test_ai_tools.cpp` (`AIEngineContextualFallbackTest`) asserient du texte français en dur sans isoler `ui/language`, et ont commencé à échouer dès que le fix ci-dessus a réellement persisté "en" sur le registre de la machine de dev pendant la vérification live. Corrigé en ajoutant un garde `ScopedUiLanguage` (même patron que `test_localization.cpp`) sur les 8 tests concernés — suite verte confirmée avec `ui/language` forcé à "en" pendant l'exécution.
+
+Build C++ propre, 469/469 tests unitaires (y compris avec langue ambiante forcée en "en"), `npm run type-check`/`npm run build` propres, vérification visuelle CDP FR et EN sur la page Modules réelle.
 
 ## Règle d'usage
 

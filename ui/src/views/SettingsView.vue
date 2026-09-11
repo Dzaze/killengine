@@ -245,8 +245,8 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           <span>{{ store.appLanguage === 'fr' ? $t('settings.french') : $t('settings.english') }}</span>
         </div>
         <div class="segmented">
-          <button :class="{ active: store.appLanguage === 'fr' }" @click="store.appLanguage = 'fr'">FR</button>
-          <button :class="{ active: store.appLanguage === 'en' }" @click="store.appLanguage = 'en'">EN</button>
+          <button :class="{ active: store.appLanguage === 'fr' }" @click="store.switchLanguage('fr')">FR</button>
+          <button :class="{ active: store.appLanguage === 'en' }" @click="store.switchLanguage('en')">EN</button>
         </div>
       </div>
     </section>

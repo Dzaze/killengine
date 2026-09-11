@@ -17,6 +17,7 @@ public:
     QVariantMap getAiModelStatus() const;
     QVariantMap browseForModelFile();
     QVariantMap saveSettings(const QVariantMap& settings);
+    QVariantMap setUiLanguage(const QString& language);
     QString getLogFilePath() const;
     QString getSmartSearchDebugFilePath() const;
     QString getScanTelemetryFilePath() const;

@@ -43,29 +43,6 @@ const isInstallTarget = (moduleId: string) => {
   return store.moduleInstallBusy && store.moduleInstallModuleId === moduleId
 }
 
-// Le catalogue de modules vient du backend C++ (application_controller.cpp),
-// qui n'a aucune notion de locale — displayName/description y sont donc du
-// texte brut, toujours en français. Pour edr_exclusion, dont la copie doit
-// être particulièrement claire sur le POURQUOI (pas juste le QUOI), on
-// substitue une version traduite ici plutôt que d'afficher le champ brut ;
-// les autres modules restent inchangés (résidu documenté, hors périmètre).
-const moduleName = (mod: { id: string, displayName: string }) => {
-  if (mod.id === 'edr_exclusion') return t('modules.catalog.edrExclusion.title')
-  return mod.displayName
-}
-
-const moduleDescription = (mod: { id: string, description: string }) => {
-  if (mod.id === 'edr_exclusion') return t('modules.catalog.edrExclusion.description')
-  return mod.description
-}
-
-const moduleDetail = (mod: { id: string, detail?: string }) => {
-  if (mod.id === 'edr_exclusion' && mod.detail === "Cliquez sur 'Vérifier' pour tester.") {
-    return t('modules.catalog.edrExclusion.detailClickCheck')
-  }
-  return mod.detail
-}
-
 // MODULES-V2 : état des diagnostics
 const edrResult = ref<Record<string, unknown> | null>(null)
 const debugPrivResult = ref<Record<string, unknown> | null>(null)
@@ -449,7 +426,7 @@ onMounted(() => {
       <div v-for="mod in store.moduleCatalog.filter(m => m.section === 'test_env')" :key="mod.id" class="module-card" :class="{ busy: isInstallTarget(mod.id) }">
         <div class="module-head">
           <div class="module-title">
-            <span class="module-name">{{ moduleName(mod) }}</span>
+            <span class="module-name">{{ mod.displayName }}</span>
             <span class="module-status" :class="statusClass(moduleEffectiveStatus(mod))">{{ statusLabel(moduleEffectiveStatus(mod)) }}</span>
           </div>
           <div class="module-actions">
@@ -471,8 +448,8 @@ onMounted(() => {
             </button>
           </div>
         </div>
-        <p class="module-desc">{{ moduleDescription(mod) }}</p>
-        <p v-if="mod.detail" class="module-detail">{{ moduleDetail(mod) }}</p>
+        <p class="module-desc">{{ mod.description }}</p>
+        <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
 
         <!-- Guide EDR / Tamper Protection -->
         <div v-if="mod.id === 'edr_exclusion'" class="edr-guide">

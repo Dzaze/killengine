@@ -1760,6 +1760,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   /** Masque (hide=true) ou restaure (hide=false) un handle specifique dans la table de handles du process proprietaire via le driver noyau. ownerPid vide = process courant. handleValue en hexadecimal (ex: "0x1234). */
   handleTable?(ownerPid: string, handleValue: string, hide: boolean): Promise<Record<string, unknown>>
   saveSettings(settings: AppSettings): Promise<AppSettings>
+  /** Persiste immédiatement la langue seule (QSettings ui/language), sans attendre le "Sauvegarder" complet de Réglages — utilisé par le switch rapide FR/EN de la sidebar pour que le texte backend (KE_TXT) suive tout de suite. */
+  setUiLanguage?(language: 'fr' | 'en'): Promise<{ success: boolean, language: string }>
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
   getScanTelemetryFilePath?(): Promise<string>
@@ -2874,6 +2876,9 @@ class BackendService {
       },
       async saveSettings(settings: AppSettings) {
         return { ...settings, success: true }
+      },
+      async setUiLanguage(language: 'fr' | 'en') {
+        return { success: true, language }
       },
       async getAiModelStatus() {
         return {

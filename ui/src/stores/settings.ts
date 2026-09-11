@@ -144,11 +144,25 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  // Persiste la langue immédiatement (QSettings ui/language), indépendamment
+  // du "Sauvegarder" complet des Réglages — sans ça, le texte backend (KE_TXT,
+  // ex. catalogue Modules) reste bloqué sur la dernière langue sauvegardée
+  // et le switch rapide FR/EN de la sidebar (App.vue) n'est qu'à moitié réel.
+  async function switchLanguage(language: 'fr' | 'en') {
+    appLanguage.value = language
+    try {
+      await backend.getController().setUiLanguage?.(language)
+    } catch (e) {
+      settingsStatus.value = t('settingsStore.saveFailed', { error: String(e) })
+    }
+  }
+
   return {
     settingsLoaded,
     settingsSaving,
     settingsStatus,
     appLanguage,
+    switchLanguage,
     settingDefaultValueType,
     settingScanMaxResults,
     settingScanChunkSizeMb,

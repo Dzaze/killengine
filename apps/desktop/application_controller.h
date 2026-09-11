@@ -1131,6 +1131,7 @@ public:
 
     /// Sauvegarde les paramètres persistants de l'application.
     Q_INVOKABLE QVariantMap saveSettings(const QVariantMap& settings);
+    Q_INVOKABLE QVariantMap setUiLanguage(const QString& language);
 
     /// Retourne le chemin du fichier de log.
     Q_INVOKABLE QString getLogFilePath() const;

@@ -82,8 +82,8 @@ watch(
       </div>
 
       <div class="lang-switch" role="group" :aria-label="$t('nav.languageSwitchLabel')">
-        <button :class="{ active: store.appLanguage === 'fr' }" @click="store.appLanguage = 'fr'">FR</button>
-        <button :class="{ active: store.appLanguage === 'en' }" @click="store.appLanguage = 'en'">EN</button>
+        <button :class="{ active: store.appLanguage === 'fr' }" @click="store.switchLanguage('fr')">FR</button>
+        <button :class="{ active: store.appLanguage === 'en' }" @click="store.switchLanguage('en')">EN</button>
       </div>
 
       <nav class="nav">

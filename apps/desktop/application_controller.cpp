@@ -5768,8 +5768,9 @@ QVariantMap ApplicationController::getModuleCatalog() const {
         const bool available = lua.value("available").toBool();
         QVariantMap item;
         item["id"] = QStringLiteral("lua_runtime");
-        item["displayName"] = QStringLiteral("Runtime Lua externe");
-        item["description"] = QStringLiteral("Interpréteur lua.exe + helper scripts/killengine.lua — scripting Lua pilotant KillEngine via le pipe d'automatisation.");
+        item["displayName"] = KE_TXT("Runtime Lua externe", "External Lua runtime");
+        item["description"] = KE_TXT("Interpréteur lua.exe + helper scripts/killengine.lua — scripting Lua pilotant KillEngine via le pipe d'automatisation.",
+            "lua.exe interpreter + scripts/killengine.lua helper — Lua scripting driving KillEngine via the automation pipe.");
         item["installed"] = available;
         item["status"] = available ? QStringLiteral("ok") : QStringLiteral("missing");
         item["detail"] = lua.value("message").toString();
@@ -5785,8 +5786,9 @@ QVariantMap ApplicationController::getModuleCatalog() const {
         const bool ready = ai.value("ready").toBool();
         QVariantMap item;
         item["id"] = QStringLiteral("ai_model");
-        item["displayName"] = QStringLiteral("Modèle IA embarqué (GGUF)");
-        item["description"] = QStringLiteral("Qwen3.5-2B Q4_K_M (~1,4 Go) pour l'Assistant et l'Auto Resolver — téléchargé depuis Hugging Face (bartowski/Qwen_Qwen3.5-2B-GGUF, même quantification que le modèle embarqué).");
+        item["displayName"] = KE_TXT("Modèle IA embarqué (GGUF)", "Embedded AI model (GGUF)");
+        item["description"] = KE_TXT("Qwen3.5-2B Q4_K_M (~1,4 Go) pour l'Assistant et l'Auto Resolver — téléchargé depuis Hugging Face (bartowski/Qwen_Qwen3.5-2B-GGUF, même quantification que le modèle embarqué).",
+            "Qwen3.5-2B Q4_K_M (~1.4 GB) for the Assistant and the Auto Resolver — downloaded from Hugging Face (bartowski/Qwen_Qwen3.5-2B-GGUF, same quantization as the embedded model).");
         item["installed"] = ready;
         item["status"] = ready ? QStringLiteral("ok") : QStringLiteral("missing");
         item["detail"] = ai.value("message").toString();
@@ -5802,11 +5804,13 @@ QVariantMap ApplicationController::getModuleCatalog() const {
         const bool available = clr.value("available").toBool();
         QVariantMap item;
         item["id"] = QStringLiteral("clr_inspector");
-        item["displayName"] = QStringLiteral("Inspecteur CLR (ClrMD)");
-        item["description"] = QStringLiteral("Helper .NET KillEngineClrInspector.exe — lecture/écriture des objets managés des cibles .NET via named pipe.");
+        item["displayName"] = KE_TXT("Inspecteur CLR (ClrMD)", "CLR Inspector (ClrMD)");
+        item["description"] = KE_TXT("Helper .NET KillEngineClrInspector.exe — lecture/écriture des objets managés des cibles .NET via named pipe.",
+            "KillEngineClrInspector.exe .NET helper — reads/writes managed objects of .NET targets via a named pipe.");
         item["installed"] = available;
         item["status"] = available ? QStringLiteral("ok") : QStringLiteral("missing");
-        item["detail"] = available ? QStringLiteral("Helper détecté.") : QStringLiteral("Helper introuvable — build local requis (SDK .NET 8+).");
+        item["detail"] = available ? KE_TXT("Helper détecté.", "Helper detected.")
+                                    : KE_TXT("Helper introuvable — build local requis (SDK .NET 8+).", "Helper not found — a local build is required (.NET 8+ SDK).");
         item["path"] = clr.value("helperPath").toString();
         item["installable"] = true;
         item["installKind"] = QStringLiteral("script");
@@ -5819,8 +5823,9 @@ QVariantMap ApplicationController::getModuleCatalog() const {
         const bool connected = drv.value("status").toString().compare(QStringLiteral("connected"), Qt::CaseInsensitive) == 0;
         QVariantMap item;
         item["id"] = QStringLiteral("kernel_driver");
-        item["displayName"] = QStringLiteral("Driver noyau KillEngineKernel");
-        item["description"] = QStringLiteral("Driver kernel optionnel (mémoire privilégiée, table de handles) — service Windows KillEngineKernel.");
+        item["displayName"] = KE_TXT("Driver noyau KillEngineKernel", "KillEngineKernel driver");
+        item["description"] = KE_TXT("Driver kernel optionnel (mémoire privilégiée, table de handles) — service Windows KillEngineKernel.",
+            "Optional kernel driver (privileged memory, handle table) — the KillEngineKernel Windows service.");
         item["installed"] = connected;
         item["status"] = connected ? QStringLiteral("ok") : QStringLiteral("missing");
         item["detail"] = drv.value("message").toString();
@@ -5836,11 +5841,24 @@ QVariantMap ApplicationController::getModuleCatalog() const {
     {
         QVariantMap item;
         item["id"] = QStringLiteral("edr_exclusion");
-        item["displayName"] = QStringLiteral("Exclusion EDR / Defender");
-        item["description"] = QStringLiteral("Vérifie si l'EDR bloque l'injection de code (VirtualAllocEx/WriteProcessMemory/CreateRemoteThread) et propose d'ajouter une exclusion pour le dossier build/bin.");
+        item["displayName"] = KE_TXT("Compatibilité EDR / Defender", "EDR / Defender compatibility");
+        item["description"] = KE_TXT(
+            "KillEngine utilise des primitives d'allocation mémoire distante et d'écriture dans un autre processus "
+            "(VirtualAllocEx/WriteProcessMemory/CreateRemoteThread) — exactement ce que les antivirus/EDR (dont Microsoft "
+            "Defender for Endpoint) surveillent pour détecter des malwares. Un blocage ici ne signifie pas que quelque "
+            "chose ne va pas : c'est attendu pour cet usage légitime de débogage mémoire. Ce diagnostic vérifie si l'EDR "
+            "bloque réellement l'injection sur le processus attaché, et propose une exclusion ciblée (dossier build/bin "
+            "uniquement, réversible) si besoin.",
+            "KillEngine uses remote memory allocation and cross-process write primitives "
+            "(VirtualAllocEx/WriteProcessMemory/CreateRemoteThread) — exactly what antivirus/EDR software (including "
+            "Microsoft Defender for Endpoint) watches for to detect malware. A block here doesn't mean something is "
+            "wrong: it's expected for this legitimate memory-debugging use. This diagnostic checks whether the EDR is "
+            "actually blocking injection on the attached process, and offers a targeted, reversible exclusion (build/bin "
+            "folder only) if needed.");
         item["installed"] = false; // diagnostic dynamique
         item["status"] = QStringLiteral("unknown");
-        item["detail"] = QStringLiteral("Cliquez sur 'Vérifier' pour tester.");
+        item["detail"] = KE_TXT("Clique sur « Vérifier » pour lancer le test sur le processus attaché.",
+            "Click \"Check\" to run the test on the attached process.");
         item["installable"] = true;
         item["installKind"] = QStringLiteral("diagnostic");
         item["section"] = QStringLiteral("test_env");
@@ -5851,11 +5869,12 @@ QVariantMap ApplicationController::getModuleCatalog() const {
     {
         QVariantMap item;
         item["id"] = QStringLiteral("debug_privilege");
-        item["displayName"] = QStringLiteral("Privilège SeDebugName");
-        item["description"] = QStringLiteral("Vérifie et active le privilège SeDebugName — requis pour tous les tests de breakpoint matériel et d'injection.");
+        item["displayName"] = KE_TXT("Privilège SeDebugName", "SeDebugName privilege");
+        item["description"] = KE_TXT("Vérifie et active le privilège SeDebugName — requis pour tous les tests de breakpoint matériel et d'injection.",
+            "Checks and enables the SeDebugName privilege — required for all hardware breakpoint and injection tests.");
         item["installed"] = false; // diagnostic dynamique
         item["status"] = QStringLiteral("unknown");
-        item["detail"] = QStringLiteral("Cliquez sur 'Vérifier' pour tester.");
+        item["detail"] = KE_TXT("Cliquez sur 'Vérifier' pour tester.", "Click 'Check' to test.");
         item["installable"] = true;
         item["installKind"] = QStringLiteral("diagnostic");
         item["section"] = QStringLiteral("test_env");
@@ -5868,13 +5887,14 @@ QVariantMap ApplicationController::getModuleCatalog() const {
     {
         QVariantMap item;
         item["id"] = QStringLiteral("stealth_sc2_profile");
-        item["displayName"] = QStringLiteral("Profil Stealth SC2");
-        item["description"] = QStringLiteral("Applique le profil stealth SC2 (anti-debug PEB + process mask + dll mask) en un clic — pour les jeux AAA/online.");
+        item["displayName"] = KE_TXT("Profil Stealth SC2", "SC2 Stealth profile");
+        item["description"] = KE_TXT("Applique le profil stealth SC2 (anti-debug PEB + process mask + dll mask) en un clic — pour les jeux AAA/online.",
+            "Applies the SC2 stealth profile (PEB anti-debug + process mask + dll mask) in one click — for AAA/online games.");
         item["installed"] = m_stealthActive;
         item["status"] = m_stealthActive ? QStringLiteral("ok") : QStringLiteral("missing");
         item["detail"] = m_stealthActive
-            ? QStringLiteral("Stealth actif (profil : %1)").arg(m_stealthProfile)
-            : QStringLiteral("Stealth inactif — profils disponibles : sc2, default, minimal.");
+            ? KE_TXT("Stealth actif (profil : %1)", "Stealth active (profile: %1)").arg(m_stealthProfile)
+            : KE_TXT("Stealth inactif — profils disponibles : sc2, default, minimal.", "Stealth inactive — available profiles: sc2, default, minimal.");
         item["installable"] = true;
         item["installKind"] = QStringLiteral("stealth");
         item["section"] = QStringLiteral("stealth");
@@ -5887,13 +5907,14 @@ QVariantMap ApplicationController::getModuleCatalog() const {
         const bool connected = drv.value("status").toString().compare(QStringLiteral("connected"), Qt::CaseInsensitive) == 0;
         QVariantMap item;
         item["id"] = QStringLiteral("handle_hider");
-        item["displayName"] = QStringLiteral("Masquage de handles (kernel)");
-        item["description"] = QStringLiteral("Masque les handles KillEngine dans la table de handles de la cible via le driver kernel (IOCTL 0x804) — invisible à NtQuerySystemInformation/SystemHandleTable.");
+        item["displayName"] = KE_TXT("Masquage de handles (kernel)", "Handle hiding (kernel)");
+        item["description"] = KE_TXT("Masque les handles KillEngine dans la table de handles de la cible via le driver kernel (IOCTL 0x804) — invisible à NtQuerySystemInformation/SystemHandleTable.",
+            "Hides KillEngine's handles in the target's handle table via the kernel driver (IOCTL 0x804) — invisible to NtQuerySystemInformation/SystemHandleTable.");
         item["installed"] = connected;
         item["status"] = connected ? QStringLiteral("ok") : QStringLiteral("missing");
         item["detail"] = connected
-            ? QStringLiteral("Driver kernel actif — prêt à masquer des handles.")
-            : QStringLiteral("Driver kernel non connecté — installez d'abord le module 'Driver noyau'.");
+            ? KE_TXT("Driver kernel actif — prêt à masquer des handles.", "Kernel driver active — ready to hide handles.")
+            : KE_TXT("Driver kernel non connecté — installez d'abord le module 'Driver noyau'.", "Kernel driver not connected — install the 'Kernel driver' module first.");
         item["installable"] = false; // action ponctuelle, pas d'installation
         item["installKind"] = QStringLiteral("stealth");
         item["section"] = QStringLiteral("stealth");
@@ -5912,7 +5933,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
     Q_UNUSED(options);
 
     if (m_moduleInstallInProgress) {
-        result["error"] = QStringLiteral("Une installation de module est déjà en cours.");
+        result["error"] = KE_TXT("Une installation de module est déjà en cours.", "A module installation is already in progress.");
         return result;
     }
     // MODULES-V2 : modules V2 (diagnostic/stealth) — pas d'installation async,
@@ -5927,7 +5948,8 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
         return applyStealthProfile(QStringLiteral("sc2"));
     }
     if (moduleId == QStringLiteral("handle_hider")) {
-        result["error"] = QStringLiteral("Utilisez la fonctionnalité de masquage de handle depuis l'Expert ou le pipe d'automatisation.");
+        result["error"] = KE_TXT("Utilisez la fonctionnalité de masquage de handle depuis l'Expert ou le pipe d'automatisation.",
+            "Use the handle hiding feature from the Expert panel or the automation pipe.");
         return result;
     }
 
@@ -5935,7 +5957,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
         && moduleId != QStringLiteral("ai_model")
         && moduleId != QStringLiteral("clr_inspector")
         && moduleId != QStringLiteral("kernel_driver")) {
-        result["error"] = QStringLiteral("Module inconnu : %1").arg(moduleId);
+        result["error"] = KE_TXT("Module inconnu : %1", "Unknown module: %1").arg(moduleId);
         return result;
     }
 
@@ -5945,7 +5967,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
     if (moduleId == QStringLiteral("kernel_driver")) {
         const QString script = findModuleCatalogScript(QStringLiteral("install-kernel-driver.ps1"));
         if (script.isEmpty()) {
-            result["error"] = QStringLiteral("scripts/install-kernel-driver.ps1 introuvable.");
+            result["error"] = KE_TXT("scripts/install-kernel-driver.ps1 introuvable.", "scripts/install-kernel-driver.ps1 not found.");
             return result;
         }
         const std::wstring parameters =
@@ -5962,9 +5984,9 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
             const DWORD err = GetLastError();
             if (err == ERROR_CANCELLED) {
                 result["cancelled"] = true;
-                result["error"] = QStringLiteral("Invite UAC refusée par l'utilisateur.");
+                result["error"] = KE_TXT("Invite UAC refusée par l'utilisateur.", "UAC prompt refused by the user.");
             } else {
-                result["error"] = QStringLiteral("ShellExecuteExW a échoué (code %1).").arg(err);
+                result["error"] = KE_TXT("ShellExecuteExW a échoué (code %1).", "ShellExecuteExW failed (code %1).").arg(err);
             }
             return result;
         }
@@ -5973,9 +5995,11 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
         }
         result["success"] = true;
         result["started"] = true;
-        result["message"] = QStringLiteral(
+        result["message"] = KE_TXT(
             "Installation lancée dans une fenêtre PowerShell élevée (service Windows KillEngineKernel). "
-            "Relancer le diagnostic Modules une fois terminé.");
+            "Relancer le diagnostic Modules une fois terminé.",
+            "Installation launched in an elevated PowerShell window (KillEngineKernel Windows service). "
+            "Re-run the Modules diagnostic once it's finished.");
         KE_LOG_INFO() << "installModule(kernel_driver): installation lancée (async, UAC affiché).";
         return result;
     }
@@ -5989,7 +6013,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
             : QStringLiteral("build-clr-inspector.ps1");
         script = findModuleCatalogScript(scriptName);
         if (script.isEmpty()) {
-            result["error"] = QStringLiteral("%1 introuvable.").arg(scriptName);
+            result["error"] = KE_TXT("%1 introuvable.", "%1 not found.").arg(scriptName);
             return result;
         }
     }
@@ -6018,7 +6042,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
             // jamais de fichier final tronqué laissé derrière.
             const QString modelDir = findModuleCatalogModelDir();
             if (modelDir.isEmpty()) {
-                finished["error"] = QStringLiteral("Dossier model/qwen introuvable.");
+                finished["error"] = KE_TXT("Dossier model/qwen introuvable.", "The model/qwen folder was not found.");
             } else {
                 const QString url = QStringLiteral(
                     "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf");
@@ -6036,13 +6060,13 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                 proc.setProcessChannelMode(QProcess::MergedChannels);
                 proc.start();
                 if (!proc.waitForStarted(15000)) {
-                    finished["error"] = QStringLiteral("curl.exe n'a pas démarré.");
+                    finished["error"] = KE_TXT("curl.exe n'a pas démarré.", "curl.exe did not start.");
                 } else {
                     while (proc.state() == QProcess::Running) {
                         if (cancellation->isCancelled()) {
                             proc.kill();
                             finished["cancelled"] = true;
-                            finished["message"] = QStringLiteral("Téléchargement annulé.");
+                            finished["message"] = KE_TXT("Téléchargement annulé.", "Download cancelled.");
                             QFile::remove(partial);
                             break;
                         }
@@ -6053,7 +6077,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                                 progress["requestId"] = requestId;
                                 progress["moduleId"] = requestedModule;
                                 progress["percent"] = -1;
-                                progress["message"] = QStringLiteral("Téléchargement du modèle (~1,4 Go)…");
+                                progress["message"] = KE_TXT("Téléchargement du modèle (~1,4 Go)…", "Downloading the model (~1.4 GB)…");
                                 QMetaObject::invokeMethod(self.data(), [self, progress]() {
                                     if (self) {
                                         emit self->moduleInstallProgress(progress);
@@ -6069,9 +6093,9 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                             QFile::remove(dest);
                             QFile::rename(partial, dest);
                             finished["success"] = true;
-                            finished["message"] = QStringLiteral("Modèle téléchargé : %1").arg(dest);
+                            finished["message"] = KE_TXT("Modèle téléchargé : %1", "Model downloaded: %1").arg(dest);
                         } else {
-                            finished["error"] = QStringLiteral("Échec du téléchargement (code %1).").arg(proc.exitCode());
+                            finished["error"] = KE_TXT("Échec du téléchargement (code %1).", "Download failed (code %1).").arg(proc.exitCode());
                             QFile::remove(partial);
                         }
                     }
@@ -6091,13 +6115,13 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
             proc.setProcessChannelMode(QProcess::MergedChannels);
             proc.start();
             if (!proc.waitForStarted(15000)) {
-                finished["error"] = QStringLiteral("powershell.exe n'a pas démarré.");
+                finished["error"] = KE_TXT("powershell.exe n'a pas démarré.", "powershell.exe did not start.");
             } else {
                 while (proc.state() == QProcess::Running) {
                     if (cancellation->isCancelled()) {
                         proc.kill();
                         finished["cancelled"] = true;
-                        finished["message"] = QStringLiteral("Installation annulée.");
+                        finished["message"] = KE_TXT("Installation annulée.", "Installation cancelled.");
                         break;
                     }
                     if (proc.waitForReadyRead(500)) {
@@ -6122,10 +6146,10 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                     finished["success"] = ok;
                     if (ok) {
                         finished["message"] = requestedModule == QStringLiteral("lua_runtime")
-                            ? QStringLiteral("Runtime Lua installé dans runtime/lua.")
-                            : QStringLiteral("Inspecteur CLR compilé.");
+                            ? KE_TXT("Runtime Lua installé dans runtime/lua.", "Lua runtime installed in runtime/lua.")
+                            : KE_TXT("Inspecteur CLR compilé.", "CLR Inspector built.");
                     } else {
-                        finished["error"] = QStringLiteral("Échec du script (code %1).").arg(proc.exitCode());
+                        finished["error"] = KE_TXT("Échec du script (code %1).", "Script failed (code %1).").arg(proc.exitCode());
                     }
                 }
             }
@@ -6159,7 +6183,7 @@ QVariantMap ApplicationController::cancelModuleInstall() {
     QVariantMap result;
     result["success"] = false;
     if (!m_moduleInstallInProgress || !m_activeModuleInstallCancellation) {
-        result["error"] = QStringLiteral("Aucune installation de module en cours.");
+        result["error"] = KE_TXT("Aucune installation de module en cours.", "No module installation is in progress.");
         return result;
     }
     m_activeModuleInstallCancellation->cancel();
@@ -6195,9 +6219,9 @@ QVariantMap runElevatedCommand(const QString& program, const QString& args, DWOR
     if (!ShellExecuteExW(&sei)) {
         const DWORD err = GetLastError();
         if (err == ERROR_CANCELLED) {
-            result["error"] = QStringLiteral("L'utilisateur a refusé l'élévation UAC.");
+            result["error"] = KE_TXT("L'utilisateur a refusé l'élévation UAC.", "The user refused the UAC elevation.");
         } else {
-            result["error"] = QStringLiteral("ShellExecuteExW failed (error: %1)").arg(err);
+            result["error"] = KE_TXT("Échec de ShellExecuteExW (erreur : %1)", "ShellExecuteExW failed (error: %1)").arg(err);
         }
         return result;
     }
@@ -6211,7 +6235,7 @@ QVariantMap runElevatedCommand(const QString& program, const QString& args, DWOR
         if (exitCode == 0) {
             result["success"] = true;
         } else {
-            result["error"] = QStringLiteral("La commande a retourné le code %1.").arg(exitCode);
+            result["error"] = KE_TXT("La commande a retourné le code %1.", "The command returned code %1.").arg(exitCode);
         }
     }
     return result;
@@ -6234,7 +6258,7 @@ QVariantMap ApplicationController::setWindowsDefenderDisabledAsync(bool disabled
     const QString batPathNative = QDir::toNativeSeparators(batPath);
 
     if (!QFile::exists(batPath)) {
-        started["error"] = QStringLiteral("Script introuvable : %1 — utilise le fichier .bat manuellement.").arg(batPathNative);
+        started["error"] = KE_TXT("Script introuvable : %1 — utilise le fichier .bat manuellement.", "Script not found: %1 — use the .bat file manually.").arg(batPathNative);
         return started;
     }
 
@@ -6250,8 +6274,10 @@ QVariantMap ApplicationController::setWindowsDefenderDisabledAsync(bool disabled
         if (result.value("success").toBool()) {
             result["disabled"] = disabled;
             result["message"] = disabled
-                ? QStringLiteral("Script de désactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.")
-                : QStringLiteral("Script de réactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.");
+                ? KE_TXT("Script de désactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.",
+                    "Disable script executed. Check the console for the result. Restart Windows for the changes to take effect.")
+                : KE_TXT("Script de réactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.",
+                    "Re-enable script executed. Check the console for the result. Restart Windows for the changes to take effect.");
         }
 
         if (!self) return;
@@ -6264,7 +6290,7 @@ QVariantMap ApplicationController::setWindowsDefenderDisabledAsync(bool disabled
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = QStringLiteral("Windows only");
+    started["error"] = KE_TXT("Fonctionnalité réservée à Windows.", "Windows only.");
 #endif
     return started;
 }
@@ -6284,7 +6310,7 @@ QVariantMap ApplicationController::setDefenderBehaviorMonitoringDisabledAsync(bo
     const QString batPathNative = QDir::toNativeSeparators(batPath);
 
     if (!QFile::exists(batPath)) {
-        started["error"] = QStringLiteral("Script introuvable : %1 — utilise le fichier .bat manuellement.").arg(batPathNative);
+        started["error"] = KE_TXT("Script introuvable : %1 — utilise le fichier .bat manuellement.", "Script not found: %1 — use the .bat file manually.").arg(batPathNative);
         return started;
     }
 
@@ -6296,8 +6322,10 @@ QVariantMap ApplicationController::setDefenderBehaviorMonitoringDisabledAsync(bo
         if (result.value("success").toBool()) {
             result["disabled"] = disabled;
             result["message"] = disabled
-                ? QStringLiteral("Script de désactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.")
-                : QStringLiteral("Script de réactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.");
+                ? KE_TXT("Script de désactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.",
+                    "Disable script executed. Check the console for the result. Restart Windows for the changes to take effect.")
+                : KE_TXT("Script de réactivation exécuté. Vérifie la console pour le résultat. Redémarre Windows pour que les modifications prennent effet.",
+                    "Re-enable script executed. Check the console for the result. Restart Windows for the changes to take effect.");
         }
 
         if (!self) return;
@@ -6310,7 +6338,7 @@ QVariantMap ApplicationController::setDefenderBehaviorMonitoringDisabledAsync(bo
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = QStringLiteral("Windows only");
+    started["error"] = KE_TXT("Fonctionnalité réservée à Windows.", "Windows only.");
 #endif
     return started;
 }
@@ -6334,7 +6362,7 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
         PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION,
         FALSE, static_cast<DWORD>(m_pid));
     if (!hProcess) {
-        result["error"] = QStringLiteral("OpenProcess failed (error: %1)").arg(GetLastError());
+        result["error"] = KE_TXT("Échec d'OpenProcess (erreur : %1)", "OpenProcess failed (error: %1)").arg(GetLastError());
         return result;
     }
 
@@ -6347,11 +6375,13 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
         result["stage"] = QStringLiteral("VirtualAllocEx");
         result["errorCode"] = static_cast<int>(allocErr);
         if (allocErr == ERROR_ACCESS_DENIED) {
-            result["error"] = QStringLiteral(
+            result["error"] = KE_TXT(
                 "VirtualAllocEx bloqué (ACCESS_DENIED) — signature EDR/Defender for Endpoint détectée. "
-                "Ajoutez une exclusion pour le dossier build/bin dans Windows Security.");
+                "Ajoutez une exclusion pour le dossier build/bin dans Windows Security.",
+                "VirtualAllocEx blocked (ACCESS_DENIED) — EDR/Defender for Endpoint signature detected. "
+                "Add an exclusion for the build/bin folder in Windows Security.");
         } else {
-            result["error"] = QStringLiteral("VirtualAllocEx failed (error: %1)").arg(allocErr);
+            result["error"] = KE_TXT("Échec de VirtualAllocEx (erreur : %1)", "VirtualAllocEx failed (error: %1)").arg(allocErr);
         }
         result["success"] = true;
         return result;
@@ -6368,7 +6398,7 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
         result["blocked"] = true;
         result["stage"] = QStringLiteral("WriteProcessMemory");
         result["errorCode"] = static_cast<int>(wpmErr);
-        result["error"] = QStringLiteral("WriteProcessMemory bloqué (error: %1)").arg(wpmErr);
+        result["error"] = KE_TXT("WriteProcessMemory bloqué (erreur : %1)", "WriteProcessMemory blocked (error: %1)").arg(wpmErr);
         result["success"] = true;
         return result;
     }
@@ -6385,7 +6415,8 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
         CloseHandle(hProcess);
         result["blocked"] = false;
         result["success"] = true;
-        result["message"] = QStringLiteral("GetProcAddress(Local LoadLibraryW) échoué, mais VirtualAllocEx/WriteProcessMemory OK.");
+        result["message"] = KE_TXT("GetProcAddress(Local LoadLibraryW) échoué, mais VirtualAllocEx/WriteProcessMemory OK.",
+            "GetProcAddress(local LoadLibraryW) failed, but VirtualAllocEx/WriteProcessMemory succeeded.");
         return result;
     }
 
@@ -6404,10 +6435,13 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
         result["stage"] = QStringLiteral("ProcessKilled");
         result["errorCode"] = static_cast<int>(exitCode);
         result["processKilled"] = true;
-        result["error"] = QStringLiteral(
+        result["error"] = KE_TXT(
             "Le processus cible a été tué pendant le test — signature EDR/Defender active. "
             "L'EDR a détecté l'injection simulée et a terminé le process. "
-            "Ajoutez une exclusion pour le dossier build/bin dans Windows Security.");
+            "Ajoutez une exclusion pour le dossier build/bin dans Windows Security.",
+            "The target process was killed during the test — an active EDR/Defender signature was detected. "
+            "The EDR detected the simulated injection and terminated the process. "
+            "Add an exclusion for the build/bin folder in Windows Security.");
         result["success"] = true;
 
         // Émettre le signal et détacher proprement
@@ -6431,11 +6465,13 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
         result["stage"] = QStringLiteral("CreateRemoteThread");
         result["errorCode"] = static_cast<int>(crtErr);
         if (crtErr == ERROR_ACCESS_DENIED) {
-            result["error"] = QStringLiteral(
+            result["error"] = KE_TXT(
                 "CreateRemoteThread bloqué (ACCESS_DENIED) — signature EDR/Defender for Endpoint détectée. "
-                "Ajoutez une exclusion pour le dossier build/bin dans Windows Security.");
+                "Ajoutez une exclusion pour le dossier build/bin dans Windows Security.",
+                "CreateRemoteThread blocked (ACCESS_DENIED) — EDR/Defender for Endpoint signature detected. "
+                "Add an exclusion for the build/bin folder in Windows Security.");
         } else {
-            result["error"] = QStringLiteral("CreateRemoteThread failed (error: %1)").arg(crtErr);
+            result["error"] = KE_TXT("Échec de CreateRemoteThread (erreur : %1)", "CreateRemoteThread failed (error: %1)").arg(crtErr);
         }
         result["success"] = true;
         return result;
@@ -6451,19 +6487,23 @@ QVariantMap ApplicationController::checkEdrBlocking() const {
     // plusieurs tentatives ou après avoir ajouté l'exclusion.
     if (m_edrCheckCount < 4) {
         result["provisional"] = true;
-        result["message"] = QStringLiteral(
+        result["message"] = KE_TXT(
             "Aucun blocage détecté à cette tentative (%1), mais l'EDR peut être en mode apprentissage. "
             "Le résultat n'est pas encore fiable — ne clique pas plusieurs fois de suite (rate limiting). "
-            "Ajoute l'exclusion PowerShell pour un résultat définitif.")
+            "Ajoute l'exclusion PowerShell pour un résultat définitif.",
+            "No block detected on this attempt (%1), but the EDR may be in learning mode. "
+            "The result isn't reliable yet — don't click repeatedly (rate limiting). "
+            "Add the PowerShell exclusion for a definitive result.")
             .arg(m_edrCheckCount);
     } else {
         result["provisional"] = false;
-        result["message"] = QStringLiteral(
-            "Aucun blocage EDR détecté après %1 tentatives — injection de code fonctionnelle sur cette machine.")
+        result["message"] = KE_TXT(
+            "Aucun blocage EDR détecté après %1 tentatives — injection de code fonctionnelle sur cette machine.",
+            "No EDR block detected after %1 attempts — code injection works on this machine.")
             .arg(m_edrCheckCount);
     }
 #else
-    result["error"] = QStringLiteral("EDR check is Windows-only");
+    result["error"] = KE_TXT("Le contrôle EDR est réservé à Windows.", "EDR check is Windows-only.");
 #endif
 
     return result;
@@ -6516,9 +6556,9 @@ QVariantMap ApplicationController::addEdrExclusionAsync(const QString& path) {
             if (!ShellExecuteExW(&sei)) {
                 const DWORD err = GetLastError();
                 if (err == ERROR_CANCELLED) {
-                    result["error"] = QStringLiteral("L'utilisateur a refusé l'élévation UAC.");
+                    result["error"] = KE_TXT("L'utilisateur a refusé l'élévation UAC.", "The user refused the UAC elevation.");
                 } else {
-                    result["error"] = QStringLiteral("ShellExecuteExW failed (error: %1)").arg(err);
+                    result["error"] = KE_TXT("Échec de ShellExecuteExW (erreur : %1)", "ShellExecuteExW failed (error: %1)").arg(err);
                 }
             } else if (sei.hProcess) {
                 WaitForSingleObject(sei.hProcess, 30000);
@@ -6528,9 +6568,9 @@ QVariantMap ApplicationController::addEdrExclusionAsync(const QString& path) {
 
                 if (exitCode == 0) {
                     result["success"] = true;
-                    result["message"] = QStringLiteral("Exclusion ajoutée : %1").arg(exclusionPath);
+                    result["message"] = KE_TXT("Exclusion ajoutée : %1", "Exclusion added: %1").arg(exclusionPath);
                 } else {
-                    result["error"] = QStringLiteral("PowerShell a retourné le code %1.").arg(exitCode);
+                    result["error"] = KE_TXT("PowerShell a retourné le code %1.", "PowerShell returned code %1.").arg(exitCode);
                 }
             }
         } else {
@@ -6538,7 +6578,7 @@ QVariantMap ApplicationController::addEdrExclusionAsync(const QString& path) {
             result = runElevatedCommand(QStringLiteral("cmd.exe"), cmdArgs);
 
             if (result.value("success").toBool()) {
-                result["message"] = QStringLiteral("Script d'exclusion exécuté. Vérifie la console pour le résultat.");
+                result["message"] = KE_TXT("Script d'exclusion exécuté. Vérifie la console pour le résultat.", "Exclusion script executed. Check the console for the result.");
             }
         }
 
@@ -6552,7 +6592,7 @@ QVariantMap ApplicationController::addEdrExclusionAsync(const QString& path) {
     started["success"] = true;
     started["started"] = true;
 #else
-    started["error"] = QStringLiteral("EDR exclusion is Windows-only");
+    started["error"] = KE_TXT("L'exclusion EDR est réservée à Windows.", "EDR exclusion is Windows-only.");
 #endif
 
     return started;
@@ -6566,7 +6606,7 @@ QVariantMap ApplicationController::checkDebugPrivilege() const {
 #ifdef Q_OS_WIN
     HANDLE hToken = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
-        result["error"] = QStringLiteral("OpenProcessToken failed (error: %1)").arg(GetLastError());
+        result["error"] = KE_TXT("Échec d'OpenProcessToken (erreur : %1)", "OpenProcessToken failed (error: %1)").arg(GetLastError());
         return result;
     }
 
@@ -6591,21 +6631,21 @@ QVariantMap ApplicationController::checkDebugPrivilege() const {
                     result["enabled"] = enabled;
                     result["success"] = true;
                     result["message"] = enabled
-                        ? QStringLiteral("SeDebugName est actif.")
-                        : QStringLiteral("SeDebugName est présent mais désactivé.");
+                        ? KE_TXT("SeDebugName est actif.", "SeDebugName is active.")
+                        : KE_TXT("SeDebugName est présent mais désactivé.", "SeDebugName is present but disabled.");
                     break;
                 }
             }
             if (!found) {
                 result["hasDebugPrivilege"] = false;
                 result["success"] = true;
-                result["message"] = QStringLiteral("SeDebugName n'est pas présent dans les privilèges du token.");
+                result["message"] = KE_TXT("SeDebugName n'est pas présent dans les privilèges du token.", "SeDebugName is not present in the token's privileges.");
             }
         }
     }
     CloseHandle(hToken);
 #else
-    result["error"] = QStringLiteral("Debug privilege check is Windows-only");
+    result["error"] = KE_TXT("Le contrôle du privilège debug est réservé à Windows.", "Debug privilege check is Windows-only.");
 #endif
 
     return result;
@@ -6618,7 +6658,7 @@ QVariantMap ApplicationController::enableDebugPrivilege() {
 #ifdef Q_OS_WIN
     HANDLE hToken = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
-        result["error"] = QStringLiteral("OpenProcessToken failed (error: %1)").arg(GetLastError());
+        result["error"] = KE_TXT("Échec d'OpenProcessToken (erreur : %1)", "OpenProcessToken failed (error: %1)").arg(GetLastError());
         return result;
     }
 
@@ -6626,7 +6666,7 @@ QVariantMap ApplicationController::enableDebugPrivilege() {
     tp.PrivilegeCount = 1;
     tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
     if (!LookupPrivilegeValueW(nullptr, SE_DEBUG_NAME, &tp.Privileges[0].Luid)) {
-        result["error"] = QStringLiteral("LookupPrivilegeValueW failed (error: %1)").arg(GetLastError());
+        result["error"] = KE_TXT("Échec de LookupPrivilegeValueW (erreur : %1)", "LookupPrivilegeValueW failed (error: %1)").arg(GetLastError());
         CloseHandle(hToken);
         return result;
     }
@@ -6636,14 +6676,15 @@ QVariantMap ApplicationController::enableDebugPrivilege() {
     CloseHandle(hToken);
 
     if (!ok || err == ERROR_NOT_ALL_ASSIGNED) {
-        result["error"] = QStringLiteral("AdjustTokenPrivileges failed (error: %1). Vérifiez que vous avez les droits admin.").arg(err);
+        result["error"] = KE_TXT("Échec d'AdjustTokenPrivileges (erreur : %1). Vérifiez que vous avez les droits admin.",
+            "AdjustTokenPrivileges failed (error: %1). Check that you have admin rights.").arg(err);
         return result;
     }
 
     result["success"] = true;
-    result["message"] = QStringLiteral("SeDebugName activé avec succès.");
+    result["message"] = KE_TXT("SeDebugName activé avec succès.", "SeDebugName enabled successfully.");
 #else
-    result["error"] = QStringLiteral("Debug privilege enable is Windows-only");
+    result["error"] = KE_TXT("L'activation du privilège debug est réservée à Windows.", "Debug privilege enable is Windows-only.");
 #endif
 
     return result;
@@ -6682,6 +6723,10 @@ QVariantMap ApplicationController::hideHandle(uint64_t ownerPid, uint64_t handle
 
 QVariantMap ApplicationController::saveSettings(const QVariantMap& settings) {
     return m_settingsDiagnosticsManager->saveSettings(settings);
+}
+
+QVariantMap ApplicationController::setUiLanguage(const QString& language) {
+    return m_settingsDiagnosticsManager->setUiLanguage(language);
 }
 
 QString ApplicationController::getLogFilePath() const {

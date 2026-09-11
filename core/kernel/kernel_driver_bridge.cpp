@@ -1,5 +1,7 @@
 #include "kernel/kernel_driver_bridge.h"
 
+#include "localization/localization.h"
+
 #include <string>
 #include <utility>
 
@@ -51,7 +53,7 @@ QString systemErrorMessage(DWORD errorCode) {
                                      reinterpret_cast<LPWSTR>(&raw),
                                      0,
                                      nullptr);
-    QString message = size > 0 && raw ? QString::fromWCharArray(raw).trimmed() : QStringLiteral("Erreur Windows inconnue");
+    QString message = size > 0 && raw ? QString::fromWCharArray(raw).trimmed() : KE_TXT("Erreur Windows inconnue", "Unknown Windows error");
     if (raw) {
         LocalFree(raw);
     }
@@ -81,7 +83,7 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
 
 #ifndef _WIN32
     result.status = KernelDriverProbeStatus::Unavailable;
-    result.message = QStringLiteral("Le connecteur driver noyau est disponible uniquement sur Windows.");
+    result.message = KE_TXT("Le connecteur driver noyau est disponible uniquement sur Windows.", "The kernel driver connector is only available on Windows.");
     return result;
 #else
     const std::wstring widePath = m_devicePath.toStdWString();
@@ -96,13 +98,14 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
         const DWORD error = GetLastError();
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
             result.status = KernelDriverProbeStatus::Unavailable;
-            result.message = QStringLiteral("Driver KillEngineKernel non chargé.");
+            result.message = KE_TXT("Driver KillEngineKernel non chargé.", "KillEngineKernel driver not loaded.");
         } else if (error == ERROR_ACCESS_DENIED) {
             result.status = KernelDriverProbeStatus::AccessDenied;
-            result.message = QStringLiteral("Accès refusé au device driver. Vérifie les droits administrateur et l'ACL du device.");
+            result.message = KE_TXT("Accès refusé au device driver. Vérifie les droits administrateur et l'ACL du device.",
+                "Access denied to the device driver. Check administrator rights and the device's ACL.");
         } else {
             result.status = KernelDriverProbeStatus::Error;
-            result.message = QStringLiteral("Ouverture du device driver échouée: %1").arg(systemErrorMessage(error));
+            result.message = KE_TXT("Ouverture du device driver échouée : %1", "Failed to open the device driver: %1").arg(systemErrorMessage(error));
         }
         return result;
     }
@@ -129,7 +132,7 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
 
     if (!ok || bytesReturned < sizeof(HealthResponse)) {
         result.status = KernelDriverProbeStatus::Error;
-        result.message = QStringLiteral("Le driver a été ouvert, mais le probe de santé a échoué: %1").arg(systemErrorMessage(ioctlError));
+        result.message = KE_TXT("Le driver a été ouvert, mais le probe de santé a échoué : %1", "The driver was opened, but the health probe failed: %1").arg(systemErrorMessage(ioctlError));
         return result;
     }
 
@@ -141,14 +144,15 @@ KernelDriverProbeResult KernelDriverBridge::probe() const {
 
     if (response.protocolVersion != kProtocolVersion) {
         result.status = KernelDriverProbeStatus::Incompatible;
-        result.message = QStringLiteral("Driver KillEngineKernel incompatible: protocole %1, attendu %2.")
+        result.message = KE_TXT("Driver KillEngineKernel incompatible : protocole %1, attendu %2.",
+                             "KillEngineKernel driver incompatible: protocol %1, expected %2.")
                              .arg(response.protocolVersion)
                              .arg(kProtocolVersion);
         return result;
     }
 
     result.status = KernelDriverProbeStatus::Connected;
-    result.message = QStringLiteral("Driver KillEngineKernel connecté en mode probe uniquement.");
+    result.message = KE_TXT("Driver KillEngineKernel connecté en mode probe uniquement.", "KillEngineKernel driver connected in probe-only mode.");
     return result;
 #endif
 }

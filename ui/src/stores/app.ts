@@ -4112,6 +4112,10 @@ export const useAppStore = defineStore('app', () => {
     return settingsStore.saveSettings(syncScanDefaultsFromSettings, refreshDiagnostics)
   }
 
+  async function switchLanguage(language: 'fr' | 'en') {
+    return settingsStore.switchLanguage(language)
+  }
+
   async function clearSmartSearchDebug() {
     try {
       const result = await backend.getController().clearSmartSearchDebugEvents()
@@ -5001,6 +5005,7 @@ export const useAppStore = defineStore('app', () => {
     doPing,
     loadSettings,
     saveSettings,
+    switchLanguage,
     refreshAiModelStatus,
     browseForModel,
     refreshDiagnostics,

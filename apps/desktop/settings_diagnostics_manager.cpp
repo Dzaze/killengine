@@ -2,6 +2,7 @@
 
 #include "application_controller.h"
 #include "crash_handler.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "model_locator.h"
 #include "scan_state_access.h"
@@ -354,14 +355,14 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
 
             QFile manifestFile(manifestInfo.absoluteFilePath());
             if (!manifestFile.open(QIODevice::ReadOnly)) {
-                agent["error"] = QString("Manifest illisible.");
+                agent["error"] = KE_TXT("Manifest illisible.", "Manifest unreadable.");
                 embeddedAgents.append(agent);
                 continue;
             }
 
             const QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
             if (!doc.isObject()) {
-                agent["error"] = QString("Manifest JSON invalide.");
+                agent["error"] = KE_TXT("Manifest JSON invalide.", "Invalid manifest JSON.");
                 embeddedAgents.append(agent);
                 continue;
             }
@@ -408,8 +409,8 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
     result["embeddedModelFolders"] = embeddedModelFolders;
     result["threads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
     result["message"] = result.value("ready").toBool()
-        ? QString("IA embarquée prête.")
-        : QString("IA embarquée indisponible: modèle ou runtime manquant.");
+        ? KE_TXT("IA embarquée prête.", "Embedded AI ready.")
+        : KE_TXT("IA embarquée indisponible : modèle ou runtime manquant.", "Embedded AI unavailable: model or runtime missing.");
     return result;
 }
 
@@ -491,6 +492,18 @@ QVariantMap SettingsDiagnosticsManager::saveSettings(const QVariantMap& incoming
 
     QVariantMap result = this->getSettings();
     result["success"] = true;
+    return result;
+}
+
+QVariantMap SettingsDiagnosticsManager::setUiLanguage(const QString& language) {
+    const QString normalized = language == "en" ? "en" : "fr";
+    QSettings settings;
+    settings.setValue("ui/language", normalized);
+    settings.sync();
+
+    QVariantMap result;
+    result["success"] = true;
+    result["language"] = normalized;
     return result;
 }
 
