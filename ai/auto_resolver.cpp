@@ -1,5 +1,7 @@
 #include "auto_resolver.h"
 
+#include "localization/localization.h"
+
 namespace killai {
 
 namespace {
@@ -34,19 +36,19 @@ int nestedSignatureInt(const QVariantMap& event, const QString& key, int fallbac
 
 QString stepTypeToString(AutoResolveStepType type) {
     switch (type) {
-        case AutoResolveStepType::ScanExact:      return "Scan exact";
-        case AutoResolveStepType::UnknownCapture: return "Capture unknown";
-        case AutoResolveStepType::UnknownCompare: return "Comparaison unknown";
-        case AutoResolveStepType::TestWrite:      return "Test d'écriture";
-        case AutoResolveStepType::VerifyFreeze:   return "Vérification freeze";
+        case AutoResolveStepType::ScanExact:      return KE_TXT("Scan exact", "Exact scan");
+        case AutoResolveStepType::UnknownCapture: return KE_TXT("Capture unknown", "Unknown capture");
+        case AutoResolveStepType::UnknownCompare: return KE_TXT("Comparaison unknown", "Unknown comparison");
+        case AutoResolveStepType::TestWrite:      return KE_TXT("Test d'écriture", "Write test");
+        case AutoResolveStepType::VerifyFreeze:   return KE_TXT("Vérification freeze", "Freeze verification");
         case AutoResolveStepType::FindWhatWrites: return "Find What Writes";
-        case AutoResolveStepType::GenerateAob:    return "Génération AOB";
-        case AutoResolveStepType::SuggestPatch:   return "Suggestion patch";
-        case AutoResolveStepType::ApplyPatch:     return "Application patch";
-        case AutoResolveStepType::Done:           return "Terminé";
-        case AutoResolveStepType::Failed:         return "Échec";
+        case AutoResolveStepType::GenerateAob:    return KE_TXT("Génération AOB", "AOB generation");
+        case AutoResolveStepType::SuggestPatch:   return KE_TXT("Suggestion patch", "Patch suggestion");
+        case AutoResolveStepType::ApplyPatch:     return KE_TXT("Application patch", "Patch application");
+        case AutoResolveStepType::Done:           return KE_TXT("Terminé", "Done");
+        case AutoResolveStepType::Failed:         return KE_TXT("Échec", "Failed");
     }
-    return "Inconnu";
+    return KE_TXT("Inconnu", "Unknown");
 }
 
 AutoResolver::AutoResolver(QObject* parent)
@@ -59,7 +61,7 @@ QList<AutoResolveStep> AutoResolver::planForGoal(const AutoResolveGoal& goal) {
     // Étape 1: Scan exact pour la valeur cible
     AutoResolveStep step1;
     step1.type = AutoResolveStepType::ScanExact;
-    step1.description = QStringLiteral("Recherche exacte de la valeur %1 (%2)")
+    step1.description = KE_TXT("Recherche exacte de la valeur %1 (%2)", "Exact search for value %1 (%2)")
         .arg(goal.targetValue).arg(goal.valueType);
     step1.params["value"] = static_cast<qlonglong>(goal.targetValue);
     step1.params["type"] = goal.valueType;
@@ -68,7 +70,7 @@ QList<AutoResolveStep> AutoResolver::planForGoal(const AutoResolveGoal& goal) {
     // Étape 2: Si le scan exact ne trouve rien, on passe en unknown
     AutoResolveStep step2;
     step2.type = AutoResolveStepType::UnknownCapture;
-    step2.description = "Capture de l'état initial (unknown initial value)";
+    step2.description = KE_TXT("Capture de l'état initial (unknown initial value)", "Capture of the initial state (unknown initial value)");
     step2.params["type"] = goal.valueType;
     plan.append(step2);
 
@@ -77,7 +79,7 @@ QList<AutoResolveStep> AutoResolver::planForGoal(const AutoResolveGoal& goal) {
     for (int i = 0; i < 3; ++i) {
         AutoResolveStep step;
         step.type = AutoResolveStepType::UnknownCompare;
-        step.description = QStringLiteral("Comparaison #%1 : la valeur a %2")
+        step.description = KE_TXT("Comparaison #%1 : la valeur a %2", "Comparison #%1: the value has %2")
             .arg(i + 1).arg(comparisons[i]);
         step.params["mode"] = comparisons[i];
         plan.append(step);
@@ -86,7 +88,7 @@ QList<AutoResolveStep> AutoResolver::planForGoal(const AutoResolveGoal& goal) {
     // Étape 6: Test d'écriture sur les top candidats
     AutoResolveStep step6;
     step6.type = AutoResolveStepType::TestWrite;
-    step6.description = QStringLiteral("Test d'écriture de %1 sur les 5 meilleurs candidats")
+    step6.description = KE_TXT("Test d'écriture de %1 sur les 5 meilleurs candidats", "Write test of %1 on the top 5 candidates")
         .arg(goal.targetValue);
     step6.params["value"] = static_cast<qlonglong>(goal.targetValue);
     step6.params["maxCandidates"] = 5;
@@ -95,27 +97,27 @@ QList<AutoResolveStep> AutoResolver::planForGoal(const AutoResolveGoal& goal) {
     // Étape 7: Vérifier si le freeze tient
     AutoResolveStep step7;
     step7.type = AutoResolveStepType::VerifyFreeze;
-    step7.description = "Vérification de la persistance du freeze (2 secondes)";
+    step7.description = KE_TXT("Vérification de la persistance du freeze (2 secondes)", "Checking freeze persistence (2 seconds)");
     step7.params["durationMs"] = 2000;
     plan.append(step7);
 
     // Étape 8: Si le freeze ne tient pas, find what writes
     AutoResolveStep step8;
     step8.type = AutoResolveStepType::FindWhatWrites;
-    step8.description = "Recherche de l'instruction qui écrit la valeur";
+    step8.description = KE_TXT("Recherche de l'instruction qui écrit la valeur", "Looking for the instruction that writes the value");
     step8.params["timeoutMs"] = 5000;
     plan.append(step8);
 
     // Étape 9: Générer l'AOB
     AutoResolveStep step9;
     step9.type = AutoResolveStepType::GenerateAob;
-    step9.description = "Génération d'une signature AOB stable";
+    step9.description = KE_TXT("Génération d'une signature AOB stable", "Generating a stable AOB signature");
     plan.append(step9);
 
     // Étape 10: Suggérer un patch
     AutoResolveStep step10;
     step10.type = AutoResolveStepType::SuggestPatch;
-    step10.description = "Suggestion de patch (NOP écriture ou forçage valeur)";
+    step10.description = KE_TXT("Suggestion de patch (NOP écriture ou forçage valeur)", "Patch suggestion (NOP the write or force the value)");
     plan.append(step10);
 
     return plan;
@@ -159,11 +161,16 @@ AutoResolveTelemetryReport computeAutoResolveTelemetryReport(const QList<QVarian
             const QString level = event.value("signatureRisk", event.value("signatureLevel")).toString().toLower();
             const int score = nestedSignatureInt(event, "score", nestedSignatureInt(event, "signatureScore", 100));
             const int fixedBytes = nestedSignatureInt(event, "fixedBytes", nestedSignatureInt(event, "signatureFixedBytes", 99));
-            const QString error = event.value("error").toString().toLower();
+            const QString errorCode = event.value("errorCode").toString();
             if (level == "weak" || score < 35 || fixedBytes < 3) {
                 ++report.aobWeakQualityCount;
             }
-            if (error.contains("bloqu") || error.contains("trop faible") || error.contains("non unique")) {
+            // Code stable plutot que du pattern-matching sur le texte affiche
+            // (traduit via KE_TXT depuis le 11/09/2026, docs/BACKEND_UI_LOCALIZATION_ROADMAP.md
+            // B3) -- sinon ce compteur casse silencieusement pour un utilisateur
+            // en anglais. Meme patron que trainerDependencies.ts/resolveOrderErrorMessage
+            // cote frontend (chantier de localisation frontend, round U27).
+            if (errorCode == "aob_signature_too_weak" || errorCode == "aob_signature_not_unique") {
                 ++report.trainerBlockedCount;
             }
         }
@@ -182,17 +189,21 @@ AutoResolveTelemetryReport computeAutoResolveTelemetryReport(const QList<QVarian
     if (report.exactZeroCount > 0) {
         addInsight(
             "exact_zero_fallback",
-            "Scan exact sans candidat",
-            QString("%1 scan(s) exact/multi-type recent(s) ont retourne 0 candidat.").arg(report.exactZeroCount),
-            "Lancer Trace UI string ou scan chiffre borne avant de tenter un debugger.",
+            KE_TXT("Scan exact sans candidat", "Exact scan with no candidate"),
+            KE_TXT("%1 scan(s) exact/multi-type récent(s) ont retourné 0 candidat.",
+                "%1 recent exact/multi-type scan(s) returned 0 candidates.").arg(report.exactZeroCount),
+            KE_TXT("Lancer Trace UI string ou scan chiffré borné avant de tenter un debugger.",
+                "Run Trace UI string or a bounded encrypted scan before attempting a debugger."),
             true);
     }
     if (unknownTooLargeCount > 0) {
         addInsight(
             "unknown_too_large",
-            "Unknown trop large",
-            QString("%1 passe(s) Unknown recentes restent trop bruyantes.").arg(unknownTooLargeCount),
-            "Demander une variation plus nette puis utiliser increased/decreased/changed plutot que stable.",
+            KE_TXT("Unknown trop large", "Unknown too large"),
+            KE_TXT("%1 passe(s) Unknown récente(s) restent trop bruyantes.",
+                "%1 recent Unknown pass(es) remain too noisy.").arg(unknownTooLargeCount),
+            KE_TXT("Demander une variation plus nette puis utiliser increased/decreased/changed plutôt que stable.",
+                "Ask for a clearer variation then use increased/decreased/changed instead of stable."),
             true);
     }
     if (report.traceUiSourceCount > kTraceUiSourceOverflowThreshold) {
@@ -202,48 +213,60 @@ AutoResolveTelemetryReport computeAutoResolveTelemetryReport(const QList<QVarian
         // pour se filtrer.
         addInsight(
             "trace_ui_sources_overflow",
-            "Trop de sources Trace UI",
-            QString("%1 source(s) proches trouvees en un seul passage : trop pour un checkpoint fiable.").arg(report.traceUiSourceCount),
-            "Change encore la valeur dans le jeu puis reclique Scan suivant (sources) pour ne garder que celles qui suivent vraiment, ou lance Auto origine qui enchaine plusieurs rayons automatiquement.",
+            KE_TXT("Trop de sources Trace UI", "Too many Trace UI sources"),
+            KE_TXT("%1 source(s) proches trouvées en un seul passage : trop pour un checkpoint fiable.",
+                "%1 close source(s) found in a single pass: too many for a reliable checkpoint.").arg(report.traceUiSourceCount),
+            KE_TXT("Change encore la valeur dans le jeu puis reclique Scan suivant (sources) pour ne garder que celles qui suivent vraiment, ou lance Auto origine qui enchaine plusieurs rayons automatiquement.",
+                "Change the value in the game again then click Next scan (sources) to keep only the ones that truly follow it, or run Auto origin which chains several rounds automatically."),
             true);
     } else if (report.traceUiSourceCount > 0 || report.traceUiGlobalHits > 0) {
         addInsight(
             "trace_ui_sources_ready",
-            "Trace UI exploitable",
-            QString("%1 source(s) proche(s) et %2 hit(s) globalValueHits observes.").arg(report.traceUiSourceCount).arg(report.traceUiGlobalHits),
-            "Promouvoir les meilleures sources en checkpoints, tester par petit lot, puis freeze confirme.",
+            KE_TXT("Trace UI exploitable", "Trace UI usable"),
+            KE_TXT("%1 source(s) proche(s) et %2 hit(s) globalValueHits observés.",
+                "%1 close source(s) and %2 globalValueHits hit(s) observed.").arg(report.traceUiSourceCount).arg(report.traceUiGlobalHits),
+            KE_TXT("Promouvoir les meilleures sources en checkpoints, tester par petit lot, puis freeze confirmé.",
+                "Promote the best sources to checkpoints, test in small batches, then confirm the freeze."),
             false);
     }
     if (report.aobMultiMatchCount > 0) {
         addInsight(
             "aob_multimatch_guard",
-            "AOB multi-match",
-            QString("%1 signature(s)/patch(s) recents matchent plusieurs sites.").arg(report.aobMultiMatchCount),
-            "Bloquer l'application directe et regenerer une signature plus specifique autour du RIP.",
+            KE_TXT("AOB multi-match", "AOB multi-match"),
+            KE_TXT("%1 signature(s)/patch(s) récent(s) matchent plusieurs sites.",
+                "%1 recent signature(s)/patch(es) match multiple sites.").arg(report.aobMultiMatchCount),
+            KE_TXT("Bloquer l'application directe et regénérer une signature plus spécifique autour du RIP.",
+                "Block direct application and regenerate a more specific signature around the RIP."),
             false);
     }
     if (report.aobWeakQualityCount > 0 || report.trainerBlockedCount > 0) {
         addInsight(
             "aob_quality_guard",
-            "AOB faible / Trainer bloque",
-            QString("%1 signature(s) faible(s), %2 blocage(s) Trainer recents.").arg(report.aobWeakQualityCount).arg(report.trainerBlockedCount),
-            "Stabiliser l'AOB: fenetre plus longue, plus d'octets fixes, verification unicite avant sauvegarde/applique.",
+            KE_TXT("AOB faible / Trainer bloqué", "Weak AOB / Trainer blocked"),
+            KE_TXT("%1 signature(s) faible(s), %2 blocage(s) Trainer récent(s).",
+                "%1 weak signature(s), %2 recent Trainer block(s).").arg(report.aobWeakQualityCount).arg(report.trainerBlockedCount),
+            KE_TXT("Stabiliser l'AOB : fenêtre plus longue, plus d'octets fixes, vérification unicité avant sauvegarde/application.",
+                "Stabilize the AOB: longer window, more fixed bytes, uniqueness check before saving/applying."),
             false);
     }
     if (writeOrFreezeCount > 0) {
         addInsight(
             "audit_risky_actions",
-            "Actions risquees detectees",
-            QString("%1 evenement(s) write/freeze recents sont presents dans la telemetry.").arg(writeOrFreezeCount),
-            "Conserver l'audit Investigation et sauvegarder uniquement les checkpoints verifies dans Trainer.",
+            KE_TXT("Actions risquées détectées", "Risky actions detected"),
+            KE_TXT("%1 événement(s) write/freeze récent(s) sont présents dans la télémetrie.",
+                "%1 recent write/freeze event(s) are present in the telemetry.").arg(writeOrFreezeCount),
+            KE_TXT("Conserver l'audit Investigation et sauvegarder uniquement les checkpoints vérifiés dans Trainer.",
+                "Keep the Investigation audit and only save verified checkpoints in the Trainer."),
             false);
     }
     if (report.freezeInstabilityCount > 0) {
         addInsight(
             "freeze_instability_detected",
-            "Freeze qui ne tient pas",
-            QString("%1 freeze(s) polling recent(s) ont derive au-dela du seuil de tenue.").arg(report.freezeInstabilityCount),
-            "Passer en Freeze BP (bloque l'ecriture a la source) pour cette adresse.",
+            KE_TXT("Freeze qui ne tient pas", "Freeze that doesn't hold"),
+            KE_TXT("%1 freeze(s) polling récent(s) ont dérivé au-delà du seuil de tenue.",
+                "%1 recent polling freeze(s) drifted beyond the holding threshold.").arg(report.freezeInstabilityCount),
+            KE_TXT("Passer en Freeze BP (bloque l'écriture à la source) pour cette adresse.",
+                "Switch to Freeze BP (blocks the write at the source) for this address."),
             false);
     }
 
@@ -255,13 +278,15 @@ AutoResolveTelemetryReport computeAutoResolveTelemetryReport(const QList<QVarian
         eventCounts.value("ui_string_sources_analyze").toInt() > 0;
 
     report.displayValuePattern = report.displayValueSignals
-        ? QString("Valeur affichee decouplee de la source memoire possible")
+        ? KE_TXT("Valeur affichée possiblement découplée de la source mémoire", "Displayed value possibly decoupled from the memory source")
         : QString();
 
     report.displayValueRecommendation = report.displayValueSignals
         ? (report.traceUiSourceCount > 0 || report.traceUiGlobalHits > 0
-            ? QString("Priorite: tester les sources Trace UI par petits lots, puis breakpoint/debug seulement sur candidat confirme.")
-            : QString("Priorite: Trace UI string, sources x100/x65536, puis find-what-writes confirme si la source suit l'affichage."))
+            ? KE_TXT("Priorité : tester les sources Trace UI par petits lots, puis breakpoint/debug seulement sur candidat confirmé.",
+                "Priority: test the Trace UI sources in small batches, then breakpoint/debug only on a confirmed candidate.")
+            : KE_TXT("Priorité : Trace UI string, sources x100/x65536, puis find-what-writes confirmé si la source suit l'affichage.",
+                "Priority: Trace UI string, x100/x65536 sources, then confirmed find-what-writes if the source follows the display."))
         : QString();
 
     return report;

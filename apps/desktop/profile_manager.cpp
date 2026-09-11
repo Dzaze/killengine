@@ -214,7 +214,7 @@ QVariantMap ProfileManager::saveClrFieldProfileTarget(
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -226,13 +226,14 @@ QVariantMap ProfileManager::saveClrFieldProfileTarget(
     const QString field = targetField.trimmed();
     if (cleanProfileName.isEmpty() || cleanTargetName.isEmpty() || typeFilter.isEmpty()
         || idField.isEmpty() || idValue.isEmpty() || field.isEmpty()) {
-        result["error"] = "Profil, cible, type CLR, champ identité, valeur identité et champ cible requis.";
+        result["error"] = KE_TXT("Profil, cible, type CLR, champ identité, valeur identité et champ cible requis.",
+            "Profile, target, CLR type, identity field, identity value and target field are required.");
         return result;
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(valueType, &type)) {
-        result["error"] = "Type invalide.";
+        result["error"] = KE_TXT("Type invalide.", "Invalid type.");
         return result;
     }
 
@@ -245,7 +246,7 @@ QVariantMap ProfileManager::saveClrFieldProfileTarget(
     const QVariantMap locatorResult = locatorProbe.value("result").toMap();
     const QVariantList matches = locatorResult.value("matches").toList();
     if (matches.isEmpty()) {
-        result["error"] = "Aucun objet CLR ne correspond à ce locator.";
+        result["error"] = KE_TXT("Aucun objet CLR ne correspond à ce locator.", "No CLR object matches this locator.");
         return result;
     }
 
@@ -302,7 +303,7 @@ QVariantMap ProfileManager::saveClrFieldProfileTarget(
     result["type"] = killcore::valueTypeToString(type);
     result["targetCount"] = profile.targets.size();
     if (!saved) {
-        result["error"] = "Échec de la sauvegarde du profil.";
+        result["error"] = KE_TXT("Échec de la sauvegarde du profil.", "Failed to save the profile.");
     }
 
     m_controller.appendScanTelemetry(QStringLiteral("clr_inspector_profile_target_save"), {
@@ -345,7 +346,7 @@ QVariantMap ProfileManager::loadProfile(const QString& profileName) {
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable ou illisible.";
+        result["error"] = KE_TXT("Profil introuvable ou illisible.", "Profile not found or unreadable.");
         return result;
     }
 
@@ -458,14 +459,14 @@ QVariantMap ProfileManager::resolveProfileTarget(const QString& profileName, con
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -476,13 +477,13 @@ QVariantMap ProfileManager::resolveProfileTarget(const QString& profileName, con
                 QVariantMap locatorProbe = m_controller.findClrObjectsByFieldValue(clr.typeSubstring, clr.identityField, clr.identityValue, 1);
                 if (!locatorProbe.value("success").toBool()) {
                     const QString error = locatorProbe.value("error").toString();
-                    result["error"] = error.isEmpty() ? "Impossible de résoudre le locator CLR." : error;
+                    result["error"] = error.isEmpty() ? KE_TXT("Impossible de résoudre le locator CLR.", "Unable to resolve the CLR locator.") : error;
                     return result;
                 }
                 const QVariantMap locatorResult = locatorProbe.value("result").toMap();
                 const QVariantList matches = locatorResult.value("matches").toList();
                 if (matches.isEmpty()) {
-                    result["error"] = "Aucun objet CLR ne correspond à ce locator.";
+                    result["error"] = KE_TXT("Aucun objet CLR ne correspond à ce locator.", "No CLR object matches this locator.");
                     return result;
                 }
 
@@ -512,13 +513,14 @@ QVariantMap ProfileManager::resolveProfileTarget(const QString& profileName, con
                     : (target.locator.kind == killcore::LocatorKind::Absolute ? "absolute" : "module_offset");
                 return result;
             } else {
-                result["error"] = "Impossible de résoudre le locator. Le module est peut-être absent.";
+                result["error"] = KE_TXT("Impossible de résoudre le locator. Le module est peut-être absent.",
+                    "Unable to resolve the locator. The module may be missing.");
                 return result;
             }
         }
     }
 
-    result["error"] = "Cible introuvable dans le profil.";
+    result["error"] = KE_TXT("Cible introuvable dans le profil.", "Target not found in the profile.");
     return result;
 }
 
@@ -527,14 +529,14 @@ QVariantMap ProfileManager::comparePointerMapAcrossRestart(const QString& profil
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -588,14 +590,14 @@ QVariantMap ProfileManager::exportPointerMap(const QString& profileName) {
 
     const QString cleanProfileName = profileName.trimmed();
     if (cleanProfileName.isEmpty()) {
-        result["error"] = "Nom de profil requis.";
+        result["error"] = KE_TXT("Nom de profil requis.", "Profile name required.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -618,14 +620,14 @@ QVariantMap ProfileManager::importPointerMap(
 
     const QString cleanProfileName = profileName.trimmed();
     if (cleanProfileName.isEmpty()) {
-        result["error"] = "Nom de profil requis.";
+        result["error"] = KE_TXT("Nom de profil requis.", "Profile name required.");
         return result;
     }
 
     QJsonParseError parseError;
     const QJsonDocument doc = QJsonDocument::fromJson(pointerMapJson.trimmed().toUtf8(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-        result["error"] = "JSON pointer map invalide : " + parseError.errorString();
+        result["error"] = KE_TXT("JSON pointer map invalide : %1", "Invalid pointer map JSON: %1").arg(parseError.errorString());
         return result;
     }
 
@@ -642,7 +644,7 @@ QVariantMap ProfileManager::importPointerMap(
     const bool replaceExisting = options.value("replaceExisting", false).toBool();
     const auto importResult = killcore::ProfileStore::mergePointerMap(&profile, doc.object(), replaceExisting);
     if (!killcore::ProfileStore::save(profile, path)) {
-        result["error"] = "Impossible de sauvegarder le profil.";
+        result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
         return result;
     }
 
@@ -672,14 +674,14 @@ QVariantMap ProfileManager::setProfileTargetDependencies(
     const QString cleanProfileName = profileName.trimmed();
     const QString cleanTargetName = targetName.trimmed();
     if (cleanProfileName.isEmpty() || cleanTargetName.isEmpty()) {
-        result["error"] = "Profil et cible requis.";
+        result["error"] = KE_TXT("Profil et cible requis.", "Profile and target required.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -697,7 +699,7 @@ QVariantMap ProfileManager::setProfileTargetDependencies(
         if (target.name.compare(cleanTargetName, Qt::CaseInsensitive) == 0) {
             target.dependsOn = cleanDependencies;
             if (!killcore::ProfileStore::save(profile, path)) {
-                result["error"] = "Impossible de sauvegarder le profil.";
+                result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
                 return result;
             }
 
@@ -714,7 +716,7 @@ QVariantMap ProfileManager::setProfileTargetDependencies(
         }
     }
 
-    result["error"] = "Cible introuvable dans le profil.";
+    result["error"] = KE_TXT("Cible introuvable dans le profil.", "Target not found in the profile.");
     return result;
 }
 
@@ -724,14 +726,14 @@ QVariantMap ProfileManager::exportGhidraArtifacts(const QString& profileName) {
 
     const QString cleanProfileName = profileName.trimmed();
     if (cleanProfileName.isEmpty()) {
-        result["error"] = "Nom de profil requis.";
+        result["error"] = KE_TXT("Nom de profil requis.", "Profile name required.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -750,18 +752,18 @@ QVariantMap ProfileManager::importGhidraSymbols(const QString& profileName, cons
 
     const QString cleanProfileName = profileName.trimmed();
     if (cleanProfileName.isEmpty()) {
-        result["error"] = "Nom de profil requis.";
+        result["error"] = KE_TXT("Nom de profil requis.", "Profile name required.");
         return result;
     }
     if (symbolsText.trimmed().isEmpty()) {
-        result["error"] = "Export Ghidra vide.";
+        result["error"] = KE_TXT("Export Ghidra vide.", "Empty Ghidra export.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -773,7 +775,7 @@ QVariantMap ProfileManager::importGhidraSymbols(const QString& profileName, cons
     }
 
     if (!killcore::ProfileStore::save(profile, path)) {
-        result["error"] = "Impossible de sauvegarder le profil.";
+        result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
         return result;
     }
 
@@ -796,14 +798,14 @@ QVariantMap ProfileManager::activateProfileTarget(const QString& profileName, co
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -820,7 +822,7 @@ QVariantMap ProfileManager::activateProfileTarget(const QString& profileName, co
                 const QVariantList matches = payload.value("matches").toList();
                 if (!locatorResult.value("success").toBool() || matches.isEmpty()) {
                     result["error"] = locatorResult.value("error").toString().isEmpty()
-                        ? "Impossible de retrouver l'objet CLR par son champ d'identité."
+                        ? KE_TXT("Impossible de retrouver l'objet CLR par son champ d'identité.", "Unable to find the CLR object by its identity field.")
                         : locatorResult.value("error").toString();
                     result["locatorKind"] = "clr_field";
                     return result;
@@ -829,7 +831,7 @@ QVariantMap ProfileManager::activateProfileTarget(const QString& profileName, co
                 uint64_t objectAddress = 0;
                 const QString objectAddressText = matches.first().toMap().value("address").toString();
                 if (!parseHexAddress(objectAddressText, &objectAddress)) {
-                    result["error"] = "Le locator CLR a renvoyé une adresse objet invalide.";
+                    result["error"] = KE_TXT("Le locator CLR a renvoyé une adresse objet invalide.", "The CLR locator returned an invalid object address.");
                     result["locatorKind"] = "clr_field";
                     return result;
                 }
@@ -871,14 +873,16 @@ QVariantMap ProfileManager::activateProfileTarget(const QString& profileName, co
                 result["clrIdentityValue"] = locator.identityValue;
                 result["clrFieldName"] = locator.targetField;
                 result["activeTargetCount"] = m_controller.m_activeProfileTargets.size();
-                result["message"] = QString("\"%1\" activé pour l'Assistant via CLR : objet 0x%2, champ %3.")
+                result["message"] = KE_TXT("« %1 » activé pour l'Assistant via CLR : objet 0x%2, champ %3.",
+                                        "\"%1\" activated for the Assistant via CLR: object 0x%2, field %3.")
                                         .arg(target.name, QString::number(objectAddress, 16), locator.targetField);
                 return result;
             }
 
             uint64_t address = 0;
             if (!killcore::resolveLocatorAddress(m_controller.m_handle, target.locator, &address)) {
-                result["error"] = "Impossible d'activer cette cible. Le module est peut-être absent.";
+                result["error"] = KE_TXT("Impossible d'activer cette cible. Le module est peut-être absent.",
+                    "Unable to activate this target. The module may be missing.");
                 return result;
             }
 
@@ -922,13 +926,14 @@ QVariantMap ProfileManager::activateProfileTarget(const QString& profileName, co
             result["address"] = QString::number(address, 16);
             result["type"] = killcore::valueTypeToString(target.type);
             result["activeTargetCount"] = m_controller.m_activeProfileTargets.size();
-            result["message"] = QString("\"%1\" activé pour l'Assistant à l'adresse 0x%2.")
+            result["message"] = KE_TXT("« %1 » activé pour l'Assistant à l'adresse 0x%2.",
+                                    "\"%1\" activated for the Assistant at address 0x%2.")
                                     .arg(target.name, QString::number(address, 16));
             return result;
         }
     }
 
-    result["error"] = "Cible introuvable dans le profil.";
+    result["error"] = KE_TXT("Cible introuvable dans le profil.", "Target not found in the profile.");
     return result;
 }
 
@@ -944,20 +949,20 @@ QVariantMap ProfileManager::saveProfileCodePatch(
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     const QString cleanProfileName = profileName.trimmed();
     const QString cleanPatchName = patchName.trimmed();
     if (cleanProfileName.isEmpty() || cleanPatchName.isEmpty()) {
-        result["error"] = "Nom de profil ou de patch vide.";
+        result["error"] = KE_TXT("Nom de profil ou de patch vide.", "Empty profile or patch name.");
         return result;
     }
 
     uint64_t address = 0;
     if (!parseHexAddress(addressHex, &address)) {
-        result["error"] = "Adresse patch invalide.";
+        result["error"] = KE_TXT("Adresse patch invalide.", "Invalid patch address.");
         return result;
     }
 
@@ -972,7 +977,9 @@ QVariantMap ProfileManager::saveProfileCodePatch(
 
     const bool allowWeakAob = metadata.value("allowWeakAob", false).toBool();
     if (!allowWeakAob && (patternQuality.fixedBytes < 3 || patternQuality.score < 35)) {
-        result["error"] = QString("Signature AOB trop faible pour Trainer (%1/100, %2 octet(s) fixe(s)). Allonge la signature ou ajoute des octets fixes.")
+        result["errorCode"] = QStringLiteral("aob_signature_too_weak");
+        result["error"] = KE_TXT("Signature AOB trop faible pour Trainer (%1/100, %2 octet(s) fixe(s)). Allonge la signature ou ajoute des octets fixes.",
+                              "AOB signature too weak for the Trainer (%1/100, %2 fixed byte(s)). Lengthen the signature or add more fixed bytes.")
                               .arg(patternQuality.score)
                               .arg(patternQuality.fixedBytes);
         result["signatureWarning"] = patternQuality.warning;
@@ -987,9 +994,15 @@ QVariantMap ProfileManager::saveProfileCodePatch(
     const auto uniquenessScan = killcore::scanAobPattern(m_controller.m_handle, parsedPattern, uniquenessOptions);
     result["signatureMatches"] = uniquenessScan.matchesFound;
     if (!uniquenessScan.success || uniquenessScan.matchesFound != 1) {
-        result["error"] = uniquenessScan.matchesFound == 0
-            ? QString("Signature AOB introuvable dans le code image executable.")
-            : QString("Signature AOB non unique (%1 matches). Sauvegarde Trainer bloquée.").arg(uniquenessScan.matchesFound);
+        if (uniquenessScan.matchesFound == 0) {
+            result["errorCode"] = QStringLiteral("aob_signature_not_found");
+            result["error"] = KE_TXT("Signature AOB introuvable dans le code image exécutable.",
+                "AOB signature not found in the executable image code.");
+        } else {
+            result["errorCode"] = QStringLiteral("aob_signature_not_unique");
+            result["error"] = KE_TXT("Signature AOB non unique (%1 matches). Sauvegarde Trainer bloquée.",
+                "AOB signature not unique (%1 matches). Trainer save blocked.").arg(uniquenessScan.matchesFound);
+        }
         m_controller.appendScanTelemetry("trainer_patch_save_blocked", result);
         return result;
     }
@@ -1072,7 +1085,7 @@ QVariantMap ProfileManager::saveProfileCodePatch(
     }
 
     if (!killcore::ProfileStore::save(profile, path)) {
-        result["error"] = "Impossible de sauvegarder le profil.";
+        result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
         return result;
     }
 
@@ -1096,14 +1109,14 @@ QVariantMap ProfileManager::applyProfileCodePatch(const QString& profileName, co
     result["patchName"] = patchName;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -1115,7 +1128,7 @@ QVariantMap ProfileManager::applyProfileCodePatch(const QString& profileName, co
         }
     }
     if (!patch) {
-        result["error"] = "Patch introuvable dans le profil.";
+        result["error"] = KE_TXT("Patch introuvable dans le profil.", "Patch not found in the profile.");
         return result;
     }
 
@@ -1142,7 +1155,9 @@ QVariantMap ProfileManager::applyProfileCodePatch(const QString& profileName, co
     result["signatureQuality"] = aobPatternQualityToVariantMap(quality);
     result["signatureRisk"] = quality.level;
     if (quality.fixedBytes < 3 || quality.score < 35) {
-        result["error"] = QString("Patch bloqué: signature AOB trop faible (%1/100, %2 octet(s) fixe(s)).")
+        result["errorCode"] = QStringLiteral("aob_signature_too_weak");
+        result["error"] = KE_TXT("Patch bloqué : signature AOB trop faible (%1/100, %2 octet(s) fixe(s)).",
+                              "Patch blocked: AOB signature too weak (%1/100, %2 fixed byte(s)).")
                               .arg(quality.score)
                               .arg(quality.fixedBytes);
         result["signatureWarning"] = quality.warning;
@@ -1157,19 +1172,28 @@ QVariantMap ProfileManager::applyProfileCodePatch(const QString& profileName, co
     const auto scan = killcore::scanAobPattern(m_controller.m_handle, pattern, options);
     if (!scan.success || scan.matches.isEmpty()) {
         if (executableVersionMismatch) {
-            result["error"] = "Signature AOB introuvable — et ce patch a été enregistré pour une version différente "
-                               "de l'exécutable (l'empreinte du fichier ne correspond pas à celle attachée "
-                               "actuellement). C'est très probablement pourquoi : une mise à jour du jeu a changé "
-                               "les octets autour de cette instruction. Recapture-la depuis \"Écrit par\" sur cette version.";
+            result["errorCode"] = QStringLiteral("aob_signature_not_found_version_mismatch");
+            result["error"] = KE_TXT(
+                "Signature AOB introuvable — et ce patch a été enregistré pour une version différente "
+                "de l'exécutable (l'empreinte du fichier ne correspond pas à celle attachée "
+                "actuellement). C'est très probablement pourquoi : une mise à jour du jeu a changé "
+                "les octets autour de cette instruction. Recapture-la depuis \"Écrit par\" sur cette version.",
+                "AOB signature not found — and this patch was saved for a different version "
+                "of the executable (the file's fingerprint doesn't match the one currently attached). "
+                "This is very likely why: a game update changed the bytes around this instruction. "
+                "Recapture it from \"Written by\" on this version.");
         } else {
-            result["error"] = scan.error.isEmpty() ? QString("Signature AOB introuvable.") : scan.error;
+            result["errorCode"] = QStringLiteral("aob_signature_not_found");
+            result["error"] = scan.error.isEmpty() ? KE_TXT("Signature AOB introuvable.", "AOB signature not found.") : scan.error;
         }
         m_controller.appendScanTelemetry("trainer_patch_apply_blocked", result);
         return result;
     }
     result["signatureMatches"] = scan.matchesFound;
     if (scan.matchesFound != 1) {
-        result["error"] = QString("Patch bloqué: signature AOB non unique (%1 matches). Regénère une signature plus spécifique.")
+        result["errorCode"] = QStringLiteral("aob_signature_not_unique");
+        result["error"] = KE_TXT("Patch bloqué : signature AOB non unique (%1 matches). Regénère une signature plus spécifique.",
+                              "Patch blocked: AOB signature not unique (%1 matches). Regenerate a more specific signature.")
                               .arg(scan.matchesFound);
         m_controller.appendScanTelemetry("trainer_patch_apply_blocked", result);
         return result;
@@ -1207,9 +1231,13 @@ QVariantMap ProfileManager::applyProfileCodePatch(const QString& profileName, co
     // certain qu'un hash identique).
     result["executableVersionMismatch"] = executableVersionMismatch;
     if (executableVersionMismatch) {
-        result["executableVersionWarning"] = "Exécutable d'une version différente de celle où ce patch a été "
-                                              "enregistré — la signature a quand même matché, mais vérifie le "
-                                              "résultat avant de t'y fier pleinement.";
+        result["executableVersionWarning"] = KE_TXT(
+            "Exécutable d'une version différente de celle où ce patch a été "
+            "enregistré — la signature a quand même matché, mais vérifie le "
+            "résultat avant de t'y fier pleinement.",
+            "Executable of a different version than the one this patch was "
+            "saved for — the signature still matched, but check the result "
+            "before fully trusting it.");
     }
     m_controller.appendScanTelemetry(result.value("success").toBool() ? "trainer_patch_apply" : "trainer_patch_apply_failed", result);
     return result;
@@ -1222,14 +1250,14 @@ QVariantMap ProfileManager::restoreProfileCodePatch(const QString& profileName, 
     result["patchName"] = patchName;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -1266,11 +1294,11 @@ QVariantMap ProfileManager::restoreProfileCodePatch(const QString& profileName, 
                 }
             }
         }
-        result["error"] = "Patch non actif dans la session courante.";
+        result["error"] = KE_TXT("Patch non actif dans la session courante.", "Patch not active in the current session.");
         return result;
     }
 
-    result["error"] = "Patch introuvable dans le profil.";
+    result["error"] = KE_TXT("Patch introuvable dans le profil.", "Patch not found in the profile.");
     return result;
 }
 
@@ -1280,14 +1308,14 @@ QVariantMap ProfileManager::applyAllProfileCodePatches(const QString& profileNam
     result["profileName"] = profileName;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -1311,9 +1339,10 @@ QVariantMap ProfileManager::applyAllProfileCodePatches(const QString& profileNam
     result["total"] = profile.patches.size();
     result["results"] = patchResults;
     if (profile.patches.isEmpty()) {
-        result["error"] = "Aucun patch trainer dans ce profil.";
+        result["error"] = KE_TXT("Aucun patch trainer dans ce profil.", "No trainer patch in this profile.");
     } else if (!result.value("success").toBool()) {
-        result["error"] = QString("Application partielle: %1 appliqué(s), %2 déjà actif(s), %3 total.")
+        result["error"] = KE_TXT("Application partielle : %1 appliqué(s), %2 déjà actif(s), %3 total.",
+                              "Partial application: %1 applied, %2 already active, %3 total.")
                               .arg(applied)
                               .arg(alreadyActive)
                               .arg(profile.patches.size());
@@ -1327,14 +1356,14 @@ QVariantMap ProfileManager::restoreAllProfileCodePatches(const QString& profileN
     result["profileName"] = profileName;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -1357,9 +1386,10 @@ QVariantMap ProfileManager::restoreAllProfileCodePatches(const QString& profileN
     result["total"] = profile.patches.size();
     result["results"] = patchResults;
     if (profile.patches.isEmpty()) {
-        result["error"] = "Aucun patch trainer dans ce profil.";
+        result["error"] = KE_TXT("Aucun patch trainer dans ce profil.", "No trainer patch in this profile.");
     } else if (!result.value("success").toBool()) {
-        result["error"] = QString("Restauration partielle: %1 restauré(s), %2 déjà inactif(s), %3 total.")
+        result["error"] = KE_TXT("Restauration partielle : %1 restauré(s), %2 déjà inactif(s), %3 total.",
+                              "Partial restore: %1 restored, %2 already inactive, %3 total.")
                               .arg(restored)
                               .arg(alreadyInactive)
                               .arg(profile.patches.size());
@@ -1373,14 +1403,14 @@ QVariantMap ProfileManager::inspectProfileCodePatches(const QString& profileName
     result["profileName"] = profileName;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attaché.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -1465,10 +1495,10 @@ QVariantMap ProfileManager::inspectProfileCodePatches(const QString& profileName
         } else if (memoryState.status == "original") {
             ++originalCount;
         } else if (memoryState.status == "missing") {
-            state["error"] = "Signature originale et patchée introuvables.";
+            state["error"] = KE_TXT("Signature originale et patchée introuvables.", "Original and patched signatures not found.");
             ++missingCount;
         } else {
-            state["warning"] = "Signature non unique ou état mixte.";
+            state["warning"] = KE_TXT("Signature non unique ou état mixte.", "Signature not unique or mixed state.");
             ++ambiguousCount;
         }
 
@@ -1484,9 +1514,10 @@ QVariantMap ProfileManager::inspectProfileCodePatches(const QString& profileName
     result["missing"] = missingCount;
     result["invalid"] = invalidCount;
     if (profile.patches.isEmpty()) {
-        result["error"] = "Aucun patch trainer dans ce profil.";
+        result["error"] = KE_TXT("Aucun patch trainer dans ce profil.", "No trainer patch in this profile.");
     } else if (!result.value("success").toBool()) {
-        result["error"] = QString("Inspection: %1 actif(s), %2 original(aux), %3 ambigu(s), %4 introuvable(s), %5 invalide(s).")
+        result["error"] = KE_TXT("Inspection : %1 actif(s), %2 original(aux), %3 ambigu(s), %4 introuvable(s), %5 invalide(s).",
+                              "Inspection: %1 active, %2 original, %3 ambiguous, %4 not found, %5 invalid.")
                               .arg(activeCount)
                               .arg(originalCount)
                               .arg(ambiguousCount)
@@ -1507,11 +1538,11 @@ QVariantMap ProfileManager::saveProfileAutoAsmScript(
     const QString cleanProfileName = profileName.trimmed();
     const QString cleanScriptName = scriptName.trimmed();
     if (cleanProfileName.isEmpty() || cleanScriptName.isEmpty()) {
-        result["error"] = "Nom de profil ou de script vide.";
+        result["error"] = KE_TXT("Nom de profil ou de script vide.", "Empty profile or script name.");
         return result;
     }
     if (scriptText.trimmed().isEmpty()) {
-        result["error"] = "Script vide.";
+        result["error"] = KE_TXT("Script vide.", "Empty script.");
         return result;
     }
 
@@ -1553,7 +1584,7 @@ QVariantMap ProfileManager::saveProfileAutoAsmScript(
     }
 
     if (!killcore::ProfileStore::save(profile, path)) {
-        result["error"] = "Impossible de sauvegarder le profil.";
+        result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
         return result;
     }
 
@@ -1575,7 +1606,7 @@ QVariantMap ProfileManager::applyProfileAutoAsmScript(const QString& profileName
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -1587,7 +1618,7 @@ QVariantMap ProfileManager::applyProfileAutoAsmScript(const QString& profileName
         }
     }
 
-    result["error"] = "Script auto-assembler introuvable dans ce profil.";
+    result["error"] = KE_TXT("Script auto-assembler introuvable dans ce profil.", "Auto-assembler script not found in this profile.");
     return result;
 }
 
@@ -1600,7 +1631,7 @@ QVariantMap ProfileManager::deleteProfileAutoAsmScript(const QString& profileNam
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -1609,12 +1640,12 @@ QVariantMap ProfileManager::deleteProfileAutoAsmScript(const QString& profileNam
         return script.name == scriptName;
     });
     if (profile.autoAsmScripts.size() == before) {
-        result["error"] = "Script auto-assembler introuvable dans ce profil.";
+        result["error"] = KE_TXT("Script auto-assembler introuvable dans ce profil.", "Auto-assembler script not found in this profile.");
         return result;
     }
 
     if (!killcore::ProfileStore::save(profile, path)) {
-        result["error"] = "Impossible de sauvegarder le profil.";
+        result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
         return result;
     }
 
@@ -1630,7 +1661,7 @@ killcore::PointerChain variantMapToPointerChain(const QVariantMap& chainMap, QSt
     killcore::PointerChain chain;
     chain.module = chainMap.value("module").toString();
     if (chain.module.isEmpty()) {
-        if (error) *error = "Chaine invalide : module manquant.";
+        if (error) *error = KE_TXT("Chaîne invalide : module manquant.", "Invalid chain: missing module.");
         return chain;
     }
 
@@ -1638,7 +1669,7 @@ killcore::PointerChain variantMapToPointerChain(const QVariantMap& chainMap, QSt
     bool ok = false;
     chain.baseOffset = baseOffsetHex.toULongLong(&ok, 16);
     if (!ok) {
-        if (error) *error = "Chaine invalide : baseOffset hex invalide.";
+        if (error) *error = KE_TXT("Chaîne invalide : baseOffset hex invalide.", "Invalid chain: invalid hex baseOffset.");
         return chain;
     }
 
@@ -1646,7 +1677,7 @@ killcore::PointerChain variantMapToPointerChain(const QVariantMap& chainMap, QSt
     for (const auto& offsetVar : offsets) {
         const uint64_t off = offsetVar.toString().toULongLong(&ok, 16);
         if (!ok) {
-            if (error) *error = "Chaine invalide : offset hex invalide.";
+            if (error) *error = KE_TXT("Chaîne invalide : offset hex invalide.", "Invalid chain: invalid hex offset.");
             return chain;
         }
         chain.offsets.append(off);
@@ -1757,7 +1788,7 @@ QVariantMap ProfileManager::resolvePointerChain(const QVariantMap& chainMap) {
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -1771,7 +1802,7 @@ QVariantMap ProfileManager::resolvePointerChain(const QVariantMap& chainMap) {
     const auto resolveResult = killcore::resolvePointerChain(m_controller.m_handle, chain);
     if (!resolveResult.success) {
         result["error"] = resolveResult.errorMessage.isEmpty()
-            ? QString("Resolution de chaine echouee.")
+            ? KE_TXT("Résolution de chaîne échouée.", "Chain resolution failed.")
             : resolveResult.errorMessage;
         return result;
     }
@@ -1797,13 +1828,13 @@ QVariantMap ProfileManager::suggestStableLocatorForAddress(
     result["chainCount"] = 0;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
     uint64_t targetAddress = 0;
     if (!parseHexAddress(addressHex, &targetAddress)) {
-        result["error"] = "Adresse invalide.";
+        result["error"] = KE_TXT("Adresse invalide.", "Invalid address.");
         return result;
     }
 
@@ -1889,7 +1920,7 @@ QVariantMap ProfileManager::savePointerChainProfileTarget(
     result["success"] = false;
 
     if (!m_controller.m_handle.isValid()) {
-        result["error"] = "Aucun processus attache.";
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -1903,7 +1934,7 @@ QVariantMap ProfileManager::savePointerChainProfileTarget(
     // Valider la chaîne avant de la sauvegarder.
     const auto resolveCheck = killcore::resolvePointerChain(m_controller.m_handle, chain);
     if (!resolveCheck.success) {
-        result["error"] = "La chaine ne se resout pas : " + resolveCheck.errorMessage;
+        result["error"] = KE_TXT("La chaîne ne se résout pas : %1", "The chain doesn't resolve: %1").arg(resolveCheck.errorMessage);
         return result;
     }
 
@@ -1945,7 +1976,7 @@ QVariantMap ProfileManager::savePointerChainProfileTarget(
     }
 
     if (!killcore::ProfileStore::save(profile, path)) {
-        result["error"] = "Impossible de sauvegarder le profil.";
+        result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
         return result;
     }
 
@@ -1955,7 +1986,8 @@ QVariantMap ProfileManager::savePointerChainProfileTarget(
     result["resolvedAddress"] = QString::number(resolveCheck.finalAddress, 16);
     result["isNewProfile"] = isNewProfile;
     result["chainLabel"] = chain.toString();
-    result["message"] = QString("Cible \"%1\" sauvegardee avec chaine de pointeurs (resout a 0x%2).")
+    result["message"] = KE_TXT("Cible « %1 » sauvegardée avec chaîne de pointeurs (résout à 0x%2).",
+                            "Target \"%1\" saved with a pointer chain (resolves to 0x%2).")
                             .arg(targetName, QString::number(resolveCheck.finalAddress, 16));
 
     KE_LOG_INFO() << "savePointerChainProfileTarget: profile=" << profileName.toStdString()
@@ -1977,11 +2009,11 @@ QVariantMap ProfileManager::saveProfileLuaScript(
     const QString cleanProfileName = profileName.trimmed();
     const QString cleanScriptName = scriptName.trimmed();
     if (cleanProfileName.isEmpty() || cleanScriptName.isEmpty()) {
-        result["error"] = "Nom de profil ou de script vide.";
+        result["error"] = KE_TXT("Nom de profil ou de script vide.", "Empty profile or script name.");
         return result;
     }
     if (scriptText.trimmed().isEmpty()) {
-        result["error"] = "Script vide.";
+        result["error"] = KE_TXT("Script vide.", "Empty script.");
         return result;
     }
 
@@ -2014,7 +2046,7 @@ QVariantMap ProfileManager::saveProfileLuaScript(
     }
 
     if (!killcore::ProfileStore::save(profile, path)) {
-        result["error"] = "Impossible de sauvegarder le profil.";
+        result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
         return result;
     }
 
@@ -2036,7 +2068,7 @@ QVariantMap ProfileManager::deleteProfileLuaScript(const QString& profileName, c
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
     if (!killcore::ProfileStore::load(path, &profile)) {
-        result["error"] = "Profil introuvable.";
+        result["error"] = KE_TXT("Profil introuvable.", "Profile not found.");
         return result;
     }
 
@@ -2045,12 +2077,12 @@ QVariantMap ProfileManager::deleteProfileLuaScript(const QString& profileName, c
         return script.name == scriptName;
     });
     if (profile.luaScripts.size() == before) {
-        result["error"] = "Script Lua introuvable dans ce profil.";
+        result["error"] = KE_TXT("Script Lua introuvable dans ce profil.", "Lua script not found in this profile.");
         return result;
     }
 
     if (!killcore::ProfileStore::save(profile, path)) {
-        result["error"] = "Impossible de sauvegarder le profil.";
+        result["error"] = KE_TXT("Impossible de sauvegarder le profil.", "Couldn't save the profile.");
         return result;
     }
 

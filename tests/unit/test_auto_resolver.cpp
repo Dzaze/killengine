@@ -1,6 +1,40 @@
 #include "auto_resolver.h"
 
 #include <gtest/gtest.h>
+#include <QSettings>
+
+namespace {
+
+// Sauvegarde/restaure "ui/language" autour du test, meme pattern que
+// ScopedUiLanguage (tests/unit/test_localization.cpp, test_ai_tools.cpp) :
+// nextAction/label/reason sont desormais traduits via KE_TXT
+// (docs/BACKEND_UI_LOCALIZATION_ROADMAP.md, candidat B3, 11/09/2026), donc
+// toute assertion sur ce texte doit fixer la langue plutot que de dependre du
+// reglage ambiant de la machine qui execute les tests.
+class ScopedUiLanguage {
+public:
+    explicit ScopedUiLanguage(const QString& language) {
+        QSettings settings;
+        m_previous = settings.value("ui/language");
+        settings.setValue("ui/language", language);
+        settings.sync();
+    }
+
+    ~ScopedUiLanguage() {
+        QSettings settings;
+        if (m_previous.isValid()) {
+            settings.setValue("ui/language", m_previous);
+        } else {
+            settings.remove("ui/language");
+        }
+        settings.sync();
+    }
+
+private:
+    QVariant m_previous;
+};
+
+} // namespace
 
 TEST(AutoResolverTest, PlansSafeProgressionForKnownValue) {
     killai::AutoResolver resolver;
@@ -70,7 +104,8 @@ TEST(AutoResolverTest, ComputesWeakAobAndTrainerBlocks) {
         QVariantMap{
             {"event", "trainer_patch_apply"},
             {"success", false},
-            {"error", "Patch bloqué: signature AOB trop faible"},
+            {"errorCode", "aob_signature_too_weak"},
+            {"error", "Patch bloqué : signature AOB trop faible"},
         },
     };
 
@@ -82,6 +117,31 @@ TEST(AutoResolverTest, ComputesWeakAobAndTrainerBlocks) {
     EXPECT_NE(findInsight(report, "aob_quality_guard"), nullptr);
 }
 
+// Regression pour le fix de couplage du 11/09/2026
+// (docs/BACKEND_UI_LOCALIZATION_ROADMAP.md, candidat B3) : le compteur doit
+// suivre le champ stable errorCode, jamais le texte error affiche (qui est
+// desormais traduit via KE_TXT et donc en anglais pour un utilisateur EN).
+TEST(AutoResolverTest, TrainerBlockedCountFollowsErrorCodeNotDisplayedText) {
+    const QList<QVariantMap> englishBlockedEvent{
+        QVariantMap{
+            {"event", "trainer_patch_apply"},
+            {"success", false},
+            {"errorCode", "aob_signature_not_unique"},
+            {"error", "Patch blocked: AOB signature not unique (3 matches). Regenerate a more specific signature."},
+        },
+    };
+    EXPECT_EQ(killai::computeAutoResolveTelemetryReport(englishBlockedEvent).trainerBlockedCount, 1);
+
+    const QList<QVariantMap> frenchLookingTextButNoCode{
+        QVariantMap{
+            {"event", "trainer_patch_apply"},
+            {"success", false},
+            {"error", "Patch bloqué : signature AOB non unique (3 matches)."},
+        },
+    };
+    EXPECT_EQ(killai::computeAutoResolveTelemetryReport(frenchLookingTextButNoCode).trainerBlockedCount, 0);
+}
+
 // Reproduit le cas signale par un utilisateur : Analyser sources retourne
 // 500 pistes en un seul passage sur une cible reelle (StarCraft II), largement
 // au-dessus du seuil de 40. Verifie que l'insight distingue bien "trop pour
@@ -89,6 +149,7 @@ TEST(AutoResolverTest, ComputesWeakAobAndTrainerBlocks) {
 // nextAction pointe vers une deuxieme variation + reclique plutot que vers
 // un freeze confirme immediat.
 TEST(AutoResolverTest, FlagsTraceUiSourceOverflowInsteadOfReadyCheckpoint) {
+    ScopedUiLanguage lang("fr");
     const QList<QVariantMap> events{
         QVariantMap{{"event", "ui_string_sources_analyze"}, {"matchesFound", 500}},
     };
