@@ -1,5 +1,6 @@
 #include "auto_assembler.h"
 
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "memory/memory_writer.h"
 #include "patch/instruction_patch_suggester.h"
@@ -116,16 +117,18 @@ const QRegularExpression reMemOperand(QStringLiteral(R"(^\s*(r[a-z0-9]+)\s*(?:([
 bool encodeMemImmMov(const QString& destination, int64_t immediate, QByteArray* out, QString* error) {
     const auto match = reMemOperand.match(destination.trimmed());
     if (!match.hasMatch()) {
-        if (error) *error = QStringLiteral(
+        if (error) *error = KE_TXT(
             "Destination mémoire non supportée : '%1'. Seule la forme [registre64+/-déplacement] est gérée "
-            "(ex: [rdi+8], [rax-4], [rbx]) — pas d'index, d'échelle, ni d'adressage RIP-relatif.").arg(destination);
+            "(ex: [rdi+8], [rax-4], [rbx]) — pas d'index, d'échelle, ni d'adressage RIP-relatif.",
+            "Unsupported memory destination: '%1'. Only the [register64+/-displacement] form is handled "
+            "(e.g. [rdi+8], [rax-4], [rbx]) — no index, scale, or RIP-relative addressing.").arg(destination);
         return false;
     }
 
     bool extended = false;
     const int regCode = registerCode(match.captured(1), &extended);
     if (regCode < 0) {
-        if (error) *error = QStringLiteral("Registre inconnu : '%1'.").arg(match.captured(1));
+        if (error) *error = KE_TXT("Registre inconnu : '%1'.", "Unknown register: '%1'.").arg(match.captured(1));
         return false;
     }
 
@@ -133,13 +136,13 @@ bool encodeMemImmMov(const QString& destination, int64_t immediate, QByteArray* 
     if (!match.captured(3).isEmpty()) {
         int64_t magnitude = 0;
         if (!parseAutoAsmNumber(match.captured(3), &magnitude)) {
-            if (error) *error = QStringLiteral("Déplacement invalide : '%1'.").arg(match.captured(3));
+            if (error) *error = KE_TXT("Déplacement invalide : '%1'.", "Invalid displacement: '%1'.").arg(match.captured(3));
             return false;
         }
         disp = match.captured(2) == "-" ? -magnitude : magnitude;
     }
     if (disp < std::numeric_limits<int32_t>::min() || disp > std::numeric_limits<int32_t>::max()) {
-        if (error) *error = "Déplacement hors plage (max disp32).";
+        if (error) *error = KE_TXT("Déplacement hors plage (max disp32).", "Displacement out of range (max disp32).");
         return false;
     }
 
@@ -180,7 +183,7 @@ bool encodeMemImmMov(const QString& destination, int64_t immediate, QByteArray* 
 bool parseRawData(const QString& mnemonic, const QString& text, QByteArray* out, QString* error) {
     const QStringList parts = text.split(QRegularExpression(QStringLiteral(R"([\s,]+)")), Qt::SkipEmptyParts);
     if (parts.isEmpty()) {
-        if (error) *error = "Raw byte directive is empty";
+        if (error) *error = KE_TXT("Directive raw byte vide.", "Raw byte directive is empty.");
         return false;
     }
 
@@ -199,7 +202,7 @@ bool parseRawData(const QString& mnemonic, const QString& text, QByteArray* out,
         }
 
         if (!ok) {
-            if (error) *error = QStringLiteral("Invalid raw value '%1'").arg(part);
+            if (error) *error = KE_TXT("Valeur raw invalide '%1'", "Invalid raw value '%1'").arg(part);
             return false;
         }
 
@@ -207,7 +210,7 @@ bool parseRawData(const QString& mnemonic, const QString& text, QByteArray* out,
             appendI32(out, value);
         } else {
             if (value < 0 || value > 0xFF) {
-                if (error) *error = QStringLiteral("Raw byte out of range '%1'").arg(part);
+                if (error) *error = KE_TXT("Byte raw hors plage '%1'", "Raw byte out of range '%1'").arg(part);
                 return false;
             }
             out->append(static_cast<char>(value & 0xFF));
@@ -244,7 +247,7 @@ int encodedInstructionSize(const AutoAsmInstruction& instr, QString* error) {
             return encodeMemImmMov(instr.destination, instr.value, &encoded, error) ? encoded.size() : -1;
         }
         default:
-            if (error) *error = "Instruction requires a full assembler backend";
+            if (error) *error = KE_TXT("L'instruction nécessite un assembleur complet.", "Instruction requires a full assembler backend.");
             return -1;
     }
 }
@@ -265,7 +268,7 @@ bool resolveBranchTarget(const AutoAsmInstruction& instr,
         return true;
     }
 
-    if (error) *error = QStringLiteral("Unknown branch target '%1'").arg(instr.target);
+    if (error) *error = KE_TXT("Cible de branchement inconnue '%1'", "Unknown branch target '%1'").arg(instr.target);
     return false;
 }
 
@@ -422,7 +425,7 @@ AutoAsmScript parseAutoAsmScript(const QString& scriptText) {
         }
 
         script.success = false;
-        script.error = QStringLiteral("Unsupported auto-assembler syntax: %1").arg(line);
+        script.error = KE_TXT("Syntaxe auto-assembleur non prise en charge : %1", "Unsupported auto-assembler syntax: %1").arg(line);
         script.errorLine = lineNum;
         return script;
     }
@@ -440,8 +443,9 @@ bool resolveModuleBlockBase(const QString& moduleName, int64_t moduleOffset,
                              const AutoAsmCompileContext& context, uint64_t* out, QString* error) {
     const auto it = context.moduleBaseAddresses.constFind(moduleName);
     if (it == context.moduleBaseAddresses.constEnd()) {
-        if (error) *error = QStringLiteral(
-            "Module inconnu : '%1'. Vérifie que le processus est attaché et que ce module y est bien chargé."
+        if (error) *error = KE_TXT(
+            "Module inconnu : '%1'. Vérifie que le processus est attaché et que ce module y est bien chargé.",
+            "Unknown module: '%1'. Check that the process is attached and that this module is actually loaded in it."
         ).arg(moduleName);
         return false;
     }
@@ -454,7 +458,7 @@ bool resolveModuleBlockBase(const QString& moduleName, int64_t moduleOffset,
 AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t baseAddress, const AutoAsmCompileContext& context) {
     AutoAsmCompileResult result;
     if (!script.success) {
-        result.error = script.error.isEmpty() ? "Invalid script" : script.error;
+        result.error = script.error.isEmpty() ? KE_TXT("Script invalide.", "Invalid script.") : script.error;
         result.errorLine = script.errorLine;
         return result;
     }
@@ -602,7 +606,7 @@ AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t 
                 const int instrSize = (instr.type == AutoAsmInstructionType::Je || instr.type == AutoAsmInstructionType::Jne) ? 6 : 5;
                 const int64_t rel = static_cast<int64_t>(target) - static_cast<int64_t>(cursor + instrSize);
                 if (rel < std::numeric_limits<int32_t>::min() || rel > std::numeric_limits<int32_t>::max()) {
-                    result.error = "Branch target is outside rel32 range";
+                    result.error = KE_TXT("Cible de branchement hors de la plage rel32.", "Branch target is outside rel32 range.");
                     result.errorLine = instr.line;
                     return result;
                 }
@@ -620,7 +624,7 @@ AutoAsmCompileResult compileAutoAsmScript(const AutoAsmScript& script, uint64_t 
                 break;
             }
             default:
-                result.error = "Instruction requires a full assembler backend";
+                result.error = KE_TXT("L'instruction nécessite un assembleur complet.", "Instruction requires a full assembler backend.");
                 result.errorLine = instr.line;
                 return result;
         }
@@ -634,13 +638,13 @@ AutoAsmResult executeAutoAsmScript(const ProcessHandle& process, const AutoAsmSc
     AutoAsmResult result;
 
     if (!script.success) {
-        result.error = "Invalid script (parse failed)";
+        result.error = KE_TXT("Script invalide (échec du parsing).", "Invalid script (parse failed).");
         return result;
     }
 
 #ifdef Q_OS_WIN
     if (!process.isValid()) {
-        result.error = "Invalid process handle";
+        result.error = KE_TXT("Handle de processus invalide.", "Invalid process handle.");
         return result;
     }
 
@@ -652,7 +656,7 @@ AutoAsmResult executeAutoAsmScript(const ProcessHandle& process, const AutoAsmSc
         LPVOID pMem = VirtualAllocEx(hProcess, nullptr, static_cast<SIZE_T>(alloc.size),
                                       MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
         if (!pMem) {
-            result.error = QStringLiteral("VirtualAllocEx failed for '%1'").arg(alloc.name);
+            result.error = KE_TXT("Échec de VirtualAllocEx pour '%1'", "VirtualAllocEx failed for '%1'").arg(alloc.name);
             for (const auto& allocated : result.allocations) {
                 if (allocated.remoteAddress) {
                     VirtualFreeEx(hProcess, reinterpret_cast<LPVOID>(allocated.remoteAddress), 0, MEM_RELEASE);
@@ -741,7 +745,7 @@ AutoAsmResult executeAutoAsmScript(const ProcessHandle& process, const AutoAsmSc
         const auto written = writer.write(region.baseAddress, region.code, /*verify=*/true);
         if (!written.success || !written.verified) {
             result.error = written.errorMessage.isEmpty()
-                ? QStringLiteral("Échec de l'écriture à 0x%1.").arg(region.baseAddress, 0, 16)
+                ? KE_TXT("Échec de l'écriture à 0x%1.", "Write failed at 0x%1.").arg(region.baseAddress, 0, 16)
                 : written.errorMessage;
             for (const auto& patched : result.patchedRegions) {
                 writer.write(patched.address, patched.originalBytes, /*verify=*/false);
@@ -764,7 +768,7 @@ AutoAsmResult executeAutoAsmScript(const ProcessHandle& process, const AutoAsmSc
     result.success = true;
 #else
     (void)process;
-    result.error = "Auto-assembler is Windows-only";
+    result.error = KE_TXT("L'auto-assembleur est réservé à Windows.", "Auto-assembler is Windows-only.");
 #endif
 
     return result;

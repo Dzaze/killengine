@@ -53,7 +53,7 @@ Ces 4 messages viennent de `apps/desktop/profile_manager.cpp:975,992,1145,1172` 
 | [x] B6 | Driver kernel + DPAPI + relais patch PowerShell | `core/kernel/kernel_driver_bridge.cpp` (déjà fait pendant B1), `core/security/dpapi_key_store.cpp`, `core/patch/code_patch.cpp`, `core/patch/instruction_patch_suggester.cpp` | ~30 | Basse-moyenne | **Fait 11/09/2026** |
 | [x] B7 | Scanner core (auto-dissect, classification source d'affichage, parsing valeur, résolution export) | `core/scanner/auto_dissect.cpp`, `core/scanner/display_source_classifier.cpp`, `core/scanner/scan_types.cpp`, `core/process/export_resolver.cpp` | ~24 | Basse-moyenne | **Fait 11/09/2026** |
 | [x] B8 | Investigation UWP/save-file + surveillance fichier | `core/process/package_storage.cpp`, `core/process/file_watch.cpp` | ~34 | Basse — fonctionnalité de niche | **Fait 11/09/2026** |
-| [ ] B9 | Auto-assembler + client CDP WebView2 | `core/scripting/auto_assembler.cpp`, `core/webview2/cdp_client.cpp` | ~6 | Basse | Pas commencé |
+| [x] B9 | Auto-assembler + client CDP WebView2 | `core/scripting/auto_assembler.cpp`, `core/webview2/cdp_client.cpp` | ~30 | Basse | **Fait 11/09/2026** |
 | [ ] B10 | Réglages/diagnostics + petits fichiers résiduels | `apps/desktop/settings_diagnostics_manager.cpp`, `apps/desktop/memory_timeline_manager.cpp`, `apps/desktop/debug_feature_manager.cpp` (1 ligne oubliée), `apps/desktop/automation_pipe_manager.cpp`, `apps/desktop/automation_pipe_server.cpp`, `apps/desktop/investigation_notebook_manager.cpp`, `apps/desktop/memory_heatmap_manager.cpp` | ~25 | Basse | Pas commencé |
 
 ## Ordre recommandé
@@ -74,6 +74,10 @@ B1 traité (catalogue Modules + flux install/UAC/EDR/debug privilege), ~58 chaî
 Cette découverte a aussi révélé une fragilité de test latente : 8 tests de `tests/unit/test_ai_tools.cpp` (`AIEngineContextualFallbackTest`) asserient du texte français en dur sans isoler `ui/language`, et ont commencé à échouer dès que le fix ci-dessus a réellement persisté "en" sur le registre de la machine de dev pendant la vérification live. Corrigé en ajoutant un garde `ScopedUiLanguage` (même patron que `test_localization.cpp`) sur les 8 tests concernés — suite verte confirmée avec `ui/language` forcé à "en" pendant l'exécution.
 
 Build C++ propre, 469/469 tests unitaires (y compris avec langue ambiante forcée en "en"), `npm run type-check`/`npm run build` propres, vérification visuelle CDP FR et EN sur la page Modules réelle.
+
+### 11/09/2026 — B9 clos (auto-assembleur + client CDP WebView2)
+
+`auto_assembler.cpp` (22 chaînes, mélange français/anglais jamais traduit — bilinguisé) et `cdp_client.cpp` (8 chaînes, découverte d'endpoints CDP + fallback Windows Device Portal) migrés vers `KE_TXT`. Aucun couplage : les tests `AutoAssembler.*` (`tests/unit/test_power_up_modules.cpp`) ne vérifient que `.error.isEmpty()`/succès, jamais le texte exact ; `cdp_client.cpp` n'a aucun test dédié et son `statusMessage` n'est actuellement consommé nulle part côté `apps/desktop`. Build + 470/470 tests propres (y compris langue ambiante forcée en "en").
 
 ### 11/09/2026 — B8 clos (UWP/save-file + surveillance fichier)
 

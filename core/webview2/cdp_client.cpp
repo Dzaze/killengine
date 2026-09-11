@@ -1,5 +1,7 @@
 #include "cdp_client.h"
 
+#include "localization/localization.h"
+
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -307,16 +309,16 @@ HttpJsonResult fetchJson(const QString& httpUrl, int timeoutMs = 5000)
         QJsonParseError parseError;
         result.document = QJsonDocument::fromJson(data, &parseError);
         if (parseError.error != QJsonParseError::NoError) {
-            result.error = QStringLiteral("Réponse CDP non JSON depuis %1 : %2")
+            result.error = KE_TXT("Réponse CDP non JSON depuis %1 : %2", "Non-JSON CDP response from %1: %2")
                 .arg(httpUrl, parseError.errorString());
         }
     } else if (timer.isActive()) {
         const QVariant status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
         result.httpStatus = status.isValid() ? status.toInt() : 0;
-        result.error = QStringLiteral("Endpoint CDP inaccessible (%1) : %2")
+        result.error = KE_TXT("Endpoint CDP inaccessible (%1) : %2", "CDP endpoint unreachable (%1): %2")
             .arg(httpUrl, reply->errorString());
     } else {
-        result.error = QStringLiteral("Timeout en interrogeant l'endpoint CDP %1").arg(httpUrl);
+        result.error = KE_TXT("Timeout en interrogeant l'endpoint CDP %1", "Timeout while querying the CDP endpoint %1").arg(httpUrl);
     }
 
     reply->deleteLater();
@@ -354,15 +356,17 @@ QJsonArray discoverCdpPagesWithFallback(const QString& directHttpUrl,
     QJsonArray directPages = discoverCdpPages(directHttpUrl, pageTargetsOnly);
     if (!directPages.isEmpty()) {
         if (statusMessage) {
-            *statusMessage = QStringLiteral("Endpoint CDP direct disponible : %1").arg(directHttpUrl);
+            *statusMessage = KE_TXT("Endpoint CDP direct disponible : %1", "Direct CDP endpoint available: %1").arg(directHttpUrl);
         }
         return directPages;
     }
 
     if (isWdpUrl(directHttpUrl)) {
         if (statusMessage) {
-            *statusMessage = QStringLiteral(
+            *statusMessage = KE_TXT(
                 "Aucune target CDP sur %1. Vérifier que la cible WebView2 est lancée avec "
+                "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--enable-features=msEdgeDevToolsWdpRemoteDebugging.",
+                "No CDP target on %1. Check that the WebView2 target is launched with "
                 "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--enable-features=msEdgeDevToolsWdpRemoteDebugging.")
                 .arg(directHttpUrl);
         }
@@ -373,19 +377,24 @@ QJsonArray discoverCdpPagesWithFallback(const QString& directHttpUrl,
     QJsonArray wdpPages = discoverCdpPages(wdpUrl, pageTargetsOnly);
     if (!wdpPages.isEmpty()) {
         if (statusMessage) {
-            *statusMessage = QStringLiteral(
-                "Endpoint CDP direct indisponible (%1) ; fallback Windows Device Portal actif via %2.")
+            *statusMessage = KE_TXT(
+                "Endpoint CDP direct indisponible (%1) ; fallback Windows Device Portal actif via %2.",
+                "Direct CDP endpoint unavailable (%1); Windows Device Portal fallback active via %2.")
                 .arg(directHttpUrl, wdpUrl);
         }
         return wdpPages;
     }
 
     if (statusMessage) {
-        *statusMessage = QStringLiteral(
+        *statusMessage = KE_TXT(
             "Aucune target CDP trouvée depuis %1. Pour une app desktop/Electron/CEF, vérifier le port direct "
             "(ex: --remote-debugging-port et /json). Pour une app UWP/Store WebView2, installer "
             "Tools.DeveloperMode.Core, activer Portail d'appareil, installer Remote Tools for Microsoft Edge, "
-            "puis relancer la cible avec --enable-features=msEdgeDevToolsWdpRemoteDebugging.")
+            "puis relancer la cible avec --enable-features=msEdgeDevToolsWdpRemoteDebugging.",
+            "No CDP target found from %1. For a desktop/Electron/CEF app, check the direct port "
+            "(e.g. --remote-debugging-port and /json). For a UWP/Store WebView2 app, install "
+            "Tools.DeveloperMode.Core, enable Device Portal, install Remote Tools for Microsoft Edge, "
+            "then relaunch the target with --enable-features=msEdgeDevToolsWdpRemoteDebugging.")
             .arg(directHttpUrl);
     }
 
