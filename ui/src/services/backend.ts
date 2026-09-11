@@ -1608,12 +1608,18 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ping(message: string): Promise<string>
   getSettings(): Promise<AppSettings>
   getAiModelStatus?(): Promise<AiModelStatus>
-  /** Démarre le serveur llama.cpp local et amorce son cache de prompt sur un thread dédié (fenêtre de préchauffage au démarrage). L'appel retourne immédiatement ; suivre la progression via localAiWarmupProgress/localAiWarmupFinished. */
+  /** Démarre le serveur llama.cpp local, calibre le débit réel sur cette machine/ce modèle puis amorce son cache de prompt sur un thread dédié (fenêtre de préchauffage au démarrage). L'appel retourne immédiatement ; suivre la progression via localAiWarmupProgress/localAiWarmupFinished, ou localAiWarmupEstimateReady si le débit mesuré indique un temps trop long. */
   warmupLocalAiModel?(): Promise<void>
-  /** Fenêtre de préchauffage IA au démarrage : étape en cours ("initializing"|"loadingModel"|"warmingPrompt"). */
+  /** Fenêtre de préchauffage IA au démarrage : étape en cours ("initializing"|"loadingModel"|"measuringSpeed"|"warmingPrompt"). */
   localAiWarmupProgress?: QWebChannelSignal<{ stage: string }>
   /** Fin du préchauffage, succès ou échec. */
   localAiWarmupFinished?: QWebChannelSignal<{ success: boolean, backend: string, error: string }>
+  /** Calibration temps réel : le débit mesuré indique un préchauffage trop long, décision requise (attendre ou désactiver pour la session). */
+  localAiWarmupEstimateReady?: QWebChannelSignal<{ estimatedSeconds: number, tokenCount: number }>
+  /** À appeler après localAiWarmupEstimateReady si l'utilisateur choisit d'attendre : relance avec le budget de temps calculé. */
+  continueAiWarmupAfterEstimate?(): Promise<void>
+  /** À appeler après localAiWarmupEstimateReady si l'utilisateur choisit de continuer sans IA locale : désactive le modèle local pour cette session (rien de persisté). */
+  disableLocalAiForSession?(): Promise<void>
   /** Catalogue des modules complémentaires (vue "Modules") : statut + installation. */
   getModuleCatalog?(): Promise<ModuleCatalog>
   /** Lance l'installation d'un module (async, progression via moduleInstallProgress). */
@@ -2902,6 +2908,12 @@ class BackendService {
       },
       async warmupLocalAiModel() {
         // No-op en mock: rien à réchauffer sans backend Qt réel.
+      },
+      async continueAiWarmupAfterEstimate() {
+        // No-op en mock.
+      },
+      async disableLocalAiForSession() {
+        // No-op en mock.
       },
       async getModuleCatalog() {
         return {

@@ -63,7 +63,51 @@ public:
     /// ApplicationController::warmupLocalAiModel, fenetre de prechauffage au
     /// demarrage). onStageChanged (optionnel) recoit "initializing",
     /// "loadingModel" puis "warmingPrompt" pour une progression honnete.
+    /// NOTE (11/09/2026) : chemin de repli utilise par
+    /// warmupLocalModelWithCalibration() quand la calibration elle-meme
+    /// echoue -- garde un timeout par defaut plutot fixe. Le chemin nominal
+    /// passe desormais par warmupLocalModelWithCalibration ci-dessous.
     LlamaGenerationResult warmupLocalModel(const std::function<void(const QString&)>& onStageChanged = {});
+
+    /// Resultat de warmupLocalModelWithCalibration : soit le prechauffage
+    /// s'est termine (succes ou echec, comme warmupLocalModel), soit le debit
+    /// mesure indique un temps trop long et une decision utilisateur explicite
+    /// est necessaire avant de continuer (voir continueWarmupAfterEstimate).
+    struct WarmupCalibrationResult {
+        enum class Outcome { Completed, NeedsDecision };
+        Outcome outcome{Outcome::Completed};
+        LlamaGenerationResult completion;   ///< valide si outcome == Completed
+        double estimatedSeconds{0.0};       ///< valide si outcome == NeedsDecision
+        int estimatedTokenCount{0};         ///< valide si outcome == NeedsDecision
+    };
+
+    /// Mesure reelle du debit de prefill sur cette machine avec ce modele
+    /// (echantillon = prefixe du vrai prompt, cache_prompt reutilise ensuite)
+    /// avant de lancer le vrai prechauffage -- un timeout fixe (45s) est
+    /// structurellement inadapte des que la machine est faible ou le modele
+    /// different du defaut recommande (voir docs/PHASE_TRACKER.md, enquete du
+    /// 11/09/2026). Si l'estimation depasse le seuil (60s), ne tente RIEN de
+    /// plus et retourne NeedsDecision -- c'est a l'appelant (fenetre de
+    /// prechauffage) de proposer explicitement d'attendre ou de desactiver le
+    /// modele local pour la session plutot que de risquer un nouveau timeout
+    /// silencieux.
+    WarmupCalibrationResult warmupLocalModelWithCalibration(const std::function<void(const QString&)>& onStageChanged = {});
+
+    /// A appeler apres un WarmupCalibrationResult::NeedsDecision si
+    /// l'utilisateur choisit d'attendre : relance le prechauffage complet
+    /// avec un budget de temps calcule depuis l'estimation (stockee en
+    /// interne lors de l'appel precedent), pas le timeout generique.
+    LlamaGenerationResult continueWarmupAfterEstimate(const std::function<void(const QString&)>& onStageChanged = {});
+
+    /// A appeler si l'utilisateur choisit de continuer sans IA locale plutot
+    /// que d'attendre : desactive le modele local en memoire UNIQUEMENT (rien
+    /// n'est persiste dans QSettings, une nouvelle session repart a zero).
+    /// ensureLlamaInitialized() retourne alors immediatement false sans
+    /// retenter quoi que ce soit -- reutilise le chemin "modele non pret"
+    /// deja gere partout ailleurs (repli deterministe/Claude selon
+    /// getActiveAiBackend(), cf. smart_search_manager.cpp).
+    void disableForSession();
+    bool isSessionDisabled() const;
 
 private:
     QVariantMap deterministicIntent(const QString& query);
@@ -87,6 +131,12 @@ private:
     LlamaRuntime   m_llama;
     /// Historique recent {query, tool, outcome} transmis aux prompts.
     QVariantList   m_history;
+    /// true tant que l'utilisateur n'a pas explicitement desactive le modele
+    /// local pour cette session (voir disableForSession()) -- jamais persiste.
+    bool           m_sessionDisabled{false};
+    /// Estimation (secondes) calculee par le dernier warmupLocalModelWithCalibration()
+    /// ayant retourne NeedsDecision -- lue par continueWarmupAfterEstimate().
+    double         m_pendingWarmupEstimateSeconds{0.0};
 };
 
 } // namespace killai

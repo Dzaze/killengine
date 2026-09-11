@@ -1355,14 +1355,48 @@ export const useAppStore = defineStore('app', () => {
   const externalAiBusy = ref(false)
   const externalAiError = ref('')
 
-  // Fenêtre de préchauffage IA au démarrage (10/09/2026, décision propriétaire) :
-  // bloque l'app jusqu'à ce que llama.cpp soit prêt (ou explicitement en mode
-  // dégradé) plutôt que de payer le coût de démarrage à froid silencieusement
-  // à l'ouverture de l'Assistant (ancien comportement, voir AssistantView.vue).
+  // Fenêtre de préchauffage IA au démarrage (10/09/2026, décision propriétaire ;
+  // calibration temps réel ajoutée le 11/09/2026 après enquête sur le goulot
+  // d'étranglement) : bloque l'app jusqu'à ce que llama.cpp soit prêt (ou
+  // explicitement en mode dégradé) plutôt que de payer le coût de démarrage à
+  // froid silencieusement à l'ouverture de l'Assistant (ancien comportement,
+  // voir AssistantView.vue). Le backend mesure le débit réel de la machine
+  // avec le modèle chargé avant de s'engager sur un timeout fixe ; si
+  // l'estimation dépasse le seuil, l'utilisateur choisit explicitement plutôt
+  // que de risquer un nouveau timeout silencieux.
   const localAiWarmupVisible = ref(false)
-  const localAiWarmupStage = ref<'initializing' | 'loadingModel' | 'warmingPrompt' | 'ready' | 'degraded' | 'error'>('initializing')
+  const localAiWarmupStage = ref<'initializing' | 'loadingModel' | 'measuringSpeed' | 'warmingPrompt' | 'ready' | 'awaitingEstimateDecision' | 'sessionDisabled' | 'degraded' | 'error'>('initializing')
   const localAiWarmupDegradedReason = ref<'modelMissing' | 'engineMissing' | 'disabled' | ''>('')
   const localAiWarmupError = ref('')
+  const localAiWarmupEstimate = ref<{ seconds: number, tokenCount: number } | null>(null)
+
+  function connectLocalAiWarmupSignals() {
+    if (backendLocalAiWarmupSignalConnected) return
+    const controller = backend.getController()
+    controller.localAiWarmupProgress?.connect((progress) => {
+      const stage = String(progress?.stage ?? '')
+      if (stage === 'initializing' || stage === 'loadingModel' || stage === 'measuringSpeed' || stage === 'warmingPrompt') {
+        localAiWarmupStage.value = stage
+      }
+    })
+    controller.localAiWarmupFinished?.connect((result) => {
+      if (result?.success) {
+        localAiWarmupStage.value = 'ready'
+        window.setTimeout(() => { localAiWarmupVisible.value = false }, 600)
+      } else {
+        localAiWarmupStage.value = 'error'
+        localAiWarmupError.value = String(result?.error ?? '')
+      }
+    })
+    controller.localAiWarmupEstimateReady?.connect((estimate) => {
+      localAiWarmupEstimate.value = {
+        seconds: Number(estimate?.estimatedSeconds ?? 0),
+        tokenCount: Number(estimate?.tokenCount ?? 0),
+      }
+      localAiWarmupStage.value = 'awaitingEstimateDecision'
+    })
+    backendLocalAiWarmupSignalConnected = true
+  }
 
   async function startLocalAiWarmup() {
     await refreshExternalAiStatus()
@@ -1379,29 +1413,20 @@ export const useAppStore = defineStore('app', () => {
       return
     }
 
-    const controller = backend.getController()
-    if (!backendLocalAiWarmupSignalConnected) {
-      controller.localAiWarmupProgress?.connect((progress) => {
-        const stage = String(progress?.stage ?? '')
-        if (stage === 'initializing' || stage === 'loadingModel' || stage === 'warmingPrompt') {
-          localAiWarmupStage.value = stage
-        }
-      })
-      controller.localAiWarmupFinished?.connect((result) => {
-        if (result?.success) {
-          localAiWarmupStage.value = 'ready'
-          window.setTimeout(() => { localAiWarmupVisible.value = false }, 600)
-        } else {
-          localAiWarmupStage.value = 'error'
-          localAiWarmupError.value = String(result?.error ?? '')
-        }
-      })
-      backendLocalAiWarmupSignalConnected = true
-    }
-
+    connectLocalAiWarmupSignals()
     localAiWarmupStage.value = 'initializing'
     localAiWarmupVisible.value = true
-    void controller.warmupLocalAiModel?.()
+    void backend.getController().warmupLocalAiModel?.()
+  }
+
+  function continueLocalAiWarmupAfterEstimate() {
+    localAiWarmupStage.value = 'warmingPrompt'
+    void backend.getController().continueAiWarmupAfterEstimate?.()
+  }
+
+  async function disableLocalAiForSessionAction() {
+    await backend.getController().disableLocalAiForSession?.()
+    localAiWarmupStage.value = 'sessionDisabled'
   }
 
   async function refreshExternalAiStatus() {
@@ -5094,7 +5119,10 @@ export const useAppStore = defineStore('app', () => {
     localAiWarmupStage,
     localAiWarmupDegradedReason,
     localAiWarmupError,
+    localAiWarmupEstimate,
     startLocalAiWarmup,
+    continueLocalAiWarmupAfterEstimate,
+    disableLocalAiForSessionAction,
     clearExternalAiApiKey,
     setActiveAiBackend,
     stealthRiskAnalysis,

@@ -12,11 +12,31 @@
 #include <QSettings>
 #include <QVariantList>
 
+#include <algorithm>
+
 namespace killai {
 
 namespace {
 
 constexpr int kMaxHistoryTurns = 12;
+
+// PHASE (11/09/2026, calibration du prechauffage) : seuil au-dela duquel on
+// propose un choix explicite (attendre / desactiver pour la session) plutot
+// que de tenter silencieusement un prechauffage qui risque fortement de
+// timeout -- voir l'enquete goulot d'etranglement dans docs/PHASE_TRACKER.md.
+constexpr double kSlowWarmupThresholdSeconds = 60.0;
+// Marge de securite appliquee a l'estimation (bruit de mesure sur un petit
+// echantillon de calibration) avant de choisir/comparer un budget de temps.
+constexpr double kWarmupTimeoutSafetyMargin = 1.5;
+// Meme valeur que kDefaultCompletionTimeoutMs (ai/llama_server.cpp, prive a ce
+// fichier) : plancher pour ne jamais reduire le budget en dessous du defaut
+// deja eprouve, meme si une estimation calibree ressort plus courte (bruit).
+constexpr int kMinWarmupTimeoutMs = 45000;
+// Taille de l'echantillon de calibration (prefixe du vrai prompt de
+// prechauffage) : assez grand pour amortir le cout fixe par requete (mesure
+// peu fiable sur un texte trop court, cf. enquete du 11/09/2026), assez petit
+// pour rester rapide meme sur une machine tres lente.
+constexpr int kCalibrationSampleChars = 2000;
 
 bool looksLikeBadTargets(const QString& q) {
     return q.contains("marche pas") || q.contains("marché pas") || q.contains("pas marché")
@@ -935,11 +955,75 @@ LlamaGenerationResult AIEngine::warmupLocalModel(const std::function<void(const 
     return warmup;
 }
 
+AIEngine::WarmupCalibrationResult AIEngine::warmupLocalModelWithCalibration(const std::function<void(const QString&)>& onStageChanged) {
+    WarmupCalibrationResult result;
+
+    if (onStageChanged) onStageChanged(QStringLiteral("initializing"));
+    if (!ensureLlamaInitialized()) {
+        result.completion.errorMessage = m_llama.info().errorMessage;
+        return result;
+    }
+
+    const QString fullPrompt = LlamaRuntime::buildPrompt(QString(), m_registry, QVariantMap());
+    const int fullTokenCount = m_llama.tokenCount(fullPrompt);
+    if (fullTokenCount <= 0) {
+        // Tokenize indisponible (best-effort) : repli sur l'ancien
+        // comportement, timeout par defaut plutot que d'echouer tout le flux.
+        KE_LOG_INFO() << "AIEngine warmup calibration: tokenize unavailable, falling back to default timeout.";
+        result.completion = m_llama.warmup(m_registry, onStageChanged);
+        return result;
+    }
+
+    if (onStageChanged) onStageChanged(QStringLiteral("measuringSpeed"));
+    const QString sample = fullPrompt.left(kCalibrationSampleChars);
+    const auto calibration = m_llama.measurePrefillSpeed(sample, onStageChanged);
+    if (!calibration.success || calibration.promptTokensPerSecond <= 0.0) {
+        KE_LOG_INFO() << "AIEngine warmup calibration failed (non-fatal), falling back to default timeout: "
+                      << calibration.errorMessage.toStdString();
+        result.completion = m_llama.warmup(m_registry, onStageChanged);
+        return result;
+    }
+
+    const double estimatedSeconds = (fullTokenCount / calibration.promptTokensPerSecond) * kWarmupTimeoutSafetyMargin;
+    KE_LOG_INFO() << "AIEngine warmup calibration: " << calibration.promptTokensPerSecond << " tok/s measured, "
+                  << fullTokenCount << " tokens to prefill, estimated " << estimatedSeconds << "s (with margin).";
+
+    if (estimatedSeconds > kSlowWarmupThresholdSeconds) {
+        m_pendingWarmupEstimateSeconds = estimatedSeconds;
+        result.outcome = WarmupCalibrationResult::Outcome::NeedsDecision;
+        result.estimatedSeconds = estimatedSeconds;
+        result.estimatedTokenCount = fullTokenCount;
+        return result;
+    }
+
+    const int timeoutMs = std::max(kMinWarmupTimeoutMs, static_cast<int>(estimatedSeconds * 1000.0));
+    result.completion = m_llama.warmup(m_registry, onStageChanged, timeoutMs);
+    return result;
+}
+
+LlamaGenerationResult AIEngine::continueWarmupAfterEstimate(const std::function<void(const QString&)>& onStageChanged) {
+    const int timeoutMs = std::max(kMinWarmupTimeoutMs, static_cast<int>(m_pendingWarmupEstimateSeconds * 1000.0));
+    if (onStageChanged) onStageChanged(QStringLiteral("warmingPrompt"));
+    return m_llama.warmup(m_registry, onStageChanged, timeoutMs);
+}
+
+void AIEngine::disableForSession() {
+    m_sessionDisabled = true;
+    KE_LOG_INFO() << "AIEngine: local model disabled for this session (user choice after slow warmup estimate).";
+}
+
+bool AIEngine::isSessionDisabled() const {
+    return m_sessionDisabled;
+}
+
 QVariantMap AIEngine::lastHistoryTurn() const {
     return m_history.isEmpty() ? QVariantMap{} : m_history.last().toMap();
 }
 
 bool AIEngine::ensureLlamaInitialized() {
+    if (m_sessionDisabled) {
+        return false;
+    }
     if (qEnvironmentVariable("KILLENGINE_DISABLE_LLAMA") == "1") {
         return false;
     }

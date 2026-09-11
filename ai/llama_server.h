@@ -29,6 +29,11 @@ struct LlamaServerCompletion {
     QString content;
     QString errorMessage;
     bool fromServer{false};
+    /// Debit de prefill mesure par le serveur pour CETTE requete
+    /// (timings.prompt_per_second de la reponse) -- utilise pour calibrer le
+    /// budget de temps du prechauffage sur la machine/le modele reels plutot
+    /// qu'un timeout fixe. 0 si absent/echec.
+    double promptTokensPerSecond{0.0};
 };
 
 /**
@@ -77,13 +82,24 @@ public:
     /// Le processus serveur est-il vivant ?
     bool isRunning() const;
 
-    /// Completion bloquantee bornee. Timeout: KILLENGINE_LLAMA_SERVER_TIMEOUT_MS (defaut 15 s).
+    /// Completion bloquante bornee. Timeout: KILLENGINE_LLAMA_SERVER_TIMEOUT_MS
+    /// (defaut 45 s) sauf si timeoutMsOverride > 0, auquel cas ce budget
+    /// explicite est utilise a la place -- permet a l'appelant (calibration,
+    /// prechauffage apres estimation) de fournir un budget calcule pour la
+    /// machine/le prompt reels plutot que le defaut generique.
     /// onStage (optionnel) : notifie "loadingModel" avant ensureRunning() (le
     /// cout de demarrage a froid, jusqu'a ~90s) puis "warmingPrompt" juste
     /// avant la requete HTTP -- utilise par la fenetre de prechauffage au
     /// demarrage (AIEngine::warmupLocalModel) pour une progression honnete.
     LlamaServerCompletion complete(const QString& prompt, int nPredict, const QStringList& stop,
-                                    const std::function<void(const QString&)>& onStage = {});
+                                    const std::function<void(const QString&)>& onStage = {},
+                                    int timeoutMsOverride = 0);
+
+    /// Nombre de tokens de `text` selon le tokenizer du modele charge (POST
+    /// /tokenize, pur, aucune inference -- rapide meme sur un gros texte).
+    /// Retourne -1 en cas d'echec (serveur down, etc.) : best-effort, ne doit
+    /// jamais faire echouer tout un flux qui l'utilise juste pour calibrer.
+    int tokenCount(const QString& text, QString* error = nullptr);
 
     /// Tue le serveur (appele aussi sur aboutToQuit de l'application).
     void shutdown();

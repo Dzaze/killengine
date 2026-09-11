@@ -54,9 +54,9 @@ int startupTimeoutMs() {
     return ok && value > 0 ? value : kDefaultStartupTimeoutMs;
 }
 
-/// POST /completion manuel sur 127.0.0.1:port, borne dans le temps.
+/// POST JSON manuel sur 127.0.0.1:port, borne dans le temps.
 /// Le serveur ferme la connexion (Connection: close) une fois la reponse envoyee.
-bool httpPostJson(int port, const QByteArray& body, int timeoutMs, QByteArray* response, QString* error) {
+bool httpPostJson(int port, const QString& path, const QByteArray& body, int timeoutMs, QByteArray* response, QString* error) {
     QTcpSocket socket;
     socket.connectToHost("127.0.0.1", port);
     if (!socket.waitForConnected(timeoutMs)) {
@@ -65,7 +65,7 @@ bool httpPostJson(int port, const QByteArray& body, int timeoutMs, QByteArray* r
     }
 
     QByteArray request;
-    request += "POST /completion HTTP/1.1\r\n";
+    request += QString("POST %1 HTTP/1.1\r\n").arg(path).toUtf8();
     request += QString("Host: 127.0.0.1:%1\r\n").arg(port).toUtf8();
     request += "Content-Type: application/json\r\n";
     request += QString("Content-Length: %1\r\n").arg(body.size()).toUtf8();
@@ -307,9 +307,11 @@ bool LlamaServer::ensureRunning(QString* error) {
 }
 
 LlamaServerCompletion LlamaServer::complete(const QString& prompt, int nPredict, const QStringList& stop,
-                                             const std::function<void(const QString&)>& onStage) {
+                                             const std::function<void(const QString&)>& onStage,
+                                             int timeoutMsOverride) {
     LlamaServerCompletion result;
     QString error;
+    const int timeoutMs = timeoutMsOverride > 0 ? timeoutMsOverride : completionTimeoutMs();
     if (onStage) onStage(QStringLiteral("loadingModel"));
     if (!ensureRunning(&error)) {
         result.errorMessage = error;
@@ -319,16 +321,22 @@ LlamaServerCompletion LlamaServer::complete(const QString& prompt, int nPredict,
 
     const QByteArray body = buildCompletionRequest(prompt, nPredict, stop);
     QByteArray response;
-    if (!httpPostJson(m_port, body, completionTimeoutMs(), &response, &error)) {
+    if (!httpPostJson(m_port, QStringLiteral("/completion"), body, timeoutMs, &response, &error)) {
         // Le serveur peut etre mort entre-temps: une tentative de redemarrage.
         if (!ensureRunning(&error)) {
             result.errorMessage = error;
             return result;
         }
-        if (!httpPostJson(m_port, body, completionTimeoutMs(), &response, &error)) {
+        if (!httpPostJson(m_port, QStringLiteral("/completion"), body, timeoutMs, &response, &error)) {
             result.errorMessage = error;
             return result;
         }
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(response);
+    if (document.isObject()) {
+        const auto timings = document.object().value("timings").toObject();
+        result.promptTokensPerSecond = timings.value("prompt_per_second").toDouble(0.0);
     }
 
     const QString content = parseCompletionContent(response);
@@ -340,6 +348,31 @@ LlamaServerCompletion LlamaServer::complete(const QString& prompt, int nPredict,
     result.content = content;
     result.fromServer = true;
     return result;
+}
+
+int LlamaServer::tokenCount(const QString& text, QString* error) {
+    QString localError;
+    if (!ensureRunning(&localError)) {
+        if (error) *error = localError;
+        return -1;
+    }
+
+    QJsonObject root;
+    root.insert("content", text);
+    const QByteArray body = QJsonDocument(root).toJson(QJsonDocument::Compact);
+
+    QByteArray response;
+    if (!httpPostJson(m_port, QStringLiteral("/tokenize"), body, completionTimeoutMs(), &response, &localError)) {
+        if (error) *error = localError;
+        return -1;
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(response);
+    if (!document.isObject() || !document.object().value("tokens").isArray()) {
+        if (error) *error = "llama-server /tokenize: malformed response.";
+        return -1;
+    }
+    return document.object().value("tokens").toArray().size();
 }
 
 void LlamaServer::shutdown() {

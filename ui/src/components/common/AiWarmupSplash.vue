@@ -4,17 +4,25 @@ import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 
-const isDegraded = computed(() => store.localAiWarmupStage === 'degraded' || store.localAiWarmupStage === 'error')
+const viewMode = computed<'progress' | 'degraded' | 'estimateDecision' | 'sessionDisabled'>(() => {
+  if (store.localAiWarmupStage === 'awaitingEstimateDecision') return 'estimateDecision'
+  if (store.localAiWarmupStage === 'sessionDisabled') return 'sessionDisabled'
+  if (store.localAiWarmupStage === 'degraded' || store.localAiWarmupStage === 'error') return 'degraded'
+  return 'progress'
+})
 
 const stagePercent = computed(() => {
   switch (store.localAiWarmupStage) {
-    case 'initializing': return 15
-    case 'loadingModel': return 55
+    case 'initializing': return 10
+    case 'loadingModel': return 40
+    case 'measuringSpeed': return 60
     case 'warmingPrompt': return 85
     case 'ready': return 100
     default: return 100
   }
 })
+
+const estimateSecondsRounded = computed(() => Math.round(store.localAiWarmupEstimate?.seconds ?? 0))
 </script>
 
 <template>
@@ -25,12 +33,33 @@ const stagePercent = computed(() => {
         <span class="warmup-logo-text">KillEngine</span>
       </div>
 
-      <template v-if="!isDegraded">
+      <template v-if="viewMode === 'progress'">
         <h1 id="warmup-title" class="warmup-title">{{ $t('aiWarmup.title') }}</h1>
         <div class="warmup-bar-track">
           <div class="warmup-bar-fill" :style="{ width: stagePercent + '%' }" />
         </div>
         <p class="warmup-stage">{{ $t('aiWarmup.stage.' + store.localAiWarmupStage) }}</p>
+      </template>
+
+      <template v-else-if="viewMode === 'estimateDecision'">
+        <h1 id="warmup-title" class="warmup-title">{{ $t('aiWarmup.estimateTitle', { seconds: estimateSecondsRounded }) }}</h1>
+        <p class="warmup-degraded-reason">{{ $t('aiWarmup.estimateDetail') }}</p>
+        <div class="warmup-decision-actions">
+          <button type="button" class="warmup-wait-btn" @click="store.continueLocalAiWarmupAfterEstimate()">
+            {{ $t('aiWarmup.estimateWaitButton') }}
+          </button>
+          <button type="button" class="warmup-continue-btn" @click="store.disableLocalAiForSessionAction()">
+            {{ $t('aiWarmup.continueWithoutAi') }}
+          </button>
+        </div>
+      </template>
+
+      <template v-else-if="viewMode === 'sessionDisabled'">
+        <h1 id="warmup-title" class="warmup-title warmup-title-degraded">{{ $t('aiWarmup.sessionDisabledTitle') }}</h1>
+        <p class="warmup-degraded-reason">{{ $t('aiWarmup.sessionDisabledMessage') }}</p>
+        <button type="button" class="warmup-continue-btn" @click="store.localAiWarmupVisible = false">
+          {{ $t('aiWarmup.sessionDisabledDismiss') }}
+        </button>
       </template>
 
       <template v-else>
@@ -149,6 +178,26 @@ const stagePercent = computed(() => {
 
 .warmup-continue-btn:hover {
   background: rgba(224, 175, 104, 0.2);
+}
+
+.warmup-decision-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.warmup-wait-btn {
+  padding: 9px 20px;
+  border: 1px solid rgba(122, 162, 247, 0.4);
+  border-radius: 6px;
+  background: rgba(122, 162, 247, 0.14);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.warmup-wait-btn:hover {
+  background: rgba(122, 162, 247, 0.24);
 }
 
 .warmup-credit {

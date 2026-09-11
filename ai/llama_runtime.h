@@ -25,6 +25,10 @@ struct LlamaGenerationResult {
     QString errorMessage;
     /// "llama-server" si servi par le serveur persistant, "llama-cli" sinon.
     QString backend;
+    /// Debit de prefill mesure pour CETTE requete (0 si indisponible, ex.
+    /// chemin llama-cli). Utilise pour calibrer le budget de temps du
+    /// prechauffage sur la machine/le modele reels.
+    double promptTokensPerSecond{0.0};
 };
 
 class LlamaRuntime {
@@ -51,8 +55,27 @@ public:
     /// AVANT le premier vrai message utilisateur -- voir docs/PHASE_TRACKER.md
     /// (goulot d'etranglement "llama.cpp execute", piste 1, 08/09/2026).
     /// onStage (optionnel) : relaye a LlamaServer::complete, voir la-bas.
+    /// timeoutMsOverride (optionnel, >0) : budget explicite au lieu du defaut
+    /// generique -- calcule par AIEngine a partir d'une calibration reelle
+    /// (voir measurePrefillSpeed) plutot qu'une constante fixe inadaptee a la
+    /// machine/au modele charge.
     LlamaGenerationResult warmup(const ToolRegistry& registry,
-                                 const std::function<void(const QString&)>& onStage = {}) const;
+                                 const std::function<void(const QString&)>& onStage = {},
+                                 int timeoutMsOverride = 0) const;
+
+    /// Calibration reelle du debit de prefill sur CETTE machine avec CE
+    /// modele : lance une petite completion sur `sampleText` (idealement un
+    /// prefixe du vrai prompt, cache_prompt actif donc reutilise ensuite par
+    /// le vrai prechauffage) et renvoie `promptTokensPerSecond` mesure par le
+    /// serveur. success=false si indisponible (ex. serveur down, fallback
+    /// llama-cli sans mesure) -- l'appelant doit alors se rabattre sur un
+    /// timeout par defaut plutot que d'echouer tout le flux.
+    LlamaGenerationResult measurePrefillSpeed(const QString& sampleText,
+                                               const std::function<void(const QString&)>& onStage = {}) const;
+
+    /// Nombre de tokens de `text` selon le tokenizer du modele charge (pur,
+    /// aucune inference). -1 si indisponible (best-effort).
+    int tokenCount(const QString& text) const;
 
     static QVariantMap extractToolCallJson(const QString& text, QString* error = nullptr);
     static QVariantMap extractIntentJson(const QString& text, QString* error = nullptr);
@@ -75,8 +98,10 @@ private:
     /// onStage (optionnel) : relaye a LlamaServer::complete sur le chemin
     /// serveur ; sur le fallback llama-cli, un seul "loadingModel" avant de
     /// lancer le process (pas de decoupage plus fin sur ce chemin rare).
+    /// timeoutMsOverride : voir warmup().
     LlamaGenerationResult generate(const QString& prompt, int nPredict,
-                                    const std::function<void(const QString&)>& onStage = {}) const;
+                                    const std::function<void(const QString&)>& onStage = {},
+                                    int timeoutMsOverride = 0) const;
     static QString findExecutable();
     static QString buildContextBlock(const QVariantMap& context);
     static QString buildHistoryBlock(const QVariantMap& context);

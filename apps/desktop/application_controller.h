@@ -1045,13 +1045,26 @@ public:
     Q_INVOKABLE QVariantMap getAiModelStatus() const;
 
     /// Démarre le serveur llama.cpp persistant et amorce son cache_prompt en
-    /// arrière-plan (requête factice, cf. AIEngine::warmupLocalModel), pour
-    /// que le premier vrai message utilisateur n'ait pas à payer le coût de
-    /// démarrage à froid. À appeler quand le panneau Assistant s'ouvre, pas
-    /// au boot. Retourne immédiatement (le travail réel, potentiellement
-    /// bloquant jusqu'à ~90s au tout premier chargement modèle, est déporté
-    /// via un timer à délai nul pour ne pas geler l'appel JS).
+    /// arrière-plan et calibre le budget de temps nécessaire sur CETTE
+    /// machine avec CE modèle (voir AIEngine::warmupLocalModelWithCalibration)
+    /// plutôt qu'un timeout fixe. Appelé une fois au boot (fenêtre de
+    /// préchauffage dédiée, pas au premier usage de l'Assistant). Retourne
+    /// immédiatement (le travail réel tourne sur un std::thread détaché) ;
+    /// progression via localAiWarmupProgress, résultat via
+    /// localAiWarmupFinished, ou — si l'estimation dépasse le seuil — via
+    /// localAiWarmupEstimateReady (voir continueAiWarmupAfterEstimate/
+    /// disableLocalAiForSession).
     Q_INVOKABLE void warmupLocalAiModel();
+
+    /// À appeler après localAiWarmupEstimateReady si l'utilisateur choisit
+    /// d'attendre : relance le préchauffage avec le budget de temps calculé
+    /// (pas le timeout générique).
+    Q_INVOKABLE void continueAiWarmupAfterEstimate();
+
+    /// À appeler après localAiWarmupEstimateReady si l'utilisateur choisit de
+    /// continuer sans IA locale : désactive le modèle local en mémoire pour
+    /// cette session (rien de persisté, repart à zéro au prochain lancement).
+    Q_INVOKABLE void disableLocalAiForSession();
 
     /// Ouvre un sélecteur de fichier natif pour choisir un modèle GGUF (remplace la saisie manuelle du chemin).
     Q_INVOKABLE QVariantMap browseForModelFile();
@@ -1602,10 +1615,15 @@ signals:
     void luaScriptExecutionFinished(const QVariantMap& result);
     /// Fenêtre de préchauffage IA au démarrage (10/09/2026) : étape en cours
     /// pendant warmupLocalAiModel() (payload : {stage: "initializing"|
-    /// "loadingModel"|"warmingPrompt"}).
+    /// "loadingModel"|"measuringSpeed"|"warmingPrompt"}).
     void localAiWarmupProgress(const QVariantMap& progress);
     /// Fin du préchauffage, succès ou échec (payload : {success, backend, error}).
     void localAiWarmupFinished(const QVariantMap& result);
+    /// Calibration (11/09/2026) : le débit mesuré sur cette machine indique un
+    /// temps de préchauffage trop long (payload : {estimatedSeconds, tokenCount})
+    /// — rien de plus n'est tenté tant que le frontend n'a pas appelé
+    /// continueAiWarmupAfterEstimate() ou disableLocalAiForSession().
+    void localAiWarmupEstimateReady(const QVariantMap& estimate);
     /// Vue "Modules" : progression d'une installation de module en cours
     /// (payload : requestId, moduleId, percent, message).
     void moduleInstallProgress(const QVariantMap& progress);

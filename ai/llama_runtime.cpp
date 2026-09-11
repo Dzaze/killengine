@@ -124,7 +124,8 @@ LlamaRuntimeInfo LlamaRuntime::info() const {
 }
 
 LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict,
-                                              const std::function<void(const QString&)>& onStage) const {
+                                              const std::function<void(const QString&)>& onStage,
+                                              int timeoutMsOverride) const {
     LlamaGenerationResult result;
 
     // 1) Serveur persistant: modele deja charge en RAM, prefixe cache.
@@ -138,7 +139,7 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
     const bool serverDueForRetry = !m_serverUsable && nowMs >= m_serverRetryAfterMs;
     if ((m_serverUsable || serverDueForRetry) && !m_serverExecutablePath.isEmpty()) {
         const auto completion = LlamaServer::instance().complete(
-            prompt, nPredict, QStringList{"\nRequete utilisateur:", "Requete:"}, onStage);
+            prompt, nPredict, QStringList{"\nRequete utilisateur:", "Requete:"}, onStage, timeoutMsOverride);
         if (completion.success) {
             if (!m_serverUsable) {
                 KE_LOG_INFO() << "llama-server recovered after cooldown, resuming persistent server.";
@@ -147,6 +148,7 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
             result.success = true;
             result.output = completion.content;
             result.backend = "llama-server";
+            result.promptTokensPerSecond = completion.promptTokensPerSecond;
             return result;
         }
         // Echec (premier ou apres cooldown) : retombe sur llama-cli pour ce
@@ -259,7 +261,8 @@ LlamaGenerationResult LlamaRuntime::planIntent(const QString& query) const {
 }
 
 LlamaGenerationResult LlamaRuntime::warmup(const ToolRegistry& registry,
-                                            const std::function<void(const QString&)>& onStage) const {
+                                            const std::function<void(const QString&)>& onStage,
+                                            int timeoutMsOverride) const {
     LlamaGenerationResult result;
     if (!m_info.available) {
         result.errorMessage = m_info.errorMessage;
@@ -268,7 +271,32 @@ LlamaGenerationResult LlamaRuntime::warmup(const ToolRegistry& registry,
     // n_predict volontairement petit: seul le prefill du prefixe statique
     // (systeme+regles+outils) compte ici pour amorcer cache_prompt, pas le
     // contenu genere (jete).
-    return generate(buildPrompt(QString(), registry, QVariantMap()), 4, onStage);
+    return generate(buildPrompt(QString(), registry, QVariantMap()), 4, onStage, timeoutMsOverride);
+}
+
+LlamaGenerationResult LlamaRuntime::measurePrefillSpeed(const QString& sampleText,
+                                                         const std::function<void(const QString&)>& onStage) const {
+    LlamaGenerationResult result;
+    if (!m_info.available) {
+        result.errorMessage = m_info.errorMessage;
+        return result;
+    }
+    // n_predict=1 : seul le prefill de l'echantillon nous interesse pour
+    // mesurer le debit reel (tokens/s) sur cette machine avec ce modele.
+    // cache_prompt reste actif cote LlamaServer::complete : si sampleText est
+    // un prefixe du vrai prompt de prechauffage, ce travail est reutilise
+    // (pas perdu) par l'appel complet qui suit.
+    result = generate(sampleText, 1, onStage);
+    if (result.success && result.promptTokensPerSecond <= 0.0) {
+        result.success = false;
+        result.errorMessage = "llama-server: calibration succeeded but no timing data returned.";
+    }
+    return result;
+}
+
+int LlamaRuntime::tokenCount(const QString& text) const {
+    if (!m_info.available) return -1;
+    return LlamaServer::instance().tokenCount(text);
 }
 
 LlamaGenerationResult LlamaRuntime::planInvestigationNotebook(const QString& symptom, const QVariantMap& context) const {

@@ -5643,14 +5643,30 @@ QVariantMap ApplicationController::getAiModelStatus() const {
     return m_settingsDiagnosticsManager->getAiModelStatus();
 }
 
+namespace {
+QVariantMap warmupCompletionPayload(const killai::LlamaGenerationResult& result) {
+    QVariantMap payload;
+    payload["success"] = result.success;
+    payload["backend"] = result.backend;
+    payload["error"] = result.errorMessage;
+    return payload;
+}
+} // namespace
+
 void ApplicationController::warmupLocalAiModel() {
-    // Fenetre de prechauffage au demarrage (10/09/2026) : le chargement du
-    // modele (cf. LlamaServer::startAndWait) est bloquant jusqu'a ~90s au
-    // premier lancement. Execute sur un std::thread detache -- meme pattern
-    // que le worker de scan (scanning_core_manager.cpp) -- pour ne jamais
-    // geler le thread GUI, et remonte la progression via
-    // localAiWarmupProgress/localAiWarmupFinished (QMetaObject::invokeMethod
-    // marshalle chaque etape vers le thread Qt avant emit).
+    // Fenetre de prechauffage au demarrage (10/09/2026, calibration temps
+    // reel ajoutee le 11/09/2026) : le chargement du modele (cf.
+    // LlamaServer::startAndWait) est bloquant jusqu'a ~90s au premier
+    // lancement, et le vrai cout (prefill du prompt complet) depend du debit
+    // CPU reel de la machine/du modele charge -- voir l'enquete goulot
+    // d'etranglement dans docs/PHASE_TRACKER.md. Execute sur un std::thread
+    // detache -- meme pattern que le worker de scan
+    // (scanning_core_manager.cpp) -- pour ne jamais geler le thread GUI, et
+    // remonte la progression via localAiWarmupProgress/localAiWarmupFinished
+    // (QMetaObject::invokeMethod marshalle chaque etape vers le thread Qt
+    // avant emit). Si l'estimation calibree depasse le seuil, emet
+    // localAiWarmupEstimateReady a la place et s'arrete la -- voir
+    // continueAiWarmupAfterEstimate/disableLocalAiForSession.
     const QPointer<ApplicationController> self(this);
     std::thread([self]() {
         if (!self) return;
@@ -5660,16 +5676,44 @@ void ApplicationController::warmupLocalAiModel() {
                 emit self->localAiWarmupProgress(QVariantMap{{"stage", stage}});
             });
         };
-        const auto result = self->m_ai.warmupLocalModel(onStage);
-        QMetaObject::invokeMethod(self.data(), [self, result]() {
+        const auto calibration = self->m_ai.warmupLocalModelWithCalibration(onStage);
+        if (calibration.outcome == killai::AIEngine::WarmupCalibrationResult::Outcome::NeedsDecision) {
+            QMetaObject::invokeMethod(self.data(), [self, calibration]() {
+                if (!self) return;
+                QVariantMap estimate;
+                estimate["estimatedSeconds"] = calibration.estimatedSeconds;
+                estimate["tokenCount"] = calibration.estimatedTokenCount;
+                emit self->localAiWarmupEstimateReady(estimate);
+            });
+            return;
+        }
+        QMetaObject::invokeMethod(self.data(), [self, result = calibration.completion]() {
             if (!self) return;
-            QVariantMap payload;
-            payload["success"] = result.success;
-            payload["backend"] = result.backend;
-            payload["error"] = result.errorMessage;
-            emit self->localAiWarmupFinished(payload);
+            emit self->localAiWarmupFinished(warmupCompletionPayload(result));
         });
     }).detach();
+}
+
+void ApplicationController::continueAiWarmupAfterEstimate() {
+    const QPointer<ApplicationController> self(this);
+    std::thread([self]() {
+        if (!self) return;
+        auto onStage = [self](const QString& stage) {
+            QMetaObject::invokeMethod(self.data(), [self, stage]() {
+                if (!self) return;
+                emit self->localAiWarmupProgress(QVariantMap{{"stage", stage}});
+            });
+        };
+        const auto result = self->m_ai.continueWarmupAfterEstimate(onStage);
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->localAiWarmupFinished(warmupCompletionPayload(result));
+        });
+    }).detach();
+}
+
+void ApplicationController::disableLocalAiForSession() {
+    m_ai.disableForSession();
 }
 
 QVariantMap ApplicationController::browseForModelFile() {

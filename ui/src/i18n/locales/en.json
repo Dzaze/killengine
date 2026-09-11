@@ -4598,6 +4598,7 @@
     "stage": {
       "initializing": "Initializing runtime...",
       "loadingModel": "Loading model...",
+      "measuringSpeed": "Measuring machine performance...",
       "warmingPrompt": "Warming up the prompt...",
       "ready": "Ready!"
     },
@@ -4608,6 +4609,12 @@
       "disabled": "The local AI model is disabled in Settings. The app remains usable, the AI Assistant will be limited while it stays disabled."
     },
     "errorTitle": "AI warmup failed",
-    "continueWithoutAi": "Continue without local AI"
+    "continueWithoutAi": "Continue without local AI",
+    "estimateTitle": "Warmup estimated at about {seconds}s on this machine",
+    "estimateDetail": "The throughput measured on this machine with this model indicates a longer-than-usual warmup time. You can wait for it to finish, or continue without local AI for this session.",
+    "estimateWaitButton": "Wait for warmup",
+    "sessionDisabledTitle": "Local AI disabled for this session",
+    "sessionDisabledMessage": "The local AI model is disabled for this session. To use the Assistant, enable the Claude backend (API key) in Settings, or drive KillEngine via the automation pipe from VS Code with the AI extension of your choice.",
+    "sessionDisabledDismiss": "Got it, continue"
   }
 }

@@ -4598,6 +4598,7 @@
     "stage": {
       "initializing": "Initialisation du runtime...",
       "loadingModel": "Chargement du modèle...",
+      "measuringSpeed": "Mesure de la puissance de la machine...",
       "warmingPrompt": "Préchauffage du prompt...",
       "ready": "Prêt !"
     },
@@ -4608,6 +4609,12 @@
       "disabled": "Le modèle IA local est désactivé dans les Réglages. L'app reste utilisable, l'Assistant IA sera limité tant qu'il reste désactivé."
     },
     "errorTitle": "Le préchauffage IA a échoué",
-    "continueWithoutAi": "Continuer sans IA locale"
+    "continueWithoutAi": "Continuer sans IA locale",
+    "estimateTitle": "Préchauffage estimé à environ {seconds}s sur cette machine",
+    "estimateDetail": "Le débit mesuré sur cette machine avec ce modèle indique un temps de préchauffage plus long que d'habitude. Tu peux attendre qu'il se termine, ou continuer sans IA locale pour cette session.",
+    "estimateWaitButton": "Attendre le préchauffage",
+    "sessionDisabledTitle": "IA locale désactivée pour cette session",
+    "sessionDisabledMessage": "Le modèle IA local est désactivé pour cette session. Pour utiliser l'Assistant, active le backend Claude (clé API) dans Réglages, ou pilote KillEngine via le pipe d'automatisation depuis VS Code avec l'extension IA de ton choix.",
+    "sessionDisabledDismiss": "Compris, continuer"
   }
 }
