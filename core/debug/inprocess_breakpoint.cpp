@@ -1,6 +1,7 @@
 #include "inprocess_breakpoint.h"
 
 #include "breakpoint_arbiter.h"
+#include "localization/localization.h"
 #include "inject/dll_injector.h"
 #include "logging/logger.h"
 #include "process/process_enumerator.h"
@@ -50,7 +51,8 @@ bool buildAppContainerMappingSecurity(AppContainerMappingSecurity* security, QSt
         L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)(A;;GRGW;;;AC)S:(ML;;NW;;;LW)";
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kSddl, SDDL_REVISION_1, &security->descriptor, nullptr)) {
         if (error) {
-            *error = QStringLiteral("ConvertStringSecurityDescriptorToSecurityDescriptorW(IPC breakpoint in-process AppContainer) a échoué (error=%1).")
+            *error = KE_TXT("ConvertStringSecurityDescriptorToSecurityDescriptorW (IPC breakpoint in-process AppContainer) a échoué (erreur=%1).",
+                         "ConvertStringSecurityDescriptorToSecurityDescriptorW (IPC in-process breakpoint AppContainer) failed (error=%1).")
                          .arg(GetLastError());
         }
         return false;
@@ -149,7 +151,7 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
     InProcessBreakpointResult result;
 
     if (config.injectedHandlerPath.isEmpty()) {
-        result.error = "Chemin de KillEngineInProcessBreakpointHandler.dll manquant.";
+        result.error = KE_TXT("Chemin de KillEngineInProcessBreakpointHandler.dll manquant.", "Missing path to KillEngineInProcessBreakpointHandler.dll.");
         return result;
     }
 
@@ -183,7 +185,7 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, securityAttributes, PAGE_READWRITE,
                                         0, sizeof(InProcessBreakpointIpcState), mappingName);
     if (!mapping) {
-        result.error = "CreateFileMapping a échoué (IPC breakpoint in-process).";
+        result.error = KE_TXT("CreateFileMapping a échoué (IPC breakpoint in-process).", "CreateFileMapping failed (in-process breakpoint IPC).");
         return result;
     }
     // Piege trouve le 19/08/2026 (voir docs/STRATEGY_ROOM.md) : si un mapping du
@@ -201,17 +203,23 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
         MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(InProcessBreakpointIpcState)));
     if (!state) {
         CloseHandle(mapping);
-        result.error = "MapViewOfFile a échoué (IPC breakpoint in-process).";
+        result.error = KE_TXT("MapViewOfFile a échoué (IPC breakpoint in-process).", "MapViewOfFile failed (in-process breakpoint IPC).");
         return result;
     }
     if (mappingAlreadyExisted && state->active) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        result.error = "Un composant breakpoint in-process est déjà actif sur cette cible "
-                        "(injecté lors d'un appel précédent). Arrête-le (stop) avant d'en "
-                        "démarrer un autre, ou redémarre la cible — la réutilisation sans "
-                        "redémarrage a été tentée et retirée après un crash reproductible de "
-                        "la cible en test (voir docs/PHASE_TRACKER.md).";
+        result.error = KE_TXT(
+            "Un composant breakpoint in-process est déjà actif sur cette cible "
+            "(injecté lors d'un appel précédent). Arrête-le (stop) avant d'en "
+            "démarrer un autre, ou redémarre la cible — la réutilisation sans "
+            "redémarrage a été tentée et retirée après un crash reproductible de "
+            "la cible en test (voir docs/PHASE_TRACKER.md).",
+            "An in-process breakpoint component is already active on this target "
+            "(injected during a previous call). Stop it before starting another "
+            "one, or restart the target — reuse without a restart was tried and "
+            "reverted after a reproducible crash of the target in testing (see "
+            "docs/PHASE_TRACKER.md).");
         return result;
     }
 
@@ -228,7 +236,7 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
     if (!injected.success) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        result.error = "Injection du handler breakpoint in-process échouée: " + injected.error;
+        result.error = KE_TXT("Injection du handler breakpoint in-process échouée : %1", "In-process breakpoint handler injection failed: %1").arg(injected.error);
         return result;
     }
 
@@ -250,8 +258,9 @@ InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandl
         CloseHandle(mapping);
         m_monitoring.store(false);
         result.error = installError
-            ? "Le composant injecté n'a pas pu poser le breakpoint (SetThreadContext/VEH échoué dans la cible)."
-            : "Timeout: le composant injecté ne s'est pas installé.";
+            ? KE_TXT("Le composant injecté n'a pas pu poser le breakpoint (SetThreadContext/VEH échoué dans la cible).",
+                "The injected component was unable to set the breakpoint (SetThreadContext/VEH failed in the target).")
+            : KE_TXT("Timeout : le composant injecté ne s'est pas installé.", "Timeout: the injected component did not install.");
         return result;
     }
 
@@ -340,15 +349,15 @@ bool InProcessBreakpointSession::startFreeze(
     const QString& injectedHandlerPath,
     QString* error) {
     if (m_freezing.load()) {
-        if (error) *error = "Un freeze in-process est déjà actif.";
+        if (error) *error = KE_TXT("Un freeze in-process est déjà actif.", "An in-process freeze is already active.");
         return false;
     }
     if (injectedHandlerPath.isEmpty()) {
-        if (error) *error = "Chemin de KillEngineInProcessBreakpointHandler.dll manquant.";
+        if (error) *error = KE_TXT("Chemin de KillEngineInProcessBreakpointHandler.dll manquant.", "Missing path to KillEngineInProcessBreakpointHandler.dll.");
         return false;
     }
     if (frozenBytes.isEmpty() || frozenBytes.size() > 8) {
-        if (error) *error = "Valeur figée invalide (1 à 8 octets attendus).";
+        if (error) *error = KE_TXT("Valeur figée invalide (1 à 8 octets attendus).", "Invalid frozen value (1 to 8 bytes expected).");
         return false;
     }
 
@@ -379,7 +388,7 @@ bool InProcessBreakpointSession::startFreeze(
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, securityAttributes, PAGE_READWRITE,
                                         0, sizeof(InProcessBreakpointIpcState), mappingName);
     if (!mapping) {
-        if (error) *error = "CreateFileMapping a échoué (IPC breakpoint in-process).";
+        if (error) *error = KE_TXT("CreateFileMapping a échoué (IPC breakpoint in-process).", "CreateFileMapping failed (in-process breakpoint IPC).");
         return false;
     }
     // Meme garde que monitor() ci-dessus — voir son commentaire pour le piege
@@ -390,15 +399,19 @@ bool InProcessBreakpointSession::startFreeze(
         MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(InProcessBreakpointIpcState)));
     if (!state) {
         CloseHandle(mapping);
-        if (error) *error = "MapViewOfFile a échoué (IPC breakpoint in-process).";
+        if (error) *error = KE_TXT("MapViewOfFile a échoué (IPC breakpoint in-process).", "MapViewOfFile failed (in-process breakpoint IPC).");
         return false;
     }
     if (mappingAlreadyExisted && state->active) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = "Un composant breakpoint in-process est déjà actif sur cette cible "
-                             "(injecté lors d'un appel précédent). Arrête-le avant d'en démarrer "
-                             "un autre, ou redémarre la cible.";
+        if (error) *error = KE_TXT(
+            "Un composant breakpoint in-process est déjà actif sur cette cible "
+            "(injecté lors d'un appel précédent). Arrête-le avant d'en démarrer "
+            "un autre, ou redémarre la cible.",
+            "An in-process breakpoint component is already active on this target "
+            "(injected during a previous call). Stop it before starting another "
+            "one, or restart the target.");
         return false;
     }
 
@@ -417,7 +430,7 @@ bool InProcessBreakpointSession::startFreeze(
     if (!injected.success) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = "Injection du composant breakpoint in-process échouée: " + injected.error;
+        if (error) *error = KE_TXT("Injection du composant breakpoint in-process échouée : %1", "In-process breakpoint component injection failed: %1").arg(injected.error);
         return false;
     }
 
@@ -435,8 +448,9 @@ bool InProcessBreakpointSession::startFreeze(
         UnmapViewOfFile(state);
         CloseHandle(mapping);
         if (error) *error = installError
-            ? "Le composant injecté n'a pas pu poser le breakpoint (SetThreadContext/VEH échoué dans la cible)."
-            : "Timeout: le composant injecté ne s'est pas installé.";
+            ? KE_TXT("Le composant injecté n'a pas pu poser le breakpoint (SetThreadContext/VEH échoué dans la cible).",
+                "The injected component was unable to set the breakpoint (SetThreadContext/VEH failed in the target).")
+            : KE_TXT("Timeout : le composant injecté ne s'est pas installé.", "Timeout: the injected component did not install.");
         return false;
     }
 
@@ -468,12 +482,12 @@ InProcessBreakpointFreezeStats InProcessBreakpointSession::freezeStats() const {
 #else
 InProcessBreakpointResult InProcessBreakpointSession::monitor(const ProcessHandle&, const InProcessBreakpointConfig&) {
     InProcessBreakpointResult result;
-    result.error = "In-process breakpoints are Windows-only";
+    result.error = KE_TXT("Les breakpoints in-process sont réservés à Windows.", "In-process breakpoints are Windows-only.");
     return result;
 }
 
 bool InProcessBreakpointSession::startFreeze(const ProcessHandle&, uint64_t, size_t, bool, const QByteArray&, const QString&, QString* error) {
-    if (error) *error = "In-process breakpoints are Windows-only";
+    if (error) *error = KE_TXT("Les breakpoints in-process sont réservés à Windows.", "In-process breakpoints are Windows-only.");
     return false;
 }
 

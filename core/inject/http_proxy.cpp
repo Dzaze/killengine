@@ -1,6 +1,7 @@
 #include "http_proxy.h"
 
 #include "dll_injector.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #ifdef Q_OS_WIN
@@ -21,11 +22,11 @@ HttpProxySession::~HttpProxySession() {
 bool HttpProxySession::start(const ProcessHandle& process, bool interceptHttps,
                              const QString& handlerPath, QString* error) {
     if (m_active) {
-        if (error) *error = "Un proxy HTTP est déjà actif sur cette session.";
+        if (error) *error = KE_TXT("Un proxy HTTP est déjà actif sur cette session.", "An HTTP proxy is already active on this session.");
         return false;
     }
     if (handlerPath.isEmpty()) {
-        if (error) *error = "Chemin du handler requis.";
+        if (error) *error = KE_TXT("Chemin du handler requis.", "Handler path required.");
         return false;
     }
 
@@ -37,20 +38,22 @@ bool HttpProxySession::start(const ProcessHandle& process, bool interceptHttps,
     HANDLE existing = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, mappingName);
     if (existing) {
         CloseHandle(existing);
-        if (error) *error = "Un proxy HTTP a déjà été injecté dans cette cible "
-                            "(une session par lancement de la cible).";
+        if (error) *error = KE_TXT("Un proxy HTTP a déjà été injecté dans cette cible "
+                            "(une session par lancement de la cible).",
+                            "An HTTP proxy has already been injected into this target "
+                            "(one session per target launch).");
         return false;
     }
 
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
                                         0, sizeof(HttpProxyIpcState), mappingName);
     if (!mapping) {
-        if (error) *error = "CreateFileMapping a échoué (IPC proxy HTTP).";
+        if (error) *error = KE_TXT("CreateFileMapping a échoué (IPC proxy HTTP).", "CreateFileMapping failed (HTTP proxy IPC).");
         return false;
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(mapping);
-        if (error) *error = "Un proxy HTTP a déjà été injecté dans cette cible.";
+        if (error) *error = KE_TXT("Un proxy HTTP a déjà été injecté dans cette cible.", "An HTTP proxy has already been injected into this target.");
         return false;
     }
 
@@ -58,7 +61,7 @@ bool HttpProxySession::start(const ProcessHandle& process, bool interceptHttps,
         MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(HttpProxyIpcState)));
     if (!state) {
         CloseHandle(mapping);
-        if (error) *error = "MapViewOfFile a échoué (IPC proxy HTTP).";
+        if (error) *error = KE_TXT("MapViewOfFile a échoué (IPC proxy HTTP).", "MapViewOfFile failed (HTTP proxy IPC).");
         return false;
     }
 
@@ -75,7 +78,7 @@ bool HttpProxySession::start(const ProcessHandle& process, bool interceptHttps,
     if (!injected.success) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = "Injection du handler proxy HTTP échouée: " + injected.error;
+        if (error) *error = KE_TXT("Injection du handler proxy HTTP échouée : %1", "HTTP proxy handler injection failed: %1").arg(injected.error);
         return false;
     }
 
@@ -89,7 +92,8 @@ bool HttpProxySession::start(const ProcessHandle& process, bool interceptHttps,
     if (state->installError) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = "Le handler proxy HTTP n'a pas pu poser les hooks (wininet/winhttp introuvables ou MinHook échoué).";
+        if (error) *error = KE_TXT("Le handler proxy HTTP n'a pas pu poser les hooks (wininet/winhttp introuvables ou MinHook échoué).",
+            "The HTTP proxy handler was unable to set the hooks (wininet/winhttp not found or MinHook failed).");
         return false;
     }
 
@@ -180,7 +184,7 @@ HttpProxyStats HttpProxySession::stats() const {
 #else // non-Windows
 
 bool HttpProxySession::start(const ProcessHandle&, bool, const QString&, QString* error) {
-    if (error) *error = "Fonctionnalité Windows uniquement.";
+    if (error) *error = KE_TXT("Fonctionnalité réservée à Windows.", "Windows-only feature.");
     return false;
 }
 

@@ -1,6 +1,7 @@
 #include "speedhack.h"
 
 #include "inject/dll_injector.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #ifdef Q_OS_WIN
@@ -47,7 +48,8 @@ bool buildAppContainerMappingSecurity(AppContainerMappingSecurity* security, QSt
         L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)(A;;GRGW;;;AC)S:(ML;;NW;;;LW)";
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kSddl, SDDL_REVISION_1, &security->descriptor, nullptr)) {
         if (error) {
-            *error = QStringLiteral("ConvertStringSecurityDescriptorToSecurityDescriptorW(IPC speedhack AppContainer) a échoué (error=%1).")
+            *error = KE_TXT("ConvertStringSecurityDescriptorToSecurityDescriptorW (IPC speedhack AppContainer) a échoué (erreur=%1).",
+                         "ConvertStringSecurityDescriptorToSecurityDescriptorW (IPC speedhack AppContainer) failed (error=%1).")
                          .arg(GetLastError());
         }
         return false;
@@ -60,7 +62,7 @@ bool buildAppContainerMappingSecurity(AppContainerMappingSecurity* security, QSt
 
 bool SpeedhackSession::start(const ProcessHandle& process, double factor, const QString& injectedHandlerPath, QString* error) {
     if (m_active) {
-        if (error) *error = "Un speedhack est déjà actif sur cette session.";
+        if (error) *error = KE_TXT("Un speedhack est déjà actif sur cette session.", "A speedhack is already active on this session.");
         return false;
     }
 
@@ -76,7 +78,7 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
 
     if (!foundExisting) {
         if (injectedHandlerPath.isEmpty()) {
-            if (error) *error = "Chemin de KillEngineSpeedhackHandler.dll manquant.";
+            if (error) *error = KE_TXT("Chemin de KillEngineSpeedhackHandler.dll manquant.", "Missing path to KillEngineSpeedhackHandler.dll.");
             return false;
         }
 
@@ -92,7 +94,7 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
         mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, securityAttributes, PAGE_READWRITE,
                                       0, sizeof(SpeedhackIpcState), mappingName);
         if (!mapping) {
-            if (error) *error = "CreateFileMapping a échoué (IPC speedhack).";
+            if (error) *error = KE_TXT("CreateFileMapping a échoué (IPC speedhack).", "CreateFileMapping failed (speedhack IPC).");
             return false;
         }
     }
@@ -105,7 +107,7 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
         MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SpeedhackIpcState)));
     if (!state) {
         CloseHandle(mapping);
-        if (error) *error = "MapViewOfFile a échoué (IPC speedhack).";
+        if (error) *error = KE_TXT("MapViewOfFile a échoué (IPC speedhack).", "MapViewOfFile failed (speedhack IPC).");
         return false;
     }
 
@@ -120,8 +122,10 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
             state->stopRequested = 1;
             UnmapViewOfFile(state);
             CloseHandle(mapping);
-            if (error) *error = "Un composant speedhack existe déjà pour cette cible mais n'a jamais démarré "
-                                 "correctement (installError). Redémarre la cible pour réessayer.";
+            if (error) *error = KE_TXT("Un composant speedhack existe déjà pour cette cible mais n'a jamais démarré "
+                                 "correctement (installError). Redémarre la cible pour réessayer.",
+                                 "A speedhack component already exists for this target but never started "
+                                 "correctly (installError). Restart the target to try again.");
             return false;
         }
         // Composant déjà installé et fonctionnel pour ce PID : juste régler
@@ -145,7 +149,7 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
     if (!injected.success) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = "Injection du composant speedhack échouée: " + injected.error;
+        if (error) *error = KE_TXT("Injection du composant speedhack échouée : %1", "Speedhack component injection failed: %1").arg(injected.error);
         return false;
     }
 
@@ -162,8 +166,9 @@ bool SpeedhackSession::start(const ProcessHandle& process, double factor, const 
         UnmapViewOfFile(state);
         CloseHandle(mapping);
         if (error) *error = installError
-            ? "Le composant injecté n'a trouvé aucune fonction de temps à hooker dans cette cible."
-            : "Timeout: le composant speedhack ne s'est pas installé.";
+            ? KE_TXT("Le composant injecté n'a trouvé aucune fonction de temps à hooker dans cette cible.",
+                "The injected component found no time function to hook in this target.")
+            : KE_TXT("Timeout : le composant speedhack ne s'est pas installé.", "Timeout: the speedhack component did not install.");
         return false;
     }
     state->factor = factor;
@@ -218,7 +223,7 @@ SpeedhackStats SpeedhackSession::stats() const {
 #else
 
 bool SpeedhackSession::start(const ProcessHandle&, double, const QString&, QString* error) {
-    if (error) *error = "Speedhack is Windows-only";
+    if (error) *error = KE_TXT("Le speedhack est réservé à Windows.", "Speedhack is Windows-only.");
     return false;
 }
 

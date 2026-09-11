@@ -1,6 +1,7 @@
 #include "lag_switch.h"
 
 #include "dll_injector.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #ifdef Q_OS_WIN
@@ -21,11 +22,11 @@ LagSwitchSession::~LagSwitchSession() {
 bool LagSwitchSession::start(const ProcessHandle& process, int delayMs,
                              const QString& handlerPath, QString* error) {
     if (m_active) {
-        if (error) *error = "Un lag switch est déjà actif sur cette session.";
+        if (error) *error = KE_TXT("Un lag switch est déjà actif sur cette session.", "A lag switch is already active on this session.");
         return false;
     }
     if (handlerPath.isEmpty()) {
-        if (error) *error = "Chemin du handler requis.";
+        if (error) *error = KE_TXT("Chemin du handler requis.", "Handler path required.");
         return false;
     }
 
@@ -37,20 +38,22 @@ bool LagSwitchSession::start(const ProcessHandle& process, int delayMs,
     HANDLE existing = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, mappingName);
     if (existing) {
         CloseHandle(existing);
-        if (error) *error = "Un lag switch a déjà été injecté dans cette cible "
-                            "(une session par lancement de la cible).";
+        if (error) *error = KE_TXT("Un lag switch a déjà été injecté dans cette cible "
+                            "(une session par lancement de la cible).",
+                            "A lag switch has already been injected into this target "
+                            "(one session per target launch).");
         return false;
     }
 
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
                                         0, sizeof(LagSwitchIpcState), mappingName);
     if (!mapping) {
-        if (error) *error = "CreateFileMapping a échoué (IPC lag switch).";
+        if (error) *error = KE_TXT("CreateFileMapping a échoué (IPC lag switch).", "CreateFileMapping failed (lag switch IPC).");
         return false;
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(mapping);
-        if (error) *error = "Un lag switch a déjà été injecté dans cette cible.";
+        if (error) *error = KE_TXT("Un lag switch a déjà été injecté dans cette cible.", "A lag switch has already been injected into this target.");
         return false;
     }
 
@@ -58,7 +61,7 @@ bool LagSwitchSession::start(const ProcessHandle& process, int delayMs,
         MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LagSwitchIpcState)));
     if (!state) {
         CloseHandle(mapping);
-        if (error) *error = "MapViewOfFile a échoué (IPC lag switch).";
+        if (error) *error = KE_TXT("MapViewOfFile a échoué (IPC lag switch).", "MapViewOfFile failed (lag switch IPC).");
         return false;
     }
 
@@ -75,7 +78,7 @@ bool LagSwitchSession::start(const ProcessHandle& process, int delayMs,
     if (!injected.success) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = "Injection du handler lag switch échouée: " + injected.error;
+        if (error) *error = KE_TXT("Injection du handler lag switch échouée : %1", "Lag switch handler injection failed: %1").arg(injected.error);
         return false;
     }
 
@@ -89,7 +92,8 @@ bool LagSwitchSession::start(const ProcessHandle& process, int delayMs,
     if (state->installError) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = "Le handler lag switch n'a pas pu poser les hooks (ws2_32.dll introuvable ou MinHook échoué).";
+        if (error) *error = KE_TXT("Le handler lag switch n'a pas pu poser les hooks (ws2_32.dll introuvable ou MinHook échoué).",
+            "The lag switch handler was unable to set the hooks (ws2_32.dll not found or MinHook failed).");
         return false;
     }
 
@@ -144,7 +148,7 @@ LagSwitchStats LagSwitchSession::stats() const {
 #else // non-Windows
 
 bool LagSwitchSession::start(const ProcessHandle&, int, const QString&, QString* error) {
-    if (error) *error = "Fonctionnalité Windows uniquement.";
+    if (error) *error = KE_TXT("Fonctionnalité réservée à Windows.", "Windows-only feature.");
     return false;
 }
 

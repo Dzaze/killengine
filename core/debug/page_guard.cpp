@@ -1,6 +1,7 @@
 #include "page_guard.h"
 
 #include "inject/dll_injector.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "page_guard_ipc.h"
 #include "process/process_enumerator.h"
@@ -51,7 +52,8 @@ bool buildAppContainerMappingSecurity(AppContainerMappingSecurity* security, QSt
         L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)(A;;GRGW;;;AC)S:(ML;;NW;;;LW)";
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kSddl, SDDL_REVISION_1, &security->descriptor, nullptr)) {
         if (error) {
-            *error = QStringLiteral("ConvertStringSecurityDescriptorToSecurityDescriptorW(IPC page guard AppContainer) a échoué (error=%1).")
+            *error = KE_TXT("ConvertStringSecurityDescriptorToSecurityDescriptorW (IPC page guard AppContainer) a échoué (erreur=%1).",
+                         "ConvertStringSecurityDescriptorToSecurityDescriptorW (IPC page guard AppContainer) failed (error=%1).")
                          .arg(GetLastError());
         }
         return false;
@@ -142,7 +144,8 @@ PageGuardResult PageGuardSession::monitor(const ProcessHandle& process, const Pa
 
 #ifdef Q_OS_WIN
     if (s_currentSession) {
-        result.error = "Another PageGuardSession is already active (single-session limit)";
+        result.error = KE_TXT("Une autre PageGuardSession est déjà active (limite d'une seule session).",
+            "Another PageGuardSession is already active (single-session limit).");
         return result;
     }
 
@@ -171,7 +174,7 @@ PageGuardResult PageGuardSession::monitor(const ProcessHandle& process, const Pa
 
     void* vehHandle = AddVectoredExceptionHandler(1, vectoredHandler);
     if (!vehHandle) {
-        result.error = "AddVectoredExceptionHandler failed";
+        result.error = KE_TXT("Échec d'AddVectoredExceptionHandler.", "AddVectoredExceptionHandler failed.");
         s_currentSession = nullptr;
         return result;
     }
@@ -180,7 +183,7 @@ PageGuardResult PageGuardSession::monitor(const ProcessHandle& process, const Pa
     const DWORD targetProtect = PAGE_READWRITE | PAGE_GUARD;
     if (!VirtualProtectEx(m_processHandle, reinterpret_cast<LPVOID>(m_pageBase), 4096,
                           targetProtect, &oldProtect)) {
-        result.error = "VirtualProtectEx failed to set page guard";
+        result.error = KE_TXT("Échec de VirtualProtectEx pour poser la page guard.", "VirtualProtectEx failed to set the page guard.");
         RemoveVectoredExceptionHandler(vehHandle);
         s_currentSession = nullptr;
         return result;
@@ -226,7 +229,7 @@ PageGuardResult PageGuardSession::monitor(const ProcessHandle& process, const Pa
 #else
     (void)process;
     (void)config;
-    result.error = "Page guards are Windows-only";
+    result.error = KE_TXT("Les page guards sont réservées à Windows.", "Page guards are Windows-only.");
 #endif
 
     return result;
@@ -237,7 +240,7 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
     PageGuardResult result;
 
     if (config.injectedHandlerPath.isEmpty()) {
-        result.error = "Chemin de KillEnginePageGuardHandler.dll manquant.";
+        result.error = KE_TXT("Chemin de KillEnginePageGuardHandler.dll manquant.", "Missing path to KillEnginePageGuardHandler.dll.");
         return result;
     }
 
@@ -260,14 +263,14 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, securityAttributes, PAGE_READWRITE,
                                         0, sizeof(PageGuardIpcState), mappingName);
     if (!mapping) {
-        result.error = "CreateFileMapping a échoué (IPC page guard).";
+        result.error = KE_TXT("CreateFileMapping a échoué (IPC page guard).", "CreateFileMapping failed (page guard IPC).");
         return result;
     }
     auto* state = static_cast<PageGuardIpcState*>(
         MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(PageGuardIpcState)));
     if (!state) {
         CloseHandle(mapping);
-        result.error = "MapViewOfFile a échoué (IPC page guard).";
+        result.error = KE_TXT("MapViewOfFile a échoué (IPC page guard).", "MapViewOfFile failed (page guard IPC).");
         return result;
     }
 
@@ -288,7 +291,7 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
     if (!injected.success) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        result.error = "Injection du handler PAGE_GUARD échouée: " + injected.error;
+        result.error = KE_TXT("Injection du handler PAGE_GUARD échouée : %1", "PAGE_GUARD handler injection failed: %1").arg(injected.error);
         return result;
     }
 
@@ -316,11 +319,12 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
             const QString step = installErrorStep == 1 ? "AddVectoredExceptionHandler"
                 : installErrorStep == 2 ? "VirtualProtect"
                 : "installation";
-            result.error = QString("Le handler injecté n'a pas pu poser la garde (%1 échoué dans la cible, GetLastError=%2).")
+            result.error = KE_TXT("Le handler injecté n'a pas pu poser la garde (%1 échoué dans la cible, GetLastError=%2).",
+                "The injected handler was unable to set the guard (%1 failed in the target, GetLastError=%2).")
                 .arg(step)
                 .arg(installLastError);
         } else {
-            result.error = "Timeout: le handler injecté ne s'est pas installé.";
+            result.error = KE_TXT("Timeout : le handler injecté ne s'est pas installé.", "Timeout: the injected handler did not install.");
         }
         return result;
     }
@@ -390,7 +394,7 @@ PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle& process, co
 #else
 PageGuardResult PageGuardSession::monitorRemote(const ProcessHandle&, const PageGuardConfig&) {
     PageGuardResult result;
-    result.error = "Page guards are Windows-only";
+    result.error = KE_TXT("Les page guards sont réservées à Windows.", "Page guards are Windows-only.");
     return result;
 }
 #endif

@@ -1,6 +1,7 @@
 #include "api_hook.h"
 
 #include "dll_injector.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #ifdef Q_OS_WIN
@@ -29,11 +30,11 @@ constexpr int kFunctionNameMaxChars = 128;
 bool ApiHookSession::start(const ProcessHandle& process, const ApiHookConfig& config,
                            const QString& handlerPath, QString* error) {
     if (m_active) {
-        if (error) *error = "Une interception est déjà active sur cette session.";
+        if (error) *error = KE_TXT("Une interception est déjà active sur cette session.", "An interception is already active on this session.");
         return false;
     }
     if (config.moduleName.isEmpty() || config.functionName.isEmpty()) {
-        if (error) *error = "Module et fonction requis (ex: kernel32.dll!CreateFileW).";
+        if (error) *error = KE_TXT("Module et fonction requis (ex : kernel32.dll!CreateFileW).", "Module and function required (e.g. kernel32.dll!CreateFileW).");
         return false;
     }
 
@@ -50,20 +51,22 @@ bool ApiHookSession::start(const ProcessHandle& process, const ApiHookConfig& co
     HANDLE existing = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, mappingName);
     if (existing) {
         CloseHandle(existing);
-        if (error) *error = "Un composant d'interception a déjà été injecté dans cette cible "
-                            "(une session par lancement de la cible, comme le breakpoint in-process).";
+        if (error) *error = KE_TXT("Un composant d'interception a déjà été injecté dans cette cible "
+                            "(une session par lancement de la cible, comme le breakpoint in-process).",
+                            "An interception component has already been injected into this target "
+                            "(one session per target launch, like the in-process breakpoint).");
         return false;
     }
 
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
                                         0, sizeof(ApiHookIpcState), mappingName);
     if (!mapping) {
-        if (error) *error = "CreateFileMapping a échoué (IPC interception).";
+        if (error) *error = KE_TXT("CreateFileMapping a échoué (IPC interception).", "CreateFileMapping failed (interception IPC).");
         return false;
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(mapping);
-        if (error) *error = "Un composant d'interception a déjà été injecté dans cette cible.";
+        if (error) *error = KE_TXT("Un composant d'interception a déjà été injecté dans cette cible.", "An interception component has already been injected into this target.");
         return false;
     }
 
@@ -71,7 +74,7 @@ bool ApiHookSession::start(const ProcessHandle& process, const ApiHookConfig& co
         MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(ApiHookIpcState)));
     if (!state) {
         CloseHandle(mapping);
-        if (error) *error = "MapViewOfFile a échoué (IPC interception).";
+        if (error) *error = KE_TXT("MapViewOfFile a échoué (IPC interception).", "MapViewOfFile failed (interception IPC).");
         return false;
     }
 
@@ -99,7 +102,7 @@ bool ApiHookSession::start(const ProcessHandle& process, const ApiHookConfig& co
     if (!injected.success) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = "Injection du composant d'interception échouée: " + injected.error;
+        if (error) *error = KE_TXT("Injection du composant d'interception échouée : %1", "Interception component injection failed: %1").arg(injected.error);
         return false;
     }
 
@@ -115,7 +118,8 @@ bool ApiHookSession::start(const ProcessHandle& process, const ApiHookConfig& co
     if (state->resolveError) {
         UnmapViewOfFile(state);
         CloseHandle(mapping);
-        if (error) *error = QStringLiteral("%1!%2 introuvable dans la cible (module non chargé ou fonction non exportée).")
+        if (error) *error = KE_TXT("%1!%2 introuvable dans la cible (module non chargé ou fonction non exportée).",
+                                 "%1!%2 not found in the target (module not loaded or function not exported).")
                                  .arg(config.moduleName, config.functionName);
         return false;
     }
@@ -123,8 +127,8 @@ bool ApiHookSession::start(const ProcessHandle& process, const ApiHookConfig& co
         UnmapViewOfFile(state);
         CloseHandle(mapping);
         if (error) *error = state->installError
-            ? QStringLiteral("La pose du hook MinHook a échoué dans la cible.")
-            : QStringLiteral("Timeout: le composant d'interception ne s'est pas installé.");
+            ? KE_TXT("La pose du hook MinHook a échoué dans la cible.", "Setting the MinHook hook failed in the target.")
+            : KE_TXT("Timeout : le composant d'interception ne s'est pas installé.", "Timeout: the interception component did not install.");
         return false;
     }
 
@@ -180,7 +184,7 @@ ApiHookStats ApiHookSession::stats() const {
 #else
 
 bool ApiHookSession::start(const ProcessHandle&, const ApiHookConfig&, const QString&, QString* error) {
-    if (error) *error = "API hooking is Windows-only";
+    if (error) *error = KE_TXT("L'interception d'API est réservée à Windows.", "API hooking is Windows-only.");
     return false;
 }
 

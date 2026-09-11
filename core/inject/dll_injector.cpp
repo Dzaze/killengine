@@ -1,5 +1,6 @@
 #include "dll_injector.h"
 
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "process/process_enumerator.h"
 
@@ -33,11 +34,15 @@ namespace {
 /// forcer a marcher — message actionnable a la place d'une erreur Win32 nue.
 QString accessDeniedHint(DWORD err) {
     if (err != ERROR_ACCESS_DENIED) return {};
-    return QStringLiteral(
+    return KE_TXT(
         " Un antivirus/EDR (ex. Microsoft Defender for Endpoint) bloque probablement cette action : "
-        "poser un breakpoint externe puis injecter dans la meme cible juste apres ressemble a une "
-        "technique d'injection de code, meme si l'usage ici est legitime. Reessaie, ou ajoute une "
-        "exclusion pour KillEngine.exe dans ton antivirus/EDR si le blocage persiste.");
+        "poser un breakpoint externe puis injecter dans la même cible juste après ressemble à une "
+        "technique d'injection de code, même si l'usage ici est légitime. Réessaie, ou ajoute une "
+        "exclusion pour KillEngine.exe dans ton antivirus/EDR si le blocage persiste.",
+        " An antivirus/EDR (e.g. Microsoft Defender for Endpoint) is likely blocking this action: "
+        "setting an external breakpoint and then injecting into the same target right after looks like a "
+        "code injection technique, even though the usage here is legitimate. Try again, or add an "
+        "exclusion for KillEngine.exe in your antivirus/EDR if the block persists.");
 }
 
 bool prepareAppContainerReadableDllCopy(const QString& dllPath, uint32_t targetPid, QString* copiedPath, QString* error) {
@@ -48,7 +53,7 @@ bool prepareAppContainerReadableDllCopy(const QString& dllPath, uint32_t targetP
     const std::wstring source = QDir::toNativeSeparators(dllPath).toStdWString();
     const std::wstring target = QDir::toNativeSeparators(targetPath).toStdWString();
     if (!CopyFileW(source.c_str(), target.c_str(), FALSE)) {
-        if (error) *error = QStringLiteral("CopyFileW vers la copie AppContainer a échoué (error=%1).").arg(GetLastError());
+        if (error) *error = KE_TXT("CopyFileW vers la copie AppContainer a échoué (erreur=%1).", "CopyFileW to the AppContainer copy failed (error=%1).").arg(GetLastError());
         return false;
     }
 
@@ -56,7 +61,7 @@ bool prepareAppContainerReadableDllCopy(const QString& dllPath, uint32_t targetP
     PSID packageSid = sidData;
     DWORD sidSize = sizeof(sidData);
     if (!CreateWellKnownSid(WELL_KNOWN_SID_TYPE::WinBuiltinAnyPackageSid, nullptr, packageSid, &sidSize)) {
-        if (error) *error = QStringLiteral("CreateWellKnownSid(ALL APPLICATION PACKAGES) a échoué (error=%1).").arg(GetLastError());
+        if (error) *error = KE_TXT("CreateWellKnownSid (ALL APPLICATION PACKAGES) a échoué (erreur=%1).", "CreateWellKnownSid (ALL APPLICATION PACKAGES) failed (error=%1).").arg(GetLastError());
         return false;
     }
 
@@ -65,7 +70,7 @@ bool prepareAppContainerReadableDllCopy(const QString& dllPath, uint32_t targetP
     DWORD status = GetNamedSecurityInfoW(target.c_str(), SE_OBJECT_TYPE::SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
                                          nullptr, nullptr, &oldAcl, nullptr, &securityDescriptor);
     if (status != ERROR_SUCCESS) {
-        if (error) *error = QStringLiteral("GetNamedSecurityInfoW sur la copie AppContainer a échoué (error=%1).").arg(status);
+        if (error) *error = KE_TXT("GetNamedSecurityInfoW sur la copie AppContainer a échoué (erreur=%1).", "GetNamedSecurityInfoW on the AppContainer copy failed (error=%1).").arg(status);
         return false;
     }
 
@@ -81,7 +86,7 @@ bool prepareAppContainerReadableDllCopy(const QString& dllPath, uint32_t targetP
     status = SetEntriesInAclW(1, &access, oldAcl, &newAcl);
     if (status != ERROR_SUCCESS) {
         LocalFree(securityDescriptor);
-        if (error) *error = QStringLiteral("SetEntriesInAclW pour ALL APPLICATION PACKAGES a échoué (error=%1).").arg(status);
+        if (error) *error = KE_TXT("SetEntriesInAclW pour ALL APPLICATION PACKAGES a échoué (erreur=%1).", "SetEntriesInAclW for ALL APPLICATION PACKAGES failed (error=%1).").arg(status);
         return false;
     }
 
@@ -90,7 +95,7 @@ bool prepareAppContainerReadableDllCopy(const QString& dllPath, uint32_t targetP
     LocalFree(newAcl);
     LocalFree(securityDescriptor);
     if (status != ERROR_SUCCESS) {
-        if (error) *error = QStringLiteral("SetNamedSecurityInfoW sur la copie AppContainer a échoué (error=%1).").arg(status);
+        if (error) *error = KE_TXT("SetNamedSecurityInfoW sur la copie AppContainer a échoué (erreur=%1).", "SetNamedSecurityInfoW on the AppContainer copy failed (error=%1).").arg(status);
         return false;
     }
 
@@ -184,14 +189,22 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
 
 #ifdef Q_OS_WIN
     if (!process.isValid()) {
-        result.error = "Invalid process handle";
+        result.error = KE_TXT("Handle de processus invalide.", "Invalid process handle.");
         return result;
     }
 
     const HANDLE hProcess = process.rawHandle();
 
+    // Indicateur stable pour la decision de retry ci-dessous -- independant du
+    // texte affiche (traduit via KE_TXT) pour eviter le meme piege que celui
+    // corrige dans profile_manager.cpp/auto_resolver.cpp
+    // (docs/BACKEND_UI_LOCALIZATION_ROADMAP.md, B3) : comparer sur le texte
+    // localise casserait silencieusement ce fallback pour un utilisateur EN.
+    bool loadLibraryReturnedNull = false;
+
     auto loadDllPath = [&](const QString& path) {
         InjectionResult attempt;
+        loadLibraryReturnedNull = false;
 
         // 1. Allouer de la mémoire pour le chemin DLL (unicode)
         const std::wstring widePath = QDir::toNativeSeparators(path).toStdWString();
@@ -201,7 +214,7 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
                                              MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         if (!pRemotePath) {
             const DWORD err = GetLastError();
-            attempt.error = QStringLiteral("VirtualAllocEx failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
+            attempt.error = KE_TXT("Échec de VirtualAllocEx (erreur=%1).%2", "VirtualAllocEx failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
             return attempt;
         }
 
@@ -210,7 +223,7 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
         if (!WriteProcessMemory(hProcess, pRemotePath, widePath.c_str(), pathSize, &bytesWritten) ||
             bytesWritten != pathSize) {
             const DWORD err = GetLastError();
-            attempt.error = QStringLiteral("WriteProcessMemory failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
+            attempt.error = KE_TXT("Échec de WriteProcessMemory (erreur=%1).%2", "WriteProcessMemory failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
             VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
             return attempt;
         }
@@ -218,7 +231,7 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
         // 3. Trouver LoadLibraryW
         const uint64_t loadLibraryAddr = getRemoteProcAddress(QStringLiteral("kernel32.dll"), QStringLiteral("LoadLibraryW"));
         if (!loadLibraryAddr) {
-            attempt.error = "Cannot find LoadLibraryW address";
+            attempt.error = KE_TXT("Adresse de LoadLibraryW introuvable.", "Cannot find LoadLibraryW address.");
             VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
             return attempt;
         }
@@ -257,7 +270,7 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
 
         if (!hThread) {
             const DWORD err = GetLastError();
-            attempt.error = QStringLiteral("CreateRemoteThread failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
+            attempt.error = KE_TXT("Échec de CreateRemoteThread (erreur=%1).%2", "CreateRemoteThread failed (error=%1).%2").arg(err).arg(accessDeniedHint(err));
             VirtualFreeEx(hProcess, pRemotePath, 0, MEM_RELEASE);
             return attempt;
         }
@@ -287,7 +300,8 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
 
         attempt.success = (attempt.moduleBase != 0);
         if (!attempt.success) {
-            attempt.error = "LoadLibraryW returned NULL in remote process";
+            attempt.error = KE_TXT("LoadLibraryW a retourné NULL dans le processus distant.", "LoadLibraryW returned NULL in the remote process.");
+            loadLibraryReturnedNull = true;
         }
         return attempt;
     };
@@ -297,7 +311,7 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
         QString copiedPath;
         QString copyError;
         if (!prepareAppContainerReadableDllCopy(dllPath, process.pid(), &copiedPath, &copyError)) {
-            result.error = QStringLiteral("Copie DLL unique impossible: %1").arg(copyError);
+            result.error = KE_TXT("Copie DLL unique impossible : %1", "Unable to make a unique DLL copy: %1").arg(copyError);
             KE_LOG_WARN() << "DllInjector: unique copy failed for " << dllPath.toStdString()
                           << " into PID " << process.pid() << ": " << result.error.toStdString();
             return result;
@@ -310,7 +324,8 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
     result = loadDllPath(loadedPath);
     if (!options.forceUniqueLoad
         && !result.success
-        && result.error == QStringLiteral("LoadLibraryW returned NULL in remote process")) {
+        && loadLibraryReturnedNull) {
+        const QString firstError = result.error;
         QString copiedPath;
         QString copyError;
         if (prepareAppContainerReadableDllCopy(dllPath, process.pid(), &copiedPath, &copyError)) {
@@ -319,14 +334,13 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
             loadedPath = copiedPath;
             result = loadDllPath(copiedPath);
             if (!result.success) {
-                result.error = QStringLiteral("%1; fallback AppContainer via %2 a échoué: %3")
-                                   .arg(QStringLiteral("LoadLibraryW returned NULL in remote process"),
-                                        copiedPath,
-                                        result.error);
+                result.error = KE_TXT("%1 ; le fallback AppContainer via %2 a échoué : %3",
+                                   "%1; the AppContainer fallback via %2 failed: %3")
+                                   .arg(firstError, copiedPath, result.error);
             }
         } else {
-            result.error = QStringLiteral("%1; fallback AppContainer impossible: %2")
-                               .arg(result.error, copyError);
+            result.error = KE_TXT("%1 ; fallback AppContainer impossible : %2", "%1; AppContainer fallback not possible: %2")
+                               .arg(firstError, copyError);
         }
     }
 
@@ -341,7 +355,7 @@ InjectionResult injectDll(const ProcessHandle& process, const QString& dllPath, 
 #else
     (void)process;
     (void)dllPath;
-    result.error = "DLL injection is Windows-only";
+    result.error = KE_TXT("L'injection de DLL est réservée à Windows.", "DLL injection is Windows-only.");
 #endif
 
     return result;
@@ -352,7 +366,7 @@ InjectionResult injectShellcode(const ProcessHandle& process, const QByteArray& 
 
 #ifdef Q_OS_WIN
     if (!process.isValid() || shellcode.isEmpty()) {
-        result.error = "Invalid process handle or empty shellcode";
+        result.error = KE_TXT("Handle de processus invalide ou shellcode vide.", "Invalid process handle or empty shellcode.");
         return result;
     }
 
@@ -362,7 +376,7 @@ InjectionResult injectShellcode(const ProcessHandle& process, const QByteArray& 
     LPVOID pRemoteCode = VirtualAllocEx(hProcess, nullptr, static_cast<SIZE_T>(shellcode.size()),
                                          MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!pRemoteCode) {
-        result.error = QStringLiteral("VirtualAllocEx failed (error=%1)").arg(GetLastError());
+        result.error = KE_TXT("Échec de VirtualAllocEx (erreur=%1)", "VirtualAllocEx failed (error=%1)").arg(GetLastError());
         return result;
     }
 
@@ -371,7 +385,7 @@ InjectionResult injectShellcode(const ProcessHandle& process, const QByteArray& 
     if (!WriteProcessMemory(hProcess, pRemoteCode, shellcode.constData(),
                             static_cast<SIZE_T>(shellcode.size()), &bytesWritten) ||
         bytesWritten != static_cast<SIZE_T>(shellcode.size())) {
-        result.error = QStringLiteral("WriteProcessMemory failed (error=%1)").arg(GetLastError());
+        result.error = KE_TXT("Échec de WriteProcessMemory (erreur=%1)", "WriteProcessMemory failed (error=%1)").arg(GetLastError());
         VirtualFreeEx(hProcess, pRemoteCode, 0, MEM_RELEASE);
         return result;
     }
@@ -387,7 +401,7 @@ InjectionResult injectShellcode(const ProcessHandle& process, const QByteArray& 
         nullptr);
 
     if (!hThread) {
-        result.error = QStringLiteral("CreateRemoteThread failed (error=%1)").arg(GetLastError());
+        result.error = KE_TXT("Échec de CreateRemoteThread (erreur=%1)", "CreateRemoteThread failed (error=%1)").arg(GetLastError());
         VirtualFreeEx(hProcess, pRemoteCode, 0, MEM_RELEASE);
         return result;
     }
@@ -400,7 +414,7 @@ InjectionResult injectShellcode(const ProcessHandle& process, const QByteArray& 
 #else
     (void)process;
     (void)shellcode;
-    result.error = "Shellcode injection is Windows-only";
+    result.error = KE_TXT("L'injection de shellcode est réservée à Windows.", "Shellcode injection is Windows-only.");
 #endif
 
     return result;
