@@ -146,7 +146,8 @@ QVariantMap SettingsDiagnosticsManager::clearTemporaryStorage() {
     QVariantMap result;
     if (m_controller.m_activeScanCancellation) {
         result["success"] = false;
-        result["error"] = "Un scan est actif : annule ou attends la fin avant de nettoyer le temporaire.";
+        result["error"] = KE_TXT("Un scan est actif : annule ou attends la fin avant de nettoyer le temporaire.",
+            "A scan is active: cancel it or wait for it to finish before clearing the temporary storage.");
         return result;
     }
 
@@ -195,10 +196,12 @@ QVariantMap SettingsDiagnosticsManager::clearTemporaryStorage() {
     result["hadUndoReduction"] = hadUndo;
     result["hadUnknownSnapshot"] = hadSnapshot;
     result["message"] = failedFiles.isEmpty()
-        ? QString("Stockage temporaire nettoyé : %1 fichier(s), %2 octet(s) supprimé(s).")
+        ? KE_TXT("Stockage temporaire nettoyé : %1 fichier(s), %2 octet(s) supprimé(s).",
+              "Temporary storage cleared: %1 file(s), %2 byte(s) removed.")
               .arg(removedFiles.size())
               .arg(removedBytes)
-        : QString("Nettoyage partiel : %1 fichier(s) supprimé(s), %2 fichier(s) verrouillé(s).")
+        : KE_TXT("Nettoyage partiel : %1 fichier(s) supprimé(s), %2 fichier(s) verrouillé(s).",
+              "Partial cleanup: %1 file(s) removed, %2 file(s) locked.")
               .arg(removedFiles.size())
               .arg(failedFiles.size());
     this->appendSmartSearchDebug("temporary_storage_cleared", result);
@@ -420,9 +423,9 @@ QVariantMap SettingsDiagnosticsManager::browseForModelFile() {
 
     const QString path = QFileDialog::getOpenFileName(
         nullptr,
-        "Choisir un modèle GGUF",
+        KE_TXT("Choisir un modèle GGUF", "Choose a GGUF model"),
         QString(),
-        "Modèles GGUF (*.gguf);;Tous les fichiers (*.*)");
+        KE_TXT("Modèles GGUF (*.gguf);;Tous les fichiers (*.*)", "GGUF models (*.gguf);;All files (*.*)"));
 
     if (path.isEmpty()) {
         result["cancelled"] = true;
@@ -540,7 +543,7 @@ QVariantMap SettingsDiagnosticsManager::getSmartSearchDebugEvents(int maxEvents)
     }
 
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        result["error"] = "Impossible de lire le fichier debug Smart Search.";
+        result["error"] = KE_TXT("Impossible de lire le fichier debug Smart Search.", "Unable to read the Smart Search debug file.");
         return result;
     }
 
@@ -589,7 +592,7 @@ QVariantMap SettingsDiagnosticsManager::clearSmartSearchDebugEvents() {
 
     QFile file(this->smartSearchDebugFilePath());
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        result["error"] = "Impossible de vider le fichier debug Smart Search.";
+        result["error"] = KE_TXT("Impossible de vider le fichier debug Smart Search.", "Unable to clear the Smart Search debug file.");
         return result;
     }
 
@@ -614,7 +617,7 @@ QVariantMap SettingsDiagnosticsManager::getLogTail(int maxLines) const {
         return result;
     }
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        result["error"] = "Impossible de lire le fichier log.";
+        result["error"] = KE_TXT("Impossible de lire le fichier log.", "Unable to read the log file.");
         return result;
     }
 
@@ -726,7 +729,7 @@ QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
 
     QFile out(exportPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        result["error"] = "Impossible de créer le fichier diagnostic.";
+        result["error"] = KE_TXT("Impossible de créer le fichier diagnostic.", "Unable to create the diagnostic file.");
         result["path"] = exportPath;
         return result;
     }
@@ -744,7 +747,8 @@ QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
     const bool folderOpened = QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
     result["folderOpened"] = folderOpened;
     if (!folderOpened) {
-        result["openFolderError"] = "Le dossier de l'export n'a pas pu être ouvert automatiquement. Chemin : " + folderPath;
+        result["openFolderError"] = KE_TXT("Le dossier de l'export n'a pas pu être ouvert automatiquement. Chemin : %1",
+            "The export folder could not be opened automatically. Path: %1").arg(folderPath);
     } else {
         result["openFolderError"] = "";
     }

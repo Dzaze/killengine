@@ -1,5 +1,7 @@
 #include "investigation_notebook_manager.h"
 
+#include "localization/localization.h"
+
 namespace killengine {
 
 QVariantMap InvestigationNotebookManager::hypothesisToVariantMap(const killai::Hypothesis& hypothesis) {
@@ -16,7 +18,7 @@ QVariantMap InvestigationNotebookManager::addHypothesis(const QString& descripti
     QVariantMap result;
     if (description.trimmed().isEmpty()) {
         result["success"] = false;
-        result["error"] = "Description vide.";
+        result["error"] = KE_TXT("Description vide.", "Empty description.");
         return result;
     }
 
@@ -35,8 +37,8 @@ QVariantMap InvestigationNotebookManager::recordTestResult(const QString& hypoth
     if (!accepted) {
         result["success"] = false;
         result["error"] = hypothesis
-            ? "Hypothese deja dans un etat terminal (confirmee ou refutee)."
-            : "Hypothese introuvable.";
+            ? KE_TXT("Hypothèse déjà dans un état terminal (confirmée ou réfutée).", "Hypothesis already in a terminal state (confirmed or refuted).")
+            : KE_TXT("Hypothèse introuvable.", "Hypothesis not found.");
         return result;
     }
 

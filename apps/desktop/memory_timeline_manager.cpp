@@ -2,6 +2,7 @@
 #include "../core/visualization/memory_timeline_analyzer.h"
 #include "../core/visualization/memory_timeline_collector.h"
 #include "../core/logging/logger.h"
+#include "localization/localization.h"
 #include <QChar>
 #include <QDebug>
 
@@ -266,7 +267,7 @@ QVariantMap MemoryTimelineManager::detectPatterns(const QString& addressHex) {
     uint64_t address = 0;
     if (!parseAddress(addressHex, address)) {
         result["success"] = false;
-        result["error"] = "Adresse invalide";
+        result["error"] = KE_TXT("Adresse invalide", "Invalid address");
         return result;
     }
 
@@ -304,7 +305,7 @@ QVariantMap MemoryTimelineManager::analyzeBehavior(const QString& addressHex) {
     uint64_t address = 0;
     if (!parseAddress(addressHex, address)) {
         result["success"] = false;
-        result["error"] = "Adresse invalide";
+        result["error"] = KE_TXT("Adresse invalide", "Invalid address");
         return result;
     }
 
@@ -373,7 +374,7 @@ QVariantMap MemoryTimelineManager::predictNextValue(const QString& addressHex) {
     uint64_t address = 0;
     if (!parseAddress(addressHex, address)) {
         result["success"] = false;
-        result["error"] = "Adresse invalide";
+        result["error"] = KE_TXT("Adresse invalide", "Invalid address");
         return result;
     }
 

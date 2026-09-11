@@ -1,5 +1,6 @@
 #include "memory_heatmap_manager.h"
 #include "../core/visualization/memory_heatmap_collector.h"
+#include "localization/localization.h"
 #include "../core/logging/logger.h"
 #include <QVariant>
 #include <QString>
@@ -52,7 +53,7 @@ killcore::HeatmapConfig MemoryHeatmapManager::convertConfig(const QVariantMap& o
 
 bool MemoryHeatmapManager::startHeatmapCollection(quint64 processHandle, const QVariantMap& options) {
     if (m_impl->collector && m_impl->collector->isCollecting()) {
-        emit heatmapError("Collection déjà en cours");
+        emit heatmapError(KE_TXT("Collection déjà en cours", "Collection already in progress"));
         return false;
     }
     
@@ -85,7 +86,7 @@ bool MemoryHeatmapManager::startHeatmapCollection(quint64 processHandle, const Q
         emit collectingChanged(true);
         KE_LOG_INFO() << "MemoryHeatmapManager: Collection started";
     } else {
-        emit heatmapError("Échec du démarrage de la collecte");
+        emit heatmapError(KE_TXT("Échec du démarrage de la collecte", "Failed to start the collection"));
     }
     
     return success;

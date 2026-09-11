@@ -1,5 +1,6 @@
 #include "automation_pipe_server.h"
 #include "application_controller.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #include <QJsonArray>
@@ -55,14 +56,16 @@ bool invokeControllerMethod(
     }
 
     if (!found) {
-        *outError = QString("Méthode inconnue ou nombre d'arguments incorrect : %1(%2 argument(s)).")
+        *outError = KE_TXT("Méthode inconnue ou nombre d'arguments incorrect : %1(%2 argument(s)).",
+            "Unknown method or incorrect argument count: %1(%2 argument(s)).")
             .arg(methodName)
             .arg(jsonParams.size());
         return false;
     }
 
     if (matched.parameterCount() > kMaxDispatchArgs) {
-        *outError = QString("Trop d'arguments pour %1 (limite dispatcher : %2).")
+        *outError = KE_TXT("Trop d'arguments pour %1 (limite dispatcher : %2).",
+            "Too many arguments for %1 (dispatcher limit: %2).")
             .arg(methodName)
             .arg(kMaxDispatchArgs);
         return false;
@@ -76,7 +79,8 @@ bool invokeControllerMethod(
         QVariant argVariant = jsonParams.at(i).toVariant();
         const QMetaType targetType = matched.parameterMetaType(i);
         if (argVariant.metaType() != targetType && !argVariant.convert(targetType)) {
-            *outError = QString("Argument %1 de %2 non convertible vers %3.")
+            *outError = KE_TXT("Argument %1 de %2 non convertible vers %3.",
+                "Argument %1 of %2 cannot be converted to %3.")
                 .arg(i)
                 .arg(methodName)
                 .arg(QString::fromUtf8(targetType.name()));
@@ -108,7 +112,7 @@ bool invokeControllerMethod(
     }
 
     if (!ok) {
-        *outError = QString("Échec d'invocation pour %1.").arg(methodName);
+        *outError = KE_TXT("Échec d'invocation pour %1.", "Invocation failed for %1.").arg(methodName);
         return false;
     }
 
@@ -210,7 +214,7 @@ void AutomationPipeServer::handleLine(QLocalSocket* socket, const QByteArray& li
     QJsonObject response;
 
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-        response["error"] = QString("JSON invalide : %1").arg(parseError.errorString());
+        response["error"] = KE_TXT("JSON invalide : %1", "Invalid JSON: %1").arg(parseError.errorString());
         writeResponse(socket, QJsonDocument(response).toJson(QJsonDocument::Compact));
         return;
     }
@@ -222,7 +226,7 @@ void AutomationPipeServer::handleLine(QLocalSocket* socket, const QByteArray& li
 
     const QString method = request.value("method").toString();
     if (method.isEmpty()) {
-        response["error"] = QStringLiteral("Champ \"method\" manquant ou vide.");
+        response["error"] = KE_TXT("Champ \"method\" manquant ou vide.", "Missing or empty \"method\" field.");
         writeResponse(socket, QJsonDocument(response).toJson(QJsonDocument::Compact));
         return;
     }

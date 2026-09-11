@@ -1,6 +1,7 @@
 #include "automation_pipe_manager.h"
 
 #include "automation_pipe_server.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #include <QProcessEnvironment>
@@ -43,7 +44,8 @@ QVariantMap AutomationPipeManager::enableAutomationMode() {
     QVariantMap result = getAutomationPipeStatus();
     result["success"] = m_server != nullptr;
     if (!m_server) {
-        result["error"] = "Demarrage du pipe d'automatisation echoue (voir les logs KillEngine).";
+        result["error"] = KE_TXT("Démarrage du pipe d'automatisation échoué (voir les logs KillEngine).",
+            "Automation pipe startup failed (see the KillEngine logs).");
     }
     return result;
 }

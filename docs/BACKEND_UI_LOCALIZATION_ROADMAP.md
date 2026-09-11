@@ -3,7 +3,9 @@
 
 # KillEngine — Feuille de route de localisation du backend C++ (hors chat)
 
-> Chantier **staffé** (11/09/2026). Voir `docs/PHASE_TRACKER.md` pour le pont vers cette feuille de route. Distinct de `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` (clos 09/09/2026, texte backend visible **dans le chat**) et de `docs/FRONTEND_LOCALIZATION_ROADMAP.md` (clos, labels statiques des templates Vue) — ici il s'agit du texte **généré par le backend C++ mais affiché hors chat** : cartes du catalogue Modules, erreurs Profile/Trainer, CLR Inspector, avertissements AOB/Stealth, etc.
+> Chantier **entièrement clos** (démarré et terminé le 11/09/2026 — les 10 candidats B1-B10 en une seule session). Voir `docs/PHASE_TRACKER.md` pour le pont vers cette feuille de route. Distinct de `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` (clos 09/09/2026, texte backend visible **dans le chat**) et de `docs/FRONTEND_LOCALIZATION_ROADMAP.md` (clos, labels statiques des templates Vue) — ici il s'agit du texte **généré par le backend C++ mais affiché hors chat** : cartes du catalogue Modules, erreurs Profile/Trainer, CLR Inspector, avertissements AOB/Stealth, etc.
+>
+> **Bilan final** : ~320 chaînes migrées vers `KE_TXT` sur ~30 fichiers. Trois découvertes majeures en cours de route (voir les entrées "Progrès" datées ci-dessous) : (1) le switch FR/EN de la sidebar ne persistait jamais réellement la langue côté backend — corrigé, affectait aussi le chantier chat IA pourtant déjà clos ; (2) deux bugs de couplage texte affiché/logique interne (`auto_resolver.cpp` télémétrie Trainer, `dll_injector.cpp` décision de retry) — corrigés avec des codes/booléens stables ; (3) une dizaine de tests unitaires fragiles asserta[ie]nt du texte français en dur sans isoler `ui/language` — tous durcis avec le garde `ScopedUiLanguage`. 470/470 tests unitaires verts en continu, y compris avec la langue ambiante forcée en anglais à chaque round.
 
 ## Origine (11/09/2026)
 
@@ -54,7 +56,7 @@ Ces 4 messages viennent de `apps/desktop/profile_manager.cpp:975,992,1145,1172` 
 | [x] B7 | Scanner core (auto-dissect, classification source d'affichage, parsing valeur, résolution export) | `core/scanner/auto_dissect.cpp`, `core/scanner/display_source_classifier.cpp`, `core/scanner/scan_types.cpp`, `core/process/export_resolver.cpp` | ~24 | Basse-moyenne | **Fait 11/09/2026** |
 | [x] B8 | Investigation UWP/save-file + surveillance fichier | `core/process/package_storage.cpp`, `core/process/file_watch.cpp` | ~34 | Basse — fonctionnalité de niche | **Fait 11/09/2026** |
 | [x] B9 | Auto-assembler + client CDP WebView2 | `core/scripting/auto_assembler.cpp`, `core/webview2/cdp_client.cpp` | ~30 | Basse | **Fait 11/09/2026** |
-| [ ] B10 | Réglages/diagnostics + petits fichiers résiduels | `apps/desktop/settings_diagnostics_manager.cpp`, `apps/desktop/memory_timeline_manager.cpp`, `apps/desktop/debug_feature_manager.cpp` (1 ligne oubliée), `apps/desktop/automation_pipe_manager.cpp`, `apps/desktop/automation_pipe_server.cpp`, `apps/desktop/investigation_notebook_manager.cpp`, `apps/desktop/memory_heatmap_manager.cpp` | ~25 | Basse | Pas commencé |
+| [x] B10 | Réglages/diagnostics + petits fichiers résiduels | `apps/desktop/settings_diagnostics_manager.cpp`, `apps/desktop/memory_timeline_manager.cpp`, `apps/desktop/debug_feature_manager.cpp` (1 ligne oubliée), `apps/desktop/automation_pipe_manager.cpp`, `apps/desktop/automation_pipe_server.cpp`, `apps/desktop/investigation_notebook_manager.cpp`, `apps/desktop/memory_heatmap_manager.cpp` | ~25 | Basse | **Fait 11/09/2026** |
 
 ## Ordre recommandé
 
@@ -74,6 +76,12 @@ B1 traité (catalogue Modules + flux install/UAC/EDR/debug privilege), ~58 chaî
 Cette découverte a aussi révélé une fragilité de test latente : 8 tests de `tests/unit/test_ai_tools.cpp` (`AIEngineContextualFallbackTest`) asserient du texte français en dur sans isoler `ui/language`, et ont commencé à échouer dès que le fix ci-dessus a réellement persisté "en" sur le registre de la machine de dev pendant la vérification live. Corrigé en ajoutant un garde `ScopedUiLanguage` (même patron que `test_localization.cpp`) sur les 8 tests concernés — suite verte confirmée avec `ui/language` forcé à "en" pendant l'exécution.
 
 Build C++ propre, 469/469 tests unitaires (y compris avec langue ambiante forcée en "en"), `npm run type-check`/`npm run build` propres, vérification visuelle CDP FR et EN sur la page Modules réelle.
+
+### 11/09/2026 — B10 clos (réglages/diagnostics + résidus) — chantier entièrement terminé
+
+`settings_diagnostics_manager.cpp` (7 chaînes : nettoyage stockage temporaire, dialogue de sélection de modèle GGUF, lecture/vidage debug Smart Search, lecture log, création fichier diagnostic, échec d'ouverture du dossier d'export), `memory_timeline_manager.cpp` (3 occurrences identiques), `debug_feature_manager.cpp` (1 seule ligne manquante — le fichier était déjà migré à ~98% avant ce round), `automation_pipe_manager.cpp` (1), `automation_pipe_server.cpp` (5, protocole JSON-RPC du pipe d'automatisation), `investigation_notebook_manager.cpp` (3), `memory_heatmap_manager.cpp` (2) migrés vers `KE_TXT`. Aucun couplage trouvé, aucun test dédié à ces fichiers. Build + 470/470 tests propres (y compris langue ambiante forcée en "en").
+
+**Ce round clôt le chantier BACKEND_UI_LOCALIZATION_ROADMAP dans son intégralité — B1 à B10 tous fermés le même jour.**
 
 ### 11/09/2026 — B9 clos (auto-assembleur + client CDP WebView2)
 

@@ -1239,7 +1239,7 @@ QVariantMap DebugFeatureManager::startApiHook(const QString& moduleName, const Q
 
     killcore::ProcessHandle ownedHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::AllAccess);
     if (!ownedHandle.isValid()) {
-        result["error"] = "Impossible d ouvrir le processus avec les droits necessaires a l injection (PROCESS_ALL_ACCESS).";
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_ALL_ACCESS).", "Could not open the process with the rights required for injection (PROCESS_ALL_ACCESS).");
         return result;
     }
 
