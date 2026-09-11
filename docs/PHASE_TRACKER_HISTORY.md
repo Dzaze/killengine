@@ -4557,3 +4557,33 @@ Root cause : `kPebLdrOffset` (ligne 29 de `core/inject/dll_mask.cpp`) était dé
 **Comment vérifié** : build + tests pas encore lancés (seuls Codex/Claude sont habilités) — à faire : `.\scripts\build.ps1` puis `cd ui && npm run type-check` + `cd ui && npm run build`. Validation manuelle attendue : le panneau Auto-dissect apparaît dans l'étape "Inspecter" d'Expert, scanne la mémoire avec le dernier template sauvegardé, affiche une table d'instances avec adresses/confiance/valeurs.
 
 **Fichiers concernés** : `core/scanner/auto_dissect.h` (nouveau), `core/scanner/auto_dissect.cpp` (nouveau), `core/CMakeLists.txt`, `apps/desktop/application_controller.h`, `apps/desktop/application_controller.cpp`, `ui/src/components/expert/AutoDissectPanel.vue` (nouveau), `ui/src/views/ExpertView.vue`, `ui/src/services/backend.ts`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`, `ui/src/services/assistantTools.ts`.
+
+### UX-LANG-SIDEBAR — Switch FR/EN visible dans l'en-tête de la barre gauche (close 10/09/2026, Claude)
+
+**Quoi** : déplacer/dupliquer le sélecteur de langue global `FR`/`EN`, jusque-là caché dans `Paramètres`, vers le haut de la sidebar, près du logo `KillEngine`.
+
+**Pourquoi** : retour propriétaire — le chantier de localisation frontend rend la langue plus importante qu'avant, mais le switch était trop difficile à trouver dans le menu Paramètres. La langue doit être accessible dès l'ouverture de l'app, au même niveau qu'une commande globale.
+
+**Fait** : nouveau bloc `.lang-switch` dans `ui/src/App.vue`, juste sous le logo, boutons FR/EN reliés directement à `store.appLanguage` (même état que `SettingsView.vue`, donc synchronisé automatiquement, aucun nouveau state dupliqué).
+
+**Comment vérifié** : `npm run type-check` OK, `npm run build` OK, suite C++ 469/469 (sanity, non touché), vérifié visuellement en direct FR et EN via CDP (bascule immédiate de toute la nav, pas seulement du bouton).
+
+**Fichiers concernés** : `ui/src/App.vue`.
+
+**Commit** : `563850e`.
+
+### MODULES-EDR-COPY — Explication stricte FR/EN des exclusions EDR et réactivation antivirus (close 10/09/2026, Claude)
+
+**Quoi** : renforcer le texte utilisateur de la section `Modules > Environnement de test > Exclusion EDR / Defender` en français et en anglais, pour expliquer clairement pourquoi KillEngine peut déclencher Defender/EDR pendant des tests légitimes (mêmes primitives bas niveau que des outils offensifs : injection, `VirtualAllocEx`, `WriteProcessMemory`, `CreateRemoteThread`, debugger, driver kernel), et distinguer exclusion ciblée vs désactivation temporaire vs retour à l'état sécurisé.
+
+**Pourquoi** : retour propriétaire avec capture UI — le texte était trop vague, ne rassurait pas sur le "pourquoi", ne donnait pas de chemin de repli si les scripts automatiques échouent selon la version de Windows/les droits/Tamper Protection.
+
+**Constat en creusant** : le "Guide de résolution EDR" détaillé (étapes 1-3 + bloc "Si le script échoue" avec mots-clés de recherche concrets) était en réalité **déjà livré et traduit** dans un round antérieur (U16, chantier de localisation frontend) — la vraie lacune était le titre/description de la carte de catalogue `edr_exclusion` elle-même (`ModulesView.vue`), qui restait du texte brut français venant directement du backend C++ (`application_controller.cpp`, aucune notion de locale côté C++).
+
+**Fait** : plutôt que de toucher au backend C++, substitution frontend par id stable → clé i18n (même pattern que `assistantTools.ts`) : nouvelles fonctions `moduleName()`/`moduleDescription()`/`moduleDetail()` dans `ModulesView.vue` qui interceptent uniquement `mod.id === 'edr_exclusion'` pour rendre une version traduite expliquant le "pourquoi" (primitives partagées avec des malwares, blocage attendu pas une anomalie) au lieu du texte brut backend ; les autres modules du catalogue restent inchangés (résidu documenté, hors périmètre).
+
+**Comment vérifié** : `npm run type-check` OK, `npm run build` OK, suite C++ 469/469 (sanity, non touché), vérifié visuellement en direct FR et EN via CDP (carte de catalogue EDR + guide de résolution déjà existant).
+
+**Fichiers concernés** : `ui/src/views/ModulesView.vue`, `ui/src/i18n/locales/fr.json`, `ui/src/i18n/locales/en.json`.
+
+**Commit** : `563850e`.
