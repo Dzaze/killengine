@@ -5644,13 +5644,32 @@ QVariantMap ApplicationController::getAiModelStatus() const {
 }
 
 void ApplicationController::warmupLocalAiModel() {
-    // Delai nul: rend la main a l'appelant JS immediatement, le demarrage du
-    // serveur llama.cpp (bloquant jusqu'a ~90s au tout premier chargement
-    // modele, cf. LlamaServer::startAndWait) s'execute au tour de boucle
-    // d'evenements suivant sans faire attendre le WebChannel.
-    QTimer::singleShot(0, this, [this]() {
-        m_ai.warmupLocalModel();
-    });
+    // Fenetre de prechauffage au demarrage (10/09/2026) : le chargement du
+    // modele (cf. LlamaServer::startAndWait) est bloquant jusqu'a ~90s au
+    // premier lancement. Execute sur un std::thread detache -- meme pattern
+    // que le worker de scan (scanning_core_manager.cpp) -- pour ne jamais
+    // geler le thread GUI, et remonte la progression via
+    // localAiWarmupProgress/localAiWarmupFinished (QMetaObject::invokeMethod
+    // marshalle chaque etape vers le thread Qt avant emit).
+    const QPointer<ApplicationController> self(this);
+    std::thread([self]() {
+        if (!self) return;
+        auto onStage = [self](const QString& stage) {
+            QMetaObject::invokeMethod(self.data(), [self, stage]() {
+                if (!self) return;
+                emit self->localAiWarmupProgress(QVariantMap{{"stage", stage}});
+            });
+        };
+        const auto result = self->m_ai.warmupLocalModel(onStage);
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            QVariantMap payload;
+            payload["success"] = result.success;
+            payload["backend"] = result.backend;
+            payload["error"] = result.errorMessage;
+            emit self->localAiWarmupFinished(payload);
+        });
+    }).detach();
 }
 
 QVariantMap ApplicationController::browseForModelFile() {

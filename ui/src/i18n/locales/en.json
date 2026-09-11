@@ -4592,5 +4592,22 @@
     "nextScanTimeout": "Async next scan timeout.",
     "unknownCaptureTimeout": "Async unknown capture timeout.",
     "unknownComparisonTimeout": "Async unknown comparison timeout."
+  },
+  "aiWarmup": {
+    "title": "Warming up the AI engine...",
+    "stage": {
+      "initializing": "Initializing runtime...",
+      "loadingModel": "Loading model...",
+      "warmingPrompt": "Warming up the prompt...",
+      "ready": "Ready!"
+    },
+    "degradedTitle": "Local AI model unavailable",
+    "degradedReason": {
+      "modelMissing": "No GGUF model found. The app remains usable, the AI Assistant will be limited — install a model from Settings or Modules.",
+      "engineMissing": "The llama.cpp runtime could not be found. The app remains usable, the AI Assistant will be limited — install it from Modules.",
+      "disabled": "The local AI model is disabled in Settings. The app remains usable, the AI Assistant will be limited while it stays disabled."
+    },
+    "errorTitle": "AI warmup failed",
+    "continueWithoutAi": "Continue without local AI"
   }
 }

@@ -919,14 +919,20 @@ void AIEngine::clearHistory() {
     m_history.clear();
 }
 
-void AIEngine::warmupLocalModel() {
-    if (!ensureLlamaInitialized()) return;
-    const auto warmup = m_llama.warmup(m_registry);
+LlamaGenerationResult AIEngine::warmupLocalModel(const std::function<void(const QString&)>& onStageChanged) {
+    if (onStageChanged) onStageChanged(QStringLiteral("initializing"));
+    if (!ensureLlamaInitialized()) {
+        LlamaGenerationResult result;
+        result.errorMessage = m_llama.info().errorMessage;
+        return result;
+    }
+    const auto warmup = m_llama.warmup(m_registry, onStageChanged);
     if (warmup.success) {
         KE_LOG_INFO() << "AIEngine warmup: llama.cpp prompt cache primed (" << warmup.backend.toStdString() << ").";
     } else if (!warmup.errorMessage.isEmpty()) {
         KE_LOG_INFO() << "AIEngine warmup skipped/failed (non-fatal): " << warmup.errorMessage.toStdString();
     }
+    return warmup;
 }
 
 QVariantMap AIEngine::lastHistoryTurn() const {

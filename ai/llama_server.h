@@ -5,6 +5,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 namespace killai {
 
 // PHASE (08/09/2026, goulot d'etranglement) : partage entre llama_server.cpp
@@ -76,7 +78,12 @@ public:
     bool isRunning() const;
 
     /// Completion bloquantee bornee. Timeout: KILLENGINE_LLAMA_SERVER_TIMEOUT_MS (defaut 15 s).
-    LlamaServerCompletion complete(const QString& prompt, int nPredict, const QStringList& stop);
+    /// onStage (optionnel) : notifie "loadingModel" avant ensureRunning() (le
+    /// cout de demarrage a froid, jusqu'a ~90s) puis "warmingPrompt" juste
+    /// avant la requete HTTP -- utilise par la fenetre de prechauffage au
+    /// demarrage (AIEngine::warmupLocalModel) pour une progression honnete.
+    LlamaServerCompletion complete(const QString& prompt, int nPredict, const QStringList& stop,
+                                    const std::function<void(const QString&)>& onStage = {});
 
     /// Tue le serveur (appele aussi sur aboutToQuit de l'application).
     void shutdown();

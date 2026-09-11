@@ -4592,5 +4592,22 @@
     "nextScanTimeout": "Timeout du next scan async.",
     "unknownCaptureTimeout": "Timeout de la capture unknown async.",
     "unknownComparisonTimeout": "Timeout de la comparaison unknown async."
+  },
+  "aiWarmup": {
+    "title": "Préchauffage du moteur IA...",
+    "stage": {
+      "initializing": "Initialisation du runtime...",
+      "loadingModel": "Chargement du modèle...",
+      "warmingPrompt": "Préchauffage du prompt...",
+      "ready": "Prêt !"
+    },
+    "degradedTitle": "Modèle IA local indisponible",
+    "degradedReason": {
+      "modelMissing": "Aucun modèle GGUF trouvé. L'app reste utilisable, l'Assistant IA sera limité — installe un modèle depuis Réglages ou Modules.",
+      "engineMissing": "Le runtime llama.cpp est introuvable. L'app reste utilisable, l'Assistant IA sera limité — installe-le depuis Modules.",
+      "disabled": "Le modèle IA local est désactivé dans les Réglages. L'app reste utilisable, l'Assistant IA sera limité tant qu'il reste désactivé."
+    },
+    "errorTitle": "Le préchauffage IA a échoué",
+    "continueWithoutAi": "Continuer sans IA locale"
   }
 }

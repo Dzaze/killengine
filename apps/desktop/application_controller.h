@@ -1600,6 +1600,12 @@ signals:
     void findWhatWritesFinished(const QVariantMap& result);
     void saveFileWatchFinished(const QVariantMap& result);
     void luaScriptExecutionFinished(const QVariantMap& result);
+    /// Fenêtre de préchauffage IA au démarrage (10/09/2026) : étape en cours
+    /// pendant warmupLocalAiModel() (payload : {stage: "initializing"|
+    /// "loadingModel"|"warmingPrompt"}).
+    void localAiWarmupProgress(const QVariantMap& progress);
+    /// Fin du préchauffage, succès ou échec (payload : {success, backend, error}).
+    void localAiWarmupFinished(const QVariantMap& result);
     /// Vue "Modules" : progression d'une installation de module en cours
     /// (payload : requestId, moduleId, percent, message).
     void moduleInstallProgress(const QVariantMap& progress);

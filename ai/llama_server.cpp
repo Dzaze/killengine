@@ -306,13 +306,16 @@ bool LlamaServer::ensureRunning(QString* error) {
     return startAndWait(error);
 }
 
-LlamaServerCompletion LlamaServer::complete(const QString& prompt, int nPredict, const QStringList& stop) {
+LlamaServerCompletion LlamaServer::complete(const QString& prompt, int nPredict, const QStringList& stop,
+                                             const std::function<void(const QString&)>& onStage) {
     LlamaServerCompletion result;
     QString error;
+    if (onStage) onStage(QStringLiteral("loadingModel"));
     if (!ensureRunning(&error)) {
         result.errorMessage = error;
         return result;
     }
+    if (onStage) onStage(QStringLiteral("warmingPrompt"));
 
     const QByteArray body = buildCompletionRequest(prompt, nPredict, stop);
     QByteArray response;

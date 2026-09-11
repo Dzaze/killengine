@@ -123,7 +123,8 @@ LlamaRuntimeInfo LlamaRuntime::info() const {
     return m_info;
 }
 
-LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict) const {
+LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict,
+                                              const std::function<void(const QString&)>& onStage) const {
     LlamaGenerationResult result;
 
     // 1) Serveur persistant: modele deja charge en RAM, prefixe cache.
@@ -137,7 +138,7 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
     const bool serverDueForRetry = !m_serverUsable && nowMs >= m_serverRetryAfterMs;
     if ((m_serverUsable || serverDueForRetry) && !m_serverExecutablePath.isEmpty()) {
         const auto completion = LlamaServer::instance().complete(
-            prompt, nPredict, QStringList{"\nRequete utilisateur:", "Requete:"});
+            prompt, nPredict, QStringList{"\nRequete utilisateur:", "Requete:"}, onStage);
         if (completion.success) {
             if (!m_serverUsable) {
                 KE_LOG_INFO() << "llama-server recovered after cooldown, resuming persistent server.";
@@ -163,6 +164,7 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
         result.errorMessage = "llama-cli executable not found.";
         return result;
     }
+    if (onStage) onStage(QStringLiteral("loadingModel"));
 
     QProcess process;
     process.setProgram(m_info.executablePath);
@@ -256,7 +258,8 @@ LlamaGenerationResult LlamaRuntime::planIntent(const QString& query) const {
     return generated;
 }
 
-LlamaGenerationResult LlamaRuntime::warmup(const ToolRegistry& registry) const {
+LlamaGenerationResult LlamaRuntime::warmup(const ToolRegistry& registry,
+                                            const std::function<void(const QString&)>& onStage) const {
     LlamaGenerationResult result;
     if (!m_info.available) {
         result.errorMessage = m_info.errorMessage;
@@ -265,7 +268,7 @@ LlamaGenerationResult LlamaRuntime::warmup(const ToolRegistry& registry) const {
     // n_predict volontairement petit: seul le prefill du prefixe statique
     // (systeme+regles+outils) compte ici pour amorcer cache_prompt, pas le
     // contenu genere (jete).
-    return generate(buildPrompt(QString(), registry, QVariantMap()), 4);
+    return generate(buildPrompt(QString(), registry, QVariantMap()), 4, onStage);
 }
 
 LlamaGenerationResult LlamaRuntime::planInvestigationNotebook(const QString& symptom, const QVariantMap& context) const {

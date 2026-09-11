@@ -8,6 +8,8 @@
 #include <QVariantMap>
 #include <QtGlobal>
 
+#include <functional>
+
 namespace killai {
 
 struct LlamaRuntimeInfo {
@@ -48,7 +50,9 @@ public:
     /// volontairement petit) pour amorcer cache_prompt cote llama-server
     /// AVANT le premier vrai message utilisateur -- voir docs/PHASE_TRACKER.md
     /// (goulot d'etranglement "llama.cpp execute", piste 1, 08/09/2026).
-    LlamaGenerationResult warmup(const ToolRegistry& registry) const;
+    /// onStage (optionnel) : relaye a LlamaServer::complete, voir la-bas.
+    LlamaGenerationResult warmup(const ToolRegistry& registry,
+                                 const std::function<void(const QString&)>& onStage = {}) const;
 
     static QVariantMap extractToolCallJson(const QString& text, QString* error = nullptr);
     static QVariantMap extractIntentJson(const QString& text, QString* error = nullptr);
@@ -68,7 +72,11 @@ public:
 
 private:
     /// Completion serveur persistant si dispo, sinon llama-cli one-shot.
-    LlamaGenerationResult generate(const QString& prompt, int nPredict) const;
+    /// onStage (optionnel) : relaye a LlamaServer::complete sur le chemin
+    /// serveur ; sur le fallback llama-cli, un seul "loadingModel" avant de
+    /// lancer le process (pas de decoupage plus fin sur ce chemin rare).
+    LlamaGenerationResult generate(const QString& prompt, int nPredict,
+                                    const std::function<void(const QString&)>& onStage = {}) const;
     static QString findExecutable();
     static QString buildContextBlock(const QVariantMap& context);
     static QString buildHistoryBlock(const QVariantMap& context);

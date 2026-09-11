@@ -629,6 +629,7 @@ export const useAppStore = defineStore('app', () => {
   let backendNetworkConnectionsSignalConnected = false
   let backendModuleInstallSignalConnected = false
   let backendClaudePendingActionSignalConnected = false
+  let backendLocalAiWarmupSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
   // d'une reconnexion du signal (ex: rechargement dev).
@@ -1353,6 +1354,55 @@ export const useAppStore = defineStore('app', () => {
   const externalAiRequestCount = ref(0)
   const externalAiBusy = ref(false)
   const externalAiError = ref('')
+
+  // Fenêtre de préchauffage IA au démarrage (10/09/2026, décision propriétaire) :
+  // bloque l'app jusqu'à ce que llama.cpp soit prêt (ou explicitement en mode
+  // dégradé) plutôt que de payer le coût de démarrage à froid silencieusement
+  // à l'ouverture de l'Assistant (ancien comportement, voir AssistantView.vue).
+  const localAiWarmupVisible = ref(false)
+  const localAiWarmupStage = ref<'initializing' | 'loadingModel' | 'warmingPrompt' | 'ready' | 'degraded' | 'error'>('initializing')
+  const localAiWarmupDegradedReason = ref<'modelMissing' | 'engineMissing' | 'disabled' | ''>('')
+  const localAiWarmupError = ref('')
+
+  async function startLocalAiWarmup() {
+    await refreshExternalAiStatus()
+    if (externalAiActiveBackend.value === 'claude') return
+
+    await settingsStore.refreshAiModelStatus()
+    const status = settingsStore.aiModelStatus
+    if (!status?.ready) {
+      localAiWarmupDegradedReason.value = status?.enabled === false
+        ? 'disabled'
+        : (!status?.modelFound ? 'modelMissing' : 'engineMissing')
+      localAiWarmupStage.value = 'degraded'
+      localAiWarmupVisible.value = true
+      return
+    }
+
+    const controller = backend.getController()
+    if (!backendLocalAiWarmupSignalConnected) {
+      controller.localAiWarmupProgress?.connect((progress) => {
+        const stage = String(progress?.stage ?? '')
+        if (stage === 'initializing' || stage === 'loadingModel' || stage === 'warmingPrompt') {
+          localAiWarmupStage.value = stage
+        }
+      })
+      controller.localAiWarmupFinished?.connect((result) => {
+        if (result?.success) {
+          localAiWarmupStage.value = 'ready'
+          window.setTimeout(() => { localAiWarmupVisible.value = false }, 600)
+        } else {
+          localAiWarmupStage.value = 'error'
+          localAiWarmupError.value = String(result?.error ?? '')
+        }
+      })
+      backendLocalAiWarmupSignalConnected = true
+    }
+
+    localAiWarmupStage.value = 'initializing'
+    localAiWarmupVisible.value = true
+    void controller.warmupLocalAiModel?.()
+  }
 
   async function refreshExternalAiStatus() {
     const controller = backend.getController()
@@ -2351,6 +2401,11 @@ export const useAppStore = defineStore('app', () => {
         backendClaudePendingActionSignalConnected = true
       }
       version.value = await controller.getVersion()
+      // Ne pas attendre : la fenêtre de préchauffage IA gère son propre
+      // affichage/masquage de façon réactive (localAiWarmupVisible) et ne
+      // doit pas retarder le reste de init() (jusqu'à ~90s au premier
+      // lancement) — voir startLocalAiWarmup().
+      void startLocalAiWarmup()
       loadActionLog()
       loadInvestigations()
       loadTrainerFeatures()
@@ -5035,6 +5090,11 @@ export const useAppStore = defineStore('app', () => {
     externalAiError,
     refreshExternalAiStatus,
     setExternalAiApiKey,
+    localAiWarmupVisible,
+    localAiWarmupStage,
+    localAiWarmupDegradedReason,
+    localAiWarmupError,
+    startLocalAiWarmup,
     clearExternalAiApiKey,
     setActiveAiBackend,
     stealthRiskAnalysis,

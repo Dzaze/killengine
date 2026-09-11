@@ -1608,8 +1608,12 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ping(message: string): Promise<string>
   getSettings(): Promise<AppSettings>
   getAiModelStatus?(): Promise<AiModelStatus>
-  /** Démarre le serveur llama.cpp local et amorce son cache de prompt en arrière-plan (à appeler à l'ouverture du panneau Assistant, pas au boot). Ne bloque pas, aucun retour utile. */
+  /** Démarre le serveur llama.cpp local et amorce son cache de prompt sur un thread dédié (fenêtre de préchauffage au démarrage). L'appel retourne immédiatement ; suivre la progression via localAiWarmupProgress/localAiWarmupFinished. */
   warmupLocalAiModel?(): Promise<void>
+  /** Fenêtre de préchauffage IA au démarrage : étape en cours ("initializing"|"loadingModel"|"warmingPrompt"). */
+  localAiWarmupProgress?: QWebChannelSignal<{ stage: string }>
+  /** Fin du préchauffage, succès ou échec. */
+  localAiWarmupFinished?: QWebChannelSignal<{ success: boolean, backend: string, error: string }>
   /** Catalogue des modules complémentaires (vue "Modules") : statut + installation. */
   getModuleCatalog?(): Promise<ModuleCatalog>
   /** Lance l'installation d'un module (async, progression via moduleInstallProgress). */

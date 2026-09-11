@@ -11,6 +11,8 @@
 #include "tool_registry.h"
 #include "tool_validator.h"
 
+#include <functional>
+
 namespace killai {
 
 /**
@@ -53,13 +55,15 @@ public:
     /// Vide l'historique conversationnel (reset de session).
     void clearHistory();
 
-    /// Demarre le serveur llama.cpp persistant et amorce son cache_prompt en
-    /// arriere-plan (voir LlamaRuntime::warmup) pour que le premier vrai
-    /// message utilisateur n'ait pas a payer le cout de demarrage a froid.
-    /// A appeler quand l'utilisateur ouvre le panneau Assistant -- init()
-    /// reste volontairement paresseuse au boot de l'application (voir init()
-    /// ci-dessus), ce warmup est le seul declencheur explicite hors chat.
-    void warmupLocalModel();
+    /// Demarre le serveur llama.cpp persistant et amorce son cache_prompt
+    /// (voir LlamaRuntime::warmup) pour que le premier vrai message
+    /// utilisateur n'ait pas a payer le cout de demarrage a froid. Bloquant
+    /// (jusqu'a ~90s au tout premier chargement modele) -- l'appelant est
+    /// responsable de l'executer hors du thread GUI (voir
+    /// ApplicationController::warmupLocalAiModel, fenetre de prechauffage au
+    /// demarrage). onStageChanged (optionnel) recoit "initializing",
+    /// "loadingModel" puis "warmingPrompt" pour une progression honnete.
+    LlamaGenerationResult warmupLocalModel(const std::function<void(const QString&)>& onStageChanged = {});
 
 private:
     QVariantMap deterministicIntent(const QString& query);

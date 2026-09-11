@@ -2,6 +2,7 @@
 import { computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import AiWarmupSplash from '@/components/common/AiWarmupSplash.vue'
 import AssistantView from '@/views/AssistantView.vue'
 import ClrInspectorView from '@/views/ClrInspectorView.vue'
 import ExpertView from '@/views/ExpertView.vue'
@@ -227,6 +228,8 @@ watch(
     <main class="main">
       <component :is="currentView" />
     </main>
+
+    <AiWarmupSplash v-if="store.localAiWarmupVisible" />
 
     <div v-if="store.showOnboarding" class="risk-backdrop" role="presentation">
       <section class="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
