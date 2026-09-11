@@ -10,6 +10,7 @@ Roadmap refactorisation : `docs/REFACTOR_ROADMAP.md`
 Roadmap backend IA externe (clé API) : `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`
 Roadmap localisation du chat IA : `docs/AI_CHAT_LOCALIZATION_ROADMAP.md`
 Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.md`
+Roadmap localisation du backend C++ hors chat (Modules, Profile/Trainer, CLR Inspector, stealth...) : `docs/BACKEND_UI_LOCALIZATION_ROADMAP.md`
 
 ## État courant
 
@@ -54,6 +55,7 @@ Roadmap localisation de l'interface (Vue) : `docs/FRONTEND_LOCALIZATION_ROADMAP.
 
 **À garder sous les yeux maintenant** :
 - Localisation du chat IA et localisation frontend Vue : chantiers clos. Les détails restent dans l'historique et dans `docs/AI_CHAT_LOCALIZATION_ROADMAP.md` / `docs/FRONTEND_LOCALIZATION_ROADMAP.md`.
+- **Localisation backend C++ hors chat — chantier staffé le 11/09/2026** (demande explicite propriétaire, "tout doit etre traduisible fr et en") : ~320 chaînes réparties en candidats B1-B10 dans `docs/BACKEND_UI_LOCALIZATION_ROADMAP.md`, aucun round commencé. Priorité B1 (catalogue Modules) + B2 (avertissements AOB) car déjà vus en direct ; B3 (Profile/Trainer + Auto Resolver) inclut un fix de couplage obligatoire (`auto_resolver.cpp` fait actuellement du pattern-matching sur le texte français de `profile_manager.cpp`, casserait la télémétrie en anglais si traduit sans fix).
 - Backend IA externe Claude : T1-T6 et corrections terrain déjà documentés ; le détail long est dans `docs/EXTERNAL_AI_BACKEND_ROADMAP.md`. Les décisions produit récentes à ne pas perdre : choix explicite entre modèle local léger recommandé, modèle local plus lourd installé dans la structure attendue, Claude cloud à crédits ; explication localisée FR/EN du pilotage par pipe depuis VS Code/extensions IA près du choix de modèle.
 - **Fenêtre de préchauffage IA au démarrage livrée (11/09/2026, Claude), calibration temps réel + choix explicite ajoutés le même jour** : voir les deux entrées dédiées ci-dessous. Le goulot d'étranglement "llama.cpp exécute" lui-même reste un vrai plafond de calcul sur du matériel faible (mesuré : ~15-33 tok/s de préfill selon le run sur cette machine) — plus de timeout fixe risquant de couper une opération légitime, mais toujours pas de solution pour accélérer le calcul lui-même (pistes 2-5 du diagnostic initial encore ouvertes si besoin un jour).
 - Investigations terrain encore utiles : Solitaire XP et reprise EXTMOD-2 Wand/SC2.
