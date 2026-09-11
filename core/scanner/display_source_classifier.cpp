@@ -1,5 +1,7 @@
 #include "display_source_classifier.h"
 
+#include "localization/localization.h"
+
 #include <QHash>
 
 #include <algorithm>
@@ -41,9 +43,13 @@ FieldStabilityClassification classifyFieldStability(
 
     if (observations.isEmpty()) {
         result.verdict = FieldStabilityVerdict::NoWritesObserved;
-        result.rationale = "Aucune écriture observée pendant la fenêtre de capture -- "
+        result.rationale = KE_TXT(
+                            "Aucune écriture observée pendant la fenêtre de capture -- "
                             "ne veut pas forcément dire que le champ est stable, la fenêtre "
-                            "était peut-être trop courte ou l'action qui le modifie ne s'est pas produite.";
+                            "était peut-être trop courte ou l'action qui le modifie ne s'est pas produite.",
+                            "No write observed during the capture window -- this doesn't necessarily "
+                            "mean the field is stable, the window may have been too short or the "
+                            "action that modifies it may not have happened.");
         return result;
     }
 
@@ -57,9 +63,11 @@ FieldStabilityClassification classifyFieldStability(
 
     if (result.writeCount < options.minHitsForPattern) {
         result.verdict = FieldStabilityVerdict::InsufficientData;
-        result.rationale = QStringLiteral(
+        result.rationale = KE_TXT(
             "Seulement %1 écriture(s) observée(s) -- pas assez pour distinguer un motif "
-            "régulier (champ affiché recalculé) d'une écriture événementielle isolée.")
+            "régulier (champ affiché recalculé) d'une écriture événementielle isolée.",
+            "Only %1 write(s) observed -- not enough to distinguish a regular pattern "
+            "(recalculated displayed field) from an isolated event-driven write.")
             .arg(result.writeCount);
         return result;
     }
@@ -99,11 +107,15 @@ FieldStabilityClassification classifyFieldStability(
 
     if (regularInterval && dominantInstructionFound) {
         result.verdict = FieldStabilityVerdict::LikelyDerivedDisplay;
-        result.rationale = QStringLiteral(
+        result.rationale = KE_TXT(
             "%1 écritures régulières (~%2 ms d'intervalle, coefficient de variation %3), "
             "%4%% venant de la même instruction (0x%5) -- motif cohérent avec un champ "
             "affiché recalculé à chaque tick depuis une autre source. Geler/patcher cette "
-            "adresse directement risque de ne pas tenir ; chercher la source en amont plutôt.")
+            "adresse directement risque de ne pas tenir ; chercher la source en amont plutôt.",
+            "%1 regular writes (~%2 ms interval, coefficient of variation %3), "
+            "%4%% coming from the same instruction (0x%5) -- pattern consistent with a "
+            "displayed field recalculated on every tick from another source. Freezing/patching "
+            "this address directly risks not holding; look for the source upstream instead.")
             .arg(result.writeCount)
             .arg(meanIntervalMs, 0, 'f', 0)
             .arg(coefficientOfVariation, 0, 'f', 2)
@@ -111,12 +123,17 @@ FieldStabilityClassification classifyFieldStability(
             .arg(QString::number(dominant.instructionPointer, 16).toUpper());
     } else {
         result.verdict = FieldStabilityVerdict::LikelyEventDriven;
-        result.rationale = QStringLiteral(
+        result.rationale = KE_TXT(
             "%1 écritures observées mais motif pas régulier et/ou pas dominé par une seule "
             "instruction (%2 instruction(s) distincte(s), intervalle ~%3 ms, coefficient de "
             "variation %4) -- plus cohérent avec des écritures liées à de vrais événements "
             "qu'avec un recalcul de tick fixe. Ne garantit pas que ce champ est une source "
-            "sûre, juste que ce n'est pas la signature d'un champ affiché interpolé.")
+            "sûre, juste que ce n'est pas la signature d'un champ affiché interpolé.",
+            "%1 writes observed but the pattern is not regular and/or not dominated by a "
+            "single instruction (%2 distinct instruction(s), ~%3 ms interval, coefficient of "
+            "variation %4) -- more consistent with writes tied to real events than a fixed "
+            "tick recalculation. This doesn't guarantee this field is a safe source, only "
+            "that it's not the signature of an interpolated displayed field.")
             .arg(result.writeCount)
             .arg(distinctCount)
             .arg(meanIntervalMs, 0, 'f', 0)

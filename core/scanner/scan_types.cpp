@@ -1,5 +1,7 @@
 #include "scan_types.h"
 
+#include "localization/localization.h"
+
 #include <limits>
 #include <cstring>
 
@@ -148,7 +150,7 @@ bool parseScanValue(const QString& text, ValueType type, ScanValue* out, QString
 
     if (!ok) {
         if (error) {
-            *error = QString("Impossible de parser '%1' comme %2.")
+            *error = KE_TXT("Impossible de parser '%1' comme %2.", "Unable to parse '%1' as %2.")
                          .arg(text, valueTypeToString(type));
         }
         return false;

@@ -1,5 +1,6 @@
 #include "process/export_resolver.h"
 
+#include "localization/localization.h"
 #include "process/process_enumerator.h"
 #include "memory/memory_reader.h"
 
@@ -77,11 +78,11 @@ bool resolveRemoteExportAddress(
         return false;
     }
     if (!process.isValid()) {
-        if (error) *error = "Process handle invalide.";
+        if (error) *error = KE_TXT("Handle de processus invalide.", "Invalid process handle.");
         return false;
     }
     if (functionName.trimmed().isEmpty()) {
-        if (error) *error = "Nom de fonction vide.";
+        if (error) *error = KE_TXT("Nom de fonction vide.", "Empty function name.");
         return false;
     }
 
@@ -94,7 +95,7 @@ bool resolveRemoteExportAddress(
         }
     }
     if (!target) {
-        if (error) *error = QString("Module '%1' introuvable dans le process.").arg(moduleName);
+        if (error) *error = KE_TXT("Module '%1' introuvable dans le process.", "Module '%1' not found in the process.").arg(moduleName);
         return false;
     }
 
@@ -102,31 +103,31 @@ bool resolveRemoteExportAddress(
 
     IMAGE_DOS_HEADER dos{};
     if (!readRemoteStruct(reader, target->baseAddress, &dos) || dos.e_magic != IMAGE_DOS_SIGNATURE) {
-        if (error) *error = QString("En-tête DOS invalide pour '%1'.").arg(target->name);
+        if (error) *error = KE_TXT("En-tête DOS invalide pour '%1'.", "Invalid DOS header for '%1'.").arg(target->name);
         return false;
     }
 
     IMAGE_NT_HEADERS64 nt{};
     const uint64_t ntAddress = target->baseAddress + static_cast<uint64_t>(dos.e_lfanew);
     if (!readRemoteStruct(reader, ntAddress, &nt) || nt.Signature != IMAGE_NT_SIGNATURE) {
-        if (error) *error = QString("En-tête NT invalide pour '%1'.").arg(target->name);
+        if (error) *error = KE_TXT("En-tête NT invalide pour '%1'.", "Invalid NT header for '%1'.").arg(target->name);
         return false;
     }
     if (nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        if (error) *error = QString("'%1' n'est pas un module x64 (KillEngine cible uniquement x64).").arg(target->name);
+        if (error) *error = KE_TXT("'%1' n'est pas un module x64 (KillEngine cible uniquement x64).", "'%1' is not an x64 module (KillEngine only targets x64).").arg(target->name);
         return false;
     }
 
     const auto& exportDir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
     if (exportDir.VirtualAddress == 0 || exportDir.Size == 0) {
-        if (error) *error = QString("Le module '%1' n'exporte aucune fonction.").arg(target->name);
+        if (error) *error = KE_TXT("Le module '%1' n'exporte aucune fonction.", "Module '%1' doesn't export any function.").arg(target->name);
         return false;
     }
 
     IMAGE_EXPORT_DIRECTORY exportTable{};
     const uint64_t exportTableAddress = target->baseAddress + exportDir.VirtualAddress;
     if (!readRemoteStruct(reader, exportTableAddress, &exportTable)) {
-        if (error) *error = "Lecture de IMAGE_EXPORT_DIRECTORY échouée.";
+        if (error) *error = KE_TXT("Lecture de IMAGE_EXPORT_DIRECTORY échouée.", "Reading IMAGE_EXPORT_DIRECTORY failed.");
         return false;
     }
 
@@ -149,13 +150,13 @@ bool resolveRemoteExportAddress(
 
         uint16_t ordinal = 0;
         if (!readRemoteStruct(reader, ordinalsArrayAddress + static_cast<uint64_t>(i) * sizeof(uint16_t), &ordinal)) {
-            if (error) *error = "Lecture de AddressOfNameOrdinals échouée.";
+            if (error) *error = KE_TXT("Lecture de AddressOfNameOrdinals échouée.", "Reading AddressOfNameOrdinals failed.");
             return false;
         }
 
         uint32_t functionRva = 0;
         if (!readRemoteStruct(reader, functionsArrayAddress + static_cast<uint64_t>(ordinal) * sizeof(uint32_t), &functionRva)) {
-            if (error) *error = "Lecture de AddressOfFunctions échouée.";
+            if (error) *error = KE_TXT("Lecture de AddressOfFunctions échouée.", "Reading AddressOfFunctions failed.");
             return false;
         }
 
@@ -168,7 +169,8 @@ bool resolveRemoteExportAddress(
             QString forwardTarget;
             readRemoteCString(reader, target->baseAddress + functionRva, &forwardTarget);
             if (error) {
-                *error = QString("'%1!%2' est un forwarder vers '%3' — résolution automatique du forward non supportée.")
+                *error = KE_TXT("'%1!%2' est un forwarder vers '%3' — résolution automatique du forward non supportée.",
+                             "'%1!%2' is a forwarder to '%3' — automatic forward resolution is not supported.")
                              .arg(target->name, functionName, forwardTarget.isEmpty() ? QStringLiteral("?") : forwardTarget);
             }
             return false;
@@ -178,13 +180,13 @@ bool resolveRemoteExportAddress(
         return true;
     }
 
-    if (error) *error = QString("Fonction '%1' introuvable dans les exports de '%2'.").arg(functionName, target->name);
+    if (error) *error = KE_TXT("Fonction '%1' introuvable dans les exports de '%2'.", "Function '%1' not found in the exports of '%2'.").arg(functionName, target->name);
     return false;
 #else
     (void)process;
     (void)moduleName;
     (void)functionName;
-    if (error) *error = "Non supporté sur cette plateforme.";
+    if (error) *error = KE_TXT("Non supporté sur cette plateforme.", "Not supported on this platform.");
     return false;
 #endif
 }
@@ -204,7 +206,7 @@ bool listRemoteExportNames(
         return false;
     }
     if (!process.isValid()) {
-        if (error) *error = "Process handle invalide.";
+        if (error) *error = KE_TXT("Handle de processus invalide.", "Invalid process handle.");
         return false;
     }
 
@@ -217,7 +219,7 @@ bool listRemoteExportNames(
         }
     }
     if (!target) {
-        if (error) *error = QString("Module '%1' introuvable dans le process.").arg(moduleName);
+        if (error) *error = KE_TXT("Module '%1' introuvable dans le process.", "Module '%1' not found in the process.").arg(moduleName);
         return false;
     }
 
@@ -225,31 +227,31 @@ bool listRemoteExportNames(
 
     IMAGE_DOS_HEADER dos{};
     if (!readRemoteStruct(reader, target->baseAddress, &dos) || dos.e_magic != IMAGE_DOS_SIGNATURE) {
-        if (error) *error = QString("En-tête DOS invalide pour '%1'.").arg(target->name);
+        if (error) *error = KE_TXT("En-tête DOS invalide pour '%1'.", "Invalid DOS header for '%1'.").arg(target->name);
         return false;
     }
 
     IMAGE_NT_HEADERS64 nt{};
     const uint64_t ntAddress = target->baseAddress + static_cast<uint64_t>(dos.e_lfanew);
     if (!readRemoteStruct(reader, ntAddress, &nt) || nt.Signature != IMAGE_NT_SIGNATURE) {
-        if (error) *error = QString("En-tête NT invalide pour '%1'.").arg(target->name);
+        if (error) *error = KE_TXT("En-tête NT invalide pour '%1'.", "Invalid NT header for '%1'.").arg(target->name);
         return false;
     }
     if (nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        if (error) *error = QString("'%1' n'est pas un module x64 (KillEngine cible uniquement x64).").arg(target->name);
+        if (error) *error = KE_TXT("'%1' n'est pas un module x64 (KillEngine cible uniquement x64).", "'%1' is not an x64 module (KillEngine only targets x64).").arg(target->name);
         return false;
     }
 
     const auto& exportDir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
     if (exportDir.VirtualAddress == 0 || exportDir.Size == 0) {
-        if (error) *error = QString("Le module '%1' n'exporte aucune fonction.").arg(target->name);
+        if (error) *error = KE_TXT("Le module '%1' n'exporte aucune fonction.", "Module '%1' doesn't export any function.").arg(target->name);
         return false;
     }
 
     IMAGE_EXPORT_DIRECTORY exportTable{};
     const uint64_t exportTableAddress = target->baseAddress + exportDir.VirtualAddress;
     if (!readRemoteStruct(reader, exportTableAddress, &exportTable)) {
-        if (error) *error = "Lecture de IMAGE_EXPORT_DIRECTORY échouée.";
+        if (error) *error = KE_TXT("Lecture de IMAGE_EXPORT_DIRECTORY échouée.", "Reading IMAGE_EXPORT_DIRECTORY failed.");
         return false;
     }
 
@@ -278,7 +280,7 @@ bool listRemoteExportNames(
     (void)moduleName;
     (void)filterSubstring;
     (void)maxNames;
-    if (error) *error = "Non supporté sur cette plateforme.";
+    if (error) *error = KE_TXT("Non supporté sur cette plateforme.", "Not supported on this platform.");
     return false;
 #endif
 }

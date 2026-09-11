@@ -1,5 +1,6 @@
 #include "auto_dissect.h"
 
+#include "localization/localization.h"
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
 
@@ -88,11 +89,11 @@ AutoDissectResult findStructureInstances(
     AutoDissectResult result;
 
     if (tmpl.fields.isEmpty()) {
-        result.error = "Template vide — aucun champ à matcher.";
+        result.error = KE_TXT("Template vide — aucun champ à matcher.", "Empty template — no field to match.");
         return result;
     }
     if (!process.isValid()) {
-        result.error = "Processus invalide.";
+        result.error = KE_TXT("Processus invalide.", "Invalid process.");
         return result;
     }
 
@@ -187,7 +188,7 @@ AutoDissectResult findStructureInstances(
     result.totalCandidates = totalCandidates;
     result.success = !result.instances.isEmpty();
     if (result.instances.isEmpty()) {
-        result.error = "Aucune instance trouvée correspondant au template.";
+        result.error = KE_TXT("Aucune instance trouvée correspondant au template.", "No instance found matching the template.");
     }
 
     return result;
