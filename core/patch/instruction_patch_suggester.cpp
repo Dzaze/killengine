@@ -1,5 +1,6 @@
 #include "instruction_patch_suggester.h"
 
+#include "localization/localization.h"
 #include "patch/aob_scanner.h"
 
 #include <algorithm>
@@ -247,7 +248,7 @@ QByteArray forceNearConditionalJumpBytes(const QByteArray& rawBytes) {
 InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
     InstructionInfo info;
     if (bytes.isEmpty()) {
-        info.error = "Aucun byte à décoder.";
+        info.error = KE_TXT("Aucun byte à décoder.", "No byte to decode.");
         return info;
     }
 
@@ -331,7 +332,7 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
         ++index;
     }
     if (!hasBytes(bytes, index, 1)) {
-        info.error = "Instruction tronquée après préfixes.";
+        info.error = KE_TXT("Instruction tronquée après préfixes.", "Instruction truncated after prefixes.");
         return info;
     }
 
@@ -340,7 +341,7 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
     uint8_t op = opcode;
     if (opcode == 0x0F) {
         if (!hasBytes(bytes, index, 1)) {
-            info.error = "Opcode 0F incomplet.";
+            info.error = KE_TXT("Opcode 0F incomplet.", "Incomplete 0F opcode.");
             return info;
         }
         twoByte = true;
@@ -352,7 +353,7 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
     if (hasModRm) {
         const int modRmSize = modRmTailSize(bytes, index);
         if (modRmSize < 0) {
-            info.error = "Instruction ModRM tronquée.";
+            info.error = KE_TXT("Instruction ModRM tronquée.", "Truncated ModRM instruction.");
             return info;
         }
         extra += modRmSize;
@@ -374,7 +375,7 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
 
     const int length = index + extra;
     if (!hasBytes(bytes, 0, length)) {
-        info.error = "Bytes insuffisants pour l'instruction.";
+        info.error = KE_TXT("Bytes insuffisants pour l'instruction.", "Not enough bytes for the instruction.");
         return info;
     }
 
@@ -390,7 +391,7 @@ InstructionInfo decodeX64InstructionLength(const QByteArray& bytes) {
 BackwardDisassemblyResult disassembleBackwardWindow(const QByteArray& windowBytes, int targetOffsetInWindow) {
     BackwardDisassemblyResult result;
     if (targetOffsetInWindow <= 0 || targetOffsetInWindow > windowBytes.size()) {
-        result.error = "Offset cible hors de la fenêtre.";
+        result.error = KE_TXT("Offset cible hors de la fenêtre.", "Target offset outside the window.");
         return result;
     }
 
@@ -439,7 +440,7 @@ BackwardDisassemblyResult disassembleBackwardWindow(const QByteArray& windowByte
     }
 
     if (!found) {
-        result.error = "Alignement d'instructions introuvable dans la fenêtre.";
+        result.error = KE_TXT("Alignement d'instructions introuvable dans la fenêtre.", "No instruction alignment found within the window.");
         return result;
     }
 
@@ -542,9 +543,10 @@ QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruct
 
     if (category == "memory-write") {
         suggestions.append(makeSuggestion(
-            QString("NOP écriture x%1").arg(instruction.length),
+            KE_TXT("NOP écriture x%1", "NOP write x%1").arg(instruction.length),
             nopBytes,
-            "Empêche cette instruction d'écrire en mémoire. C'est généralement le premier test pour une ressource réécrite.",
+            KE_TXT("Empêche cette instruction d'écrire en mémoire. C'est généralement le premier test pour une ressource réécrite.",
+                "Prevents this instruction from writing to memory. This is usually the first test for a value that keeps getting rewritten."),
             "memory-write",
             "low"));
         // "NOP" fige la valeur telle qu'elle est au moment du patch — ça ne
@@ -560,10 +562,12 @@ QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruct
             && instruction.immediateOffset >= 0
             && instruction.immediateOffset + instruction.immediateSize <= instruction.length) {
             PatchSuggestion valueOverride = makeSuggestion(
-                "Forcer une valeur",
+                KE_TXT("Forcer une valeur", "Force a value"),
                 instruction.rawBytesText,
-                "Remplace l'immédiat écrit par cette instruction par une valeur de ton choix, sans toucher au reste "
+                KE_TXT("Remplace l'immédiat écrit par cette instruction par une valeur de ton choix, sans toucher au reste "
                 "de l'instruction. Demande une valeur avant de pouvoir appliquer.",
+                "Replaces the immediate written by this instruction with a value of your choice, without touching the "
+                "rest of the instruction. Requires a value before it can be applied."),
                 "memory-write",
                 "medium");
             valueOverride.needsValueInput = true;
@@ -573,58 +577,65 @@ QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruct
         }
     } else if (category == "conditional-jump") {
         suggestions.append(makeSuggestion(
-            "Forcer non pris",
+            KE_TXT("Forcer non pris", "Force not taken"),
             nopBytes,
-            "Neutralise le saut conditionnel: le flux continue comme si la condition était fausse.",
+            KE_TXT("Neutralise le saut conditionnel: le flux continue comme si la condition était fausse.",
+                "Neutralizes the conditional jump: execution continues as if the condition were false."),
             "branch",
             "medium"));
         if (rawBytes.size() == 2) {
             QByteArray patch = rawBytes;
             patch[0] = static_cast<char>(0xEB);
             suggestions.append(makeSuggestion(
-                "Forcer pris",
+                KE_TXT("Forcer pris", "Force taken"),
                 patchBytesToText(patch),
-                "Convertit le saut conditionnel court en saut inconditionnel vers la même cible.",
+                KE_TXT("Convertit le saut conditionnel court en saut inconditionnel vers la même cible.",
+                    "Converts the short conditional jump into an unconditional jump to the same target."),
                 "branch",
                 "medium"));
         } else if (rawBytes.size() == 6) {
             const QByteArray patch = forceNearConditionalJumpBytes(rawBytes);
             if (!patch.isEmpty()) {
                 suggestions.append(makeSuggestion(
-                    "Forcer pris",
+                    KE_TXT("Forcer pris", "Force taken"),
                     patchBytesToText(patch),
-                    "Convertit le saut conditionnel proche en saut inconditionnel et garde la même taille.",
+                    KE_TXT("Convertit le saut conditionnel proche en saut inconditionnel et garde la même taille.",
+                        "Converts the near conditional jump into an unconditional jump and keeps the same size."),
                     "branch",
                     "medium"));
             }
         }
     } else if (category == "compare") {
         suggestions.append(makeSuggestion(
-            QString("NOP compare x%1").arg(instruction.length),
+            KE_TXT("NOP compare x%1", "NOP compare x%1").arg(instruction.length),
             nopBytes,
-            "Neutralise un compare/test; utile seulement si l'instruction suivante dépend des flags.",
+            KE_TXT("Neutralise un compare/test; utile seulement si l'instruction suivante dépend des flags.",
+                "Neutralizes a compare/test; only useful if the following instruction depends on the flags."),
             "compare",
             "high"));
     } else if (category == "call") {
         suggestions.append(makeSuggestion(
-            QString("NOP call x%1").arg(instruction.length),
+            KE_TXT("NOP call x%1", "NOP call x%1").arg(instruction.length),
             nopBytes,
-            "Saute l'appel de fonction. Risqué si la fonction prépare un état requis après l'appel.",
+            KE_TXT("Saute l'appel de fonction. Risqué si la fonction prépare un état requis après l'appel.",
+                "Skips the function call. Risky if the function sets up state required after the call."),
             "call",
             "high"));
     } else {
         suggestions.append(makeSuggestion(
-            QString("NOP x%1").arg(instruction.length),
+            KE_TXT("NOP x%1", "NOP x%1").arg(instruction.length),
             nopBytes,
-            "Neutralise l'instruction en gardant exactement la même longueur.",
+            KE_TXT("Neutralise l'instruction en gardant exactement la même longueur.",
+                "Neutralizes the instruction while keeping exactly the same length."),
             "generic",
             "medium"));
     }
 
     PatchSuggestion int3 = makeSuggestion(
-        "INT3 debug",
+        KE_TXT("INT3 debug", "INT3 debug"),
         nopBytes,
-        "Breakpoint logiciel pour valider que le code passe ici; expérimental.",
+        KE_TXT("Breakpoint logiciel pour valider que le code passe ici ; expérimental.",
+            "Software breakpoint to confirm that execution reaches here; experimental."),
         "debug",
         "high");
     if (instruction.length > 0) {
@@ -634,9 +645,10 @@ QList<PatchSuggestion> suggestInstructionPatches(const InstructionInfo& instruct
 
     if (instruction.length >= 1) {
         PatchSuggestion ret = makeSuggestion(
-            "RET + NOP",
+            KE_TXT("RET + NOP", "RET + NOP"),
             nopBytes,
-            "Force un retour immédiat; très risqué hors début de fonction.",
+            KE_TXT("Force un retour immédiat ; très risqué hors début de fonction.",
+                "Forces an immediate return; very risky outside the start of a function."),
             "return",
             "high");
         ret.bytesText.replace(0, 2, "C3");

@@ -1,5 +1,7 @@
 #include "security/dpapi_key_store.h"
 
+#include "localization/localization.h"
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -35,7 +37,7 @@ QString systemErrorMessage(DWORD errorCode) {
                                      reinterpret_cast<LPWSTR>(&raw),
                                      0,
                                      nullptr);
-    QString message = size > 0 && raw ? QString::fromWCharArray(raw).trimmed() : QStringLiteral("Erreur Windows inconnue");
+    QString message = size > 0 && raw ? QString::fromWCharArray(raw).trimmed() : KE_TXT("Erreur Windows inconnue", "Unknown Windows error");
     if (raw) {
         LocalFree(raw);
     }
@@ -47,7 +49,7 @@ QString systemErrorMessage(DWORD errorCode) {
 
 QByteArray DpapiKeyStore::encrypt(const QByteArray& plaintext, bool* ok, QString* errorMessage) {
 #ifndef _WIN32
-    setOutParams(ok, errorMessage, false, QStringLiteral("DPAPI disponible uniquement sur Windows."));
+    setOutParams(ok, errorMessage, false, KE_TXT("DPAPI disponible uniquement sur Windows.", "DPAPI is only available on Windows."));
     return {};
 #else
     DATA_BLOB input;
@@ -59,7 +61,7 @@ QByteArray DpapiKeyStore::encrypt(const QByteArray& plaintext, bool* ok, QString
                                            CRYPTPROTECT_UI_FORBIDDEN, &output);
     if (!success) {
         setOutParams(ok, errorMessage, false,
-                     QStringLiteral("Échec du chiffrement DPAPI: %1").arg(systemErrorMessage(GetLastError())));
+                     KE_TXT("Échec du chiffrement DPAPI : %1", "DPAPI encryption failed: %1").arg(systemErrorMessage(GetLastError())));
         return {};
     }
 
@@ -72,11 +74,11 @@ QByteArray DpapiKeyStore::encrypt(const QByteArray& plaintext, bool* ok, QString
 
 QByteArray DpapiKeyStore::decrypt(const QByteArray& encryptedBlob, bool* ok, QString* errorMessage) {
 #ifndef _WIN32
-    setOutParams(ok, errorMessage, false, QStringLiteral("DPAPI disponible uniquement sur Windows."));
+    setOutParams(ok, errorMessage, false, KE_TXT("DPAPI disponible uniquement sur Windows.", "DPAPI is only available on Windows."));
     return {};
 #else
     if (encryptedBlob.isEmpty()) {
-        setOutParams(ok, errorMessage, false, QStringLiteral("Blob chiffré vide."));
+        setOutParams(ok, errorMessage, false, KE_TXT("Blob chiffré vide.", "Empty encrypted blob."));
         return {};
     }
 
@@ -89,7 +91,7 @@ QByteArray DpapiKeyStore::decrypt(const QByteArray& encryptedBlob, bool* ok, QSt
                                              CRYPTPROTECT_UI_FORBIDDEN, &output);
     if (!success) {
         setOutParams(ok, errorMessage, false,
-                     QStringLiteral("Échec du déchiffrement DPAPI: %1").arg(systemErrorMessage(GetLastError())));
+                     KE_TXT("Échec du déchiffrement DPAPI : %1", "DPAPI decryption failed: %1").arg(systemErrorMessage(GetLastError())));
         return {};
     }
 

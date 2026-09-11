@@ -1,5 +1,6 @@
 #include "code_patch.h"
 
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "memory/memory_writer.h"
 
@@ -72,13 +73,14 @@ RelayPatchResult runPatchRelay(uint32_t pid, uint64_t address, const QByteArray&
 
     const QString scriptPath = findPatchRelayScript();
     if (scriptPath.isEmpty()) {
-        result.error = "Relais PowerShell introuvable (scripts/killengine-patch-relay.ps1 absent à côté de KillEngine.exe).";
+        result.error = KE_TXT("Relais PowerShell introuvable (scripts/killengine-patch-relay.ps1 absent à côté de KillEngine.exe).",
+            "PowerShell relay not found (scripts/killengine-patch-relay.ps1 missing next to KillEngine.exe).");
         return result;
     }
 
     QTemporaryFile paramsFile(QDir::temp().filePath("killengine-patch-relay-XXXXXX.json"));
     if (!paramsFile.open()) {
-        result.error = QStringLiteral("Impossible de créer le fichier de paramètres du relais : %1").arg(paramsFile.errorString());
+        result.error = KE_TXT("Impossible de créer le fichier de paramètres du relais : %1", "Unable to create the relay's parameters file: %1").arg(paramsFile.errorString());
         return result;
     }
     QJsonObject params;
@@ -101,13 +103,13 @@ RelayPatchResult runPatchRelay(uint32_t pid, uint64_t address, const QByteArray&
     process.setProcessChannelMode(QProcess::SeparateChannels);
     process.start();
     if (!process.waitForStarted(3000)) {
-        result.error = QStringLiteral("Impossible de démarrer le relais PowerShell : %1").arg(process.errorString());
+        result.error = KE_TXT("Impossible de démarrer le relais PowerShell : %1", "Unable to start the PowerShell relay: %1").arg(process.errorString());
         return result;
     }
     if (!process.waitForFinished(10000)) {
         process.kill();
         process.waitForFinished(2000);
-        result.error = "Le relais PowerShell n'a pas répondu (timeout de 10s).";
+        result.error = KE_TXT("Le relais PowerShell n'a pas répondu (timeout de 10s).", "The PowerShell relay did not respond (10s timeout).");
         return result;
     }
 
@@ -116,7 +118,7 @@ RelayPatchResult runPatchRelay(uint32_t pid, uint64_t address, const QByteArray&
     const QJsonDocument doc = QJsonDocument::fromJson(stdoutData, &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
         const QString stderrText = QString::fromUtf8(process.readAllStandardError());
-        result.error = QStringLiteral("Réponse du relais PowerShell illisible.%1")
+        result.error = KE_TXT("Réponse du relais PowerShell illisible.%1", "Unreadable PowerShell relay response.%1")
                            .arg(stderrText.isEmpty() ? QString() : QStringLiteral(" stderr: %1").arg(stderrText));
         return result;
     }
@@ -131,7 +133,7 @@ RelayPatchResult runPatchRelay(uint32_t pid, uint64_t address, const QByteArray&
     if (!result.success) {
         result.error = obj.value("error").toString();
         if (result.error.isEmpty()) {
-            result.error = "Le relais PowerShell a échoué sans message d'erreur.";
+            result.error = KE_TXT("Le relais PowerShell a échoué sans message d'erreur.", "The PowerShell relay failed with no error message.");
         }
     }
     return result;
@@ -144,7 +146,7 @@ CodePatchResult writePatchBytes(const ProcessHandle& process, uint64_t address, 
     result.address = address;
 
     if (bytes.isEmpty()) {
-        result.error = "Aucun byte de patch.";
+        result.error = KE_TXT("Aucun byte de patch.", "No patch bytes.");
         return result;
     }
 
@@ -177,14 +179,15 @@ CodePatchResult writePatchBytes(const ProcessHandle& process, uint64_t address, 
                 const auto after = reader.read(address, static_cast<size_t>(bytes.size()));
                 result.verified = after.success && after.data == bytes;
                 if (!result.verified) {
-                    result.error = "Write verification failed after relay patch (value was overwritten or unreadable).";
+                    result.error = KE_TXT("Échec de la vérification d'écriture après le patch via relais (valeur écrasée ou illisible).",
+                        "Write verification failed after relay patch (value was overwritten or unreadable).");
                 }
             } else {
                 result.verified = true;
             }
             KE_LOG_WARN() << "CodePatch: relais PowerShell a reussi a 0x" << std::hex << address;
         } else {
-            result.error = QStringLiteral("%1 Relais PowerShell (fallback) : %2")
+            result.error = KE_TXT("%1 Relais PowerShell (fallback) : %2", "%1 PowerShell relay (fallback): %2")
                                 .arg(result.error, relay.error);
             KE_LOG_WARN() << "CodePatch: relais PowerShell a aussi echoue : " << relay.error.toStdString();
         }
@@ -200,7 +203,7 @@ PatchBytes parsePatchBytes(const QString& bytesText) {
     PatchBytes parsed;
     const QStringList tokens = bytesText.simplified().split(' ', Qt::SkipEmptyParts);
     if (tokens.isEmpty()) {
-        parsed.error = "Bytes de patch vides.";
+        parsed.error = KE_TXT("Bytes de patch vides.", "Empty patch bytes.");
         return parsed;
     }
 
@@ -210,12 +213,12 @@ PatchBytes parsePatchBytes(const QString& bytesText) {
             token = token.mid(2);
         }
         if (token == "?" || token == "??") {
-            parsed.error = "Un patch doit contenir des bytes exacts, pas de wildcard.";
+            parsed.error = KE_TXT("Un patch doit contenir des bytes exacts, pas de wildcard.", "A patch must contain exact bytes, no wildcards.");
             parsed.bytes.clear();
             return parsed;
         }
         if (token.size() != 2) {
-            parsed.error = QString("Byte de patch invalide: '%1'. Utilise par exemple '90 90'.").arg(rawToken);
+            parsed.error = KE_TXT("Byte de patch invalide : '%1'. Utilise par exemple '90 90'.", "Invalid patch byte: '%1'. Use for example '90 90'.").arg(rawToken);
             parsed.bytes.clear();
             return parsed;
         }
@@ -223,7 +226,7 @@ PatchBytes parsePatchBytes(const QString& bytesText) {
         const int hi = hexNibble(token.at(0));
         const int lo = hexNibble(token.at(1));
         if (hi < 0 || lo < 0) {
-            parsed.error = QString("Octet hex invalide: '%1'.").arg(rawToken);
+            parsed.error = KE_TXT("Octet hex invalide : '%1'.", "Invalid hex byte: '%1'.").arg(rawToken);
             parsed.bytes.clear();
             return parsed;
         }

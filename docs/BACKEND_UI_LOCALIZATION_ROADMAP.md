@@ -50,7 +50,7 @@ Ces 4 messages viennent de `apps/desktop/profile_manager.cpp:975,992,1145,1172` 
 | [x] B3 | Profile/Trainer (sauvegarde/application de patch) + Auto Resolver (labels d'étapes + insights) + **fix du couplage `errorCode`** | `apps/desktop/profile_manager.cpp`, `ai/auto_resolver.cpp` | ~85 | **Haute-moyenne** | **Fait 11/09/2026** |
 | [x] B4 | CLR Inspector (erreurs de résolution locator, setter, écriture struct) | `apps/desktop/clr_inspector_bridge.cpp` | ~26 | Moyenne | **Fait 11/09/2026** |
 | [x] B5 | Cluster stealth/injection (pattern répétitif "CreateFileMapping/MapViewOfFile/déjà actif") | `core/debug/stealth_profiler.cpp`, `core/debug/inprocess_breakpoint.cpp`, `core/debug/page_guard.cpp`, `core/inject/dll_injector.cpp`, `core/inject/lag_switch.cpp`, `core/inject/http_proxy.cpp`, `core/inject/api_hook.cpp`, `core/debug/speedhack.cpp` | ~85 | Basse-moyenne | **Fait 11/09/2026** |
-| [ ] B6 | Driver kernel + DPAPI + relais patch PowerShell | `core/kernel/kernel_driver_bridge.cpp`, `core/security/dpapi_key_store.cpp`, `core/patch/code_patch.cpp`, `core/patch/instruction_patch_suggester.cpp` | ~25 | Basse-moyenne | Pas commencé |
+| [x] B6 | Driver kernel + DPAPI + relais patch PowerShell | `core/kernel/kernel_driver_bridge.cpp` (déjà fait pendant B1), `core/security/dpapi_key_store.cpp`, `core/patch/code_patch.cpp`, `core/patch/instruction_patch_suggester.cpp` | ~30 | Basse-moyenne | **Fait 11/09/2026** |
 | [ ] B7 | Scanner core (auto-dissect, classification source d'affichage, parsing valeur, résolution export) | `core/scanner/auto_dissect.cpp`, `core/scanner/display_source_classifier.cpp`, `core/scanner/scan_types.cpp` (⚠️ ~18 appelants, vérifier chaque site après correction), `core/process/export_resolver.cpp` | ~25 | Basse-moyenne | Pas commencé |
 | [ ] B8 | Investigation UWP/save-file + surveillance fichier | `core/process/package_storage.cpp`, `core/process/file_watch.cpp` | ~15 | Basse — fonctionnalité de niche | Pas commencé |
 | [ ] B9 | Auto-assembler + client CDP WebView2 | `core/scripting/auto_assembler.cpp`, `core/webview2/cdp_client.cpp` | ~6 | Basse | Pas commencé |
@@ -74,6 +74,12 @@ B1 traité (catalogue Modules + flux install/UAC/EDR/debug privilege), ~58 chaî
 Cette découverte a aussi révélé une fragilité de test latente : 8 tests de `tests/unit/test_ai_tools.cpp` (`AIEngineContextualFallbackTest`) asserient du texte français en dur sans isoler `ui/language`, et ont commencé à échouer dès que le fix ci-dessus a réellement persisté "en" sur le registre de la machine de dev pendant la vérification live. Corrigé en ajoutant un garde `ScopedUiLanguage` (même patron que `test_localization.cpp`) sur les 8 tests concernés — suite verte confirmée avec `ui/language` forcé à "en" pendant l'exécution.
 
 Build C++ propre, 469/469 tests unitaires (y compris avec langue ambiante forcée en "en"), `npm run type-check`/`npm run build` propres, vérification visuelle CDP FR et EN sur la page Modules réelle.
+
+### 11/09/2026 — B6 clos (driver kernel + DPAPI + patch)
+
+`core/kernel/kernel_driver_bridge.cpp` était déjà entièrement migré pendant B1 (aucun résidu). `dpapi_key_store.cpp` (5 chaînes, chiffrement clé API Claude), `code_patch.cpp` (relais PowerShell de patch, fallback ACCESS_DENIED), `instruction_patch_suggester.cpp` (labels/descriptions des suggestions de patch NOP/branch/compare/call/INT3/RET) migrés vers `KE_TXT`. Aucun couplage trouvé (categorie/riskLevel restent des codes stables séparés du label affiché).
+
+**Test de régression trouvé** : 3 tests de `tests/unit/test_aob_scanner.cpp` (`InstructionPatchSuggester.Suggests*`) asserient les labels français en dur — même fragilité que B1/B3, corrigée avec le même garde `ScopedUiLanguage`. Build + 470/470 tests propres (y compris langue ambiante forcée en "en").
 
 ### 11/09/2026 — B5 clos (cluster stealth/injection)
 

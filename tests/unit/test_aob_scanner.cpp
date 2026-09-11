@@ -5,9 +5,41 @@
 
 #include <algorithm>
 
+#include <QSettings>
 #include <gtest/gtest.h>
 
 using namespace killcore;
+
+namespace {
+
+// Sauvegarde/restaure "ui/language" autour du test, meme pattern que
+// test_localization.cpp/test_ai_tools.cpp/test_auto_resolver.cpp : les labels
+// de suggestion sont desormais traduits via KE_TXT
+// (docs/BACKEND_UI_LOCALIZATION_ROADMAP.md, candidat B6, 11/09/2026).
+class ScopedUiLanguage {
+public:
+    explicit ScopedUiLanguage(const QString& language) {
+        QSettings settings;
+        m_previous = settings.value("ui/language");
+        settings.setValue("ui/language", language);
+        settings.sync();
+    }
+
+    ~ScopedUiLanguage() {
+        QSettings settings;
+        if (m_previous.isValid()) {
+            settings.setValue("ui/language", m_previous);
+        } else {
+            settings.remove("ui/language");
+        }
+        settings.sync();
+    }
+
+private:
+    QVariant m_previous;
+};
+
+} // namespace
 
 TEST(AobScanner, ParsesHexBytesAndWildcards) {
     const auto pattern = parseAobPattern("48 8B ?? 10 0xFF ?");
@@ -144,6 +176,7 @@ TEST(InstructionPatchSuggester, DecodesCommonRipRelativeWriteLength) {
 }
 
 TEST(InstructionPatchSuggester, SuggestsSameLengthNopPatch) {
+    ScopedUiLanguage lang("fr");
     InstructionInfo instruction;
     instruction.success = true;
     instruction.length = 7;
@@ -219,6 +252,7 @@ TEST(InstructionPatchSuggester, LeavesMemBaseRegisterEmptyForRipRelativeWrite) {
 }
 
 TEST(InstructionPatchSuggester, SuggestsValueOverrideForImmediateMemoryWrite) {
+    ScopedUiLanguage lang("fr");
     InstructionInfo instruction;
     instruction.success = true;
     instruction.length = 7;
@@ -261,6 +295,7 @@ TEST(InstructionPatchSuggester, DoesNotSuggestValueOverrideWithoutImmediate) {
 }
 
 TEST(InstructionPatchSuggester, SuggestsBranchDirectionPatches) {
+    ScopedUiLanguage lang("fr");
     const QByteArray bytes = QByteArray::fromHex("7505");
     auto instruction = decodeX64InstructionLength(bytes);
     ASSERT_TRUE(instruction.success) << instruction.error.toStdString();
