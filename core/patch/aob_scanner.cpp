@@ -1,5 +1,6 @@
 #include "aob_scanner.h"
 
+#include "localization/localization.h"
 #include "logging/logger.h"
 #include "memory/memory_map.h"
 #include "memory/memory_reader.h"
@@ -34,7 +35,7 @@ AobPattern parseAobPattern(const QString& patternText) {
     AobPattern pattern;
     const QStringList tokens = patternText.simplified().split(' ', Qt::SkipEmptyParts);
     if (tokens.isEmpty()) {
-        pattern.error = "Pattern AOB vide.";
+        pattern.error = KE_TXT("Pattern AOB vide.", "Empty AOB pattern.");
         return pattern;
     }
 
@@ -50,7 +51,8 @@ AobPattern parseAobPattern(const QString& patternText) {
         }
 
         if (token.size() != 2) {
-            pattern.error = QString("Token AOB invalide: '%1'. Utilise par exemple '48 8B ?? 10'.").arg(rawToken);
+            pattern.error = KE_TXT("Token AOB invalide : '%1'. Utilise par exemple '48 8B ?? 10'.",
+                "Invalid AOB token: '%1'. Use for example '48 8B ?? 10'.").arg(rawToken);
             pattern.bytes.clear();
             return pattern;
         }
@@ -58,7 +60,7 @@ AobPattern parseAobPattern(const QString& patternText) {
         const int hi = hexNibble(token.at(0));
         const int lo = hexNibble(token.at(1));
         if (hi < 0 || lo < 0) {
-            pattern.error = QString("Octet hex invalide: '%1'.").arg(rawToken);
+            pattern.error = KE_TXT("Octet hex invalide : '%1'.", "Invalid hex byte: '%1'.").arg(rawToken);
             pattern.bytes.clear();
             return pattern;
         }
@@ -78,7 +80,7 @@ AobPatternQuality evaluateAobPatternQuality(const AobPattern& pattern) {
     quality.patternBytes = static_cast<int>(pattern.bytes.size());
     if (!pattern.isValid()) {
         quality.level = "invalid";
-        quality.warning = pattern.error.isEmpty() ? "Pattern AOB invalide." : pattern.error;
+        quality.warning = pattern.error.isEmpty() ? KE_TXT("Pattern AOB invalide.", "Invalid AOB pattern.") : pattern.error;
         return quality;
     }
 
@@ -113,13 +115,16 @@ AobPatternQuality evaluateAobPatternQuality(const AobPattern& pattern) {
     quality.score = std::clamp(score, 0, 100);
     if (quality.score >= 75) {
         quality.level = "strong";
-        quality.warning = "Signature AOB robuste; verifier quand meme l'unicite avant Trainer.";
+        quality.warning = KE_TXT("Signature AOB robuste ; vérifier quand même l'unicité avant Trainer.",
+            "Robust AOB signature; still verify uniqueness before using it in the Trainer.");
     } else if (quality.score >= 50) {
         quality.level = "medium";
-        quality.warning = "Signature AOB moyenne; preferer une fenetre plus longue ou plus d'octets fixes.";
+        quality.warning = KE_TXT("Signature AOB moyenne ; préférer une fenêtre plus longue ou plus d'octets fixes.",
+            "Medium AOB signature; prefer a longer window or more fixed bytes.");
     } else {
         quality.level = "weak";
-        quality.warning = "Signature AOB faible; risque eleve de multi-match ou de casse apres update.";
+        quality.warning = KE_TXT("Signature AOB faible ; risque élevé de multi-match ou de casse après update.",
+            "Weak AOB signature; high risk of multiple matches or breakage after an update.");
     }
     quality.trainerSafe = quality.score >= 75 && quality.fixedBytes >= 8 && quality.fixedRatio >= 0.55;
     return quality;
@@ -189,11 +194,11 @@ QList<uint64_t> searchAobBuffer(const QByteArray& haystack, const AobPattern& pa
 AobScanResult scanAobPattern(const ProcessHandle& process, const AobPattern& pattern, const AobScanOptions& options) {
     AobScanResult result;
     if (!process.isValid()) {
-        result.error = "Process handle invalide.";
+        result.error = KE_TXT("Handle de processus invalide.", "Invalid process handle.");
         return result;
     }
     if (!pattern.isValid()) {
-        result.error = pattern.error.isEmpty() ? "Pattern AOB invalide." : pattern.error;
+        result.error = pattern.error.isEmpty() ? KE_TXT("Pattern AOB invalide.", "Invalid AOB pattern.") : pattern.error;
         return result;
     }
 
