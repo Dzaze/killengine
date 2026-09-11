@@ -680,14 +680,15 @@ bool encodeInstanceMethodParameterImmediate(const QString& valueText, const QStr
         } else if (lower == QStringLiteral("false") || lower == QStringLiteral("0")) {
             normalizedText = QStringLiteral("0");
         } else {
-            if (error) *error = QStringLiteral("Valeur booleenne invalide : '%1' (attendu true/false/1/0).").arg(valueText);
+            if (error) *error = KE_TXT("Valeur booléenne invalide : '%1' (attendu true/false/1/0).",
+                "Invalid boolean value: '%1' (expected true/false/1/0).").arg(valueText);
             return false;
         }
     }
 
     killcore::ValueType type;
     if (!killcore::parseValueType(killcoreToken, &type)) {
-        if (error) *error = QStringLiteral("Type de parametre non reconnu : %1").arg(killcoreToken);
+        if (error) *error = KE_TXT("Type de paramètre non reconnu : %1", "Unrecognized parameter type: %1").arg(killcoreToken);
         return false;
     }
 
@@ -770,19 +771,22 @@ bool encodeStructParameterBytes(
         const int separator = part.indexOf(QLatin1Char('='));
         const QString trimmedPart = part.trimmed();
         if (separator <= 0) {
-            if (error) *error = QStringLiteral("Format d'ecriture struct invalide (attendu \"Champ=Valeur\") : '%1'.").arg(trimmedPart);
+            if (error) *error = KE_TXT("Format d'écriture struct invalide (attendu \"Champ=Valeur\") : '%1'.",
+                "Invalid struct write format (expected \"Field=Value\"): '%1'.").arg(trimmedPart);
             return false;
         }
         const QString name = part.left(separator).trimmed();
         const QString value = part.mid(separator + 1).trimmed();
         if (name.isEmpty() || value.isEmpty()) {
-            if (error) *error = QStringLiteral("Format d'ecriture struct invalide (attendu \"Champ=Valeur\") : '%1'.").arg(trimmedPart);
+            if (error) *error = KE_TXT("Format d'écriture struct invalide (attendu \"Champ=Valeur\") : '%1'.",
+                "Invalid struct write format (expected \"Field=Value\"): '%1'.").arg(trimmedPart);
             return false;
         }
         assignments.insert(name, value);
     }
     if (assignments.isEmpty()) {
-        if (error) *error = QStringLiteral("Parametre struct : aucune assignation fournie (format attendu \"Champ1=Valeur1,Champ2=Valeur2\").");
+        if (error) *error = KE_TXT("Paramètre struct : aucune assignation fournie (format attendu \"Champ1=Valeur1,Champ2=Valeur2\").",
+            "Struct parameter: no assignment provided (expected format \"Field1=Value1,Field2=Value2\").");
         return false;
     }
 
@@ -797,12 +801,12 @@ bool encodeStructParameterBytes(
         }
     }
     if (!unknown.isEmpty()) {
-        if (error) *error = QStringLiteral("Champ(s) inconnu(s) pour le parametre struct : %1.").arg(unknown.join(QStringLiteral(", ")));
+        if (error) *error = KE_TXT("Champ(s) inconnu(s) pour le paramètre struct : %1.", "Unknown field(s) for the struct parameter: %1.").arg(unknown.join(QStringLiteral(", ")));
         return false;
     }
 
     if (bufferSize <= 0 || bufferSize > 512) {
-        if (error) *error = QStringLiteral("Parametre struct : taille de buffer invalide (%1).").arg(bufferSize);
+        if (error) *error = KE_TXT("Paramètre struct : taille de buffer invalide (%1).", "Struct parameter: invalid buffer size (%1).").arg(bufferSize);
         return false;
     }
     QByteArray buffer(bufferSize, '\0');
@@ -819,21 +823,21 @@ bool encodeStructParameterBytes(
         bool isBoolean = false;
         const QString clrElementType = field.value("elementType").toString();
         if (!clrElementTypeNameToKillcoreToken(clrElementType, &killcoreToken, &isBoolean)) {
-            if (error) *error = QStringLiteral("Champ struct de type non supporte : %1 (%2).").arg(fieldName, clrElementType);
+            if (error) *error = KE_TXT("Champ struct de type non supporté : %1 (%2).", "Struct field of unsupported type: %1 (%2).").arg(fieldName, clrElementType);
             return false;
         }
 
         uint64_t fieldImmediate = 0;
         QString parseError;
         if (!encodeInstanceMethodParameterImmediate(assignments.value(fieldName), killcoreToken, isBoolean, &fieldImmediate, &parseError)) {
-            if (error) *error = QStringLiteral("Champ %1 : %2").arg(fieldName, parseError);
+            if (error) *error = KE_TXT("Champ %1 : %2", "Field %1: %2").arg(fieldName, parseError);
             return false;
         }
 
         const int offset = field.value("offset").toInt();
         const int fieldSize = field.value("size").toInt();
         if (offset < 0 || fieldSize <= 0 || fieldSize > 8 || offset + fieldSize > buffer.size()) {
-            if (error) *error = QStringLiteral("Champ struct %1 : offset/taille invalide (%2/%3).").arg(fieldName).arg(offset).arg(fieldSize);
+            if (error) *error = KE_TXT("Champ struct %1 : offset/taille invalide (%2/%3).", "Struct field %1: invalid offset/size (%2/%3).").arg(fieldName).arg(offset).arg(fieldSize);
             return false;
         }
         for (int i = 0; i < fieldSize; ++i) {
@@ -864,11 +868,11 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
     const QString address = objectAddressHex.trimmed();
     const QString method = methodName.trimmed();
     if (address.isEmpty() || method.isEmpty()) {
-        result["error"] = QStringLiteral("Adresse objet et nom de methode requis.");
+        result["error"] = KE_TXT("Adresse objet et nom de méthode requis.", "Object address and method name required.");
         return result;
     }
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = QStringLiteral("Aucun processus attache.");
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -921,7 +925,7 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
     uint64_t objectAddress = 0;
     uint64_t nativeCodeAddress = 0;
     if (!parseHexAddress(address, &objectAddress) || !parseHexAddress(nativeCodeAddressHex, &nativeCodeAddress)) {
-        result["error"] = QStringLiteral("Adresse objet ou adresse native invalide apres resolution.");
+        result["error"] = KE_TXT("Adresse objet ou adresse native invalide après résolution.", "Invalid object or native address after resolution.");
         return result;
     }
 
@@ -941,7 +945,8 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
     QByteArray structByRefBytes;
     if (hasParam) {
         if (valueText.trimmed().isEmpty()) {
-            result["error"] = QStringLiteral("Ce setter attend un parametre (%1) mais aucune valeur n'a ete fournie.").arg(parameterTypeName);
+            result["error"] = KE_TXT("Ce setter attend un paramètre (%1) mais aucune valeur n'a été fournie.",
+                "This setter expects a parameter (%1) but no value was provided.").arg(parameterTypeName);
             return result;
         }
 
@@ -1039,7 +1044,7 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
             QString killcoreToken;
             bool isBoolean = false;
             if (!clrParameterTypeToKillcoreToken(parameterTypeName, &killcoreToken, &isBoolean)) {
-                result["error"] = QStringLiteral("Type de parametre CLR non supporte : %1.").arg(parameterTypeName);
+                result["error"] = KE_TXT("Type de paramètre CLR non supporté : %1.", "Unsupported CLR parameter type: %1.").arg(parameterTypeName);
                 return result;
             }
             paramIsFloat = (killcoreToken == QStringLiteral("float32") || killcoreToken == QStringLiteral("float64"));
@@ -1075,7 +1080,8 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
     const QByteArray shellcode = buildCallInstanceMethodShellcode(objectAddress, hasParam, paramImmediate, nativeCodeAddress, paramIsFloat, structByRefBytes);
     killcore::ProcessHandle injectionHandle(static_cast<uint32_t>(m_pid()), killcore::ProcessAccess::AllAccess);
     if (!injectionHandle.isValid()) {
-        result["error"] = QStringLiteral("Impossible d'ouvrir le processus avec les droits necessaires a l'injection (PROCESS_VM_OPERATION/PROCESS_VM_WRITE).");
+        result["error"] = KE_TXT("Impossible d'ouvrir le processus avec les droits nécessaires à l'injection (PROCESS_VM_OPERATION/PROCESS_VM_WRITE).",
+            "Unable to open the process with the rights needed for injection (PROCESS_VM_OPERATION/PROCESS_VM_WRITE).");
         m_appendScanTelemetry(QStringLiteral("clr_inspector_call_instance_method"), {
             {"success", false}, {"objectAddress", address}, {"methodName", resolvedMethodName}, {"error", result.value("error")},
         });
@@ -1115,9 +1121,11 @@ QVariantMap ClrInspectorBridge::callClrInstanceMethod(const QString& objectAddre
     result["verified"] = threadCompleted && rereadOk;
     result["success"] = threadCompleted && rereadOk;
     if (!threadCompleted) {
-        result["error"] = QStringLiteral("Le thread distant n'a pas termine dans le delai imparti (timeout 3000 ms).");
+        result["error"] = KE_TXT("Le thread distant n'a pas terminé dans le délai imparti (timeout 3000 ms).",
+            "The remote thread did not finish within the allotted time (3000 ms timeout).");
     } else if (!rereadOk) {
-        result["error"] = QStringLiteral("Appel effectue mais la relecture de l'objet a echoue apres coup : %1")
+        result["error"] = KE_TXT("Appel effectué mais la relecture de l'objet a échoué après coup : %1",
+            "Call performed but re-reading the object failed afterward: %1")
             .arg(rereadResponse.value("error").toString());
     }
 
@@ -1137,7 +1145,7 @@ QVariantMap ClrInspectorBridge::findClrGcRootPath(const QString& targetObjectAdd
     if (address.isEmpty()) {
         QVariantMap result;
         result["success"] = false;
-        result["error"] = QStringLiteral("Adresse objet cible requise.");
+        result["error"] = KE_TXT("Adresse objet cible requise.", "Target object address required.");
         return result;
     }
 
@@ -1160,7 +1168,7 @@ QVariantMap ClrInspectorBridge::generateClrObjectReport(const QString& objectAdd
     if (address.isEmpty()) {
         QVariantMap result;
         result["success"] = false;
-        result["error"] = QStringLiteral("Adresse objet requise.");
+        result["error"] = KE_TXT("Adresse objet requise.", "Object address required.");
         return result;
     }
 
@@ -1187,11 +1195,11 @@ QVariantMap ClrInspectorBridge::disassembleClrMethod(const QString& objectAddres
     const QString address = objectAddressHex.trimmed();
     const QString method = methodName.trimmed();
     if (address.isEmpty() || method.isEmpty()) {
-        result["error"] = QStringLiteral("Adresse objet et nom de methode requis.");
+        result["error"] = KE_TXT("Adresse objet et nom de méthode requis.", "Object address and method name required.");
         return result;
     }
     if (!m_isAttached() || !m_handle.isValid()) {
-        result["error"] = QStringLiteral("Aucun processus attache.");
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
         return result;
     }
 
@@ -1215,7 +1223,7 @@ QVariantMap ClrInspectorBridge::disassembleClrMethod(const QString& objectAddres
 
     uint64_t nativeCodeAddress = 0;
     if (!parseHexAddress(nativeCodeAddressHex, &nativeCodeAddress)) {
-        result["error"] = QStringLiteral("Adresse native invalide apres resolution.");
+        result["error"] = KE_TXT("Adresse native invalide après résolution.", "Invalid native address after resolution.");
         return result;
     }
 
@@ -1229,7 +1237,7 @@ QVariantMap ClrInspectorBridge::disassembleClrMethod(const QString& objectAddres
     killcore::MemoryReader reader(m_handle);
     const auto read = reader.readChunked(nativeCodeAddress, static_cast<size_t>(bufferSize), 4096);
     if (!read.success && !read.partial) {
-        result["error"] = QStringLiteral("Lecture du code natif JITte echouee : %1").arg(read.errorMessage);
+        result["error"] = KE_TXT("Lecture du code natif JITté échouée : %1", "Reading the JITted native code failed: %1").arg(read.errorMessage);
         return result;
     }
 
@@ -1259,7 +1267,7 @@ QVariantMap ClrInspectorBridge::disassembleClrMethod(const QString& objectAddres
     result["truncated"] = instructions.size() < boundedCount;
     result["bufferBytesRead"] = static_cast<int>(read.bytesRead);
     if (instructions.isEmpty()) {
-        result["error"] = QStringLiteral("Aucune instruction decodee depuis l'adresse native resolue.");
+        result["error"] = KE_TXT("Aucune instruction décodée depuis l'adresse native résolue.", "No instruction decoded from the resolved native address.");
     }
     return result;
 }

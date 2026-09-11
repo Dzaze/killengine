@@ -48,7 +48,7 @@ Ces 4 messages viennent de `apps/desktop/profile_manager.cpp:975,992,1145,1172` 
 | [x] B1 | Catalogue Modules (8 cartes) + flux install/téléchargement/UAC/exclusion | `apps/desktop/application_controller.cpp` (`getModuleCatalog()`, `installModule()`, `checkEdrBlocking()`, `addEdrExclusionAsync()`, `checkDebugPrivilege()`/`enableDebugPrivilege()`), + résidus visibles trouvés en vérification live : `apps/desktop/settings_diagnostics_manager.cpp::getAiModelStatus()`, `core/kernel/kernel_driver_bridge.cpp::probe()` | ~58 chaînes traitées | **Haute** | **Fait 11/09/2026** |
 | [x] B2 | Avertissements de qualité de signature AOB | `core/patch/aob_scanner.cpp` | 8 | **Haute** | **Fait 11/09/2026** |
 | [x] B3 | Profile/Trainer (sauvegarde/application de patch) + Auto Resolver (labels d'étapes + insights) + **fix du couplage `errorCode`** | `apps/desktop/profile_manager.cpp`, `ai/auto_resolver.cpp` | ~85 | **Haute-moyenne** | **Fait 11/09/2026** |
-| [ ] B4 | CLR Inspector (erreurs de résolution locator, setter, écriture struct) | `apps/desktop/clr_inspector_bridge.cpp` | ~50 | Moyenne | Pas commencé |
+| [x] B4 | CLR Inspector (erreurs de résolution locator, setter, écriture struct) | `apps/desktop/clr_inspector_bridge.cpp` | ~26 | Moyenne | **Fait 11/09/2026** |
 | [ ] B5 | Cluster stealth/injection (pattern répétitif "CreateFileMapping/MapViewOfFile/déjà actif") | `core/debug/stealth_profiler.cpp`, `core/debug/inprocess_breakpoint.cpp`, `core/debug/page_guard.cpp`, `core/inject/dll_injector.cpp`, `core/inject/lag_switch.cpp`, `core/inject/http_proxy.cpp`, `core/inject/api_hook.cpp`, `core/debug/speedhack.cpp` | ~90 | Basse-moyenne — très répétitif, traitement mécanique rapide malgré le volume | Pas commencé |
 | [ ] B6 | Driver kernel + DPAPI + relais patch PowerShell | `core/kernel/kernel_driver_bridge.cpp`, `core/security/dpapi_key_store.cpp`, `core/patch/code_patch.cpp`, `core/patch/instruction_patch_suggester.cpp` | ~25 | Basse-moyenne | Pas commencé |
 | [ ] B7 | Scanner core (auto-dissect, classification source d'affichage, parsing valeur, résolution export) | `core/scanner/auto_dissect.cpp`, `core/scanner/display_source_classifier.cpp`, `core/scanner/scan_types.cpp` (⚠️ ~18 appelants, vérifier chaque site après correction), `core/process/export_resolver.cpp` | ~25 | Basse-moyenne | Pas commencé |
@@ -74,6 +74,10 @@ B1 traité (catalogue Modules + flux install/UAC/EDR/debug privilege), ~58 chaî
 Cette découverte a aussi révélé une fragilité de test latente : 8 tests de `tests/unit/test_ai_tools.cpp` (`AIEngineContextualFallbackTest`) asserient du texte français en dur sans isoler `ui/language`, et ont commencé à échouer dès que le fix ci-dessus a réellement persisté "en" sur le registre de la machine de dev pendant la vérification live. Corrigé en ajoutant un garde `ScopedUiLanguage` (même patron que `test_localization.cpp`) sur les 8 tests concernés — suite verte confirmée avec `ui/language` forcé à "en" pendant l'exécution.
 
 Build C++ propre, 469/469 tests unitaires (y compris avec langue ambiante forcée en "en"), `npm run type-check`/`npm run build` propres, vérification visuelle CDP FR et EN sur la page Modules réelle.
+
+### 11/09/2026 — B4 clos
+
+`apps/desktop/clr_inspector_bridge.cpp` (26 chaînes résiduelles — le fichier était déjà partiellement localisé) migré vers `KE_TXT` : résolution de setter d'instance, encodage de paramètres struct, écriture struct, décodage de code natif JITté. Confirmé sans couplage frontend (les seuls `.includes(...)` sur ce domaine dans `ClrInspectorView.vue` portent sur des noms de type CLR techniques, jamais traduits). Build + 470/470 tests propres (y compris langue ambiante forcée en "en").
 
 ### 11/09/2026 — B3 clos (Profile/Trainer + Auto Resolver + fix de couplage)
 
