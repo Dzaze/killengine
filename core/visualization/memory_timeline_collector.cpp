@@ -409,19 +409,4 @@ std::vector<uint64_t> MemoryTimelineCollector::findStableAddresses(uint32_t minD
     return result;
 }
 
-std::vector<uint64_t> MemoryTimelineCollector::findCyclicalAddresses(double correlationThreshold) const {
-    // TODO: Implémenter la détection de cycles avec autocorrélation
-    // Pour l'instant, retourne les adresses avec faible volatilité (changements réguliers)
-    std::vector<uint64_t> result;
-    std::lock_guard<std::mutex> lock(m_impl->m_mutex);
-    
-    for (const auto& [address, series] : m_impl->m_series) {
-        if (series.volatilityScore < 0.3 && series.changeCount > 5) {
-            result.push_back(address);
-        }
-    }
-    
-    return result;
-}
-
 } // namespace killcore

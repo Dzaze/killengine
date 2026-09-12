@@ -104,7 +104,6 @@ public:
     // Analyse rapide
     std::vector<uint64_t> findVolatileAddresses(double threshold = 0.5) const;
     std::vector<uint64_t> findStableAddresses(uint32_t minDurationMs = 5000) const;
-    std::vector<uint64_t> findCyclicalAddresses(double correlationThreshold = 0.7) const;
 
 private:
     class Impl;
