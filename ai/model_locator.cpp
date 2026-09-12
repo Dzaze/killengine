@@ -1,5 +1,7 @@
 #include "model_locator.h"
 
+#include "localization/localization.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -89,7 +91,9 @@ ModelInfo ModelLocator::findQwenGguf() {
     }
 
     ModelInfo info;
-    info.errorMessage = "No GGUF model found. Ship one in model/<ai-name>/, set modelPath, or set KILLENGINE_QWEN_GGUF.";
+    info.errorMessage = KE_TXT(
+        "Aucun modèle GGUF trouvé. Place-en un dans model/<nom-ia>/, renseigne modelPath, ou définis KILLENGINE_QWEN_GGUF.",
+        "No GGUF model found. Ship one in model/<ai-name>/, set modelPath, or set KILLENGINE_QWEN_GGUF.");
     return info;
 }
 

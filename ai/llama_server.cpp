@@ -3,6 +3,7 @@
 
 #include "llama_server.h"
 
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #include <QCoreApplication>
@@ -60,7 +61,8 @@ bool httpPostJson(int port, const QString& path, const QByteArray& body, int tim
     QTcpSocket socket;
     socket.connectToHost("127.0.0.1", port);
     if (!socket.waitForConnected(timeoutMs)) {
-        if (error) *error = QString("llama-server connect timeout (port %1): %2").arg(port).arg(socket.errorString());
+        if (error) *error = KE_TXT("Timeout de connexion à llama-server (port %1) : %2",
+            "llama-server connect timeout (port %1): %2").arg(port).arg(socket.errorString());
         return false;
     }
 
@@ -74,7 +76,7 @@ bool httpPostJson(int port, const QString& path, const QByteArray& body, int tim
 
     socket.write(request);
     if (!socket.waitForBytesWritten(timeoutMs)) {
-        if (error) *error = "llama-server write timeout.";
+        if (error) *error = KE_TXT("Timeout d'écriture llama-server.", "llama-server write timeout.");
         return false;
     }
 
@@ -93,7 +95,7 @@ bool httpPostJson(int port, const QString& path, const QByteArray& body, int tim
         }
         const int remaining = static_cast<int>(deadline - QDateTime::currentMSecsSinceEpoch());
         if (remaining <= 0) {
-            if (error) *error = QString("llama-server read timeout (%1 ms).").arg(timeoutMs);
+            if (error) *error = KE_TXT("Timeout de lecture llama-server (%1 ms).", "llama-server read timeout (%1 ms).").arg(timeoutMs);
             return false;
         }
         QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
@@ -104,20 +106,21 @@ bool httpPostJson(int port, const QString& path, const QByteArray& body, int tim
     all += socket.readAll();
 
     if (all.isEmpty()) {
-        if (error) *error = "llama-server returned empty response.";
+        if (error) *error = KE_TXT("llama-server a renvoyé une réponse vide.", "llama-server returned empty response.");
         return false;
     }
 
     // Separation headers / corps.
     const int headerEnd = all.indexOf("\r\n\r\n");
     if (headerEnd < 0) {
-        if (error) *error = "llama-server malformed HTTP response (no header terminator).";
+        if (error) *error = KE_TXT("Réponse HTTP llama-server malformée (pas de fin d'en-têtes).",
+            "llama-server malformed HTTP response (no header terminator).");
         return false;
     }
     const QByteArray headers = all.left(headerEnd);
     const QByteArray statusLine = headers.left(headers.indexOf("\r\n"));
     if (!statusLine.contains("200")) {
-        if (error) *error = QString("llama-server HTTP error: %1").arg(QString::fromUtf8(statusLine));
+        if (error) *error = KE_TXT("Erreur HTTP llama-server : %1", "llama-server HTTP error: %1").arg(QString::fromUtf8(statusLine));
         return false;
     }
 
@@ -226,7 +229,7 @@ bool LlamaServer::healthCheck(int timeoutMs) {
 
 bool LlamaServer::startAndWait(QString* error) {
     if (m_executablePath.isEmpty() || m_modelPath.isEmpty()) {
-        if (error) *error = "llama-server executable or model not configured.";
+        if (error) *error = KE_TXT("Exécutable ou modèle llama-server non configuré.", "llama-server executable or model not configured.");
         return false;
     }
     if (m_process.state() != QProcess::NotRunning) {
@@ -261,7 +264,8 @@ bool LlamaServer::startAndWait(QString* error) {
     if (!m_process.waitForStarted(5000)) {
         m_lastServerError = m_process.readAllStandardError();
         if (error) {
-            *error = QString("llama-server failed to start: %1").arg(QString::fromUtf8(m_lastServerError).trimmed());
+            *error = KE_TXT("Échec du démarrage de llama-server : %1", "llama-server failed to start: %1")
+                .arg(QString::fromUtf8(m_lastServerError).trimmed());
         }
         return false;
     }
@@ -279,7 +283,8 @@ bool LlamaServer::startAndWait(QString* error) {
         if (m_process.state() != QProcess::Running) {
             m_lastServerError = m_process.readAllStandardError();
             if (error) {
-                *error = QString("llama-server exited during startup: %1")
+                *error = KE_TXT("llama-server s'est arrêté pendant le démarrage : %1",
+                             "llama-server exited during startup: %1")
                              .arg(QString::fromUtf8(m_lastServerError).trimmed());
             }
             return false;
@@ -291,13 +296,13 @@ bool LlamaServer::startAndWait(QString* error) {
         QThread::msleep(250);
     }
 
-    if (error) *error = "llama-server startup timeout (model load).";
+    if (error) *error = KE_TXT("Timeout de démarrage de llama-server (chargement du modèle).", "llama-server startup timeout (model load).");
     return false;
 }
 
 bool LlamaServer::ensureRunning(QString* error) {
     if (serverDisabledByEnv() || serverDisabledBySettings()) {
-        if (error) *error = "llama-server disabled by settings/env.";
+        if (error) *error = KE_TXT("llama-server désactivé par les réglages/variable d'environnement.", "llama-server disabled by settings/env.");
         return false;
     }
     if (isRunning() && healthCheck(1500)) return true;
@@ -341,7 +346,7 @@ LlamaServerCompletion LlamaServer::complete(const QString& prompt, int nPredict,
 
     const QString content = parseCompletionContent(response);
     if (content.isEmpty()) {
-        result.errorMessage = "llama-server completion returned empty content.";
+        result.errorMessage = KE_TXT("La complétion llama-server a renvoyé un contenu vide.", "llama-server completion returned empty content.");
         return result;
     }
     result.success = true;
@@ -369,7 +374,7 @@ int LlamaServer::tokenCount(const QString& text, QString* error) {
 
     const QJsonDocument document = QJsonDocument::fromJson(response);
     if (!document.isObject() || !document.object().value("tokens").isArray()) {
-        if (error) *error = "llama-server /tokenize: malformed response.";
+        if (error) *error = KE_TXT("llama-server /tokenize : réponse malformée.", "llama-server /tokenize: malformed response.");
         return -1;
     }
     return document.object().value("tokens").toArray().size();

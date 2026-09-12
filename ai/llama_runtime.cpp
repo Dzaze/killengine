@@ -2,6 +2,7 @@
 
 #include "investigation_notebook_planner.h"
 #include "llama_server.h"
+#include "localization/localization.h"
 #include "logging/logger.h"
 
 #include <QCoreApplication>
@@ -94,7 +95,9 @@ bool LlamaRuntime::init() {
     const bool hasAnyBackend = !executable.isEmpty() || !serverExecutable.isEmpty();
     if (!hasAnyBackend) {
         m_info.available = false;
-        m_info.errorMessage = "No llama.cpp backend found. Set KILLENGINE_LLAMA_CLI or KILLENGINE_LLAMA_SERVER.";
+        m_info.errorMessage = KE_TXT(
+            "Aucun moteur llama.cpp trouvé. Définis KILLENGINE_LLAMA_CLI ou KILLENGINE_LLAMA_SERVER.",
+            "No llama.cpp backend found. Set KILLENGINE_LLAMA_CLI or KILLENGINE_LLAMA_SERVER.");
         return false;
     }
 
@@ -163,7 +166,7 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
 
     // 2) Fallback historique: processus llama-cli one-shot.
     if (m_info.executablePath.isEmpty()) {
-        result.errorMessage = "llama-cli executable not found.";
+        result.errorMessage = KE_TXT("Exécutable llama-cli introuvable.", "llama-cli executable not found.");
         return result;
     }
     if (onStage) onStage(QStringLiteral("loadingModel"));
@@ -185,7 +188,7 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
     process.start();
 
     if (!process.waitForStarted(5000)) {
-        result.errorMessage = "llama-cli failed to start.";
+        result.errorMessage = KE_TXT("Échec du démarrage de llama-cli.", "llama-cli failed to start.");
         return result;
     }
 
@@ -197,13 +200,13 @@ LlamaGenerationResult LlamaRuntime::generate(const QString& prompt, int nPredict
     if (!process.waitForFinished(90000)) {
         process.kill();
         process.waitForFinished(3000);
-        result.errorMessage = "llama-cli timed out.";
+        result.errorMessage = KE_TXT("Timeout de llama-cli.", "llama-cli timed out.");
         return result;
     }
 
     const QString output = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        result.errorMessage = QString("llama-cli failed: %1").arg(output);
+        result.errorMessage = KE_TXT("Échec de llama-cli : %1", "llama-cli failed: %1").arg(output);
         return result;
     }
 
@@ -289,7 +292,9 @@ LlamaGenerationResult LlamaRuntime::measurePrefillSpeed(const QString& sampleTex
     result = generate(sampleText, 1, onStage);
     if (result.success && result.promptTokensPerSecond <= 0.0) {
         result.success = false;
-        result.errorMessage = "llama-server: calibration succeeded but no timing data returned.";
+        result.errorMessage = KE_TXT(
+            "llama-server : la calibration a réussi mais aucune donnée de timing n'a été renvoyée.",
+            "llama-server: calibration succeeded but no timing data returned.");
     }
     return result;
 }
