@@ -6,7 +6,6 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
-#include <QStandardPaths>
 #include <QSysInfo>
 #include <QTextStream>
 
@@ -124,11 +123,11 @@ void CrashHandler::install() {
 }
 
 QString CrashHandler::crashDirectory() {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    if (dir.isEmpty()) {
-        dir = QDir::currentPath();
-    }
-    dir += "/crashes";
+    // Portabilite reelle (13/09/2026, docs/PORTABILITY_ROADMAP.md candidat P4) :
+    // AppLocalDataLocation (%LOCALAPPDATA%) casse le mode portable comme P1/P2/P3
+    // -- deplacer/copier le dossier de l'app perdait silencieusement les dumps de
+    // crash. Redirige vers un dossier relatif a l'executable.
+    QString dir = QDir(QCoreApplication::applicationDirPath()).filePath("crashes");
     QDir().mkpath(dir);
     return dir;
 }

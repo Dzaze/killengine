@@ -68,7 +68,11 @@ int runApplication(int argc, char* argv[]) {
 #endif
 
     // Initialize logging
-    killcore::Logger::instance().init();
+    // Portabilite reelle (13/09/2026, docs/PORTABILITY_ROADMAP.md candidat P3) :
+    // Logger::init() sans argument retombe sur AppLocalDataLocation
+    // (%LOCALAPPDATA%), meme probleme que P1/P2 -- Logger::init() accepte deja
+    // un logDir explicite, il suffisait de le renseigner.
+    killcore::Logger::instance().init(QDir(QCoreApplication::applicationDirPath()).filePath("logs"));
     killcore::Logger::instance().setLevel(killcore::LogLevel::Debug);
     killengine::CrashHandler::install();
 

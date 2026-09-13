@@ -51,9 +51,9 @@ Décision propriétaire : distribution en libre-service sur SourceForge, en mode
 | --- | --- | --- | --- | --- |
 | [x] P1 | Rediriger `QSettings` (registre → INI relatif à l'exe) | `apps/desktop/main.cpp` | **Haute** — couvre ~30+ sites d'un coup | **Fait 13/09/2026** |
 | [x] P2 | Rediriger le stockage persistant WebEngine (Trainer/workspace/journal d'action) | `apps/desktop/main.cpp` | **Haute** — donnée utilisateur la plus riche après les réglages | **Fait 13/09/2026** |
-| [ ] P3 | Rediriger le dossier de logs | `apps/desktop/main.cpp` (juste renseigner `Logger::init(logDir)`, déjà supporté) | Moyenne | Pas commencé |
-| [ ] P4 | Rediriger le dossier de dumps de crash | `apps/desktop/crash_handler.cpp::crashDirectory()` | Moyenne | Pas commencé |
-| [ ] P5 | Rediriger la base Pattern Learning | `apps/desktop/pattern_learning_manager.cpp::getDatabasePath()` | Moyenne — vraie donnée apprise, pas du cache | Pas commencé |
+| [x] P3 | Rediriger le dossier de logs | `apps/desktop/main.cpp` (juste renseigner `Logger::init(logDir)`, déjà supporté) | Moyenne | **Fait 13/09/2026** |
+| [x] P4 | Rediriger le dossier de dumps de crash | `apps/desktop/crash_handler.cpp::crashDirectory()` | Moyenne | **Fait 13/09/2026** |
+| [x] P5 | Rediriger la base Pattern Learning | `apps/desktop/pattern_learning_manager.cpp::getDatabasePath()` | Moyenne — vraie donnée apprise, pas du cache | **Fait 13/09/2026** |
 | [ ] P6 | Documentation utilisateur : limites acceptées (clé API DPAPI, driver kernel, bascules Defender) | UI Réglages ou README de distribution, à définir | Basse — aucun code, juste rendre explicite ce qui ne suit pas le dossier | Pas commencé |
 
 ## Ordre recommandé
@@ -77,6 +77,15 @@ Décision propriétaire : distribution en libre-service sur SourceForge, en mode
 `webEngineStoragePath` dans `apps/desktop/main.cpp` redirigé de `QStandardPaths::AppLocalDataLocation` vers `QDir(QCoreApplication::applicationDirPath()).filePath("webengine")` — un seul changement, `setCachePath`/`setPersistentStoragePath` restent co-localisés comme avant (juste la base qui change). Include `QStandardPaths` retiré (devenu inutilisé dans ce fichier).
 
 **Vérifié en direct** : lancé l'app, écrit une clé de test dans `window.localStorage` via CDP (`localStorage.setItem("portability_p2_test", "hello_portable_world")`), confirmé la création de `build/bin/webengine/Local Storage/leveldb/` (vraie base LevelDB Chromium, pas un profil en mémoire). Fermé et relancé le process : la clé/valeur de test est bien retrouvée dans le fichier `.log` de la leveldb après redémarrage (vérifié par lecture directe du fichier, CDP indisponible au second lancement — non bloquant, la preuve fichier est aussi solide). Build + 470/470 tests unitaires propres.
+
+### 13/09/2026 — P3, P4, P5 clos (mécaniques, un seul patron de correction)
+
+Trois candidats mécaniques traités ensemble (même patron que P1/P2 : remplacer un `QStandardPaths::writableLocation(...)` par un chemin relatif à `QCoreApplication::applicationDirPath()`) :
+- **P3** : `apps/desktop/main.cpp` — `killcore::Logger::instance().init()` renseigné avec `QDir(applicationDirPath()).filePath("logs")` (le paramètre `logDir` existait déjà sur `Logger::init()`, juste jamais utilisé).
+- **P4** : `apps/desktop/crash_handler.cpp::crashDirectory()` — remplacé `QStandardPaths::AppLocalDataLocation` (+ repli `QDir::currentPath()`) par `QDir(applicationDirPath()).filePath("crashes")`. Include `QStandardPaths` retiré (devenu inutilisé dans ce fichier).
+- **P5** : `apps/desktop/pattern_learning_manager.cpp::getDatabasePath()` — remplacé `QStandardPaths::AppDataLocation` par `QDir(applicationDirPath()).filePath("data")`. Include `QStandardPaths` remplacé par `QCoreApplication` (nécessaire pour `applicationDirPath()`, absent du fichier auparavant).
+
+**Vérifié en direct** : build propre, 470/470 tests unitaires. App relancée avec un `WorkingDirectory` volontairement différent (`C:\`, pas le dossier de l'exe) pour prouver que la résolution ne dépend pas d'un `QDir::currentPath()` accidentel — confirmé `build/bin/logs/killengine_<timestamp>.log` créé et `build/bin/data/` créé (dossier Pattern Learning, prêt à recevoir `pattern_learning.json` dès la première écriture). Confirmé en parallèle que les anciens emplacements (`%LOCALAPPDATA%\KillEngine\KillEngine\{logs,crashes,webengine}`) n'ont montré **aucune activité** pendant ce lancement (dates de modification inchangées, antérieures à ce test) — la bascule est complète, plus aucune écriture résiduelle vers les anciens chemins système.
 
 ## Règle d'usage
 

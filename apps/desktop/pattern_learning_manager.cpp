@@ -1,6 +1,6 @@
 #include "pattern_learning_manager.h"
 #include "pattern_learning/pattern_learning_engine.h"
-#include <QStandardPaths>
+#include <QCoreApplication>
 #include <QDir>
 #include <QUuid>
 #include <QDateTime>
@@ -26,7 +26,11 @@ public:
     std::map<std::string, TrackingState> tracking;
     
     QString getDatabasePath() {
-        QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        // Portabilite reelle (13/09/2026, docs/PORTABILITY_ROADMAP.md candidat P5) :
+        // AppDataLocation (%APPDATA%) casse le mode portable comme P1/P2/P3/P4 --
+        // deplacer/copier le dossier de l'app perdait silencieusement la base
+        // Pattern Learning. Redirige vers un dossier relatif a l'executable.
+        QString dataDir = QDir(QCoreApplication::applicationDirPath()).filePath("data");
         QDir().mkpath(dataDir);
         // ".json", pas ".db" : GameProfileDatabase est en JSON-in-file
         // (02/09/2026, Claude) — voir core/pattern_learning/game_profile_database.cpp.
