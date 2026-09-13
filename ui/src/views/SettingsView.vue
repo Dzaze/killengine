@@ -870,6 +870,24 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
     <section class="panel">
       <div class="panel-title">
+        <h2>{{ $t('settings.portabilityTitle') }}</h2>
+      </div>
+      <p class="hint">
+        {{ $t('settings.portabilityHint') }}
+      </p>
+      <p class="hint">
+        <strong>{{ $t('settings.portabilityApiKeyLabel') }}</strong> — {{ $t('settings.portabilityApiKeyText') }}
+      </p>
+      <p class="hint">
+        <strong>{{ $t('settings.portabilityKernelDriverLabel') }}</strong> — {{ $t('settings.portabilityKernelDriverText') }}
+      </p>
+      <p class="hint">
+        <strong>{{ $t('settings.portabilityDefenderLabel') }}</strong> — {{ $t('settings.portabilityDefenderText') }}
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
         <h2>{{ $t('settings.antivirusCompatTitle') }}</h2>
       </div>
       <p class="hint">

@@ -54,7 +54,7 @@ Décision propriétaire : distribution en libre-service sur SourceForge, en mode
 | [x] P3 | Rediriger le dossier de logs | `apps/desktop/main.cpp` (juste renseigner `Logger::init(logDir)`, déjà supporté) | Moyenne | **Fait 13/09/2026** |
 | [x] P4 | Rediriger le dossier de dumps de crash | `apps/desktop/crash_handler.cpp::crashDirectory()` | Moyenne | **Fait 13/09/2026** |
 | [x] P5 | Rediriger la base Pattern Learning | `apps/desktop/pattern_learning_manager.cpp::getDatabasePath()` | Moyenne — vraie donnée apprise, pas du cache | **Fait 13/09/2026** |
-| [ ] P6 | Documentation utilisateur : limites acceptées (clé API DPAPI, driver kernel, bascules Defender) | UI Réglages ou README de distribution, à définir | Basse — aucun code, juste rendre explicite ce qui ne suit pas le dossier | Pas commencé |
+| [x] P6 | Documentation utilisateur : limites acceptées (clé API DPAPI, driver kernel, bascules Defender) | UI Réglages (`ui/src/views/SettingsView.vue`) | Basse — aucun code métier, juste rendre explicite ce qui ne suit pas le dossier | **Fait 13/09/2026** |
 
 ## Ordre recommandé
 
@@ -86,6 +86,14 @@ Trois candidats mécaniques traités ensemble (même patron que P1/P2 : remplace
 - **P5** : `apps/desktop/pattern_learning_manager.cpp::getDatabasePath()` — remplacé `QStandardPaths::AppDataLocation` par `QDir(applicationDirPath()).filePath("data")`. Include `QStandardPaths` remplacé par `QCoreApplication` (nécessaire pour `applicationDirPath()`, absent du fichier auparavant).
 
 **Vérifié en direct** : build propre, 470/470 tests unitaires. App relancée avec un `WorkingDirectory` volontairement différent (`C:\`, pas le dossier de l'exe) pour prouver que la résolution ne dépend pas d'un `QDir::currentPath()` accidentel — confirmé `build/bin/logs/killengine_<timestamp>.log` créé et `build/bin/data/` créé (dossier Pattern Learning, prêt à recevoir `pattern_learning.json` dès la première écriture). Confirmé en parallèle que les anciens emplacements (`%LOCALAPPDATA%\KillEngine\KillEngine\{logs,crashes,webengine}`) n'ont montré **aucune activité** pendant ce lancement (dates de modification inchangées, antérieures à ce test) — la bascule est complète, plus aucune écriture résiduelle vers les anciens chemins système.
+
+### 13/09/2026 — P6 clos
+
+Nouvelle section « Mode portable — limites acceptées » ajoutée dans `ui/src/views/SettingsView.vue`, entre le panneau Diagnostic et le panneau Compatibilité antivirus (aucun code backend, purement informatif — pas de nouvel appel `Q_INVOKABLE`). Trois blocs, un par exception documentée dans l'audit du 13/09/2026 : clé API Claude (DPAPI, liée au compte Windows courant), driver noyau (service Windows, non portable par nature), exclusion Windows Defender (modification machine déclenchée explicitement par le bouton du panneau voisin). Clés i18n `settings.portability*` ajoutées en FR et EN (`ui/src/i18n/locales/{fr,en}.json`).
+
+**Vérifié en direct** : `npm run type-check` et `npm run build` propres, JSON des deux locales validé. App relancée avec CDP, section lue via `Runtime.evaluate` en anglais (langue par défaut) puis basculée en français via le sélecteur FR de la sidebar et relue — les deux versions s'affichent correctement, aucun texte manquant ou clé i18n non résolue.
+
+Ce candidat clôt le chantier de portabilité (P1-P6 tous faits). Reste ouvert uniquement le test de renommage de dossier bout-en-bout mentionné dans la Décision de méthode 5 (déjà couvert indirectement par les vérifications par redémarrage/`WorkingDirectory` différent de chaque candidat, mais jamais fait comme un seul scénario "copier le dossier entier vers un nouveau chemin puis tout réutiliser") — à faire si le propriétaire veut une validation finale avant la première distribution SourceForge.
 
 ## Règle d'usage
 
