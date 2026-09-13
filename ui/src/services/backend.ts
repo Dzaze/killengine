@@ -1648,6 +1648,12 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   setDefenderBehaviorMonitoringDisabledAsync?(disabled: boolean): Promise<Record<string, unknown>>
   /** MODULES-V2 : résultat différé de setDefenderBehaviorMonitoringDisabledAsync. */
   defenderBehaviorMonitoringDisabledFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** Lit l'état actuel du mode Test Signing Windows (bcdedit, lecture seule) — prérequis pour charger le driver noyau non signé WHQL. */
+  getTestSigningStatus?(): Promise<Record<string, unknown>>
+  /** Active/désactive le mode Test Signing (élévation UAC, réversible, redémarrage requis). Non bloquant ; résultat via testSigningEnabledFinished. */
+  setTestSigningEnabledAsync?(enabled: boolean): Promise<Record<string, unknown>>
+  /** Résultat différé de setTestSigningEnabledAsync. */
+  testSigningEnabledFinished?: QWebChannelSignal<Record<string, unknown>>
   /** MODULES-V2 : applique un profil stealth (sc2/default/minimal). */
   applyStealthProfile?(profile: string): Promise<Record<string, unknown>>
   /** MODULES-V2 : restaure le mode stealth. */
@@ -2960,6 +2966,13 @@ class BackendService {
         return { success: false, started: false, error: 'Mock backend' }
       },
       defenderBehaviorMonitoringDisabledFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
+      async getTestSigningStatus() {
+        return { success: true, enabled: false }
+      },
+      async setTestSigningEnabledAsync(_enabled: boolean) {
+        return { success: false, started: false, error: 'Mock backend' }
+      },
+      testSigningEnabledFinished: undefined as unknown as QWebChannelSignal<Record<string, unknown>>,
       async applyStealthProfile(_profile: string) {
         return { success: false, error: 'Mock: stealth non disponible.' }
       },

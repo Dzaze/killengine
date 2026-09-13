@@ -93,6 +93,48 @@ const behaviorMonitoringDisabled = ref(false)
 const behaviorMonitoringBusy = ref(false)
 const behaviorMonitoringResult = ref<Record<string, unknown> | null>(null)
 
+// Test Signing (KillEngineKernel.sys n'est pas signé WHQL/EV — voir
+// docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md) : prérequis pour que le
+// driver noyau se charge. État lu au montage (bcdedit, lecture seule, pas
+// d'élévation), bascule via un thread élevé côté backend comme le toggle
+// Defender ci-dessus.
+const testSigningEnabled = ref(false)
+const testSigningBusy = ref(false)
+const testSigningResult = ref<Record<string, unknown> | null>(null)
+
+async function refreshTestSigningStatus() {
+  try {
+    const result = await backend.getController().getTestSigningStatus?.()
+    if (result?.success) {
+      testSigningEnabled.value = Boolean(result.enabled)
+    }
+  } catch {
+    // Best-effort : reste sur l'état par défaut (désactivé) en cas d'échec.
+  }
+}
+
+async function toggleTestSigning() {
+  const next = !testSigningEnabled.value
+  const accepted = await riskGate.confirmRiskAction(
+    'debug',
+    next ? t('modules.kernel.confirmEnableTitle') : t('modules.kernel.confirmDisableTitle'),
+    next ? t('modules.kernel.confirmEnableDesc') : t('modules.kernel.confirmDisableDesc'),
+  )
+  if (!accepted) return
+  testSigningBusy.value = true
+  testSigningResult.value = null
+  try {
+    const result = await backend.getController().setTestSigningEnabledAsync?.(next)
+    if (!result?.started) {
+      testSigningResult.value = result ?? { error: t('modules.errors.backendMissing') }
+      testSigningBusy.value = false
+    }
+  } catch (e) {
+    testSigningResult.value = { success: false, error: String(e) }
+    testSigningBusy.value = false
+  }
+}
+
 // setWindowsDefenderDisabledAsync/setDefenderBehaviorMonitoringDisabledAsync/
 // addEdrExclusionAsync ne bloquent plus le thread GUI : elles démarrent
 // l'élévation UAC + la commande sur un thread séparé côté backend et
@@ -364,6 +406,12 @@ onMounted(() => {
     if (result?.success) behaviorMonitoringDisabled.value = Boolean(result.disabled)
     behaviorMonitoringBusy.value = false
   })
+  controller.testSigningEnabledFinished?.connect((result: Record<string, unknown>) => {
+    testSigningResult.value = result
+    if (result?.success) testSigningEnabled.value = Boolean(result.enabled)
+    testSigningBusy.value = false
+  })
+  void refreshTestSigningStatus()
 })
 </script>
 
@@ -416,6 +464,30 @@ onMounted(() => {
           <button class="btn btn-secondary cancel-btn" @click="store.cancelModuleInstall()">
             {{ $t('modules.cancel') }}
           </button>
+        </div>
+
+        <!-- Prérequis Test Signing pour le driver noyau (non signé WHQL/EV) -->
+        <div v-if="mod.id === 'kernel_driver'" class="edr-guide">
+          <p class="guide-title">📖 {{ $t('modules.kernel.guideTitle') }}</p>
+          <p>{{ $t('modules.kernel.guideDesc') }}</p>
+          <div class="guide-step">
+            <strong>{{ $t('modules.kernel.testSigningLabel') }}</strong>
+            <span class="module-status" :class="testSigningEnabled ? 'ok' : 'missing'">
+              {{ testSigningEnabled ? $t('settings.enabled') : $t('settings.disabled') }}
+            </span>
+            <button
+              class="btn compact"
+              :class="testSigningEnabled ? 'btn-secondary' : 'btn-primary'"
+              :disabled="testSigningBusy"
+              @click="toggleTestSigning()"
+            >
+              {{ testSigningBusy ? '...' : (testSigningEnabled ? $t('modules.kernel.disable') : $t('modules.kernel.enable')) }}
+            </button>
+          </div>
+          <p v-if="testSigningResult?.message" class="status-line">{{ testSigningResult.message }}</p>
+          <p v-else-if="testSigningResult?.cancelled" class="warning">{{ $t('settings.elevationRefused') }}</p>
+          <p v-else-if="testSigningResult?.error" class="error">{{ testSigningResult.error }}</p>
+          <p class="manual-warning">{{ $t('modules.kernel.rebootWarning') }}</p>
         </div>
       </div>
     </section>

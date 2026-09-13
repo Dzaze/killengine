@@ -6343,6 +6343,85 @@ QVariantMap ApplicationController::setDefenderBehaviorMonitoringDisabledAsync(bo
     return started;
 }
 
+QVariantMap ApplicationController::getTestSigningStatus() const {
+    QVariantMap result;
+    result["success"] = false;
+    result["enabled"] = false;
+#ifdef Q_OS_WIN
+    QProcess process;
+    process.start(QStringLiteral("bcdedit"), {QStringLiteral("/enum"), QStringLiteral("{current}")});
+    if (!process.waitForFinished(5000)) {
+        result["error"] = KE_TXT("bcdedit n'a pas répondu.", "bcdedit did not respond.");
+        return result;
+    }
+    const QString output = QString::fromLocal8Bit(process.readAllStandardOutput());
+    // bcdedit n'affiche la ligne "testsigning" que si elle a deja ete definie
+    // au moins une fois (absente = jamais defini = desactive par defaut).
+    bool enabled = false;
+    for (const QString& line : output.split('\n')) {
+        if (line.contains(QStringLiteral("testsigning"), Qt::CaseInsensitive)) {
+            enabled = line.contains(QStringLiteral("Yes"), Qt::CaseInsensitive);
+            break;
+        }
+    }
+    result["success"] = true;
+    result["enabled"] = enabled;
+#else
+    result["error"] = KE_TXT("Fonctionnalité réservée à Windows.", "Windows only.");
+#endif
+    return result;
+}
+
+QVariantMap ApplicationController::setTestSigningEnabledAsync(bool enabled) {
+    QVariantMap started;
+    started["success"] = false;
+#ifdef Q_OS_WIN
+    // Chercher le script .bat : d'abord dans le layout distribué (scripts/ à côté de l'exe),
+    // puis dans le layout dev (../../scripts/) — même convention que les scripts Defender.
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString batName = enabled
+        ? QStringLiteral("enable_test_signing.bat")
+        : QStringLiteral("disable_test_signing.bat");
+    QString batPath = QDir(appDir).filePath("scripts/" + batName);
+    if (!QFile::exists(batPath)) {
+        batPath = QDir(appDir).filePath("../../scripts/" + batName);
+    }
+    const QString batPathNative = QDir::toNativeSeparators(batPath);
+
+    if (!QFile::exists(batPath)) {
+        started["error"] = KE_TXT("Script introuvable : %1 — utilise le fichier .bat manuellement.", "Script not found: %1 — use the .bat file manually.").arg(batPathNative);
+        return started;
+    }
+
+    const QPointer<ApplicationController> self(this);
+    std::thread([self, batPathNative, enabled]() {
+        const QString cmdArgs = QStringLiteral("/c \"%1\"").arg(batPathNative);
+        QVariantMap result = runElevatedCommand(QStringLiteral("cmd.exe"), cmdArgs);
+
+        if (result.value("success").toBool()) {
+            result["enabled"] = enabled;
+            result["message"] = enabled
+                ? KE_TXT("Test Signing activé. Redémarre Windows pour que le changement prenne effet, puis installe le driver depuis Modules.",
+                    "Test Signing enabled. Restart Windows for the change to take effect, then install the driver from Modules.")
+                : KE_TXT("Test Signing désactivé. Redémarre Windows pour que le changement prenne effet.",
+                    "Test Signing disabled. Restart Windows for the change to take effect.");
+        }
+
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, result]() {
+            if (!self) return;
+            emit self->testSigningEnabledFinished(result);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    started["success"] = true;
+    started["started"] = true;
+#else
+    started["error"] = KE_TXT("Fonctionnalité réservée à Windows.", "Windows only.");
+#endif
+    return started;
+}
+
 QVariantMap ApplicationController::checkEdrBlocking() const {
     QVariantMap result;
     result["success"] = false;

@@ -95,6 +95,23 @@ Nouvelle section « Mode portable — limites acceptées » ajoutée dans `ui/sr
 
 Ce candidat clôt le chantier de portabilité (P1-P6 tous faits). Reste ouvert uniquement le test de renommage de dossier bout-en-bout mentionné dans la Décision de méthode 5 (déjà couvert indirectement par les vérifications par redémarrage/`WorkingDirectory` différent de chaque candidat, mais jamais fait comme un seul scénario "copier le dossier entier vers un nouveau chemin puis tout réutiliser") — à faire si le propriétaire veut une validation finale avant la première distribution SourceForge.
 
+### 13/09/2026 — Correctif post-P6 : le driver noyau était installable dans l'UI mais pas dans le vrai paquet
+
+En creusant la question du propriétaire "l'utilisateur peut-il utiliser le driver kernel ?", deux trous réels trouvés dans `scripts/package-windows.ps1` (le générateur du ZIP `KillEngine-portable`), tous deux invisibles en dev car le dépôt complet a toujours les deux :
+1. `scripts/install-kernel-driver.ps1` (le script que le bouton "Installer" de Modules invoque via `findModuleCatalogScript`) n'était jamais copié dans `scripts\` du paquet — seuls 5 scripts EDR/Lua l'étaient.
+2. Le `.sys` compilé (`tools\kernel_driver\...\Release\KillEngineKernel.sys`) n'était jamais copié non plus, contrairement à l'inspecteur CLR qui est bien publié dans le paquet.
+
+Un utilisateur réel cliquant "Installer" sur le driver kernel depuis le ZIP SourceForge serait tombé sur `install-kernel-driver.ps1 introuvable.` **Corrigé** : les deux scripts test-signing + `install-kernel-driver.ps1` sont maintenant copiés inconditionnellement dans `scripts\` du paquet ; le `.sys` (Release) est copié en best-effort dans `tools\kernel_driver\Release\` avec un nouveau flag `-SkipKernelDriver` (avertissement, pas d'échec bloquant, car builder le driver nécessite le WDK/MSBuild — pas garanti présent sur toute machine de packaging). `PACKAGE_README.txt` avait aussi une ligne obsolète ("Logs and profiles are stored under the Windows local app data folder") — corrigée pour refléter P1-P5, et `docs/PORTABILITY_ROADMAP.md` est désormais copié dans le paquet.
+
+**Second trou, plus profond** : même avec les fichiers présents, `KillEngineKernel.sys` n'est pas signé WHQL/EV (`scripts/build-kernel-driver.ps1` n'a aucune étape de signature) — Windows refuse de le charger sans le mode **Test Signing** (`bcdedit /set testsigning on`), jusqu'ici documenté seulement pour les développeurs (`docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md`), jamais expliqué à l'utilisateur final. Décision du propriétaire : ajouter un bouton pour activer **et** désactiver ce mode depuis l'UI (pas seulement de la doc).
+
+**Ajouté** :
+- `scripts/enable_test_signing.bat` / `scripts/disable_test_signing.bat` (même patron auto-élévation que les scripts Defender existants).
+- `ApplicationController::getTestSigningStatus()` (lecture seule, `bcdedit /enum {current}`, pas d'élévation) et `setTestSigningEnabledAsync(bool)` (élévation UAC via thread séparé, même mécanisme que `setWindowsDefenderDisabledAsync`), signal `testSigningEnabledFinished`.
+- UI : nouveau bloc dans `ModulesView.vue`, à l'intérieur de la carte `kernel_driver` (section Dépendances), avec statut Test Signing + bouton Activer/Désactiver (élévation UAC, `riskGate.confirmRiskAction`) + avertissement redémarrage/watermark. Clés i18n `modules.kernel.*` en FR/EN.
+
+**Vérifié en direct** : build propre, 470/470 tests unitaires, `npm run type-check`/`build` propres, JSON des deux locales validé, syntaxe `package-windows.ps1` validée (parseur PowerShell, sans lancer un packaging complet). `getTestSigningStatus()` appelé en direct via le pipe d'automatisation (`KILLENGINE_AUTOMATION_PIPE=1`) sur cette machine — CDP indisponible au relancement (flakiness déjà documentée, voir Progrès P1/P2) — résultat `{"enabled":true,"success":true}`, confirmé exact vs. `bcdedit /enum {current}` lancé en parallèle (`testsigning Yes` sur cette machine de dev). Le chemin d'écriture (`setTestSigningEnabledAsync`) n'a délibérément pas été déclenché pour de vrai : il modifierait la configuration de démarrage réelle de cette machine (watermark permanent + redémarrage requis) — non exercé sans demande explicite, risque jugé faible par construction (copie exacte du mécanisme `setWindowsDefenderDisabledAsync` déjà en production).
+
 ## Règle d'usage
 
 Mettre à jour ce document (case cochée + date) à chaque candidat clos, journaliser dans `docs/PHASE_TRACKER.md`. Le chantier n'est réellement clos qu'après le test de renommage de dossier décrit dans la Décision de méthode 5 sur P1 et P2 au minimum.

@@ -354,6 +354,18 @@
       "confirmTitle": "Enable SeDebugName",
       "confirmDesc": "Enable the SeDebugName privilege for the current process — required for hardware breakpoints and injection."
     },
+    "kernel": {
+      "guideTitle": "Prerequisite: Test Signing",
+      "guideDesc": "KillEngineKernel.sys isn't signed by Microsoft (WHQL/EV) — Windows refuses to load it unless Test Signing mode is enabled on this machine. It's reversible: turn it back off once you no longer need the driver.",
+      "testSigningLabel": "Test Signing",
+      "enable": "Enable (UAC)",
+      "disable": "Disable (UAC)",
+      "rebootWarning": "A Windows restart is required for the change to take effect, and shows a permanent \"Test Mode\" watermark on the desktop while it's active.",
+      "confirmEnableTitle": "Enable Test Signing mode",
+      "confirmEnableDesc": "Enables Windows Test Signing mode (bcdedit, UAC elevation required) so the unsigned kernel driver KillEngineKernel.sys can load. Shows a permanent watermark and slightly weakens Windows' driver signature verification. ⚠ A restart is required for the change to take effect.",
+      "confirmDisableTitle": "Disable Test Signing mode",
+      "confirmDisableDesc": "Disables Windows Test Signing mode (bcdedit, UAC elevation required). The kernel driver KillEngineKernel.sys will no longer be able to load while it stays disabled. ⚠ A restart is required for the change to take effect."
+    },
     "handleHider": {
       "ownerPid": "Target process PID",
       "handleValue": "Handle value (hex)",

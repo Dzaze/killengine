@@ -354,6 +354,18 @@
       "confirmTitle": "Activer SeDebugName",
       "confirmDesc": "Activer le privilège SeDebugName pour le processus courant — requis pour les breakpoints matériels et l'injection."
     },
+    "kernel": {
+      "guideTitle": "Prérequis : Test Signing",
+      "guideDesc": "KillEngineKernel.sys n'est pas signé par Microsoft (WHQL/EV) — Windows refuse de le charger tant que le mode Test Signing n'est pas activé sur cette machine. C'est réversible : désactive-le une fois que tu n'as plus besoin du driver.",
+      "testSigningLabel": "Test Signing",
+      "enable": "Activer (UAC)",
+      "disable": "Désactiver (UAC)",
+      "rebootWarning": "Un redémarrage Windows est nécessaire pour que le changement prenne effet, et affiche un watermark « Test Mode » permanent sur le bureau tant que c'est actif.",
+      "confirmEnableTitle": "Activer le mode Test Signing",
+      "confirmEnableDesc": "Active le mode Test Signing Windows (bcdedit, élévation UAC requise) pour permettre le chargement du driver noyau non signé KillEngineKernel.sys. Affiche un watermark permanent et réduit légèrement la vérification des pilotes chargés par Windows. ⚠ Un redémarrage est nécessaire pour que le changement prenne effet.",
+      "confirmDisableTitle": "Désactiver le mode Test Signing",
+      "confirmDisableDesc": "Désactive le mode Test Signing Windows (bcdedit, élévation UAC requise). Le driver noyau KillEngineKernel.sys ne pourra plus se charger tant qu'il reste désactivé. ⚠ Un redémarrage est nécessaire pour que le changement prenne effet."
+    },
     "handleHider": {
       "ownerPid": "PID du process cible",
       "handleValue": "Valeur du handle (hex)",

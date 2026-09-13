@@ -1114,6 +1114,18 @@ public:
     /// defenderBehaviorMonitoringDisabledFinished.
     Q_INVOKABLE QVariantMap setDefenderBehaviorMonitoringDisabledAsync(bool disabled);
 
+    /// Lit l'état actuel du mode Test Signing Windows (`bcdedit /enum {current}`,
+    /// lecture seule, pas d'élévation nécessaire) — prérequis pour charger
+    /// KillEngineKernel.sys, qui n'est pas signé WHQL/EV. Voir
+    /// docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md.
+    Q_INVOKABLE QVariantMap getTestSigningStatus() const;
+
+    /// Active (enabled=true) ou désactive (enabled=false) le mode Test Signing
+    /// via bcdedit (élévation UAC, réversible, nécessite un redémarrage Windows
+    /// pour prendre effet). Non bloquant, même mécanisme que
+    /// setWindowsDefenderDisabledAsync ; résultat via testSigningEnabledFinished.
+    Q_INVOKABLE QVariantMap setTestSigningEnabledAsync(bool enabled);
+
     /// Vérifie si le privilège SeDebugName est actif pour le process courant.
     Q_INVOKABLE QVariantMap checkDebugPrivilege() const;
 
@@ -1654,6 +1666,8 @@ signals:
     void windowsDefenderDisabledFinished(const QVariantMap& result);
     /// Résultat différé de setDefenderBehaviorMonitoringDisabledAsync.
     void defenderBehaviorMonitoringDisabledFinished(const QVariantMap& result);
+    /// Résultat différé de setTestSigningEnabledAsync.
+    void testSigningEnabledFinished(const QVariantMap& result);
 
     /// Résultat différé de spoofDnsAsync.
     void dnsSpoofFinished(const QVariantMap& result);

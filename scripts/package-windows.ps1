@@ -10,6 +10,7 @@ param(
     [switch]$SkipBuild,
     [switch]$ExcludeModel,
     [switch]$SkipClrInspector,
+    [switch]$SkipKernelDriver,
     [switch]$RequireSigning
 )
 
@@ -120,6 +121,7 @@ Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\PHASE_TRACKER.md") -Destinati
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\USER_GUIDE.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\V1_REGRESSION_CHECKLIST.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\AUTOMATION_API.md") -Destination $packageRoot
+Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\PORTABILITY_ROADMAP.md") -Destination $packageRoot
 
 $llamaCli = Find-FirstExistingFile -Paths @(
     (Join-Path $repoRoot "third_party\llama.cpp\llama-cli.exe"),
@@ -141,6 +143,16 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\automation-pipe-call.ps1") 
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\add_defender_exclusion.bat") -Destination $scriptsOut -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\disable_defender_registry.bat") -Destination $scriptsOut -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\enable_defender_registry.bat") -Destination $scriptsOut -Force
+
+# Test Signing helper scripts (prerequisite to load the unsigned kernel driver,
+# see docs/KILLENGINE_KERNEL_DRIVER_ARCHITECTURE.md) — used by Settings'
+# getTestSigningStatus/setTestSigningEnabledAsync.
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\enable_test_signing.bat") -Destination $scriptsOut -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\disable_test_signing.bat") -Destination $scriptsOut -Force
+
+# Kernel driver install/uninstall script (used by the Modules view's
+# installModule("kernel_driver")) — the compiled .sys itself is copied below.
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\install-kernel-driver.ps1") -Destination $scriptsOut -Force
 
 $luaExamples = Join-Path $repoRoot "scripts\lua_examples"
 if (Test-Path $luaExamples) {
@@ -213,6 +225,32 @@ if (-not $SkipClrInspector) {
     Write-Warning "KillEngineClrInspector skipped. The CLR view will require a dev-built helper or will report it as unavailable."
 }
 
+# Kernel driver (optional module, not required for the app to run): unlike
+# the CLR inspector above, building KillEngineKernel.sys needs the WDK/MSBuild
+# toolchain, which may not be present on every machine that packages a
+# release -- best-effort include, warn instead of failing the whole package.
+# Without this, the Modules "Installer" button for kernel_driver has nothing
+# to install once the ZIP leaves this machine (install-kernel-driver.ps1 looks
+# for the .sys under tools\kernel_driver relative to the exe).
+if (-not $SkipKernelDriver) {
+    $kernelDriverSys = Get-ChildItem (Join-Path $repoRoot "tools\kernel_driver") -Recurse -Filter "KillEngineKernel.sys" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -like "*\Release\*" } |
+        Select-Object -First 1 -ExpandProperty FullName
+
+    if ($kernelDriverSys) {
+        # install-kernel-driver.ps1 requires the found path to contain
+        # "\Release\" (its -Configuration filter) -- keep that segment.
+        $kernelDriverOut = Join-Path $packageRoot "tools\kernel_driver\Release"
+        New-Item -ItemType Directory -Force -Path $kernelDriverOut | Out-Null
+        Copy-Item -LiteralPath $kernelDriverSys -Destination $kernelDriverOut -Force
+        Write-Host "Kernel driver bundled: $kernelDriverSys" -ForegroundColor Cyan
+    } else {
+        Write-Warning "KillEngineKernel.sys (Release) not found under tools\kernel_driver. Build it first with .\scripts\build-kernel-driver.ps1, or pass -SkipKernelDriver to suppress this warning. The Modules 'Install' button for the kernel driver will report the driver as missing in this package."
+    }
+} else {
+    Write-Warning "Kernel driver skipped (-SkipKernelDriver). The Modules 'Install' button for the kernel driver will report the driver as missing in this package."
+}
+
 $modelRoot = Join-Path $repoRoot "model"
 $modelOut = Join-Path $packageRoot "model"
 New-Item -ItemType Directory -Force -Path $modelOut | Out-Null
@@ -267,7 +305,7 @@ Notes:
   - The normal product layout is model\<ai-name>\ next to KillEngine.exe.
   - Agent folders use MODEL_MANIFEST.json and may point to shared GGUF weights.
   - A custom model path is only an advanced override.
-  - Logs and profiles are stored under the Windows local app data folder.
+  - Logs, crash dumps, settings, workspace data and Pattern Learning profiles are all stored next to KillEngine.exe (portable by design) -- see PORTABILITY_ROADMAP.md.
   - Read USER_GUIDE.md for the V1 user workflow.
   - Read AUTOMATION_API.md to script KillEngine via the local JSON-RPC pipe (Lua scripting, or your own agent/tool).
   - If the app does not start from a development checkout, run scripts\diagnose-launch.ps1.
@@ -304,6 +342,9 @@ $requiredRuntimeItems = @(
     "scripts\add_defender_exclusion.bat",
     "scripts\disable_defender_registry.bat",
     "scripts\enable_defender_registry.bat",
+    "scripts\enable_test_signing.bat",
+    "scripts\disable_test_signing.bat",
+    "scripts\install-kernel-driver.ps1",
     "scripts\lua_examples\README.md",
     "USER_GUIDE.md",
     "V1_REGRESSION_CHECKLIST.md",
