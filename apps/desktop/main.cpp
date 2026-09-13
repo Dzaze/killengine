@@ -14,7 +14,6 @@
 #include <QIcon>
 #include <QDir>
 #include <QSettings>
-#include <QStandardPaths>
 
 #include <exception>
 
@@ -110,8 +109,18 @@ int runApplication(int argc, char* argv[]) {
     // au lieu de dependre du profil par defaut dont le chemin peut ne pas etre
     // fige a temps si WebEngine s'initialise avant que setApplicationName/
     // setOrganizationName aient un effet visible pour lui.
+    //
+    // Portabilite reelle (13/09/2026, docs/PORTABILITY_ROADMAP.md candidat P2) :
+    // c'est ici, pas dans QSettings (candidat P1, deja traite), que vivent les
+    // features Trainer, le workspace (bookmarks/templates/projets) et le
+    // journal d'action -- tout ce que le frontend Vue persiste via
+    // window.localStorage. AppLocalDataLocation (%LOCALAPPDATA%) cassait le
+    // mode portable au meme titre que le registre : deplacer le dossier de
+    // l'app perdait silencieusement cette donnee. Redirige vers un dossier
+    // relatif a l'executable, comme le reste des donnees portables du projet
+    // (modele IA, helper CLR Inspector, KillEngine.ini).
     const QString webEngineStoragePath =
-        QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("webengine");
+        QDir(QCoreApplication::applicationDirPath()).filePath("webengine");
     KE_LOG_INFO() << "WebEngine persistent storage path: " << webEngineStoragePath.toStdString();
     auto* webEngineProfile = new QWebEngineProfile(QStringLiteral("KillEngineProfile"), &mainWindow);
     webEngineProfile->setPersistentStoragePath(webEngineStoragePath);

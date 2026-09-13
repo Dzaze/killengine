@@ -50,7 +50,7 @@ Décision propriétaire : distribution en libre-service sur SourceForge, en mode
 | # | Candidat | Fichier(s) | Priorité | Statut |
 | --- | --- | --- | --- | --- |
 | [x] P1 | Rediriger `QSettings` (registre → INI relatif à l'exe) | `apps/desktop/main.cpp` | **Haute** — couvre ~30+ sites d'un coup | **Fait 13/09/2026** |
-| [ ] P2 | Rediriger le stockage persistant WebEngine (Trainer/workspace/journal d'action) | `apps/desktop/main.cpp` | **Haute** — donnée utilisateur la plus riche après les réglages | Pas commencé |
+| [x] P2 | Rediriger le stockage persistant WebEngine (Trainer/workspace/journal d'action) | `apps/desktop/main.cpp` | **Haute** — donnée utilisateur la plus riche après les réglages | **Fait 13/09/2026** |
 | [ ] P3 | Rediriger le dossier de logs | `apps/desktop/main.cpp` (juste renseigner `Logger::init(logDir)`, déjà supporté) | Moyenne | Pas commencé |
 | [ ] P4 | Rediriger le dossier de dumps de crash | `apps/desktop/crash_handler.cpp::crashDirectory()` | Moyenne | Pas commencé |
 | [ ] P5 | Rediriger la base Pattern Learning | `apps/desktop/pattern_learning_manager.cpp::getDatabasePath()` | Moyenne — vraie donnée apprise, pas du cache | Pas commencé |
@@ -71,6 +71,12 @@ Décision propriétaire : distribution en libre-service sur SourceForge, en mode
 **Vérifié en direct** : lancé l'app, basculé la langue en anglais via l'UI (déclenche `SettingsDiagnosticsManager::setUiLanguage()` → `QSettings().setValue(...)` + `sync()`) → `build/bin/KillEngine/KillEngine.ini` créé avec `[ui]\nlanguage=en`. Vérifié que le registre (`HKCU\Software\KillEngine\KillEngine\ui\language`) n'a **pas** été modifié (toujours `fr`, valeur laissée par les sessions précédentes) — confirme que l'app n'écrit plus du tout dans le registre. Build + 470/470 tests unitaires propres (la suite de tests garde son propre comportement registre, comme prévu par la Décision de méthode 3 — elle a son propre `main()` googletest, jamais celui d'`apps/desktop/main.cpp`).
 
 **Non re-testé formellement** : la lecture après redémarrage complet du process (relance de l'exe et confirmation visuelle que l'anglais est bien réappliqué) — le mécanisme de lecture est le même `QSettings().value(...)` inchangé partout dans le code, seul le format/emplacement change, donc risque jugé négligeable ; le fichier INI a été relu manuellement après un redémarrage et contenait toujours `language=en`, sans passer par l'UI pour le confirmer visuellement (CDP indisponible au moment du test, non bloquant).
+
+### 13/09/2026 — P2 clos
+
+`webEngineStoragePath` dans `apps/desktop/main.cpp` redirigé de `QStandardPaths::AppLocalDataLocation` vers `QDir(QCoreApplication::applicationDirPath()).filePath("webengine")` — un seul changement, `setCachePath`/`setPersistentStoragePath` restent co-localisés comme avant (juste la base qui change). Include `QStandardPaths` retiré (devenu inutilisé dans ce fichier).
+
+**Vérifié en direct** : lancé l'app, écrit une clé de test dans `window.localStorage` via CDP (`localStorage.setItem("portability_p2_test", "hello_portable_world")`), confirmé la création de `build/bin/webengine/Local Storage/leveldb/` (vraie base LevelDB Chromium, pas un profil en mémoire). Fermé et relancé le process : la clé/valeur de test est bien retrouvée dans le fichier `.log` de la leveldb après redémarrage (vérifié par lecture directe du fichier, CDP indisponible au second lancement — non bloquant, la preuve fichier est aussi solide). Build + 470/470 tests unitaires propres.
 
 ## Règle d'usage
 
