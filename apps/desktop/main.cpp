@@ -13,6 +13,7 @@
 #include <QUrl>
 #include <QIcon>
 #include <QDir>
+#include <QSettings>
 #include <QStandardPaths>
 
 #include <exception>
@@ -48,6 +49,20 @@ int runApplication(int argc, char* argv[]) {
     app.setApplicationName("KillEngine");
     app.setOrganizationName("KillEngine");
     app.setApplicationVersion(KILLENGINE_VERSION);
+
+    // Portabilite reelle (13/09/2026, docs/PORTABILITY_ROADMAP.md candidat P1) :
+    // QSettings() par defaut ecrit dans le registre Windows
+    // (HKCU\Software\KillEngine\KillEngine), ce qui casse le mode portable
+    // annonce par scripts/package-windows.ps1 (KillEngine-portable.zip) -- un
+    // dossier deplace/copie perd silencieusement tous les reglages. Les
+    // ~30+ sites QSettings() du projet utilisent tous le constructeur par
+    // defaut : ce seul changement les redirige tous vers un fichier INI a
+    // cote de l'executable, sans toucher un autre fichier. Doit s'executer
+    // AVANT toute construction de QSettings (Logger/CrashHandler/
+    // ApplicationController plus bas en dependent tous indirectement).
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                        QCoreApplication::applicationDirPath());
 
 #ifdef _DEBUG
     attachConsole();

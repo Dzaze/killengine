@@ -49,7 +49,7 @@ Décision propriétaire : distribution en libre-service sur SourceForge, en mode
 
 | # | Candidat | Fichier(s) | Priorité | Statut |
 | --- | --- | --- | --- | --- |
-| [ ] P1 | Rediriger `QSettings` (registre → INI relatif à l'exe) | `apps/desktop/main.cpp` | **Haute** — couvre ~30+ sites d'un coup | Pas commencé |
+| [x] P1 | Rediriger `QSettings` (registre → INI relatif à l'exe) | `apps/desktop/main.cpp` | **Haute** — couvre ~30+ sites d'un coup | **Fait 13/09/2026** |
 | [ ] P2 | Rediriger le stockage persistant WebEngine (Trainer/workspace/journal d'action) | `apps/desktop/main.cpp` | **Haute** — donnée utilisateur la plus riche après les réglages | Pas commencé |
 | [ ] P3 | Rediriger le dossier de logs | `apps/desktop/main.cpp` (juste renseigner `Logger::init(logDir)`, déjà supporté) | Moyenne | Pas commencé |
 | [ ] P4 | Rediriger le dossier de dumps de crash | `apps/desktop/crash_handler.cpp::crashDirectory()` | Moyenne | Pas commencé |
@@ -61,6 +61,16 @@ Décision propriétaire : distribution en libre-service sur SourceForge, en mode
 1. **P1 puis P2** — les deux vrais blocages ; P2 dépend d'un profil `QWebEngineProfile` déjà nommé explicitement (juste changer le chemin de base), aucun risque de régression sur le mécanisme lui-même (déjà expliqué en commentaire dans `main.cpp` : le profil nommé existe justement pour forcer une vraie base LevelDB sur disque).
 2. **P3, P4, P5** — mécaniques, faible risque, à faire dans n'importe quel ordre.
 3. **P6** — une fois P1-P5 clos, documenter ce qui reste volontairement non-portable pour ne pas laisser l'utilisateur découvrir la limite DPAPI par surprise après un déplacement de dossier.
+
+## Progrès
+
+### 13/09/2026 — P1 clos
+
+`QSettings::setDefaultFormat(QSettings::IniFormat)` + `QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, applicationDirPath())` ajoutés dans `apps/desktop/main.cpp`, juste après `setApplicationName`/`setOrganizationName`, avant toute autre construction de `QSettings`. Résultat empirique : Qt compose le chemin `<applicationDirPath()>/KillEngine/KillEngine.ini` (organisation/application imbriquées, comportement standard de `IniFormat`+`UserScope`).
+
+**Vérifié en direct** : lancé l'app, basculé la langue en anglais via l'UI (déclenche `SettingsDiagnosticsManager::setUiLanguage()` → `QSettings().setValue(...)` + `sync()`) → `build/bin/KillEngine/KillEngine.ini` créé avec `[ui]\nlanguage=en`. Vérifié que le registre (`HKCU\Software\KillEngine\KillEngine\ui\language`) n'a **pas** été modifié (toujours `fr`, valeur laissée par les sessions précédentes) — confirme que l'app n'écrit plus du tout dans le registre. Build + 470/470 tests unitaires propres (la suite de tests garde son propre comportement registre, comme prévu par la Décision de méthode 3 — elle a son propre `main()` googletest, jamais celui d'`apps/desktop/main.cpp`).
+
+**Non re-testé formellement** : la lecture après redémarrage complet du process (relance de l'exe et confirmation visuelle que l'anglais est bien réappliqué) — le mécanisme de lecture est le même `QSettings().value(...)` inchangé partout dans le code, seul le format/emplacement change, donc risque jugé négligeable ; le fichier INI a été relu manuellement après un redémarrage et contenait toujours `language=en`, sans passer par l'UI pour le confirmer visuellement (CDP indisponible au moment du test, non bloquant).
 
 ## Règle d'usage
 
