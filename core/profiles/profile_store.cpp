@@ -1,14 +1,21 @@
 #include "profile_store.h"
 
 #include "logging/logger.h"
+#include "memory/memory_reader.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QCryptographicHash>
+#include <QDateTime>
+#include <QElapsedTimer>
+#include <QRegularExpression>
+#include <QSet>
 
 #include <nlohmann/json.hpp>
 
@@ -104,11 +111,126 @@ Locator locatorFromJson(const QJsonObject& json) {
     return loc;
 }
 
+QJsonObject resolutionPlanToJson(const ProfileResolutionPlan& plan) {
+    QJsonArray alternatives;
+    for (const auto& locator : plan.alternatives) alternatives.append(locatorToJson(locator));
+    return {{"schemaVersion", 1}, {"invalid", plan.invalid},
+            {"discoveryMethod", plan.discoveryMethod}, {"expectedBytes", plan.expectedBytes},
+            {"validationTest", plan.validationTest}, {"executableHash", plan.executableHash},
+            {"recordedSession", plan.recordedSession}, {"recordedAt", plan.recordedAt},
+            {"evidenceNote", plan.evidenceNote}, {"moduleHashes", plan.moduleHashes},
+            {"baselineObservation", plan.baselineObservation},
+            {"alternativeNames", QJsonArray::fromStringList(plan.alternativeNames)},
+            {"alternatives", alternatives}};
+}
+
+ProfileResolutionPlan resolutionPlanFromJson(const QJsonValue& value) {
+    ProfileResolutionPlan plan;
+    if (value.isUndefined()) return plan;
+    const QJsonObject json = value.toObject();
+    plan.invalid = !value.isObject() || json.value("invalid").toBool()
+        || (json.contains("schemaVersion") && json.value("schemaVersion").toInt(-1) != 1);
+    for (const QString& key : {QString("discoveryMethod"), QString("expectedBytes"), QString("validationTest"),
+                              QString("executableHash"), QString("recordedSession"), QString("recordedAt"), QString("evidenceNote")}) {
+        if (json.contains(key) && !json.value(key).isString()) plan.invalid = true;
+    }
+    if ((json.contains("alternatives") && !json.value("alternatives").isArray())
+        || (json.contains("moduleHashes") && !json.value("moduleHashes").isObject())) plan.invalid = true;
+    plan.discoveryMethod = json.value("discoveryMethod").toString();
+    plan.expectedBytes = json.value("expectedBytes").toString();
+    plan.validationTest = json.value("validationTest").toString();
+    plan.executableHash = json.value("executableHash").toString();
+    plan.recordedSession = json.value("recordedSession").toString();
+    plan.recordedAt = json.value("recordedAt").toString();
+    plan.evidenceNote = json.value("evidenceNote").toString();
+    plan.baselineObservation = json.value("baselineObservation").toObject();
+    plan.moduleHashes = json.value("moduleHashes").toObject();
+    for (const auto& name : json.value("alternativeNames").toArray()) plan.alternativeNames.append(name.toString());
+    for (const auto& item : json.value("alternatives").toArray()) {
+        const QString kind = item.toObject().value("kind").toString();
+        if (!item.isObject() || (kind != "module_offset" && kind != "pointer_chain"
+            && kind != "absolute" && kind != "clr_field")) plan.invalid = true;
+        plan.alternatives.append(locatorFromJson(item.toObject()));
+        if (plan.alternatives.size() > 8) { plan.invalid = true; break; }
+    }
+    return plan;
+}
+
+bool parseExpectedBytes(const QString& text, QByteArray* bytes) {
+    QString compact = text;
+    compact.remove(QRegularExpression("\\s"));
+    if (compact.isEmpty()) { bytes->clear(); return true; }
+    static const QRegularExpression hex("^[0-9a-fA-F]+$");
+    if (compact.size() > 128 || compact.size() % 2 != 0 || !hex.match(compact).hasMatch()) return false;
+    *bytes = QByteArray::fromHex(compact.toLatin1());
+    return true;
+}
+
+QString resolutionModule(const Locator& locator) {
+    if (locator.kind == LocatorKind::Absolute || locator.kind == LocatorKind::ClrField) return {};
+    return (locator.kind == LocatorKind::PointerChain
+        ? locator.pointerChain.module : locator.module).toLower();
+}
+
+Locator patchLocator(const ProfileCodePatch& patch) {
+    Locator locator;
+    locator.kind = LocatorKind::ModuleOffset;
+    locator.module = patch.module;
+    locator.offset = patch.moduleOffset;
+    return locator;
+}
+
+// File fingerprints are bounded: unknown is preferable to stalling the GUI or
+// accepting a truncated hash. Cache lifetime is one diagnostic request only.
+QString resolutionFileHash(const QString& path, QElapsedTimer& timer, qint64& budget) {
+    QFile file(path);
+    if (path.isEmpty() || timer.elapsed() > 1500 || !file.open(QIODevice::ReadOnly)
+        || file.size() > 64 * 1024 * 1024 || file.size() > budget) return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!file.atEnd()) {
+        if (timer.elapsed() > 1500) return {};
+        const QByteArray block = file.read(64 * 1024);
+        if (block.isEmpty() || block.size() > budget) return {};
+        budget -= block.size();
+        hash.addData(block);
+    }
+    if (file.error() != QFileDevice::NoError) return {};
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+ProfileResolutionContext resolutionContext(const ProcessHandle& process,
+                                           const QList<ProcessModuleInfo>& modules,
+                                           const QSet<QString>& requiredModules) {
+    ProfileResolutionContext context;
+    context.executableName = process.executableName();
+#ifdef Q_OS_WIN
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (GetProcessTimes(process.rawHandle(), &created, &exited, &kernel, &user)) {
+        const quint64 stamp = (quint64(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+        context.session = QString("%1:%2").arg(process.pid()).arg(stamp);
+    }
+#endif
+    QElapsedTimer timer;
+    timer.start();
+    qint64 budget = 128 * 1024 * 1024;
+    const QString executablePath = process.executablePath();
+    context.executableHash = resolutionFileHash(executablePath, timer, budget);
+    for (const auto& module : modules) {
+        const QString name = module.name.toLower();
+        if (!requiredModules.contains(name)) continue;
+        const QString hash = module.path.compare(executablePath, Qt::CaseInsensitive) == 0
+            ? context.executableHash : resolutionFileHash(module.path, timer, budget);
+        context.moduleHashes[name] = hash;
+    }
+    return context;
+}
+
 QJsonObject targetToJson(const ProfileTarget& target) {
     QJsonObject json;
     json["name"] = target.name;
     json["type"] = valueTypeToString(target.type);
     json["locator"] = locatorToJson(target.locator);
+    json["resolutionPlan"] = resolutionPlanToJson(target.resolutionPlan);
     if (!target.description.isEmpty()) {
         json["description"] = target.description;
     }
@@ -139,6 +261,7 @@ QJsonObject patchToJson(const ProfileCodePatch& patch) {
     json["moduleOffset"] = QString::number(patch.moduleOffset, 16);
     json["aobPattern"] = patch.aobPattern;
     json["patchBytes"] = patch.patchBytes;
+    json["resolutionPlan"] = resolutionPlanToJson(patch.resolutionPlan);
     if (!patch.originalBytes.isEmpty()) {
         json["originalBytes"] = patch.originalBytes;
     }
@@ -222,6 +345,7 @@ ProfileTarget targetFromJson(const QJsonObject& json) {
     target.name = json.value("name").toString();
     parseValueType(json.value("type").toString("Int32"), &target.type);
     target.locator = locatorFromJson(json.value("locator").toObject());
+    target.resolutionPlan = resolutionPlanFromJson(json.value("resolutionPlan"));
     target.description = json.value("description").toString();
     target.ghidraSymbol = json.value("ghidraSymbol").toString();
     target.ghidraNote = json.value("ghidraNote").toString();
@@ -244,6 +368,7 @@ ProfileCodePatch patchFromJson(const QJsonObject& json) {
     patch.moduleOffset = json.value("moduleOffset").toString().toULongLong(nullptr, 16);
     patch.aobPattern = json.value("aobPattern").toString();
     patch.patchBytes = json.value("patchBytes").toString();
+    patch.resolutionPlan = resolutionPlanFromJson(json.value("resolutionPlan"));
     patch.originalBytes = json.value("originalBytes").toString();
     patch.disassembly = json.value("disassembly").toString();
     patch.riskLevel = json.value("riskLevel").toString();
@@ -319,14 +444,17 @@ bool ProfileStore::save(const Profile& profile, const QString& filename) {
 
     QJsonDocument doc(root);
 
-    QFile file(filename);
+    QSaveFile file(filename);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         KE_LOG_ERROR() << "ProfileStore: Cannot write" << filename.toStdString();
         return false;
     }
 
-    file.write(doc.toJson(QJsonDocument::Indented));
-    file.close();
+    const QByteArray encoded = doc.toJson(QJsonDocument::Indented);
+    if (file.write(encoded) != encoded.size() || !file.commit()) {
+        KE_LOG_ERROR() << "ProfileStore: Cannot commit " << filename.toStdString();
+        return false;
+    }
 
     KE_LOG_INFO() << "Profile saved: " << filename.toStdString()
                   << " (" << profile.targets.size() << " targets)";
@@ -477,6 +605,239 @@ ProfileStore::PointerMapImportResult ProfileStore::mergePointerMap(
     }
 
     return result;
+}
+
+QJsonObject diagnoseProfileResolution(const QString& expectedExecutable,
+                                     const QString& legacyExecutableHash,
+                                     const Locator& primary,
+                                     const ProfileResolutionPlan& plan,
+                                     const ProfileResolutionContext& context,
+                                     const QList<LocatorProbe>& observations) {
+    QJsonObject result{{"status", "unverified"}, {"conditionsVerified", false},
+                       {"automaticApplicationAllowed", false}, {"candidateAddress", ""},
+                       {"requiredTest", plan.validationTest}, {"plan", resolutionPlanToJson(plan)}};
+    auto finish = [&](const QString& status, const QString& nextAction) {
+        result["status"] = status;
+        result["nextAction"] = nextAction;
+        return result;
+    };
+    QByteArray expected;
+    if (plan.invalid || !parseExpectedBytes(plan.expectedBytes, &expected) || plan.alternatives.size() > 8
+        || observations.size() != plan.alternatives.size() + 1) {
+        return finish("invalid_conditions", "edit_conditions");
+    }
+    if (!expectedExecutable.isEmpty()
+        && context.executableName.compare(expectedExecutable, Qt::CaseInsensitive) != 0) {
+        return finish("wrong_process", "attach_expected_process");
+    }
+    const QString expectedHash = plan.executableHash.isEmpty() ? legacyExecutableHash : plan.executableHash;
+    const bool versionKnown = !expectedHash.isEmpty() && !context.executableHash.isEmpty();
+    const bool versionChanged = versionKnown
+        && expectedHash.compare(context.executableHash, Qt::CaseInsensitive) != 0;
+    result["executableVersionChanged"] = versionChanged;
+    result["versionKnown"] = versionKnown;
+    result["sessionChanged"] = !plan.recordedSession.isEmpty() && !context.session.isEmpty()
+        && plan.recordedSession != context.session;
+    QList<Locator> locators{primary};
+    locators.append(plan.alternatives);
+    QJsonArray candidates;
+    QSet<quint64> matchingAddresses;
+    int selected = -1;
+    bool incomplete = false;
+    int readable = 0;
+    for (qsizetype i = 0; i < observations.size(); ++i) {
+        const auto& observation = observations[i];
+        const bool matches = observation.readable && observation.resolved && observation.address != 0
+            && (expected.isEmpty() || observation.bytes == expected);
+        const QString code = observation.errorCode;
+        incomplete = incomplete || code == "unsupported_locator" || code == "ambiguous_module"
+            || code == "invalid_probe" || code == "pointer_unreadable" || code == "address_unreadable";
+        if (observation.readable) ++readable;
+        if (matches) {
+            matchingAddresses.insert(observation.address);
+            if (selected < 0) selected = static_cast<int>(i);
+        }
+        QJsonObject candidate{{"index", static_cast<int>(i)}, {"locator", locators[i].toString()},
+                              {"address", observation.resolved ? QString::number(observation.address, 16) : QString()},
+                              {"readable", observation.readable}, {"matchesConditions", matches && !expected.isEmpty()},
+                              {"observedBytes", QString::fromLatin1(observation.bytes.toHex(' '))},
+                              {"errorCode", code}};
+        candidates.append(candidate);
+    }
+    result["candidates"] = candidates;
+    result["candidateCount"] = matchingAddresses.size();
+    if (matchingAddresses.size() > 1) return finish("ambiguous", "disambiguate_candidates");
+    if (incomplete) return finish("inconclusive", "retry_read_or_inspect_manually");
+    if (selected < 0) return finish(readable > 0 ? "conditions_mismatch" : "missing", "rediscover_target");
+    result["candidateAddress"] = QString::number(observations[selected].address, 16);
+    result["candidateIndex"] = selected;
+    result["addressMoved"] = primary.lastAddress != 0 && primary.lastAddress != observations[selected].address;
+    const QString moduleName = resolutionModule(locators[selected]);
+    const QString savedModuleHash = plan.moduleHashes.value(moduleName).toString();
+    const QString currentModuleHash = context.moduleHashes.value(moduleName).toString();
+    const bool moduleKnown = !savedModuleHash.isEmpty() && !currentModuleHash.isEmpty();
+    const bool moduleChanged = moduleKnown && savedModuleHash != currentModuleHash;
+    result["moduleVersionChanged"] = moduleChanged;
+    if (versionChanged || moduleChanged) return finish("version_changed", "revalidate_on_current_version");
+    if (selected != 0) return finish("repair_candidate", "test_alternative_before_replacing");
+    if (primary.kind == LocatorKind::Absolute
+        && (plan.recordedSession.isEmpty() || context.session.isEmpty() || plan.recordedSession != context.session)) {
+        return finish("session_changed", "rediscover_absolute_address");
+    }
+    if (expectedExecutable.isEmpty() || expected.isEmpty() || !versionKnown || (!moduleName.isEmpty() && !moduleKnown)) {
+        return finish("unverified", "record_and_check_stable_conditions");
+    }
+    result["conditionsVerified"] = true;
+    return finish("conditions_verified", "verify_effect_separately");
+}
+
+QJsonObject ProfileStore::diagnose(const Profile& profile, const ProcessHandle& process) {
+    if (!process.isValid()) return {{"success", false}, {"errorCode", "no_process"}};
+    if (profile.targets.size() + profile.patches.size() > 256) {
+        return {{"success", false}, {"errorCode", "too_many_entries"}};
+    }
+    QElapsedTimer diagnosticTimer;
+    diagnosticTimer.start();
+    const auto modules = ProcessEnumerator::enumerateModules(process.pid());
+    QSet<QString> requiredModules;
+    auto collect = [&](const Locator& locator, const ProfileResolutionPlan& plan) {
+        requiredModules.insert(resolutionModule(locator));
+        for (const auto& alternative : plan.alternatives) requiredModules.insert(resolutionModule(alternative));
+    };
+    for (const auto& target : profile.targets) collect(target.locator, target.resolutionPlan);
+    for (const auto& patch : profile.patches) collect(patchLocator(patch), patch.resolutionPlan);
+    const auto context = resolutionContext(process, modules, requiredModules);
+    MemoryReader reader(process);
+    const size_t pointerBytes = process.architecture() == Architecture::x86 ? 4 : 8;
+    const LocatorReadBytes read = [&](uint64_t address, size_t count) {
+        if (diagnosticTimer.elapsed() > 2000) return QByteArray();
+        const auto result = reader.read(address, count);
+        return result.success && !result.partial ? result.data : QByteArray();
+    };
+    QJsonArray entries;
+    auto inspect = [&](const QString& kind, const QString& name, const Locator& locator,
+                       const ProfileResolutionPlan& plan, size_t valueBytes) {
+        QByteArray expected;
+        QList<LocatorProbe> observations;
+        if (parseExpectedBytes(plan.expectedBytes, &expected) && plan.alternatives.size() <= 8) {
+            const size_t count = expected.isEmpty() ? std::clamp<size_t>(valueBytes, 1, 64) : expected.size();
+            observations.append(probeLocator(locator, modules, pointerBytes, count, read));
+            for (const auto& alternative : plan.alternatives) {
+                observations.append(probeLocator(alternative, modules, pointerBytes, count, read));
+            }
+        }
+        auto item = diagnoseProfileResolution(profile.executableName, profile.executableHash,
+                                             locator, plan, context, observations);
+        item["entryKind"] = kind;
+        item["name"] = name;
+        entries.append(item);
+    };
+    for (const auto& target : profile.targets) {
+        inspect("target", target.name, target.locator, target.resolutionPlan, valueTypeSize(target.type));
+    }
+    for (const auto& patch : profile.patches) {
+        auto plan = patch.resolutionPlan;
+        if (plan.expectedBytes.isEmpty()) plan.expectedBytes = patch.originalBytes;
+        inspect("patch", patch.name, patchLocator(patch), plan, 1);
+    }
+    return {{"success", true}, {"entries", entries}, {"session", context.session},
+            {"executableName", context.executableName}, {"executableHash", context.executableHash},
+            {"observedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+            {"readBudgetExceeded", diagnosticTimer.elapsed() > 2000},
+            {"automaticApplicationAllowed", false}, {"scope", "stored_locators_only"}};
+}
+
+bool ProfileStore::setResolutionPlan(Profile* profile, const QString& entryKind,
+                                     const QString& entryName, const QJsonObject& options,
+                                     const ProcessHandle& process, QString* error) {
+    auto fail = [&](const QString& code) { if (error) *error = code; return false; };
+    if (!profile || !process.isValid()) return fail("no_process");
+    if (profile->executableName.isEmpty()
+        || profile->executableName.compare(process.executableName(), Qt::CaseInsensitive) != 0) {
+        return fail("wrong_process");
+    }
+    ProfileResolutionPlan* destination = nullptr;
+    Locator primary;
+    ValueType primaryType{ValueType::Int32};
+    if (entryKind == "target") {
+        for (auto& target : profile->targets) {
+            if (target.name != entryName) continue;
+            if (destination) return fail("ambiguous_entry_name");
+            destination = &target.resolutionPlan;
+            primary = target.locator;
+            primaryType = target.type;
+        }
+    } else if (entryKind == "patch") {
+        for (auto& patch : profile->patches) {
+            if (patch.name != entryName) continue;
+            if (destination) return fail("ambiguous_entry_name");
+            destination = &patch.resolutionPlan;
+            primary = patchLocator(patch);
+        }
+    } else return fail("invalid_entry_kind");
+    if (!destination) return fail("entry_not_found");
+    ProfileResolutionPlan plan;
+    plan.discoveryMethod = options.value("discoveryMethod").toString().trimmed();
+    plan.validationTest = options.value("validationTest").toString().trimmed();
+    plan.evidenceNote = options.value("evidenceNote").toString().trimmed();
+    QByteArray expected;
+    if (!options.value("expectedBytes").isString()
+        || !parseExpectedBytes(options.value("expectedBytes").toString(), &expected)) return fail("invalid_conditions");
+    if (plan.discoveryMethod.isEmpty() || plan.discoveryMethod.size() > 512
+        || plan.validationTest.isEmpty() || plan.validationTest.size() > 2048
+        || plan.evidenceNote.size() > 2048) return fail("invalid_plan");
+    plan.expectedBytes = QString::fromLatin1(expected.toHex(' '));
+    if (!options.value("alternativeNames").isArray()) return fail("invalid_alternatives");
+    const auto names = options.value("alternativeNames").toArray();
+    if (names.size() > 8) return fail("too_many_alternatives");
+    QSet<QString> seen;
+    for (const auto& value : names) {
+        if (!value.isString() || value.toString().isEmpty() || value.toString() == entryName
+            || seen.contains(value.toString())) return fail("invalid_alternatives");
+        const QString name = value.toString();
+        seen.insert(name);
+        plan.alternativeNames.append(name);
+        int matches = 0;
+        Locator alternative;
+        if (entryKind == "target") {
+            for (const auto& target : profile->targets) {
+                if (target.name == name) {
+                    if (target.type != primaryType) return fail("alternative_type_mismatch");
+                    alternative = target.locator;
+                    ++matches;
+                }
+            }
+        } else {
+            for (const auto& patch : profile->patches) {
+                if (patch.name == name) { alternative = patchLocator(patch); ++matches; }
+            }
+        }
+        if (matches != 1) return fail("alternative_not_unique");
+        plan.alternatives.append(alternative);
+    }
+    const auto modules = ProcessEnumerator::enumerateModules(process.pid());
+    QSet<QString> requiredModules{resolutionModule(primary)};
+    for (const auto& locator : plan.alternatives) requiredModules.insert(resolutionModule(locator));
+    const auto context = resolutionContext(process, modules, requiredModules);
+    plan.executableHash = context.executableHash;
+    plan.moduleHashes = context.moduleHashes;
+    plan.recordedSession = context.session;
+    plan.recordedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    MemoryReader reader(process);
+    const auto observation = probeLocator(primary, modules,
+        process.architecture() == Architecture::x86 ? 4 : 8,
+        expected.isEmpty() ? 1 : static_cast<size_t>(expected.size()),
+        [&](uint64_t address, size_t count) {
+            const auto result = reader.read(address, count);
+            return result.success && !result.partial ? result.data : QByteArray();
+        });
+    plan.baselineObservation = {{"address", QString::number(observation.address, 16)},
+        {"readable", observation.readable}, {"observedBytes", QString::fromLatin1(observation.bytes.toHex(' '))},
+        {"errorCode", observation.errorCode}, {"source", "memory_read"}, {"effectVerified", false}};
+    // The note is declared provenance, not evidence that an effect was observed.
+    *destination = plan;
+    if (error) error->clear();
+    return true;
 }
 
 } // namespace killcore

@@ -50,6 +50,7 @@ class ClaudeChatManager;
 class ClrInspectorBridge;
 class CodePatchManager;
 class DebugFeatureManager;
+class EffectProofManager;
 class ExternalToolProfiler;
 class FreezeHotkeyOverlayManager;
 class InvestigationNotebookManager;
@@ -292,6 +293,11 @@ public:
         const QVariantMap& options);
     Q_INVOKABLE QVariantMap getChangedPagesConsensus(const QVariantMap& options) const;
     Q_INVOKABLE QVariantMap stopChangedPagesSession();
+
+    // R3: read-only, timestamped samples of existing sources; no screen capture.
+    Q_INVOKABLE QVariantMap captureVisualObservationSources(const QVariantList& sources) const;
+    Q_INVOKABLE QVariantMap correlateVisualObservation(const QVariantMap& observation,
+        const QVariantMap& before, const QVariantList& sources) const;
 
     /// Lance un scan exact déterministe.
     Q_INVOKABLE QVariantMap startExactScan(const QString& value, const QString& valueType);
@@ -746,6 +752,17 @@ public:
     Q_INVOKABLE QVariantMap getInvestigationNotebookSynthesis() const;
     Q_INVOKABLE QVariantMap proposeInvestigationNotebookPlan(const QString& symptom, const QVariantMap& options);
     Q_INVOKABLE QVariantMap resetInvestigationNotebook();
+
+    /// Registre de preuves d'effet (PRODUIT-R section R1) : sépare écriture
+    /// confirmée / effet confirmé / solution durable pour un même objectif,
+    /// plutôt que de traiter une relecture réussie comme une preuve suffisante.
+    /// `level` attendu : "unverified" | "inconclusive" | "write_confirmed" |
+    /// "effect_confirmed" | "durable_solution".
+    Q_INVOKABLE QVariantMap recordEffectProof(const QString& targetLabel, const QString& address, const QString& level,
+                                               const QString& source, const QString& conditions, const QString& sessionId,
+                                               const QString& note);
+    Q_INVOKABLE QVariantMap getEffectProofSynthesis() const;
+    Q_INVOKABLE QVariantMap resetEffectProofLedger();
 
     /// Ajoute un événement d'audit IA dans la télémétrie locale.
     Q_INVOKABLE QVariantMap logAiAudit(const QString& event, const QVariantMap& payload);
@@ -1220,6 +1237,12 @@ public:
 
     /// Charge un profil et retourne ses cibles.
     Q_INVOKABLE QVariantMap loadProfile(const QString& profileName);
+
+    /// R2 : diagnostic des locators sauvegardés, sans application ni réparation.
+    Q_INVOKABLE QVariantMap inspectProfileDurability(const QString& profileName);
+    /// R2 : enregistre conditions/provenance/alternatives, sans écrire la cible.
+    Q_INVOKABLE QVariantMap saveProfileResolutionPlan(const QString& profileName,
+        const QString& entryKind, const QString& entryName, const QVariantMap& options);
 
     /// Supprime un profil.
     Q_INVOKABLE bool deleteProfile(const QString& profileName);
@@ -1782,6 +1805,7 @@ private:
     std::unique_ptr<DebugFeatureManager> m_debugFeatureManager;
     std::unique_ptr<FreezeHotkeyOverlayManager> m_freezeHotkeyOverlayManager;
     std::unique_ptr<InvestigationNotebookManager> m_investigationNotebookManager;
+    std::unique_ptr<EffectProofManager> m_effectProofManager;
     std::unique_ptr<KernelDriverManager> m_kernelDriverManager;
     std::unique_ptr<LuaReplManager> m_luaReplManager;
     std::unique_ptr<SaveFileInvestigator> m_saveFileInvestigator;

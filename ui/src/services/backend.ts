@@ -9,6 +9,62 @@ import { i18n } from '@/i18n'
 
 const { t } = i18n.global
 
+export interface ProfileResolutionPlanOptions {
+  discoveryMethod: string
+  expectedBytes: string
+  validationTest: string
+  evidenceNote: string
+  alternativeNames: string[]
+}
+
+export interface ProfileDurabilityEntry {
+  entryKind: 'target' | 'patch'
+  name: string
+  status: string
+  conditionsVerified: boolean
+  automaticApplicationAllowed: false
+  candidateAddress?: string
+  candidateIndex?: number
+  candidateCount?: number
+  addressMoved?: boolean
+  executableVersionChanged?: boolean
+  moduleVersionChanged?: boolean
+  sessionChanged?: boolean
+  nextAction: string
+  requiredTest: string
+  plan: {
+    discoveryMethod: string
+    expectedBytes: string
+    validationTest: string
+    evidenceNote: string
+    recordedAt: string
+    recordedSession: string
+    executableHash: string
+    alternativeNames: string[]
+    baselineObservation?: { address?: string; readable?: boolean; observedBytes?: string }
+    alternatives: Array<Record<string, unknown>>
+  }
+  candidates?: Array<{
+    index: number
+    locator: string
+    address: string
+    readable: boolean
+    matchesConditions: boolean
+    observedBytes: string
+    errorCode: string
+  }>
+}
+
+export interface ProfileDurabilityReport {
+  success: boolean
+  errorCode?: string
+  profileName?: string
+  session?: string
+  observedAt?: string
+  readBudgetExceeded?: boolean
+  entries?: ProfileDurabilityEntry[]
+}
+
 export interface ProcessInfo {
   pid: number
   name: string
@@ -514,6 +570,36 @@ export interface UiStringTrackResult {
   remaining: number
   error: string
   survivors: UiStringCandidate[]
+}
+
+export interface VisualObservationSnapshot {
+  success: boolean
+  error: string
+  startedMs: number
+  finishedMs?: number
+  processInstance?: string
+  partial?: boolean
+  candidates: Array<UiStringSourceCandidate & { readable: boolean; bytesHex: string; source: string }>
+}
+
+export interface VisualObservationInput {
+  description: string
+  previousValue: string
+  currentValue: string
+  hypothesis: string
+}
+
+export interface VisualObservationResult {
+  success: boolean
+  error: string
+  status: string
+  causalityProven: false
+  observationUncertain: true
+  ambiguous: boolean
+  partial?: boolean
+  observedMs?: number
+  experiment?: string
+  candidates: Array<UiStringSourceCandidate & { status: string; beforeHex: string; bytesHex: string; source: string }>
 }
 
 export interface UiStringSourceCandidate {
@@ -1396,6 +1482,8 @@ export interface ModuleCatalog {
   applyChangedPagesRound?(previousValue: string, currentValue: string, options: Record<string, unknown>): Promise<ChangedPagesConsensusResult>
   getChangedPagesConsensus?(options: Record<string, unknown>): Promise<ChangedPagesConsensusResult>
   stopChangedPagesSession?(): Promise<ChangedPagesConsensusResult>
+  captureVisualObservationSources?(sources: UiStringSourceCandidate[]): Promise<VisualObservationSnapshot>
+  correlateVisualObservation?(observation: VisualObservationInput, before: VisualObservationSnapshot, sources: UiStringSourceCandidate[]): Promise<VisualObservationResult>
   startExactScan(value: string, valueType: string): Promise<ExactScanResult>
   startExactScanExpert(
     value: string,
@@ -1450,6 +1538,19 @@ export interface ModuleCatalog {
   getInvestigationNotebookSynthesis?(): Promise<Record<string, unknown>>
   proposeInvestigationNotebookPlan?(symptom: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   resetInvestigationNotebook?(): Promise<Record<string, unknown>>
+  /** PRODUIT-R section R1 : enregistre une preuve (write_confirmed/effect_confirmed/durable_solution/inconclusive/unverified) pour une cible identifiée par adresse ou libellé. */
+  recordEffectProof?(
+    targetLabel: string,
+    address: string,
+    level: string,
+    source: string,
+    conditions: string,
+    sessionId: string,
+    note: string,
+  ): Promise<Record<string, unknown>>
+  /** Synthèse groupée known/uncertain + action suivante suggérée, pour distinguer écriture confirmée d'un effet réellement vérifié. */
+  getEffectProofSynthesis?(): Promise<Record<string, unknown>>
+  resetEffectProofLedger?(): Promise<Record<string, unknown>>
   freezeWithBreakpoint?(addressHex: string, valueType: string, value: string, options: Record<string, unknown>): Promise<MemoryWriteResult>
   stopBreakpointFreeze?(): Promise<MemoryWriteResult>
   /** Stats live du freeze BP actif (hits/rewrites/errors) sans attendre l'arrêt. */
@@ -1802,6 +1903,10 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ): Promise<Record<string, unknown>>
   listProfiles(): Promise<Array<Record<string, unknown>>>
   loadProfile(profileName: string): Promise<Record<string, unknown>>
+  /** R2: read-only observations, never applies an alternative locator. */
+  inspectProfileDurability(profileName: string): Promise<ProfileDurabilityReport>
+  saveProfileResolutionPlan(profileName: string, entryKind: 'target' | 'patch', entryName: string,
+    options: ProfileResolutionPlanOptions): Promise<{ success: boolean; errorCode?: string }>
   deleteProfile(profileName: string): Promise<boolean>
   resolveProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   /** Roadmap section L — Pointer maps : résout toutes les cibles du profil d'un coup (diagnostic groupé après redémarrage). */
@@ -2449,6 +2554,33 @@ class BackendService {
           success: true,
         }
       },
+      async recordEffectProof(
+        _targetLabel: string,
+        _address: string,
+        _level: string,
+        _source: string,
+        _conditions: string,
+        _sessionId: string,
+        _note: string,
+      ) {
+        return {
+          success: false,
+          error: 'Mock backend',
+        }
+      },
+      async getEffectProofSynthesis() {
+        return {
+          success: true,
+          known: [],
+          uncertain: [],
+          overallNextAction: 'Aucun objectif suivi pour le moment.',
+        }
+      },
+      async resetEffectProofLedger() {
+        return {
+          success: true,
+        }
+      },
       async startExactScan(_value: string, _valueType: string) {
         return {
           success: false,
@@ -2604,6 +2736,13 @@ class BackendService {
       },
       async stopChangedPagesSession() {
         return { success: false, error: 'Mock backend' }
+      },
+      async captureVisualObservationSources(_sources: UiStringSourceCandidate[]): Promise<VisualObservationSnapshot> {
+        return { success: false, error: 'Mock backend', startedMs: Date.now(), candidates: [] }
+      },
+      async correlateVisualObservation(_observation: VisualObservationInput, _before: VisualObservationSnapshot, _sources: UiStringSourceCandidate[]): Promise<VisualObservationResult> {
+        return { success: false, error: 'Mock backend', status: 'unavailable', causalityProven: false,
+          observationUncertain: true, ambiguous: false, candidates: [] }
       },
       async rollbackLastWrite() {
         return { success: false, verified: false, bytesWritten: 0, error: 'Mock backend' }
@@ -3272,6 +3411,13 @@ class BackendService {
       },
       async loadProfile() {
         return { success: false, error: 'Mock backend' }
+      },
+      async inspectProfileDurability(_profileName: string): Promise<ProfileDurabilityReport> {
+        return { success: false, errorCode: 'mock_backend', entries: [] }
+      },
+      async saveProfileResolutionPlan(_profileName: string, _entryKind: 'target' | 'patch',
+        _entryName: string, _options: ProfileResolutionPlanOptions) {
+        return { success: false, errorCode: 'mock_backend' }
       },
       async deleteProfile() {
         return false

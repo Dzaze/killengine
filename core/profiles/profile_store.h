@@ -11,6 +11,39 @@
 
 namespace killcore {
 
+/// Optional R2 metadata. A historical observation never certifies a new session.
+/// expectedBytes describes deliberately stable bytes, not a fluctuating counter.
+struct ProfileResolutionPlan {
+    bool invalid{false}; // Malformed imported metadata must not weaken checks.
+    QString discoveryMethod;
+    QString expectedBytes;
+    QString validationTest;
+    QString executableHash;
+    QString recordedSession;
+    QString recordedAt;
+    QString evidenceNote;
+    QJsonObject baselineObservation;
+    QJsonObject moduleHashes;
+    QList<Locator> alternatives;
+    QStringList alternativeNames;
+};
+
+struct ProfileResolutionContext {
+    QString executableName;
+    QString executableHash;
+    QString session;
+    QJsonObject moduleHashes;
+};
+
+/// Pure decision function. Observations correspond to primary + alternatives.
+/// Returns machine codes, observations and a required test; never authorizes a write.
+QJsonObject diagnoseProfileResolution(const QString& expectedExecutable,
+                                     const QString& legacyExecutableHash,
+                                     const Locator& primary,
+                                     const ProfileResolutionPlan& plan,
+                                     const ProfileResolutionContext& context,
+                                     const QList<LocatorProbe>& observations);
+
 /**
  * @brief Une cible découverte et sauvegardée dans un profil.
  */
@@ -22,6 +55,7 @@ struct ProfileTarget {
     QStringList dependsOn;    // noms d'autres cibles du profil à activer avant celle-ci
     QString   ghidraSymbol;   // nom importé depuis Ghidra, sans renommer la cible KillEngine
     QString   ghidraNote;
+    ProfileResolutionPlan resolutionPlan;
 };
 
 struct ProfileCodePatch {
@@ -45,6 +79,7 @@ struct ProfileCodePatch {
     double signatureFixedRatio{0.0};
     bool trainerSafe{false};
     int signatureMatches{0};
+    ProfileResolutionPlan resolutionPlan;
 };
 
 /**
@@ -128,6 +163,15 @@ public:
 
     /// Fusionne une pointer map exportée dans un profil existant ou nouveau.
     static PointerMapImportResult mergePointerMap(Profile* profile, const QJsonObject& pointerMap, bool replaceExisting);
+
+    /// Read-only diagnostics, capped at 256 entries and 8 alternatives per entry.
+    static QJsonObject diagnose(const Profile& profile, const ProcessHandle& process);
+
+    /// Configure an entry without modifying its locator or writing target memory.
+    /// Alternative names refer to entries of the same kind in this profile.
+    static bool setResolutionPlan(Profile* profile, const QString& entryKind,
+                                  const QString& entryName, const QJsonObject& options,
+                                  const ProcessHandle& process, QString* error);
 };
 
 } // namespace killcore

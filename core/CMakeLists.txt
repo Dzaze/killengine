@@ -69,6 +69,7 @@ add_library(killcore STATIC
     scanner/display_value_tracker.cpp
     scanner/changed_pages_consensus.h
     scanner/changed_pages_consensus.cpp
+    scanner/visual_change_correlator.cpp
     scanner/display_source_classifier.h
     scanner/display_source_classifier.cpp
     scanner/memory_window_search.h

@@ -4,6 +4,8 @@
 #include "pointer/pointer_chain.h"
 
 #include <QString>
+#include <QByteArray>
+#include <functional>
 #include <cstdint>
 
 namespace killcore {
@@ -68,5 +70,21 @@ struct Locator {
  * @return true si la résolution a réussi.
  */
 bool resolveLocatorAddress(const ProcessHandle& handle, const Locator& locator, uint64_t* address);
+
+/// Read-only diagnostic resolver. Does not fall back to lastAddress. The injected
+/// reader allows deterministic relocation tests without attaching a process.
+struct LocatorProbe {
+    bool resolved{false};
+    bool readable{false};
+    uint64_t address{0};
+    QByteArray bytes;
+    QString errorCode;
+};
+
+using LocatorReadBytes = std::function<QByteArray(uint64_t, size_t)>;
+LocatorProbe probeLocator(const Locator& locator,
+                          const QList<ProcessModuleInfo>& modules,
+                          size_t pointerBytes, size_t readBytes,
+                          const LocatorReadBytes& read);
 
 } // namespace killcore

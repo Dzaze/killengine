@@ -3,10 +3,12 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useInvestigationNotebookStore, type InvestigationHypothesis } from '@/stores/investigationNotebook'
+import { useEffectProofStore, type EffectProofLevel } from '@/stores/effectProof'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
 const notebook = useInvestigationNotebookStore()
+const effectProof = useEffectProofStore()
 const { t } = useI18n()
 const exportText = ref('')
 const statusFilter = ref('all')
@@ -26,6 +28,17 @@ const notebookSections = computed(() => [
   { id: 'active', title: t('investigation.sectionActive'), items: notebook.active },
   { id: 'refuted', title: t('investigation.sectionRefuted'), items: notebook.refuted },
 ])
+const effectProofLevelOptions = computed<Array<{ value: EffectProofLevel; label: string }>>(() => [
+  { value: 'write_confirmed', label: t('investigation.effectProofLevelWriteConfirmed') },
+  { value: 'effect_confirmed', label: t('investigation.effectProofLevelEffectConfirmed') },
+  { value: 'durable_solution', label: t('investigation.effectProofLevelDurableSolution') },
+  { value: 'inconclusive', label: t('investigation.effectProofLevelInconclusive') },
+  { value: 'unverified', label: t('investigation.effectProofLevelUnverified') },
+])
+function effectProofLevelLabel(level: string): string {
+  const found = effectProofLevelOptions.value.find((option) => option.value === level)
+  return found ? found.label : level
+}
 const sortedCheckpoints = computed(() => [...checkpoints.value].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)))
 const bestNextAction = computed(() => {
   const action = autoReport.value?.nextBestAction
@@ -224,6 +237,7 @@ onMounted(() => {
     void store.refreshAutoResolveReport()
   }
   void notebook.refreshNotebook()
+  void effectProof.refresh()
 })
 
 // Relie le rapport IA (deja calcule cote backend, rien de nouveau a produire)
@@ -421,6 +435,105 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
             </div>
           </article>
           <p v-if="section.items.length === 0" class="muted">{{ $t('investigation.noHypothesis') }}</p>
+        </section>
+      </div>
+    </section>
+
+    <PanelIntro
+      :what="$t('investigation.effectProofIntro.what')"
+      :purpose="$t('investigation.effectProofIntro.purpose')"
+      :how="$t('investigation.effectProofIntro.how')"
+    />
+
+    <section class="panel effect-proof-panel">
+      <div class="section-head">
+        <h2>{{ $t('investigation.effectProofTitle') }}</h2>
+      </div>
+      <p v-if="effectProof.overallNextAction" class="next-action-banner">{{ effectProof.overallNextAction }}</p>
+      <form class="notebook-form" @submit.prevent="effectProof.recordProof()">
+        <input
+          v-model="effectProof.targetLabelDraft"
+          class="filter-input"
+          :placeholder="$t('investigation.effectProofTargetLabelPlaceholder')"
+          :disabled="effectProof.busy"
+        />
+        <input
+          v-model="effectProof.addressDraft"
+          class="filter-input"
+          :placeholder="$t('investigation.effectProofAddressPlaceholder')"
+          :disabled="effectProof.busy"
+        />
+        <label>
+          <span>{{ $t('investigation.effectProofLevelLabel') }}</span>
+          <select v-model="effectProof.levelDraft" class="filter-input" :disabled="effectProof.busy">
+            <option v-for="option in effectProofLevelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <input
+          v-model="effectProof.sourceDraft"
+          class="filter-input"
+          :placeholder="$t('investigation.effectProofSourcePlaceholder')"
+          :disabled="effectProof.busy"
+        />
+        <input
+          v-model="effectProof.conditionsDraft"
+          class="filter-input"
+          :placeholder="$t('investigation.effectProofConditionsPlaceholder')"
+          :disabled="effectProof.busy"
+        />
+        <input
+          v-model="effectProof.noteDraft"
+          class="filter-input"
+          :placeholder="$t('investigation.effectProofNotePlaceholder')"
+          :disabled="effectProof.busy"
+        />
+        <button
+          class="btn primary"
+          type="submit"
+          :disabled="effectProof.busy || (!effectProof.targetLabelDraft.trim() && !effectProof.addressDraft.trim())"
+        >
+          {{ $t('investigation.effectProofRecord') }}
+        </button>
+        <button
+          class="btn"
+          type="button"
+          :disabled="effectProof.busy || (effectProof.known.length === 0 && effectProof.uncertain.length === 0)"
+          @click="effectProof.resetLedger()"
+        >
+          {{ $t('investigation.effectProofReset') }}
+        </button>
+      </form>
+      <p v-if="effectProof.error" class="error">{{ effectProof.error }}</p>
+      <div class="notebook-grid">
+        <section class="notebook-column">
+          <div class="notebook-column-head">
+            <h3>{{ $t('investigation.effectProofKnownSection') }}</h3>
+            <span>{{ effectProof.known.length }}</span>
+          </div>
+          <article v-for="item in effectProof.known" :key="item.targetKey" class="hypothesis-card confirmed">
+            <div class="hypothesis-head">
+              <strong>{{ item.targetLabel || item.address }}</strong>
+              <span>{{ effectProofLevelLabel(item.bestLevel) }}</span>
+            </div>
+            <p v-if="item.address && item.targetLabel">{{ item.address }}</p>
+            <p class="evidence-preview">{{ item.nextAction }}</p>
+          </article>
+          <p v-if="effectProof.known.length === 0" class="muted">{{ $t('investigation.effectProofEmpty') }}</p>
+        </section>
+        <section class="notebook-column">
+          <div class="notebook-column-head">
+            <h3>{{ $t('investigation.effectProofUncertainSection') }}</h3>
+            <span>{{ effectProof.uncertain.length }}</span>
+          </div>
+          <article v-for="item in effectProof.uncertain" :key="item.targetKey" class="hypothesis-card">
+            <div class="hypothesis-head">
+              <strong>{{ item.targetLabel || item.address }}</strong>
+              <span>{{ effectProofLevelLabel(item.bestLevel) }}</span>
+            </div>
+            <p v-if="item.address && item.targetLabel">{{ item.address }}</p>
+            <p class="evidence-preview">{{ item.nextAction }}</p>
+          </article>
+          <p v-if="effectProof.uncertain.length === 0" class="muted">{{ $t('investigation.effectProofEmpty') }}</p>
         </section>
       </div>
     </section>
@@ -888,6 +1001,15 @@ p {
 
 .next-action-body p {
   margin-top: 6px;
+}
+
+.next-action-banner {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(122, 162, 247, 0.34);
+  background: rgba(122, 162, 247, 0.07);
+  color: var(--text-primary);
 }
 
 .report-grid,

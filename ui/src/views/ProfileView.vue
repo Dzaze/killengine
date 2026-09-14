@@ -3,11 +3,167 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
-import type { ClrFieldInfo } from '@/services/backend'
+import type { ClrFieldInfo, ProfileDurabilityEntry, ProfileDurabilityReport, ProfileResolutionPlanOptions } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+// R2 messages kept local to the reserved ProfileView lane (FR/EN reactive).
+const durabilityCopy: Record<string, [string, string]> = {
+  title: ['Diagnostic de durabilité', 'Durability diagnostics'],
+  inspect: ['Vérifier les profils sauvegardés', 'Check saved profile entries'],
+  scope: ['Lecture seule des locators enregistrés. Les signatures AOB restent dans l’inspection des patchs. Les objets CLR nécessitent leur inspecteur dédié.', 'Read-only checks of stored locators. AOB signatures remain in patch inspection. CLR objects require their dedicated inspector.'],
+  budget: ['Budget de lecture atteint : certains résultats restent non concluants.', 'Read budget reached: some results remain inconclusive.'],
+  proof: ['Des conditions mémoire vérifiées ne prouvent pas l’effet recherché. Aucune alternative n’est appliquée automatiquement.', 'Matching memory conditions do not prove the intended effect. No alternative is applied automatically.'],
+  configure: ['Définir les conditions', 'Set conditions'],
+  discovery: ['Méthode de découverte', 'Discovery method'],
+  bytes: ['Octets stables attendus (hex, 64 octets maximum)', 'Expected stable bytes (hex, up to 64 bytes)'],
+  bytesHint: ['Laisser vide pour une valeur qui varie. Ne pas prendre un compteur courant pour une signature stable.', 'Leave empty for a changing value. A current counter value is not a stable signature.'],
+  test: ['Test nécessaire avant réutilisation', 'Required test before reuse'],
+  note: ['Observation ou provenance déclarée', 'Declared observation or provenance'],
+  alternatives: ['Autres entrées à conserver comme pistes (8 maximum)', 'Other entries to retain as alternatives (up to 8)'],
+  save: ['Enregistrer pour la version attachée', 'Save for the attached version'],
+  saved: ['Conditions enregistrées ; aucune écriture effectuée sur la cible.', 'Conditions saved; no target memory was written.'],
+  cancel: ['Annuler', 'Cancel'],
+  baseline: ['Dernière référence enregistrée', 'Last recorded baseline'],
+  observed: ['Octets observés', 'Observed bytes'],
+  blocked: ['Action suspendue : résoudre le diagnostic avant réutilisation.', 'Action paused: resolve the diagnostic before reuse.'],
+  failed: ['Diagnostic indisponible', 'Diagnostics unavailable'],
+  no_process: ['Aucun processus attaché', 'No process attached'],
+  too_many_entries: ['Profil trop volumineux (256 entrées maximum)', 'Profile too large (up to 256 entries)'],
+  invalid_profile_name: ['Nom de profil invalide', 'Invalid profile name'],
+  profile_not_found: ['Profil introuvable', 'Profile not found'],
+  profile_save_failed: ['Enregistrement du profil impossible', 'Could not save the profile'],
+  mock_backend: ['Diagnostic indisponible dans la démonstration', 'Diagnostics unavailable in the demo'],
+  invalid_plan: ['Méthode et test requis ; vérifier la longueur des champs', 'Method and test required; check field lengths'],
+  invalid_alternatives: ['Liste de pistes alternatives invalide', 'Invalid alternative list'],
+  too_many_alternatives: ['Huit alternatives maximum', 'Up to eight alternatives'],
+  alternative_not_unique: ['Nom alternatif absent ou non unique', 'Alternative name missing or not unique'],
+  alternative_type_mismatch: ['Les alternatives doivent avoir le même type de valeur', 'Alternatives must use the same value type'],
+  entry_not_found: ['Entrée introuvable', 'Entry not found'],
+  ambiguous_entry_name: ['Nom d’entrée non unique', 'Entry name is not unique'],
+  invalid_entry_kind: ['Type d’entrée invalide', 'Invalid entry kind'],
+  unsupported_locator: ['Utiliser l’inspecteur dédié pour ce locator', 'Use the dedicated inspector for this locator'],
+  ambiguous_module: ['Plusieurs modules portent ce nom', 'Multiple modules have this name'],
+  invalid_probe: ['Paramètres de lecture invalides', 'Invalid read parameters'],
+  module_missing: ['Module absent', 'Module missing'],
+  module_offset_out_of_range: ['Offset hors du module', 'Offset outside the module'],
+  invalid_pointer_chain: ['Chaîne invalide ou supérieure à 16 niveaux', 'Invalid chain or more than 16 levels'],
+  pointer_unreadable: ['Pointeur illisible', 'Unreadable pointer'],
+  address_unreadable: ['Adresse illisible', 'Unreadable address'],
+  null_pointer: ['Pointeur nul', 'Null pointer'],
+  address_overflow: ['Adresse hors limites', 'Address out of bounds'],
+  unverified: ['Non vérifié : conditions ou empreintes insuffisantes', 'Unverified: insufficient conditions or fingerprints'],
+  conditions_verified: ['Conditions mémoire vérifiées', 'Memory conditions verified'],
+  wrong_process: ['Le processus attaché ne correspond pas au profil', 'Attached process does not match the profile'],
+  invalid_conditions: ['Conditions invalides', 'Invalid conditions'],
+  ambiguous: ['Plusieurs adresses possibles : ambiguïté', 'Multiple possible addresses: ambiguous'],
+  inconclusive: ['Lecture incomplète ou locator non pris en charge', 'Incomplete read or unsupported locator'],
+  conditions_mismatch: ['Les octets attendus ne correspondent plus', 'Expected bytes no longer match'],
+  missing: ['Aucune adresse retrouvée parmi les pistes enregistrées', 'No address found among the stored alternatives'],
+  version_changed: ['Version de l’exécutable ou du module différente', 'Executable or module version changed'],
+  repair_candidate: ['Piste alternative retrouvée, à tester', 'Alternative candidate found, testing required'],
+  session_changed: ['Adresse absolue issue d’une autre session', 'Absolute address from another session'],
+  edit_conditions: ['Corriger les conditions enregistrées.', 'Correct the saved conditions.'],
+  attach_expected_process: ['Attacher le processus correspondant.', 'Attach the matching process.'],
+  disambiguate_candidates: ['Départager les candidats avec le test enregistré avant toute réparation.', 'Disambiguate candidates using the saved test before repairing.'],
+  retry_read_or_inspect_manually: ['Relancer la lecture ou utiliser l’inspecteur adapté.', 'Retry reading or use the appropriate inspector.'],
+  rediscover_target: ['Rechercher de nouveau la source et enregistrer une piste après vérification.', 'Rediscover the source and save a candidate after verification.'],
+  revalidate_on_current_version: ['Vérifier les conditions et le test sur cette version avant de renouveler la référence.', 'Check the conditions and test on this version before renewing the baseline.'],
+  test_alternative_before_replacing: ['Tester la piste proposée puis remplacer explicitement le locator depuis les outils de profil existants.', 'Test the proposed candidate, then explicitly replace the locator using the existing profile tools.'],
+  rediscover_absolute_address: ['Retrouver l’adresse actuelle ; préférer un module ou une chaîne de pointeurs.', 'Rediscover the current address; prefer a module or pointer chain.'],
+  record_and_check_stable_conditions: ['Définir une condition stable ; une adresse lisible seule reste non vérifiée.', 'Define a stable condition; a readable address alone remains unverified.'],
+  verify_effect_separately: ['Exécuter le test enregistré pour vérifier l’effet indépendamment.', 'Run the saved test to verify the effect separately.'],
+}
+
+function durabilityText(key: string): string {
+  return durabilityCopy[key]?.[locale.value.startsWith('fr') ? 0 : 1] ?? key
+}
+
+const durabilityReport = ref<ProfileDurabilityReport | null>(null)
+const durabilityBusy = ref(false)
+const durabilityError = ref('')
+const durabilityEditor = ref<ProfileDurabilityEntry | null>(null)
+const durabilityForm = ref<ProfileResolutionPlanOptions>({
+  discoveryMethod: '', expectedBytes: '', validationTest: '', evidenceNote: '', alternativeNames: [],
+})
+let durabilityRequest = 0
+
+async function inspectDurability(): Promise<ProfileDurabilityReport | null> {
+  const name = selectedProfile.value
+  if (!name || !store.isAttached) return null
+  const request = ++durabilityRequest
+  durabilityReport.value = null
+  durabilityBusy.value = true
+  durabilityError.value = ''
+  try {
+    const result = await backend.getController().inspectProfileDurability(name)
+    if (request !== durabilityRequest || name !== selectedProfile.value || !store.isAttached) return null
+    durabilityReport.value = result
+    if (!result.success) durabilityError.value = result.errorCode ?? 'failed'
+    return result
+  } catch (error) {
+    if (request === durabilityRequest) durabilityError.value = String(error)
+    return null
+  } finally {
+    if (request === durabilityRequest) durabilityBusy.value = false
+  }
+}
+
+function editDurability(entry: ProfileDurabilityEntry) {
+  durabilityEditor.value = entry
+  durabilityForm.value = {
+    discoveryMethod: entry.plan.discoveryMethod ?? '',
+    expectedBytes: entry.plan.expectedBytes ?? '',
+    validationTest: entry.plan.validationTest ?? '',
+    evidenceNote: entry.plan.evidenceNote ?? '',
+    alternativeNames: [...(entry.plan.alternativeNames ?? [])],
+  }
+}
+
+async function saveDurabilityPlan() {
+  const entry = durabilityEditor.value
+  const name = selectedProfile.value
+  if (!entry || !name || !store.isAttached || durabilityBusy.value) return
+  durabilityBusy.value = true
+  try {
+    const result = await backend.getController().saveProfileResolutionPlan(name, entry.entryKind, entry.name, durabilityForm.value)
+    if (name !== selectedProfile.value) return
+    if (!result.success) {
+      durabilityError.value = result.errorCode ?? 'failed'
+      return
+    }
+    durabilityEditor.value = null
+    statusMessage.value = durabilityText('saved')
+    await inspectDurability()
+  } catch (error) {
+    durabilityError.value = String(error)
+  } finally {
+    durabilityBusy.value = false
+  }
+}
+
+// Fresh read before an explicit ProfileView action. This never selects or applies
+// an alternative. Legacy/CLR flows keep their own checks outside this R2 lane.
+async function checkDurabilityBeforeUse(kind: 'target' | 'patch', names: string[]): Promise<boolean> {
+  const report = await inspectDurability()
+  if (!report?.success) {
+    statusMessage.value = durabilityText('failed')
+    return false
+  }
+  for (const name of names) {
+    const entry = report.entries?.find((item) => item.entryKind === kind && item.name === name)
+    const legacyClr = kind === 'target' && profileTargets.value.some((target) =>
+      target.name === name && target.locatorKind === 'clr_field')
+    if (legacyClr) continue
+    if (!entry || !['conditions_verified', 'unverified'].includes(entry.status)) {
+      statusMessage.value = `${durabilityText('blocked')} ${name}: ${durabilityText(entry?.status ?? 'failed')}`
+      return false
+    }
+  }
+  return true
+}
 
 interface ProfileEntry {
   name: string
@@ -79,6 +235,20 @@ const clrProfileIdentityValue = ref('')
 const clrProfileTargetField = ref('')
 const clrProfileValueType = ref('Int32')
 const lastProfileStorageKey = 'killengine.lastProfile'
+
+function resetDurability() {
+  ++durabilityRequest
+  durabilityReport.value = null
+  durabilityEditor.value = null
+  durabilityError.value = ''
+  durabilityBusy.value = false
+}
+
+watch(selectedProfile, resetDurability)
+watch([() => store.isAttached, () => store.processModules], () => {
+  resetDurability()
+  if (selectedProfile.value && store.isAttached) void inspectDurability()
+})
 
 const profileSaveTargets = computed(() => {
   if (store.finalCandidateTargets.length > 0) {
@@ -205,11 +375,13 @@ async function refreshProfiles() {
 }
 
 async function selectProfile(name: string) {
+  resetDurability()
   selectedProfile.value = name
   localStorage.setItem(lastProfileStorageKey, name)
   resolveResult.value = null
   try {
     const result = await backend.getController().loadProfile(name)
+    if (name !== selectedProfile.value) return
     profileInfo.value = result
     profileTargets.value = (result.targets as ProfileTargetEntry[]) ?? []
     profilePatches.value = (result.patches as ProfilePatchEntry[]) ?? []
@@ -217,6 +389,7 @@ async function selectProfile(name: string) {
     if (store.isAttached && profilePatches.value.length > 0) {
       await inspectProfilePatches()
     }
+    if (store.isAttached && name === selectedProfile.value) await inspectDurability()
   } catch {
     profileTargets.value = []
     profilePatches.value = []
@@ -331,6 +504,7 @@ async function createNewProfile() {
 
 async function activateTarget(targetName: string) {
   if (!selectedProfile.value) return
+  if (!await checkDurabilityBeforeUse('target', [targetName])) return
   try {
     const result = await backend.getController().activateProfileTarget(selectedProfile.value, targetName)
     resolveResult.value = result
@@ -522,6 +696,7 @@ async function repairTargetWithCurrentAddress(target: ProfileTargetEntry) {
 
 async function activateAllTargets() {
   if (!selectedProfile.value || profileTargets.value.length === 0) return
+  if (!await checkDurabilityBeforeUse('target', profileTargets.value.map((target) => target.name))) return
 
   let activated = 0
   const activatableTargets = profileTargets.value.filter((target) => target.locatorKind !== 'clr_field')
@@ -548,6 +723,7 @@ async function activateAllTargets() {
 
 async function activateTargetGroup(group: ProfileTargetGroup) {
   if (!selectedProfile.value || group.targets.length === 0) return
+  if (!await checkDurabilityBeforeUse('target', group.targets.map((target) => target.name))) return
 
   let activated = 0
   const activatableTargets = group.targets.filter((target) => target.locatorKind !== 'clr_field')
@@ -576,6 +752,7 @@ async function activateTargetGroup(group: ProfileTargetGroup) {
 async function writeProfileTarget(target: ProfileTargetEntry) {
   const value = (targetWriteValues.value[target.name] ?? '').trim()
   if (!selectedProfile.value || !value) return
+  if (!await checkDurabilityBeforeUse('target', [target.name])) return
 
   try {
     const resolved = await backend.getController().resolveProfileTarget(selectedProfile.value, target.name)
@@ -628,6 +805,7 @@ async function deleteSelectedProfile() {
 
 async function applyProfilePatch(patch: ProfilePatchEntry) {
   if (!selectedProfile.value || !patch.name) return
+  if (!await checkDurabilityBeforeUse('patch', [patch.name])) return
   if (!patchCanApply(patch)) {
     statusMessage.value = '⚠ ' + (patchStates.value[patch.name]
       ? t('profile.patchNotApplicableState', { name: patch.name, state: patchStateLabel(patch) })
@@ -784,6 +962,7 @@ async function inspectProfilePatches() {
 
 async function applyAllProfilePatches() {
   if (!selectedProfile.value || profilePatches.value.length === 0) return
+  if (!await checkDurabilityBeforeUse('patch', profilePatches.value.map((patch) => patch.name))) return
   if (!trainerPatchSummary.value.canApplyAll) {
     statusMessage.value = '⚠ ' + (trainerPatchSummary.value.inspected
       ? (trainerPatchSummary.value.unsafeQuality > 0
@@ -906,6 +1085,52 @@ onMounted(() => {
     <!-- Détails du profil sélectionné -->
     <div v-if="selectedProfile" class="section">
       <h2>{{ selectedProfile }}</h2>
+
+      <div class="targets-list durability-panel">
+        <h3>{{ durabilityText('title') }}</h3>
+        <p class="hint">{{ durabilityText('scope') }}</p>
+        <p class="hint">{{ durabilityText('proof') }}</p>
+        <button class="btn btn-secondary btn-sm" :disabled="durabilityBusy || !store.isAttached" @click="inspectDurability()">
+          {{ durabilityText('inspect') }}
+        </button>
+        <p v-if="durabilityError" role="status">{{ durabilityText('failed') }} : {{ durabilityText(durabilityError) }}</p>
+        <p v-if="durabilityReport?.observedAt" class="hint">{{ durabilityReport.observedAt }}</p>
+        <p v-if="durabilityReport?.readBudgetExceeded" role="status">{{ durabilityText('budget') }}</p>
+        <details v-for="entry in durabilityReport?.entries ?? []" :key="`${entry.entryKind}:${entry.name}`" class="durability-entry">
+          <summary><strong>{{ entry.name }}</strong> — {{ durabilityText(entry.status) }}</summary>
+          <p>{{ durabilityText(entry.nextAction) }}</p>
+          <p v-if="entry.requiredTest">{{ durabilityText('test') }} : {{ entry.requiredTest }}</p>
+          <p v-if="entry.plan.recordedAt" class="hint">
+            {{ durabilityText('baseline') }} : {{ entry.plan.recordedAt }}
+            <code>{{ entry.plan.baselineObservation?.observedBytes }}</code>
+          </p>
+          <p v-if="entry.plan.evidenceNote" class="hint">{{ durabilityText('note') }} : {{ entry.plan.evidenceNote }}</p>
+          <ul>
+            <li v-for="candidate in entry.candidates ?? []" :key="candidate.index">
+              <code>{{ candidate.locator }}</code>
+              <span v-if="candidate.address"> → <code>0x{{ candidate.address }}</code></span>
+              <span v-if="candidate.observedBytes"> · {{ durabilityText('observed') }} : <code>{{ candidate.observedBytes }}</code></span>
+              <span v-if="candidate.errorCode"> · {{ durabilityText(candidate.errorCode) }}</span>
+            </li>
+          </ul>
+          <button class="btn btn-secondary btn-sm" :disabled="durabilityBusy" @click="editDurability(entry)">{{ durabilityText('configure') }}</button>
+        </details>
+        <form v-if="durabilityEditor" class="durability-form" @submit.prevent="saveDurabilityPlan()">
+          <strong>{{ durabilityEditor.name }}</strong>
+          <label>{{ durabilityText('discovery') }}<input v-model="durabilityForm.discoveryMethod" class="scan-input" required maxlength="512" /></label>
+          <label>{{ durabilityText('bytes') }}<input v-model="durabilityForm.expectedBytes" class="scan-input" maxlength="191" placeholder="01 00 00 00" /></label>
+          <p class="hint">{{ durabilityText('bytesHint') }}</p>
+          <label>{{ durabilityText('test') }}<textarea v-model="durabilityForm.validationTest" class="scan-input" required maxlength="2048" /></label>
+          <label>{{ durabilityText('note') }}<textarea v-model="durabilityForm.evidenceNote" class="scan-input" maxlength="2048" /></label>
+          <label>{{ durabilityText('alternatives') }}
+            <select v-model="durabilityForm.alternativeNames" class="scan-input" multiple>
+              <option v-for="entry in (durabilityEditor.entryKind === 'target' ? profileTargets : profilePatches).filter((item) => item.name !== durabilityEditor?.name)" :key="entry.name" :value="entry.name">{{ entry.name }}</option>
+            </select>
+          </label>
+          <button type="submit" class="btn btn-primary btn-sm" :disabled="durabilityBusy || !store.isAttached || durabilityForm.alternativeNames.length > 8">{{ durabilityText('save') }}</button>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="durabilityBusy" @click="durabilityEditor = null">{{ durabilityText('cancel') }}</button>
+        </form>
+      </div>
 
       <!-- Sauvegarder une cible -->
       <div class="save-target-box">
@@ -1240,6 +1465,45 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.durability-panel {
+  margin-bottom: 16px;
+}
+
+.durability-entry {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.durability-entry summary {
+  cursor: pointer;
+}
+
+.durability-entry p,
+.durability-entry ul {
+  margin: 8px 0;
+}
+
+.durability-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.durability-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.durability-form .scan-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.durability-form select {
+  min-height: 90px;
+}
+
 .profile-view {
   padding: 24px 32px;
   max-width: 800px;

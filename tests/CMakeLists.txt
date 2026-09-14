@@ -35,7 +35,9 @@ add_executable(killengine_unit_tests
     unit/test_ghidra_bridge.cpp
     unit/test_investigation_notebook.cpp
     unit/test_investigation_notebook_planner.cpp
+    unit/test_effect_proof_ledger.cpp
     unit/test_changed_pages_consensus.cpp
+    unit/test_visual_change_correlator.cpp
     unit/test_page_diff_analyzer.cpp
     unit/test_smart_watchdog.cpp
     unit/test_lua_repl_protocol.cpp

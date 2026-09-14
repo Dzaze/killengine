@@ -10,6 +10,8 @@
 
 ---
 
+> **Lecture actuelle (14/09/2026)** : la nouvelle priorisation produit est en [section R](#r-direction-produit--objectif-preuve-et-solution-durable-14092026). Les états des lieux et priorités datés ci-dessous sont historiques ; vérifier le tracker et le code avant de reprendre un chantier.
+
 ## État des lieux en une ligne
 
 KillEngine est aujourd'hui un **Cheat Engine "lite"** très avancé côté scan (multi-type, unknown, UI string, pointer chains, freeze) avec un début de couche pro (hardware breakpoints, AOB/trainer, AI tool-calling). Le gap principal se situe sur **l'interception active** (bloquer l'écriture du jeu) et **l'injection in-process**.
@@ -484,3 +486,73 @@ Niveau de puissance
 
 **KillEngine est déjà au niveau "Cheat Engine standard" pour le scan et l'AOB.
 Le prochain saut est l'interception active (breakpoint freeze) puis l'injection.**
+
+
+## R. Direction produit — objectif, preuve et solution durable (14/09/2026)
+
+**Statut : roadmap documentée à la demande du propriétaire, non implémentée par cette session.** Après la proposition « rendre KillEngine véritablement révolutionnaire », le propriétaire demande de la consigner dans la roadmap et le tracker après tri des entrées archivables. Cette demande autorise la documentation ; les cases ci-dessous décrivent du travail futur. Elle ne rouvre pas automatiquement le chantier du carnet d'hypothèses PHASE 120-E/F/G/H, déjà clos et soumis à un accord explicite pour une nouvelle évolution.
+
+**Promesse produit** : transformer une observation et un objectif utilisateur en résultat vérifié, compréhensible et réutilisable. Prolongement de [la direction produit](ULTIMATE_PRODUCT_GUIDELINE.md), avec un parcours central : **Objectif → observation → expérience guidée → effet vérifié → commande réutilisable**.
+
+**Point de départ vérifié** : auto-résolution, carnet d'hypothèses (`ai/investigation_notebook.*`, `investigation_notebook_planner.*`), Trace UI string, Changed Pages, Timeline, Pattern Learning, profils et Trainer existent déjà. Ne pas annoncer leur recréation. Avant chaque tranche, relire le code et le tracker pour identifier précisément le comportement à étendre. Certaines descriptions historiques de cette roadmap sont périmées : notamment la section de priorisation du 26/08 disant le carnet non livré, contredite par les phases 120-E/F/G/H closes du tracker et par le code.
+
+### R1 — Vérification de l'effet réel et parcours guidé (priorité 1)
+
+- [ ] Définir avec l'utilisateur un critère de succès observable avant l'action : effet immédiat, transition de scène, conservation après fin de partie ou redémarrage.
+- [ ] Séparer les preuves : **écriture confirmée** (relecture), **effet confirmé** (comportement attendu observé), **solution durable** (conditions de persistance effectivement testées). Une relecture correcte ne valide jamais à elle seule l'objectif.
+- [ ] Enregistrer source de preuve, conditions, date/session et résultat ; autoriser « non vérifié » / « inconclusif ». Solliciter l'observation humaine quand le résultat n'est pas automatiquement mesurable.
+- [ ] Présenter dans le parcours principal ce qui est connu, ce qui reste incertain et la prochaine action utile ; permettre d'approfondir avec les vues techniques existantes.
+
+**Pourquoi** : l'investigation Solitaire XP a porté l'affichage à 5555 mais le gain crédité est resté 15. Ce cas démontre un succès technique sans succès utilisateur.
+
+**Validation attendue** : cible contrôlée où affichage et source persistante divergent, puis scénario réel autorisé ; vérifier qu'une écriture sans effet ne produit pas un statut de réussite. Un novice doit pouvoir aller de l'objectif à l'effet confirmé sans intervention d'un expert. Conserver confirmations et restauration existantes pour les actions qui modifient la cible.
+
+### R2 — Profils durables et diagnostic de rupture (priorité 2)
+
+- [ ] Enrichir les profils existants avec méthode de découverte, conditions attendues, preuves et moyens alternatifs de résolution.
+- [ ] Après redémarrage ou changement de version, diagnostiquer ce qui ne correspond plus ; proposer une nouvelle résolution et le test nécessaire avant de qualifier le profil de valide.
+- [ ] En présence de plusieurs candidats, afficher l'ambiguïté et ne pas réappliquer automatiquement une solution non validée.
+
+**Validation attendue** : retrouver et vérifier la solution après plusieurs redémarrages ; introduire un changement contrôlé de disposition/version et vérifier le diagnostic, y compris un cas ambigu et un cas irrécupérable. La réparation universelle après mise à jour n'est pas promise.
+
+### R3 — « Montre-moi ce qui change » (priorité 3)
+
+- [ ] Permettre de sélectionner une zone à l'écran et d'associer une action utilisateur aux observations visuelles et aux variations des sources accessibles (mémoire, strings UI, état applicatif).
+- [ ] Synchroniser ces observations avec les captures existantes ; traiter la reconnaissance visuelle comme une mesure incertaine à confirmer.
+- [ ] Guider vers l'expérience qui départage les pistes : par exemple changer le maximum sans changer la valeur actuelle. Justifier la question par les hypothèses en présence.
+
+**Validation attendue** : comparer avec le parcours manuel sur les mêmes scénarios, en comptant saisies et essais ; inclure erreurs de reconnaissance, animation/interpolation et plusieurs valeurs corrélées. Une corrélation visuelle seule ne prouve pas la causalité.
+
+### R4 — Mémoire d'enquête réutilisable (priorité 4)
+
+- [ ] Prolonger carnet et Pattern Learning pour conserver échecs expliqués, conditions de réussite, expériences discriminantes et éléments à revérifier.
+- [ ] Associer les connaissances à la cible/version et aux preuves ; permettre leur remise en question lorsque de nouvelles observations les contredisent.
+- [ ] Réutiliser la méthode sur une nouvelle session même si les adresses changent, sans rejouer aveuglément les écritures passées.
+
+**Validation attendue** : une deuxième enquête demande moins d'interventions ; un changement de version invalide correctement une connaissance périmée. Cadrer explicitement l'évolution de PHASE 120 avant implémentation, sans dupliquer son stockage ou ses scores existants.
+
+### R0 — Préalable transverse : réactivité IA locale
+
+- [ ] Mesurer et améliorer le temps de démarrage froid et le temps de réponse chaude sur le matériel cible, avec contrôle de qualité du raisonnement et du dimensionnement du contexte.
+
+**Déjà livré** : préchauffage asynchrone, calibration et choix explicite si l'attente estimée est longue. La calibration du 11/09 a identifié le coût de préfill CPU sur cette machine ; chargement disque lent et mauvais dispatch CPU ne sont pas des conclusions actuelles. Respecter la décision propriétaire de conserver le contenu du prompt. Les réglages du scanner sont indépendants du runtime IA. Aucun changement de fournisseur ou routage automatique n'est décidé ici.
+
+### Première démonstration et critères de clôture
+
+**Tranche recommandée** : un utilisateur novice montre ou saisit une valeur, KillEngine guide la recherche de sa source, vérifie l'effet demandé, sauvegarde une commande et retrouve la solution après redémarrage. Commencer avec une valeur saisie et les outils existants : R3 ne bloque pas la première démonstration R1/R2.
+
+Mesurer temps jusqu'à l'effet confirmé, nombre d'interventions humaines, essais nécessaires, faux succès, survie après redémarrage, latence froide/chaude. Établir une baseline avant de fixer des objectifs chiffrés ; aucune performance ou réussite universelle n'est annoncée. Valider en priorité une cible synthétique reproductible par automatisation, puis une application réelle autorisée si elle est disponible et pilotable sans intervention du propriétaire. Une validation manuelle indisponible ne bloque pas la suite : appliquer la règle ci-dessous. Un build vert seul ne prouve pas le comportement de cette tranche produit.
+
+**Ordre proposé** : R1 → R2 → R3 → R4 ; R0 suivi transversalement. Chaque réalisation future doit inclure contrat backend/frontend, persistance pertinente, preuves/telemetry, validation automatisée adaptée et mise à jour du tracker ; validation terrain selon la disponibilité et la règle ci-dessous.
+
+### Règle de validation — temps propriétaire limité (14/09/2026)
+
+**Décision propriétaire** : « je n'ai pas trop de temps pour de la validation manuelle donc il ne faut pas hésiter à sauter quelques étapes ».
+
+- Les agents prennent en charge les builds, tests pertinents et scénarios reproductibles via cible contrôlée, pipe d'automatisation et contrôle UI lorsque disponibles. Ne pas transférer au propriétaire une vérification que l'agent peut exécuter.
+- Les étapes manuelles non indispensables peuvent être sautées ou différées sans bloquer les phases suivantes. Une session utilisateur novice et un essai sur un vrai jeu ne sont pas des prérequis systématiques de livraison.
+- Consigner pour chaque tranche ce qui a réellement été vérifié, ce qui a été sauté et pourquoi. Utiliser « implémenté, validation automatisée réussie ; validation manuelle non réalisée » lorsque c'est le statut réel. Ne pas prétendre à une validation terrain ou à une preuve d'utilisabilité novice qui n'a pas eu lieu.
+- Garder les contrôles nécessaires au comportement modifié : notamment, pour R1/R2, distinguer effet réel et simple relecture, traiter les candidats ambigus et vérifier la reprise après redémarrage sur une cible automatisable. L'absence de temps humain doit conduire d'abord à automatiser ou réduire le périmètre de la tranche.
+- Solliciter le propriétaire seulement si une observation ou une décision indispensable ne peut pas être obtenue autrement ; regrouper alors les demandes en une vérification courte. Continuer entre-temps les travaux indépendants.
+
+Cette règle précise les critères R0-R4 et la première démonstration : l'objectif d'expérience novice reste une ambition produit, sa vérification humaine peut être différée. Elle ne supprime pas les confirmations applicables aux actions sensibles.

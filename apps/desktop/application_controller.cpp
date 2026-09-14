@@ -28,6 +28,7 @@
 #include "debug_feature_manager.h"
 #include "freeze_hotkey_overlay_manager.h"
 #include "investigation_notebook_manager.h"
+#include "effect_proof_manager.h"
 #include "kernel_driver_manager.h"
 #include "lua_repl_manager.h"
 #include "lua_runtime_locator.h"
@@ -70,6 +71,7 @@
 #include "scanner/scan_engine.h"
 #include "scanner/scan_types.h"
 #include "scanner/display_value_tracker.h"
+#include "scanner/visual_change_correlator.h"
 #include "scanner/display_source_classifier.h"
 #include "scanner/memory_window_search.h"
 #include "scanner/encrypted_scan.h"
@@ -1413,6 +1415,7 @@ ApplicationController::ApplicationController(QObject* parent)
     m_automationPipeManager = std::make_unique<AutomationPipeManager>(this);
     m_claudeChatManager = std::make_unique<ClaudeChatManager>(this);
     m_investigationNotebookManager = std::make_unique<InvestigationNotebookManager>();
+    m_effectProofManager = std::make_unique<EffectProofManager>();
     m_kernelDriverManager = std::make_unique<KernelDriverManager>(
         m_handle,
         [this](const QString& event, const QVariantMap& payload) {
@@ -2354,6 +2357,79 @@ QVariantMap ApplicationController::getChangedPagesConsensus(const QVariantMap& o
 
 QVariantMap ApplicationController::stopChangedPagesSession() {
     return m_uiStringInvestigator->stopChangedPagesSession();
+}
+
+QVariantMap ApplicationController::captureVisualObservationSources(const QVariantList& sources) const {
+    QVariantMap result{{"success", false}, {"error", "No live process attached"},
+        {"candidates", QVariantList{}}, {"startedMs", QDateTime::currentMSecsSinceEpoch()}};
+    if (!m_handle.isValid()) return result;
+    FILETIME created{}, exited{}, kernel{}, user{};
+    DWORD exitCode = 0;
+    if (!GetProcessTimes(m_handle.rawHandle(), &created, &exited, &kernel, &user)
+        || !GetExitCodeProcess(m_handle.rawHandle(), &exitCode) || exitCode != STILL_ACTIVE) return result;
+    result["processInstance"] = QString("%1:%2:%3").arg(m_handle.pid())
+        .arg(created.dwHighDateTime).arg(created.dwLowDateTime);
+    const auto consensus = m_uiStringInvestigator->getChangedPagesConsensus({{"maxResults", 256}});
+    QVariantList inputs = sources.mid(0, 256);
+    if (consensus.value("sessionActive").toBool()) {
+        for (const auto& value : consensus.value("topEntries").toList()) {
+            auto item = value.toMap();
+            item["source"] = "changed_pages";
+            inputs.append(item);
+        }
+    }
+    bool partial = sources.size() > 256 || consensus.value("entriesTotal").toInt() > 256;
+    QSet<QString> seen;
+    QVariantList samples;
+    killcore::MemoryReader reader(m_handle);
+    QElapsedTimer budget;
+    budget.start();
+    for (const auto& value : inputs) {
+        if (samples.size() >= 256 || budget.elapsed() > 250) { partial = true; break; }
+        const auto input = value.toMap();
+        uint64_t address = 0;
+        killcore::ValueType type;
+        if (!parseHexAddress(input.value("address").toString(), &address) || !address
+            || !killcore::parseValueType(input.value("type").toString(), &type)) {
+            partial = true;
+            continue;
+        }
+        const QString variant = input.value("variantLabel").toString().left(80);
+        const QString hex = QString::number(address, 16).toUpper();
+        const QString key = hex + "|" + killcore::valueTypeToString(type) + "|" + variant;
+        if (seen.contains(key)) continue;
+        seen.insert(key);
+        const auto size = killcore::valueTypeSize(type);
+        const auto read = reader.read(address, size);
+        const bool readable = (read.success || read.partial) && read.bytesRead == size;
+        samples.append(QVariantMap{{"address", hex}, {"type", killcore::valueTypeToString(type)},
+            {"variantLabel", variant}, {"source", input.value("source", "ui_string")},
+            {"readable", readable}, {"sampledMs", QDateTime::currentMSecsSinceEpoch()},
+            {"bytesHex", readable ? QString::fromLatin1(read.data.left(size).toHex()) : QString{}}});
+    }
+    result["success"] = true;
+    result["error"] = "";
+    result["candidates"] = samples;
+    result["partial"] = partial;
+    result["finishedMs"] = QDateTime::currentMSecsSinceEpoch();
+    return result;
+}
+
+QVariantMap ApplicationController::correlateVisualObservation(const QVariantMap& observation,
+    const QVariantMap& before, const QVariantList& sources) const {
+    // Re-read the baseline candidates first, even if an existing tracker eliminated them.
+    // That preserves contradictions instead of showing only surviving matches.
+    QVariantList candidates = before.value("candidates").toList().mid(0, 256);
+    candidates.append(sources.mid(0, 256));
+    QVariantMap boundedObservation{
+        {"description", observation.value("description").toString().left(2000)},
+        {"previousValue", observation.value("previousValue").toString().left(64)},
+        {"currentValue", observation.value("currentValue").toString().left(64)},
+        {"hypothesis", observation.value("hypothesis").toString().left(32)}};
+    const auto after = captureVisualObservationSources(candidates);
+    auto result = killcore::correlateVisualChange(boundedObservation, before, after);
+    result["observedMs"] = QDateTime::currentMSecsSinceEpoch();
+    return result;
 }
 
 QVariantMap ApplicationController::startExactScan(const QString& value, const QString& valueType) {
@@ -3773,6 +3849,20 @@ QVariantMap ApplicationController::proposeInvestigationNotebookPlan(const QStrin
 
 QVariantMap ApplicationController::resetInvestigationNotebook() {
     return m_investigationNotebookManager->resetNotebook();
+}
+
+QVariantMap ApplicationController::recordEffectProof(const QString& targetLabel, const QString& address, const QString& level,
+                                                       const QString& source, const QString& conditions, const QString& sessionId,
+                                                       const QString& note) {
+    return m_effectProofManager->recordProof(targetLabel, address, level, source, conditions, sessionId, note);
+}
+
+QVariantMap ApplicationController::getEffectProofSynthesis() const {
+    return m_effectProofManager->getSynthesis();
+}
+
+QVariantMap ApplicationController::resetEffectProofLedger() {
+    return m_effectProofManager->resetLedger();
 }
 
 QVariantMap ApplicationController::logAiAudit(const QString& event, const QVariantMap& payload) {
@@ -6882,6 +6972,48 @@ QVariantList ApplicationController::listProfiles() {
 
 QVariantMap ApplicationController::loadProfile(const QString& profileName) {
     return m_profileManager->loadProfile(profileName);
+}
+
+QVariantMap ApplicationController::inspectProfileDurability(const QString& profileName) {
+    const QString name = profileName.trimmed();
+    if (name.isEmpty() || name.contains('/') || name.contains('\\') || name.contains(':')
+        || name == "." || name == "..") {
+        return {{"success", false}, {"errorCode", "invalid_profile_name"}};
+    }
+    killcore::Profile profile;
+    if (!killcore::ProfileStore::load(killcore::ProfileStore::profilePath(name), &profile)) {
+        return {{"success", false}, {"errorCode", "profile_not_found"}};
+    }
+    auto result = killcore::ProfileStore::diagnose(profile, m_handle).toVariantMap();
+    result["profileName"] = name;
+    appendScanTelemetry("profile_durability_inspect", result);
+    return result;
+}
+
+QVariantMap ApplicationController::saveProfileResolutionPlan(const QString& profileName,
+    const QString& entryKind, const QString& entryName, const QVariantMap& options) {
+    const QString name = profileName.trimmed();
+    if (name.isEmpty() || name.contains('/') || name.contains('\\') || name.contains(':')
+        || name == "." || name == "..") {
+        return {{"success", false}, {"errorCode", "invalid_profile_name"}};
+    }
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(name);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        return {{"success", false}, {"errorCode", "profile_not_found"}};
+    }
+    QString error;
+    if (!killcore::ProfileStore::setResolutionPlan(&profile, entryKind, entryName,
+            QJsonObject::fromVariantMap(options), m_handle, &error)) {
+        return {{"success", false}, {"errorCode", error}};
+    }
+    if (!killcore::ProfileStore::save(profile, path)) {
+        return {{"success", false}, {"errorCode", "profile_save_failed"}};
+    }
+    QVariantMap result{{"success", true}, {"profileName", name}, {"entryKind", entryKind},
+                       {"entryName", entryName}, {"automaticApplicationAllowed", false}};
+    appendScanTelemetry("profile_resolution_plan_saved", result);
+    return result;
 }
 
 bool ApplicationController::deleteProfile(const QString& profileName) {

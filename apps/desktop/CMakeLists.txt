@@ -25,6 +25,7 @@ qt_add_executable(KillEngine
     claude_chat_manager.cpp
     crash_handler.cpp
     investigation_notebook_manager.cpp
+    effect_proof_manager.cpp
     smart_watchdog_manager.cpp
     lua_runtime_locator.cpp
     lua_repl_manager.cpp

@@ -5,6 +5,8 @@ import { useAppStore } from '@/stores/app'
 import {
   backend,
   type ChangedPagesConsensusResult,
+  type VisualObservationSnapshot,
+  type VisualObservationResult,
   type UiStringCandidate,
   type UiStringInvestigationFinishResult,
   type UiStringInvestigationStartResult,
@@ -128,6 +130,78 @@ const structureDeltaResult = ref<Record<string, unknown> | null>(null)
 const structureDeltaBusy = ref(false)
 const uiStringCandidates = ref<UiStringCandidate[]>([])
 const uiStringSourceCandidates = ref<UiStringSourceCandidate[]>([])
+
+// R3: descriptions are declared observations; no screenshot or OCR is implied.
+const { locale: visualLocale } = useI18n()
+const visualBefore = ref<VisualObservationSnapshot | null>(null)
+const visualResult = ref<VisualObservationResult | null>(null)
+const visualBusy = ref(false)
+const visualError = ref('')
+const visualDescription = ref('')
+const visualPrevious = ref('')
+const visualCurrent = ref('')
+const visualHypothesis = ref('quantity')
+const visualText = (fr: string, en: string) => visualLocale.value.startsWith('fr') ? fr : en
+const visualStatus = (status: string) => (({
+  strong: visualText('Corrélation forte (deux valeurs concordantes)', 'Strong correlation (both values match)'),
+  weak: visualText('Indice faible', 'Weak indication'),
+  unsupported: visualText('Valeur ou représentation non interprétable', 'Value or representation cannot be interpreted'),
+  unchanged: visualText('Octets inchangés', 'Unchanged bytes'),
+  contradicted: visualText('Valeurs déclarées contredites', 'Declared values contradicted'),
+  unavailable: visualText('Lecture ou référence indisponible', 'Reading or baseline unavailable'),
+  correlated: visualText('Piste corrélée, effet non prouvé', 'Correlated candidate, effect unproven'),
+  ambiguous: visualText('Plusieurs pistes : ambiguïté non résolue', 'Multiple candidates: unresolved ambiguity'),
+  inconclusive: visualText('Aucune corrélation exploitable', 'No usable correlation'),
+  process_changed: visualText('Processus changé ou inaccessible : reprendre le relevé avant', 'Process changed or inaccessible: capture a new baseline'),
+  expired_window: visualText('Relevés périmés (10 minutes maximum) : recommencer', 'Expired samples (10-minute maximum): start again'),
+  invalid_observation: visualText('Décrire l’action et ce qui a été vu', 'Describe the action and what you saw'),
+} as Record<string, string>)[status] ?? status)
+const visualExperiment = computed(() => {
+  switch (visualResult.value?.experiment) {
+    case 'change_maximum_keep_current': return visualText(
+      'Hypothèses : valeur actuelle ou plafond. Changez uniquement le maximum en gardant la valeur actuelle fixe, puis refaites les relevés. Les pistes qui réagissent au plafond se distinguent de celles qui suivent la valeur actuelle.',
+      'Hypotheses: current value or maximum. Change only the maximum while keeping the current value fixed, then sample again. Candidates responding to the maximum separate from those following the current value.')
+    case 'wait_for_animation_then_repeat': return visualText(
+      'Hypothèses : source ou copie animée. Attendez la fin de l’animation et relevez sans nouvelle action, puis répétez une petite variation. Une copie interpolée peut continuer à varier après la stabilisation de la source.',
+      'Hypotheses: source or animated copy. Wait for the animation to finish and sample without another action, then repeat a small change. An interpolated copy may keep changing after the source settles.')
+    default: return visualText(
+      'Hypothèses : quantité ciblée ou autre valeur corrélée. Faites varier une seule quantité en maintenant les autres fixes, puis inversez l’action. Répétez les relevés : suivre une seule variation ne permet pas de choisir entre source et copie.',
+      'Hypotheses: intended quantity or another correlated value. Change only one quantity while keeping others fixed, then reverse the action. Repeat the samples: following one change cannot distinguish a source from a copy.')
+  }
+})
+watch([visualDescription, visualPrevious, visualCurrent, visualHypothesis], () => { visualResult.value = null })
+watch(() => store.isAttached, () => { visualBefore.value = null; visualResult.value = null })
+async function captureVisualBefore() {
+  visualBusy.value = true
+  visualError.value = ''
+  visualBefore.value = null
+  visualResult.value = null
+  try {
+    const method = backend.getController().captureVisualObservationSources
+    if (!method) throw new Error(visualText('Backend indisponible', 'Backend unavailable'))
+    const snapshot = await method(uiStringSourceCandidates.value)
+    if (!snapshot.success) throw new Error(snapshot.error)
+    if (!snapshot.candidates.length) throw new Error(visualText(
+      'Produisez d’abord des candidats avec Changed Pages ou Analyser sources.',
+      'First produce candidates using Changed Pages or Analyze sources.'))
+    visualBefore.value = snapshot
+  } catch (error) { visualError.value = String(error) }
+  finally { visualBusy.value = false }
+}
+async function correlateVisualAfter() {
+  if (!visualBefore.value) return
+  visualBusy.value = true
+  visualError.value = ''
+  visualResult.value = null
+  try {
+    const method = backend.getController().correlateVisualObservation
+    if (!method) throw new Error(visualText('Backend indisponible', 'Backend unavailable'))
+    visualResult.value = await method({ description: visualDescription.value,
+      previousValue: visualPrevious.value, currentValue: visualCurrent.value,
+      hypothesis: visualHypothesis.value }, visualBefore.value, uiStringSourceCandidates.value)
+  } catch (error) { visualError.value = String(error) }
+  finally { visualBusy.value = false }
+}
 const selectedUiStringAddresses = ref<string[]>([])
 const selectedUiSourceAddresses = ref<string[]>([])
 const uiStringLiveTexts = ref<Record<string, {
@@ -2439,6 +2513,42 @@ onMounted(() => {
               {{ $t('expert.stabilitySummary', { reads: changedPagesStabilityResult.readCount, changes: changedPagesStabilityResult.changeCount, unreadable: changedPagesStabilityResult.unreadable }) }}
             </p>
           </div>
+        </div>
+        <div class="find-writes-panel" data-testid="visual-observation-panel">
+          <strong>{{ visualText('Montre-moi ce qui change', 'Show me what changes') }}</strong>
+          <p class="hint">{{ visualText('Observation décrite, sans capture écran. Les lectures sont séquentielles et la description reste incertaine. Une corrélation ne prouve ni la causalité ni l’effet.', 'Described observation, without screen capture. Readings are sequential and the description remains uncertain. Correlation proves neither causality nor effect.') }}</p>
+          <p class="hint">{{ visualText('1. Relevez avant. 2. Faites une action dans la cible et décrivez le changement. 3. Relevez après pour comparer les candidats existants.', '1. Sample before. 2. Perform an action in the target and describe the change. 3. Sample after to compare existing candidates.') }}</p>
+          <button :disabled="visualBusy" @click="captureVisualBefore">{{ visualText('Relever avant / recommencer', 'Sample before / restart') }}</button>
+          <p v-if="visualBefore" class="hint">{{ visualBefore.candidates.length }} {{ visualText('candidats relevés à', 'candidates sampled at') }} {{ new Date(visualBefore.finishedMs ?? visualBefore.startedMs).toLocaleTimeString() }}</p>
+          <label>{{ visualText('Action et observation', 'Action and observation') }}
+            <textarea v-model="visualDescription" :disabled="visualBusy" maxlength="2000" rows="2" :placeholder="visualText('J’ai gagné un point : le score est passé de 100 à 101.', 'I gained a point: the score went from 100 to 101.')" />
+          </label>
+          <div class="input-row">
+            <label>{{ visualText('Valeur avant (facultatif)', 'Value before (optional)') }} <input v-model="visualPrevious" :disabled="visualBusy" maxlength="64" /></label>
+            <label>{{ visualText('Valeur après (facultatif)', 'Value after (optional)') }} <input v-model="visualCurrent" :disabled="visualBusy" maxlength="64" /></label>
+            <label>{{ visualText('Hypothèses à départager', 'Hypotheses to distinguish') }}
+              <select v-model="visualHypothesis" :disabled="visualBusy">
+                <option value="quantity">{{ visualText('Quantités corrélées / copies', 'Correlated quantities / copies') }}</option>
+                <option value="maximum">{{ visualText('Valeur actuelle / maximum', 'Current value / maximum') }}</option>
+                <option value="animation">{{ visualText('Source / affichage animé', 'Source / animated display') }}</option>
+              </select>
+            </label>
+          </div>
+          <button :disabled="visualBusy || !visualBefore || !visualDescription.trim()" @click="correlateVisualAfter">{{ visualText('Relever après et corréler', 'Sample after and correlate') }}</button>
+          <p v-if="visualError" class="error">{{ visualError }}</p>
+          <p v-if="visualBefore?.partial || visualResult?.partial" class="hint">{{ visualText('Relevé partiel : certaines pistes n’ont pas été examinées. Aucune unicité garantie.', 'Partial sample: some candidates were not examined. Uniqueness is not guaranteed.') }}</p>
+          <template v-if="visualResult">
+            <p><strong>{{ visualStatus(visualResult.status) }}</strong></p>
+            <p v-if="visualResult.error" class="error">{{ visualResult.error }}</p>
+            <p v-if="visualResult.observedMs" class="hint">{{ new Date(visualResult.observedMs).toLocaleTimeString() }}</p>
+            <div style="max-height: 260px; overflow: auto;">
+              <div v-for="candidate in visualResult.candidates" :key="`${candidate.address}:${candidate.type}:${candidate.variantLabel}`" class="find-writes-row">
+                <code>{{ candidate.address }}</code><span>{{ candidate.type }} {{ candidate.variantLabel }} · {{ candidate.source }}</span>
+                <span>{{ visualStatus(candidate.status) }}</span><code>{{ candidate.beforeHex || '?' }} → {{ candidate.bytesHex || '?' }}</code>
+              </div>
+            </div>
+            <p v-if="visualResult.success" class="hint">{{ visualExperiment }}</p>
+          </template>
         </div>
         <div v-if="disassembleBackwardResult || disassembleBackwardBusy" class="find-writes-panel">
           <div class="source-list-title">

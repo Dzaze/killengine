@@ -20,8 +20,355 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QJsonDocument>
+#include <QMap>
+#include <cstring>
+#include <limits>
 
 using namespace killcore;
+
+namespace {
+
+Locator r2ModuleLocator(uint64_t offset = 0x20) {
+    Locator locator;
+    locator.module = "game.exe";
+    locator.offset = offset;
+    locator.lastAddress = 0x1020;
+    return locator;
+}
+
+ProfileResolutionPlan r2Plan() {
+    ProfileResolutionPlan plan;
+    plan.discoveryMethod = "Controlled pointer scan";
+    plan.expectedBytes = "ef be ad de";
+    plan.validationTest = "Check the independent effect after a scene transition";
+    plan.executableHash = "hash-v1";
+    plan.moduleHashes = {{"game.exe", "hash-v1"}};
+    plan.recordedSession = "100:created-1";
+    plan.recordedAt = "2026-09-14T10:00:00Z";
+    plan.evidenceNote = "Declared observation, not effect certification";
+    return plan;
+}
+
+ProfileResolutionContext r2Context() {
+    return {"game.exe", "hash-v1", "101:created-2", {{"game.exe", "hash-v1"}}};
+}
+
+LocatorProbe r2Observed(uint64_t address) {
+    LocatorProbe probe;
+    probe.resolved = true;
+    probe.readable = true;
+    probe.address = address;
+    probe.bytes = QByteArray::fromHex("efbeadde");
+    return probe;
+}
+
+QJsonObject r2Diagnose(const ProfileResolutionPlan& plan, const QList<LocatorProbe>& observations,
+                       const ProfileResolutionContext& context = r2Context(),
+                       const Locator& locator = r2ModuleLocator()) {
+    return diagnoseProfileResolution("game.exe", "hash-v1", locator, plan, context, observations);
+}
+
+QByteArray r2Pointer(uint64_t pointer, size_t width = 8) {
+    QByteArray result(static_cast<qsizetype>(width), '\0');
+    std::memcpy(result.data(), &pointer, width);
+    return result;
+}
+
+LocatorReadBytes r2Reader(const QMap<uint64_t, QByteArray>& memory) {
+    return [memory](uint64_t address, size_t count) {
+        return memory.value(address).left(static_cast<qsizetype>(count));
+    };
+}
+
+} // namespace
+
+TEST(ProfileDurability, RoundTripsMetadataForTargetsPatchesAndPointerMap) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    Profile profile;
+    profile.executableName = "game.exe";
+    ProfileTarget target;
+    target.name = "Signature";
+    target.locator = r2ModuleLocator();
+    target.locator.kind = LocatorKind::PointerChain;
+    target.locator.pointerChain = {"game.exe", 0x20, {0x10, 0x8}};
+    target.resolutionPlan = r2Plan();
+    target.resolutionPlan.alternatives = {r2ModuleLocator(0x80)};
+    target.resolutionPlan.alternativeNames = {"Alternative"};
+    target.resolutionPlan.baselineObservation = {{"address", "fedcba9876543210"},
+        {"observedBytes", "ef be ad de"}, {"effectVerified", false}};
+    profile.targets.append(target);
+    ProfileCodePatch patch;
+    patch.name = "Patch";
+    patch.resolutionPlan = target.resolutionPlan;
+    profile.patches.append(patch);
+    const QString path = directory.filePath("r2.keprofile");
+    ASSERT_TRUE(ProfileStore::save(profile, path));
+    Profile loaded;
+    ASSERT_TRUE(ProfileStore::load(path, &loaded));
+    ASSERT_EQ(loaded.targets.size(), 1);
+    ASSERT_EQ(loaded.patches.size(), 1);
+    for (const auto& plan : {loaded.targets[0].resolutionPlan, loaded.patches[0].resolutionPlan}) {
+        EXPECT_EQ(plan.discoveryMethod, target.resolutionPlan.discoveryMethod);
+        EXPECT_EQ(plan.expectedBytes, "ef be ad de");
+        EXPECT_EQ(plan.validationTest, target.resolutionPlan.validationTest);
+        EXPECT_EQ(plan.executableHash, "hash-v1");
+        EXPECT_EQ(plan.recordedSession, "100:created-1");
+        EXPECT_EQ(plan.recordedAt, target.resolutionPlan.recordedAt);
+        EXPECT_EQ(plan.evidenceNote, target.resolutionPlan.evidenceNote);
+        EXPECT_EQ(plan.moduleHashes, target.resolutionPlan.moduleHashes);
+        EXPECT_EQ(plan.baselineObservation, target.resolutionPlan.baselineObservation);
+        ASSERT_EQ(plan.alternatives.size(), 1);
+        EXPECT_EQ(plan.alternatives[0].offset, 0x80u);
+        EXPECT_EQ(plan.alternativeNames, QStringList{"Alternative"});
+    }
+    Profile imported;
+    const auto merged = ProfileStore::mergePointerMap(&imported, ProfileStore::exportPointerMap(profile), false);
+    ASSERT_EQ(merged.imported, 1);
+    EXPECT_EQ(imported.targets[0].resolutionPlan.expectedBytes, "ef be ad de");
+}
+
+TEST(ProfileDurability, LegacyProfileHasNoInventedEvidence) {
+    QTemporaryDir directory;
+    QFile file(directory.filePath("legacy.keprofile"));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write(R"({"formatVersion":1,"targets":[{"name":"Old","locator":{"kind":"absolute","lastAddress":"1234"}}]})");
+    file.close();
+    Profile profile;
+    ASSERT_TRUE(ProfileStore::load(file.fileName(), &profile));
+    ASSERT_EQ(profile.targets.size(), 1);
+    const auto& plan = profile.targets[0].resolutionPlan;
+    EXPECT_TRUE(plan.expectedBytes.isEmpty());
+    EXPECT_TRUE(plan.baselineObservation.isEmpty());
+    EXPECT_TRUE(plan.recordedSession.isEmpty());
+}
+
+TEST(ProfileDurability, RepeatedModuleRelocationsRecheckConditionsWithoutCertifyingEffect) {
+    // Three synthetic sessions, not three real process launches.
+    for (uint64_t base : {0x1000ULL, 0x5000ULL, 0x100000000ULL}) {
+        const QList<ProcessModuleInfo> modules{{"game.exe", "", base, 0x1000}};
+        const auto probe = probeLocator(r2ModuleLocator(), modules, 8, 4,
+            r2Reader({{base + 0x20, QByteArray::fromHex("efbeadde")}}));
+        ASSERT_TRUE(probe.readable);
+        EXPECT_EQ(probe.address, base + 0x20);
+        const auto report = r2Diagnose(r2Plan(), {probe});
+        EXPECT_EQ(report.value("status").toString(), "conditions_verified");
+        EXPECT_TRUE(report.value("conditionsVerified").toBool());
+        EXPECT_FALSE(report.value("automaticApplicationAllowed").toBool());
+        EXPECT_EQ(report.value("nextAction").toString(), "verify_effect_separately");
+    }
+}
+
+TEST(ProfileDurability, PointerChainDereferencesBeforeEveryOffsetAfterHeapRelocation) {
+    Locator locator = r2ModuleLocator();
+    locator.kind = LocatorKind::PointerChain;
+    locator.pointerChain = {"game.exe", 0x20, {0x10, 0x8}};
+    for (uint64_t heap : {0x2000ULL, 0x9000ULL, 0x100000000ULL}) {
+        const auto read = r2Reader({{0x1020, r2Pointer(heap)},
+                                   {heap + 0x10, r2Pointer(heap + 0x100)},
+                                   {heap + 0x108, QByteArray::fromHex("efbeadde")}});
+        const auto probe = probeLocator(locator, {{"game.exe", "", 0x1000, 0x1000}}, 8, 4, read);
+        ASSERT_TRUE(probe.readable);
+        EXPECT_EQ(probe.address, heap + 0x108);
+        EXPECT_EQ(r2Diagnose(r2Plan(), {probe}, r2Context(), locator).value("status").toString(), "conditions_verified");
+    }
+}
+
+TEST(ProfileDurability, ChangedLayoutProposesAlternativeWithoutReplacingPrimary) {
+    auto plan = r2Plan();
+    plan.alternatives = {r2ModuleLocator(0x80)};
+    auto old = r2Observed(0x1020);
+    old.bytes = QByteArray::fromHex("00000000");
+    const auto report = r2Diagnose(plan, {old, r2Observed(0x1080)});
+    EXPECT_EQ(report.value("status").toString(), "repair_candidate");
+    EXPECT_EQ(report.value("candidateAddress").toString(), "1080");
+    EXPECT_FALSE(report.value("conditionsVerified").toBool());
+    EXPECT_FALSE(report.value("automaticApplicationAllowed").toBool());
+    EXPECT_EQ(plan.alternatives[0].offset, 0x80u);
+}
+
+TEST(ProfileDurability, TwoMatchingAddressesAreAmbiguousEvenWhenPrimaryMatches) {
+    auto plan = r2Plan();
+    plan.alternatives = {r2ModuleLocator(0x80)};
+    const auto report = r2Diagnose(plan, {r2Observed(0x1020), r2Observed(0x1080)});
+    EXPECT_EQ(report.value("status").toString(), "ambiguous");
+    EXPECT_EQ(report.value("candidateCount").toInt(), 2);
+    EXPECT_TRUE(report.value("candidateAddress").toString().isEmpty());
+    EXPECT_FALSE(report.value("conditionsVerified").toBool());
+}
+
+TEST(ProfileDurability, DuplicatePathsToSameAddressAreNotAmbiguous) {
+    auto plan = r2Plan();
+    plan.alternatives = {r2ModuleLocator(0x20)};
+    const auto report = r2Diagnose(plan, {r2Observed(0x1020), r2Observed(0x1020)});
+    EXPECT_EQ(report.value("candidateCount").toInt(), 1);
+    EXPECT_EQ(report.value("status").toString(), "conditions_verified");
+}
+
+TEST(ProfileDurability, MissingAllStoredPathsIsExplicitlyIrrecoverableWithinScope) {
+    auto plan = r2Plan();
+    plan.alternatives = {r2ModuleLocator(0x80)};
+    LocatorProbe missing;
+    missing.errorCode = "module_missing";
+    const auto report = r2Diagnose(plan, {missing, missing});
+    EXPECT_EQ(report.value("status").toString(), "missing");
+    EXPECT_EQ(report.value("nextAction").toString(), "rediscover_target");
+    EXPECT_FALSE(report.value("automaticApplicationAllowed").toBool());
+}
+
+TEST(ProfileDurability, UnreadableAlternativeCannotProveUniqueness) {
+    auto plan = r2Plan();
+    plan.alternatives = {r2ModuleLocator(0x80)};
+    LocatorProbe unknown;
+    unknown.errorCode = "pointer_unreadable";
+    const auto report = r2Diagnose(plan, {r2Observed(0x1020), unknown});
+    EXPECT_EQ(report.value("status").toString(), "inconclusive");
+    EXPECT_FALSE(report.value("conditionsVerified").toBool());
+}
+
+TEST(ProfileDurability, ExecutableAndModuleVersionChangesRequireRevalidation) {
+    auto context = r2Context();
+    context.executableHash = "hash-v2";
+    auto report = r2Diagnose(r2Plan(), {r2Observed(0x1020)}, context);
+    EXPECT_EQ(report.value("status").toString(), "version_changed");
+    EXPECT_TRUE(report.value("executableVersionChanged").toBool());
+    context = r2Context();
+    context.moduleHashes["game.exe"] = "module-v2";
+    report = r2Diagnose(r2Plan(), {r2Observed(0x1020)}, context);
+    EXPECT_EQ(report.value("status").toString(), "version_changed");
+    EXPECT_TRUE(report.value("moduleVersionChanged").toBool());
+}
+
+TEST(ProfileDurability, MissingHashesAndMissingConditionsNeverBecomeVerified) {
+    auto context = r2Context();
+    context.executableHash.clear();
+    EXPECT_EQ(r2Diagnose(r2Plan(), {r2Observed(0x1020)}, context).value("status").toString(), "unverified");
+    context = r2Context();
+    context.moduleHashes = {};
+    EXPECT_EQ(r2Diagnose(r2Plan(), {r2Observed(0x1020)}, context).value("status").toString(), "unverified");
+    auto plan = r2Plan();
+    plan.expectedBytes.clear();
+    EXPECT_EQ(r2Diagnose(plan, {r2Observed(0x1020)}).value("status").toString(), "unverified");
+}
+
+TEST(ProfileDurability, AbsoluteAddressReusedByNewSessionDoesNotBecomeValid) {
+    auto locator = r2ModuleLocator();
+    locator.kind = LocatorKind::Absolute;
+    locator.module.clear();
+    const auto report = r2Diagnose(r2Plan(), {r2Observed(locator.lastAddress)}, r2Context(), locator);
+    EXPECT_EQ(report.value("status").toString(), "session_changed");
+    EXPECT_FALSE(report.value("conditionsVerified").toBool());
+}
+
+TEST(ProfileDurability, WrongExecutableIsRejectedEvenWithMatchingBytes) {
+    auto context = r2Context();
+    context.executableName = "other.exe";
+    EXPECT_EQ(r2Diagnose(r2Plan(), {r2Observed(0x1020)}, context).value("status").toString(), "wrong_process");
+}
+
+TEST(ProfileDurability, RejectsMalformedConditionsAndTruncatedObservationSets) {
+    for (const QString& invalid : {QString("GG"), QString("0"), QString("??"), QString(130, 'a')}) {
+        auto plan = r2Plan();
+        plan.expectedBytes = invalid;
+        EXPECT_EQ(r2Diagnose(plan, {r2Observed(0x1020)}).value("status").toString(), "invalid_conditions");
+    }
+    auto plan = r2Plan();
+    plan.alternatives = {r2ModuleLocator(0x80)};
+    EXPECT_EQ(r2Diagnose(plan, {r2Observed(0x1020)}).value("status").toString(), "invalid_conditions");
+}
+
+TEST(ProfileDurability, LocatorBoundsPreventOverflowAndOutOfModuleReads) {
+    int reads = 0;
+    const LocatorReadBytes read = [&](uint64_t, size_t) { ++reads; return QByteArray(); };
+    auto locator = r2ModuleLocator(0x1000);
+    auto probe = probeLocator(locator, {{"game.exe", "", 0x1000, 0x1000}}, 8, 4, read);
+    EXPECT_EQ(probe.errorCode, "module_offset_out_of_range");
+    locator.offset = 0x20;
+    probe = probeLocator(locator, {{"game.exe", "", std::numeric_limits<uint64_t>::max() - 0x10, 0x1000}}, 8, 4, read);
+    EXPECT_EQ(probe.errorCode, "module_offset_out_of_range");
+    EXPECT_EQ(reads, 0);
+}
+
+TEST(ProfileDurability, ModuleOffsetZeroAndHomonymousModulesAreHandled) {
+    auto locator = r2ModuleLocator(0);
+    const auto read = r2Reader({{0x1000, QByteArray::fromHex("efbeadde")}});
+    EXPECT_TRUE(probeLocator(locator, {{"GAME.EXE", "", 0x1000, 0x1000}}, 8, 4, read).readable);
+    const auto ambiguous = probeLocator(locator,
+        {{"GAME.EXE", "", 0x1000, 0x1000}, {"game.exe", "", 0x2000, 0x1000}}, 8, 4, read);
+    EXPECT_EQ(ambiguous.errorCode, "ambiguous_module");
+}
+
+TEST(ProfileDurability, PointerWidthNullOverflowAndShortReadsAreRejected) {
+    auto locator = r2ModuleLocator();
+    locator.kind = LocatorKind::PointerChain;
+    locator.pointerChain = {"game.exe", 0x20, {0x10}};
+    const QList<ProcessModuleInfo> modules{{"game.exe", "", 0x1000, 0x1000}};
+    auto probe = probeLocator(locator, modules, 4, 4, r2Reader({{0x1020, r2Pointer(0xfffffff8, 4)}}));
+    EXPECT_EQ(probe.errorCode, "address_overflow");
+    probe = probeLocator(locator, modules, 8, 4, r2Reader({{0x1020, r2Pointer(0)}}));
+    EXPECT_EQ(probe.errorCode, "null_pointer");
+    probe = probeLocator(locator, modules, 8, 4, r2Reader({{0x1020, QByteArray(3, '\0')}}));
+    EXPECT_EQ(probe.errorCode, "pointer_unreadable");
+    probe = probeLocator(r2ModuleLocator(), modules, 8, 4, r2Reader({{0x1020, QByteArray(3, '\0')}}));
+    EXPECT_FALSE(probe.readable);
+    EXPECT_EQ(probe.errorCode, "address_unreadable");
+}
+
+TEST(ProfileDurability, ClrProbeIsExplicitlyUnsupportedWithoutMemoryAccess) {
+    Locator locator;
+    locator.kind = LocatorKind::ClrField;
+    int reads = 0;
+    const auto probe = probeLocator(locator, {}, 8, 4, [&](uint64_t, size_t) { ++reads; return QByteArray(); });
+    EXPECT_EQ(probe.errorCode, "unsupported_locator");
+    EXPECT_EQ(reads, 0);
+}
+
+TEST(ProfileDurability, MalformedImportedMetadataCannotSilentlyDropConditions) {
+    QTemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    for (const auto& malformed : {QJsonValue("invalid"), QJsonValue(QJsonObject{{"expectedBytes", 123}}),
+                                  QJsonValue(QJsonObject{{"schemaVersion", 99}}),
+                                  QJsonValue(QJsonObject{{"alternatives", "not an array"}})}) {
+        QFile file(directory.filePath("malformed.keprofile"));
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        QJsonObject target{{"name", "Target"}, {"resolutionPlan", malformed}};
+        file.write(QJsonDocument(QJsonObject{{"targets", QJsonArray{target}}}).toJson());
+        file.close();
+        Profile loaded;
+        ASSERT_TRUE(ProfileStore::load(file.fileName(), &loaded));
+        ASSERT_EQ(loaded.targets.size(), 1);
+        EXPECT_TRUE(loaded.targets[0].resolutionPlan.invalid);
+        EXPECT_EQ(r2Diagnose(loaded.targets[0].resolutionPlan, {r2Observed(0x1020)}).value("status").toString(), "invalid_conditions");
+        // Re-saving must not silently remove the invalid marker.
+        ASSERT_TRUE(ProfileStore::save(loaded, file.fileName()));
+        ASSERT_TRUE(ProfileStore::load(file.fileName(), &loaded));
+        EXPECT_TRUE(loaded.targets[0].resolutionPlan.invalid);
+    }
+}
+
+TEST(ProfileDurability, ReadableButChangedBytesAreNotSuccessfulResolutionEvidence) {
+    auto observation = r2Observed(0x1020);
+    observation.bytes = QByteArray::fromHex("00000000");
+    const auto report = r2Diagnose(r2Plan(), {observation});
+    EXPECT_EQ(report.value("status").toString(), "conditions_mismatch");
+    EXPECT_FALSE(report.value("conditionsVerified").toBool());
+}
+
+TEST(ProfileDurability, ExcessiveChainAndAlternativeCountsStayBounded) {
+    auto locator = r2ModuleLocator();
+    locator.kind = LocatorKind::PointerChain;
+    locator.pointerChain = {"game.exe", 0x20, QList<uint64_t>(17, 0x10)};
+    int reads = 0;
+    const auto probe = probeLocator(locator, {{"game.exe", "", 0x1000, 0x1000}}, 8, 4,
+        [&](uint64_t, size_t) { ++reads; return QByteArray(); });
+    EXPECT_EQ(probe.errorCode, "invalid_pointer_chain");
+    EXPECT_EQ(reads, 0);
+    auto plan = r2Plan();
+    plan.alternatives = QList<Locator>(9, r2ModuleLocator());
+    const auto report = r2Diagnose(plan, QList<LocatorProbe>(10, r2Observed(0x1020)));
+    EXPECT_EQ(report.value("status").toString(), "invalid_conditions");
+}
 
 namespace {
 
