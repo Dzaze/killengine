@@ -65,6 +65,40 @@ export interface ProfileDurabilityReport {
   entries?: ProfileDurabilityEntry[]
 }
 
+/** R4 (PRODUIT-R) : mémoire d'enquête réutilisable, une note par cible/patch. */
+export type ProfileKnowledgeNoteKind = 'explained_failure' | 'success_condition' | 'discriminating_experiment' | 'recheck'
+
+export interface ProfileKnowledgeNoteOptions {
+  kind: ProfileKnowledgeNoteKind
+  description: string
+  experiment?: string
+  evidenceNote?: string
+}
+
+export interface ProfileKnowledgeNote {
+  id: string
+  invalid?: boolean
+  kind: ProfileKnowledgeNoteKind
+  description: string
+  experiment: string
+  evidenceNote: string
+  sessionId: string
+  executableHash: string
+  recordedAt: string
+}
+
+export interface ProfileKnowledgeNotesResult {
+  success: boolean
+  errorCode?: string
+  profileName?: string
+  entryKind?: 'target' | 'patch'
+  entryName?: string
+  versionEvaluated?: boolean
+  valid?: ProfileKnowledgeNote[]
+  stale?: ProfileKnowledgeNote[]
+  unversioned?: ProfileKnowledgeNote[]
+}
+
 export interface ProcessInfo {
   pid: number
   name: string
@@ -1907,6 +1941,11 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   inspectProfileDurability(profileName: string): Promise<ProfileDurabilityReport>
   saveProfileResolutionPlan(profileName: string, entryKind: 'target' | 'patch', entryName: string,
     options: ProfileResolutionPlanOptions): Promise<{ success: boolean; errorCode?: string }>
+  /** R4 : ajoute une note (échec expliqué/condition de réussite/expérience discriminante/à revérifier) à une cible ou un patch existant. */
+  addProfileKnowledgeNote?(profileName: string, entryKind: 'target' | 'patch', entryName: string,
+    options: ProfileKnowledgeNoteOptions): Promise<{ success: boolean; errorCode?: string; noteId?: string }>
+  /** R4 : lecture seule, jamais d'application automatique. */
+  getProfileKnowledgeNotes?(profileName: string, entryKind: 'target' | 'patch', entryName: string): Promise<ProfileKnowledgeNotesResult>
   deleteProfile(profileName: string): Promise<boolean>
   resolveProfileTarget(profileName: string, targetName: string): Promise<Record<string, unknown>>
   /** Roadmap section L — Pointer maps : résout toutes les cibles du profil d'un coup (diagnostic groupé après redémarrage). */
@@ -3418,6 +3457,13 @@ class BackendService {
       async saveProfileResolutionPlan(_profileName: string, _entryKind: 'target' | 'patch',
         _entryName: string, _options: ProfileResolutionPlanOptions) {
         return { success: false, errorCode: 'mock_backend' }
+      },
+      async addProfileKnowledgeNote(_profileName: string, _entryKind: 'target' | 'patch',
+        _entryName: string, _options: ProfileKnowledgeNoteOptions) {
+        return { success: false, errorCode: 'mock_backend' }
+      },
+      async getProfileKnowledgeNotes(_profileName: string, _entryKind: 'target' | 'patch', _entryName: string): Promise<ProfileKnowledgeNotesResult> {
+        return { success: false, errorCode: 'mock_backend', valid: [], stale: [], unversioned: [] }
       },
       async deleteProfile() {
         return false

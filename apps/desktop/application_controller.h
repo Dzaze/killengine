@@ -1244,6 +1244,17 @@ public:
     Q_INVOKABLE QVariantMap saveProfileResolutionPlan(const QString& profileName,
         const QString& entryKind, const QString& entryName, const QVariantMap& options);
 
+    /// R4 (PRODUIT-R) : ajoute une note de connaissance (échec expliqué / condition de
+    /// réussite / expérience discriminante / à revérifier) à une cible ou un patch d'un
+    /// profil existant. `options` attend {kind, description, experiment?, evidenceNote?}.
+    /// Versionnée automatiquement si un process est attaché, honnêtement non versionnée sinon.
+    Q_INVOKABLE QVariantMap addProfileKnowledgeNote(const QString& profileName,
+        const QString& entryKind, const QString& entryName, const QVariantMap& options);
+    /// R4 : lecture seule des notes d'une cible/patch, séparées en valid/stale/unversioned
+    /// face à la version actuellement attachée. Ne modifie jamais les notes stockées.
+    Q_INVOKABLE QVariantMap getProfileKnowledgeNotes(const QString& profileName,
+        const QString& entryKind, const QString& entryName);
+
     /// Supprime un profil.
     Q_INVOKABLE bool deleteProfile(const QString& profileName);
 

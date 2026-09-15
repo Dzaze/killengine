@@ -16,6 +16,7 @@
 #include <QElapsedTimer>
 #include <QRegularExpression>
 #include <QSet>
+#include <QUuid>
 
 #include <nlohmann/json.hpp>
 
@@ -156,6 +157,46 @@ ProfileResolutionPlan resolutionPlanFromJson(const QJsonValue& value) {
     return plan;
 }
 
+QString knowledgeNoteKindToStorageString(KnowledgeNoteKind kind) {
+    switch (kind) {
+        case KnowledgeNoteKind::ExplainedFailure:         return "explained_failure";
+        case KnowledgeNoteKind::SuccessCondition:         return "success_condition";
+        case KnowledgeNoteKind::DiscriminatingExperiment: return "discriminating_experiment";
+        case KnowledgeNoteKind::Recheck:                  return "recheck";
+    }
+    return "recheck";
+}
+
+QJsonObject knowledgeNoteToJson(const KnowledgeNote& note) {
+    return {{"schemaVersion", 1}, {"id", note.id}, {"invalid", note.invalid},
+            {"kind", knowledgeNoteKindToStorageString(note.kind)},
+            {"description", note.description}, {"experiment", note.experiment},
+            {"evidenceNote", note.evidenceNote}, {"sessionId", note.sessionId},
+            {"executableHash", note.executableHash}, {"recordedAt", note.recordedAt}};
+}
+
+KnowledgeNote knowledgeNoteFromJson(const QJsonValue& value) {
+    KnowledgeNote note;
+    if (!value.isObject()) { note.invalid = true; return note; }
+    const QJsonObject json = value.toObject();
+    note.invalid = json.value("invalid").toBool()
+        || (json.contains("schemaVersion") && json.value("schemaVersion").toInt(-1) != 1);
+    for (const QString& key : {QString("id"), QString("description"), QString("experiment"),
+                              QString("evidenceNote"), QString("sessionId"),
+                              QString("executableHash"), QString("recordedAt")}) {
+        if (json.contains(key) && !json.value(key).isString()) note.invalid = true;
+    }
+    note.id = json.value("id").toString();
+    if (!knowledgeNoteKindFromString(json.value("kind").toString(), &note.kind)) note.invalid = true;
+    note.description = json.value("description").toString();
+    note.experiment = json.value("experiment").toString();
+    note.evidenceNote = json.value("evidenceNote").toString();
+    note.sessionId = json.value("sessionId").toString();
+    note.executableHash = json.value("executableHash").toString();
+    note.recordedAt = json.value("recordedAt").toString();
+    return note;
+}
+
 bool parseExpectedBytes(const QString& text, QByteArray* bytes) {
     QString compact = text;
     compact.remove(QRegularExpression("\\s"));
@@ -231,6 +272,11 @@ QJsonObject targetToJson(const ProfileTarget& target) {
     json["type"] = valueTypeToString(target.type);
     json["locator"] = locatorToJson(target.locator);
     json["resolutionPlan"] = resolutionPlanToJson(target.resolutionPlan);
+    if (!target.knowledgeNotes.isEmpty()) {
+        QJsonArray notes;
+        for (const auto& note : target.knowledgeNotes) notes.append(knowledgeNoteToJson(note));
+        json["knowledgeNotes"] = notes;
+    }
     if (!target.description.isEmpty()) {
         json["description"] = target.description;
     }
@@ -262,6 +308,11 @@ QJsonObject patchToJson(const ProfileCodePatch& patch) {
     json["aobPattern"] = patch.aobPattern;
     json["patchBytes"] = patch.patchBytes;
     json["resolutionPlan"] = resolutionPlanToJson(patch.resolutionPlan);
+    if (!patch.knowledgeNotes.isEmpty()) {
+        QJsonArray notes;
+        for (const auto& note : patch.knowledgeNotes) notes.append(knowledgeNoteToJson(note));
+        json["knowledgeNotes"] = notes;
+    }
     if (!patch.originalBytes.isEmpty()) {
         json["originalBytes"] = patch.originalBytes;
     }
@@ -346,6 +397,10 @@ ProfileTarget targetFromJson(const QJsonObject& json) {
     parseValueType(json.value("type").toString("Int32"), &target.type);
     target.locator = locatorFromJson(json.value("locator").toObject());
     target.resolutionPlan = resolutionPlanFromJson(json.value("resolutionPlan"));
+    for (const auto& item : json.value("knowledgeNotes").toArray()) {
+        if (target.knowledgeNotes.size() >= ProfileStore::kMaxKnowledgeNotesPerEntry) break;
+        target.knowledgeNotes.append(knowledgeNoteFromJson(item));
+    }
     target.description = json.value("description").toString();
     target.ghidraSymbol = json.value("ghidraSymbol").toString();
     target.ghidraNote = json.value("ghidraNote").toString();
@@ -369,6 +424,10 @@ ProfileCodePatch patchFromJson(const QJsonObject& json) {
     patch.aobPattern = json.value("aobPattern").toString();
     patch.patchBytes = json.value("patchBytes").toString();
     patch.resolutionPlan = resolutionPlanFromJson(json.value("resolutionPlan"));
+    for (const auto& item : json.value("knowledgeNotes").toArray()) {
+        if (patch.knowledgeNotes.size() >= ProfileStore::kMaxKnowledgeNotesPerEntry) break;
+        patch.knowledgeNotes.append(knowledgeNoteFromJson(item));
+    }
     patch.originalBytes = json.value("originalBytes").toString();
     patch.disassembly = json.value("disassembly").toString();
     patch.riskLevel = json.value("riskLevel").toString();
@@ -389,6 +448,34 @@ ProfileCodePatch patchFromJson(const QJsonObject& json) {
 }
 
 } // namespace
+
+QString knowledgeNoteKindToString(KnowledgeNoteKind kind) {
+    return knowledgeNoteKindToStorageString(kind);
+}
+
+bool knowledgeNoteKindFromString(const QString& text, KnowledgeNoteKind* kind) {
+    if (text == "explained_failure") { *kind = KnowledgeNoteKind::ExplainedFailure; return true; }
+    if (text == "success_condition") { *kind = KnowledgeNoteKind::SuccessCondition; return true; }
+    if (text == "discriminating_experiment") { *kind = KnowledgeNoteKind::DiscriminatingExperiment; return true; }
+    if (text == "recheck") { *kind = KnowledgeNoteKind::Recheck; return true; }
+    return false;
+}
+
+QJsonObject evaluateKnowledgeNotes(const QList<KnowledgeNote>& notes, const QString& currentExecutableHash) {
+    QJsonArray valid, stale, unversioned;
+    for (const auto& note : notes) {
+        const QJsonObject json = knowledgeNoteToJson(note);
+        if (note.executableHash.isEmpty()) {
+            unversioned.append(json);
+        } else if (!currentExecutableHash.isEmpty()
+                   && note.executableHash.compare(currentExecutableHash, Qt::CaseInsensitive) != 0) {
+            stale.append(json);
+        } else {
+            valid.append(json);
+        }
+    }
+    return {{"valid", valid}, {"stale", stale}, {"unversioned", unversioned}};
+}
 
 // ---------------------------------------------------------------------------
 // ProfileStore
@@ -838,6 +925,78 @@ bool ProfileStore::setResolutionPlan(Profile* profile, const QString& entryKind,
     *destination = plan;
     if (error) error->clear();
     return true;
+}
+
+QString ProfileStore::addKnowledgeNote(Profile* profile, const QString& entryKind,
+                                       const QString& entryName, const QJsonObject& options,
+                                       const ProcessHandle& process, QString* error) {
+    auto fail = [&](const QString& code) { if (error) *error = code; return QString(); };
+    if (!profile) return fail("no_profile");
+    QList<KnowledgeNote>* destination = nullptr;
+    if (entryKind == "target") {
+        for (auto& target : profile->targets) {
+            if (target.name != entryName) continue;
+            if (destination) return fail("ambiguous_entry_name");
+            destination = &target.knowledgeNotes;
+        }
+    } else if (entryKind == "patch") {
+        for (auto& patch : profile->patches) {
+            if (patch.name != entryName) continue;
+            if (destination) return fail("ambiguous_entry_name");
+            destination = &patch.knowledgeNotes;
+        }
+    } else return fail("invalid_entry_kind");
+    if (!destination) return fail("entry_not_found");
+    if (destination->size() >= kMaxKnowledgeNotesPerEntry) return fail("too_many_notes");
+
+    KnowledgeNote note;
+    if (!knowledgeNoteKindFromString(options.value("kind").toString(), &note.kind)) return fail("invalid_kind");
+    note.description = options.value("description").toString().trimmed();
+    note.experiment = options.value("experiment").toString().trimmed();
+    note.evidenceNote = options.value("evidenceNote").toString().trimmed();
+    if (note.description.isEmpty() || note.description.size() > 2048
+        || note.experiment.size() > 128 || note.evidenceNote.size() > 2048) return fail("invalid_note");
+
+    // A version-scoped note is strictly more useful than an unversioned one (it can be
+    // contradicted later by evaluateKnowledgeNotes), but recording knowledge without an
+    // attached process must still succeed -- a lesson learned after a session ended is
+    // real, just honestly unversioned rather than falsely tied to no process.
+    if (process.isValid()) {
+        const auto context = resolutionContext(process, {}, {});
+        note.executableHash = context.executableHash;
+        note.sessionId = context.session;
+    }
+    note.recordedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    note.id = QString("K-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    destination->append(note);
+    if (error) error->clear();
+    return note.id;
+}
+
+QJsonObject ProfileStore::getKnowledgeNotes(const Profile& profile, const QString& entryKind,
+                                            const QString& entryName, const ProcessHandle& process) {
+    const QList<KnowledgeNote>* source = nullptr;
+    if (entryKind == "target") {
+        for (const auto& target : profile.targets) {
+            if (target.name != entryName) continue;
+            if (source) return {{"success", false}, {"errorCode", "ambiguous_entry_name"}};
+            source = &target.knowledgeNotes;
+        }
+    } else if (entryKind == "patch") {
+        for (const auto& patch : profile.patches) {
+            if (patch.name != entryName) continue;
+            if (source) return {{"success", false}, {"errorCode", "ambiguous_entry_name"}};
+            source = &patch.knowledgeNotes;
+        }
+    } else return {{"success", false}, {"errorCode", "invalid_entry_kind"}};
+    if (!source) return {{"success", false}, {"errorCode", "entry_not_found"}};
+
+    QString currentExecutableHash;
+    if (process.isValid()) currentExecutableHash = resolutionContext(process, {}, {}).executableHash;
+    QJsonObject result = evaluateKnowledgeNotes(*source, currentExecutableHash);
+    result["success"] = true;
+    result["versionEvaluated"] = !currentExecutableHash.isEmpty();
+    return result;
 }
 
 } // namespace killcore

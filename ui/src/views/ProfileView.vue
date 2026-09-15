@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
-import type { ClrFieldInfo, ProfileDurabilityEntry, ProfileDurabilityReport, ProfileResolutionPlanOptions } from '@/services/backend'
+import type { ClrFieldInfo, ProfileDurabilityEntry, ProfileDurabilityReport, ProfileResolutionPlanOptions, ProfileKnowledgeNoteOptions, ProfileKnowledgeNoteKind, ProfileKnowledgeNotesResult } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
@@ -165,6 +165,107 @@ async function checkDurabilityBeforeUse(kind: 'target' | 'patch', names: string[
   return true
 }
 
+// R4 (PRODUIT-R) : mémoire d'enquête réutilisable, une lane distincte de R2 qui
+// s'appuie sur le même contrôleur backend et le même profil sélectionné, mais
+// n'écrit jamais un locator ni une preuve d'effet (voir ai/effect_proof_ledger.*
+// pour la preuve d'effet en session, hors périmètre de ce fichier).
+const knowledgeCopy: Record<string, [string, string]> = {
+  title: ['Mémoire d’enquête', 'Investigation memory'],
+  hint: ['Notes qui survivent aux redémarrages : ce qui a échoué et pourquoi, ce qui a marché, l’expérience qui a tranché, ou un doute à revérifier. Un changement de version ne supprime rien, il signale juste à revérifier.', 'Notes that survive restarts: what failed and why, what worked, the experiment that settled it, or a doubt to recheck. A version change does not delete anything, it just flags it for review.'],
+  load: ['Charger les notes', 'Load notes'],
+  kind_explained_failure: ['Échec expliqué', 'Explained failure'],
+  kind_success_condition: ['Condition de réussite', 'Success condition'],
+  kind_discriminating_experiment: ['Expérience discriminante', 'Discriminating experiment'],
+  kind_recheck: ['À revérifier', 'Recheck'],
+  descriptionLabel: ['Description', 'Description'],
+  experimentLabel: ['Expérience (optionnel)', 'Experiment (optional)'],
+  evidenceLabel: ['Preuve / observation (optionnel)', 'Evidence / observation (optional)'],
+  add: ['Ajouter la note', 'Add note'],
+  valid: ['Toujours valable pour cette version', 'Still valid for this version'],
+  stale: ['Version différente : à revérifier', 'Different version: recheck needed'],
+  unversioned: ['Non versionné (aucun process attaché à l’enregistrement)', 'Unversioned (no process attached when recorded)'],
+  noNotes: ['Aucune note pour le moment.', 'No notes yet.'],
+  no_profile: ['Aucun profil chargé', 'No profile loaded'],
+  invalid_kind: ['Type de note invalide', 'Invalid note kind'],
+  invalid_note: ['Description requise (2048 caractères maximum)', 'Description required (up to 2048 characters)'],
+  too_many_notes: ['50 notes maximum pour cette entrée', 'Up to 50 notes for this entry'],
+}
+
+function knowledgeText(key: string): string {
+  const local = knowledgeCopy[key]
+  if (local) return local[locale.value.startsWith('fr') ? 0 : 1]
+  return durabilityText(key)
+}
+
+function knowledgeEntryKey(entryKind: string, name: string): string {
+  return `${entryKind}:${name}`
+}
+
+const knowledgeNotesByEntry = ref<Record<string, ProfileKnowledgeNotesResult>>({})
+const knowledgeBusy = ref<Record<string, boolean>>({})
+const knowledgeForm = ref<Record<string, ProfileKnowledgeNoteOptions>>({})
+
+function emptyKnowledgeDraft(): ProfileKnowledgeNoteOptions {
+  return { kind: 'recheck' as ProfileKnowledgeNoteKind, description: '', experiment: '', evidenceNote: '' }
+}
+
+function notesFor(entry: ProfileDurabilityEntry): ProfileKnowledgeNotesResult | undefined {
+  return knowledgeNotesByEntry.value[knowledgeEntryKey(entry.entryKind, entry.name)]
+}
+
+async function loadKnowledgeNotes(entryKind: 'target' | 'patch', name: string) {
+  const profileName = selectedProfile.value
+  const controller = backend.getController()
+  if (!profileName || !controller.getProfileKnowledgeNotes) return
+  const key = knowledgeEntryKey(entryKind, name)
+  knowledgeBusy.value = { ...knowledgeBusy.value, [key]: true }
+  try {
+    const result = await controller.getProfileKnowledgeNotes(profileName, entryKind, name)
+    if (profileName !== selectedProfile.value) return
+    knowledgeNotesByEntry.value = { ...knowledgeNotesByEntry.value, [key]: result }
+  } catch (error) {
+    knowledgeNotesByEntry.value = { ...knowledgeNotesByEntry.value, [key]: { success: false, errorCode: String(error) } }
+  } finally {
+    knowledgeBusy.value = { ...knowledgeBusy.value, [key]: false }
+  }
+}
+
+async function addKnowledgeNote(entryKind: 'target' | 'patch', name: string) {
+  const profileName = selectedProfile.value
+  const controller = backend.getController()
+  const key = knowledgeEntryKey(entryKind, name)
+  const draft = knowledgeForm.value[key]
+  if (!profileName || !controller.addProfileKnowledgeNote || !draft || !draft.description.trim()) return
+  knowledgeBusy.value = { ...knowledgeBusy.value, [key]: true }
+  try {
+    const result = await controller.addProfileKnowledgeNote(profileName, entryKind, name, draft)
+    if (profileName !== selectedProfile.value) return
+    if (!result.success) {
+      statusMessage.value = `${knowledgeText('title')} : ${knowledgeText(result.errorCode ?? 'failed')}`
+      return
+    }
+    knowledgeForm.value = { ...knowledgeForm.value, [key]: emptyKnowledgeDraft() }
+    await loadKnowledgeNotes(entryKind, name)
+  } catch (error) {
+    statusMessage.value = `${knowledgeText('title')} : ${String(error)}`
+  } finally {
+    knowledgeBusy.value = { ...knowledgeBusy.value, [key]: false }
+  }
+}
+
+// Garantit un brouillon par entrée avant que le template ne s'y lie (v-model
+// a besoin d'un objet déjà présent, pas d'une création paresseuse pendant le rendu).
+watch(durabilityReport, (report) => {
+  if (!report?.entries) return
+  const updated = { ...knowledgeForm.value }
+  let changed = false
+  for (const entry of report.entries) {
+    const key = knowledgeEntryKey(entry.entryKind, entry.name)
+    if (!updated[key]) { updated[key] = emptyKnowledgeDraft(); changed = true }
+  }
+  if (changed) knowledgeForm.value = updated
+})
+
 interface ProfileEntry {
   name: string
   gameName?: string
@@ -242,6 +343,9 @@ function resetDurability() {
   durabilityEditor.value = null
   durabilityError.value = ''
   durabilityBusy.value = false
+  knowledgeNotesByEntry.value = {}
+  knowledgeForm.value = {}
+  knowledgeBusy.value = {}
 }
 
 watch(selectedProfile, resetDurability)
@@ -1114,6 +1218,87 @@ onMounted(() => {
             </li>
           </ul>
           <button class="btn btn-secondary btn-sm" :disabled="durabilityBusy" @click="editDurability(entry)">{{ durabilityText('configure') }}</button>
+
+          <div class="knowledge-panel">
+            <div class="knowledge-head">
+              <strong>{{ knowledgeText('title') }}</strong>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="knowledgeBusy[knowledgeEntryKey(entry.entryKind, entry.name)]"
+                @click="loadKnowledgeNotes(entry.entryKind, entry.name)"
+              >
+                {{ knowledgeText('load') }}
+              </button>
+            </div>
+            <p class="hint">{{ knowledgeText('hint') }}</p>
+            <template v-if="notesFor(entry)">
+              <p v-if="!notesFor(entry)?.success" role="status">{{ knowledgeText(notesFor(entry)?.errorCode ?? 'failed') }}</p>
+              <template v-else>
+                <div v-for="note in notesFor(entry)?.valid ?? []" :key="note.id" class="knowledge-note valid">
+                  <span class="knowledge-kind">{{ knowledgeText(`kind_${note.kind}`) }}</span>
+                  <span class="knowledge-status">{{ knowledgeText('valid') }}</span>
+                  <p>{{ note.description }}</p>
+                  <p v-if="note.experiment" class="hint">{{ note.experiment }}</p>
+                  <p v-if="note.evidenceNote" class="hint">{{ note.evidenceNote }}</p>
+                </div>
+                <div v-for="note in notesFor(entry)?.stale ?? []" :key="note.id" class="knowledge-note stale">
+                  <span class="knowledge-kind">{{ knowledgeText(`kind_${note.kind}`) }}</span>
+                  <span class="knowledge-status">{{ knowledgeText('stale') }}</span>
+                  <p>{{ note.description }}</p>
+                </div>
+                <div v-for="note in notesFor(entry)?.unversioned ?? []" :key="note.id" class="knowledge-note unversioned">
+                  <span class="knowledge-kind">{{ knowledgeText(`kind_${note.kind}`) }}</span>
+                  <span class="knowledge-status">{{ knowledgeText('unversioned') }}</span>
+                  <p>{{ note.description }}</p>
+                </div>
+                <p
+                  v-if="!(notesFor(entry)?.valid?.length) && !(notesFor(entry)?.stale?.length) && !(notesFor(entry)?.unversioned?.length)"
+                  class="muted"
+                >
+                  {{ knowledgeText('noNotes') }}
+                </p>
+              </template>
+            </template>
+            <form
+              v-if="knowledgeForm[knowledgeEntryKey(entry.entryKind, entry.name)]"
+              class="knowledge-form"
+              @submit.prevent="addKnowledgeNote(entry.entryKind, entry.name)"
+            >
+              <select v-model="knowledgeForm[knowledgeEntryKey(entry.entryKind, entry.name)].kind" class="scan-input">
+                <option value="explained_failure">{{ knowledgeText('kind_explained_failure') }}</option>
+                <option value="success_condition">{{ knowledgeText('kind_success_condition') }}</option>
+                <option value="discriminating_experiment">{{ knowledgeText('kind_discriminating_experiment') }}</option>
+                <option value="recheck">{{ knowledgeText('kind_recheck') }}</option>
+              </select>
+              <textarea
+                v-model="knowledgeForm[knowledgeEntryKey(entry.entryKind, entry.name)].description"
+                class="scan-input"
+                :placeholder="knowledgeText('descriptionLabel')"
+                maxlength="2048"
+                required
+              />
+              <input
+                v-model="knowledgeForm[knowledgeEntryKey(entry.entryKind, entry.name)].experiment"
+                class="scan-input"
+                :placeholder="knowledgeText('experimentLabel')"
+                maxlength="128"
+              />
+              <textarea
+                v-model="knowledgeForm[knowledgeEntryKey(entry.entryKind, entry.name)].evidenceNote"
+                class="scan-input"
+                :placeholder="knowledgeText('evidenceLabel')"
+                maxlength="2048"
+              />
+              <button
+                type="submit"
+                class="btn btn-primary btn-sm"
+                :disabled="knowledgeBusy[knowledgeEntryKey(entry.entryKind, entry.name)] || !knowledgeForm[knowledgeEntryKey(entry.entryKind, entry.name)].description.trim()"
+              >
+                {{ knowledgeText('add') }}
+              </button>
+            </form>
+          </div>
         </details>
         <form v-if="durabilityEditor" class="durability-form" @submit.prevent="saveDurabilityPlan()">
           <strong>{{ durabilityEditor.name }}</strong>
@@ -1502,6 +1687,56 @@ onMounted(() => {
 
 .durability-form select {
   min-height: 90px;
+}
+
+.knowledge-panel {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.knowledge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.knowledge-note {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.knowledge-note.stale {
+  border-color: var(--warning, #b8860b);
+}
+
+.knowledge-note.unversioned {
+  opacity: 0.85;
+}
+
+.knowledge-kind {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.knowledge-status {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.knowledge-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.knowledge-form .scan-input {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .profile-view {

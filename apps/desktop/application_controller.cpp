@@ -7016,6 +7016,51 @@ QVariantMap ApplicationController::saveProfileResolutionPlan(const QString& prof
     return result;
 }
 
+QVariantMap ApplicationController::addProfileKnowledgeNote(const QString& profileName,
+    const QString& entryKind, const QString& entryName, const QVariantMap& options) {
+    const QString name = profileName.trimmed();
+    if (name.isEmpty() || name.contains('/') || name.contains('\\') || name.contains(':')
+        || name == "." || name == "..") {
+        return {{"success", false}, {"errorCode", "invalid_profile_name"}};
+    }
+    killcore::Profile profile;
+    const QString path = killcore::ProfileStore::profilePath(name);
+    if (!killcore::ProfileStore::load(path, &profile)) {
+        return {{"success", false}, {"errorCode", "profile_not_found"}};
+    }
+    QString error;
+    const QString noteId = killcore::ProfileStore::addKnowledgeNote(&profile, entryKind, entryName,
+        QJsonObject::fromVariantMap(options), m_handle, &error);
+    if (noteId.isEmpty()) {
+        return {{"success", false}, {"errorCode", error}};
+    }
+    if (!killcore::ProfileStore::save(profile, path)) {
+        return {{"success", false}, {"errorCode", "profile_save_failed"}};
+    }
+    QVariantMap result{{"success", true}, {"profileName", name}, {"entryKind", entryKind},
+                       {"entryName", entryName}, {"noteId", noteId}};
+    appendScanTelemetry("profile_knowledge_note_added", result);
+    return result;
+}
+
+QVariantMap ApplicationController::getProfileKnowledgeNotes(const QString& profileName,
+    const QString& entryKind, const QString& entryName) {
+    const QString name = profileName.trimmed();
+    if (name.isEmpty() || name.contains('/') || name.contains('\\') || name.contains(':')
+        || name == "." || name == "..") {
+        return {{"success", false}, {"errorCode", "invalid_profile_name"}};
+    }
+    killcore::Profile profile;
+    if (!killcore::ProfileStore::load(killcore::ProfileStore::profilePath(name), &profile)) {
+        return {{"success", false}, {"errorCode", "profile_not_found"}};
+    }
+    auto result = killcore::ProfileStore::getKnowledgeNotes(profile, entryKind, entryName, m_handle).toVariantMap();
+    result["profileName"] = name;
+    result["entryKind"] = entryKind;
+    result["entryName"] = entryName;
+    return result;
+}
+
 bool ApplicationController::deleteProfile(const QString& profileName) {
     return m_profileManager->deleteProfile(profileName);
 }
