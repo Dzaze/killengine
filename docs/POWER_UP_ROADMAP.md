@@ -531,11 +531,13 @@ Le prochain saut est l'interception active (breakpoint freeze) puis l'injection.
 
 **Validation attendue** : une deuxième enquête demande moins d'interventions ; un changement de version invalide correctement une connaissance périmée. Cadrer explicitement l'évolution de PHASE 120 avant implémentation, sans dupliquer son stockage ou ses scores existants.
 
-### R0 — Préalable transverse : réactivité IA locale
+### R0 — Préalable transverse : réactivité IA locale — considéré clos (15/09/2026, décision propriétaire)
 
-- [ ] Mesurer et améliorer le temps de démarrage froid et le temps de réponse chaude sur le matériel cible, avec contrôle de qualité du raisonnement et du dimensionnement du contexte.
+- [x] Mesurer et améliorer le temps de démarrage froid et le temps de réponse chaude sur le matériel cible, avec contrôle de qualité du raisonnement et du dimensionnement du contexte.
 
 **Déjà livré** : préchauffage asynchrone, calibration et choix explicite si l'attente estimée est longue. La calibration du 11/09 a identifié le coût de préfill CPU sur cette machine ; chargement disque lent et mauvais dispatch CPU ne sont pas des conclusions actuelles. Respecter la décision propriétaire de conserver le contenu du prompt. Les réglages du scanner sont indépendants du runtime IA. Aucun changement de fournisseur ou routage automatique n'est décidé ici.
+
+**Clôture (15/09/2026)** : la latence restante est un plafond matériel réel (~15-33 tok/s de préfill CPU mesuré selon les runs sur cette machine), pas un bug logiciel — toutes les pistes logicielles (mauvais dispatch CPU, I/O disque lent, mauvais binaire) ont été explorées et écartées lors de la calibration du 11/09. Décomposer plus finement démarrage froid/réponse chaude/taille de contexte par modèle resterait possible mais n'apporterait pas de gain de latence supplémentaire tant que le matériel ne change pas ; le propriétaire a tranché que R0 peut être considéré clos en l'état plutôt que de continuer à mesurer un plafond déjà identifié.
 
 ### Première démonstration et critères de clôture
 
