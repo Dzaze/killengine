@@ -163,23 +163,37 @@ int runApplication(int argc, char* argv[]) {
     view->page()->setWebChannel(channel);
     KE_LOG_INFO() << "QWebChannel attached to page.";
 
-    // Load the UI
-    // In development: load from ui/dist/index.html
-    // In production: load from qrc:/index.html
+    // Load the UI. The Vue bundle (ui/dist, built by scripts/build.ps1) is never
+    // compiled into the .qrc -- it ships as loose files, same portable-by-design
+    // convention as model/, tools/clr_inspector/ and runtime/lua/ (see
+    // docs/PORTABILITY_ROADMAP.md). Two on-disk locations are tried before the
+    // resource fallback:
+    //   1. Dev checkout: ../../ui/dist/index.html relative to build/bin.
+    //   2. Portable package: ui/dist/index.html copied next to the exe by
+    //      scripts/package-windows.ps1 (AM-1, docs/PHASE_TRACKER.md, 16/09/2026).
+    // Without candidate 2, a ZIP extracted outside the repo silently fell back
+    // to the ":/index.html" resource placeholder below -- a real "Interface non
+    // construite" screen shipped to every end user, since candidate 1 only ever
+    // resolves inside a dev checkout (or, misleadingly, when testing the
+    // package from inside dist/ still nested under the repo).
     QUrl url;
 
     QString devPath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../ui/dist/index.html");
-    if (QDir::isAbsolutePath(devPath) && QFile::exists(devPath)) {
+    QString packagedPath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("ui/dist/index.html");
+    if (QFile::exists(devPath)) {
         KE_LOG_INFO() << "Loading UI from dev path: " << devPath.toStdString();
         url = QUrl::fromLocalFile(devPath);
+    } else if (QFile::exists(packagedPath)) {
+        KE_LOG_INFO() << "Loading UI from packaged path: " << packagedPath.toStdString();
+        url = QUrl::fromLocalFile(packagedPath);
     } else {
         // Try resource path
         QString resPath = ":/index.html";
         if (QFile::exists(resPath)) {
-            KE_LOG_INFO() << "Loading UI from resources";
+            KE_LOG_WARN() << "UI bundle not found on disk, loading built-in placeholder from resources";
             url = QUrl("qrc:/index.html");
         } else {
-            KE_LOG_WARN() << "UI not found! Neither dev nor resource path exists.";
+            KE_LOG_WARN() << "UI not found! Neither dev, packaged nor resource path exists.";
             KE_LOG_WARN() << "Run 'npm run build' in ui/ directory first, or build the QRC.";
         }
     }

@@ -17,7 +17,7 @@ dist\KillEngine-portable\
 dist\KillEngine-portable.zip
 ```
 
-The package includes the deployed Qt runtime from `build\bin`, the application executable, license, README, project spec, phase tracker, user guide, AI model layout, and Lua helper scripts.
+The package includes the deployed Qt runtime from `build\bin`, the application executable, license, README, project spec, phase tracker, user guide, AI model layout, and Lua helper scripts. It also copies the built Vue UI bundle to `ui\dist\` next to the executable — `apps/desktop/main.cpp` loads it from there when running outside a dev checkout — and never copies any developer session state that may exist under `build\bin` (settings, WebEngine cache/cookies/history, logs, crash dumps, Pattern Learning data): each portable install starts clean.
 It also publishes and bundles the ClrMD helper by default under:
 
 ```text

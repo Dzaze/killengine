@@ -82,7 +82,27 @@ $excludedNames = @(
 
 $excludedExtensions = @(".pdb", ".ilk", ".exp", ".lib")
 
+# build\bin is a live dev workspace, not just build output: running KillEngine.exe
+# from there (as every dev session does) creates real session state next to the
+# binaries -- QSettings INI (docs/PORTABILITY_ROADMAP.md P1), WebEngine persistent
+# profile/cache/cookies/history (P2), logs (P3), crash dumps (P4), Pattern Learning
+# database (P5). None of that belongs in a package meant to start clean on someone
+# else's machine (AM-1, docs/PHASE_TRACKER.md, 16/09/2026). "model" is excluded
+# here too: it gets its own -ExcludeModel-aware copy from the repo below, copying
+# it here first would let a GGUF already staged in build\bin\model bypass that flag.
+$excludedDirNames = @(
+    "KillEngine",
+    "webengine",
+    "logs",
+    "crashes",
+    "data",
+    "model"
+)
+
 Get-ChildItem -LiteralPath $buildBin -Force | ForEach-Object {
+    if ($_.PSIsContainer -and $excludedDirNames -contains $_.Name) {
+        return
+    }
     if ($excludedNames -contains $_.Name) {
         return
     }
@@ -116,6 +136,29 @@ foreach ($pattern in $debugPatterns) {
 }
 
 $signResult = & (Join-Path $repoRoot "scripts\codesign.ps1") -Path (Join-Path $packageRoot "KillEngine.exe") -RequireSigning:$RequireSigning
+
+# The real Vue UI (ui\dist, built by scripts\build.ps1 as part of the build above
+# unless -SkipBuild) ships as loose files next to the exe -- same portable-by-design
+# convention as model\, tools\clr_inspector\ and runtime\lua\ below, and what
+# apps\desktop\main.cpp now looks for at "ui/dist/index.html" relative to
+# applicationDirPath() (AM-1, docs/PHASE_TRACKER.md, 16/09/2026). Without this,
+# a package extracted outside the repo fell back to the ":/index.html" resource
+# placeholder ("Interface non construite") for every real user.
+$uiDistSource = Join-Path $repoRoot "ui\dist"
+$uiDistIndex = Join-Path $uiDistSource "index.html"
+if (-not (Test-Path -LiteralPath $uiDistIndex -PathType Leaf)) {
+    throw "ui\dist\index.html not found. Run 'npm run build' in ui\ (or .\scripts\build.ps1 without -SkipUi) before packaging."
+}
+
+$uiOut = Join-Path $packageRoot "ui"
+New-Item -ItemType Directory -Force -Path $uiOut | Out-Null
+Copy-Item -LiteralPath $uiDistSource -Destination $uiOut -Recurse -Force
+$uiDistOut = Join-Path $uiOut "dist"
+
+$uiDistAssetCount = @(Get-ChildItem -LiteralPath $uiDistOut -Recurse -File -Include "*.js", "*.css" -ErrorAction SilentlyContinue).Count
+if ($uiDistAssetCount -eq 0) {
+    throw "Packaged ui\dist has no .js/.css assets -- refusing to ship a package that would fall back to the placeholder UI."
+}
 
 Copy-ItemIfExists -Path (Join-Path $repoRoot "README.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "LICENSE") -Destination $packageRoot
@@ -310,6 +353,7 @@ Notes:
   - Agent folders use MODEL_MANIFEST.json and may point to shared GGUF weights.
   - A custom model path is only an advanced override.
   - Logs, crash dumps, settings, workspace data and Pattern Learning profiles are all stored next to KillEngine.exe (portable by design) -- see PORTABILITY_ROADMAP.md.
+  - The Vue UI bundle is included at ui\dist\ next to KillEngine.exe; do not delete it.
   - Read USER_GUIDE.md for the V1 user workflow.
   - Read AUTOMATION_API.md to script KillEngine via the local JSON-RPC pipe (Lua scripting, or your own agent/tool).
   - If the app does not start from a development checkout, run scripts\diagnose-launch.ps1.
@@ -319,6 +363,7 @@ Set-Content -Path (Join-Path $packageRoot "PACKAGE_README.txt") -Value $packageR
 
 $requiredRuntimeItems = @(
     "KillEngine.exe",
+    "ui\dist\index.html",
     "model\README.md",
     "model\assistant\README.md",
     "model\assistant\MODEL_MANIFEST.json",
@@ -378,7 +423,12 @@ $forbiddenRuntimeItems = @(
     "killengine_unit_tests.exe",
     "killengine_integration_tests.exe",
     "KillEngineBenchmark.exe",
-    "KillEngineTestTarget.exe"
+    "KillEngineTestTarget.exe",
+    "KillEngine",
+    "webengine",
+    "logs",
+    "crashes",
+    "data"
 )
 
 $forbiddenPresent = @(
