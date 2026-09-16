@@ -449,6 +449,15 @@ ProfileCodePatch patchFromJson(const QJsonObject& json) {
 
 } // namespace
 
+ProcessIdentity currentProcessIdentity(const ProcessHandle& process) {
+    ProcessIdentity identity;
+    if (!process.isValid()) return identity;
+    const ProfileResolutionContext context = resolutionContext(process, {}, {});
+    identity.executableHash = context.executableHash;
+    identity.sessionId = context.session;
+    return identity;
+}
+
 QString knowledgeNoteKindToString(KnowledgeNoteKind kind) {
     return knowledgeNoteKindToStorageString(kind);
 }

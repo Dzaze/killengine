@@ -135,3 +135,59 @@ TEST(EffectProofLevelStringConversion, UnknownStringIsNotAKnownLevel) {
     EXPECT_FALSE(killai::effectProofLevelIsKnownString("not_a_real_level"));
     EXPECT_EQ(killai::effectProofLevelFromString("not_a_real_level"), EffectProofLevel::Unverified);
 }
+
+// AM-5 (docs/PHASE_TRACKER.md, 16/09/2026) : une adresse brute réutilisée par
+// coïncidence par un autre exécutable ne doit jamais faire hériter
+// silencieusement un effet déjà confirmé sur une cible sans rapport.
+TEST(EffectProofLedgerTest, DifferentExecutableHashAtSameAddressDoesNotInheritConfirmedEffect) {
+    EffectProofLedger ledger;
+    ledger.addRecord("Or (jeu A)", "0x1000", EffectProofLevel::EffectConfirmed, "observation", "", "s1", "", "hashA");
+    ledger.addRecord("", "0x1000", EffectProofLevel::WriteConfirmed, "écriture confirmée", "", "s2", "", "hashB");
+
+    const QString key = EffectProofLedger::targetKeyFor("", "0x1000");
+    EffectProofTargetStatus statusForB = ledger.statusForTarget(key, "hashB");
+    EXPECT_EQ(statusForB.bestLevel, EffectProofLevel::WriteConfirmed);
+    ASSERT_EQ(statusForB.history.size(), 1);
+    EXPECT_EQ(statusForB.history.first().executableHash, "hashB");
+
+    EffectProofTargetStatus statusForA = ledger.statusForTarget(key, "hashA");
+    EXPECT_EQ(statusForA.bestLevel, EffectProofLevel::EffectConfirmed);
+    ASSERT_EQ(statusForA.history.size(), 1);
+}
+
+TEST(EffectProofLedgerTest, SynthesisOmitsTargetsThatBelongOnlyToAnotherExecutable) {
+    EffectProofLedger ledger;
+    ledger.addRecord("Or (jeu A)", "0x1000", EffectProofLevel::EffectConfirmed, "observation", "", "s1", "", "hashA");
+
+    QVariantMap synthesis = ledger.synthesis("hashB");
+    EXPECT_TRUE(synthesis["known"].toList().isEmpty());
+    EXPECT_TRUE(synthesis["uncertain"].toList().isEmpty());
+    // Le registre global n'est pas vide, mais rien n'est pertinent pour hashB :
+    // même message que "rien n'a jamais été enregistré", jamais "tout est prouvé"
+    // (qui serait trompeur -- constaté en dry-run avant ce correctif). Comparé
+    // au message d'un registre vraiment vide plutôt qu'un texte figé, pour ne
+    // pas dépendre de la langue UI par défaut du binaire de test.
+    EffectProofLedger emptyLedger;
+    EXPECT_EQ(synthesis["overallNextAction"].toString(), emptyLedger.synthesis()["overallNextAction"].toString());
+}
+
+TEST(EffectProofLedgerTest, RecordWithoutExecutableHashIsNeverTreatedAsForeign) {
+    // Saisie manuelle historique (aucun process attaché au moment de
+    // l'enregistrement) : ne peut pas être prouvée étrangère, doit rester visible.
+    EffectProofLedger ledger;
+    ledger.addRecord("Vies", "0x2000", EffectProofLevel::EffectConfirmed, "observation", "", "s1", "");
+
+    EffectProofTargetStatus status = ledger.statusForTarget(EffectProofLedger::targetKeyFor("Vies", "0x2000"), "hashB");
+    EXPECT_EQ(status.bestLevel, EffectProofLevel::EffectConfirmed);
+    ASSERT_EQ(status.history.size(), 1);
+}
+
+TEST(EffectProofLedgerTest, AddRecordStampsExecutableHashAndNonEmptyTimestamp) {
+    EffectProofLedger ledger;
+    ledger.addRecord("Cible", "0x3000", EffectProofLevel::WriteConfirmed, "écriture confirmée", "", "s1", "", "hashX");
+
+    ASSERT_EQ(ledger.records().size(), 1);
+    const auto& record = ledger.records().first();
+    EXPECT_EQ(record.executableHash, "hashX");
+    EXPECT_FALSE(record.recordedAt.isEmpty());
+}

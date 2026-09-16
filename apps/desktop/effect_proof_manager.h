@@ -18,8 +18,12 @@ class EffectProofManager {
 public:
     QVariantMap recordProof(const QString& targetLabel, const QString& address, const QString& level,
                              const QString& source, const QString& conditions, const QString& sessionId,
-                             const QString& note);
-    QVariantMap getSynthesis() const;
+                             const QString& note, const QString& executableHash = QString());
+    /// `currentExecutableHash` (AM-5, optionnel) : voir EffectProofLedger::synthesis.
+    /// Reflété dans le résultat (`currentExecutableHash`) pour que l'appelant
+    /// puisse comparer la version d'une preuve donnée à la version courante
+    /// sans dupliquer le calcul d'identité de process.
+    QVariantMap getSynthesis(const QString& currentExecutableHash = QString()) const;
     QVariantMap resetLedger();
 
 private:

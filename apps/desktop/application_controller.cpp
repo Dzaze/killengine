@@ -2560,7 +2560,20 @@ QVariantMap ApplicationController::writeMemoryValuesAtomic(const QVariantList& t
 }
 
 QVariantMap ApplicationController::writeMemoryValuesWithVariants(const QVariantList& targets, const QString& value) {
-    return m_writeFreezeCoreManager->writeMemoryValuesWithVariants(targets, value);
+    const QVariantMap result = m_writeFreezeCoreManager->writeMemoryValuesWithVariants(targets, value);
+    const QVariantList perAddressResults = result.value("results").toList();
+    for (const QVariant& item : perAddressResults) {
+        const QVariantMap writeResult = item.toMap();
+        if (writeResult.value("success").toBool() && writeResult.value("verified").toBool()) {
+            recordWriteConfirmedEffectProof(
+                writeResult.value("address").toString(),
+                writeResult.value("type").toString(),
+                writeResult.value("displayValue").toString(),
+                KE_TXT("Écriture par lot avec variantes (writeMemoryValuesWithVariants)",
+                       "Batch write with variants (writeMemoryValuesWithVariants)"));
+        }
+    }
+    return result;
 }
 
 QVariantMap ApplicationController::writeMemoryValueConfirmed(
@@ -2568,7 +2581,32 @@ QVariantMap ApplicationController::writeMemoryValueConfirmed(
     const QString& valueType,
     const QString& value,
     bool persistHistory) {
-    return m_writeFreezeCoreManager->writeMemoryValueConfirmed(addressHex, valueType, value, persistHistory);
+    const QVariantMap result = m_writeFreezeCoreManager->writeMemoryValueConfirmed(addressHex, valueType, value, persistHistory);
+    if (result.value("success").toBool() && result.value("verified").toBool()) {
+        recordWriteConfirmedEffectProof(addressHex, valueType, value,
+            KE_TXT("Écriture confirmée (writeMemoryValueConfirmed)", "Confirmed write (writeMemoryValueConfirmed)"));
+    }
+    return result;
+}
+
+void ApplicationController::recordWriteConfirmedEffectProof(const QString& addressHex, const QString& valueType,
+                                                              const QString& value, const QString& source) {
+    if (!m_effectProofManager) return;
+
+    QString normalizedAddress = addressHex.trimmed();
+    if (normalizedAddress.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
+        normalizedAddress = normalizedAddress.mid(2);
+    }
+    if (normalizedAddress.isEmpty()) return;
+    normalizedAddress = QStringLiteral("0x") + normalizedAddress.toUpper();
+
+    const QString label = valueType.trimmed().isEmpty()
+        ? QString()
+        : KE_TXT("Écriture %1 = %2", "Write %1 = %2").arg(valueType, value);
+
+    const auto identity = killcore::currentProcessIdentity(m_handle);
+    m_effectProofManager->recordProof(label, normalizedAddress, QStringLiteral("write_confirmed"), source,
+                                       QString(), identity.sessionId, QString(), identity.executableHash);
 }
 
 QVariantMap ApplicationController::rollbackLastWriteBatch() {
@@ -3113,6 +3151,11 @@ QVariantMap ApplicationController::writeMemoryHex(const QString& addressHex, con
     if (writeResult.success) {
         watchSmartWriteIfPossible(address, bytes, writeResult.previousValue);
         KE_LOG_INFO() << "writeMemoryHex: " << writeResult.bytesWritten << " octets ecrits a 0x" << std::hex << address;
+        if (writeResult.verified) {
+            recordWriteConfirmedEffectProof(result.value("address").toString(), QStringLiteral("Hex"),
+                result.value("newHex").toString(),
+                KE_TXT("Écriture hexadécimale (writeMemoryHex)", "Hex write (writeMemoryHex)"));
+        }
     }
     return result;
 }
@@ -3859,11 +3902,19 @@ QVariantMap ApplicationController::resetInvestigationNotebook() {
 QVariantMap ApplicationController::recordEffectProof(const QString& targetLabel, const QString& address, const QString& level,
                                                        const QString& source, const QString& conditions, const QString& sessionId,
                                                        const QString& note) {
-    return m_effectProofManager->recordProof(targetLabel, address, level, source, conditions, sessionId, note);
+    // AM-5 (docs/PHASE_TRACKER.md, 16/09/2026) : l'identité de session/version
+    // est désormais toujours calculée depuis le process réellement attaché,
+    // jamais depuis l'appelant -- le paramètre `sessionId` reste accepté pour
+    // ne pas changer la signature Q_INVOKABLE (le formulaire UI existant ne
+    // l'a d'ailleurs jamais renseigné), mais son contenu est ignoré.
+    Q_UNUSED(sessionId);
+    const auto identity = killcore::currentProcessIdentity(m_handle);
+    return m_effectProofManager->recordProof(targetLabel, address, level, source, conditions, identity.sessionId, note, identity.executableHash);
 }
 
 QVariantMap ApplicationController::getEffectProofSynthesis() const {
-    return m_effectProofManager->getSynthesis();
+    const auto identity = killcore::currentProcessIdentity(m_handle);
+    return m_effectProofManager->getSynthesis(identity.executableHash);
 }
 
 QVariantMap ApplicationController::resetEffectProofLedger() {

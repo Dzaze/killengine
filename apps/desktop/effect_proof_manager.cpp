@@ -6,7 +6,7 @@ namespace killengine {
 
 QVariantMap EffectProofManager::recordProof(const QString& targetLabel, const QString& address, const QString& level,
                                              const QString& source, const QString& conditions, const QString& sessionId,
-                                             const QString& note) {
+                                             const QString& note, const QString& executableHash) {
     QVariantMap result;
 
     if (targetLabel.trimmed().isEmpty() && address.trimmed().isEmpty()) {
@@ -23,10 +23,10 @@ QVariantMap EffectProofManager::recordProof(const QString& targetLabel, const QS
     }
 
     const killai::EffectProofLevel parsedLevel = killai::effectProofLevelFromString(level);
-    const QString id = m_ledger.addRecord(targetLabel, address, parsedLevel, source, conditions, sessionId, note);
+    const QString id = m_ledger.addRecord(targetLabel, address, parsedLevel, source, conditions, sessionId, note, executableHash);
 
     const QString targetKey = killai::EffectProofLedger::targetKeyFor(targetLabel, address);
-    const killai::EffectProofTargetStatus status = m_ledger.statusForTarget(targetKey);
+    const killai::EffectProofTargetStatus status = m_ledger.statusForTarget(targetKey, executableHash);
     QVariantMap targetStatus;
     targetStatus["targetKey"] = status.targetKey;
     targetStatus["targetLabel"] = status.targetLabel;
@@ -40,13 +40,14 @@ QVariantMap EffectProofManager::recordProof(const QString& targetLabel, const QS
     return result;
 }
 
-QVariantMap EffectProofManager::getSynthesis() const {
-    QVariantMap synthesis = m_ledger.synthesis();
+QVariantMap EffectProofManager::getSynthesis(const QString& currentExecutableHash) const {
+    QVariantMap synthesis = m_ledger.synthesis(currentExecutableHash);
     QVariantMap result;
     result["success"] = true;
     result["known"] = synthesis["known"];
     result["uncertain"] = synthesis["uncertain"];
     result["overallNextAction"] = synthesis["overallNextAction"];
+    result["currentExecutableHash"] = currentExecutableHash;
     return result;
 }
 

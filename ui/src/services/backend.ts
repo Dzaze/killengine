@@ -1581,7 +1581,7 @@ export interface ModuleCatalog {
   getInvestigationNotebookSynthesis?(): Promise<Record<string, unknown>>
   proposeInvestigationNotebookPlan?(symptom: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
   resetInvestigationNotebook?(): Promise<Record<string, unknown>>
-  /** PRODUIT-R section R1 : enregistre une preuve (write_confirmed/effect_confirmed/durable_solution/inconclusive/unverified) pour une cible identifiée par adresse ou libellé. */
+  /** PRODUIT-R section R1 : enregistre une preuve (write_confirmed/effect_confirmed/durable_solution/inconclusive/unverified) pour une cible identifiée par adresse ou libellé. `sessionId` reste accepté mais est ignoré côté backend depuis AM-5 (docs/PHASE_TRACKER.md, 16/09/2026) : l'identité de session/version est toujours calculée serveur depuis le process réellement attaché. Chaque enregistrement retourné (et chaque entrée de `history` dans la synthèse) porte désormais aussi `executableHash`/`recordedAt`. */
   recordEffectProof?(
     targetLabel: string,
     address: string,
@@ -1591,7 +1591,7 @@ export interface ModuleCatalog {
     sessionId: string,
     note: string,
   ): Promise<Record<string, unknown>>
-  /** Synthèse groupée known/uncertain + action suivante suggérée, pour distinguer écriture confirmée d'un effet réellement vérifié. */
+  /** Synthèse groupée known/uncertain + action suivante suggérée, pour distinguer écriture confirmée d'un effet réellement vérifié. Le résultat inclut `currentExecutableHash` (AM-5) : un enregistrement dont l'`executableHash` diffère de cette valeur appartient à un autre process/exécutable et n'est déjà plus mélangé dans `known`/`uncertain` côté backend -- exposé pour que l'UI puisse aussi avertir avant de relier une preuve à un profil (AM-5c). */
   getEffectProofSynthesis?(): Promise<Record<string, unknown>>
   resetEffectProofLedger?(): Promise<Record<string, unknown>>
   freezeWithBreakpoint?(addressHex: string, valueType: string, value: string, options: Record<string, unknown>): Promise<MemoryWriteResult>
@@ -2648,6 +2648,7 @@ class BackendService {
           known: [],
           uncertain: [],
           overallNextAction: 'Aucun objectif suivi pour le moment.',
+          currentExecutableHash: '',
         }
       },
       async resetEffectProofLedger() {

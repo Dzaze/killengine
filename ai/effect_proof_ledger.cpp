@@ -2,6 +2,8 @@
 
 #include "localization/localization.h"
 
+#include <QDateTime>
+
 namespace killai {
 
 namespace {
@@ -47,8 +49,21 @@ QVariantMap recordToVariantMap(const EffectProofRecord& record) {
     map["source"] = record.source;
     map["conditions"] = record.conditions;
     map["sessionId"] = record.sessionId;
+    map["executableHash"] = record.executableHash;
+    map["recordedAt"] = record.recordedAt;
     map["note"] = record.note;
     return map;
+}
+
+// AM-5 : une adresse brute qui coïncide entre deux exécutables différents ne
+// désigne pas la même cible -- un enregistrement versionné (executableHash non
+// vide) qui ne correspond pas à la version courante est étranger à la cible
+// affichée maintenant, jamais inclus dans son meilleur niveau/historique.
+bool recordBelongsToCurrentContext(const EffectProofRecord& record, const QString& currentExecutableHash) {
+    if (currentExecutableHash.isEmpty() || record.executableHash.isEmpty()) {
+        return true;
+    }
+    return record.executableHash.compare(currentExecutableHash, Qt::CaseInsensitive) == 0;
 }
 
 QVariantMap targetStatusToVariantMap(const EffectProofTargetStatus& status) {
@@ -109,7 +124,7 @@ QString EffectProofLedger::targetKeyFor(const QString& targetLabel, const QStrin
 
 QString EffectProofLedger::addRecord(const QString& targetLabel, const QString& address, EffectProofLevel level,
                                       const QString& source, const QString& conditions, const QString& sessionId,
-                                      const QString& note) {
+                                      const QString& note, const QString& executableHash) {
     EffectProofRecord record;
     record.id = QStringLiteral("P%1").arg(m_nextId++);
     record.targetLabel = targetLabel.trimmed();
@@ -118,6 +133,8 @@ QString EffectProofLedger::addRecord(const QString& targetLabel, const QString& 
     record.source = source.trimmed();
     record.conditions = conditions.trimmed();
     record.sessionId = sessionId.trimmed();
+    record.executableHash = executableHash.trimmed();
+    record.recordedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     record.note = note.trimmed();
     m_records.append(record);
     return record.id;
@@ -139,16 +156,21 @@ QList<QString> EffectProofLedger::orderedTargetKeys() const {
     return keys;
 }
 
-EffectProofTargetStatus EffectProofLedger::statusForTarget(const QString& targetKey) const {
+EffectProofTargetStatus EffectProofLedger::statusForTarget(const QString& targetKey, const QString& currentExecutableHash) const {
     EffectProofTargetStatus status;
     status.targetKey = targetKey;
 
     // Le plus récent en tête, mais le "meilleur niveau atteint" retient le rang
     // maximum jamais observé -- une relance inconclusive après un effet déjà
-    // confirmé ne doit pas faire régresser le statut affiché.
+    // confirmé ne doit pas faire régresser le statut affiché. Les
+    // enregistrements d'une autre version/exécutable (AM-5) sont ignorés ici :
+    // ils ne comptent ni pour l'historique affiché ni pour le meilleur niveau.
     for (auto it = m_records.crbegin(); it != m_records.crend(); ++it) {
         const EffectProofRecord& record = *it;
         if (targetKeyFor(record.targetLabel, record.address) != targetKey) {
+            continue;
+        }
+        if (!recordBelongsToCurrentContext(record, currentExecutableHash)) {
             continue;
         }
         status.history.append(record);
@@ -162,14 +184,20 @@ EffectProofTargetStatus EffectProofLedger::statusForTarget(const QString& target
     return status;
 }
 
-QVariantMap EffectProofLedger::synthesis() const {
+QVariantMap EffectProofLedger::synthesis(const QString& currentExecutableHash) const {
     QVariantList known;
     QVariantList uncertain;
     EffectProofTargetStatus mostUrgent;
     bool hasUncertain = false;
 
     for (const QString& key : orderedTargetKeys()) {
-        EffectProofTargetStatus status = statusForTarget(key);
+        EffectProofTargetStatus status = statusForTarget(key, currentExecutableHash);
+        if (status.history.isEmpty()) {
+            // Tous les enregistrements de cette clé appartiennent à une autre
+            // version/exécutable (AM-5) -- rien à afficher pour le contexte
+            // courant, ne pas synthétiser une entrée vide.
+            continue;
+        }
         const bool isKnown = effectProofLevelRank(status.bestLevel) >= effectProofLevelRank(EffectProofLevel::EffectConfirmed);
         if (isKnown) {
             known.append(targetStatusToVariantMap(status));
@@ -183,7 +211,11 @@ QVariantMap EffectProofLedger::synthesis() const {
     }
 
     QString overallNextAction;
-    if (m_records.isEmpty()) {
+    if (known.isEmpty() && uncertain.isEmpty()) {
+        // AM-5 : un registre global non vide peut n'avoir aucune cible pour le
+        // contexte courant (tout appartient à un autre exécutable/version,
+        // filtré ci-dessus) -- même message que "registre vraiment vide",
+        // jamais le message "tout est déjà prouvé" qui serait trompeur ici.
         overallNextAction = KE_TXT("Aucun objectif suivi pour le moment.", "No tracked goal yet.");
     } else if (hasUncertain) {
         overallNextAction = mostUrgent.nextAction;

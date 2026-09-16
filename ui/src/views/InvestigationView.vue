@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useInvestigationNotebookStore, type InvestigationHypothesis } from '@/stores/investigationNotebook'
 import { useEffectProofStore, type EffectProofLevel } from '@/stores/effectProof'
+import type { ProfileKnowledgeNoteKind } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 
 const store = useAppStore()
@@ -38,6 +39,39 @@ const effectProofLevelOptions = computed<Array<{ value: EffectProofLevel; label:
 function effectProofLevelLabel(level: string): string {
   const found = effectProofLevelOptions.value.find((option) => option.value === level)
   return found ? found.label : level
+}
+
+// AM-5b : boutons de raccourci qui préremplissent le formulaire existant
+// (jamais de soumission automatique -- l'utilisateur confirme via "Enregistrer").
+const openHistoryKeys = ref<Set<string>>(new Set())
+function toggleHistory(targetKey: string) {
+  const next = new Set(openHistoryKeys.value)
+  if (next.has(targetKey)) next.delete(targetKey)
+  else next.add(targetKey)
+  openHistoryKeys.value = next
+}
+
+// AM-5c : options de nature de note réutilisant le vocabulaire R4 existant
+// (core/profiles/profile_store.h KnowledgeNoteKind), jamais un nouveau schéma.
+const linkNoteKindOptions = computed<Array<{ value: ProfileKnowledgeNoteKind; label: string }>>(() => [
+  { value: 'success_condition', label: t('investigation.effectProofLinkKindSuccessCondition') },
+  { value: 'explained_failure', label: t('investigation.effectProofLinkKindExplainedFailure') },
+  { value: 'discriminating_experiment', label: t('investigation.effectProofLinkKindDiscriminatingExperiment') },
+  { value: 'recheck', label: t('investigation.effectProofLinkKindRecheck') },
+])
+
+// Le select combine kind+name dans une seule valeur ("target:Foo") pour éviter
+// toute ambiguïté si une cible et un patch partagent le même nom -- voir le
+// garde "ambiguous_entry_name" de ProfileStore::addKnowledgeNote.
+function onLinkEntrySelected(combined: string) {
+  const separatorIndex = combined.indexOf(':')
+  if (separatorIndex < 0) return
+  const kind = combined.slice(0, separatorIndex)
+  const name = combined.slice(separatorIndex + 1)
+  if (kind === 'target' || kind === 'patch') {
+    effectProof.linkEntryKind = kind
+  }
+  effectProof.linkEntryName = name
 }
 const sortedCheckpoints = computed(() => [...checkpoints.value].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)))
 const bestNextAction = computed(() => {
@@ -517,6 +551,22 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
             </div>
             <p v-if="item.address && item.targetLabel">{{ item.address }}</p>
             <p class="evidence-preview">{{ item.nextAction }}</p>
+            <div class="effect-proof-actions">
+              <button type="button" class="btn mini" @click="effectProof.prefillObservation(item, 'observed')">{{ $t('investigation.effectProofQuickObserved') }}</button>
+              <button type="button" class="btn mini" @click="effectProof.prefillObservation(item, 'absent')">{{ $t('investigation.effectProofQuickAbsent') }}</button>
+              <button type="button" class="btn mini" @click="effectProof.prefillObservation(item, 'inconclusive')">{{ $t('investigation.effectProofQuickInconclusive') }}</button>
+              <button type="button" class="btn mini" @click="effectProof.startLinkToProfile(item)">{{ $t('investigation.effectProofLinkButton') }}</button>
+              <button type="button" class="btn mini" @click="toggleHistory(item.targetKey)">{{ $t('investigation.effectProofHistoryToggle', { count: item.history.length }) }}</button>
+            </div>
+            <ul v-if="openHistoryKeys.has(item.targetKey)" class="effect-proof-history">
+              <li v-for="record in item.history" :key="record.id">
+                <strong>{{ effectProofLevelLabel(record.level) }}</strong>
+                <span v-if="record.recordedAt">— {{ record.recordedAt }}</span>
+                <span v-if="record.source"> — {{ record.source }}</span>
+                <p v-if="record.note">{{ record.note }}</p>
+              </li>
+              <li v-if="item.history.length === 0" class="muted">{{ $t('investigation.effectProofHistoryEmpty') }}</li>
+            </ul>
           </article>
           <p v-if="effectProof.known.length === 0" class="muted">{{ $t('investigation.effectProofEmpty') }}</p>
         </section>
@@ -532,10 +582,90 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
             </div>
             <p v-if="item.address && item.targetLabel">{{ item.address }}</p>
             <p class="evidence-preview">{{ item.nextAction }}</p>
+            <div class="effect-proof-actions">
+              <button type="button" class="btn mini" @click="effectProof.prefillObservation(item, 'observed')">{{ $t('investigation.effectProofQuickObserved') }}</button>
+              <button type="button" class="btn mini" @click="effectProof.prefillObservation(item, 'absent')">{{ $t('investigation.effectProofQuickAbsent') }}</button>
+              <button type="button" class="btn mini" @click="effectProof.prefillObservation(item, 'inconclusive')">{{ $t('investigation.effectProofQuickInconclusive') }}</button>
+              <button type="button" class="btn mini" @click="effectProof.startLinkToProfile(item)">{{ $t('investigation.effectProofLinkButton') }}</button>
+              <button type="button" class="btn mini" @click="toggleHistory(item.targetKey)">{{ $t('investigation.effectProofHistoryToggle', { count: item.history.length }) }}</button>
+            </div>
+            <ul v-if="openHistoryKeys.has(item.targetKey)" class="effect-proof-history">
+              <li v-for="record in item.history" :key="record.id">
+                <strong>{{ effectProofLevelLabel(record.level) }}</strong>
+                <span v-if="record.recordedAt">— {{ record.recordedAt }}</span>
+                <span v-if="record.source"> — {{ record.source }}</span>
+                <p v-if="record.note">{{ record.note }}</p>
+              </li>
+              <li v-if="item.history.length === 0" class="muted">{{ $t('investigation.effectProofHistoryEmpty') }}</li>
+            </ul>
           </article>
           <p v-if="effectProof.uncertain.length === 0" class="muted">{{ $t('investigation.effectProofEmpty') }}</p>
         </section>
       </div>
+
+      <form v-if="effectProof.linkingItem" class="notebook-form effect-proof-link-form" @submit.prevent="effectProof.confirmLinkToProfile()">
+        <h3>{{ $t('investigation.effectProofLinkTitle') }} — {{ effectProof.linkingItem.targetLabel || effectProof.linkingItem.address }}</h3>
+        <p v-if="effectProof.linkedProofVersionMismatch()" class="warning">{{ $t('investigation.effectProofLinkVersionMismatch') }}</p>
+        <label>
+          <span>{{ $t('investigation.effectProofLinkProfileLabel') }}</span>
+          <input
+            v-model="effectProof.linkProfileName"
+            class="filter-input"
+            :placeholder="$t('investigation.effectProofLinkProfilePlaceholder')"
+            :disabled="effectProof.linkBusy"
+          />
+        </label>
+        <button
+          type="button"
+          class="btn mini"
+          :disabled="effectProof.linkBusy || !effectProof.linkProfileName.trim()"
+          @click="effectProof.loadProfileEntriesForLink()"
+        >
+          {{ $t('investigation.effectProofLinkLoadEntries') }}
+        </button>
+        <label>
+          <span>{{ $t('investigation.effectProofLinkEntryLabel') }}</span>
+          <select
+            :value="`${effectProof.linkEntryKind}:${effectProof.linkEntryName}`"
+            class="filter-input"
+            :disabled="effectProof.linkBusy || effectProof.linkProfileEntries.length === 0"
+            @change="onLinkEntrySelected(($event.target as HTMLSelectElement).value)"
+          >
+            <option value=":" disabled>{{ $t('investigation.effectProofLinkEntryPlaceholder') }}</option>
+            <option
+              v-for="entry in effectProof.linkProfileEntries"
+              :key="`${entry.kind}:${entry.name}`"
+              :value="`${entry.kind}:${entry.name}`"
+            >
+              {{ entry.name }} ({{ entry.kind === 'target' ? $t('investigation.effectProofLinkEntryKindTarget') : $t('investigation.effectProofLinkEntryKindPatch') }})
+            </option>
+          </select>
+        </label>
+        <label>
+          <span>{{ $t('investigation.effectProofLinkKindLabel') }}</span>
+          <select v-model="effectProof.linkNoteKind" class="filter-input" :disabled="effectProof.linkBusy">
+            <option v-for="option in linkNoteKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <input
+          v-model="effectProof.linkDescription"
+          class="filter-input effect-proof-link-description"
+          :placeholder="$t('investigation.effectProofLinkDescriptionPlaceholder')"
+          :disabled="effectProof.linkBusy"
+        />
+        <p v-if="effectProof.linkError" class="error">{{ effectProof.linkError }}</p>
+        <p v-if="effectProof.linkMessage" class="muted">{{ effectProof.linkMessage }}</p>
+        <button
+          class="btn primary"
+          type="submit"
+          :disabled="effectProof.linkBusy || !effectProof.linkProfileName.trim() || !effectProof.linkEntryName.trim()"
+        >
+          {{ $t('investigation.effectProofLinkConfirm') }}
+        </button>
+        <button class="btn" type="button" :disabled="effectProof.linkBusy" @click="effectProof.cancelLinkToProfile()">
+          {{ $t('investigation.effectProofLinkCancel') }}
+        </button>
+      </form>
     </section>
 
     <section v-if="run" class="summary">
@@ -1207,6 +1337,38 @@ p {
 .evidence-preview {
   margin-top: 8px;
   font-size: 12px;
+}
+
+.effect-proof-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.effect-proof-history {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.effect-proof-history p {
+  margin: 2px 0 0;
+  opacity: 0.85;
+}
+
+.effect-proof-link-form {
+  margin-top: 12px;
+  border-top: 1px solid rgba(125, 142, 255, 0.16);
+  padding-top: 12px;
+}
+
+.effect-proof-link-form .warning {
+  color: var(--warning);
+  font-weight: 600;
 }
 
 .evidence-actions {

@@ -1784,6 +1784,15 @@ private:
     QVariantList filterAutoWriteSuggestionsByRegion(const QVariantList& suggestions, QVariantList* rejected) const;
     QVariantMap writeMemoryValueConfirmed(const QString& addressHex, const QString& valueType, const QString& value, bool persistHistory = true);
     void persistWriteHistorySequenceEntry(uint64_t address, killcore::ValueType type, const QString& valueText);
+    /// AM-5a (docs/PHASE_TRACKER.md, 16/09/2026) : preuve technique automatique
+    /// "write_confirmed" pour une écriture utilisateur finale réussie ET
+    /// relue -- appelé uniquement par writeMemoryValueConfirmed/writeMemoryHex/
+    /// writeMemoryValuesWithVariants après un succès confirmé (jamais sur
+    /// échec, jamais pour une restauration interne, jamais par le tick de
+    /// freeze qui écrit directement via MemoryWriter sans passer par ces
+    /// fonctions). `valueType`/`value` sont optionnels (juste pour un libellé
+    /// lisible) ; seule `addressHex` sert de clé d'agrégation.
+    void recordWriteConfirmedEffectProof(const QString& addressHex, const QString& valueType, const QString& value, const QString& source);
     bool hasAddressBeenWriteVerified(uint64_t address) const;
     void watchSmartWriteIfPossible(uint64_t address, const QByteArray& writtenBytes, const QByteArray& originalBytes);
     void detectStableCandidateGroup(killcore::NextScanMode mode, const QList<killcore::Candidate>& survivors, QVariantMap* result);

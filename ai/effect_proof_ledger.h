@@ -33,6 +33,10 @@ struct EffectProofRecord {
     QString source;       // ex: "relecture", "observation utilisateur", "test redémarrage"
     QString conditions;   // ex: "après fin de partie", "après redémarrage du jeu"
     QString sessionId;
+    QString executableHash; // AM-5 : version du process attaché au moment de l'enregistrement,
+                             // vide si aucun process attaché (même convention que
+                             // core/profiles/profile_store.h KnowledgeNote::executableHash).
+    QString recordedAt;     // AM-5 : horodatage ISO UTC, calculé par le registre.
     QString note;
 };
 
@@ -67,9 +71,12 @@ class EffectProofLedger {
 public:
     /// Enregistre une preuve pour une cible identifiée par `address` si non
     /// vide, sinon par `targetLabel`. Retourne l'id généré (ex. "P1").
+    /// `executableHash` est optionnel (rétrocompatible : chaîne vide = aucun
+    /// filtrage par version, comportement historique) -- voir AM-5,
+    /// docs/PHASE_TRACKER.md, 16/09/2026.
     QString addRecord(const QString& targetLabel, const QString& address, EffectProofLevel level,
                        const QString& source, const QString& conditions, const QString& sessionId,
-                       const QString& note);
+                       const QString& note, const QString& executableHash = QString());
 
     QList<EffectProofRecord> records() const { return m_records; }
     void clear();
@@ -78,11 +85,21 @@ public:
     /// ("known"), cibles avec seulement écriture confirmée / inconclusif /
     /// non vérifié ("uncertain"), et une action suivante suggérée par cible
     /// ainsi qu'une action globale (la plus urgente parmi les cibles incertaines).
-    QVariantMap synthesis() const;
+    ///
+    /// `currentExecutableHash` (AM-5, optionnel) : quand non vide, un
+    /// enregistrement dont l'`executableHash` est renseigné et DIFFÉRENT est
+    /// exclu du calcul du meilleur niveau/historique pour cette cible -- une
+    /// adresse brute réutilisée par coïncidence par un autre exécutable ne doit
+    /// jamais faire hériter silencieusement un effet confirmé d'une cible sans
+    /// rapport. Un enregistrement sans `executableHash` (aucun process attaché
+    /// au moment de l'enregistrement, ex. saisie manuelle historique) reste
+    /// toujours inclus : on ne peut pas prouver qu'il est étranger.
+    QVariantMap synthesis(const QString& currentExecutableHash = QString()) const;
 
     /// Statut calculé pour une seule cible (utile pour un affichage ciblé
-    /// sans reconstruire toute la synthèse).
-    EffectProofTargetStatus statusForTarget(const QString& targetKey) const;
+    /// sans reconstruire toute la synthèse). Même filtrage `currentExecutableHash`
+    /// que `synthesis()`.
+    EffectProofTargetStatus statusForTarget(const QString& targetKey, const QString& currentExecutableHash = QString()) const;
 
     static QString targetKeyFor(const QString& targetLabel, const QString& address);
 

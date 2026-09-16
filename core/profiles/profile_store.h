@@ -35,6 +35,18 @@ struct ProfileResolutionContext {
     QJsonObject moduleHashes;
 };
 
+/// Identité minimale du process attaché (AM-5, docs/PHASE_TRACKER.md,
+/// 16/09/2026) : mêmes deux champs que ProfileResolutionContext::executableHash/
+/// session, exposés seuls pour un appelant qui n'a pas besoin des empreintes de
+/// modules complètes (ex. tamponner une preuve d'effet avec une identité de
+/// session/version réelle, sans dépendre du sous-système de résolution de
+/// locators). Vide si `process` n'est pas valide.
+struct ProcessIdentity {
+    QString executableHash;
+    QString sessionId;
+};
+ProcessIdentity currentProcessIdentity(const ProcessHandle& process);
+
 /// Pure decision function. Observations correspond to primary + alternatives.
 /// Returns machine codes, observations and a required test; never authorizes a write.
 QJsonObject diagnoseProfileResolution(const QString& expectedExecutable,
