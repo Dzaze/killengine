@@ -23,15 +23,20 @@ KillEngine est un outil d'analyse et d'édition mémoire pour Windows inspiré d
 ## Build rapide
 
 ```powershell
-# 1. Construire l'UI
+# 1. Installer les dépendances Node (une seule fois)
 cd ui
 npm install
-npm run build
 cd ..
 
-# 2. Configurer et construire le C++
+# 2. Configurer, puis construire — build.ps1 enchaîne UI (vue-tsc + vite) et C++
 .\scripts\configure.ps1
 .\scripts\build.ps1
+```
+
+Build C++ seul, sans reconstruire l'UI (l'UI déjà présente dans `ui\dist` reste utilisée telle quelle) :
+
+```powershell
+.\scripts\build.ps1 -SkipUi
 ```
 
 ## Package Windows

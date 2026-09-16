@@ -1,7 +1,33 @@
 # KillEngine — Script de build
 # Usage: .\scripts\build.ps1
+# Usage (C++ seul, sans reconstruire le frontend Vue) : .\scripts\build.ps1 -SkipUi
+
+param(
+    [switch]$SkipUi
+)
 
 $ErrorActionPreference = "Stop"
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+if (-not $SkipUi) {
+    # npm run build lance deja vue-tsc --noEmit puis vite build (ui/scripts/build.mjs) :
+    # un seul passage de typage, pas de doublon avec release-check.ps1.
+    Write-Host "Building UI (Vue)..." -ForegroundColor Cyan
+    Push-Location (Join-Path $repoRoot "ui")
+    try {
+        npm run build
+        $uiExitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+
+    if ($uiExitCode -ne 0) {
+        Write-Host "`nUI build FAILED!" -ForegroundColor Red
+        exit $uiExitCode
+    }
+    Write-Host "UI build successful." -ForegroundColor Green
+}
 
 # Find Visual Studio vcvars64.bat
 $vcvars = $null
@@ -170,8 +196,7 @@ try {
 }
 
 if ($buildExitCode -eq 0) {
-    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-    Sync-AiRuntimeLayout -RepoRoot $repoRoot.Path -BuildBin (Join-Path $repoRoot.Path "build\bin")
+    Sync-AiRuntimeLayout -RepoRoot $repoRoot -BuildBin (Join-Path $repoRoot "build\bin")
     Write-Host "`nBuild successful!" -ForegroundColor Green
     Write-Host "Executable: build\bin\KillEngine.exe" -ForegroundColor Cyan
 } else {

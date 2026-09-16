@@ -147,34 +147,17 @@ if ($OnlyAutomationPipeSafeMethods) {
 
 Push-Location $repoRoot
 try {
-    if (-not $SkipUi) {
-        Invoke-Step "UI type-check" {
-            Push-Location (Join-Path $repoRoot "ui")
-            try {
-                npm run type-check
-            } finally {
-                Pop-Location
-            }
-        }
-
-        Invoke-Step "UI build" {
-            Push-Location (Join-Path $repoRoot "ui")
-            try {
-                npm run build
-            } finally {
-                Pop-Location
-            }
-        }
-    }
-
     if (-not $SkipConfigure) {
         Invoke-Step "CMake configure" {
             & (Join-Path $repoRoot "scripts\configure.ps1")
         }
     }
 
-    Invoke-Step "C++ build" {
-        & (Join-Path $repoRoot "scripts\build.ps1")
+    # build.ps1 construit lui-meme l'UI (vue-tsc + vite) avant le C++ sauf
+    # -SkipUi : un seul chemin de build frontend, pas de double compilation
+    # Vue entre release-check.ps1 et build.ps1.
+    Invoke-Step "Build (UI + C++)" {
+        & (Join-Path $repoRoot "scripts\build.ps1") -SkipUi:$SkipUi
     }
 
     Invoke-Step "Embedded AI layout" {

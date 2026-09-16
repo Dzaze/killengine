@@ -139,8 +139,11 @@ Tous les commits sont signés par le même auteur Git (`Dzaze`) : **l'historique
 ## Démarrage rapide
 
 ```
-# Build C++ + frontend
+# Build C++ + frontend (vue-tsc + vite puis cmake --build, arret immediat si l'UI echoue)
 .\scripts\build.ps1
+
+# Build C++ seul, sans reconstruire l'UI (utilise ui\dist tel quel)
+.\scripts\build.ps1 -SkipUi
 
 # Build frontend uniquement
 cd ui && npm run build

@@ -47,6 +47,9 @@ function Find-FirstExistingFile {
 
 if (-not $SkipBuild) {
     & (Join-Path $repoRoot "scripts\build.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "scripts\build.ps1 failed with exit code $LASTEXITCODE — refusing to package a stale/missing binary."
+    }
 }
 
 $exePath = Join-Path $buildBin "KillEngine.exe"
