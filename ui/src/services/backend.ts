@@ -1490,7 +1490,16 @@ export interface ModuleCatalog {
   /** Edite en place une séquence d'octets (find/replace hex, même longueur, occurrence unique) dans un fichier de sauvegarde. */
   patchProcessSaveFileBytes?(path: string, findHex: string, replaceHex: string): Promise<SaveFilePatchResult>
   attachProcess(pid: number): Promise<boolean>
-  detachProcess(): Promise<void>
+  /** true si réellement détaché ; false si différé (scan/debug en cours, voir DebugFeatureManager::deferDetachIfBusy) -- le moteur reste attaché dans ce cas. Le retour direct de cet appel est la source de vérité, plus fiable qu'une relecture de isAttached juste après (ordre de propagation non garanti entre la réponse RPC et la mise à jour des propriétés sur ce même canal). */
+  detachProcess(): Promise<boolean>
+  /** Miroir en direct d'ApplicationController::isAttached (Q_PROPERTY, NOTIFY attachmentChanged) -- source de vérité pour l'attache réelle du moteur, y compris quand elle change via le pipe d'automatisation plutôt que depuis cette UI. */
+  isAttached?: boolean
+  /** Miroir en direct d'ApplicationController::processName (même NOTIFY). */
+  processName?: string
+  /** Miroir en direct d'ApplicationController::attachedPid (même NOTIFY) -- distingue deux instances du même exécutable (même processName, PID différent), ex. deux KillEngineTestTarget.exe. */
+  attachedPid?: number
+  /** Émis par le backend natif à chaque attache/détache réellement effective, quelle que soit la source (UI ou pipe). Volontairement PAS émis quand detachProcess() est différé (scan/debug encore en cours, voir DebugFeatureManager::deferDetachIfBusy) -- isAttached reste vrai tant que le détachement réel n'a pas eu lieu. */
+  attachmentChanged?: QWebChannelSignal<void>
   getMemoryMap(): Promise<MemoryMapResult>
   readMemoryPreview(addressHex: string, size: number): Promise<MemoryReadPreview>
   /** Lecture large (jusqu'à 64 Ko) pour le visualiseur hexadécimal navigable — pagination distincte de l'aperçu compact. */
@@ -2456,7 +2465,23 @@ class BackendService {
   // Mock backend pour le développement navigateur
   // -------------------------------------------------------------------------
   private createMockBackend(): BackendController {
+    // Pub-sub minimal pour émuler attachmentChanged (NOTIFY de isAttached/processName
+    // côté vrai backend) -- garde le mock cohérent avec le contrat réel plutôt que de
+    // laisser resyncAttachment() ne jamais voir de changement en mode navigateur.
+    const attachmentListeners: Array<() => void> = []
     return {
+      isAttached: false,
+      processName: '',
+      attachedPid: 0,
+      attachmentChanged: {
+        connect(callback: () => void) {
+          attachmentListeners.push(callback)
+        },
+        disconnect(callback: () => void) {
+          const index = attachmentListeners.indexOf(callback)
+          if (index >= 0) attachmentListeners.splice(index, 1)
+        },
+      },
       async getVersion() {
         return '0.1.0 (mock)'
       },
@@ -2487,10 +2512,20 @@ class BackendService {
       async patchProcessSaveFileBytes(_path: string, _findHex: string, _replaceHex: string) {
         return { success: false, path: _path, occurrencesFound: 0, error: 'Mock backend' }
       },
-      async attachProcess(_pid: number) {
+      async attachProcess(pid: number) {
+        this.isAttached = true
+        this.processName = `mock-pid-${pid}`
+        this.attachedPid = pid
+        attachmentListeners.forEach((callback) => callback())
         return true
       },
-      async detachProcess() {},
+      async detachProcess() {
+        this.isAttached = false
+        this.processName = ''
+        this.attachedPid = 0
+        attachmentListeners.forEach((callback) => callback())
+        return true
+      },
       async getMemoryMap() {
         return {
           attached: false,

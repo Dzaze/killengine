@@ -88,6 +88,12 @@ class ApplicationController : public QObject {
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(bool   isAttached READ isAttached NOTIFY attachmentChanged)
     Q_PROPERTY(QString processName READ processName NOTIFY attachmentChanged)
+    // AM-2 (docs/PHASE_TRACKER.md, 16/09/2026) : processName seul ne distingue pas
+    // deux instances du même exécutable (ex: deux KillEngineTestTarget.exe) --
+    // sans le PID, un ré-attache direct d'une instance à l'autre via le pipe
+    // d'automatisation semble à l'UI un non-événement (même isAttached, même
+    // processName) et ne déclenche aucun nettoyage des caches liées à la cible.
+    Q_PROPERTY(int    attachedPid READ attachedPid NOTIFY attachmentChanged)
 
 public:
     explicit ApplicationController(QObject* parent = nullptr);
@@ -105,6 +111,7 @@ public:
     QString version() const;
     bool    isAttached() const;
     QString processName() const;
+    int     attachedPid() const;
 
     // -----------------------------------------------------------------------
     // Méthodes exposées au frontend Vue (slots)
@@ -195,8 +202,15 @@ public:
     /// Attache KillEngine à un processus.
     Q_INVOKABLE bool attachProcess(int pid);
 
-    /// Détache le processus courant.
-    Q_INVOKABLE void detachProcess();
+    /// Détache le processus courant. Retourne false sans rien faire si le
+    /// détachement est différé (scan ou opération de debug encore en cours,
+    /// voir DebugFeatureManager::deferDetachIfBusy) -- isAttached() reste vrai
+    /// dans ce cas, et attachmentChanged n'est PAS émis (AM-2, 16/09/2026) :
+    /// le retour direct de cet appel est la seule façon fiable pour l'appelant
+    /// de savoir si le détachement a réellement eu lieu, sans dépendre du
+    /// timing relatif entre cette réponse et la propagation des propriétés
+    /// isAttached/processName/attachedPid sur le canal QWebChannel.
+    Q_INVOKABLE bool detachProcess();
 
     /// Retourne la carte mémoire du processus attaché.
     Q_INVOKABLE QVariantMap getMemoryMap() const;

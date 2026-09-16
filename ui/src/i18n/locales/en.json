@@ -3291,6 +3291,8 @@
   },
   "appStore": {
     "attach": {
+      "failedDetail": "Insufficient access to the process (PID {pid}), or the process disappeared in the meantime.",
+      "failedTitle": "Attach failed",
       "kernelModeDetail": "Process attached with active Kernel memory mode for interactive reads/writes.",
       "standardModeDetail": "Process attached with Standard memory mode.",
       "title": "Attach {name}"
@@ -3422,6 +3424,10 @@
       "writePathByLocatorTitle": "CLR path write by locator",
       "writePathDesc": "{address}.{path} = {value}. Managed symbolic path in the attached process.",
       "writePathTitle": "CLR path write"
+    },
+    "detach": {
+      "deferredDetail": "A scan or a debug operation is still running; the engine stays attached. Try again once it finishes.",
+      "deferredTitle": "Detach deferred"
     },
     "diagnostics": {
       "exportImpossible": "Diagnostic export impossible."

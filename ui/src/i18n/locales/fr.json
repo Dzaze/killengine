@@ -3291,6 +3291,8 @@
   },
   "appStore": {
     "attach": {
+      "failedDetail": "Accès insuffisant au processus (PID {pid}), ou processus disparu entre-temps.",
+      "failedTitle": "Attache échouée",
       "kernelModeDetail": "Process attaché avec mode mémoire Kernel actif pour les lectures/écritures interactives.",
       "standardModeDetail": "Process attaché avec mode mémoire Standard.",
       "title": "Attach {name}"
@@ -3422,6 +3424,10 @@
       "writePathByLocatorTitle": "Écriture chemin CLR par locator",
       "writePathDesc": "{address}.{path} = {value}. Chemin symbolique managé dans le processus attaché.",
       "writePathTitle": "Écriture chemin CLR"
+    },
+    "detach": {
+      "deferredDetail": "Un scan ou une opération de debug est encore en cours ; le moteur reste attaché. Réessayez une fois l'opération terminée.",
+      "deferredTitle": "Détachement différé"
     },
     "diagnostics": {
       "exportImpossible": "Export diagnostic impossible."

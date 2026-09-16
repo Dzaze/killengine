@@ -118,6 +118,9 @@ export const useAppStore = defineStore('app', () => {
   const showOnboarding = ref(false)
   const isAttached = ref(false)
   const processName = ref('')
+  // AM-2 (docs/PHASE_TRACKER.md, 16/09/2026) : processName seul ne distingue
+  // pas deux instances du même exécutable -- voir resyncAttachment().
+  const attachedPid = ref(0)
   const processes = ref<ProcessInfo[]>([])
   const processModules = ref<ProcessModuleInfo[]>([])
   const discoveredSaveFiles = ref<ProcessSaveFileInfo[]>([])
@@ -630,6 +633,7 @@ export const useAppStore = defineStore('app', () => {
   let backendModuleInstallSignalConnected = false
   let backendClaudePendingActionSignalConnected = false
   let backendLocalAiWarmupSignalConnected = false
+  let backendAttachmentSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
   // d'une reconnexion du signal (ex: rechargement dev).
@@ -2169,6 +2173,21 @@ export const useAppStore = defineStore('app', () => {
       await backend.connect()
       isConnected.value = backend.isConnected
       const controller = backend.getController()
+      if (!backendAttachmentSignalConnected) {
+        // AM-2 (docs/PHASE_TRACKER.md, 16/09/2026) : isAttached/processName ne
+        // doivent plus dépendre uniquement du résultat local d'attach()/detach()
+        // -- une attache/détache déclenchée par le pipe d'automatisation (PHASE
+        // 206) ne passe jamais par ces fonctions et ne mettait à jour ni l'état
+        // ni les caches liés à la cible précédente avant ce correctif.
+        controller.attachmentChanged?.connect(() => {
+          resyncAttachment()
+        })
+        backendAttachmentSignalConnected = true
+      }
+      // Lit l'état réel à chaque connexion/reconnexion (ex: le moteur était
+      // déjà attaché via le pipe avant que cette UI ne se connecte) --
+      // resyncAttachment() est un no-op si rien n'a changé depuis le dernier appel.
+      resyncAttachment()
       if (!backendScanSignalsConnected) {
         controller.scanStarted?.connect(() => {
           setScanProgress(0)
@@ -3369,15 +3388,55 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // AM-2 (docs/PHASE_TRACKER.md, 16/09/2026) : seule fonction qui écrit
+  // isAttached/processName -- lue depuis les propriétés backend réelles
+  // (ApplicationController::isAttached/processName, Q_PROPERTY NOTIFY
+  // attachmentChanged), jamais supposée depuis le seul résultat local d'un
+  // appel attachProcess()/detachProcess(). Appelée à la connexion, après
+  // chaque appel attach()/detach() de cette UI, ET depuis le signal
+  // attachmentChanged (attache/détache déclenchée par le pipe d'automatisation).
+  // Idempotente : ne rejoue le nettoyage que si l'état a réellement changé,
+  // ce qui couvre aussi un detachProcess() différé (DebugFeatureManager::
+  // deferDetachIfBusy) -- isAttached reste vrai côté backend, donc ici aussi.
+  function resyncAttachment() {
+    const controller = backend.getController()
+    const nowAttached = Boolean(controller.isAttached)
+    const nowName = String(controller.processName ?? '')
+    const nowPid = Number(controller.attachedPid ?? 0)
+    const wasAttached = isAttached.value
+    const wasName = processName.value
+    const wasPid = attachedPid.value
+
+    if (nowAttached === wasAttached && nowName === wasName && nowPid === wasPid) {
+      return
+    }
+
+    isAttached.value = nowAttached
+    processName.value = nowName
+    attachedPid.value = nowPid
+
+    // Attache, détache ou changement de cible sans détachement explicite
+    // intermédiaire (ex: le pipe ré-attache directement sur un nouveau PID) :
+    // même nettoyage des caches liés à la cible précédente dans tous les cas,
+    // pour ne jamais mélanger les données de deux processus différents.
+    clearSessionEntries()
+    processModules.value = []
+    memoryMap.value = null
+    memoryPreview.value = null
+    memoryPreviewAddress.value = ''
+    memoryPreviewLoading.value = false
+    closeHexViewer()
+    clrObjects.value = []
+    clrSelectedObject.value = null
+    clrRoots.value = []
+  }
+
   async function attach(pid: number, mode: 'standard' | 'kernel' = memoryAccessMode.value) {
     try {
-      clearSessionEntries()
       setMemoryAccessMode(mode)
       const ok = await backend.getController().attachProcess(pid)
-      if (ok) {
-        isAttached.value = true
-        const proc = processes.value.find((p) => p.pid === pid)
-        processName.value = proc?.name ?? `PID ${pid}`
+      resyncAttachment()
+      if (ok && isAttached.value) {
         addActionLog(
           'attach',
           t('appStore.attach.title', { name: processName.value }),
@@ -3385,6 +3444,13 @@ export const useAppStore = defineStore('app', () => {
             ? t('appStore.attach.kernelModeDetail')
             : t('appStore.attach.standardModeDetail'),
           'success',
+        )
+      } else {
+        addActionLog(
+          'attach',
+          t('appStore.attach.failedTitle'),
+          t('appStore.attach.failedDetail', { pid }),
+          'error',
         )
       }
     } catch (e) {
@@ -3930,19 +3996,31 @@ export const useAppStore = defineStore('app', () => {
 
   async function detach() {
     try {
-      await backend.getController().detachProcess()
-      isAttached.value = false
-      clearSessionEntries()
-      processName.value = ''
-      processModules.value = []
-      memoryMap.value = null
-      memoryPreview.value = null
-      memoryPreviewAddress.value = ''
-      memoryPreviewLoading.value = false
-      closeHexViewer()
-      clrObjects.value = []
-      clrSelectedObject.value = null
-      clrRoots.value = []
+      // Le booléen retourné par detachProcess() est la source de vérité pour
+      // savoir si le détachement a réellement eu lieu -- ne PAS se fier à une
+      // relecture de isAttached juste après resyncAttachment() : l'ordre de
+      // propagation entre la réponse RPC de cet appel et la notification de
+      // changement des propriétés isAttached/processName/attachedPid sur le
+      // même canal QWebChannel n'est pas garanti (constaté en direct : un
+      // detachProcess() différé de ~8s par un findWhatWrites en cours pouvait
+      // laisser lire un isAttached encore vrai un court instant après la
+      // résolution de la promesse, alors que le détachement avait déjà
+      // réellement réussi -- voir docs/PHASE_TRACKER.md AM-2, 16/09/2026).
+      const detached = await backend.getController().detachProcess()
+      resyncAttachment()
+      if (!detached) {
+        // detachProcess() a été différé côté backend (scan ou opération de
+        // debug encore en cours -- DebugFeatureManager::deferDetachIfBusy) :
+        // le moteur reste réellement attaché, ne jamais afficher un faux état
+        // "détaché" ici. resyncAttachment() n'a donc rien changé/nettoyé.
+        addActionLog(
+          'detach',
+          t('appStore.detach.deferredTitle'),
+          t('appStore.detach.deferredDetail'),
+          'warning',
+        )
+        return
+      }
       await refreshClrInspectorStatus()
     } catch (e) {
       console.error('[KillEngine] Detach failed:', e)
@@ -4817,6 +4895,7 @@ export const useAppStore = defineStore('app', () => {
     deleteSavedLuaScript,
     isAttached,
     processName,
+    attachedPid,
     processes,
     processModules,
     discoveredSaveFiles,

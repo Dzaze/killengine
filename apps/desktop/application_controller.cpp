@@ -1611,6 +1611,10 @@ QString ApplicationController::processName() const {
     return m_processName;
 }
 
+int ApplicationController::attachedPid() const {
+    return m_pid;
+}
+
 // ---------------------------------------------------------------------------
 // Slots
 // ---------------------------------------------------------------------------
@@ -1798,16 +1802,16 @@ bool ApplicationController::attachProcess(int pid) {
     return true;
 }
 
-void ApplicationController::detachProcess() {
+bool ApplicationController::detachProcess() {
     KE_LOG_INFO() << "detachProcess()";
 
     if (m_scanningCoreManager->isScanInProgress()) {
         m_scanningCoreManager->requestCancelActiveScan();
         KE_LOG_INFO() << "Detach deferred because a scan is still running.";
-        return;
+        return false;
     }
     if (m_debugFeatureManager->deferDetachIfBusy()) {
-        return;
+        return false;
     }
 
     m_debugFeatureManager->stopBreakpointFreeze();
@@ -1830,6 +1834,7 @@ void ApplicationController::detachProcess() {
     m_claudeChatManager->resetConversation();
 
     emit attachmentChanged();
+    return true;
 }
 
 bool ApplicationController::rememberCandidatesForUndo(QString* error) {
