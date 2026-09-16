@@ -10,10 +10,17 @@
 #   .\scripts\release-check.ps1 -IncludeRecentTargetedTests
 #   .\scripts\release-check.ps1 -OnlyRecentTargetedTests
 #   .\scripts\release-check.ps1 -OnlyAutomationPipeSafeMethods
+#   .\scripts\release-check.ps1 -OnlyUiJourneys
 #
 # -IncludeLuaExamples runs scripts\test-lua-examples.ps1 WITHOUT -RequirePipe (pipe-backed
 # strictness is a separate, explicit command -- run it directly when you want that guarantee):
 #   .\scripts\test-lua-examples.ps1 -RequirePipe   (needs KillEngine.exe already running with KILLENGINE_AUTOMATION_PIPE=1)
+#
+# -OnlyUiJourneys drives scripts\test-ui-journeys.ps1 (AM-4, docs/PHASE_TRACKER.md,
+# 16/09/2026): real CDP-driven UI journeys against an isolated KillEngine.exe
+# instance (attach/scan/language/profile durability). Not part of the default
+# run or -OnlyFastQa -- launches its own process pair and takes noticeably
+# longer than the other -Only* batteries, so it stays opt-in.
 
 param(
     [switch]$SkipUi,
@@ -29,7 +36,8 @@ param(
     [switch]$IncludeRecentTargetedTests,
     [switch]$IncludeAutomationPipeSafeMethods,
     [switch]$OnlyRecentTargetedTests,
-    [switch]$OnlyAutomationPipeSafeMethods
+    [switch]$OnlyAutomationPipeSafeMethods,
+    [switch]$OnlyUiJourneys
 )
 
 $ErrorActionPreference = "Stop"
@@ -139,6 +147,22 @@ if ($OnlyAutomationPipeSafeMethods) {
         $duration = New-TimeSpan -Start $startedAt -End (Get-Date)
         Write-Host ""
         Write-Host ("Automation pipe safe-methods check passed in {0:mm\:ss}." -f $duration) -ForegroundColor Green
+    } finally {
+        Pop-Location
+    }
+    return
+}
+
+if ($OnlyUiJourneys) {
+    Push-Location $repoRoot
+    try {
+        Invoke-Step "UI journeys (CDP-driven, AM-4)" {
+            & (Join-Path $repoRoot "scripts\test-ui-journeys.ps1")
+        }
+
+        $duration = New-TimeSpan -Start $startedAt -End (Get-Date)
+        Write-Host ""
+        Write-Host ("UI journeys check passed in {0:mm\:ss}." -f $duration) -ForegroundColor Green
     } finally {
         Pop-Location
     }

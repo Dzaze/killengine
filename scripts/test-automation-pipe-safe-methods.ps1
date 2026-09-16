@@ -164,7 +164,7 @@ try {
         if ($r.result.success -ne $true) { throw "success attendu true, recu $($r.result.success) (error: $($r.result.error)) -- la page UI a-t-elle fini de charger ?" }
     }
 
-    Test-Case 'detachProcess ne leve pas d''erreur (retour void)' {
+    Test-Case 'detachProcess ne leve pas d''erreur (retourne un bool depuis AM-2, 16/09/2026)' {
         Invoke-Pipe -Method 'detachProcess' | Out-Null
     }
 } finally {
