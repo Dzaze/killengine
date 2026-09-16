@@ -119,6 +119,7 @@ Copy-ItemIfExists -Path (Join-Path $repoRoot "LICENSE") -Destination $packageRoo
 Copy-ItemIfExists -Path (Join-Path $repoRoot "KILLENGINE_PROJECT_SPEC.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\PHASE_TRACKER.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\USER_GUIDE.md") -Destination $packageRoot
+Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\USER_GUIDE_EN.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\V1_REGRESSION_CHECKLIST.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\AUTOMATION_API.md") -Destination $packageRoot
 Copy-ItemIfExists -Path (Join-Path $repoRoot "docs\PORTABILITY_ROADMAP.md") -Destination $packageRoot

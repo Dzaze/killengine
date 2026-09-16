@@ -106,6 +106,24 @@ Les boutons `Markdown` / `JSON` exportent le rapport d'enquête, `Sauver projet`
 
 Si la vue affiche `Aucune investigation active`, c'est normal : lance `Auto` depuis l'Assistant pour créer une timeline.
 
+### Vérification de l'effet — savoir si l'objectif est vraiment atteint
+
+Une écriture qui « prend » (relecture correcte) n'est pas la même chose qu'un effet réellement observé dans la cible. Exemple réel : un compteur affiché manipulé jusqu'à 5555 alors que le gain réellement crédité en fin de partie était resté à 15 — l'écriture avait techniquement réussi, l'objectif non.
+
+Le panneau `Vérification de l'effet`, dans `Investigation`, distingue explicitement trois niveaux de preuve pour une même cible :
+
+- **Écriture confirmée** — la relecture après écriture correspond, rien de plus.
+- **Effet confirmé** — tu as toi-même observé le comportement attendu (transition, animation, changement d'affichage réel).
+- **Solution durable** — l'effet a été vérifié après une condition qui aurait pu le casser (redémarrage, fin de partie).
+
+Pour enregistrer une preuve :
+
+1. Renseigne un libellé ou une adresse pour la cible.
+2. Choisis le niveau de preuve obtenu, ajoute la source (ex. `relecture`, `observation utilisateur`) et les conditions si pertinent.
+3. Clique sur `Enregistrer la preuve`.
+
+Le panneau classe ensuite chaque cible en `Connu` (effet confirmé ou solution durable) ou `Incertain` (écriture confirmée seule, inconclusif, ou rien), avec une suggestion de prochaine action pour chaque cible incertaine. Une preuve inconclusive ou contredite plus tard **n'efface jamais** un niveau déjà atteint, mais ne le fait pas non plus progresser tout seul : c'est toi qui constates et enregistres.
+
 ## Trainer — transformer une trouvaille en toggle
 
 L'onglet `Trainer` est le résultat final : tes découvertes deviennent des **features nommées** avec un interrupteur ON/OFF, réutilisables après un redémarrage.
@@ -172,6 +190,57 @@ Le bloc `Pont Ghidra` sert à passer de KillEngine vers une analyse statique ext
 3. L'import inverse accepte un JSON ou CSV de symboles Ghidra (`module,offset,name,comment`, ou `address` avec `imageBase`) pour enrichir les notes KillEngine.
 
 KillEngine ne pilote pas Ghidra directement : le pont est volontairement un format d'échange simple et vérifiable.
+
+### Diagnostic de durabilité — un profil résiste-t-il à un redémarrage ?
+
+Une cible ou un patch sauvegardé dans un profil peut se casser silencieusement : le jeu change de version, l'ASLR redistribue les modules, ou plusieurs adresses deviennent plausibles à la fois. Le panneau `Diagnostic de durabilité` (dans `Profils`, une fois un profil sélectionné) fait un diagnostic en lecture seule, sans jamais réparer tout seul :
+
+1. Clique sur `Vérifier les profils sauvegardés`.
+2. Chaque cible/patch affiche un statut : `Conditions mémoire vérifiées`, `Non vérifié`, `Ambiguïté`, `Version de l'exécutable ou du module différente`, `Piste alternative retrouvée, à tester`, etc.
+3. Clique sur `Définir les conditions` pour enregistrer une méthode de découverte, des octets stables attendus, un test de validation, et jusqu'à 8 pistes alternatives à conserver pour cette même entrée.
+
+Un statut `repair_candidate` propose une piste alternative — **jamais appliquée automatiquement**. C'est toujours toi qui la testes et qui remplaces le locator explicitement via les outils habituels.
+
+### Mémoire d'enquête — garder trace de ce qui a marché ou pas
+
+Sous chaque entrée du diagnostic de durabilité, le panneau `Mémoire d'enquête` garde des notes texte qui survivent aux redémarrages, avec 4 types :
+
+- **Échec expliqué** — une piste testée qui n'a pas marché, et pourquoi.
+- **Condition de réussite** — ce qu'il a fallu pour qu'une résolution tienne.
+- **Expérience discriminante** — le test qui a permis de départager deux hypothèses concurrentes.
+- **À revérifier** — un doute explicite à ne pas oublier.
+
+Clique sur `Charger les notes` pour voir celles déjà enregistrées, classées `Toujours valable pour cette version` ou `Version différente : à revérifier` selon que le jeu attaché correspond ou non à la version où la note a été prise. Un changement de version ne supprime jamais une note, il la signale seulement à revérifier.
+
+## Modules — dépendances optionnelles
+
+L'onglet `Modules` liste les composants optionnels de KillEngine et leur statut, avec une installation possible directement depuis l'UI. Un bouton `Tout rafraîchir` en haut relance la détection de tous les modules.
+
+### Dépendances
+
+- **Runtime Lua externe** — bouton `Installer`, nécessaire pour l'onglet `Lua`.
+- **Modèle IA (GGUF)** — bouton `Télécharger`, nécessaire pour l'Assistant en local ; le téléchargement depuis Hugging Face peut être long (plusieurs Go).
+- **Inspecteur CLR** — bouton `Compiler`, nécessaire pour l'onglet `CLR` (cibles .NET/Mono).
+- **Driver noyau (`KillEngineKernel`)** — bouton `Installer (UAC)`, nécessaire pour le mode d'accès mémoire `Kernel` et les fonctionnalités stealth avancées.
+
+Le driver noyau n'étant pas signé WHQL, sa carte inclut un bloc `Test Signing` avec un bouton `Activer (UAC)` / `Désactiver (UAC)` pour autoriser Windows à le charger. Active-le seulement si nécessaire : ça demande un redémarrage Windows et affiche un filigrane permanent « Mode test » sur le bureau tant que c'est actif.
+
+### 🔧 Environnement de test
+
+- **`debug_privilege`** — bouton `Vérifier` puis `Activer` (active `SeDebugPrivilege`, souvent nécessaire pour attacher certains processus).
+- **`edr_exclusion`** — le module EDR/Defender, avec un `Guide de résolution EDR` en 3 étapes directement dans la carte :
+  1. `Vérifier` le blocage, puis `Ajouter exclusion` (exclut `build\bin` de Windows Defender).
+  2. Si la Protection contre les falsifications (Tamper Protection) bloque encore : bascule-la manuellement dans Windows Security, ou utilise les boutons `Exécuter`/`Réactiver` de la carte (redémarrage nécessaire pour que ça prenne effet).
+  3. `Réactiver` la protection une fois le test terminé.
+
+  Un lien `Solutions manuelles` affiche les commandes PowerShell équivalentes avec un bouton `Copier`, pour qui préfère les lancer lui-même.
+
+Cette carte explique aussi, en clair, pourquoi un antivirus ou un EDR peut signaler KillEngine : les mêmes primitives bas niveau (lecture/écriture mémoire d'un autre processus, hooks, driver noyau) sont utilisées aussi bien par un outil légitime que par un malware. Un blocage EDR/Defender est donc **attendu**, pas une anomalie à corriger — et il ne faut pas laisser Defender/Tamper Protection désactivés après le test, seulement le temps du diagnostic.
+
+### 🛡️ Sécurité / Stealth
+
+- **`stealth_sc2_profile`** — bouton `Appliquer`, puis `Restaurer` une fois actif.
+- **Handle Hider** — masque un handle spécifique dans la table de handles d'un processus (invisible à `NtQuerySystemInformation`). Saisis le `PID du process cible` et la `Valeur du handle (hex)`, puis `Masquer`.
 
 ## Mode Expert
 
@@ -257,6 +326,108 @@ Cette méthode s'applique à tout compteur qui défile visuellement (XP, score, 
 
 Une étude de cas complète (désassemblage réel, raisonnement pas à pas) est disponible dans `docs/STRATEGY_ROOM.md`.
 
+### Trace UI string : partir du texte affiché à l'écran
+
+Quand un scan numérique classique ne trouve rien (valeur encodée, arrondie, ou affichée sous une forme qui ne correspond à aucun type simple), pars du texte réellement affiché à l'écran plutôt que d'un nombre supposé :
+
+1. **`Scanner texte`** — étape 1, entre le texte affiché (ex. `50`). KillEngine cherche la chaîne en ASCII/UTF-16 dans les régions mémoire.
+2. Change la valeur affichée en jeu, puis **`Scan suivant (texte)`** — étape 2, avec la nouvelle valeur affichée. Réduit les candidats texte, en suivant une chaîne légèrement déplacée si besoin.
+3. **`Analyser sources`** — cherche des formes numériques (`Int32`, `Int32 x100`, `Int32 x65536`, etc.) proches des chaînes suivies.
+4. **`Scan suivant (sources)`** — garde les sources numériques qui suivent la nouvelle valeur affichée.
+5. **`Auto origine`** enchaîne tout ça automatiquement (plusieurs rayons de recherche, sélection auto des sources trouvées, préparation du panneau Write) si tu ne veux pas faire les étapes une par une.
+6. **`Backrefs`** cherche les pointeurs 64-bit qui pointent près des chaînes exactes trouvées — utile pour remonter à la structure qui contient la valeur.
+
+Beaucoup de chaînes UI trouvées ne sont que des copies d'affichage, pas la vraie source utilisée par le jeu — c'est pour ça qu'`Auto origine` existe : il aide à trancher plutôt que de deviner à l'œil.
+
+`Démarrer enquête` / `Arrêter enquête` capture des snapshots autour des sources sélectionnées pendant que tu joues, puis relit les blocs modifiés pour proposer automatiquement de nouvelles pistes numériques cohérentes avec la nouvelle valeur affichée.
+
+### Changed Pages : consensus multi-round
+
+Sur des cibles qui obscurcissent ou chiffrent leurs pages mémoire entre deux lectures (jeux compétitifs en ligne, certains moteurs AAA), une seule comparaison avant/après peut rater la bonne adresse ou en retenir trop. Le panneau `Consensus multi-round (Changed Pages)` capture plusieurs rounds et classe les adresses par stabilité :
+
+1. **`Démarrer session`**.
+2. Change la valeur en jeu, saisis la `Valeur avant` / `Valeur après` si tu les connais, puis **`Appliquer round`**. Répète sur plusieurs rounds.
+3. **`Consensus`** — affiche les `Entrées classées` : combien de fois chaque adresse a été vue, confirmée, ou en contradiction, avec un score de stabilité.
+4. **`Arrêter session`** une fois une adresse fiable identifiée.
+
+Une adresse confirmée sur plusieurs rounds consécutifs, sans contradiction, est un bien meilleur candidat qu'une correspondance sur un seul round.
+
+### Montre-moi ce qui change : corréler une observation avec les sources déjà trouvées
+
+Ce panneau relie ce que tu observes visuellement à ce que KillEngine a déjà trouvé (Changed Pages, Trace UI string), sans capture d'écran ni reconnaissance d'image — la description reste du texte que tu tapes toi-même :
+
+1. **`Relever avant / recommencer`** — capture un premier relevé des candidats déjà connus. Nécessite d'avoir déjà des candidats issus de Changed Pages ou Analyser sources : ce panneau ne fabrique jamais de piste à partir de rien.
+2. Décris l'action et ce que tu observes dans `Action et observation`, avec la `Valeur avant`/`Valeur après` si tu les connais, et choisis l'hypothèse à départager (`Quantités corrélées / copies`, `Valeur actuelle / maximum`, `Source / affichage animé`).
+3. **`Relever après et corréler`** — un deuxième relevé frais, comparé au premier et à ta description.
+
+Chaque candidat ressort classé (`Corrélation forte`, `Indice faible`, `Valeurs déclarées contredites`, etc.), avec une suggestion d'expérience pour départager quand plusieurs candidats restent plausibles — par exemple changer uniquement le maximum sans toucher la valeur actuelle. **Une corrélation, même forte, n'est jamais présentée comme une preuve de causalité** : elle indique une piste à confirmer, pas un résultat acquis.
+
+## CLR Inspector — cibles .NET / Mono
+
+Sur une cible managée (Unity C#, .NET, Mono), les objets se déplacent sous l'effet du garbage collector : une adresse brute qui fonctionne maintenant peut ne plus rien contenir de valide après le prochain GC. L'onglet `CLR` marche par type et chemin de champ plutôt que par adresse.
+
+1. Attache un processus .NET/Mono, puis ouvre `CLR`.
+2. Entre un filtre de type (ex. `KillEngine.ClrTestTarget`) et clique `Attacher CLR` (démarre l'aide externe `KillEngineClrInspector`).
+3. `Objets` liste les instances managées correspondant au filtre ; `Lire` sur une instance charge ses champs.
+4. Dans `Objet lu`, chaque champ peut être lu (`Lire`, pour descendre dans un champ de type référence) ou écrit directement s'il est primitif.
+5. Pour survivre à un déplacement GC ou une reconnexion, construis un `Locator stable` : choisis un objet réel, puis un champ stable qui l'identifie (le mini-assistant guide les 3 étapes). Utilise ensuite `Chemin symbolique` (ex. `Self.Health`, `Inventory.Items[0].Value`) avec la case `Utiliser un locator` cochée pour écrire par type+champ plutôt que par adresse.
+6. `Transaction multi-champs` permet d'écrire plusieurs champs en une seule fois (`Health=100`, un `chemin=valeur` par ligne), avec l'option de suspendre le process pendant l'opération.
+
+Le panneau `Appeler un setter` **exécute réellement le vrai setter/méthode C#** dans le processus cible via injection de code — ce n'est pas une simple écriture mémoire passive. Utilise plutôt `Désassembler ce setter` (lecture seule) en cas de doute, et réserve `Appeler un setter` aux cas où une écriture de champ simple ne suffit pas (propriété avec logique associée, par exemple).
+
+## WebView2 Inspector — cibles hybrides natif + web
+
+Certaines applications (Electron, WebView2, certaines apps UWP) affichent leur état réel dans du JavaScript/DOM plutôt qu'en mémoire native — un scan classique ne trouve alors que du bruit du moteur de rendu. L'onglet `WebView2` lit et écrit directement cet état via le protocole Chrome DevTools (CDP).
+
+1. Attache le processus cible, puis ouvre `WebView2`.
+2. `Lister les targets` — affiche les cibles CDP disponibles pour ce processus.
+3. `Connecter` — ouvre une connexion CDP (confirmation requise, la connexion peut lire l'état JS/DOM d'un processus externe).
+4. Une fois connecté, `Sonder le contexte` liste les variables JavaScript propres à la page (en filtrant le bruit générique de Chromium), chacune avec un bouton `Explorer` qui prépare une expression d'inspection.
+5. `Chercher dans le DOM` — par valeur numérique affichée ou par texte affiché, pour retrouver l'élément qui montre la valeur qui t'intéresse.
+6. `Évaluer` exécute une expression JavaScript libre (également soumise à confirmation, puisqu'elle peut écrire).
+7. `Déconnecter` / `Réinitialiser` pour terminer.
+
+**Si la cible est une app Store/UWP**, le port CDP direct est bloqué par défaut (AppContainer). Va d'abord dans `Paramètres`, section `Préparer l'inspection WebView2 (apps Store/UWP)`, et lance le diagnostic : il vérifie et installe si besoin le Mode développeur Windows nécessaire à la chaîne Device Portal. Pour une app Electron/WebView2/CEF classique (pas UWP), utilise plutôt le panneau `Débogage CDP WebView2 (avancé)` des `Paramètres`, qui force le port de debug pour l'utilisateur Windows courant.
+
+## Mémoire dans le temps : Heatmap, Timeline, Pattern Learning
+
+### Heatmap — voir où ça écrit le plus
+
+Quand tu ne sais même pas par où commencer, l'onglet `Heatmap` montre quelles régions mémoire sont le plus sollicitées en écriture, sans avoir à deviner un scan de départ.
+
+1. Attache un processus.
+2. Choisis éventuellement une adresse de départ, une taille de région (page/64 Ko/1 Mo) et un intervalle d'échantillonnage, puis coche `Lectures`/`Écritures` selon ce qui t'intéresse.
+3. `Démarrer`, laisse tourner quelques secondes pendant que tu joues normalement.
+4. Regarde le tableau `Régions les plus actives`, trié par intensité — ce sont tes meilleurs points de départ pour un scan classique.
+5. `Arrêter` une fois fini.
+
+Une région trop large (1 Mo) peut noyer un petit champ chaud dans une zone globalement bruyante — réduis la taille de région si les résultats restent trop généraux.
+
+### Timeline — suivre une valeur dans le temps
+
+L'onglet `Timeline` enregistre l'évolution d'une ou plusieurs adresses dans le temps, et peut détecter des motifs ou des corrélations entre elles.
+
+1. Ajoute une ou plusieurs adresses à surveiller (adresse hex + type + `Ajouter`).
+2. Configure l'intervalle d'échantillonnage, la durée max, et coche `Ne tracker que les changements` si tu veux limiter le bruit.
+3. `Démarrer`, puis `Arrêter` quand tu as assez de données.
+4. Clique une adresse pour voir sa courbe et ses statistiques (changements, volatilité, intervalle moyen).
+5. `Analyser` lance la détection de motif sur l'adresse sélectionnée (`Constant`, `Step`, `Linéaire`, `Cyclique`, `Aléatoire`, `Corrélé`, `Anti-cheat`, avec un score de confiance).
+6. Les `Actions rapides` couvrent plusieurs adresses à la fois : `Trouver volatiles`, `Trouver stables`, `Profil comportemental`, `Prédiction`, `Corrélations` (coefficient de Pearson entre deux adresses, avec décalage temporel si détecté), `Rapport texte`.
+7. `Exporter JSON` sauvegarde l'enregistrement.
+
+Utile quand le repère n'est pas une valeur isolée mais un comportement : deux adresses qui bougent ensemble (vie/bouclier), un vrai minuteur à distinguer d'un leurre, ou un motif de triche à repérer avant de tenter un freeze.
+
+### Pattern Learning — réutiliser ce qui a déjà marché
+
+L'onglet `Pattern Learning` retient, par jeu, les moteurs détectés, les offsets déjà trouvés et les chemins de résolution qui ont fonctionné, pour aller plus vite lors d'une prochaine session sur le même jeu.
+
+1. Attache le processus, clique `Détecter le moteur` (identifie Unity/Unreal/Godot etc. depuis les modules chargés).
+2. Charge un profil de jeu existant (`Profils de jeu`, bouton `Charger`) ou crée-en un nouveau vide.
+3. Le profil chargé affiche un tableau des offsets déjà connus (nom, offset, type, échelle, stabilité).
+4. `Suggestions` (nom du jeu + type de motif + nombre) propose les meilleures pistes déjà validées par le passé pour ce type de valeur.
+
+Optionnel : coller un historique de valeurs observées dans `Classifier un historique de valeurs` pour obtenir un type de motif suggéré (compteur de ressource, points de vie, timer, etc.) avec le raisonnement associé.
+
 ## Lua scripting
 
 L'onglet `Lua` permet d'exécuter un script Lua externe pour orchestrer KillEngine : scan, next scan, lecture kernel, écriture kernel, ou tout autre appel exposé par le backend. Le script ne s'injecte pas dans le processus cible ; il appelle KillEngine via le pipe d'automatisation local.
@@ -300,6 +471,33 @@ scripts\automation-pipe-call.ps1
 
 `scripts\package-windows.ps1` copie automatiquement le runtime Lua s'il trouve un interpréteur dans `runtime\lua`, `third_party\lua`, `third_party\lua\bin` ou `tools\lua`. Le script `setup-lua-runtime.ps1` remplit directement le premier emplacement.
 
+## Speedhack
+
+L'onglet `Speedhack` accélère ou ralentit la perception du temps par le processus cible (hooks des fonctions de temps Windows), sans toucher aux valeurs mémoire du jeu.
+
+1. Attache un processus.
+2. Choisis un multiplicateur via le curseur (0.1x à 10x) ou un préréglage (`0.25x`, `0.5x`, `1x`, `2x`, `4x`, `10x`), ou `Pause (0x)` pour figer complètement la perception du temps.
+3. `Activer` (confirmation requise, le hook est traité comme une injection).
+4. Tu peux changer de vitesse à la volée sans désactiver.
+5. `Désactiver` pour revenir à la vitesse normale.
+
+Si le statut affiche `Échec install` (« Aucune fonction de temps n'a pu être hookée dans cette cible »), c'est souvent une cible .NET/managée dont l'API de temps est résolue dynamiquement (JIT) plutôt qu'importée statiquement.
+
+## Réseau
+
+L'onglet `Réseau` regroupe l'observation et la manipulation du trafic du processus attaché :
+
+- **Connexions actives** — tableau live des connexions TCP/UDP, avec filtres et rafraîchissement automatique (`Live 🔄`).
+- **Modules réseau chargés** — DLLs liées au réseau (API socket, HTTP, DNS, chiffrement, système).
+- **Proxy HTTP** — intercepte et modifie les requêtes HTTP/HTTPS locales (port configurable, case `Intercepter HTTPS`).
+- **Spoof DNS** — redirige un domaine vers une IP choisie (modifie le fichier hosts Windows, confirmation UAC).
+- **Lag switch** — introduit un délai artificiel sur la réception réseau, pour simuler une mauvaise connexion.
+- **Blocage réseau** — `Couper le réseau` / `Rétablir le réseau` via une règle de pare-feu Windows.
+
+Usage typique : couper le réseau pour voir si une valeur suspecte se stabilise une fois la synchronisation serveur coupée — utile pour distinguer un calcul côté client d'une valeur imposée par le serveur.
+
+**Attention** : la règle de pare-feu posée par `Couper le réseau` reste active même après avoir détaché le processus — pense à cliquer `Rétablir le réseau` explicitement.
+
 ## Paramètres
 
 La page `Paramètres` permet de régler :
@@ -321,6 +519,40 @@ Les deux agents IA inclus sont visibles dans ce dossier:
 - `model/assistant/` pour l'assistant utilisateur.
 - `model/auto_resolver/` pour l'agent autonome.
 - `model/qwen/` pour les poids GGUF partagés.
+
+### Backend IA externe (Claude)
+
+Optionnel, jamais activé par défaut. Bascule le chat Assistant vers l'API Claude (clé API personnelle) pour les tâches qui demandent un raisonnement plus profond que le modèle local embarqué :
+
+1. Colle ta clé dans le champ `Clé API Claude (sk-ant-...)`, puis `Enregistrer` — la clé est chiffrée (DPAPI Windows, liée au compte utilisateur) et n'est plus jamais réaffichée en clair.
+2. Bascule le menu `Backend actif` sur `Claude (clé API)`.
+3. Utilise le chat Assistant normalement ; le badge de statut confirme `Claude actif`.
+4. `Supprimer` retire la clé stockée et repasse en local.
+
+Dès que ce backend est actif, le contexte des appels d'outils (adresses mémoire, nom du process, parfois du code désassemblé) part vers Anthropic à chaque requête. Chaque outil sensible (écriture mémoire, kernel, réseau, stealth...) reste soumis à sa propre confirmation avant exécution — activer ce backend n'exécute rien tout seul.
+
+Ce backend Claude n'est qu'une option parmi d'autres : tu peux aussi piloter KillEngine avec le modèle en ligne de ton choix via le `Mode Automation` ci-dessous — le pipe local expose toute la surface de commandes sans restriction à n'importe quel outil/agent externe sur cette machine (par exemple une extension IA branchée dessus).
+
+### Mode Automation (avancé)
+
+Permet à un agent IA externe (Claude Code, Cursor, une extension VS Code...) de piloter KillEngine en direct via un pipe nommé local, en réutilisant le même moteur que l'onglet `Lua`.
+
+1. Dans la section `Mode Automation (avancé)`, clique `Activer le mode Automation`.
+2. Confirme une seule fois — le pipe démarre immédiatement, sans redémarrer KillEngine. Le statut affiche le nom du pipe, le nombre d'appels reçus, et le dernier appel effectué.
+3. `Rafraîchir le statut` pour actualiser ; `Désactiver le mode Automation` pour couper (sans confirmation nécessaire).
+
+**Une fois actif, les appels via le pipe s'exécutent sans confirmation par action** — chaque appel reste journalisé, mais il n'y a plus de fenêtre de confirmation individuelle tant que le mode reste activé. Voir `docs/AUTOMATION_API.md` pour le protocole complet (JSON-RPC, nom du pipe, référence des méthodes) plutôt que de le dupliquer ici. Alternative pour un usage scripté : lancer KillEngine avec la variable d'environnement `KILLENGINE_AUTOMATION_PIPE=1` au lieu du bouton.
+
+### Mode Stealth (avancé)
+
+Réduit la détectabilité de KillEngine face aux mécanismes anti-debug/anti-cheat courants (masquage du nom de process, des DLLs injectées, hooks anti-anti-debug sur `IsDebuggerPresent`/`CheckRemoteDebuggerPresent`/`NtQueryInformationProcess`).
+
+1. Attache un processus.
+2. `Analyser la détectabilité` (optionnel mais conseillé) — scanne les modules chargés à la recherche de protections connues (BattlEye, Easy Anti-Cheat, Vanguard, PunkBuster, GameGuard, Xigncode3, Denuvo, mhyprot...) et donne un score de risque avec des recommandations.
+3. Choisis un profil : `sc2` (anti-debug + masquage process + masquage DLL, les trois modules), `default` (anti-debug seul), ou `minimal` (masquage process seul).
+4. Confirme, puis `Restaurer / désactiver` une fois terminé.
+
+Un raccourci équivalent existe dans `Modules`, section « 🛡️ Sécurité / Stealth » (carte « Profil Stealth SC2 »), pour appliquer le même profil en un clic depuis cet onglet.
 
 ## Diagnostics
 

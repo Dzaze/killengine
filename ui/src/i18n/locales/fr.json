@@ -256,7 +256,9 @@
     "network": "Réseau",
     "lexicon": "Lexique",
     "modules": "Modules",
-    "languageSwitchLabel": "Langue de l'interface"
+    "languageSwitchLabel": "Langue de l'interface",
+    "help": "Aide",
+    "helpTitle": "Ouvrir le guide utilisateur"
   },
   "modules": {
     "intro": "Dépendances optionnelles de KillEngine : statut installé/manquant et installation depuis l'UI (scripts locaux, téléchargement réseau, invite UAC). Pensez à installer les modules manquants avant d'exporter le package sur une autre machine.",

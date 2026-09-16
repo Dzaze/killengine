@@ -256,7 +256,9 @@
     "network": "Network",
     "lexicon": "Glossary",
     "modules": "Modules",
-    "languageSwitchLabel": "Interface language"
+    "languageSwitchLabel": "Interface language",
+    "help": "Help",
+    "helpTitle": "Open the user guide"
   },
   "modules": {
     "intro": "Optional KillEngine dependencies: installed/missing status and in-UI installation (local scripts, network download, UAC prompt). Install missing modules before exporting the package to another machine.",

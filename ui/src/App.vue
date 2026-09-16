@@ -81,9 +81,14 @@ watch(
         <span class="logo-text">KillEngine</span>
       </div>
 
-      <div class="lang-switch" role="group" :aria-label="$t('nav.languageSwitchLabel')">
-        <button :class="{ active: store.appLanguage === 'fr' }" @click="store.switchLanguage('fr')">FR</button>
-        <button :class="{ active: store.appLanguage === 'en' }" @click="store.switchLanguage('en')">EN</button>
+      <div class="lang-switch">
+        <div class="lang-switch-group" role="group" :aria-label="$t('nav.languageSwitchLabel')">
+          <button :class="{ active: store.appLanguage === 'fr' }" @click="store.switchLanguage('fr')">FR</button>
+          <button :class="{ active: store.appLanguage === 'en' }" @click="store.switchLanguage('en')">EN</button>
+        </div>
+        <button class="help-btn" :title="$t('nav.helpTitle')" :aria-label="$t('nav.helpTitle')" @click="store.openUserGuide()">
+          {{ $t('nav.help') }}
+        </button>
       </div>
 
       <nav class="nav">
@@ -368,6 +373,12 @@ body {
   border-bottom: 1px solid rgba(125, 142, 255, 0.14);
 }
 
+.lang-switch-group {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
 .lang-switch button {
   flex: 1;
   padding: 6px 0;
@@ -379,6 +390,11 @@ body {
   font-weight: 700;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.lang-switch button.help-btn {
+  flex: 0 0 auto;
+  padding: 6px 10px;
 }
 
 .lang-switch button:hover {

@@ -3925,8 +3925,15 @@ void ApplicationController::setOnboardingSeen(bool seen) {
 }
 
 bool ApplicationController::openUserGuide() const {
+    // English falls back to the French guide if USER_GUIDE_EN.md is missing
+    // (e.g. a portable package built before the EN translation existed)
+    // rather than failing outright.
+    const QString fileName = killcore::currentUiLanguage() == "en" ? "USER_GUIDE_EN.md" : "USER_GUIDE.md";
     const QDir appDir(QCoreApplication::applicationDirPath());
     const QStringList candidates = {
+        appDir.filePath(fileName),
+        appDir.filePath("../../docs/" + fileName),
+        QDir::current().filePath("docs/" + fileName),
         appDir.filePath("USER_GUIDE.md"),
         appDir.filePath("../../docs/USER_GUIDE.md"),
         QDir::current().filePath("docs/USER_GUIDE.md"),
