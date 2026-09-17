@@ -7037,6 +7037,10 @@ QVariantMap ApplicationController::loadProfile(const QString& profileName) {
     return m_profileManager->loadProfile(profileName);
 }
 
+QVariantMap ApplicationController::importLegacyProfiles() {
+    return m_profileManager->importLegacyProfiles();
+}
+
 QVariantMap ApplicationController::inspectProfileDurability(const QString& profileName) {
     const QString name = profileName.trimmed();
     if (name.isEmpty() || name.contains('/') || name.contains('\\') || name.contains(':')

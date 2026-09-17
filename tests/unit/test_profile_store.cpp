@@ -10,6 +10,7 @@
 // scripts/test-trainer-dependencies.ps1 -- pas dupliqué ici.
 
 #include "profiles/profile_store.h"
+#include "paths/portable_paths.h"
 
 #include <gtest/gtest.h>
 
@@ -28,6 +29,33 @@
 using namespace killcore;
 
 namespace {
+
+// Meme pattern que ScopedUiLanguage (tests/unit/test_localization.cpp) : force
+// une racine portable de fixture pour la duree du scope, jamais permanente.
+class ScopedPortableRoot {
+public:
+    explicit ScopedPortableRoot(const QString& root) {
+        PortablePaths::setTestRootOverride(root);
+    }
+    ~ScopedPortableRoot() {
+        PortablePaths::setTestRootOverride(QString());
+    }
+};
+
+// PORT-2c : legacyProfilesDir() pointe vers le vrai emplacement systeme
+// (%LOCALAPPDATA%), pas overridable par design (c'est justement l'ancien
+// dossier reel qu'on doit lire). Un fichier de fixture y est cree avec un nom
+// unique, jamais un profil du propriétaire, et toujours supprime en fin de
+// test -- meme pattern que ListRemoveRoundTripUsesRealProfilesDirWithUniqueName
+// ci-dessous.
+class ScopedLegacyProfileFile {
+public:
+    explicit ScopedLegacyProfileFile(const QString& path) : m_path(path) {}
+    ~ScopedLegacyProfileFile() { QFile::remove(m_path); }
+
+private:
+    QString m_path;
+};
 
 Locator r2ModuleLocator(uint64_t offset = 0x20) {
     Locator locator;
@@ -691,10 +719,11 @@ TEST(ProfileStore, LoadReturnsFalseWithNullOutputPointer) {
 
 TEST(ProfileStore, ListRemoveRoundTripUsesRealProfilesDirWithUniqueName) {
     // listProfiles()/remove()/profilePath() travaillent sur le dossier reel
-    // (%LOCALAPPDATA%\KillEngine\Profiles), contrairement a save/load qui
-    // acceptent un chemin complet arbitraire (teste ci-dessus via
-    // QTemporaryDir). Nom unique + nettoyage explicite pour ne pas polluer
-    // le vrai dossier de profils de la machine qui lance les tests.
+    // (<dossier de l'executable>\data\profiles depuis PORT-2b, 17/09/2026 --
+    // avant, %LOCALAPPDATA%\KillEngine\Profiles), contrairement a save/load
+    // qui acceptent un chemin complet arbitraire (teste ci-dessus via
+    // QTemporaryDir). Nom unique + nettoyage explicite pour ne pas laisser de
+    // profil residuel sous le dossier de sortie du build.
     const QString uniqueName = QStringLiteral("killengine_test_profile_store_%1")
         .arg(QDateTime::currentMSecsSinceEpoch());
 
@@ -712,4 +741,107 @@ TEST(ProfileStore, ListRemoveRoundTripUsesRealProfilesDirWithUniqueName) {
 
     EXPECT_TRUE(ProfileStore::remove(uniqueName));
     EXPECT_FALSE(ProfileStore::listProfiles().contains(uniqueName));
+}
+
+// PORT-2c (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : reprise explicite et non
+// destructive des profils encore sous l'ancien emplacement systeme.
+TEST(ProfileStore, ImportLegacyProfilesCopiesValidSkipsCollisionAndFlagsInvalid) {
+    QDir().mkpath(ProfileStore::legacyProfilesDir());
+
+    const QString suffix = QString::number(QDateTime::currentMSecsSinceEpoch());
+    const QString validName = "killengine_test_legacy_valid_" + suffix;
+    const QString collisionName = "killengine_test_legacy_collision_" + suffix;
+    const QString invalidName = "killengine_test_legacy_invalid_" + suffix;
+
+    const QString validLegacyPath = QDir(ProfileStore::legacyProfilesDir()).filePath(validName + ".keprofile");
+    const QString collisionLegacyPath = QDir(ProfileStore::legacyProfilesDir()).filePath(collisionName + ".keprofile");
+    const QString invalidLegacyPath = QDir(ProfileStore::legacyProfilesDir()).filePath(invalidName + ".keprofile");
+
+    ScopedLegacyProfileFile cleanupValid(validLegacyPath);
+    ScopedLegacyProfileFile cleanupCollision(collisionLegacyPath);
+    ScopedLegacyProfileFile cleanupInvalid(invalidLegacyPath);
+
+    Profile validLegacyProfile;
+    validLegacyProfile.gameName = "Legacy Valid";
+    validLegacyProfile.executableName = "legacy.exe";
+    ASSERT_TRUE(ProfileStore::save(validLegacyProfile, validLegacyPath));
+
+    Profile collisionLegacyProfile;
+    collisionLegacyProfile.gameName = "Legacy Incoming (must not win)";
+    ASSERT_TRUE(ProfileStore::save(collisionLegacyProfile, collisionLegacyPath));
+
+    QFile invalidFile(invalidLegacyPath);
+    ASSERT_TRUE(invalidFile.open(QIODevice::WriteOnly | QIODevice::Text));
+    invalidFile.write("this is not valid profile JSON {{{");
+    invalidFile.close();
+
+    QTemporaryDir portableRootDir;
+    ASSERT_TRUE(portableRootDir.isValid());
+    ScopedPortableRoot scopedRoot(portableRootDir.path());
+
+    // Un profil portable du meme nom existe deja *avant* l'import -- ne doit
+    // jamais etre ecrase par la version legacy homonyme.
+    const QString collisionPortablePath = QDir(ProfileStore::profilesDir()).filePath(collisionName + ".keprofile");
+    Profile existingPortableProfile;
+    existingPortableProfile.gameName = "Portable Original (must survive)";
+    ASSERT_TRUE(ProfileStore::save(existingPortableProfile, collisionPortablePath));
+
+    const QList<ProfileStore::LegacyImportResult> results = ProfileStore::importLegacyProfiles();
+
+    auto findResult = [&results](const QString& fileName) -> const ProfileStore::LegacyImportResult* {
+        for (const auto& r : results) {
+            if (r.fileName == fileName) return &r;
+        }
+        return nullptr;
+    };
+
+    const auto* validResult = findResult(validName + ".keprofile");
+    ASSERT_NE(validResult, nullptr);
+    EXPECT_TRUE(validResult->imported);
+    EXPECT_FALSE(validResult->skippedExisting);
+    EXPECT_FALSE(validResult->invalid);
+
+    const auto* collisionResult = findResult(collisionName + ".keprofile");
+    ASSERT_NE(collisionResult, nullptr);
+    EXPECT_FALSE(collisionResult->imported);
+    EXPECT_TRUE(collisionResult->skippedExisting);
+
+    const auto* invalidResult = findResult(invalidName + ".keprofile");
+    ASSERT_NE(invalidResult, nullptr);
+    EXPECT_FALSE(invalidResult->imported);
+    EXPECT_TRUE(invalidResult->invalid);
+
+    // Copie reelle, contenu correct, jamais un deplacement.
+    const QString validPortablePath = QDir(ProfileStore::profilesDir()).filePath(validName + ".keprofile");
+    Profile importedProfile;
+    ASSERT_TRUE(ProfileStore::load(validPortablePath, &importedProfile));
+    EXPECT_EQ(importedProfile.gameName, "Legacy Valid");
+    EXPECT_TRUE(QFile::exists(validLegacyPath)); // la source n'a jamais ete supprimee
+
+    // Le profil portable pre-existant n'a pas ete ecrase par l'homonyme legacy.
+    Profile survivingProfile;
+    ASSERT_TRUE(ProfileStore::load(collisionPortablePath, &survivingProfile));
+    EXPECT_EQ(survivingProfile.gameName, "Portable Original (must survive)");
+
+    // Le fichier invalide n'a jamais ete copie.
+    const QString invalidPortablePath = QDir(ProfileStore::profilesDir()).filePath(invalidName + ".keprofile");
+    EXPECT_FALSE(QFile::exists(invalidPortablePath));
+}
+
+TEST(ProfileStore, ImportLegacyProfilesReturnsEmptyWhenNothingToImportFromLegacyDir) {
+    // legacyProfilesDir() existe presque certainement deja sur la machine de
+    // test (vrais profils du propriétaire) -- ce test ne verifie donc pas
+    // l'absence du dossier, seulement qu'un nom qui n'existe pas cote legacy
+    // n'apparait jamais dans les resultats.
+    const QString suffix = QString::number(QDateTime::currentMSecsSinceEpoch());
+    const QString absentName = "killengine_test_legacy_absent_" + suffix + ".keprofile";
+
+    QTemporaryDir portableRootDir;
+    ASSERT_TRUE(portableRootDir.isValid());
+    ScopedPortableRoot scopedRoot(portableRootDir.path());
+
+    const QList<ProfileStore::LegacyImportResult> results = ProfileStore::importLegacyProfiles();
+    for (const auto& r : results) {
+        EXPECT_NE(r.fileName, absentName);
+    }
 }

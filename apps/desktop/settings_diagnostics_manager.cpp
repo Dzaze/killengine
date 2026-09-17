@@ -5,6 +5,7 @@
 #include "localization/localization.h"
 #include "logging/logger.h"
 #include "model_locator.h"
+#include "paths/portable_paths.h"
 #include "scan_state_access.h"
 #include "scanner/performance_profile.h"
 #include "scanner/scan_types.h"
@@ -757,23 +758,17 @@ QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
 }
 
 QString SettingsDiagnosticsManager::smartSearchDebugFilePath() const {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    if (dir.isEmpty()) {
-        dir = QDir::currentPath();
-    }
-    dir += "/logs";
-    QDir().mkpath(dir);
-    return dir + "/smart_search_debug.jsonl";
+    // PORT-2b (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : AppLocalDataLocation
+    // (%LOCALAPPDATA%) cassait le mode portable -- copier le dossier de l'app
+    // perdait silencieusement ce journal. Redirige vers le meme dossier "logs"
+    // deja portable (killcore::Logger, voir main.cpp) au lieu d'un dossier a
+    // part, via le resolveur commun killcore::PortablePaths.
+    return killcore::PortablePaths::filePath("logs", "smart_search_debug.jsonl");
 }
 
 QString SettingsDiagnosticsManager::scanTelemetryFilePath() const {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    if (dir.isEmpty()) {
-        dir = QDir::currentPath();
-    }
-    dir += "/logs";
-    QDir().mkpath(dir);
-    return dir + "/scan_telemetry.jsonl";
+    // PORT-2b : meme raisonnement que smartSearchDebugFilePath() ci-dessus.
+    return killcore::PortablePaths::filePath("logs", "scan_telemetry.jsonl");
 }
 
 void SettingsDiagnosticsManager::appendSmartSearchDebug(const QString& event, const QVariantMap& payload) const {

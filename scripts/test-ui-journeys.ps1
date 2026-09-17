@@ -22,8 +22,11 @@ Isolation :
   - Refuse de demarrer si une instance de KillEngine.exe/KillEngineTestTarget.exe
     tourne deja (le pipe KillEngineAutomationPipe est un nom global fixe -- ne
     jamais risquer de piloter/arreter l'instance du propriétaire).
-  - Nom de profil unique par execution ; seul CE profil est supprime en fin de
-    run (ProfileStore n'est pas portable, voir docs/PHASE_TRACKER.md AM-1/AM-4).
+  - Nom de profil unique par execution ; ProfileStore est portable depuis
+    PORT-2b (17/09/2026) -- le profil vit sous $fixtureRoot\data\profiles et
+    part avec le reste de la fixture en fin de run, jamais aux cotes des
+    profils reels du propriétaire (c'etait encore le cas avant PORT-2b, voir
+    docs/PHASE_TRACKER.md AM-1/AM-4).
 
 Usage :
   .\scripts\test-ui-journeys.ps1
@@ -71,13 +74,15 @@ $artifactsRoot = Join-Path $repoRoot "dist\ui-journey-artifacts\$runId"
 New-Item -ItemType Directory -Force -Path $artifactsRoot | Out-Null
 
 $profileName = "am4-harness-$runId"
-# ProfileStore::profilesDir() (core/profiles/profile_store.cpp) utilise
-# QStandardPaths::GenericDataLocation, qui correspond a %LOCALAPPDATA% sous
-# Windows (PAS %ProgramData% -- verifie en direct : un profil cree pendant un
-# dry-run n'apparaissait pas sous CommonApplicationData, mais bien sous
-# [Environment]::GetFolderPath('LocalApplicationData')\KillEngine\Profiles,
-# aux cotes de vrais profils du propriétaire deja presents, non touches).
-$profilesDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'KillEngine\Profiles'
+# PORT-2b (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : ProfileStore::profilesDir()
+# (core/profiles/profile_store.cpp) est desormais portable -- "data/profiles"
+# relatif a l'executable (killcore::PortablePaths), plus %LOCALAPPDATA%. Avant
+# ce lot, un profil cree pendant un dry-run vivait sous
+# [Environment]::GetFolderPath('LocalApplicationData')\KillEngine\Profiles, aux
+# cotes de vrais profils du propriétaire (jamais touches par ce harnais) ; il
+# vit maintenant sous l'instance isolee elle-meme ($fixtureRoot), supprimee en
+# bloc a la fin du run comme le reste de la fixture.
+$profilesDir = Join-Path $fixtureRoot 'data\profiles'
 $profileFile = Join-Path $profilesDir "$profileName.keprofile"
 
 function Invoke-Pipe {

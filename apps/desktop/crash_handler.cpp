@@ -1,6 +1,7 @@
 #include "crash_handler.h"
 
 #include "logging/logger.h"
+#include "paths/portable_paths.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -126,10 +127,9 @@ QString CrashHandler::crashDirectory() {
     // Portabilite reelle (13/09/2026, docs/PORTABILITY_ROADMAP.md candidat P4) :
     // AppLocalDataLocation (%LOCALAPPDATA%) casse le mode portable comme P1/P2/P3
     // -- deplacer/copier le dossier de l'app perdait silencieusement les dumps de
-    // crash. Redirige vers un dossier relatif a l'executable.
-    QString dir = QDir(QCoreApplication::applicationDirPath()).filePath("crashes");
-    QDir().mkpath(dir);
-    return dir;
+    // crash. Redirige vers un dossier relatif a l'executable (PORT-2b,
+    // 17/09/2026 : via le resolveur commun killcore::PortablePaths).
+    return killcore::PortablePaths::ensureSubdir("crashes");
 }
 
 QString CrashHandler::writeReport(const QString& reason, const QString& detail, void* exceptionPointers) {

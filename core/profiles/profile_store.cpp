@@ -2,6 +2,7 @@
 
 #include "logging/logger.h"
 #include "memory/memory_reader.h"
+#include "paths/portable_paths.h"
 
 #include <QDir>
 #include <QFile>
@@ -491,8 +492,13 @@ QJsonObject evaluateKnowledgeNotes(const QList<KnowledgeNote>& notes, const QStr
 // ---------------------------------------------------------------------------
 
 QString ProfileStore::profilesDir() {
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    return base + "/KillEngine/Profiles";
+    // PORT-2b (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : ancien emplacement
+    // QStandardPaths::GenericDataLocation (%LOCALAPPDATA% sur Windows, pas
+    // %ProgramData% -- confusion vecue et corrigee pendant AM-4) cassait le
+    // mode portable, comme P1-P6 avant lui. Deplace vers "data/profiles" via
+    // le resolveur commun killcore::PortablePaths ; voir legacyProfilesDir()
+    // pour l'ancien chemin, utilise uniquement par importLegacyProfiles().
+    return PortablePaths::ensureSubdir("data/profiles");
 }
 
 bool ProfileStore::ensureProfilesDir() {
@@ -500,6 +506,66 @@ bool ProfileStore::ensureProfilesDir() {
     QDir d(dir);
     if (d.exists()) return true;
     return d.mkpath(dir);
+}
+
+QString ProfileStore::legacyProfilesDir() {
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    return base + "/KillEngine/Profiles";
+}
+
+QList<ProfileStore::LegacyImportResult> ProfileStore::importLegacyProfiles() {
+    QList<LegacyImportResult> results;
+
+    const QDir legacyDir(legacyProfilesDir());
+    if (!legacyDir.exists()) {
+        return results; // Rien a importer -- pas une erreur.
+    }
+
+    if (!ensureProfilesDir()) {
+        LegacyImportResult failure;
+        failure.error = QStringLiteral("Impossible de créer le dossier de profils portable.");
+        results.append(failure);
+        return results;
+    }
+
+    const QStringList legacyFiles = legacyDir.entryList(QStringList() << "*.keprofile",
+                                                          QDir::Files, QDir::Name);
+    for (const QString& fileName : legacyFiles) {
+        LegacyImportResult result;
+        result.fileName = fileName;
+
+        const QString sourcePath = legacyDir.filePath(fileName);
+        const QString destinationPath = QDir(profilesDir()).filePath(fileName);
+
+        if (QFile::exists(destinationPath)) {
+            // Ne jamais ecraser un profil portable deja present -- une
+            // collision de nom est signalee, pas resolue automatiquement.
+            result.skippedExisting = true;
+            results.append(result);
+            continue;
+        }
+
+        Profile scratch;
+        if (!ProfileStore::load(sourcePath, &scratch)) {
+            // Ne se charge pas comme un Profile valide : signale, jamais copie.
+            result.invalid = true;
+            results.append(result);
+            continue;
+        }
+
+        if (!QFile::copy(sourcePath, destinationPath)) {
+            // Copie (jamais deplace) : la source reste intacte meme en cas
+            // d'echec, et un echec sur un fichier n'interrompt pas les suivants.
+            result.error = QStringLiteral("Échec de la copie vers le dossier portable.");
+            results.append(result);
+            continue;
+        }
+
+        result.imported = true;
+        results.append(result);
+    }
+
+    return results;
 }
 
 bool ProfileStore::save(const Profile& profile, const QString& filename) {

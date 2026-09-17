@@ -1252,6 +1252,11 @@ public:
     /// Charge un profil et retourne ses cibles.
     Q_INVOKABLE QVariantMap loadProfile(const QString& profileName);
 
+    /// PORT-2c (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : copie (jamais ne
+    /// déplace) les profils encore sous l'ancien emplacement système vers le
+    /// dossier portable, sans jamais écraser un profil portable homonyme.
+    Q_INVOKABLE QVariantMap importLegacyProfiles();
+
     /// R2 : diagnostic des locators sauvegardés, sans application ni réparation.
     Q_INVOKABLE QVariantMap inspectProfileDurability(const QString& profileName);
     /// R2 : enregistre conditions/provenance/alternatives, sans écrire la cible.

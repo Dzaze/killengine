@@ -478,6 +478,33 @@ async function refreshProfiles() {
   }
 }
 
+const importingLegacyProfiles = ref(false)
+
+// PORT-2c (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : reprise explicite et non
+// destructive des profils encore sous l'ancien emplacement système.
+async function importLegacyProfiles() {
+  importingLegacyProfiles.value = true
+  statusMessage.value = t('profile.importLegacyRunning')
+  try {
+    const result = await backend.getController().importLegacyProfiles()
+    const imported = Number(result.importedCount ?? 0)
+    const skipped = Number(result.skippedCount ?? 0)
+    const invalid = Number(result.invalidCount ?? 0)
+    if (imported + skipped + invalid === 0) {
+      statusMessage.value = t('profile.importLegacyNone')
+    } else {
+      statusMessage.value = (imported > 0 ? '✓ ' : '') + t('profile.importLegacySummary', { imported, skipped, invalid })
+    }
+    if (imported > 0) {
+      await refreshProfiles()
+    }
+  } catch (e) {
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
+  } finally {
+    importingLegacyProfiles.value = false
+  }
+}
+
 async function selectProfile(name: string) {
   resetDurability()
   selectedProfile.value = name
@@ -1135,6 +1162,13 @@ onMounted(() => {
     <div class="header">
       <h1>{{ $t('profile.title') }}</h1>
       <button class="btn btn-secondary" @click="refreshProfiles">↻ {{ $t('profile.refresh') }}</button>
+      <button
+        class="btn btn-secondary"
+        :disabled="importingLegacyProfiles"
+        @click="importLegacyProfiles"
+      >
+        {{ $t('profile.importLegacyProfiles') }}
+      </button>
     </div>
 
     <PanelIntro

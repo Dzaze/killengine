@@ -1,5 +1,6 @@
 #include "pattern_learning_manager.h"
 #include "pattern_learning/pattern_learning_engine.h"
+#include "paths/portable_paths.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QUuid>
@@ -29,12 +30,11 @@ public:
         // Portabilite reelle (13/09/2026, docs/PORTABILITY_ROADMAP.md candidat P5) :
         // AppDataLocation (%APPDATA%) casse le mode portable comme P1/P2/P3/P4 --
         // deplacer/copier le dossier de l'app perdait silencieusement la base
-        // Pattern Learning. Redirige vers un dossier relatif a l'executable.
-        QString dataDir = QDir(QCoreApplication::applicationDirPath()).filePath("data");
-        QDir().mkpath(dataDir);
+        // Pattern Learning. Redirige vers un dossier relatif a l'executable
+        // (PORT-2b, 17/09/2026 : via le resolveur commun killcore::PortablePaths).
         // ".json", pas ".db" : GameProfileDatabase est en JSON-in-file
         // (02/09/2026, Claude) — voir core/pattern_learning/game_profile_database.cpp.
-        return dataDir + "/pattern_learning.json";
+        return killcore::PortablePaths::filePath("data", "pattern_learning.json");
     }
 };
 

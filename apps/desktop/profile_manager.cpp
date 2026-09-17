@@ -339,6 +339,37 @@ QVariantList ProfileManager::listProfiles() {
     return result;
 }
 
+QVariantMap ProfileManager::importLegacyProfiles() {
+    QVariantMap result;
+    const auto legacyResults = killcore::ProfileStore::importLegacyProfiles();
+
+    QVariantList entries;
+    int importedCount = 0;
+    int skippedCount = 0;
+    int invalidCount = 0;
+    for (const auto& r : legacyResults) {
+        QVariantMap entry;
+        entry["fileName"] = r.fileName;
+        entry["imported"] = r.imported;
+        entry["skippedExisting"] = r.skippedExisting;
+        entry["invalid"] = r.invalid;
+        entry["error"] = r.error;
+        entries.append(entry);
+
+        if (r.imported) importedCount++;
+        else if (r.skippedExisting) skippedCount++;
+        else if (r.invalid) invalidCount++;
+    }
+
+    result["success"] = true;
+    result["results"] = entries;
+    result["importedCount"] = importedCount;
+    result["skippedCount"] = skippedCount;
+    result["invalidCount"] = invalidCount;
+    result["legacyDirectory"] = killcore::ProfileStore::legacyProfilesDir();
+    return result;
+}
+
 QVariantMap ProfileManager::loadProfile(const QString& profileName) {
     QVariantMap result;
     result["success"] = false;

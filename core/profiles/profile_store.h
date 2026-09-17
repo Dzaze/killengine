@@ -184,8 +184,11 @@ struct Profile {
 /**
  * @brief Stockage et gestion des profils KillEngine.
  *
- * Les profils sont stockés dans %LOCALAPPDATA%\KillEngine\Profiles\
- * au format JSON (.keprofile).
+ * Les profils sont stockés dans <dossier de l'exécutable>\data\profiles\
+ * au format JSON (.keprofile) -- portable depuis PORT-2b
+ * (docs/PORTABILITY_ROADMAP.md#port-2, 17/09/2026). Voir legacyProfilesDir()
+ * pour l'ancien emplacement (%LOCALAPPDATA%), toujours lu par
+ * importLegacyProfiles() pour une reprise explicite et non destructive.
  */
 class ProfileStore {
 public:
@@ -196,11 +199,34 @@ public:
         QStringList messages;
     };
 
-    /// Retourne le dossier de stockage des profils.
+    /// Retourne le dossier de stockage des profils (portable, PORT-2b,
+    /// docs/PORTABILITY_ROADMAP.md#port-2 : relatif à l'exécutable, plus
+    /// jamais à un dossier utilisateur Windows).
     static QString profilesDir();
 
     /// Crée le dossier de stockage si nécessaire.
     static bool ensureProfilesDir();
+
+    /// Ancien emplacement (PORT-2c) : %LOCALAPPDATA%\KillEngine\Profiles,
+    /// utilisé avant PORT-2b. Sert uniquement à `importLegacyProfiles()` ;
+    /// jamais lu/écrit par le reste de ProfileStore.
+    static QString legacyProfilesDir();
+
+    struct LegacyImportResult {
+        QString fileName;
+        bool imported{false};   // copié avec succès vers profilesDir()
+        bool skippedExisting{false}; // un profil portable du même nom existe déjà -- jamais écrasé
+        bool invalid{false};    // ne se charge pas comme un Profile valide
+        QString error;
+    };
+
+    /// PORT-2c : copie (jamais ne déplace, ne supprime aucune source) chaque
+    /// `.keprofile` valide de `legacyProfilesDir()` vers `profilesDir()`, sauf
+    /// collision de nom avec un profil portable déjà présent (jamais écrasé
+    /// silencieusement). Un profil invalide est signalé, pas copié ; un échec
+    /// partiel n'interrompt pas les fichiers suivants. Retourne un résultat
+    /// par fichier trouvé dans l'ancien dossier.
+    static QList<LegacyImportResult> importLegacyProfiles();
 
     /// Sauvegarde un profil dans un fichier .keprofile.
     static bool save(const Profile& profile, const QString& filename);

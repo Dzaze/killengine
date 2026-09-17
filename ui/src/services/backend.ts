@@ -1946,6 +1946,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   ): Promise<Record<string, unknown>>
   listProfiles(): Promise<Array<Record<string, unknown>>>
   loadProfile(profileName: string): Promise<Record<string, unknown>>
+  /** PORT-2c: copies (never moves) profiles still under the old system location into the portable folder. */
+  importLegacyProfiles(): Promise<Record<string, unknown>>
   /** R2: read-only observations, never applies an alternative locator. */
   inspectProfileDurability(profileName: string): Promise<ProfileDurabilityReport>
   saveProfileResolutionPlan(profileName: string, entryKind: 'target' | 'patch', entryName: string,
@@ -3486,6 +3488,9 @@ class BackendService {
       },
       async loadProfile() {
         return { success: false, error: 'Mock backend' }
+      },
+      async importLegacyProfiles() {
+        return { success: true, results: [], importedCount: 0, skippedCount: 0, invalidCount: 0, legacyDirectory: '' }
       },
       async inspectProfileDurability(_profileName: string): Promise<ProfileDurabilityReport> {
         return { success: false, errorCode: 'mock_backend', entries: [] }

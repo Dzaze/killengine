@@ -19,6 +19,10 @@ public:
     QVariantMap saveClrFieldProfileTarget(const QString& profileName, const QString& targetName, const QString& typeSubstring, const QString& identityField, const QString& identityValue, const QString& targetField, const QString& valueType, const QString& description);
     QVariantList listProfiles();
     QVariantMap loadProfile(const QString& profileName);
+    /// PORT-2c (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : reprise explicite
+    /// et non destructive des profils encore sous l'ancien emplacement
+    /// (%LOCALAPPDATA%) vers le nouveau dossier portable.
+    QVariantMap importLegacyProfiles();
     bool deleteProfile(const QString& profileName);
     QVariantMap resolveProfileTarget(const QString& profileName, const QString& targetName);
     QVariantMap comparePointerMapAcrossRestart(const QString& profileName);

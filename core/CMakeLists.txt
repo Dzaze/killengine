@@ -7,6 +7,12 @@
 # ---------------------------------------------------------------------------
 add_library(killcore_logging STATIC
     logging/logger.cpp
+
+    # PORT-2a (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : résolveur commun de
+    # chemins portables, ajouté ici (pas à killcore) pour rester disponible
+    # sans dépendance inverse de killcore_logging vers tout killcore.
+    paths/portable_paths.h
+    paths/portable_paths.cpp
 )
 target_include_directories(killcore_logging PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(killcore_logging PUBLIC Qt6::Core)

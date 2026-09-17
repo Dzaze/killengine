@@ -163,12 +163,14 @@ Mettre à jour ce document (case cochée + date) à chaque candidat clos, journa
 
 **Lots à exécuter** :
 
-- [ ] **PORT-2a — socle** : introduire un résolveur léger commun de racine/chemins, avec racine injectable pour les tests et chemins indépendants du répertoire courant. Documenter son API avant de paralléliser ses consommateurs ; ne pas introduire une dépendance inverse de `killcore_logging` vers tout `killcore`.
-- [ ] **PORT-2b — raccordement** : rediriger profils vers `data/profiles/`, journaux JSONL vers `logs/`, puis faire converger les consommateurs existants sur le résolveur sans déplacer inutilement les données déjà portables. Mettre à jour le harnais AM-4 qui cherche/nettoie actuellement ses profils dans l'ancien emplacement.
-- [ ] **PORT-2c — reprise des profils existants** : proposer un import explicite depuis l'ancien répertoire. Copier après validation, ne supprimer aucune source ; gérer collisions de noms, profil invalide et échec partiel avec un résultat par fichier. Ne pas écraser un profil portable existant ni revenir silencieusement au répertoire système à chaque chargement.
-- [ ] Coordonner les exclusions du packaging : le nouveau dossier de profils reste une donnée utilisateur, exclue d'un ZIP neuf. Mettre à jour chemins dans diagnostics/documents et exemples de test concernés.
+- [x] **PORT-2a — socle** : introduire un résolveur léger commun de racine/chemins, avec racine injectable pour les tests et chemins indépendants du répertoire courant. Documenter son API avant de paralléliser ses consommateurs ; ne pas introduire une dépendance inverse de `killcore_logging` vers tout `killcore`.
+- [x] **PORT-2b — raccordement** : rediriger profils vers `data/profiles/`, journaux JSONL vers `logs/`, puis faire converger les consommateurs existants sur le résolveur sans déplacer inutilement les données déjà portables. Mettre à jour le harnais AM-4 qui cherche/nettoie actuellement ses profils dans l'ancien emplacement.
+- [x] **PORT-2c — reprise des profils existants** : proposer un import explicite depuis l'ancien répertoire. Copier après validation, ne supprimer aucune source ; gérer collisions de noms, profil invalide et échec partiel avec un résultat par fichier. Ne pas écraser un profil portable existant ni revenir silencieusement au répertoire système à chaque chargement.
+- [x] Coordonner les exclusions du packaging : le nouveau dossier de profils reste une donnée utilisateur, exclue d'un ZIP neuf. Mettre à jour chemins dans diagnostics/documents et exemples de test concernés.
 
 **Clôture** : deux racines de test indépendantes n'échangent pas de profils ; lancement avec répertoire courant différent conserve les mêmes chemins ; création/lecture/suppression d'un profil de fixture fonctionne sous le paquet ; aucune nouvelle écriture des profils/journaux concernés dans les anciens dossiers. Import valide, invalide, homonyme et répété testé sans perte ni doublon involontaire. Ne pas vérifier cela sur les vrais profils du propriétaire.
+
+**Clos (17/09/2026, Claude)** : voir [PHASE_TRACKER.md#portable-v2](PHASE_TRACKER.md#portable-v2) pour le détail (diagnostic → correctif → tests → validation/limites). Résumé : nouveau `killcore::PortablePaths` (`core/paths/portable_paths.*`, ajouté à `killcore_logging`) ; `ProfileStore::profilesDir()` et les deux fichiers JSONL de `SettingsDiagnosticsManager` convergés dessus ; `ProfileStore::importLegacyProfiles()` (copie non destructive, jamais d'écrasement) exposé jusqu'à l'UI (`ProfileView.vue`) et vérifié en direct sur les vrais profils du propriétaire (copiés, jamais modifiés ni déplacés) ; harnais AM-4 mis à jour et rejoué avec succès (5/5 parcours).
 
 <a id="port-3"></a>
 ### PORT-3 — Sauvegardes fiables et erreurs visibles

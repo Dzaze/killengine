@@ -1,6 +1,7 @@
 #include "application_controller.h"
 #include "crash_handler.h"
 #include "logging/logger.h"
+#include "paths/portable_paths.h"
 
 #include <QApplication>
 #include <QWebChannel>
@@ -61,7 +62,7 @@ int runApplication(int argc, char* argv[]) {
     // ApplicationController plus bas en dependent tous indirectement).
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                        QCoreApplication::applicationDirPath());
+                        killcore::PortablePaths::root());
 
 #ifdef _DEBUG
     attachConsole();
@@ -72,7 +73,7 @@ int runApplication(int argc, char* argv[]) {
     // Logger::init() sans argument retombe sur AppLocalDataLocation
     // (%LOCALAPPDATA%), meme probleme que P1/P2 -- Logger::init() accepte deja
     // un logDir explicite, il suffisait de le renseigner.
-    killcore::Logger::instance().init(QDir(QCoreApplication::applicationDirPath()).filePath("logs"));
+    killcore::Logger::instance().init(killcore::PortablePaths::ensureSubdir("logs"));
     killcore::Logger::instance().setLevel(killcore::LogLevel::Debug);
     killengine::CrashHandler::install();
 
@@ -123,8 +124,7 @@ int runApplication(int argc, char* argv[]) {
     // l'app perdait silencieusement cette donnee. Redirige vers un dossier
     // relatif a l'executable, comme le reste des donnees portables du projet
     // (modele IA, helper CLR Inspector, KillEngine.ini).
-    const QString webEngineStoragePath =
-        QDir(QCoreApplication::applicationDirPath()).filePath("webengine");
+    const QString webEngineStoragePath = killcore::PortablePaths::ensureSubdir("webengine");
     KE_LOG_INFO() << "WebEngine persistent storage path: " << webEngineStoragePath.toStdString();
     auto* webEngineProfile = new QWebEngineProfile(QStringLiteral("KillEngineProfile"), &mainWindow);
     webEngineProfile->setPersistentStoragePath(webEngineStoragePath);
