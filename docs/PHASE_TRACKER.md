@@ -494,3 +494,42 @@ Après chaque lot, consigner ici **diagnostic → correctif → tests réellemen
 Pour les implémentations futures : builds/tests pertinents par Codex ou Claude, suite C++ complète après changement C++, typage et build Vue après changement frontend ; avant AM-3, le build Vue reste une commande séparée. Respecter le piège Ninja sur les headers partagés. Contrôler encodage/fins de ligne sans normalisation générale ; ne pas lancer plusieurs builds concurrents. Les agents prennent en charge les validations sur cible contrôlée ; un essai manuel indisponible se documente et ne devient pas automatiquement un blocage.
 
 **Comment vérifié pour cette entrée documentaire** : points d'entrée et comportement des scripts/contrats relus, cohérence des dépendances revue ; contrôle du diff, conservation de l'intégralité du contenu antérieur, UTF-8 sans BOM et fins de ligne contrôlés. Pas de build ni test applicatif : aucun code modifié. Les cases ci-dessus restent ouvertes jusqu'à implémentation et preuves de validation.
+
+<a id="portable-v2"></a>
+### PORTABLE-V2 — Six chantiers pour une livraison portable autonome (17/09/2026, Codex)
+
+**Statut : à faire, non affecté ; aucune implémentation commencée par cette entrée.** Demande propriétaire : inscrire les améliorations de portabilité de manière qu'un agent puisse retrouver et compléter tous les chantiers efficacement. Les lots P1-P6 et AM-1 à AM-5 restent clos ; les défauts ci-dessous sont des compléments identifiés après leur livraison.
+
+**Fiche d'exécution de référence** : [PORTABILITY_ROADMAP.md — PORT-1 à PORT-6](PORTABILITY_ROADMAP.md#portable-v2). Elle contient pour chaque lot diagnostic, fonctions/fichiers, cases d'implémentation, erreurs à traiter et critères de clôture. Le présent tracker reste le point de réservation et de suivi ; ne pas se baser sur les anciens diagnostics AM-* précédant leurs paragraphes « Clos ».
+
+| ID / priorité | Diagnostic et résultat à livrer | Dépendances | État / responsable |
+| --- | --- | --- | --- |
+| [PORT-1](PORTABILITY_ROADMAP.md#port-1) / critique | Le filtre `*d.dll` retire `mtmd.dll` Release ; bibliothèques VC++ importées mais absentes du paquet. Corriger les exclusions, embarquer les dépendances redistribuables nécessaires et contrôler les imports/lancements. | Aucune ; prépare la validation de PORT-5/PORT-6. | À faire / non affecté |
+| [PORT-2](PORTABILITY_ROADMAP.md#port-2) / haute | Profils et journaux JSONL encore hors paquet. Résolveur de chemins commun, `data/profiles/`, logs cohérents et import explicite non destructif des profils existants. | Aucune ; livrer PORT-2a (contrat de chemins) avant les consommateurs. | À faire / non affecté |
+| [PORT-3](PORTABILITY_ROADMAP.md#port-3) / haute | Succès de sauvegarde annoncé sans contrôle, exceptions localStorage absorbées, JSON Pattern Learning tronqué. Propager les erreurs et enregistrer atomiquement sans perdre la version valide. | PORT-2a ; lots backend/frontend séparables. | À faire / non affecté |
+| [PORT-4](PORTABILITY_ROADMAP.md#port-4) / haute | `ai/modelPath` absolu et recopié dans le workspace : une copie B peut utiliser le modèle de A. Références internes relatives, externes explicites et ressources du paquet prioritaires. | PORT-2a ; séquencer avec PORT-3 sur fichiers partagés. | À faire / non affecté |
+| [PORT-5](PORTABILITY_ROADMAP.md#port-5) / haute | « Installer » Lua/CLR appelle des scripts développeur absents/inadaptés au ZIP. Archives précompilées vérifiables, installation locale sans SDK et catalogue fidèle aux capacités réelles. | PORT-1 + PORT-2a ; aucune publication réseau obligatoire. | À faire / non affecté |
+| [PORT-6](PORTABILITY_ROADMAP.md#port-6) / clôture | Le test AM-4 ne déplace pas KillEngine avec son état. Tester A→B (A conservé), puis déplacement vers C avec A absent ; relire les données via la vraie UI et valider les dépendances hors environnement dev. | Harnais préparable tôt ; scénario final après PORT-1 à PORT-5. | À faire / non affecté |
+
+**Ordre optimal / répartition** :
+
+1. **Agent seul** : PORT-1 → PORT-2 → PORT-3 → PORT-4 → PORT-5 → PORT-6 ; construire les fixtures/tests du lot au fur et à mesure, sans reporter tous les contrôles à la fin.
+2. **Agents en parallèle** : voie livraison = PORT-1 puis PORT-5 ; voie données = PORT-2a/b/c puis PORT-3 et PORT-4 ; voie QA = préparer PORT-6 pendant les correctifs, puis exécuter sur leur état intégré. PORT-5 attend le petit contrat PORT-2a, pas toute la migration.
+3. **Fichiers à réserver explicitement** : `package-windows.ps1` (PORT-1/PORT-2 exclusions/PORT-5), `release-check.ps1` (PORT-1/PORT-6), `main.cpp` (PORT-2/PORT-4), `settings_diagnostics_manager.cpp` et `workspaceSession.ts` (PORT-2/PORT-3/PORT-4). Les responsables échangent les contrats avant d'éditer ; un seul écrivain à la fois par fichier partagé, un seul build à la fois.
+
+**Premiers pas pour l'agent qui reprend** : lire AGENTS → ce tracker → fiche du lot ; relire les fichiers actuels et l'état Git ; renseigner ici responsable/lot « en cours » ; reproduire le constat sur fixture ; implémenter le plus petit lot complet avec ses tests. Les chemins proposés par PORT-2 conservent les emplacements déjà portables : pas de déplacement général de l'INI/WebEngine ni de migration automatique depuis le registre.
+
+**Critères minimaux de clôture, à cocher avec preuves** :
+
+- [ ] **PORT-1** : `mtmd.dll` et dépendances VC++ requises présentes dans le ZIP ; dépendance retirée volontairement détectée ; vrais lancements app/IA hors dépôt. Séparer validation locale et validation sur Windows propre.
+- [ ] **PORT-2** : profils/journaux concernés sous le paquet ; imports invalides/homonymes traités sans écrasement ; deux racines de test isolées ; harnais AM-4 mis à jour.
+- [ ] **PORT-3** : échec d'écriture ou quota simulé → erreur visible, aucun faux succès ; ancienne version conservée ; sauvegarde/réessai puis relecture vérifiés.
+- [ ] **PORT-4** : B choisit son modèle interne même si A existe ; déplacement et import de workspace gardent le choix ; référence externe manquante explicitement signalée.
+- [ ] **PORT-5** : installer puis utiliser Lua/CLR depuis des archives locales sur un paquet allégé, sans compilateur/SDK ; archive invalide/annulation n'abîme pas l'installation précédente. Aucune URL inventée ni `installable=true` sans source réalisable.
+- [ ] **PORT-6** : langue, Trainer, workspace, profils/notes, modèle et Pattern Learning relus après copie puis déplacement ; aucune référence cachée au dépôt/à A ; deux runs et un contrôle négatif. Pas de réussite comptée si le scénario est sauté.
+
+**Suivi attendu après chaque lot** : diagnostic → correctif → commandes/tests exécutés → résultat/limites → prochaine étape. Mettre à jour état/responsable et cases ici ainsi que la fiche correspondante. Contrats C++/TS/mock synchronisés, textes FR/EN, tests sur fixture, UTF-8 sans BOM et fins de ligne préservées. Les builds/tests applicatifs sont assurés par Codex ou Claude. Ne pas demander au propriétaire un test que le harnais peut exécuter ; si une machine propre n'est pas disponible, consigner cette limite sans arrêter les autres lots ni revendiquer une validation inter-machine.
+
+**Périmètre** : conserver DPAPI et la nature optionnelle du driver ; aucun changement de sécurité Windows, publication externe ou achat de certificat. Un catalogue honnête en cas d'absence d'artefact ne remplace pas l'implémentation de la voie archive locale prévue pour PORT-5.
+
+**Comment vérifié pour cette inscription** : diagnostics recoupés avec le code actuel et, pour PORT-1, les imports PE/fichiers du paquet inspectés pendant l'audit ; cadrage relu, liens/ancres et diff contrôlés, contenu antérieur et encodage préservés. Documentation uniquement (`PHASE_TRACKER.md` + complément de la feuille de route existante) ; aucun code, build, lancement applicatif ou test fonctionnel modifié/exécuté par cette inscription.
