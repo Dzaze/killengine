@@ -1355,7 +1355,14 @@ ApplicationController::ApplicationController(QObject* parent)
       // Ouvre juste un fichier JSON (pas de process attaché nécessaire) --
       // initialisation auto pour que le reste de l'API soit utilisable
       // immédiatement, sans étape "initialize" explicite côté appelant.
-      m_patternLearningManager->initialize();
+      // PORT-3c : la valeur de retour était ignorée -- un JSON Pattern
+      // Learning corrompu échouait silencieusement (aucune trace, la
+      // fonctionnalité restait juste inerte sans explication). Le détail de
+      // l'échec est déjà journalisé dans GameProfileDatabase::load(), ce log
+      // rend visible qu'un appelant en a bien tenu compte.
+      if (!m_patternLearningManager->initialize()) {
+          KE_LOG_WARN() << "PatternLearningManager::initialize() failed -- Pattern Learning disabled for this session, see previous error for the cause.";
+      }
       m_clrInspectorBridge = std::make_unique<ClrInspectorBridge>(
         m_handle,
         [this](const QString& event, const QVariantMap& payload) {

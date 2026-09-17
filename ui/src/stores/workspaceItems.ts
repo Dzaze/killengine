@@ -17,6 +17,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { i18n } from '@/i18n'
 import { useActionLogStore } from './actionLog'
+import { persistJsonToLocalStorage } from '@/utils/persistLocalStorage'
 
 const { t } = i18n.global
 
@@ -66,15 +67,20 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
   const workspaceBookmarks = ref<WorkspaceBookmark[]>([])
   const workspaceBookmarkIdCounter = ref(0)
 
-  function saveStructureTemplates() {
-    try {
-      window.localStorage.setItem(structureTemplateStorageKey, JSON.stringify({
-        templates: structureTemplates.value,
-        id: structureTemplateIdCounter.value,
-      }))
-    } catch {
-      // Best-effort persistence.
-    }
+  // PORT-3b (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : voir trainer.ts pour
+  // le raisonnement complet -- même défaut (exception localStorage avalée),
+  // même correctif (résultat exploitable + état d'échec visible et distinct
+  // par type de donnée, puisque templates/bookmarks se sauvegardent séparément).
+  const structureTemplatesPersistenceError = ref<string | null>(null)
+  const workspaceBookmarksPersistenceError = ref<string | null>(null)
+
+  function saveStructureTemplates(): boolean {
+    const outcome = persistJsonToLocalStorage(structureTemplateStorageKey, {
+      templates: structureTemplates.value,
+      id: structureTemplateIdCounter.value,
+    })
+    structureTemplatesPersistenceError.value = outcome.success ? null : (outcome.error ?? t('workspaceItemsStore.persistenceFailedGeneric'))
+    return outcome.success
   }
 
   function loadStructureTemplates() {
@@ -139,15 +145,13 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     actionLogStore.addActionLog('structure', t('workspaceItemsStore.templatesCleared'), t('workspaceItemsStore.allLocalTemplatesRemoved'), 'warning')
   }
 
-  function saveWorkspaceBookmarks() {
-    try {
-      window.localStorage.setItem(workspaceBookmarkStorageKey, JSON.stringify({
-        bookmarks: workspaceBookmarks.value,
-        id: workspaceBookmarkIdCounter.value,
-      }))
-    } catch {
-      // Best-effort persistence.
-    }
+  function saveWorkspaceBookmarks(): boolean {
+    const outcome = persistJsonToLocalStorage(workspaceBookmarkStorageKey, {
+      bookmarks: workspaceBookmarks.value,
+      id: workspaceBookmarkIdCounter.value,
+    })
+    workspaceBookmarksPersistenceError.value = outcome.success ? null : (outcome.error ?? t('workspaceItemsStore.persistenceFailedGeneric'))
+    return outcome.success
   }
 
   function loadWorkspaceBookmarks() {
@@ -225,6 +229,8 @@ export const useWorkspaceItemsStore = defineStore('workspaceItems', () => {
     structureTemplateIdCounter,
     workspaceBookmarks,
     workspaceBookmarkIdCounter,
+    structureTemplatesPersistenceError,
+    workspaceBookmarksPersistenceError,
     saveStructureTemplates,
     loadStructureTemplates,
     saveStructureTemplate,

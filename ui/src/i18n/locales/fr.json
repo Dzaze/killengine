@@ -30,6 +30,12 @@
       "disconnected": "Déconnecté",
       "ready": "Prêt",
       "attached": "Attaché: {name}"
+    },
+    "persistenceBanner": {
+      "unsavedChanges": "Modifications non enregistrées",
+      "retry": "Réessayer",
+      "exportInMemory": "Exporter les données en mémoire",
+      "hideExport": "Masquer l'export"
     }
   },
   "process": {
@@ -4209,6 +4215,7 @@
     "saved": "Paramètres sauvegardés."
   },
   "trainerStore": {
+    "persistenceFailedGeneric": "Impossible d'enregistrer les features Trainer localement.",
     "activateFeatureTitle": "Activer feature Trainer: {name}",
     "allLocalFeaturesRemoved": "Toutes les features locales ont été supprimées.",
     "aobNotUnique": "AOB non unique ({count} match(es)). Regénère une signature plus spécifique.",
@@ -4352,6 +4359,7 @@
     "searchFailed": "Échec de la recherche"
   },
   "workspaceItemsStore": {
+    "persistenceFailedGeneric": "Impossible d'enregistrer ces données localement.",
     "allLocalBookmarksRemoved": "Tous les bookmarks locaux ont été supprimés.",
     "allLocalTemplatesRemoved": "Tous les templates locaux ont été supprimés.",
     "bookmarkAdded": "Bookmark ajouté: {label}",
@@ -4368,6 +4376,7 @@
     "templatesCleared": "Templates vidés"
   },
   "workspaceSessionStore": {
+    "persistenceFailedGeneric": "Impossible d'enregistrer les projets workspace localement.",
     "addChainError": "Erreur ajout chaîne",
     "allLocalProjectsRemoved": "Tous les projets locaux ont été supprimés.",
     "chainCount": "{count} chaîne(s).",
@@ -4641,6 +4650,7 @@
     "depthNote": "profondeur {depth}"
   },
   "actionLogStore": {
+    "persistenceFailedGeneric": "Impossible d'enregistrer le journal d'action localement.",
     "markdown": {
       "export": "Export",
       "process": "Processus",

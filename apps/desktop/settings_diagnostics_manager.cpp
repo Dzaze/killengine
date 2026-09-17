@@ -6,6 +6,7 @@
 #include "logging/logger.h"
 #include "model_locator.h"
 #include "paths/portable_paths.h"
+#include "settings/settings_persistence.h"
 #include "scan_state_access.h"
 #include "scanner/performance_profile.h"
 #include "scanner/scan_types.h"
@@ -491,11 +492,20 @@ QVariantMap SettingsDiagnosticsManager::saveSettings(const QVariantMap& incoming
     const QString stealthProfile = incoming.value("stealthDefaultProfile", "default").toString();
     settings.setValue("stealth/defaultProfile",
         (stealthProfile == "sc2" || stealthProfile == "minimal") ? stealthProfile : "default");
-    settings.sync();
+
+    // PORT-3a : le changement ci-dessus est déjà actif en mémoire dans ce
+    // QSettings (et scanState() ci-dessous l'applique réellement) que la
+    // synchronisation sur disque réussisse ou non -- seul le champ "success"
+    // (persistance réelle) doit refléter un échec, jamais l'état en mémoire.
+    QString syncError;
+    const bool persisted = killcore::commitSettingsSync(settings, &syncError);
     m_controller.scanState().setFileBackedThreshold(candidateFileBackedThresholdFromSettings());
 
     QVariantMap result = this->getSettings();
-    result["success"] = true;
+    result["success"] = persisted;
+    if (!persisted) {
+        result["error"] = syncError;
+    }
     return result;
 }
 
@@ -503,11 +513,16 @@ QVariantMap SettingsDiagnosticsManager::setUiLanguage(const QString& language) {
     const QString normalized = language == "en" ? "en" : "fr";
     QSettings settings;
     settings.setValue("ui/language", normalized);
-    settings.sync();
+
+    QString syncError;
+    const bool persisted = killcore::commitSettingsSync(settings, &syncError);
 
     QVariantMap result;
-    result["success"] = true;
+    result["success"] = persisted;
     result["language"] = normalized;
+    if (!persisted) {
+        result["error"] = syncError;
+    }
     return result;
 }
 

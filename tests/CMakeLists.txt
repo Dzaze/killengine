@@ -11,6 +11,7 @@ add_executable(killengine_unit_tests
     unit/test_aob_scanner.cpp
     unit/test_logger.cpp
     unit/test_portable_paths.cpp
+    unit/test_settings_persistence.cpp
     unit/test_localization.cpp
     unit/test_candidate_store.cpp
     unit/test_ai_tools.cpp

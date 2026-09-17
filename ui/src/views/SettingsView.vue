@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore, type WorkspaceBookmark } from '@/stores/app'
 import AssistantToolsPanel from '@/components/settings/AssistantToolsPanel.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
+import PersistenceErrorBanner from '@/components/PersistenceErrorBanner.vue'
 
 const store = useAppStore()
 const { locale, t } = useI18n()
@@ -645,6 +646,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       <p class="hint">
         {{ $t('settings.workspaceActionsHint') }}
       </p>
+      <PersistenceErrorBanner
+        :error="store.workspaceProjectsPersistenceError"
+        :retry="() => store.saveWorkspaceProjects()"
+        :export-data="() => JSON.stringify(store.workspaceProjects, null, 2)"
+      />
       <div class="project-panel">
         <div class="panel-title">
           <h3>{{ $t('settings.workspaceProjectsTitle') }}</h3>
@@ -665,6 +671,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           </div>
         </div>
       </div>
+      <PersistenceErrorBanner
+        :error="store.workspaceBookmarksPersistenceError"
+        :retry="() => store.saveWorkspaceBookmarks()"
+        :export-data="() => JSON.stringify(store.workspaceBookmarks, null, 2)"
+      />
       <div v-if="store.workspaceBookmarks.length > 0" class="bookmark-list">
         <div class="panel-title">
           <h3>{{ $t('settings.bookmarksNotesTitle') }}</h3>
@@ -730,6 +741,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           <span>{{ $t('settings.importPreviewSettings', { value: workspaceImportPreview.hasSettings ? $t('settings.yes') : $t('settings.no') }) }}</span>
         </div>
       </div>
+      <PersistenceErrorBanner
+        :error="store.structureTemplatesPersistenceError"
+        :retry="() => store.saveStructureTemplates()"
+        :export-data="() => JSON.stringify(store.structureTemplates, null, 2)"
+      />
       <div v-if="store.structureTemplates.length > 0" class="template-list">
         <div class="panel-title">
           <h3>{{ $t('settings.structureTemplates') }}</h3>
@@ -774,6 +790,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <p v-if="workspaceExportStatus" class="status-line">{{ workspaceExportStatus }}</p>
         <pre>{{ workspaceExportText }}</pre>
       </div>
+      <PersistenceErrorBanner
+        :error="store.actionLogPersistenceError"
+        :retry="() => store.saveActionLog()"
+        :export-data="() => JSON.stringify(store.actionLog, null, 2)"
+      />
       <div class="audit-panel">
         <div class="panel-title">
           <h3>{{ $t('settings.actionAudit') }}</h3>

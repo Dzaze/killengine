@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QFile>
 #include <QTemporaryDir>
 
 using killcore::GameProfile;
@@ -248,4 +249,57 @@ TEST(GameProfileDatabaseTest, OperationsFailWhenNotOpen) {
     EXPECT_FALSE(db.loadProfile("X").has_value());
     EXPECT_FALSE(db.recordSession(LearningSession{}));
     EXPECT_TRUE(db.listGames().empty());
+}
+
+// PORT-3c (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : un JSON illisible ne
+// doit jamais être silencieusement remplacé par une base vide qui masquerait
+// la corruption -- open() doit échouer, pas réussir avec 0 profil.
+TEST(GameProfileDatabaseTest, OpenFailsOnCorruptJsonInsteadOfSilentlyEmptyBase) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = dbPathIn(dir);
+
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    file.write("{ this is not valid JSON");
+    file.close();
+
+    GameProfileDatabase db;
+    EXPECT_FALSE(db.open(path.toStdString()));
+    EXPECT_FALSE(db.isOpen());
+}
+
+// PORT-3c : un refus d'écriture (simulé par un fichier en lecture seule,
+// jamais un vrai remplissage de disque ni un changement des droits d'un
+// dossier utilisateur partagé) ne doit ni annoncer un faux succès ni
+// endommager la dernière version valide sur disque.
+TEST(GameProfileDatabaseTest, SaveFailureLeavesPreviousValidFileIntact) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = dbPathIn(dir);
+
+    GameProfileDatabase db;
+    ASSERT_TRUE(db.open(path.toStdString()));
+    ASSERT_TRUE(db.saveProfile(makeProfile("SurvivingGame")));
+
+    ASSERT_TRUE(QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::ReadUser
+                                            | QFileDevice::ReadGroup | QFileDevice::ReadOther));
+
+    const bool saveSucceeded = db.saveProfile(makeProfile("ShouldNeverPersist"));
+
+    // Restaure les droits avant toute assertion supplémentaire : ne jamais
+    // laisser un fichier en lecture seule empêcher le nettoyage de
+    // QTemporaryDir, même si une assertion ci-dessous échoue.
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                | QFileDevice::ReadUser | QFileDevice::WriteUser
+                                | QFileDevice::ReadGroup | QFileDevice::ReadOther);
+
+    EXPECT_FALSE(saveSucceeded);
+
+    GameProfileDatabase reopened;
+    ASSERT_TRUE(reopened.open(path.toStdString()));
+    const auto surviving = reopened.loadProfile("SurvivingGame");
+    ASSERT_TRUE(surviving.has_value());
+    EXPECT_EQ(surviving->gameName, "SurvivingGame");
+    EXPECT_FALSE(reopened.loadProfile("ShouldNeverPersist").has_value());
 }

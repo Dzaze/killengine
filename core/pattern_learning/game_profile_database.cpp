@@ -1,5 +1,7 @@
 #include "game_profile_database.h"
 
+#include "logging/logger.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -7,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QSaveFile>
 #include <QVariantMap>
 #include <QVariantList>
 
@@ -110,6 +113,7 @@ public:
             return true; // Pas encore de fichier : base vide valide (premier lancement).
         }
         if (!file.open(QIODevice::ReadOnly)) {
+            KE_LOG_ERROR() << "GameProfileDatabase: cannot open for reading: " << filePath.toStdString();
             return false;
         }
         const QByteArray raw = file.readAll();
@@ -121,6 +125,12 @@ public:
         QJsonParseError err{};
         const QJsonDocument doc = QJsonDocument::fromJson(raw, &err);
         if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+            // PORT-3c : ne jamais remplacer silencieusement un JSON illisible
+            // par une base vide -- open() propage cet échec à l'appelant
+            // (PatternLearningEngine::initialize() renvoie false) au lieu de
+            // réussir avec une base vide qui masquerait la corruption.
+            KE_LOG_ERROR() << "GameProfileDatabase: invalid JSON in " << filePath.toStdString()
+                           << ": " << err.errorString().toStdString();
             return false;
         }
         const QVariantMap root = doc.object().toVariantMap();
@@ -174,15 +184,37 @@ public:
         root["sessions"] = sessionsList;
         root["successRates"] = ratesMap;
 
+        // PORT-3c (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : QFile en
+        // WriteOnly|Truncate écrase le fichier existant AVANT que le contenu
+        // ne soit écrit -- une écriture qui échoue ensuite (disque plein,
+        // process tué) perdait la dernière base valide, sans aucun moyen de
+        // la récupérer. QSaveFile écrit dans un fichier temporaire et ne
+        // remplace l'original qu'au commit() réussi (même patron que
+        // core/profiles/profile_store.cpp) : un échec laisse l'ancien fichier
+        // intact. `written == encoded.size()` (pas seulement `>= 0`) détecte
+        // aussi une écriture partielle que write() rapporterait comme un
+        // nombre positif mais incomplet.
         QDir().mkpath(QFileInfo(filePath).absolutePath());
-        QFile file(filePath);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QSaveFile file(filePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            KE_LOG_ERROR() << "GameProfileDatabase: cannot open for writing: " << filePath.toStdString();
             return false;
         }
         const QJsonDocument doc = QJsonDocument::fromVariant(root);
-        const qint64 written = file.write(doc.toJson(QJsonDocument::Indented));
-        file.close();
-        return written >= 0;
+        const QByteArray encoded = doc.toJson(QJsonDocument::Indented);
+        const qint64 written = file.write(encoded);
+        if (written != encoded.size()) {
+            KE_LOG_ERROR() << "GameProfileDatabase: partial write (" << written << "/" << encoded.size()
+                           << " bytes): " << filePath.toStdString();
+            file.cancelWriting();
+            return false;
+        }
+        if (!file.commit()) {
+            KE_LOG_ERROR() << "GameProfileDatabase: commit failed: " << filePath.toStdString()
+                           << " (" << file.errorString().toStdString() << ")";
+            return false;
+        }
+        return true;
     }
 };
 

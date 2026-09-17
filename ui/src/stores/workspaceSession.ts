@@ -38,6 +38,7 @@ import {
   type WorkspaceBookmark,
 } from './workspaceItems'
 import { useSettingsStore } from './settings'
+import { persistJsonToLocalStorage } from '@/utils/persistLocalStorage'
 
 const { t } = i18n.global
 
@@ -145,16 +146,18 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
   const workspaceProjectStorageKey = 'killengine.workspace.projects.v1'
   const workspaceProjects = ref<WorkspaceProject[]>([])
   const workspaceProjectIdCounter = ref(0)
+  // PORT-3b (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : voir trainer.ts pour
+  // le raisonnement complet (exception localStorage avalée -> résultat
+  // exploitable + état d'échec visible).
+  const workspaceProjectsPersistenceError = ref<string | null>(null)
 
-  function saveWorkspaceProjects() {
-    try {
-      window.localStorage.setItem(workspaceProjectStorageKey, JSON.stringify({
-        projects: workspaceProjects.value,
-        id: workspaceProjectIdCounter.value,
-      }))
-    } catch {
-      // Best-effort persistence.
-    }
+  function saveWorkspaceProjects(): boolean {
+    const outcome = persistJsonToLocalStorage(workspaceProjectStorageKey, {
+      projects: workspaceProjects.value,
+      id: workspaceProjectIdCounter.value,
+    })
+    workspaceProjectsPersistenceError.value = outcome.success ? null : (outcome.error ?? t('workspaceSessionStore.persistenceFailedGeneric'))
+    return outcome.success
   }
 
   function loadWorkspaceProjects() {
@@ -619,6 +622,7 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     configureWorkspaceSessionContext,
     workspaceProjects,
     workspaceProjectIdCounter,
+    workspaceProjectsPersistenceError,
     saveWorkspaceProjects,
     loadWorkspaceProjects,
     exportWorkspaceJson,

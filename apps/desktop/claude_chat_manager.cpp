@@ -5,6 +5,7 @@
 #include "anthropic_tool_schema.h"
 #include "localization/localization.h"
 #include "security/dpapi_key_store.h"
+#include "settings/settings_persistence.h"
 #include "tool_registry.h"
 
 #include <QCoreApplication>
@@ -112,7 +113,10 @@ QVariantMap ClaudeChatManager::setApiKey(const QString& apiKey) {
     }
     QSettings settings;
     settings.setValue("ai/externalApiKeyBlob", encrypted);
-    settings.sync();
+    QString syncError;
+    if (!killcore::commitSettingsSync(settings, &syncError)) {
+        return makeErrorResult(syncError);
+    }
 
     QVariantMap result;
     result["success"] = true;
@@ -122,7 +126,10 @@ QVariantMap ClaudeChatManager::setApiKey(const QString& apiKey) {
 QVariantMap ClaudeChatManager::clearApiKey() {
     QSettings settings;
     settings.remove("ai/externalApiKeyBlob");
-    settings.sync();
+    QString syncError;
+    if (!killcore::commitSettingsSync(settings, &syncError)) {
+        return makeErrorResult(syncError);
+    }
 
     QVariantMap result;
     result["success"] = true;
@@ -162,7 +169,10 @@ QVariantMap ClaudeChatManager::setActiveBackend(const QString& backend) {
     }
     QSettings settings;
     settings.setValue("ai/activeBackend", backend);
-    settings.sync();
+    QString syncError;
+    if (!killcore::commitSettingsSync(settings, &syncError)) {
+        return makeErrorResult(syncError);
+    }
 
     QVariantMap result;
     result["success"] = true;

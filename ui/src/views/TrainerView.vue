@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, type TrainerFeature } from '@/stores/app'
 import PanelIntro from '@/components/common/PanelIntro.vue'
+import PersistenceErrorBanner from '@/components/PersistenceErrorBanner.vue'
 
 const store = useAppStore()
 const { t } = useI18n()
@@ -244,6 +245,12 @@ async function copyTrainerExport() {
         <button class="btn" :disabled="store.trainerFeatures.length === 0" @click="showTrainerMarkdownExport()">{{ $t('trainer.actions.exportMd') }}</button>
       </div>
     </header>
+
+    <PersistenceErrorBanner
+      :error="store.trainerPersistenceError"
+      :retry="() => store.saveTrainerFeatures()"
+      :export-data="() => store.exportTrainerFeaturesJson()"
+    />
 
     <PanelIntro
       :what="$t('trainer.intro.what')"

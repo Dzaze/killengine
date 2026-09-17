@@ -11,6 +11,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { i18n } from '@/i18n'
+import { persistJsonToLocalStorage } from '@/utils/persistLocalStorage'
 
 const { t } = i18n.global
 
@@ -33,6 +34,15 @@ export const useActionLogStore = defineStore('actionLog', () => {
 
   const actionLogStorageKey = 'killengine.action_log.v1'
 
+  // PORT-3b (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : jamais remontée via
+  // addActionLog() elle-même -- le journal d'action ne doit jamais tenter de
+  // s'auto-journaliser quand SA PROPRE persistance échoue (boucle infinie :
+  // échec -> log de l'échec -> nouvel échec -> nouveau log...). Un ref
+  // silencieux séparé, même patron que trainer.ts/workspaceItems.ts/
+  // workspaceSession.ts, affiché par un composant qui n'écrit jamais dans le
+  // journal en réaction à cet état.
+  const actionLogPersistenceError = ref<string | null>(null)
+
   function addActionLog(
     kind: string,
     title: string,
@@ -52,15 +62,13 @@ export const useActionLogStore = defineStore('actionLog', () => {
     saveActionLog()
   }
 
-  function saveActionLog() {
-    try {
-      window.localStorage.setItem(actionLogStorageKey, JSON.stringify({
-        entries: actionLog.value.slice(0, 200),
-        id: actionLogIdCounter.value,
-      }))
-    } catch {
-      // Best-effort audit: runtime actions must continue even if local storage is full.
-    }
+  function saveActionLog(): boolean {
+    const outcome = persistJsonToLocalStorage(actionLogStorageKey, {
+      entries: actionLog.value.slice(0, 200),
+      id: actionLogIdCounter.value,
+    })
+    actionLogPersistenceError.value = outcome.success ? null : (outcome.error ?? t('actionLogStore.persistenceFailedGeneric'))
+    return outcome.success
   }
 
   function loadActionLog() {
@@ -109,6 +117,7 @@ export const useActionLogStore = defineStore('actionLog', () => {
   return {
     actionLog,
     actionLogIdCounter,
+    actionLogPersistenceError,
     addActionLog,
     saveActionLog,
     loadActionLog,

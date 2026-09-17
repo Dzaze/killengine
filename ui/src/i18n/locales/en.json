@@ -30,6 +30,12 @@
       "disconnected": "Disconnected",
       "ready": "Ready",
       "attached": "Attached: {name}"
+    },
+    "persistenceBanner": {
+      "unsavedChanges": "Unsaved changes",
+      "retry": "Retry",
+      "exportInMemory": "Export in-memory data",
+      "hideExport": "Hide export"
     }
   },
   "process": {
@@ -4209,6 +4215,7 @@
     "saved": "Settings saved."
   },
   "trainerStore": {
+    "persistenceFailedGeneric": "Unable to save Trainer features locally.",
     "activateFeatureTitle": "Enable Trainer feature: {name}",
     "allLocalFeaturesRemoved": "All local features have been removed.",
     "aobNotUnique": "AOB not unique ({count} match(es)). Regenerate a more specific signature.",
@@ -4352,6 +4359,7 @@
     "searchFailed": "Search failed"
   },
   "workspaceItemsStore": {
+    "persistenceFailedGeneric": "Unable to save this data locally.",
     "allLocalBookmarksRemoved": "All local bookmarks have been removed.",
     "allLocalTemplatesRemoved": "All local templates have been removed.",
     "bookmarkAdded": "Bookmark added: {label}",
@@ -4368,6 +4376,7 @@
     "templatesCleared": "Templates cleared"
   },
   "workspaceSessionStore": {
+    "persistenceFailedGeneric": "Unable to save workspace projects locally.",
     "addChainError": "Error adding chain",
     "allLocalProjectsRemoved": "All local projects have been removed.",
     "chainCount": "{count} chain(s).",
@@ -4641,6 +4650,7 @@
     "depthNote": "depth {depth}"
   },
   "actionLogStore": {
+    "persistenceFailedGeneric": "Unable to save the action log locally.",
     "markdown": {
       "export": "Export",
       "process": "Process",

@@ -45,6 +45,7 @@ import { useClrInspectorStore } from './clrInspector'
 import { useScanningStore } from './scanning'
 import { useWriteFreezeStore } from './writeFreeze'
 import { useWorkspaceItemsStore } from './workspaceItems'
+import { persistJsonToLocalStorage } from '@/utils/persistLocalStorage'
 
 const { t } = i18n.global
 
@@ -146,15 +147,21 @@ export const useTrainerStore = defineStore('trainer', () => {
   const trainerStorageKey = 'killengine.trainer.features.v1'
   const overlayHotkeyStorageKey = 'killengine.trainer.overlayHotkey.v1'
 
-  function saveTrainerFeatures() {
-    try {
-      window.localStorage.setItem(trainerStorageKey, JSON.stringify({
-        features: trainerFeatures.value,
-        id: trainerFeatureIdCounter.value,
-      }))
-    } catch {
-      // Best-effort persistence.
-    }
+  // PORT-3b (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : reflète l'échec réel
+  // de persistance (quota localStorage dépassé, stockage désactivé), jamais
+  // rétabli automatiquement par une simple relecture -- seule une prochaine
+  // sauvegarde réussie l'efface. Le changement en mémoire (trainerFeatures)
+  // reste actif même en cas d'échec : c'est la persistance seule qui est en
+  // défaut, pas l'état courant de la session.
+  const trainerPersistenceError = ref<string | null>(null)
+
+  function saveTrainerFeatures(): boolean {
+    const outcome = persistJsonToLocalStorage(trainerStorageKey, {
+      features: trainerFeatures.value,
+      id: trainerFeatureIdCounter.value,
+    })
+    trainerPersistenceError.value = outcome.success ? null : (outcome.error ?? t('trainerStore.persistenceFailedGeneric'))
+    return outcome.success
   }
 
   function loadTrainerFeatures() {
@@ -1168,6 +1175,7 @@ export const useTrainerStore = defineStore('trainer', () => {
     trainerOverlayStatus,
     trainerOverlayHotkey,
     trainerOverlayHotkeyId,
+    trainerPersistenceError,
     saveTrainerFeatures,
     loadTrainerFeatures,
     saveOverlayHotkey,

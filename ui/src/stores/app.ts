@@ -358,8 +358,10 @@ export const useAppStore = defineStore('app', () => {
     trainerOverlayStatus,
     trainerOverlayHotkey,
     trainerOverlayHotkeyId,
+    trainerPersistenceError,
   } = storeToRefs(trainerStore)
   const {
+    saveTrainerFeatures,
     loadTrainerFeatures,
     loadOverlayHotkey,
     createTrainerFeature,
@@ -397,6 +399,8 @@ export const useAppStore = defineStore('app', () => {
   const {
     structureTemplates,
     workspaceBookmarks,
+    structureTemplatesPersistenceError,
+    workspaceBookmarksPersistenceError,
   } = storeToRefs(workspaceItemsStore)
   // Store RiskGate extrait (dernière fondation partagée, docs/REFACTOR_ROADMAP.md,
   // 29/08/2026) -- confirmRiskAction() ci-dessous délègue au store en
@@ -615,7 +619,7 @@ export const useAppStore = defineStore('app', () => {
   // meme patron que investigationStore : refs directement mutables, fonctions
   // ci-dessous en wrappers minces qui gardent les memes noms/signatures.
   const actionLogStore = useActionLogStore()
-  const { actionLog } = storeToRefs(actionLogStore)
+  const { actionLog, actionLogPersistenceError } = storeToRefs(actionLogStore)
   const sessionEntries = ref<SessionEntry[]>([])
   const sessionGroups = ref<SessionGroup[]>([])
   const sessionGroupIdCounter = ref(0)
@@ -650,8 +654,10 @@ export const useAppStore = defineStore('app', () => {
     workspaceProjects,
     watchedPointerChains,
     watchedPointerChainsLiveEnabled,
+    workspaceProjectsPersistenceError,
   } = storeToRefs(workspaceSessionStore)
   const {
+    saveWorkspaceProjects,
     loadWorkspaceProjects,
     exportWorkspaceJson,
     exportWorkspaceMarkdown,
@@ -1023,6 +1029,11 @@ export const useAppStore = defineStore('app', () => {
     actionLogStore.loadActionLog()
   }
 
+  // PORT-3b : exposé pour le bouton "Réessayer" de PersistenceErrorBanner.
+  function saveActionLog() {
+    return actionLogStore.saveActionLog()
+  }
+
   function clearActionLog() {
     actionLogStore.clearActionLog()
   }
@@ -1141,6 +1152,17 @@ export const useAppStore = defineStore('app', () => {
 
   function loadStructureTemplates() {
     workspaceItemsStore.loadStructureTemplates()
+  }
+
+  // PORT-3b : exposés pour le bouton "Réessayer" de PersistenceErrorBanner --
+  // pas d'action utilisateur directe autrement (la sauvegarde se déclenche
+  // déjà automatiquement après chaque mutation).
+  function saveStructureTemplates() {
+    return workspaceItemsStore.saveStructureTemplates()
+  }
+
+  function saveWorkspaceBookmarks() {
+    return workspaceItemsStore.saveWorkspaceBookmarks()
   }
 
   function saveStructureTemplate(input: {
@@ -4985,9 +5007,13 @@ export const useAppStore = defineStore('app', () => {
     trainerOverlayStatus,
     trainerOverlayHotkey,
     trainerOverlayHotkeyId,
+    trainerPersistenceError,
     structureTemplates,
     workspaceBookmarks,
     workspaceProjects,
+    structureTemplatesPersistenceError,
+    workspaceBookmarksPersistenceError,
+    workspaceProjectsPersistenceError,
     riskDialog,
     searchQuery,
     searchResult,
@@ -5049,7 +5075,9 @@ export const useAppStore = defineStore('app', () => {
     sessionPromotionBusyIds,
     messages,
     actionLog,
+    actionLogPersistenceError,
     addActionLog,
+    saveActionLog,
     workflowStatus,
     targetValueGuided,
     candidateHistory,
@@ -5236,6 +5264,10 @@ export const useAppStore = defineStore('app', () => {
     cancelModuleInstall,
     prepareCheckpointAob,
     executeCheckpointForceValue,
+    saveTrainerFeatures,
+    saveStructureTemplates,
+    saveWorkspaceBookmarks,
+    saveWorkspaceProjects,
     createTrainerFeature,
     createTrainerClrFieldFeature,
     createTrainerFeatureFromCheckpoint,

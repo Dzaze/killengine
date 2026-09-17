@@ -13,6 +13,9 @@ add_library(killcore_logging STATIC
     # sans dépendance inverse de killcore_logging vers tout killcore.
     paths/portable_paths.h
     paths/portable_paths.cpp
+
+    # PORT-3a : même raisonnement -- utilitaire Qt::Core pur, header-only.
+    settings/settings_persistence.h
 )
 target_include_directories(killcore_logging PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(killcore_logging PUBLIC Qt6::Core)
