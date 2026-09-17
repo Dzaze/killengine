@@ -82,6 +82,16 @@ $excludedNames = @(
 
 $excludedExtensions = @(".pdb", ".ilk", ".exp", ".lib")
 
+# PORT-1 (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : le motif "*d.dll" ci-dessous
+# est une heuristique de nom (suffixe "d" ajoute par convention aux DLL de debug
+# Qt/MSVC, ex. Qt6Cored.dll), pas une vraie detection de build debug -- il attrape
+# aussi des noms de projet qui se terminent legitimement par "d", ex. mtmd.dll
+# (bibliotheque multimodale de llama.cpp, confirme Release par ses imports PE
+# reels llama-cli-impl.dll -> llama-server-impl.dll -> mtmd.dll). Liste explicite
+# plutot que d'affiner davantage l'heuristique de nom ; a completer si un futur
+# faux positif est trouve.
+$debugFilterExceptions = @("mtmd.dll")
+
 # build\bin is a live dev workspace, not just build output: running KillEngine.exe
 # from there (as every dev session does) creates real session state next to the
 # binaries -- QSettings INI (docs/PORTABILITY_ROADMAP.md P1), WebEngine persistent
@@ -109,7 +119,7 @@ Get-ChildItem -LiteralPath $buildBin -Force | ForEach-Object {
     if (-not $_.PSIsContainer -and $excludedExtensions -contains $_.Extension) {
         return
     }
-    if (-not $_.PSIsContainer -and $_.Name -match "d\.dll$") {
+    if (-not $_.PSIsContainer -and $_.Name -match "d\.dll$" -and $debugFilterExceptions -notcontains $_.Name) {
         return
     }
 
@@ -132,10 +142,88 @@ $debugPatterns = @(
 
 foreach ($pattern in $debugPatterns) {
     Get-ChildItem -LiteralPath $packageRoot -Recurse -File -Filter $pattern -ErrorAction SilentlyContinue |
+        Where-Object { $debugFilterExceptions -notcontains $_.Name } |
         Remove-Item -Force
 }
 
 $signResult = & (Join-Path $repoRoot "scripts\codesign.ps1") -Path (Join-Path $packageRoot "KillEngine.exe") -RequireSigning:$RequireSigning
+
+# PORT-1 (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : KillEngine.exe et les
+# runtimes llama.cpp importent MSVCP140.dll/VCRUNTIME140.dll/VCRUNTIME140_1.dll
+# (confirme via "dumpbin /dependents" le 17/09) -- absentes de build\bin, donc
+# absentes du paquet jusqu'ici. `vc_redist.x64.exe` (deja copie plus bas) exige
+# une installation systeme (UAC, modifie l'etat de la machine) : ca contredit
+# "extraire et lancer", donc on l'embarque aussi en app-local, la methode de
+# redistribution officiellement supportee par Microsoft pour ce cas exact.
+#
+# Source du CRT embarque -- IMPORTANT, corrige apres un vrai crash live : NE
+# PAS se limiter au toolset utilise par scripts\build.ps1 (VS2019 BuildTools,
+# 14.29). Verifie le 17/09 par lancement reel : llama-cli.exe + le paquet
+# msvcp140/vcruntime140/vcruntime140_1 issus de CE toolset 14.29 plante
+# immediatement (0xC0000005) au demarrage du paquet -- les binaires llama.cpp
+# vendorises (ggml*.dll, llama-*.dll, mtmd.dll) sont precompiles avec un
+# toolset MSVC plus recent que celui utilise pour compiler KillEngine.exe
+# lui-meme, et ont besoin du CRT correspondant. Remplacer par la version
+# installee sur System32 (643512 octets) a fait disparaitre le crash ; ce
+# fichier correspond exactement (meme taille) au CRT du dossier Redist
+# 14.51.36231\x64\Microsoft.VC145.CRT d'une installation VS plus recente
+# presente sur cette machine (VS "18" BuildTools), distincte de celle que
+# build.ps1 utilise pour compiler.
+#
+# D'ou la strategie : scanner TOUTES les installations Visual Studio
+# presentes (tous dossiers VC\Redist\MSVC\<version>\x64\Microsoft.VC*.CRT,
+# toutes editions/versions confondues) et prendre la version de CRT la plus
+# recente trouvee, plutot que celle du toolset de compilation. Sans risque
+# pour KillEngine.exe : la famille runtime "140" (VC140/141/142/143/145) est
+# garantie par Microsoft binairement retro-compatible -- un binaire compile
+# avec un toolset plus ancien fonctionne avec un CRT plus recent, jamais
+# l'inverse. Ne JAMAIS copier directement depuis System32 (verifie ce qui est
+# installe sur LA machine de packaging au moment du build, pas une version
+# garantie a l'avenir ou sur une autre machine) -- source unique : les
+# dossiers Redist versionnes livres avec les installations Visual Studio
+# elles-memes.
+function Find-VcRedistCrtDir {
+    $vsRoots = @(
+        Get-ChildItem -Path "C:\Program Files (x86)\Microsoft Visual Studio" -Directory -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "C:\Program Files\Microsoft Visual Studio" -Directory -ErrorAction SilentlyContinue
+    ) | ForEach-Object {
+        Get-ChildItem -Path $_.FullName -Directory -ErrorAction SilentlyContinue
+    }
+
+    $candidates = foreach ($vsEdition in $vsRoots) {
+        $redistRoot = Join-Path $vsEdition.FullName "VC\Redist\MSVC"
+        Get-ChildItem -Path $redistRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $crtGlob = Join-Path $_.FullName "x64\Microsoft.VC*.CRT"
+            $resolved = Resolve-Path $crtGlob -ErrorAction SilentlyContinue
+            if ($resolved) {
+                [pscustomobject]@{ Version = [version]($_.Name -replace "[^0-9.]", ""); Path = $resolved.Path }
+            }
+        }
+    }
+    $best = $candidates | Sort-Object -Property Version -Descending | Select-Object -First 1
+    if ($best) { return $best.Path }
+    return $null
+}
+
+# msvcp140_1/_2 : Qt6Core/Qt6Gui/Qt6Network/Qt6Quick/Qt6Widgets les importent
+# directement (confirme par scripts\verify-native-dependencies.ps1 le 17/09) --
+# compagnons du meme CRT "140" (support C++17 supplementaire), pas optionnels.
+$requiredVcRedistDlls = @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140_1.dll", "msvcp140_2.dll")
+$missingVcRedistDlls = @($requiredVcRedistDlls | Where-Object { -not (Test-Path -LiteralPath (Join-Path $packageRoot $_) -PathType Leaf) })
+if ($missingVcRedistDlls.Count -gt 0) {
+    $crtDir = Find-VcRedistCrtDir
+    if (-not $crtDir) {
+        throw "Impossible de trouver un dossier Redist Visual C++ (VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT) sur cette machine -- installer le composant 'Redistribuables C++' de Visual Studio, ou copier manuellement $($missingVcRedistDlls -join ', ') dans build\bin avant de packager."
+    }
+    foreach ($dllName in $missingVcRedistDlls) {
+        $source = Join-Path $crtDir $dllName
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "DLL redistribuable introuvable dans $crtDir : $dllName"
+        }
+        Copy-Item -LiteralPath $source -Destination $packageRoot -Force
+    }
+    Write-Host "Runtime Visual C++ (app-local) embarque depuis $crtDir : $($missingVcRedistDlls -join ', ')" -ForegroundColor Cyan
+}
 
 # The real Vue UI (ui\dist, built by scripts\build.ps1 as part of the build above
 # unless -SkipBuild) ships as loose files next to the exe -- same portable-by-design

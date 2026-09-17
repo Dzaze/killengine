@@ -257,6 +257,27 @@ try {
                 & (Join-Path $repoRoot "scripts\verify-ai-layout.ps1") -LayoutRoot (Join-Path $repoRoot "dist\KillEngine-portable")
             }
         }
+
+        # PORT-1 (docs/PORTABILITY_ROADMAP.md, 17/09/2026), 3e lot : rapport des
+        # dependances natives transitives du paquet (fournies/systeme/manquantes).
+        # Toujours pertinent, meme avec -ExcludeModel (KillEngine.exe/llama.cpp
+        # importent le CRT quel que soit l'etat du modele).
+        Invoke-Step "Portable native dependencies" {
+            & (Join-Path $repoRoot "scripts\verify-native-dependencies.ps1") -LayoutRoot (Join-Path $repoRoot "dist\KillEngine-portable")
+        }
+
+        if (-not $ExcludeModel) {
+            # PORT-1, 4e lot : un rapport d'imports PE statiques (ci-dessus) ne
+            # voit pas les DLL chargees dynamiquement (ex. ggml.dll choisit sa
+            # variante ggml-cpu-<arch>.dll par LoadLibrary a l'execution) ni un
+            # CRT app-local incompatible avec les binaires llama.cpp vendorises
+            # (crash reel 0xC0000005 constate et corrige le 17/09 -- voir le
+            # commentaire de Find-VcRedistCrtDir dans package-windows.ps1) : seul
+            # un vrai lancement le prouve.
+            Invoke-Step "Portable AI runtime smoke" {
+                & (Join-Path $repoRoot "scripts\verify-ai-runtime-smoke.ps1") -LayoutRoot (Join-Path $repoRoot "dist\KillEngine-portable")
+            }
+        }
     }
 
     $duration = New-TimeSpan -Start $startedAt -End (Get-Date)
