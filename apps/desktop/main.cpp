@@ -180,12 +180,17 @@ int runApplication(int argc, char* argv[]) {
 
     QString devPath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../ui/dist/index.html");
     QString packagedPath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("ui/dist/index.html");
-    if (QFile::exists(devPath)) {
-        KE_LOG_INFO() << "Loading UI from dev path: " << devPath.toStdString();
-        url = QUrl::fromLocalFile(devPath);
-    } else if (QFile::exists(packagedPath)) {
+    // PORT-4 (docs/PORTABILITY_ROADMAP.md, 18/09/2026) : le paquet portable
+    // doit toujours l'emporter sur le repli développeur quand les deux
+    // existent -- l'ordre inverse pouvait faire charger un ui/dist de dépôt
+    // différent (ex. paquet testé depuis un dossier imbriqué sous le dépôt)
+    // au lieu du bundle réellement livré à côté de l'exécutable.
+    if (QFile::exists(packagedPath)) {
         KE_LOG_INFO() << "Loading UI from packaged path: " << packagedPath.toStdString();
         url = QUrl::fromLocalFile(packagedPath);
+    } else if (QFile::exists(devPath)) {
+        KE_LOG_INFO() << "Loading UI from dev path: " << devPath.toStdString();
+        url = QUrl::fromLocalFile(devPath);
     } else {
         // Try resource path
         QString resPath = ":/index.html";

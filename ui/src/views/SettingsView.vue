@@ -411,6 +411,9 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <span>{{ $t('settings.modelDetected') }}</span>
         <code>{{ store.aiModelStatus?.modelPath || store.settingModelPath || '-' }}</code>
       </div>
+      <p v-if="store.aiModelStatus?.configuredModelMissing" class="warning">
+        {{ store.aiModelStatus.configuredModelWarning }}
+      </p>
       <div class="path-row">
         <span>{{ $t('settings.activeRuntime') }}</span>
         <code>{{ store.aiModelStatus?.executablePath || '-' }}</code>

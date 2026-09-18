@@ -1365,6 +1365,12 @@ export interface AiModelStatus {
   enabled?: boolean
   backend: 'llama.cpp' | 'deterministic' | string
   configuredModelPath: string
+  /** PORT-4: raw stored value (relative portable reference or absolute external path), before resolution. */
+  configuredModelPathRaw?: string
+  /** PORT-4: true when a non-empty configured reference no longer resolves to an existing file. */
+  configuredModelMissing?: boolean
+  /** PORT-4: shown only when configuredModelMissing is true -- names the fallback actually in use, if any. */
+  configuredModelWarning?: string
   envModelPath: string
   envExecutablePath: string
   modelFound: boolean

@@ -250,11 +250,20 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
     QVariantList embeddedAgents;
     QVariantList embeddedModelFolders;
 
-    const QString configuredModel = settings.value("ai/modelPath", "").toString().trimmed();
+    // PORT-4 (docs/PORTABILITY_ROADMAP.md, 18/09/2026) : la valeur stockée
+    // peut désormais être une référence portable relative -- résolue ici pour
+    // comparaison/affichage, jamais contre le répertoire courant du process.
+    const QString configuredModelRaw = settings.value("ai/modelPath", "").toString().trimmed();
+    const QString configuredModel = killai::ModelLocator::resolveModelReference(configuredModelRaw);
     const bool modelEnabled = settings.value("ai/modelEnabled", true).toBool();
     const QString envModel = QProcessEnvironment::systemEnvironment().value("KILLENGINE_QWEN_GGUF").trimmed();
     const QString envExe = QProcessEnvironment::systemEnvironment().value("KILLENGINE_LLAMA_CLI").trimmed();
     const auto model = killai::ModelLocator::findQwenGguf();
+    // Une référence configurée devenue introuvable ne doit jamais être
+    // présentée comme "le choix inchangé" -- le modèle réellement utilisé
+    // (s'il y en a un) est rendu visible séparément via configuredModelWarning.
+    const bool configuredModelMissing = !configuredModelRaw.isEmpty()
+        && !(QFileInfo(configuredModel).exists() && QFileInfo(configuredModel).isFile());
 
     for (const auto& path : killai::ModelLocator::candidateModelPaths()) {
         QFileInfo file(path);
@@ -399,6 +408,15 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
     result["ready"] = modelEnabled && model.found && !executablePath.isEmpty();
     result["available"] = model.found && !executablePath.isEmpty();
     result["configuredModelPath"] = configuredModel;
+    result["configuredModelPathRaw"] = configuredModelRaw;
+    result["configuredModelMissing"] = configuredModelMissing;
+    if (configuredModelMissing) {
+        result["configuredModelWarning"] = model.found
+            ? KE_TXT("Le modèle configuré est introuvable ; un autre modèle est utilisé à la place : %1",
+                     "The configured model could not be found; another model is used instead: %1").arg(model.path)
+            : KE_TXT("Le modèle configuré est introuvable et aucun autre modèle n'a été trouvé.",
+                     "The configured model could not be found and no other model was found.");
+    }
     result["envModelPath"] = envModel;
     result["envExecutablePath"] = envExe;
     result["modelFound"] = model.found;
@@ -482,7 +500,14 @@ QVariantMap SettingsDiagnosticsManager::saveSettings(const QVariantMap& incoming
     settings.setValue(
         "diagnostics/smartSearchDebugMaxEvents",
         std::clamp(incoming.value("smartSearchDebugMaxEvents", 30).toInt(), 5, 200));
-    settings.setValue("ai/modelPath", incoming.value("modelPath", "").toString().trimmed());
+    // PORT-4 (docs/PORTABILITY_ROADMAP.md, 18/09/2026) : un chemin absolu dont
+    // l'appartenance au paquet est démontrée est converti en référence
+    // portable (relative à killcore::PortablePaths::root()) avant stockage --
+    // sinon il restait figé sur l'ancien emplacement après une copie/déplacement
+    // du dossier. Un chemin externe (hors paquet) n'est jamais deviné comme
+    // appartenant au paquet : reste absolu tel quel.
+    settings.setValue("ai/modelPath",
+        killai::ModelLocator::toPortableModelReference(incoming.value("modelPath", "").toString()));
     settings.setValue("ai/modelEnabled", incoming.value("modelEnabled", true).toBool());
     settings.setValue(
         "ai/modelThreads",
