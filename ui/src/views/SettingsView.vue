@@ -1,26 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppStore, type WorkspaceBookmark, type WorkspaceProject, type StructureTemplate } from '@/stores/app'
+import { useAppStore } from '@/stores/app'
 import AssistantToolsPanel from '@/components/settings/AssistantToolsPanel.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
-import PersistenceErrorBanner from '@/components/PersistenceErrorBanner.vue'
-import { usePaginatedFilter } from '@/composables/usePaginatedFilter'
 
 const store = useAppStore()
 const { locale, t } = useI18n()
-
-// UX-PIPE-9 (docs/PHASE_TRACKER.md, 18/09/2026) : les projets/notes/modèles
-// de structure conservés au-delà de la tranche fixe précédemment rendue
-// (12/20/12) étaient toujours en stockage mais totalement inaccessibles
-// (pas de suivant, pas de recherche) -- voir usePaginatedFilter pour le
-// contrat détaillé. Les trois listes ont un état indépendant.
-const workspaceProjectsList = computed(() => store.workspaceProjects as WorkspaceProject[])
-const workspaceProjectsFilter = usePaginatedFilter(workspaceProjectsList, 12, (project) => `${project.name} ${project.processName}`)
-const workspaceBookmarksList = computed(() => store.workspaceBookmarks as WorkspaceBookmark[])
-const workspaceBookmarksFilter = usePaginatedFilter(workspaceBookmarksList, 20, (bookmark) => `${bookmark.label} ${bookmark.note} ${bookmark.kind} ${bookmark.address ?? ''}`)
-const structureTemplatesList = computed(() => store.structureTemplates as StructureTemplate[])
-const structureTemplatesFilter = usePaginatedFilter(structureTemplatesList, 12, (template) => `${template.name} ${template.processName}`)
 
 const runtimeRows = computed(() => [
   { label: t('settings.backend'), value: store.isConnected ? t('settings.connected') : t('settings.disconnected') },
@@ -37,11 +23,6 @@ const stealthRecommendations = computed(
 )
 
 const debugEvents = computed(() => [...store.smartSearchDebugEvents].reverse())
-const learnedAutoProfile = computed(() => store.autoResolveReport?.learnedProfile ?? {})
-const strategyWins = computed(() => {
-  const wins = learnedAutoProfile.value.strategyWins
-  return wins && typeof wins === 'object' ? wins as Record<string, unknown> : {}
-})
 const valueTypes = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Float32', 'Float64']
 const performanceModes = ['Auto', 'Eco', 'Normal', 'Performance', 'Max']
 const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096, 8192]
@@ -53,20 +34,6 @@ async function saveExternalAiApiKey() {
     externalAiApiKeyInput.value = ''
   }
 }
-const workspaceExportText = ref('')
-const workspaceExportStatus = ref('')
-const auditExportText = ref('')
-const auditExportStatus = ref('')
-const workspaceImportText = ref('')
-const workspaceImportPreview = ref<Record<string, unknown> | null>(null)
-const workspaceImportStatus = ref('')
-const selectedStructureTemplateId = ref<number | null>(null)
-const workspaceProjectName = ref('')
-const bookmarkLabel = ref('')
-const bookmarkAddress = ref('')
-const bookmarkType = ref('Int32')
-const bookmarkValue = ref('')
-const bookmarkNote = ref('')
 const kernelReadAddress = ref('')
 const kernelReadSize = ref(16)
 const kernelWriteAddress = ref('')
@@ -84,9 +51,6 @@ const kernelLearningSteps = computed(() => [
   { label: t('settings.kernelStep3Label'), detail: t('settings.kernelStep3Detail') },
   { label: t('settings.kernelStep4Label'), detail: t('settings.kernelStep4Detail') },
 ])
-const selectedStructureTemplate = computed(() =>
-  store.structureTemplates.find((template) => template.id === selectedStructureTemplateId.value) ?? null,
-)
 const visibleModelCandidates = computed(() =>
   (store.aiModelStatus?.modelCandidates ?? []).slice(0, 6),
 )
@@ -156,108 +120,6 @@ async function saveAll() {
   await store.saveSettings()
 }
 
-function showWorkspaceExport() {
-  workspaceExportText.value = store.exportWorkspaceJson()
-  workspaceExportStatus.value = ''
-}
-
-function showWorkspaceMarkdownExport() {
-  workspaceExportText.value = store.exportWorkspaceMarkdown()
-  workspaceExportStatus.value = ''
-}
-
-function showAuditJsonExport() {
-  auditExportText.value = store.exportActionLogJson()
-  auditExportStatus.value = ''
-}
-
-function showAuditMarkdownExport() {
-  auditExportText.value = store.exportActionLogMarkdown()
-  auditExportStatus.value = ''
-}
-
-async function copyWorkspaceExport() {
-  if (!workspaceExportText.value) return
-  await navigator.clipboard?.writeText(workspaceExportText.value)
-  workspaceExportStatus.value = t('settings.exportCopied')
-}
-
-async function copyAuditExport() {
-  if (!auditExportText.value) return
-  await navigator.clipboard?.writeText(auditExportText.value)
-  auditExportStatus.value = t('settings.auditCopied')
-}
-
-function previewWorkspaceImport() {
-  workspaceImportPreview.value = store.previewWorkspaceImport(workspaceImportText.value)
-  workspaceImportStatus.value = workspaceImportPreview.value.success === true ? t('settings.previewReady') : String(workspaceImportPreview.value.error ?? t('settings.invalidImport'))
-}
-
-// Vidé par importWorkspace() après un succès : ce vidage déclenche le même
-// watcher que la saisie utilisateur ci-dessous (Vue ne distingue pas la
-// source d'une mutation reactive) -- ce drapeau évite que le message de
-// succès qu'on vient d'afficher soit aussitôt écrasé par "aperçu périmé".
-let suppressNextImportTextInvalidation = false
-
-async function importWorkspace() {
-  const result = await store.importWorkspaceJson(workspaceImportText.value)
-  workspaceImportPreview.value = result
-  workspaceImportStatus.value = result.success === true
-    ? (result.trainerImportBlockReason ? `${t('settings.workspaceImported')} ${result.trainerImportBlockReason}` : t('settings.workspaceImported'))
-    : String(result.error ?? t('settings.importRefused'))
-  if (result.success === true) {
-    suppressNextImportTextInvalidation = true
-    workspaceImportText.value = ''
-  }
-}
-
-// UX-PIPE-7 (docs/PHASE_TRACKER.md, 18/09/2026) : un aperçu réussi ne doit
-// plus autoriser Importer une fois le texte modifié -- sans ça, "Importer"
-// restait cliquable sur la foi d'un aperçu qui ne correspondait plus au
-// texte réellement collé. Invalide (ne recalcule pas automatiquement, pour
-// éviter de revalider à chaque frappe) ; l'utilisateur relance "Aperçu"
-// explicitement, cohérent avec le bouton déjà désactivé tant qu'aucun aperçu
-// valide n'existe pour le texte courant.
-watch(workspaceImportText, () => {
-  if (suppressNextImportTextInvalidation) {
-    suppressNextImportTextInvalidation = false
-    return
-  }
-  if (workspaceImportPreview.value !== null) {
-    workspaceImportPreview.value = null
-    workspaceImportStatus.value = t('settings.previewStale')
-  }
-})
-
-function saveWorkspaceProject() {
-  const project = store.saveCurrentWorkspaceProject(workspaceProjectName.value)
-  if (project) workspaceProjectName.value = ''
-}
-
-function addManualBookmark() {
-  const bookmark = store.addWorkspaceBookmark({
-    kind: bookmarkAddress.value.trim() ? 'address' : 'note',
-    label: bookmarkLabel.value || bookmarkAddress.value || t('settings.workspaceNoteFallback'),
-    address: bookmarkAddress.value,
-    type: bookmarkAddress.value.trim() ? bookmarkType.value : undefined,
-    value: bookmarkValue.value,
-    note: bookmarkNote.value,
-  })
-  if (bookmark) {
-    bookmarkLabel.value = ''
-    bookmarkAddress.value = ''
-    bookmarkValue.value = ''
-    bookmarkNote.value = ''
-  }
-}
-
-function bookmarkToWrite(bookmark: WorkspaceBookmark) {
-  store.useWorkspaceBookmarkAsWriteTarget(bookmark.id)
-}
-
-function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freeze_polling') {
-  store.createTrainerFeatureFromBookmark(bookmark.id, action)
-}
 </script>
 
 <template>
@@ -580,331 +442,12 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       <div class="panel-title">
         <h2>{{ $t('settings.workspaceTitle') }}</h2>
       </div>
-      <div class="runtime-grid">
-        <div class="runtime-cell">
-          <span>{{ $t('settings.activeInvestigation') }}</span>
-          <strong>{{ $t('settings.stepCount', { count: store.activeInvestigation ? store.activeInvestigation.steps.length : 0 }) }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.investigationArchives') }}</span>
-          <strong>{{ store.investigationArchive.length }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.trainerFeatures') }}</span>
-          <strong>{{ store.trainerFeatures.length }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.structureTemplates') }}</span>
-          <strong>{{ store.structureTemplates.length }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.bookmarks') }}</span>
-          <strong>{{ store.workspaceBookmarks.length }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.localProjects') }}</span>
-          <strong>{{ store.workspaceProjects.length }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.actionAudit') }}</span>
-          <strong>{{ store.actionLog.length }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.autoMemoryProcess') }}</span>
-          <strong>{{ store.processName || $t('settings.globalFallback') }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.lastStrategy') }}</span>
-          <strong>{{ learnedAutoProfile.lastSuccessfulAuditEvent || '-' }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.lastAddress') }}</span>
-          <strong>{{ learnedAutoProfile.lastSuccessfulAddress ? `0x${learnedAutoProfile.lastSuccessfulAddress}` : '-' }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.lastType') }}</span>
-          <strong>{{ learnedAutoProfile.lastSuccessfulValueType || '-' }}</strong>
-        </div>
-        <div class="runtime-cell">
-          <span>{{ $t('settings.winningStrategies') }}</span>
-          <strong>{{ Object.keys(strategyWins).length }}</strong>
-        </div>
-      </div>
-      <div class="path-row">
-        <span>{{ $t('settings.learnedAobPattern') }}</span>
-        <code>{{ learnedAutoProfile.lastSuccessfulAobPattern || '-' }}</code>
-      </div>
-      <div v-if="store.rememberedPatterns.length" class="remembered-patterns">
-        <div class="source-list-title">
-          <strong>{{ $t('settings.rememberedPatternsTitle') }}</strong>
-          <span>{{ $t('settings.entryCount', { count: store.rememberedPatterns.length }) }}</span>
-        </div>
-        <div v-for="pattern in store.rememberedPatterns" :key="`${pattern.module}:${pattern.moduleOffset}`" class="remembered-pattern-row">
-          <div class="remembered-pattern-label">
-            <strong v-if="pattern.queryLabel" :title="String(pattern.queryLabel)">{{ pattern.queryLabel }}</strong>
-            <code>{{ pattern.module }}+0x{{ pattern.moduleOffset }}</code>
-          </div>
-          <span>{{ pattern.valueType || '-' }}</span>
-          <span>{{ pattern.confirmCount }}×</span>
-          <span :class="pattern.resolved ? 'hint' : 'error'">
-            {{ pattern.resolved ? `0x${pattern.liveAddress}` : $t('settings.moduleAbsent') }}
-          </span>
-          <button
-            v-if="pattern.resolved"
-            class="btn btn-secondary compact"
-            type="button"
-            @click="store.previewRememberedPattern(pattern)"
-          >
-            {{ $t('settings.preview') }}
-          </button>
-        </div>
-      </div>
-      <div v-if="store.writeHistorySequence.length" class="remembered-patterns">
-        <div class="source-list-title">
-          <strong>{{ $t('settings.writeHistoryTitle') }}</strong>
-          <span>{{ $t('settings.entryCount', { count: store.writeHistorySequence.length }) }}</span>
-        </div>
-        <div v-for="(entry, index) in store.writeHistorySequence" :key="`${entry.module}:${entry.moduleOffset}:${entry.writtenAt}:${index}`" class="remembered-pattern-row">
-          <code>{{ entry.module }}+0x{{ entry.moduleOffset }}</code>
-          <span>{{ entry.valueType || '-' }} = {{ entry.value }}</span>
-          <span :class="entry.resolved ? 'hint' : 'error'">
-            {{ entry.resolved ? `0x${entry.liveAddress}` : $t('settings.moduleAbsent') }}
-          </span>
-        </div>
-        <div class="panel-actions">
-          <button class="btn btn-primary compact" type="button" @click="store.replayWriteHistorySequence()">
-            {{ $t('settings.replaySequence') }}
-          </button>
-          <button class="btn btn-secondary compact" type="button" @click="store.clearWriteHistorySequence()">
-            {{ $t('settings.clearHistory') }}
-          </button>
-        </div>
-      </div>
-      <div class="panel-actions workspace-actions">
-        <button class="btn btn-secondary compact" @click="showWorkspaceExport()">{{ $t('settings.exportWorkspaceJson') }}</button>
-        <button class="btn btn-secondary compact" @click="showWorkspaceMarkdownExport()">{{ $t('settings.exportWorkspaceMd') }}</button>
-        <button class="btn btn-secondary compact" @click="showAuditJsonExport()">{{ $t('settings.exportAuditJson') }}</button>
-        <button class="btn btn-secondary compact" @click="showAuditMarkdownExport()">{{ $t('settings.exportAuditMd') }}</button>
-        <button class="btn btn-secondary compact" @click="store.clearInvestigation()">{{ $t('settings.clearActiveInvestigation') }}</button>
-        <button class="btn btn-secondary compact" @click="store.clearInvestigationArchive()">{{ $t('settings.clearArchives') }}</button>
-        <button class="btn btn-secondary compact" @click="store.clearTrainerFeatures()">{{ $t('settings.clearLocalTrainer') }}</button>
-        <button class="btn btn-secondary compact" @click="store.clearStructureTemplates()">{{ $t('settings.clearStructureTemplates') }}</button>
-        <button class="btn btn-secondary compact" @click="store.clearWorkspaceBookmarks()">{{ $t('settings.clearBookmarks') }}</button>
-        <button class="btn btn-secondary compact" @click="store.clearWorkspaceProjects()">{{ $t('settings.clearProjects') }}</button>
-        <button class="btn btn-secondary compact" @click="store.clearActionLog()">{{ $t('settings.clearAudit') }}</button>
-        <button class="btn btn-secondary compact" @click="store.clearAutoResolveMemory(false)">{{ $t('settings.clearAutoMemoryProcess') }}</button>
-        <button class="btn btn-secondary compact danger-action" @click="store.clearAutoResolveMemory(true)">{{ $t('settings.clearAutoMemoryGlobal') }}</button>
-      </div>
-      <p class="hint">
-        {{ $t('settings.workspaceActionsHint') }}
-      </p>
-      <PersistenceErrorBanner
-        :error="store.workspaceProjectsPersistenceError"
-        :retry="() => store.saveWorkspaceProjects()"
-        :export-data="() => JSON.stringify(store.workspaceProjects, null, 2)"
-      />
-      <div class="project-panel">
-        <div class="panel-title">
-          <h3>{{ $t('settings.workspaceProjectsTitle') }}</h3>
-          <span>{{ store.workspaceProjects.length }}</span>
-          <div class="panel-actions">
-            <input v-model="workspaceProjectName" class="input project-name-input" :placeholder="$t('settings.projectNamePlaceholder')" />
-            <button class="btn btn-secondary compact" @click="saveWorkspaceProject()">{{ $t('settings.saveProject') }}</button>
-          </div>
-        </div>
-        <div v-if="store.workspaceProjects.length === 0" class="empty-line">{{ $t('settings.noLocalProject') }}</div>
-        <template v-else>
-          <input
-            v-if="store.workspaceProjects.length > 12"
-            v-model="workspaceProjectsFilter.filterText.value"
-            class="input list-filter-input"
-            :placeholder="$t('settings.filterProjectsPlaceholder')"
-          />
-          <div v-if="workspaceProjectsFilter.filteredCount.value === 0" class="empty-line">{{ $t('settings.noListMatch') }}</div>
-          <div v-for="project in workspaceProjectsFilter.visibleItems.value" :key="project.id" class="project-row">
-          <div>
-            <strong>{{ project.name }}</strong>
-            <span>{{ $t('settings.projectSummary', { process: project.processName || '-', features: project.trainerFeatureCount, templates: project.structureTemplateCount, bookmarks: project.bookmarkCount, audits: project.auditCount || 0 }) }}</span>
-          </div>
-          <div class="panel-actions">
-            <button class="btn btn-secondary compact" @click="store.loadWorkspaceProject(project.id)">{{ $t('settings.load') }}</button>
-            <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceProject(project.id)">{{ $t('settings.delete') }}</button>
-          </div>
-          </div>
-          <button v-if="workspaceProjectsFilter.hasMore.value" class="btn btn-secondary compact list-show-more" @click="workspaceProjectsFilter.showMore()">
-            {{ $t('settings.showMoreItems', { count: Math.min(12, workspaceProjectsFilter.filteredCount.value - workspaceProjectsFilter.visibleItems.value.length) }) }}
-          </button>
-        </template>
-      </div>
-      <PersistenceErrorBanner
-        :error="store.workspaceBookmarksPersistenceError"
-        :retry="() => store.saveWorkspaceBookmarks()"
-        :export-data="() => JSON.stringify(store.workspaceBookmarks, null, 2)"
-      />
-      <div v-if="store.workspaceBookmarks.length > 0" class="bookmark-list">
-        <div class="panel-title">
-          <h3>{{ $t('settings.bookmarksNotesTitle') }}</h3>
-          <span>{{ store.workspaceBookmarks.length }}</span>
-        </div>
-        <div class="bookmark-create">
-          <input v-model="bookmarkLabel" class="input" :placeholder="$t('settings.labelPlaceholder')" />
-          <input v-model="bookmarkAddress" class="input" :placeholder="$t('settings.addressHexOptional')" />
-          <select v-model="bookmarkType" class="select">
-            <option v-for="type in valueTypes" :key="type" :value="type">{{ type }}</option>
-          </select>
-          <input v-model="bookmarkValue" class="input" :placeholder="$t('settings.valueOptional')" />
-          <input v-model="bookmarkNote" class="input bookmark-note-input" :placeholder="$t('settings.notePlaceholder')" />
-          <button class="btn btn-secondary compact" @click="addManualBookmark()">{{ $t('settings.add') }}</button>
-        </div>
-        <input
-          v-if="store.workspaceBookmarks.length > 20"
-          v-model="workspaceBookmarksFilter.filterText.value"
-          class="input list-filter-input"
-          :placeholder="$t('settings.filterBookmarksPlaceholder')"
-        />
-        <div v-if="workspaceBookmarksFilter.filteredCount.value === 0" class="empty-line">{{ $t('settings.noListMatch') }}</div>
-        <div v-for="bookmark in workspaceBookmarksFilter.visibleItems.value" :key="bookmark.id" class="bookmark-row">
-          <div>
-            <strong>{{ bookmark.label }}</strong>
-            <span>{{ bookmark.kind }} · {{ bookmark.address ? `0x${bookmark.address}` : '-' }} · {{ bookmark.type || '-' }} · {{ bookmark.note || '-' }}</span>
-          </div>
-          <div class="panel-actions">
-            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToWrite(bookmark)">{{ $t('settings.write') }}</button>
-            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToTrainer(bookmark, 'write')">{{ $t('settings.trainer') }}</button>
-            <button class="btn btn-secondary compact" :disabled="!bookmark.address" @click="bookmarkToTrainer(bookmark, 'freeze_polling')">{{ $t('settings.freeze') }}</button>
-            <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceBookmark(bookmark.id)">{{ $t('settings.delete') }}</button>
-          </div>
-        </div>
-        <button v-if="workspaceBookmarksFilter.hasMore.value" class="btn btn-secondary compact list-show-more" @click="workspaceBookmarksFilter.showMore()">
-          {{ $t('settings.showMoreItems', { count: Math.min(20, workspaceBookmarksFilter.filteredCount.value - workspaceBookmarksFilter.visibleItems.value.length) }) }}
-        </button>
-      </div>
-      <div v-else class="bookmark-list">
-        <div class="panel-title">
-          <h3>{{ $t('settings.bookmarksNotesTitle') }}</h3>
-          <span>0</span>
-        </div>
-        <div class="bookmark-create">
-          <input v-model="bookmarkLabel" class="input" :placeholder="$t('settings.labelPlaceholder')" />
-          <input v-model="bookmarkAddress" class="input" :placeholder="$t('settings.addressHexOptional')" />
-          <select v-model="bookmarkType" class="select">
-            <option v-for="type in valueTypes" :key="type" :value="type">{{ type }}</option>
-          </select>
-          <input v-model="bookmarkValue" class="input" :placeholder="$t('settings.valueOptional')" />
-          <input v-model="bookmarkNote" class="input bookmark-note-input" :placeholder="$t('settings.notePlaceholder')" />
-          <button class="btn btn-secondary compact" @click="addManualBookmark()">{{ $t('settings.add') }}</button>
-        </div>
-      </div>
-      <div class="workspace-import">
-        <div class="panel-title">
-          <h3>{{ $t('settings.importWorkspaceJsonTitle') }}</h3>
-          <div class="panel-actions">
-            <button class="btn btn-secondary compact" :disabled="!workspaceImportText.trim()" @click="previewWorkspaceImport()">{{ $t('settings.importPreviewAction') }}</button>
-            <button class="btn btn-secondary compact danger-action" :disabled="workspaceImportPreview?.success !== true" @click="importWorkspace()">{{ $t('settings.importAction') }}</button>
-          </div>
-        </div>
-        <textarea v-model="workspaceImportText" class="workspace-import-input" :placeholder="$t('settings.pasteWorkspaceExportPlaceholder')" />
-        <p v-if="workspaceImportStatus" class="status-line">{{ workspaceImportStatus }}</p>
-        <div v-if="workspaceImportPreview?.success === true" class="import-preview">
-          <span>{{ $t('settings.importPreviewActiveInvestigation', { value: workspaceImportPreview.activeInvestigation }) }}</span>
-          <span>{{ $t('settings.importPreviewArchives', { value: workspaceImportPreview.archiveCount }) }}</span>
-          <span>{{ $t('settings.importPreviewFeatures', { value: workspaceImportPreview.trainerFeatureCount }) }}</span>
-          <span>{{ $t('settings.importPreviewTemplates', { value: workspaceImportPreview.structureTemplateCount }) }}</span>
-          <span>{{ $t('settings.importPreviewBookmarks', { value: workspaceImportPreview.bookmarkCount }) }}</span>
-          <span>{{ $t('settings.importPreviewAudit', { value: workspaceImportPreview.auditCount || 0 }) }}</span>
-          <span>{{ $t('settings.importPreviewPreset', { value: workspaceImportPreview.lastPresetId || '-' }) }}</span>
-          <span>{{ $t('settings.importPreviewSettings', { value: workspaceImportPreview.hasSettings ? $t('settings.yes') : $t('settings.no') }) }}</span>
-        </div>
-      </div>
-      <PersistenceErrorBanner
-        :error="store.structureTemplatesPersistenceError"
-        :retry="() => store.saveStructureTemplates()"
-        :export-data="() => JSON.stringify(store.structureTemplates, null, 2)"
-      />
-      <div v-if="store.structureTemplates.length > 0" class="template-list">
-        <div class="panel-title">
-          <h3>{{ $t('settings.structureTemplates') }}</h3>
-          <span>{{ store.structureTemplates.length }}</span>
-        </div>
-        <input
-          v-if="store.structureTemplates.length > 12"
-          v-model="structureTemplatesFilter.filterText.value"
-          class="input list-filter-input"
-          :placeholder="$t('settings.filterStructuresPlaceholder')"
-        />
-        <div v-if="structureTemplatesFilter.filteredCount.value === 0" class="empty-line">{{ $t('settings.noListMatch') }}</div>
-        <div v-for="template in structureTemplatesFilter.visibleItems.value" :key="template.id" class="template-row">
-          <div>
-            <strong>{{ template.name }}</strong>
-            <span>0x{{ template.baseAddress }} · {{ $t('settings.fieldCount', { count: template.fieldCount }) }} · {{ template.processName || '-' }}</span>
-          </div>
-          <div class="panel-actions">
-            <button class="btn btn-secondary compact" @click="selectedStructureTemplateId = template.id">{{ $t('settings.details') }}</button>
-            <button class="btn btn-secondary compact danger-action" @click="store.deleteStructureTemplate(template.id)">{{ $t('settings.delete') }}</button>
-          </div>
-        </div>
-        <button v-if="structureTemplatesFilter.hasMore.value" class="btn btn-secondary compact list-show-more" @click="structureTemplatesFilter.showMore()">
-          {{ $t('settings.showMoreItems', { count: Math.min(12, structureTemplatesFilter.filteredCount.value - structureTemplatesFilter.visibleItems.value.length) }) }}
-        </button>
-        <div v-if="selectedStructureTemplate" class="template-detail">
-          <div class="panel-title">
-            <h3>{{ selectedStructureTemplate.name }}</h3>
-            <button class="btn btn-secondary compact" @click="selectedStructureTemplateId = null">{{ $t('settings.close') }}</button>
-          </div>
-          <div
-            v-for="field in selectedStructureTemplate.fields.slice(0, 80)"
-            :key="`${selectedStructureTemplate.id}:${field.offset}:${field.type}`"
-            class="template-field-row"
-          >
-            <code>{{ field.offset >= 0 ? '+' : '' }}{{ field.offset }}</code>
-            <strong>{{ field.type }}</strong>
-            <span>{{ field.label || '-' }}</span>
-            <span>{{ field.sampleValue || '-' }}</span>
-            <span>{{ field.note || '-' }}</span>
-          </div>
-        </div>
-      </div>
-      <div v-if="workspaceExportText" class="workspace-export">
-        <div class="panel-title">
-          <h3>{{ $t('settings.exportWorkspaceTitle') }}</h3>
-          <div class="panel-actions">
-            <button class="btn btn-secondary compact" @click="copyWorkspaceExport()">{{ $t('settings.copy') }}</button>
-            <button class="btn btn-secondary compact" @click="workspaceExportText = ''">{{ $t('settings.close') }}</button>
-          </div>
-        </div>
-        <p v-if="workspaceExportStatus" class="status-line">{{ workspaceExportStatus }}</p>
-        <pre>{{ workspaceExportText }}</pre>
-      </div>
-      <PersistenceErrorBanner
-        :error="store.actionLogPersistenceError"
-        :retry="() => store.saveActionLog()"
-        :export-data="() => JSON.stringify(store.actionLog, null, 2)"
-      />
-      <div class="audit-panel">
-        <div class="panel-title">
-          <h3>{{ $t('settings.actionAudit') }}</h3>
-          <span>{{ store.actionLog.length }}</span>
-        </div>
-        <div v-if="store.actionLog.length === 0" class="empty-line">{{ $t('settings.noAuditedAction') }}</div>
-        <div v-for="entry in store.actionLog.slice(0, 20)" :key="entry.id" class="audit-row">
-          <div>
-            <strong>{{ entry.title }}</strong>
-            <span>{{ entry.time }} · {{ entry.kind }} · {{ entry.status }}{{ entry.detail ? ` · ${entry.detail}` : '' }}</span>
-          </div>
-        </div>
-      </div>
-      <div v-if="auditExportText" class="workspace-export">
-        <div class="panel-title">
-          <h3>{{ $t('settings.exportAuditTitle') }}</h3>
-          <div class="panel-actions">
-            <button class="btn btn-secondary compact" @click="copyAuditExport()">{{ $t('settings.copy') }}</button>
-            <button class="btn btn-secondary compact" @click="auditExportText = ''">{{ $t('settings.close') }}</button>
-          </div>
-        </div>
-        <p v-if="auditExportStatus" class="status-line">{{ auditExportStatus }}</p>
-        <pre>{{ auditExportText }}</pre>
-      </div>
+      <p class="hint">{{ $t('settings.workspaceMovedHint') }}</p>
+      <button class="btn btn-primary" type="button" @click="store.activeView = 'project'">
+        {{ $t('settings.openProjectView') }}
+      </button>
     </section>
+
 
     <section class="panel">
       <div class="panel-title">

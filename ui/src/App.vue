@@ -16,6 +16,7 @@ import PatternLearningView from '@/views/PatternLearningView.vue'
 import NetworkView from '@/views/NetworkView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import ProcessView from '@/views/ProcessView.vue'
+import ProjectView from '@/views/ProjectView.vue'
 import ScriptingView from '@/views/ScriptingView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import SpeedhackView from '@/views/SpeedhackView.vue'
@@ -40,6 +41,7 @@ const currentView = computed(() => {
   if (store.activeView === 'network') return NetworkView
   if (store.activeView === 'profiles') return ProfileView
   if (store.activeView === 'trainer') return TrainerView
+  if (store.activeView === 'project') return ProjectView
   if (store.activeView === 'expert') return ExpertView
   if (store.activeView === 'lexicon') return LexiconView
   if (store.activeView === 'modules') return ModulesView
@@ -190,6 +192,13 @@ watch(
           @click="store.activeView = 'trainer'"
         >
           {{ $t('nav.trainer') }}
+        </button>
+        <button
+          class="nav-item"
+          :class="{ active: store.activeView === 'project' }"
+          @click="store.activeView = 'project'"
+        >
+          {{ $t('nav.project') }}
         </button>
         <button
           class="nav-item"

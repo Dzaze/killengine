@@ -80,7 +80,7 @@ export interface SessionPromotionResult {
   warnings: string[]
 }
 
-export type AppView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'modules' | 'settings'
+export type AppView = 'assistant' | 'investigation' | 'trainer' | 'project' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'modules' | 'settings'
 
 export interface MemoryPreviewDecodedValue {
   label: string

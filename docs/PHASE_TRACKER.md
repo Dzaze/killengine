@@ -15,6 +15,7 @@ Roadmap portabilité réelle (distribution SourceForge en mode portable) : `docs
 
 ## État courant
 
+- **Pistes produit du checkup du 22/09 : cadrées, à réaliser (UX-PRODUIT-7/8/9/10/11A/11B).** Choix retenus et fiches autonomes dans [UX-PRODUIT-PLAN-20260922](#ux-produit-plan-20260922) : Projet/session et diagnostics séparés, navigation groupée, accès rapide Expert, ordre Investigation, lisibilité et rôles IA dédupliqués. Ordre : 8 → 7 → 9 → 10 → 11A → 11B. Documentation livrée ; aucun de ces lots produit implémenté par cette inscription. Les correctifs UX-CHECKUP-1 à 6 et le correctif de persistance UX-CHECKUP-7 déjà consignés restent clos.
 - **PORTABLE-AUDIT-20260919 : absorbé par PORT-7, clos (Codex → Claude, 19/09/2026).** Le paquet réel `dist/KillEngine-portable.zip` a été reconstruit et testé via pipe depuis deux dossiers isolés hors dépôt (UI Vue réelle chargée, attach/lecture/écriture, Trainer, profils, aucun chemin résiduel vers le dépôt/AppData). Détail complet dans [PHASE_TRACKER_HISTORY.md#portable-v2](PHASE_TRACKER_HISTORY.md#portable-v2).
 - **Corrections UX issues du contrôle pipe du 18/09/2026 : closes (UX-PIPE-1 à 6, Claude, 18/09/2026).** Fiches autonomes, diagnostic, correctifs et preuves de test dans [PHASE_TRACKER_HISTORY.md#ux-pipe-plan-20260918](PHASE_TRACKER_HISTORY.md#ux-pipe-plan-20260918).
 - **Second contrôle UX du 18/09/2026 (Codex) : UX-PIPE-7 à 10, closes (Claude, 18-19/09/2026).** Import workspace invalide désormais refusé sans mutation d'état ni crash de Paramètres ; réessai Trainer individuel découplé d'une erreur transitoire passée ; projets/notes/modèles de structure accessibles au-delà de 12/20/12 via pagination+recherche ; un freeze/patch chargé depuis un snapshot de projet n'est plus jamais annoncé « actif » sans opération réelle en cours côté moteur. Détail dans [PHASE_TRACKER_HISTORY.md#ux-pipe-suite-20260918](PHASE_TRACKER_HISTORY.md#ux-pipe-suite-20260918).
@@ -98,7 +99,7 @@ Les entrées détaillées diagnostic → correctif → tests → validation de I
 
 ### UX-CHECKUP-20260922 — fiches de reprise des 6 défauts prioritaires (22/09/2026, Claude)
 
-**Pourquoi cette entrée** : l'audit ci-dessus (`UX-CHECKUP-20260922`, Codex) documentait 11 pistes en prose dans `docs/UX_CHECKUP_20260922.md`, sans les transcrire en fiches actionnables — contrairement à `UX-PIPE-PLAN-20260918`/`UX-PIPE-SUITE-20260918` (transférées dans l'historique, sixième passe). Le propriétaire a demandé que ce soit bien consigné en étape de chantier ici. Cette entrée transforme les 6 points de priorité haute/suivante (bugs reproduits ou confirmés au code) en fiches sur le même modèle ; les 5 points restants (7 à 11, propositions d'organisation produit, pas des bugs) restent volontairement en pistes dans le rapport, non fichés — à cadrer avec le propriétaire avant de les transformer en chantier.
+**Pourquoi cette entrée** : l'audit ci-dessus (`UX-CHECKUP-20260922`, Codex) documentait 11 pistes en prose dans `docs/UX_CHECKUP_20260922.md`, sans les transcrire en fiches actionnables — contrairement à `UX-PIPE-PLAN-20260918`/`UX-PIPE-SUITE-20260918` (transférées dans l'historique, sixième passe). Le propriétaire a demandé que ce soit bien consigné en étape de chantier ici. Cette entrée transforme les 6 points de priorité haute/suivante (bugs reproduits ou confirmés au code) en fiches sur le même modèle ; les 5 points restants (7 à 11, propositions produit) étaient laissés en pistes à cette inscription. Leur cadrage est maintenant demandé explicitement et défini dans [UX-PRODUIT-PLAN-20260922](#ux-produit-plan-20260922), sans rouvrir les six correctifs.
 
 **État à l'inscription : correctifs non commencés, responsables non attribués.** Diagnostics, fichiers/lignes et causes repris tels quels du rapport Codex (pas re-vérifiés indépendamment par cette entrée) ; à reconfirmer sur le code courant avant de corriger, comme pour toute fiche de reprise.
 
@@ -312,9 +313,9 @@ Les entrées détaillées diagnostic → correctif → tests → validation de I
 
 **Limites (assumées, pas oubliées)** : comme le rapport source lui-même le précisait, **la course n'a pas été déclenchée de façon déterministe** — elle dépend d'un ordonnancement précis entre deux allers-retours RPC asynchrones, non contrôlable depuis un script de test externe. La correction structurelle (même patron que le chemin exact-scan, déjà en production) élimine la fenêtre de course par construction plutôt que de la démontrer par un timing forcé. L'annulation en cours d'opération et le changement de cible en vol n'ont pas pu être testés en direct faute d'une cible avec assez de mémoire writable pour ralentir suffisamment le scan sur cette machine ; la logique de filtrage par `requestId` qui les protège n'a pas été modifiée par ce lot (elle est identique à celle déjà éprouvée sur `startExactScanAsync`). Aucune généralisation en helper commun n'a été tentée, conformément à la mise en garde du rapport.
 
-#### Pistes produit non fichées (7 à 11)
+#### Pistes produit cadrées (7 à 11)
 
-Réorganisation du menu (18 pages), séparation Projet/session vs Paramètres, sommaire+recherche dans Expert, réordonnancement d'Investigation (situation avant formulaires), lisibilité des textes secondaires et déduplication de l'affichage des agents IA : propositions d'organisation documentées en détail dans `docs/UX_CHECKUP_20260922.md` (§7-11), volontairement laissées en pistes plutôt qu'en fiches — ce sont des choix de produit/UX à trancher avec le propriétaire avant de cadrer un chantier, pas des bugs à corriger sur diagnostic seul.
+À la demande explicite du propriétaire, ces pistes disposent maintenant de décisions produit et de fiches de réalisation : [UX-PRODUIT-PLAN-20260922](#ux-produit-plan-20260922). Suivre les nouveaux IDs UX-PRODUIT et leur ordre de dépendances ; ne pas les confondre avec le correctif UX-CHECKUP-7 de sauvegarde d’Investigation ajouté dans le second audit.
 
 **Comment vérifié pour cette entrée** : mise en forme des diagnostics déjà établis par l'audit Codex du même jour en fiches actionnables, sans nouvelle investigation ni relecture indépendante du code par cette entrée — les lignes/causes citées sont à reconfirmer par l'agent qui prend un lot, comme rappelé dans le mode d'emploi. Aucun code modifié, aucun build/test nécessaire pour cette inscription documentaire.
 
@@ -414,3 +415,210 @@ Réorganisation du menu (18 pages), séparation Projet/session vs Paramètres, s
    - Scan mojibake et fins de ligne propres sur les 5 fichiers touchés (`investigation.ts`, `app.ts`, `InvestigationView.vue`, `fr.json`, `en.json`).
 
 **Limites** : `loadInvestigations()` (lecture, pas écriture) n'a pas été touchée dans ce lot — un JSON corrompu en lecture efface encore silencieusement `activeInvestigation`/`archive` sans avertissement. Risque jugé distinct et moins critique que l'écriture (une lecture corrompue implique déjà une donnée perdue en amont, alors que l'écriture silencieuse perdait des données encore récupérables) ; à cadrer séparément si le propriétaire le souhaite. `trainer.ts::saveOverlayHotkey()` (réglage mineur, une seule touche) reste aussi sur l'ancien patron brut — non touché, hors périmètre de cette fiche.
+
+<a id="ux-produit-plan-20260922"></a>
+### UX-PRODUIT-PLAN-20260922 — réalisation cadrée des pistes produit 7 à 11 (22/09/2026, Codex)
+
+**Demande / périmètre** : le propriétaire demande de trancher et détailler les pistes produit restantes du [rapport UX](UX_CHECKUP_20260922.md), directement dans ce tracker, pour qu'un agent puisse les réaliser efficacement. Cette entrée contient les choix de réalisation, pas de simples suggestions. Elle remplace le statut « à cadrer » des pistes 7 à 11. Le travail de cette session est documentaire ; aucune fonctionnalité ci-dessous n'est annoncée comme livrée.
+
+**État revérifié juste avant inscription** : les six défauts prioritaires `UX-CHECKUP-1` à `6` sont maintenant clos dans leurs fiches Claude ; le `UX-CHECKUP-7` du second audit est le correctif de sauvegarde d'Investigation, également réalisé. **Ne pas les rouvrir ni confondre leurs IDs avec la piste produit 7 du rapport.** Les nouveaux IDs utilisent donc le préfixe distinct `UX-PRODUIT`. Conserver les changements de code/validation déjà consignés, y compris la bannière de persistance d'Investigation.
+
+#### Tableau d'exécution et dépendances
+
+| Ordre | ID / fiche | Point du rapport | Livrable précis | Dépendance | Statut / responsable |
+| --- | --- | --- | --- | --- | --- |
+| 1 | [UX-PRODUIT-8](#ux-produit-8) | 8 | Page Projet/session + diagnostics déplacés, sous-lots 8A puis 8B | Aucune | En cours — Claude — 22/09/2026 — **8A terminé et vérifié live** (voir note sous la fiche), **8B reste à faire** — fichiers réservés pour 8B : `SettingsView.vue`, `ModulesView.vue`, nouveaux `ui/src/components/diagnostics/*` |
+| 2 | [UX-PRODUIT-7](#ux-produit-7) | 7 | Menu groupé, cible permanente, prérequis et noms cohérents | 8 | À faire / non attribué |
+| 3 | [UX-PRODUIT-9](#ux-produit-9) | 9 | Sommaire fixe Expert, recherche et favoris | 7 pour stabiliser la navigation | À faire / non attribué |
+| 4 | [UX-PRODUIT-10](#ux-produit-10) | 10 | Situation/preuves/prochaine action avant formulaires | 8 pour le lien Reprendre un projet | À faire / non attribué |
+| 5 | [UX-PRODUIT-11A](#ux-produit-11a) | 11, lisibilité | Contraste et tailles des textes informatifs | 7/8/9/10 | À faire / non attribué |
+| 6 | [UX-PRODUIT-11B](#ux-produit-11b) | 11, diagnostic IA | Rôles logiques dédupliqués et sources détaillées | 8B pour le panneau de diagnostic | À faire / non attribué |
+
+**Pourquoi cet ordre** : créer les destinations avant de réorganiser leurs liens ; fixer les surfaces avant la passe de lisibilité ; corriger le diagnostic IA dans son emplacement final. Les numéros suivent le rapport, pas l'ordre d'exécution. Priorité produit : simplifier les pages et le parcours (8/7), faciliter le travail quotidien (9/10), puis lisibilité et exactitude du diagnostic (11A/11B).
+
+**Coordination** : par défaut exécuter séquentiellement. Inscrire « En cours — agent — date — fichiers réservés » avant de coder. Les lots partagent `App.vue`, `app.ts`, `SettingsView.vue`, `ModulesView.vue`, `ExpertView.vue`, les locales FR/EN, les guides et `scripts/test-ui-journeys.ps1` : ne pas les éditer en parallèle sans répartition explicite. Respecter la règle de branche actuelle `main`, relire avant chaque modification et ne pas nettoyer le travail préexistant d'un autre agent.
+
+#### Mode d'emploi commun et clôture
+
+1. Lire `AGENTS.md`, cette section, la fiche entière et les symboles concernés dans le code courant. Les numéros de ligne du rapport sont historiques ; rechercher les symboles avec `rg`. Les nouveaux noms de vues/composants décrivent des fichiers à créer, pas une API supposée déjà disponible.
+2. Photographier le point de départ utile par capture/DOM, puis suivre le comportement fixé et les étapes. Préserver le moteur, les formats/clés de persistance et les confirmations existantes. Une extraction de vue doit déplacer aussi ses watchers, chargements et bannières, pas seulement son HTML.
+3. Réutiliser `scripts/test-ui-journeys.ps1` et `scripts/lib/cdp-client.ps1` pour les clics/saisies/captures réels ; lire d'abord leur préparation de fixture portable et nettoyage. Le pipe global ne doit pas piloter par erreur une autre instance. Le harnais saute si une instance préexiste : SKIPPED n'est pas une réussite ; ne pas fermer l'application du propriétaire pour forcer un test.
+4. Vérifier ce qui concerne l'UX via ses boutons réels, pas par mutation de Pinia présentée comme test de clic. Fermer réellement les modales d'accueil/préchauffage, ne pas cliquer derrière. Les données de test vivent dans la fixture isolée ; ne pas importer/supprimer les vrais projets. Vérifier le PID du marqueur de cible si une adresse de test est utilisée ; aucune adresse historique du rapport réutilisée.
+5. Localiser tous les nouveaux textes FR/EN, garder IDs/codes stables indépendants des traductions. Utiliser `data-view`/`data-testid` si un sélecteur stable manque ; mettre à jour le harnais lors des déplacements sans supprimer ses assertions. Ces parcours n'exigent pas d'appel IA payant ni d'installation ou modification système.
+6. Après code, Codex/Claude lance `./scripts/build.ps1`, puis `./build/bin/killengine_unit_tests.exe` et les contrôles ciblés de la fiche. Les autres agents laissent explicitement ces validations à Codex/Claude. Rejouer les parcours existants affectés et les critères UI ; pour les simples déplacements/style, captures et parcours suffisent, pas de tests unitaires qui répètent le template. Pour une logique pure nouvelle (favoris/déduplication), utiliser les tests du vrai module, sans recopier l'algorithme ; patron TS Node/esbuild existant `test-workspace-import-validation.ps1/.mjs`, pas de Vitest supposé installé.
+7. Pour 11B, adapter le type/mock TS avec les champs C++ et appeler réellement `getAiModelStatus` par pipe. Tout ajout de fichier C++ nécessite son CMakeLists et tout changement de header partagé la recompilation documentée dans `AGENTS.md`. Aucun besoin d'ajouter un nouvel outil IA pour les lots produit.
+8. Contrôler UTF-8 sans BOM, scan mojibake et `scripts/check-line-endings.ps1` en mode rapport, sans convertir les fichiers historiques. Consigner ici **diagnostic → fichiers/symboles changés → commandes/résultats → preuves UI/pipe → limites**. Cocher les critères seulement après vérification. Statut « Implémenté, validation restante » si des contrôles restent ; « Clos » uniquement si tous les critères applicables sont satisfaits. Mettre à jour tableau et État courant ensemble.
+
+**Livrable de chaque lot** : code compilable, textes et guides FR/EN adaptés, preuves locales datées sous `dist/`, résumé durable de validation dans sa fiche. Les nouvelles destinations n'ajoutent pas de routeur ni une autre infrastructure de tests. Les corrections UX précédentes, notamment import/pagination/persistance/Trainer actif, restent des obligations de non-régression.
+
+#### Décisions produit retenues pour les pistes 7 à 11
+
+**Précision propriétaire pendant la rédaction** : orienter clairement les pistes produit et donner les meilleurs choix afin que l'agent réalise, sans devoir choisir lui-même entre plusieurs architectures. Les décisions suivantes font partie des objectifs des six fiches UX-PRODUIT ci-dessous ; elles remplacent les formulations optionnelles du rapport. Pas de maquette exploratoire ni de refonte visuelle globale préalable requise.
+
+| Sujet | Choix à réaliser | Raison d'usage |
+| --- | --- | --- |
+| Navigation | Parcours principal toujours visible ; groupes techniques secondaires repliés au premier lancement ; accès cible, langue et Aide permanents | Les outils restent disponibles, mais le débutant voit d'abord où commencer et où retrouver son résultat |
+| Projet/session | Une vraie page pour le travail sauvegardé, les notes, les imports et l'historique | L'utilisateur ne cherche plus ses données dans les préférences |
+| Diagnostics | Second onglet de « Composants et diagnostics », avec accès direct par section | Installer, comprendre un composant et diagnostiquer son état appartiennent au même espace |
+| Expert | Défaut Tout conservé ; barre fixe de navigation, recherche locale et favoris | Retrouver rapidement un outil sans masquer les étapes de travail existantes |
+| Investigation | Situation et prochaine action avant carnet/formulaires ; une seule action principale contextualisée | Comprendre ce qui est prouvé et quoi faire ensuite avant de lire les détails |
+| Lisibilité | Token de texte secondaire lisible distinct des éléments désactivés ; petits textes informatifs au moins 12 px | Une explication active ne doit pas ressembler à une commande indisponible |
+| Diagnostic IA | Nombre de rôles logiques en premier, emplacements/copies dans le détail | Deux copies installées d'un même rôle ne deviennent pas quatre agents |
+
+**Délimitation** : les changements concernent présentation, navigation et vérité des statuts. Ne pas ajouter de nouvel algorithme IA, nouveau fournisseur, mode novice bridant les outils, nouvelle API d'installation, migration de données ou activation automatique d'un outil risqué. Toute interaction purement navigatoire est sans exécution moteur.
+
+<a id="ux-produit-8"></a>
+#### UX-PRODUIT-8 — Créer Projet/session et séparer les diagnostics des préférences
+
+**Diagnostic** : Paramètres mêle travail courant, réglages, diagnostics et journaux ; 73 boutons au checkup. La pagination/recherche des projets et notes fonctionne déjà.
+
+**Entrées** : `SettingsView.vue` (script, watchers et panneaux workspace) ; `stores/workspaceSession.ts`, `workspaceItems.ts`, `workspaceImportValidation.ts`, `investigation.ts`, `trainer.ts`, `actionLog.ts`, `composables/usePaginatedFilter.ts`, `components/PersistenceErrorBanner.vue` ; `App.vue`, union `AppView` dans `app.ts` et union `AssistantView` dans `assistantSmartSearch.ts` ; `USER_GUIDE.md` et `USER_GUIDE_EN.md`.
+
+**Répartition fixée — à réaliser en deux sous-lots compilables 8A puis 8B, tous deux nécessaires à la clôture** :
+
+| Destination | Contenu exact |
+| --- | --- |
+| `project`, « Projet / session » | Projets sauvegardés/reprise, notes et bookmarks, modèles de structure, import/export workspace, mémoire Auto/motifs mémorisés, historique des écritures et journal d'actions |
+| Paramètres | Langue/interface, réglages de scan et stockage temporaire, choix/configuration IA, outils Assistant, préférences de journalisation, limites du mode portable, sauvegarde des réglages |
+| `modules`, « Composants et diagnostics » — onglet **Composants** | Catalogue d'installation et disponibilité existant, chemins d'accès vers les diagnostics concernés |
+| Même page — onglet **Diagnostics** | État d'exécution et export diagnostic, log principal/événements Smart Search, diagnostics et commandes noyau existantes, antivirus/stealth, statut/pilotage Automation, disponibilité/préparation WebView2 |
+
+Les exports/archives propres à une enquête restent dans Investigation et les actions propres aux features dans Trainer. Les cartes d'installation ne sont pas recopiées dans Diagnostics ; elles y renvoient. Les deux préférences `settingSmartSearchDebugEnabled`/`settingSmartSearchDebugMaxEvents` restent dans Paramètres, leurs lectures/export sont dans Diagnostics.
+
+**Réalisation** :
+1. **8A** : créer `ProjectView.vue`, enregistrer le type et le composant dans la navigation existante sans introduire de router. Déplacer les sections workspace complètes, leur état local, watchers d'aperçu d'import, pagination/recherche et bannières d'erreur. Réutiliser les stores/actions, clés de persistance et format JSON : aucun nouveau stockage de projets. Inclure `learnedAutoProfile`, `rememberedPatterns`, `writeHistorySequence` et actionLog.
+2. Premier écran Projet : titre, cible/projet courant si cette information est connue, nom du projet à sauvegarder, bouton principal **Sauvegarder le projet**, puis liste/recherche des projets à reprendre. Afficher l'état vide « Aucun projet sauvegardé » avec l'action de sauvegarde ; ne pas inventer de badge « tout sauvegardé » ou de suivi de modifications non implémenté.
+3. Sommaire local fixe dans Projet, ordre **Projets → Notes et adresses → Modèles → Import/export → Historique**. Les trois listes gardent chacune leur pagination/recherche indépendante. Mémoire Auto et motifs mémorisés sont des détails repliables dans Historique, pas de nouveaux panneaux dominants. L'import garde aperçu, erreurs et confirmation existants. Une seule UI propriétaire par panneau ; remplacer l'ancien workspace dans Paramètres par le lien « Ouvrir Projet/session ».
+4. **8B** : extraire les diagnostics techniques de Settings vers des composants sous `ui/src/components/diagnostics/` et les monter dans le second onglet de `ModulesView.vue` ; éviter de copier 800 lignes directement dans cette vue. Découper au minimum par Runtime et journaux / Noyau / Automation / WebView2 / Compatibilité et stealth. Réutiliser/fusionner les contrôles équivalents déjà présents dans Modules pour ne pas avoir deux commandes concurrentes du même outil.
+5. Premier écran Composants : deux onglets **Composants** et **Diagnostics**, Composants par défaut. Diagnostics possède un sommaire local vers les cinq familles ci-dessus. Un lien depuis une carte ou une vue spécialisée ouvre l'onglet et la bonne section ; ajouter un état de navigation consommé une seule fois, sur le patron `pendingExpertAnchor`, sans nouveau router. Préserver les confirmations et les limites de toutes les actions existantes ; aucune installation, exclusion, activation système ou lecture/écriture mémoire au simple montage.
+6. Paramètres reçoit un sommaire local fixe **Interface → Scan et stockage → IA locale/externe et outils → Préférences avancées**. Ce dernier contient journalisation, limites portables et sauvegarde des réglages. Les diagnostics quittent effectivement cette page ; laisser un lien « Ouvrir les diagnostics ». Garder les règles actuelles de sauvegarde, ne pas transformer au passage en autosave.
+7. Chaque vue charge son domaine : Projet lit les stores workspace ; Paramètres lit les réglages ; Diagnostics actualise les statuts/logs au besoin. Pas de trois `refreshAll()` simultanés. Mettre à jour liens croisés, traductions et guides FR/EN, notamment les anciens chemins « Paramètres > Noyau/Diagnostics/WebView2 ». Préserver l'interdiction d'importer/remplacer un Trainer actif et toutes les corrections UX-PIPE-7 à 10.
+
+**Validation à cocher** :
+- [x] Sauver, retrouver, rechercher, charger et supprimer un projet via nouvelle page ; même résultat après redémarrage de la fixture portable. *(8A, vérifié live 22/09/2026)*
+- [x] Plus de 12 projets et 20 notes : pagination/recherche permettent d'atteindre les dernières entrées ; modèles de structure aussi accessibles. *(8A, vérifié live 22/09/2026)*
+- [x] Import invalide refuse sans mutation ; éditer le texte invalide l'ancien aperçu ; import valide ne restaure pas un freeze actif fictif. Rejouer les tests de validation d'import existants. *(8A, vérifié live 22/09/2026 — la garde freeze actif n'a pas été re-testée par fault injection car la logique store n'a pas été modifiée, seule la vue appelante a bougé)*
+- [x] Échec de persistance reste visible avec retry/export ; aucun faux message « sauvegardé ». Les raccourcis note → Write/Trainer et la sélection de modèle de structure fonctionnent depuis Projet. *(8A, vérifié live 22/09/2026)*
+- [ ] Diagnostics effectivement accessibles depuis le second onglet Composants ; liens directs ouvrent la bonne section. Paramètres ne lance plus le chargement lourd de ces diagnostics au montage ; aucune action système/mémoire provoquée par navigation. *(8B, pas commencé)*
+- [ ] Vérifier chaque ligne du tableau de répartition : aucune fonction perdue ou dupliquée, textes/guide et captures FR/EN mis à jour ; 8A et 8B tous deux validés. *(fiche non close tant que 8B n'est pas fait)*
+
+**Note de sous-lot 8A (Claude, 22/09/2026)** : `ProjectView.vue` créé (1385 lignes), contenu workspace complet déplacé depuis `SettingsView.vue` (projets, notes/bookmarks, modèles de structure, import/export, mémoire Auto/motifs mémorisés repliables, historique d'écriture, audit) avec réutilisation stricte des stores/actions/clés existantes — aucun nouveau stockage. `SettingsView.vue` passe de 2210 à 1754 lignes ; son panneau Workspace ne garde qu'un lien « Ouvrir Projet/session ». `AppView` (app.ts) et `AssistantView` (assistantSmartSearch.ts, union dupliquée découverte via le type-check) mis à jour ; navigation ajoutée dans `App.vue` après Trainer. Clés `nav.project` et namespace `project.*` ajoutées en FR/EN ; le reste de la page réutilise les clés `settings.*` existantes. Bug de placement trouvé et corrigé en cours de route : les 4 boutons d'export (workspace JSON/MD, audit JSON/MD) avaient été extraits avec le bundle de boutons « Vider X » à l'intérieur du `<details>` repliable — désormais remontés dans leurs sections propres (Import/export et en-tête du panneau Audit) pour rester découvrables, seuls les 9 boutons de purge restent repliés. Vérifié live via pipe+CDP (port 9420 puis 9421/9422 après qu'un socket resté bloqué sur 9420 ait forcé un changement de port) : navigation Settings→Project et sidebar, pagination/recherche sur projets (13 réels), notes (22 fixtures) et modèles (13 fixtures, créés/nettoyés via actions store réelles), aperçu d'import invalide et invalidation après édition (UX-PIPE-7 non régressé), import valide réel, injection de faute `QuotaExceededError` sur la clé projets avec bannière + retry réel (donnée réellement réécrite sur disque, vérifiée par lecture indépendante), boutons Write/Trainer/Freeze sur bookmark avec adresse, chargement réel d'un projet (restaure 6 features Trainer), persistance à travers un redémarrage complet du process (13 projets retrouvés après kill+relaunch). `npm run type-check` et `npm run build` passent ; build C++ complet exécuté une fois en tout début de sous-lot. Limite connue : le screenshot visuel du panneau Paramètres raccourci n'a pas isolé la bonne section (scrollIntoView trop tôt), remplacé par une vérification structurelle JS (childCount, texte du lien, absence de l'ancien panneau) jugée suffisante.
+
+<a id="ux-produit-7"></a>
+#### UX-PRODUIT-7 — Navigation par usage et accès permanent à la cible
+
+**Diagnostic** : menu plat à 18 destinations, Expert 16e et menu défilant. « Modules » désigne à la fois composants installables et DLL chargées.
+
+**Entrées** : `App.vue` (boutons, computed `currentView`, styles/sidebar), `app.ts::AppView/activeView`, union `AssistantView` de `assistantSmartSearch.ts` ; `ProcessView.vue` ; `ModulesView.vue` ; vues spécialisées et locales FR/EN. Dépend de l'ajout `project` du lot UX-PRODUIT-8.
+
+**Ordre fixé** :
+- **Parcours** : Processus, Assistant, Investigation, Expert, Profils, Trainer.
+- **Session** : Projet/session.
+- **Inspection** : Mémoire, Timeline, Heatmap, Pattern Learning, CLR, WebView2, Réseau.
+- **Outils avancés** : Lua, Speedhack.
+- **Configuration et aide** : Composants et diagnostics, Paramètres, Lexique. Le bouton Aide existant reste permanent.
+
+**Réalisation** :
+1. Définir une liste de destinations/groupes avec IDs stables et clés i18n ; rendre menu et état actif depuis cette source. Conserver les IDs actuels sauf ajout `project` ; le libellé Modules change, pas son ID ni les API `getProcessModules`/`getModuleCatalog`. Ajouter des sélecteurs stables `data-view` indépendants de la langue pour le harnais. Si les unions de types sont factorisées, utiliser un fichier de types indépendant, pas un import circulaire entre stores.
+2. **État par défaut retenu** : Parcours et l'entrée Projet restent ouverts ; Inspection, Outils avancés et Configuration/aide sont repliés. Le titre de chaque groupe secondaire est un bouton explicite avec chevron et `aria-expanded`. Ouvrir un groupe n'en ferme pas un autre. L'arrivée dans une vue via un raccourci ouvre automatiquement son groupe ; empêcher le repli du groupe actif tant que sa vue est affichée. Garder les choix de repli pendant la session ; pas de nouvelle persistance disque pour ce confort. Aucun outil moteur supprimé parce que son entrée est secondaire.
+3. Dans la sidebar, hors de la liste défilante, garder logo, FR/EN, Aide et un bloc cible compact : nom/PID ou « Aucune cible », bouton **Changer/Choisir**. Ce bouton ouvre Processus et utilise son attachement existant ; aucune liste de processus dupliquée dans la sidebar et aucune nouvelle méthode d'attachement. Le statut se met à jour aussi après un appel pipe. Le nom long est tronqué visuellement avec son nom complet accessible, le PID reste lisible.
+4. Harmoniser les états sans prérequis des inspecteurs : cible absente → explication + bouton Processus ; helper manquant → lien Composants ; connexion CLR/CDP absente → action existante. Ne pas deviner qu'une cible est .NET/WebView2 sans preuve, ne pas bloquer les outils qui fonctionnent hors attachement (Lua, classement d'un historique collé, gestion de profils).
+5. Renommer la section Processus ambiguë en « Modules chargés » ; libeller Timeline/Heatmap/Pattern Learning avec sous-titres FR/EN explicatifs. Mettre à jour guides, aide et sélecteurs du harnais.
+
+**Validation à cocher** :
+- [ ] Les 19 destinations (18 existantes + Projet) sont accessibles, identifiées et sans doublon ; clic, focus clavier, groupes repliés/dépliés, groupe actif et raccourcis entre vues fonctionnent. Un agent teste chacune, pas seulement les six du parcours principal.
+- [ ] À 1282×802 puis fenêtre plus étroite autorisée par l'app : aucun élément essentiel recouvert, menu scrollable et cible/Aide accessibles.
+- [ ] Attache/détache via pipe reflétées dans l'en-tête ; état sans cible/helper manquant propose le bon lien sans action risquée automatique.
+- [ ] Parcours existants du harnais et captures FR/EN après nouveau menu ; Vue dédiée CLR et WebView2 conservées.
+
+<a id="ux-produit-9"></a>
+#### UX-PRODUIT-9 — Expert : sommaire fixe, recherche et outils épinglés
+
+**Diagnostic** : 112 boutons en mode Tout ; filtre d'étapes déjà livré et défaut Tout volontaire. Ne pas remplacer ce défaut par un masquage automatique du panneau Write.
+
+**Entrées** : `ExpertView.vue` (`expertSteps`, `activeStep`, `showStep`, consommation `pendingExpertStep/pendingExpertAnchor`) ; `AssistantView.vue` (rechercher les actions `open_expert` et l'affectation des ancres) ; `app.ts`, composants `ui/src/components/expert/`, `utils/persistLocalStorage.ts`. L'ancre explicite déjà identifiée est `expert-anchor-find-what-writes` ; les autres devront être ajoutées, pas supposées présentes. Conserver cette ancre également référencée par l'IA.
+
+**Réalisation** :
+1. Créer un catalogue UI des panneaux/outils existants : ID stable, label i18n, étape, ancre, mots-clés et condition de disponibilité. Couvrir tous les panneaux, pas seulement les quatre démos : scans, Trace UI, Écrit par, observation visuelle, candidats, Write/Freeze, Watch, AOB, injection, pointeurs, group scan, accès mémoire, autodissection, sauvegardes, session et journal. Une section conditionnelle absente explique son prérequis au lieu de scroller vers du vide. Ce catalogue sert à naviguer, il ne remplace pas le registry des outils IA et n'exécute aucune méthode moteur.
+2. Ajouter des ancres uniques aux panneaux ciblables. Une seule fonction d'ouverture est partagée par sommaire/recherche/favoris et recommandations Assistant ; attendre le rendu, puis scroll/focus. Si un filtre d'étape cache le panneau explicitement demandé, ouvrir son étape ou Tout ; une navigation normale reste sur Tout par défaut.
+3. La barre d'accès rapide reste sticky dans le conteneur qui défile réellement (`main`) ; elle contient les quatre étapes + Tout, le champ **Aller à un outil**, puis une ligne compacte de favoris. Les résultats de recherche sont une liste locale avec titre, étape et prérequis si indisponible. Chercher dans titres FR/EN et mots-clés, sans distinction casse/accents ; ordre déterministe correspondance exacte, préfixe, puis sous-chaîne. Montrer « Aucun outil trouvé » si vide ; liste défilante plutôt que troncature silencieuse des résultats. Flèches haut/bas changent la sélection, Entrée ouvre, Échap ferme. Aucun appel IA/réseau ni scan/write déclenché.
+4. Ajouter une étoile/bouton **Épingler** à chaque destination de la liste et un accès **Tous les outils** au sommaire complet. Première utilisation : favoris vides avec indication courte ; ne pas inventer des préférences de l'utilisateur. Les favoris restent dans l'ordre d'ajout, suppression immédiate possible, et sont accessibles même si leur outil ne correspond pas à la recherche actuelle.
+5. Persister uniquement leurs IDs via `persistLocalStorage` et une clé dédiée versionnée, sans modifier le format des exports workspace. JSON absent/invalide → liste vide ; doublons/IDs inconnus ignorés ; échec de sauvegarde visible sans prétendre à une persistance acquise. Ne pas stocker d'adresse/PID ni réutiliser les bookmarks mémoire pour ces favoris. Après ouverture d'un outil, lui donner le focus et compenser la barre fixe (`scroll-margin-top`) pour que son titre reste visible.
+
+**Validation à cocher** :
+- [ ] Recherche FR/EN trouve scan, Watch, Write/Freeze et Find What Writes ; action ouvre/focalise le bon panneau, y compris depuis un filtre qui le masquait.
+- [ ] Recommandation Assistant vers Find What Writes fonctionne encore ; toutes les ancres du catalogue sont uniques et existent.
+- [ ] Favoris conservés après redémarrage ; ID inconnu ignoré sans crash ; aucune opération moteur lancée par une simple navigation.
+- [ ] À 1282×802, sommaire reste utilisable en bas de page et ne recouvre pas les contrôles ; défaut Tout et accès direct à Write conservés.
+
+<a id="ux-produit-10"></a>
+#### UX-PRODUIT-10 — Investigation : situation et prochaine action avant les formulaires
+
+**Diagnostic** : carnet/formulaires avant objectif/prochaine action et même avant l'état vide. Il s'agit d'une réorganisation, pas d'une nouvelle logique de raisonnement.
+
+**Entrées** : `InvestigationView.vue` (résumé, `bestNextAction`/équivalent, carnet, preuves, états vide/archives) ; stores/computed qu'elle utilise ; traductions et guides. Ne pas modifier scores/planner/schéma du carnet ni les niveaux de preuve.
+
+**Ordre fixé** : en-tête cible/objectif/état → synthèse « connu / incertain / prochaine action » → preuves → étapes/journal → carnet/formulaires détaillés → exports/archives. Sans enquête, afficher d'abord un état vide et un bouton vers Assistant ou Processus selon le prérequis ; laisser les archives consultables.
+
+**Premier écran décidé** : une carte compacte de situation, une carte de prochaine action, puis le résumé des preuves. Ne pas mettre les textes pédagogiques complets ou le formulaire d'ajout d'hypothèse au-dessus. L'aide longue reste consultable via le mécanisme d'aide/repli existant. Une seule action principale mise en avant ; les autres actions restent secondaires et nommées.
+
+| Situation | Texte/état principal | Action principale |
+| --- | --- | --- |
+| Aucune cible, aucune enquête | « Choisir une cible pour démarrer » | Ouvrir Processus |
+| Cible attachée, aucune enquête | « Aucun objectif actif » avec nom/PID | Ouvrir Assistant ; lien secondaire Reprendre un projet |
+| Enquête en cours | Objectif, cible de l'enquête, état existant, connu/incertain | Prochaine action existante si exécutable ; sinon conseil et bouton vers le panneau approprié |
+| Enquête ancienne avec cible actuelle différente | Présenter explicitement les deux cibles ; preuves rattachées à l'ancienne enquête | Ouvrir Processus pour choisir la cible adaptée ; aucune action d'adresse de l'ancienne cible exécutée sur la nouvelle par défaut |
+| Enquête terminée/archivée | Statut existant et preuves réelles conservées | Consulter/reprendre via le flux existant ; pas de relance automatique |
+
+**Réalisation** :
+1. Déplacer les blocs et réutiliser leurs computed/actions actuels ; rendre les formulaires spécialisés repliables sans les supprimer sous `v-if="run"` : preuves/carnet peuvent exister indépendamment d'une enquête active. Les formulaires se déplient à la demande, y compris depuis un raccourci d'observation.
+2. Utiliser d'abord `bestNextAction`, sinon l'orientation existante de `effectProof.overallNextAction` puis `notebook.suggestedNextTest`, en indiquant sa provenance ; ce choix ordonne la présentation, il ne modifie aucun score/planner. Le bouton de prochaine action appelle exactement le chemin existant avec ses confirmations ; un conseil sans action exécutable reste un conseil.
+3. Distinguer cible actuellement attachée et `run.processName` historique si elles diffèrent. Un nom identique ne prouve pas qu'une adresse reste valide après redémarrage ; conserver les garde-fous de session/locator existants. Aucun changement de cible ou appel IA déclenché par le simple montage. Conserver `PersistenceErrorBanner` récemment livré pour `investigationPersistenceError`, ses actions Retry/Export et sa visibilité dès qu'une sauvegarde échoue ; ne pas le mettre dans un bloc replié ou en bas de page. Une erreur de sauvegarde prime sur l'objectif de compacité du premier écran.
+4. Faire suivre les raccourcis vers le formulaire de preuve déplacé par ouverture/scroll/focus. Résumer séparément écriture relue, effet observé, durabilité vérifiée, inconclusif/non vérifié ; ne pas fusionner en un pourcentage global « réussi ».
+
+**Validation à cocher** :
+- [ ] Enquête vide : premier écran explique comment commencer, sans empilement de formulaires vides ; archives accessibles.
+- [ ] Les cinq situations du tableau sont vérifiées avec captures ; cible/objectif/prochaine action ou état vide visibles sans faire défiler à 1282×802 ; détails et formulaires toujours accessibles.
+- [ ] Enquête seulement « écriture confirmée » : aucun badge d'effet/durabilité validé ajouté par la réorganisation ; actions et confirmations conservées, captures FR/EN.
+
+<a id="ux-produit-11a"></a>
+#### UX-PRODUIT-11A — Lisibilité des textes secondaires
+
+**Diagnostic** : `--text-dim:#565f89` sur fond `#16171f`, descriptions de 11–12 px. Le gris utilisé pour des explications actives les fait ressembler à des éléments désactivés.
+
+**Entrées** : variables CSS de `App.vue` ; `PanelIntro.vue`, styles des étapes Expert et pages remaniées par les lots UX-PRODUIT-7 à 10. Chercher `--text-dim`, couleurs en dur et opacités additionnelles avant de changer une variable globale.
+
+**Décision visuelle à appliquer** : créer/utiliser `--text-muted:#929bb8` pour l'information secondaire et `--text-disabled` pour les contrôles réellement désactivés. Garder les textes principaux et les couleurs de risque/succès/erreur actuels. Les descriptions informatives à 11 px passent à 12 px minimum, les paragraphes d'aide restent à 13 px minimum et l'interligne des descriptions à 1,4 minimum. Préférer le retour à la ligne aux hauteurs fixes qui coupent le texte.
+
+**Réalisation** : remplacer les usages informatifs de `--text-dim` et les couleurs codées en dur équivalentes ; ne pas changer aveuglément une variable globale sans classer ses usages (aide, métadonnées, statut, contrôle inactif). Objectif interne mesurable : contraste d'au moins 4,5:1 pour les petits textes informatifs normaux sur les fonds réels `#1a1b26`, `#16171f`, `#1f2031`, `#2a2b3d`. La couleur retenue dépasse ce seuil sur ces quatre fonds opaques ; supprimer/adapter les opacités supplémentaires qui annuleraient ce gain et recalculer sur la couleur compositée. Échantillonner toutes les vues après le changement global, pas seulement Expert. Aucun changement de police, palette complète ou thème clair demandé.
+
+**Validation à cocher** :
+- [ ] Tableau des paires texte/fond et ratios calculés, notamment aides, sous-titres, badges et état vide ; seuil atteint pour le périmètre informatif visé.
+- [ ] Captures réelles FR/EN, viewport du checkup et plus étroit : pas de libellé coupé ni de bouton recouvert après changement de taille.
+- [ ] Focus, texte actif et contrôle désactivé restent discernables. Ne pas annoncer une conformité globale d'accessibilité : seuls les contrôles effectués sont revendiqués.
+
+<a id="ux-produit-11b"></a>
+#### UX-PRODUIT-11B — Diagnostics IA : agents logiques et provenance
+
+**Diagnostic** : le pipe annonçait 4 agents car assistant/auto_resolver sont présents dans les racines build et dépôt ; la déduplication actuelle ne porte que sur les répertoires. Le template utilise en outre `agent.id` comme clé de ligne.
+
+**Entrées** : `SettingsDiagnosticsManager::getAiModelStatus` (`modelRootCandidates`, `embeddedAgents`, `embeddedAgentCount`) ; `ui/src/services/backend.ts::AiModelStatus` et mock ; retrouver `visibleEmbeddedAgents` et son rendu, originellement dans `SettingsView.vue`, après leur déplacement éventuel dans Diagnostics par 8B ; `model/README.md`, `ai/model_locator.*` pour le chemin du modèle effectivement résolu.
+
+**Présentation retenue** : résumé « 2 rôles IA détectés » avec une ligne par rôle ; chaque ligne donne nom/rôle et état valide/incomplet. Bouton **Voir les sources** dépliant les emplacements et erreurs. Les chemins techniques complets ne dominent pas le résumé. Un encart séparé **Modèle effectivement sélectionné** montre le GGUF/exécutable résolus ; il n'implique pas que le moteur est chargé/chaud. Le nombre logique et les états doivent être identiques dans Paramètres (résumé IA), Diagnostics et le pipe.
+
+**Réalisation** :
+1. Regrouper les manifestes identifiables par identité logique `(id, role)` ; ordonner les sources de façon déterministe selon les racines déjà parcourues. `embeddedAgents` contient une entrée par groupe ; `embeddedAgentCount` compte les groupes possédant au moins un manifeste valide, pas les fichiers. Une identité identique dans deux racines n'ajoute pas un rôle ; deux rôles différents restent distincts même si leur ID est identique. Garder les champs existants pour compatibilité, ajouter une liste `sources` avec chemins/validité/erreurs pour les copies secondaires ; utiliser une clé UI composite stable. Le manifeste représentatif est le premier valide selon cet ordre, sinon le premier lisible identifié ; ce choix est uniquement diagnostique et ne modifie pas le chargement du modèle.
+2. Conserver les diagnostics des manifestes invalides/illisibles sans les faire passer pour agents valides. Si leur identité ne peut pas être lue, les présenter comme erreurs de sources distinctes, sans gonfler le nombre d'agents valides. Ne supprimer ni déplacer aucun fichier modèle.
+3. Afficher séparément le modèle GGUF et l'exécutable **effectivement résolus** (`modelPath`, `modelSource`, `executablePath`) et les sources de manifestes détectées. Ne pas qualifier un manifeste de « utilisé par le runtime » si le runtime ne résout que le GGUF ; ne pas changer la priorité réelle de chargement dans ce lot.
+4. Garder les règles installé/activé/session désactivée de UX-PIPE-2 et la portabilité des chemins. Les copies secondaires restent consultables dans un détail repliable.
+
+**Validation à cocher** :
+- [ ] Deux racines avec mêmes assistant/auto_resolver : count 2, deux lignes logiques, quatre sources détaillées ; aucune clé Vue dupliquée.
+- [ ] Une seule racine portable : count 2 sans dépendance au dépôt ; ajout d'un troisième ID valide → count 3 ; manifeste invalide lisible comme erreur, pas compté comme agent valide.
+- [ ] Chemin effectif du modèle inchangé avant/après, statut session désactivée inchangé ; réponse réelle `getAiModelStatus` et rendu FR/EN concordants.
+
+#### Contrôle de cette inscription documentaire
+
+**Quoi/pourquoi** : cadrage demandé des pistes 7 à 11, transformées en six fiches exécutables avec un ordre, des choix produit retenus, des cas d'usage, fichiers, étapes et critères observables. Les pistes 1 à 6 déjà réalisées par Claude restent closes ; aucun doublon de chantier créé. Le point documentaire du rapport 11 (anciens UX-PIPE-7 à 10 mal résumés) est déjà corrigé dans l'État courant, donc exclu des travaux restants.
+
+**Comment vérifié** : relecture du rapport, du tracker réactualisé et des points d'entrée frontend/backend ; contrôle de couverture, des liens/ancres, des dépendances et de la distinction entre existant et futur. Fichier édité de manière ciblée, sans suppression des nouvelles entrées concurrentes. Documentation seulement : aucun code applicatif modifié, aucun build ni test applicatif relancé ou revendiqué pour cette session. Les cases futures restent décochées.

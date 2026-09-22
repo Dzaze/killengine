@@ -266,6 +266,7 @@
     "settings": "Settings",
     "investigation": "Investigation",
     "trainer": "Trainer",
+    "project": "Project",
     "speedhack": "Speedhack",
     "network": "Network",
     "lexicon": "Glossary",
@@ -274,6 +275,23 @@
     "languageSaveFailed": "Language changed for this session, but not saved: {error}",
     "help": "Help",
     "helpTitle": "Open the user guide"
+  },
+  "project": {
+    "title": "Project / session",
+    "subtitle": "Local projects, notes and addresses, structure templates, workspace import/export, and the current session's history.",
+    "intro": {
+      "what": "Groups everything that describes an investigation session: saved local projects, bookmarks (notes and addresses), structure templates, workspace import/export, and history (auto memory, remembered patterns, write history, action audit).",
+      "purpose": "Find and manage in one place what used to be scattered across Settings, to switch between sessions or targets more easily.",
+      "how": "Saving a project captures the current state (investigation, Trainer features, templates, bookmarks). Loading it restores that state. Import/export lets you move a full workspace between machines."
+    },
+    "sommaire": {
+      "projects": "Projects",
+      "notes": "Notes and addresses",
+      "templates": "Templates",
+      "importExport": "Import / export",
+      "history": "History"
+    },
+    "autoMemoryDetailsTitle": "Auto memory and remembered patterns"
   },
   "modules": {
     "intro": "Optional KillEngine dependencies: installed/missing status and in-UI installation (local scripts, network download, UAC prompt). Install missing modules before exporting the package to another machine.",
@@ -2208,6 +2226,8 @@
     "requestsThisSession": "Requests this session",
     "externalAiHint3": "The key is encrypted (Windows DPAPI, tied to the user account) before storage — never in plain text, never returned by the backend once saved. No request limit imposed by KillEngine: the counter above is informational only, the actual cost depends on your Anthropic account.",
     "workspaceTitle": "AI Workspace / Trainer",
+    "workspaceMovedHint": "Projects, notes, structure templates, import/export, and history are now grouped in the Project page.",
+    "openProjectView": "Open Project/session",
     "activeInvestigation": "Active investigation",
     "stepCount": "{count} step(s)",
     "investigationArchives": "Investigation archives",

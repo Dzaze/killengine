@@ -41,7 +41,7 @@ import { i18n } from '@/i18n'
 
 const { t } = i18n.global
 
-export type AssistantView = 'assistant' | 'investigation' | 'trainer' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'modules' | 'settings'
+export type AssistantView = 'assistant' | 'investigation' | 'trainer' | 'project' | 'process' | 'memory' | 'memory-timeline' | 'memory-heatmap' | 'pattern-learning' | 'clr' | 'webview2' | 'scripting' | 'speedhack' | 'network' | 'profiles' | 'expert' | 'lexicon' | 'modules' | 'settings'
 
 export interface ChatMessage {
   id: number

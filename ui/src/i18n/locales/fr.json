@@ -266,6 +266,7 @@
     "settings": "Paramètres",
     "investigation": "Investigation",
     "trainer": "Trainer",
+    "project": "Projet",
     "speedhack": "Speedhack",
     "network": "Réseau",
     "lexicon": "Lexique",
@@ -274,6 +275,23 @@
     "languageSaveFailed": "Langue changée pour cette session, mais non enregistrée : {error}",
     "help": "Aide",
     "helpTitle": "Ouvrir le guide utilisateur"
+  },
+  "project": {
+    "title": "Projet / session",
+    "subtitle": "Projets locaux, notes et adresses, modèles de structure, import/export et historique de la session en cours.",
+    "intro": {
+      "what": "Regroupe tout ce qui décrit une session d'investigation : projets locaux sauvegardés, bookmarks (notes et adresses), modèles de structure, import/export du workspace, et l'historique (mémoire auto, motifs mémorisés, historique d'écriture, audit des actions).",
+      "purpose": "Retrouver et gérer d'un seul endroit ce qui était auparavant dispersé dans Paramètres, pour passer d'une session ou d'une cible à l'autre plus facilement.",
+      "how": "Sauvegarder un projet capture l'état courant (investigation, features Trainer, modèles, bookmarks). Le recharger restaure cet état. L'import/export permet de transférer un workspace complet entre machines."
+    },
+    "sommaire": {
+      "projects": "Projets",
+      "notes": "Notes et adresses",
+      "templates": "Modèles",
+      "importExport": "Import / export",
+      "history": "Historique"
+    },
+    "autoMemoryDetailsTitle": "Mémoire auto et motifs mémorisés"
   },
   "modules": {
     "intro": "Dépendances optionnelles de KillEngine : statut installé/manquant et installation depuis l'UI (scripts locaux, téléchargement réseau, invite UAC). Pensez à installer les modules manquants avant d'exporter le package sur une autre machine.",
@@ -2208,6 +2226,8 @@
     "requestsThisSession": "Requêtes cette session",
     "externalAiHint3": "La clé est chiffrée (DPAPI Windows, liée au compte utilisateur) avant stockage — jamais en clair, jamais renvoyée par le backend une fois enregistrée. Aucune limite de requêtes imposée par KillEngine : le compteur ci-dessus est informatif seulement, le coût réel dépend de ton compte Anthropic.",
     "workspaceTitle": "Workspace IA / Trainer",
+    "workspaceMovedHint": "Les projets, notes, modèles de structure, import/export et l'historique sont maintenant regroupés dans la page Projet.",
+    "openProjectView": "Ouvrir Projet/session",
     "activeInvestigation": "Investigation active",
     "stepCount": "{count} étape(s)",
     "investigationArchives": "Archives Investigation",
