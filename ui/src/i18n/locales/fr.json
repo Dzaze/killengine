@@ -47,7 +47,15 @@
     "windowOnly": "Fenêtres seulement",
     "hasWindow": "fenêtre",
     "noModules": "Aucun module accessible",
+    "noModulesMatch": "Aucun module ne correspond à ce filtre",
+    "moduleFilterPlaceholder": "Filtrer les modules (nom ou chemin)...",
+    "moduleCountFiltered": "{shown} sur {total}",
+    "showMoreModules": "Afficher {count} de plus",
     "noProcesses": "Aucun processus trouvé",
+    "loading": "Chargement des processus...",
+    "errors": {
+      "loadFailed": "Impossible de charger les processus : {error}"
+    },
     "intro": {
       "what": "La liste des processus Windows en cours d'exécution.",
       "purpose": "Choisir et attacher le programme que tu veux inspecter ou modifier — indispensable avant toute autre action dans KillEngine.",
@@ -263,6 +271,7 @@
     "lexicon": "Lexique",
     "modules": "Modules",
     "languageSwitchLabel": "Langue de l'interface",
+    "languageSaveFailed": "Langue changée pour cette session, mais non enregistrée : {error}",
     "help": "Aide",
     "helpTitle": "Ouvrir le guide utilisateur"
   },
@@ -1346,6 +1355,13 @@
       "attachFirst": "Attache un processus avant de scanner",
       "readyToSearch": "Prêt à chercher"
     },
+    "aiMode": {
+      "checking": "Vérification de l'IA...",
+      "claude": "Claude",
+      "claudeNoKey": "Claude (clé manquante)",
+      "local": "IA locale",
+      "deterministic": "Sans IA (outils déterministes)"
+    },
     "subtitle": "Décris ce que tu cherches, KillEngine fait le reste.",
     "thinking": {
       "analyzingQuery": "Analyse de ta requête...",
@@ -1916,6 +1932,8 @@
     "clear": "Effacer",
     "empty": "Aucune adresse surveillée.",
     "previousValue": "précédent {value}",
+    "unreadable": "Illisible",
+    "lastKnownValue": "dernière valeur connue {value}",
     "remove": "Retirer"
   },
   "groupScanPanel": {
@@ -2149,6 +2167,7 @@
     "tempStorageHint": "Le nettoyage ferme le contexte de scan courant, vide l'undo et le snapshot unknown, puis supprime les fichiers `killengine_candidates_*.kecand` et `killengine_snapshot_*.kesnap` restants.",
     "localAiTitle": "IA locale",
     "aiReady": "IA prête",
+    "aiDisabled": "IA désactivée",
     "aiUnavailable": "IA indisponible",
     "checking": "Vérif...",
     "verify": "Vérifier",
@@ -2230,6 +2249,11 @@
     "saveProject": "Sauver projet",
     "noLocalProject": "Aucun projet local.",
     "projectSummary": "{process} · {features} feature(s) · {templates} template(s) · {bookmarks} bookmark(s) · {audits} audit(s)",
+    "filterProjectsPlaceholder": "Filtrer les projets (nom, processus)...",
+    "filterBookmarksPlaceholder": "Filtrer les notes/bookmarks (libellé, note, type)...",
+    "filterStructuresPlaceholder": "Filtrer les modèles de structure (nom, processus)...",
+    "noListMatch": "Aucun élément ne correspond à ce filtre.",
+    "showMoreItems": "Afficher {count} de plus",
     "load": "Charger",
     "delete": "Supprimer",
     "bookmarksNotesTitle": "Bookmarks / Notes",
@@ -2386,6 +2410,7 @@
     "exportCopied": "Export copié.",
     "auditCopied": "Audit copié.",
     "previewReady": "Aperçu prêt.",
+    "previewStale": "Texte modifié depuis l'aperçu — clique à nouveau sur Aperçu avant d'importer.",
     "invalidImport": "Import invalide.",
     "workspaceImported": "Workspace importé.",
     "importRefused": "Import refusé.",
@@ -2582,6 +2607,7 @@
     "targetSaved": "Cible \"{name}\" sauvegardée dans \"{profile}\" ({locator}).",
     "addressesSaved": "{count} adresses sauvegardées dans \"{profile}\" sous \"{name} 1\", \"{name} 2\"...",
     "errorPrefix": "Erreur : {error}",
+    "loadFailed": "Chargement du profil impossible.",
     "readClrObjectFirst": "Lis d'abord un objet dans la vue CLR.",
     "clrSaveUnavailable": "Sauvegarde de cible CLR indisponible côté backend.",
     "clrTargetSaved": "Cible CLR \"{name}\" sauvegardée ({locator}).",
@@ -3056,11 +3082,15 @@
       "exportJson": "Exporter JSON"
     },
     "status": {
-      "starting": "Démarrage..."
+      "starting": "Démarrage...",
+      "pointsCollected": "{count} points collectés",
+      "finishedAuto": "Terminé automatiquement ({count} points)"
     },
     "logs": {
       "addressAlreadyWatched": "Adresse déjà surveillée",
-      "exported": "Timeline exportée"
+      "exported": "Timeline exportée",
+      "continuesInBackground": "La collecte Timeline continue en arrière-plan (les points restent comptés, revenez sur cette page pour les voir).",
+      "finishedAuto": "Collecte Timeline terminée automatiquement ({count} points collectés)."
     },
     "stats": {
       "title": "Statistiques",
@@ -3610,6 +3640,7 @@
       "classificationFailed": "Classification échouée",
       "engineDetectionFailed": "Détection de moteur échouée",
       "profileDeleteFailed": "Suppression du profil échouée",
+      "profileListFailed": "Liste des profils de jeu indisponible",
       "profileLoadFailed": "Chargement du profil échoué",
       "profileSaveFailed": "Sauvegarde du profil échouée"
     },
@@ -3721,7 +3752,8 @@
       "reasonScaledStorage": "valeur affichée {value}, stock possible {scaled}",
       "reasonShortInteger": "entier court possible",
       "reasonSmallCompactValue": "petite valeur compacte possible",
-      "reasonSmallSignedCompactValue": "petite valeur signée compacte possible"
+      "reasonSmallSignedCompactValue": "petite valeur signée compacte possible",
+      "scaleRefused": "Suggestion {typeLabel} refusée (hors bornes ou valeur non numérique)."
     },
     "watch": {
       "addressCount": "{count} adresse(s).",
@@ -4212,6 +4244,7 @@
     "filePickerNotExposed": "Sélecteur de fichier non exposé par ce backend.",
     "loadFailed": "Impossible de charger les paramètres : {error}",
     "saveFailed": "Sauvegarde impossible : {error}",
+    "saveFailedUnknown": "erreur inconnue",
     "saved": "Paramètres sauvegardés."
   },
   "trainerStore": {
@@ -4384,6 +4417,35 @@
     "defaultChainLabel": "Chaîne #{id}",
     "importedCounts": "{features} feature(s), {templates} template(s), {bookmarks} bookmark(s), {archives} archive(s), {audits} audit(s).",
     "importedCountsDetailed": "{features} feature(s), {templates} template(s), {bookmarks} bookmark(s), {archives} archive(s), {audits} audit(s), settings={hasSettings}, preset={preset}.",
+    "trainerImportSkipped": "Trainer non importé",
+    "trainerImportBlockedActive": "Trainer non importé : une opération est actuellement active ({names}). Arrêtez-la (OFF, avec confirmation) sur la cible où elle tourne réellement, puis relancez l'import.",
+    "trainerImportBlockedBusy": "Trainer non importé : une opération Trainer est en cours. Attendez qu'elle se termine, puis relancez l'import.",
+    "importErrors": {
+      "template": "Import refusé — section « {section} » : {reason}.",
+      "section": {
+        "format": "format du fichier",
+        "version": "version",
+        "investigation": "Investigation",
+        "trainer": "Trainer",
+        "structures": "Structures",
+        "bookmarks": "Bookmarks",
+        "audit": "Audit",
+        "settings": "Réglages"
+      },
+      "reason": {
+        "json_syntax": "JSON invalide ({detail})",
+        "not_object": "le contenu doit être un objet JSON",
+        "unsupported_version": "version {detail} non prise en charge (acceptée : 1)",
+        "section_not_object": "doit être un objet",
+        "invalid_active_investigation": "l'investigation active est incomplète ou mal formée (un ou plusieurs champs requis manquent, ex. les étapes)",
+        "invalid_archive_entry": "une entrée de l'archive est incomplète ou mal formée",
+        "invalid_feature_entry": "une feature Trainer est incomplète ou mal formée",
+        "invalid_template_entry": "un modèle de structure est incomplet ou mal formé",
+        "invalid_bookmark_entry": "un bookmark est incomplet ou mal formé",
+        "invalid_entry": "une entrée du journal est incomplète ou mal formée",
+        "invalid_field": "le champ « {detail} » est invalide"
+      }
+    },
     "liveWatchEnabled": "Watch expressions live activé",
     "liveWatchStopped": "Watch expressions live arrêté",
     "markdown": {
@@ -4585,6 +4647,7 @@
     "valueDetail": "Valeur {value}."
   },
   "speedhackStore": {
+    "apiHookStatusUnavailable": "Statut d'interception API indisponible",
     "backendNotExposed": "Backend non exposé.",
     "count": "compter",
     "factorDetail": "Facteur {factor}x.",
@@ -4665,7 +4728,8 @@
     "displayValueReportReason": "Trace UI string et sources numériques avant debugger.",
     "priorityLabel": "Priorité : {label}",
     "actionFallback": "action",
-    "plannedStep": "Étape planifiée"
+    "plannedStep": "Étape planifiée",
+    "persistenceFailedGeneric": "Impossible d'enregistrer l'investigation localement."
   },
   "main": {
     "fatalErrorBanner": "⚠ Erreur d'affichage KillEngine ({info}) : {message} — détails dans la console (Ctrl+Shift+J / F12).",
@@ -4698,7 +4762,7 @@
     },
     "errorTitle": "Le préchauffage IA a échoué",
     "continueWithoutAi": "Continuer sans IA locale",
-    "estimateTitle": "Préchauffage estimé à environ {seconds}s sur cette machine",
+    "estimateTitle": "Préchauffage estimé à environ {duration} sur cette machine",
     "estimateDetail": "Le débit mesuré sur cette machine avec ce modèle indique un temps de préchauffage plus long que d'habitude. Tu peux attendre qu'il se termine, ou continuer sans IA locale pour cette session.",
     "estimateWaitButton": "Attendre le préchauffage",
     "sessionDisabledTitle": "IA locale désactivée pour cette session",

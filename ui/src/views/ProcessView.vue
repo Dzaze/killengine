@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
-import type { ProcessInfo } from '@/services/backend'
 
 const store = useAppStore()
 const { t } = useI18n()
@@ -12,7 +11,34 @@ const searchFilter = ref('')
 const selectedPid = ref<number | null>(null)
 const windowOnly = ref(false)
 
-const filteredProcesses = ref<ProcessInfo[]>([])
+// UX-PIPE-4 : la liste de modules d'un process pouvait dépasser largement 40
+// éléments (147 observés en audit live) mais n'en affichait que les 40
+// premiers sans aucune indication ni moyen d'accéder au reste.
+const MODULE_PAGE_SIZE = 40
+const moduleFilter = ref('')
+const moduleVisibleCount = ref(MODULE_PAGE_SIZE)
+const filteredModules = computed(() => {
+  if (!moduleFilter.value) return store.processModules
+  const q = moduleFilter.value.toLowerCase()
+  return store.processModules.filter((m) => m.name.toLowerCase().includes(q) || m.path.toLowerCase().includes(q))
+})
+const visibleModules = computed(() => filteredModules.value.slice(0, moduleVisibleCount.value))
+watch(moduleFilter, () => {
+  moduleVisibleCount.value = MODULE_PAGE_SIZE
+})
+
+// UX-PIPE-1 : dérivé réactivement de store.processes (au lieu d'une copie
+// locale resynchronisée manuellement) -- sinon un chargement déclenché après
+// le montage (connexion backend tardive, voir le watch ci-dessous) ne se
+// répercutait jamais sur la liste affichée.
+const filteredProcesses = computed(() =>
+  store.processes.filter((p) => {
+    if (windowOnly.value && !p.hasWindow) return false
+    if (!searchFilter.value) return true
+    const q = searchFilter.value.toLowerCase()
+    return p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
+  }),
+)
 const selectedProcess = computed(() => store.processes.find((p) => p.pid === selectedPid.value) ?? null)
 const kernelStatusText = computed(() => {
   if (!store.kernelDriverStatus) return t('process.kernelStatus.notTested')
@@ -21,17 +47,10 @@ const kernelStatusText = computed(() => {
   return t('process.kernelStatus.notLoaded')
 })
 
-function updateFiltered() {
-  filteredProcesses.value = store.processes.filter((p) => {
-    if (windowOnly.value && !p.hasWindow) return false
-    if (!searchFilter.value) return true
-    const q = searchFilter.value.toLowerCase()
-    return p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
-  })
-}
-
 async function selectProcess(pid: number) {
   selectedPid.value = pid
+  moduleFilter.value = ''
+  moduleVisibleCount.value = MODULE_PAGE_SIZE
   await store.refreshProcessModules(pid)
 }
 
@@ -49,17 +68,31 @@ async function detach() {
   await store.detach()
 }
 
-onMounted(async () => {
+async function loadProcesses() {
   await Promise.all([store.refreshProcesses(), store.refreshKernelDriverStatus()])
-  updateFiltered()
-})
+}
+
+// UX-PIPE-1 : déclenché par la connexion réelle du backend plutôt que par le
+// montage du composant -- App.vue lance store.init() (async) au même moment,
+// et selon l'ordre de montage Vue, ProcessView pouvait monter avant que le
+// backend QWebChannel soit prêt. { immediate: true } couvre les deux cas :
+// backend déjà connecté (ex. retour sur cette vue) déclenche le chargement
+// tout de suite ; backend pas encore connecté ne fait rien ici et se
+// déclenche seul dès que store.isConnected passe à true.
+watch(
+  () => store.isConnected,
+  (connected) => {
+    if (connected) void loadProcesses()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
   <div class="process-view">
     <div class="header">
       <h1>{{ $t('process.select') }}</h1>
-      <button class="btn btn-secondary" @click="store.refreshProcesses().then(updateFiltered)">
+      <button class="btn btn-secondary" :disabled="store.processesLoading" @click="loadProcesses">
         {{ $t('process.refresh') }}
       </button>
     </div>
@@ -87,16 +120,22 @@ onMounted(async () => {
         v-model="searchFilter"
         :placeholder="$t('process.filterPlaceholder')"
         class="search-input"
-        @input="updateFiltered"
       />
       <label class="window-toggle">
-        <input v-model="windowOnly" type="checkbox" @change="updateFiltered" />
+        <input v-model="windowOnly" type="checkbox" />
         {{ $t('process.windowOnly') }}
       </label>
     </div>
 
     <!-- Process list -->
-    <div class="process-list">
+    <div v-if="store.processesLoading && store.processes.length === 0" class="empty">
+      {{ $t('process.loading') }}
+    </div>
+    <div v-else-if="store.processesError" class="empty error">
+      {{ $t('process.errors.loadFailed', { error: store.processesError }) }}
+      <button class="btn btn-secondary" @click="loadProcesses">{{ $t('process.refresh') }}</button>
+    </div>
+    <div v-else class="process-list">
       <div
         v-for="proc in filteredProcesses"
         :key="proc.pid"
@@ -191,16 +230,36 @@ onMounted(async () => {
     <div v-if="selectedPid !== null" class="module-panel">
       <div class="module-header">
         <h2>{{ $t('process.modules') }}</h2>
-        <span>{{ store.processModules.length }}</span>
+        <span>
+          {{ moduleFilter || visibleModules.length < filteredModules.length
+            ? $t('process.moduleCountFiltered', { shown: visibleModules.length, total: filteredModules.length })
+            : store.processModules.length }}
+        </span>
       </div>
+      <input
+        v-if="store.processModules.length > MODULE_PAGE_SIZE"
+        v-model="moduleFilter"
+        :placeholder="$t('process.moduleFilterPlaceholder')"
+        class="search-input module-filter-input"
+      />
       <div class="module-list">
-        <div v-for="module in store.processModules.slice(0, 40)" :key="`${module.baseAddress}-${module.name}`" class="module-item">
+        <div v-for="module in visibleModules" :key="`${module.baseAddress}-${module.name}`" class="module-item">
           <div class="module-name">{{ module.name }}</div>
           <div class="module-path" :title="module.path">{{ module.path }}</div>
         </div>
         <div v-if="store.processModules.length === 0" class="empty compact">
           {{ $t('process.noModules') }}
         </div>
+        <div v-else-if="filteredModules.length === 0" class="empty compact">
+          {{ $t('process.noModulesMatch') }}
+        </div>
+        <button
+          v-if="visibleModules.length < filteredModules.length"
+          class="btn btn-secondary module-load-more"
+          @click="moduleVisibleCount += MODULE_PAGE_SIZE"
+        >
+          {{ $t('process.showMoreModules', { count: Math.min(MODULE_PAGE_SIZE, filteredModules.length - visibleModules.length) }) }}
+        </button>
       </div>
     </div>
   </div>
@@ -348,6 +407,14 @@ onMounted(async () => {
   color: var(--text-dim);
 }
 
+.empty.error {
+  color: var(--error);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
 .attach-bar {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(320px, 1.4fr) auto;
@@ -472,12 +539,25 @@ onMounted(async () => {
   font-size: 12px;
 }
 
+.module-filter-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
 .module-list {
   display: flex;
   max-height: 220px;
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+}
+
+.module-load-more {
+  align-self: center;
+  margin: 4px 0;
+  font-size: 12px;
+  padding: 6px 12px;
 }
 
 .module-item {

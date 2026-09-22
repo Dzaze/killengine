@@ -57,7 +57,7 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? t('exact
         :key="String(item.type)"
         class="type-chip"
         type="button"
-        :class="{ active: store.exactScanType === String(item.type).replace(/\\s+x100$/i, '') }"
+        :class="{ active: store.exactScanType === String(item.type).replace(/\s+x\d+$/i, '') }"
         :title="`${item.confidence} · ${item.reason}`"
         @click="store.useInferredType(String(item.type))"
       >

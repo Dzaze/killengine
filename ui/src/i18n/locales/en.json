@@ -47,7 +47,15 @@
     "windowOnly": "Windows only",
     "hasWindow": "window",
     "noModules": "No accessible modules",
+    "noModulesMatch": "No module matches this filter",
+    "moduleFilterPlaceholder": "Filter modules (name or path)...",
+    "moduleCountFiltered": "{shown} of {total}",
+    "showMoreModules": "Show {count} more",
     "noProcesses": "No processes found",
+    "loading": "Loading processes...",
+    "errors": {
+      "loadFailed": "Couldn't load processes: {error}"
+    },
     "intro": {
       "what": "The list of currently running Windows processes.",
       "purpose": "Choose and attach the program you want to inspect or modify — required before any other action in KillEngine.",
@@ -263,6 +271,7 @@
     "lexicon": "Glossary",
     "modules": "Modules",
     "languageSwitchLabel": "Interface language",
+    "languageSaveFailed": "Language changed for this session, but not saved: {error}",
     "help": "Help",
     "helpTitle": "Open the user guide"
   },
@@ -1346,6 +1355,13 @@
       "attachFirst": "Attach a process before scanning",
       "readyToSearch": "Ready to search"
     },
+    "aiMode": {
+      "checking": "Checking AI...",
+      "claude": "Claude",
+      "claudeNoKey": "Claude (missing key)",
+      "local": "Local AI",
+      "deterministic": "No AI (deterministic tools)"
+    },
     "subtitle": "Describe what you are looking for, KillEngine does the rest.",
     "thinking": {
       "analyzingQuery": "Analyzing your request...",
@@ -1916,6 +1932,8 @@
     "clear": "Clear",
     "empty": "No watched address.",
     "previousValue": "previous {value}",
+    "unreadable": "Unreadable",
+    "lastKnownValue": "last known value {value}",
     "remove": "Remove"
   },
   "groupScanPanel": {
@@ -2149,6 +2167,7 @@
     "tempStorageHint": "Cleanup closes the current scan context, clears the undo and unknown snapshot, then removes remaining `killengine_candidates_*.kecand` and `killengine_snapshot_*.kesnap` files.",
     "localAiTitle": "Local AI",
     "aiReady": "AI ready",
+    "aiDisabled": "AI disabled",
     "aiUnavailable": "AI unavailable",
     "checking": "Checking...",
     "verify": "Verify",
@@ -2230,6 +2249,11 @@
     "saveProject": "Save project",
     "noLocalProject": "No local project.",
     "projectSummary": "{process} · {features} feature(s) · {templates} template(s) · {bookmarks} bookmark(s) · {audits} audit(s)",
+    "filterProjectsPlaceholder": "Filter projects (name, process)...",
+    "filterBookmarksPlaceholder": "Filter notes/bookmarks (label, note, type)...",
+    "filterStructuresPlaceholder": "Filter structure templates (name, process)...",
+    "noListMatch": "No item matches this filter.",
+    "showMoreItems": "Show {count} more",
     "load": "Load",
     "delete": "Delete",
     "bookmarksNotesTitle": "Bookmarks / Notes",
@@ -2386,6 +2410,7 @@
     "exportCopied": "Export copied.",
     "auditCopied": "Audit copied.",
     "previewReady": "Preview ready.",
+    "previewStale": "Text changed since the preview — click Preview again before importing.",
     "invalidImport": "Invalid import.",
     "workspaceImported": "Workspace imported.",
     "importRefused": "Import refused.",
@@ -2582,6 +2607,7 @@
     "targetSaved": "Target \"{name}\" saved in \"{profile}\" ({locator}).",
     "addressesSaved": "{count} addresses saved in \"{profile}\" as \"{name} 1\", \"{name} 2\"...",
     "errorPrefix": "Error: {error}",
+    "loadFailed": "Could not load the profile.",
     "readClrObjectFirst": "Read an object in the CLR view first.",
     "clrSaveUnavailable": "CLR target save unavailable on the backend side.",
     "clrTargetSaved": "CLR target \"{name}\" saved ({locator}).",
@@ -3056,11 +3082,15 @@
       "exportJson": "Export JSON"
     },
     "status": {
-      "starting": "Starting..."
+      "starting": "Starting...",
+      "pointsCollected": "{count} points collected",
+      "finishedAuto": "Finished automatically ({count} points)"
     },
     "logs": {
       "addressAlreadyWatched": "Address already watched",
-      "exported": "Timeline exported"
+      "exported": "Timeline exported",
+      "continuesInBackground": "Timeline collection continues in the background (points still counted, return to this page to see them).",
+      "finishedAuto": "Timeline collection finished automatically ({count} points collected)."
     },
     "stats": {
       "title": "Statistics",
@@ -3610,6 +3640,7 @@
       "classificationFailed": "Classification failed",
       "engineDetectionFailed": "Engine detection failed",
       "profileDeleteFailed": "Profile deletion failed",
+      "profileListFailed": "Game profile list unavailable",
       "profileLoadFailed": "Profile load failed",
       "profileSaveFailed": "Profile save failed"
     },
@@ -3721,7 +3752,8 @@
       "reasonScaledStorage": "displayed value {value}, possibly stored as {scaled}",
       "reasonShortInteger": "possibly a short integer",
       "reasonSmallCompactValue": "possibly a small compact value",
-      "reasonSmallSignedCompactValue": "possibly a small signed compact value"
+      "reasonSmallSignedCompactValue": "possibly a small signed compact value",
+      "scaleRefused": "Suggestion {typeLabel} refused (out of range or not a number)."
     },
     "watch": {
       "addressCount": "{count} address(es).",
@@ -4212,6 +4244,7 @@
     "filePickerNotExposed": "File picker not exposed by this backend.",
     "loadFailed": "Could not load settings: {error}",
     "saveFailed": "Could not save: {error}",
+    "saveFailedUnknown": "unknown error",
     "saved": "Settings saved."
   },
   "trainerStore": {
@@ -4384,6 +4417,35 @@
     "defaultChainLabel": "Chain #{id}",
     "importedCounts": "{features} feature(s), {templates} template(s), {bookmarks} bookmark(s), {archives} archive(s), {audits} audit(s).",
     "importedCountsDetailed": "{features} feature(s), {templates} template(s), {bookmarks} bookmark(s), {archives} archive(s), {audits} audit(s), settings={hasSettings}, preset={preset}.",
+    "trainerImportSkipped": "Trainer not imported",
+    "trainerImportBlockedActive": "Trainer not imported: an operation is currently active ({names}). Turn it OFF (with confirmation) on the target it is really running on, then import again.",
+    "trainerImportBlockedBusy": "Trainer not imported: a Trainer operation is in progress. Wait for it to finish, then import again.",
+    "importErrors": {
+      "template": "Import rejected — section \"{section}\": {reason}.",
+      "section": {
+        "format": "file format",
+        "version": "version",
+        "investigation": "Investigation",
+        "trainer": "Trainer",
+        "structures": "Structures",
+        "bookmarks": "Bookmarks",
+        "audit": "Audit",
+        "settings": "Settings"
+      },
+      "reason": {
+        "json_syntax": "invalid JSON ({detail})",
+        "not_object": "the content must be a JSON object",
+        "unsupported_version": "version {detail} not supported (accepted: 1)",
+        "section_not_object": "must be an object",
+        "invalid_active_investigation": "the active investigation is incomplete or malformed (one or more required fields are missing, e.g. its steps)",
+        "invalid_archive_entry": "an archive entry is incomplete or malformed",
+        "invalid_feature_entry": "a Trainer feature is incomplete or malformed",
+        "invalid_template_entry": "a structure template is incomplete or malformed",
+        "invalid_bookmark_entry": "a bookmark is incomplete or malformed",
+        "invalid_entry": "a log entry is incomplete or malformed",
+        "invalid_field": "the field \"{detail}\" is invalid"
+      }
+    },
     "liveWatchEnabled": "Live watch expressions enabled",
     "liveWatchStopped": "Live watch expressions stopped",
     "markdown": {
@@ -4585,6 +4647,7 @@
     "valueDetail": "Value {value}."
   },
   "speedhackStore": {
+    "apiHookStatusUnavailable": "API hook status unavailable",
     "backendNotExposed": "Backend not exposed.",
     "count": "count",
     "factorDetail": "Factor {factor}x.",
@@ -4665,7 +4728,8 @@
     "displayValueReportReason": "Trace UI string and numeric sources before debugging.",
     "priorityLabel": "Priority: {label}",
     "actionFallback": "action",
-    "plannedStep": "Planned step"
+    "plannedStep": "Planned step",
+    "persistenceFailedGeneric": "Unable to save the investigation locally."
   },
   "main": {
     "fatalErrorBanner": "⚠ KillEngine display error ({info}): {message} — details in the console (Ctrl+Shift+J / F12).",
@@ -4698,7 +4762,7 @@
     },
     "errorTitle": "AI warmup failed",
     "continueWithoutAi": "Continue without local AI",
-    "estimateTitle": "Warmup estimated at about {seconds}s on this machine",
+    "estimateTitle": "Warmup estimated at about {duration} on this machine",
     "estimateDetail": "The throughput measured on this machine with this model indicates a longer-than-usual warmup time. You can wait for it to finish, or continue without local AI for this session.",
     "estimateWaitButton": "Wait for warmup",
     "sessionDisabledTitle": "Local AI disabled for this session",

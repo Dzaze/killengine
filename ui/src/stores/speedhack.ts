@@ -115,7 +115,13 @@ export const useSpeedhackStore = defineStore('speedhack', () => {
     try {
       apiHookStatus.value = await controller.getApiHookStatus()
       return apiHookStatus.value
-    } catch {
+    } catch (e) {
+      // UX-CHECKUP round 2 (22/09/2026) : seule fonction refresh* du fichier
+      // sans addActionLog sur échec (contrairement à refreshSpeedhackStatus/
+      // refreshProcessNetworkBlockStatus juste au-dessus) -- oubli, pas un
+      // choix. apiHookStatus.value n'est réécrit que dans le try réussi, donc
+      // un échec garde la dernière valeur connue plutôt que de l'effacer.
+      actionLogStore.addActionLog('injection', t('speedhackStore.apiHookStatusUnavailable'), String(e), 'warning')
       return null
     }
   }

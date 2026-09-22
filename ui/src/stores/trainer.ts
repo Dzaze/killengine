@@ -169,7 +169,24 @@ export const useTrainerStore = defineStore('trainer', () => {
       const raw = window.localStorage.getItem(trainerStorageKey)
       if (!raw) return
       const parsed = JSON.parse(raw) as { features?: TrainerFeature[], id?: number }
-      trainerFeatures.value = Array.isArray(parsed.features) ? parsed.features : []
+      // UX-PIPE-10 (docs/PHASE_TRACKER.md, 18/09/2026) : ce qui a été persisté
+      // avant la fermeture (y compris un freeze/patch enabled:true) ne prouve
+      // rien du moteur fraîchement relancé -- même défaut que l'import de
+      // projet, ici via le redémarrage complet plutôt qu'un import explicite.
+      // hotkeyId est aussi remis à zéro : le compteur du gestionnaire de
+      // hotkeys backend repart de zéro à chaque lancement, donc réutiliser un
+      // hotkeyId persisté pour un unregisterGlobalHotkey (dans
+      // registerTrainerFeatureHotkey, appelé juste après par
+      // reregisterPersistedHotkeys) risquerait de viser un identifiant déjà
+      // réattribué CETTE session à une autre feature, désinscrivant son
+      // enregistrement fraîchement créé.
+      trainerFeatures.value = (Array.isArray(parsed.features) ? parsed.features : []).map((feature) => ({
+        ...feature,
+        enabled: false,
+        status: 'idle',
+        lastError: '',
+        hotkeyId: undefined,
+      }))
       trainerFeatureIdCounter.value = Number(parsed.id ?? 0)
     } catch {
       trainerFeatures.value = []

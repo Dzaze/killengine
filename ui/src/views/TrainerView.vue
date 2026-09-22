@@ -151,31 +151,48 @@ function featureQualityClass(feature: TrainerFeature) {
   return quality ? `quality-${quality.level}` : ''
 }
 
-function featureQualityWarning(feature: TrainerFeature): string {
-  if (feature.action !== 'patch' || feature.locatorKind !== 'aob') return ''
-  const quality = featureSignatureQuality(feature)
-  if (!quality) return ''
-  const score = Number(quality.score ?? 0)
-  const fixedBytes = Number(quality.fixedBytes ?? 0)
-  if (fixedBytes < 3 || score < 35) {
-    return t('trainer.warnings.weakAob', { score, fixedBytes })
-  }
-  return String(quality.warning ?? '')
-}
-
-function featureWarning(feature: TrainerFeature): string {
+// UX-PIPE-8 (docs/PHASE_TRACKER.md, 18/09/2026) : préconditions
+// STRUCTURELLES -- vraies indépendamment de l'historique d'exécution, donc
+// un vrai motif de blocage. Réutilise `trainerFeaturePatchBlockReason` du
+// store, exactement la même fonction déjà utilisée par
+// `doApplyTrainerFeature`/`applyAllTrainerFeatures` avant d'exécuter --
+// « bloqué dans l'UI » et « refusé à l'exécution » sont donc désormais
+// littéralement la même règle (couvre patch incomplet, chaîne de pointeurs
+// manquante, AOB manquant/trop faible). `clr_write` n'est pas couvert par
+// cette fonction store (son incomplétude n'est aujourd'hui détectée qu'à
+// l'exécution, après confirmation -- hors périmètre de ce lot) : conservé
+// ici comme seule précondition encore spécifique à cette vue.
+function featurePreconditionWarning(feature: TrainerFeature): string {
+  const patchBlock = store.trainerFeaturePatchBlockReason(feature)
+  if (patchBlock) return patchBlock
   if (feature.status === 'ambiguous') return t('trainer.warnings.ambiguousFeature')
-  if (feature.status === 'error') return feature.lastError || t('trainer.warnings.errorFeature')
-  if (feature.action === 'patch' && !feature.patchBytes?.trim()) return t('trainer.warnings.incompletePatch')
-  if (feature.action === 'patch' && feature.locatorKind === 'aob' && !feature.aobPattern?.trim()) return t('trainer.warnings.missingAob')
   if (feature.action === 'clr_write' && (!feature.clrTypeSubstring || !feature.clrIdentityField || !feature.clrIdentityValue || !feature.clrFieldName)) return t('trainer.warnings.incompleteClrLocator')
-  const qualityWarning = featureQualityWarning(feature)
-  if (qualityWarning) return qualityWarning
   return ''
 }
 
+// Texte affiché sous la feature : précondition structurelle en priorité
+// (motif réel de blocage), sinon la dernière erreur d'une tentative
+// précédente -- gardée comme INFORMATION tant qu'aucune nouvelle tentative
+// n'a eu lieu, mais qui ne doit plus À ELLE SEULE bloquer un réessai (ex.
+// « process introuvable » devient obsolète dès que la cible est rattachée ;
+// avant ce correctif, `status === 'error'` bloquait ON/Sauver profil pour
+// toujours, alors que le bouton global « Tout appliquer » réessayait quand
+// même et pouvait réussir sur la même feature -- voir featureBlocked).
+function featureWarning(feature: TrainerFeature): string {
+  const precondition = featurePreconditionWarning(feature)
+  if (precondition) return precondition
+  if (feature.status === 'error') return feature.lastError || t('trainer.warnings.errorFeature')
+  return ''
+}
+
+// Ne bloque plus que sur une précondition structurelle réelle -- un
+// `status === 'error'` seul (ex. cible pas encore attachée) n'empêche plus
+// le réessai individuel une fois la cause corrigée. Sauver profil réutilise
+// cette même fonction (voir le bouton plus bas) : sauvegarder une
+// définition de feature ne dépend pas de l'état d'attache du moment, donc la
+// bloquer sur une erreur transitoire n'avait pas de sens non plus.
 function featureBlocked(feature: TrainerFeature): boolean {
-  return Boolean(featureWarning(feature))
+  return Boolean(featurePreconditionWarning(feature))
 }
 
 function hotkeyDraft(feature: TrainerFeature): string {

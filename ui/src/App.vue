@@ -90,6 +90,14 @@ watch(
           {{ $t('nav.help') }}
         </button>
       </div>
+      <!-- UX-PIPE-5 (docs/PHASE_TRACKER.md, 18/09/2026) : le switch rapide FR/EN
+           change la langue Vue immédiatement (effectif pour la session) mais
+           peut échouer à persister côté backend -- afficher l'échec ici, là où
+           l'utilisateur vient d'agir, pas seulement tout en bas de Paramètres
+           (page potentiellement pas même ouverte). -->
+      <p v-if="store.languageSwitchError" class="lang-switch-error">
+        {{ $t('nav.languageSaveFailed', { error: store.languageSwitchError }) }}
+      </p>
 
       <nav class="nav">
         <button
@@ -371,6 +379,16 @@ body {
   gap: 4px;
   padding: 10px 16px 14px;
   border-bottom: 1px solid rgba(125, 142, 255, 0.14);
+}
+
+.lang-switch-error {
+  margin: -6px 16px 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 .lang-switch-group {

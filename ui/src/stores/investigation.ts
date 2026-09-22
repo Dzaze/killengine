@@ -13,6 +13,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { i18n } from '@/i18n'
+import { persistJsonToLocalStorage } from '@/utils/persistLocalStorage'
 
 const { t } = i18n.global
 
@@ -55,17 +56,26 @@ export const useInvestigationStore = defineStore('investigation', () => {
 
   const investigationStorageKey = 'killengine.investigation.v1'
 
-  function saveInvestigations() {
-    try {
-      window.localStorage.setItem(investigationStorageKey, JSON.stringify({
-        active: activeInvestigation.value,
-        archive: investigationArchive.value.slice(0, 20),
-        stepId: investigationStepIdCounter.value,
-        runId: investigationRunIdCounter.value,
-      }))
-    } catch {
-      // Best-effort persistence: analysis must keep working even if storage is unavailable.
-    }
+  // UX-CHECKUP-8 (22/09/2026) : reflète l'échec réel de persistance (quota
+  // localStorage dépassé, stockage désactivé), jamais rétabli automatiquement
+  // par une simple relecture -- seule une prochaine sauvegarde réussie
+  // l'efface. Le changement en mémoire (activeInvestigation/archive) reste
+  // actif même en cas d'échec : c'est la persistance seule qui est en défaut,
+  // pas l'état courant de la session. Même patron que trainer.ts
+  // (trainerPersistenceError, PORT-3b) -- ce store était le seul (avec le
+  // réglage mineur trainer.ts::saveOverlayHotkey) encore sur l'ancien
+  // window.localStorage.setItem() direct qui avalait l'exception.
+  const investigationPersistenceError = ref<string | null>(null)
+
+  function saveInvestigations(): boolean {
+    const outcome = persistJsonToLocalStorage(investigationStorageKey, {
+      active: activeInvestigation.value,
+      archive: investigationArchive.value.slice(0, 20),
+      stepId: investigationStepIdCounter.value,
+      runId: investigationRunIdCounter.value,
+    })
+    investigationPersistenceError.value = outcome.success ? null : (outcome.error ?? t('investigationStore.persistenceFailedGeneric'))
+    return outcome.success
   }
 
   function loadInvestigations() {
@@ -261,6 +271,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     investigationArchive,
     investigationStepIdCounter,
     investigationRunIdCounter,
+    investigationPersistenceError,
     saveInvestigations,
     loadInvestigations,
     startInvestigation,

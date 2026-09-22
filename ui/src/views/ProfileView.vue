@@ -473,8 +473,12 @@ async function refreshProfiles() {
     if (!selectedProfile.value && match) {
       await selectProfile(match.name)
     }
-  } catch {
+  } catch (e) {
+    // UX-CHECKUP-7 (22/09/2026) : listProfiles() ne renvoie jamais success:false
+    // (seul un échec de transport RPC atterrit ici) -- rare, mais ne doit plus
+    // disparaître sans trace pour autant.
     profiles.value = []
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   }
 }
 
@@ -510,9 +514,28 @@ async function selectProfile(name: string) {
   selectedProfile.value = name
   localStorage.setItem(lastProfileStorageKey, name)
   resolveResult.value = null
+  // UX-CHECKUP-7 : une erreur affichée par une sélection précédente (ex.
+  // profil corrompu) ne doit pas rester affichée après avoir sélectionné un
+  // profil différent qui se charge normalement.
+  statusMessage.value = ''
   try {
     const result = await backend.getController().loadProfile(name)
     if (name !== selectedProfile.value) return
+    // UX-CHECKUP-7 (22/09/2026) : loadProfile() ne lève jamais d'exception sur
+    // un profil introuvable/corrompu -- il résout normalement avec
+    // {success:false, error}. Ce code utilisait `result` sans jamais lire
+    // `success`, donc un échec affichait un profil vide (0 cible/0 patch)
+    // indiscernable d'un profil réellement vide créé par l'utilisateur. Le
+    // profil reste sélectionné (le nom affiché) pour que l'utilisateur voie
+    // clairement LEQUEL a échoué, plutôt que d'annuler la sélection.
+    if (result.success !== true) {
+      profileInfo.value = {}
+      profileTargets.value = []
+      profilePatches.value = []
+      patchStates.value = {}
+      statusMessage.value = '✗ ' + String(result.error ?? t('profile.loadFailed'))
+      return
+    }
     profileInfo.value = result
     profileTargets.value = (result.targets as ProfileTargetEntry[]) ?? []
     profilePatches.value = (result.patches as ProfilePatchEntry[]) ?? []
@@ -521,10 +544,11 @@ async function selectProfile(name: string) {
       await inspectProfilePatches()
     }
     if (store.isAttached && name === selectedProfile.value) await inspectDurability()
-  } catch {
+  } catch (e) {
     profileTargets.value = []
     profilePatches.value = []
     patchStates.value = {}
+    statusMessage.value = '✗ ' + t('profile.errorPrefix', { error: String(e) })
   }
 }
 

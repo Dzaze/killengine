@@ -256,6 +256,12 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
     const QString configuredModelRaw = settings.value("ai/modelPath", "").toString().trimmed();
     const QString configuredModel = killai::ModelLocator::resolveModelReference(configuredModelRaw);
     const bool modelEnabled = settings.value("ai/modelEnabled", true).toBool();
+    // UX-PIPE-2 (docs/PHASE_TRACKER.md, 18/09/2026) : desactiveForSession()
+    // (bouton "Continuer sans IA locale") n'est jamais persiste -- distinct
+    // de modelEnabled (reglage persistant) ET de la presence reelle des
+    // fichiers (available ci-dessous). Les trois etats ne doivent jamais se
+    // recouvrir dans un seul champ.
+    const bool sessionDisabled = m_controller.m_ai.isSessionDisabled();
     const QString envModel = QProcessEnvironment::systemEnvironment().value("KILLENGINE_QWEN_GGUF").trimmed();
     const QString envExe = QProcessEnvironment::systemEnvironment().value("KILLENGINE_LLAMA_CLI").trimmed();
     const auto model = killai::ModelLocator::findQwenGguf();
@@ -404,8 +410,12 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
 
     result["success"] = true;
     result["enabled"] = modelEnabled;
-    result["backend"] = modelEnabled && model.found && !executablePath.isEmpty() ? QString("llama.cpp") : QString("deterministic");
-    result["ready"] = modelEnabled && model.found && !executablePath.isEmpty();
+    result["sessionDisabled"] = sessionDisabled;
+    result["backend"] = modelEnabled && !sessionDisabled && model.found && !executablePath.isEmpty() ? QString("llama.cpp") : QString("deterministic");
+    result["ready"] = modelEnabled && !sessionDisabled && model.found && !executablePath.isEmpty();
+    // available = fichiers presents, INDEPENDAMMENT de l'activation courante
+    // (reglage persistant ou session) -- c'est le seul champ qui doit piloter
+    // "installe ?" dans le catalogue Modules (voir getModuleCatalog, piege 1).
     result["available"] = model.found && !executablePath.isEmpty();
     result["configuredModelPath"] = configuredModel;
     result["configuredModelPathRaw"] = configuredModelRaw;
@@ -431,9 +441,22 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
     result["embeddedAgentCount"] = embeddedAgents.size();
     result["embeddedModelFolders"] = embeddedModelFolders;
     result["threads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
-    result["message"] = result.value("ready").toBool()
-        ? KE_TXT("IA embarquée prête.", "Embedded AI ready.")
-        : KE_TXT("IA embarquée indisponible : modèle ou runtime manquant.", "Embedded AI unavailable: model or runtime missing.");
+    // UX-PIPE-2 : message hiérarchisé -- "prêt" / "désactivée" ne doivent
+    // jamais être confondus avec "fichiers manquants", sinon l'UI suggère à
+    // tort un téléchargement/réinstallation alors que le modèle est là mais
+    // simplement pas autorisé à tourner (session ou réglage persistant).
+    const bool available = result.value("available").toBool();
+    if (result.value("ready").toBool()) {
+        result["message"] = KE_TXT("IA embarquée prête.", "Embedded AI ready.");
+    } else if (sessionDisabled && available) {
+        result["message"] = KE_TXT("IA locale désactivée pour cette session (fichiers installés, redémarre KillEngine pour la réactiver).",
+                                    "Local AI disabled for this session (files installed, restart KillEngine to re-enable it).");
+    } else if (!modelEnabled && available) {
+        result["message"] = KE_TXT("IA locale désactivée dans les réglages (fichiers installés).",
+                                    "Local AI disabled in settings (files installed).");
+    } else {
+        result["message"] = KE_TXT("IA embarquée indisponible : modèle ou runtime manquant.", "Embedded AI unavailable: model or runtime missing.");
+    }
     return result;
 }
 

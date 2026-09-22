@@ -47,6 +47,7 @@
 #include "display_string_investigator.h"
 #include "candidates/candidate_store.h"
 #include "crash_handler.h"
+#include "paths/portable_paths.h"
 #include "debug/hardware_breakpoint.h"
 #include "debug/stealth_profiler.h"
 #include "inject/lag_switch.h"
@@ -2448,8 +2449,8 @@ QVariantMap ApplicationController::startExactScan(const QString& value, const QS
     return m_scanningCoreManager->startExactScan(value, valueType);
 }
 
-QVariantMap ApplicationController::startExactScanMultiType(const QString& value, const QString& valueType) {
-    return m_scanningCoreManager->startExactScanMultiType(value, valueType);
+QVariantMap ApplicationController::startExactScanMultiType(const QString& value, const QString& valueType, const QVariantMap& expertOptions) {
+    return m_scanningCoreManager->startExactScanMultiType(value, valueType, expertOptions);
 }
 
 QVariantMap ApplicationController::startExactScanExpert(const QString& value, const QString& valueType, const QVariantMap& expertOptions) {
@@ -5880,6 +5881,27 @@ QVariantMap ApplicationController::browseForModelFile() {
     return m_settingsDiagnosticsManager->browseForModelFile();
 }
 
+QVariantMap ApplicationController::browseForModuleArchive(const QString& moduleId) {
+    QVariantMap result;
+    result["success"] = false;
+    Q_UNUSED(moduleId); // filtre identique pour tous les modules PORT-5 (archive .zip)
+
+    const QString path = QFileDialog::getOpenFileName(
+        nullptr,
+        KE_TXT("Choisir une archive de module (.zip)", "Choose a module archive (.zip)"),
+        QString(),
+        KE_TXT("Archives de module (*.zip)", "Module archives (*.zip)"));
+
+    if (path.isEmpty()) {
+        result["cancelled"] = true;
+        return result;
+    }
+
+    result["success"] = true;
+    result["path"] = path;
+    return result;
+}
+
 namespace {
 // Résolution des scripts d'installation des modules complémentaires :
 // dev (build/bin -> ../../scripts) ET package portable (scripts/ à la racine,
@@ -5915,6 +5937,140 @@ QString findModuleCatalogModelDir() {
     }
     return {};
 }
+
+// PORT-5 (docs/PORTABILITY_ROADMAP.md#port-5) : après une installation
+// depuis archive locale, vérifie un vrai démarrage du binaire avant
+// d'annoncer le module prêt -- une copie de fichiers hash-valides ne prouve
+// pas que le binaire fonctionne réellement (mauvaise archi silencieuse,
+// dépendance native manquante, etc.).
+bool probeLuaRuntimeInstall(const QString& luaExePath, QString* error) {
+    QProcess proc;
+    proc.setProgram(luaExePath);
+    proc.setArguments({QStringLiteral("-v")});
+    proc.setProcessChannelMode(QProcess::MergedChannels);
+    proc.start();
+    if (!proc.waitForStarted(3000)) {
+        if (error) {
+            *error = KE_TXT("lua.exe fraîchement installé n'a pas démarré.", "The freshly installed lua.exe did not start.");
+        }
+        return false;
+    }
+    // Sans script/-e, lua.exe -v lit stdin en mode batch (pas de TTY) : fermer
+    // immédiatement le canal d'écriture force un EOF et évite un blocage.
+    proc.closeWriteChannel();
+    if (!proc.waitForFinished(3000)) {
+        proc.kill();
+        proc.waitForFinished(1000);
+        if (error) {
+            *error = KE_TXT("lua.exe fraîchement installé ne répond pas.", "The freshly installed lua.exe is not responding.");
+        }
+        return false;
+    }
+    const QString output = QString::fromLocal8Bit(proc.readAllStandardOutput());
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0 || !output.contains(QStringLiteral("Lua"), Qt::CaseInsensitive)) {
+        if (error) {
+            *error = KE_TXT("lua.exe fraîchement installé a répondu de façon inattendue : %1", "The freshly installed lua.exe responded unexpectedly: %1").arg(output.trimmed());
+        }
+        return false;
+    }
+    return true;
+}
+
+// Sonde indépendante de ClrInspectorBridge (pas d'accès à son état partagé
+// m_process/pipe, potentiellement utilisé en parallèle par le thread GUI) :
+// démarre sa propre instance jetable sur un pipe dédié, envoie "shutdown" et
+// vérifie une réponse JSON valide suivie d'une sortie propre du process.
+bool probeClrInspectorInstall(const QString& exePath, const QString& pipeName, QString* error) {
+    QProcess proc;
+    proc.setProgram(exePath);
+    proc.setWorkingDirectory(QFileInfo(exePath).absolutePath());
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("KILLENGINE_CLR_INSPECTOR_PIPE_NAME"), pipeName);
+    proc.setProcessEnvironment(env);
+    proc.start();
+    if (!proc.waitForStarted(3000)) {
+        if (error) {
+            *error = KE_TXT("KillEngineClrInspector.exe fraîchement installé n'a pas démarré.",
+                             "The freshly installed KillEngineClrInspector.exe did not start.");
+        }
+        return false;
+    }
+
+    const QString pipePath = QStringLiteral("\\\\.\\pipe\\%1").arg(pipeName);
+    const std::wstring pipePathW = pipePath.toStdWString();
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    QElapsedTimer connectTimer;
+    connectTimer.start();
+    while (connectTimer.elapsed() < 3000) {
+        pipe = CreateFileW(pipePathW.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (pipe != INVALID_HANDLE_VALUE) {
+            break;
+        }
+        const DWORD err = GetLastError();
+        if (err != ERROR_PIPE_BUSY && err != ERROR_FILE_NOT_FOUND) {
+            break;
+        }
+        const int remainingMs = 3000 - static_cast<int>(connectTimer.elapsed());
+        if (remainingMs <= 0) {
+            break;
+        }
+        WaitNamedPipeW(pipePathW.c_str(), static_cast<DWORD>(std::min(250, remainingMs)));
+    }
+
+    bool ok = false;
+    if (pipe == INVALID_HANDLE_VALUE) {
+        if (error) {
+            *error = KE_TXT("Pipe du helper fraîchement installé indisponible (timeout).",
+                             "The freshly installed helper's pipe is unavailable (timeout).");
+        }
+    } else {
+        QJsonObject request;
+        request["id"] = 1;
+        request["method"] = QStringLiteral("shutdown");
+        request["params"] = QJsonArray();
+        QByteArray requestBytes = QJsonDocument(request).toJson(QJsonDocument::Compact);
+        requestBytes.append('\n');
+
+        DWORD written = 0;
+        if (WriteFile(pipe, requestBytes.constData(), static_cast<DWORD>(requestBytes.size()), &written, nullptr)
+            && written == static_cast<DWORD>(requestBytes.size())) {
+            QByteArray responseLine;
+            char buffer[512];
+            QElapsedTimer readTimer;
+            readTimer.start();
+            while (readTimer.elapsed() < 3000) {
+                DWORD bytesRead = 0;
+                if (ReadFile(pipe, buffer, sizeof(buffer), &bytesRead, nullptr)) {
+                    responseLine.append(buffer, static_cast<qsizetype>(bytesRead));
+                    if (responseLine.indexOf('\n') >= 0 || bytesRead == 0) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+            responseLine = responseLine.left(responseLine.indexOf('\n') >= 0 ? responseLine.indexOf('\n') : responseLine.size()).trimmed();
+            QJsonParseError parseError;
+            const QJsonDocument responseDoc = QJsonDocument::fromJson(responseLine, &parseError);
+            if (parseError.error == QJsonParseError::NoError && responseDoc.isObject()) {
+                ok = true;
+            } else if (error) {
+                *error = KE_TXT("Réponse du helper fraîchement installé invalide.", "Invalid response from the freshly installed helper.");
+            }
+        } else if (error) {
+            *error = KE_TXT("Écriture vers le pipe du helper fraîchement installé échouée.",
+                             "Couldn't write to the freshly installed helper's pipe.");
+        }
+        CloseHandle(pipe);
+    }
+
+    proc.waitForFinished(3000);
+    if (proc.state() != QProcess::NotRunning) {
+        proc.kill();
+        proc.waitForFinished(1000);
+    }
+    return ok;
+}
 } // namespace
 
 QVariantMap ApplicationController::getModuleCatalog() const {
@@ -5936,21 +6092,28 @@ QVariantMap ApplicationController::getModuleCatalog() const {
         item["detail"] = lua.value("message").toString();
         item["path"] = lua.value("luaPath").toString();
         item["installable"] = true;
-        item["installKind"] = QStringLiteral("script");
+        // PORT-5 : installation depuis une archive locale vérifiée (SHA256),
+        // plus de compilation MSVC côté utilisateur — voir installModule().
+        item["installKind"] = QStringLiteral("archive");
         modules.append(item);
     }
 
     // 2) Modèle IA embarqué (GGUF partagé des agents).
     {
         const QVariantMap ai = getAiModelStatus();
-        const bool ready = ai.value("ready").toBool();
+        // UX-PIPE-2, piège 1 (docs/PHASE_TRACKER.md, 18/09/2026) : "installé ?"
+        // doit refléter la présence des fichiers (available), pas l'activation
+        // courante (ready) -- sinon une IA désactivée pour la session (ou dans
+        // les réglages) apparaît à tort comme "manquante" dans le catalogue,
+        // suggérant un téléchargement/réinstallation inutile.
+        const bool available = ai.value("available").toBool();
         QVariantMap item;
         item["id"] = QStringLiteral("ai_model");
         item["displayName"] = KE_TXT("Modèle IA embarqué (GGUF)", "Embedded AI model (GGUF)");
         item["description"] = KE_TXT("Qwen3.5-2B Q4_K_M (~1,4 Go) pour l'Assistant et l'Auto Resolver — téléchargé depuis Hugging Face (bartowski/Qwen_Qwen3.5-2B-GGUF, même quantification que le modèle embarqué).",
             "Qwen3.5-2B Q4_K_M (~1.4 GB) for the Assistant and the Auto Resolver — downloaded from Hugging Face (bartowski/Qwen_Qwen3.5-2B-GGUF, same quantization as the embedded model).");
-        item["installed"] = ready;
-        item["status"] = ready ? QStringLiteral("ok") : QStringLiteral("missing");
+        item["installed"] = available;
+        item["status"] = available ? QStringLiteral("ok") : QStringLiteral("missing");
         item["detail"] = ai.value("message").toString();
         item["path"] = ai.value("modelPath").toString();
         item["installable"] = true;
@@ -5970,10 +6133,12 @@ QVariantMap ApplicationController::getModuleCatalog() const {
         item["installed"] = available;
         item["status"] = available ? QStringLiteral("ok") : QStringLiteral("missing");
         item["detail"] = available ? KE_TXT("Helper détecté.", "Helper detected.")
-                                    : KE_TXT("Helper introuvable — build local requis (SDK .NET 8+).", "Helper not found — a local build is required (.NET 8+ SDK).");
+                                    : KE_TXT("Helper introuvable — installe-le depuis une archive de module locale.", "Helper not found — install it from a local module archive.");
         item["path"] = clr.value("helperPath").toString();
         item["installable"] = true;
-        item["installKind"] = QStringLiteral("script");
+        // PORT-5 : installation depuis une archive locale vérifiée (SHA256),
+        // plus de SDK .NET côté utilisateur — voir installModule().
+        item["installKind"] = QStringLiteral("archive");
         modules.append(item);
     }
 
@@ -6090,7 +6255,6 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
     result["success"] = false;
     result["started"] = false;
     result["moduleId"] = moduleId;
-    Q_UNUSED(options);
 
     if (m_moduleInstallInProgress) {
         result["error"] = KE_TXT("Une installation de module est déjà en cours.", "A module installation is already in progress.");
@@ -6164,23 +6328,41 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
         return result;
     }
 
-    // lua_runtime / clr_inspector : script PowerShell local dans un thread worker.
+    // lua_runtime / clr_inspector : installation depuis une archive locale
+    // vérifiée (PORT-5, docs/PORTABILITY_ROADMAP.md#port-5) via
+    // scripts/install-module-from-archive.ps1 dans un thread worker — plus
+    // aucune invocation de MSVC/dotnet build chez l'utilisateur.
     // ai_model : téléchargement curl.exe du GGUF officiel dans un thread worker.
     QString script;
-    if (moduleId != QStringLiteral("ai_model")) {
-        const QString scriptName = moduleId == QStringLiteral("lua_runtime")
-            ? QStringLiteral("setup-lua-runtime.ps1")
-            : QStringLiteral("build-clr-inspector.ps1");
-        script = findModuleCatalogScript(scriptName);
-        if (script.isEmpty()) {
-            result["error"] = KE_TXT("%1 introuvable.", "%1 not found.").arg(scriptName);
+    QString archivePath;
+    QString targetDir;
+    if (moduleId == QStringLiteral("lua_runtime") || moduleId == QStringLiteral("clr_inspector")) {
+        archivePath = options.value(QStringLiteral("archivePath")).toString().trimmed();
+        if (archivePath.isEmpty()) {
+            result["error"] = KE_TXT("Choisis d'abord une archive de module locale (.zip).",
+                                      "Choose a local module archive (.zip) first.");
             return result;
         }
+        const QFileInfo archiveInfo(archivePath);
+        if (!archiveInfo.exists() || !archiveInfo.isFile()) {
+            result["error"] = KE_TXT("Archive introuvable : %1", "Archive not found: %1").arg(archivePath);
+            return result;
+        }
+        script = findModuleCatalogScript(QStringLiteral("install-module-from-archive.ps1"));
+        if (script.isEmpty()) {
+            result["error"] = KE_TXT("scripts/install-module-from-archive.ps1 introuvable.",
+                                      "scripts/install-module-from-archive.ps1 not found.");
+            return result;
+        }
+        targetDir = killcore::PortablePaths::ensureSubdir(
+            moduleId == QStringLiteral("lua_runtime") ? QStringLiteral("runtime/lua") : QStringLiteral("tools/clr_inspector"));
     }
 
     const int requestId = ++m_moduleInstallRequestId;
     const QString requestedModule = moduleId;
     const QString requestedScript = script;
+    const QString requestedArchivePath = archivePath;
+    const QString requestedTargetDir = targetDir;
     const QPointer<ApplicationController> self(this);
     auto cancellation = std::make_shared<killcore::CancellationToken>();
 
@@ -6190,7 +6372,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
 
     KE_LOG_INFO() << "installModule(" << moduleId.toStdString() << ", requestId=" << requestId << ")";
 
-    std::thread([self, requestId, requestedModule, requestedScript, cancellation]() {
+    std::thread([self, requestId, requestedModule, requestedScript, requestedArchivePath, requestedTargetDir, cancellation]() {
         QVariantMap finished;
         finished["requestId"] = requestId;
         finished["moduleId"] = requestedModule;
@@ -6262,16 +6444,18 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                 }
             }
         } else {
+            // PORT-5 : installation depuis une archive locale vérifiée, plus
+            // aucun compilateur/SDK requis côté utilisateur.
             QProcess proc;
             proc.setProgram(QStringLiteral("powershell.exe"));
             proc.setArguments({
                 QStringLiteral("-NoProfile"),
                 QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"),
                 QStringLiteral("-File"), requestedScript,
+                QStringLiteral("-ModuleId"), requestedModule,
+                QStringLiteral("-ArchivePath"), requestedArchivePath,
+                QStringLiteral("-TargetDir"), requestedTargetDir,
             });
-            if (requestedModule == QStringLiteral("lua_runtime")) {
-                proc.arguments().append(QStringLiteral("-Force"));
-            }
             proc.setProcessChannelMode(QProcess::MergedChannels);
             proc.start();
             if (!proc.waitForStarted(15000)) {
@@ -6302,14 +6486,33 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                 }
                 proc.waitForFinished(10000);
                 if (!finished.contains(QStringLiteral("cancelled"))) {
-                    const bool ok = proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
-                    finished["success"] = ok;
-                    if (ok) {
-                        finished["message"] = requestedModule == QStringLiteral("lua_runtime")
-                            ? KE_TXT("Runtime Lua installé dans runtime/lua.", "Lua runtime installed in runtime/lua.")
-                            : KE_TXT("Inspecteur CLR compilé.", "CLR Inspector built.");
+                    const bool scriptOk = proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
+                    if (!scriptOk) {
+                        finished["error"] = KE_TXT("Échec de l'installation (code %1).", "Installation failed (code %1).").arg(proc.exitCode());
                     } else {
-                        finished["error"] = KE_TXT("Échec du script (code %1).", "Script failed (code %1).").arg(proc.exitCode());
+                        // Le staging/swap a réussi : vérifie maintenant un vrai
+                        // démarrage du binaire avant d'annoncer le module prêt.
+                        QString probeError;
+                        bool probeOk = false;
+                        if (requestedModule == QStringLiteral("lua_runtime")) {
+                            probeOk = probeLuaRuntimeInstall(QDir(requestedTargetDir).filePath(QStringLiteral("lua.exe")), &probeError);
+                        } else {
+                            const QString probePipeName = QStringLiteral("KillEngineClrInspectorInstallProbe_%1_%2")
+                                .arg(QCoreApplication::applicationPid()).arg(requestId);
+                            probeOk = probeClrInspectorInstall(
+                                QDir(requestedTargetDir).filePath(QStringLiteral("KillEngineClrInspector.exe")),
+                                probePipeName, &probeError);
+                        }
+                        finished["success"] = probeOk;
+                        if (probeOk) {
+                            finished["message"] = requestedModule == QStringLiteral("lua_runtime")
+                                ? KE_TXT("Runtime Lua installé et vérifié dans runtime/lua.", "Lua runtime installed and verified in runtime/lua.")
+                                : KE_TXT("Inspecteur CLR installé et vérifié.", "CLR Inspector installed and verified.");
+                        } else {
+                            finished["error"] = probeError.isEmpty()
+                                ? KE_TXT("Fichiers copiés mais le module ne démarre pas correctement.", "Files copied but the module does not start correctly.")
+                                : probeError;
+                        }
                     }
                 }
             }

@@ -347,7 +347,7 @@ QVariantMap ClaudeChatManager::executeTool(const QString& tool, const QVariantMa
                 "liste, utilise next_scan (mode=\"exact\", value=...) à la place. Si tu veux vraiment "
                 "démarrer une toute nouvelle recherche, tu peux rappeler exact_scan_multi_type.", "A scan is already active with candidates in memory. To narrow this list down, use next_scan (mode=\"exact\", value=...) instead. If you really want to start a new search, you can call exact_scan_multi_type again."));
         }
-        const QVariantMap result = m_controller->startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
+        const QVariantMap result = m_controller->startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString(), QVariantMap());
         if (result.value("success").toBool()) {
             m_scanActive = true;
         }

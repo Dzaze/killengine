@@ -220,6 +220,9 @@ const stats = ref({
   watchedAddressCount: 0,
   totalDataPoints: 0
 })
+// Réconciliation périodique avec le moteur réel (getTimelineStatus), voir refreshTimelineStatus.
+let pollTimer: ReturnType<typeof setInterval> | undefined
+let collectionStartedAt: number | null = null
 
 const selectedSeries = ref<any>(null)
 const patterns = ref<any[]>([])
@@ -300,19 +303,75 @@ async function loadSeriesData() {
 async function startCollection() {
   // Apply config
   await store.setTimelineConfig(config.value)
-  
+
   const success = await store.startTimelineCollection()
   if (success) {
     isCollecting.value = true
     progressPercent.value = 0
     progressStatus.value = t('memoryTimeline.status.starting')
+    collectionStartedAt = Date.now()
+    startPolling()
   }
 }
 
 async function stopCollection() {
   await store.stopTimelineCollection()
+  stopPolling()
   isCollecting.value = false
+  collectionStartedAt = null
   loadSeriesData()
+}
+
+// Réconciliation avec l'état réel du moteur (getTimelineStatus), au lieu des
+// événements DOM 'timeline-data'/'timeline-progress'/'timeline-finished'
+// jamais émis nulle part dans le code (UX-CHECKUP-1, 22/09/2026) : la vue
+// restait bloquée sur "Collecting..." après une fin automatique côté moteur.
+async function refreshTimelineStatus() {
+  const status = await store.getTimelineStatus()
+  if (!status) return
+
+  stats.value = {
+    watchedAddressCount: status.watchedAddressCount,
+    totalDataPoints: status.totalDataPoints
+  }
+
+  const wasCollecting = isCollecting.value
+  isCollecting.value = status.collecting
+
+  if (status.collecting) {
+    // Collecte détectée comme déjà en cours (remontage de la vue après navigation,
+    // voir onUnmounted) sans horodatage de départ local connu : on ne peut pas
+    // calculer l'écoulé réel, donc on prend cet instant comme approximation plutôt
+    // que de laisser la barre figée à 0% jusqu'à la fin.
+    if (collectionStartedAt === null) {
+      collectionStartedAt = Date.now()
+    }
+    if (config.value.maxDurationMs > 0) {
+      const elapsed = Date.now() - collectionStartedAt
+      progressPercent.value = Math.min(100, (elapsed / config.value.maxDurationMs) * 100)
+    }
+    progressStatus.value = t('memoryTimeline.status.pointsCollected', { count: status.totalDataPoints })
+  } else if (wasCollecting) {
+    // Transition collecte -> arrêt détectée par ce polling : fin automatique
+    // (maxDurationMs atteint) plutôt qu'un clic Stop, qui appelle déjà stopPolling().
+    progressPercent.value = 100
+    collectionStartedAt = null
+    stopPolling()
+    loadSeriesData()
+    store.addActionLog('memory_timeline', t('memoryTimeline.logs.finishedAuto', { count: status.totalDataPoints }), '', 'success')
+  }
+}
+
+function startPolling() {
+  if (pollTimer !== undefined) return
+  pollTimer = setInterval(refreshTimelineStatus, 500)
+}
+
+function stopPolling() {
+  if (pollTimer !== undefined) {
+    clearInterval(pollTimer)
+    pollTimer = undefined
+  }
 }
 
 function clearAll() {
@@ -502,33 +561,28 @@ function onChartLeave() {
 }
 
 // Lifecycle
-onMounted(() => {
+onMounted(async () => {
   // Load initial state
-  store.getTimelineWatchedAddresses().then(addrs => {
-    watchedAddresses.value = addrs
-  })
-  
-  // Listen for updates
-  window.addEventListener('timeline-data', ((e: CustomEvent) => {
-    if (e.detail.address === selectedAddress.value) {
-      loadSeriesData()
-    }
-  }) as EventListener)
-  
-  window.addEventListener('timeline-progress', ((e: CustomEvent) => {
-    progressPercent.value = e.detail.percent
-    progressStatus.value = e.detail.status
-  }) as EventListener)
-  
-  window.addEventListener('timeline-finished', () => {
-    isCollecting.value = false
-    loadSeriesData()
-  })
+  const addrs = await store.getTimelineWatchedAddresses()
+  watchedAddresses.value = addrs
+
+  // Réconcilier avec l'état réel du moteur (une collecte a pu continuer en
+  // arrière-plan pendant qu'on était sur une autre page, ou avoir fini
+  // automatiquement) plutôt que de repartir sur l'état local par défaut.
+  await refreshTimelineStatus()
+  if (isCollecting.value) {
+    startPolling()
+  }
 })
 
 onUnmounted(() => {
+  stopPolling()
+  // Ne PAS arrêter la collecte moteur en quittant la page (UX-CHECKUP-1,
+  // 22/09/2026) : une collecte longue doit pouvoir continuer en arrière-plan,
+  // comme MemoryHeatmapView.vue, plutôt que d'être coupée silencieusement à
+  // chaque navigation. On informe explicitement l'utilisateur à la place.
   if (isCollecting.value) {
-    stopCollection()
+    store.addActionLog('memory_timeline', t('memoryTimeline.logs.continuesInBackground'), '', 'info')
   }
 })
 

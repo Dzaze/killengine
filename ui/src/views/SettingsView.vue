@@ -1,13 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppStore, type WorkspaceBookmark } from '@/stores/app'
+import { useAppStore, type WorkspaceBookmark, type WorkspaceProject, type StructureTemplate } from '@/stores/app'
 import AssistantToolsPanel from '@/components/settings/AssistantToolsPanel.vue'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 import PersistenceErrorBanner from '@/components/PersistenceErrorBanner.vue'
+import { usePaginatedFilter } from '@/composables/usePaginatedFilter'
 
 const store = useAppStore()
 const { locale, t } = useI18n()
+
+// UX-PIPE-9 (docs/PHASE_TRACKER.md, 18/09/2026) : les projets/notes/modèles
+// de structure conservés au-delà de la tranche fixe précédemment rendue
+// (12/20/12) étaient toujours en stockage mais totalement inaccessibles
+// (pas de suivant, pas de recherche) -- voir usePaginatedFilter pour le
+// contrat détaillé. Les trois listes ont un état indépendant.
+const workspaceProjectsList = computed(() => store.workspaceProjects as WorkspaceProject[])
+const workspaceProjectsFilter = usePaginatedFilter(workspaceProjectsList, 12, (project) => `${project.name} ${project.processName}`)
+const workspaceBookmarksList = computed(() => store.workspaceBookmarks as WorkspaceBookmark[])
+const workspaceBookmarksFilter = usePaginatedFilter(workspaceBookmarksList, 20, (bookmark) => `${bookmark.label} ${bookmark.note} ${bookmark.kind} ${bookmark.address ?? ''}`)
+const structureTemplatesList = computed(() => store.structureTemplates as StructureTemplate[])
+const structureTemplatesFilter = usePaginatedFilter(structureTemplatesList, 12, (template) => `${template.name} ${template.processName}`)
 
 const runtimeRows = computed(() => [
   { label: t('settings.backend'), value: store.isConnected ? t('settings.connected') : t('settings.disconnected') },
@@ -180,12 +193,41 @@ function previewWorkspaceImport() {
   workspaceImportStatus.value = workspaceImportPreview.value.success === true ? t('settings.previewReady') : String(workspaceImportPreview.value.error ?? t('settings.invalidImport'))
 }
 
-function importWorkspace() {
-  const result = store.importWorkspaceJson(workspaceImportText.value)
+// Vidé par importWorkspace() après un succès : ce vidage déclenche le même
+// watcher que la saisie utilisateur ci-dessous (Vue ne distingue pas la
+// source d'une mutation reactive) -- ce drapeau évite que le message de
+// succès qu'on vient d'afficher soit aussitôt écrasé par "aperçu périmé".
+let suppressNextImportTextInvalidation = false
+
+async function importWorkspace() {
+  const result = await store.importWorkspaceJson(workspaceImportText.value)
   workspaceImportPreview.value = result
-  workspaceImportStatus.value = result.success === true ? t('settings.workspaceImported') : String(result.error ?? t('settings.importRefused'))
-  if (result.success === true) workspaceImportText.value = ''
+  workspaceImportStatus.value = result.success === true
+    ? (result.trainerImportBlockReason ? `${t('settings.workspaceImported')} ${result.trainerImportBlockReason}` : t('settings.workspaceImported'))
+    : String(result.error ?? t('settings.importRefused'))
+  if (result.success === true) {
+    suppressNextImportTextInvalidation = true
+    workspaceImportText.value = ''
+  }
 }
+
+// UX-PIPE-7 (docs/PHASE_TRACKER.md, 18/09/2026) : un aperçu réussi ne doit
+// plus autoriser Importer une fois le texte modifié -- sans ça, "Importer"
+// restait cliquable sur la foi d'un aperçu qui ne correspondait plus au
+// texte réellement collé. Invalide (ne recalcule pas automatiquement, pour
+// éviter de revalider à chaque frappe) ; l'utilisateur relance "Aperçu"
+// explicitement, cohérent avec le bouton déjà désactivé tant qu'aucun aperçu
+// valide n'existe pour le texte courant.
+watch(workspaceImportText, () => {
+  if (suppressNextImportTextInvalidation) {
+    suppressNextImportTextInvalidation = false
+    return
+  }
+  if (workspaceImportPreview.value !== null) {
+    workspaceImportPreview.value = null
+    workspaceImportStatus.value = t('settings.previewStale')
+  }
+})
 
 function saveWorkspaceProject() {
   const project = store.saveCurrentWorkspaceProject(workspaceProjectName.value)
@@ -360,8 +402,15 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       <div class="panel-title">
         <h2>{{ $t('settings.localAiTitle') }}</h2>
         <div class="panel-actions">
+          <!-- UX-PIPE-2 : "installé" (available) et "prêt à répondre" (ready) sont
+               deux états distincts -- une IA désactivée (session ou réglage) ne
+               doit jamais s'afficher comme prête, ni comme fichiers manquants. -->
           <span class="status-pill" :class="store.aiModelStatus?.ready ? 'ok' : 'warn'">
-            {{ store.aiModelStatus?.ready ? $t('settings.aiReady') : $t('settings.aiUnavailable') }}
+            {{ store.aiModelStatus?.ready
+              ? $t('settings.aiReady')
+              : store.aiModelStatus?.available
+                ? $t('settings.aiDisabled')
+                : $t('settings.aiUnavailable') }}
           </span>
           <button class="btn btn-secondary compact" :disabled="store.aiModelStatusLoading" @click="store.refreshAiModelStatus()">
             {{ store.aiModelStatusLoading ? $t('settings.checking') : $t('settings.verify') }}
@@ -657,13 +706,22 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
       <div class="project-panel">
         <div class="panel-title">
           <h3>{{ $t('settings.workspaceProjectsTitle') }}</h3>
+          <span>{{ store.workspaceProjects.length }}</span>
           <div class="panel-actions">
             <input v-model="workspaceProjectName" class="input project-name-input" :placeholder="$t('settings.projectNamePlaceholder')" />
             <button class="btn btn-secondary compact" @click="saveWorkspaceProject()">{{ $t('settings.saveProject') }}</button>
           </div>
         </div>
         <div v-if="store.workspaceProjects.length === 0" class="empty-line">{{ $t('settings.noLocalProject') }}</div>
-        <div v-for="project in store.workspaceProjects.slice(0, 12)" :key="project.id" class="project-row">
+        <template v-else>
+          <input
+            v-if="store.workspaceProjects.length > 12"
+            v-model="workspaceProjectsFilter.filterText.value"
+            class="input list-filter-input"
+            :placeholder="$t('settings.filterProjectsPlaceholder')"
+          />
+          <div v-if="workspaceProjectsFilter.filteredCount.value === 0" class="empty-line">{{ $t('settings.noListMatch') }}</div>
+          <div v-for="project in workspaceProjectsFilter.visibleItems.value" :key="project.id" class="project-row">
           <div>
             <strong>{{ project.name }}</strong>
             <span>{{ $t('settings.projectSummary', { process: project.processName || '-', features: project.trainerFeatureCount, templates: project.structureTemplateCount, bookmarks: project.bookmarkCount, audits: project.auditCount || 0 }) }}</span>
@@ -672,7 +730,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
             <button class="btn btn-secondary compact" @click="store.loadWorkspaceProject(project.id)">{{ $t('settings.load') }}</button>
             <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceProject(project.id)">{{ $t('settings.delete') }}</button>
           </div>
-        </div>
+          </div>
+          <button v-if="workspaceProjectsFilter.hasMore.value" class="btn btn-secondary compact list-show-more" @click="workspaceProjectsFilter.showMore()">
+            {{ $t('settings.showMoreItems', { count: Math.min(12, workspaceProjectsFilter.filteredCount.value - workspaceProjectsFilter.visibleItems.value.length) }) }}
+          </button>
+        </template>
       </div>
       <PersistenceErrorBanner
         :error="store.workspaceBookmarksPersistenceError"
@@ -694,7 +756,14 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           <input v-model="bookmarkNote" class="input bookmark-note-input" :placeholder="$t('settings.notePlaceholder')" />
           <button class="btn btn-secondary compact" @click="addManualBookmark()">{{ $t('settings.add') }}</button>
         </div>
-        <div v-for="bookmark in store.workspaceBookmarks.slice(0, 20)" :key="bookmark.id" class="bookmark-row">
+        <input
+          v-if="store.workspaceBookmarks.length > 20"
+          v-model="workspaceBookmarksFilter.filterText.value"
+          class="input list-filter-input"
+          :placeholder="$t('settings.filterBookmarksPlaceholder')"
+        />
+        <div v-if="workspaceBookmarksFilter.filteredCount.value === 0" class="empty-line">{{ $t('settings.noListMatch') }}</div>
+        <div v-for="bookmark in workspaceBookmarksFilter.visibleItems.value" :key="bookmark.id" class="bookmark-row">
           <div>
             <strong>{{ bookmark.label }}</strong>
             <span>{{ bookmark.kind }} · {{ bookmark.address ? `0x${bookmark.address}` : '-' }} · {{ bookmark.type || '-' }} · {{ bookmark.note || '-' }}</span>
@@ -706,6 +775,9 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
             <button class="btn btn-secondary compact danger-action" @click="store.deleteWorkspaceBookmark(bookmark.id)">{{ $t('settings.delete') }}</button>
           </div>
         </div>
+        <button v-if="workspaceBookmarksFilter.hasMore.value" class="btn btn-secondary compact list-show-more" @click="workspaceBookmarksFilter.showMore()">
+          {{ $t('settings.showMoreItems', { count: Math.min(20, workspaceBookmarksFilter.filteredCount.value - workspaceBookmarksFilter.visibleItems.value.length) }) }}
+        </button>
       </div>
       <div v-else class="bookmark-list">
         <div class="panel-title">
@@ -754,7 +826,14 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           <h3>{{ $t('settings.structureTemplates') }}</h3>
           <span>{{ store.structureTemplates.length }}</span>
         </div>
-        <div v-for="template in store.structureTemplates.slice(0, 12)" :key="template.id" class="template-row">
+        <input
+          v-if="store.structureTemplates.length > 12"
+          v-model="structureTemplatesFilter.filterText.value"
+          class="input list-filter-input"
+          :placeholder="$t('settings.filterStructuresPlaceholder')"
+        />
+        <div v-if="structureTemplatesFilter.filteredCount.value === 0" class="empty-line">{{ $t('settings.noListMatch') }}</div>
+        <div v-for="template in structureTemplatesFilter.visibleItems.value" :key="template.id" class="template-row">
           <div>
             <strong>{{ template.name }}</strong>
             <span>0x{{ template.baseAddress }} · {{ $t('settings.fieldCount', { count: template.fieldCount }) }} · {{ template.processName || '-' }}</span>
@@ -764,6 +843,9 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
             <button class="btn btn-secondary compact danger-action" @click="store.deleteStructureTemplate(template.id)">{{ $t('settings.delete') }}</button>
           </div>
         </div>
+        <button v-if="structureTemplatesFilter.hasMore.value" class="btn btn-secondary compact list-show-more" @click="structureTemplatesFilter.showMore()">
+          {{ $t('settings.showMoreItems', { count: Math.min(12, structureTemplatesFilter.filteredCount.value - structureTemplatesFilter.visibleItems.value.length) }) }}
+        </button>
         <div v-if="selectedStructureTemplate" class="template-detail">
           <div class="panel-title">
             <h3>{{ selectedStructureTemplate.name }}</h3>
@@ -1324,7 +1406,10 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
           {{ $t('process.detach') }}
         </button>
       </div>
-      <p v-if="store.settingsStatus" class="status-line">{{ store.settingsStatus }}</p>
+      <!-- UX-PIPE-5 : distinction visuelle explicite, plus seulement le texte
+           -- sinon un échec de persistance disque n'affichait qu'un message
+           neutre indiscernable d'un succès. -->
+      <p v-if="store.settingsStatus" class="status-line" :class="{ error: store.settingsSaveError }">{{ store.settingsStatus }}</p>
     </section>
   </div>
 </template>
@@ -1613,6 +1698,11 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
   font-size: 12px;
 }
 
+.status-line.error {
+  color: var(--error);
+  font-weight: 600;
+}
+
 .input {
   min-width: 0;
   width: 100%;
@@ -1625,6 +1715,16 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
   font-size: 13px;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.list-filter-input {
+  margin: 8px 0;
+}
+
+.list-show-more {
+  align-self: center;
+  margin: 8px auto 0;
+  display: block;
 }
 
 .input::placeholder {

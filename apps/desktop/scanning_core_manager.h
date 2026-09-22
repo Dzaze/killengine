@@ -29,7 +29,7 @@ public:
     void requestCancelActiveScan();
 
     QVariantMap startExactScan(const QString& value, const QString& valueType);
-    QVariantMap startExactScanMultiType(const QString& value, const QString& valueType);
+    QVariantMap startExactScanMultiType(const QString& value, const QString& valueType, const QVariantMap& expertOptions);
     QVariantMap startExactScanExpert(const QString& value, const QString& valueType, const QVariantMap& expertOptions);
     QVariantMap scanEncryptedValue(const QString& value, const QString& valueType, const QVariantMap& options);
     QVariantMap startExactScanAsync(const QString& value, const QString& valueType, const QVariantMap& expertOptions);

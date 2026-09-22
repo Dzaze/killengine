@@ -1992,11 +1992,19 @@ onMounted(() => {
       <div class="summary-grid">
         <div class="stat">
           <span>{{ $t('scan.stored') }}</span>
-          <strong>{{ formatNumber(store.candidatePage?.totalCount) }}</strong>
+          <strong>{{ store.candidatePage ? formatNumber(store.candidatePage.totalCount) : '—' }}</strong>
         </div>
         <div class="stat">
+          <!-- UX-PIPE-3 (docs/PHASE_TRACKER.md, 18/09/2026) : dérivé de
+               candidatePage.totalCount (déjà tenu à jour en direct, y compris
+               pour un affinage déclenché par le pipe d'automatisation), au
+               lieu de nextScanResult.remaining qui n'était mis à jour que par
+               le bouton UI doNextScan() -- restait figé (donc faux) après un
+               nextScan pipe, et n'était jamais réinitialisé au changement de
+               cible. Après tout affinage, les candidats stockés SONT les
+               candidats restants par construction : même source pour les deux. -->
           <span>{{ $t('scan.remaining') }}</span>
-          <strong>{{ formatNumber(store.nextScanResult?.remaining) }}</strong>
+          <strong>{{ store.candidatePage ? formatNumber(store.candidatePage.totalCount) : '—' }}</strong>
         </div>
         <div class="stat">
           <span>Type</span>

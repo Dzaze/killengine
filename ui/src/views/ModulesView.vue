@@ -380,7 +380,16 @@ async function handleInstall(modId: string) {
     return
   }
 
-  // Modules classiques (lua_runtime, ai_model, clr_inspector, kernel_driver)
+  // PORT-5 : lua_runtime/clr_inspector s'installent depuis une archive locale
+  // choisie via un sélecteur de fichier natif, pas un simple clic (voir
+  // docs/PORTABILITY_ROADMAP.md#port-5).
+  const catalogEntry = store.moduleCatalog.find((m) => m.id === modId)
+  if (catalogEntry?.installKind === 'archive') {
+    store.browseAndInstallModuleFromArchive(modId)
+    return
+  }
+
+  // Modules classiques (ai_model, kernel_driver)
   store.installModule(modId)
 }
 

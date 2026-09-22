@@ -319,7 +319,11 @@ public:
     /// Phase 13 : Lance un scan multi-type + variantes de représentation.
     /// Quand valueType est vide ou "Auto", cherche plusieurs représentations
     /// numériques (Int/UInt, Float, fixed-point) et applique un score de confiance.
-    Q_INVOKABLE QVariantMap startExactScanMultiType(const QString& value, const QString& valueType);
+    /// expertOptions : mêmes clés que startExactScanExpert/startExactScanAsync
+    /// (startAddress, stopAddress, alignment, writableOnly, executableOnly,
+    /// copyOnWriteOnly), toutes optionnelles (UX-CHECKUP-3, 22/09/2026 : ces
+    /// filtres étaient calculés côté frontend mais jamais transmis à ce chemin).
+    Q_INVOKABLE QVariantMap startExactScanMultiType(const QString& value, const QString& valueType, const QVariantMap& expertOptions);
 
     /// Lance un scan exact avec filtres Mode Expert (Phase 12).
     /// expertOptions keys: startAddress, stopAddress, alignment, writableOnly,
@@ -1119,6 +1123,11 @@ public:
     /// Annule l'installation de module en cours (thread worker uniquement —
     /// pas d'effet sur le cas élevé UAC déjà détaché).
     Q_INVOKABLE QVariantMap cancelModuleInstall();
+
+    /// PORT-5 : ouvre un sélecteur de fichier natif pour choisir l'archive de
+    /// module locale (.zip) à installer (lua_runtime | clr_inspector) — voir
+    /// docs/PORTABILITY_ROADMAP.md#port-5.
+    Q_INVOKABLE QVariantMap browseForModuleArchive(const QString& moduleId);
 
     // MODULES-V2 : Environnement de test + Sécurité/Stealth
     /// Vérifie si l'EDR bloque l'injection de code sur le process attaché

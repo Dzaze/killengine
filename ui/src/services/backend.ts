@@ -1341,6 +1341,8 @@ export interface AutoResolveReportResult {
 
 export interface AppSettings {
   success?: boolean
+  /** UX-PIPE-5: set when success is false -- real disk persistence failure (killcore::commitSettingsSync), values are still applied in memory. */
+  error?: string
   language: 'fr' | 'en'
   defaultValueType: string
   scanMaxResults: number
@@ -1363,6 +1365,8 @@ export interface AiModelStatus {
   ready: boolean
   available?: boolean
   enabled?: boolean
+  /** UX-PIPE-2: true when disabled in-memory for this session only ("Continuer sans IA locale"), never persisted -- distinct from `enabled` (persistent setting) and `available` (files present). */
+  sessionDisabled?: boolean
   backend: 'llama.cpp' | 'deterministic' | string
   configuredModelPath: string
   /** PORT-4: raw stored value (relative portable reference or absolute external path), before resolution. */
@@ -1545,7 +1549,7 @@ export interface ModuleCatalog {
     expertOptions: ExpertScanOptions,
   ): Promise<Record<string, unknown>>
   /** Phase 13 : scan multi-type + variantes de representation (precision de recherche). */
-  startExactScanMultiType?(value: string, valueType: string): Promise<ExactScanResult>
+  startExactScanMultiType?(value: string, valueType: string, expertOptions: ExpertScanOptions): Promise<ExactScanResult>
   scanEncryptedValue?(value: string, valueType: string, options: Record<string, unknown>): Promise<EncryptedScanResult>
   scanStarted?: QWebChannelSignal<void>
   scanProgress?: QWebChannelSignal<number>
@@ -1812,6 +1816,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   hideHandle?(ownerPid: number, handleValue: number): Promise<Record<string, unknown>>
   /** Sélecteur de fichier natif pour le chemin GGUF personnalisé (remplace la saisie manuelle). */
   browseForModelFile?(): Promise<Record<string, unknown>>
+  /** PORT-5 : sélecteur de fichier natif pour l'archive de module locale (.zip) à installer (lua_runtime | clr_inspector). */
+  browseForModuleArchive?(moduleId: string): Promise<Record<string, unknown>>
   /** Modale de bienvenue première ouverture (QSettings, survit à un profil Windows différent). */
   hasSeenOnboarding?(): Promise<boolean>
   setOnboardingSeen?(seen: boolean): Promise<void>
@@ -1917,7 +1923,7 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   handleTable?(ownerPid: string, handleValue: string, hide: boolean): Promise<Record<string, unknown>>
   saveSettings(settings: AppSettings): Promise<AppSettings>
   /** Persiste immédiatement la langue seule (QSettings ui/language), sans attendre le "Sauvegarder" complet de Réglages — utilisé par le switch rapide FR/EN de la sidebar pour que le texte backend (KE_TXT) suive tout de suite. */
-  setUiLanguage?(language: 'fr' | 'en'): Promise<{ success: boolean, language: string }>
+  setUiLanguage?(language: 'fr' | 'en'): Promise<{ success: boolean, language: string, error?: string }>
   getLogFilePath(): Promise<string>
   getSmartSearchDebugFilePath(): Promise<string>
   getScanTelemetryFilePath?(): Promise<string>
@@ -2344,26 +2350,21 @@ class BackendService {
         : controller.captureUnknownSnapshot()
     }
 
-    const start = controller.captureUnknownSnapshotAsyncWithOptions
-      ? await controller.captureUnknownSnapshotAsyncWithOptions(expertOptions)
-      : await controller.captureUnknownSnapshotAsync()
-    if (start.success !== true || start.started !== true) {
-      return {
-        success: false,
-        partial: false,
-        cancelled: false,
-        regionsCaptured: 0,
-        regionsSkipped: 0,
-        bytesCaptured: 0,
-        error: String(start.error ?? t('backendService.cannotStartUnknownCapture')),
-      }
-    }
-
-    const requestId = Number(start.requestId)
+    // UX-CHECKUP-6 (22/09/2026) : s'abonner à scanFinished AVANT d'attendre la
+    // réponse de démarrage (comme startExactScanAsync ci-dessus, jamais comme
+    // avant ici) -- sinon un backend qui répond très vite pouvait émettre le
+    // signal avant que ce handler existe, perdu pour de bon jusqu'au timeout de
+    // 10 min. Le timeout se désabonnait aussi de nulle part avant ce lot (fuite
+    // de handler permanente à chaque scan Unknown qui expire).
     return new Promise((resolve) => {
+      let requestId: number | null = null
+      let settled = false
+      const earlyPayloads: Array<ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult> = []
       const timeout = window.setTimeout(() => {
+        settled = true
+        controller.scanFinished?.disconnect?.(handler)
         resolve({
-          requestId,
+          requestId: requestId ?? undefined,
           kind: 'unknown_capture',
           success: false,
           partial: false,
@@ -2376,13 +2377,59 @@ class BackendService {
       }, 10 * 60 * 1000)
 
       const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
+        if (requestId === null) {
+          earlyPayloads.push(payload)
+          return
+        }
         if (Number(payload.requestId) !== requestId) return
         if ('kind' in payload && payload.kind && payload.kind !== 'unknown_capture') return
+        settled = true
         window.clearTimeout(timeout)
         controller.scanFinished?.disconnect?.(handler)
         resolve(payload as UnknownSnapshotResult)
       }
       controller.scanFinished?.connect(handler)
+
+      const startPromise = controller.captureUnknownSnapshotAsyncWithOptions
+        ? controller.captureUnknownSnapshotAsyncWithOptions(expertOptions)
+        : controller.captureUnknownSnapshotAsync()
+      void startPromise.then((start) => {
+        if (settled) return
+        if (start.success !== true || start.started !== true) {
+          settled = true
+          window.clearTimeout(timeout)
+          controller.scanFinished?.disconnect?.(handler)
+          resolve({
+            success: false,
+            partial: false,
+            cancelled: false,
+            regionsCaptured: 0,
+            regionsSkipped: 0,
+            bytesCaptured: 0,
+            error: String(start.error ?? t('backendService.cannotStartUnknownCapture')),
+          })
+          return
+        }
+        requestId = Number(start.requestId)
+        for (const payload of earlyPayloads.splice(0)) {
+          handler(payload)
+          if (settled) break
+        }
+      }).catch((error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        controller.scanFinished?.disconnect?.(handler)
+        resolve({
+          success: false,
+          partial: false,
+          cancelled: false,
+          regionsCaptured: 0,
+          regionsSkipped: 0,
+          bytesCaptured: 0,
+          error: String(error),
+        })
+      })
     })
   }
 
@@ -2392,40 +2439,21 @@ class BackendService {
       return controller.unknownNextScan(mode, valueType)
     }
 
-    const start = await controller.unknownNextScanAsync(mode, valueType)
-    if (start.success === true && start.started !== true) {
-      const direct = start as UnknownNextScanResult & NextScanResult & Record<string, unknown>
-      return {
-        requestId: Number(direct.requestId ?? 0),
-        kind: 'unknown_refine',
-        success: direct.success,
-        partial: Boolean(direct.partial ?? false),
-        cancelled: Boolean(direct.cancelled ?? false),
-        checkedBytes: Number(direct.checkedBytes ?? direct.checked ?? 0),
-        matchesFound: Number(direct.matchesFound ?? direct.remaining ?? 0),
-        stored: Number(direct.stored ?? direct.remaining ?? 0),
-        error: String(direct.error ?? ''),
-        diagnostic: direct.diagnostic ? String(direct.diagnostic) : undefined,
-        refinedFromCandidates: true,
-      }
-    }
-    if (start.success !== true || start.started !== true) {
-      return {
-        success: false,
-        partial: false,
-        cancelled: false,
-        checkedBytes: 0,
-        matchesFound: 0,
-        stored: 0,
-        error: String(start.error ?? t('backendService.cannotStartUnknownComparison')),
-      }
-    }
-
-    const requestId = Number(start.requestId)
+    // UX-CHECKUP-6 (22/09/2026) : même correctif que captureUnknownSnapshotAsync
+    // ci-dessus -- abonnement à scanFinished avant d'attendre la réponse de
+    // démarrage (avec tampon des événements précoces), timeout qui se désabonne
+    // désormais. Le cas particulier "terminé de façon synchrone" (success mais
+    // started faux, ex. réduction déjà résolue sans travail async) reste géré
+    // en premier, avant tout abonnement inutile.
     return new Promise((resolve) => {
+      let requestId: number | null = null
+      let settled = false
+      const earlyPayloads: Array<ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult> = []
       const timeout = window.setTimeout(() => {
+        settled = true
+        controller.scanFinished?.disconnect?.(handler)
         resolve({
-          requestId,
+          requestId: requestId ?? undefined,
           kind: 'unknown_next',
           success: false,
           partial: false,
@@ -2438,14 +2466,19 @@ class BackendService {
       }, 10 * 60 * 1000)
 
       const handler = (payload: ExactScanResult | NextScanResult | UnknownSnapshotResult | UnknownNextScanResult) => {
+        if (requestId === null) {
+          earlyPayloads.push(payload)
+          return
+        }
         if (Number(payload.requestId) !== requestId) return
         if ('kind' in payload && payload.kind && payload.kind !== 'unknown_next' && payload.kind !== 'next_scan') return
+        settled = true
         window.clearTimeout(timeout)
         controller.scanFinished?.disconnect?.(handler)
         if ('kind' in payload && payload.kind === 'next_scan') {
           const nextPayload = payload as NextScanResult
           resolve({
-            requestId,
+            requestId: requestId as number,
             kind: 'unknown_refine',
             success: nextPayload.success,
             partial: false,
@@ -2462,6 +2495,64 @@ class BackendService {
         resolve(payload as UnknownNextScanResult)
       }
       controller.scanFinished?.connect(handler)
+
+      void controller.unknownNextScanAsync(mode, valueType).then((start) => {
+        if (settled) return
+        if (start.success === true && start.started !== true) {
+          const direct = start as UnknownNextScanResult & NextScanResult & Record<string, unknown>
+          settled = true
+          window.clearTimeout(timeout)
+          controller.scanFinished?.disconnect?.(handler)
+          resolve({
+            requestId: Number(direct.requestId ?? 0),
+            kind: 'unknown_refine',
+            success: direct.success,
+            partial: Boolean(direct.partial ?? false),
+            cancelled: Boolean(direct.cancelled ?? false),
+            checkedBytes: Number(direct.checkedBytes ?? direct.checked ?? 0),
+            matchesFound: Number(direct.matchesFound ?? direct.remaining ?? 0),
+            stored: Number(direct.stored ?? direct.remaining ?? 0),
+            error: String(direct.error ?? ''),
+            diagnostic: direct.diagnostic ? String(direct.diagnostic) : undefined,
+            refinedFromCandidates: true,
+          })
+          return
+        }
+        if (start.success !== true || start.started !== true) {
+          settled = true
+          window.clearTimeout(timeout)
+          controller.scanFinished?.disconnect?.(handler)
+          resolve({
+            success: false,
+            partial: false,
+            cancelled: false,
+            checkedBytes: 0,
+            matchesFound: 0,
+            stored: 0,
+            error: String(start.error ?? t('backendService.cannotStartUnknownComparison')),
+          })
+          return
+        }
+        requestId = Number(start.requestId)
+        for (const payload of earlyPayloads.splice(0)) {
+          handler(payload)
+          if (settled) break
+        }
+      }).catch((error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        controller.scanFinished?.disconnect?.(handler)
+        resolve({
+          success: false,
+          partial: false,
+          cancelled: false,
+          checkedBytes: 0,
+          matchesFound: 0,
+          stored: 0,
+          error: String(error),
+        })
+      })
     })
   }
 
@@ -3114,6 +3205,7 @@ class BackendService {
           ready: false,
           available: false,
           enabled: true,
+          sessionDisabled: false,
           backend: 'deterministic',
           configuredModelPath: '',
           envModelPath: '',
@@ -3139,6 +3231,9 @@ class BackendService {
       async browseForModelFile() {
         return { success: false, cancelled: true }
       },
+      async browseForModuleArchive(_moduleId: string) {
+        return { success: false, cancelled: true }
+      },
       async warmupLocalAiModel() {
         // No-op en mock: rien à réchauffer sans backend Qt réel.
       },
@@ -3152,9 +3247,9 @@ class BackendService {
         return {
           success: true,
           modules: [
-            { id: 'lua_runtime', displayName: 'Runtime Lua externe', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'script' },
+            { id: 'lua_runtime', displayName: 'Runtime Lua externe', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'archive' },
             { id: 'ai_model', displayName: 'Modèle IA embarqué (GGUF)', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'download' },
-            { id: 'clr_inspector', displayName: 'Inspecteur CLR (ClrMD)', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'script' },
+            { id: 'clr_inspector', displayName: 'Inspecteur CLR (ClrMD)', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'archive' },
             { id: 'kernel_driver', displayName: 'Driver noyau KillEngineKernel', description: 'Mock.', installed: false, status: 'missing', detail: 'Mock backend.', installable: true, installKind: 'elevated' },
           ],
         }

@@ -220,15 +220,33 @@ export const useScanningStore = defineStore('scanning', () => {
     try {
       scanBusy.value = true
       setScanProgress(0)
+      // UX-PIPE-3 : un nextScanResult d'une recherche précédente (autre valeur,
+      // autre cible) n'était jamais réinitialisé au démarrage d'un nouveau scan
+      // -- NextScanPanel.vue continuait d'afficher ses métriques (restants,
+      // vérifiés, illisibles) comme si elles décrivaient la recherche en cours.
+      nextScanResult.value = null
       scanStatusText.value = isAutoType ? t('scanningStore.multiTypeScanRunning') : t('scanningStore.exactScanRunning')
       addActionLog('scan', t('scanningStore.scanTitle', { kind: isAutoType ? t('scanningStore.multiType') : t('scanningStore.exact'), value: exactScanValue.value }), `${exactScanType.value}${hasExpertFilter ? ` · ${t('scanningStore.expertFiltersActive')}` : ''}.`, 'info')
 
       if (isAutoType) {
         const controller = backend.getController()
         if (controller.startExactScanMultiType) {
+          // UX-CHECKUP-3 (22/09/2026) : les filtres Mode Expert étaient calculés
+          // ci-dessus (hasExpertFilter) mais jamais transmis à ce chemin multi-type,
+          // contrairement à la branche mono-type juste en dessous.
           exactScanResult.value = await controller.startExactScanMultiType(
             exactScanValue.value,
             exactScanType.value,
+            hasExpertFilter
+              ? {
+                  startAddress: expertStartAddress.value.trim() || undefined,
+                  stopAddress: expertStopAddress.value.trim() || undefined,
+                  alignment: expertAlignment.value > 0 ? expertAlignment.value : undefined,
+                  writableOnly: expertWritableOnly.value,
+                  executableOnly: expertExecutableOnly.value,
+                  copyOnWriteOnly: expertCopyOnWriteOnly.value,
+                }
+              : {},
           )
         } else {
           // Fallback : si le backend n'expose pas le scan multi-type, on utilise le scan simple.
@@ -479,6 +497,10 @@ export const useScanningStore = defineStore('scanning', () => {
       undoCandidateScanResult.value = await backend.getController().undoCandidateScan()
       if (undoCandidateScanResult.value.success) {
         candidatePageIndex.value = 0
+        // UX-PIPE-3 : l'annulation revient à un état antérieur au dernier
+        // affinage -- ses métriques (restants/vérifiés/illisibles) ne décrivent
+        // plus l'ensemble de candidats désormais restauré.
+        nextScanResult.value = null
         await refreshCandidates()
         scanStatusText.value = t('scanningStore.narrowingRestored', { count: undoCandidateScanResult.value.count })
         addActionLog('rollback', t('scanningStore.narrowingRestoredTitle'), t('scanningStore.candidateCountDetail', { count: undoCandidateScanResult.value.count }), 'success')

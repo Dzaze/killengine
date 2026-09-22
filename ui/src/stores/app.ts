@@ -1,5 +1,5 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { i18n } from '@/i18n'
 import {
   backend,
@@ -122,6 +122,8 @@ export const useAppStore = defineStore('app', () => {
   // pas deux instances du même exécutable -- voir resyncAttachment().
   const attachedPid = ref(0)
   const processes = ref<ProcessInfo[]>([])
+  const processesLoading = ref(false)
+  const processesError = ref('')
   const processModules = ref<ProcessModuleInfo[]>([])
   const discoveredSaveFiles = ref<ProcessSaveFileInfo[]>([])
   const discoveredSaveFilesFamilyName = ref('')
@@ -200,6 +202,8 @@ export const useAppStore = defineStore('app', () => {
     settingsLoaded,
     settingsSaving,
     settingsStatus,
+    settingsSaveError,
+    languageSwitchError,
     appLanguage,
     settingDefaultValueType,
     settingScanMaxResults,
@@ -342,7 +346,7 @@ export const useAppStore = defineStore('app', () => {
   // memes noms/signatures qu'avant partout ou c'est appele (35+ sites internes +
   // InvestigationView/SettingsView/TrainerView.vue).
   const investigationStore = useInvestigationStore()
-  const { activeInvestigation, investigationArchive } = storeToRefs(investigationStore)
+  const { activeInvestigation, investigationArchive, investigationPersistenceError } = storeToRefs(investigationStore)
   // Store Trainer Features extrait (candidat S8, docs/REFACTOR_ROADMAP.md,
   // PHASE 230, 30/08/2026) -- meme patron que writeFreeze.ts (S7, PHASE 229) :
   // refs mutables via storeToRefs, wrappers minces, dependances transversales
@@ -388,6 +392,7 @@ export const useAppStore = defineStore('app', () => {
     refreshTrainerOverlay,
     setTrainerOverlay,
     handleGlobalHotkey,
+    trainerFeaturePatchBlockReason,
   } = trainerStore
   trainerStore.configureTrainerContext({
     processName,
@@ -1431,6 +1436,18 @@ export const useAppStore = defineStore('app', () => {
     await settingsStore.refreshAiModelStatus()
     const status = settingsStore.aiModelStatus
     if (!status?.ready) {
+      // UX-PIPE-2 : sessionDisabled est vérifié en premier et route vers
+      // l'écran dédié existant ('sessionDisabled', déjà utilisé par
+      // disableLocalAiForSessionAction) -- sinon un rechargement de page après
+      // un "Continuer sans IA locale" retombait ici et annonçait à tort
+      // 'engineMissing' (modelFound/enabled restent vrais, seule la session
+      // est désactivée), ce qui aurait redémontré le bug diagnostiqué au lieu
+      // de refléter l'état réel du moteur à la reconnexion.
+      if (status?.sessionDisabled) {
+        localAiWarmupStage.value = 'sessionDisabled'
+        localAiWarmupVisible.value = true
+        return
+      }
       localAiWarmupDegradedReason.value = status?.enabled === false
         ? 'disabled'
         : (!status?.modelFound ? 'modelMissing' : 'engineMissing')
@@ -1452,7 +1469,18 @@ export const useAppStore = defineStore('app', () => {
 
   async function disableLocalAiForSessionAction() {
     await backend.getController().disableLocalAiForSession?.()
-    localAiWarmupStage.value = 'sessionDisabled'
+    // UX-PIPE-6 (docs/PHASE_TRACKER.md, 18/09/2026) : ferme directement au lieu
+    // d'exiger un second clic de confirmation sur un écran séparé -- l'utilisateur
+    // vient de faire un choix actif ("Continuer sans IA"), inutile de le retenir
+    // une deuxième fois. L'état désactivé-pour-la-session reste visible de façon
+    // persistante dans Paramètres/Modules (UX-PIPE-2), l'information n'est donc
+    // pas perdue en fermant directement.
+    localAiWarmupVisible.value = false
+    // UX-CHECKUP-5 (22/09/2026) : avant, settingsStore.aiModelStatus ne se
+    // rafraîchissait qu'au clic manuel "Vérifier" (Paramètres) ou au prochain
+    // démarrage -- tout autre lecteur de aiModelStatus (dont le bandeau
+    // Assistant) restait sur l'ancien état jusque-là.
+    void settingsStore.refreshAiModelStatus()
   }
 
   async function refreshExternalAiStatus() {
@@ -1656,7 +1684,7 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function installModule(moduleId: string) {
+  async function installModule(moduleId: string, options: Record<string, unknown> = {}) {
     if (moduleInstallBusy.value) return null
     const labels: Record<string, string> = {
       lua_runtime: t('appStore.modules.installLuaRuntime'),
@@ -1676,7 +1704,7 @@ export const useAppStore = defineStore('app', () => {
     moduleInstallResult.value = null
     try {
       const controller = backend.getController()
-      const started = await controller.installModule?.(moduleId, {})
+      const started = await controller.installModule?.(moduleId, options)
       if (!started?.started) {
         moduleInstallResult.value = started ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
         return moduleInstallResult.value
@@ -1723,6 +1751,20 @@ export const useAppStore = defineStore('app', () => {
   async function cancelModuleInstall() {
     const result = await backend.getController().cancelModuleInstall?.()
     return result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
+  }
+
+  // PORT-5 : lua_runtime/clr_inspector s'installent désormais depuis une
+  // archive locale (docs/PORTABILITY_ROADMAP.md#port-5) — on choisit le
+  // fichier d'abord (pas de dialogue de risque tant qu'aucune archive n'est
+  // choisie), puis on enchaîne sur le flux installModule() existant.
+  async function browseAndInstallModuleFromArchive(moduleId: string) {
+    if (moduleInstallBusy.value) return null
+    const controller = backend.getController()
+    const picked = await controller.browseForModuleArchive?.(moduleId)
+    if (!picked?.success || !picked.path) {
+      return null
+    }
+    return installModule(moduleId, { archivePath: picked.path })
   }
 
   async function executeCheckpointFindWhatWrites(checkpoint: Record<string, unknown>) {
@@ -2217,6 +2259,16 @@ export const useAppStore = defineStore('app', () => {
         controller.scanProgress?.connect((percent) => {
           setScanProgress(Number(percent))
         })
+        // UX-PIPE-3 (docs/PHASE_TRACKER.md, 18/09/2026) : scanStatsUpdated est
+        // émis par ScanningCoreManager à chaque scan/affinage/annulation réel
+        // (exact, next-scan, undo, ...), y compris ceux déclenchés par le pipe
+        // d'automatisation -- jamais écouté avant ce correctif, donc Expert
+        // gardait ses candidats affichés figés si la vue était déjà montée
+        // pendant une opération externe (le garde-fou de montage
+        // `if (store.candidatePage) return` ne rejoue rien dans ce cas).
+        controller.scanStatsUpdated?.connect(() => {
+          void refreshCandidates()
+        })
         backendScanSignalsConnected = true
       }
       if (!backendHotkeySignalConnected) {
@@ -2653,10 +2705,20 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function refreshProcesses() {
+    // UX-PIPE-1 (docs/PHASE_TRACKER.md, 18/09/2026) : cet appel échouait
+    // silencieusement (getController() lève si le backend n'est pas encore
+    // connecté) quand ProcessView montait avant la fin de store.init() --
+    // `processes` restait vide sans jamais réessayer ni le signaler, d'où
+    // le faux "Aucun processus trouvé" au tout premier affichage.
+    processesLoading.value = true
+    processesError.value = ''
     try {
       processes.value = await backend.getController().getProcesses()
     } catch (e) {
+      processesError.value = String(e)
       console.error('[KillEngine] Failed to get processes:', e)
+    } finally {
+      processesLoading.value = false
     }
   }
 
@@ -3061,6 +3123,23 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function getTimelineStatus(): Promise<{ collecting: boolean; watchedAddressCount: number; totalDataPoints: number } | null> {
+    const controller = backend.getController()
+    if (!controller.getTimelineStatus) return null
+    try {
+      const result = await controller.getTimelineStatus()
+      if (result.success !== true) return null
+      const stats = (result.stats as Record<string, unknown>) ?? {}
+      return {
+        collecting: result.collecting === true,
+        watchedAddressCount: Number(result.watchedAddressCount ?? stats.watchedAddressCount ?? 0),
+        totalDataPoints: Number(stats.totalDataPoints ?? 0)
+      }
+    } catch {
+      return null
+    }
+  }
+
   async function getTimelineSeries(addressHex: string): Promise<Record<string, unknown> | null> {
     const controller = backend.getController()
     if (!controller.getTimelineSeriesForAddress) return null
@@ -3315,7 +3394,11 @@ export const useAppStore = defineStore('app', () => {
     if (!controller.listKnownGameProfiles) return []
     try {
       return await controller.listKnownGameProfiles()
-    } catch {
+    } catch (e) {
+      // UX-CHECKUP round 2 (22/09/2026) : seule fonction de ce groupe (avec
+      // loadGameProfile/saveGameProfile/deleteGameProfile juste au-dessus) sans
+      // addActionLog sur échec -- oubli, pas un choix.
+      addActionLog('pattern_learning', t('appStore.patternLearning.profileListFailed'), String(e), 'warning')
       return []
     }
   }
@@ -3451,6 +3534,13 @@ export const useAppStore = defineStore('app', () => {
     clrObjects.value = []
     clrSelectedObject.value = null
     clrRoots.value = []
+    // UX-CHECKUP-4 (22/09/2026) : watchedAddresses (adresses brutes, sans
+    // locator module+offset) manquait à ce nettoyage -- un watch créé sur un
+    // process gardait ses adresses après une ré-attache vers un AUTRE process,
+    // et continuait de les relire silencieusement dans la mauvaise cible.
+    if (watchedAddresses.value.length > 0) {
+      watchedAddresses.value = []
+    }
   }
 
   async function attach(pid: number, mode: 'standard' | 'kernel' = memoryAccessMode.value) {
@@ -4389,15 +4479,45 @@ export const useAppStore = defineStore('app', () => {
     return results
   }
 
-  const inferredExactTypes = computed(() => inferredTypesForValue(exactScanValue.value))
+  // UX-CHECKUP-2 (22/09/2026) : base stable pour les suggestions de type, distincte
+  // de exactScanValue (qu'un clic de suggestion peut réécrire). Sans elle, les
+  // suggestions x10/x100/x1000/x4096/x65536 se recalculaient depuis la valeur déjà
+  // transformée par le clic précédent (via inferredExactTypes, réactif à
+  // exactScanValue) — cliquer deux fois "x100" multipliait deux fois (50→5000→500000),
+  // et le seul facteur géré (x100, en dur) laissait les autres écrire un type
+  // invalide (ex. "Int32 x4096") dans exactScanType. Suit exactScanValue tant que
+  // le changement vient de la saisie utilisateur, pas d'un clic de suggestion.
+  const exactScanValueBaseline = ref(exactScanValue.value)
+  let suppressBaselineCapture = false
+  watch(exactScanValue, (value) => {
+    if (suppressBaselineCapture) return
+    exactScanValueBaseline.value = value
+  }, { flush: 'sync' })
+
+  const inferredExactTypes = computed(() => inferredTypesForValue(exactScanValueBaseline.value))
 
   function useInferredType(typeLabel: string) {
-    const type = typeLabel.replace(/\s+x100$/i, '')
-    if (typeLabel.endsWith('x100')) {
-      const numeric = Number(exactScanValue.value.trim().replace(',', '.'))
-      if (Number.isFinite(numeric)) exactScanValue.value = String(numeric * 100)
+    const scaleMatch = typeLabel.match(/^(.*?)\s+x(\d+)$/i)
+    const type = scaleMatch ? scaleMatch[1] : typeLabel
+    const baseline = exactScanValueBaseline.value.trim().replace(',', '.')
+    const numeric = Number(baseline)
+    let nextValue = exactScanValueBaseline.value
+
+    if (scaleMatch) {
+      const scale = Number(scaleMatch[2])
+      const scaled = numeric * scale
+      if (!Number.isFinite(numeric) || !Number.isFinite(scaled) || Math.abs(scaled) > 2147483647) {
+        addActionLog('scan_type', t('appStore.typeInference.scaleRefused', { typeLabel }), baseline, 'warning')
+        return
+      }
+      nextValue = String(scaled)
     }
+
+    suppressBaselineCapture = true
+    exactScanValue.value = nextValue
     exactScanType.value = type
+    suppressBaselineCapture = false
+
     addActionLog('scan_type', `Type de scan choisi : ${typeLabel}`, `Valeur ${exactScanValue.value}.`, 'info')
   }
 
@@ -4456,7 +4576,10 @@ export const useAppStore = defineStore('app', () => {
         ...watched,
         previousValue: watched.value,
         value,
-        changed: watched.value !== '' && value !== watched.value,
+        // UX-CHECKUP-4 : ne marquer "changed" que sur une lecture réellement
+        // réussie -- sinon un échec juste après une valeur connue (value passe
+        // à '') se comparait à tort comme un changement réel vers vide.
+        changed: preview.success && watched.value !== '' && value !== watched.value,
         error: preview.success ? '' : preview.error,
         updatedAt: nowTime(),
       }
@@ -4470,9 +4593,21 @@ export const useAppStore = defineStore('app', () => {
     return updated
   }
 
+  // UX-CHECKUP-4 (22/09/2026) : le timer de setWatchLiveEnabled appelle cette
+  // fonction toutes les 1000 ms sans attendre le tour précédent (void, fire-and-
+  // forget) — sur beaucoup d'adresses ou une cible lente, un tour encore en cours
+  // pouvait se faire chevaucher par le suivant. Garde simple : ignorer un appel
+  // (bouton Rafraîchir ou timer) tant qu'un tour est déjà en vol.
+  let watchRefreshInFlight = false
   async function refreshWatchedAddresses() {
-    for (const watched of watchedAddresses.value.slice(0, watchLiveReadLimit)) {
-      await refreshWatchedAddress(watched.address)
+    if (watchRefreshInFlight) return
+    watchRefreshInFlight = true
+    try {
+      for (const watched of watchedAddresses.value.slice(0, watchLiveReadLimit)) {
+        await refreshWatchedAddress(watched.address)
+      }
+    } finally {
+      watchRefreshInFlight = false
     }
   }
 
@@ -4890,6 +5025,7 @@ export const useAppStore = defineStore('app', () => {
     setTimelineConfig,
     startTimelineCollection,
     stopTimelineCollection,
+    getTimelineStatus,
     getTimelineSeries,
     detectTimelinePatterns,
     findVolatileTimelineAddresses,
@@ -4919,6 +5055,8 @@ export const useAppStore = defineStore('app', () => {
     processName,
     attachedPid,
     processes,
+    processesLoading,
+    processesError,
     processModules,
     discoveredSaveFiles,
     discoveredSaveFilesFamilyName,
@@ -4974,6 +5112,8 @@ export const useAppStore = defineStore('app', () => {
     settingsLoaded,
     settingsSaving,
     settingsStatus,
+    settingsSaveError,
+    languageSwitchError,
     appLanguage,
     settingDefaultValueType,
     settingScanMaxResults,
@@ -5000,6 +5140,7 @@ export const useAppStore = defineStore('app', () => {
     investigationReport,
     activeInvestigation,
     investigationArchive,
+    investigationPersistenceError,
     trainerFeatures,
     trainerBusy,
     trainerHotkeyStatus,
@@ -5131,6 +5272,7 @@ export const useAppStore = defineStore('app', () => {
     refreshSmartSearchContext,
     setInvestigationReport,
     startInvestigation,
+    saveInvestigations,
     addInvestigationStep,
     applyWorkflowPreset,
     updateInvestigationFromAutoResult,
@@ -5262,6 +5404,7 @@ export const useAppStore = defineStore('app', () => {
     refreshModuleCatalog,
     installModule,
     cancelModuleInstall,
+    browseAndInstallModuleFromArchive,
     prepareCheckpointAob,
     executeCheckpointForceValue,
     saveTrainerFeatures,
@@ -5273,6 +5416,7 @@ export const useAppStore = defineStore('app', () => {
     createTrainerFeatureFromCheckpoint,
     generateTrainerFeaturePointerChain,
     applyTrainerFeature,
+    trainerFeaturePatchBlockReason,
     restoreTrainerFeature,
     applyAllTrainerFeatures,
     restoreAllTrainerFeatures,

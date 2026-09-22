@@ -6,6 +6,7 @@ import { useInvestigationNotebookStore, type InvestigationHypothesis } from '@/s
 import { useEffectProofStore, type EffectProofLevel } from '@/stores/effectProof'
 import type { ProfileKnowledgeNoteKind } from '@/services/backend'
 import PanelIntro from '@/components/common/PanelIntro.vue'
+import PersistenceErrorBanner from '@/components/PersistenceErrorBanner.vue'
 
 const store = useAppStore()
 const notebook = useInvestigationNotebookStore()
@@ -362,6 +363,12 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
         <button class="btn danger" :disabled="!run" @click="store.clearInvestigation()">{{ $t('investigation.clear') }}</button>
       </div>
     </header>
+
+    <PersistenceErrorBanner
+      :error="store.investigationPersistenceError"
+      :retry="() => store.saveInvestigations()"
+      :export-data="() => store.exportInvestigationJson()"
+    />
 
     <PanelIntro
       :what="$t('investigation.intro.what')"

@@ -45,6 +45,59 @@ function Find-FirstExistingFile {
     return $null
 }
 
+# PORT-5 (docs/PORTABILITY_ROADMAP.md) : emet une archive de module
+# installable localement (voir scripts/install-module-from-archive.ps1) a
+# partir d'une sortie de build/publish deja produite ci-dessous -- jamais une
+# seconde compilation. Le MODULE_MANIFEST.json embarque permet une
+# verification d'integrite (SHA256) et d'architecture entierement offline,
+# sans URL de telechargement inventee.
+function New-ModuleArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModuleId,
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)][string]$SourceDir,
+        [Parameter(Mandatory = $true)][string]$OutputZip
+    )
+
+    $sourceFull = (Resolve-Path -LiteralPath $SourceDir).Path
+    $files = Get-ChildItem -LiteralPath $sourceFull -Recurse -File
+
+    $manifestFiles = @()
+    foreach ($file in $files) {
+        $relative = [System.IO.Path]::GetRelativePath($sourceFull, $file.FullName) -replace '\\', '/'
+        $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
+        $manifestFiles += [ordered]@{
+            path   = $relative
+            sha256 = $hash
+            size   = $file.Length
+        }
+    }
+
+    $manifest = [ordered]@{
+        moduleId = $ModuleId
+        version  = $Version
+        arch     = "win-x64"
+        files    = $manifestFiles
+    }
+
+    $stagingDir = Join-Path $env:TEMP "killengine_module_archive_$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
+    try {
+        Get-ChildItem -LiteralPath $sourceFull -Force | Copy-Item -Destination $stagingDir -Recurse -Force
+        $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $stagingDir "MODULE_MANIFEST.json") -Encoding UTF8
+
+        $outputDir = Split-Path -Parent $OutputZip
+        New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+        if (Test-Path -LiteralPath $OutputZip) {
+            Remove-Item -LiteralPath $OutputZip -Force
+        }
+        Compress-Archive -Path (Join-Path $stagingDir "*") -DestinationPath $OutputZip -CompressionLevel Optimal
+        Write-Host "Module archive: $OutputZip ($($files.Count) file(s))" -ForegroundColor Cyan
+    } finally {
+        Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if (-not $SkipBuild) {
     & (Join-Path $repoRoot "scripts\build.ps1")
     if ($LASTEXITCODE -ne 0) {
@@ -289,6 +342,11 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\disable_test_signing.bat") 
 # installModule("kernel_driver")) — the compiled .sys itself is copied below.
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\install-kernel-driver.ps1") -Destination $scriptsOut -Force
 
+# PORT-5 : script d'installation de module depuis archive locale, utilisé par
+# installModule("lua_runtime" | "clr_inspector") — doit être présent même
+# dans un paquet allégé sans runtime\lua ni tools\clr_inspector.
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\install-module-from-archive.ps1") -Destination $scriptsOut -Force
+
 $luaExamples = Join-Path $repoRoot "scripts\lua_examples"
 if (Test-Path $luaExamples) {
     Copy-Item -LiteralPath $luaExamples -Destination $scriptsOut -Recurse -Force
@@ -326,6 +384,18 @@ if ($luaRuntimeExe) {
         ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination $luaRuntimeOut -Force
         }
+
+    # PORT-5 : archive installable localement (voir install-module-from-archive.ps1)
+    # a partir de ce meme runtime deja bundle -- pas de seconde compilation.
+    $luaExeName = Split-Path -Leaf $luaRuntimeExe
+    # "" | pour fermer immediatement stdin (chunk vide) : lua.exe -v sans
+    # script ni -e lit stdin en mode batch (pas de TTY) et se terminerait
+    # sinon en attendant une entree interactive qui ne viendra jamais.
+    $luaVersionOutput = "" | & (Join-Path $luaRuntimeOut $luaExeName) -v 2>&1 | Select-Object -First 1
+    $luaVersionMatch = [regex]::Match([string]$luaVersionOutput, '(\d+\.\d+(\.\d+)?)')
+    $luaVersion = if ($luaVersionMatch.Success) { $luaVersionMatch.Value } else { "unknown" }
+    New-ModuleArchive -ModuleId "lua_runtime" -Version $luaVersion -SourceDir $luaRuntimeOut `
+        -OutputZip (Join-Path $distRoot "module-archives\killengine-module-lua_runtime-win-x64.zip")
 } else {
     Write-Warning "Lua runtime not found. Put Lua in runtime\lua, third_party\lua, third_party\lua\bin or tools\lua to bundle scripting support."
 }
@@ -356,6 +426,13 @@ if (-not $SkipClrInspector) {
 
     Get-ChildItem -LiteralPath $clrOut -Recurse -File -Include "*.pdb", "*.xml" -ErrorAction SilentlyContinue |
         Remove-Item -Force
+
+    # PORT-5 : archive installable localement a partir de cette meme
+    # publication self-contained -- pas de second `dotnet publish`.
+    $clrVersionInfo = (Get-Item -LiteralPath (Join-Path $clrOut "KillEngineClrInspector.exe")).VersionInfo.FileVersion
+    $clrVersion = if ($clrVersionInfo) { $clrVersionInfo } else { "unknown" }
+    New-ModuleArchive -ModuleId "clr_inspector" -Version $clrVersion -SourceDir $clrOut `
+        -OutputZip (Join-Path $distRoot "module-archives\killengine-module-clr_inspector-win-x64.zip")
 } else {
     Write-Warning "KillEngineClrInspector skipped. The CLR view will require a dev-built helper or will report it as unavailable."
 }
@@ -437,6 +514,10 @@ Notes:
   - GGUF models are included by default.
   - Use -ExcludeModel only for lightweight development packages.
   - Use -SkipClrInspector only for lightweight development packages without the CLR helper.
+  - A lightweight package built with -SkipClrInspector or without runtime\lua can still install
+    those modules later, without any compiler/SDK, from the module archives this same build
+    produces at dist\module-archives\killengine-module-<id>-win-x64.zip (Modules view, "Install"
+    button; see docs/PORTABILITY_ROADMAP.md#port-5).
   - The normal product layout is model\<ai-name>\ next to KillEngine.exe.
   - Agent folders use MODEL_MANIFEST.json and may point to shared GGUF weights.
   - A custom model path is only an advanced override.
@@ -482,6 +563,7 @@ $requiredRuntimeItems = @(
     "scripts\enable_test_signing.bat",
     "scripts\disable_test_signing.bat",
     "scripts\install-kernel-driver.ps1",
+    "scripts\install-module-from-archive.ps1",
     "scripts\lua_examples\README.md",
     "USER_GUIDE.md",
     "V1_REGRESSION_CHECKLIST.md",

@@ -19,6 +19,15 @@ export const useSettingsStore = defineStore('settings', () => {
   const settingsLoaded = ref(false)
   const settingsSaving = ref(false)
   const settingsStatus = ref('')
+  // UX-PIPE-5 (docs/PHASE_TRACKER.md, 18/09/2026) : true seulement quand
+  // settingsStatus décrit un échec (persistance disque ou exception de
+  // transport), jamais quand elle décrit un succès -- permet à l'UI de
+  // distinguer visuellement les deux sans avoir à reparser le texte.
+  const settingsSaveError = ref(false)
+  // UX-PIPE-5 : échec de setUiLanguage (sélecteur rapide sidebar) -- distinct
+  // de settingsStatus/settingsSaveError qui ne sont affichés que dans
+  // Paramètres, alors que ce sélecteur est visible sur toutes les vues.
+  const languageSwitchError = ref('')
   const appLanguage = ref<'fr' | 'en'>('fr')
   const settingDefaultValueType = ref('Int32')
   const settingScanMaxResults = ref(1000000)
@@ -128,15 +137,26 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function saveSettings(onApplied?: (settings: AppSettings) => void, onSaved?: () => void) {
     settingsSaving.value = true
+    settingsSaveError.value = false
     try {
       const saved = await backend.getController().saveSettings(currentSettings())
+      // PORT-3 : le backend applique déjà les valeurs en mémoire (et à l'état
+      // moteur effectif) même si la synchronisation disque échoue -- refléter
+      // ça ici aussi (garde la saisie de l'utilisateur, pas de perte), mais ne
+      // JAMAIS annoncer "sauvegardé" quand saved.success est false.
       applySettings(saved, onApplied)
       settingsLoaded.value = true
-      settingsStatus.value = t('settingsStore.saved')
+      if (saved.success === false) {
+        settingsSaveError.value = true
+        settingsStatus.value = t('settingsStore.saveFailed', { error: saved.error || t('settingsStore.saveFailedUnknown') })
+      } else {
+        settingsStatus.value = t('settingsStore.saved')
+      }
       await onSaved?.()
       await refreshAiModelStatus()
       return saved
     } catch (e) {
+      settingsSaveError.value = true
       settingsStatus.value = t('settingsStore.saveFailed', { error: String(e) })
       return null
     } finally {
@@ -149,11 +169,17 @@ export const useSettingsStore = defineStore('settings', () => {
   // ex. catalogue Modules) reste bloqué sur la dernière langue sauvegardée
   // et le switch rapide FR/EN de la sidebar (App.vue) n'est qu'à moitié réel.
   async function switchLanguage(language: 'fr' | 'en') {
+    // Appliqué côté Vue immédiatement (effectif pour cette session même si la
+    // persistance échoue plus bas) -- voir UX-PIPE-5 : mémoire et disque sont
+    // deux états différents, ne jamais les confondre dans un seul message.
     appLanguage.value = language
     try {
-      await backend.getController().setUiLanguage?.(language)
+      const result = await backend.getController().setUiLanguage?.(language)
+      languageSwitchError.value = result && result.success === false
+        ? (result.error || t('settingsStore.saveFailedUnknown'))
+        : ''
     } catch (e) {
-      settingsStatus.value = t('settingsStore.saveFailed', { error: String(e) })
+      languageSwitchError.value = String(e)
     }
   }
 
@@ -161,6 +187,8 @@ export const useSettingsStore = defineStore('settings', () => {
     settingsLoaded,
     settingsSaving,
     settingsStatus,
+    settingsSaveError,
+    languageSwitchError,
     appLanguage,
     switchLanguage,
     settingDefaultValueType,

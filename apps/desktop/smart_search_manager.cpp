@@ -2507,7 +2507,7 @@ QVariantMap SmartSearchManager::startAutoResolve(const QString& query, const QVa
         return result;
     }
 
-    QVariantMap firstScan = m_controller.startExactScanMultiType(numbers.first(), "Auto");
+    QVariantMap firstScan = m_controller.startExactScanMultiType(numbers.first(), "Auto", QVariantMap());
     appendSafeStep(
         "exact_scan_multi_type",
         firstScan.value("success").toBool() ? "success" : "error",
@@ -3756,7 +3756,7 @@ QVariantMap SmartSearchManager::startSmartSearch(const QString& query) {
             result["recoveryActions"] = recoveryActions;
         }
     } else if (tool == "exact_scan_multi_type") {
-        actionResult = m_controller.startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString());
+        actionResult = m_controller.startExactScanMultiType(args.value("value").toString(), args.value("valueType").toString(), QVariantMap());
     } else if (tool == "next_scan") {
         actionResult = m_controller.nextScan(args.value("mode").toString(), args.value("value").toString());
     } else if (tool == "get_candidates") {

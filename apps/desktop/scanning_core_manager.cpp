@@ -800,7 +800,7 @@ QVariantMap ScanningCoreManager::startExactScan(const QString& value, const QStr
 
 
 
-QVariantMap ScanningCoreManager::startExactScanMultiType(const QString& value, const QString& valueType) {
+QVariantMap ScanningCoreManager::startExactScanMultiType(const QString& value, const QString& valueType, const QVariantMap& expertOptions) {
     QVariantMap result;
     QVariantList matches;
     result["success"] = false;
@@ -839,6 +839,55 @@ QVariantMap ScanningCoreManager::startExactScanMultiType(const QString& value, c
     }
 
     killcore::ScanOptions options = scanOptionsFromSettings();
+
+    // Filtres Mode Expert (tous optionnels) — UX-CHECKUP-3 (22/09/2026) : mêmes
+    // clés et même comportement que startExactScanExpert/startExactScanAsync,
+    // jusqu'ici ignorées par ce chemin multi-type (options construites uniquement
+    // depuis les réglages globaux, filtres frontend silencieusement perdus).
+    if (expertOptions.contains("startAddress")) {
+        const QString startText = expertOptions.value("startAddress").toString().trimmed();
+        if (!startText.isEmpty()) {
+            uint64_t startAddress = 0;
+            if (parseHexAddress(startText, &startAddress)) {
+                options.startAddress = startAddress;
+            } else {
+                result["error"] = KE_TXT("Adresse de début invalide.", "Invalid start address.");
+                result["matches"] = matches;
+                return result;
+            }
+        }
+    }
+    if (expertOptions.contains("stopAddress")) {
+        const QString stopText = expertOptions.value("stopAddress").toString().trimmed();
+        if (!stopText.isEmpty()) {
+            uint64_t stopAddress = 0;
+            if (parseHexAddress(stopText, &stopAddress)) {
+                options.stopAddress = stopAddress;
+            } else {
+                result["error"] = KE_TXT("Adresse de fin invalide.", "Invalid end address.");
+                result["matches"] = matches;
+                return result;
+            }
+        }
+    }
+    if (options.startAddress != 0
+        && options.stopAddress != 0
+        && options.stopAddress <= options.startAddress) {
+        result["error"] = KE_TXT("La fin de plage doit être supérieure au début.", "The range end must be greater than the start.");
+        result["matches"] = matches;
+        return result;
+    }
+    if (expertOptions.contains("alignment")) {
+        bool alignOk = false;
+        const auto align = expertOptions.value("alignment").toULongLong(&alignOk);
+        if (alignOk && align > 0) {
+            options.alignment = static_cast<size_t>(align);
+            options.fastScan = false; // alignement explicite désactive le fast scan auto
+        }
+    }
+    options.writableOnly = expertOptions.value("writableOnly", false).toBool();
+    options.executableOnly = expertOptions.value("executableOnly", false).toBool();
+    options.copyOnWriteOnly = expertOptions.value("copyOnWriteOnly", false).toBool();
 
     emit scanStarted();
     emit scanProgress(0);
@@ -902,6 +951,7 @@ QVariantMap ScanningCoreManager::startExactScanMultiType(const QString& value, c
         {"smartAuto", smartAuto},
         {"explicitTypeGiven", explicitTypeGiven},
         {"variantCount", variants.size()},
+        {"hasExpertFilter", !expertOptions.isEmpty()},
         {"success", result.value("success")},
         {"partial", result.value("partial")},
         {"matchesFound", result.value("matchesFound")},
@@ -914,6 +964,7 @@ QVariantMap ScanningCoreManager::startExactScanMultiType(const QString& value, c
         {"smartAuto", smartAuto},
         {"explicitTypeGiven", explicitTypeGiven},
         {"variantCount", variants.size()},
+        {"hasExpertFilter", !expertOptions.isEmpty()},
         {"success", result.value("success")},
         {"partial", result.value("partial")},
         {"cancelled", result.value("cancelled")},

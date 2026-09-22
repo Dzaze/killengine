@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { formatDuration } from '@/utils/format'
 
 const store = useAppStore()
 
@@ -22,7 +23,7 @@ const stagePercent = computed(() => {
   }
 })
 
-const estimateSecondsRounded = computed(() => Math.round(store.localAiWarmupEstimate?.seconds ?? 0))
+const estimateDurationLabel = computed(() => formatDuration(store.localAiWarmupEstimate?.seconds))
 </script>
 
 <template>
@@ -42,7 +43,7 @@ const estimateSecondsRounded = computed(() => Math.round(store.localAiWarmupEsti
       </template>
 
       <template v-else-if="viewMode === 'estimateDecision'">
-        <h1 id="warmup-title" class="warmup-title">{{ $t('aiWarmup.estimateTitle', { seconds: estimateSecondsRounded }) }}</h1>
+        <h1 id="warmup-title" class="warmup-title">{{ $t('aiWarmup.estimateTitle', { duration: estimateDurationLabel }) }}</h1>
         <p class="warmup-degraded-reason">{{ $t('aiWarmup.estimateDetail') }}</p>
         <div class="warmup-decision-actions">
           <button type="button" class="warmup-wait-btn" @click="store.continueLocalAiWarmupAfterEstimate()">

@@ -42,11 +42,13 @@ const store = useAppStore()
     </div>
     <div v-if="store.watchedAddresses.length === 0" class="hint">{{ $t('watchLivePanel.empty') }}</div>
     <div v-else class="watch-list">
-      <div v-for="item in store.watchedAddresses" :key="item.address" class="watch-row" :class="{ changed: item.changed }">
+      <div v-for="item in store.watchedAddresses" :key="item.address" class="watch-row" :class="{ changed: item.changed, unreadable: item.error }">
         <code>0x{{ item.address }}</code>
         <span>{{ item.type }}</span>
-        <strong>{{ item.value || '-' }}</strong>
-        <span v-if="item.previousValue">{{ $t('watchLivePanel.previousValue', { value: item.previousValue }) }}</span>
+        <strong v-if="item.error" class="watch-error" :title="item.error">{{ $t('watchLivePanel.unreadable') }}</strong>
+        <strong v-else>{{ item.value || '-' }}</strong>
+        <span v-if="item.error && item.previousValue">{{ $t('watchLivePanel.lastKnownValue', { value: item.previousValue }) }}</span>
+        <span v-else-if="item.previousValue">{{ $t('watchLivePanel.previousValue', { value: item.previousValue }) }}</span>
         <span>{{ item.updatedAt }}</span>
         <button class="btn btn-secondary compact" @click="store.removeAddressFromWatch(item.address)">{{ $t('watchLivePanel.remove') }}</button>
       </div>

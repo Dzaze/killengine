@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, type WorkflowPreset } from '@/stores/app'
 import { useWebView2InspectorStore } from '@/stores/webView2Inspector'
@@ -67,6 +67,13 @@ onUnmounted(() => {
   if (thinkingTimer) clearInterval(thinkingTimer)
 })
 
+onMounted(() => {
+  // UX-CHECKUP-5 : aiModelStatus ne se rafraîchit pas tout seul en continu --
+  // s'assurer que le bandeau reflète l'état réel dès l'arrivée sur la page,
+  // pas seulement l'état mesuré au démarrage de l'app.
+  void store.refreshAiModelStatus()
+})
+
 const isAwaitingChange = computed(() => store.workflowStatus === 'awaiting_value_change')
 const needsMoreRefinement = computed(() => store.workflowStatus === 'needs_more_refinement')
 const isWorkflowActive = computed(() => store.workflowStatus !== 'idle')
@@ -81,6 +88,30 @@ const searchStatusText = computed(() => {
   if (isWorkflowActive.value) return workflowLabel(store.workflowStatus)
   return store.isAttached ? t('assistant.status.readyToSearch') : t('assistant.status.attachFirst')
 })
+
+// UX-CHECKUP-5 (22/09/2026) : l'Assistant se présentait comme un chat qui
+// choisit ses outils sans jamais préciser le mode IA réellement disponible
+// (IA locale désactivée pour la session, Claude actif, ou aucune IA -- outils
+// déterministes seulement). Réutilise l'état déjà déterminé par UX-PIPE-2
+// (aiModelStatus.backend/.message) et le choix de fournisseur existant
+// (externalAiActiveBackend) plutôt que de recalculer une nouvelle logique ;
+// ne propose aucun nouveau fournisseur.
+const aiModeInfo = computed(() => {
+  if (store.externalAiActiveBackend === 'claude') {
+    return store.externalAiHasApiKey
+      ? { label: t('assistant.aiMode.claude'), cls: 'ready', hint: t('assistant.aiMode.claude') }
+      : { label: t('assistant.aiMode.claudeNoKey'), cls: 'warn', hint: t('assistant.aiMode.claudeNoKey') }
+  }
+  const status = store.aiModelStatus
+  if (!status) return { label: t('assistant.aiMode.checking'), cls: '', hint: t('assistant.aiMode.checking') }
+  if (status.backend === 'llama.cpp') {
+    return { label: t('assistant.aiMode.local'), cls: 'ready', hint: String(status.message ?? t('assistant.aiMode.local')) }
+  }
+  return { label: t('assistant.aiMode.deterministic'), cls: 'warn', hint: String(status.message ?? t('assistant.aiMode.deterministic')) }
+})
+const aiModeLabel = computed(() => aiModeInfo.value.label)
+const aiModeClass = computed(() => aiModeInfo.value.cls)
+const aiModeHint = computed(() => aiModeInfo.value.hint)
 const contextItems = computed(() => {
   const context = store.smartSearchContext
   if (!context) return []
@@ -936,6 +967,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
         <span class="status-dot"></span>
         <span>{{ searchStatusText }}</span>
       </div>
+      <div class="ai-mode-badge" :class="aiModeClass" :title="aiModeHint">{{ aiModeLabel }}</div>
       <div v-if="store.isSearching" class="top-search-progress"></div>
     </div>
 
@@ -1261,12 +1293,37 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .assistant-status-strip {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 12px;
   padding: 7px 10px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: rgba(36, 40, 59, 0.58);
+}
+
+.ai-mode-badge {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: help;
+}
+
+.ai-mode-badge.ready {
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+  color: var(--success);
+}
+
+.ai-mode-badge.warn {
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+  color: var(--warning);
 }
 
 .top-search-status {

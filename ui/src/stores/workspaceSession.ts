@@ -25,20 +25,23 @@ import { ref, type Ref } from 'vue'
 import { i18n } from '@/i18n'
 import {
   backend,
-  type AppSettings,
   type AutoResolveReportResult,
   type MemoryReadPreview,
 } from '@/services/backend'
-import { useActionLogStore, type UserActionLogEntry } from './actionLog'
-import { useInvestigationStore, type InvestigationRun } from './investigation'
-import { useTrainerStore, type TrainerFeature } from './trainer'
+import { useActionLogStore } from './actionLog'
+import { useInvestigationStore } from './investigation'
+import { useTrainerStore } from './trainer'
 import {
   useWorkspaceItemsStore,
-  type StructureTemplate,
   type WorkspaceBookmark,
 } from './workspaceItems'
 import { useSettingsStore } from './settings'
 import { persistJsonToLocalStorage } from '@/utils/persistLocalStorage'
+import {
+  validateWorkspaceImport,
+  type ValidatedWorkspaceImport,
+  type WorkspaceImportValidationError,
+} from './workspaceImportValidation'
 
 const { t } = i18n.global
 
@@ -318,66 +321,63 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     return lines.join('\n')
   }
 
-  function previewWorkspaceImport(raw: string) {
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>
-      const investigation = parsed.investigation as Record<string, unknown> | undefined
-      const trainer = parsed.trainer as Record<string, unknown> | undefined
-      const structures = parsed.structures as Record<string, unknown> | undefined
-      const bookmarksRoot = parsed.bookmarks as Record<string, unknown> | undefined
-      const auditRoot = parsed.audit as Record<string, unknown> | undefined
-      const settings = parsed.settings as Record<string, unknown> | undefined
-      const presetsRoot = parsed.workflowPresets as Record<string, unknown> | undefined
-      const active = investigation?.active && typeof investigation.active === 'object' ? 1 : 0
-      const archive = Array.isArray(investigation?.archive) ? investigation.archive.length : 0
-      const features = Array.isArray(trainer?.features) ? trainer.features.length : 0
-      const templates = Array.isArray(structures?.templates) ? structures.templates.length : 0
-      const bookmarks = Array.isArray(bookmarksRoot?.items) ? bookmarksRoot.items.length : 0
-      const audit = Array.isArray(auditRoot?.entries) ? auditRoot.entries.length : 0
-      const presetId = String(presetsRoot?.lastPresetId ?? '')
-      return {
-        success: true,
-        version: Number(parsed.version ?? 0),
-        exportedAt: String(parsed.exportedAt ?? ''),
-        activeInvestigation: active,
-        archiveCount: archive,
-        trainerFeatureCount: features,
-        structureTemplateCount: templates,
-        bookmarkCount: bookmarks,
-        auditCount: audit,
-        lastPresetId: presetId,
-        hasSettings: Boolean(settings),
-      }
-    } catch (e) {
-      return {
-        success: false,
-        error: String(e),
-      }
+  // UX-PIPE-7 (docs/PHASE_TRACKER.md, 18/09/2026) : la validation réelle vit
+  // dans workspaceImportValidation.ts, un module pur sans dépendance store --
+  // ici on ne fait que traduire son verdict en message localisé et, pour
+  // importWorkspaceJson, appliquer un candidat déjà entièrement validé (plus
+  // aucune mutation ne peut donc échouer à mi-chemin sur des données
+  // invalides). Aperçu et import appellent tous deux validateWorkspaceImport
+  // sur le texte qu'on leur passe -- jamais un résultat mis en cache.
+  function describeWorkspaceImportError(error: WorkspaceImportValidationError): string {
+    const section = t(`workspaceSessionStore.importErrors.section.${error.section}`)
+    const reason = t(`workspaceSessionStore.importErrors.reason.${error.reason}`, { detail: error.detail ?? '' })
+    return t('workspaceSessionStore.importErrors.template', { section, reason })
+  }
+
+  function buildImportPreview(data: ValidatedWorkspaceImport) {
+    return {
+      success: true as const,
+      version: data.version,
+      exportedAt: data.exportedAt,
+      activeInvestigation: data.investigation?.active ? 1 : 0,
+      archiveCount: data.investigation?.archive.length ?? 0,
+      trainerFeatureCount: data.trainer?.features.length ?? 0,
+      structureTemplateCount: data.structures?.templates.length ?? 0,
+      bookmarkCount: data.bookmarks?.items.length ?? 0,
+      auditCount: data.audit?.entries.length ?? 0,
+      lastPresetId: data.lastPresetId,
+      hasSettings: Boolean(data.settings),
     }
   }
 
-  function importWorkspaceJson(raw: string) {
+  function previewWorkspaceImport(raw: string) {
+    const result = validateWorkspaceImport(raw)
+    if (result.success !== true) {
+      return { success: false, error: describeWorkspaceImportError(result.error) }
+    }
+    return buildImportPreview(result.data)
+  }
+
+  async function importWorkspaceJson(raw: string) {
     const d = deps()
-    const preview = previewWorkspaceImport(raw)
-    if (preview.success !== true) return preview
+    // Revérifie systématiquement le texte courant -- jamais un aperçu
+    // mémorisé, potentiellement périmé par rapport à ce texte (voir la
+    // fiche : "l'import doit revérifier le texte courant").
+    const result = validateWorkspaceImport(raw)
+    if (result.success !== true) {
+      return { success: false as const, error: describeWorkspaceImportError(result.error) }
+    }
+    const data = result.data
+    const preview = buildImportPreview(data)
+    let trainerImportBlockReason: string | undefined
 
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const investigation = parsed.investigation as Record<string, unknown> | undefined
-    const trainer = parsed.trainer as Record<string, unknown> | undefined
-    const structures = parsed.structures as Record<string, unknown> | undefined
-    const bookmarksRoot = parsed.bookmarks as Record<string, unknown> | undefined
-    const auditRoot = parsed.audit as Record<string, unknown> | undefined
-    const settings = parsed.settings as Record<string, unknown> | undefined
-    const presetsRoot = parsed.workflowPresets as Record<string, unknown> | undefined
-
-    if (investigation) {
-      activeInvestigation.value =
-        investigation.active && typeof investigation.active === 'object'
-          ? investigation.active as InvestigationRun
-          : null
-      investigationArchive.value = Array.isArray(investigation.archive)
-        ? (investigation.archive as InvestigationRun[]).slice(0, 20)
-        : []
+    // À partir d'ici, chaque section présente a déjà été validée
+    // intégralement par validateWorkspaceImport -- aucune mutation
+    // ci-dessous ne peut plus échouer sur une entrée mal formée. Une section
+    // absente de `data` n'est jamais touchée (politique d'import partiel).
+    if (data.investigation) {
+      activeInvestigation.value = data.investigation.active
+      investigationArchive.value = data.investigation.archive.slice(0, 20)
       investigationStepIdCounter.value = Math.max(
         investigationStepIdCounter.value,
         activeInvestigation.value?.steps.reduce((max, step) => Math.max(max, Number(step.id) || 0), 0) ?? 0,
@@ -391,47 +391,87 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
       saveInvestigations()
     }
 
-    if (trainer && Array.isArray(trainer.features)) {
-      trainerFeatures.value = (trainer.features as TrainerFeature[]).slice(0, 200)
-      trainerFeatureIdCounter.value = Math.max(0, ...trainerFeatures.value.map((feature) => Number(feature.id) || 0))
-      saveTrainerFeatures()
-      void refreshTrainerOverlay()
+    if (data.trainer) {
+      // UX-PIPE-10 (docs/PHASE_TRACKER.md, 18/09/2026) : un snapshot exporté
+      // pendant un freeze/patch actif ne prouve jamais qu'une opération
+      // tourne encore côté moteur pour LA session courante -- enabled/status/
+      // lastError sont donc toujours ramenés à un état inactif ici, jamais
+      // recopiés tels quels. Si une feature de la session courante est
+      // réellement active (ou qu'une opération Trainer est en cours), on
+      // refuse ce seul remplacement plutôt que de faire perdre la référence
+      // nécessaire pour l'arrêter/la restaurer (les autres sections
+      // continuent de s'appliquer normalement, même politique que les
+      // sections absentes d'un import partiel).
+      const activeFeatures = trainerFeatures.value.filter((feature) => feature.enabled)
+      if (trainerStore.trainerBusy || activeFeatures.length > 0) {
+        trainerImportBlockReason = activeFeatures.length > 0
+          ? t('workspaceSessionStore.trainerImportBlockedActive', { names: activeFeatures.slice(0, 3).map((feature) => feature.name).join(', ') })
+          : t('workspaceSessionStore.trainerImportBlockedBusy')
+        addActionLog('trainer', t('workspaceSessionStore.trainerImportSkipped'), trainerImportBlockReason, 'warning')
+      } else {
+        // hotkeyId est un identifiant de session côté backend (repart à zéro
+        // à chaque lancement), pas une donnée durable du projet : on
+        // désinscrit les raccourcis des features remplacées avant de les
+        // abandonner, pour ne pas laisser d'enregistrement orphelin.
+        for (const feature of [...trainerFeatures.value]) {
+          if (feature.hotkeyId) {
+            await trainerStore.unregisterTrainerFeatureHotkey(feature.id)
+          }
+        }
+        trainerFeatures.value = data.trainer.features.slice(0, 200).map((feature) => ({
+          ...feature,
+          enabled: false,
+          status: 'idle',
+          lastError: '',
+          hotkeyId: undefined,
+        }))
+        trainerFeatureIdCounter.value = Math.max(0, ...trainerFeatures.value.map((feature) => Number(feature.id) || 0))
+        saveTrainerFeatures()
+        void refreshTrainerOverlay()
+        // Ré-enregistrement scopé aux seules features Trainer importées
+        // (contrairement à trainerStore.reregisterPersistedHotkeys, qui
+        // toucherait aussi le hotkey de l'overlay, non concerné par cet
+        // import et jamais désinscrit ci-dessus).
+        for (const feature of trainerFeatures.value) {
+          if (feature.hotkey) {
+            await trainerStore.registerTrainerFeatureHotkey(feature.id, feature.hotkey)
+          }
+        }
+      }
     }
 
-    if (structures && Array.isArray(structures.templates)) {
-      structureTemplates.value = (structures.templates as StructureTemplate[]).slice(0, 100)
+    if (data.structures) {
+      structureTemplates.value = data.structures.templates.slice(0, 100)
       structureTemplateIdCounter.value = Math.max(0, ...structureTemplates.value.map((template) => Number(template.id) || 0))
       saveStructureTemplates()
     }
 
-    if (bookmarksRoot && Array.isArray(bookmarksRoot.items)) {
-      workspaceBookmarks.value = (bookmarksRoot.items as WorkspaceBookmark[]).slice(0, 500)
+    if (data.bookmarks) {
+      workspaceBookmarks.value = data.bookmarks.items.slice(0, 500)
       workspaceBookmarkIdCounter.value = Math.max(0, ...workspaceBookmarks.value.map((bookmark) => Number(bookmark.id) || 0))
       saveWorkspaceBookmarks()
     }
 
-    if (auditRoot && Array.isArray(auditRoot.entries)) {
-      actionLog.value = (auditRoot.entries as UserActionLogEntry[]).slice(0, 200)
+    if (data.audit) {
+      actionLog.value = data.audit.entries.slice(0, 200)
       actionLogIdCounter.value = Math.max(0, ...actionLog.value.map((entry) => Number(entry.id) || 0))
       saveActionLog()
     }
 
-    if (settings) {
-      if (settings.language === 'fr' || settings.language === 'en') appLanguage.value = settings.language
-      if (typeof settings.defaultValueType === 'string') settingDefaultValueType.value = settings.defaultValueType
-      if (['Auto', 'Eco', 'Normal', 'Performance', 'Max'].includes(String(settings.performanceMode))) {
-        settingPerformanceMode.value = settings.performanceMode as AppSettings['performanceMode']
-      }
-      if (typeof settings.modelEnabled === 'boolean') settingModelEnabled.value = settings.modelEnabled
-      if (typeof settings.modelPath === 'string') settingModelPath.value = settings.modelPath
-      if (Number.isFinite(Number(settings.modelThreads))) settingModelThreads.value = Number(settings.modelThreads)
-      if (Number.isFinite(Number(settings.scanMaxResults))) settingScanMaxResults.value = Number(settings.scanMaxResults)
-      if (Number.isFinite(Number(settings.unknownSnapshotMaxMb))) settingUnknownSnapshotMaxMb.value = Number(settings.unknownSnapshotMaxMb)
+    if (data.settings) {
+      const settings = data.settings
+      if (settings.language !== undefined) appLanguage.value = settings.language
+      if (settings.defaultValueType !== undefined) settingDefaultValueType.value = settings.defaultValueType
+      if (settings.performanceMode !== undefined) settingPerformanceMode.value = settings.performanceMode
+      if (settings.modelEnabled !== undefined) settingModelEnabled.value = settings.modelEnabled
+      if (settings.modelPath !== undefined) settingModelPath.value = settings.modelPath
+      if (settings.modelThreads !== undefined) settingModelThreads.value = settings.modelThreads
+      if (settings.scanMaxResults !== undefined) settingScanMaxResults.value = settings.scanMaxResults
+      if (settings.unknownSnapshotMaxMb !== undefined) settingUnknownSnapshotMaxMb.value = settings.unknownSnapshotMaxMb
     }
 
-    const presetId = String(presetsRoot?.lastPresetId ?? '')
-    if (presetId && d.workflowPresets.value.some((preset) => preset.id === presetId)) {
-      d.lastWorkflowPresetId.value = presetId
+    if (data.lastPresetId && d.workflowPresets.value.some((preset) => preset.id === data.lastPresetId)) {
+      d.lastWorkflowPresetId.value = data.lastPresetId
     }
 
     addActionLog(
@@ -451,6 +491,7 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     return {
       ...preview,
       imported: true,
+      ...(trainerImportBlockReason ? { trainerImportBlockReason } : {}),
     }
   }
 
@@ -482,10 +523,10 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     return project
   }
 
-  function loadWorkspaceProject(id: number) {
+  async function loadWorkspaceProject(id: number) {
     const project = workspaceProjects.value.find((item) => item.id === id)
     if (!project) return { success: false, error: t('workspaceSessionStore.projectNotFound') }
-    const result = importWorkspaceJson(project.snapshotJson)
+    const result = await importWorkspaceJson(project.snapshotJson)
     if (result.success === true) {
       addActionLog('workspace', t('workspaceSessionStore.projectLoaded', { name: project.name }), project.processName || '-', 'success')
       addInvestigationStep({
