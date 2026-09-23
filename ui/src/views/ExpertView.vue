@@ -44,8 +44,10 @@ import { useExpertPointerChain } from '@/composables/useExpertPointerChain'
 import { useExpertAobFlow } from '@/composables/useExpertAobFlow'
 import { formatNumber, formatBytes } from '@/utils/format'
 import { findWhatWritesSizeForType } from '@/utils/valueTypes'
+import { expertToolCatalog, type ExpertToolEntry } from '@/components/expert/toolCatalog'
+import { persistJsonToLocalStorage } from '@/utils/persistLocalStorage'
 
-const { t } = useI18n()
+const { t, messages } = useI18n()
 const store = useAppStore()
 const {
   selectedCandidateAddresses,
@@ -1817,6 +1819,171 @@ function showStep(id: ExpertStepId) {
   return activeStep.value === 'all' || activeStep.value === id
 }
 
+// UX-PRODUIT-9 (docs/PHASE_TRACKER.md, 23/09/2026) : sommaire fixe, recherche
+// "Aller à un outil" et favoris épinglés, tous basés sur expertToolCatalog.
+// Sert uniquement à naviguer (scroll/focus) -- ne remplace pas le registry
+// des outils IA et n'exécute aucune méthode moteur.
+
+// Compense la barre d'accès rapide sticky (scroll-margin-top en CSS) puis
+// donne le focus au premier élément interactif du panneau visé -- fonction
+// unique réutilisée par le sommaire, la recherche, les favoris ET la
+// consommation de pendingExpertAnchor ci-dessous (recommandations Assistant),
+// pour ne jamais dupliquer la logique de scroll/focus.
+function focusAnchor(anchorId: string) {
+  void nextTick(() => {
+    const el = document.getElementById(anchorId)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const focusable = el.matches('input, button, select, textarea, [tabindex]')
+      ? el
+      : el.querySelector<HTMLElement>('input, button, select, textarea, [tabindex]')
+    focusable?.focus({ preventScroll: true })
+  })
+}
+
+function openCatalogEntry(entry: ExpertToolEntry) {
+  if (!isCatalogEntryAvailable(entry)) return
+  // Si le filtre d'étape actuel cacherait le panneau visé, ouvre son étape ;
+  // une navigation normale (déjà sur Tout) reste sur Tout par défaut.
+  if (activeStep.value !== 'all' && activeStep.value !== entry.step) {
+    activeStep.value = entry.step
+  }
+  focusAnchor(entry.anchor)
+  searchQuery.value = ''
+  searchOpen.value = false
+  showAllToolsCatalog.value = false
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+// Résout le titre d'une entrée du catalogue dans les DEUX langues (pas
+// seulement la langue active) en lisant directement les messages i18n déjà
+// chargés, sans dupliquer le texte des titres dans le catalogue.
+function resolveBothLocaleLabels(labelKey: string): string[] {
+  const labels: string[] = []
+  for (const loc of ['fr', 'en'] as const) {
+    const bundle = messages.value[loc] as Record<string, unknown> | undefined
+    if (!bundle) continue
+    let node: unknown = bundle
+    for (const segment of labelKey.split('.')) {
+      if (node && typeof node === 'object') node = (node as Record<string, unknown>)[segment]
+      else { node = undefined; break }
+    }
+    if (typeof node === 'string') labels.push(node)
+  }
+  return labels
+}
+
+interface CatalogSearchHit {
+  entry: ExpertToolEntry
+  rank: number
+}
+
+const searchQuery = ref('')
+const searchOpen = ref(false)
+const searchActiveIndex = ref(0)
+
+const searchResults = computed<CatalogSearchHit[]>(() => {
+  const query = normalizeSearchText(searchQuery.value)
+  if (!query) return []
+  const hits: CatalogSearchHit[] = []
+  for (const entry of expertToolCatalog) {
+    const haystacks = [...resolveBothLocaleLabels(entry.labelKey), ...entry.keywords].map(normalizeSearchText)
+    let rank = -1
+    for (const text of haystacks) {
+      if (text === query) { rank = 0; break }
+      if (text.startsWith(query)) { rank = Math.min(rank === -1 ? 1 : rank, 1); continue }
+      if (text.includes(query)) { rank = rank === -1 ? 2 : rank }
+    }
+    if (rank !== -1) hits.push({ entry, rank })
+  }
+  hits.sort((a, b) => a.rank - b.rank)
+  return hits
+})
+
+watch(searchResults, () => { searchActiveIndex.value = 0 })
+
+function onSearchKeydown(event: KeyboardEvent) {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    if (searchResults.value.length) searchActiveIndex.value = (searchActiveIndex.value + 1) % searchResults.value.length
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    if (searchResults.value.length) searchActiveIndex.value = (searchActiveIndex.value - 1 + searchResults.value.length) % searchResults.value.length
+  } else if (event.key === 'Enter') {
+    event.preventDefault()
+    const hit = searchResults.value[searchActiveIndex.value]
+    if (hit) openCatalogEntry(hit.entry)
+  } else if (event.key === 'Escape') {
+    searchQuery.value = ''
+    searchOpen.value = false
+  }
+}
+
+// Favoris : IDs uniquement, persistés localement, jamais d'adresse/PID.
+// JSON absent/invalide -> liste vide ; doublons/IDs inconnus ignorés.
+const EXPERT_FAVORITES_KEY = 'killengine.expert.favorites.v1'
+const favoriteIds = ref<string[]>([])
+const favoritesSaveError = ref('')
+
+function loadFavorites() {
+  try {
+    const raw = window.localStorage.getItem(EXPERT_FAVORITES_KEY)
+    if (!raw) { favoriteIds.value = []; return }
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) { favoriteIds.value = []; return }
+    const knownIds = new Set(expertToolCatalog.map((e) => e.id))
+    const seen = new Set<string>()
+    const cleaned: string[] = []
+    for (const id of parsed) {
+      if (typeof id !== 'string' || !knownIds.has(id) || seen.has(id)) continue
+      seen.add(id)
+      cleaned.push(id)
+    }
+    favoriteIds.value = cleaned
+  } catch {
+    favoriteIds.value = []
+  }
+}
+
+function saveFavorites() {
+  const outcome = persistJsonToLocalStorage(EXPERT_FAVORITES_KEY, favoriteIds.value)
+  favoritesSaveError.value = outcome.success ? '' : (outcome.error ?? t('expert.favoritesSaveErrorGeneric'))
+}
+
+function toggleFavorite(id: string) {
+  const index = favoriteIds.value.indexOf(id)
+  if (index === -1) favoriteIds.value = [...favoriteIds.value, id]
+  else favoriteIds.value = favoriteIds.value.filter((existing) => existing !== id)
+  saveFavorites()
+}
+
+function isFavorite(id: string): boolean {
+  return favoriteIds.value.includes(id)
+}
+
+const favoriteEntries = computed<ExpertToolEntry[]>(() => {
+  const byId = new Map(expertToolCatalog.map((e) => [e.id, e]))
+  return favoriteIds.value.map((id) => byId.get(id)).filter((e): e is ExpertToolEntry => !!e)
+})
+
+const showAllToolsCatalog = ref(false)
+
+// Seule entrée du catalogue avec une condition d'affichage (RegionPanel a un
+// v-if, tous les autres panneaux sont toujours dans le DOM une fois attaché).
+// Une section conditionnelle absente explique son prérequis au lieu de
+// scroller vers du vide.
+function isCatalogEntryAvailable(entry: ExpertToolEntry): boolean {
+  if (entry.id === 'region') return Boolean(store.expertRegionSize || store.expertRegionProtection)
+  return true
+}
+
 // Compteur affiche sur l'onglet d'etape: montre ou en est le travail sans
 // forcer une navigation automatique (un changement d'onglet subi est pire
 // qu'un onglet a cliquer).
@@ -1920,10 +2087,12 @@ onMounted(() => {
   if (store.pendingExpertAnchor) {
     const anchorId = store.pendingExpertAnchor
     store.pendingExpertAnchor = null
-    void nextTick(() => {
-      document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+    focusAnchor(anchorId)
   }
+})
+
+onMounted(() => {
+  loadFavorites()
 })
 </script>
 
@@ -2016,49 +2185,123 @@ onMounted(() => {
         </div>
       </div>
 
-      <nav class="workflow-steps" :aria-label="$t('expert.stepsAriaLabel')">
-        <button
-          v-for="step in expertSteps"
-          :key="step.id"
-          type="button"
-          class="workflow-step"
-          :class="{ active: activeStep === step.id }"
-          @click="activeStep = step.id"
-        >
-          <span class="workflow-step-head">
-            <span class="workflow-step-title">{{ $t(`help.step.${step.id}.title`) }}</span>
-            <RiskBadge v-if="step.risk !== 'read'" :level="step.risk" />
-            <span v-if="stepCount(step.id)" class="workflow-step-count">{{ formatNumber(stepCount(step.id)) }}</span>
-          </span>
-          <span class="workflow-step-what">{{ $t(`help.step.${step.id}.what`) }}</span>
-        </button>
-        <button
-          type="button"
-          class="workflow-step compact-step"
-          :class="{ active: activeStep === 'all' }"
-          @click="activeStep = 'all'"
-        >
-          <span class="workflow-step-head">
-            <span class="workflow-step-title">{{ $t('expert.all') }}</span>
-          </span>
-          <span class="workflow-step-what">{{ $t('expert.showAllFourSteps') }}</span>
-        </button>
-      </nav>
+      <div class="expert-quickbar">
+        <nav class="workflow-steps" :aria-label="$t('expert.stepsAriaLabel')">
+          <button
+            v-for="step in expertSteps"
+            :key="step.id"
+            type="button"
+            class="workflow-step"
+            :class="{ active: activeStep === step.id }"
+            @click="activeStep = step.id"
+          >
+            <span class="workflow-step-head">
+              <span class="workflow-step-title">{{ $t(`help.step.${step.id}.title`) }}</span>
+              <RiskBadge v-if="step.risk !== 'read'" :level="step.risk" />
+              <span v-if="stepCount(step.id)" class="workflow-step-count">{{ formatNumber(stepCount(step.id)) }}</span>
+            </span>
+            <span class="workflow-step-what">{{ $t(`help.step.${step.id}.what`) }}</span>
+          </button>
+          <button
+            type="button"
+            class="workflow-step compact-step"
+            :class="{ active: activeStep === 'all' }"
+            @click="activeStep = 'all'"
+          >
+            <span class="workflow-step-head">
+              <span class="workflow-step-title">{{ $t('expert.all') }}</span>
+            </span>
+            <span class="workflow-step-what">{{ $t('expert.showAllFourSteps') }}</span>
+          </button>
+        </nav>
 
-      <RegionPanel v-show="showStep('inspect')" v-if="store.expertRegionSize || store.expertRegionProtection" />
+        <div class="expert-search-row">
+          <input
+            v-model="searchQuery"
+            type="text"
+            class="input expert-search-input"
+            :placeholder="$t('expert.searchPlaceholder')"
+            @focus="searchOpen = true"
+            @keydown="onSearchKeydown"
+          />
+          <div v-if="searchOpen && searchQuery" class="expert-search-results">
+            <div v-if="searchResults.length === 0" class="expert-search-empty">{{ $t('expert.noToolFound') }}</div>
+            <button
+              v-for="(hit, idx) in searchResults"
+              :key="hit.entry.id"
+              type="button"
+              class="expert-search-result"
+              :class="{ active: idx === searchActiveIndex, unavailable: !isCatalogEntryAvailable(hit.entry) }"
+              @mouseenter="searchActiveIndex = idx"
+              @click="openCatalogEntry(hit.entry)"
+            >
+              <span class="expert-search-result-title">{{ $t(hit.entry.labelKey) }}</span>
+              <span class="expert-search-result-step">{{ $t(`help.step.${hit.entry.step}.title`) }}</span>
+              <span v-if="!isCatalogEntryAvailable(hit.entry)" class="expert-search-result-unavailable">{{ $t('expert.toolUnavailableHint') }}</span>
+            </button>
+          </div>
+        </div>
 
-      <SaveFilesPanel v-show="showStep('inspect')" />
+        <div class="expert-favorites-row">
+          <template v-if="favoriteEntries.length">
+            <button
+              v-for="entry in favoriteEntries"
+              :key="entry.id"
+              type="button"
+              class="expert-favorite-chip"
+              @click="openCatalogEntry(entry)"
+            >
+              <span class="expert-favorite-star">★</span>{{ $t(entry.labelKey) }}
+            </button>
+          </template>
+          <span v-else class="hint expert-favorites-empty">{{ $t('expert.noFavoritesYet') }}</span>
+          <button type="button" class="expert-all-tools-btn" @click="showAllToolsCatalog = !showAllToolsCatalog">
+            {{ $t('expert.allTools') }}
+          </button>
+        </div>
+        <p v-if="favoritesSaveError" class="error expert-favorites-error">{{ $t('expert.favoritesSaveErrorPrefix') }} {{ favoritesSaveError }}</p>
 
-      <ExactScanPanel v-show="showStep('find')" :on-start-new-scan="startNewScan" />
+        <div v-if="showAllToolsCatalog" class="expert-all-tools-panel">
+          <div v-for="step in expertSteps.map(s => s.id)" :key="step" class="expert-all-tools-group">
+            <h4>{{ $t(`help.step.${step}.title`) }}</h4>
+            <div
+              v-for="entry in expertToolCatalog.filter(e => e.step === step)"
+              :key="entry.id"
+              class="expert-all-tools-row"
+              :class="{ unavailable: !isCatalogEntryAvailable(entry) }"
+            >
+              <button type="button" class="expert-all-tools-open" @click="openCatalogEntry(entry)">
+                {{ $t(entry.labelKey) }}
+              </button>
+              <span v-if="!isCatalogEntryAvailable(entry)" class="hint">{{ $t('expert.toolUnavailableHint') }}</span>
+              <button
+                type="button"
+                class="expert-favorite-toggle"
+                :class="{ active: isFavorite(entry.id) }"
+                :aria-label="isFavorite(entry.id) ? $t('expert.unpin') : $t('expert.pin')"
+                @click="toggleFavorite(entry.id)"
+              >
+                ★
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
-      <NextScanPanel v-show="showStep('find')" />
+      <RegionPanel id="expert-anchor-region" v-show="showStep('inspect')" v-if="store.expertRegionSize || store.expertRegionProtection" />
 
-      <UnknownScanPanel v-show="showStep('find')" />
+      <SaveFilesPanel id="expert-anchor-save-files" v-show="showStep('inspect')" />
 
-      <section v-show="showStep('find')" class="panel ui-string-panel risk-read">
+      <ExactScanPanel id="expert-anchor-exact-scan" v-show="showStep('find')" :on-start-new-scan="startNewScan" />
+
+      <NextScanPanel id="expert-anchor-next-scan" v-show="showStep('find')" />
+
+      <UnknownScanPanel id="expert-anchor-unknown-scan" v-show="showStep('find')" />
+
+      <section id="expert-anchor-trace-ui-string" v-show="showStep('find')" class="panel ui-string-panel risk-read">
         <div class="panel-title">
           <div class="panel-heading">
-            <h2>Trace UI string</h2>
+            <h2>{{ $t('expert.traceUiStringTitle') }}</h2>
             <InfoDot topic="uiString" />
             <RiskBadge level="read" />
           </div>
@@ -2522,8 +2765,8 @@ onMounted(() => {
             </p>
           </div>
         </div>
-        <div class="find-writes-panel" data-testid="visual-observation-panel">
-          <strong>{{ visualText('Montre-moi ce qui change', 'Show me what changes') }}</strong>
+        <div id="expert-anchor-visual-observation" class="find-writes-panel" data-testid="visual-observation-panel">
+          <strong>{{ $t('expert.visualObservationTitle') }}</strong>
           <p class="hint">{{ visualText('Observation décrite, sans capture écran. Les lectures sont séquentielles et la description reste incertaine. Une corrélation ne prouve ni la causalité ni l’effet.', 'Described observation, without screen capture. Readings are sequential and the description remains uncertain. Correlation proves neither causality nor effect.') }}</p>
           <p class="hint">{{ visualText('1. Relevez avant. 2. Faites une action dans la cible et décrivez le changement. 3. Relevez après pour comparer les candidats existants.', '1. Sample before. 2. Perform an action in the target and describe the change. 3. Sample after to compare existing candidates.') }}</p>
           <button :disabled="visualBusy" @click="captureVisualBefore">{{ visualText('Relever avant / recommencer', 'Sample before / restart') }}</button>
@@ -2859,22 +3102,22 @@ onMounted(() => {
         </div>
       </section>
 
-      <CandidatePanel v-show="showStep('inspect')" />
+      <CandidatePanel id="expert-anchor-candidates" v-show="showStep('inspect')" />
 
-      <WritePanel v-show="showStep('act')" />
-      <WatchLivePanel v-show="showStep('inspect')" />
+      <WritePanel id="expert-anchor-write" v-show="showStep('act')" />
+      <WatchLivePanel id="expert-anchor-watch" v-show="showStep('inspect')" />
 
-      <AobSignaturePanel v-show="showStep('persist')" />
-      <InjectionPanel v-show="showStep('persist')" />
+      <AobSignaturePanel id="expert-anchor-aob" v-show="showStep('persist')" />
+      <InjectionPanel id="expert-anchor-injection" v-show="showStep('persist')" />
 
-      <PointerChainScanPanel v-show="showStep('inspect')" />
+      <PointerChainScanPanel id="expert-anchor-pointer-chain-scan" v-show="showStep('inspect')" />
 
-      <GroupScanPanel v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
-      <FindWhatAccessesPanel v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
-      <AutoDissectPanel v-show="showStep('find')" />
-      <PointerChainWatchPanel v-show="showStep('inspect')" />
-      <SessionPanel v-show="showStep('persist')" />
-      <ActionLogPanel v-show="showStep('persist')" />
+      <GroupScanPanel id="expert-anchor-group-scan" v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
+      <FindWhatAccessesPanel id="expert-anchor-find-what-accesses" v-show="showStep('find')" :find-what-accesses-result="findWhatAccessesResult" />
+      <AutoDissectPanel id="expert-anchor-auto-dissect" v-show="showStep('find')" />
+      <PointerChainWatchPanel id="expert-anchor-pointer-chain-watch" v-show="showStep('inspect')" />
+      <SessionPanel id="expert-anchor-session" v-show="showStep('persist')" />
+      <ActionLogPanel id="expert-anchor-action-log" v-show="showStep('persist')" />
     </template>
   </div>
 </template>
@@ -2949,6 +3192,208 @@ onMounted(() => {
 
 .workflow-step.compact-step {
   max-width: 150px;
+}
+
+.expert-quickbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 -4px 16px;
+  padding: 12px 4px 10px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.expert-search-row {
+  position: relative;
+  margin-top: 10px;
+}
+
+.expert-search-input {
+  width: 100%;
+}
+
+.expert-search-results {
+  position: absolute;
+  z-index: 30;
+  width: 100%;
+  max-height: 320px;
+  margin-top: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.expert-search-empty {
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.expert-search-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.expert-search-result:first-child {
+  border-top: none;
+}
+
+.expert-search-result.active {
+  background: var(--bg-accent);
+}
+
+.expert-search-result.unavailable {
+  opacity: 0.6;
+}
+
+.expert-search-result-step {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.expert-search-result-unavailable {
+  flex-shrink: 0;
+  color: var(--warning);
+  font-size: 11px;
+}
+
+.expert-favorites-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.expert-favorite-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.expert-favorite-chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.expert-favorite-star {
+  margin-right: 4px;
+  color: var(--warning);
+}
+
+.expert-favorites-empty {
+  font-size: 12px;
+}
+
+.expert-all-tools-btn {
+  margin-left: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.expert-all-tools-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.expert-favorites-error {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.expert-all-tools-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.expert-all-tools-group h4 {
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.expert-all-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.expert-all-tools-row.unavailable .expert-all-tools-open {
+  color: var(--text-dim);
+}
+
+.expert-all-tools-open {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 3px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.expert-all-tools-open:hover {
+  color: var(--text-primary);
+}
+
+.expert-favorite-toggle {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.expert-favorite-toggle.active {
+  color: var(--warning);
+}
+
+@media (max-width: 980px) {
+  .expert-all-tools-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .workflow-step-head {
@@ -3112,6 +3557,16 @@ onMounted(() => {
 .panel {
   margin-bottom: 12px;
   padding: 12px;
+}
+
+/* UX-PRODUIT-9 : compense la hauteur de la barre d'accès rapide sticky pour
+   que le titre du panneau visé reste visible après un scroll par ancre
+   (sommaire/recherche/favoris/recommandation Assistant), au lieu d'être
+   caché sous la barre. Sélecteur d'attribut plutôt que `.panel` seul : deux
+   ancres (find-what-writes, visual-observation) ciblent un élément interne
+   au panneau Trace UI string, pas sa racine `.panel`. */
+[id^="expert-anchor-"] {
+  scroll-margin-top: 220px;
 }
 
 /* Repère visuel par niveau de risque, memes couleurs que RiskBadge (lecture
