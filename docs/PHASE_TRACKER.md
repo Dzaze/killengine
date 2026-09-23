@@ -16,7 +16,7 @@ Roadmap portabilité réelle (distribution SourceForge en mode portable) : `docs
 ## État courant
 
 - **Suite produit 12–17 : cadrée, à réaliser (23/09/2026).** Six fiches détaillées dans [UX-PRODUIT-SUITE-20260923](#ux-produit-suite-20260923) : centre d’activité, historique/récupération du workspace, contrôles de contrats, tutoriel isolé, comparaison de candidats et rapport reproductible. Après 7–11 : socle 14A, puis 12 → 13 → 14B → 15 → 16 → 17. Sous-lots, dépendances et critères de clôture définis ; inscription documentaire, aucune de ces nouvelles fonctionnalités livrée par cette session.
-- **Pistes produit du checkup du 22/09 : cadrées, à réaliser (UX-PRODUIT-7/8/9/10/11A/11B).** Choix retenus et fiches autonomes dans [UX-PRODUIT-PLAN-20260922](#ux-produit-plan-20260922) : Projet/session et diagnostics séparés, navigation groupée, accès rapide Expert, ordre Investigation, lisibilité et rôles IA dédupliqués. Ordre : 8 → 7 → 9 → 10 → 11A → 11B. Documentation livrée ; aucun de ces lots produit implémenté par cette inscription. Les correctifs UX-CHECKUP-1 à 6 et le correctif de persistance UX-CHECKUP-8 déjà consignés restent clos.
+- **UX-PRODUIT-7 à 11 : clos (23/09/2026).** Projet/session et diagnostics séparés, navigation groupée, accès Expert, ordre Investigation, lisibilité et diagnostic IA livrés ; tableau de clôture détaillé dans [UX-PRODUIT-PLAN-20260922](#ux-produit-plan-20260922).
 - **PORTABLE-AUDIT-20260919 : absorbé par PORT-7, clos (Codex → Claude, 19/09/2026).** Le paquet réel `dist/KillEngine-portable.zip` a été reconstruit et testé via pipe depuis deux dossiers isolés hors dépôt (UI Vue réelle chargée, attach/lecture/écriture, Trainer, profils, aucun chemin résiduel vers le dépôt/AppData). Détail complet dans [PHASE_TRACKER_HISTORY.md#portable-v2](PHASE_TRACKER_HISTORY.md#portable-v2).
 - **Corrections UX issues du contrôle pipe du 18/09/2026 : closes (UX-PIPE-1 à 6, Claude, 18/09/2026).** Fiches autonomes, diagnostic, correctifs et preuves de test dans [PHASE_TRACKER_HISTORY.md#ux-pipe-plan-20260918](PHASE_TRACKER_HISTORY.md#ux-pipe-plan-20260918).
 - **Second contrôle UX du 18/09/2026 (Codex) : UX-PIPE-7 à 10, closes (Claude, 18-19/09/2026).** Import workspace invalide désormais refusé sans mutation d'état ni crash de Paramètres ; réessai Trainer individuel découplé d'une erreur transitoire passée ; projets/notes/modèles de structure accessibles au-delà de 12/20/12 via pagination+recherche ; un freeze/patch chargé depuis un snapshot de projet n'est plus jamais annoncé « actif » sans opération réelle en cours côté moteur. Détail dans [PHASE_TRACKER_HISTORY.md#ux-pipe-suite-20260918](PHASE_TRACKER_HISTORY.md#ux-pipe-suite-20260918).
@@ -695,6 +695,30 @@ Périmètre traité au-delà des 39 fichiers déjà listés par les lots UX-PROD
 
 ---
 
+### PORTABLE-BUILD-20260923 — reconstruction et contrôle pipe du ZIP portable (23/09/2026, Codex)
+
+**Diagnostic / demande** : le propriétaire demande de supprimer la version portable déjà construite, de refaire le package et de contrôler son fonctionnement via le pipe. Ancien dossier et ZIP `dist/KillEngine-portable*` datés du 19/09/2026 ; dépôt propre sur `main` avant l'opération. Aucun fichier source modifié.
+
+**Réalisation** : suppression vérifiée du seul dossier `dist/KillEngine-portable` et du seul `dist/KillEngine-portable.zip`, puis `scripts/package-windows.ps1` sans option (build Vue + C++, modèle GGUF et inspecteur CLR inclus). Nouveau dossier de 360 fichiers et ZIP de 1 572 364 936 octets. Signature absente : aucun certificat de signature configuré ; package local non signé.
+
+**Tests / validation** : build complet OK ; `killengine_unit_tests.exe --gtest_brief=1` 562/562 OK ; `verify-ai-layout.ps1` OK ; `verify-native-dependencies.ps1` 313/313 binaires analysés, aucune dépendance manquante ; archive ZIP ouverte (361 entrées), extraite hors dépôt dans `%TEMP%`. Depuis cette extraction, `KillEngine.exe` démarre avec `KILLENGINE_AUTOMATION_PIPE=1` et les appels pipe réussissent : ping, version, réglages, état Lua, pont Vue `getTrainerFeaturesSnapshot`, liste/attachement de `KillEngineTestTarget.exe`, lecture de `g_health=100`, scan exact Int32 avec pagination de candidats, écriture/lecture de 123 puis restauration de 100, profil temporaire sauvegardé/chargé/résolu/comparé/supprimé, détachement. INI, WebEngine et logs créés dans le dossier extrait. `verify-ai-runtime-smoke.ps1` sur le ZIP extrait charge le GGUF et produit `OK`. Langue basculée en anglais par le pipe, puis relance depuis un chemin de dossier déplacé : `getSettings.language=en` et chemin du log sous la nouvelle racine. Les copies et processus de test temporaires ont été supprimés ; le dossier et le ZIP finaux restent dans `dist`.
+
+**Limites** : contrôle pipe ciblé sur les parcours ci-dessus, sans revue visuelle exhaustive ni test sur un jeu tiers. La première tentative de script de contrôle a échoué sur une condition PowerShell locale, la deuxième sur une mauvaise attente du schéma `getCandidates` ; les appels applicatifs concernés répondaient correctement et le parcours final a réussi. Le premier déplacement temporaire a été interrompu par des processus `llama-server.exe` restés ouverts après arrêt forcé ; ces processus ont été nettoyés, le package déplacé reconstitué à partir du même ZIP, puis la persistance a été revérifiée.
+
+### TRACKER-UX-12-17-CLASSEMENT — chantiers à faire regroupés en fin de fichier (23/09/2026, Codex)
+
+**Diagnostic / demande** : le propriétaire demande de placer les chantiers 12 à 17 à la fin de `docs/PHASE_TRACKER.md`, de les marquer comme à faire et de les détailler. Les six fiches étaient déjà détaillées mais précédaient la dernière validation portable ; le résumé initial annonçait encore les lots 7 à 11 comme à réaliser malgré leur clôture dans le tableau.
+
+**Correctif** : les fiches 12 à 17, leur ordre, leurs dépendances, sous-lots, critères de validation et limites ont été déplacés ensemble en fin de tracker ; section et statut global « Chantiers à faire », plus un statut « chantier à faire — non attribué » sous chaque fiche. Le résumé des lots 7 à 11 reflète désormais leur clôture. Aucun code applicatif modifié.
+
+**Tests / validation** : six ancres de fiches uniques, six statuts individuels et six lignes « À faire » dans le tableau vérifiés ; sections et critères conservés ; `git diff --check` propre, UTF-8 sans BOM et fins de ligne CRLF conservés. Pas de build ni test applicatif : réorganisation documentaire uniquement.
+
+---
+
+## Chantiers à faire — UX-PRODUIT-12 à 17
+
+**Statut global : à faire.** Les six fiches ci-dessous sont détaillées et non implémentées ; leurs sous-lots et critères de validation restent ouverts.
+
 <a id="ux-produit-suite-20260923"></a>
 ### UX-PRODUIT-SUITE-20260923 — six chantiers après les pistes 7 à 11 (23/09/2026, Codex)
 
@@ -728,6 +752,8 @@ Périmètre traité au-delà des 39 fichiers déjà listés par les lots UX-PROD
 <a id="ux-produit-12"></a>
 #### UX-PRODUIT-12 — Centre d'activité permanent
 
+**Statut : chantier à faire — non attribué.**
+
 **Diagnostic** : les scans async ont un `requestId` et `scanFinished`, mais les signaux historiques `scanStarted/scanProgress` ne portent pas d'ID et `cancelActiveScan()` vise l'opération courante. Le statut Timeline est interrogé par sa vue, donc plus actualisé hors page ; ID/départ réel ne sont pas exposés. `currentStats()` copie les séries pour compter les points. L'attachement doit aussi empêcher le remplacement d'un handle encore utilisé par un scan/collecteur. Un journal de clics ne suffit pas à réconcilier ces états.
 
 **Choix retenu** : bouton permanent **Activité · N en cours** dans la coque de l'application, ouvrant un tiroir latéral. Opérations actives d'abord, terminées ensuite : nom, cible éventuelle, étape, durée moteur, progression mesurée ou indéterminée, résultat/erreur, **Voir** et **Arrêter** si supporté. Aucune navigation automatique à la fin. États terminaux non consultés signalés dans le badge ; erreurs disponibles jusqu'à consultation dans la limite annoncée de **200 résumés terminaux par lancement**. Les actives ne sont jamais évincées ; au-delà de 200, les plus anciens résumés sont retirés avec indication de la limite. Pas de reprise automatique des tâches au redémarrage.
@@ -759,6 +785,8 @@ Périmètre traité au-delà des 39 fichiers déjà listés par les lots UX-PROD
 
 <a id="ux-produit-13"></a>
 #### UX-PRODUIT-13 — Historique automatique et récupération du workspace
+
+**Statut : chantier à faire — non attribué.**
 
 **Diagnostic** : `workspaceSession.ts::saveCurrentWorkspaceProject` crée un snapshot manuel dans la liste de projets (50 maximum). `persistJsonToLocalStorage` remonte les échecs, mais ne garde pas de versions antérieures. `importWorkspaceJson` valide la structure avant mutation ; sa persistance reste répartie entre stores. Un import structurellement valide n'est donc pas une transaction disque multi-domaines. Les profils `.keprofile` ont leur stockage propre (`QSaveFile`) : ce lot ne remplace pas ce système.
 
@@ -793,6 +821,8 @@ Périmètre traité au-delà des 39 fichiers déjà listés par les lots UX-PROD
 <a id="ux-produit-14"></a>
 #### UX-PRODUIT-14 — Vérifier les contrats Qt, TypeScript, mock et réponses réelles
 
+**Statut : chantier à faire — non attribué.**
+
 **Diagnostic** : `AutomationPipeServer` résout les méthodes par `QMetaMethod`, nombre d'arguments puis conversion `QVariant`. Cette accessibilité ne prouve pas que les champs d'un `QVariantMap` correspondent à l'UI. `BackendController` et `createMockBackend` sont dans `backend.ts`. Les batteries safe-methods, profils et parcours UI existent déjà ; elles couvrent une sélection, pas un inventaire automatique croisé. Le lot étend leur couverture sans les remplacer.
 
 **Choix retenu** : deux contrôles complémentaires : **inventaire structurel complet sans exécution des méthodes**, puis **contrats de résultats/scénarios sur une sélection explicite**. Utiliser l'API compilateur TypeScript déjà installée pour lire l'interface/mock, pas des regex fragiles. Pas de génération intégrale des wrappers ni de conversion de toutes les réponses backend en une seule forme dans ce chantier.
@@ -820,6 +850,8 @@ Périmètre traité au-delà des 39 fichiers déjà listés par les lots UX-PROD
 
 <a id="ux-produit-15"></a>
 #### UX-PRODUIT-15 — Tutoriel interactif dans une session de démonstration isolée
+
+**Statut : chantier à faire — non attribué.**
 
 **Diagnostic** : l'accueil d'`App.vue` expose trois explications et un lien au guide. `tests/memory_targets/test_target_main.cpp` contient déjà une fenêtre et des scénarios pertinents, mais `KillEngineTestTarget.exe` est construit sous tests, explicitement exclu puis interdit par `scripts/package-windows.ps1` ; son marqueur d'adresses temporaire est global. Ce n'est pas une cible distribuable telle quelle.
 
@@ -863,6 +895,8 @@ Périmètre traité au-delà des 39 fichiers déjà listés par les lots UX-PROD
 <a id="ux-produit-16"></a>
 #### UX-PRODUIT-16 — Comparateur visuel de 2 à 6 candidats
 
+**Statut : chantier à faire — non attribué.**
+
 **Diagnostic** : Timeline suit plusieurs adresses, mais le graphique montre une seule série. Le collecteur conserve taille/octets sans type natif, l'analyseur lit des entiers non signés, et `drawChart` utilise `parseInt(valueHex, 16)` : signes/flottants et entiers au-delà de 2^53 sont mal interprétés. Les corrélations actuelles rapprochent des indices de tableaux, même si des lectures/timestamps diffèrent. Ajouter plusieurs courbes sans ce préalable produirait des comparaisons trompeuses.
 
 **Choix retenu** : bouton **Comparer** pour une sélection explicite de **2 à 6 candidats** depuis Candidats/Watch/sources numériques Trace UI, puis onglet local **Comparer** dans Timeline. Aucune nouvelle destination principale. Courbes synchronisées, curseur commun, valeurs exactes et repères manuels « action observée ». Lecture seulement ; une ressemblance ne désigne pas automatiquement la source. La fonction complète la corrélation visuelle R3 et le registre de preuves existants.
@@ -892,6 +926,8 @@ Périmètre traité au-delà des 39 fichiers déjà listés par les lots UX-PROD
 
 <a id="ux-produit-17"></a>
 #### UX-PRODUIT-17 — Rapport de problème reproductible et export prévisualisable
+
+**Statut : chantier à faire — non attribué.**
 
 **Diagnostic** : `SettingsDiagnosticsManager::exportDiagnostics` produit déjà un `.kezdiag` (sections texte compressées via `qCompress`), avec manifeste, réglages, logs et rapports de crash. Les logs sont lus en entier ; la version textuelle seule ne distingue pas deux builds ni un bundle Vue différent. Le code inspecté ne contrôle pas le retour complet d'écriture avant d'annoncer le succès. Ce dernier point doit être traité dans le chemin d'export, sans attendre qu'un échec utilisateur soit reproduit. L'existence de données sensibles dans un export réel n'est pas affirmée par ce diagnostic.
 
@@ -924,13 +960,3 @@ Périmètre traité au-delà des 39 fichiers déjà listés par les lots UX-PROD
 **Quoi / pourquoi** : six propositions transformées en fiches 12–17, avec décisions retenues, périmètre précis, contrats à créer distingués de l'existant, sous-lots, ordre, tests et critères de clôture. Demande de préparation des travaux ; aucun sous-lot logiciel réalisé par cette inscription.
 
 **Comment vérifié** : confrontation au tracker et aux points d'entrée actuels (stores workspace, validation/persistance, réflexion pipe, harnais QA, cible de tests/packaging, Timeline, preuves, export diagnostics). Relecture des dépendances et de la couverture des six propositions ; contrôle des ancres, cases, encodage et diff. Aucun build/test applicatif lancé pour cette modification documentaire ; les changements de code préexistants appartiennent aux travaux concurrents et ne sont pas revendiqués ici.
-
-### PORTABLE-BUILD-20260923 — reconstruction et contrôle pipe du ZIP portable (23/09/2026, Codex)
-
-**Diagnostic / demande** : le propriétaire demande de supprimer la version portable déjà construite, de refaire le package et de contrôler son fonctionnement via le pipe. Ancien dossier et ZIP `dist/KillEngine-portable*` datés du 19/09/2026 ; dépôt propre sur `main` avant l'opération. Aucun fichier source modifié.
-
-**Réalisation** : suppression vérifiée du seul dossier `dist/KillEngine-portable` et du seul `dist/KillEngine-portable.zip`, puis `scripts/package-windows.ps1` sans option (build Vue + C++, modèle GGUF et inspecteur CLR inclus). Nouveau dossier de 360 fichiers et ZIP de 1 572 364 936 octets. Signature absente : aucun certificat de signature configuré ; package local non signé.
-
-**Tests / validation** : build complet OK ; `killengine_unit_tests.exe --gtest_brief=1` 562/562 OK ; `verify-ai-layout.ps1` OK ; `verify-native-dependencies.ps1` 313/313 binaires analysés, aucune dépendance manquante ; archive ZIP ouverte (361 entrées), extraite hors dépôt dans `%TEMP%`. Depuis cette extraction, `KillEngine.exe` démarre avec `KILLENGINE_AUTOMATION_PIPE=1` et les appels pipe réussissent : ping, version, réglages, état Lua, pont Vue `getTrainerFeaturesSnapshot`, liste/attachement de `KillEngineTestTarget.exe`, lecture de `g_health=100`, scan exact Int32 avec pagination de candidats, écriture/lecture de 123 puis restauration de 100, profil temporaire sauvegardé/chargé/résolu/comparé/supprimé, détachement. INI, WebEngine et logs créés dans le dossier extrait. `verify-ai-runtime-smoke.ps1` sur le ZIP extrait charge le GGUF et produit `OK`. Langue basculée en anglais par le pipe, puis relance depuis un chemin de dossier déplacé : `getSettings.language=en` et chemin du log sous la nouvelle racine. Les copies et processus de test temporaires ont été supprimés ; le dossier et le ZIP finaux restent dans `dist`.
-
-**Limites** : contrôle pipe ciblé sur les parcours ci-dessus, sans revue visuelle exhaustive ni test sur un jeu tiers. La première tentative de script de contrôle a échoué sur une condition PowerShell locale, la deuxième sur une mauvaise attente du schéma `getCandidates` ; les appels applicatifs concernés répondaient correctement et le parcours final a réussi. Le premier déplacement temporaire a été interrompu par des processus `llama-server.exe` restés ouverts après arrêt forcé ; ces processus ont été nettoyés, le package déplacé reconstitué à partir du même ZIP, puis la persistance a été revérifiée.
