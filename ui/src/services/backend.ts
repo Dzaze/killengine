@@ -1385,8 +1385,12 @@ export interface AiModelStatus {
   executablePath: string
   modelCandidates: Array<Record<string, unknown>>
   executableCandidates: Array<Record<string, unknown>>
+  /** UX-PRODUIT-11B: one entry per distinct logical (id, role) role, already deduplicated across model roots on the C++ side. Each entry carries `sources` (every manifest copy found for that role, e.g. one in build/bin/model and one in the repo's model/) -- never re-count manifests per root in the UI, the backend already grouped them. */
   embeddedAgents?: Array<Record<string, unknown>>
+  /** Count of distinct valid logical roles in `embeddedAgents` (not the number of manifest files or roots scanned). */
   embeddedAgentCount?: number
+  /** UX-PRODUIT-11B: unreadable/invalid manifests that couldn't be matched to a logical identity -- shown as diagnostic-only errors, never counted in embeddedAgentCount. */
+  embeddedAgentIssues?: Array<Record<string, unknown>>
   embeddedModelFolders?: Array<Record<string, unknown>>
   threads: number
   message: string
@@ -3215,10 +3219,11 @@ class BackendService {
           modelCandidates: [],
           executableCandidates: [],
           embeddedAgents: [
-            { id: 'assistant', displayName: 'Assistant IA', role: 'assistant', modelFound: false, valid: true, modelPath: '' },
-            { id: 'auto_resolver', displayName: 'Auto Resolver IA', role: 'resolver', modelFound: false, valid: true, modelPath: '' },
+            { id: 'assistant', displayName: 'Assistant IA', role: 'assistant', modelFound: false, valid: true, modelPath: '', sources: [{ rootPath: '', folderName: 'assistant', modelFound: false }] },
+            { id: 'auto_resolver', displayName: 'Auto Resolver IA', role: 'resolver', modelFound: false, valid: true, modelPath: '', sources: [{ rootPath: '', folderName: 'auto_resolver', modelFound: false }] },
           ],
           embeddedAgentCount: 2,
+          embeddedAgentIssues: [],
           embeddedModelFolders: [],
           threads: 4,
           message: 'IA embarquée indisponible dans le mock.',

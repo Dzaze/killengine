@@ -25,16 +25,52 @@ const visibleModelCandidates = computed(() =>
 const visibleExecutableCandidates = computed(() =>
   (store.aiModelStatus?.executableCandidates ?? []).slice(0, 6),
 )
+// UX-PRODUIT-11B : embeddedAgents est déjà regroupé par identité logique
+// (id, role) côté C++ (settings_diagnostics_manager.cpp) -- une entrée ici
+// = un rôle IA distinct, jamais un manifeste brut. `sources` liste les
+// copies (une par racine où le manifeste a été trouvé), dépliées à la
+// demande via "Voir les sources" plutôt que noyer le résumé.
 const visibleEmbeddedAgents = computed(() =>
-  (store.aiModelStatus?.embeddedAgents ?? []).slice(0, 8).map((agent) => ({
-    id: String(agent.id ?? ''),
-    displayName: String(agent.displayName ?? agent.id ?? 'Agent IA'),
-    role: String(agent.role ?? 'agent'),
-    modelPath: String(agent.modelPath ?? ''),
-    modelFound: agent.modelFound === true,
-    valid: agent.valid !== false,
+  (store.aiModelStatus?.embeddedAgents ?? []).slice(0, 8).map((agent) => {
+    const id = String(agent.id ?? '')
+    const role = String(agent.role ?? 'agent')
+    const sources = Array.isArray(agent.sources)
+      ? (agent.sources as Array<Record<string, unknown>>).map((source) => ({
+          manifestPath: String(source.manifestPath ?? ''),
+          folderName: String(source.folderName ?? ''),
+          rootPath: String(source.rootPath ?? ''),
+          modelFound: source.modelFound === true,
+        }))
+      : []
+    return {
+      key: `${id}::${role}`,
+      id,
+      displayName: String(agent.displayName ?? agent.id ?? 'Agent IA'),
+      role,
+      modelPath: String(agent.modelPath ?? ''),
+      modelFound: agent.modelFound === true,
+      valid: agent.valid !== false,
+      sources,
+    }
+  }),
+)
+const visibleAgentIssues = computed(() =>
+  (store.aiModelStatus?.embeddedAgentIssues ?? []).slice(0, 8).map((issue) => ({
+    folderName: String(issue.folderName ?? ''),
+    rootPath: String(issue.rootPath ?? ''),
+    error: String(issue.error ?? ''),
   })),
 )
+const expandedAgentSourceKeys = ref<Set<string>>(new Set())
+function toggleAgentSources(key: string) {
+  const next = new Set(expandedAgentSourceKeys.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  expandedAgentSourceKeys.value = next
+}
 
 function formatBytes(value: number | undefined) {
   const bytes = value ?? 0
@@ -287,22 +323,49 @@ async function saveAll() {
           <strong>{{ store.aiModelStatus?.threads ?? store.settingModelThreads }}</strong>
         </div>
       </div>
-      <div class="path-row">
-        <span>{{ $t('settings.modelDetected') }}</span>
-        <code>{{ store.aiModelStatus?.modelPath || store.settingModelPath || '-' }}</code>
-      </div>
-      <p v-if="store.aiModelStatus?.configuredModelMissing" class="warning">
-        {{ store.aiModelStatus.configuredModelWarning }}
-      </p>
-      <div class="path-row">
-        <span>{{ $t('settings.activeRuntime') }}</span>
-        <code>{{ store.aiModelStatus?.executablePath || '-' }}</code>
+      <div class="resolved-model-box">
+        <strong>{{ $t('settings.resolvedModelTitle') }}</strong>
+        <div class="path-row">
+          <span>{{ $t('settings.modelDetected') }}</span>
+          <code>{{ store.aiModelStatus?.modelPath || store.settingModelPath || '-' }}</code>
+        </div>
+        <p v-if="store.aiModelStatus?.configuredModelMissing" class="warning">
+          {{ store.aiModelStatus.configuredModelWarning }}
+        </p>
+        <div class="path-row">
+          <span>{{ $t('settings.activeRuntime') }}</span>
+          <code>{{ store.aiModelStatus?.executablePath || '-' }}</code>
+        </div>
+        <p class="hint">{{ $t('settings.resolvedModelHint') }}</p>
       </div>
       <div v-if="visibleEmbeddedAgents.length" class="embedded-agent-list">
-        <strong>{{ $t('settings.embeddedAgents') }}</strong>
-        <div v-for="agent in visibleEmbeddedAgents" :key="agent.id" class="candidate-path">
-          <span :class="agent.modelFound && agent.valid ? 'ok-text' : 'dim-text'">{{ agent.modelFound && agent.valid ? $t('settings.ok') : '--' }}</span>
-          <code>{{ agent.displayName }} · {{ agent.role }} · {{ agent.modelPath || '-' }}</code>
+        <strong>{{ $t('settings.aiRolesDetected', { count: store.aiModelStatus?.embeddedAgentCount ?? visibleEmbeddedAgents.length }) }}</strong>
+        <div v-for="agent in visibleEmbeddedAgents" :key="agent.key" class="ai-role-row">
+          <div class="ai-role-row-main">
+            <span :class="agent.modelFound && agent.valid ? 'ok-text' : 'dim-text'">{{ agent.modelFound && agent.valid ? $t('settings.roleValid') : $t('settings.roleIncomplete') }}</span>
+            <code>{{ agent.displayName }} · {{ agent.role }}</code>
+            <button
+              v-if="agent.sources.length"
+              class="btn btn-secondary compact"
+              type="button"
+              @click="toggleAgentSources(agent.key)"
+            >
+              {{ expandedAgentSourceKeys.has(agent.key) ? $t('settings.hideSources') : $t('settings.viewSources') }}
+            </button>
+          </div>
+          <div v-if="expandedAgentSourceKeys.has(agent.key)" class="ai-role-sources">
+            <div v-for="(source, idx) in agent.sources" :key="idx" class="candidate-path">
+              <span :class="source.modelFound ? 'ok-text' : 'dim-text'">{{ source.modelFound ? $t('settings.ok') : '--' }}</span>
+              <code>{{ source.manifestPath || source.folderName }}</code>
+            </div>
+          </div>
+        </div>
+        <div v-if="visibleAgentIssues.length" class="ai-role-issues">
+          <strong>{{ $t('settings.agentIssuesTitle') }}</strong>
+          <div v-for="(issue, idx) in visibleAgentIssues" :key="idx" class="candidate-path">
+            <span class="dim-text">!</span>
+            <code>{{ issue.folderName }} · {{ issue.error }}</code>
+          </div>
         </div>
       </div>
       <p v-if="store.aiModelStatus?.message" class="status-line">{{ store.aiModelStatus.message }}</p>
@@ -964,6 +1027,28 @@ async function saveAll() {
   font-size: 12px;
 }
 
+.resolved-model-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.resolved-model-box > strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.resolved-model-box .path-row {
+  padding: 6px 0;
+}
+
+.resolved-model-box .hint {
+  margin-top: 6px;
+}
+
 .embedded-agent-list {
   margin-top: 10px;
   color: var(--text-muted);
@@ -971,6 +1056,45 @@ async function saveAll() {
 }
 
 .embedded-agent-list > strong {
+  color: var(--text-primary);
+}
+
+.ai-role-row {
+  margin-top: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+.ai-role-row:first-of-type {
+  border-top: none;
+}
+
+.ai-role-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-role-row-main code {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-role-sources {
+  margin-top: 6px;
+  margin-left: 34px;
+}
+
+.ai-role-issues {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-role-issues > strong {
   color: var(--text-primary);
 }
 

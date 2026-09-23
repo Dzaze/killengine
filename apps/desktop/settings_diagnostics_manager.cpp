@@ -19,6 +19,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -27,6 +28,7 @@
 #include <QSet>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QVector>
 #include <QtGlobal>
 
 #include <algorithm>
@@ -247,8 +249,16 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
     QVariantMap result;
     QVariantList modelCandidates;
     QVariantList executableCandidates;
-    QVariantList embeddedAgents;
     QVariantList embeddedModelFolders;
+    QVariantList embeddedAgentIssues;
+    // UX-PRODUIT-11B (docs/PHASE_TRACKER.md, 23/09/2026) : embeddedAgents est
+    // regroupé par identité logique (id, role) et non plus par manifeste brut
+    // -- un même agent présent dans plusieurs racines (ex. build/bin/model ET
+    // <dépôt>/model, cas courant en dev) ne doit compter qu'une fois. Les
+    // copies secondaires restent consultables via le champ "sources" de leur
+    // groupe plutôt que de gonfler embeddedAgentCount.
+    QVector<QVariantMap> agentGroups;
+    QHash<QString, int> agentGroupIndexByKey;
 
     // PORT-4 (docs/PORTABILITY_ROADMAP.md, 18/09/2026) : la valeur stockée
     // peut désormais être une référence portable relative -- résolue ici pour
@@ -364,47 +374,80 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
                 continue;
             }
 
-            QVariantMap agent;
-            agent["id"] = subdirInfo.fileName();
-            agent["displayName"] = subdirInfo.fileName();
-            agent["role"] = QString("agent");
-            agent["provider"] = QString("llama.cpp");
-            agent["manifestPath"] = manifestInfo.absoluteFilePath();
-            agent["valid"] = false;
-            agent["modelFound"] = false;
-
             QFile manifestFile(manifestInfo.absoluteFilePath());
             if (!manifestFile.open(QIODevice::ReadOnly)) {
-                agent["error"] = KE_TXT("Manifest illisible.", "Manifest unreadable.");
-                embeddedAgents.append(agent);
+                QVariantMap issue;
+                issue["folderName"] = subdirInfo.fileName();
+                issue["rootPath"] = rootPath;
+                issue["manifestPath"] = manifestInfo.absoluteFilePath();
+                issue["error"] = KE_TXT("Manifest illisible.", "Manifest unreadable.");
+                embeddedAgentIssues.append(issue);
                 continue;
             }
 
             const QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
             if (!doc.isObject()) {
-                agent["error"] = KE_TXT("Manifest JSON invalide.", "Invalid manifest JSON.");
-                embeddedAgents.append(agent);
+                QVariantMap issue;
+                issue["folderName"] = subdirInfo.fileName();
+                issue["rootPath"] = rootPath;
+                issue["manifestPath"] = manifestInfo.absoluteFilePath();
+                issue["error"] = KE_TXT("Manifest JSON invalide.", "Invalid manifest JSON.");
+                embeddedAgentIssues.append(issue);
                 continue;
             }
 
             const QJsonObject object = doc.object();
-            agent["valid"] = true;
-            agent["id"] = object.value("id").toString(subdirInfo.fileName());
-            agent["displayName"] = object.value("displayName").toString(agent.value("id").toString());
-            agent["role"] = object.value("role").toString("agent");
-            agent["provider"] = object.value("provider").toString("llama.cpp");
-            agent["required"] = object.value("required").toBool(true);
+            const QString agentId = object.value("id").toString(subdirInfo.fileName());
+            const QString agentRole = object.value("role").toString("agent");
+            const QString agentDisplayName = object.value("displayName").toString(agentId);
+            const QString agentProvider = object.value("provider").toString("llama.cpp");
+            const bool agentRequired = object.value("required").toBool(true);
 
             const QString manifestModelPath = object.value("modelPath").toString().trimmed();
             const QFileInfo manifestModelInfo(manifestModelPath.isEmpty()
                 ? QString()
                 : subdir.filePath(manifestModelPath));
-            agent["modelPath"] = manifestModelInfo.absoluteFilePath();
-            agent["modelFound"] = manifestModelInfo.exists() && manifestModelInfo.isFile();
+            const bool agentModelFound = manifestModelInfo.exists() && manifestModelInfo.isFile();
+
+            QVariantMap source;
+            source["rootPath"] = rootPath;
+            source["folderName"] = subdirInfo.fileName();
+            source["manifestPath"] = manifestInfo.absoluteFilePath();
+            source["modelPath"] = manifestModelInfo.absoluteFilePath();
+            source["modelFound"] = agentModelFound;
             if (manifestModelInfo.exists()) {
-                agent["modelSizeBytes"] = static_cast<qlonglong>(manifestModelInfo.size());
+                source["modelSizeBytes"] = static_cast<qlonglong>(manifestModelInfo.size());
             }
-            embeddedAgents.append(agent);
+
+            // (id, role) est l'identité logique : deux racines avec le même id
+            // ET le même role sont la même IA embarquée (une copie de secours),
+            // pas deux IA distinctes ; un id identique avec un role différent
+            // reste distinct (ne jamais fusionner sur l'id seul).
+            const QString groupKey = agentId + QStringLiteral("::") + agentRole;
+            const auto existingIndexIt = agentGroupIndexByKey.constFind(groupKey);
+            if (existingIndexIt != agentGroupIndexByKey.constEnd()) {
+                QVariantMap& existingGroup = agentGroups[existingIndexIt.value()];
+                QVariantList sources = existingGroup["sources"].toList();
+                sources.append(source);
+                existingGroup["sources"] = sources;
+            } else {
+                QVariantMap agent;
+                agent["id"] = agentId;
+                agent["displayName"] = agentDisplayName;
+                agent["role"] = agentRole;
+                agent["provider"] = agentProvider;
+                agent["required"] = agentRequired;
+                agent["valid"] = true;
+                agent["manifestPath"] = manifestInfo.absoluteFilePath();
+                agent["modelPath"] = manifestModelInfo.absoluteFilePath();
+                agent["modelFound"] = agentModelFound;
+                if (manifestModelInfo.exists()) {
+                    agent["modelSizeBytes"] = static_cast<qlonglong>(manifestModelInfo.size());
+                }
+                agent["sources"] = QVariantList{ source };
+                agentGroupIndexByKey.insert(groupKey, agentGroups.size());
+                agentGroups.append(agent);
+            }
         }
     }
 
@@ -437,8 +480,16 @@ QVariantMap SettingsDiagnosticsManager::getAiModelStatus() const {
     result["executablePath"] = executablePath;
     result["modelCandidates"] = modelCandidates;
     result["executableCandidates"] = executableCandidates;
+    QVariantList embeddedAgents;
+    for (const auto& agent : agentGroups) {
+        embeddedAgents.append(agent);
+    }
     result["embeddedAgents"] = embeddedAgents;
+    // embeddedAgentCount compte les rôles logiques (id, role) distincts avec
+    // au moins un manifeste valide -- pas le nombre de fichiers manifestes ni
+    // de racines parcourues. Voir agentGroups ci-dessus.
     result["embeddedAgentCount"] = embeddedAgents.size();
+    result["embeddedAgentIssues"] = embeddedAgentIssues;
     result["embeddedModelFolders"] = embeddedModelFolders;
     result["threads"] = boundedSettingInt(settings, "ai/modelThreads", 4, 1, 32);
     // UX-PIPE-2 : message hiérarchisé -- "prêt" / "désactivée" ne doivent
