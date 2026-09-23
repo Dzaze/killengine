@@ -619,9 +619,9 @@ Retourne `bool` brut (lit `QSettings`).
 ### `openUserGuide()`
 Retourne `bool` brut (succès de l'ouverture via `QDesktopServices`).
 
-### `requestWindowsDefenderExclusion()`
+### `addEdrExclusionAsync(path)`
 Fichier : `application_controller.cpp`
-Réponse : `{ success, cancelled, error? }` (Windows uniquement ; ouvre une invite UAC visible, pas adapté à l'automation non supervisée).
+`path` vide utilise `<dossier install>/bin`. Non bloquant : renvoie `{ success: true, started: true }` immédiatement, résultat réel via le signal `edrExclusionAddedFinished` → `{ success, message?, error? }` (Windows uniquement ; ouvre une invite UAC visible, pas adapté à l'automation non supervisée). Exclut le dossier ET le process `KillEngine.exe` par nom (`Add-MpPreference -ExclusionPath ... -ExclusionProcess ...`).
 
 ---
 

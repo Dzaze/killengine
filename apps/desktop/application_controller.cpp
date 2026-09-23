@@ -4011,93 +4011,6 @@ bool ApplicationController::openUserGuide() const {
     return false;
 }
 
-QVariantMap ApplicationController::requestWindowsDefenderExclusionAsync() {
-    QVariantMap started;
-    started["success"] = false;
-    started["cancelled"] = false;
-
-#ifdef Q_OS_WIN
-    const QString installDir = QDir::toNativeSeparators(QCoreApplication::applicationDirPath());
-    const QString exeName = QFileInfo(QCoreApplication::applicationFilePath()).fileName();
-
-    // Guillemets simples PowerShell pour le chemin : les guillemets doubles
-    // seraient interpretes par PowerShell, pas juste par le shell qui lance
-    // ShellExecute. Un chemin contenant une apostrophe casserait cette
-    // commande — cas limite volontairement non gere ici (rare sur Windows,
-    // et l'echec serait visible/explicite plutot que silencieux).
-    const QString psCommand = QStringLiteral(
-        "Add-MpPreference -ExclusionPath '%1' -ExclusionProcess '%2'")
-        .arg(installDir, exeName);
-
-    // L'élévation UAC + son attente (jusqu'à 15s) tournent sur un thread
-    // séparé pour ne pas geler le thread GUI (Q_INVOKABLE via QWebChannel),
-    // même raisonnement que spoofDnsAsync.
-    const QPointer<ApplicationController> self(this);
-    std::thread([self, psCommand, installDir, exeName]() {
-        QVariantMap result;
-        result["success"] = false;
-        result["cancelled"] = false;
-
-        const std::wstring parameters =
-            L"-NoProfile -ExecutionPolicy Bypass -Command \"" + psCommand.toStdWString() + L"\"";
-
-        SHELLEXECUTEINFOW sei{};
-        sei.cbSize = sizeof(sei);
-        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-        sei.hwnd = nullptr;
-        sei.lpVerb = L"runas"; // declenche l'invite UAC visible -- jamais silencieux
-        sei.lpFile = L"powershell.exe";
-        sei.lpParameters = parameters.c_str();
-        sei.nShow = SW_HIDE;
-
-        if (!ShellExecuteExW(&sei)) {
-            const DWORD err = GetLastError();
-            if (err == ERROR_CANCELLED) {
-                result["cancelled"] = true;
-                result["error"] = KE_TXT("Invite d'élévation refusée par l'utilisateur.", "The user declined the elevation prompt.");
-            } else {
-                result["error"] = KE_TXT("Impossible de lancer PowerShell élevé (error=%1).", "Unable to launch elevated PowerShell (error=%1).").arg(err);
-            }
-            KE_LOG_WARN() << "requestWindowsDefenderExclusionAsync: ShellExecuteExW failed, error=" << err;
-        } else if (sei.hProcess) {
-            WaitForSingleObject(sei.hProcess, 15000);
-            DWORD exitCode = 1;
-            GetExitCodeProcess(sei.hProcess, &exitCode);
-            CloseHandle(sei.hProcess);
-            result["success"] = (exitCode == 0);
-            if (exitCode != 0) {
-                result["error"] = KE_TXT(
-                    "Add-MpPreference a échoué (code %1) — l'exclusion est peut-être gérée de façon centralisée "
-                    "par une politique d'entreprise (Tamper Protection) et ne peut pas être modifiée localement.",
-                    "Add-MpPreference failed (code %1) — the exclusion may be centrally managed "
-                    "by an enterprise policy (Tamper Protection) and cannot be changed locally.")
-                    .arg(exitCode);
-            }
-        } else {
-            // Pas de handle de process a attendre -- best-effort, on suppose que
-            // l'invite s'est affichee correctement.
-            result["success"] = true;
-        }
-
-        KE_LOG_INFO() << "requestWindowsDefenderExclusionAsync: success=" << result.value("success").toBool()
-                      << " path=" << installDir.toStdString() << " process=" << exeName.toStdString();
-
-        if (!self) return;
-        QMetaObject::invokeMethod(self.data(), [self, result]() {
-            if (!self) return;
-            emit self->windowsDefenderExclusionRequestFinished(result);
-        }, Qt::QueuedConnection);
-    }).detach();
-
-    started["success"] = true;
-    started["started"] = true;
-#else
-    started["error"] = KE_TXT("Fonctionnalité Windows uniquement.", "Windows-only feature.");
-#endif
-
-    return started;
-}
-
 namespace {
 // Nom de regle pare-feu derive du nom d'executable : caracteres hors
 // [A-Za-z0-9_.-] remplaces par '_' pour eviter tout probleme de quoting dans
@@ -4139,14 +4052,14 @@ QVariantMap ApplicationController::blockProcessNetworkAsync() {
     const QString ruleIn = firewallRuleNameIn(ruleToken);
 
     // Guillemets simples PowerShell pour le chemin — meme convention que
-    // requestWindowsDefenderExclusionAsync() ci-dessus (un chemin contenant
+    // addEdrExclusionAsync() (un chemin contenant
     // une apostrophe casserait cette commande, cas limite non gere ici).
     const QString psCommand = QStringLiteral(
         "New-NetFirewallRule -DisplayName '%1' -Direction Outbound -Program '%2' -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null; "
         "New-NetFirewallRule -DisplayName '%3' -Direction Inbound -Program '%2' -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null")
         .arg(ruleOut, exePath, ruleIn);
 
-    // Même raisonnement que requestWindowsDefenderExclusionAsync : thread
+    // Même raisonnement que addEdrExclusionAsync : thread
     // séparé pour ne pas geler le thread GUI pendant l'invite UAC. Les
     // membres m_networkBlockRuleToken/m_networkBlockExePath ne sont écrits
     // que dans le callback marshalé sur le thread GUI ci-dessous, jamais
@@ -4189,7 +4102,7 @@ QVariantMap ApplicationController::blockProcessNetworkAsync() {
             }
         } else {
             // Pas de handle de process a attendre -- best-effort, meme logique
-            // que requestWindowsDefenderExclusionAsync().
+            // que addEdrExclusionAsync().
             result["success"] = true;
         }
 
@@ -5550,7 +5463,7 @@ QVariantMap ApplicationController::installWebView2DeveloperModeCapability() {
     QVariantMap result;
     result[QStringLiteral("success")] = false;
 #ifdef Q_OS_WIN
-    // Meme mecanisme que requestWindowsDefenderExclusion()/blockProcessNetwork()
+    // Meme mecanisme que addEdrExclusionAsync()/blockProcessNetwork()
     // : invite UAC visible via `runas`, jamais silencieux. Contrairement a ces
     // deux-la, on n'attend PAS la fin du process (WaitForSingleObject) : cette
     // installation peut prendre plusieurs minutes et rester silencieuse cote
@@ -6981,11 +6894,14 @@ QVariantMap ApplicationController::addEdrExclusionAsync(const QString& path) {
         result["success"] = false;
 
         if (!useBat) {
-            // Fallback : exécuter PowerShell directement si le .bat est absent
+            // Fallback : exécuter PowerShell directement si le .bat est absent.
+            // -ExclusionProcess en plus du chemin (comme le .bat) : fusion de
+            // l'ancien requestWindowsDefenderExclusionAsync(), retiré lors de
+            // UX-PRODUIT-8B au profit de ce chemin unique.
             const std::wstring cmd = L"powershell.exe";
             const std::wstring args =
                 L"-NoProfile -Command \"Add-MpPreference -ExclusionPath '" +
-                exclusionPath.toStdWString() + L"'\"";
+                exclusionPath.toStdWString() + L"' -ExclusionProcess 'KillEngine.exe'\"";
 
             SHELLEXECUTEINFOW sei{};
             sei.cbSize = sizeof(sei);

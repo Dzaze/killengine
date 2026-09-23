@@ -817,21 +817,6 @@ public:
     /// Ouvre USER_GUIDE.md dans l'application par défaut du système (package: à côté de l'exe ; dev: docs/USER_GUIDE.md).
     Q_INVOKABLE bool openUserGuide() const;
 
-    /// Demande une exclusion Windows Defender (protection temps réel) pour le
-    /// dossier d'installation et KillEngine.exe — déclenche une invite UAC
-    /// visible (élévation explicite), n'agit que si l'utilisateur accepte.
-    /// Nécessaire car un cycle debug externe (findWhatWrites) suivi d'une
-    /// injection in-process peut être bloqué par certains EDR/antivirus qui
-    /// traitent cette séquence comme une heuristique d'injection de code
-    /// malveillante — voir docs/STRATEGY_ROOM.md, 20/08/2026. Ne fait RIEN
-    /// silencieusement : cette méthode existe précisément pour que ce soit
-    /// toujours un choix explicite de l'utilisateur, jamais automatique. Non
-    /// bloquant : l'élévation UAC (ShellExecuteExW "runas") + son attente
-    /// (jusqu'à 15s) tournent sur un thread séparé — sinon ça gèle le thread
-    /// GUI comme les autres actions élevées avant leur fix. Résultat via
-    /// windowsDefenderExclusionRequestFinished.
-    Q_INVOKABLE QVariantMap requestWindowsDefenderExclusionAsync();
-
     /// Coupe l'accès réseau (entrant + sortant) du processus attaché via une
     /// règle pare-feu Windows dédiée à son exécutable — déclenche une invite
     /// UAC visible (élévation explicite pour New-NetFirewallRule, jamais
@@ -1034,7 +1019,7 @@ public:
 
     /// Installe la capability Windows optionnelle Tools.DeveloperMode.Core
     /// (Add-WindowsCapability, invite UAC visible via `runas` — jamais
-    /// silencieux, même mécanisme que requestWindowsDefenderExclusion()).
+    /// silencieux, même mécanisme que addEdrExclusionAsync()).
     /// Peut prendre plusieurs minutes et rester silencieuse côté process :
     /// le frontend doit prévenir l'utilisateur avant de lancer, puis proposer
     /// un nouveau getWebView2SystemPrepStatus() pour re-tester. N'ouvre PAS le
@@ -1134,12 +1119,22 @@ public:
     /// (VirtualAllocEx + WriteProcessMemory + CreateRemoteThread simulés).
     Q_INVOKABLE QVariantMap checkEdrBlocking() const;
 
-    /// Ajoute une exclusion Defender pour le dossier build/bin (PowerShell admin).
-    /// Non bloquant : la commande élevée tourne sur un thread séparé, le
-    /// résultat arrive via edrExclusionAddedFinished. Nécessaire car
-    /// ShellExecuteExW("runas") + son attente peuvent durer plusieurs secondes
-    /// (invite UAC comprise) et geler tout le thread GUI sinon (Q_INVOKABLE
-    /// s'exécute sur le thread propriétaire de l'objet, ici le thread GUI).
+    /// Ajoute une exclusion Defender pour le dossier build/bin ET le process
+    /// KillEngine.exe par nom (PowerShell admin, -ExclusionPath +
+    /// -ExclusionProcess). Nécessaire car un cycle debug externe
+    /// (findWhatWrites) suivi d'une injection in-process peut être bloqué par
+    /// certains EDR/antivirus qui traitent cette séquence comme une
+    /// heuristique d'injection de code malveillante — voir
+    /// docs/STRATEGY_ROOM.md, 20/08/2026. Ne fait RIEN silencieusement : le
+    /// frontend ne l'appelle que sur action explicite de l'utilisateur.
+    /// Chemin unique pour cette opération depuis UX-PRODUIT-8B (a absorbé
+    /// l'ancien requestWindowsDefenderExclusionAsync(), qui faisait la même
+    /// chose en moins complet, sans -ExclusionProcess). Non bloquant : la
+    /// commande élevée tourne sur un thread séparé, le résultat arrive via
+    /// edrExclusionAddedFinished. Nécessaire car ShellExecuteExW("runas") +
+    /// son attente peuvent durer plusieurs secondes (invite UAC comprise) et
+    /// geler tout le thread GUI sinon (Q_INVOKABLE s'exécute sur le thread
+    /// propriétaire de l'objet, ici le thread GUI).
     Q_INVOKABLE QVariantMap addEdrExclusionAsync(const QString& path);
 
     /// Active (disabled=true) ou réactive (disabled=false) Windows Defender via
@@ -1754,8 +1749,6 @@ signals:
     /// Résultat différé de stopApiHookAsync.
     void apiHookStopFinished(const QVariantMap& result);
 
-    /// Résultat différé de requestWindowsDefenderExclusionAsync.
-    void windowsDefenderExclusionRequestFinished(const QVariantMap& result);
     /// Résultat différé de blockProcessNetworkAsync.
     void processNetworkBlockFinished(const QVariantMap& result);
     /// Résultat différé de unblockProcessNetworkAsync.

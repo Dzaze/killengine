@@ -1,13 +1,35 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useRiskGateStore } from '@/stores/riskGate'
 import { backend } from '@/services/backend'
+import RuntimeLogsDiagnostics from '@/components/diagnostics/RuntimeLogsDiagnostics.vue'
+import KernelDiagnostics from '@/components/diagnostics/KernelDiagnostics.vue'
+import AutomationDiagnostics from '@/components/diagnostics/AutomationDiagnostics.vue'
+import WebView2Diagnostics from '@/components/diagnostics/WebView2Diagnostics.vue'
 
 const { t } = useI18n()
 const store = useAppStore()
 const riskGate = useRiskGateStore()
+
+// UX-PRODUIT-8B : deux onglets, Composants par defaut ; Diagnostics a son
+// propre sommaire local vers les familles ci-dessous (patron ExpertView
+// activeStep, sans nouveau router).
+const activeTab = ref<'components' | 'diagnostics'>('components')
+const diagnosticsFamilies = ['runtime', 'kernel', 'automation', 'webview2'] as const
+type DiagnosticsFamily = typeof diagnosticsFamilies[number]
+const activeDiagnosticsFamily = ref<DiagnosticsFamily>('runtime')
+function goToDiagnosticsFamily(family: DiagnosticsFamily) {
+  activeDiagnosticsFamily.value = family
+  document.getElementById(family)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+const diagnosticsFamilyLabel = (family: DiagnosticsFamily) => {
+  if (family === 'runtime') return t('modules.diagnostics.familyRuntime')
+  if (family === 'kernel') return t('modules.diagnostics.familyKernel')
+  if (family === 'automation') return t('modules.diagnostics.familyAutomation')
+  return t('modules.diagnostics.familyWebview2')
+}
 
 const statusLabel = (status: string) => {
   if (status === 'ok') return t('modules.status.ok')
@@ -49,8 +71,35 @@ const debugPrivResult = ref<Record<string, unknown> | null>(null)
 const edrBusy = ref(false)
 const debugPrivBusy = ref(false)
 const showEdrManualFix = ref(false)
-const stealthBusy = ref(false)
 const stealthResult = ref<Record<string, unknown> | null>(null)
+const stealthThreats = computed(
+  () => (store.stealthRiskAnalysis?.threats as Array<Record<string, unknown>> | undefined) ?? [],
+)
+const stealthRecommendations = computed(
+  () => (store.stealthRiskAnalysis?.recommendations as string[] | undefined) ?? [],
+)
+
+// Réutilise store.applyStealthMode (app.ts) au lieu d'appeler le backend
+// directement : cette action gère déjà la confirmation RiskGate, son propre
+// store.stealthBusy ET rafraîchit store.stealthStatus après coup — sans ça,
+// le bouton "Restaurer" (qui lit store.stealthStatus?.active) ne s'affichait
+// jamais après un "Appliquer" réussi depuis cet écran. UX-PRODUIT-8B : seul
+// point d'entrée stealth de l'app, l'ancien panneau à 3 profils de Paramètres
+// a été retiré au profit de celui-ci pour ne pas avoir deux commandes
+// concurrentes du même outil.
+async function applyStealthProfile(profile: string) {
+  try {
+    const result = await store.applyStealthMode(profile)
+    if (result) {
+      stealthResult.value = result as unknown as Record<string, unknown>
+      if (result.success) {
+        await store.refreshModuleCatalog()
+      }
+    }
+  } catch (e) {
+    stealthResult.value = { success: false, error: String(e) }
+  }
+}
 
 // applyStealthMode/restoreStealthMode ne renvoient jamais de champ `message`
 // (voir application_controller.cpp) : sur un succès sans warning, il n'y a ni
@@ -207,7 +256,7 @@ function copyToClipboard(text: string, btnId: string) {
 }
 
 function copyEdrExclusionCmd() {
-  copyToClipboard(`powershell -Command "Add-MpPreference -ExclusionPath '${buildDir}'"`, 'edr1')
+  copyToClipboard(`powershell -Command "Add-MpPreference -ExclusionPath '${buildDir}' -ExclusionProcess 'KillEngine.exe'"`, 'edr1')
 }
 
 function copyRegDisableSpyware() {
@@ -314,30 +363,13 @@ async function handleInstall(modId: string) {
   }
 
   if (modId === 'stealth_sc2_profile') {
-    // Réutilise store.applyStealthMode (app.ts) au lieu d'appeler le backend
-    // directement : cette action gère déjà la confirmation RiskGate ET
-    // rafraîchit store.stealthStatus après coup — sans ça, le bouton
-    // "Restaurer" ci-dessous (qui lit store.stealthStatus?.active) ne
-    // s'affichait jamais après un "Appliquer" réussi depuis cet écran.
-    stealthBusy.value = true
-    try {
-      const result = await store.applyStealthMode('sc2')
-      if (result) {
-        stealthResult.value = result as unknown as Record<string, unknown>
-        if (result.success) {
-          await store.refreshModuleCatalog()
-        }
-      }
-    } catch (e) {
-      stealthResult.value = { success: false, error: String(e) }
-    } finally {
-      stealthBusy.value = false
-    }
+    await applyStealthProfile('sc2')
     return
   }
 
   if (modId === 'restore_stealth') {
-    stealthBusy.value = true
+    // store.restoreStealthMode gère déjà son propre stealthBusy + rafraîchit
+    // store.stealthStatus après coup (voir applyStealthProfile ci-dessous).
     try {
       const result = await store.restoreStealthMode()
       if (result) {
@@ -348,8 +380,6 @@ async function handleInstall(modId: string) {
       }
     } catch (e) {
       stealthResult.value = { success: false, error: String(e) }
-    } finally {
-      stealthBusy.value = false
     }
     return
   }
@@ -421,6 +451,25 @@ onMounted(() => {
     testSigningBusy.value = false
   })
   void refreshTestSigningStatus()
+
+  // UX-PRODUIT-8B : consomme pendingModulesTab/pendingModulesAnchor une
+  // seule fois (patron pendingExpertStep/pendingExpertAnchor d'ExpertView) —
+  // un lien externe ouvre le bon onglet et scrolle à la bonne famille, une
+  // visite manuelle normale de Modules ne force jamais d'onglet.
+  if (store.pendingModulesTab) {
+    activeTab.value = store.pendingModulesTab
+    store.pendingModulesTab = null
+  }
+  if (store.pendingModulesAnchor) {
+    const anchorId = store.pendingModulesAnchor
+    store.pendingModulesAnchor = null
+    if (diagnosticsFamilies.includes(anchorId as DiagnosticsFamily)) {
+      activeDiagnosticsFamily.value = anchorId as DiagnosticsFamily
+    }
+    void nextTick(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
 })
 </script>
 
@@ -440,6 +489,28 @@ onMounted(() => {
       </button>
     </div>
 
+    <div class="modules-tabs" role="tablist">
+      <button
+        class="modules-tab"
+        :class="{ active: activeTab === 'components' }"
+        role="tab"
+        :aria-selected="activeTab === 'components'"
+        @click="activeTab = 'components'"
+      >
+        {{ $t('modules.tabs.components') }}
+      </button>
+      <button
+        class="modules-tab"
+        :class="{ active: activeTab === 'diagnostics' }"
+        role="tab"
+        :aria-selected="activeTab === 'diagnostics'"
+        @click="activeTab = 'diagnostics'"
+      >
+        {{ $t('modules.tabs.diagnostics') }}
+      </button>
+    </div>
+
+    <template v-if="activeTab === 'components'">
     <div v-if="store.moduleCatalog.length === 0 && !store.moduleCatalogBusy" class="empty">
       {{ $t('modules.empty') }}
     </div>
@@ -539,7 +610,7 @@ onMounted(() => {
             <strong>{{ $t('modules.edr.guide.step1Title') }}</strong>
             <p>{{ $t('modules.edr.guide.step1Desc') }}</p>
             <p class="guide-action">{{ $t('modules.edr.guide.step1ActionPrefix') }} <strong>{{ $t('modules.edr.addExclusion') }}</strong> {{ $t('modules.edr.guide.step1ActionSuffix') }}</p>
-            <pre class="manual-code">powershell -Command "Add-MpPreference -ExclusionPath '{{ buildDir }}'"</pre>
+            <pre class="manual-code">powershell -Command "Add-MpPreference -ExclusionPath '{{ buildDir }}' -ExclusionProcess 'KillEngine.exe'"</pre>
           </div>
           <div class="guide-step">
             <strong>{{ $t('modules.edr.guide.step2Title') }}</strong>
@@ -587,7 +658,7 @@ onMounted(() => {
             <div class="manual-step">
               <strong>{{ $t('modules.edr.step1Title') }}</strong>
               <p>{{ $t('modules.edr.step1Desc') }}</p>
-              <pre class="manual-code">powershell -Command "Add-MpPreference -ExclusionPath '{{ buildDir }}'"</pre>
+              <pre class="manual-code">powershell -Command "Add-MpPreference -ExclusionPath '{{ buildDir }}' -ExclusionProcess 'KillEngine.exe'"</pre>
               <button class="btn btn-secondary compact" @click="copyEdrExclusionCmd" :title="$t('modules.edr.copy')">
                 {{ $t('modules.edr.copy') }}
               </button>
@@ -661,28 +732,84 @@ onMounted(() => {
           </div>
           <div class="module-actions">
             <button
-              v-if="mod.id === 'stealth_sc2_profile' && !stealthBusy"
-              class="btn btn-primary install-btn"
-              @click="handleInstall(mod.id)"
-            >
-              {{ installLabel(mod.id) }}
-            </button>
-            <button
-              v-if="mod.id === 'stealth_sc2_profile' && store.stealthStatus?.active && !stealthBusy"
+              v-if="mod.id === 'stealth_sc2_profile' && store.stealthStatus?.active && !store.stealthBusy"
               class="btn btn-secondary install-btn"
               @click="handleInstall('restore_stealth')"
             >
-              {{ $t('modules.install.restore') }}
+              {{ $t('settings.restoreDisable') }}
+            </button>
+            <button
+              v-if="mod.id === 'stealth_sc2_profile'"
+              class="btn btn-secondary install-btn"
+              :disabled="store.stealthBusy"
+              @click="store.refreshStealthStatus()"
+            >
+              {{ $t('settings.refreshStatus') }}
             </button>
           </div>
         </div>
         <p class="module-desc">{{ mod.description }}</p>
         <p v-if="mod.detail" class="module-detail">{{ mod.detail }}</p>
 
+        <!-- Sélecteur de profil : 3 profils fusionnés depuis l'ancien panneau
+             Stealth de Paramètres (retiré, UX-PRODUIT-8B) pour n'avoir qu'un
+             seul endroit où appliquer un profil stealth. -->
+        <div v-if="mod.id === 'stealth_sc2_profile'" class="panel-actions">
+          <button class="btn btn-secondary compact" :disabled="store.stealthBusy" @click="applyStealthProfile('sc2')">
+            {{ $t('settings.enableSc2') }}
+          </button>
+          <button class="btn btn-secondary compact" :disabled="store.stealthBusy" @click="applyStealthProfile('default')">
+            {{ $t('settings.enableDefault') }}
+          </button>
+          <button class="btn btn-secondary compact" :disabled="store.stealthBusy" @click="applyStealthProfile('minimal')">
+            {{ $t('settings.enableMinimal') }}
+          </button>
+        </div>
+
         <!-- Résultat Appliquer/Restaurer Stealth -->
         <div v-if="mod.id === 'stealth_sc2_profile' && stealthResult" class="diag-result" :class="stealthResult.success ? 'ok' : 'blocked'">
           <p>{{ stealthResultText(stealthResult) }}</p>
         </div>
+
+        <div v-if="mod.id === 'stealth_sc2_profile' && store.stealthStatus?.modules" class="settings-grid compact-grid">
+          <div>
+            <strong>antiDebug</strong>
+            <span>{{ store.stealthStatus.modules.antiDebug ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
+          </div>
+          <div>
+            <strong>processMask</strong>
+            <span>{{ store.stealthStatus.modules.processMask ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
+          </div>
+          <div>
+            <strong>dllMask</strong>
+            <span>{{ store.stealthStatus.modules.dllMask ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
+          </div>
+        </div>
+
+        <div v-if="mod.id === 'stealth_sc2_profile'" class="panel-actions" style="margin-top: 10px">
+          <button class="btn btn-secondary compact" :disabled="store.stealthBusy || !store.isAttached" @click="store.analyzeStealthRisk()">
+            {{ $t('settings.analyzeDetectability') }}
+          </button>
+        </div>
+        <p v-if="mod.id === 'stealth_sc2_profile' && !store.isAttached" class="hint">{{ $t('settings.attachToAnalyze') }}</p>
+
+        <div v-if="mod.id === 'stealth_sc2_profile' && store.stealthRiskAnalysis?.success" class="stealth-analysis">
+          <div class="stealth-risk-line">
+            <span class="risk-badge" :class="`risk-${store.stealthRiskAnalysis.riskLevel}`">
+              {{ store.stealthRiskAnalysis.riskLevel }} — {{ store.stealthRiskAnalysis.riskScore }}/100
+            </span>
+            <span class="hint">{{ $t('settings.moduleScannedCount', { count: store.stealthRiskAnalysis.moduleCount }) }}</span>
+          </div>
+          <ul v-if="stealthThreats.length" class="stealth-threat-list">
+            <li v-for="(threat, idx) in stealthThreats" :key="idx">
+              <strong>{{ threat.name }}</strong> ({{ threat.source }}) — {{ threat.detail }}
+            </li>
+          </ul>
+          <ul v-if="stealthRecommendations.length" class="stealth-recommendation-list">
+            <li v-for="(rec, idx) in stealthRecommendations" :key="idx">{{ rec }}</li>
+          </ul>
+        </div>
+        <p v-else-if="mod.id === 'stealth_sc2_profile' && store.stealthRiskAnalysis?.error" class="error">{{ store.stealthRiskAnalysis.error }}</p>
 
         <!-- Handle Hider UI -->
         <div v-if="mod.id === 'handle_hider'" class="handle-hider-ui">
@@ -711,6 +838,33 @@ onMounted(() => {
         {{ $t('modules.refresh') }}
       </button>
     </div>
+    </template>
+
+    <template v-else>
+      <nav class="diagnostics-toc" aria-label="Sommaire diagnostics">
+        <button
+          v-for="family in diagnosticsFamilies"
+          :key="family"
+          class="diagnostics-toc-item"
+          :class="{ active: activeDiagnosticsFamily === family }"
+          @click="goToDiagnosticsFamily(family)"
+        >
+          {{ diagnosticsFamilyLabel(family) }}
+        </button>
+      </nav>
+      <div id="runtime">
+        <RuntimeLogsDiagnostics />
+      </div>
+      <div id="kernel">
+        <KernelDiagnostics />
+      </div>
+      <div id="automation">
+        <AutomationDiagnostics />
+      </div>
+      <div id="webview2">
+        <WebView2Diagnostics />
+      </div>
+    </template>
   </div>
 </template>
 
@@ -732,6 +886,55 @@ onMounted(() => {
   font-size: 22px;
   color: var(--text-primary);
   margin: 0 0 6px;
+}
+
+.modules-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modules-tab {
+  padding: 8px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modules-tab.active {
+  border-bottom-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.diagnostics-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.diagnostics-toc-item {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.diagnostics-toc-item:hover {
+  color: var(--text-primary);
+}
+
+.diagnostics-toc-item.active {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .header p {
@@ -1137,5 +1340,69 @@ onMounted(() => {
 .install-result.error {
   border-color: color-mix(in srgb, var(--error) 40%, var(--border));
   color: var(--error);
+}
+
+/* Fusion stealth (UX-PRODUIT-8B) : copié depuis l'ancien panneau Stealth de
+   SettingsView.vue, verbatim, pour garder l'apparence identique. */
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stealth-analysis {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stealth-risk-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.risk-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+}
+
+.risk-badge.risk-low {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+}
+
+.risk-badge.risk-medium {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+}
+
+.risk-badge.risk-high {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 50%, var(--border));
+}
+
+.stealth-threat-list,
+.stealth-recommendation-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.stealth-threat-list li,
+.stealth-recommendation-list li {
+  margin-bottom: 4px;
 }
 </style>

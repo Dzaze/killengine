@@ -1822,10 +1822,6 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   hasSeenOnboarding?(): Promise<boolean>
   setOnboardingSeen?(seen: boolean): Promise<void>
   openUserGuide?(): Promise<boolean>
-  /** Demande une exclusion Windows Defender pour KillEngine.exe (invite UAC visible, jamais silencieux). Non bloquant (élévation UAC sur thread séparé côté backend) — résultat via windowsDefenderExclusionRequestFinished, cet appel ne fait que démarrer l'opération. */
-  requestWindowsDefenderExclusionAsync?(): Promise<{ success: boolean; started?: boolean; cancelled?: boolean; error?: string }>
-  /** Résultat différé de requestWindowsDefenderExclusionAsync. */
-  windowsDefenderExclusionRequestFinished?: QWebChannelSignal<{ success: boolean; cancelled?: boolean; error?: string }>
   /** Inspecteur WebView2/CDP pour inspection de contenu web embarqué. */
   getWebView2InspectorStatus?(): Promise<WebView2InspectorStatus>
   listWebView2CdpTargets?(browserProcessId: number, options?: Record<string, unknown>): Promise<WebView2TargetsResponse>
@@ -3306,10 +3302,6 @@ class BackendService {
       async openUserGuide() {
         return false
       },
-      async requestWindowsDefenderExclusionAsync() {
-        return { success: false, started: false, cancelled: true, error: 'Indisponible dans le mock.' }
-      },
-      windowsDefenderExclusionRequestFinished: undefined as unknown as QWebChannelSignal<{ success: boolean; cancelled?: boolean; error?: string }>,
       async getWebView2InspectorStatus() {
         return {
           success: true,

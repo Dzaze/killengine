@@ -26,7 +26,7 @@ If the application doesn't start, run the diagnostic from the repo:
 .\scripts\diagnose-launch.ps1
 ```
 
-The script briefly opens KillEngine, collects recent Windows events, copies local logs, and writes a bundle under `diagnostics\`. After a successful launch, `Settings > Diagnostics` can also export logs, Smart Search debug data, and recent crash reports.
+The script briefly opens KillEngine, collects recent Windows events, copies local logs, and writes a bundle under `diagnostics\`. After a successful launch, `Modules > Diagnostics > Runtime and logs` can also export logs, Smart Search debug data, and recent crash reports.
 
 ## Attaching a process
 
@@ -239,7 +239,13 @@ This card also explains, in plain terms, why an antivirus or EDR might flag Kill
 
 ### 🛡️ Security / Stealth
 
-- **`stealth_sc2_profile`** — `Apply` button, then `Restore` once active.
+Reduces KillEngine's detectability against common anti-debug/anti-cheat mechanisms (process name masking, injected DLL masking, anti-anti-debug hooks on `IsDebuggerPresent`/`CheckRemoteDebuggerPresent`/`NtQueryInformationProcess`).
+
+1. Attach a process.
+2. `Analyze detectability` (optional but recommended) — scans loaded modules for known protections (BattlEye, Easy Anti-Cheat, Vanguard, PunkBuster, GameGuard, Xigncode3, Denuvo, mhyprot...) and gives a risk score with recommendations.
+3. Pick a profile: `sc2` (anti-debug + process masking + DLL masking, all three modules), `default` (anti-debug only), or `minimal` (process masking only).
+4. Confirm, then `Restore / disable` once done.
+
 - **Handle Hider** — hides a specific handle in a process's handle table (invisible to `NtQuerySystemInformation`). Enter the `Target process PID` and the `Handle value (hex)`, then `Hide`.
 
 ## Expert Mode
@@ -300,9 +306,9 @@ When a normal write explicitly fails, or sticks for a moment then always reverts
 
 Recommended path to learn this without guessing:
 
-1. **Process > Memory access mode > Kernel** — check right at attach time whether the driver is ready. If needed, `Settings > Kernel driver > Test the driver` lets you reprobe `KillEngineKernel.sys` and confirm `Kernel memory access = yes`. Without this driver, Kernel mode cleanly refuses advanced reads/writes.
+1. **Process > Memory access mode > Kernel** — check right at attach time whether the driver is ready. If needed, `Modules > Diagnostics > Kernel > Test the driver` lets you reprobe `KillEngineKernel.sys` and confirm `Kernel memory access = yes`. Without this driver, Kernel mode cleanly refuses advanced reads/writes.
 2. **Narrow the candidates first** with a normal scan (`175`, then next scan `185`, etc.). The kernel isn't a replacement for scanning: it steps in once few plausible addresses remain.
-3. **Reread the address(es)** via `Settings > Kernel driver > Memory read (kernel)` or from the Expert flow. Solid proof starts with "this address really does contain the expected value."
+3. **Reread the address(es)** via `Modules > Diagnostics > Kernel > Memory read (kernel)` or from the Expert flow. Solid proof starts with "this address really does contain the expected value."
 4. Once `Kernel` mode is active, simple writes from the `Candidates and writes` panel go through the driver. Multi-address atomic write remains a separate tool, since it suspends threads and solves a different problem.
 5. **Reread immediately after writing**, then check the display in the target. If memory and the on-screen value move together, you likely have the right address.
 6. **In the Assistant**, ask for it directly in natural language: *"write 9999 to 0x... via the kernel."* The Assistant recognizes the explicit request and offers a dedicated confirmation button — one click is enough, but nothing runs without that confirmation.
@@ -387,7 +393,7 @@ Some applications (Electron, WebView2, some UWP apps) display their real state i
 6. `Evaluate` runs a free-form JavaScript expression (also subject to confirmation, since it can write).
 7. `Disconnect` / `Reset` to finish.
 
-**If the target is a Store/UWP app**, the direct CDP port is blocked by default (AppContainer). First go to `Settings`, section `Prepare WebView2 inspection (Store/UWP apps)`, and run the diagnostic: it checks and, if needed, installs the Windows Developer Mode capability required for the Device Portal chain. For a regular Electron/WebView2/CEF app (not UWP), use the `WebView2 CDP debugging (advanced)` panel in `Settings` instead, which forces the debug port for the current Windows user.
+**If the target is a Store/UWP app**, the direct CDP port is blocked by default (AppContainer). First go to `Modules > Diagnostics > WebView2`, section `Prepare WebView2 inspection (Store/UWP apps)`, and run the diagnostic: it checks and, if needed, installs the Windows Developer Mode capability required for the Device Portal chain. For a regular Electron/WebView2/CEF app (not UWP), use the `WebView2 CDP debugging (advanced)` panel in `Modules > Diagnostics > WebView2` instead, which forces the debug port for the current Windows user.
 
 ## Memory over time: Heatmap, Timeline, Pattern Learning
 
@@ -531,39 +537,43 @@ Optional, never enabled by default. Switches the Assistant chat to the Claude AP
 
 As soon as this backend is active, the context of tool calls (memory addresses, process name, sometimes disassembled code) is sent to Anthropic on every request. Every sensitive tool (memory write, kernel, network, stealth...) still requires its own confirmation before running — enabling this backend doesn't execute anything on its own.
 
-This Claude backend is just one option among others: you can just as well drive KillEngine with the online model of your choice via `Automation Mode` below — the local pipe exposes the entire command surface without restriction to any external tool/agent on this machine (for example, an AI extension plugged into it).
+This Claude backend is just one option among others: you can just as well drive KillEngine with the online model of your choice via `Automation Mode` (see `Modules > Diagnostics > Automation` below) — the local pipe exposes the entire command surface without restriction to any external tool/agent on this machine (for example, an AI extension plugged into it).
 
-### Automation Mode (advanced)
+## Modules diagnostics
 
-Lets an external AI agent (Claude Code, Cursor, a VS Code extension...) drive KillEngine live over a local named pipe, reusing the same engine as the `Lua` tab.
+`Modules` has two tabs: `Components` (default, installable dependencies) and `Diagnostics`, with its own local summary linking to four families.
 
-1. In the `Automation Mode (advanced)` section, click `Enable Automation Mode`.
-2. Confirm once — the pipe starts immediately, no KillEngine restart needed. The status shows the pipe name, the number of calls received, and the last call made.
-3. `Refresh status` to update; `Disable Automation Mode` to turn it off (no confirmation needed).
+### Runtime and logs
 
-**Once active, calls made through the pipe run without per-action confirmation** — every call is still logged, but there's no more individual confirmation popup as long as the mode stays on. See `docs/AUTOMATION_API.md` for the full protocol (JSON-RPC, pipe name, method reference) rather than duplicating it here. Alternative for a scripted setup: launch KillEngine with the environment variable `KILLENGINE_AUTOMATION_PIPE=1` instead of the toggle.
+In `Modules > Diagnostics > Runtime and logs` (or the `Open diagnostics` link from `Settings > Diagnostic`), you can:
 
-### Stealth Mode (advanced)
-
-Reduces KillEngine's detectability against common anti-debug/anti-cheat mechanisms (process name masking, injected DLL masking, anti-anti-debug hooks on `IsDebuggerPresent`/`CheckRemoteDebuggerPresent`/`NtQueryInformationProcess`).
-
-1. Attach a process.
-2. `Analyze detectability` (optional but recommended) — scans loaded modules for known protections (BattlEye, Easy Anti-Cheat, Vanguard, PunkBuster, GameGuard, Xigncode3, Denuvo, mhyprot...) and gives a risk score with recommendations.
-3. Pick a profile: `sc2` (anti-debug + process masking + DLL masking, all three modules), `default` (anti-debug only), or `minimal` (process masking only).
-4. Confirm, then `Restore / disable` once done.
-
-An equivalent shortcut exists in `Modules`, section "🛡️ Security / Stealth" (card "Stealth Profile SC2"), to apply the same profile in one click from that tab.
-
-## Diagnostics
-
-In `Settings > Diagnostics`, you can:
-
+- see backend/process/version/workflow state and send a ping;
 - read the latest lines of the main log;
 - see the Smart Search JSONL path;
 - export a compressed diagnostic bundle;
 - clear the displayed Smart Search events.
 
+The two logging preferences (enable the Smart Search JSONL, number of events displayed) stay in `Settings > Diagnostic`.
+
 Use the diagnostic export when the Assistant picks a wrong action, a scan seems inconsistent, or a write fails.
+
+### Kernel
+
+Test/restart the `KillEngineKernel.sys` driver and, once memory access is confirmed, read/write raw bytes at a given address — see "Kernel write (escalation)" under Expert Mode below for when to use it.
+
+### Automation
+
+Lets an external AI agent (Claude Code, Cursor, a VS Code extension...) drive KillEngine live over a local named pipe, reusing the same engine as the `Lua` tab.
+
+1. In `Modules > Diagnostics > Automation`, click `Enable Automation Mode`.
+2. Confirm once — the pipe starts immediately, no KillEngine restart needed. The status shows the pipe name, the number of calls received, and the last call made.
+3. `Refresh status` to update; `Disable Automation Mode` to turn it off (no confirmation needed).
+
+**Once active, calls made through the pipe run without per-action confirmation** — every call is still logged, but there's no more individual confirmation popup as long as the mode stays on. See `docs/AUTOMATION_API.md` for the full protocol (JSON-RPC, pipe name, method reference) rather than duplicating it here. Alternative for a scripted setup: launch KillEngine with the environment variable `KILLENGINE_AUTOMATION_PIPE=1` instead of the toggle.
+
+### WebView2
+
+CDP debug flag toggle and the Store/UWP Device Portal preparation diagnostic — see "WebView2 Inspector — hybrid native + web targets" above for the full picture.
 
 ## Troubleshooting tips
 

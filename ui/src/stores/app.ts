@@ -113,6 +113,12 @@ export const useAppStore = defineStore('app', () => {
   // dans une longue etape (ex. "Ecrit par" est au milieu d'un long panneau
   // "find"), meme regle de consommation unique que pendingExpertStep.
   const pendingExpertAnchor = ref<string | null>(null)
+  // UX-PRODUIT-8B : meme patron que pendingExpertStep/pendingExpertAnchor
+  // ci-dessus, pour ouvrir directement le bon onglet/famille de diagnostics
+  // de ModulesView depuis une carte ou une vue specialisee (ex. Parametres,
+  // ExpertView) sans nouveau router. Consomme une seule fois au montage.
+  const pendingModulesTab = ref<'components' | 'diagnostics' | null>(null)
+  const pendingModulesAnchor = ref<string | null>(null)
   const version = ref('...')
   const isConnected = ref(false)
   const showOnboarding = ref(false)
@@ -2392,12 +2398,8 @@ export const useAppStore = defineStore('app', () => {
         backendSpeedhackApiHookSignalConnected = true
       }
       if (!backendElevatedNetworkActionsSignalConnected) {
-        // Exclusion Defender / blocage réseau non bloquants (voir
-        // requestWindowsDefenderExclusionAsync/blockProcessNetworkAsync/
+        // Blocage réseau non bloquant (voir blockProcessNetworkAsync/
         // unblockProcessNetworkAsync) : résultat différé.
-        controller.windowsDefenderExclusionRequestFinished?.connect((result) => {
-          onWindowsDefenderExclusionRequestFinished(result)
-        })
         controller.processNetworkBlockFinished?.connect((result) => {
           speedhackStore.onBlockProcessNetworkFinished(result)
         })
@@ -2553,34 +2555,6 @@ export const useAppStore = defineStore('app', () => {
 
   async function openUserGuide() {
     await backend.getController().openUserGuide?.()
-  }
-
-  const defenderExclusionResult = ref<{ success: boolean; cancelled?: boolean; error?: string } | null>(null)
-  const defenderExclusionBusy = ref(false)
-
-  // requestWindowsDefenderExclusionAsync ne bloque plus le thread GUI
-  // (élévation UAC + Add-MpPreference jusqu'à 15s sur thread séparé côté
-  // backend) : elle renvoie juste {started:true} immédiatement, le vrai
-  // résultat arrive via le signal windowsDefenderExclusionRequestFinished
-  // (branché plus bas dans init()) — busy reste true jusque-là.
-  async function requestWindowsDefenderExclusion() {
-    defenderExclusionBusy.value = true
-    defenderExclusionResult.value = null
-    try {
-      const result = await backend.getController().requestWindowsDefenderExclusionAsync?.()
-      if (!result?.started) {
-        defenderExclusionBusy.value = false
-        defenderExclusionResult.value = result ?? { success: false, error: t('appStore.errors.backendResponseMissing') }
-      }
-    } catch (e) {
-      defenderExclusionBusy.value = false
-      defenderExclusionResult.value = { success: false, error: String(e) }
-    }
-  }
-
-  function onWindowsDefenderExclusionRequestFinished(result: { success: boolean; cancelled?: boolean; error?: string }) {
-    defenderExclusionBusy.value = false
-    defenderExclusionResult.value = result
   }
 
   async function refreshKernelDriverStatus() {
@@ -4937,13 +4911,12 @@ export const useAppStore = defineStore('app', () => {
     activeView,
     pendingExpertStep,
     pendingExpertAnchor,
+    pendingModulesTab,
+    pendingModulesAnchor,
     isConnected,
     showOnboarding,
     dismissOnboarding,
     openUserGuide,
-    defenderExclusionResult,
-    defenderExclusionBusy,
-    requestWindowsDefenderExclusion,
     kernelDriverStatus,
     kernelDriverStatusLoading,
     kernelDriverStartLoading,

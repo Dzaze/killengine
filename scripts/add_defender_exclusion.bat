@@ -26,8 +26,10 @@ echo.
 echo Dossier: %BUILD_BIN%
 echo.
 
-:: Ajouter l'exclusion
-powershell -Command "Add-MpPreference -ExclusionPath '%BUILD_BIN%'"
+:: Ajouter l'exclusion (dossier + nom de process, protection plus complete
+:: qu'une exclusion de chemin seule -- fusionne ce que faisait l'ancien bouton
+:: Parametres > Antivirus, retire lors de UX-PRODUIT-8B).
+powershell -Command "Add-MpPreference -ExclusionPath '%BUILD_BIN%' -ExclusionProcess 'KillEngine.exe'"
 if %errorLevel% equ 0 (
     echo [OK] Exclusion ajoutee avec succes.
     echo.

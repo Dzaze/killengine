@@ -26,7 +26,7 @@ Si l'application ne démarre pas, lance le diagnostic depuis le dépôt :
 .\scripts\diagnose-launch.ps1
 ```
 
-Le script ouvre brièvement KillEngine, collecte les événements Windows récents, copie les logs locaux et écrit un bundle sous `diagnostics\`. Après un prochain lancement réussi, `Paramètres > Diagnostic` permet aussi d'exporter les logs, le debug Smart Search et les rapports de crash récents.
+Le script ouvre brièvement KillEngine, collecte les événements Windows récents, copie les logs locaux et écrit un bundle sous `diagnostics\`. Après un prochain lancement réussi, `Modules > Diagnostics > Runtime et journaux` permet aussi d'exporter les logs, le debug Smart Search et les rapports de crash récents.
 
 ## Attacher un processus
 
@@ -239,7 +239,13 @@ Cette carte explique aussi, en clair, pourquoi un antivirus ou un EDR peut signa
 
 ### 🛡️ Sécurité / Stealth
 
-- **`stealth_sc2_profile`** — bouton `Appliquer`, puis `Restaurer` une fois actif.
+Réduit la détectabilité de KillEngine face aux mécanismes anti-debug/anti-cheat courants (masquage du nom de process, masquage de DLL injectée, hooks anti-anti-debug sur `IsDebuggerPresent`/`CheckRemoteDebuggerPresent`/`NtQueryInformationProcess`).
+
+1. Attache un processus.
+2. `Analyser la détectabilité` (optionnel mais recommandé) — scanne les modules chargés à la recherche de protections connues (BattlEye, Easy Anti-Cheat, Vanguard, PunkBuster, GameGuard, Xigncode3, Denuvo, mhyprot...) et donne un score de risque avec des recommandations.
+3. Choisis un profil : `sc2` (anti-debug + masquage process + masquage DLL, les trois modules), `default` (anti-debug seul), ou `minimal` (masquage process seul).
+4. Confirme, puis `Restaurer / désactiver` une fois terminé.
+
 - **Handle Hider** — masque un handle spécifique dans la table de handles d'un processus (invisible à `NtQuerySystemInformation`). Saisis le `PID du process cible` et la `Valeur du handle (hex)`, puis `Masquer`.
 
 ## Mode Expert
@@ -300,9 +306,9 @@ Quand une écriture normale échoue explicitement, ou tient un instant puis revi
 
 Parcours conseillé pour apprendre sans deviner :
 
-1. **Processus > Mode d'accès mémoire > Kernel** — vérifie dès l'attache si le driver est prêt. Si besoin, `Paramètres > Driver kernel > Tester le driver` permet de reprober `KillEngineKernel.sys` et de confirmer `Accès mémoire kernel = oui`. Sans ce driver, le mode kernel refuse proprement les lectures/écritures avancées.
+1. **Processus > Mode d'accès mémoire > Kernel** — vérifie dès l'attache si le driver est prêt. Si besoin, `Modules > Diagnostics > Noyau > Tester le driver` permet de reprober `KillEngineKernel.sys` et de confirmer `Accès mémoire kernel = oui`. Sans ce driver, le mode kernel refuse proprement les lectures/écritures avancées.
 2. **Réduis d'abord les candidats** avec un scan normal (`175`, puis next scan `185`, etc.). Le kernel n'est pas un remplaçant du scan : il intervient quand il reste peu d'adresses plausibles.
-3. **Relis la ou les adresses** via `Paramètres > Driver kernel > Lecture mémoire (kernel)` ou depuis le flux Expert. La preuve propre commence par "cette adresse contient bien la valeur attendue".
+3. **Relis la ou les adresses** via `Modules > Diagnostics > Noyau > Lecture mémoire (kernel)` ou depuis le flux Expert. La preuve propre commence par "cette adresse contient bien la valeur attendue".
 4. Une fois le mode `Kernel` actif, les écritures simples du panneau `Candidats et écritures` passent par le driver. L'écriture atomique multi-adresses reste un outil séparé, car elle suspend les threads et répond à un autre problème.
 5. **Relis immédiatement après écriture**, puis vérifie l'affichage dans la cible. Si la mémoire et l'écran bougent ensemble, tu as probablement la bonne adresse.
 6. **Dans l'Assistant**, demande-le directement en langage naturel : *« écris 9999 à 0x... via le kernel »*. L'Assistant reconnaît la demande explicite et propose un bouton de confirmation dédié — un clic suffit, mais rien ne s'exécute sans cette confirmation.
@@ -387,7 +393,7 @@ Certaines applications (Electron, WebView2, certaines apps UWP) affichent leur �
 6. `Évaluer` exécute une expression JavaScript libre (également soumise à confirmation, puisqu'elle peut écrire).
 7. `Déconnecter` / `Réinitialiser` pour terminer.
 
-**Si la cible est une app Store/UWP**, le port CDP direct est bloqué par défaut (AppContainer). Va d'abord dans `Paramètres`, section `Préparer l'inspection WebView2 (apps Store/UWP)`, et lance le diagnostic : il vérifie et installe si besoin le Mode développeur Windows nécessaire à la chaîne Device Portal. Pour une app Electron/WebView2/CEF classique (pas UWP), utilise plutôt le panneau `Débogage CDP WebView2 (avancé)` des `Paramètres`, qui force le port de debug pour l'utilisateur Windows courant.
+**Si la cible est une app Store/UWP**, le port CDP direct est bloqué par défaut (AppContainer). Va d'abord dans `Modules > Diagnostics > WebView2`, section `Préparer l'inspection WebView2 (apps Store/UWP)`, et lance le diagnostic : il vérifie et installe si besoin le Mode développeur Windows nécessaire à la chaîne Device Portal. Pour une app Electron/WebView2/CEF classique (pas UWP), utilise plutôt le panneau `Débogage CDP WebView2 (avancé)` de `Modules > Diagnostics > WebView2`, qui force le port de debug pour l'utilisateur Windows courant.
 
 ## Mémoire dans le temps : Heatmap, Timeline, Pattern Learning
 
@@ -531,39 +537,42 @@ Optionnel, jamais activé par défaut. Bascule le chat Assistant vers l'API Clau
 
 Dès que ce backend est actif, le contexte des appels d'outils (adresses mémoire, nom du process, parfois du code désassemblé) part vers Anthropic à chaque requête. Chaque outil sensible (écriture mémoire, kernel, réseau, stealth...) reste soumis à sa propre confirmation avant exécution — activer ce backend n'exécute rien tout seul.
 
-Ce backend Claude n'est qu'une option parmi d'autres : tu peux aussi piloter KillEngine avec le modèle en ligne de ton choix via le `Mode Automation` ci-dessous — le pipe local expose toute la surface de commandes sans restriction à n'importe quel outil/agent externe sur cette machine (par exemple une extension IA branchée dessus).
+Ce backend Claude n'est qu'une option parmi d'autres : tu peux aussi piloter KillEngine avec le modèle en ligne de ton choix via le `Mode Automation` (voir `Modules > Diagnostics > Automation` ci-dessous) — le pipe local expose toute la surface de commandes sans restriction à n'importe quel outil/agent externe sur cette machine (par exemple une extension IA branchée dessus).
 
-### Mode Automation (avancé)
+## Diagnostics des Modules
 
-Permet à un agent IA externe (Claude Code, Cursor, une extension VS Code...) de piloter KillEngine en direct via un pipe nommé local, en réutilisant le même moteur que l'onglet `Lua`.
+`Modules` a deux onglets : `Composants` (par défaut, dépendances installables) et `Diagnostics`, avec son propre sommaire local vers quatre familles.
 
-1. Dans la section `Mode Automation (avancé)`, clique `Activer le mode Automation`.
-2. Confirme une seule fois — le pipe démarre immédiatement, sans redémarrer KillEngine. Le statut affiche le nom du pipe, le nombre d'appels reçus, et le dernier appel effectué.
-3. `Rafraîchir le statut` pour actualiser ; `Désactiver le mode Automation` pour couper (sans confirmation nécessaire).
+### Runtime et journaux
 
-**Une fois actif, les appels via le pipe s'exécutent sans confirmation par action** — chaque appel reste journalisé, mais il n'y a plus de fenêtre de confirmation individuelle tant que le mode reste activé. Voir `docs/AUTOMATION_API.md` pour le protocole complet (JSON-RPC, nom du pipe, référence des méthodes) plutôt que de le dupliquer ici. Alternative pour un usage scripté : lancer KillEngine avec la variable d'environnement `KILLENGINE_AUTOMATION_PIPE=1` au lieu du bouton.
-
-### Mode Stealth (avancé)
-
-Réduit la détectabilité de KillEngine face aux mécanismes anti-debug/anti-cheat courants (masquage du nom de process, des DLLs injectées, hooks anti-anti-debug sur `IsDebuggerPresent`/`CheckRemoteDebuggerPresent`/`NtQueryInformationProcess`).
-
-1. Attache un processus.
-2. `Analyser la détectabilité` (optionnel mais conseillé) — scanne les modules chargés à la recherche de protections connues (BattlEye, Easy Anti-Cheat, Vanguard, PunkBuster, GameGuard, Xigncode3, Denuvo, mhyprot...) et donne un score de risque avec des recommandations.
-3. Choisis un profil : `sc2` (anti-debug + masquage process + masquage DLL, les trois modules), `default` (anti-debug seul), ou `minimal` (masquage process seul).
-4. Confirme, puis `Restaurer / désactiver` une fois terminé.
-
-Un raccourci équivalent existe dans `Modules`, section « 🛡️ Sécurité / Stealth » (carte « Profil Stealth SC2 »), pour appliquer le même profil en un clic depuis cet onglet.
-
-## Diagnostics
-
-Dans `Paramètres > Diagnostic`, tu peux :
+Dans `Modules > Diagnostics > Runtime et journaux` (lien « Ouvrir les diagnostics » depuis `Paramètres > Diagnostic`), tu peux :
 
 - lire les dernières lignes du log principal ;
 - voir le chemin du JSONL Smart Search ;
 - exporter un bundle diagnostic compressé ;
 - vider les événements Smart Search affichés.
 
+Les deux réglages de journalisation (activer le JSONL Smart Search, nombre d'événements affichés) restent dans `Paramètres > Diagnostic`.
+
 Utilise l'export diagnostic quand l'Assistant choisit une mauvaise action, quand un scan semble incohérent, ou quand une écriture échoue.
+
+### Noyau
+
+Teste/redémarre le driver `KillEngineKernel.sys` et, une fois l'accès mémoire confirmé, lit/écrit des octets bruts à une adresse donnée — voir « Écriture kernel (escalade) » sous Mode Expert plus haut pour savoir quand l'utiliser.
+
+### Automation
+
+Permet à un agent IA externe (Claude Code, Cursor, une extension VS Code...) de piloter KillEngine en direct via un pipe nommé local, en réutilisant le même moteur que l'onglet `Lua`.
+
+1. Dans `Modules > Diagnostics > Automation`, clique `Activer le mode Automation`.
+2. Confirme une seule fois — le pipe démarre immédiatement, sans redémarrer KillEngine. Le statut affiche le nom du pipe, le nombre d'appels reçus, et le dernier appel effectué.
+3. `Rafraîchir le statut` pour actualiser ; `Désactiver le mode Automation` pour couper (sans confirmation nécessaire).
+
+**Une fois actif, les appels via le pipe s'exécutent sans confirmation par action** — chaque appel reste journalisé, mais il n'y a plus de fenêtre de confirmation individuelle tant que le mode reste activé. Voir `docs/AUTOMATION_API.md` pour le protocole complet (JSON-RPC, nom du pipe, référence des méthodes) plutôt que de le dupliquer ici. Alternative pour un usage scripté : lancer KillEngine avec la variable d'environnement `KILLENGINE_AUTOMATION_PIPE=1` au lieu du bouton.
+
+### WebView2
+
+Bascule du flag de debug CDP et diagnostic de préparation Device Portal pour Store/UWP — voir « WebView2 Inspector — cibles hybrides natif + web » plus haut pour la vue d'ensemble.
 
 ## Conseils de dépannage
 

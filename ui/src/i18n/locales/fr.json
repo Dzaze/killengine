@@ -295,6 +295,16 @@
   },
   "modules": {
     "intro": "Dépendances optionnelles de KillEngine : statut installé/manquant et installation depuis l'UI (scripts locaux, téléchargement réseau, invite UAC). Pensez à installer les modules manquants avant d'exporter le package sur une autre machine.",
+    "tabs": {
+      "components": "Composants",
+      "diagnostics": "Diagnostics"
+    },
+    "diagnostics": {
+      "familyRuntime": "Runtime et journaux",
+      "familyKernel": "Noyau",
+      "familyAutomation": "Automation",
+      "familyWebview2": "WebView2"
+    },
     "refresh": "Actualiser",
     "refreshAll": "Tout rafraîchir",
     "refreshing": "Analyse…",
@@ -936,7 +946,7 @@
     "writeKernel": {
       "title": "Écrire via kernel",
       "what": "Écrit la valeur via le driver noyau KillEngineKernel (KeStackAttachProcess côté driver, pas WriteProcessMemory usermode) au lieu de l'écriture normale. C'est une escalade de chemin d'accès : elle sert à prouver que KillEngine peut lire/écrire depuis le ring 0 quand le driver est chargé.",
-      "when": "À utiliser après un scan réduit à peu de candidats, surtout si une écriture normale échoue ou si tu veux vérifier que le chemin kernel fonctionne. Nécessite que le driver KillEngineKernel soit chargé (Paramètres > Driver kernel > Tester le driver) — le bouton reste masqué sinon. Si la valeur revient systématiquement même après une écriture kernel réussie, la leçon importante est que l'adresse écrite n'est probablement pas la source de vérité : lance \"Écrit par\", puis \"Tester automatiquement\".",
+      "when": "À utiliser après un scan réduit à peu de candidats, surtout si une écriture normale échoue ou si tu veux vérifier que le chemin kernel fonctionne. Nécessite que le driver KillEngineKernel soit chargé (Modules > Diagnostics > Noyau > Tester le driver) — le bouton reste masqué sinon. Si la valeur revient systématiquement même après une écriture kernel réussie, la leçon importante est que l'adresse écrite n'est probablement pas la source de vérité : lance \"Écrit par\", puis \"Tester automatiquement\".",
       "cost": "Nécessite le driver kernel installé et chargé (voir Paramètres). Une seule adresse à la fois, jamais de bulk. Lis l'adresse avant et après pour garder une preuve claire de ce qui a vraiment changé.",
       "example": "Score Solitaire : scan 175, next scan 185, deux candidats. Lecture kernel des deux adresses, écriture kernel de 1337 sur la bonne adresse, relecture kernel et confirmation visuelle dans le jeu. Si une adresse revient aussitôt, elle est probablement une copie ou une valeur recalculée."
     },
@@ -1264,7 +1274,7 @@
       "jsResult": "Résultat : {result}",
       "keep": "Garder",
       "kernelWriteBlockedBySafeMode": "Écriture kernel bloquée par ton mode Auto actuel (Safe) ou refusée à la confirmation. Passe en Trainer dans Paramètres pour autoriser ce type d'action.",
-      "kernelWriteFailed": "Écriture kernel échouée : {reason}. Vérifie que le driver KillEngineKernel est chargé (Paramètres > Driver kernel).",
+      "kernelWriteFailed": "Écriture kernel échouée : {reason}. Vérifie que le driver KillEngineKernel est chargé (Modules > Diagnostics > Noyau).",
       "kernelWriteSuccess": "Écrit {value} à 0x{address} via le driver kernel ({bytes} octet(s), contourne les protections usermode).",
       "killEngineThinking": "KillEngine réfléchit",
       "lagSwitchAlreadyActive": "Lag switch déjà actif.",
@@ -2152,6 +2162,10 @@
       "purpose": "Ajuster l'app à tes préférences et vérifier l'état des composants (helpers, connexions) sans passer par un fichier de config.",
       "how": "Modifie un réglage dans la section correspondante ; les changements s'appliquent immédiatement."
     },
+    "tocInterface": "Interface",
+    "tocScanStorage": "Scan et stockage",
+    "tocAi": "IA locale/externe et outils",
+    "tocAdvanced": "Préférences avancées",
     "interfaceTitle": "Interface",
     "language": "Langue",
     "french": "Français",
@@ -2310,6 +2324,8 @@
     "disconnected": "déconnecté",
     "none": "aucun",
     "diagnosticTitle": "Diagnostic",
+    "diagnosticsMovedHint": "L'état runtime, les journaux, le noyau, l'automation et WebView2 sont maintenant regroupés dans Modules > Diagnostics.",
+    "openDiagnostics": "Ouvrir les diagnostics",
     "logs": "Logs",
     "exportAction": "Exporter",
     "log": "Log",
@@ -2328,12 +2344,7 @@
     "portabilityKernelDriverLabel": "Driver noyau",
     "portabilityKernelDriverText": "Module optionnel installé à la demande (voir Modules) : un driver Windows est par nature enregistré comme service au niveau système, jamais « portable ». Si tu déplaces le dossier vers une autre machine, il faudra le réinstaller là-bas.",
     "portabilityDefenderLabel": "Exclusion Windows Defender",
-    "portabilityDefenderText": "Ajoutée explicitement via le bouton de compatibilité antivirus ci-dessous : c'est une modification machine que tu déclenches consciemment, elle reste liée à cette machine et ne se déplace pas avec le dossier.",
-    "antivirusCompatTitle": "Compatibilité antivirus",
-    "antivirusHint": "Certains antivirus/EDR (ex. Microsoft Defender for Endpoint) bloquent parfois l'injection utilisée par le breakpoint in-process ou le freeze avancé, en confondant cet usage légitime de débogage avec une technique d'injection malveillante. Le bouton ci-dessous ouvre une invite d'élévation Windows (UAC) pour ajouter une exclusion — rien ne se passe sans ta confirmation explicite dans cette invite.",
-    "addingInProgress": "En cours…",
-    "addDefenderExclusion": "Ajouter une exclusion Windows Defender",
-    "exclusionAddedSuccess": "Exclusion ajoutée avec succès.",
+    "portabilityDefenderText": "Ajoutée explicitement via le bouton d'exclusion Defender dans Modules > Diagnostics : c'est une modification machine que tu déclenches consciemment, elle reste liée à cette machine et ne se déplace pas avec le dossier.",
     "elevationRefused": "Invite d'élévation refusée — aucune modification effectuée.",
     "kernelDriverTitle": "Driver kernel",
     "unknownStatus": "inconnu",

@@ -8,21 +8,6 @@ import PanelIntro from '@/components/common/PanelIntro.vue'
 const store = useAppStore()
 const { locale, t } = useI18n()
 
-const runtimeRows = computed(() => [
-  { label: t('settings.backend'), value: store.isConnected ? t('settings.connected') : t('settings.disconnected') },
-  { label: t('investigation.process'), value: store.isAttached ? store.processName : t('settings.none') },
-  { label: 'Version', value: store.version },
-  { label: 'Workflow', value: store.workflowStatus },
-])
-
-const stealthThreats = computed(
-  () => (store.stealthRiskAnalysis?.threats as Array<Record<string, unknown>> | undefined) ?? [],
-)
-const stealthRecommendations = computed(
-  () => (store.stealthRiskAnalysis?.recommendations as string[] | undefined) ?? [],
-)
-
-const debugEvents = computed(() => [...store.smartSearchDebugEvents].reverse())
 const valueTypes = ['Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Float32', 'Float64']
 const performanceModes = ['Auto', 'Eco', 'Normal', 'Performance', 'Max']
 const unknownSnapshotPresets = [-1, 128, 512, 1024, 2048, 4096, 8192]
@@ -34,23 +19,6 @@ async function saveExternalAiApiKey() {
     externalAiApiKeyInput.value = ''
   }
 }
-const kernelReadAddress = ref('')
-const kernelReadSize = ref(16)
-const kernelWriteAddress = ref('')
-const kernelWriteBytes = ref('')
-const kernelCapabilityLabel = computed(() => {
-  const status = store.kernelDriverStatus
-  if (!status) return t('settings.kernelNotTested')
-  if (status.capabilities.processMemoryAccess) return t('settings.kernelReadWriteReady')
-  if (status.status === 'connected') return t('settings.kernelProbeOnly')
-  return t('settings.kernelUnavailable')
-})
-const kernelLearningSteps = computed(() => [
-  { label: t('settings.kernelStep1Label'), detail: t('settings.kernelStep1Detail') },
-  { label: t('settings.kernelStep2Label'), detail: t('settings.kernelStep2Detail') },
-  { label: t('settings.kernelStep3Label'), detail: t('settings.kernelStep3Detail') },
-  { label: t('settings.kernelStep4Label'), detail: t('settings.kernelStep4Detail') },
-])
 const visibleModelCandidates = computed(() =>
   (store.aiModelStatus?.modelCandidates ?? []).slice(0, 6),
 )
@@ -76,24 +44,18 @@ function formatBytes(value: number | undefined) {
   return t('settings.bUnit', { value: bytes })
 }
 
-function eventSummary(event: Record<string, unknown>) {
-  const parts = [
-    event.intent ? `intent=${String(event.intent)}` : '',
-    event.tool ? `tool=${String(event.tool)}` : '',
-    event.workflowStatus ? `workflow=${String(event.workflowStatus)}` : '',
-    event.actionStatus ? `action=${String(event.actionStatus)}` : '',
-    event.candidateCount !== undefined ? `${t('settings.eventCandidates')}=${String(event.candidateCount)}` : '',
-    event.targetValue ? `${t('settings.eventTarget')}=${String(event.targetValue)}` : '',
-  ].filter(Boolean)
-  return parts.join('  ')
-}
-
 async function refreshAll() {
   await store.doPing()
   await store.loadSettings()
-  await store.refreshKernelDriverStatus()
-  await store.refreshAutomationPipeStatus()
-  await store.refreshDiagnostics()
+  await store.refreshTemporaryStorageStatus()
+}
+
+// UX-PRODUIT-8B : les diagnostics (noyau, automation, runtime/journaux,
+// WebView2) ont leur propre chargement dans Modules > Diagnostics — ce
+// bouton n'y navigue plus qu'un lien, il ne les rafraîchit plus ici.
+function openDiagnostics() {
+  store.pendingModulesTab = 'diagnostics'
+  store.activeView = 'modules'
 }
 
 onMounted(() => {
@@ -140,7 +102,14 @@ async function saveAll() {
       :how="$t('settings.intro.how')"
     />
 
-    <section class="panel">
+    <nav class="settings-toc" aria-label="Sommaire">
+      <a href="#settings-interface">{{ $t('settings.tocInterface') }}</a>
+      <a href="#settings-scan-storage">{{ $t('settings.tocScanStorage') }}</a>
+      <a href="#settings-ai">{{ $t('settings.tocAi') }}</a>
+      <a href="#settings-advanced">{{ $t('settings.tocAdvanced') }}</a>
+    </nav>
+
+    <section id="settings-interface" class="panel">
       <div class="panel-title">
         <h2>{{ $t('settings.interfaceTitle') }}</h2>
       </div>
@@ -156,7 +125,7 @@ async function saveAll() {
       </div>
     </section>
 
-    <section class="panel">
+    <section id="settings-scan-storage" class="panel">
       <div class="panel-title">
         <h2>{{ $t('settings.scanTitle') }}</h2>
       </div>
@@ -260,7 +229,7 @@ async function saveAll() {
       </p>
     </section>
 
-    <section class="panel">
+    <section id="settings-ai" class="panel">
       <div class="panel-title">
         <h2>{{ $t('settings.localAiTitle') }}</h2>
         <div class="panel-actions">
@@ -438,7 +407,7 @@ async function saveAll() {
 
     <AssistantToolsPanel />
 
-    <section class="panel">
+    <section id="settings-advanced" class="panel">
       <div class="panel-title">
         <h2>{{ $t('settings.workspaceTitle') }}</h2>
       </div>
@@ -451,46 +420,12 @@ async function saveAll() {
 
     <section class="panel">
       <div class="panel-title">
-        <h2>{{ $t('settings.stateTitle') }}</h2>
-      </div>
-      <div class="runtime-grid">
-        <div v-for="row in runtimeRows" :key="row.label" class="runtime-cell">
-          <span>{{ row.label }}</span>
-          <strong>{{ row.value }}</strong>
-        </div>
-      </div>
-      <div class="ping-line">
-        <button class="btn btn-secondary" @click="store.doPing()">
-          {{ $t('actions.ping') }}
-        </button>
-        <code>{{ store.pingResult || '-' }}</code>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
         <h2>{{ $t('settings.diagnosticTitle') }}</h2>
-        <div class="panel-actions">
-          <button class="btn btn-secondary compact" @click="store.refreshLogTail()">
-            {{ $t('settings.logs') }}
-          </button>
-          <button class="btn btn-secondary compact" @click="store.exportDiagnostics()">
-            {{ $t('settings.exportAction') }}
-          </button>
-        </div>
       </div>
-      <div class="path-row">
-        <span>{{ $t('settings.log') }}</span>
-        <code>{{ store.logFilePath || '-' }}</code>
-      </div>
-      <div class="path-row">
-        <span>{{ $t('settings.smartSearchJson') }}</span>
-        <code>{{ store.smartSearchDebugFilePath || '-' }}</code>
-      </div>
-      <div class="path-row">
-        <span>{{ $t('settings.scanTelemetryJson') }}</span>
-        <code>{{ store.scanTelemetryFilePath || '-' }}</code>
-      </div>
+      <p class="hint">{{ $t('settings.diagnosticsMovedHint') }}</p>
+      <button class="btn btn-primary" type="button" @click="openDiagnostics()">
+        {{ $t('settings.openDiagnostics') }}
+      </button>
       <div class="setting-row inline-setting">
         <div>
           <strong>{{ $t('settings.debugSmartSearch') }}</strong>
@@ -508,13 +443,6 @@ async function saveAll() {
         </div>
         <input v-model.number="store.settingSmartSearchDebugMaxEvents" class="input short-input" type="number" min="5" max="200" step="5" />
       </div>
-      <p v-if="store.diagnosticExportPath" class="status-line">
-        {{ $t('settings.diagnosticExported') }} <code>{{ store.diagnosticExportPath }}</code>
-      </p>
-      <p v-if="store.diagnosticExportError" class="error">{{ store.diagnosticExportError }}</p>
-      <p v-if="store.diagnosticOpenFolderError" class="warning">{{ store.diagnosticOpenFolderError }}</p>
-      <p v-if="store.logError" class="error">{{ store.logError }}</p>
-      <p v-if="store.smartSearchDebugError" class="error">{{ store.smartSearchDebugError }}</p>
     </section>
 
     <section class="panel">
@@ -533,405 +461,6 @@ async function saveAll() {
       <p class="hint">
         <strong>{{ $t('settings.portabilityDefenderLabel') }}</strong> — {{ $t('settings.portabilityDefenderText') }}
       </p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <h2>{{ $t('settings.antivirusCompatTitle') }}</h2>
-      </div>
-      <p class="hint">
-        {{ $t('settings.antivirusHint') }}
-      </p>
-      <div class="panel-actions">
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.defenderExclusionBusy"
-          @click="store.requestWindowsDefenderExclusion()"
-        >
-          {{ store.defenderExclusionBusy ? $t('settings.addingInProgress') : $t('settings.addDefenderExclusion') }}
-        </button>
-      </div>
-      <p v-if="store.defenderExclusionResult?.success" class="status-line">
-        {{ $t('settings.exclusionAddedSuccess') }}
-      </p>
-      <p v-else-if="store.defenderExclusionResult?.cancelled" class="warning">
-        {{ $t('settings.elevationRefused') }}
-      </p>
-      <p v-else-if="store.defenderExclusionResult?.error" class="error">
-        {{ store.defenderExclusionResult.error }}
-      </p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <h2>{{ $t('settings.kernelDriverTitle') }}</h2>
-        <span>{{ store.kernelDriverStatus?.status ?? $t('settings.unknownStatus') }}</span>
-      </div>
-      <p class="hint">
-        {{ $t('settings.kernelDriverHint') }}
-      </p>
-      <div class="kernel-learning">
-        <div class="kernel-learning-head">
-          <strong>{{ $t('settings.kernelJourney') }}</strong>
-          <span>{{ kernelCapabilityLabel }}</span>
-        </div>
-        <div class="kernel-learning-steps">
-          <div v-for="step in kernelLearningSteps" :key="step.label" class="kernel-learning-step">
-            <strong>{{ step.label }}</strong>
-            <span>{{ step.detail }}</span>
-          </div>
-        </div>
-      </div>
-      <div class="panel-actions">
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.kernelDriverStatusLoading"
-          @click="store.refreshKernelDriverStatus()"
-        >
-          {{ store.kernelDriverStatusLoading ? $t('settings.probing') : $t('settings.testDriver') }}
-        </button>
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.kernelDriverStartLoading || store.kernelDriverStatusLoading"
-          :title="$t('settings.restartDriverTitle')"
-          @click="store.startKernelDriver()"
-        >
-          {{ store.kernelDriverStartLoading ? $t('settings.starting') : $t('settings.restartDriver') }}
-        </button>
-      </div>
-      <div v-if="store.kernelDriverStatus" class="settings-grid compact-grid">
-        <div>
-          <strong>{{ $t('settings.device') }}</strong>
-          <span>{{ store.kernelDriverStatus.devicePath }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.message') }}</strong>
-          <span>{{ store.kernelDriverStatus.message }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.protocol') }}</strong>
-          <span>{{ store.kernelDriverStatus.capabilities.protocolVersion }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.healthProbe') }}</strong>
-          <span>{{ store.kernelDriverStatus.capabilities.healthProbe ? $t('settings.yes') : $t('settings.no') }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.kernelMemoryAccess') }}</strong>
-          <span>{{ store.kernelDriverStatus.capabilities.processMemoryAccess ? $t('settings.yes') : $t('settings.no') }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.privilegedInstrumentation') }}</strong>
-          <span>{{ store.kernelDriverStatus.capabilities.privilegedInstrumentation ? $t('settings.yes') : $t('settings.no') }}</span>
-        </div>
-      </div>
-      <p v-if="store.kernelDriverStatusError" class="error">
-        {{ store.kernelDriverStatusError }}
-      </p>
-
-      <template v-if="store.kernelDriverStatus?.capabilities.processMemoryAccess">
-        <h3>{{ $t('settings.kernelReadTitle') }}</h3>
-        <p class="hint">
-          {{ $t('settings.kernelReadHint', { process: store.isAttached ? store.processName : $t('settings.none') }) }}
-        </p>
-        <div class="panel-actions">
-          <input v-model="kernelReadAddress" class="input" :placeholder="$t('settings.addressHexPlaceholder')" />
-          <input v-model.number="kernelReadSize" class="input short-input" type="number" min="1" max="4096" step="1" />
-          <button
-            class="btn btn-secondary compact"
-            :disabled="store.kernelMemoryReadBusy || !store.isAttached"
-            @click="store.readMemoryKernel(kernelReadAddress, kernelReadSize)"
-          >
-            {{ store.kernelMemoryReadBusy ? $t('settings.reading') : $t('settings.readKernel') }}
-          </button>
-        </div>
-        <p v-if="store.kernelMemoryReadResult?.success" class="status-line">
-          {{ $t('settings.bytesRead', { count: store.kernelMemoryReadResult.bytesRead, hex: store.kernelMemoryReadResult.hex }) }}
-        </p>
-        <p v-else-if="store.kernelMemoryReadResult?.error" class="error">
-          {{ store.kernelMemoryReadResult.error }}
-        </p>
-
-        <h3>{{ $t('settings.kernelWriteTitle') }}</h3>
-        <p class="hint">
-          {{ $t('settings.kernelWriteHint') }}
-        </p>
-        <div class="panel-actions">
-          <input v-model="kernelWriteAddress" class="input" :placeholder="$t('settings.addressHexPlaceholder')" />
-          <input v-model="kernelWriteBytes" class="input" :placeholder="$t('settings.bytesHexPlaceholder')" />
-          <button
-            class="btn btn-secondary compact"
-            :disabled="store.kernelMemoryWriteBusy || !store.isAttached"
-            @click="store.writeMemoryKernel(kernelWriteAddress, kernelWriteBytes)"
-          >
-            {{ store.kernelMemoryWriteBusy ? $t('settings.writing') : $t('settings.writeKernel') }}
-          </button>
-        </div>
-        <p v-if="store.kernelMemoryWriteResult?.success" class="status-line">
-          {{ $t('settings.bytesWritten', { count: store.kernelMemoryWriteResult.bytesWritten }) }}
-        </p>
-        <p v-else-if="store.kernelMemoryWriteResult?.error" class="error">
-          {{ store.kernelMemoryWriteResult.error }}
-        </p>
-      </template>
-      <p v-else class="hint">
-        {{ $t('settings.kernelUnavailableHint') }}
-      </p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <h2>{{ $t('settings.automationModeTitle') }}</h2>
-        <span>{{ store.automationPipeStatus?.running ? $t('settings.activeState') : $t('settings.inactive') }}</span>
-      </div>
-      <p class="hint">
-        {{ $t('settings.automationHint') }}
-      </p>
-      <div class="panel-actions">
-        <button
-          v-if="!store.automationPipeStatus?.running"
-          class="btn btn-secondary compact"
-          @click="store.enableAutomationMode()"
-        >
-          {{ $t('settings.enableAutomation') }}
-        </button>
-        <button
-          v-else
-          class="btn btn-secondary compact"
-          @click="store.disableAutomationMode()"
-        >
-          {{ $t('settings.disableAutomation') }}
-        </button>
-        <button class="btn btn-secondary compact" @click="store.refreshAutomationPipeStatus()">
-          {{ $t('settings.refreshStatus') }}
-        </button>
-      </div>
-      <div v-if="store.automationPipeStatus" class="settings-grid compact-grid">
-        <div>
-          <strong>{{ $t('settings.pipe') }}</strong>
-          <span>{{ store.automationPipeStatus.pipeName }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.callsReceived') }}</strong>
-          <span>{{ store.automationPipeStatus.callCount ?? 0 }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.lastCall') }}</strong>
-          <span>{{ store.automationPipeStatus.lastMethod || '—' }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.atLabel') }}</strong>
-          <span>{{ store.automationPipeStatus.lastCallAt || '—' }}</span>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <h2>{{ $t('settings.stealthModeTitle') }}</h2>
-        <span>{{ store.stealthStatus?.active ? $t('settings.stealthActiveProfile', { profile: store.stealthStatus.profile }) : $t('settings.inactive') }}</span>
-      </div>
-      <p class="hint">
-        {{ $t('settings.stealthHint') }}
-      </p>
-      <div class="panel-actions">
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.stealthBusy || !store.isAttached"
-          @click="store.applyStealthMode('sc2')"
-        >
-          {{ $t('settings.enableSc2') }}
-        </button>
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.stealthBusy || !store.isAttached"
-          @click="store.applyStealthMode('default')"
-        >
-          {{ $t('settings.enableDefault') }}
-        </button>
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.stealthBusy || !store.isAttached"
-          @click="store.applyStealthMode('minimal')"
-        >
-          {{ $t('settings.enableMinimal') }}
-        </button>
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.stealthBusy || !store.stealthStatus?.active"
-          @click="store.restoreStealthMode()"
-        >
-          {{ $t('settings.restoreDisable') }}
-        </button>
-        <button class="btn btn-secondary compact" :disabled="store.stealthBusy" @click="store.refreshStealthStatus()">
-          {{ $t('settings.refreshStatus') }}
-        </button>
-      </div>
-      <div v-if="store.stealthStatus?.modules" class="settings-grid compact-grid">
-        <div>
-          <strong>antiDebug</strong>
-          <span>{{ store.stealthStatus.modules.antiDebug ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
-        </div>
-        <div>
-          <strong>processMask</strong>
-          <span>{{ store.stealthStatus.modules.processMask ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
-        </div>
-        <div>
-          <strong>dllMask</strong>
-          <span>{{ store.stealthStatus.modules.dllMask ? $t('settings.activeState') : $t('settings.inactiveState') }}</span>
-        </div>
-      </div>
-
-      <div class="panel-actions" style="margin-top: 12px">
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.stealthBusy || !store.isAttached"
-          @click="store.analyzeStealthRisk()"
-        >
-          {{ $t('settings.analyzeDetectability') }}
-        </button>
-      </div>
-      <p v-if="!store.isAttached" class="hint">{{ $t('settings.attachToAnalyze') }}</p>
-
-      <div v-if="store.stealthRiskAnalysis?.success" class="stealth-analysis">
-        <div class="stealth-risk-line">
-          <span class="risk-badge" :class="`risk-${store.stealthRiskAnalysis.riskLevel}`">
-            {{ store.stealthRiskAnalysis.riskLevel }} — {{ store.stealthRiskAnalysis.riskScore }}/100
-          </span>
-          <span class="hint">{{ $t('settings.moduleScannedCount', { count: store.stealthRiskAnalysis.moduleCount }) }}</span>
-        </div>
-        <ul v-if="stealthThreats.length" class="stealth-threat-list">
-          <li v-for="(threat, idx) in stealthThreats" :key="idx">
-            <strong>{{ threat.name }}</strong> ({{ threat.source }}) — {{ threat.detail }}
-          </li>
-        </ul>
-        <ul v-if="stealthRecommendations.length" class="stealth-recommendation-list">
-          <li v-for="(rec, idx) in stealthRecommendations" :key="idx">{{ rec }}</li>
-        </ul>
-      </div>
-      <p v-else-if="store.stealthRiskAnalysis?.error" class="error">{{ store.stealthRiskAnalysis.error }}</p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <h2>{{ $t('settings.webview2CdpTitle') }}</h2>
-        <span>{{ store.webView2CdpDebugFlagStatus?.enabled ? $t('settings.activeState') : $t('settings.inactive') }}</span>
-      </div>
-      <p class="hint">
-        {{ $t('settings.webview2CdpHintPrefix') }} <strong>{{ $t('settings.webview2CdpHintStrong') }}</strong> {{ $t('settings.webview2CdpHintSuffix') }}
-      </p>
-      <div class="panel-actions">
-        <button
-          v-if="!store.webView2CdpDebugFlagStatus?.enabled"
-          class="btn btn-secondary compact"
-          :disabled="store.webView2CdpDebugFlagBusy"
-          @click="store.enableWebView2CdpDebugFlag()"
-        >
-          {{ $t('settings.enableCdpDebug') }}
-        </button>
-        <button
-          v-else
-          class="btn btn-secondary compact"
-          :disabled="store.webView2CdpDebugFlagBusy"
-          @click="store.disableWebView2CdpDebugFlag()"
-        >
-          {{ $t('settings.disableCdpDebug') }}
-        </button>
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.webView2CdpDebugFlagBusy"
-          @click="store.refreshWebView2CdpDebugFlagStatus()"
-        >
-          {{ $t('settings.refreshStatus') }}
-        </button>
-      </div>
-      <p v-if="store.webView2CdpDebugFlagStatus?.value" class="status-line">
-        {{ $t('settings.variableSetLabel') }} <code>{{ store.webView2CdpDebugFlagStatus.value }}</code>
-      </p>
-      <p v-if="store.webView2CdpDebugFlagStatus?.error" class="error">
-        {{ store.webView2CdpDebugFlagStatus.error }}
-      </p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <h2>{{ $t('settings.webview2PrepTitle') }}</h2>
-        <span>{{ store.webView2SystemPrepStatus?.capabilityInstalled ? $t('settings.ready') : $t('settings.toPrepare') }}</span>
-      </div>
-      <p class="hint">
-        {{ $t('settings.webview2PrepHint') }}
-      </p>
-      <div class="panel-actions">
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.webView2SystemPrepBusy"
-          @click="store.refreshWebView2SystemPrepStatus()"
-        >
-          {{ store.webView2SystemPrepBusy ? $t('settings.diagnosing') : $t('settings.runDiagnostic') }}
-        </button>
-        <button
-          class="btn btn-secondary compact"
-          :disabled="store.webView2SystemPrepBusy || store.webView2SystemPrepStatus?.capabilityInstalled"
-          @click="store.installWebView2DeveloperModeCapability()"
-        >
-          {{ $t('settings.installCapability') }}
-        </button>
-      </div>
-      <div v-if="store.webView2SystemPrepStatus" class="settings-grid compact-grid">
-        <div>
-          <strong>{{ $t('settings.developerMode') }}</strong>
-          <span>{{ store.webView2SystemPrepStatus.developerModeEnabled ? $t('settings.enabledState') : $t('settings.disabledState') }}</span>
-        </div>
-        <div>
-          <strong>{{ $t('settings.capabilityLabel') }}</strong>
-          <span>{{ store.webView2SystemPrepStatus.capabilityState || '—' }}</span>
-        </div>
-      </div>
-      <p v-if="store.webView2CapabilityInstallResult?.message" class="status-line">
-        {{ store.webView2CapabilityInstallResult.message }}
-      </p>
-      <p v-else-if="store.webView2CapabilityInstallResult?.error" class="error">
-        {{ store.webView2CapabilityInstallResult.error }}
-      </p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <h2>{{ $t('settings.mainLogTitle') }}</h2>
-        <span>{{ store.logLines.length }}</span>
-      </div>
-      <div v-if="store.logLines.length === 0" class="empty-line">
-        {{ $t('settings.noLogLoaded') }}
-      </div>
-      <pre v-else class="log-viewer">{{ store.logLines.join('\n') }}</pre>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <h2>{{ $t('settings.smartSearchEventsTitle') }}</h2>
-        <div class="panel-actions">
-          <span>{{ debugEvents.length }}</span>
-          <button class="btn btn-secondary compact" :disabled="debugEvents.length === 0" @click="store.clearSmartSearchDebug()">
-            {{ $t('settings.clear') }}
-          </button>
-        </div>
-      </div>
-      <div v-if="debugEvents.length === 0" class="empty-line">
-        {{ $t('settings.noDebugEvent') }}
-      </div>
-      <div v-else class="debug-list">
-        <div v-for="(event, index) in debugEvents" :key="index" class="debug-row">
-          <div class="debug-head">
-            <strong>{{ String(event.event ?? '-') }}</strong>
-            <span>{{ String(event.timestamp ?? '') }}</span>
-          </div>
-          <code v-if="event.query">{{ event.query }}</code>
-          <p v-if="eventSummary(event)">{{ eventSummary(event) }}</p>
-          <p v-if="event.intentRationale">{{ event.intentRationale }}</p>
-          <p v-if="event.message">{{ event.message }}</p>
-          <p v-if="event.error" class="error">{{ event.error }}</p>
-        </div>
-      </div>
     </section>
 
     <section class="panel">
@@ -1701,53 +1230,24 @@ code {
   }
 }
 
-.stealth-analysis {
-  margin-top: 12px;
+.settings-toc {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
 }
 
-.stealth-risk-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.risk-badge {
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
+.settings-toc a {
+  padding: 5px 10px;
   border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-decoration: none;
 }
 
-.risk-badge.risk-low {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
-}
-
-.risk-badge.risk-medium {
-  color: var(--warning);
-  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
-}
-
-.risk-badge.risk-high {
-  color: var(--error);
-  border-color: color-mix(in srgb, var(--error) 50%, var(--border));
-}
-
-.stealth-threat-list,
-.stealth-recommendation-list {
-  margin: 0;
-  padding-left: 18px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.stealth-threat-list li,
-.stealth-recommendation-list li {
-  margin-bottom: 4px;
+.settings-toc a:hover {
+  color: var(--text-primary);
+  border-color: rgba(122, 162, 247, 0.6);
 }
 </style>

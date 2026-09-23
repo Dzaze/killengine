@@ -295,6 +295,16 @@
   },
   "modules": {
     "intro": "Optional KillEngine dependencies: installed/missing status and in-UI installation (local scripts, network download, UAC prompt). Install missing modules before exporting the package to another machine.",
+    "tabs": {
+      "components": "Components",
+      "diagnostics": "Diagnostics"
+    },
+    "diagnostics": {
+      "familyRuntime": "Runtime and logs",
+      "familyKernel": "Kernel",
+      "familyAutomation": "Automation",
+      "familyWebview2": "WebView2"
+    },
     "refresh": "Refresh",
     "refreshAll": "Refresh all",
     "refreshing": "Scanning…",
@@ -936,7 +946,7 @@
     "writeKernel": {
       "title": "Write via kernel",
       "what": "Writes the value through the KillEngineKernel driver (KeStackAttachProcess on the driver side, not usermode WriteProcessMemory) instead of a normal write. This is an access-path escalation: it proves KillEngine can read/write from ring 0 when the driver is loaded.",
-      "when": "Use it after a scan has been reduced to a small candidate set, especially when a normal write fails or when you want to verify that the kernel path works. Requires the KillEngineKernel driver to be loaded (Settings > Kernel driver > Test driver) — the button stays hidden otherwise. If the value still reverts after a successful kernel write, the important lesson is that the address is probably not the source of truth: run \"Find what writes\", then \"Test automatically\".",
+      "when": "Use it after a scan has been reduced to a small candidate set, especially when a normal write fails or when you want to verify that the kernel path works. Requires the KillEngineKernel driver to be loaded (Modules > Diagnostics > Kernel > Test driver) — the button stays hidden otherwise. If the value still reverts after a successful kernel write, the important lesson is that the address is probably not the source of truth: run \"Find what writes\", then \"Test automatically\".",
       "cost": "Requires the kernel driver installed and loaded (see Settings). One address at a time, never bulk. Read the address before and after writing so the proof is clear.",
       "example": "Solitaire score: scan 175, next scan 185, two candidates. Kernel-read both addresses, kernel-write 1337 to the right one, kernel-read again, then confirm visually in the game. If one address reverts immediately, it is probably a copy or a recomputed value."
     },
@@ -1264,7 +1274,7 @@
       "jsResult": "Result: {result}",
       "keep": "Keep",
       "kernelWriteBlockedBySafeMode": "Kernel write blocked by your current Auto mode (Safe) or denied at confirmation. Switch to Trainer in Settings to allow this kind of action.",
-      "kernelWriteFailed": "Kernel write failed: {reason}. Check that the KillEngineKernel driver is loaded (Settings > Kernel driver).",
+      "kernelWriteFailed": "Kernel write failed: {reason}. Check that the KillEngineKernel driver is loaded (Modules > Diagnostics > Kernel).",
       "kernelWriteSuccess": "Wrote {value} at 0x{address} via the kernel driver ({bytes} byte(s), bypasses usermode protections).",
       "killEngineThinking": "KillEngine is thinking",
       "lagSwitchAlreadyActive": "Lag switch already active.",
@@ -2152,6 +2162,10 @@
       "purpose": "Adjust the app to your preferences and check component status (helpers, connections) without going through a config file.",
       "how": "Change a setting in the matching section; changes apply immediately."
     },
+    "tocInterface": "Interface",
+    "tocScanStorage": "Scan and storage",
+    "tocAi": "Local/external AI and tools",
+    "tocAdvanced": "Advanced preferences",
     "interfaceTitle": "Interface",
     "language": "Language",
     "french": "Français",
@@ -2310,6 +2324,8 @@
     "disconnected": "disconnected",
     "none": "none",
     "diagnosticTitle": "Diagnostic",
+    "diagnosticsMovedHint": "Runtime state, logs, kernel, automation and WebView2 are now grouped in Modules > Diagnostics.",
+    "openDiagnostics": "Open diagnostics",
     "logs": "Logs",
     "exportAction": "Export",
     "log": "Log",
@@ -2328,12 +2344,7 @@
     "portabilityKernelDriverLabel": "Kernel driver",
     "portabilityKernelDriverText": "Optional module installed on demand (see Modules): a Windows driver is by nature registered as a system-level service, never \"portable\". Moving the folder to another machine means reinstalling it there.",
     "portabilityDefenderLabel": "Windows Defender exclusion",
-    "portabilityDefenderText": "Added explicitly via the antivirus compatibility button below: it's a machine-level change you trigger consciously, tied to this machine, and it does not travel with the folder.",
-    "antivirusCompatTitle": "Antivirus compatibility",
-    "antivirusHint": "Some antivirus/EDR (e.g. Microsoft Defender for Endpoint) sometimes block the injection used by the in-process breakpoint or the advanced freeze, mistaking this legitimate debugging use for a malicious injection technique. The button below opens a Windows elevation prompt (UAC) to add an exclusion — nothing happens without your explicit confirmation in that prompt.",
-    "addingInProgress": "In progress…",
-    "addDefenderExclusion": "Add a Windows Defender exclusion",
-    "exclusionAddedSuccess": "Exclusion added successfully.",
+    "portabilityDefenderText": "Added explicitly via the Defender exclusion button in Modules > Diagnostics: it's a machine-level change you trigger consciously, tied to this machine, and it does not travel with the folder.",
     "elevationRefused": "Elevation prompt refused — no change made.",
     "kernelDriverTitle": "Kernel driver",
     "unknownStatus": "unknown",
