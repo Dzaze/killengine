@@ -43,7 +43,7 @@
     "refresh": "Refresh",
     "attach": "Attach",
     "detach": "Detach",
-    "modules": "Modules",
+    "modules": "Loaded modules",
     "windowOnly": "Windows only",
     "hasWindow": "window",
     "noModules": "No accessible modules",
@@ -271,6 +271,24 @@
     "network": "Network",
     "lexicon": "Glossary",
     "modules": "Modules",
+    "memoryTimeline": "Timeline",
+    "memoryTimelineSubtitle": "Track a value over time",
+    "memoryHeatmap": "Heatmap",
+    "memoryHeatmapSubtitle": "See where writes are concentrated",
+    "patternLearning": "Pattern Learning",
+    "patternLearningSubtitle": "Reuse what already worked",
+    "clr": "CLR",
+    "webview2": "WebView2",
+    "noTarget": "No target",
+    "changeTarget": "Change",
+    "chooseTarget": "Choose",
+    "groups": {
+      "parcours": "Journey",
+      "session": "Session",
+      "inspection": "Inspection",
+      "advancedTools": "Advanced tools",
+      "configHelp": "Configuration and help"
+    },
     "languageSwitchLabel": "Interface language",
     "languageSaveFailed": "Language changed for this session, but not saved: {error}",
     "help": "Help",
@@ -462,6 +480,7 @@
     "warning": {
       "notAttached": "Attach a process to list its WebView2 CDP targets (see the Process view)."
     },
+    "goToProcess": "Go to Process",
     "targets": {
       "title": "Available CDP targets"
     },

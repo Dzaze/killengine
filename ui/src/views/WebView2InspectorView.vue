@@ -176,6 +176,9 @@ function handleReset() {
         class="warning-message"
       >
         {{ $t('webview2.warning.notAttached') }}
+        <button class="btn btn-primary compact" @click="appStore.activeView = 'process'">
+          {{ $t('webview2.goToProcess') }}
+        </button>
       </div>
 
       <div
@@ -542,6 +545,10 @@ function handleReset() {
 }
 
 .warning-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 0.8rem 0.9rem;
   background: rgba(224, 175, 104, 0.1);
   color: var(--warning);

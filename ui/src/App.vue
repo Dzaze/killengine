@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { navGroups, groupIdForView } from '@/navigation'
 import AiWarmupSplash from '@/components/common/AiWarmupSplash.vue'
 import AssistantView from '@/views/AssistantView.vue'
 import ClrInspectorView from '@/views/ClrInspectorView.vue'
@@ -47,6 +48,41 @@ const currentView = computed(() => {
   if (store.activeView === 'modules') return ModulesView
   if (store.activeView === 'settings') return SettingsView
   return ProcessView
+})
+
+// UX-PRODUIT-7 : état de repli des groupes secondaires, garde uniquement en
+// mémoire pour la session (pas de nouvelle persistance disque pour ce
+// confort) -- state ré-initialisé à chaque relance de l'app sur les
+// defaultOpen définis dans navigation.ts.
+const openGroups = reactive<Record<string, boolean>>(
+  Object.fromEntries(navGroups.map((g) => [g.id, g.defaultOpen])),
+)
+
+const activeGroupId = computed(() => groupIdForView(store.activeView))
+
+// Arriver dans une vue via un raccourci (lien Projet, IA, pendingModulesTab...)
+// doit ouvrir automatiquement son groupe, pas seulement un clic direct sur le
+// sommaire du groupe.
+watch(
+  () => store.activeView,
+  (view) => {
+    const groupId = groupIdForView(view)
+    if (groupId) openGroups[groupId] = true
+  },
+  { immediate: true },
+)
+
+function toggleGroup(groupId: string) {
+  // Empêche le repli du groupe actif tant que sa vue reste affichée --
+  // sinon le menu referme sous les pieds de l'utilisateur la section qu'il
+  // est en train de consulter.
+  if (groupId === activeGroupId.value && openGroups[groupId]) return
+  openGroups[groupId] = !openGroups[groupId]
+}
+
+const truncatedProcessName = computed(() => {
+  const name = store.processName || ''
+  return name.length > 22 ? `${name.slice(0, 19)}...` : name
 })
 
 // Sépare une éventuelle mise en garde "⚠ ..." de la fin du detail du risk-modal
@@ -101,141 +137,50 @@ watch(
         {{ $t('nav.languageSaveFailed', { error: store.languageSwitchError }) }}
       </p>
 
-      <nav class="nav">
+      <div class="target-block">
+        <div v-if="store.isAttached" class="target-info">
+          <span class="target-name" :title="store.processName">{{ truncatedProcessName }}</span>
+          <span class="target-pid">PID {{ store.attachedPid }}</span>
+        </div>
+        <div v-else class="target-info">
+          <span class="target-none">{{ $t('nav.noTarget') }}</span>
+        </div>
         <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'assistant' }"
-          @click="store.activeView = 'assistant'"
-        >
-          {{ $t('nav.assistant') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'modules' }"
-          @click="store.activeView = 'modules'"
-        >
-          {{ $t('nav.modules') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'process' }"
+          class="target-switch-btn"
+          data-view="process"
           @click="store.activeView = 'process'"
         >
-          {{ $t('nav.process') }}
+          {{ store.isAttached ? $t('nav.changeTarget') : $t('nav.chooseTarget') }}
         </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'investigation' }"
-          @click="store.activeView = 'investigation'"
-        >
-          {{ $t('nav.investigation') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'memory' }"
-          @click="store.activeView = 'memory'"
-        >
-          {{ $t('nav.memory') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'memory-timeline' }"
-          @click="store.activeView = 'memory-timeline'"
-        >
-          Timeline
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'memory-heatmap' }"
-          @click="store.activeView = 'memory-heatmap'"
-        >
-          Heatmap
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'pattern-learning' }"
-          @click="store.activeView = 'pattern-learning'"
-        >
-          Pattern Learning
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'clr' }"
-          @click="store.activeView = 'clr'"
-        >
-          CLR
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'webview2' }"
-          @click="store.activeView = 'webview2'"
-        >
-          WebView2
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'scripting' }"
-          @click="store.activeView = 'scripting'"
-        >
-          {{ $t('nav.scripting') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'profiles' }"
-          @click="store.activeView = 'profiles'"
-        >
-          {{ $t('nav.profiles') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'trainer' }"
-          @click="store.activeView = 'trainer'"
-        >
-          {{ $t('nav.trainer') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'project' }"
-          @click="store.activeView = 'project'"
-        >
-          {{ $t('nav.project') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'speedhack' }"
-          @click="store.activeView = 'speedhack'"
-        >
-          {{ $t('nav.speedhack') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'network' }"
-          @click="store.activeView = 'network'"
-        >
-          {{ $t('nav.network') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'expert' }"
-          @click="store.activeView = 'expert'"
-        >
-          {{ $t('nav.expert') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'lexicon' }"
-          @click="store.activeView = 'lexicon'"
-        >
-          {{ $t('nav.lexicon') }}
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: store.activeView === 'settings' }"
-          @click="store.activeView = 'settings'"
-        >
-          {{ $t('nav.settings') }}
-        </button>
+      </div>
+
+      <nav class="nav">
+        <template v-for="group in navGroups" :key="group.id">
+          <button
+            class="nav-group-title"
+            type="button"
+            :aria-expanded="openGroups[group.id]"
+            @click="toggleGroup(group.id)"
+          >
+            <span class="nav-group-chevron" :class="{ open: openGroups[group.id] }">▸</span>
+            <span>{{ $t(group.labelKey) }}</span>
+          </button>
+          <div v-show="openGroups[group.id]" class="nav-group-items">
+            <button
+              v-for="dest in group.destinations"
+              :key="dest.id"
+              class="nav-item"
+              :class="{ active: store.activeView === dest.id, 'has-subtitle': dest.subtitleKey }"
+              :data-view="dest.id"
+              @click="store.activeView = dest.id"
+            >
+              <span class="nav-item-label">{{ $t(dest.labelKey) }}</span>
+              <span v-if="dest.subtitleKey" class="nav-item-subtitle">{{ $t(dest.subtitleKey) }}</span>
+            </button>
+          </div>
+        </template>
       </nav>
+
 
       <div class="sidebar-footer">
         <div class="credits">Pirolley Benoist</div>
@@ -489,6 +434,122 @@ body {
 .nav-item:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.nav-item-label {
+  display: block;
+}
+
+.nav-item.has-subtitle {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.nav-item-subtitle {
+  display: block;
+  margin-top: 2px;
+  color: #6a75a8;
+  font-size: 11px;
+  font-weight: 400;
+  white-space: normal;
+}
+
+.nav-item.active .nav-item-subtitle {
+  color: rgba(122, 162, 247, 0.75);
+}
+
+.target-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(125, 142, 255, 0.14);
+  background: rgba(10, 12, 20, 0.32);
+}
+
+.target-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.target-name {
+  overflow: hidden;
+  color: #c7d2ff;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-pid {
+  color: #7580b3;
+  font-size: 11px;
+}
+
+.target-none {
+  color: #7580b3;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.target-switch-btn {
+  padding: 6px 10px;
+  border: 1px solid rgba(125, 142, 255, 0.28);
+  border-radius: 6px;
+  background: transparent;
+  color: #9fbdff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.target-switch-btn:hover {
+  background: rgba(122, 162, 247, 0.12);
+  border-color: rgba(122, 162, 247, 0.45);
+}
+
+.nav-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: #7580b3;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.nav-group-title:first-child {
+  margin-top: 0;
+}
+
+.nav-group-title:hover {
+  color: #a9b8ff;
+}
+
+.nav-group-chevron {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.nav-group-chevron.open {
+  transform: rotate(90deg);
+}
+
+.nav-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 4px;
 }
 
 .sidebar-footer {

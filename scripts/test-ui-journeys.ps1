@@ -271,7 +271,7 @@ try {
     # WriteProcessMemory direct) -> next-scan "decreased" -> resultat visible.
     # -----------------------------------------------------------------------
     Test-Journey 'Scan exact -> changement independant -> next-scan decreased' {
-        Invoke-CdpClickByText -Session $script:cdpSession -Selector '.nav-item' -Text 'Expert'
+        Invoke-CdpClickByText -Session $script:cdpSession -Selector '[data-view="expert"]' -Text ''
         Wait-CdpCondition -Session $script:cdpSession -Expression "!!document.querySelector('.exact-controls input.input')" -TimeoutSec 10 -Description "panneau Exact Scan visible" | Out-Null
 
         # Type explicite (Int32) plutot que "Auto" : g_health est un int32 statique,
@@ -355,7 +355,7 @@ try {
     # diagnostic de durabilite.
     # -----------------------------------------------------------------------
     Test-Journey 'Profil : sauvegarde -> redemarrage cible -> diagnostic durabilite' {
-        Invoke-CdpClickByText -Session $script:cdpSession -Selector '.nav-item' -Text 'Profiles'
+        Invoke-CdpClickByText -Session $script:cdpSession -Selector '[data-view="profiles"]' -Text ''
         Wait-CdpCondition -Session $script:cdpSession -Expression "!!document.querySelector('input[placeholder]')" -TimeoutSec 10 -Description "vue Profils montee" | Out-Null
 
         # Cree le profil (nom unique a ce run) -- ui/src/views/ProfileView.vue:1174-1187.
@@ -409,7 +409,7 @@ try {
     # memoire independante par le pipe (pas juste que le dialogue s'est ferme).
     # -----------------------------------------------------------------------
     Test-Journey 'Annulation RiskGate (ecriture memoire) sans effet' {
-        Invoke-CdpClickByText -Session $script:cdpSession -Selector '.nav-item' -Text 'Expert'
+        Invoke-CdpClickByText -Session $script:cdpSession -Selector '[data-view="expert"]' -Text ''
         Wait-CdpCondition -Session $script:cdpSession -Expression "!!document.querySelector('.write-controls')" -TimeoutSec 10 -Description "panneau Ecrire visible" | Out-Null
 
         $before = Invoke-Pipe -Method 'readMemoryPreview' -ParamsJson "[`"$script:currentHealthAddress`", 4]"
