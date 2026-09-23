@@ -19,6 +19,12 @@ const toolFilter = ref('all')
 const searchFilter = ref('')
 
 const run = computed(() => store.activeInvestigation)
+// UX-PRODUIT-10 : le carnet et les preuves détaillées sont repliables mais
+// jamais retirés (peuvent exister sans enquête active) -- ouverts par défaut
+// si une enquête est en cours (cas d'usage courant), repliés sinon. Choix de
+// repli gardé en mémoire pour la session seulement, comme les groupes de
+// App.vue (UX-PRODUIT-7) ; pas de nouvelle persistance disque.
+const formsOpen = ref(Boolean(run.value))
 const autoReport = computed(() => store.autoResolveReport)
 const steps = computed(() => run.value?.steps ?? [])
 const hypotheses = computed(() => run.value?.hypotheses ?? [])
@@ -98,6 +104,70 @@ const bestNextAction = computed(() => {
   }
   return null
 })
+
+// UX-PRODUIT-10 (docs/PHASE_TRACKER.md, 23/09/2026) : réorganisation pure de
+// présentation -- n'ajoute aucun score/planner. Ordre de priorité fixé par la
+// fiche : bestNextAction (déjà calculé) -> effectProof.overallNextAction ->
+// notebook.suggestedNextTest, chacun avec sa provenance affichée. Un conseil
+// sans action exécutable (les deux derniers paliers) reste un conseil : seul
+// le premier palier a un bouton qui appelle un chemin d'action existant.
+const resolvedNextAction = computed(() => {
+  if (bestNextAction.value) return { ...bestNextAction.value, executable: true }
+  if (effectProof.overallNextAction) {
+    return {
+      label: effectProof.overallNextAction,
+      reason: t('investigation.effectProofSource'),
+      risk: 'safe',
+      confidence: 0,
+      source: t('investigation.effectProofSource'),
+      executable: false,
+    }
+  }
+  if (notebook.suggestedNextTest) {
+    return {
+      label: notebook.suggestedNextTest.title,
+      reason: notebook.suggestedNextTest.rationale || t('investigation.notebookSource'),
+      risk: notebook.suggestedNextTest.risk || 'safe',
+      confidence: 0,
+      source: t('investigation.notebookSource'),
+      executable: false,
+    }
+  }
+  return null
+})
+
+// Un nom de process identique ne prouve pas qu'une adresse reste valide
+// après redémarrage (garde-fous de session/locator existants conservés,
+// aucun changement ici) -- sert uniquement à afficher explicitement les deux
+// cibles quand elles diffèrent, jamais à réexécuter une action de l'ancienne
+// cible sur la nouvelle.
+const targetMismatch = computed(() => {
+  if (!run.value || !store.isAttached) return false
+  const runProcess = (run.value.processName ?? '').trim()
+  const currentProcess = (store.processName ?? '').trim()
+  return Boolean(runProcess && currentProcess && runProcess !== currentProcess)
+})
+
+// Résumé compact des preuves : compte par palier existant (EffectProofLevel),
+// jamais fusionné en un pourcentage global -- juste un regroupement d'affichage
+// de effectProof.known/uncertain déjà calculés côté store.
+const evidenceSummary = computed(() => {
+  const all = [...effectProof.known, ...effectProof.uncertain]
+  const counts: Record<EffectProofLevel, number> = {
+    write_confirmed: 0,
+    effect_confirmed: 0,
+    durable_solution: 0,
+    inconclusive: 0,
+    unverified: 0,
+  }
+  for (const item of all) {
+    const level = item.bestLevel as EffectProofLevel
+    if (level in counts) counts[level] += 1
+  }
+  return counts
+})
+const hasAnyEvidence = computed(() => effectProof.known.length > 0 || effectProof.uncertain.length > 0)
+
 const toolOptions = computed(() => {
   const tools = new Set<string>()
   for (const step of steps.value) {
@@ -376,6 +446,233 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
       :how="$t('investigation.intro.how')"
     />
 
+    <section class="panel situation-card">
+      <template v-if="!store.isAttached && !run">
+        <h2>{{ $t('investigation.situationNoTargetTitle') }}</h2>
+        <p>{{ $t('investigation.situationNoTargetBody') }}</p>
+        <button class="btn primary" @click="store.activeView = 'process'">{{ $t('investigation.goToProcess') }}</button>
+      </template>
+      <template v-else-if="store.isAttached && !run">
+        <h2>{{ $t('investigation.situationNoObjectiveTitle') }}</h2>
+        <p>{{ $t('investigation.situationNoObjectiveBody', { process: store.processName, pid: store.attachedPid }) }}</p>
+        <div class="situation-actions">
+          <button class="btn primary" @click="store.activeView = 'assistant'">{{ $t('investigation.goToAssistant') }}</button>
+          <button class="btn" @click="store.activeView = 'project'">{{ $t('investigation.resumeProject') }}</button>
+        </div>
+      </template>
+      <template v-else-if="run">
+        <div class="situation-grid">
+          <div>
+            <span>{{ $t('investigation.objective') }}</span>
+            <strong>{{ run.objective }}</strong>
+          </div>
+          <div>
+            <span>{{ $t('investigation.process') }}</span>
+            <strong>{{ run.processName || $t('investigation.notAttached') }}</strong>
+          </div>
+          <div>
+            <span>{{ $t('investigation.status') }}</span>
+            <strong>{{ statusLabel(run.status) }}</strong>
+          </div>
+          <div>
+            <span>{{ $t('investigation.strategy') }}</span>
+            <strong>{{ run.preferredStrategy?.label ?? $t('investigation.notDetermined') }}</strong>
+          </div>
+        </div>
+        <p v-if="targetMismatch" class="warning situation-mismatch">
+          {{ $t('investigation.targetMismatch', { runProcess: run.processName, currentProcess: store.processName }) }}
+        </p>
+      </template>
+    </section>
+
+    <section v-if="resolvedNextAction" class="panel next-action">
+      <div class="section-head">
+        <h2>{{ $t('investigation.bestNextActionTitle') }}</h2>
+        <span>{{ resolvedNextAction.source }}</span>
+      </div>
+      <div class="next-action-body">
+        <strong>{{ resolvedNextAction.label }}</strong>
+        <p>{{ resolvedNextAction.reason }}</p>
+        <div class="meta">
+          <span>{{ resolvedNextAction.risk }}</span>
+          <span v-if="resolvedNextAction.confidence">{{ $t('investigation.confidenceLabel', { score: resolvedNextAction.confidence }) }}</span>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="hasAnyEvidence" class="panel evidence-summary">
+      <div class="section-head">
+        <h2>{{ $t('investigation.evidenceSummaryTitle') }}</h2>
+      </div>
+      <div class="evidence-summary-grid">
+        <div>
+          <span>{{ $t('investigation.effectProofLevelWriteConfirmed') }}</span>
+          <strong>{{ evidenceSummary.write_confirmed }}</strong>
+        </div>
+        <div>
+          <span>{{ $t('investigation.effectProofLevelEffectConfirmed') }}</span>
+          <strong>{{ evidenceSummary.effect_confirmed }}</strong>
+        </div>
+        <div>
+          <span>{{ $t('investigation.effectProofLevelDurableSolution') }}</span>
+          <strong>{{ evidenceSummary.durable_solution }}</strong>
+        </div>
+        <div>
+          <span>{{ $t('investigation.evidenceInconclusiveOrUnverified') }}</span>
+          <strong>{{ evidenceSummary.inconclusive + evidenceSummary.unverified }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <div v-if="run" class="grid">
+      <section class="panel timeline">
+        <div class="section-head">
+          <h2>{{ $t('investigation.steps') }}</h2>
+          <span>{{ filteredSteps.length }} / {{ steps.length }}</span>
+        </div>
+        <div class="filters">
+          <input v-model="searchFilter" class="filter-input" :placeholder="$t('investigation.searchTimelinePlaceholder')" />
+          <select v-model="statusFilter" class="filter-input">
+            <option value="all">{{ $t('investigation.allStatuses') }}</option>
+            <option value="planned">planned</option>
+            <option value="running">running</option>
+            <option value="success">success</option>
+            <option value="warning">warning</option>
+            <option value="error">error</option>
+            <option value="checkpoint">checkpoint</option>
+          </select>
+          <select v-model="riskFilter" class="filter-input">
+            <option value="all">{{ $t('investigation.allRisks') }}</option>
+            <option value="safe">safe</option>
+            <option value="write">write</option>
+            <option value="debug">debug</option>
+            <option value="patch">patch</option>
+            <option value="inject">inject</option>
+          </select>
+          <select v-model="toolFilter" class="filter-input">
+            <option value="all">{{ $t('investigation.allTools') }}</option>
+            <option v-for="tool in toolOptions" :key="tool" :value="tool">{{ tool }}</option>
+          </select>
+        </div>
+        <article v-for="step in filteredSteps" :key="step.id" class="step" :class="stepClass(step.status)">
+          <div class="step-head">
+            <strong>{{ step.title }}</strong>
+            <span>{{ step.time }}</span>
+          </div>
+          <p>{{ step.detail }}</p>
+          <p v-if="stepStrategyReason(step)" class="step-reason">{{ $t('investigation.why', { reason: stepStrategyReason(step) }) }}</p>
+          <div class="meta">
+            <span>{{ step.status }}</span>
+            <span v-if="step.tool">{{ step.tool }}</span>
+            <span v-if="step.risk">{{ step.risk }}</span>
+          </div>
+        </article>
+        <p v-if="filteredSteps.length === 0" class="muted">{{ $t('investigation.noStepMatches') }}</p>
+      </section>
+
+      <aside class="side">
+        <section class="panel">
+          <h2>{{ $t('investigation.hypothesesTitle') }}</h2>
+          <article v-for="item in hypotheses" :key="String(item.id ?? item.label)" class="card">
+            <strong>{{ item.label ?? item.id }}</strong>
+            <p>{{ item.reason ?? $t('investigation.hypothesisFallbackReason') }}</p>
+          </article>
+          <p v-if="hypotheses.length === 0" class="muted">{{ $t('investigation.noHypothesisYet') }}</p>
+        </section>
+
+        <section class="panel">
+          <h2>{{ $t('investigation.checkpointsTitle') }}</h2>
+          <article v-for="item in sortedCheckpoints" :key="String(item.id ?? item.address ?? item.label)" class="card checkpoint">
+            <strong>{{ checkpointTitle(item) }}</strong>
+            <div class="checkpoint-badges">
+              <span>{{ checkpointKindLabel(item) }}</span>
+              <span v-if="checkpointScoreLabel(item)">{{ checkpointScoreLabel(item) }}</span>
+              <span :class="item.requiresConfirmation === true ? 'risk-badge' : 'safe-badge'">{{ checkpointRiskLabel(item) }}</span>
+            </div>
+            <p>{{ checkpointDetail(item) || $t('investigation.confirmationRequiredBeforeAction') }}</p>
+            <p v-if="checkpointStrategyReason(item)" class="step-reason">{{ $t('investigation.why', { reason: checkpointStrategyReason(item) }) }}</p>
+            <div class="action-plan">
+              <span
+                v-for="action in checkpointPlan(item).actions"
+                :key="action.id"
+                :class="[{ disabled: !action.enabled }, `risk-${action.risk}`]"
+                :title="action.reason"
+              >
+                {{ action.label }}
+              </span>
+            </div>
+            <div class="checkpoint-actions">
+              <button v-if="checkpointAddress(item)" class="btn mini" :title="checkpointPlanReason(item, 'watch')" @click="watchCheckpoint(item)">{{ $t('investigation.watch') }}</button>
+              <button v-if="checkpointCanWrite(item)" class="btn mini" :title="checkpointPlanReason(item, 'write')" @click="store.executeCheckpointWrite(item, false)">{{ $t('investigation.prepareWrite') }}</button>
+              <button v-if="checkpointCanWrite(item)" class="btn mini" :title="checkpointPlanReason(item, 'freeze_polling')" @click="store.executeCheckpointWrite(item, true)">{{ $t('investigation.freeze') }}</button>
+              <button v-if="checkpointCanDebug(item)" class="btn mini" :title="checkpointPlanReason(item, 'find_writes')" @click="store.executeCheckpointFindWhatWrites(item)">{{ $t('investigation.findWhatWrites') }}</button>
+              <button v-if="checkpointCanAob(item)" class="btn mini" :title="checkpointPlanReason(item, 'aob_patch')" @click="store.prepareCheckpointAob(item)">{{ $t('investigation.aobPatch') }}</button>
+              <button v-if="checkpointCanForceValue(item)" class="btn mini" :title="checkpointPlanReason(item, 'force_value')" @click="selectForceValueTarget(item)">{{ $t('investigation.forceValueHook') }}</button>
+              <button class="btn mini" @click="bookmarkCheckpoint(item)">{{ $t('investigation.bookmark') }}</button>
+              <button v-if="checkpointAddress(item)" class="btn mini" :title="checkpointPlanReason(item, 'trainer')" @click="createFromCheckpoint(item)">{{ $t('investigation.createTrainer') }}</button>
+            </div>
+            <div v-if="forceValueTarget === item" class="checkpoint-actions">
+              <input
+                v-model="forceValueInput"
+                class="input"
+                :placeholder="$t('investigation.valuePlaceholder')"
+                :disabled="forceValueBusy"
+                @keyup.enter="applyForceValue()"
+              />
+              <button class="btn mini" type="button" :disabled="forceValueBusy || !forceValueInput.trim()" @click="applyForceValue()">{{ $t('investigation.apply') }}</button>
+            </div>
+            <p v-if="forceValueTarget === item && forceValueResult" :class="forceValueResult.success ? 'hint' : 'error'">
+              {{ forceValueResult.success
+                ? $t('investigation.valueForcedSuccess', { address: forceValueResult.patchAddress })
+                : forceValueResult.error }}
+            </p>
+          </article>
+          <p v-if="checkpoints.length === 0" class="muted">{{ $t('investigation.noActiveCheckpoint') }}</p>
+        </section>
+      </aside>
+    </div>
+
+    <section v-if="autoReport" class="panel report">
+      <div class="section-head">
+        <h2>{{ $t('investigation.aiReport') }}</h2>
+        <span>{{ autoReport.processName || $t('investigation.notAttached') }} · {{ $t('investigation.candidateCount', { count: autoReport.candidateCount }) }}</span>
+      </div>
+      <p>{{ autoReport.summary || $t('investigation.reportAvailable') }}</p>
+      <div class="report-grid">
+        <div>
+          <span>{{ $t('investigation.strategy') }}</span>
+          <strong>{{ autoReport.preferredStrategy?.label ?? $t('investigation.notDetermined') }}</strong>
+        </div>
+        <div>
+          <span>{{ $t('investigation.workflow') }}</span>
+          <strong>{{ autoReport.workflow || '-' }}</strong>
+        </div>
+        <div>
+          <span>{{ $t('investigation.value') }}</span>
+          <strong>{{ autoReport.initialValue || autoReport.targetValue || '-' }}</strong>
+        </div>
+      </div>
+      <div class="report-lists">
+        <div>
+          <h3>{{ $t('investigation.recommendations') }}</h3>
+          <p v-for="item in reportRecommendations.slice(0, 4)" :key="String(item.id ?? item.label)" class="report-item">
+            {{ item.label ?? item.id }} · {{ item.reason ?? '' }}
+          </p>
+          <p v-if="reportRecommendations.length === 0" class="muted">{{ $t('investigation.noRecommendation') }}</p>
+        </div>
+        <div>
+          <h3>{{ $t('investigation.guardrails') }}</h3>
+          <p v-for="item in reportGuardrails.slice(0, 4)" :key="String(item.id ?? item.label)" class="report-item">
+            {{ item.label ?? item.id }} · {{ item.reason ?? '' }}
+          </p>
+          <p v-if="reportGuardrails.length === 0" class="muted">{{ $t('investigation.noGuardrail') }}</p>
+        </div>
+      </div>
+    </section>
+
+
+    <details class="detailed-forms" :open="formsOpen" @toggle="formsOpen = ($event.target as HTMLDetailsElement).open">
+      <summary>{{ $t('investigation.detailedFormsTitle') }}</summary>
     <PanelIntro
       :what="$t('investigation.notebookIntro.what')"
       :purpose="$t('investigation.notebookIntro.purpose')"
@@ -490,7 +787,6 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
       <div class="section-head">
         <h2>{{ $t('investigation.effectProofTitle') }}</h2>
       </div>
-      <p v-if="effectProof.overallNextAction" class="next-action-banner">{{ effectProof.overallNextAction }}</p>
       <form class="notebook-form" @submit.prevent="effectProof.recordProof()">
         <input
           v-model="effectProof.targetLabelDraft"
@@ -675,192 +971,7 @@ function checkpointStrategyReason(item: Record<string, unknown>): string {
       </form>
     </section>
 
-    <section v-if="run" class="summary">
-      <div>
-        <span>{{ $t('investigation.objective') }}</span>
-        <strong>{{ run.objective }}</strong>
-      </div>
-      <div>
-        <span>{{ $t('investigation.process') }}</span>
-        <strong>{{ run.processName || $t('investigation.notAttached') }}</strong>
-      </div>
-      <div>
-        <span>{{ $t('investigation.status') }}</span>
-        <strong>{{ statusLabel(run.status) }}</strong>
-      </div>
-      <div>
-        <span>{{ $t('investigation.strategy') }}</span>
-        <strong>{{ run.preferredStrategy?.label ?? $t('investigation.notDetermined') }}</strong>
-      </div>
-    </section>
-
-    <section v-if="autoReport" class="panel report">
-      <div class="section-head">
-        <h2>{{ $t('investigation.aiReport') }}</h2>
-        <span>{{ autoReport.processName || $t('investigation.notAttached') }} · {{ $t('investigation.candidateCount', { count: autoReport.candidateCount }) }}</span>
-      </div>
-      <p>{{ autoReport.summary || $t('investigation.reportAvailable') }}</p>
-      <div class="report-grid">
-        <div>
-          <span>{{ $t('investigation.strategy') }}</span>
-          <strong>{{ autoReport.preferredStrategy?.label ?? $t('investigation.notDetermined') }}</strong>
-        </div>
-        <div>
-          <span>{{ $t('investigation.workflow') }}</span>
-          <strong>{{ autoReport.workflow || '-' }}</strong>
-        </div>
-        <div>
-          <span>{{ $t('investigation.value') }}</span>
-          <strong>{{ autoReport.initialValue || autoReport.targetValue || '-' }}</strong>
-        </div>
-      </div>
-      <div class="report-lists">
-        <div>
-          <h3>{{ $t('investigation.recommendations') }}</h3>
-          <p v-for="item in reportRecommendations.slice(0, 4)" :key="String(item.id ?? item.label)" class="report-item">
-            {{ item.label ?? item.id }} · {{ item.reason ?? '' }}
-          </p>
-          <p v-if="reportRecommendations.length === 0" class="muted">{{ $t('investigation.noRecommendation') }}</p>
-        </div>
-        <div>
-          <h3>{{ $t('investigation.guardrails') }}</h3>
-          <p v-for="item in reportGuardrails.slice(0, 4)" :key="String(item.id ?? item.label)" class="report-item">
-            {{ item.label ?? item.id }} · {{ item.reason ?? '' }}
-          </p>
-          <p v-if="reportGuardrails.length === 0" class="muted">{{ $t('investigation.noGuardrail') }}</p>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="bestNextAction" class="panel next-action">
-      <div class="section-head">
-        <h2>{{ $t('investigation.bestNextActionTitle') }}</h2>
-        <span>{{ bestNextAction.source }}</span>
-      </div>
-      <div class="next-action-body">
-        <strong>{{ bestNextAction.label }}</strong>
-        <p>{{ bestNextAction.reason }}</p>
-        <div class="meta">
-          <span>{{ bestNextAction.risk }}</span>
-          <span v-if="bestNextAction.confidence">{{ $t('investigation.confidenceLabel', { score: bestNextAction.confidence }) }}</span>
-        </div>
-      </div>
-    </section>
-
-    <div v-if="!run" class="empty">
-      <h2>{{ $t('investigation.noActiveInvestigation') }}</h2>
-      <p>{{ $t('investigation.noActiveInvestigationBody') }}</p>
-      <p>{{ $t('investigation.emptyBodyPrefix') }} <strong>Assistant</strong>{{ $t('investigation.emptyBodyMiddle') }} <strong>Auto</strong>{{ $t('investigation.emptyBodySuffix') }}</p>
-      <button class="btn primary" @click="store.activeView = 'assistant'">{{ $t('investigation.goToAssistant') }}</button>
-    </div>
-
-    <div v-else class="grid">
-      <section class="panel timeline">
-        <div class="section-head">
-          <h2>{{ $t('investigation.steps') }}</h2>
-          <span>{{ filteredSteps.length }} / {{ steps.length }}</span>
-        </div>
-        <div class="filters">
-          <input v-model="searchFilter" class="filter-input" :placeholder="$t('investigation.searchTimelinePlaceholder')" />
-          <select v-model="statusFilter" class="filter-input">
-            <option value="all">{{ $t('investigation.allStatuses') }}</option>
-            <option value="planned">planned</option>
-            <option value="running">running</option>
-            <option value="success">success</option>
-            <option value="warning">warning</option>
-            <option value="error">error</option>
-            <option value="checkpoint">checkpoint</option>
-          </select>
-          <select v-model="riskFilter" class="filter-input">
-            <option value="all">{{ $t('investigation.allRisks') }}</option>
-            <option value="safe">safe</option>
-            <option value="write">write</option>
-            <option value="debug">debug</option>
-            <option value="patch">patch</option>
-            <option value="inject">inject</option>
-          </select>
-          <select v-model="toolFilter" class="filter-input">
-            <option value="all">{{ $t('investigation.allTools') }}</option>
-            <option v-for="tool in toolOptions" :key="tool" :value="tool">{{ tool }}</option>
-          </select>
-        </div>
-        <article v-for="step in filteredSteps" :key="step.id" class="step" :class="stepClass(step.status)">
-          <div class="step-head">
-            <strong>{{ step.title }}</strong>
-            <span>{{ step.time }}</span>
-          </div>
-          <p>{{ step.detail }}</p>
-          <p v-if="stepStrategyReason(step)" class="step-reason">{{ $t('investigation.why', { reason: stepStrategyReason(step) }) }}</p>
-          <div class="meta">
-            <span>{{ step.status }}</span>
-            <span v-if="step.tool">{{ step.tool }}</span>
-            <span v-if="step.risk">{{ step.risk }}</span>
-          </div>
-        </article>
-        <p v-if="filteredSteps.length === 0" class="muted">{{ $t('investigation.noStepMatches') }}</p>
-      </section>
-
-      <aside class="side">
-        <section class="panel">
-          <h2>{{ $t('investigation.hypothesesTitle') }}</h2>
-          <article v-for="item in hypotheses" :key="String(item.id ?? item.label)" class="card">
-            <strong>{{ item.label ?? item.id }}</strong>
-            <p>{{ item.reason ?? $t('investigation.hypothesisFallbackReason') }}</p>
-          </article>
-          <p v-if="hypotheses.length === 0" class="muted">{{ $t('investigation.noHypothesisYet') }}</p>
-        </section>
-
-        <section class="panel">
-          <h2>{{ $t('investigation.checkpointsTitle') }}</h2>
-          <article v-for="item in sortedCheckpoints" :key="String(item.id ?? item.address ?? item.label)" class="card checkpoint">
-            <strong>{{ checkpointTitle(item) }}</strong>
-            <div class="checkpoint-badges">
-              <span>{{ checkpointKindLabel(item) }}</span>
-              <span v-if="checkpointScoreLabel(item)">{{ checkpointScoreLabel(item) }}</span>
-              <span :class="item.requiresConfirmation === true ? 'risk-badge' : 'safe-badge'">{{ checkpointRiskLabel(item) }}</span>
-            </div>
-            <p>{{ checkpointDetail(item) || $t('investigation.confirmationRequiredBeforeAction') }}</p>
-            <p v-if="checkpointStrategyReason(item)" class="step-reason">{{ $t('investigation.why', { reason: checkpointStrategyReason(item) }) }}</p>
-            <div class="action-plan">
-              <span
-                v-for="action in checkpointPlan(item).actions"
-                :key="action.id"
-                :class="[{ disabled: !action.enabled }, `risk-${action.risk}`]"
-                :title="action.reason"
-              >
-                {{ action.label }}
-              </span>
-            </div>
-            <div class="checkpoint-actions">
-              <button v-if="checkpointAddress(item)" class="btn mini" :title="checkpointPlanReason(item, 'watch')" @click="watchCheckpoint(item)">{{ $t('investigation.watch') }}</button>
-              <button v-if="checkpointCanWrite(item)" class="btn mini" :title="checkpointPlanReason(item, 'write')" @click="store.executeCheckpointWrite(item, false)">{{ $t('investigation.prepareWrite') }}</button>
-              <button v-if="checkpointCanWrite(item)" class="btn mini" :title="checkpointPlanReason(item, 'freeze_polling')" @click="store.executeCheckpointWrite(item, true)">{{ $t('investigation.freeze') }}</button>
-              <button v-if="checkpointCanDebug(item)" class="btn mini" :title="checkpointPlanReason(item, 'find_writes')" @click="store.executeCheckpointFindWhatWrites(item)">{{ $t('investigation.findWhatWrites') }}</button>
-              <button v-if="checkpointCanAob(item)" class="btn mini" :title="checkpointPlanReason(item, 'aob_patch')" @click="store.prepareCheckpointAob(item)">{{ $t('investigation.aobPatch') }}</button>
-              <button v-if="checkpointCanForceValue(item)" class="btn mini" :title="checkpointPlanReason(item, 'force_value')" @click="selectForceValueTarget(item)">{{ $t('investigation.forceValueHook') }}</button>
-              <button class="btn mini" @click="bookmarkCheckpoint(item)">{{ $t('investigation.bookmark') }}</button>
-              <button v-if="checkpointAddress(item)" class="btn mini" :title="checkpointPlanReason(item, 'trainer')" @click="createFromCheckpoint(item)">{{ $t('investigation.createTrainer') }}</button>
-            </div>
-            <div v-if="forceValueTarget === item" class="checkpoint-actions">
-              <input
-                v-model="forceValueInput"
-                class="input"
-                :placeholder="$t('investigation.valuePlaceholder')"
-                :disabled="forceValueBusy"
-                @keyup.enter="applyForceValue()"
-              />
-              <button class="btn mini" type="button" :disabled="forceValueBusy || !forceValueInput.trim()" @click="applyForceValue()">{{ $t('investigation.apply') }}</button>
-            </div>
-            <p v-if="forceValueTarget === item && forceValueResult" :class="forceValueResult.success ? 'hint' : 'error'">
-              {{ forceValueResult.success
-                ? $t('investigation.valueForcedSuccess', { address: forceValueResult.patchAddress })
-                : forceValueResult.error }}
-            </p>
-          </article>
-          <p v-if="checkpoints.length === 0" class="muted">{{ $t('investigation.noActiveCheckpoint') }}</p>
-        </section>
-      </aside>
-    </div>
+    </details>
 
     <section v-if="exportText" class="panel export">
       <div class="export-head">
@@ -1061,23 +1172,9 @@ p {
   background: var(--accent-hover);
 }
 
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 20px;
-}
-
-.empty p {
-  max-width: 640px;
-}
-
-.empty .btn {
-  margin-top: 6px;
-}
-
-.summary {
+.summary,
+.situation-grid,
+.evidence-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
@@ -1085,31 +1182,96 @@ p {
 }
 
 .summary div,
+.situation-grid div,
+.evidence-summary-grid div,
 .panel,
-.empty {
+.situation-card {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-secondary);
 }
 
-.summary div {
+.summary div,
+.situation-grid div,
+.evidence-summary-grid div {
   min-width: 0;
   padding: 10px;
 }
 
 .summary span,
+.situation-grid span,
+.evidence-summary-grid span,
 .meta span {
   color: var(--text-dim);
   font-size: 11px;
 }
 
-.summary strong {
+.summary strong,
+.situation-grid strong,
+.evidence-summary-grid strong {
   display: block;
   overflow: hidden;
   margin-top: 4px;
   color: var(--text-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* UX-PRODUIT-10 : carte de situation compacte en tête de page, réunit les
+   anciens états "summary" (enquête active) et "empty" (aucune enquête, dont
+   le style repris ci-dessous) en un seul bloc. */
+.situation-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px;
+  margin-bottom: 14px;
+}
+
+.situation-card p {
+  max-width: 640px;
+}
+
+.situation-card .btn {
+  margin-top: 6px;
+}
+
+.situation-card .situation-grid {
+  width: 100%;
+  margin: 0;
+}
+
+.situation-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.situation-mismatch {
+  margin-top: 4px;
+}
+
+.evidence-summary {
+  margin-bottom: 14px;
+}
+
+.evidence-summary-grid {
+  margin: 10px 0 0;
+}
+
+.detailed-forms {
+  margin-top: 4px;
+}
+
+.detailed-forms > summary {
+  padding: 10px 4px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.detailed-forms > summary:hover {
+  color: var(--text-primary);
 }
 
 .grid {
@@ -1138,15 +1300,6 @@ p {
 
 .next-action-body p {
   margin-top: 6px;
-}
-
-.next-action-banner {
-  margin-bottom: 14px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(122, 162, 247, 0.34);
-  background: rgba(122, 162, 247, 0.07);
-  color: var(--text-primary);
 }
 
 .report-grid,
@@ -1186,8 +1339,7 @@ p {
   margin-top: 6px;
 }
 
-.panel,
-.empty {
+.panel {
   padding: 12px;
 }
 
