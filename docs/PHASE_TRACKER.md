@@ -55,6 +55,14 @@ Roadmap portabilité réelle (distribution SourceForge en mode portable) : `docs
 
 ## Journal actif
 
+### UX-PROJET-SELECT — sélecteur de type des notes (23/09/2026, Codex)
+
+**Diagnostic / demande** : le propriétaire trouve le contrôle « Int32 » blanc de la vue Projet/session discordant avec les autres champs sombres. Les deux branches de `ProjectView.vue` (liste de notes vide ou remplie) utilisent `class="select"` seul ; cette classe ne règle que le curseur, tandis que le style commun de champ est porté par `.input`.
+
+**Correctif** : les deux sélecteurs `bookmarkType` portent désormais `class="input select"`, comme ceux de Paramètres. Le choix du type et la logique de création des notes restent identiques.
+
+**Tests / validation** : `scripts/build.ps1` OK (Vue + C++) ; `killengine_unit_tests.exe` 562/562 OK ; `git diff --check` OK. Scan mojibake : correspondances dans l'historique documentaire uniquement, aucune dans les deux fichiers touchés. Rapport de fins de ligne : `ProjectView.vue` et ce tracker restent en LF, sans conversion globale ; fichiers mixtes signalés ailleurs dans le dépôt, non touchés. Contrôle visuel en navigateur intégré indisponible dans cette session (aucun navigateur connecté) ; la vérification directe porte sur les classes CSS et le build.
+
 ### Synthèse active — tracker allégé après transfert historique (10/09/2026, Codex)
 
 **Pourquoi** : le propriétaire a signalé que `docs/PHASE_TRACKER.md` redevenait trop gros alors que beaucoup d'entrées du `Journal actif` étaient closes. Les détails complets des rounds terminés ont été transférés dans `docs/PHASE_TRACKER_HISTORY.md`, section "Transfert PHASE_TRACKER actif — nettoyage tracker actif quatrième passe (10/09/2026, Codex)".

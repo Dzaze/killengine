@@ -235,7 +235,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <div class="bookmark-create">
           <input v-model="bookmarkLabel" class="input" :placeholder="$t('settings.labelPlaceholder')" />
           <input v-model="bookmarkAddress" class="input" :placeholder="$t('settings.addressHexOptional')" />
-          <select v-model="bookmarkType" class="select">
+          <select v-model="bookmarkType" class="input select">
             <option v-for="type in valueTypeOptions" :key="type" :value="type">{{ type }}</option>
           </select>
           <input v-model="bookmarkValue" class="input" :placeholder="$t('settings.valueOptional')" />
@@ -273,7 +273,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         <div class="bookmark-create">
           <input v-model="bookmarkLabel" class="input" :placeholder="$t('settings.labelPlaceholder')" />
           <input v-model="bookmarkAddress" class="input" :placeholder="$t('settings.addressHexOptional')" />
-          <select v-model="bookmarkType" class="select">
+          <select v-model="bookmarkType" class="input select">
             <option v-for="type in valueTypeOptions" :key="type" :value="type">{{ type }}</option>
           </select>
           <input v-model="bookmarkValue" class="input" :placeholder="$t('settings.valueOptional')" />
