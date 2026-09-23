@@ -499,7 +499,7 @@ h2 {
 
 p,
 .empty {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .panel {
@@ -677,7 +677,7 @@ p,
 }
 
 .quality-detail {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
 }
@@ -755,7 +755,7 @@ p,
   max-width: 260px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   padding: 3px 7px;
   text-overflow: ellipsis;

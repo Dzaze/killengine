@@ -158,7 +158,7 @@ function readSaveFileFromExpert(path: string) {
 }
 
 .save-file-actions span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -177,7 +177,7 @@ function readSaveFileFromExpert(path: string) {
   border: 1px solid rgba(122, 162, 247, 0.16);
   border-radius: 4px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font: inherit;
   font-size: 12px;
   text-align: left;

@@ -1849,7 +1849,7 @@ onMounted(() => {
 }
 
 .empty {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -1888,7 +1888,7 @@ onMounted(() => {
   gap: 12px;
   margin-top: 4px;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .create-row,
@@ -1914,7 +1914,7 @@ onMounted(() => {
 
 .hint {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-bottom: 8px;
 }
 
@@ -1948,7 +1948,7 @@ onMounted(() => {
   border: 1px solid rgba(224, 175, 104, 0.32);
   border-radius: 6px;
   background: rgba(224, 175, 104, 0.08);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -2011,7 +2011,7 @@ onMounted(() => {
 }
 
 .target-group-header span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -2046,13 +2046,13 @@ onMounted(() => {
 .target-locator {
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .target-desc {
   grid-column: 1 / -1;
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 12px;
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -2078,7 +2078,7 @@ onMounted(() => {
 .patch-state-detail {
   grid-column: 1 / -1;
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
   text-overflow: ellipsis;
@@ -2089,7 +2089,7 @@ onMounted(() => {
   padding: 2px 6px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -2153,7 +2153,7 @@ onMounted(() => {
   padding: 4px 7px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2181,7 +2181,7 @@ onMounted(() => {
 
 .target-resolution.unsupported {
   border-color: var(--border);
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .pointer-map-box {

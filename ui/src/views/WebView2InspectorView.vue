@@ -633,7 +633,7 @@ function handleReset() {
 
 .target-url {
   font-size: 0.75rem;
-  color: var(--text-dim);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -642,7 +642,7 @@ function handleReset() {
 .target-type {
   width: fit-content;
   font-size: 0.75rem;
-  color: var(--text-dim);
+  color: var(--text-muted);
   text-transform: uppercase;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;

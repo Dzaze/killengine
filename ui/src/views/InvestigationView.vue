@@ -1109,7 +1109,7 @@ h3 {
 }
 
 p {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .actions {
@@ -1123,7 +1123,7 @@ p {
 }
 
 .section-head span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
   font-size: 12px;
 }
@@ -1202,7 +1202,7 @@ p {
 .situation-grid span,
 .evidence-summary-grid span,
 .meta span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -1323,7 +1323,7 @@ p {
 }
 
 .report-grid span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -1369,7 +1369,7 @@ p {
   min-width: 0;
   flex-direction: column;
   gap: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -1397,7 +1397,7 @@ p {
 
 .notebook-column-head span,
 .hypothesis-head span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
 }
@@ -1430,7 +1430,7 @@ p {
 
 .next-test-grid h3 {
   margin: 0 0 5px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -1575,7 +1575,7 @@ p {
 }
 
 .step-head span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
 }
@@ -1586,8 +1586,8 @@ p {
 }
 
 .step-reason {
-  color: var(--text-dim);
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-style: italic;
 }
 
@@ -1623,7 +1623,7 @@ p {
 .checkpoint-badges span {
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   padding: 3px 7px;
 }
@@ -1654,7 +1654,7 @@ p {
 }
 
 .action-plan span.disabled {
-  color: var(--text-dim);
+  color: var(--text-disabled);
   opacity: 0.45;
 }
 
@@ -1701,7 +1701,7 @@ p {
 }
 
 .archive-row span {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 @media (max-width: 980px) {
@@ -1744,7 +1744,7 @@ pre {
 }
 
 .archive-row span {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 @media (max-width: 980px) {

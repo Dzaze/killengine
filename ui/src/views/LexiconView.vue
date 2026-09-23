@@ -83,7 +83,7 @@ const groupedTerms = computed(() => {
 .header p {
   margin-top: 4px;
   font-size: 13px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .search-input {
@@ -103,7 +103,7 @@ const groupedTerms = computed(() => {
 }
 
 .empty {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
 }
 

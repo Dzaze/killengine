@@ -221,7 +221,7 @@ const exactScanButtonLabel = computed(() => hasCandidateContext.value ? t('exact
 .type-chip span {
   overflow: hidden;
   max-width: 58px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

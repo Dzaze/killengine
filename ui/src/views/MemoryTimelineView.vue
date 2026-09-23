@@ -630,7 +630,7 @@ watch(selectedAddress, loadSeriesData)
 
 .config-item label {
   font-size: 12px;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .config-item input[type="number"] {
@@ -758,7 +758,7 @@ button:disabled {
 
 .progress-text {
   font-size: 12px;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .stats-grid {
@@ -775,7 +775,7 @@ button:disabled {
 
 .stat-label {
   font-size: 12px;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .stat-value {
@@ -820,7 +820,7 @@ button:disabled {
 }
 
 .series-stats .label {
-  color: #888;
+  color: var(--text-muted);
 }
 
 .series-stats .value {
@@ -867,12 +867,12 @@ button:disabled {
 }
 
 .pattern-desc {
-  color: #888;
+  color: var(--text-muted);
   font-size: 13px;
 }
 
 .no-patterns {
-  color: #666;
+  color: var(--text-muted);
   font-style: italic;
   margin-top: 12px;
 }

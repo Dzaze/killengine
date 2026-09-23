@@ -248,7 +248,7 @@ function saveStableLocator() {
   grid-template-columns: auto minmax(86px, 1fr);
   gap: 6px;
   align-items: center;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -286,7 +286,7 @@ function saveStableLocator() {
 }
 
 .write-plan-title {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -303,7 +303,7 @@ function saveStableLocator() {
   padding: 5px 6px;
   border-radius: 4px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -354,7 +354,7 @@ function saveStableLocator() {
   border: 1px solid rgba(247, 118, 142, 0.2);
   border-radius: 4px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 

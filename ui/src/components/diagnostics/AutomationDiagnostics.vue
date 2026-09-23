@@ -78,7 +78,7 @@ onMounted(() => {
 
 .panel-title span,
 .empty-line {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -157,7 +157,7 @@ onMounted(() => {
 .bookmark-row span,
 .audit-row span {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -193,7 +193,7 @@ onMounted(() => {
 .import-preview span {
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   padding: 4px 8px;
 }
@@ -226,7 +226,7 @@ onMounted(() => {
 
 .template-row span {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -248,7 +248,7 @@ onMounted(() => {
   min-height: 28px;
   padding: 5px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -289,7 +289,7 @@ onMounted(() => {
 
 .header p {
   margin-top: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -339,7 +339,7 @@ onMounted(() => {
 .toggle-row span,
 .hint,
 .status-line {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -373,7 +373,7 @@ onMounted(() => {
 }
 
 .input::placeholder {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .input:focus {
@@ -459,7 +459,7 @@ onMounted(() => {
 .runtime-cell span,
 .path-row span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -477,7 +477,7 @@ onMounted(() => {
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
@@ -533,13 +533,13 @@ onMounted(() => {
 
 .model-candidates {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .embedded-agent-list {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -577,7 +577,7 @@ onMounted(() => {
 }
 
 .dim-text {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .ping-line {
@@ -668,7 +668,7 @@ onMounted(() => {
 
 .kernel-learning-head span,
 .kernel-learning-step span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -728,7 +728,7 @@ onMounted(() => {
 
 .debug-head span,
 .debug-row p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 

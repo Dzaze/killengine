@@ -1122,7 +1122,7 @@ onMounted(() => {
 }
 
 .header p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
@@ -1182,7 +1182,7 @@ onMounted(() => {
 .path-write-head span,
 .field-label span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   margin-bottom: 4px;
 }
@@ -1233,7 +1233,7 @@ onMounted(() => {
 
 .guide-steps span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   margin-bottom: 3px;
 }
@@ -1257,7 +1257,7 @@ onMounted(() => {
 
 .status-band span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   margin-bottom: 4px;
 }
@@ -1348,7 +1348,7 @@ onMounted(() => {
 
 .wizard-steps span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   margin-bottom: 3px;
 }
@@ -1394,7 +1394,7 @@ onMounted(() => {
 
 .wizard-summary-item span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   margin-bottom: 2px;
 }
@@ -1488,7 +1488,7 @@ onMounted(() => {
 }
 
 .panel-head span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -1575,7 +1575,7 @@ onMounted(() => {
 
 .setter-call-head span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   margin-top: 2px;
   max-width: 480px;
@@ -1645,7 +1645,7 @@ onMounted(() => {
   margin: 0;
   padding-left: 20px;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .gcroot-steps li {
@@ -1748,7 +1748,7 @@ code {
 }
 
 .empty-row {
-  color: var(--text-dim);
+  color: var(--text-muted);
   text-align: center;
   padding: 22px;
 }

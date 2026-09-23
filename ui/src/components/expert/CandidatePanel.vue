@@ -274,7 +274,7 @@ function fieldStabilityLabel(address: string): string {
 .page-info {
   margin-bottom: 6px;
   text-align: right;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -303,7 +303,7 @@ function fieldStabilityLabel(address: string): string {
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary));
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -336,7 +336,7 @@ function fieldStabilityLabel(address: string): string {
   border: 1px solid transparent;
   border-radius: 4px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
   font-size: 12px;
 }
@@ -360,7 +360,7 @@ function fieldStabilityLabel(address: string): string {
 
 .candidate-value {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -385,7 +385,7 @@ function fieldStabilityLabel(address: string): string {
 .candidate-stability-result {
   grid-column: 1 / -1;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   padding-left: 36px;
 }
 
@@ -436,7 +436,7 @@ function fieldStabilityLabel(address: string): string {
 }
 
 .candidate-type {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -466,7 +466,7 @@ function fieldStabilityLabel(address: string): string {
 
 .variant-label {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 10px;
   font-style: italic;
   text-overflow: ellipsis;
@@ -484,7 +484,7 @@ function fieldStabilityLabel(address: string): string {
 
 .visual-state,
 .live-dot {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 

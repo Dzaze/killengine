@@ -553,7 +553,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
 .panel-title span,
 .empty-line {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -632,7 +632,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 .bookmark-row span,
 .audit-row span {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -668,7 +668,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 .import-preview span {
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   padding: 4px 8px;
 }
@@ -701,7 +701,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
 .template-row span {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -723,7 +723,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
   min-height: 28px;
   padding: 5px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -764,7 +764,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
 .header p {
   margin-top: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -814,7 +814,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 .toggle-row span,
 .hint,
 .status-line {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -848,7 +848,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 }
 
 .input::placeholder {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .input:focus {
@@ -934,7 +934,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 .runtime-cell span,
 .path-row span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -952,7 +952,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
@@ -1008,13 +1008,13 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
 .model-candidates {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .embedded-agent-list {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1052,7 +1052,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 }
 
 .dim-text {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .ping-line {
@@ -1143,7 +1143,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
 .kernel-learning-head span,
 .kernel-learning-step span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1203,7 +1203,7 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
 
 .debug-head span,
 .debug-row p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1341,7 +1341,7 @@ code {
 }
 
 .current-target {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1360,7 +1360,7 @@ code {
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-decoration: none;
 }

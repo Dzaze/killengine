@@ -203,7 +203,7 @@ onMounted(() => {
   text-align: left;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-weight: 600;
 }
 
@@ -267,7 +267,7 @@ onMounted(() => {
   padding: 8px 14px;
   margin-top: 8px;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   background: var(--bg-tertiary);
   border-radius: 4px;
 }

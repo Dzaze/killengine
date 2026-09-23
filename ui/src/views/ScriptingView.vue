@@ -243,7 +243,7 @@ onMounted(() => {
 
 .header p {
   margin: 4px 0 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .header-actions {
@@ -274,7 +274,7 @@ onMounted(() => {
 .status-band span,
 .panel-head span,
 .editor-head label {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 
@@ -393,7 +393,7 @@ onMounted(() => {
 }
 
 .repl-entry-output {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .repl-entry-error {
@@ -408,7 +408,7 @@ onMounted(() => {
 }
 
 .repl-prompt {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: "Cascadia Mono", Consolas, monospace;
 }
 
@@ -430,7 +430,7 @@ onMounted(() => {
 
 .saved-scripts-header h4 {
   margin: 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 

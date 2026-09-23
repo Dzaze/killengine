@@ -273,7 +273,7 @@ const {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 9px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -327,7 +327,7 @@ const {
   border: 1px solid rgba(122, 162, 247, 0.16);
   border-radius: 4px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 

@@ -535,13 +535,13 @@ onMounted(() => {
 
 .header p {
   margin-top: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
 .empty-state {
   padding: 32px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   text-align: center;
 }
 
@@ -567,7 +567,7 @@ onMounted(() => {
 .stat span,
 .stat small {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -592,7 +592,7 @@ onMounted(() => {
 }
 
 .module {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
   overflow: hidden;
@@ -611,7 +611,7 @@ onMounted(() => {
 .chip {
   padding: 7px 10px;
   background: var(--bg-tertiary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -652,7 +652,7 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-tertiary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -754,7 +754,7 @@ onMounted(() => {
 
 .preview-title span,
 .preview-panel p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -799,7 +799,7 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-accent);
-  color: var(--text-dim);
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 12px;
 }
@@ -850,7 +850,7 @@ onMounted(() => {
 }
 
 .dump-label {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -915,7 +915,7 @@ onMounted(() => {
 }
 
 .hex-viewer-header-row {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -939,7 +939,7 @@ onMounted(() => {
 }
 
 .hv-ascii {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .hv-edit-btn {

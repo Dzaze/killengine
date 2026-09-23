@@ -264,6 +264,20 @@ watch(
   --text-primary: #c0caf5;
   --text-secondary: #7aa2f7;
   --text-dim: #565f89;
+  /* UX-PRODUIT-11A (docs/PHASE_TRACKER.md, 23/09/2026) : --text-dim (contraste
+     ~2.3-2.9:1 sur les fonds réels de l'app, sous le seuil WCAG AA 4.5:1 pour
+     un texte normal) était utilisé indifféremment pour du texte informatif
+     actif (aide, métadonnées, statut) ET pour signaler un contrôle désactivé
+     -- le rendait visuellement indiscernable d'un élément inactif. Deux
+     variables séparées : --text-muted (6.2-6.5:1 sur les 4 fonds opaques de
+     l'app, calculé sans opacité additionnelle) pour l'information secondaire
+     active, --text-disabled conserve l'ancienne valeur/apparence pour les
+     rares cas de contrôle réellement désactivé (ex: étape de plan d'action
+     non disponible). --text-dim reste défini pour compatibilité descendante
+     (composants tiers/pas encore audités) mais n'est plus le choix par
+     défaut pour du texte informatif neuf. */
+  --text-muted: #929bb8;
+  --text-disabled: #565f89;
   --accent: #7aa2f7;
   --accent-hover: #89b4fa;
   --success: #9ece6a;
@@ -357,7 +371,7 @@ body {
   border: 1px solid rgba(125, 142, 255, 0.24);
   border-radius: 6px;
   background: transparent;
-  color: #7580b3;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -448,8 +462,8 @@ body {
 .nav-item-subtitle {
   display: block;
   margin-top: 2px;
-  color: #6a75a8;
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: 400;
   white-space: normal;
 }
@@ -484,12 +498,12 @@ body {
 }
 
 .target-pid {
-  color: #7580b3;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
 .target-none {
-  color: #7580b3;
+  color: var(--text-muted);
   font-size: 12px;
   font-style: italic;
 }
@@ -519,7 +533,7 @@ body {
   padding: 6px 10px;
   border: none;
   background: transparent;
-  color: #7580b3;
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -560,7 +574,7 @@ body {
 
 .version {
   font-size: 11px;
-  color: #7580b3;
+  color: var(--text-muted);
   margin-bottom: 4px;
 }
 
@@ -608,7 +622,7 @@ body {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -643,7 +657,7 @@ body {
 
 .risk-warning {
   margin-top: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   line-height: 1.5;
 }
 
@@ -679,7 +693,7 @@ body {
 
 .onboarding-intro {
   margin-top: 8px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .onboarding-steps {

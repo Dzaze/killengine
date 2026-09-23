@@ -1264,7 +1264,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .subtitle {
   font-size: 13px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
@@ -1312,7 +1312,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   border: 1px solid var(--border);
   font-size: 11px;
   font-weight: 500;
-  color: var(--text-dim);
+  color: var(--text-muted);
   cursor: help;
 }
 
@@ -1331,7 +1331,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   align-items: center;
   gap: 7px;
   min-height: 16px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1339,7 +1339,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--text-dim);
+  background: var(--text-muted);
 }
 
 .assistant-status-strip.is-working {
@@ -1383,8 +1383,8 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 .wf-warning .dot { background: var(--warning); }
 .wf-error { background: rgba(247, 118, 142, 0.15); color: var(--error); }
 .wf-error .dot { background: var(--error); }
-.wf-idle { background: var(--bg-tertiary); color: var(--text-dim); }
-.wf-idle .dot { background: var(--text-dim); }
+.wf-idle { background: var(--bg-tertiary); color: var(--text-muted); }
+.wf-idle .dot { background: var(--text-muted); }
 
 .active-targets {
   display: flex;
@@ -1439,7 +1439,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .context-chip span {
   flex-shrink: 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -1483,7 +1483,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 }
 
 .empty-state p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 14px;
 }
 
@@ -1533,7 +1533,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .workflow-preset span {
   margin-top: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -1626,7 +1626,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
   display: flex;
   gap: 8px;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .message-role {
@@ -1661,7 +1661,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .decision-line {
   max-width: 720px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -1741,14 +1741,14 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 }
 
 .safe-step-metric {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
   font-size: 11px;
 }
 
 .safe-step-detail {
   margin-top: 3px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -1778,12 +1778,12 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 }
 
 .auto-write-box.auto-invalidated .auto-write-title {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .invalidated-note {
   margin-bottom: 6px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -1813,19 +1813,19 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 }
 
 .confirm-steps {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .write-summary {
   width: 100%;
   color: var(--text-secondary);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .value-history {
   width: 100%;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: inherit;
   font-size: 11px;
 }
@@ -1839,7 +1839,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .rollback-note {
   margin-top: 6px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   font-style: italic;
 }
@@ -1899,7 +1899,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .suggestion-confidence {
   margin-top: 3px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -1917,8 +1917,8 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 }
 
 .suggestions-title {
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 12px;
+  color: var(--text-muted);
   margin-bottom: 4px;
 }
 
@@ -2051,7 +2051,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 
 .quick-hint {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 /* Input bar */
@@ -2079,7 +2079,7 @@ function filteredCandidatesFor(message: typeof store.messages[number]): string {
 }
 
 .chat-input::placeholder {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .btn {

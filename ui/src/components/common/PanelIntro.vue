@@ -46,7 +46,7 @@ defineProps<{
 .intro-label {
   display: block;
   margin-bottom: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 

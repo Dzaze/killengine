@@ -157,12 +157,12 @@ const estimateDurationLabel = computed(() => formatDuration(store.localAiWarmupE
 
 .warmup-stage {
   font-size: 13px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .warmup-degraded-reason {
   font-size: 13px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   line-height: 1.5;
 }
 
@@ -203,8 +203,8 @@ const estimateDurationLabel = computed(() => formatDuration(store.localAiWarmupE
 
 .warmup-credit {
   margin-top: 6px;
-  font-size: 11px;
-  color: #565f89;
+  font-size: 12px;
+  color: var(--text-muted);
   text-decoration: none;
 }
 

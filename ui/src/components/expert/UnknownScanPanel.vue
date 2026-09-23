@@ -137,7 +137,7 @@ const unknownDepthLabel = (mb: number) => (mb === -1 ? t('unknown.auto') : t('un
   grid-template-columns: auto minmax(90px, 1fr);
   gap: 6px;
   align-items: center;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -173,7 +173,7 @@ const unknownDepthLabel = (mb: number) => (mb === -1 ? t('unknown.auto') : t('un
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 

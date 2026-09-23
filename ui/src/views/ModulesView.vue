@@ -900,7 +900,7 @@ onMounted(() => {
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -923,7 +923,7 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-tertiary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
 }
@@ -961,7 +961,7 @@ onMounted(() => {
   padding: 24px;
   border: 1px dashed var(--border);
   border-radius: 6px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   text-align: center;
 }
 
@@ -1046,13 +1046,13 @@ onMounted(() => {
 .module-detail {
   margin: 8px 0 0;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .module-path {
   margin: 6px 0 0;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Consolas', monospace;
   word-break: break-all;
 }
@@ -1091,7 +1091,7 @@ onMounted(() => {
 
 .diag-result .attempt-count {
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin: 0 0 4px;
   font-weight: 600;
 }
@@ -1210,7 +1210,7 @@ onMounted(() => {
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   font-size: 11px;
   white-space: pre-wrap;

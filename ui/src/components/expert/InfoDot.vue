@@ -101,7 +101,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 50%;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
@@ -149,7 +149,7 @@ onBeforeUnmount(() => {
 
 .info-dot-free {
   margin: 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
 
 .info-dot-rows dd {
   margin: 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -200,7 +200,7 @@ onBeforeUnmount(() => {
 
 .info-dot-example p {
   margin: 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
 }

@@ -168,7 +168,7 @@ const riskLabels: Record<string, string> = {
 
 .tool-stat-cell span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -181,7 +181,7 @@ const riskLabels: Record<string, string> = {
 .tool-stat-cell em {
   display: block;
   margin-top: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   font-style: normal;
   line-height: 1.4;
@@ -201,7 +201,7 @@ const riskLabels: Record<string, string> = {
 
 .tools-details {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -274,7 +274,7 @@ const riskLabels: Record<string, string> = {
 }
 
 .tool-risk {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -285,8 +285,8 @@ const riskLabels: Record<string, string> = {
 }
 
 .tool-note {
-  color: var(--text-dim);
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-style: italic;
   line-height: 1.4;
 }

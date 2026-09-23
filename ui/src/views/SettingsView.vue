@@ -505,7 +505,7 @@ async function saveAll() {
 
 .panel-title span,
 .empty-line {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -584,7 +584,7 @@ async function saveAll() {
 .bookmark-row span,
 .audit-row span {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -620,7 +620,7 @@ async function saveAll() {
 .import-preview span {
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   padding: 4px 8px;
 }
@@ -653,7 +653,7 @@ async function saveAll() {
 
 .template-row span {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -675,7 +675,7 @@ async function saveAll() {
   min-height: 28px;
   padding: 5px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -716,7 +716,7 @@ async function saveAll() {
 
 .header p {
   margin-top: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -766,7 +766,7 @@ async function saveAll() {
 .toggle-row span,
 .hint,
 .status-line {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -800,7 +800,7 @@ async function saveAll() {
 }
 
 .input::placeholder {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .input:focus {
@@ -886,7 +886,7 @@ async function saveAll() {
 .runtime-cell span,
 .path-row span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -904,7 +904,7 @@ async function saveAll() {
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
@@ -960,13 +960,13 @@ async function saveAll() {
 
 .model-candidates {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .embedded-agent-list {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1004,7 +1004,7 @@ async function saveAll() {
 }
 
 .dim-text {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .ping-line {
@@ -1095,7 +1095,7 @@ async function saveAll() {
 
 .kernel-learning-head span,
 .kernel-learning-step span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1155,7 +1155,7 @@ async function saveAll() {
 
 .debug-head span,
 .debug-row p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -1241,7 +1241,7 @@ code {
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-decoration: none;
 }

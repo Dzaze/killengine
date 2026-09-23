@@ -110,7 +110,7 @@ function formatNumber(n: unknown) {
   text-align: left;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-weight: 600;
 }
 
@@ -134,7 +134,7 @@ function formatNumber(n: unknown) {
 }
 
 .no-module {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .empty-state,
@@ -149,7 +149,7 @@ function formatNumber(n: unknown) {
 }
 
 .cancelled-state {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-style: italic;
 }
 </style>

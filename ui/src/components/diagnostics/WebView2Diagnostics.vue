@@ -109,7 +109,7 @@ const store = useAppStore()
 
 .panel-title span,
 .empty-line {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -188,7 +188,7 @@ const store = useAppStore()
 .bookmark-row span,
 .audit-row span {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -224,7 +224,7 @@ const store = useAppStore()
 .import-preview span {
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   padding: 4px 8px;
 }
@@ -257,7 +257,7 @@ const store = useAppStore()
 
 .template-row span {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -279,7 +279,7 @@ const store = useAppStore()
   min-height: 28px;
   padding: 5px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -320,7 +320,7 @@ const store = useAppStore()
 
 .header p {
   margin-top: 4px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -370,7 +370,7 @@ const store = useAppStore()
 .toggle-row span,
 .hint,
 .status-line {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -404,7 +404,7 @@ const store = useAppStore()
 }
 
 .input::placeholder {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .input:focus {
@@ -490,7 +490,7 @@ const store = useAppStore()
 .runtime-cell span,
 .path-row span {
   display: block;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -508,7 +508,7 @@ const store = useAppStore()
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
@@ -564,13 +564,13 @@ const store = useAppStore()
 
 .model-candidates {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .embedded-agent-list {
   margin-top: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -608,7 +608,7 @@ const store = useAppStore()
 }
 
 .dim-text {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .ping-line {
@@ -699,7 +699,7 @@ const store = useAppStore()
 
 .kernel-learning-head span,
 .kernel-learning-step span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -759,7 +759,7 @@ const store = useAppStore()
 
 .debug-head span,
 .debug-row p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 

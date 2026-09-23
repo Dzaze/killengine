@@ -151,7 +151,7 @@ onMounted(() => {
 }
 
 .header p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
@@ -173,7 +173,7 @@ onMounted(() => {
   gap: 20px;
   padding: 14px;
   margin-bottom: 14px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .status-band .error {
@@ -192,7 +192,7 @@ onMounted(() => {
 }
 
 .slider-label {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   width: 32px;
 }
@@ -228,7 +228,7 @@ onMounted(() => {
 }
 
 .hint {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 </style>

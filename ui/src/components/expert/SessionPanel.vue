@@ -252,7 +252,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
 <style scoped>
 .session-empty {
   padding: 10px 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -261,7 +261,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -281,7 +281,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
   border-radius: 6px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   transition: border-color 0.1s ease, background-color 0.1s ease;
 }
@@ -351,7 +351,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   cursor: grab;
 }
@@ -409,7 +409,7 @@ function handleGroupDrop(event: DragEvent, groupId: string) {
 
 .session-warning {
   color: var(--warning);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 

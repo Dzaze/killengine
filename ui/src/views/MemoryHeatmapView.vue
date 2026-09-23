@@ -233,7 +233,7 @@ onUnmounted(() => {
 }
 
 .header p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
@@ -275,7 +275,7 @@ onUnmounted(() => {
 
 .field-row label {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .field-row input,
@@ -319,7 +319,7 @@ onUnmounted(() => {
 
 .stat-label {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .stat-value {
@@ -340,7 +340,7 @@ table {
 
 th {
   text-align: left;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-weight: 500;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
@@ -383,7 +383,7 @@ td {
 }
 
 .empty-hint {
-  color: var(--text-dim);
+  color: var(--text-muted);
   text-align: center;
 }
 </style>

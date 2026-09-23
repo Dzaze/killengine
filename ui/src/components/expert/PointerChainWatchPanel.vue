@@ -91,8 +91,8 @@ async function addManualExpression() {
 
 <style scoped>
 .hint-inline {
-  color: var(--text-dim);
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: normal;
 }
 

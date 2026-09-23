@@ -323,7 +323,7 @@ onMounted(() => {
 }
 
 .header p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
@@ -342,7 +342,7 @@ onMounted(() => {
 }
 
 .hint {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
   margin: 0 0 10px 0;
 }
@@ -361,7 +361,7 @@ onMounted(() => {
 
 .stat-label {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .stat-value {
@@ -380,7 +380,7 @@ onMounted(() => {
 
 .field-row label {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .field-row input,
@@ -408,7 +408,7 @@ onMounted(() => {
 }
 
 .result-box .k {
-  color: var(--text-dim);
+  color: var(--text-muted);
   min-width: 110px;
 }
 
@@ -474,7 +474,7 @@ table {
 
 th {
   text-align: left;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-weight: 500;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);

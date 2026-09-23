@@ -444,7 +444,7 @@ watch(() => store.isAttached, (attached) => {
 }
 
 .header p {
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
@@ -492,13 +492,13 @@ watch(() => store.isAttached, (attached) => {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-tertiary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .last-refresh {
   margin-left: auto;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .filter-bar {
@@ -533,7 +533,7 @@ watch(() => store.isAttached, (attached) => {
   text-align: left;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
@@ -552,14 +552,14 @@ watch(() => store.isAttached, (attached) => {
 .empty-table {
   padding: 16px;
   text-align: center;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .table-footer {
   margin-top: 8px;
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 12px;
+  color: var(--text-muted);
   text-align: right;
 }
 
@@ -579,8 +579,8 @@ watch(() => store.isAttached, (attached) => {
 }
 
 .state-timewait {
-  color: var(--text-dim);
-  border-color: color-mix(in srgb, var(--text-dim) 50%, var(--border));
+  color: var(--text-muted);
+  border-color: color-mix(in srgb, var(--text-muted) 50%, var(--border));
 }
 
 .state-closewait {
@@ -599,7 +599,7 @@ watch(() => store.isAttached, (attached) => {
 }
 
 .state-other {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 /* Cellules du tableau connexions */
@@ -619,20 +619,20 @@ watch(() => store.isAttached, (attached) => {
 
 .hostname-ip {
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-left: 4px;
 }
 
 .no-host {
   font-family: 'Consolas', monospace;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .addr-cell {
   font-family: 'Consolas', monospace;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 /* Cellules du tableau DLL */
@@ -652,7 +652,7 @@ watch(() => store.isAttached, (attached) => {
 .path-cell {
   font-family: 'Consolas', monospace;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   word-break: break-all;
 }
 
@@ -722,7 +722,7 @@ watch(() => store.isAttached, (attached) => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--text-dim);
+  background: var(--text-muted);
 }
 
 .status-dot.active {
@@ -846,7 +846,7 @@ watch(() => store.isAttached, (attached) => {
 
 .dns-ip {
   font-family: 'Consolas', monospace;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 /* Existing block panel */
@@ -857,7 +857,7 @@ watch(() => store.isAttached, (attached) => {
 }
 
 .hint {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 

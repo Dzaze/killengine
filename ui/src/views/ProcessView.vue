@@ -335,7 +335,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 13px;
   white-space: nowrap;
 }
@@ -389,13 +389,13 @@ watch(
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .proc-path {
   margin-top: 2px;
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -404,7 +404,7 @@ watch(
 .empty {
   padding: 40px;
   text-align: center;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .empty.error {
@@ -444,7 +444,7 @@ watch(
 
 .attach-summary small,
 .access-mode-hint {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -475,7 +475,7 @@ watch(
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-primary);
-  color: var(--text-dim);
+  color: var(--text-muted);
   text-align: left;
   cursor: pointer;
 }
@@ -535,7 +535,7 @@ watch(
 }
 
 .module-header span {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -575,7 +575,7 @@ watch(
 
 .module-path {
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
