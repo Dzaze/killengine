@@ -304,4 +304,67 @@ double scanBytesToDouble(const QByteArray& bytes, ValueType type) {
     return 0.0;
 }
 
+QString scanBytesToExactString(const QByteArray& bytes, ValueType type) {
+    if (bytes.size() < static_cast<qsizetype>(valueTypeSize(type))) {
+        return QString();
+    }
+    switch (type) {
+        case ValueType::Int8: {
+            int8_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return QString::number(static_cast<qint64>(value));
+        }
+        case ValueType::UInt8: {
+            uint8_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return QString::number(static_cast<quint64>(value));
+        }
+        case ValueType::Int16: {
+            int16_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return QString::number(static_cast<qint64>(value));
+        }
+        case ValueType::UInt16: {
+            uint16_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return QString::number(static_cast<quint64>(value));
+        }
+        case ValueType::Int32: {
+            int32_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return QString::number(static_cast<qint64>(value));
+        }
+        case ValueType::UInt32: {
+            uint32_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return QString::number(static_cast<quint64>(value));
+        }
+        case ValueType::Int64: {
+            int64_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return QString::number(static_cast<qint64>(value));
+        }
+        case ValueType::UInt64: {
+            uint64_t value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            return QString::number(static_cast<quint64>(value));
+        }
+        case ValueType::Float32: {
+            float value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            if (std::isnan(value)) return QStringLiteral("NaN");
+            if (std::isinf(value)) return value > 0 ? QStringLiteral("Inf") : QStringLiteral("-Inf");
+            return QString::number(static_cast<double>(value), 'g', 17);
+        }
+        case ValueType::Float64: {
+            double value = 0;
+            std::memcpy(&value, bytes.constData(), sizeof(value));
+            if (std::isnan(value)) return QStringLiteral("NaN");
+            if (std::isinf(value)) return value > 0 ? QStringLiteral("Inf") : QStringLiteral("-Inf");
+            return QString::number(value, 'g', 17);
+        }
+    }
+    return QString();
+}
+
 } // namespace killcore

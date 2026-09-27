@@ -6,6 +6,31 @@
       :how="$t('memoryTimeline.intro.how')"
     />
 
+    <!-- UX-PRODUIT-16 : bascule locale (aucun composant d'onglets partagé
+         trouvé dans le dépôt -- motif le plus simple compatible avec la
+         structure à sections séquentielles déjà en place ici). -->
+    <div class="local-tab-switch">
+      <button
+        type="button"
+        class="btn btn-secondary compact"
+        :class="{ active: activeLocalTab === 'main' }"
+        @click="activeLocalTab = 'main'"
+      >
+        {{ $t('memoryTimeline.tabs.main') }}
+      </button>
+      <button
+        type="button"
+        class="btn btn-secondary compact"
+        :class="{ active: activeLocalTab === 'compare' }"
+        @click="activeLocalTab = 'compare'"
+      >
+        {{ $t('memoryTimeline.tabs.compare') }}
+      </button>
+    </div>
+
+    <CandidateComparisonPanel v-if="activeLocalTab === 'compare'" />
+
+    <div v-show="activeLocalTab === 'main'">
     <!-- Configuration Panel -->
     <div class="config-panel">
       <h3>{{ $t('memoryTimeline.config.title') }}</h3>
@@ -190,6 +215,7 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
@@ -197,10 +223,18 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
+import { useCandidateComparisonStore } from '../stores/candidateComparison'
 import PanelIntro from '../components/common/PanelIntro.vue'
+import CandidateComparisonPanel from '../components/timeline/CandidateComparisonPanel.vue'
 
 const store = useAppStore()
 const { t } = useI18n()
+
+// UX-PRODUIT-16 : ouvre directement l'onglet Comparer si une sélection est
+// déjà en attente (CandidatePanel/ExpertView Trace UI string/WatchLivePanel
+// naviguent ici après avoir appelé stageSeriesFromSelection()).
+const candidateComparisonStore = useCandidateComparisonStore()
+const activeLocalTab = ref<'main' | 'compare'>(candidateComparisonStore.pendingSeries.length > 0 ? 'compare' : 'main')
 
 // State
 const config = ref({

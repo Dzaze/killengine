@@ -1,0 +1,56 @@
+{
+  "_comment": "UX-PRODUIT-14A (docs/PHASE_TRACKER.md) -- exceptions unitaires motivées au contrôle de contrat backend (scripts/test-backend-contract.mjs). Chaque entrée doit avoir une raison réelle, vérifiée dans le code au moment de l'ajout (grep ui/src/ + emit sites C++), pas un motif générique. Revérifier une exception si le nom réapparaît dans un contexte différent lors d'un futur run.",
+
+  "missingTs": [
+    { "name": "version", "kind": "property", "reason": "Q_PROPERTY non utilisée par le frontend Vue -- getVersion() (Q_INVOKABLE, déjà en TS + mock) est le chemin réellement emprunté (app.ts:2554). Aucun usage de controller.version trouvé dans ui/src/." },
+
+    { "name": "findWhatAccesses", "kind": "method", "reason": "Supersédée par findWhatAccessesAsync (déjà en TS, sans mock -- voir missingMock). Seuls des usages i18n (libellés findWhatAccesses.*) existent côté UI, aucun appel au backend sous ce nom exact." },
+    { "name": "startInProcessExecuteWatch", "kind": "method", "reason": "Supersédée par startInProcessExecuteWatchAsync (déjà en TS + mocké, backend.ts:1730/3068). Aucun appel au variant synchrone trouvé dans ui/src/." },
+
+    { "name": "callVueStoreAction", "kind": "method", "reason": "Pont interne C++ -> Vue (PHASE 119, application_controller.h:1601-1607) : appelé PAR le C++ (scripts Lua whitelistés) sur la page Vue, jamais appelé PAR le frontend sur lui-même. N'a pas sa place dans BackendController (qui décrit les appels frontend -> backend)." },
+
+    { "name": "listModuleExports", "kind": "method", "reason": "Aucun usage dans ui/src/ -- outil bas niveau accessible via le pipe d'automatisation (réflexion QMetaMethod générique, voir AGENTS.md \"le pipe d'automatisation est le canal de contrôle universel\") sans wrapper Vue dédié à ce jour." },
+    { "name": "scanMemoryWindow", "kind": "method", "reason": "Idem listModuleExports : aucun usage ui/src/, accessible pipe/Lua uniquement à ce jour." },
+    { "name": "readUiAutomationTree", "kind": "method", "reason": "Idem : aucun usage ui/src/, accessible pipe/Lua uniquement à ce jour (UI Automation, cibles tierces -- voir PHASE199_AUTHORIZED_THIRD_PARTY_SMOKE_PASS)." },
+
+    { "name": "captureProfilerCheckpoint", "kind": "method", "reason": "Cluster External Tool Profiler (EXTMOD-2) : aucun usage ui/src/ pour ce sous-ensemble checkpoint/diff/timeline. Capacité backend complète mais non wirée à une vue Vue dédiée à ce jour -- accessible pipe/Lua." },
+    { "name": "getProfilerDiff", "kind": "method", "reason": "Voir captureProfilerCheckpoint -- même cluster External Tool Profiler non wiré." },
+    { "name": "listProfilerCheckpoints", "kind": "method", "reason": "Voir captureProfilerCheckpoint -- même cluster." },
+    { "name": "clearProfilerSession", "kind": "method", "reason": "Voir captureProfilerCheckpoint -- même cluster." },
+    { "name": "recordProfilerTimelineStep", "kind": "method", "reason": "Voir captureProfilerCheckpoint -- même cluster." },
+    { "name": "getProfilerTimelineSummary", "kind": "method", "reason": "Voir captureProfilerCheckpoint -- même cluster." },
+    { "name": "clearProfilerTimeline", "kind": "method", "reason": "Voir captureProfilerCheckpoint -- même cluster." },
+
+    { "name": "recordLearningSession", "kind": "method", "reason": "Cluster Pattern Learning avancé (tracking/clustering/session) : aucun usage ui/src/. Le sous-ensemble suggestions de base (getTopPatternSuggestions, suggestPatternValueTypes...) EST wiré (voir missingMock) ; ce sous-ensemble avancé ne l'est pas encore." },
+    { "name": "getPatternValueTypeSuccessRate", "kind": "method", "reason": "Voir recordLearningSession -- même cluster avancé non wiré." },
+    { "name": "clusterPatternAddresses", "kind": "method", "reason": "Voir recordLearningSession -- même cluster avancé non wiré." },
+    { "name": "startPatternTracking", "kind": "method", "reason": "Voir recordLearningSession -- même cluster avancé non wiré." },
+    { "name": "stopPatternTracking", "kind": "method", "reason": "Voir recordLearningSession -- même cluster avancé non wiré." },
+    { "name": "recordPatternTrackingValue", "kind": "method", "reason": "Voir recordLearningSession -- même cluster avancé non wiré." },
+    { "name": "getPatternTrackingAnalysis", "kind": "method", "reason": "Voir recordLearningSession -- même cluster avancé non wiré." },
+    { "name": "analyzePatternCandidates", "kind": "method", "reason": "Voir recordLearningSession -- même cluster avancé non wiré." },
+    { "name": "patternLearningEngineDetected", "kind": "signal", "reason": "Signal du cluster Pattern Learning avancé -- vérifié : AUCUN site d'emit trouvé dans apps/desktop/*.cpp (code mort des deux côtés, pas juste non wiré côté TS). Non corrigé dans cette passe 14A (hors périmètre : suppression de code mort ≠ vérification de contrat)." },
+    { "name": "patternLearningClassified", "kind": "signal", "reason": "Voir patternLearningEngineDetected -- même constat, aucun emit trouvé." },
+    { "name": "patternLearningSuggestionReady", "kind": "signal", "reason": "Voir patternLearningEngineDetected -- même constat, aucun emit trouvé." },
+    { "name": "patternLearningTrackingUpdated", "kind": "signal", "reason": "Voir patternLearningEngineDetected -- même constat, aucun emit trouvé." },
+
+    { "name": "startInProcessBreakpointWatchAsync", "kind": "method", "reason": "Breakpoint matériel in-process (DR0-DR7, voir AGENTS.md/POWER_UP_ROADMAP section F) : capacité backend réelle et émise (inProcessBreakpointWatchFinished a un vrai site d'emit), mais aucun usage ui/src/ -- accessible pipe/Lua uniquement à ce jour." },
+    { "name": "cancelInProcessBreakpointWatch", "kind": "method", "reason": "Voir startInProcessBreakpointWatchAsync -- même cluster." },
+    { "name": "startInProcessBreakpointFreezeAsync", "kind": "method", "reason": "Voir startInProcessBreakpointWatchAsync -- même cluster (freeze via breakpoint in-process)." },
+    { "name": "stopInProcessBreakpointFreezeAsync", "kind": "method", "reason": "Voir startInProcessBreakpointWatchAsync -- même cluster." },
+    { "name": "getInProcessBreakpointFreezeStats", "kind": "method", "reason": "Voir startInProcessBreakpointWatchAsync -- même cluster." },
+    { "name": "inProcessBreakpointWatchFinished", "kind": "signal", "reason": "Émis réellement (application_controller.cpp:1509, via startInProcessBreakpointWatchAsync) mais sans consommateur ui/src/ -- accessible pipe/Lua uniquement à ce jour." },
+    { "name": "inProcessBreakpointFreezeStartFinished", "kind": "signal", "reason": "Vérifié : aucun site d'emit trouvé (code mort, contrairement à inProcessBreakpointWatchFinished qui, lui, est réellement émis). Non corrigé dans cette passe 14A." },
+    { "name": "inProcessBreakpointFreezeStopFinished", "kind": "signal", "reason": "Voir inProcessBreakpointFreezeStartFinished -- même constat, aucun emit trouvé." },
+
+    { "name": "aiMessage", "kind": "signal", "reason": "Vérifié : aucun site d'emit dans apps/desktop/*.cpp -- signal déclaré mais jamais utilisé des deux côtés (code mort). Non corrigé dans cette passe 14A (hors périmètre : suppression de code mort ≠ vérification de contrat)." },
+    { "name": "targetConfidenceChanged", "kind": "signal", "reason": "Voir aiMessage -- même constat, aucun emit trouvé." },
+    { "name": "targetFound", "kind": "signal", "reason": "Voir aiMessage -- même constat, aucun emit trouvé." },
+    { "name": "processExited", "kind": "signal", "reason": "Voir aiMessage -- même constat, aucun emit trouvé. Note produit : un signal de ce nom serait utile (prévenir l'utilisateur que la cible attachée s'est fermée) -- candidat pour un futur chantier, pas fixé ici." },
+
+    { "name": "errorOccurred", "kind": "signal", "reason": "GAP RÉEL NON RÉSOLU, documenté honnêtement plutôt que masqué : ce signal EST émis activement à de nombreux endroits réels de application_controller.cpp (erreurs d'attache, d'écriture, etc.) mais AUCUN listener n'existe dans ui/src/ (grep vérifié sur app.ts et App.vue). Les erreurs émises par ce canal n'atteignent donc aujourd'hui aucune UI. Hors périmètre de correction pour 14A (décision UX nécessaire : toast ? bannière dédiée ? fusion avec le journal d'actions ?) -- à traiter dans un chantier dédié, pas silencieusement classé \"non pertinent\"." }
+  ],
+
+  "missingBackend": [],
+  "incompatible": []
+}

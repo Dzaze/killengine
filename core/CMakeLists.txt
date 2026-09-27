@@ -51,6 +51,12 @@ add_library(killcore STATIC
     process/package_storage.h
     process/package_storage.cpp
 
+    # UX-PRODUIT-15 -- Job Object Windows (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE),
+    # nécessaire pour qu'un enfant de session tutoriel ne survive jamais
+    # orphelin à un parent tué/crashé.
+    process/job_object.h
+    process/job_object.cpp
+
     # PHASE 93 — Surveillance native (ReadDirectoryChangesW) d'un fichier de
     # sauvegarde/état, remplace l'usage manuel de Process Monitor de PHASE 90.
     process/file_watch.h
@@ -229,6 +235,22 @@ add_library(killcore STATIC
     visualization/memory_timeline_analyzer.h
     visualization/memory_timeline_analyzer.cpp
 
+    # UX-PRODUIT-16 — Comparateur visuel de 2 à 6 candidats : décodage
+    # numérique typé (16A) puis capture par tour de lecture commun (16B),
+    # séparés de Memory Timeline ci-dessus (motif similaire, concept de tour/
+    # batchId absent de MemoryTimelineCollector).
+    visualization/candidate_comparison_decoder.h
+    visualization/candidate_comparison_decoder.cpp
+    visualization/candidate_comparison_collector.h
+    visualization/candidate_comparison_collector.cpp
+
+    # UX-PRODUIT-17 — Rapport de problème reproductible : assembleur pur
+    # (rédaction, bornes, pagination, hash) réutilisé par
+    # apps/desktop/settings_diagnostics_manager.* pour le flux Préparer/
+    # Aperçu/Exporter.
+    diagnostics/diagnostic_report_builder.h
+    diagnostics/diagnostic_report_builder.cpp
+
     # PROPOSITIONS-1 #4 — Live Lua REPL : protocole stdin/stdout pur entre
     # LuaReplManager (apps/desktop) et scripts/killengine_repl_driver.lua
     scripting/lua_repl_protocol.h
@@ -248,6 +270,17 @@ add_library(killcore STATIC
     pattern_learning/game_profile_database.cpp
     pattern_learning/pattern_learning_engine.h
     pattern_learning/pattern_learning_engine.cpp
+
+    # UX-PRODUIT-12 — Centre d'activité permanent : registre pur des opérations
+    # en cours/terminées (scans, Timeline, Lua, installations, surveillance de
+    # fichier). Voir apps/desktop/activity_manager.* pour la glue Qt/signal.
+    activity/activity_registry.h
+    activity/activity_registry.cpp
+
+    # UX-PRODUIT-13 — Historique automatique et récupération du workspace :
+    # registre de révisions immuables sur disque portable (data/workspace-history/).
+    workspace/workspace_revision_store.h
+    workspace/workspace_revision_store.cpp
 )
 
 target_include_directories(killcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -4,6 +4,7 @@
 #include <thread>
 #include <atomic>
 #include <algorithm>
+#include <condition_variable>
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>
@@ -21,10 +22,22 @@ public:
     std::atomic<bool> m_shouldStop{false};
     std::thread m_collectionThread;
     void* m_processHandle{nullptr};
-    
+
+    // UX-PRODUIT-12 -- attente interruptible (voir collectionLoop) : mutex/cv
+    // dédiés, distincts de m_mutex (qui protège les séries), pour ne jamais
+    // bloquer une lecture (getSeries/watchedAddresses/currentStats) pendant
+    // tout un intervalle de sampling.
+    std::mutex m_stopMutex;
+    std::condition_variable m_stopCv;
+    std::atomic<int> m_stopReason{static_cast<int>(TimelineStopReason::UserStop)};
+    // Compteur incrémental du nombre de points stockés, toutes séries
+    // confondues -- évite à currentStats()/totalStoredPointCount() de copier
+    // getSeries() en entier juste pour sommer des tailles.
+    std::atomic<int> m_totalStoredPoints{0};
+
     ProgressCallback m_progressCallback;
     DataCallback m_dataCallback;
-    
+
     std::chrono::steady_clock::time_point m_startTime;
 
     void collectionLoop() {
@@ -44,6 +57,7 @@ public:
             
             if (static_cast<uint32_t>(elapsed) >= m_config.maxDurationMs) {
                 KE_LOG_INFO() << "Timeline collector: max duration reached";
+                m_stopReason.store(static_cast<int>(TimelineStopReason::DurationReached));
                 break;
             }
             
@@ -58,10 +72,18 @@ public:
             auto elapsedInLoop = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - loopStart).count();
             
-            int32_t sleepMs = static_cast<int32_t>(m_config.samplingIntervalMs) - 
+            int32_t sleepMs = static_cast<int32_t>(m_config.samplingIntervalMs) -
                              static_cast<int32_t>(elapsedInLoop);
             if (sleepMs > 0) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+                // Attente interruptible (UX-PRODUIT-12) : stopCollection() peut
+                // notifier m_stopCv immédiatement après avoir posé m_shouldStop,
+                // au lieu de laisser un sleep_for bloquer jusqu'à un intervalle
+                // entier (jusqu'à ~5s documenté) avant que la boucle ne le
+                // remarque. Mutex dédié (pas m_mutex) pour ne pas bloquer les
+                // lectures pendant l'attente.
+                std::unique_lock<std::mutex> stopLock(m_stopMutex);
+                m_stopCv.wait_for(stopLock, std::chrono::milliseconds(sleepMs),
+                                   [this] { return m_shouldStop.load(); });
             }
         }
         
@@ -120,12 +142,19 @@ public:
             }
             
             if (shouldStore) {
-                // Limiter le nombre de points
+                // Limiter le nombre de points. Compteur incrémental
+                // (totalStoredPointCount) : un trim (erase+push) est neutre en
+                // taille nette, seul un push sans trim ajoute réellement un point.
+                bool trimmed = false;
                 if (series.points.size() >= m_config.maxPointsPerSeries) {
                     series.points.erase(series.points.begin());
+                    trimmed = true;
                 }
                 series.points.push_back(point);
-                
+                if (!trimmed) {
+                    m_totalStoredPoints.fetch_add(1, std::memory_order_relaxed);
+                }
+
                 // Mettre à jour les statistiques
                 if (m_config.calculateStatistics) {
                     updateStatistics(series);
@@ -204,13 +233,19 @@ void MemoryTimelineCollector::addAddress(uint64_t address, size_t valueSize) {
 void MemoryTimelineCollector::removeAddress(uint64_t address) {
     std::lock_guard<std::mutex> lock(m_impl->m_mutex);
     m_impl->m_addressSizes.erase(address);
-    m_impl->m_series.erase(address);
+    auto it = m_impl->m_series.find(address);
+    if (it != m_impl->m_series.end()) {
+        m_impl->m_totalStoredPoints.fetch_sub(
+            static_cast<int>(it->second.points.size()), std::memory_order_relaxed);
+        m_impl->m_series.erase(it);
+    }
 }
 
 void MemoryTimelineCollector::clearAddresses() {
     std::lock_guard<std::mutex> lock(m_impl->m_mutex);
     m_impl->m_addressSizes.clear();
     m_impl->m_series.clear();
+    m_impl->m_totalStoredPoints.store(0, std::memory_order_relaxed);
 }
 
 std::vector<uint64_t> MemoryTimelineCollector::watchedAddresses() const {
@@ -255,6 +290,10 @@ bool MemoryTimelineCollector::startCollection(void* processHandle) {
     m_impl->m_processHandle = processHandle;
     m_impl->m_shouldStop.store(false);
     m_impl->m_collecting.store(true);
+    // Reset : une DurationReached d'une collecte précédente ne doit pas fuiter
+    // dans ce nouveau run tant que sa propre boucle n'a pas décidé de sa
+    // propre raison de fin.
+    m_impl->m_stopReason.store(static_cast<int>(TimelineStopReason::UserStop));
 
     m_impl->m_collectionThread = std::thread(&Impl::collectionLoop, m_impl.get());
     
@@ -272,6 +311,7 @@ void MemoryTimelineCollector::stopCollection() {
     // std::thread encore joinable appelle std::terminate(). Toujours tenter
     // le join si joinable, peu importe l'état de m_collecting.
     m_impl->m_shouldStop.store(true);
+    m_impl->m_stopCv.notify_one();
 
     if (m_impl->m_collectionThread.joinable()) {
         m_impl->m_collectionThread.join();
@@ -283,6 +323,15 @@ void MemoryTimelineCollector::stopCollection() {
 
 bool MemoryTimelineCollector::isCollecting() const {
     return m_impl->m_collecting.load();
+}
+
+TimelineStopReason MemoryTimelineCollector::lastStopReason() const {
+    return static_cast<TimelineStopReason>(m_impl->m_stopReason.load());
+}
+
+size_t MemoryTimelineCollector::totalStoredPointCount() const {
+    const int count = m_impl->m_totalStoredPoints.load(std::memory_order_relaxed);
+    return count > 0 ? static_cast<size_t>(count) : 0;
 }
 
 void MemoryTimelineCollector::setProgressCallback(ProgressCallback callback) {

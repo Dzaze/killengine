@@ -160,6 +160,10 @@ message(STATUS "============================================")
 add_subdirectory(core)
 add_subdirectory(ai)
 add_subdirectory(apps/desktop)
+# UX-PRODUIT-15 -- cible démo du tutoriel : toujours construite (comme
+# apps/desktop), jamais gated par KILLENGINE_BUILD_TESTS contrairement à
+# KillEngineTestTarget (tests/), puisqu'elle doit être distribuée.
+add_subdirectory(apps/demo)
 
 if(KILLENGINE_BUILD_TESTS)
     add_subdirectory(tests)

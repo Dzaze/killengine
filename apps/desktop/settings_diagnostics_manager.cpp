@@ -24,10 +24,14 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcessEnvironment>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QSettings>
 #include <QSet>
 #include <QStandardPaths>
+#include <QSysInfo>
 #include <QUrl>
+#include <QUuid>
 #include <QVector>
 #include <QtGlobal>
 
@@ -57,6 +61,68 @@ int unknownSnapshotMaxMbFromSettings() {
     QSettings settings;
     const int mb = boundedSettingInt(settings, "scan/unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb, -1, 32768);
     return mb == -1 ? -1 : std::max(mb, kDefaultUnknownSnapshotMaxMb);
+}
+
+// UX-PRODUIT-17 -- même motif borné/tail-safe que getLogTail() (2 Mio, garde
+// la dernière ligne partielle hors résultat) mais réutilisable pour un
+// fichier arbitraire (scan_telemetry.jsonl) sans dupliquer getLogTail()
+// lui-même, qui a sa propre signature Q_INVOKABLE/QVariantMap à conserver
+// intacte pour compatibilité pipe/TS.
+QString readTailLinesFromFile(const QString& path, int maxLines) {
+    QFile file(path);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return QString();
+    }
+    constexpr qint64 kMaxTailBytes = 2 * 1024 * 1024;
+    if (file.size() > kMaxTailBytes) {
+        file.seek(file.size() - kMaxTailBytes);
+        file.readLine();
+    }
+    QList<QByteArray> tail;
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        tail.append(line);
+        if (tail.size() > maxLines) {
+            tail.removeFirst();
+        }
+    }
+    QStringList lines;
+    lines.reserve(tail.size());
+    for (const auto& line : tail) {
+        lines.append(QString::fromUtf8(line));
+    }
+    return lines.join('\n');
+}
+
+// Noms de fichiers content-hachés par Vite référencés par le index.html
+// réellement chargé (ex. "assets/index-BrsHc4Q4.js") -- sert d'empreinte
+// pragmatique de bundle UI en l'absence d'un vrai manifeste de build généré
+// séparément (docs/PHASE_TRACKER.md #ux-produit-17, décision de conception 1).
+QStringList parseUiAssetReferences(const QString& indexHtmlPath) {
+    QStringList result;
+    QFile file(indexHtmlPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return result;
+    }
+    // Borne fixe large : un index.html Vite ne devrait jamais approcher 256 Kio.
+    const QString html = QString::fromUtf8(file.read(256 * 1024));
+    // Vite préfixe généralement d'un "./" (ex. "./assets/index-BrsHc4Q4.js") --
+    // capture "assets/..." où qu'il apparaisse dans la valeur entre guillemets,
+    // pas seulement juste après le guillemet ouvrant.
+    static const QRegularExpression pattern(QStringLiteral(R"(["'][^"']*(assets/[^"']+)["'])"));
+    auto it = pattern.globalMatch(html);
+    QSet<QString> seen;
+    while (it.hasNext()) {
+        const QString rel = it.next().captured(1);
+        if (!seen.contains(rel)) {
+            seen.insert(rel);
+            result.append(rel);
+        }
+    }
+    return result;
 }
 
 size_t candidateFileBackedThresholdFromSettings() {
@@ -765,8 +831,16 @@ QVariantMap SettingsDiagnosticsManager::getLogTail(int maxLines) const {
 }
 
 QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
-    QVariantMap result;
-    result["success"] = false;
+    // UX-PRODUIT-17 -- conservé sans argument pour compatibilité pipe/TS,
+    // mais passe désormais par le même assembleur borné/rédigé que
+    // prepareDiagnosticReport (options par défaut : récit vide, sections
+    // additionnelles désactivées) et écrit via QSaveFile avec vérification du
+    // nombre d'octets réellement écrits -- l'ancien code ne le faisait pas
+    // (voir docs/PHASE_TRACKER.md #ux-produit-17, diagnostic de départ).
+    const QVariantMap prepareResult = prepareDiagnosticReport(QVariantMap());
+    if (prepareResult.value("success").toBool() != true) {
+        return prepareResult;
+    }
 
     const QString exportDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation).isEmpty()
         ? QDir::currentPath()
@@ -774,89 +848,14 @@ QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
     const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
     const QString exportPath = QDir(exportDir).filePath("KillEngine-diagnostics-" + timestamp + ".kezdiag");
 
-    QVariantMap manifest;
-    manifest["createdAt"] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-    manifest["version"] = m_controller.getVersion();
-    manifest["pid"] = m_controller.m_pid;
-    manifest["processName"] = m_controller.m_processName;
-    manifest["attached"] = m_controller.m_attached;
-    const auto& candidateStore = m_controller.scanState().candidates();
-    manifest["candidateCount"] = static_cast<qulonglong>(candidateStore.size());
-    manifest["candidateStoreFileBacked"] = candidateStore.isFileBacked();
-    manifest["candidateStorePath"] = candidateStore.backingFilePath();
-    manifest["candidateStoreBytes"] = static_cast<qulonglong>(candidateStore.storageBytes());
-    manifest["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidateStore.estimatedMemoryBytes());
-    manifest["logFilePath"] = this->getLogFilePath();
-    manifest["smartSearchDebugFilePath"] = this->smartSearchDebugFilePath();
-    manifest["scanTelemetryFilePath"] = this->scanTelemetryFilePath();
-    manifest["crashDirectory"] = CrashHandler::crashDirectory();
-    manifest["settings"] = this->getSettings();
-
-    QDir crashDir(CrashHandler::crashDirectory());
-    const auto crashFiles = crashDir.entryInfoList(QStringList{"*.crash.txt"}, QDir::Files, QDir::Time);
-    // Les .dmp (minidump binaire, WinDbg/Visual Studio) ne rentrent pas dans
-    // ce bundle texte compressé comme les .crash.txt embarqués plus bas —
-    // juste listés dans le manifeste pour que la personne qui traite le
-    // diagnostic sache qu'ils existent et où les récupérer séparément
-    // (chaque .crash.txt référence aussi son .dmp pairé via "minidump=").
-    const auto dumpFiles = crashDir.entryInfoList(QStringList{"*.dmp"}, QDir::Files, QDir::Time);
-    QStringList recentDumpPaths;
-    for (qsizetype i = 0; i < std::min<qsizetype>(dumpFiles.size(), 5); ++i) {
-        recentDumpPaths.append(dumpFiles.at(i).absoluteFilePath());
-    }
-    manifest["recentMinidumps"] = recentDumpPaths;
-
-    QByteArray payload;
-    auto appendSection = [&payload](const QString& name, const QByteArray& data) {
-        payload.append("\n===== ");
-        payload.append(name.toUtf8());
-        payload.append(" =====\n");
-        payload.append(data);
-        if (!payload.endsWith('\n')) {
-            payload.append('\n');
-        }
-    };
-
-    appendSection("manifest.json", QJsonDocument(QJsonObject::fromVariantMap(manifest)).toJson(QJsonDocument::Indented));
-
-    QFile logFile(this->getLogFilePath());
-    if (logFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        appendSection(QFileInfo(logFile).fileName(), logFile.readAll());
-    }
-
-    QFile debugFile(this->smartSearchDebugFilePath());
-    if (debugFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        appendSection(QFileInfo(debugFile).fileName(), debugFile.readAll());
-    }
-
-    QFile scanTelemetryFile(this->scanTelemetryFilePath());
-    if (scanTelemetryFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        appendSection(QFileInfo(scanTelemetryFile).fileName(), scanTelemetryFile.readAll());
-    }
-
-    const qsizetype crashFileCount = std::min<qsizetype>(crashFiles.size(), 5);
-    for (qsizetype i = 0; i < crashFileCount; ++i) {
-        QFile crashFile(crashFiles.at(i).absoluteFilePath());
-        if (crashFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            appendSection("crashes/" + crashFiles.at(i).fileName(), crashFile.readAll());
-        }
-    }
-
-    QFile out(exportPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        result["error"] = KE_TXT("Impossible de créer le fichier diagnostic.", "Unable to create the diagnostic file.");
-        result["path"] = exportPath;
+    QVariantMap result = writeReportToPath(*m_preparedReport, exportPath);
+    if (result.value("success").toBool() != true) {
         return result;
     }
-    out.write(qCompress(payload, 9));
-    out.close();
-
-    result["success"] = true;
-    result["path"] = exportPath;
-    result["bytesWritten"] = static_cast<qulonglong>(QFileInfo(exportPath).size());
     result["error"] = "";
 
-    // Ouvre l'explorateur Windows sur le dossier contenant l'export.
+    // Ouvre l'explorateur Windows sur le dossier contenant l'export (motif
+    // déjà présent avant cette fiche, conservé pour les appelants existants).
     // L'échec de l'ouverture ne doit pas invalider l'export.
     const QString folderPath = QFileInfo(exportPath).absolutePath();
     const bool folderOpened = QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
@@ -869,6 +868,409 @@ QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
     }
 
     return result;
+}
+
+QVariantMap SettingsDiagnosticsManager::prepareDiagnosticReport(const QVariantMap& options) {
+    QVariantMap result;
+
+    const auto stepsBounded = killcore::boundNarrativeField(options.value("steps").toString());
+    if (!stepsBounded.ok) {
+        result["success"] = false;
+        result["error"] = stepsBounded.error;
+        return result;
+    }
+    const auto expectedBounded = killcore::boundNarrativeField(options.value("expected").toString());
+    if (!expectedBounded.ok) {
+        result["success"] = false;
+        result["error"] = expectedBounded.error;
+        return result;
+    }
+    const auto observedBounded = killcore::boundNarrativeField(options.value("observed").toString());
+    if (!observedBounded.ok) {
+        result["success"] = false;
+        result["error"] = observedBounded.error;
+        return result;
+    }
+
+    killcore::DiagnosticNarrative narrative;
+    narrative.steps = stepsBounded.text;
+    narrative.expected = expectedBounded.text;
+    narrative.observed = observedBounded.text;
+
+    // Provenance -- accès direct aux champs privés de m_controller autorisé
+    // par l'amitié déjà en place (application_controller.h).
+    killcore::DiagnosticProvenance provenance;
+    provenance.engineVersion = m_controller.getVersion();
+    provenance.buildId = qEnvironmentVariable("KILLENGINE_BUILD_ID");
+    provenance.executableSha256 = killcore::hashFileBounded(QCoreApplication::applicationFilePath());
+    provenance.uiBundleOrigin = m_controller.m_uiBundleOrigin.isEmpty() ? QStringLiteral("none") : m_controller.m_uiBundleOrigin;
+    provenance.osName = QSysInfo::prettyProductName();
+    provenance.architecture = QSysInfo::currentCpuArchitecture();
+
+    if (m_controller.m_uiIndexHtmlPath.isEmpty() || !QFile::exists(m_controller.m_uiIndexHtmlPath)) {
+        provenance.uiFingerprintStatus = QStringLiteral("unknown");
+    } else {
+        const QStringList assetRefs = parseUiAssetReferences(m_controller.m_uiIndexHtmlPath);
+        const QDir indexDir = QFileInfo(m_controller.m_uiIndexHtmlPath).absoluteDir();
+        bool allPresent = !assetRefs.isEmpty();
+        for (const auto& rel : assetRefs) {
+            if (!QFile::exists(indexDir.filePath(rel))) {
+                allPresent = false;
+                break;
+            }
+        }
+        provenance.uiAssetFiles = assetRefs;
+        provenance.uiFingerprintStatus = assetRefs.isEmpty()
+            ? QStringLiteral("unknown")
+            : (allPresent ? QStringLiteral("matches") : QStringLiteral("changed_on_disk"));
+    }
+
+    // Sections -- lectures bornées côté Qt, le builder pur ne fait aucune E/S.
+    QList<killcore::DiagnosticRawSection> rawSections;
+
+    {
+        QVariantMap session;
+        session["pid"] = m_controller.m_pid;
+        session["processName"] = m_controller.m_processName;
+        session["attached"] = m_controller.m_attached;
+        const auto& candidateStore = m_controller.scanState().candidates();
+        session["candidateCount"] = static_cast<qulonglong>(candidateStore.size());
+        session["candidateStoreFileBacked"] = candidateStore.isFileBacked();
+        session["candidateStorePath"] = candidateStore.backingFilePath();
+        session["candidateStoreBytes"] = static_cast<qulonglong>(candidateStore.storageBytes());
+        session["candidateStoreMemoryBytes"] = static_cast<qulonglong>(candidateStore.estimatedMemoryBytes());
+        session["logFilePath"] = this->getLogFilePath();
+        session["smartSearchDebugFilePath"] = this->smartSearchDebugFilePath();
+        session["scanTelemetryFilePath"] = this->scanTelemetryFilePath();
+        session["crashDirectory"] = CrashHandler::crashDirectory();
+        session["settings"] = this->getSettings();
+
+        killcore::DiagnosticRawSection section;
+        section.id = QStringLiteral("session");
+        section.title = QStringLiteral("session.json");
+        section.content = QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(session)).toJson(QJsonDocument::Indented));
+        rawSections.append(section);
+    }
+
+    {
+        // Toujours inclus -- signal principal d'un rapport de problème.
+        constexpr int kLogTailLines = 500;
+        const QVariantMap tail = this->getLogTail(kLogTailLines);
+        const QVariantList lines = tail.value("lines").toList();
+        QStringList joined;
+        joined.reserve(lines.size());
+        for (const auto& line : lines) {
+            joined.append(line.toString());
+        }
+        killcore::DiagnosticRawSection section;
+        section.id = QStringLiteral("log");
+        section.title = QFileInfo(this->getLogFilePath()).fileName();
+        section.content = joined.join('\n');
+        section.sourceOmittedData = lines.size() >= kLogTailLines;
+        if (section.sourceOmittedData) {
+            section.omissionNote = KE_TXT("Dernières 500 lignes seulement (fichier plus long).",
+                                           "Last 500 lines only (file is longer).");
+        }
+        rawSections.append(section);
+    }
+
+    if (options.value("includeSmartSearchDebug", false).toBool()) {
+        const QVariantMap events = this->getSmartSearchDebugEvents(200);
+        killcore::DiagnosticRawSection section;
+        section.id = QStringLiteral("smartSearchDebug");
+        section.title = QStringLiteral("smart_search_debug.jsonl");
+        section.content = QString::fromUtf8(
+            QJsonDocument(QJsonArray::fromVariantList(events.value("events").toList())).toJson(QJsonDocument::Indented));
+        rawSections.append(section);
+    }
+
+    if (options.value("includeScanTelemetry", false).toBool()) {
+        killcore::DiagnosticRawSection section;
+        section.id = QStringLiteral("scanTelemetry");
+        section.title = QStringLiteral("scan_telemetry.jsonl");
+        section.content = readTailLinesFromFile(this->scanTelemetryFilePath(), 500);
+        rawSections.append(section);
+    }
+
+    if (options.value("includeCrashReports", false).toBool()) {
+        QDir crashDir(CrashHandler::crashDirectory());
+        const auto crashFiles = crashDir.entryInfoList(QStringList{"*.crash.txt"}, QDir::Files, QDir::Time);
+        QStringList combined;
+        const qsizetype count = std::min<qsizetype>(crashFiles.size(), 5);
+        for (qsizetype i = 0; i < count; ++i) {
+            QFile crashFile(crashFiles.at(i).absoluteFilePath());
+            // Borné par fichier (64 Kio) -- un .crash.txt anormalement gros ne
+            // doit jamais faire exploser le budget total à lui seul.
+            if (crashFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                combined.append(QStringLiteral("----- %1 -----").arg(crashFiles.at(i).fileName()));
+                combined.append(QString::fromUtf8(crashFile.read(64 * 1024)));
+            }
+        }
+        if (!combined.isEmpty()) {
+            killcore::DiagnosticRawSection section;
+            section.id = QStringLiteral("crashes");
+            section.title = QStringLiteral("crashes");
+            section.content = combined.join('\n');
+            rawSections.append(section);
+        }
+    }
+
+    // Événements structurés : ActivityRegistry (moteur, horodatage réel) +
+    // actionLog (UI, fourni par le frontend qui seul a accès au store Pinia).
+    QList<killcore::DiagnosticEvent> events;
+    const QVariantMap activitySnapshot = m_controller.getActivitySnapshot();
+    for (const auto& entryVariant : activitySnapshot.value("entries").toList()) {
+        const QVariantMap entry = entryVariant.toMap();
+        killcore::DiagnosticEvent event;
+        event.source = QStringLiteral("activity");
+        event.operationId = entry.value("operationId").toString();
+        event.kind = entry.value("kind").toString();
+        event.state = entry.value("state").toString();
+        event.summary = entry.value("summary").toString();
+        event.timestampMs = entry.value("startedAtMs").toLongLong();
+        events.append(event);
+    }
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const QVariantList actionLogEvents = options.value("actionLogEvents").toList();
+    const int actionLogCount = static_cast<int>(actionLogEvents.size());
+    for (int i = 0; i < actionLogCount; ++i) {
+        const QVariantMap entry = actionLogEvents.at(i).toMap();
+        const QString title = entry.value("title").toString();
+        const QString detail = entry.value("detail").toString();
+        killcore::DiagnosticEvent event;
+        event.source = QStringLiteral("actionLog");
+        // actionLog.ts ne porte pas d'ID d'opération moteur -- corrélation
+        // inconnue, assumée explicitement via ce champ vide plutôt que
+        // deviné.
+        event.operationId = QString();
+        event.kind = entry.value("kind").toString();
+        event.state = entry.value("status").toString();
+        event.summary = detail.isEmpty() ? title : (title + QStringLiteral(": ") + detail);
+        // actionLog.ts ne garde qu'une heure locale affichée (pas d'epoch ms) :
+        // ordre synthétique ancré juste avant l'instant de préparation, en
+        // supposant que le frontend envoie déjà ces entrées de la plus
+        // ancienne à la plus récente (voir app.ts) -- PAS un vrai horodatage
+        // de capture, seulement un ordre relatif conservé.
+        event.timestampMs = nowMs - static_cast<qint64>(actionLogCount - 1 - i) * 1000;
+        events.append(event);
+    }
+
+    // Rédaction : racines connues -> étiquettes stables. QDir::homePath()/
+    // tempPath()/PortablePaths::root() retournent des chemins à séparateurs
+    // "/" (convention Qt), alors que le texte réel (récit tapé par un humain,
+    // messages de log Windows) utilise très souvent "\\" -- sans la variante
+    // à antislashs, la rédaction manquerait silencieusement le cas le plus
+    // courant (confirmé en direct via pipe : un chemin "C:\Users\<vrai nom>\..."
+    // tapé dans le récit n'était pas rédigé avant ce correctif).
+    QHash<QString, QString> rootsToLabels;
+    auto addRedactionRoot = [&rootsToLabels](const QString& root, const QString& label) {
+        if (root.isEmpty()) {
+            return;
+        }
+        rootsToLabels.insert(root, label);
+        QString backslashVariant = root;
+        backslashVariant.replace(QLatin1Char('/'), QLatin1Char('\\'));
+        if (backslashVariant != root) {
+            rootsToLabels.insert(backslashVariant, label);
+        }
+    };
+    addRedactionRoot(QDir::homePath(), QStringLiteral("<user_home>"));
+    addRedactionRoot(QDir::tempPath(), QStringLiteral("<temp_dir>"));
+    addRedactionRoot(killcore::PortablePaths::root(), QStringLiteral("<app_root>"));
+
+    const QString reportId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto buildResult = killcore::buildDiagnosticReport(
+        reportId, nowMs, narrative, provenance, rawSections, events, rootsToLabels);
+
+    if (!buildResult.ok) {
+        result["success"] = false;
+        result["error"] = buildResult.error;
+        return result;
+    }
+
+    m_preparedReport = buildResult.report;
+
+    result["success"] = true;
+    result["reportId"] = reportId;
+    return result;
+}
+
+bool SettingsDiagnosticsManager::isPreparedReportValid() const {
+    if (!m_preparedReport.has_value()) {
+        return false;
+    }
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    return (nowMs - m_preparedReport->preparedAtMs) < killcore::DiagnosticReportLimits::kTtlMs;
+}
+
+QVariantMap SettingsDiagnosticsManager::getPreparedDiagnosticReportPreview() const {
+    QVariantMap result;
+    if (!isPreparedReportValid()) {
+        result["success"] = false;
+        result["error"] = KE_TXT("Aucun aperçu préparé, ou aperçu expiré (10 minutes). Prépare un nouvel aperçu.",
+                                  "No prepared preview, or the preview expired (10 minutes). Prepare a new one.");
+        return result;
+    }
+    const auto& report = *m_preparedReport;
+
+    result["success"] = true;
+    result["reportId"] = report.reportId;
+    result["preparedAtMs"] = report.preparedAtMs;
+    result["totalBytes"] = report.totalBytes;
+    result["payloadSha256"] = report.payloadSha256;
+
+    QVariantMap narrative;
+    narrative["steps"] = report.narrative.steps;
+    narrative["expected"] = report.narrative.expected;
+    narrative["observed"] = report.narrative.observed;
+    result["narrative"] = narrative;
+
+    QVariantMap provenance;
+    provenance["engineVersion"] = report.provenance.engineVersion;
+    provenance["buildId"] = report.provenance.buildId;
+    provenance["executableSha256"] = report.provenance.executableSha256;
+    provenance["uiBundleOrigin"] = report.provenance.uiBundleOrigin;
+    provenance["uiAssetFiles"] = QVariant::fromValue(QStringList(report.provenance.uiAssetFiles));
+    provenance["uiFingerprintStatus"] = report.provenance.uiFingerprintStatus;
+    provenance["os"] = report.provenance.osName;
+    provenance["architecture"] = report.provenance.architecture;
+    result["provenance"] = provenance;
+
+    QVariantList sections;
+    for (const auto& section : report.sections) {
+        QVariantMap s;
+        s["id"] = section.id;
+        s["title"] = section.title;
+        s["sizeBytes"] = static_cast<qulonglong>(section.content.size());
+        s["truncated"] = section.truncated;
+        s["omittedBytes"] = section.omittedBytes;
+        s["note"] = section.note;
+        sections.append(s);
+    }
+    result["sections"] = sections;
+
+    QVariantList events;
+    for (const auto& event : report.events) {
+        QVariantMap e;
+        e["source"] = event.source;
+        e["operationId"] = event.operationId;
+        e["kind"] = event.kind;
+        e["state"] = event.state;
+        e["summary"] = event.summary;
+        e["timestampMs"] = event.timestampMs;
+        events.append(e);
+    }
+    result["events"] = events;
+
+    return result;
+}
+
+QVariantMap SettingsDiagnosticsManager::getPreparedDiagnosticReportSection(const QString& sectionId, qint64 offset, qint64 limit) const {
+    QVariantMap result;
+    if (!isPreparedReportValid()) {
+        result["success"] = false;
+        result["error"] = KE_TXT("Aucun aperçu préparé, ou aperçu expiré.", "No prepared preview, or it expired.");
+        return result;
+    }
+
+    const killcore::DiagnosticSection* found = nullptr;
+    for (const auto& section : m_preparedReport->sections) {
+        if (section.id == sectionId) {
+            found = &section;
+            break;
+        }
+    }
+    if (!found) {
+        result["success"] = false;
+        result["error"] = KE_TXT("Section inconnue.", "Unknown section.");
+        return result;
+    }
+
+    const auto page = killcore::readSectionPage(*found, offset, limit);
+    if (!page.ok) {
+        result["success"] = false;
+        result["error"] = page.error;
+        return result;
+    }
+
+    result["success"] = true;
+    result["data"] = QString::fromUtf8(page.data);
+    result["nextOffset"] = page.nextOffset;
+    return result;
+}
+
+QByteArray SettingsDiagnosticsManager::buildExportPayload(const killcore::PreparedDiagnosticReport& report) const {
+    QByteArray payload;
+    for (const auto& section : report.sections) {
+        payload.append("\n===== ");
+        payload.append((section.title.isEmpty() ? section.id : section.title).toUtf8());
+        payload.append(" =====\n");
+        payload.append(section.content);
+        if (!payload.endsWith('\n')) {
+            payload.append('\n');
+        }
+    }
+    return qCompress(payload, 9);
+}
+
+QVariantMap SettingsDiagnosticsManager::writeReportToPath(const killcore::PreparedDiagnosticReport& report, const QString& path) const {
+    QVariantMap result;
+    const QByteArray compressed = buildExportPayload(report);
+
+    // QSaveFile + vérification du nombre d'octets réellement écrits avant
+    // commit() -- corrige le défaut de l'ancien exportDiagnostics(), qui
+    // annonçait success:true sans jamais vérifier l'écriture (voir
+    // docs/PHASE_TRACKER.md #ux-produit-17, diagnostic de départ). Même motif
+    // que core/workspace/workspace_revision_store.cpp.
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        result["success"] = false;
+        result["error"] = KE_TXT("Impossible de créer le fichier diagnostic.", "Unable to create the diagnostic file.");
+        return result;
+    }
+    if (file.write(compressed) != compressed.size() || !file.commit()) {
+        result["success"] = false;
+        result["error"] = KE_TXT("Échec de l'écriture du fichier diagnostic (disque plein ou verrouillé ?).",
+                                  "Failed to write the diagnostic file (disk full or locked?).");
+        return result;
+    }
+
+    result["success"] = true;
+    result["path"] = path;
+    result["bytesWritten"] = static_cast<qulonglong>(compressed.size());
+    return result;
+}
+
+QVariantMap SettingsDiagnosticsManager::exportPreparedDiagnosticReport() {
+    QVariantMap result;
+    if (!isPreparedReportValid()) {
+        result["success"] = false;
+        result["error"] = KE_TXT("Aperçu absent ou expiré. Prépare un nouvel aperçu avant d'exporter.",
+                                  "Missing or expired preview. Prepare a new one before exporting.");
+        return result;
+    }
+
+    const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    const QString suggestedName = QStringLiteral("KillEngine-diagnostics-%1.kezdiag").arg(timestamp);
+    const QString defaultDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation).isEmpty()
+        ? QDir::currentPath()
+        : QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+
+    // Premier QFileDialog::getSaveFileName du dépôt (confirmé absent avant
+    // cette fiche) -- même convention {cancelled:true} sur chemin vide que
+    // browseForModelFile()/browseForModuleArchive() ci-dessus.
+    const QString path = QFileDialog::getSaveFileName(
+        nullptr,
+        KE_TXT("Exporter le rapport de problème", "Export the problem report"),
+        QDir(defaultDir).filePath(suggestedName),
+        KE_TXT("Rapport KillEngine (*.kezdiag)", "KillEngine report (*.kezdiag)"));
+
+    if (path.isEmpty()) {
+        result["cancelled"] = true;
+        return result;
+    }
+
+    return writeReportToPath(*m_preparedReport, path);
 }
 
 QString SettingsDiagnosticsManager::smartSearchDebugFilePath() const {

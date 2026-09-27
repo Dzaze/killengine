@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { backend } from '@/services/backend'
 import { useAppStore } from '@/stores/app'
 import { useExpertWriteSelection } from '@/composables/useExpertWriteSelection'
+import { useCandidateComparisonStore } from '@/stores/candidateComparison'
 import { formatBytes, formatNumber } from '@/utils/format'
 import { findWhatWritesSizeForType } from '@/utils/valueTypes'
 import InfoDot from './InfoDot.vue'
@@ -17,11 +18,13 @@ const fieldStabilityVerdictLabelKeys: Record<string, string> = {
 }
 
 const store = useAppStore()
+const candidateComparisonStore = useCandidateComparisonStore()
 const { t } = useI18n()
 const {
   selectedCandidateAddresses,
   currentPageCandidates,
   displayedCandidates,
+  selectedWriteTargets,
   clearCandidateSelection,
   useCandidateInAssistant,
   isCandidateSelected,
@@ -36,6 +39,26 @@ const {
   watchCurrentCandidatePage,
   watchedCandidate,
 } = useExpertWriteSelection()
+
+/// UX-PRODUIT-16 : réutilise selectedWriteTargets (déjà résout type/variantLabel
+/// par candidat, avec le même repli sur store.exactScanType hors page courante
+/// que l'écriture) -- pas de second mécanisme de résolution de type. Le
+/// facteur d'échelle (ex. "Int32 x100") est extrait du variantLabel, même
+/// regex que encodedDisplayWriteValue ci-dessus dans useExpertWriteSelection.
+function compareSelectedCandidates() {
+  if (selectedWriteTargets.value.length < 2 || selectedWriteTargets.value.length > 6) return
+  candidateComparisonStore.stageSeriesFromSelection(selectedWriteTargets.value.map((target) => {
+    const scaleMatch = target.variantLabel?.match(/\bx\s*(\d+(?:\.\d+)?)\b/i)
+    const factor = scaleMatch ? Number(scaleMatch[1]) : 1
+    return {
+      address: target.address,
+      type: String(target.type),
+      factor: Number.isFinite(factor) && factor > 0 ? factor : 1,
+      label: `${target.variantLabel || target.type} 0x${target.address}`,
+    }
+  }))
+  store.activeView = 'memory-timeline'
+}
 
 const candidatePageTotal = computed(() => {
   if (!store.candidatePage) return 1
@@ -157,6 +180,14 @@ function fieldStabilityLabel(address: string): string {
       </button>
       <button class="btn btn-secondary compact" :disabled="selectedCandidateAddresses.length === 0" @click="watchSelectedCandidates()">
         {{ $t('candidatePanel.watchSelection') }}
+      </button>
+      <button
+        class="btn btn-secondary compact"
+        :disabled="selectedCandidateAddresses.length < 2 || selectedCandidateAddresses.length > 6"
+        :title="$t('candidatePanel.compareHint')"
+        @click="compareSelectedCandidates()"
+      >
+        {{ $t('candidatePanel.compare', { count: selectedCandidateAddresses.length }) }}
       </button>
     </div>
     <div class="page-info">

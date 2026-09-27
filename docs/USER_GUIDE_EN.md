@@ -28,6 +28,23 @@ If the application doesn't start, run the diagnostic from the repo:
 
 The script briefly opens KillEngine, collects recent Windows events, copies local logs, and writes a bundle under `diagnostics\`. After a successful launch, `Modules > Diagnostics > Runtime and logs` can also export logs, Smart Search debug data, and recent crash reports.
 
+## Try the tutorial — practice risk-free
+
+Before attaching a real game, you can practice on a disposable demo target without touching anything real. The `Try the tutorial` button is available from the very first launch (welcome modal) and permanently next to the `Help` button in the sidebar.
+
+Clicking it opens a **second, fully isolated KillEngine window** ("KillEngine — Tutorial"), with its own demo target (a small window with a `Health` value and `Damage`/`Heal`/`Reset` buttons). Your normal instance — attachment, scans, Trainer — is not affected.
+
+In the tutorial window, a `Tutorial guide` panel (bottom-right corner) walks you through 6 steps, each validated by a real engine observation, never a plain "next" click:
+
+1. **Attach** — find the demo target in `Process` and attach to it.
+2. **Search, then change it** — scan the value shown in the demo window, click `Damage` or `Heal` in it, then run a next scan.
+3. **Refine, then select** — select the right candidate in the list.
+4. **Write** — write a new value and confirm.
+5. **Verify the effect** — observe that the value shown in the demo window actually changed.
+6. **Save, then find it again** — save a profile, restart the target, re-attach, and find the address again via the profile.
+
+Each step has a `Verify this step` button: the guide only advances once the engine actually confirms what's asked (wrong candidate, unconfirmed write, or address not found yet → the step is refused with `Retry` available). `Quit` hides the panel without ending the session; the `Close the tutorial` button (sidebar, normal instance) actually ends the session and closes the window.
+
 ## Attaching a process
 
 1. Open the `Process` tab.
@@ -39,6 +56,14 @@ The script briefly opens KillEngine, collects recent Windows events, copies loca
 5. Click `Attach`.
 
 The attached process name then shows up in the other views. If the process doesn't appear, launch it first with a visible window, then refresh.
+
+## Activity center — tracking ongoing operations
+
+The `Activity · N running` button (always visible) opens a drawer listing every background operation, regardless of which view started it: scans (exact, next, unknown), Timeline collection, Lua script, module install, save-file watch, candidate comparison.
+
+Each entry shows its status (`Running`, `Cancel requested`, `Completed`, `Cancelled`, `Failed`, `Interrupted`), with `Stop` when the operation allows it and `View` to open the matching view. Finished entries you haven't looked at yet are counted separately (`N finished activity/activities not yet reviewed`). `Escape` closes the drawer.
+
+Handy for starting a long scan, switching views, then coming back to check on it without hunting down the original tab.
 
 ## Using the Assistant
 
@@ -211,6 +236,20 @@ Under each durability diagnostics entry, the `Investigation memory` panel keeps 
 - **Recheck** — an explicit doubt not to forget.
 
 Click `Load notes` to see the ones already recorded, sorted as `Still valid for this version` or `Different version: recheck needed` depending on whether the attached game matches the version the note was taken against. A version change never deletes a note, it only flags it for review.
+
+## Project — workspace history and recovery
+
+The `Project` tab keeps a safety net independent from profiles: a **restore point** regularly captures the state of your investigation, your Trainer features, your structure templates, your notes/addresses, and your action log — never your preferences (language, settings).
+
+In `Project > History and recovery`:
+
+1. A restore point is created **automatically** after 2 seconds of inactivity (at most one every 30 seconds), and always right before an import or a restore. `Create a restore point` forces one manually.
+2. Each entry shows its date, reason (`Automatic`, `Before import`, `Before restore`, `Manual`), and size.
+3. `Preview` opens a **before/after diff** section by section (`Investigation`, `Trainer`, `Structure templates`, `Notes and addresses`, `Action log`) before restoring anything.
+4. Check the sections you actually want to restore, then `Restore selection`. Only the checked sections are touched — the rest of your current state is never overwritten.
+5. `Delete` removes an entry from the history.
+
+Restoring the Trainer section is refused while a Trainer feature is active or running ("uncheck Trainer to continue, or stop it first") — this avoids reimporting a state while a freeze or a patch is genuinely running against the target.
 
 ## Modules — optional dependencies
 
@@ -423,6 +462,18 @@ The `Timeline` tab records how one or more addresses evolve over time, and can d
 
 Useful when the clue isn't an isolated value but a behavior: two addresses that move together (health/shield), telling a real timer apart from a decoy, or spotting a cheat-detection pattern before attempting a freeze.
 
+### Comparator — comparing 2 to 6 candidates side by side
+
+From a candidate selection (`Candidates` panel, `Watch`, or `Trace UI string` numeric sources), a `Compare (N)` button (active between 2 and 6 selections) sends the selection to the `Compare` tab in `Timeline`.
+
+1. Adjust the interval and max duration, then `Start comparison`.
+2. The chart plots every series synchronized on the same time axis, with a `Values` / `Variations since start` toggle.
+3. The exact-value table shows the last value, delta since start, min/max, and valid-read rate per series.
+4. `Correlations` computes a Pearson coefficient per pair, matched by real reading round (not by index) — `Not computable` below 10 valid pairs or zero variance, never a made-up coefficient.
+5. While the comparison is running, add **timestamped markers** ("Heal button clicked", etc.) to remember what you did and when — up to 100 markers, refused once the capture has stopped.
+6. `Export to JSON` produces a standalone file (config, decoded series, correlations, markers) usable outside the application.
+7. `Log this comparison` records the observation as proof (`Unverified` level by default) under `Investigation > Effect verification` — a visual resemblance is never presented as proof of causality.
+
 ### Pattern Learning — reusing what already worked
 
 The `Pattern Learning` tab remembers, per game, the engines detected, the offsets already found, and the resolution paths that worked, to go faster in a future session on the same game.
@@ -556,6 +607,16 @@ In `Modules > Diagnostics > Runtime and logs` (or the `Open diagnostics` link fr
 The two logging preferences (enable the Smart Search JSONL, number of events displayed) stay in `Settings > Diagnostic`.
 
 Use the diagnostic export when the Assistant picks a wrong action, a scan seems inconsistent, or a write fails.
+
+### Preparing a reproducible problem report
+
+The same panel offers `Prepare a problem report`: a short `Steps` / `Expected` / `Observed` form, plus checkboxes to include or skip the Smart Search debug log, scan telemetry, and recent crash reports.
+
+1. Fill in the form, check the sections you want, click `Prepare`.
+2. The preview shows provenance (version, build fingerprint), each section's size, and `Load more` for long sections, before any export happens.
+3. `Export` opens a real Windows save dialog — disabled until the preview is ready, and automatically grayed out again if you edit the form afterward (you need to `Prepare` again).
+
+Personal paths (home folder, temp folder) are automatically replaced with generic placeholders in the report before export.
 
 ### Kernel
 

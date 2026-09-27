@@ -1,0 +1,227 @@
+{
+  "_comment": "UX-PRODUIT-14B (docs/PHASE_TRACKER.md) -- manifeste déclaratif de comportements : par API, des scénarios nommés avec les champs requis (chemin+type, éventuellement une valeur attendue) et un invariant en prose. Complète 14A (qui prouve seulement que les SIGNATURES C++/TS/mock correspondent) en décrivant ce que les VALEURS JSON réelles doivent satisfaire. Vérifié par scripts/test-behavior-manifest.ps1 (scénarios live réels) et scripts/test-scan-race-guards.ps1 (garde requestId simulée/déterministe -- les deux preuves sont distinctes, jamais confondues). Champs/valeurs relevés en lisant directement le C++/TS réel (pas devinés) -- revérifier ici avant de faire confiance si le code source a pu changer depuis.",
+  "manifestVersion": 1,
+
+  "apis": [
+    {
+      "id": "getTimelineStatus",
+      "source": "apps/desktop/application_controller.cpp (ApplicationController::getTimelineStatus)",
+      "scenarios": [
+        {
+          "id": "default",
+          "trigger": "pipe:getTimelineStatus",
+          "requiredFields": [
+            { "path": "success", "type": "boolean", "expected": true },
+            { "path": "collecting", "type": "boolean" },
+            { "path": "watchedAddressCount", "type": "number" },
+            { "path": "stats.isCollecting", "type": "boolean" },
+            { "path": "stats.watchedAddressCount", "type": "number" },
+            { "path": "stats.totalDataPoints", "type": "number" }
+          ],
+          "invariant": "success est toujours true -- aucun chemin d'erreur connu côté C++, appelable sans attache ni collecte active."
+        }
+      ]
+    },
+
+    {
+      "id": "scanLifecycle",
+      "source": "core/scanner/scan_engine.* via apps/desktop/scanning_core_manager.cpp, wrappé côté frontend par BackendService.startExactScanAsync (ui/src/services/backend.ts:2312-2390)",
+      "scenarios": [
+        {
+          "id": "startAckSuccess",
+          "trigger": "pipe:startExactScanAsync",
+          "requiredFields": [
+            { "path": "success", "type": "boolean", "expected": true },
+            { "path": "started", "type": "boolean", "expected": true },
+            { "path": "requestId", "type": "number" }
+          ],
+          "invariant": "L'accusé de réception synchrone (avant tout scanFinished) porte toujours requestId quand success/started sont true -- c'est la clé de corrélation utilisée par le garde anti-course côté frontend."
+        },
+        {
+          "id": "startRejectedWhileAlreadyRunning",
+          "trigger": "pipe:startExactScanAsync (pendant qu'un scan est déjà actif)",
+          "requiredFields": [
+            { "path": "success", "type": "boolean", "expected": false },
+            { "path": "error", "type": "string", "expected": "Un scan est déjà en cours." }
+          ],
+          "invariant": "Un deuxième démarrage pendant un scan actif est refusé avec ce message exact (scanning_core_manager.cpp) -- jamais une file d'attente silencieuse ni un remplacement du scan en cours."
+        },
+        {
+          "id": "scanFinishedNormal",
+          "trigger": "signal:scanFinished (payload exact -- QWebChannel uniquement, pas observable via le pipe d'automatisation)",
+          "requiredFields": [
+            { "path": "requestId", "type": "number" },
+            { "path": "success", "type": "boolean", "expected": true },
+            { "path": "cancelled", "type": "boolean", "expected": false },
+            { "path": "regionsScanned", "type": "number" },
+            { "path": "bytesScanned", "type": "number" },
+            { "path": "matchesFound", "type": "number" },
+            { "path": "matchesReturned", "type": "number" },
+            { "path": "matches", "type": "array" },
+            { "path": "candidateStoreSize", "type": "number" },
+            { "path": "error", "type": "string" }
+          ],
+          "invariant": "requestId du signal correspond exactement au requestId reçu dans startAckSuccess pour cet appel. Contrainte réelle découverte en construisant 14B : le pipe d'automatisation (automation_pipe_server.h) ne relaie QUE des appels de méthode réfléchis par QMetaMethod, jamais un signal Qt -- ce scénario n'est donc PAS vérifiable en direct via test-behavior-manifest.ps1. Preuve de substitution assumée : (a) la forme exacte du payload est déjà prouvée structurellement par 14A (comparateur AST TS/mock/C++), (b) la logique de corrélation requestId elle-même est prouvée en direct et déterministe par scripts/test-scan-race-guards.ps1 sur le vrai code de BackendService, (c) test-behavior-manifest.ps1 vérifie à la place, via getCandidates(), que le scan a réellement produit des candidats correspondant à la valeur cherchée -- preuve comportementale indirecte mais réelle, pas simulée."
+        },
+        {
+          "id": "cancelThenRestart",
+          "trigger": "pipe:cancelActiveScan puis pipe:startExactScanAsync immédiatement après",
+          "requiredFields": [
+            { "path": "success", "type": "boolean", "expected": true }
+          ],
+          "invariant": "cancelActiveScan() accepté (m_scanInProgress vrai au moment de l'appel) libère m_scanInProgress -- le redémarrage immédiat qui suit ne doit JAMAIS être refusé par 'Un scan est déjà en cours.', et son propre scanFinished ne doit jamais recevoir un requestId de l'ancien scan annulé."
+        },
+        {
+          "id": "detachDuringActiveScan",
+          "trigger": "pipe:detachProcess pendant qu'un scan tourne",
+          "requiredFields": [],
+          "invariant": "Comportement à observer et consigner tel quel (pas un contrat figé a priori) : soit le scan se termine proprement avant le détachement effectif, soit detachProcess() retourne false (rapport, motif déjà connu ailleurs dans ce dépôt pour Timeline/comparateur) le temps que le scan se termine. Ce qui est interdit dans tous les cas : un crash, ou un scanFinished ultérieur qui référence encore l'ancien PID attaché."
+        }
+      ]
+    },
+
+    {
+      "id": "loadProfile",
+      "source": "apps/desktop/profile_manager.cpp (ProfileManager::loadProfile)",
+      "scenarios": [
+        {
+          "id": "invalidName",
+          "trigger": "pipe:loadProfile avec un nom de profil inexistant",
+          "requiredFields": [
+            { "path": "success", "type": "boolean", "expected": false },
+            { "path": "error", "type": "string" }
+          ],
+          "invariant": "Champ 'error' (pas 'errorCode', contrairement à inspectProfileDurability/saveProfileResolutionPlan dans le même fichier) -- incohérence de forme réelle du code, à respecter telle quelle dans le manifeste plutôt que normalisée."
+        },
+        {
+          "id": "validProfile",
+          "trigger": "pipe:saveProfileTarget (cible synthétique) puis pipe:loadProfile sur ce même profil",
+          "requiredFields": [
+            { "path": "success", "type": "boolean", "expected": true },
+            { "path": "profileName", "type": "string" },
+            { "path": "targets", "type": "array" },
+            { "path": "targetCount", "type": "number" },
+            { "path": "patches", "type": "array" },
+            { "path": "patchCount", "type": "number" },
+            { "path": "targets.0.name", "type": "string" },
+            { "path": "targets.0.locator", "type": "string" },
+            { "path": "targets.0.locatorKind", "type": "string" }
+          ],
+          "invariant": "targetCount === targets.length ; locatorKind ∈ {'absolute','module_offset','pointer_chain','clr_field'}. Profil synthétique nommé de façon unique, créé puis supprimé dans le même run (motif déjà établi par test-automation-pipe-profile-methods.ps1)."
+        }
+      ]
+    },
+
+    {
+      "id": "getAiModelStatus",
+      "source": "apps/desktop/settings_diagnostics_manager.cpp (SettingsDiagnosticsManager::getAiModelStatus)",
+      "scenarios": [
+        {
+          "id": "default",
+          "trigger": "pipe:getAiModelStatus",
+          "requiredFields": [
+            { "path": "success", "type": "boolean", "expected": true },
+            { "path": "enabled", "type": "boolean" },
+            { "path": "sessionDisabled", "type": "boolean" },
+            { "path": "available", "type": "boolean" },
+            { "path": "modelFound", "type": "boolean" },
+            { "path": "backend", "type": "string" },
+            { "path": "ready", "type": "boolean" },
+            { "path": "modelCandidates", "type": "array" },
+            { "path": "executableCandidates", "type": "array" },
+            { "path": "embeddedAgents", "type": "array" },
+            { "path": "embeddedAgentCount", "type": "number" },
+            { "path": "message", "type": "string" }
+          ],
+          "invariant": "Trois états distincts qui ne doivent JAMAIS se recouvrir dans un seul champ (commenté explicitement dans le C++) : sessionDisabled (en mémoire seulement, 'Continuer sans IA locale'), enabled (réglage persisté), available/modelFound (fichiers réellement présents sur disque). Un futur changement qui les fusionnerait serait une régression silencieuse."
+        }
+      ]
+    },
+
+    {
+      "id": "workspaceImport",
+      "source": "ui/src/stores/workspaceImportValidation.ts (module pur) + ui/src/stores/workspaceSession.ts::importWorkspaceJson",
+      "scenarios": [
+        {
+          "id": "pureValidatorCoverage",
+          "trigger": "déjà couvert -- scripts/test-workspace-import-validation.ps1 (20+ assertions)",
+          "requiredFields": [],
+          "invariant": "Syntaxe JSON invalide / objet non conforme / version non supportée / section présente mais structurellement invalide (rejette la totalité de l'import, jamais une fusion partielle) / import Trainer refusé si une feature est active. Ne pas dupliquer ici -- voir ce script pour le détail."
+        },
+        {
+          "id": "realExportRoundTrips",
+          "trigger": "CDP: un vrai exportWorkspaceJson() réel (store Pinia workspaceSession, accessible uniquement via CDP -- pas de méthode pipe équivalente, ni sans dépendances Vue/Pinia) repassé dans validateWorkspaceImport()",
+          "requiredFields": [
+            { "path": "valid", "type": "boolean", "expected": true }
+          ],
+          "invariant": "Écart identifié par le grounding 14B : le test existant (scripts/test-workspace-import-validation.ps1) est purement synthétique (fixtures écrites à la main), jamais vérifié contre un vrai export produit par l'application elle-même. Tentative faite en direct via CDP cette session (voir note de clôture 14B) -- CDP indisponible sur ce lancement (connexion refusée, récurrence déjà documentée ailleurs cette session, pas spécifique à ce chantier). Explicitement non vérifié en direct cette passe -- limite assumée, pas un oubli. `exportWorkspaceJson()` n'est pas une fonction pure (dépend de Pinia + plusieurs sous-stores), donc pas transposable au patron esbuild-node pur déjà utilisé pour le reste de ce module."
+        }
+      ]
+    },
+
+    {
+      "id": "activityRegistry",
+      "source": "core/activity/activity_registry.* + ui/src/stores/activity.ts (UX-PRODUIT-12)",
+      "scenarios": [
+        {
+          "id": "scanCreatesAndCompletesEntry",
+          "trigger": "pipe:getActivitySnapshot avant et après un scan exact réel",
+          "requiredFields": [
+            { "path": "entries", "type": "array" }
+          ],
+          "invariant": "Une entrée apparaît avec le scan (kind=ScanExact), son operationId doit correspondre au requestId corrélé côté scanLifecycle, et elle passe à un état terminal (Completed/Cancelled/Failed) quand le scan finit -- jamais une entrée qui reste 'running' indéfiniment après un scanFinished reçu."
+        },
+        {
+          "id": "cancelActivityOnTerminalIsIdempotent",
+          "trigger": "pipe:cancelActivity sur un operationId déjà terminal",
+          "requiredFields": [
+            { "path": "accepted", "type": "boolean", "expected": true }
+          ],
+          "invariant": "No-op idempotent (application_controller.cpp:8188-8196) -- accepted:true sans effet de bord, jamais une erreur ni une action sur une tâche plus récente. C'est la preuve directe qu'une annulation tardive ne peut pas viser une nouvelle tâche."
+        }
+      ]
+    },
+
+    {
+      "id": "preparedDiagnosticReport",
+      "source": "apps/desktop/settings_diagnostics_manager.cpp (UX-PRODUIT-17)",
+      "scenarios": [
+        {
+          "id": "prepareThenPreview",
+          "trigger": "pipe:prepareDiagnosticReport (options minimales) puis pipe:getPreparedDiagnosticReportPreview",
+          "requiredFields": [
+            { "path": "success", "type": "boolean", "expected": true },
+            { "path": "reportId", "type": "string" }
+          ],
+          "invariant": "prepareDiagnosticReport ne retourne jamais le corps du rapport, seulement un reportId opaque -- la récupération se fait via getPreparedDiagnosticReportPreview/Section, TTL 10 minutes. Déjà exhaustivement testé (redaction, pagination UTF-8, bornes) dans la note de clôture UX-PRODUIT-17 -- ici, simple vérification de forme, pas re-test complet."
+        }
+      ]
+    },
+
+    {
+      "id": "candidateComparison",
+      "source": "UX-PRODUIT-16, déjà clos et validé en direct cette session (docs/PHASE_TRACKER.md, section UX-PRODUIT-16)",
+      "scenarios": [
+        {
+          "id": "reference",
+          "trigger": "aucun -- décision assumée de ne pas re-déclencher ici",
+          "requiredFields": [],
+          "invariant": "Marqueurs (addCandidateComparisonMarker) et export JSON (exportCandidateComparisonToJson) déjà validés en direct bout en bout dans la note de clôture UX-PRODUIT-16 (pipe réel : ajout de repères pendant une capture réelle, refus après arrêt, export réexporté et reparsé avec la structure exacte attendue). Pas de plus-value à répéter ici la même séquence -- ce manifeste renvoie explicitement à cette validation plutôt que de l'oublier ou de la dupliquer."
+        }
+      ]
+    },
+
+    {
+      "id": "tutorialSession",
+      "source": "UX-PRODUIT-15, déjà clos et validé en direct cette session (docs/PHASE_TRACKER.md, section UX-PRODUIT-15)",
+      "scenarios": [
+        {
+          "id": "reference",
+          "trigger": "aucun -- décision assumée de ne pas re-déclencher ici",
+          "requiredFields": [],
+          "invariant": "startTutorialSession/getTutorialSessionStatus/closeTutorialSession déjà validés en direct (second KillEngine.exe réel, cascade Job Object confirmée, cycle démarrage->attache->vérification->fermeture rejoué). Relancer une session tutoriel complète ici (second process, cible démo, fenêtre) serait lourd sans preuve supplémentaire réelle -- décision assumée, pas un oubli."
+        }
+      ]
+    }
+  ]
+}

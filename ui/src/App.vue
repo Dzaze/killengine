@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useActivityStore } from '@/stores/activity'
 import { navGroups, groupIdForView } from '@/navigation'
+import ActivityPanel from '@/components/common/ActivityPanel.vue'
 import AiWarmupSplash from '@/components/common/AiWarmupSplash.vue'
 import AssistantView from '@/views/AssistantView.vue'
 import ClrInspectorView from '@/views/ClrInspectorView.vue'
@@ -23,9 +25,18 @@ import SettingsView from '@/views/SettingsView.vue'
 import SpeedhackView from '@/views/SpeedhackView.vue'
 import TrainerView from '@/views/TrainerView.vue'
 import WebView2InspectorView from '@/views/WebView2InspectorView.vue'
+import TutorialGuide from '@/components/tutorial/TutorialGuide.vue'
 
 const store = useAppStore()
+const activityStore = useActivityStore()
 const { locale } = useI18n()
+
+// UX-PRODUIT-12 : rend le focus au bouton déclencheur à la fermeture du
+// tiroir (Échap ou bouton fermer), plutôt que de le laisser sur <body>.
+const activityTriggerBtn = ref<HTMLButtonElement | null>(null)
+function focusActivityTrigger() {
+  activityTriggerBtn.value?.focus()
+}
 
 const currentView = computed(() => {
   if (store.activeView === 'assistant') return AssistantView
@@ -127,6 +138,24 @@ watch(
         <button class="help-btn" :title="$t('nav.helpTitle')" :aria-label="$t('nav.helpTitle')" @click="store.openUserGuide()">
           {{ $t('nav.help') }}
         </button>
+        <button
+          v-if="!store.isTutorialMode && !store.tutorialSessionActive"
+          class="help-btn"
+          :title="$t('nav.tryTutorialTitle')"
+          :aria-label="$t('nav.tryTutorialTitle')"
+          @click="store.launchTutorial()"
+        >
+          {{ $t('nav.tryTutorial') }}
+        </button>
+        <button
+          v-else-if="!store.isTutorialMode && store.tutorialSessionActive"
+          class="help-btn"
+          :title="$t('tutorial.entry.close')"
+          :aria-label="$t('tutorial.entry.close')"
+          @click="store.endTutorial()"
+        >
+          {{ $t('tutorial.entry.close') }}
+        </button>
       </div>
       <!-- UX-PIPE-5 (docs/PHASE_TRACKER.md, 18/09/2026) : le switch rapide FR/EN
            change la langue Vue immédiatement (effectif pour la session) mais
@@ -183,6 +212,16 @@ watch(
 
 
       <div class="sidebar-footer">
+        <button
+          ref="activityTriggerBtn"
+          type="button"
+          class="activity-trigger-btn"
+          data-view="activity"
+          @click="activityStore.toggleDrawer()"
+        >
+          <span>{{ $t('activity.trigger', { count: activityStore.runningCount }) }}</span>
+          <span v-if="activityStore.unacknowledgedTerminalCount > 0" class="activity-trigger-alert" :title="$t('activity.unacknowledgedTitle', { count: activityStore.unacknowledgedTerminalCount })" />
+        </button>
         <div class="credits">Pirolley Benoist</div>
         <div class="version">v{{ store.version }}</div>
         <div class="status" :class="{ connected: store.isConnected }">
@@ -197,6 +236,10 @@ watch(
     </main>
 
     <AiWarmupSplash v-if="store.localAiWarmupVisible" />
+
+    <ActivityPanel v-if="activityStore.drawerOpen" @close="focusActivityTrigger" />
+
+    <TutorialGuide v-if="store.isTutorialMode" />
 
     <div v-if="store.showOnboarding" class="risk-backdrop" role="presentation">
       <section class="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
@@ -219,6 +262,9 @@ watch(
         <div class="onboarding-actions">
           <button type="button" class="risk-btn secondary" @click="store.openUserGuide()">
             {{ $t('app.onboarding.fullGuide') }}
+          </button>
+          <button type="button" class="risk-btn secondary" @click="store.dismissOnboarding(); store.launchTutorial()">
+            {{ $t('app.onboarding.tryTutorial') }}
           </button>
           <button type="button" class="risk-btn primary" @click="store.dismissOnboarding()">
             {{ $t('app.onboarding.start') }}
@@ -570,6 +616,34 @@ body {
   padding: 12px 16px;
   border-top: 1px solid rgba(125, 142, 255, 0.14);
   background: rgba(10, 12, 20, 0.52);
+}
+
+.activity-trigger-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-accent);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.activity-trigger-btn:hover {
+  border-color: var(--accent);
+}
+
+.activity-trigger-alert {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--error);
+  flex-shrink: 0;
 }
 
 .version {

@@ -4,9 +4,10 @@
 // workspace, mémoire Auto/motifs mémorisés et journal d'actions, qui mêlaient
 // travail courant et préférences dans une seule page de 2200+ lignes. Mêmes
 // stores/actions/clés de persistance que Paramètres, aucun nouveau stockage.
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, type WorkspaceBookmark, type WorkspaceProject, type StructureTemplate } from '@/stores/app'
+import { useWorkspaceHistoryStore, type WorkspaceHistorySectionKey } from '@/stores/workspaceHistory'
 import PanelIntro from '@/components/common/PanelIntro.vue'
 import PersistenceErrorBanner from '@/components/PersistenceErrorBanner.vue'
 import { usePaginatedFilter } from '@/composables/usePaginatedFilter'
@@ -14,6 +15,32 @@ import { valueTypeOptions } from '@/utils/valueTypes'
 
 const store = useAppStore()
 const { t } = useI18n()
+
+// UX-PRODUIT-13 -- Historique et récupération du workspace.
+const historyStore = useWorkspaceHistoryStore()
+const selectedRestoreSections = ref<WorkspaceHistorySectionKey[]>([])
+watch(() => historyStore.previewDiff, (diff) => {
+  selectedRestoreSections.value = diff ? diff.filter((section) => section.items.length > 0).map((section) => section.section) : []
+})
+onMounted(() => {
+  void historyStore.refreshList()
+})
+function formatRevisionDate(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
+}
+function formatRevisionBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} o`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Kio`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mio`
+}
+async function createManualRevision() {
+  await historyStore.captureNow('manual', '', store.processName)
+}
+async function restoreSelectedRevision() {
+  if (!historyStore.previewRevisionId) return
+  await historyStore.restoreSelectedSections(historyStore.previewRevisionId, new Set(selectedRestoreSections.value))
+}
 
 const historyDetailsOpen = ref(false)
 
@@ -94,6 +121,14 @@ function previewWorkspaceImport() {
 let suppressNextImportTextInvalidation = false
 
 async function importWorkspace() {
+  // UX-PRODUIT-13 : révision de protection de l'état courant avant tout
+  // remplacement par import -- si elle échoue, l'import est refusé et
+  // l'utilisateur garde Exporter/Réessayer (fiche point 5).
+  const protection = await historyStore.captureNow('before_import', '', store.processName)
+  if (!protection.success) {
+    workspaceImportStatus.value = t('project.history.protectionFailedBeforeImport', { error: protection.error ?? '' })
+    return
+  }
   const result = await store.importWorkspaceJson(workspaceImportText.value)
   workspaceImportPreview.value = result
   workspaceImportStatus.value = result.success === true
@@ -530,6 +565,70 @@ function bookmarkToTrainer(bookmark: WorkspaceBookmark, action: 'write' | 'freez
         {{ $t('settings.workspaceActionsHint') }}
       </p>
       </details>
+
+      <div class="workspace-history-panel">
+        <div class="panel-title">
+          <h3>{{ $t('project.history.title') }}</h3>
+          <div class="panel-actions">
+            <button class="btn btn-secondary compact" type="button" @click="historyStore.refreshList()">{{ $t('project.history.refresh') }}</button>
+            <button class="btn btn-primary compact" type="button" :disabled="historyStore.restoreBusy" @click="createManualRevision()">{{ $t('project.history.createManual') }}</button>
+          </div>
+        </div>
+        <p class="hint">{{ $t('project.history.scopeHint') }}</p>
+        <PersistenceErrorBanner
+          :error="historyStore.revisionsPersistenceError"
+          :retry="() => historyStore.refreshList()"
+        />
+        <div v-if="historyStore.listBusy" class="hint">{{ $t('project.history.loading') }}</div>
+        <div v-else-if="historyStore.revisions.length === 0" class="empty-line">{{ $t('project.history.empty') }}</div>
+        <div v-for="revision in historyStore.revisions" :key="revision.id" class="revision-row" :class="{ invalid: revision.valid === false }">
+          <div class="revision-main">
+            <strong>{{ formatRevisionDate(revision.createdAtUtc) }}</strong>
+            <span class="revision-reason">{{ $t(`project.history.reason.${revision.reason}`) }}</span>
+            <span v-if="revision.projectContext">{{ revision.projectContext }}</span>
+            <span>{{ formatRevisionBytes(revision.payloadSizeBytes) }}</span>
+          </div>
+          <div v-if="revision.valid === false" class="error">{{ revision.error }}</div>
+          <div class="panel-actions">
+            <button class="btn btn-secondary compact" type="button" :disabled="revision.valid === false" @click="historyStore.loadPreview(revision.id)">{{ $t('project.history.preview') }}</button>
+            <button class="btn btn-secondary compact danger-action" type="button" @click="historyStore.deleteRevision(revision.id)">{{ $t('project.history.delete') }}</button>
+          </div>
+        </div>
+
+        <div v-if="historyStore.previewRevisionId" class="workspace-export">
+          <div class="panel-title">
+            <h3>{{ $t('project.history.previewTitle') }}</h3>
+            <button class="btn btn-secondary compact" @click="historyStore.clearPreview()">{{ $t('settings.close') }}</button>
+          </div>
+          <p v-if="historyStore.previewBusy" class="hint">{{ $t('project.history.previewLoading') }}</p>
+          <p v-if="historyStore.previewError" class="error">{{ historyStore.previewError }}</p>
+          <template v-if="historyStore.previewDiff">
+            <div v-for="diff in historyStore.previewDiff" :key="diff.section" class="revision-diff-section">
+              <label class="restore-section-checkbox">
+                <input v-model="selectedRestoreSections" type="checkbox" :value="diff.section" />
+                <strong>{{ $t(`project.history.section.${diff.section}`) }}</strong>
+              </label>
+              <span v-if="diff.items.length === 0" class="hint">{{ $t('project.history.noChange') }}</span>
+              <ul v-else>
+                <li v-for="item in diff.items" :key="item.id" :class="item.kind">
+                  {{ item.label }} — {{ $t(`project.history.diffKind.${item.kind}`) }}
+                </li>
+              </ul>
+            </div>
+            <p v-if="historyStore.restoreError" class="error">{{ historyStore.restoreError }}</p>
+            <div class="panel-actions">
+              <button
+                class="btn btn-primary compact"
+                type="button"
+                :disabled="historyStore.restoreBusy || selectedRestoreSections.length === 0"
+                @click="restoreSelectedRevision()"
+              >
+                {{ $t('project.history.restoreSelected') }}
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
     </section>
   </div>
 </template>
@@ -1380,5 +1479,63 @@ code {
 
 .history-details[open] summary {
   margin-bottom: 8px;
+}
+
+.workspace-history-panel {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.revision-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.revision-row.invalid {
+  border-color: color-mix(in srgb, var(--error) 45%, var(--border));
+}
+
+.revision-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text-primary);
+}
+
+.revision-reason {
+  color: var(--text-muted);
+}
+
+.revision-diff-section {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+}
+
+.revision-diff-section ul {
+  margin: 6px 0 0 18px;
+  font-size: 12px;
+}
+
+.revision-diff-section li.added { color: var(--success); }
+.revision-diff-section li.removed { color: var(--error); }
+.revision-diff-section li.modified { color: var(--warning); }
+
+.restore-section-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
 }
 </style>

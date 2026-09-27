@@ -19,6 +19,7 @@
 #include "scripting/auto_assembler.h"
 #include "scan_state_access.h"
 #include "snapshot/snapshot_store.h"
+#include "workspace/workspace_revision_store.h"
 
 #include <QObject>
 #include <QByteArray>
@@ -40,13 +41,16 @@ namespace killcore {
 class WebView2Inspector;
 class LagSwitchSession;
 class HttpProxySession;
+class JobObject;
 }
 
 namespace killengine {
 
 class AutomationPipeServer;
 class AutomationPipeManager;
+class CandidateComparisonManager;
 class ClaudeChatManager;
+class ActivityManager;
 class ClrInspectorBridge;
 class CodePatchManager;
 class DebugFeatureManager;
@@ -65,6 +69,7 @@ class ScanningCoreManager;
 class SettingsDiagnosticsManager;
 class SmartSearchManager;
 class SmartWatchdogManager;
+class TutorialSessionManager;
 class UiStringInvestigator;
 class WriteFreezeCoreManager;
 
@@ -105,6 +110,13 @@ public:
     /// rebranchable depuis le pipe d'automatisation.
     void setWebEnginePage(QWebEnginePage* page);
 
+    /// UX-PRODUIT-17 -- câblage interne (appelé une fois par main.cpp juste
+    /// après avoir choisi quelle branche packagedPath/devPath/qrc-placeholder
+    /// a réellement chargé l'UI) : provenance pour le rapport de problème.
+    /// `origin` ∈ {"packaged","dev","qrc-placeholder","none"}. Pas Q_INVOKABLE :
+    /// un fait de démarrage, jamais rejouable depuis le pipe.
+    void setUiBundleOrigin(const QString& origin, const QString& indexHtmlPath);
+
     // -----------------------------------------------------------------------
     // Propriétés
     // -----------------------------------------------------------------------
@@ -119,6 +131,18 @@ public:
 
     /// Retourne la version de KillEngine.
     Q_INVOKABLE QString getVersion() const;
+
+    /// UX-PRODUIT-14A -- inventaire structurel réel du contrôleur via son
+    /// méta-objet Qt (aucune méthode décrite n'est appelée ; hérité de QObject
+    /// exclu par offset, valide ici car ApplicationController hérite QObject
+    /// directement, sans base QObject intermédiaire). {schemaVersion,
+    /// methods:[{name,arity,parameterTypes,returnType}], properties:[{name,
+    /// type,readable,writable,hasNotify,notifySignal,constant}],
+    /// signals:[{name,arity,parameterTypes,returnType}]}. Les surcharges et
+    /// signatures générées par paramètre par défaut apparaissent comme des
+    /// entrées distinctes (même nom, arité différente) -- moc en génère une
+    /// par arité, jamais collapsées ici.
+    Q_INVOKABLE QVariantMap describeBackendContract() const;
 
     /// Énumère les processus avec fenêtre visible.
     /// Retourne une liste de maps: {pid, name, path, arch, moduleCount}
@@ -211,6 +235,43 @@ public:
     /// timing relatif entre cette réponse et la propagation des propriétés
     /// isAttached/processName/attachedPid sur le canal QWebChannel.
     Q_INVOKABLE bool detachProcess();
+
+    /// UX-PRODUIT-15 -- rôle NORMAL uniquement (refusé avec erreur explicite
+    /// si m_tutorialMode est vrai) : démarre une session tutoriel isolée
+    /// (second KillEngine.exe + sa propre cible démo). Sans effet si une
+    /// session est déjà active -- retourne son état existant.
+    Q_INVOKABLE QVariantMap startTutorialSession();
+
+    /// UX-PRODUIT-15 -- rôle NORMAL uniquement. État de la session tutoriel
+    /// courante (active, sessionId, sessionRoot, pid).
+    Q_INVOKABLE QVariantMap getTutorialSessionStatus() const;
+
+    /// UX-PRODUIT-15 -- rôle NORMAL uniquement. Termine la session tutoriel
+    /// courante (processus + dossier de données isolé).
+    Q_INVOKABLE QVariantMap closeTutorialSession();
+
+    /// UX-PRODUIT-15 -- vrai uniquement dans le processus enfant lancé avec
+    /// --tutorial-session-root=. Le frontend Vue l'utilise pour désactiver
+    /// des comportements normaux non pertinents en session jetable (ex. le
+    /// préchauffage IA locale, voir ui/src/stores/app.ts).
+    Q_INVOKABLE bool isTutorialMode() const { return m_tutorialMode; }
+
+    /// UX-PRODUIT-15 -- rôle ENFANT uniquement (refusé avec erreur explicite
+    /// si !m_tutorialMode) : relance la cible démo (KillEngineDemoTarget.exe)
+    /// si elle a été fermée/a crashé, refait la poignée de main IPC.
+    Q_INVOKABLE QVariantMap restartTutorialTarget();
+
+    /// UX-PRODUIT-15 -- rôle ENFANT uniquement (refusé si !m_tutorialMode).
+    /// Vérité terrain de la cible démo courante (adresses, valeurs) --
+    /// jamais affichée telle quelle à l'utilisateur, réservée à un futur
+    /// validateur interne (15C).
+    Q_INVOKABLE QVariantMap getTutorialTargetInfo() const;
+
+    /// Entrée dans le rôle enfant : spawn de KillEngineDemoTarget.exe, Job
+    /// Object dédié, poignée de main IPC. Appelé une seule fois par main.cpp
+    /// juste après la construction du contrôleur, uniquement quand
+    /// --tutorial-session-root= a été reconnu sur la ligne de commande.
+    void enterTutorialMode();
 
     /// Retourne la carte mémoire du processus attaché.
     Q_INVOKABLE QVariantMap getMemoryMap() const;
@@ -1201,6 +1262,22 @@ public:
     /// Exporte logs et diagnostics dans une archive zip locale.
     Q_INVOKABLE QVariantMap exportDiagnostics();
 
+    /// UX-PRODUIT-17 -- flux Préparer/Aperçu/Exporter d'un rapport de
+    /// problème borné, rédigé et prévisualisable. `options` : steps/expected/
+    /// observed (bornés à 64 Kio UTF-8 chacun), includeSmartSearchDebug/
+    /// includeScanTelemetry/includeCrashReports (bool, défaut false), et
+    /// actionLogEvents (liste des dernières entrées actionLog.ts, le backend
+    /// n'a pas accès au store Pinia). Une seule préparation active à la fois,
+    /// TTL 10 minutes.
+    Q_INVOKABLE QVariantMap prepareDiagnosticReport(const QVariantMap& options);
+    /// Métadonnées/tailles/omissions/provenance -- jamais le contenu complet.
+    Q_INVOKABLE QVariantMap getPreparedDiagnosticReportPreview() const;
+    /// Lecture paginée (16 Kio max/page) d'une section de l'aperçu préparé.
+    Q_INVOKABLE QVariantMap getPreparedDiagnosticReportSection(const QString& sectionId, qint64 offset, qint64 limit) const;
+    /// Ouvre un dialogue de sauvegarde natif puis écrit le rapport préparé
+    /// via QSaveFile avec vérification du nombre d'octets réellement écrits.
+    Q_INVOKABLE QVariantMap exportPreparedDiagnosticReport();
+
     /// Liste les adresses mémoire actives dans l'Assistant.
     Q_INVOKABLE QVariantMap getActiveChatMemoryTargets() const;
 
@@ -1446,6 +1523,27 @@ public:
     Q_INVOKABLE QVariantMap findTimelineCorrelations();
     Q_INVOKABLE QVariantMap generateTimelineReport();
 
+    /// UX-PRODUIT-16 — Comparateur visuel de 2 à 6 candidats. `series` :
+    /// liste de {id, address, type, factor, label}. `options` : intervalMs
+    /// (min 50, défaut 100), maxDurationMs (défaut 30000, max 120000, bornés
+    /// côté collecteur). Une seule comparaison active à la fois — un nouvel
+    /// appel remplace la précédente uniquement après un appel explicite.
+    Q_INVOKABLE QVariantMap startCandidateComparison(const QVariantList& series, const QVariantMap& options);
+    Q_INVOKABLE QVariantMap getCandidateComparisonStatus() const;
+    Q_INVOKABLE QVariantMap getCandidateComparisonSamples(const QString& seriesId, int offset, int limit) const;
+    Q_INVOKABLE QVariantMap getCandidateComparisonCorrelations() const;
+    Q_INVOKABLE QVariantMap stopCandidateComparison();
+    /// UX-PRODUIT-16 (16C) — repère horodaté (même horloge que les points/
+    /// tours) pendant une capture active uniquement. Au plus 100 repères de
+    /// 500 caractères ; refusé après l'arrêt de la capture.
+    Q_INVOKABLE QVariantMap addCandidateComparisonMarker(const QString& text);
+    /// UX-PRODUIT-16 (16C) — export JSON versionné et borné de la capture
+    /// courante (config, séries décodées, minutages de tour, corrélations,
+    /// repères, méthode de calcul). Lecture seule, aucune capture requise
+    /// (peut exporter une capture déjà arrêtée). N'affecte jamais les
+    /// exports Memory Timeline existants (format/fichier distincts).
+    Q_INVOKABLE QVariantMap exportCandidateComparisonToJson();
+
     /// PROPOSITIONS-1 #2 — Pattern Learning : classification de patterns
     /// mémoire (compteur/santé/flag/timer/coordonnée), détection de moteur
     /// de jeu (Unity/Unreal/Godot), profils par jeu réutilisables entre
@@ -1667,8 +1765,41 @@ public:
     /// ClaudeChatManager::sendMessage en attente pour ce pendingId.
     Q_INVOKABLE void resolveClaudePendingAction(const QString& pendingId, const QVariantMap& result);
 
+    /// UX-PRODUIT-12 — Centre d'activité permanent : snapshot complet
+    /// (autorité serveur) des opérations en cours/terminées (scans, Timeline,
+    /// Lua, installations, surveillance de fichier). {globalRevision, entries:[...]}.
+    Q_INVOKABLE QVariantMap getActivitySnapshot() const;
+    /// Demande l'arrêt d'une activité. Ne garantit pas la fin immédiate --
+    /// {accepted:bool, error?} ; l'état terminal réel arrive via activityUpdated.
+    Q_INVOKABLE QVariantMap cancelActivity(const QString& operationId);
+    /// Accesseur public pour les managers producteurs (ScanningCoreManager
+    /// est friend, mais les fonctions libres de scanning_core_manager.cpp ne
+    /// le sont pas -- cet accesseur leur évite de dupliquer le friend, et sert
+    /// aussi aux futurs adaptateurs 12C).
+    ActivityManager& activityManager();
+
+    /// UX-PRODUIT-13 -- Historique automatique et récupération du workspace :
+    /// CRUD synchrone sur le registre de révisions immuables (voir
+    /// core/workspace/workspace_revision_store.h). metadata attend
+    /// {reason, projectContext?, targetName?}. Pas de glue Qt dédiée (pas de
+    /// signal à pousser, contrairement à l'activité de UX-PRODUIT-12).
+    Q_INVOKABLE QVariantMap createWorkspaceRevision(const QString& payloadJson, const QVariantMap& metadata);
+    Q_INVOKABLE QVariantMap listWorkspaceRevisions(const QVariantMap& options) const;
+    Q_INVOKABLE QVariantMap readWorkspaceRevision(const QString& id) const;
+    Q_INVOKABLE QVariantMap deleteWorkspaceRevision(const QString& id);
+
 signals:
     void attachmentChanged();
+    /// UX-PRODUIT-12 : une seule entrée changée + globalRevision (pas tout le
+    /// snapshot -- évite de pousser 200 entrées à chaque tick de progression).
+    /// Le snapshot reste l'autorité ; cette poussée n'est qu'un indice pour
+    /// éviter d'attendre la réconciliation périodique côté frontend.
+    void activityUpdated(const QVariantMap& payload);
+
+    /// UX-PRODUIT-16 -- relais du signal interne de CandidateComparisonManager
+    /// vers le canal QWebChannel (seul ApplicationController y est enregistré,
+    /// voir main.cpp). reason ∈ {"user_stop", "duration_reached", "target_lost"}.
+    void comparisonFinished(const QString& reason);
 
     /// Backend IA externe (T4) : le backend Claude a besoin d'une action
     /// frontend avant de pouvoir continuer (confirmation RiskGate réelle, ou
@@ -1831,13 +1962,55 @@ private:
         QString clrFieldName;
     };
 
+    // UX-PRODUIT-17 -- provenance : quelle branche packagedPath/devPath/
+    // qrc-placeholder a réellement chargé l'UI, et le index.html effectif,
+    // capturés une seule fois par main.cpp via setUiBundleOrigin().
+    QString                 m_uiBundleOrigin;
+    QString                 m_uiIndexHtmlPath;
+
     bool                    m_attached{false};
     QString                 m_processName;
     int                     m_pid{0};
+    // UX-PRODUIT-12 : incrémenté uniquement à une vraie transition d'attache
+    // réussie (jamais sur un refus). Porté par les cibles d'activité pour que
+    // le frontend puisse distinguer une opération liée à une ancienne session
+    // d'attachement d'une opération actuelle.
+    int                     m_attachmentGeneration{0};
     killcore::ProcessHandle m_handle;
     std::unique_ptr<UiStringInvestigator> m_uiStringInvestigator;
     std::unique_ptr<MemoryHeatmapManager> m_memoryHeatmapManager;
     std::unique_ptr<MemoryTimelineManager> m_memoryTimelineManager;
+    // UX-PRODUIT-16 -- une seule comparaison active à la fois (même motif
+    // que m_activeTimelineActivityOpId ci-dessous).
+    std::unique_ptr<CandidateComparisonManager> m_candidateComparisonManager;
+    QString m_activeComparisonActivityOpId;
+    std::unique_ptr<ActivityManager> m_activityManager;
+    // UX-PRODUIT-15 -- rôle NORMAL : possède le cycle de vie d'une session
+    // tutoriel (second KillEngine.exe). N'existe/n'est utilisé que si
+    // !m_tutorialMode.
+    std::unique_ptr<TutorialSessionManager> m_tutorialSessionManager;
+    // UX-PRODUIT-15 -- rôle ENFANT : vrai uniquement dans le processus lancé
+    // avec --tutorial-session-root=. m_tutorialTargetProcess/m_tutorialJobObject/
+    // m_tutorialTargetPid/m_tutorialGroundTruth ne sont peuplés que dans ce rôle.
+    bool m_tutorialMode{false};
+    std::unique_ptr<QProcess> m_tutorialTargetProcess;
+    std::unique_ptr<killcore::JobObject> m_tutorialJobObject;
+    qint64 m_tutorialTargetPid{0};
+    QString m_tutorialTargetNonce;
+    // Vérité terrain (health/decoys/profileTarget + adresses) de la dernière
+    // poignée de main/réponse getState réussie -- jamais affichée telle
+    // quelle à l'utilisateur, réservée à getTutorialTargetInfo() (15C futur).
+    QVariantMap m_tutorialGroundTruth;
+    // UX-PRODUIT-13 : pas de unique_ptr -- classe pure sans QObject, construite
+    // directement dans le constructeur (killcore::PortablePaths::ensureSubdir).
+    killcore::WorkspaceRevisionStore m_workspaceRevisionStore;
+    // UX-PRODUIT-12 : une seule collecte Timeline à la fois (pas de requestId
+    // dédié côté MemoryTimelineManager) -- id de l'activité en cours, vidé par
+    // le handler collectionFinished connecté dans le constructeur.
+    QString m_activeTimelineActivityOpId;
+    // UX-PRODUIT-12 (12C) : même motif single-slot pour la surveillance de
+    // fichier de sauvegarde (une seule à la fois, comme Timeline ci-dessus).
+    QString m_activeSaveFileWatchActivityOpId;
     std::unique_ptr<PatternLearningManager> m_patternLearningManager;
     std::unique_ptr<ClrInspectorBridge> m_clrInspectorBridge;
     std::unique_ptr<killcore::WebView2Inspector> m_webView2Inspector;

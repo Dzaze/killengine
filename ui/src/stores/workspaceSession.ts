@@ -237,6 +237,42 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     }, null, 2)
   }
 
+  /**
+   * UX-PRODUIT-13 -- Historique automatique et récupération du workspace :
+   * sous-ensemble récupérable d'exportWorkspaceJson(), sélection POSITIVE des
+   * sections réellement restaurables (enquête, Trainer, notes/modèles,
+   * journal d'actions, dernier preset). Exclut délibérément `settings`
+   * (préférences, hors périmètre par défaut), `app`/`workflowPresets.available`/
+   * `autoResolve`/`aiModel`/`diagnostics` (caches runtime, jamais réimportés
+   * par importWorkspaceJson de toute façon). Même forme que
+   * ValidatedWorkspaceImport (workspaceImportValidation.ts) pour rester
+   * directement ré-important via importWorkspaceJson sans transformation.
+   */
+  function buildRecoverableSnapshotJson(): string {
+    const d = deps()
+    return JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      lastPresetId: d.lastWorkflowPresetId.value,
+      investigation: {
+        active: activeInvestigation.value,
+        archive: investigationArchive.value,
+      },
+      trainer: {
+        features: trainerFeatures.value,
+      },
+      structures: {
+        templates: structureTemplates.value,
+      },
+      bookmarks: {
+        items: workspaceBookmarks.value,
+      },
+      audit: {
+        entries: actionLog.value.slice(0, 200),
+      },
+    })
+  }
+
   function workspaceBookmarkMarkdownLine(bookmark: WorkspaceBookmark): string {
     const payload = bookmark.payload ?? {}
     const details = [
@@ -358,7 +394,7 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     return buildImportPreview(result.data)
   }
 
-  async function importWorkspaceJson(raw: string) {
+  async function importWorkspaceJson(raw: string, source: 'import' | 'revision_restore' = 'import') {
     const d = deps()
     // Revérifie systématiquement le texte courant -- jamais un aperçu
     // mémorisé, potentiellement périmé par rapport à ce texte (voir la
@@ -474,17 +510,22 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
       d.lastWorkflowPresetId.value = data.lastPresetId
     }
 
+    // UX-PRODUIT-13 : seul le libellé change selon la provenance -- toute la
+    // logique de mutation/validation/garde Trainer ci-dessus reste identique
+    // et non dupliquée, que l'appel vienne d'un import JSON classique ou
+    // d'une restauration depuis l'historique de révisions.
+    const titleKey = source === 'revision_restore' ? 'workspaceSessionStore.workspaceRestoredFromHistory' : 'workspaceSessionStore.workspaceImported'
     addActionLog(
       'workspace',
-      t('workspaceSessionStore.workspaceImported'),
+      t(titleKey),
       t('workspaceSessionStore.importedCounts', { features: preview.trainerFeatureCount, templates: preview.structureTemplateCount, bookmarks: preview.bookmarkCount, archives: preview.archiveCount, audits: preview.auditCount ?? 0 }),
       'success',
     )
     addInvestigationStep({
-      title: t('workspaceSessionStore.workspaceImported'),
+      title: t(titleKey),
       detail: t('workspaceSessionStore.importedCountsDetailed', { features: preview.trainerFeatureCount, templates: preview.structureTemplateCount, bookmarks: preview.bookmarkCount, archives: preview.archiveCount, audits: preview.auditCount ?? 0, hasSettings: preview.hasSettings ? t('workspaceSessionStore.yes') : t('workspaceSessionStore.no'), preset: String(preview.lastPresetId || '-') }),
       status: 'success',
-      tool: 'importWorkspaceJson',
+      tool: source === 'revision_restore' ? 'restoreWorkspaceRevision' : 'importWorkspaceJson',
       risk: 'safe',
       payload: preview,
     })
@@ -667,6 +708,7 @@ export const useWorkspaceSessionStore = defineStore('workspaceSession', () => {
     saveWorkspaceProjects,
     loadWorkspaceProjects,
     exportWorkspaceJson,
+    buildRecoverableSnapshotJson,
     exportWorkspaceMarkdown,
     previewWorkspaceImport,
     importWorkspaceJson,

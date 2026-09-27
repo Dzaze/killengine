@@ -18,7 +18,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $startedAt = Get-Date
 
 if ($SkipRecentTargeted -and $SkipAutomationPipe) {
-    throw "Nothing to run: both -SkipRecentTargeted and -SkipAutomationPipe were provided."
+    Write-Host "Recent targeted tests and the automation pipe battery are both skipped -- only the static backend contract check (TS-side) will run." -ForegroundColor Yellow
 }
 
 function Invoke-Step {
@@ -47,6 +47,32 @@ try {
     if (-not $SkipAutomationPipe) {
         Invoke-Step "Automation pipe safe-methods battery" {
             & (Join-Path $repoRoot "scripts\test-automation-pipe-safe-methods.ps1")
+        }
+    }
+
+    # UX-PRODUIT-14A (docs/PHASE_TRACKER.md) : contrôle statique TS toujours
+    # exécuté ; -SkipAutomationPipe fait aussi sauter l'inventaire runtime C++
+    # dépendant du pipe (le script le signale lui-même en SKIPPED, pas une
+    # disparition silencieuse de l'étape).
+    Invoke-Step "Backend contract (C++/TS/mock)" {
+        & (Join-Path $repoRoot "scripts\test-backend-contract.ps1") -SkipAutomationPipe:$SkipAutomationPipe
+    }
+
+    # UX-PRODUIT-14B (docs/PHASE_TRACKER.md) : manifeste déclaratif des
+    # comportements réels (pas seulement leurs signatures, déjà couvertes par
+    # 14A ci-dessus). Le checker et la garde requestId simulée sont purs/
+    # déterministes -- toujours exécutés. Le manifeste live a besoin d'une
+    # instance KillEngine.exe/KillEngineTestTarget.exe dédiée, donc respecte
+    # -SkipAutomationPipe comme l'étape 14A juste au-dessus (même convention).
+    Invoke-Step "Behavior manifest checker (pure)" {
+        & (Join-Path $repoRoot "scripts\test-behavior-manifest-check.ps1")
+    }
+    Invoke-Step "Scan race-guard assertions (simulated, deterministic)" {
+        & (Join-Path $repoRoot "scripts\test-scan-race-guards.ps1")
+    }
+    if (-not $SkipAutomationPipe) {
+        Invoke-Step "Behavior manifest (live)" {
+            & (Join-Path $repoRoot "scripts\test-behavior-manifest.ps1")
         }
     }
 

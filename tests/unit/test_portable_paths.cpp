@@ -21,6 +21,18 @@ public:
     }
 };
 
+// UX-PRODUIT-15 : même patron, pour l'override de production (storage
+// statique séparé de l'override de test, voir portable_paths.cpp).
+class ScopedProductionPortableRoot {
+public:
+    explicit ScopedProductionPortableRoot(const QString& root) {
+        killcore::PortablePaths::setProductionRootOverride(root);
+    }
+    ~ScopedProductionPortableRoot() {
+        killcore::PortablePaths::setProductionRootOverride(QString());
+    }
+};
+
 } // namespace
 
 TEST(PortablePathsTest, RootDefaultsToApplicationDirPathWithoutOverride) {
@@ -90,4 +102,64 @@ TEST(PortablePathsTest, TwoIndependentOverriddenRootsDoNotShareSubdirs) {
         EXPECT_NE(pathInA, pathInB);
         EXPECT_FALSE(QFileInfo(pathInB).exists());
     }
+}
+
+// --- UX-PRODUIT-15 : override de production, storage séparé de l'override de test ---
+
+TEST(PortablePathsTest, ProductionOverrideChangesRootAndClearingRestoresDefault) {
+    QTemporaryDir tmpDir;
+    ASSERT_TRUE(tmpDir.isValid());
+
+    {
+        ScopedProductionPortableRoot scoped(tmpDir.path());
+        EXPECT_EQ(killcore::PortablePaths::root(), tmpDir.path());
+    }
+
+    EXPECT_EQ(killcore::PortablePaths::root(), QCoreApplication::applicationDirPath());
+}
+
+TEST(PortablePathsTest, TestOverrideTakesPrecedenceOverProductionOverride) {
+    QTemporaryDir testDir;
+    QTemporaryDir prodDir;
+    ASSERT_TRUE(testDir.isValid());
+    ASSERT_TRUE(prodDir.isValid());
+
+    ScopedProductionPortableRoot scopedProd(prodDir.path());
+    ScopedPortableRoot scopedTest(testDir.path());
+
+    // L'override de test (fixture GTest) ne doit jamais être masqué par un
+    // override de production qui traînerait -- comportement des tests
+    // existants garanti inchangé même si les deux sont actifs simultanément
+    // (ne devrait jamais arriver en usage réel, mais l'ordre de vérification
+    // dans root() doit rester déterministe).
+    EXPECT_EQ(killcore::PortablePaths::root(), testDir.path());
+}
+
+TEST(PortablePathsTest, ProductionOverrideAppliesWhenNoTestOverrideActive) {
+    QTemporaryDir prodDir;
+    ASSERT_TRUE(prodDir.isValid());
+    ScopedProductionPortableRoot scopedProd(prodDir.path());
+
+    EXPECT_EQ(killcore::PortablePaths::root(), prodDir.path());
+
+    const QString dir = killcore::PortablePaths::ensureSubdir("data/tutorial-sessions/fake-uuid");
+    EXPECT_EQ(dir, QDir(prodDir.path()).filePath("data/tutorial-sessions/fake-uuid"));
+    EXPECT_TRUE(QFileInfo(dir).isDir());
+}
+
+TEST(PortablePathsTest, ProductionAndTestOverrideStoragesAreIndependent) {
+    QTemporaryDir prodDir;
+    ASSERT_TRUE(prodDir.isValid());
+
+    // Poser puis effacer l'override de PRODUCTION ne doit pas affecter
+    // l'override de TEST -- deux slots de storage réellement distincts, pas
+    // un seul partagé sous deux noms de méthode.
+    killcore::PortablePaths::setProductionRootOverride(prodDir.path());
+    killcore::PortablePaths::setProductionRootOverride(QString());
+    EXPECT_EQ(killcore::PortablePaths::root(), QCoreApplication::applicationDirPath());
+
+    QTemporaryDir testDir;
+    ASSERT_TRUE(testDir.isValid());
+    ScopedPortableRoot scopedTest(testDir.path());
+    EXPECT_EQ(killcore::PortablePaths::root(), testDir.path());
 }

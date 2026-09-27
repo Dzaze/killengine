@@ -46,6 +46,13 @@ public:
     // Contrôle de la collecte
     Q_INVOKABLE bool startCollection();
     Q_INVOKABLE void stopCollection();
+    // UX-PRODUIT-12 : variante non bloquante de stopCollection(), pour les
+    // appelants qui tournent déjà sur le thread Qt/UI (ex. attachProcess/
+    // detachProcess) et ne doivent jamais attendre le join() du thread de
+    // collecte (jusqu'à l'intervalle de sampling avant le fix -- voir
+    // memory_timeline_collector.cpp). Émet collectingChanged/collectionFinished
+    // depuis une continuation marshalée, comme les scans async.
+    Q_INVOKABLE void stopCollectionAsync();
     Q_INVOKABLE void pauseCollection();
     Q_INVOKABLE void resumeCollection();
 
@@ -85,7 +92,10 @@ signals:
     void statsChanged();
     void dataPointReceived(const QString& addressHex, const QVariantMap& pointData);
     void collectionProgress(int percent, const QString& status);
-    void collectionFinished();
+    // UX-PRODUIT-12 : reason ∈ {"user_stop", "duration_reached"} -- aucun
+    // abonné externe n'existait avant (grep confirmé), signature étendue sans
+    // risque de régression plutôt qu'ajouter un second signal parallèle.
+    void collectionFinished(const QString& reason);
     void patternDetected(const QString& addressHex, const QVariantMap& patternData);
     void correlationFound(const QVariantMap& correlationData);
 

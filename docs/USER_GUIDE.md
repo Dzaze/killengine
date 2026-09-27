@@ -28,6 +28,23 @@ Si l'application ne démarre pas, lance le diagnostic depuis le dépôt :
 
 Le script ouvre brièvement KillEngine, collecte les événements Windows récents, copie les logs locaux et écrit un bundle sous `diagnostics\`. Après un prochain lancement réussi, `Modules > Diagnostics > Runtime et journaux` permet aussi d'exporter les logs, le debug Smart Search et les rapports de crash récents.
 
+## Essayer le tutoriel — s'entraîner sans risque
+
+Avant d'attacher un vrai jeu, tu peux t'entraîner sur une cible de démonstration jetable, sans toucher à quoi que ce soit de réel. Le bouton `Essayer le tutoriel` est disponible dès le premier lancement (modale de bienvenue) et en permanence à côté du bouton `Aide` dans la sidebar.
+
+Cliquer dessus ouvre une **deuxième fenêtre KillEngine complètement isolée** (« KillEngine — Tutoriel »), avec sa propre cible de démonstration (une petite fenêtre avec une valeur `Santé` et des boutons `Dégâts`/`Soin`/`Réinitialiser`). Ton instance normale — attachement, scans, Trainer — n'est pas affectée.
+
+Dans la fenêtre tutoriel, un panneau `Guide du tutoriel` (coin bas-droit) te fait parcourir 6 étapes, chacune validée par une vraie observation du moteur, jamais par un simple clic « suivant » :
+
+1. **Attacher** — trouve la cible de démonstration dans `Processus` et attache-toi.
+2. **Chercher puis varier** — scanne la valeur affichée dans la fenêtre de démonstration, clique `Dégâts` ou `Soin` dedans, puis relance un scan suivant.
+3. **Affiner puis sélectionner** — sélectionne le bon candidat dans la liste.
+4. **Écrire** — écris une nouvelle valeur et confirme.
+5. **Vérifier l'effet** — observe que la valeur affichée dans la fenêtre de démonstration a bien changé.
+6. **Sauvegarder puis retrouver** — sauvegarde un profil, redémarre la cible, ré-attache-toi et retrouve l'adresse via le profil.
+
+Chaque étape a un bouton `Vérifier cette étape` : le guide n'avance que si le moteur confirme réellement ce qui est demandé (mauvais candidat, écriture non confirmée ou adresse pas encore trouvée → étape refusée avec `Réessayer` disponible). `Quitter` masque le panneau sans fermer la session ; le bouton `Fermer le tutoriel` (sidebar, instance normale) termine réellement la session et referme la fenêtre.
+
 ## Attacher un processus
 
 1. Ouvre l'onglet `Processus`.
@@ -39,6 +56,14 @@ Le script ouvre brièvement KillEngine, collecte les événements Windows récen
 5. Clique sur `Attacher`.
 
 Le nom du processus attaché apparaît ensuite dans les autres vues. Si le processus n'apparaît pas, lance-le d'abord avec une fenêtre visible, puis rafraîchis.
+
+## Centre d'activité — suivre les opérations en cours
+
+Le bouton `Activité · N en cours` (visible en permanence) ouvre un tiroir listant toutes les opérations de fond, quelle que soit la vue où elles ont été lancées : scans (exact, next, unknown), collecte Timeline, script Lua, installation de module, surveillance de fichier de sauvegarde, comparaison de candidats.
+
+Chaque entrée affiche son statut (`En cours`, `Arrêt demandé`, `Terminé`, `Annulé`, `Échec`, `Interrompu`), avec `Arrêter` quand l'opération le permet et `Voir` pour ouvrir la vue correspondante. Les entrées terminées non consultées sont comptées séparément (`N activité(s) terminée(s) non consultée(s)`). `Échap` ferme le tiroir.
+
+Utile pour lancer un scan long, changer de vue, puis revenir vérifier où il en est sans avoir à retourner sur l'onglet d'origine.
 
 ## Utiliser l'Assistant
 
@@ -211,6 +236,20 @@ Sous chaque entrée du diagnostic de durabilité, le panneau `Mémoire d'enquêt
 - **À revérifier** — un doute explicite à ne pas oublier.
 
 Clique sur `Charger les notes` pour voir celles déjà enregistrées, classées `Toujours valable pour cette version` ou `Version différente : à revérifier` selon que le jeu attaché correspond ou non à la version où la note a été prise. Un changement de version ne supprime jamais une note, il la signale seulement à revérifier.
+
+## Projet — historique et récupération du workspace
+
+L'onglet `Projet` conserve un filet de sécurité indépendant des profils : un **point de restauration** capture régulièrement l'état de ton enquête, de tes features Trainer, de tes modèles de structure, de tes notes/adresses et de ton journal d'actions — jamais tes préférences (langue, réglages).
+
+Dans `Projet > Historique et récupération` :
+
+1. Un point de restauration est créé **automatiquement** après 2 secondes d'inactivité (au plus un toutes les 30 secondes), plus systématiquement juste avant un import ou une restauration. `Créer un point de restauration` en force un manuellement.
+2. Chaque entrée affiche sa date, sa raison (`Automatique`, `Avant import`, `Avant restauration`, `Manuelle`) et sa taille.
+3. `Aperçu` ouvre un **diff avant/après** section par section (`Enquête`, `Trainer`, `Modèles de structure`, `Notes et adresses`, `Journal d'actions`) avant de restaurer quoi que ce soit.
+4. Coche les sections que tu veux réellement restaurer, puis `Restaurer la sélection`. Seules les sections cochées sont touchées — le reste de ton état actuel n'est jamais écrasé.
+5. `Supprimer` retire une entrée de l'historique.
+
+La restauration de la section Trainer est refusée tant qu'une feature Trainer est active ou en cours d'exécution (« décoche Trainer pour continuer, ou arrête-la d'abord ») — évite de réimporter un état pendant qu'un freeze ou un patch tourne réellement sur la cible.
 
 ## Modules — dépendances optionnelles
 
@@ -423,6 +462,18 @@ L'onglet `Timeline` enregistre l'évolution d'une ou plusieurs adresses dans le 
 
 Utile quand le repère n'est pas une valeur isolée mais un comportement : deux adresses qui bougent ensemble (vie/bouclier), un vrai minuteur à distinguer d'un leurre, ou un motif de triche à repérer avant de tenter un freeze.
 
+### Comparateur — comparer 2 à 6 candidats côte à côte
+
+Depuis une sélection de candidats (panneau `Candidats`, `Watch`, ou sources numériques de `Trace UI string`), un bouton `Comparer (N)` (actif entre 2 et 6 sélections) envoie la sélection vers l'onglet `Comparer` de `Timeline`.
+
+1. Ajuste l'intervalle et la durée max, puis `Démarrer la comparaison`.
+2. Le graphique trace toutes les séries synchronisées sur le même axe temps, avec bascule `Valeurs` / `Variations depuis le début`.
+3. Le tableau exact affiche dernière valeur, delta depuis le début, min/max et taux de lectures valides par série.
+4. `Corrélations` calcule un coefficient de Pearson par paire, apparié par tour de lecture réel (pas par indice) — `Non calculable` en dessous de 10 paires valides ou variance nulle, jamais un coefficient inventé.
+5. Pendant que la comparaison tourne, ajoute des **repères horodatés** (« bouton Soin cliqué », etc.) pour te souvenir de ce que tu as fait à quel moment — jusqu'à 100 repères, refusés après l'arrêt de la capture.
+6. `Exporter en JSON` produit un fichier autonome (config, séries décodées, corrélations, repères) réutilisable hors de l'application.
+7. `Consigner cette comparaison` enregistre l'observation comme preuve (niveau `Non vérifié` par défaut) dans `Investigation > Vérification de l'effet` — une ressemblance visuelle n'est jamais présentée comme une preuve de causalité.
+
 ### Pattern Learning — réutiliser ce qui a déjà marché
 
 L'onglet `Pattern Learning` retient, par jeu, les moteurs détectés, les offsets déjà trouvés et les chemins de résolution qui ont fonctionné, pour aller plus vite lors d'une prochaine session sur le même jeu.
@@ -555,6 +606,16 @@ Dans `Modules > Diagnostics > Runtime et journaux` (lien « Ouvrir les diagnosti
 Les deux réglages de journalisation (activer le JSONL Smart Search, nombre d'événements affichés) restent dans `Paramètres > Diagnostic`.
 
 Utilise l'export diagnostic quand l'Assistant choisit une mauvaise action, quand un scan semble incohérent, ou quand une écriture échoue.
+
+### Préparer un rapport de problème reproductible
+
+Le même panneau propose `Préparer un rapport de problème` : un formulaire court `Étapes` / `Attendu` / `Observé` à remplir, plus des cases pour inclure ou non le debug Smart Search, la télémétrie de scan et les rapports de crash récents.
+
+1. Remplis le formulaire, coche les sections utiles, clique `Préparer`.
+2. L'aperçu affiche la provenance (version, empreinte de build), la taille de chaque section, et `Charger la suite` pour les sections longues, avant tout export.
+3. `Exporter` ouvre un vrai dialogue de sauvegarde Windows — désactivé tant que l'aperçu n'est pas prêt, et redevient grisé automatiquement si tu modifies le formulaire après coup (il faut re-`Préparer`).
+
+Les chemins personnels (dossier utilisateur, dossier temporaire) sont automatiquement remplacés par des repères génériques dans le rapport avant export.
 
 ### Noyau
 

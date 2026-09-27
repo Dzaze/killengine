@@ -48,6 +48,17 @@ QList<ValueVariant> generateScanVariants(
 /// Retourne 0.0 si `bytes` est trop court pour `type`.
 double scanBytesToDouble(const QByteArray& bytes, ValueType type);
 
+/// UX-PRODUIT-16 -- texte base-10 EXACT (pas de conversion double
+/// intermediaire, donc pas de perte de precision) pour la valeur decodee
+/// depuis `bytes` selon `type`. Les types entiers passent par
+/// int64_t/uint64_t natifs (QString::number gere ces largeurs exactement,
+/// contrairement a scanBytesToDouble/double qui perd des bits au-dela de
+/// 2^53). Float32/64 : texte round-trippable ('g', 17 chiffres significatifs),
+/// avec "NaN"/"Inf"/"-Inf" explicites plutot qu'un texte numerique trompeur
+/// pour ces cas particuliers. Retourne une chaine vide si `bytes` est trop
+/// court pour `type` (jamais une valeur inventee).
+QString scanBytesToExactString(const QByteArray& bytes, ValueType type);
+
 /// Variante de delta scalé pour un scan Unknown en mode Delta (SC2-UNKNOWN-1).
 struct DeltaVariant {
     double  rawDelta{0.0}; ///< Delta attendu sur la valeur brute stockée (ex. 7 * 4096 = 28672).

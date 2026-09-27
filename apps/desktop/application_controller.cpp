@@ -19,7 +19,12 @@
 #include <wrl/client.h>
 #endif
 
+#include "activity_manager.h"
+#include "candidate_comparison_manager.h"
+#include "tutorial_session_manager.h"
+#include "process/job_object.h"
 #include "auto_resolver.h"
+#include "workspace/workspace_revision_store.h"
 #include "automation_pipe_manager.h"
 #include "claude_chat_manager.h"
 #include "clr_inspector_bridge.h"
@@ -98,7 +103,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QMetaMethod>
 #include <QMetaObject>
+#include <QMetaProperty>
 #include <QPointer>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -1289,9 +1296,19 @@ BOOL CALLBACK enumWindowTextProc(HWND hwnd, LPARAM lParam) {
 } // namespace
 
 ApplicationController::ApplicationController(QObject* parent)
-    : QObject(parent) {
+    : QObject(parent)
+    , m_workspaceRevisionStore(killcore::PortablePaths::ensureSubdir(QStringLiteral("data/workspace-history"))) {
     const size_t candidateThreshold = candidateFileBackedThresholdFromSettings();
     scanState().setFileBackedThreshold(candidateThreshold);
+    // UX-PRODUIT-12 : construit tôt car les producteurs (scans, Timeline...)
+    // le référencent via m_controller.m_activityManager lors de LEURS appels
+    // (pas à leur propre construction) -- seul compte qu'il soit prêt avant
+    // tout Q_INVOKABLE, ce que garantit la fin du constructeur.
+    m_activityManager = std::make_unique<ActivityManager>(*this, this);
+    // UX-PRODUIT-15 : construit inconditionnellement (coût nul tant que
+    // start() n'est pas appelé) -- le rôle enfant ne l'utilise simplement
+    // jamais, ses propres Q_INVOKABLE le refusent explicitement.
+    m_tutorialSessionManager = std::make_unique<TutorialSessionManager>(this);
     m_scanningCoreManager = std::make_unique<ScanningCoreManager>(*this, this);
     m_settingsDiagnosticsManager = std::make_unique<SettingsDiagnosticsManager>(*this);
     m_smartSearchManager = std::make_unique<SmartSearchManager>(*this);
@@ -1348,6 +1365,41 @@ ApplicationController::ApplicationController(QObject* parent)
       // chantier -- voir docs/SALON.md.
       m_memoryHeatmapManager = std::make_unique<MemoryHeatmapManager>(this);
       m_memoryTimelineManager = std::make_unique<MemoryTimelineManager>(this);
+      // UX-PRODUIT-12 : termine l'activité Timeline en cours quelle que soit
+      // la voie d'arrêt (bouton Stop dédié, cancelActivity(), garde attach/
+      // detach, ou fin naturelle par durée max) -- une seule connexion ici
+      // plutôt que dupliquer la logique à chaque appelant de stop*.
+      connect(m_memoryTimelineManager.get(), &MemoryTimelineManager::collectionFinished, this, [this](const QString& reason) {
+          if (m_activeTimelineActivityOpId.isEmpty()) {
+              return;
+          }
+          const auto state = (reason == QStringLiteral("duration_reached"))
+              ? killcore::ActivityState::Completed
+              : killcore::ActivityState::Cancelled;
+          const QString opId = m_activeTimelineActivityOpId;
+          m_activeTimelineActivityOpId.clear();
+          if (m_activityManager->registry().finish(opId, state, QString(), QString())) {
+              m_activityManager->notifyUpdated(opId);
+          }
+      });
+      m_candidateComparisonManager = std::make_unique<CandidateComparisonManager>(this);
+      // UX-PRODUIT-16 : même motif que la connexion Timeline juste au-dessus
+      // -- une seule connexion couvrant tous les chemins d'arrêt (bouton
+      // Stop, cancelActivity(), garde attach/detach, fin naturelle par durée
+      // max ou cible perdue).
+      connect(m_candidateComparisonManager.get(), &CandidateComparisonManager::comparisonFinished, this, [this](const QString& reason) {
+          if (!m_activeComparisonActivityOpId.isEmpty()) {
+              const auto state = (reason == QStringLiteral("duration_reached"))
+                  ? killcore::ActivityState::Completed
+                  : killcore::ActivityState::Cancelled;
+              const QString opId = m_activeComparisonActivityOpId;
+              m_activeComparisonActivityOpId.clear();
+              if (m_activityManager->registry().finish(opId, state, QString(), QString())) {
+                  m_activityManager->notifyUpdated(opId);
+              }
+          }
+          emit comparisonFinished(reason);
+      });
       m_patternLearningManager = std::make_unique<PatternLearningManager>(this);
       connect(m_patternLearningManager.get(), &PatternLearningManager::engineDetected, this, &ApplicationController::patternLearningEngineDetected);
       connect(m_patternLearningManager.get(), &PatternLearningManager::patternClassified, this, &ApplicationController::patternLearningClassified);
@@ -1437,6 +1489,20 @@ ApplicationController::ApplicationController(QObject* parent)
             return m_nextDebugRequestId++;
         },
         [this](const QVariantMap& result) {
+            // UX-PRODUIT-12 (12C) : "surveillance finie sans changement" reste
+            // Completed (pas Failed) -- ce n'est pas un échec, juste l'absence
+            // d'observation. cancelSaveFileWatch()/deferDetachIfBusy() passent
+            // tous deux par ce même callback de résultat.
+            if (!m_activeSaveFileWatchActivityOpId.isEmpty()) {
+                const QString opId = m_activeSaveFileWatchActivityOpId;
+                m_activeSaveFileWatchActivityOpId.clear();
+                const auto state = result.value("cancelled").toBool()
+                    ? killcore::ActivityState::Cancelled
+                    : (result.value("success").toBool() ? killcore::ActivityState::Completed : killcore::ActivityState::Failed);
+                if (m_activityManager->registry().finish(opId, state, QString(), result.value("error").toString())) {
+                    m_activityManager->notifyUpdated(opId);
+                }
+            }
             emit saveFileWatchFinished(result);
         },
         this);
@@ -1630,6 +1696,62 @@ QString ApplicationController::getVersion() const {
     return version();
 }
 
+// UX-PRODUIT-14A -- inventaire structurel réel, sans exécuter aucune des
+// méthodes décrites. ApplicationController hérite QObject directement (pas
+// de base QObject intermédiaire) : les offsets méthode/propriété de
+// QObject::staticMetaObject bornent exactement l'héritage générique à
+// exclure. moc génère une QMetaMethod par arité pour les paramètres par
+// défaut (ex. unknownNextScanAsync, addInvestigationHypothesis) -- chacune
+// apparaît ici comme une entrée distincte, jamais fusionnée.
+QVariantMap ApplicationController::describeBackendContract() const {
+    QVariantMap result;
+    result["schemaVersion"] = 1;
+
+    const QMetaObject* meta = metaObject();
+    const int methodOffset = QObject::staticMetaObject.methodCount();
+    const int propertyOffset = QObject::staticMetaObject.propertyCount();
+
+    QVariantList methods;
+    QVariantList signalsList;
+    for (int i = methodOffset; i < meta->methodCount(); ++i) {
+        const QMetaMethod m = meta->method(i);
+        QVariantMap entry;
+        entry["name"] = QString::fromLatin1(m.name());
+        entry["arity"] = m.parameterCount();
+        QVariantList paramTypes;
+        for (int p = 0; p < m.parameterCount(); ++p) {
+            paramTypes.append(QString::fromLatin1(m.parameterTypeName(p)));
+        }
+        entry["parameterTypes"] = paramTypes;
+        entry["returnType"] = QString::fromLatin1(m.typeName());
+
+        if (m.methodType() == QMetaMethod::Signal) {
+            signalsList.append(entry);
+        } else {
+            methods.append(entry);
+        }
+    }
+    result["methods"] = methods;
+    result["signals"] = signalsList;
+
+    QVariantList properties;
+    for (int i = propertyOffset; i < meta->propertyCount(); ++i) {
+        const QMetaProperty p = meta->property(i);
+        QVariantMap entry;
+        entry["name"] = QString::fromLatin1(p.name());
+        entry["type"] = QString::fromLatin1(p.typeName());
+        entry["readable"] = p.isReadable();
+        entry["writable"] = p.isWritable();
+        entry["hasNotify"] = p.hasNotifySignal();
+        entry["notifySignal"] = p.hasNotifySignal() ? QString::fromLatin1(p.notifySignal().name()) : QString();
+        entry["constant"] = p.isConstant();
+        properties.append(entry);
+    }
+    result["properties"] = properties;
+
+    return result;
+}
+
 QVariantList ApplicationController::getProcesses() const {
     QVariantList result;
 
@@ -1757,7 +1879,18 @@ QVariantMap ApplicationController::watchSaveFileForChanges(const QString& path, 
 }
 
 QVariantMap ApplicationController::startSaveFileWatchAsync(const QString& path, const QVariantMap& options) {
-    return m_saveFileInvestigator->startSaveFileWatchAsync(path, options);
+    const QVariantMap result = m_saveFileInvestigator->startSaveFileWatchAsync(path, options);
+    if (result.value("started").toBool()) {
+        killcore::ActivityTarget target;
+        target.pid = QString::number(m_pid);
+        target.processName = m_processName;
+        target.attachmentGeneration = QString::number(m_attachmentGeneration);
+        m_activeSaveFileWatchActivityOpId = m_activityManager->registry().beginActivity(
+            killcore::ActivityKind::SaveFileWatch, KE_TXT("Surveillance de fichier", "File watch"),
+            /*canCancel=*/true, target, result.value("requestId").toString());
+        m_activityManager->notifyUpdated(m_activeSaveFileWatchActivityOpId);
+    }
+    return result;
 }
 
 QVariantMap ApplicationController::cancelSaveFileWatch() {
@@ -1770,6 +1903,47 @@ QVariantMap ApplicationController::patchProcessSaveFileBytes(const QString& path
 
 bool ApplicationController::attachProcess(int pid) {
     KE_LOG_INFO() << "attachProcess(pid=" << pid << ")";
+
+    // UX-PRODUIT-12 : ne jamais couper le tapis sous un scan/une collecte
+    // Timeline en cours -- même motif de report que detachProcess ci-dessous
+    // (déjà en place pour les scans, étendu ici à l'attache elle-même et à
+    // Timeline). Pas de mise en file silencieuse : l'appelant doit réessayer
+    // une fois l'arrêt confirmé (errorOccurred porte le message explicite).
+    if (m_scanningCoreManager->isScanInProgress()) {
+        m_scanningCoreManager->requestCancelActiveScan();
+        KE_LOG_INFO() << "Attach deferred because a scan is still running.";
+        emit errorOccurred(KE_TXT(
+            "Un scan est en cours. Réessaie l'attachement après son arrêt.",
+            "A scan is still running. Retry the attachment after it stops."));
+        return false;
+    }
+    if (m_memoryTimelineManager->isCollecting()) {
+        m_memoryTimelineManager->stopCollectionAsync();
+        KE_LOG_INFO() << "Attach deferred because a Timeline collection is still running.";
+        emit errorOccurred(KE_TXT(
+            "Une collecte Timeline est en cours. Réessaie l'attachement après son arrêt.",
+            "A Timeline collection is still running. Retry the attachment after it stops."));
+        return false;
+    }
+    // UX-PRODUIT-16 : même garde que Timeline juste au-dessus.
+    if (m_candidateComparisonManager->isCollecting()) {
+        m_candidateComparisonManager->stopCollectionAsync();
+        KE_LOG_INFO() << "Attach deferred because a candidate comparison capture is still running.";
+        emit errorOccurred(KE_TXT(
+            "Une comparaison de candidats est en cours. Réessaie l'attachement après son arrêt.",
+            "A candidate comparison capture is still running. Retry the attachment after it stops."));
+        return false;
+    }
+
+    // UX-PRODUIT-15 : en mode tutoriel, seule la cible démo possédée par
+    // enterTutorialMode() peut être attachée -- une session jetable ne doit
+    // jamais pouvoir s'attacher à un processus tiers réel de la machine.
+    if (m_tutorialMode && pid != m_tutorialTargetPid) {
+        emit errorOccurred(KE_TXT(
+            "Mode tutoriel : seule la cible du tutoriel peut être attachée.",
+            "Tutorial mode: only the tutorial target can be attached."));
+        return false;
+    }
 
     m_debugFeatureManager->stopBreakpointFreeze();
     m_debugFeatureManager->resetHardwareBreakpointStateForPreviousTarget(m_pid);
@@ -1785,6 +1959,10 @@ bool ApplicationController::attachProcess(int pid) {
 
     m_pid = pid;
     m_attached = true;
+    // UX-PRODUIT-12 : uniquement sur une vraie transition réussie (jamais sur
+    // un refus ci-dessus) -- porté par les cibles d'activité pour distinguer
+    // une opération de la session d'attachement courante d'une ancienne.
+    m_attachmentGeneration++;
     m_processName = m_handle.executableName();
     scanState().clearCandidates();
     clearCandidateUndo();
@@ -1818,6 +1996,19 @@ bool ApplicationController::detachProcess() {
         KE_LOG_INFO() << "Detach deferred because a scan is still running.";
         return false;
     }
+    // UX-PRODUIT-12 : même garde que pour attachProcess ci-dessus -- manquait
+    // ici (seuls le scan et debug_feature_manager étaient couverts avant).
+    if (m_memoryTimelineManager->isCollecting()) {
+        m_memoryTimelineManager->stopCollectionAsync();
+        KE_LOG_INFO() << "Detach deferred because a Timeline collection is still running.";
+        return false;
+    }
+    // UX-PRODUIT-16 : même garde que Timeline juste au-dessus.
+    if (m_candidateComparisonManager->isCollecting()) {
+        m_candidateComparisonManager->stopCollectionAsync();
+        KE_LOG_INFO() << "Detach deferred because a candidate comparison capture is still running.";
+        return false;
+    }
     if (m_debugFeatureManager->deferDetachIfBusy()) {
         return false;
     }
@@ -1843,6 +2034,202 @@ bool ApplicationController::detachProcess() {
 
     emit attachmentChanged();
     return true;
+}
+
+namespace {
+
+// UX-PRODUIT-15 -- rôle ENFANT : lit une ligne complète depuis le canal IPC
+// de la cible démo, en bloquant jusqu'à timeoutMs au total (pas par appel de
+// waitForReadyRead, qui peut se déclencher plusieurs fois sur des paquets
+// partiels). Utilisé uniquement lors de la poignée de main au démarrage et
+// pour getTutorialTargetInfo/restartTutorialTarget -- jamais sur le chemin
+// d'une action utilisateur à latence perceptible.
+bool readTutorialIpcLine(QProcess* process, int timeoutMs, QByteArray* outLine) {
+    if (!process) {
+        return false;
+    }
+    QElapsedTimer timer;
+    timer.start();
+    while (!process->canReadLine()) {
+        const int remaining = timeoutMs - static_cast<int>(timer.elapsed());
+        if (remaining <= 0 || !process->waitForReadyRead(remaining)) {
+            return false;
+        }
+    }
+    *outLine = process->readLine();
+    return true;
+}
+
+bool sendTutorialIpcRequest(QProcess* process, const QString& method, int timeoutMs, QJsonObject* outResponse) {
+    if (!process || process->state() != QProcess::Running) {
+        return false;
+    }
+    QJsonObject request;
+    request[QStringLiteral("id")] = 1;
+    request[QStringLiteral("method")] = method;
+    const QByteArray line = QJsonDocument(request).toJson(QJsonDocument::Compact) + "\n";
+    process->write(line);
+    if (!process->waitForBytesWritten(timeoutMs)) {
+        return false;
+    }
+    QByteArray responseLine;
+    if (!readTutorialIpcLine(process, timeoutMs, &responseLine)) {
+        return false;
+    }
+    QJsonParseError parseError{};
+    const QJsonDocument doc = QJsonDocument::fromJson(responseLine, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        return false;
+    }
+    *outResponse = doc.object();
+    return true;
+}
+
+} // namespace
+
+QVariantMap ApplicationController::startTutorialSession() {
+    if (m_tutorialMode) {
+        QVariantMap result;
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")] = KE_TXT(
+            "Cette instance est déjà une session tutoriel : elle ne peut pas en démarrer une autre.",
+            "This instance is already a tutorial session: it cannot start another one.");
+        return result;
+    }
+    return m_tutorialSessionManager->start();
+}
+
+QVariantMap ApplicationController::getTutorialSessionStatus() const {
+    QVariantMap result;
+    if (m_tutorialMode) {
+        result[QStringLiteral("active")] = false;
+        result[QStringLiteral("error")] = KE_TXT(
+            "Cette instance est une session tutoriel, elle n'en possède pas.",
+            "This instance is a tutorial session, it does not own one.");
+        return result;
+    }
+    return m_tutorialSessionManager->status();
+}
+
+QVariantMap ApplicationController::closeTutorialSession() {
+    if (m_tutorialMode) {
+        QVariantMap result;
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")] = KE_TXT(
+            "Cette instance est une session tutoriel, elle n'en possède pas.",
+            "This instance is a tutorial session, it does not own one.");
+        return result;
+    }
+    return m_tutorialSessionManager->close();
+}
+
+void ApplicationController::enterTutorialMode() {
+    m_tutorialMode = true;
+
+    const QString demoTargetPath =
+        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("KillEngineDemoTarget.exe"));
+
+    auto process = std::make_unique<QProcess>();
+    process->setProgram(demoTargetPath);
+    process->start();
+    if (!process->waitForStarted(5000)) {
+        KE_LOG_ERROR() << "enterTutorialMode: échec du démarrage de KillEngineDemoTarget.exe ("
+                        << demoTargetPath.toStdString() << "):" << process->errorString().toStdString();
+        return;
+    }
+
+    QByteArray readyLine;
+    if (!readTutorialIpcLine(process.get(), 5000, &readyLine)) {
+        KE_LOG_ERROR() << "enterTutorialMode: pas de message 'ready' reçu de la cible démo.";
+        process->kill();
+        return;
+    }
+    QJsonParseError parseError{};
+    const QJsonDocument readyDoc = QJsonDocument::fromJson(readyLine, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !readyDoc.isObject() ||
+        readyDoc.object().value(QStringLiteral("type")).toString() != QStringLiteral("ready")) {
+        KE_LOG_ERROR() << "enterTutorialMode: message 'ready' invalide reçu de la cible démo.";
+        process->kill();
+        return;
+    }
+    m_tutorialTargetNonce = readyDoc.object().value(QStringLiteral("nonce")).toString();
+
+    auto jobObject = std::make_unique<killcore::JobObject>();
+    bool assigned = false;
+    if (jobObject->isValid()) {
+        assigned = jobObject->assignProcess(process->processId());
+    }
+    if (!assigned) {
+        KE_LOG_ERROR() << "enterTutorialMode: échec de l'assignation au Job Object pour la cible démo, pid="
+                        << process->processId();
+    }
+
+    m_tutorialTargetPid = static_cast<qint64>(process->processId());
+    m_tutorialTargetProcess = std::move(process);
+    m_tutorialJobObject = std::move(jobObject);
+
+    QJsonObject stateResponse;
+    if (sendTutorialIpcRequest(m_tutorialTargetProcess.get(), QStringLiteral("getState"), 3000, &stateResponse)) {
+        m_tutorialGroundTruth = stateResponse.value(QStringLiteral("result")).toObject().toVariantMap();
+    } else {
+        KE_LOG_ERROR() << "enterTutorialMode: échec de la requête getState initiale sur la cible démo.";
+    }
+
+    KE_LOG_INFO() << "enterTutorialMode: cible démo prête, pid=" << m_tutorialTargetPid
+                   << ", jobObjectAssigned=" << (assigned ? "true" : "false");
+}
+
+QVariantMap ApplicationController::restartTutorialTarget() {
+    QVariantMap result;
+    if (!m_tutorialMode) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")] = KE_TXT(
+            "Cette instance n'est pas une session tutoriel.",
+            "This instance is not a tutorial session.");
+        return result;
+    }
+
+    if (m_tutorialTargetProcess) {
+        if (m_attached && m_pid == m_tutorialTargetPid) {
+            detachProcess();
+        }
+        m_tutorialTargetProcess->terminate();
+        if (!m_tutorialTargetProcess->waitForFinished(3000)) {
+            m_tutorialTargetProcess->kill();
+            m_tutorialTargetProcess->waitForFinished(3000);
+        }
+        m_tutorialJobObject.reset();
+        m_tutorialTargetProcess.reset();
+        m_tutorialTargetPid = 0;
+        m_tutorialGroundTruth.clear();
+    }
+
+    enterTutorialMode();
+
+    result[QStringLiteral("success")] = m_tutorialTargetProcess != nullptr;
+    result[QStringLiteral("pid")] = m_tutorialTargetPid;
+    if (!m_tutorialTargetProcess) {
+        result[QStringLiteral("error")] = KE_TXT(
+            "Échec du redémarrage de la cible du tutoriel.",
+            "Failed to restart the tutorial target.");
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::getTutorialTargetInfo() const {
+    QVariantMap result;
+    if (!m_tutorialMode) {
+        result[QStringLiteral("success")] = false;
+        result[QStringLiteral("error")] = KE_TXT(
+            "Cette instance n'est pas une session tutoriel.",
+            "This instance is not a tutorial session.");
+        return result;
+    }
+    result[QStringLiteral("success")] = m_tutorialTargetProcess != nullptr;
+    result[QStringLiteral("pid")] = m_tutorialTargetPid;
+    result[QStringLiteral("nonce")] = m_tutorialTargetNonce;
+    result[QStringLiteral("groundTruth")] = m_tutorialGroundTruth;
+    return result;
 }
 
 bool ApplicationController::rememberCandidatesForUndo(QString* error) {
@@ -6283,9 +6670,20 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
     m_moduleInstallId = moduleId;
     m_activeModuleInstallCancellation = cancellation;
 
+    // UX-PRODUIT-12 (12C) : seul ce chemin worker thread (lua_runtime/
+    // clr_inspector/ai_model) a un vrai cycle begin/progress/finish suivi --
+    // kernel_driver (ShellExecuteExW/UAC, plus haut dans cette fonction) est
+    // fire-and-forget côté KillEngine, sans signal de fin possible à ce jour,
+    // donc volontairement non enregistré comme activité (limite connue,
+    // consignée dans docs/PHASE_TRACKER.md).
+    const QString activityOpId = m_activityManager->registry().beginActivity(
+        killcore::ActivityKind::ModuleInstall, KE_TXT("Installation de module : %1", "Module install: %1").arg(requestedModule),
+        /*canCancel=*/true, std::nullopt, QString::number(requestId));
+    m_activityManager->notifyUpdated(activityOpId);
+
     KE_LOG_INFO() << "installModule(" << moduleId.toStdString() << ", requestId=" << requestId << ")";
 
-    std::thread([self, requestId, requestedModule, requestedScript, requestedArchivePath, requestedTargetDir, cancellation]() {
+    std::thread([self, requestId, requestedModule, requestedScript, requestedArchivePath, requestedTargetDir, cancellation, activityOpId]() {
         QVariantMap finished;
         finished["requestId"] = requestId;
         finished["moduleId"] = requestedModule;
@@ -6333,10 +6731,14 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                                 progress["moduleId"] = requestedModule;
                                 progress["percent"] = -1;
                                 progress["message"] = KE_TXT("Téléchargement du modèle (~1,4 Go)…", "Downloading the model (~1.4 GB)…");
-                                QMetaObject::invokeMethod(self.data(), [self, progress]() {
-                                    if (self) {
-                                        emit self->moduleInstallProgress(progress);
+                                QMetaObject::invokeMethod(self.data(), [self, progress, activityOpId]() {
+                                    if (!self) {
+                                        return;
                                     }
+                                    if (self->m_activityManager->registry().updateProgress(activityOpId, QVariant(), progress.value("message").toString())) {
+                                        self->m_activityManager->notifyUpdated(activityOpId);
+                                    }
+                                    emit self->moduleInstallProgress(progress);
                                 }, Qt::QueuedConnection);
                             }
                         }
@@ -6389,10 +6791,14 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                             progress["moduleId"] = requestedModule;
                             progress["percent"] = -1;
                             progress["message"] = line;
-                            QMetaObject::invokeMethod(self.data(), [self, progress]() {
-                                if (self) {
-                                    emit self->moduleInstallProgress(progress);
+                            QMetaObject::invokeMethod(self.data(), [self, progress, activityOpId]() {
+                                if (!self) {
+                                    return;
                                 }
+                                if (self->m_activityManager->registry().updateProgress(activityOpId, QVariant(), progress.value("message").toString())) {
+                                    self->m_activityManager->notifyUpdated(activityOpId);
+                                }
+                                emit self->moduleInstallProgress(progress);
                             }, Qt::QueuedConnection);
                         }
                     }
@@ -6434,7 +6840,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
         if (!self) {
             return;
         }
-        QMetaObject::invokeMethod(self.data(), [self, finished]() {
+        QMetaObject::invokeMethod(self.data(), [self, finished, activityOpId]() {
             if (!self) {
                 return;
             }
@@ -6445,6 +6851,12 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                 {"moduleId", finished.value("moduleId")},
                 {"success", finished.value("success")},
             });
+            const auto activityState = finished.value("cancelled").toBool()
+                ? killcore::ActivityState::Cancelled
+                : (finished.value("success").toBool() ? killcore::ActivityState::Completed : killcore::ActivityState::Failed);
+            if (self->m_activityManager->registry().finish(activityOpId, activityState, QString(), finished.value("error").toString())) {
+                self->m_activityManager->notifyUpdated(activityOpId);
+            }
             emit self->moduleInstallFinished(finished);
         }, Qt::QueuedConnection);
     }).detach();
@@ -7115,6 +7527,27 @@ QVariantMap ApplicationController::exportDiagnostics() {
     return m_settingsDiagnosticsManager->exportDiagnostics();
 }
 
+QVariantMap ApplicationController::prepareDiagnosticReport(const QVariantMap& options) {
+    return m_settingsDiagnosticsManager->prepareDiagnosticReport(options);
+}
+
+QVariantMap ApplicationController::getPreparedDiagnosticReportPreview() const {
+    return m_settingsDiagnosticsManager->getPreparedDiagnosticReportPreview();
+}
+
+QVariantMap ApplicationController::getPreparedDiagnosticReportSection(const QString& sectionId, qint64 offset, qint64 limit) const {
+    return m_settingsDiagnosticsManager->getPreparedDiagnosticReportSection(sectionId, offset, limit);
+}
+
+QVariantMap ApplicationController::exportPreparedDiagnosticReport() {
+    return m_settingsDiagnosticsManager->exportPreparedDiagnosticReport();
+}
+
+void ApplicationController::setUiBundleOrigin(const QString& origin, const QString& indexHtmlPath) {
+    m_uiBundleOrigin = origin;
+    m_uiIndexHtmlPath = indexHtmlPath;
+}
+
 QString ApplicationController::smartSearchDebugFilePath() const {
     return m_settingsDiagnosticsManager->smartSearchDebugFilePath();
 }
@@ -7421,17 +7854,26 @@ QVariantMap ApplicationController::executeLuaScriptAsync(const QString& scriptTe
     m_luaScriptInProgress = true;
     m_activeLuaScriptCancellation = cancellation;
 
+    killcore::ActivityTarget luaTarget;
+    luaTarget.pid = QString::number(m_pid);
+    luaTarget.processName = m_processName;
+    luaTarget.attachmentGeneration = QString::number(m_attachmentGeneration);
+    const QString activityOpId = m_activityManager->registry().beginActivity(
+        killcore::ActivityKind::LuaScript, KE_TXT("Script Lua", "Lua script"),
+        /*canCancel=*/true, luaTarget, QString::number(requestId));
+    m_activityManager->notifyUpdated(activityOpId);
+
     KE_LOG_INFO() << "executeLuaScriptAsync(requestId=" << requestId
                   << ", scriptBytes=" << requestedScript.toUtf8().size() << ")";
 
-    std::thread([self, requestId, requestedScript, requestedOptions, cancellation]() {
+    std::thread([self, requestId, requestedScript, requestedOptions, cancellation, activityOpId]() {
         const LuaScriptRunOutcome outcome = runLuaScriptProcess(requestedScript, requestedOptions, cancellation.get());
 
         if (!self) {
             return;
         }
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, outcome]() {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, outcome, activityOpId]() {
             if (!self) {
                 return;
             }
@@ -7439,6 +7881,7 @@ QVariantMap ApplicationController::executeLuaScriptAsync(const QString& scriptTe
             QVariantMap finished = luaScriptRunOutcomeToVariant(outcome);
             finished["requestId"] = requestId;
             finished["kind"] = "lua_script_execute";
+            finished["operationId"] = activityOpId;
 
             self->m_luaScriptInProgress = false;
             self->m_activeLuaScriptCancellation.reset();
@@ -7450,6 +7893,13 @@ QVariantMap ApplicationController::executeLuaScriptAsync(const QString& scriptTe
                 {"stdoutBytes", outcome.stdoutText.toUtf8().size()},
                 {"stderrBytes", outcome.stderrText.toUtf8().size()},
             });
+            const auto activityState = outcome.cancelled
+                ? killcore::ActivityState::Cancelled
+                : (outcome.success ? killcore::ActivityState::Completed : killcore::ActivityState::Failed);
+            const QString activityError = outcome.success ? QString() : outcome.stderrText;
+            if (self->m_activityManager->registry().finish(activityOpId, activityState, QString(), activityError)) {
+                self->m_activityManager->notifyUpdated(activityOpId);
+            }
             emit self->luaScriptExecutionFinished(finished);
         }, Qt::QueuedConnection);
     }).detach();
@@ -7622,7 +8072,17 @@ QVariantMap ApplicationController::startTimelineCollection() {
     result["success"] = started;
     if (!started) {
         result["error"] = KE_TXT("Impossible de démarrer (aucune adresse surveillée, ou collecte déjà en cours ?).", "Unable to start (no watched address, or collection already running?).");
+        return result;
     }
+
+    killcore::ActivityTarget target;
+    target.pid = QString::number(m_pid);
+    target.processName = m_processName;
+    target.attachmentGeneration = QString::number(m_attachmentGeneration);
+    m_activeTimelineActivityOpId = m_activityManager->registry().beginActivity(
+        killcore::ActivityKind::TimelineCollection, KE_TXT("Collecte Timeline", "Timeline collection"),
+        /*canCancel=*/true, target);
+    m_activityManager->notifyUpdated(m_activeTimelineActivityOpId);
     return result;
 }
 
@@ -7639,6 +8099,219 @@ QVariantMap ApplicationController::getTimelineStatus() const {
     result["collecting"] = m_memoryTimelineManager->isCollecting();
     result["watchedAddressCount"] = m_memoryTimelineManager->watchedAddressCount();
     result["stats"] = m_memoryTimelineManager->currentStats();
+    return result;
+}
+
+// UX-PRODUIT-16 -- Comparateur visuel de 2 à 6 candidats.
+QVariantMap ApplicationController::startCandidateComparison(const QVariantList& series, const QVariantMap& options) {
+    QVariantMap result;
+    if (!m_handle.isValid()) {
+        result["success"] = false;
+        result["error"] = KE_TXT("Aucun processus attaché.", "No process attached.");
+        return result;
+    }
+    m_candidateComparisonManager->setProcessHandle(m_handle.rawHandle());
+    result = m_candidateComparisonManager->startComparison(series, options);
+    if (result.value("success").toBool() != true) {
+        return result;
+    }
+
+    killcore::ActivityTarget target;
+    target.pid = QString::number(m_pid);
+    target.processName = m_processName;
+    target.attachmentGeneration = QString::number(m_attachmentGeneration);
+    m_activeComparisonActivityOpId = m_activityManager->registry().beginActivity(
+        killcore::ActivityKind::CandidateComparison, KE_TXT("Comparaison de candidats", "Candidate comparison"),
+        /*canCancel=*/true, target);
+    m_activityManager->notifyUpdated(m_activeComparisonActivityOpId);
+    return result;
+}
+
+QVariantMap ApplicationController::getCandidateComparisonStatus() const {
+    QVariantMap result = m_candidateComparisonManager->getStatus();
+    result["success"] = true;
+    return result;
+}
+
+QVariantMap ApplicationController::getCandidateComparisonSamples(const QString& seriesId, int offset, int limit) const {
+    return m_candidateComparisonManager->getSamples(seriesId, offset, limit);
+}
+
+QVariantMap ApplicationController::getCandidateComparisonCorrelations() const {
+    QVariantMap result = m_candidateComparisonManager->getCorrelations();
+    result["success"] = true;
+    return result;
+}
+
+QVariantMap ApplicationController::stopCandidateComparison() {
+    m_candidateComparisonManager->stopCollection();
+    QVariantMap result;
+    result["success"] = true;
+    return result;
+}
+
+QVariantMap ApplicationController::addCandidateComparisonMarker(const QString& text) {
+    return m_candidateComparisonManager->addMarker(text);
+}
+
+QVariantMap ApplicationController::exportCandidateComparisonToJson() {
+    QVariantMap result;
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/KillEngine/candidate-comparisons";
+    QDir().mkpath(dir);
+    const QString filePath = dir + "/candidate_comparison_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".json";
+    result["success"] = m_candidateComparisonManager->exportToJson(filePath);
+    result["filepath"] = filePath;
+    if (!result["success"].toBool()) {
+        result["error"] = KE_TXT("Échec de l'export JSON.", "JSON export failed.");
+    }
+    return result;
+}
+
+// UX-PRODUIT-12 -- Centre d'activité permanent.
+QVariantMap ApplicationController::getActivitySnapshot() const {
+    return m_activityManager->getActivitySnapshot();
+}
+
+ActivityManager& ApplicationController::activityManager() {
+    return *m_activityManager;
+}
+
+QVariantMap ApplicationController::cancelActivity(const QString& operationId) {
+    QVariantMap result;
+    const auto entry = m_activityManager->registry().find(operationId);
+    if (!entry.has_value()) {
+        result["accepted"] = false;
+        result["error"] = KE_TXT("Activité introuvable.", "Activity not found.");
+        return result;
+    }
+
+    const bool alreadyTerminal = entry->state == killcore::ActivityState::Completed
+        || entry->state == killcore::ActivityState::Cancelled
+        || entry->state == killcore::ActivityState::Failed
+        || entry->state == killcore::ActivityState::Interrupted;
+    if (alreadyTerminal) {
+        // Idempotent : annuler une activité déjà terminée n'est pas une erreur.
+        result["accepted"] = true;
+        return result;
+    }
+    if (!entry->canCancel) {
+        result["accepted"] = false;
+        result["error"] = KE_TXT("Cette activité n'est pas annulable.", "This activity cannot be cancelled.");
+        return result;
+    }
+
+    // Le registre ne devient jamais un ordonnanceur : chaque manager reste
+    // autorité de ses propres transitions, on route juste vers son mécanisme
+    // d'annulation réel existant selon le type d'activité.
+    switch (entry->kind) {
+        case killcore::ActivityKind::ScanExact:
+        case killcore::ActivityKind::ScanAuto:
+        case killcore::ActivityKind::ScanNext:
+        case killcore::ActivityKind::ScanCaptureUnknown:
+        case killcore::ActivityKind::ScanUnknownNext:
+            m_scanningCoreManager->requestCancelActiveScan();
+            break;
+        case killcore::ActivityKind::TimelineCollection:
+            m_memoryTimelineManager->stopCollectionAsync();
+            break;
+        case killcore::ActivityKind::LuaScript:
+            cancelLuaScriptExecution();
+            break;
+        case killcore::ActivityKind::ModuleInstall:
+            // canCancel=false pour kernel_driver (UAC détaché, non annulable) --
+            // déjà filtré par le check ci-dessus si l'appelant respecte le champ.
+            cancelModuleInstall();
+            break;
+        case killcore::ActivityKind::SaveFileWatch:
+            cancelSaveFileWatch();
+            break;
+        case killcore::ActivityKind::CandidateComparison:
+            m_candidateComparisonManager->stopCollectionAsync();
+            break;
+    }
+
+    m_activityManager->registry().markCancelRequested(operationId);
+    m_activityManager->notifyUpdated(operationId);
+    result["accepted"] = true;
+    return result;
+}
+
+namespace {
+QVariantMap workspaceRevisionMetadataToVariantMap(const killcore::WorkspaceRevisionMetadata& metadata) {
+    QVariantMap map;
+    map["id"] = metadata.id;
+    map["createdAtUtc"] = metadata.createdAtUtc;
+    map["reason"] = killcore::workspaceRevisionReasonToString(metadata.reason);
+    map["projectContext"] = metadata.projectContext;
+    map["targetName"] = metadata.targetName;
+    map["payloadSizeBytes"] = static_cast<qlonglong>(metadata.payloadSizeBytes);
+    map["payloadSha256"] = metadata.payloadSha256;
+    return map;
+}
+} // namespace
+
+// UX-PRODUIT-13 -- Historique automatique et récupération du workspace.
+QVariantMap ApplicationController::createWorkspaceRevision(const QString& payloadJson, const QVariantMap& metadata) {
+    QVariantMap result;
+    killcore::WorkspaceRevisionReason reason = killcore::WorkspaceRevisionReason::Automatic;
+    if (!killcore::workspaceRevisionReasonFromString(metadata.value("reason").toString(), &reason)) {
+        result["success"] = false;
+        result["error"] = KE_TXT("Motif de révision invalide.", "Invalid revision reason.");
+        return result;
+    }
+    const QString projectContext = metadata.value("projectContext").toString();
+    const QString targetName = metadata.value("targetName").toString();
+
+    const auto created = m_workspaceRevisionStore.create(reason, projectContext, targetName, payloadJson);
+    result["success"] = created.success;
+    if (created.success) {
+        result["revision"] = workspaceRevisionMetadataToVariantMap(created.metadata);
+    } else {
+        result["error"] = created.error;
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::listWorkspaceRevisions(const QVariantMap& options) const {
+    QVariantMap result;
+    const int offset = options.value("offset", 0).toInt();
+    const int limit = options.value("limit", 20).toInt();
+    const auto entries = m_workspaceRevisionStore.list(offset, limit);
+
+    QVariantList list;
+    for (const auto& entry : entries) {
+        QVariantMap entryMap = workspaceRevisionMetadataToVariantMap(entry.metadata);
+        entryMap["valid"] = entry.valid;
+        if (!entry.valid) {
+            entryMap["error"] = entry.error;
+        }
+        list.append(entryMap);
+    }
+    result["success"] = true;
+    result["entries"] = list;
+    return result;
+}
+
+QVariantMap ApplicationController::readWorkspaceRevision(const QString& id) const {
+    QVariantMap result;
+    const auto read = m_workspaceRevisionStore.read(id);
+    result["success"] = read.success;
+    if (read.success) {
+        result["revision"] = workspaceRevisionMetadataToVariantMap(read.metadata);
+        result["payloadJson"] = read.payloadJson;
+    } else {
+        result["error"] = read.error;
+    }
+    return result;
+}
+
+QVariantMap ApplicationController::deleteWorkspaceRevision(const QString& id) {
+    QVariantMap result;
+    QString error;
+    result["success"] = m_workspaceRevisionStore.remove(id, &error);
+    if (!error.isEmpty()) {
+        result["error"] = error;
+    }
     return result;
 }
 

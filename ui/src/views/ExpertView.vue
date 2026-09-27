@@ -46,9 +46,11 @@ import { formatNumber, formatBytes } from '@/utils/format'
 import { findWhatWritesSizeForType } from '@/utils/valueTypes'
 import { expertToolCatalog, type ExpertToolEntry } from '@/components/expert/toolCatalog'
 import { persistJsonToLocalStorage } from '@/utils/persistLocalStorage'
+import { useCandidateComparisonStore } from '@/stores/candidateComparison'
 
 const { t, messages } = useI18n()
 const store = useAppStore()
+const candidateComparisonStore = useCandidateComparisonStore()
 const {
   selectedCandidateAddresses,
   setSelectedWriteTargets,
@@ -1761,6 +1763,26 @@ function useSelectedUiSourcesForWrite() {
   scrollToWritePanel()
 }
 
+/// UX-PRODUIT-16 : même résolution clé->candidat que useSelectedUiSourcesForWrite
+/// ci-dessus, sans chooseNonOverlappingSources (lecture seule -- pas besoin
+/// d'exclure les régions qui se chevauchent comme pour une écriture groupée).
+function compareSelectedUiSources() {
+  const selected = new Set(selectedUiSourceAddresses.value)
+  const chosen = uiStringSourceCandidates.value.filter((candidate) => selected.has(sourceKey(candidate)))
+  if (chosen.length < 2 || chosen.length > 6) return
+  candidateComparisonStore.stageSeriesFromSelection(chosen.map((candidate) => {
+    const scaleMatch = candidate.variantLabel?.match(/\bx\s*(\d+(?:\.\d+)?)\b/i)
+    const factor = scaleMatch ? Number(scaleMatch[1]) : 1
+    return {
+      address: candidate.address,
+      type: candidate.type,
+      factor: Number.isFinite(factor) && factor > 0 ? factor : 1,
+      label: `${candidate.variantLabel || candidate.type} 0x${candidate.address}`,
+    }
+  }))
+  store.activeView = 'memory-timeline'
+}
+
 const structureProbeRows = computed(() => (structureProbeResult.value?.rows as StructureProbeRow[] | undefined) ?? [])
 const structureDiffRows = computed(() => {
   const aRows = structureCaptureA.value ?? []
@@ -3062,6 +3084,15 @@ onMounted(() => {
                 @click="useSelectedUiSourcesForWrite()"
               >
                 {{ $t('expert.sendToWrite', { count: formatNumber(selectedUiSourceAddresses.length) }) }}
+              </button>
+              <button
+                class="btn btn-secondary compact"
+                type="button"
+                :disabled="selectedUiSourceAddresses.length < 2 || selectedUiSourceAddresses.length > 6"
+                :title="$t('expert.compareSourcesHint')"
+                @click="compareSelectedUiSources()"
+              >
+                {{ $t('expert.compareSources', { count: formatNumber(selectedUiSourceAddresses.length) }) }}
               </button>
               <label class="checkbox-label debugger-check" :title="$t('expert.debuggerRequiredTitle')">
                 <input v-model="findWhatWritesAcknowledged" type="checkbox" :disabled="findWhatWritesBusy" />

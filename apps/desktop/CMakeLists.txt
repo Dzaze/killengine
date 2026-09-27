@@ -32,6 +32,9 @@ qt_add_executable(KillEngine
     memory_heatmap_manager.cpp
     memory_timeline_manager.cpp
     pattern_learning_manager.cpp
+    activity_manager.cpp
+    tutorial_session_manager.cpp
+    candidate_comparison_manager.cpp
 )
 
 

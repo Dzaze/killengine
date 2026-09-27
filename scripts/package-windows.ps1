@@ -532,6 +532,11 @@ Set-Content -Path (Join-Path $packageRoot "PACKAGE_README.txt") -Value $packageR
 
 $requiredRuntimeItems = @(
     "KillEngine.exe",
+    # UX-PRODUIT-15 -- cible démo du tutoriel interactif : contrairement à
+    # KillEngineTestTarget.exe (tests/, exclu explicitement), celle-ci doit
+    # être distribuée -- KillEngine.exe la spawn lui-même en mode tutoriel
+    # (--tutorial-session-root=), voir ApplicationController::enterTutorialMode.
+    "KillEngineDemoTarget.exe",
     "ui\dist\index.html",
     "model\README.md",
     "model\assistant\README.md",

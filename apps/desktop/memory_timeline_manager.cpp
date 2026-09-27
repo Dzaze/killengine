@@ -5,6 +5,10 @@
 #include "localization/localization.h"
 #include <QChar>
 #include <QDebug>
+#include <QMetaObject>
+#include <QPointer>
+
+#include <thread>
 
 namespace killengine {
 
@@ -120,14 +124,10 @@ QVariantMap MemoryTimelineManager::currentStats() const {
     QVariantMap stats;
     stats["isCollecting"] = isCollecting();
     stats["watchedAddressCount"] = watchedAddressCount();
-    
-    auto series = m_impl->collector->getSeries();
-    int totalPoints = 0;
-    for (const auto& [addr, s] : series) {
-        totalPoints += static_cast<int>(s.points.size());
-    }
-    stats["totalDataPoints"] = totalPoints;
-    
+    // UX-PRODUIT-12 point 4 : compteur incrémental côté collecteur, plus de
+    // copie de getSeries() (toutes séries + tous points) juste pour compter.
+    stats["totalDataPoints"] = static_cast<qulonglong>(m_impl->collector->totalStoredPointCount());
+
     return stats;
 }
 
@@ -183,10 +183,48 @@ bool MemoryTimelineManager::startCollection() {
     return started;
 }
 
+namespace {
+QString stopReasonToString(killcore::TimelineStopReason reason) {
+    switch (reason) {
+        case killcore::TimelineStopReason::DurationReached: return QStringLiteral("duration_reached");
+        case killcore::TimelineStopReason::UserStop:
+        default: return QStringLiteral("user_stop");
+    }
+}
+} // namespace
+
 void MemoryTimelineManager::stopCollection() {
     m_impl->collector->stopCollection();
+    const QString reason = stopReasonToString(m_impl->collector->lastStopReason());
     emit collectingChanged();
-    emit collectionFinished();
+    emit collectionFinished(reason);
+}
+
+void MemoryTimelineManager::stopCollectionAsync() {
+    // UX-PRODUIT-12 : ne jamais bloquer le thread Qt sur le join() du thread
+    // de collecte (jusqu'à un intervalle de sampling avant le fix côté
+    // collecteur) -- utilisé par la garde attach/detach qui tourne, elle,
+    // directement sur le thread Qt. L'arrêt réel est lancé sur un thread
+    // séparé ; le résultat est marshalé en retour comme les scans async.
+    if (!m_impl->collector->isCollecting()) {
+        return;
+    }
+    auto* collector = m_impl->collector.get();
+    QPointer<MemoryTimelineManager> self(this);
+    std::thread([self, collector]() {
+        collector->stopCollection();
+        const auto reason = collector->lastStopReason();
+        if (!self) {
+            return;
+        }
+        QMetaObject::invokeMethod(self.data(), [self, reason]() {
+            if (!self) {
+                return;
+            }
+            emit self->collectingChanged();
+            emit self->collectionFinished(stopReasonToString(reason));
+        }, Qt::QueuedConnection);
+    }).detach();
 }
 
 void MemoryTimelineManager::pauseCollection() {

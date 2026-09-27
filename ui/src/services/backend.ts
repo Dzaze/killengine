@@ -1486,8 +1486,102 @@ export interface ModuleCatalog {
     }
   }
 
+  /** UX-PRODUIT-12 -- Centre d'activité permanent : une entrée du registre backend. */
+  export interface ActivityEntry {
+    operationId: string
+    kind: string
+    state: 'running' | 'cancel_requested' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
+    revision: number
+    startedAtMs: number
+    finishedAtMs: number
+    progress: number | null
+    summary: string
+    errorMessage: string
+    canCancel: boolean
+    acknowledged: boolean
+    resultRef: string
+    requestId: string
+    target: { pid: string, processName: string, attachmentGeneration: string } | null
+  }
+
+  /** Snapshot complet, autorité serveur -- réponse de getActivitySnapshot(). */
+  export interface ActivitySnapshot {
+    globalRevision: number
+    runningCount: number
+    unacknowledgedTerminalCount: number
+    entries: ActivityEntry[]
+  }
+
+  /** Poussée par activityUpdated -- une seule entrée changée + révision globale (pas tout le snapshot). */
+  export interface ActivityUpdatePayload {
+    globalRevision: number
+    entry: ActivityEntry
+  }
+
+  /** UX-PRODUIT-13 -- Historique automatique et récupération du workspace. */
+  export interface WorkspaceRevisionSummary {
+    id: string
+    createdAtUtc: string
+    reason: 'automatic' | 'before_import' | 'before_restore' | 'manual'
+    projectContext: string
+    targetName: string
+    payloadSizeBytes: number
+    payloadSha256: string
+    /** Uniquement présent dans une réponse de listWorkspaceRevisions -- absent d'une réponse de create/read (toujours valide dans ce cas). */
+    valid?: boolean
+    error?: string
+  }
+
+  export interface WorkspaceRevisionCreateResult {
+    success: boolean
+    error?: string
+    revision?: WorkspaceRevisionSummary
+  }
+
+  export interface WorkspaceRevisionListResult {
+    success: boolean
+    error?: string
+    entries: WorkspaceRevisionSummary[]
+  }
+
+  export interface WorkspaceRevisionReadResult {
+    success: boolean
+    error?: string
+    revision?: WorkspaceRevisionSummary
+    payloadJson?: string
+  }
+
+  /** UX-PRODUIT-14A -- une entrée de méthode/signal du contrat backend réel (voir describeBackendContract côté C++). */
+  export interface BackendContractMember {
+    name: string
+    arity: number
+    parameterTypes: string[]
+    returnType: string
+  }
+
+  /** UX-PRODUIT-14A -- une entrée de propriété Qt du contrat backend réel. */
+  export interface BackendContractProperty {
+    name: string
+    type: string
+    readable: boolean
+    writable: boolean
+    hasNotify: boolean
+    notifySignal: string
+    constant: boolean
+  }
+
+  /** UX-PRODUIT-14A -- inventaire structurel réel du contrôleur (aucune méthode décrite n'est appelée). */
+  export interface BackendContractDescription {
+    schemaVersion: number
+    methods: BackendContractMember[]
+    properties: BackendContractProperty[]
+    signals: BackendContractMember[]
+  }
+
   export interface BackendController {
   getVersion(): Promise<string>
+  /** UX-PRODUIT-14A -- inventaire réel des méthodes/propriétés/signaux du contrôleur, pour scripts/test-backend-contract.ps1/.mjs. */
+  describeBackendContract?(): Promise<BackendContractDescription>
   getProcesses(): Promise<ProcessInfo[]>
   getProcessModules(pid: number): Promise<ProcessModuleInfo[]>
   discoverProcessSaveFiles(maxResults: number): Promise<ProcessSaveFileDiscoveryResult>
@@ -1506,6 +1600,18 @@ export interface ModuleCatalog {
   attachProcess(pid: number): Promise<boolean>
   /** true si réellement détaché ; false si différé (scan/debug en cours, voir DebugFeatureManager::deferDetachIfBusy) -- le moteur reste attaché dans ce cas. Le retour direct de cet appel est la source de vérité, plus fiable qu'une relecture de isAttached juste après (ordre de propagation non garanti entre la réponse RPC et la mise à jour des propriétés sur ce même canal). */
   detachProcess(): Promise<boolean>
+  /** UX-PRODUIT-15 -- rôle NORMAL uniquement (erreur explicite sinon) : démarre une session tutoriel isolée (second KillEngine.exe + sa propre cible démo). Sans effet si déjà active -- retourne son état existant (alreadyActive: true). */
+  startTutorialSession?(): Promise<Record<string, unknown>>
+  /** UX-PRODUIT-15 -- rôle NORMAL uniquement. État de la session tutoriel courante. */
+  getTutorialSessionStatus?(): Promise<Record<string, unknown>>
+  /** UX-PRODUIT-15 -- rôle NORMAL uniquement. Termine la session tutoriel courante (processus + dossier de données isolé). */
+  closeTutorialSession?(): Promise<Record<string, unknown>>
+  /** UX-PRODUIT-15 -- vrai uniquement dans le processus enfant lancé avec --tutorial-session-root=. Utilisé pour désactiver des comportements normaux non pertinents en session jetable (ex. préchauffage IA locale). */
+  isTutorialMode?(): Promise<boolean>
+  /** UX-PRODUIT-15 -- rôle ENFANT uniquement (erreur explicite sinon) : relance KillEngineDemoTarget.exe si elle a été fermée/a crashé, refait la poignée de main IPC. Préparation 15C (guide interactif), pas de consommateur UI dans cette passe. */
+  restartTutorialTarget?(): Promise<Record<string, unknown>>
+  /** UX-PRODUIT-15 -- rôle ENFANT uniquement (erreur explicite sinon). Vérité terrain de la cible démo (adresses/valeurs) -- jamais affichée telle quelle à l'utilisateur. Préparation 15C, pas de consommateur UI dans cette passe. */
+  getTutorialTargetInfo?(): Promise<Record<string, unknown>>
   /** Miroir en direct d'ApplicationController::isAttached (Q_PROPERTY, NOTIFY attachmentChanged) -- source de vérité pour l'attache réelle du moteur, y compris quand elle change via le pipe d'automatisation plutôt que depuis cette UI. */
   isAttached?: boolean
   /** Miroir en direct d'ApplicationController::processName (même NOTIFY). */
@@ -1786,6 +1892,17 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   cancelModuleInstall?(): Promise<Record<string, unknown>>
   moduleInstallProgress?: QWebChannelSignal<Record<string, unknown>>
   moduleInstallFinished?: QWebChannelSignal<Record<string, unknown>>
+  /** UX-PRODUIT-12 -- Centre d'activité permanent : snapshot complet (autorité serveur) des opérations en cours/terminées (scans, Timeline, Lua, installations, surveillance de fichier). */
+  getActivitySnapshot?(): Promise<ActivitySnapshot>
+  /** Demande l'arrêt d'une activité. accepted=true signifie "arrêt demandé", pas "terminée" -- l'état terminal réel arrive via activityUpdated. */
+  cancelActivity?(operationId: string): Promise<{ accepted: boolean, error?: string }>
+  /** Une seule entrée changée + révision globale à chaque mutation -- le snapshot reste l'autorité, cette poussée n'est qu'un indice pour éviter d'attendre la réconciliation périodique. */
+  activityUpdated?: QWebChannelSignal<ActivityUpdatePayload>
+  /** UX-PRODUIT-13 -- crée une révision immuable du workspace (automatique/avant import/avant restauration/manuelle). metadata: {reason, projectContext?, targetName?}. */
+  createWorkspaceRevision?(payloadJson: string, metadata: { reason: string, projectContext?: string, targetName?: string }): Promise<WorkspaceRevisionCreateResult>
+  listWorkspaceRevisions?(options: { offset?: number, limit?: number }): Promise<WorkspaceRevisionListResult>
+  readWorkspaceRevision?(id: string): Promise<WorkspaceRevisionReadResult>
+  deleteWorkspaceRevision?(id: string): Promise<{ success: boolean, error?: string }>
   /** MODULES-V2 : vérifie si l'EDR bloque l'injection sur le process attaché. */
   checkEdrBlocking?(): Promise<Record<string, unknown>>
   /** MODULES-V2 : le processus cible a été tué par l'EDR pendant le test. */
@@ -1931,6 +2048,14 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   clearSmartSearchDebugEvents(): Promise<Record<string, unknown>>
   getLogTail(maxLines: number): Promise<LogTailResult>
   exportDiagnostics(): Promise<Record<string, unknown>>
+  /** UX-PRODUIT-17 — flux Préparer/Aperçu/Exporter. `options` : steps/expected/observed (bornés à 64 Kio UTF-8), includeSmartSearchDebug/includeScanTelemetry/includeCrashReports (bool, défaut false), actionLogEvents (dernières entrées actionLog.ts, du plus ancien au plus récent). Une seule préparation active à la fois, TTL 10 minutes. */
+  prepareDiagnosticReport?(options: Record<string, unknown>): Promise<Record<string, unknown>>
+  /** Métadonnées/tailles/omissions/provenance — jamais le contenu complet des sections. */
+  getPreparedDiagnosticReportPreview?(): Promise<Record<string, unknown>>
+  /** Lecture paginée (16 Kio max/page, frontière UTF-8 respectée) d'une section de l'aperçu préparé. */
+  getPreparedDiagnosticReportSection?(sectionId: string, offset: number, limit: number): Promise<Record<string, unknown>>
+  /** Ouvre un dialogue de sauvegarde natif puis écrit le rapport préparé (QSaveFile vérifié). `cancelled:true` si l'utilisateur annule le dialogue. */
+  exportPreparedDiagnosticReport?(): Promise<Record<string, unknown>>
   getTemporaryStorageStatus(): Promise<TemporaryStorageStatus>
   clearTemporaryStorage(): Promise<Record<string, unknown>>
   getActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
@@ -2047,6 +2172,21 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   /** Corrélations entre toutes les séries surveillées + rapport texte (ajoutés le 03/09/2026). */
   findTimelineCorrelations?(): Promise<Record<string, unknown>>
   generateTimelineReport?(): Promise<Record<string, unknown>>
+
+  /** UX-PRODUIT-16 — Comparateur visuel de 2 à 6 candidats. `series` : liste de {id, address, type, factor, label}. `options` : intervalMs (min 50, défaut 100), maxDurationMs (défaut 30000, max 120000). Une seule comparaison active à la fois. */
+  startCandidateComparison?(series: Record<string, unknown>[], options: Record<string, unknown>): Promise<Record<string, unknown>>
+  getCandidateComparisonStatus?(): Promise<Record<string, unknown>>
+  /** Points paginés (exactValueText/numericValue/scaledValueText/isValid) pour une série, par batchId croissant. */
+  getCandidateComparisonSamples?(seriesId: string, offset: number, limit: number): Promise<Record<string, unknown>>
+  /** Corrélation de Pearson par paire de séries, appariée par tour de lecture (batchId) commun -- jamais par indice brut. */
+  getCandidateComparisonCorrelations?(): Promise<Record<string, unknown>>
+  stopCandidateComparison?(): Promise<Record<string, unknown>>
+  /** UX-PRODUIT-16 (16C) — repère horodaté (même horloge que les points/tours) pendant une capture active. Au plus 100 repères de 500 caractères ; refusé après l'arrêt de la capture. */
+  addCandidateComparisonMarker?(text: string): Promise<Record<string, unknown>>
+  /** UX-PRODUIT-16 (16C) — export JSON versionné et borné de la capture courante (config, séries décodées, minutages, corrélations, repères) ; écrit sur disque côté backend, retourne `filepath`. N'affecte jamais les exports Memory Timeline existants. */
+  exportCandidateComparisonToJson?(): Promise<Record<string, unknown>>
+  /** reason ∈ 'user_stop' | 'duration_reached' | 'target_lost'. */
+  comparisonFinished?: QWebChannelSignal<string>
 
   /** ANALYSE-CLINE-1 — Memory Heatmap : scanne passivement les accès (lecture/écriture) sur tout l'espace mémoire du process attaché, borné par tick (voir HeatmapConfig::maxPagesPerTick côté backend). Vue dédiée : MemoryHeatmapView.vue. */
   startMemoryHeatmap?(addressHex: string, options: Record<string, unknown>): Promise<Record<string, unknown>>
@@ -2624,6 +2764,24 @@ class BackendService {
         this.attachedPid = 0
         attachmentListeners.forEach((callback) => callback())
         return true
+      },
+      async startTutorialSession() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async getTutorialSessionStatus() {
+        return { active: false }
+      },
+      async closeTutorialSession() {
+        return { success: false, wasActive: false, error: 'Mock backend' }
+      },
+      async isTutorialMode() {
+        return false
+      },
+      async restartTutorialTarget() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async getTutorialTargetInfo() {
+        return { success: false, error: 'Mock backend' }
       },
       async getMemoryMap() {
         return {
@@ -3261,6 +3419,30 @@ class BackendService {
       async cancelModuleInstall() {
         return { success: false, error: 'Indisponible dans le mock.' }
       },
+      // UX-PRODUIT-12 -- Centre d'activité permanent : registre toujours vide dans le mock.
+      async getActivitySnapshot() {
+        return { globalRevision: 0, runningCount: 0, unacknowledgedTerminalCount: 0, entries: [] }
+      },
+      async cancelActivity(_operationId: string) {
+        return { accepted: false, error: 'Indisponible dans le mock.' }
+      },
+      // UX-PRODUIT-14A -- pas de vrai méta-objet Qt à introspecter dans le mock ; structure valide mais vide.
+      async describeBackendContract() {
+        return { schemaVersion: 1, methods: [], properties: [], signals: [] }
+      },
+      // UX-PRODUIT-13 -- Historique du workspace : aucune persistance réelle dans le mock.
+      async createWorkspaceRevision(_payloadJson: string, _metadata) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async listWorkspaceRevisions(_options) {
+        return { success: true, entries: [] }
+      },
+      async readWorkspaceRevision(_id: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
+      async deleteWorkspaceRevision(_id: string) {
+        return { success: false, error: 'Indisponible dans le mock.' }
+      },
       // MODULES-V2 mocks
       async checkEdrBlocking() {
         return { success: true, blocked: false, message: 'Mock: aucun blocage EDR détecté.' }
@@ -3531,6 +3713,18 @@ class BackendService {
       },
       async exportDiagnostics() {
         return { success: false, path: '', error: 'Mock backend' }
+      },
+      async prepareDiagnosticReport() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async getPreparedDiagnosticReportPreview() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async getPreparedDiagnosticReportSection() {
+        return { success: false, error: 'Mock backend' }
+      },
+      async exportPreparedDiagnosticReport() {
+        return { success: false, error: 'Mock backend' }
       },
       async getTemporaryStorageStatus() {
         return {

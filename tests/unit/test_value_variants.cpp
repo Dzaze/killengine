@@ -4,6 +4,7 @@
 
 #include <QByteArray>
 #include <cstring>
+#include <limits>
 
 using killcore::generateScanVariants;
 using killcore::scanValueToBytes;
@@ -132,4 +133,70 @@ TEST(ValueVariants, DeltaVariantsSkipScalingForFloatTypes) {
     const auto variantsF64 = killcore::generateDeltaVariants(2.5, ValueType::Float64);
     ASSERT_EQ(variantsF64.size(), 1);
     EXPECT_EQ(variantsF64.first().label, "Float64");
+}
+
+namespace {
+
+template <typename T>
+QByteArray bytesFrom(T value) {
+    QByteArray bytes(sizeof(T), '\0');
+    std::memcpy(bytes.data(), &value, sizeof(T));
+    return bytes;
+}
+
+} // namespace
+
+using killcore::scanBytesToExactString;
+
+TEST(ValueVariants, ExactStringNegativeInt32) {
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<int32_t>(-12345), ValueType::Int32), "-12345");
+}
+
+TEST(ValueVariants, ExactStringUInt64BeyondDoublePrecision) {
+    // 2^53 + 1 -- pas representable exactement en double, doit rester exact en texte.
+    const uint64_t value = (uint64_t(1) << 53) + 1;
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<uint64_t>(value), ValueType::UInt64), "9007199254740993");
+}
+
+TEST(ValueVariants, ExactStringInt64Max) {
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<int64_t>(std::numeric_limits<int64_t>::max()), ValueType::Int64),
+              "9223372036854775807");
+}
+
+TEST(ValueVariants, ExactStringInt64Min) {
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<int64_t>(std::numeric_limits<int64_t>::min()), ValueType::Int64),
+              "-9223372036854775808");
+}
+
+TEST(ValueVariants, ExactStringDeltaOneNearInt32Boundary) {
+    const int32_t nearMax = std::numeric_limits<int32_t>::max() - 1;
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<int32_t>(nearMax), ValueType::Int32), "2147483646");
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<int32_t>(nearMax + 1), ValueType::Int32), "2147483647");
+}
+
+TEST(ValueVariants, ExactStringFloat32RoundTrips) {
+    const QString text = scanBytesToExactString(bytesFrom<float>(3.5f), ValueType::Float32);
+    EXPECT_DOUBLE_EQ(text.toDouble(), 3.5);
+}
+
+TEST(ValueVariants, ExactStringFloat64RoundTrips) {
+    const QString text = scanBytesToExactString(bytesFrom<double>(1.0 / 3.0), ValueType::Float64);
+    EXPECT_DOUBLE_EQ(text.toDouble(), 1.0 / 3.0);
+}
+
+TEST(ValueVariants, ExactStringFloat32NaNAndInfinite) {
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<float>(std::numeric_limits<float>::quiet_NaN()), ValueType::Float32), "NaN");
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<float>(std::numeric_limits<float>::infinity()), ValueType::Float32), "Inf");
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<float>(-std::numeric_limits<float>::infinity()), ValueType::Float32), "-Inf");
+}
+
+TEST(ValueVariants, ExactStringFloat64NaNAndInfinite) {
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<double>(std::numeric_limits<double>::quiet_NaN()), ValueType::Float64), "NaN");
+    EXPECT_EQ(scanBytesToExactString(bytesFrom<double>(std::numeric_limits<double>::infinity()), ValueType::Float64), "Inf");
+}
+
+TEST(ValueVariants, ExactStringEmptyForTruncatedBytes) {
+    QByteArray tooShort(2, '\0');
+    EXPECT_EQ(scanBytesToExactString(tooShort, ValueType::Int32), "");
+    EXPECT_EQ(scanBytesToExactString(QByteArray(), ValueType::Int64), "");
 }

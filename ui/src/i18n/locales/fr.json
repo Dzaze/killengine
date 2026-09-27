@@ -11,6 +11,7 @@
       "step3Title": "Transforme une trouvaille en Trainer.",
       "step3Detail": "Une fois une valeur confirmée, sauvegarde-la comme feature réutilisable avec un raccourci clavier.",
       "fullGuide": "Guide complet",
+      "tryTutorial": "Essayer le tutoriel",
       "start": "Commencer"
     },
     "riskGate": {
@@ -292,7 +293,40 @@
     "languageSwitchLabel": "Langue de l'interface",
     "languageSaveFailed": "Langue changée pour cette session, mais non enregistrée : {error}",
     "help": "Aide",
-    "helpTitle": "Ouvrir le guide utilisateur"
+    "helpTitle": "Ouvrir le guide utilisateur",
+    "tryTutorial": "Essayer le tutoriel",
+    "tryTutorialTitle": "Ouvrir une fenêtre de démonstration isolée pour s'entraîner sans risque"
+  },
+  "activity": {
+    "trigger": "Activité · {count} en cours",
+    "unacknowledgedTitle": "{count} activité(s) terminée(s) non consultée(s)",
+    "title": "Centre d'activité",
+    "close": "Fermer",
+    "empty": "Aucune activité pour l'instant.",
+    "sectionActive": "Actives",
+    "sectionTerminal": "Terminées",
+    "view": "Voir",
+    "stop": "Arrêter",
+    "kind": {
+      "scan_exact": "Scan exact",
+      "scan_auto": "Scan Auto",
+      "scan_next": "Next scan",
+      "scan_capture_unknown": "Capture unknown",
+      "scan_unknown_next": "Next scan (unknown)",
+      "timeline_collection": "Collecte Timeline",
+      "lua_script": "Script Lua",
+      "module_install": "Installation de module",
+      "save_file_watch": "Surveillance de fichier",
+      "candidate_comparison": "Comparaison de candidats"
+    },
+    "state": {
+      "running": "En cours",
+      "cancel_requested": "Arrêt demandé",
+      "completed": "Terminé",
+      "cancelled": "Annulé",
+      "failed": "Échec",
+      "interrupted": "Interrompu"
+    }
   },
   "project": {
     "title": "Projet / session",
@@ -309,7 +343,40 @@
       "importExport": "Import / export",
       "history": "Historique"
     },
-    "autoMemoryDetailsTitle": "Mémoire auto et motifs mémorisés"
+    "autoMemoryDetailsTitle": "Mémoire auto et motifs mémorisés",
+    "history": {
+      "title": "Historique et récupération",
+      "refresh": "Actualiser",
+      "createManual": "Créer un point de restauration",
+      "scopeHint": "Capture automatique après 2 s d'inactivité (au plus une toutes les 30 s) : enquête, Trainer, notes/modèles, journal d'actions, dernier preset. Les préférences ne sont pas incluses.",
+      "loading": "Chargement…",
+      "empty": "Aucune révision pour l'instant.",
+      "reason": {
+        "automatic": "Automatique",
+        "before_import": "Avant import",
+        "before_restore": "Avant restauration",
+        "manual": "Manuelle"
+      },
+      "preview": "Aperçu",
+      "delete": "Supprimer",
+      "previewTitle": "Aperçu avant/après",
+      "previewLoading": "Chargement de l'aperçu…",
+      "section": {
+        "investigation": "Enquête",
+        "trainer": "Trainer",
+        "structures": "Modèles de structure",
+        "bookmarks": "Notes et adresses",
+        "audit": "Journal d'actions"
+      },
+      "noChange": "Aucun changement",
+      "diffKind": {
+        "added": "ajouté",
+        "removed": "retiré",
+        "modified": "modifié"
+      },
+      "restoreSelected": "Restaurer la sélection",
+      "protectionFailedBeforeImport": "Import annulé : impossible de créer la révision de protection avant remplacement ({error})."
+    }
   },
   "modules": {
     "intro": "Dépendances optionnelles de KillEngine : statut installé/manquant et installation depuis l'UI (scripts locaux, téléchargement réseau, invite UAC). Pensez à installer les modules manquants avant d'exporter le package sur une autre machine.",
@@ -876,6 +943,13 @@
       "cost": "Lecture seule. La relecture interroge le processus cible à chaque rafraîchissement.",
       "example": "Il reste 3 adresses après réduction. Coche-les, puis clique Envoyer à l'Assistant pour continuer la conversation avec ces pistes actives sans retaper les adresses."
     },
+    "candidateComparison": {
+      "title": "Comparateur",
+      "what": "Compare 2 à 6 candidats sur un même graphique, avec un décodage numérique typé exact et une corrélation calculée tour par tour (pas par simple indice).",
+      "when": "Pour distinguer une valeur affichée d'une vraie source, ou vérifier si deux adresses évoluent réellement ensemble.",
+      "cost": "Lecture seule. Aucune écriture n'est jamais déclenchée par le comparateur.",
+      "example": "Sélectionne 3 candidats dans le panneau Candidats, clique Comparer : la comparaison démarre sur un nouvel onglet de Memory Timeline."
+    },
     "write": {
       "title": "Write / Freeze",
       "what": "Écrit une valeur aux adresses sélectionnées, et peut la réécrire en boucle (freeze) pour qu'elle ne redescende pas.",
@@ -1193,6 +1267,69 @@
       "when": "Pour comprendre ce qui maintient un objet en vie, ou comme point de départ pour reconstruire un chemin root → objet dans le panneau ci-dessous.",
       "cost": "Lecture seule. Sur un gros tas, la liste peut être longue et ne pas inclure certaines racines de type StaticVar (limitation connue de l'attache passive ClrMD, contournée ailleurs par une résolution dédiée).",
       "example": "Une racine `StrongHandle` pointant vers l'objet `Player` explique pourquoi cet objet n'est jamais collecté par le GC tant que le handle existe."
+    }
+  },
+  "tutorial": {
+    "title": "Guide du tutoriel",
+    "subtitle": "Fenêtre de démonstration isolée — rien ici n'affecte tes vraies sessions.",
+    "intro": {
+      "what": "Un parcours guidé sur une cible jetable pour t'entraîner sans risque.",
+      "purpose": "Chaque étape ne passe que quand KillEngine a vraiment vérifié ce que tu as fait — pas au simple clic sur Suivant.",
+      "how": "Utilise les vraies vues (Processus, Expert, Profils) comme dans une session normale, puis reviens ici cliquer Vérifier cette étape."
+    },
+    "entry": {
+      "tryTutorial": "Essayer le tutoriel",
+      "close": "Fermer le tutoriel",
+      "reopen": "Rouvrir le guide"
+    },
+    "steps": {
+      "attach": {
+        "label": "Attacher",
+        "hint": "La fenêtre « KillEngine — Tutoriel » vient de s'ouvrir avec sa propre cible de démonstration. Va dans Processus, trouve ce processus démo et attache-toi.",
+        "expected": "L'engine est attaché au processus de la cible démo.",
+        "goTo": "Aller à Processus"
+      },
+      "search": {
+        "label": "Chercher puis varier",
+        "hint": "Lis la valeur affichée dans la fenêtre de la cible démo, lance un scan exact avec cette valeur dans Expert. Puis clique Dégâts ou Soin dans la fenêtre démo, et relance un scan suivant avec la nouvelle valeur affichée.",
+        "expected": "Le scan a convergé vers une seule adresse plausible, sans les valeurs qui ne changent jamais.",
+        "goTo": "Aller à Expert"
+      },
+      "refine": {
+        "label": "Affiner puis sélectionner",
+        "hint": "Sélectionne le candidat retenu dans la liste des résultats.",
+        "expected": "Le candidat sélectionné correspond bien à la valeur santé de la cible démo."
+      },
+      "write": {
+        "label": "Écrire",
+        "hint": "Entre une nouvelle valeur et clique Écrire, puis confirme dans la boîte de dialogue qui s'ouvre.",
+        "expected": "L'écriture a réussi sur l'adresse retenue."
+      },
+      "verify": {
+        "label": "Vérifier l'effet",
+        "hint": "Regarde la fenêtre de la cible démo : la valeur affichée doit maintenant correspondre à ce que tu as écrit.",
+        "expected": "La valeur relue sur la cible démo correspond à l'écriture."
+      },
+      "save": {
+        "label": "Sauvegarder puis retrouver",
+        "hint": "Va dans Profils, crée ou choisis un profil, et sauvegarde l'adresse retenue comme cible nommée. Puis clique Redémarrer la cible ci-dessous, ré-attache-toi au nouveau processus, et recharge le profil sauvegardé.",
+        "expected": "Le profil rechargé retrouve une adresse valide après le redémarrage de la cible."
+      }
+    },
+    "actions": {
+      "verify": "Vérifier cette étape",
+      "retry": "Réessayer",
+      "quit": "Quitter",
+      "restartTarget": "Redémarrer la cible",
+      "profileNamePlaceholder": "Nom du profil",
+      "targetNamePlaceholder": "Nom de la cible"
+    },
+    "status": {
+      "checking": "Vérification…",
+      "passed": "Étape validée",
+      "failed": "Pas encore — {reason}",
+      "completedTitle": "Tutoriel terminé !",
+      "completedDetail": "Tu as fait le tour complet : attacher, chercher, affiner, écrire, vérifier, sauvegarder et retrouver. Tu peux fermer ce guide et recommencer avec un vrai programme."
     }
   },
   "assistant": {
@@ -1587,6 +1724,8 @@
     "score": "score",
     "seenCount": "vu {count}x",
     "sendToWrite": "Envoyer {count} vers Write",
+    "compareSources": "Comparer ({count})",
+    "compareSourcesHint": "Ouvre l'onglet Comparer de Memory Timeline avec 2 à 6 sources sélectionnées.",
     "sessionInProgress": "Session en cours...",
     "showAllFourSteps": "Afficher les panneaux des quatre étapes en même temps.",
     "smartLeads": "Pistes intelligentes",
@@ -1755,6 +1894,8 @@
     "writeKernelTitle": "Contourne les protections mémoire usermode — pour une adresse qui refuse de tenir une écriture normale (ex : instabilité/compteur animé).",
     "watchPage": "Watch page",
     "watchSelection": "Watch sélection",
+    "compare": "Comparer ({count})",
+    "compareHint": "Ouvre l'onglet Comparer de Memory Timeline avec 2 à 6 candidats sélectionnés.",
     "fileStorage": "Stockage fichier",
     "ramStorage": "Stockage RAM",
     "fileBytes": "Fichier : {bytes}",
@@ -1992,7 +2133,9 @@
     "previousValue": "précédent {value}",
     "unreadable": "Illisible",
     "lastKnownValue": "dernière valeur connue {value}",
-    "remove": "Retirer"
+    "remove": "Retirer",
+    "compare": "Comparer ({count})",
+    "compareHint": "Ouvre l'onglet Comparer de Memory Timeline avec 2 à 6 adresses cochées."
   },
   "groupScanPanel": {
     "title": "Group scan",
@@ -3135,6 +3278,10 @@
     }
   },
   "memoryTimeline": {
+    "tabs": {
+      "main": "Vue principale",
+      "compare": "Comparer"
+    },
     "intro": {
       "what": "Un visualiseur de l'évolution temporelle des valeurs mémoire — courbe de valeur au fil du temps pour un ensemble d'adresses surveillées.",
       "purpose": "Repérer des cycles (timers, animations), des adresses volatiles vs stables, et suivre visuellement comment une valeur évolue pendant que le jeu tourne.",
@@ -3229,6 +3376,76 @@
       "time": "t : {ms} ms",
       "value": "valeur : {value}"
     }
+  },
+  "candidateComparison": {
+    "title": "Comparateur de candidats",
+    "hint": "Sélectionne 2 à 6 candidats depuis Candidats, Watch ou Trace UI string, puis compare leurs courbes ici. Lecture seule.",
+    "empty": "Aucune sélection en attente. Coche 2 à 6 candidats ailleurs dans l'app puis clique Comparer.",
+    "pendingTitle": "Sélection en attente ({count})",
+    "remove": "Retirer",
+    "interval": "Intervalle",
+    "duration": "Durée max",
+    "duration30s": "30 s",
+    "duration60s": "60 s",
+    "duration120s": "120 s",
+    "start": "Démarrer la comparaison",
+    "clear": "Vider la sélection",
+    "stop": "Arrêter",
+    "collecting": "Comparaison en cours...",
+    "stopped": "Arrêtée ({reason})",
+    "tourCount": "{count} tour(s)",
+    "skippedTicks": "{count} tick(s) sauté(s) (capture en retard)",
+    "modeValues": "Valeurs",
+    "modeVariations": "Variations depuis le début",
+    "lastValue": "Dernière valeur",
+    "deltaFromStart": "Delta depuis le début",
+    "validRate": "{percent}% lectures valides",
+    "correlationsTitle": "Corrélations",
+    "coefficient": "r = {value} ({count} paires)",
+    "notComputable": "Non calculable",
+    "consignButton": "Consigner cette comparaison",
+    "consignTitle": "Consigner cette comparaison comme preuve",
+    "consignLevel": "Niveau",
+    "consignNotePlaceholder": "Observation (ex. la valeur affichée suit fidèlement la source B)...",
+    "consignSubmit": "Enregistrer",
+    "cancel": "Annuler",
+    "consignTargetPrefix": "Comparaison :",
+    "consignSource": "Comparateur visuel ({count} candidats)",
+    "consignConditions": "Intervalle {interval} ms, durée max {duration} s",
+    "markerPlaceholder": "Repère (ex. bouton Soin cliqué)...",
+    "markerAdd": "Ajouter un repère",
+    "markerListTitle": "Repères ({count})",
+    "exportButton": "Exporter en JSON",
+    "exportSuccess": "Export réussi : {path}",
+    "exportFailed": "Export échoué."
+  },
+  "diagnosticReport": {
+    "title": "Préparer un rapport de problème",
+    "hint": "Aperçu prévisualisable et borné avant export : provenance, sections bornées et rédigées (chemins personnels remplacés par des étiquettes), aucune donnée sensible par défaut. Aucun envoi réseau, aucun rejeu automatique.",
+    "steps": "Étapes",
+    "expected": "Résultat attendu",
+    "observed": "Résultat observé",
+    "includeSmartSearchDebug": "Inclure le journal debug Smart Search",
+    "includeScanTelemetry": "Inclure la télémétrie de scan",
+    "includeCrashReports": "Inclure les rapports de crash récents",
+    "prepare": "Préparer l'aperçu",
+    "export": "Exporter",
+    "cancelled": "Export annulé.",
+    "exported": "Rapport exporté :",
+    "previewTitle": "Aperçu du rapport",
+    "stale": "Options modifiées depuis la préparation — prépare un nouvel aperçu avant d'exporter.",
+    "engineVersion": "Version du moteur",
+    "buildId": "Build ID",
+    "executableSha256": "SHA-256 de l'exécutable",
+    "uiBundleOrigin": "Origine de l'UI",
+    "uiFingerprintStatus": "Empreinte des assets UI",
+    "os": "Système",
+    "totalBytes": "Taille totale",
+    "truncated": "tronqué ({bytes} omis)",
+    "showContent": "Voir le contenu",
+    "hideContent": "Masquer",
+    "loadMore": "Charger la suite",
+    "eventsTitle": "Événements de session ({count})"
   },
   "patternLearning": {
     "title": "Pattern Learning",
@@ -4328,6 +4545,24 @@
     "saveFailedUnknown": "erreur inconnue",
     "saved": "Paramètres sauvegardés."
   },
+  "tutorialStore": {
+    "startTitle": "Session tutoriel",
+    "closeTitle": "Fermeture du tutoriel",
+    "mockUnavailable": "Backend non disponible.",
+    "alreadyActive": "Une session tutoriel est déjà active.",
+    "started": "Session tutoriel démarrée — une nouvelle fenêtre va s'ouvrir.",
+    "closed": "Session tutoriel fermée.",
+    "groundTruthUnavailable": "Impossible de relire l'état de la cible démo pour l'instant.",
+    "notAttachedYet": "Pas encore attaché au bon processus démo.",
+    "matchReasonEmpty": "aucun résultat pour l'instant.",
+    "matchReasonDecoyPresent": "une valeur qui ne change jamais est encore dans les résultats, relance le scan suivant.",
+    "matchReasonNotFound": "la valeur retenue n'est pas encore dans les résultats.",
+    "matchReasonTooMany": "trop de résultats encore, affine encore le scan.",
+    "writeNotConfirmedYet": "aucune écriture confirmée sur cette adresse pour l'instant.",
+    "writeStepFirst": "termine d'abord l'étape Écrire.",
+    "effectNotObservedYet": "la valeur affichée sur la cible démo ne correspond pas encore à l'écriture.",
+    "profileNotSavedYet": "aucune cible portant ce nom trouvée dans ce profil pour l'instant."
+  },
   "trainerStore": {
     "persistenceFailedGeneric": "Impossible d'enregistrer les features Trainer localement.",
     "activateFeatureTitle": "Activer feature Trainer: {name}",
@@ -4570,8 +4805,15 @@
     "projectsCleared": "Projets vidés",
     "resolutionImpossible": "Résolution impossible.",
     "workspaceImported": "Workspace importé",
+    "workspaceRestoredFromHistory": "Workspace restauré depuis l'historique",
     "workspaceProjectLoaded": "Projet workspace chargé",
     "yes": "oui"
+  },
+  "workspaceHistoryStore": {
+    "persistenceFailedGeneric": "Impossible d'accéder à l'historique de révisions.",
+    "trainerActiveBlocksRestore": "Une feature Trainer est active ou en cours d'exécution -- décoche Trainer pour continuer, ou arrête-la d'abord.",
+    "protectionFailed": "Impossible de créer la révision de protection avant restauration -- rien n'a été modifié.",
+    "noSectionSelected": "Sélectionne au moins une section à restaurer."
   },
   "clrInspectorStore": {
     "atomicOperationsApplied": "{count} opération(s) appliquée(s), {threads} thread(s) suspendue(s) pendant l'écriture.",

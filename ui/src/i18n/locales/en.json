@@ -11,6 +11,7 @@
       "step3Title": "Turn a finding into a Trainer.",
       "step3Detail": "Once a value is confirmed, save it as a reusable feature with a keyboard shortcut.",
       "fullGuide": "Full guide",
+      "tryTutorial": "Try the tutorial",
       "start": "Get started"
     },
     "riskGate": {
@@ -292,7 +293,40 @@
     "languageSwitchLabel": "Interface language",
     "languageSaveFailed": "Language changed for this session, but not saved: {error}",
     "help": "Help",
-    "helpTitle": "Open the user guide"
+    "helpTitle": "Open the user guide",
+    "tryTutorial": "Try the tutorial",
+    "tryTutorialTitle": "Open an isolated demo window to practice risk-free"
+  },
+  "activity": {
+    "trigger": "Activity · {count} running",
+    "unacknowledgedTitle": "{count} finished activity/activities not yet seen",
+    "title": "Activity center",
+    "close": "Close",
+    "empty": "No activity yet.",
+    "sectionActive": "Active",
+    "sectionTerminal": "Finished",
+    "view": "View",
+    "stop": "Stop",
+    "kind": {
+      "scan_exact": "Exact scan",
+      "scan_auto": "Auto scan",
+      "scan_next": "Next scan",
+      "scan_capture_unknown": "Unknown capture",
+      "scan_unknown_next": "Next scan (unknown)",
+      "timeline_collection": "Timeline collection",
+      "lua_script": "Lua script",
+      "module_install": "Module install",
+      "save_file_watch": "File watch",
+      "candidate_comparison": "Candidate comparison"
+    },
+    "state": {
+      "running": "Running",
+      "cancel_requested": "Stop requested",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "failed": "Failed",
+      "interrupted": "Interrupted"
+    }
   },
   "project": {
     "title": "Project / session",
@@ -309,7 +343,40 @@
       "importExport": "Import / export",
       "history": "History"
     },
-    "autoMemoryDetailsTitle": "Auto memory and remembered patterns"
+    "autoMemoryDetailsTitle": "Auto memory and remembered patterns",
+    "history": {
+      "title": "History and recovery",
+      "refresh": "Refresh",
+      "createManual": "Create a restore point",
+      "scopeHint": "Automatic capture after 2s of inactivity (at most one every 30s): investigation, Trainer, notes/templates, action log, last preset. Preferences are not included.",
+      "loading": "Loading…",
+      "empty": "No revision yet.",
+      "reason": {
+        "automatic": "Automatic",
+        "before_import": "Before import",
+        "before_restore": "Before restore",
+        "manual": "Manual"
+      },
+      "preview": "Preview",
+      "delete": "Delete",
+      "previewTitle": "Before/after preview",
+      "previewLoading": "Loading preview…",
+      "section": {
+        "investigation": "Investigation",
+        "trainer": "Trainer",
+        "structures": "Structure templates",
+        "bookmarks": "Notes and addresses",
+        "audit": "Action log"
+      },
+      "noChange": "No change",
+      "diffKind": {
+        "added": "added",
+        "removed": "removed",
+        "modified": "modified"
+      },
+      "restoreSelected": "Restore selection",
+      "protectionFailedBeforeImport": "Import cancelled: could not create the protection revision before replacement ({error})."
+    }
   },
   "modules": {
     "intro": "Optional KillEngine dependencies: installed/missing status and in-UI installation (local scripts, network download, UAC prompt). Install missing modules before exporting the package to another machine.",
@@ -876,6 +943,13 @@
       "cost": "Read only. Re-reading queries the target process on every refresh.",
       "example": "3 addresses remain after narrowing. Check them, then click Send to Assistant to keep the conversation going with these active leads without retyping addresses."
     },
+    "candidateComparison": {
+      "title": "Comparator",
+      "what": "Compares 2 to 6 candidates on one chart, with an exact typed numeric decode and a correlation computed per read-tour (never by raw index).",
+      "when": "To tell a displayed value apart from its real source, or to check whether two addresses actually move together.",
+      "cost": "Read only. The comparator never triggers a write.",
+      "example": "Select 3 candidates in the Candidates panel, click Compare: the comparison starts on a new Memory Timeline tab."
+    },
     "write": {
       "title": "Write / Freeze",
       "what": "Writes a value to the selected addresses, and can rewrite it in a loop (freeze) so it does not drop back.",
@@ -1193,6 +1267,69 @@
       "when": "To understand what's keeping an object alive, or as a starting point to rebuild a root → object path in the panel below.",
       "cost": "Read only. On a large heap the list can be long and may miss some StaticVar-kind roots (a known limitation of passive ClrMD attach, worked around elsewhere by a dedicated resolution).",
       "example": "A `StrongHandle` root pointing to the `Player` object explains why that object is never collected by the GC while the handle exists."
+    }
+  },
+  "tutorial": {
+    "title": "Tutorial guide",
+    "subtitle": "Isolated demo window — nothing here affects your real sessions.",
+    "intro": {
+      "what": "A guided walkthrough on a disposable target to practice risk-free.",
+      "purpose": "Each step only advances once KillEngine has actually verified what you did — not on a plain Next click.",
+      "how": "Use the real views (Process, Expert, Profiles) just like a normal session, then come back here to click Verify this step."
+    },
+    "entry": {
+      "tryTutorial": "Try the tutorial",
+      "close": "Close the tutorial",
+      "reopen": "Reopen the guide"
+    },
+    "steps": {
+      "attach": {
+        "label": "Attach",
+        "hint": "The \"KillEngine — Tutorial\" window just opened with its own demo target. Go to Process, find that demo process and attach to it.",
+        "expected": "The engine is attached to the demo target process.",
+        "goTo": "Go to Process"
+      },
+      "search": {
+        "label": "Search, then change it",
+        "hint": "Read the value shown in the demo target window, run an exact scan with that value in Expert. Then click Damage or Heal in the demo window, and run a next scan with the new displayed value.",
+        "expected": "The scan converged on a single plausible address, without the values that never change.",
+        "goTo": "Go to Expert"
+      },
+      "refine": {
+        "label": "Refine, then select",
+        "hint": "Select the retained candidate in the results list.",
+        "expected": "The selected candidate really matches the demo target's health value."
+      },
+      "write": {
+        "label": "Write",
+        "hint": "Enter a new value and click Write, then confirm in the dialog that opens.",
+        "expected": "The write succeeded on the retained address."
+      },
+      "verify": {
+        "label": "Verify the effect",
+        "hint": "Look at the demo target window: the displayed value should now match what you wrote.",
+        "expected": "The value read back from the demo target matches the write."
+      },
+      "save": {
+        "label": "Save, then find it again",
+        "hint": "Go to Profiles, create or pick a profile, and save the retained address as a named target. Then click Restart the target below, re-attach to the new process, and reload the saved profile.",
+        "expected": "The reloaded profile finds a valid address again after the target restarts."
+      }
+    },
+    "actions": {
+      "verify": "Verify this step",
+      "retry": "Retry",
+      "quit": "Quit",
+      "restartTarget": "Restart the target",
+      "profileNamePlaceholder": "Profile name",
+      "targetNamePlaceholder": "Target name"
+    },
+    "status": {
+      "checking": "Checking…",
+      "passed": "Step validated",
+      "failed": "Not yet — {reason}",
+      "completedTitle": "Tutorial complete!",
+      "completedDetail": "You've done the full round: attach, search, refine, write, verify, save and find it again. You can close this guide and start over with a real program."
     }
   },
   "assistant": {
@@ -1587,6 +1724,8 @@
     "score": "score",
     "seenCount": "seen {count}x",
     "sendToWrite": "Send {count} to Write",
+    "compareSources": "Compare ({count})",
+    "compareSourcesHint": "Opens the Memory Timeline Compare tab with 2 to 6 selected sources.",
     "sessionInProgress": "Session in progress...",
     "showAllFourSteps": "Show the panels for all four steps at the same time.",
     "smartLeads": "Smart leads",
@@ -1755,6 +1894,8 @@
     "writeKernelTitle": "Bypasses usermode memory protections for an address that refuses to hold a normal write, such as instability or an animated counter.",
     "watchPage": "Watch page",
     "watchSelection": "Watch selection",
+    "compare": "Compare ({count})",
+    "compareHint": "Opens the Memory Timeline Compare tab with 2 to 6 selected candidates.",
     "fileStorage": "File storage",
     "ramStorage": "RAM storage",
     "fileBytes": "File: {bytes}",
@@ -1992,7 +2133,9 @@
     "previousValue": "previous {value}",
     "unreadable": "Unreadable",
     "lastKnownValue": "last known value {value}",
-    "remove": "Remove"
+    "remove": "Remove",
+    "compare": "Compare ({count})",
+    "compareHint": "Opens the Memory Timeline Compare tab with 2 to 6 checked addresses."
   },
   "groupScanPanel": {
     "title": "Group scan",
@@ -3135,6 +3278,10 @@
     }
   },
   "memoryTimeline": {
+    "tabs": {
+      "main": "Main view",
+      "compare": "Compare"
+    },
     "intro": {
       "what": "A timeline viewer for memory values, showing how watched addresses change over time.",
       "purpose": "Spot cycles such as timers or animations, separate volatile addresses from stable ones, and watch how a value evolves while the game is running.",
@@ -3229,6 +3376,76 @@
       "time": "t: {ms} ms",
       "value": "value: {value}"
     }
+  },
+  "candidateComparison": {
+    "title": "Candidate comparator",
+    "hint": "Select 2 to 6 candidates from Candidates, Watch or UI string tracing, then compare their curves here. Read only.",
+    "empty": "No pending selection. Check 2 to 6 candidates elsewhere in the app, then click Compare.",
+    "pendingTitle": "Pending selection ({count})",
+    "remove": "Remove",
+    "interval": "Interval",
+    "duration": "Max duration",
+    "duration30s": "30 s",
+    "duration60s": "60 s",
+    "duration120s": "120 s",
+    "start": "Start comparison",
+    "clear": "Clear selection",
+    "stop": "Stop",
+    "collecting": "Comparison running...",
+    "stopped": "Stopped ({reason})",
+    "tourCount": "{count} tour(s)",
+    "skippedTicks": "{count} tick(s) skipped (capture running late)",
+    "modeValues": "Values",
+    "modeVariations": "Variations from start",
+    "lastValue": "Last value",
+    "deltaFromStart": "Delta from start",
+    "validRate": "{percent}% valid reads",
+    "correlationsTitle": "Correlations",
+    "coefficient": "r = {value} ({count} pairs)",
+    "notComputable": "Not computable",
+    "consignButton": "Record this comparison",
+    "consignTitle": "Record this comparison as evidence",
+    "consignLevel": "Level",
+    "consignNotePlaceholder": "Observation (e.g. the displayed value tracks source B closely)...",
+    "consignSubmit": "Save",
+    "cancel": "Cancel",
+    "consignTargetPrefix": "Comparison:",
+    "consignSource": "Visual comparator ({count} candidates)",
+    "consignConditions": "Interval {interval} ms, max duration {duration} s",
+    "markerPlaceholder": "Marker (e.g. Heal button clicked)...",
+    "markerAdd": "Add marker",
+    "markerListTitle": "Markers ({count})",
+    "exportButton": "Export to JSON",
+    "exportSuccess": "Export succeeded: {path}",
+    "exportFailed": "Export failed."
+  },
+  "diagnosticReport": {
+    "title": "Prepare a problem report",
+    "hint": "Bounded, previewable preview before export: provenance, bounded and redacted sections (personal paths replaced with labels), no sensitive data by default. No network upload, no automatic replay.",
+    "steps": "Steps",
+    "expected": "Expected result",
+    "observed": "Observed result",
+    "includeSmartSearchDebug": "Include the Smart Search debug log",
+    "includeScanTelemetry": "Include scan telemetry",
+    "includeCrashReports": "Include recent crash reports",
+    "prepare": "Prepare preview",
+    "export": "Export",
+    "cancelled": "Export cancelled.",
+    "exported": "Report exported:",
+    "previewTitle": "Report preview",
+    "stale": "Options changed since preparation — prepare a new preview before exporting.",
+    "engineVersion": "Engine version",
+    "buildId": "Build ID",
+    "executableSha256": "Executable SHA-256",
+    "uiBundleOrigin": "UI origin",
+    "uiFingerprintStatus": "UI asset fingerprint",
+    "os": "OS",
+    "totalBytes": "Total size",
+    "truncated": "truncated ({bytes} omitted)",
+    "showContent": "Show content",
+    "hideContent": "Hide",
+    "loadMore": "Load more",
+    "eventsTitle": "Session events ({count})"
   },
   "patternLearning": {
     "title": "Pattern Learning",
@@ -4328,6 +4545,24 @@
     "saveFailedUnknown": "unknown error",
     "saved": "Settings saved."
   },
+  "tutorialStore": {
+    "startTitle": "Tutorial session",
+    "closeTitle": "Closing the tutorial",
+    "mockUnavailable": "Backend unavailable.",
+    "alreadyActive": "A tutorial session is already active.",
+    "started": "Tutorial session started — a new window will open.",
+    "closed": "Tutorial session closed.",
+    "groundTruthUnavailable": "Could not read the demo target's state right now.",
+    "notAttachedYet": "Not attached to the right demo process yet.",
+    "matchReasonEmpty": "no results yet.",
+    "matchReasonDecoyPresent": "a value that never changes is still in the results, run the next scan again.",
+    "matchReasonNotFound": "the retained value is not in the results yet.",
+    "matchReasonTooMany": "still too many results, narrow the scan further.",
+    "writeNotConfirmedYet": "no confirmed write on this address yet.",
+    "writeStepFirst": "finish the Write step first.",
+    "effectNotObservedYet": "the value shown on the demo target doesn't match the write yet.",
+    "profileNotSavedYet": "no target with that name found in this profile yet."
+  },
   "trainerStore": {
     "persistenceFailedGeneric": "Unable to save Trainer features locally.",
     "activateFeatureTitle": "Enable Trainer feature: {name}",
@@ -4570,8 +4805,15 @@
     "projectsCleared": "Projects cleared",
     "resolutionImpossible": "Could not resolve.",
     "workspaceImported": "Workspace imported",
+    "workspaceRestoredFromHistory": "Workspace restored from history",
     "workspaceProjectLoaded": "Workspace project loaded",
     "yes": "yes"
+  },
+  "workspaceHistoryStore": {
+    "persistenceFailedGeneric": "Could not access the revision history.",
+    "trainerActiveBlocksRestore": "A Trainer feature is active or currently running -- uncheck Trainer to continue, or stop it first.",
+    "protectionFailed": "Could not create the protection revision before restoring -- nothing was changed.",
+    "noSectionSelected": "Select at least one section to restore."
   },
   "clrInspectorStore": {
     "atomicOperationsApplied": "{count} operation(s) applied, {threads} thread(s) suspended during the write.",

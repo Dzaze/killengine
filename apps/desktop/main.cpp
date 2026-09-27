@@ -50,6 +50,26 @@ int runApplication(int argc, char* argv[]) {
     app.setOrganizationName("KillEngine");
     app.setApplicationVersion(KILLENGINE_VERSION);
 
+    // UX-PRODUIT-15 -- mode tutoriel : un second KillEngine.exe lancé par
+    // TutorialSessionManager (instance normale) avec --tutorial-session-root=
+    // doit rediriger PortablePaths::root() AVANT son tout premier consommateur
+    // (QSettings::setPath juste en dessous), donc dès que possible après la
+    // construction de QApplication. Pas de QCommandLineParser (première
+    // utilisation dans ce fichier) : un seul argument reconnu, scan minimal.
+    bool isTutorialMode = false;
+    for (int i = 1; i < argc; ++i) {
+        const QString arg = QString::fromLocal8Bit(argv[i]);
+        const QString prefix = QStringLiteral("--tutorial-session-root=");
+        if (arg.startsWith(prefix)) {
+            const QString tutorialRoot = arg.mid(prefix.size());
+            if (!tutorialRoot.isEmpty()) {
+                killcore::PortablePaths::setProductionRootOverride(tutorialRoot);
+                isTutorialMode = true;
+            }
+            break;
+        }
+    }
+
     // Portabilite reelle (13/09/2026, docs/PORTABILITY_ROADMAP.md candidat P1) :
     // QSettings() par defaut ecrit dans le registre Windows
     // (HKCU\Software\KillEngine\KillEngine), ce qui casse le mode portable
@@ -94,7 +114,9 @@ int runApplication(int argc, char* argv[]) {
     // Create the main window
     KE_LOG_INFO() << "Creating main window...";
     QMainWindow mainWindow;
-    mainWindow.setWindowTitle("KillEngine");
+    mainWindow.setWindowTitle(isTutorialMode
+        ? QStringLiteral("KillEngine — Tutoriel — environnement de démonstration")
+        : QStringLiteral("KillEngine"));
     mainWindow.resize(1280, 800);
     mainWindow.setMinimumSize(960, 600);
     KE_LOG_INFO() << "Main window created.";
@@ -152,7 +174,17 @@ int runApplication(int argc, char* argv[]) {
     // demandé (variable d'environnement dev OU toggle Settings persistant).
     // Voir ApplicationController::ensureAutomationPipeStartedIfConfigured()
     // et automation_pipe_server.h pour le protocole et les garde-fous.
-    controller->ensureAutomationPipeStartedIfConfigured();
+    // UX-PRODUIT-15 : jamais en mode tutoriel, même si une variable d'env
+    // héritée du parent le demanderait -- une session jetable ne doit jamais
+    // exposer le pipe d'automatisation (bypass RiskGate, voir AGENTS.md).
+    if (!isTutorialMode) {
+        controller->ensureAutomationPipeStartedIfConfigured();
+    }
+
+    if (isTutorialMode) {
+        KE_LOG_INFO() << "Mode tutoriel actif -- entrée dans enterTutorialMode()...";
+        controller->enterTutorialMode();
+    }
 
     KE_LOG_INFO() << "Creating QWebChannel...";
     QWebChannel* channel = new QWebChannel(&mainWindow);
@@ -177,6 +209,11 @@ int runApplication(int argc, char* argv[]) {
     // resolves inside a dev checkout (or, misleadingly, when testing the
     // package from inside dist/ still nested under the repo).
     QUrl url;
+    // UX-PRODUIT-17 -- provenance du rapport de problème : quelle branche a
+    // réellement chargé l'UI, capturée une seule fois ici et transmise au
+    // contrôleur (déjà construit plus haut) via setUiBundleOrigin().
+    QString uiBundleOrigin = QStringLiteral("none");
+    QString uiIndexHtmlPath;
 
     QString devPath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../ui/dist/index.html");
     QString packagedPath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("ui/dist/index.html");
@@ -188,20 +225,26 @@ int runApplication(int argc, char* argv[]) {
     if (QFile::exists(packagedPath)) {
         KE_LOG_INFO() << "Loading UI from packaged path: " << packagedPath.toStdString();
         url = QUrl::fromLocalFile(packagedPath);
+        uiBundleOrigin = QStringLiteral("packaged");
+        uiIndexHtmlPath = packagedPath;
     } else if (QFile::exists(devPath)) {
         KE_LOG_INFO() << "Loading UI from dev path: " << devPath.toStdString();
         url = QUrl::fromLocalFile(devPath);
+        uiBundleOrigin = QStringLiteral("dev");
+        uiIndexHtmlPath = devPath;
     } else {
         // Try resource path
         QString resPath = ":/index.html";
         if (QFile::exists(resPath)) {
             KE_LOG_WARN() << "UI bundle not found on disk, loading built-in placeholder from resources";
             url = QUrl("qrc:/index.html");
+            uiBundleOrigin = QStringLiteral("qrc-placeholder");
         } else {
             KE_LOG_WARN() << "UI not found! Neither dev, packaged nor resource path exists.";
             KE_LOG_WARN() << "Run 'npm run build' in ui/ directory first, or build the QRC.";
         }
     }
+    controller->setUiBundleOrigin(uiBundleOrigin, uiIndexHtmlPath);
 
     if (!url.isEmpty()) {
         view->load(url);

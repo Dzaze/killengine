@@ -43,6 +43,16 @@ struct TimelineSeries {
 };
 
 /**
+ * @brief Raison de fin d'une collecte, pour distinguer un arrêt utilisateur
+ * d'une fin naturelle (durée max atteinte) -- UX-PRODUIT-12, activité "Voir
+ * pourquoi une opération s'est terminée" au lieu d'un simple booléen isCollecting.
+ */
+enum class TimelineStopReason {
+    UserStop,
+    DurationReached,
+};
+
+/**
  * @brief Configuration de la collecte de timeline
  */
 struct TimelineCollectorConfig {
@@ -88,6 +98,15 @@ public:
     bool startCollection(void* processHandle);
     void stopCollection();
     bool isCollecting() const;
+
+    /// Raison de la dernière fin de collecte (défaut UserStop, écrasé par
+    /// DurationReached uniquement quand la boucle sort d'elle-même).
+    TimelineStopReason lastStopReason() const;
+
+    /// Nombre total de points actuellement stockés, toutes séries confondues
+    /// -- maintenu incrémentalement (pas de copie de getSeries() juste pour
+    /// compter, UX-PRODUIT-12 point 4).
+    size_t totalStoredPointCount() const;
 
     // Callbacks
     void setProgressCallback(ProgressCallback callback);

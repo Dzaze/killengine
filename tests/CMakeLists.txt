@@ -54,6 +54,12 @@ add_executable(killengine_unit_tests
     unit/test_game_profile_database.cpp
     unit/test_auto_dissect.cpp
     unit/test_candidate_confidence.cpp
+    unit/test_activity_registry.cpp
+    unit/test_workspace_revision_store.cpp
+    unit/test_job_object.cpp
+    unit/test_candidate_comparison_decoder.cpp
+    unit/test_candidate_comparison_collector.cpp
+    unit/test_diagnostic_report_builder.cpp
 )
 
 target_link_libraries(killengine_unit_tests PRIVATE

@@ -39,6 +39,19 @@ public:
     /// applicationDirPath(). Passer une chaîne vide annule l'override et
     /// revient au comportement par défaut.
     static void setTestRootOverride(const QString& root);
+
+    /// UX-PRODUIT-15 -- distinct de setTestRootOverride (jamais utilisé en
+    /// production) : override de production pour un processus enfant isolé
+    /// (session tutoriel), appelé UNE SEULE FOIS au tout début de main.cpp,
+    /// avant QSettings::setPath/Logger/WebEngine/ApplicationController.
+    /// Storage statique séparé de l'override de test : root() vérifie
+    /// l'override de test en premier (comportement des tests inchangé), puis
+    /// celui-ci, sinon applicationDirPath() comme aujourd'hui. L'instance
+    /// normale n'appelle jamais cette méthode -- purement additif, aucun
+    /// consommateur existant de root()/ensureSubdir()/filePath() n'est
+    /// affecté tant qu'elle n'est pas appelée. Passer une chaîne vide annule
+    /// l'override.
+    static void setProductionRootOverride(const QString& root);
 };
 
 } // namespace killcore

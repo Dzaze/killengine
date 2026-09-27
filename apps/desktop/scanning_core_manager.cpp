@@ -1,5 +1,6 @@
 #include "scanning_core_manager.h"
 
+#include "activity_manager.h"
 #include "application_controller.h"
 
 #include "localization/localization.h"
@@ -41,18 +42,44 @@ constexpr int kDefaultUnknownSnapshotMaxMb = 128;
 double bytesToDouble(const QByteArray& bytes, killcore::ValueType type);
 QString bytesToHex(const QByteArray& bytes);
 
-void emitQueuedScanProgress(const QPointer<ApplicationController>& self, int percent) {
+void emitQueuedScanProgress(const QPointer<ApplicationController>& self, int percent, const QString& activityOpId = QString()) {
     const int clamped = std::clamp(percent, 0, 100);
     if (!self) {
         return;
     }
-    QMetaObject::invokeMethod(self.data(), [self, clamped]() {
+    QMetaObject::invokeMethod(self.data(), [self, clamped, activityOpId]() {
         if (!self) {
             return;
+        }
+        // UX-PRODUIT-12 : registre d'activité mis à jour depuis CETTE
+        // continuation déjà marshalée sur le thread Qt (jamais depuis le
+        // worker thread qui a appelé emitQueuedScanProgress).
+        if (!activityOpId.isEmpty() && self->activityManager().registry().updateProgress(activityOpId, clamped)) {
+            self->activityManager().notifyUpdated(activityOpId);
         }
         emit self->scanProgress(clamped);
     }, Qt::QueuedConnection);
 }
+// UX-PRODUIT-12 : termine l'activité associée à un scan à partir du
+// QVariantMap "finished" déjà construit (champs success/cancelled/error
+// communs aux 4 méthodes async ci-dessous). Appelé depuis la continuation
+// déjà marshalée sur le thread Qt, juste avant emit self->scanFinished(...).
+void finishScanActivity(ApplicationController* self, const QString& activityOpId, const QVariantMap& finished) {
+    if (activityOpId.isEmpty()) {
+        return;
+    }
+    killcore::ActivityState state = killcore::ActivityState::Completed;
+    if (finished.value("cancelled").toBool()) {
+        state = killcore::ActivityState::Cancelled;
+    } else if (!finished.value("success").toBool()) {
+        state = killcore::ActivityState::Failed;
+    }
+    const QString errorMessage = finished.value("error").toString();
+    if (self->activityManager().registry().finish(activityOpId, state, QString(), errorMessage)) {
+        self->activityManager().notifyUpdated(activityOpId);
+    }
+}
+
 double ratePerSecond(size_t count, qint64 elapsedMs) {
     if (elapsedMs <= 0) {
         return 0.0;
@@ -636,6 +663,14 @@ QString noCandidateDiagnosticMessage(const QVariantMap& actionResult, const QStr
 
 
 } // namespace
+
+killcore::ActivityTarget ScanningCoreManager::activityTarget() const {
+    killcore::ActivityTarget target;
+    target.pid = QString::number(m_controller.m_pid);
+    target.processName = m_controller.m_processName;
+    target.attachmentGeneration = QString::number(m_controller.m_attachmentGeneration);
+    return target;
+}
 
 ScanningCoreManager::ScanningCoreManager(ApplicationController& controller, QObject* parent)
     : QObject(parent)
@@ -1409,11 +1444,15 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
 
     m_controller.m_scanInProgress = true;
     m_controller.m_activeScanCancellation = cancellation;
+    const QString activityOpId = m_controller.activityManager().registry().beginActivity(
+        killcore::ActivityKind::ScanExact, KE_TXT("Scan exact", "Exact scan"),
+        /*canCancel=*/true, activityTarget(), QString::number(requestId));
+    m_controller.activityManager().notifyUpdated(activityOpId);
     emit scanStarted();
     emit scanProgress(0);
 
     int lastWorkerProgress = 0;
-    options.progressCallback = [self, lastWorkerProgress](const killcore::ScanProgress& progress) mutable {
+    options.progressCallback = [self, lastWorkerProgress, activityOpId](const killcore::ScanProgress& progress) mutable {
         int percent = 1;
         if (progress.bytesTotal > 0) {
             percent = 1 + static_cast<int>((progress.bytesScanned * 94) / progress.bytesTotal);
@@ -1425,10 +1464,10 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
             return;
         }
         lastWorkerProgress = percent;
-        emitQueuedScanProgress(self, percent);
+        emitQueuedScanProgress(self, percent, activityOpId);
     };
 
-    std::thread([self, requestId, pid, value, valueType, expertOptions, scanValue, options, scannedBytes, cancellation]() {
+    std::thread([self, requestId, pid, value, valueType, expertOptions, scanValue, options, scannedBytes, cancellation, activityOpId]() {
         QElapsedTimer timer;
         timer.start();
         killcore::ScanResult scan;
@@ -1445,7 +1484,7 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
         if (!self) {
             return;
         }
-        QMetaObject::invokeMethod(self.data(), [self, requestId, value, valueType, expertOptions, scannedBytes, scan, elapsedMs]() {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, value, valueType, expertOptions, scannedBytes, scan, elapsedMs, activityOpId]() {
             if (!self) {
                 return;
             }
@@ -1531,6 +1570,8 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
             });
             self->m_scanInProgress = false;
             self->m_activeScanCancellation.reset();
+            finished["operationId"] = activityOpId;
+            finishScanActivity(self.data(), activityOpId, finished);
             emit self->scanStatsUpdated(static_cast<int>(candidates.size()));
             emit self->scanProgress(100);
             emit self->scanFinished(finished);
@@ -1649,10 +1690,14 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
 
     m_controller.m_scanInProgress = true;
     m_controller.m_activeScanCancellation = cancellation;
+    const QString activityOpId = m_controller.activityManager().registry().beginActivity(
+        killcore::ActivityKind::ScanNext, KE_TXT("Next scan", "Next scan"),
+        /*canCancel=*/true, activityTarget(), QString::number(requestId));
+    m_controller.activityManager().notifyUpdated(activityOpId);
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, mode, value, scanMode, firstCandidateType, candidateSnapshot, candidateThreshold, targetNumber, rangeMin, rangeMax, cancellation, confidenceHistory]() mutable {
+    std::thread([self, requestId, pid, mode, value, scanMode, firstCandidateType, candidateSnapshot, candidateThreshold, targetNumber, rangeMin, rangeMax, cancellation, confidenceHistory, activityOpId]() mutable {
         QElapsedTimer timer;
         timer.start();
         QVariantMap finished;
@@ -1680,7 +1725,7 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
                 return;
             }
             lastWorkerProgress = percent;
-            emitQueuedScanProgress(self, percent);
+            emitQueuedScanProgress(self, percent, activityOpId);
         };
 
         if (streamOutput && !survivors.beginFileBackedReplacement(&error)) {
@@ -1814,7 +1859,7 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
         }
         const qint64 elapsedMs = timer.elapsed();
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, firstCandidateType, candidateSnapshot, survivors = std::move(survivors), memorySurvivors = std::move(memorySurvivors), checked, unreadable, cancelled, error, debugSamples, valueHistoryUpdates, streamInput, streamOutput, elapsedMs]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, value, firstCandidateType, candidateSnapshot, survivors = std::move(survivors), memorySurvivors = std::move(memorySurvivors), checked, unreadable, cancelled, error, debugSamples, valueHistoryUpdates, streamInput, streamOutput, elapsedMs, activityOpId]() mutable {
             if (!self) {
                 return;
             }
@@ -1916,6 +1961,8 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
 
             self->m_scanInProgress = false;
             self->m_activeScanCancellation.reset();
+            finished["operationId"] = activityOpId;
+            finishScanActivity(self.data(), activityOpId, finished);
             emit self->scanStatsUpdated(static_cast<int>(candidates.size()));
             emit self->scanProgress(100);
             emit self->scanFinished(finished);
@@ -2342,6 +2389,10 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
 
     m_controller.m_scanInProgress = true;
     m_controller.m_activeScanCancellation = cancellation;
+    const QString activityOpId = m_controller.activityManager().registry().beginActivity(
+        killcore::ActivityKind::ScanCaptureUnknown, KE_TXT("Capture unknown", "Unknown capture"),
+        /*canCancel=*/true, activityTarget(), QString::number(requestId));
+    m_controller.activityManager().notifyUpdated(activityOpId);
     emit scanStarted();
     emit scanProgress(0);
 
@@ -2350,7 +2401,7 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
     // toute l'app) — même granularité de rapport que startExactScanAsync
     // (SnapshotStore::capture rapporte maintenant par région).
     int lastSnapshotProgress = 0;
-    options.progressCallback = [self, lastSnapshotProgress](const killcore::ScanProgress& progress) mutable {
+    options.progressCallback = [self, lastSnapshotProgress, activityOpId](const killcore::ScanProgress& progress) mutable {
         int percent = 1;
         if (progress.regionsTotal > 0) {
             percent = 1 + static_cast<int>((progress.regionsScanned * 94) / progress.regionsTotal);
@@ -2360,11 +2411,11 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
             return;
         }
         lastSnapshotProgress = percent;
-        emitQueuedScanProgress(self, percent);
+        emitQueuedScanProgress(self, percent, activityOpId);
     };
 
     const bool autoDepthApplied = requestedUnknownSnapshotMaxMb(expertOptions) == -1;
-    std::thread([self, requestId, pid, maxSnapshotBytes, suggestedDepthMb, relevantBytes, autoDepthApplied, options, cancellation]() mutable {
+    std::thread([self, requestId, pid, maxSnapshotBytes, suggestedDepthMb, relevantBytes, autoDepthApplied, options, cancellation, activityOpId]() mutable {
         killcore::SnapshotStore snapshotStore;
         killcore::ProcessHandle workerHandle(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly);
         killcore::SnapshotResult snapshot;
@@ -2379,7 +2430,7 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
             return;
         }
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, maxSnapshotBytes, suggestedDepthMb, relevantBytes, autoDepthApplied, snapshot, options, snapshotStore = std::move(snapshotStore)]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, maxSnapshotBytes, suggestedDepthMb, relevantBytes, autoDepthApplied, snapshot, options, snapshotStore = std::move(snapshotStore), activityOpId]() mutable {
             if (!self) {
                 return;
             }
@@ -2446,6 +2497,8 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
 
             self->m_scanInProgress = false;
             self->m_activeScanCancellation.reset();
+            finished["operationId"] = activityOpId;
+            finishScanActivity(self.data(), activityOpId, finished);
             emit self->scanProgress(100);
             emit self->scanFinished(finished);
         }, Qt::QueuedConnection);
@@ -2749,10 +2802,14 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
 
     m_controller.m_scanInProgress = true;
     m_controller.m_activeScanCancellation = cancellation;
+    const QString activityOpId = m_controller.activityManager().registry().beginActivity(
+        killcore::ActivityKind::ScanUnknownNext, KE_TXT("Next scan (unknown)", "Next scan (unknown)"),
+        /*canCancel=*/true, activityTarget(), QString::number(requestId));
+    m_controller.activityManager().notifyUpdated(activityOpId);
     emit scanStarted();
     emit scanProgress(0);
 
-    std::thread([self, requestId, pid, mode, valueType, autoType, typesToRun, scanMode, displayedDelta, cancellation]() {
+    std::thread([self, requestId, pid, mode, valueType, autoType, typesToRun, scanMode, displayedDelta, cancellation, activityOpId]() {
         QList<killcore::Candidate> unknownCandidates;
         QVariantList typeSummaries;
         size_t checkedBytes = 0;
@@ -2804,7 +2861,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
                     }
 
                     killcore::ScanOptions compareOptions;
-                    compareOptions.progressCallback = [self, typeIndex, totalTypes, &lastUnknownProgress](const killcore::ScanProgress& progress) {
+                    compareOptions.progressCallback = [self, typeIndex, totalTypes, &lastUnknownProgress, activityOpId](const killcore::ScanProgress& progress) {
                         int withinTypePercent = 0;
                         if (progress.regionsTotal > 0) {
                             withinTypePercent = static_cast<int>((progress.regionsScanned * 100) / progress.regionsTotal);
@@ -2815,7 +2872,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
                             return;
                         }
                         lastUnknownProgress = percent;
-                        emitQueuedScanProgress(self, percent);
+                        emitQueuedScanProgress(self, percent, activityOpId);
                     };
                     if (scanMode == killcore::NextScanMode::Delta) {
                         compareOptions.targetDelta = deltaVariant.rawDelta;
@@ -2895,7 +2952,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
             return;
         }
 
-        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, valueType, autoType, compareSuccess, partial, cancelled, checkedBytes, matchesFound, compareError, typeSummaries, unknownCandidates = std::move(unknownCandidates)]() mutable {
+        QMetaObject::invokeMethod(self.data(), [self, requestId, mode, valueType, autoType, compareSuccess, partial, cancelled, checkedBytes, matchesFound, compareError, typeSummaries, unknownCandidates = std::move(unknownCandidates), activityOpId]() mutable {
             if (!self) {
                 return;
             }
@@ -2963,6 +3020,8 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
 
             self->m_scanInProgress = false;
             self->m_activeScanCancellation.reset();
+            finished["operationId"] = activityOpId;
+            finishScanActivity(self.data(), activityOpId, finished);
             emit self->scanStatsUpdated(static_cast<int>(candidates.size()));
             emit self->scanProgress(100);
             emit self->scanFinished(finished);

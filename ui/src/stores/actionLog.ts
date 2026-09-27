@@ -58,7 +58,11 @@ export const useActionLogStore = defineStore('actionLog', () => {
       detail,
       status,
     })
-    actionLog.value = actionLog.value.slice(0, 80)
+    // UX-PRODUIT-17 : relevé de 80 à 200 pour matcher le journal structuré
+    // circulaire de 200 événements max attendu par le rapport de problème
+    // (docs/PHASE_TRACKER.md #ux-produit-17) -- cohérent avec le cap déjà
+    // utilisé côté persistance juste en dessous.
+    actionLog.value = actionLog.value.slice(0, 200)
     saveActionLog()
   }
 

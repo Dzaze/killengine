@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/app'
 import { useRiskGateStore } from '@/stores/riskGate'
 import { backend } from '@/services/backend'
 import RuntimeLogsDiagnostics from '@/components/diagnostics/RuntimeLogsDiagnostics.vue'
+import DiagnosticReportPanel from '@/components/diagnostics/DiagnosticReportPanel.vue'
 import KernelDiagnostics from '@/components/diagnostics/KernelDiagnostics.vue'
 import AutomationDiagnostics from '@/components/diagnostics/AutomationDiagnostics.vue'
 import WebView2Diagnostics from '@/components/diagnostics/WebView2Diagnostics.vue'
@@ -854,6 +855,7 @@ onMounted(() => {
       </nav>
       <div id="runtime">
         <RuntimeLogsDiagnostics />
+        <DiagnosticReportPanel />
       </div>
       <div id="kernel">
         <KernelDiagnostics />

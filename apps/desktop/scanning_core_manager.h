@@ -15,6 +15,7 @@
 
 namespace killcore {
 class CancellationToken;
+struct ActivityTarget;
 }
 
 namespace killengine {
@@ -61,6 +62,10 @@ private:
     void scanProgress(int percent);
     void scanStatsUpdated(int candidateCount);
     void scanFinished(const QVariantMap& result);
+    // UX-PRODUIT-12 : cible d'activité (pid/nom/génération d'attachement
+    // courants) commune aux 4 scans async -- ScanningCoreManager est friend
+    // d'ApplicationController, les fonctions libres du .cpp ne le sont pas.
+    killcore::ActivityTarget activityTarget() const;
 
     ApplicationController& m_controller;
 };

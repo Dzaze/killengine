@@ -27,6 +27,9 @@ import {
 } from '@/services/backend'
 import { useInvestigationStore, type InvestigationRun, type InvestigationStep } from './investigation'
 import { useActionLogStore, type UserActionLogEntry } from './actionLog'
+import { useActivityStore } from './activity'
+import { useCandidateComparisonStore } from './candidateComparison'
+import { useWorkspaceHistoryStore } from './workspaceHistory'
 import { useClrInspectorStore } from './clrInspector'
 import { useSpeedhackStore } from './speedhack'
 import { useNetworkStore } from './network'
@@ -122,6 +125,13 @@ export const useAppStore = defineStore('app', () => {
   const version = ref('...')
   const isConnected = ref(false)
   const showOnboarding = ref(false)
+  // UX-PRODUIT-15C : vrai uniquement dans l'instance enfant lancée avec
+  // --tutorial-session-root= -- reflète controller.isTutorialMode(), déjà
+  // interrogé une fois dans init() mais jamais conservé avant cette phase.
+  const isTutorialMode = ref(false)
+  // État coté instance NORMALE seulement : une session tutoriel enfant a-t-elle
+  // été démarrée par cette instance (pour afficher "Fermer le tutoriel").
+  const tutorialSessionActive = ref(false)
   const isAttached = ref(false)
   const processName = ref('')
   // AM-2 (docs/PHASE_TRACKER.md, 16/09/2026) : processName seul ne distingue
@@ -192,6 +202,16 @@ export const useAppStore = defineStore('app', () => {
   const diagnosticExportError = ref('')
   const diagnosticFolderOpened = ref(false)
   const diagnosticOpenFolderError = ref('')
+  // UX-PRODUIT-17 -- flux Préparer/Aperçu/Exporter d'un rapport de problème.
+  const preparedReportPreview = ref<Record<string, unknown> | null>(null)
+  const preparedReportBusy = ref(false)
+  const preparedReportError = ref('')
+  const preparedReportExportPath = ref('')
+  const preparedReportCancelled = ref(false)
+  // Invalide localement l'aperçu dès qu'une option change après la dernière
+  // préparation -- le bouton Exporter reste désactivé tant qu'un nouvel
+  // aperçu n'a pas été demandé, cohérent avec l'exigence de la fiche.
+  const preparedReportStale = ref(false)
   const temporaryStorageStatus = ref<TemporaryStorageStatus | null>(null)
   const temporaryStorageCleanupResult = ref<Record<string, unknown> | null>(null)
   const temporaryStorageError = ref('')
@@ -631,6 +651,11 @@ export const useAppStore = defineStore('app', () => {
   // ci-dessous en wrappers minces qui gardent les memes noms/signatures.
   const actionLogStore = useActionLogStore()
   const { actionLog, actionLogPersistenceError } = storeToRefs(actionLogStore)
+  // UX-PRODUIT-12 -- Centre d'activité permanent : instancié une fois ici
+  // (même patron que actionLogStore/scanningStore), connecté au signal et à
+  // la boucle de réconciliation dans init() ci-dessous.
+  const activityStore = useActivityStore()
+  const candidateComparisonStore = useCandidateComparisonStore()
   const sessionEntries = ref<SessionEntry[]>([])
   const sessionGroups = ref<SessionGroup[]>([])
   const sessionGroupIdCounter = ref(0)
@@ -649,6 +674,8 @@ export const useAppStore = defineStore('app', () => {
   let backendClaudePendingActionSignalConnected = false
   let backendLocalAiWarmupSignalConnected = false
   let backendAttachmentSignalConnected = false
+  let backendActivitySignalConnected = false
+  let backendCandidateComparisonSignalConnected = false
   // Defense-in-depth cote frontend : le backend ne notifie deja qu'une fois
   // par adresse (FreezeEntry::flaggedUnstable), ce Set couvre juste le cas
   // d'une reconnexion du signal (ex: rechargement dev).
@@ -700,6 +727,12 @@ export const useAppStore = defineStore('app', () => {
     valueTypeReadSize,
     decodeTypedPreviewValue,
   })
+
+  // UX-PRODUIT-13 : instancié ici (après configureWorkspaceSessionContext,
+  // dont il dépend via buildRecoverableSnapshotJson) -- startWatching() est
+  // appelé depuis init() ci-dessous, pas ici, pour rester dans le même ordre
+  // que les autres abonnements de signaux/watchers de ce store.
+  const workspaceHistoryStore = useWorkspaceHistoryStore()
 
   // Getters
   const statusText = computed(() => {
@@ -2428,6 +2461,36 @@ export const useAppStore = defineStore('app', () => {
         })
         backendModuleInstallSignalConnected = true
       }
+      if (!backendActivitySignalConnected) {
+        // UX-PRODUIT-12 : le snapshot reste l'autorité (activityStore.reconcile
+        // ci-dessous + boucle 2s) -- cette poussée n'est qu'un indice pour ne
+        // pas attendre le prochain tick de réconciliation.
+        controller.activityUpdated?.connect((payload) => {
+          activityStore.applyDelta(payload)
+        })
+        backendActivitySignalConnected = true
+      }
+      // "Connecter le signal puis demander le snapshot" (fiche) : snapshot
+      // initial hors cycle, puis boucle 2s démarrée une seule fois (idempotent).
+      void activityStore.reconcile()
+      activityStore.startReconciliationLoop()
+
+      if (!backendCandidateComparisonSignalConnected) {
+        // UX-PRODUIT-16 : contrairement à Timeline (jamais connecté, poll
+        // manuel), le comparateur couvre tous les chemins d'arrêt (bouton
+        // Stop, cancelActivity, garde attach/detach, fin naturelle) via ce
+        // seul signal -- voir ApplicationController (connexion unique dans
+        // le constructeur -> registry().finish()).
+        controller.comparisonFinished?.connect((reason) => {
+          void candidateComparisonStore.handleComparisonFinished(reason)
+        })
+        backendCandidateComparisonSignalConnected = true
+      }
+
+      // UX-PRODUIT-13 : démarre le watcher de capture automatique (2s de
+      // silence, throttle 30s) -- idempotent, un second appel ne double pas
+      // l'abonnement.
+      workspaceHistoryStore.startWatching()
       if (!backendClaudePendingActionSignalConnected) {
         // Backend IA externe (T4, docs/EXTERNAL_AI_BACKEND_ROADMAP.md) : le
         // backend Claude met sa boucle agentique en pause (C++, bloquant)
@@ -2525,7 +2588,13 @@ export const useAppStore = defineStore('app', () => {
       // affichage/masquage de façon réactive (localAiWarmupVisible) et ne
       // doit pas retarder le reste de init() (jusqu'à ~90s au premier
       // lancement) — voir startLocalAiWarmup().
-      void startLocalAiWarmup()
+      // UX-PRODUIT-15 : jamais en session tutoriel -- une session jetable ne
+      // doit pas dépenser CPU/RAM/temps à charger le modèle IA local.
+      const inTutorialMode = await controller.isTutorialMode?.().catch(() => false)
+      isTutorialMode.value = inTutorialMode === true
+      if (!inTutorialMode) {
+        void startLocalAiWarmup()
+      }
       loadActionLog()
       loadInvestigations()
       loadTrainerFeatures()
@@ -2555,6 +2624,55 @@ export const useAppStore = defineStore('app', () => {
 
   async function openUserGuide() {
     await backend.getController().openUserGuide?.()
+  }
+
+  // UX-PRODUIT-15C : démarre (ou signale déjà active) une session tutoriel
+  // isolée -- appelable uniquement depuis l'instance NORMALE, jamais depuis
+  // l'instance enfant elle-même (garde de rôle côté backend).
+  async function launchTutorial() {
+    try {
+      const result = await backend.getController().startTutorialSession?.()
+      if (!result) {
+        addActionLog('tutorial', t('tutorialStore.startTitle'), t('tutorialStore.mockUnavailable'), 'error')
+        return { success: false, error: t('tutorialStore.mockUnavailable') }
+      }
+      if (result.success || result.alreadyActive) {
+        tutorialSessionActive.value = true
+        addActionLog(
+          'tutorial',
+          t('tutorialStore.startTitle'),
+          result.alreadyActive ? t('tutorialStore.alreadyActive') : t('tutorialStore.started'),
+          'success',
+        )
+      } else {
+        addActionLog('tutorial', t('tutorialStore.startTitle'), String(result.error ?? ''), 'error')
+      }
+      return result
+    } catch (e) {
+      addActionLog('tutorial', t('tutorialStore.startTitle'), String(e), 'error')
+      return { success: false, error: String(e) }
+    }
+  }
+
+  // UX-PRODUIT-15C : termine la session tutoriel démarrée par cette instance.
+  async function endTutorial() {
+    try {
+      const result = await backend.getController().closeTutorialSession?.()
+      if (!result) {
+        return { success: false, wasActive: false, error: t('tutorialStore.mockUnavailable') }
+      }
+      tutorialSessionActive.value = false
+      addActionLog(
+        'tutorial',
+        t('tutorialStore.closeTitle'),
+        result.success ? t('tutorialStore.closed') : String(result.error ?? ''),
+        result.success ? 'success' : 'error',
+      )
+      return result
+    } catch (e) {
+      addActionLog('tutorial', t('tutorialStore.closeTitle'), String(e), 'error')
+      return { success: false, wasActive: false, error: String(e) }
+    }
   }
 
   async function refreshKernelDriverStatus() {
@@ -4216,6 +4334,112 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // UX-PRODUIT-17 -- flux Préparer/Aperçu/Exporter. `actionLog` (store
+  // actionLog.ts) est déjà newest-first (unshift) -- renversé ici pour
+  // envoyer les entrées de la plus ancienne à la plus récente, l'ordre que
+  // le backend suppose pour son horodatage synthétique (voir commentaire
+  // côté SettingsDiagnosticsManager::prepareDiagnosticReport).
+  async function prepareDiagnosticReport(options: {
+    steps: string
+    expected: string
+    observed: string
+    includeSmartSearchDebug?: boolean
+    includeScanTelemetry?: boolean
+    includeCrashReports?: boolean
+  }) {
+    preparedReportBusy.value = true
+    preparedReportError.value = ''
+    preparedReportCancelled.value = false
+    try {
+      const controller = backend.getController()
+      if (!controller.prepareDiagnosticReport) {
+        preparedReportError.value = 'Backend indisponible.'
+        return { success: false, error: preparedReportError.value }
+      }
+      const actionLogEvents = actionLog.value.slice(0, 200).slice().reverse()
+      const result = await controller.prepareDiagnosticReport({
+        ...options,
+        actionLogEvents,
+      })
+      if (result.success === true) {
+        preparedReportStale.value = false
+        await refreshPreparedDiagnosticReportPreview()
+      } else {
+        preparedReportError.value = String(result.error ?? 'Préparation impossible.')
+        preparedReportPreview.value = null
+      }
+      return result
+    } catch (e) {
+      preparedReportError.value = String(e)
+      return { success: false, error: String(e) }
+    } finally {
+      preparedReportBusy.value = false
+    }
+  }
+
+  async function refreshPreparedDiagnosticReportPreview() {
+    try {
+      const controller = backend.getController()
+      if (!controller.getPreparedDiagnosticReportPreview) return null
+      const result = await controller.getPreparedDiagnosticReportPreview()
+      if (result.success === true) {
+        preparedReportPreview.value = result
+      } else {
+        preparedReportPreview.value = null
+        preparedReportError.value = String(result.error ?? '')
+      }
+      return result
+    } catch (e) {
+      preparedReportPreview.value = null
+      preparedReportError.value = String(e)
+      return null
+    }
+  }
+
+  async function fetchPreparedDiagnosticReportSection(sectionId: string, offset: number, limit: number) {
+    try {
+      const controller = backend.getController()
+      if (!controller.getPreparedDiagnosticReportSection) {
+        return { success: false, error: 'Backend indisponible.' }
+      }
+      return await controller.getPreparedDiagnosticReportSection(sectionId, offset, limit)
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  }
+
+  async function exportPreparedDiagnosticReport() {
+    preparedReportBusy.value = true
+    preparedReportError.value = ''
+    preparedReportCancelled.value = false
+    try {
+      const controller = backend.getController()
+      if (!controller.exportPreparedDiagnosticReport) {
+        preparedReportError.value = 'Backend indisponible.'
+        return { success: false, error: preparedReportError.value }
+      }
+      const result = await controller.exportPreparedDiagnosticReport()
+      if (result.cancelled === true) {
+        preparedReportCancelled.value = true
+      } else if (result.success === true) {
+        preparedReportExportPath.value = String(result.path ?? '')
+        actionLogStore.addActionLog('diagnostics', 'Rapport de problème exporté', preparedReportExportPath.value, 'success')
+      } else {
+        preparedReportError.value = String(result.error ?? 'Export impossible.')
+      }
+      return result
+    } catch (e) {
+      preparedReportError.value = String(e)
+      return { success: false, error: String(e) }
+    } finally {
+      preparedReportBusy.value = false
+    }
+  }
+
+  function markPreparedDiagnosticReportStale() {
+    preparedReportStale.value = true
+  }
+
   async function refreshTemporaryStorageStatus() {
     try {
       temporaryStorageStatus.value = await backend.getController().getTemporaryStorageStatus()
@@ -4917,6 +5141,10 @@ export const useAppStore = defineStore('app', () => {
     showOnboarding,
     dismissOnboarding,
     openUserGuide,
+    isTutorialMode,
+    tutorialSessionActive,
+    launchTutorial,
+    endTutorial,
     kernelDriverStatus,
     kernelDriverStatusLoading,
     kernelDriverStartLoading,
@@ -5073,6 +5301,12 @@ export const useAppStore = defineStore('app', () => {
     diagnosticExportError,
     diagnosticFolderOpened,
     diagnosticOpenFolderError,
+    preparedReportPreview,
+    preparedReportBusy,
+    preparedReportError,
+    preparedReportExportPath,
+    preparedReportCancelled,
+    preparedReportStale,
     temporaryStorageStatus,
     temporaryStorageCleanupResult,
     temporaryStorageError,
@@ -5239,6 +5473,11 @@ export const useAppStore = defineStore('app', () => {
     clearWriteHistorySequence,
     refreshLogTail,
     exportDiagnostics,
+    prepareDiagnosticReport,
+    refreshPreparedDiagnosticReportPreview,
+    fetchPreparedDiagnosticReportSection,
+    exportPreparedDiagnosticReport,
+    markPreparedDiagnosticReportStale,
     refreshTemporaryStorageStatus,
     clearTemporaryStorage,
     refreshActiveChatMemoryTargets,
