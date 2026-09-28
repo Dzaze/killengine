@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace killcore {
@@ -274,20 +275,43 @@ CandidatePage CandidateStore::page(size_t pageIndex, size_t pageSize, const QStr
 
     const QString normalized = addressFilter.trimmed().remove("0x", Qt::CaseInsensitive).toLower();
     const bool hasFilter = !normalized.isEmpty();
-    const size_t start = pageIndex * pageSize;
+    const size_t start = pageIndex > std::numeric_limits<size_t>::max() / pageSize
+        ? std::numeric_limits<size_t>::max()
+        : pageIndex * pageSize;
 
     if (isFileBacked() && m_candidates.isEmpty()) {
+        if (!hasFilter) {
+            result.totalCount = m_totalCount;
+            if (start >= m_totalCount
+                || start > static_cast<size_t>(std::numeric_limits<qint64>::max()) / sizeof(StoredCandidate)
+                || !m_backingFile->seek(static_cast<qint64>(start * sizeof(StoredCandidate)))) {
+                return result;
+            }
+            const size_t count = std::min(pageSize, m_totalCount - start);
+            for (size_t i = 0; i < count; ++i) {
+                StoredCandidate stored;
+                if (m_backingFile->read(reinterpret_cast<char*>(&stored), sizeof(stored)) != sizeof(stored)) {
+                    break;
+                }
+                result.candidates.append(storedToCandidate(stored));
+            }
+            return result;
+        }
+
+        if (!m_backingFile->seek(0)) {
+            return result;
+        }
         size_t matched = 0;
         for (size_t i = 0; i < m_totalCount; ++i) {
-            Candidate candidate;
-            if (!readCandidateAt(i, &candidate)) {
+            StoredCandidate stored;
+            if (m_backingFile->read(reinterpret_cast<char*>(&stored), sizeof(stored)) != sizeof(stored)) {
                 break;
             }
-            if (hasFilter && !QString::number(candidate.address, 16).toLower().contains(normalized)) {
+            if (!QString::number(stored.address, 16).contains(normalized)) {
                 continue;
             }
-            if (matched >= start && result.candidates.size() < static_cast<qsizetype>(pageSize)) {
-                result.candidates.append(candidate);
+            if (matched >= start && static_cast<size_t>(result.candidates.size()) < pageSize) {
+                result.candidates.append(storedToCandidate(stored));
             }
             ++matched;
         }

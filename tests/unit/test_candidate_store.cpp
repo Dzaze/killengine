@@ -2,6 +2,8 @@
 
 #include "candidates/candidate_store.h"
 
+#include <limits>
+
 TEST(CandidateStoreTest, SortsAndPaginates) {
     killcore::ScanResult scan;
     scan.matches.append({0x3000, killcore::ValueType::Int32});
@@ -243,4 +245,41 @@ TEST(CandidateStoreTest, ClonesFileBackedCandidatesWithoutHydratingSource) {
     ASSERT_EQ(page.candidates.size(), 3);
     EXPECT_EQ(page.candidates[0].address, 0x700cu);
     EXPECT_EQ(page.candidates[0].lastValue, QByteArray::fromHex("09000000"));
+}
+
+TEST(CandidateStoreTest, PaginatesFileAndMemoryBackedCandidatesIdenticallyAtBoundaries) {
+    QList<killcore::Candidate> input;
+    for (uint64_t address : {0x1000ull, 0x1200ull, 0x2200ull, 0x3000ull, 0x3200ull}) {
+        killcore::Candidate candidate;
+        candidate.address = address;
+        candidate.type = killcore::ValueType::Int32;
+        input.append(candidate);
+    }
+
+    for (size_t threshold : {size_t{0}, size_t{1}}) {
+        killcore::CandidateStore store;
+        store.setFileBackedThreshold(threshold);
+        store.replaceCandidates(input);
+        ASSERT_EQ(store.isFileBacked(), threshold == 1);
+
+        auto page = store.page(1, 2);
+        ASSERT_EQ(page.totalCount, 5u);
+        ASSERT_EQ(page.candidates.size(), 2);
+        EXPECT_EQ(page.candidates[0].address, 0x2200u);
+        EXPECT_EQ(page.candidates[1].address, 0x3000u);
+
+        page = store.page(2, 2);
+        ASSERT_EQ(page.totalCount, 5u);
+        ASSERT_EQ(page.candidates.size(), 1);
+        EXPECT_EQ(page.candidates[0].address, 0x3200u);
+
+        page = store.page(1, 2, "0x200");
+        ASSERT_EQ(page.totalCount, 3u);
+        ASSERT_EQ(page.candidates.size(), 1);
+        EXPECT_EQ(page.candidates[0].address, 0x3200u);
+
+        page = store.page(std::numeric_limits<size_t>::max(), 2);
+        EXPECT_EQ(page.totalCount, 5u);
+        EXPECT_TRUE(page.candidates.isEmpty());
+    }
 }
