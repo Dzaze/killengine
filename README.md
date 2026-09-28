@@ -1,169 +1,72 @@
-> **ATTENTION - Priorité Des Ordres Projet**
-> Un ordre prioritaire explicite du propriétaire du projet prime sur les consignes temporaires de session des agents IA.
 # ⚡ KillEngine
 
-> Analyseur de mémoire Windows assisté par IA — l'utilisateur donne la valeur, KillEngine choisit les scans.
+**Repérez ce qui change en mémoire. Comprenez d'où vient la valeur. Gardez une solution réutilisable.**
 
-KillEngine est un outil d'analyse et d'édition mémoire pour Windows inspiré du fonctionnement de Cheat Engine, mais conçu pour être piloté par une IA locale (Qwen3.5-2B via llama.cpp). L'utilisateur n'a pas besoin de connaître les types de données, l'alignement mémoire ou les pointeurs.
+KillEngine est un outil d'analyse et d'instrumentation de processus Windows. Son Assistant vous aide à partir d'une valeur visible à l'écran, à choisir une recherche et à affiner les résultats. Les vues Investigation et Expert permettent ensuite de vérifier chaque piste, tandis que les profils et le Trainer conservent ce qui fonctionne.
 
-## Architecture
+Le modèle d'IA local est inclus dans l'archive portable complète. Vous pouvez aussi avancer entièrement à la main.
 
-- **Core** (C++20) : moteur mémoire déterministe (Win32 API, scanner multithread)
-- **AI** (C++20 + llama.cpp) : planificateur et analyste (Qwen3.5-2B GGUF Q4_K_M)
-- **UI** (Qt 6.8 WebEngine + Vue 3 + TypeScript) : interface moderne via QWebChannel
+## Commencer
 
-## Prérequis
+1. Téléchargez **`KillEngine-portable.zip`** dans les fichiers de la version publiée.
+2. Extrayez **tout** le ZIP dans un dossier où vous pouvez enregistrer des fichiers.
+3. Lancez **`KillEngine.exe`**. Aucun installateur n'est nécessaire.
+4. Cliquez sur **« Essayer le tutoriel »** en bas de la barre latérale pour découvrir le parcours sur une cible de démonstration isolée.
 
-- Windows 10/11 x64
-- Visual Studio 2019+ Build Tools (MSVC C++20)
-- CMake 3.21+
-- Qt 6.8 (installé via `aqtinstall`)
-- Node.js 20+ (pour le build de l'UI uniquement)
+**Système requis : Windows 10 ou 11, 64 bits.** Le ZIP complet comprend l'interface, les dépendances et le modèle IA local. Réglages, profils et données de travail sont conservés avec le dossier portable ; les exceptions liées à certains modules Windows et aux clés API sont expliquées dans le [guide utilisateur](docs/USER_GUIDE.md).
 
-## Build rapide
+## De la valeur affichée à une piste vérifiée
+
+Dans le tutoriel, une petite cible affiche une valeur de santé. Cherchez cette valeur, faites-la varier avec le bouton **Dégâts**, puis lancez un scan suivant : KillEngine réduit les adresses candidates à mesure que vous observez ce qui change. Vous pouvez inspecter la piste obtenue, préparer une écriture, en vérifier l'effet et sauvegarder le résultat dans un profil.
+
+Ce parcours s'appuie sur de vraies lectures et écritures de la cible de démonstration. Il permet de se familiariser avec l'outil avant d'analyser vos propres applications.
+
+## Choisissez votre façon de travailler
+
+| Vue | Ce qu'elle apporte |
+| --- | --- |
+| **Assistant** | Décrivez la valeur recherchée en français ou en anglais ; l'IA locale propose et guide les scans. |
+| **Investigation** | Suivez les étapes, hypothèses et résultats de votre recherche. |
+| **Expert** | Pilotez les scans, l'inspection mémoire, les pointeurs, la surveillance et les outils de diagnostic. |
+| **Trainer** | Regroupez des actions dans des fonctions réutilisables, à activer ou restaurer. |
+
+KillEngine propose aussi des scans de valeur initiale inconnue, l'affinage après changement, la comparaison de candidats, les profils et un centre d'activité pour suivre les opérations en cours. Les actions qui modifient la mémoire passent par des étapes de vérification ou de confirmation selon le workflow.
+
+## Pour qui ?
+
+KillEngine s'adresse aux personnes qui analysent des applications qu'elles possèdent ou sont autorisées à étudier : développement et débogage, QA, recherche sur des logiciels anciens, modding autorisé et exploration de la mémoire en environnement contrôlé.
+
+**Statut : version bêta 0.1.0.** Le package Windows portable est actuellement non signé. Certaines fonctions avancées dépendent du processus cible ou d'un module optionnel ; aucun outil de mémoire ne peut garantir le même résultat sur tous les programmes.
+
+## Documentation
+
+- [Guide utilisateur en français](docs/USER_GUIDE.md) · [User guide in English](docs/USER_GUIDE_EN.md)
+
+## Construire depuis les sources
+
+La version portable évite toute compilation. Pour développer KillEngine, prévoyez Visual Studio Build Tools (MSVC C++20), CMake 3.21+, Qt 6.8 et Node.js 20+.
 
 ```powershell
-# 1. Installer les dépendances Node (une seule fois)
 cd ui
 npm install
 cd ..
-
-# 2. Configurer, puis construire — build.ps1 enchaîne UI (vue-tsc + vite) et C++
 .\scripts\configure.ps1
 .\scripts\build.ps1
+.\build\bin\killengine_unit_tests.exe
 ```
 
-Build C++ seul, sans reconstruire l'UI (l'UI déjà présente dans `ui\dist` reste utilisée telle quelle) :
-
-```powershell
-.\scripts\build.ps1 -SkipUi
-```
-
-## Package Windows
+Pour créer le package Windows complet :
 
 ```powershell
 .\scripts\package-windows.ps1
 ```
 
-Sorties :
+Le dossier `dist\KillEngine-portable\` et l'archive `dist\KillEngine-portable.zip` sont alors produits. Pour valider un build local, lancez `.\scripts\release-check.ps1`.
 
-```text
-dist\KillEngine-portable\
-dist\KillEngine-portable.zip
-```
+**Architecture :** moteur mémoire C++20 et API Win32, Assistant local via llama.cpp, interface Qt 6.8 et Vue 3.
 
-Un template Inno Setup est disponible dans `packaging/windows/KillEngine.iss`.
+## Licence et contribution
 
-## Validation release
+KillEngine est distribué sous [licence MIT](LICENSE). Les contributions et retours d'expérience sont bienvenus via le dépôt du projet.
 
-```powershell
-.\scripts\release-check.ps1
-.\scripts\release-check.ps1 -Package
-```
 
-Validation rapide pour les sessions courantes :
-
-```powershell
-.\scripts\test-fast-qa.ps1
-.\scripts\release-check.ps1 -OnlyFastQa
-```
-
-La checklist manuelle V1 est disponible ici :
-
-- [`docs/V1_REGRESSION_CHECKLIST.md`](docs/V1_REGRESSION_CHECKLIST.md)
-
-## Guide utilisateur
-
-Le guide V1 est disponible ici :
-
-- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)
-
-Il couvre l'attachement au processus, l'Assistant, les profils, le Mode Expert, les paramètres, les diagnostics et les principaux cas de dépannage.
-
-## Automation API
-
-Pour piloter KillEngine par script ou par un agent IA externe (pipe JSON-RPC local, scripting Lua, branchement d'un agent) :
-
-- [`docs/AUTOMATION_API.md`](docs/AUTOMATION_API.md)
-
-## Build détaillé
-
-### UI (Vue 3 + TypeScript)
-
-```powershell
-cd ui
-npm install      # installer les dépendances
-npm run dev      # serveur de développement (http://localhost:5173)
-npm run build    # build de production → ui/dist/
-```
-
-### C++ (CMake + MSVC)
-
-```powershell
-# Configurer (nécessite vcvars64.bat dans le PATH)
-cmake -B build -G Ninja ^
-  -DCMAKE_BUILD_TYPE=Release ^
-  -DCMAKE_PREFIX_PATH=C:/Qt/6.8.1/msvc2022_64 ^
-  -DKILLENGINE_BUILD_TESTS=ON
-
-# Construire
-cmake --build build --config Release
-
-# Lancer les tests
-ctest --test-dir build --output-on-failure
-```
-
-## Structure du dépôt
-
-```
-KillEngine/
-├── apps/desktop/     # Application Qt (main.cpp, controller)
-├── core/             # KillCore — moteur C++20 (process, memory, scanner...)
-├── ai/               # KillAI — couche IA (llama.cpp, tool calling)
-├── ui/               # Frontend Vue 3 + TypeScript
-├── tests/            # Tests unitaires et d'intégration (Google Test)
-├── docs/             # Documentation
-├── scripts/          # Scripts de build et configuration
-├── model/            # IA embarquées: agents + poids GGUF partagés
-├── packaging/        # Scripts d'installation (Inno Setup)
-└── third_party/      # Dépendances tierces
-```
-
-## Licence
-
-MIT — voir [LICENSE](LICENSE)
-
-## Les quatre vues
-
-KillEngine s'articule autour de quatre vues, du plus guidé au plus manuel :
-
-| Vue | Rôle | Pour qui |
-| --- | --- | --- |
-| **Assistant** | Langage naturel : tu décris la valeur, KillEngine choisit et enchaîne les scans safe | Flux recommandé, débutant comme expert |
-| **Investigation** | Timeline de l'enquête : stratégie choisie, étapes exécutées, hypothèses, confiance, checkpoints à confirmer | Comprendre *pourquoi* l'IA a fait ce qu'elle a fait |
-| **Expert** | Outils manuels : scans exact/unknown/chiffré, Trace UI string, pointer scanner, write/freeze, find what writes, AOB, patches | Reprendre la main sur chaque étape |
-| **Trainer** | Features nommées, toggles ON/OFF, apply all / restore all, rollback, persistance par profil | Le résultat réutilisable |
-
-Détail de la direction produit dans [`docs/ULTIMATE_PRODUCT_GUIDELINE.md`](docs/ULTIMATE_PRODUCT_GUIDELINE.md).
-
-## Statut
-
-Prototype avancé, en cours de montée en gamme produit :
-
-- Phases 0 à 12 validées, checklist V1 complète.
-- Phases 13 à 18 : scalabilité, profils, pointer chains, freeze, hardware breakpoints, AOB → patch → trainer.
-- Smart Search opérationnel : scan guidé, next scan, auto-write confirmé/restauré/vérifié, rollback batch.
-- Profils opérationnels : plusieurs cibles, résolution d'adresses, patches de code persistés, réutilisation par l'Assistant.
-- Gros volumes : candidats stockés en fichier temporaire compact, next scan streaming, métriques perf et restauration de réduction.
-- IA locale embarquée : tool-calls JSON, contrat d'intention structuré, agents sous `model/<nom_ia>/`, état dégradé si modèle/runtime manquant.
-- Phases ultimes (U1 Assistant proactif, U2 Investigation, U3 Trainer Builder) : livrées au niveau workflow, validation terrain en cours.
-- Guide utilisateur dans [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md), avancement détaillé dans [`docs/PHASE_TRACKER.md`](docs/PHASE_TRACKER.md).
-
-Pour l'état des tests, se référer à `docs/PHASE_TRACKER.md` plutôt qu'à ce README : les compteurs figés se périment vite.
-
-Voir [`KILLENGINE_PROJECT_SPEC.md`](KILLENGINE_PROJECT_SPEC.md) pour le cahier des charges complet.
-
-## Contribution
-
-Trois agents IA (Codex, Cline + z.ai, Claude) contribuent en parallèle à ce dépôt.
-Lire [`AGENTS.md`](AGENTS.md) — section « Équipe d'agents » — avant toute modification. Ce même fichier contient en tête une carte de tous les `.md` du dépôt (qui documente quoi, quand le lire) ; les hypothèses/pistes en cours de réflexion vivent dans [`docs/STRATEGY_ROOM.md`](docs/STRATEGY_ROOM.md).
