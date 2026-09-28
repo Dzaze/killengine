@@ -138,24 +138,6 @@ watch(
         <button class="help-btn" :title="$t('nav.helpTitle')" :aria-label="$t('nav.helpTitle')" @click="store.openUserGuide()">
           {{ $t('nav.help') }}
         </button>
-        <button
-          v-if="!store.isTutorialMode && !store.tutorialSessionActive"
-          class="help-btn"
-          :title="$t('nav.tryTutorialTitle')"
-          :aria-label="$t('nav.tryTutorialTitle')"
-          @click="store.launchTutorial()"
-        >
-          {{ $t('nav.tryTutorial') }}
-        </button>
-        <button
-          v-else-if="!store.isTutorialMode && store.tutorialSessionActive"
-          class="help-btn"
-          :title="$t('tutorial.entry.close')"
-          :aria-label="$t('tutorial.entry.close')"
-          @click="store.endTutorial()"
-        >
-          {{ $t('tutorial.entry.close') }}
-        </button>
       </div>
       <!-- UX-PIPE-5 (docs/PHASE_TRACKER.md, 18/09/2026) : le switch rapide FR/EN
            change la langue Vue immédiatement (effectif pour la session) mais
@@ -213,9 +195,29 @@ watch(
 
       <div class="sidebar-footer">
         <button
+          v-if="!store.isTutorialMode && !store.tutorialSessionActive"
+          type="button"
+          class="sidebar-action-btn tutorial-entry-btn"
+          :title="$t('nav.tryTutorialTitle')"
+          :aria-label="$t('nav.tryTutorialTitle')"
+          @click="store.launchTutorial()"
+        >
+          {{ $t('nav.tryTutorial') }}
+        </button>
+        <button
+          v-else-if="!store.isTutorialMode && store.tutorialSessionActive"
+          type="button"
+          class="sidebar-action-btn tutorial-entry-btn"
+          :title="$t('tutorial.entry.close')"
+          :aria-label="$t('tutorial.entry.close')"
+          @click="store.endTutorial()"
+        >
+          {{ $t('tutorial.entry.close') }}
+        </button>
+        <button
           ref="activityTriggerBtn"
           type="button"
-          class="activity-trigger-btn"
+          class="sidebar-action-btn activity-trigger-btn"
           data-view="activity"
           @click="activityStore.toggleDrawer()"
         >
@@ -618,7 +620,7 @@ body {
   background: rgba(10, 12, 20, 0.52);
 }
 
-.activity-trigger-btn {
+.sidebar-action-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -634,8 +636,15 @@ body {
   cursor: pointer;
 }
 
-.activity-trigger-btn:hover {
+.sidebar-action-btn:hover {
   border-color: var(--accent);
+}
+
+.tutorial-entry-btn {
+  justify-content: center;
+  color: #9fbdff;
+  border-color: rgba(122, 162, 247, 0.4);
+  background: rgba(122, 162, 247, 0.12);
 }
 
 .activity-trigger-alert {

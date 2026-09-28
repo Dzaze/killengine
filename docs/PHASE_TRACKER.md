@@ -1497,3 +1497,11 @@ Réserver un seul chantier à la fois ici avant édition ; relire les fichiers p
 **Correctif / quoi** : `core/candidates/candidate_store.cpp` positionne directement le fichier sur le premier enregistrement d'une page sans filtre puis lit seulement cette page ; le filtrage parcourt les enregistrements séquentiellement. Le calcul de l'offset de page est borné. `tests/unit/test_candidate_store.cpp` compare les résultats mémoire/fichier sur pages intermédiaire et finale, filtrage et index extrême.
 
 **Tests / validation** : `scripts/build.ps1` complet réussi ; `killengine_unit_tests.exe` : **705/705 tests verts** (84 suites). Même benchmark `KillEngineBenchmark.exe --large-candidates 100000 --json`, 10 pages de 200 candidats file-backed : **373,30 ms avant → 0,40 ms après** (environ 925 fois plus rapide sur cette machine). `git diff --check` sans erreur ; scan mojibake global : uniquement des citations historiques déjà présentes, aucune dans les fichiers de code touchés. Fins de ligne : les deux fichiers C++ restent en LF, le tracker en CRLF comme avant.
+
+## UX-TUTORIAL-SIDEBAR-20260928 — accès au tutoriel en bas de la barre latérale (Codex)
+
+**Diagnostic / pourquoi** : le propriétaire a signalé que le bouton « Essayer le tutoriel » débordait de la ligne FR / EN / Aide dans la barre latérale de 220 px et a demandé son placement en bas.
+
+**Correctif / quoi** : `ui/src/App.vue` déplace les boutons de lancement et de fermeture du tutoriel dans le pied de la barre latérale, au-dessus du centre d'activité. Le bouton occupe la largeur disponible ; les conditions d'affichage et les actions existantes sont conservées.
+
+**Tests / validation** : `scripts/build.ps1` complet réussi ; `killengine_unit_tests.exe` : **705/705 tests verts** (84 suites). Le propriétaire confirme visuellement que le tutoriel est correctement placé en bas. Le navigateur intégré était indisponible pendant cette session ; aucune capture automatisée n'a été réalisée.
