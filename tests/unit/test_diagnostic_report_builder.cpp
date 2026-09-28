@@ -2,8 +2,12 @@
 
 #include <gtest/gtest.h>
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QUuid>
@@ -54,18 +58,120 @@ TEST(DiagnosticReportBuilder, RedactionNoOpOnEmptyInput) {
     EXPECT_EQ(redactKnownRoots("", sampleRoots()), "");
 }
 
-TEST(BoundNarrativeField, AcceptsTextWithinLimit) {
-    const auto result = boundNarrativeField("Steps: click, scan, observe.");
+TEST(BoundNarrativeTotal, AcceptsCombinedTextWithinLimit) {
+    DiagnosticNarrative narrative;
+    narrative.steps = "Steps: click, scan, observe.";
+    narrative.expected = "Nothing special.";
+    narrative.observed = "Crash observed.";
+    const auto result = boundNarrativeTotal(narrative);
     EXPECT_TRUE(result.ok);
-    EXPECT_EQ(result.text, "Steps: click, scan, observe.");
+    EXPECT_EQ(result.narrative.steps, narrative.steps);
+    EXPECT_EQ(result.narrative.observed, narrative.observed);
 }
 
-TEST(BoundNarrativeField, RejectsTextOverLimitExplicitlyNeverSilentlyTruncates) {
+TEST(BoundNarrativeTotal, RejectsTotalOverLimitExplicitlyNeverSilentlyTruncates) {
     const QString huge(DiagnosticReportLimits::kMaxNarrativeBytes + 100, QChar('a'));
-    const auto result = boundNarrativeField(huge);
+    DiagnosticNarrative narrative;
+    narrative.steps = huge;
+    const auto result = boundNarrativeTotal(narrative);
     EXPECT_FALSE(result.ok);
     EXPECT_FALSE(result.error.isEmpty());
-    EXPECT_TRUE(result.text.isEmpty());
+    EXPECT_TRUE(result.narrative.steps.isEmpty());
+}
+
+TEST(BoundNarrativeTotal, RejectsWhenSumOfThreeFieldsExceedsLimitEvenIfNoSingleFieldDoes) {
+    // AUDIT-PIPE-A5 : régression exacte du défaut reproduit en audit -- 3
+    // champs individuellement sous la borne (chacun un peu au-dessus du
+    // tiers) mais dont la somme la dépasse devaient être refusés, pas
+    // acceptés comme avec l'ancienne boundNarrativeField() par-champ.
+    const qint64 third = DiagnosticReportLimits::kMaxNarrativeBytes / 3 + 100;
+    DiagnosticNarrative narrative;
+    narrative.steps = QString(third, QChar('a'));
+    narrative.expected = QString(third, QChar('b'));
+    narrative.observed = QString(third, QChar('c'));
+    ASSERT_LT(narrative.steps.toUtf8().size(), DiagnosticReportLimits::kMaxNarrativeBytes);
+    const auto result = boundNarrativeTotal(narrative);
+    EXPECT_FALSE(result.ok);
+    EXPECT_FALSE(result.error.isEmpty());
+}
+
+// ---------------------------------------------------------------------------
+// redactSecretPatterns (AUDIT-PIPE-A4) -- motifs de credentials génériques,
+// distincts de redactKnownRoots (chemins/secrets connus par valeur exacte).
+// ---------------------------------------------------------------------------
+
+TEST(DiagnosticReportBuilder, RedactSecretPatternsRedactsBearerToken) {
+    const QString input = "Failed call: Authorization: Bearer AUDIT_FAKE_BEARER_20260927_token";
+    const QString redacted = redactSecretPatterns(input);
+    EXPECT_FALSE(redacted.contains("AUDIT_FAKE_BEARER_20260927_token"));
+    EXPECT_TRUE(redacted.contains("Bearer <redacted>"));
+}
+
+TEST(DiagnosticReportBuilder, RedactSecretPatternsRedactsPasswordAssignment) {
+    const QString input = "steps: login with password=AUDIT_FAKE_PASSWORD_20260927 then retry";
+    const QString redacted = redactSecretPatterns(input);
+    EXPECT_FALSE(redacted.contains("AUDIT_FAKE_PASSWORD_20260927"));
+    EXPECT_TRUE(redacted.contains("password=<redacted>"));
+}
+
+TEST(DiagnosticReportBuilder, RedactSecretPatternsRedactsApiKeyAssignmentCaseInsensitiveKeyword) {
+    const QString input = "config had apiKey=AUDIT_ONLY_API_SECRET_20260927 in the log";
+    const QString redacted = redactSecretPatterns(input);
+    EXPECT_FALSE(redacted.contains("AUDIT_ONLY_API_SECRET_20260927"));
+    // Le mot-clé garde sa casse d'origine (contexte utile), seule la valeur change.
+    EXPECT_TRUE(redacted.contains("apiKey=<redacted>"));
+}
+
+TEST(DiagnosticReportBuilder, RedactSecretPatternsRedactsQuotedTokenValue) {
+    const QString input = "token: \"AUDIT_FAKE_TOKEN_20260927\" was rejected";
+    const QString redacted = redactSecretPatterns(input);
+    EXPECT_FALSE(redacted.contains("AUDIT_FAKE_TOKEN_20260927"));
+}
+
+TEST(DiagnosticReportBuilder, RedactSecretPatternsPreservesUnrelatedText) {
+    const QString input = "Scan exact trouve 42 candidats, aucune cle ici.";
+    EXPECT_EQ(redactSecretPatterns(input), input);
+}
+
+TEST(DiagnosticReportBuilder, RedactSecretPatternsNoOpOnEmptyInput) {
+    EXPECT_EQ(redactSecretPatterns(""), "");
+}
+
+TEST(BuildDiagnosticReport, SecretPatternsRedactedInNarrativeSectionsAndEvents) {
+    DiagnosticNarrative narrative;
+    narrative.steps = "Configurer apiKey=AUDIT_ONLY_API_SECRET_20260927 puis relancer.";
+    narrative.expected = "Connexion reussie.";
+    narrative.observed = "Authorization: Bearer AUDIT_FAKE_BEARER_20260927 refuse (401).";
+
+    QList<DiagnosticRawSection> sections;
+    DiagnosticRawSection section;
+    section.id = "log";
+    section.title = "killengine.log";
+    section.content = "[ERROR] request failed, password=AUDIT_FAKE_PASSWORD_20260927 was sent";
+    sections.append(section);
+
+    QList<DiagnosticEvent> events;
+    DiagnosticEvent event;
+    event.source = "actionLog";
+    event.kind = "external_ai";
+    event.state = "failed";
+    event.timestampMs = 1000;
+    event.summary = "backend call with token=AUDIT_FAKE_EVENT_TOKEN_20260927";
+    events.append(event);
+
+    const auto result = buildDiagnosticReport(
+        QUuid::createUuid().toString(QUuid::WithoutBraces), 1000,
+        narrative, sampleProvenance(), sections, events, {});
+
+    ASSERT_TRUE(result.ok);
+    EXPECT_FALSE(result.report.narrative.steps.contains("AUDIT_ONLY_API_SECRET_20260927"));
+    EXPECT_FALSE(result.report.narrative.observed.contains("AUDIT_FAKE_BEARER_20260927"));
+    for (const auto& reportSection : result.report.sections) {
+        EXPECT_FALSE(QString::fromUtf8(reportSection.content).contains("AUDIT_FAKE_PASSWORD_20260927"))
+            << "section " << reportSection.id.toStdString() << " leaked the password sentinel";
+    }
+    ASSERT_EQ(result.report.events.size(), 1);
+    EXPECT_FALSE(result.report.events.first().summary.contains("AUDIT_FAKE_EVENT_TOKEN_20260927"));
 }
 
 TEST(BuildDiagnosticReport, SecretSentinelAbsentFromNarrativeSectionsAndProvenance) {
@@ -206,6 +312,76 @@ TEST(BuildDiagnosticReport, PayloadHashStableForSameContentDifferentForDifferent
     const auto resultA2 = buildDiagnosticReport(
         "r1", 1000, DiagnosticNarrative{}, sampleProvenance(), {}, {}, {});
     EXPECT_EQ(resultA.report.payloadSha256, resultA2.report.payloadSha256);
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT-PIPE-A5 -- manifeste JSON toujours valide sous les bornes, et
+// payloadSha256 identique aux octets réellement assemblés pour l'export.
+// ---------------------------------------------------------------------------
+
+TEST(BuildDiagnosticReport, ManifestStaysValidJsonWithManyLongEvents) {
+    // Régression exacte du défaut reproduit en audit : 200 événements avec
+    // des résumés ~1500 caractères produisaient un manifeste de 262144
+    // octets tronqué en plein milieu d'une chaîne ("Unterminated string").
+    QList<DiagnosticEvent> events;
+    const QString longSummary(1500, QChar('e'));
+    for (int i = 0; i < 200; ++i) {
+        DiagnosticEvent event;
+        event.source = "activity";
+        event.kind = "scan_exact";
+        event.state = "completed";
+        event.timestampMs = 1000 + i;
+        event.summary = QStringLiteral("%1 %2").arg(i).arg(longSummary);
+        events.append(event);
+    }
+
+    const auto result = buildDiagnosticReport(
+        QUuid::createUuid().toString(QUuid::WithoutBraces), 1000,
+        DiagnosticNarrative{}, sampleProvenance(), {}, events, {});
+
+    ASSERT_TRUE(result.ok);
+    ASSERT_FALSE(result.report.sections.isEmpty());
+    const auto& manifestSection = result.report.sections.first();
+    ASSERT_EQ(manifestSection.id, "manifest");
+    EXPECT_LE(manifestSection.content.size(), DiagnosticReportLimits::kMaxSectionBytes);
+
+    QJsonParseError parseError;
+    const auto doc = QJsonDocument::fromJson(manifestSection.content, &parseError);
+    EXPECT_EQ(parseError.error, QJsonParseError::NoError)
+        << "manifest.json is not valid JSON: " << parseError.errorString().toStdString();
+    ASSERT_TRUE(doc.isObject());
+    // Honnêteté : si des événements ont dû être omis pour tenir sous la
+    // borne, le manifeste doit le déclarer explicitement plutôt que de
+    // silencieusement présenter une liste incomplète comme complète.
+    const auto obj = doc.object();
+    ASSERT_TRUE(obj.contains("eventsIncludedCount"));
+    ASSERT_TRUE(obj.contains("eventsOmittedForSizeCap"));
+    if (obj.value("eventsOmittedForSizeCap").toBool()) {
+        EXPECT_LT(obj.value("eventsIncludedCount").toInt(), 200);
+    }
+}
+
+TEST(BuildDiagnosticReport, PayloadSha256MatchesAssembledExportPayloadBytes) {
+    DiagnosticNarrative narrative;
+    narrative.steps = "Some steps";
+    QList<DiagnosticRawSection> sections;
+    DiagnosticRawSection section;
+    section.id = "log";
+    section.title = "killengine.log";
+    section.content = "some log content";
+    sections.append(section);
+
+    const auto result = buildDiagnosticReport(
+        "r1", 1000, narrative, sampleProvenance(), sections, {}, {});
+    ASSERT_TRUE(result.ok);
+
+    // AUDIT-PIPE-A5 : avant ce correctif, payloadSha256 portait sur une
+    // concaténation id+content différente des octets réellement écrits par
+    // un export (titres + délimiteurs "===== <nom> =====" + saut de ligne).
+    const QByteArray exportedBytes = assembleExportPayload(result.report.sections);
+    const QString independentHash = QString::fromLatin1(
+        QCryptographicHash::hash(exportedBytes, QCryptographicHash::Sha256).toHex());
+    EXPECT_EQ(result.report.payloadSha256, independentHash);
 }
 
 // ---------------------------------------------------------------------------

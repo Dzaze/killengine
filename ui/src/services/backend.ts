@@ -2048,14 +2048,15 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   clearSmartSearchDebugEvents(): Promise<Record<string, unknown>>
   getLogTail(maxLines: number): Promise<LogTailResult>
   exportDiagnostics(): Promise<Record<string, unknown>>
-  /** UX-PRODUIT-17 — flux Préparer/Aperçu/Exporter. `options` : steps/expected/observed (bornés à 64 Kio UTF-8), includeSmartSearchDebug/includeScanTelemetry/includeCrashReports (bool, défaut false), actionLogEvents (dernières entrées actionLog.ts, du plus ancien au plus récent). Une seule préparation active à la fois, TTL 10 minutes. */
+  /** UX-PRODUIT-17 — flux Préparer/Aperçu/Exporter. `options` : steps/expected/observed (bornés à 64 Kio UTF-8), includeLog (bool, défaut true — AUDIT-PIPE-A4, désormais optionnel), includeSmartSearchDebug/includeScanTelemetry/includeCrashReports (bool, défaut false), actionLogEvents (dernières entrées actionLog.ts, du plus ancien au plus récent). Une seule préparation active à la fois, TTL 10 minutes. La clé API externe enregistrée et les motifs de credentials clairement identifiables (Bearer/password=/apiKey=...) sont rédigés automatiquement dans le récit et les sections — pas une détection générale de secrets arbitraires (AUDIT-PIPE-A4). */
+  /** Le `reportId` retourné doit être retenu et repassé aux 3 méthodes ci-dessous (AUDIT-PIPE-A6) pour garantir de lire/exporter cet aperçu précis, jamais un autre qui l'aurait silencieusement remplacé. */
   prepareDiagnosticReport?(options: Record<string, unknown>): Promise<Record<string, unknown>>
-  /** Métadonnées/tailles/omissions/provenance — jamais le contenu complet des sections. */
-  getPreparedDiagnosticReportPreview?(): Promise<Record<string, unknown>>
-  /** Lecture paginée (16 Kio max/page, frontière UTF-8 respectée) d'une section de l'aperçu préparé. */
-  getPreparedDiagnosticReportSection?(sectionId: string, offset: number, limit: number): Promise<Record<string, unknown>>
-  /** Ouvre un dialogue de sauvegarde natif puis écrit le rapport préparé (QSaveFile vérifié). `cancelled:true` si l'utilisateur annule le dialogue. */
-  exportPreparedDiagnosticReport?(): Promise<Record<string, unknown>>
+  /** Métadonnées/tailles/omissions/provenance — jamais le contenu complet des sections. `reportId` optionnel (AUDIT-PIPE-A6) : omis = sert l'aperçu en cache quel qu'il soit (ancien comportement) ; fourni = refuse explicitement (`success:false`, `currentReportId`) si l'aperçu en cache a été remplacé depuis. */
+  getPreparedDiagnosticReportPreview?(reportId?: string): Promise<Record<string, unknown>>
+  /** Lecture paginée (16 Kio max/page, frontière UTF-8 respectée) d'une section de l'aperçu préparé. `reportId` optionnel, même contrat que getPreparedDiagnosticReportPreview (AUDIT-PIPE-A6). */
+  getPreparedDiagnosticReportSection?(sectionId: string, offset: number, limit: number, reportId?: string): Promise<Record<string, unknown>>
+  /** Ouvre un dialogue de sauvegarde natif puis écrit le rapport préparé (QSaveFile vérifié). `cancelled:true` si l'utilisateur annule le dialogue. `reportId` optionnel, vérifié avant l'ouverture du dialogue ; le contenu exporté est figé à cet instant, immunisé contre un remplacement de l'aperçu pendant que le dialogue est ouvert (AUDIT-PIPE-A6). */
+  exportPreparedDiagnosticReport?(reportId?: string): Promise<Record<string, unknown>>
   getTemporaryStorageStatus(): Promise<TemporaryStorageStatus>
   clearTemporaryStorage(): Promise<Record<string, unknown>>
   getActiveChatMemoryTargets(): Promise<ChatMemoryTargetsResult>
@@ -2173,7 +2174,7 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   findTimelineCorrelations?(): Promise<Record<string, unknown>>
   generateTimelineReport?(): Promise<Record<string, unknown>>
 
-  /** UX-PRODUIT-16 — Comparateur visuel de 2 à 6 candidats. `series` : liste de {id, address, type, factor, label}. `options` : intervalMs (min 50, défaut 100), maxDurationMs (défaut 30000, max 120000). Une seule comparaison active à la fois. */
+  /** UX-PRODUIT-16 — Comparateur visuel de 2 à 6 candidats. `series` : liste de {id, address, type, factor, label}. `options` : intervalMs (min 50, défaut 100), maxDurationMs (défaut 30000, max 120000). Une seule comparaison active à la fois. Le résultat porte `captureId` (AUDIT-PIPE-A8) : à retenir et repasser à recordCandidateComparisonObservation pour consigner une preuve liée à CETTE capture précise, même après un changement de cible attachée. */
   startCandidateComparison?(series: Record<string, unknown>[], options: Record<string, unknown>): Promise<Record<string, unknown>>
   getCandidateComparisonStatus?(): Promise<Record<string, unknown>>
   /** Points paginés (exactValueText/numericValue/scaledValueText/isValid) pour une série, par batchId croissant. */
@@ -2181,6 +2182,8 @@ findWhatAccessesAsync?(addressHex: string, options: Record<string, unknown>): Pr
   /** Corrélation de Pearson par paire de séries, appariée par tour de lecture (batchId) commun -- jamais par indice brut. */
   getCandidateComparisonCorrelations?(): Promise<Record<string, unknown>>
   stopCandidateComparison?(): Promise<Record<string, unknown>>
+  /** AUDIT-PIPE-A8 — consigne une preuve d'effet (registre PRODUIT-R) liée à une capture PRÉCISE du comparateur, identifiée par `captureId` (retourné par startCandidateComparison), pas par la session/le process actuellement attaché. Recherche la provenance immuable enregistrée au démarrage de cette capture (identité de session/process, séries/paramètres réellement appliqués) dans un historique borné côté serveur ; refuse explicitement si `captureId` est inconnu/évincé, sans jamais attribuer la preuve à une autre capture. Niveau toujours "unverified", aucune promotion automatique possible par cette voie (contrairement à recordEffectProof générique). */
+  recordCandidateComparisonObservation?(captureId: string, note: string): Promise<Record<string, unknown>>
   /** UX-PRODUIT-16 (16C) — repère horodaté (même horloge que les points/tours) pendant une capture active. Au plus 100 repères de 500 caractères ; refusé après l'arrêt de la capture. */
   addCandidateComparisonMarker?(text: string): Promise<Record<string, unknown>>
   /** UX-PRODUIT-16 (16C) — export JSON versionné et borné de la capture courante (config, séries décodées, minutages, corrélations, repères) ; écrit sur disque côté backend, retourne `filepath`. N'affecte jamais les exports Memory Timeline existants. */

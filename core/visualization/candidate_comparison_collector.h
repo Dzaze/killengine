@@ -5,6 +5,7 @@
 #include <QString>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -108,6 +109,26 @@ public:
     bool isCollecting() const;
     ComparisonStopReason lastStopReason() const;
     uint32_t skippedTickCount() const;
+
+    using FinishedCallback = std::function<void(ComparisonStopReason)>;
+    /// AUDIT-PIPE-A2 : source unique de vérité pour "cette capture est
+    /// terminée", appelée EXACTEMENT une fois par run réussi de
+    /// startCollection(), depuis le thread de capture lui-même, juste après
+    /// que collectionLoop() sorte -- quelle que soit la voie de sortie
+    /// (durée max, cible perdue, ou m_shouldStop posé par stopCollection()/
+    /// stopCollectionAsync()). Avant ce correctif, seuls les appelants
+    /// manuels de stopCollection() émettaient une notification côté manager
+    /// -- une sortie naturelle (durée max/cible perdue) sans stop explicite
+    /// ne notifiait jamais personne, laissant l'activité "running" pour
+    /// toujours côté UI/registre. startCollection() joint toujours le thread
+    /// précédent avant d'en lancer un nouveau (voir plus bas) : ce join
+    /// garantit que le callback d'un run précédent s'est déjà exécuté avant
+    /// qu'un nouveau run ne puisse démarrer, donc jamais de notification
+    /// tardive d'un ancien run après le début d'un nouveau. L'appelant doit
+    /// rester léger et thread-safe (ne pas toucher l'UI directement -- le
+    /// marshaling vers le thread Qt est la responsabilité de l'appelant, ex.
+    /// candidate_comparison_manager.cpp).
+    void setFinishedCallback(FinishedCallback callback);
 
     std::vector<ComparisonSeriesConfig> seriesConfigs() const;
     std::vector<ComparisonPoint> pointsForSeries(const QString& seriesId, size_t offset, size_t limit) const;

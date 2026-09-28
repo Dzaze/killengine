@@ -133,6 +133,14 @@ export const useCandidateComparisonStore = defineStore('candidateComparison', ()
   const maxDurationMs = ref(30000)
   const busy = ref(false)
   const error = ref('')
+  // AUDIT-PIPE-A8 : identité serveur de la capture EN COURS (ou de la
+  // dernière capture démarrée), retournée par startCandidateComparison.
+  // Repassée à recordObservation() ci-dessous -- jamais la session/le
+  // process actuellement attaché, qui peut avoir changé depuis. Reste
+  // renseignée après l'arrêt/la fin d'une capture (utile pour consigner une
+  // preuve juste après la fin), et n'est écrasée que par un nouveau
+  // startComparison() réussi.
+  const currentCaptureId = ref('')
 
   const canStart = computed(() => pendingSeries.value.length >= kMinSeries && pendingSeries.value.length <= kMaxSeries && !collecting.value)
   const hasResults = computed(() => activeSeries.value.length > 0)
@@ -180,6 +188,7 @@ export const useCandidateComparisonStore = defineStore('candidateComparison', ()
         samplesBySeries.value = new Map()
         correlations.value = []
         markers.value = []
+        currentCaptureId.value = String(result.captureId ?? '')
         actionLogStore.addActionLog('investigation', 'Comparaison de candidats démarrée',
           `${pendingSeries.value.length} série(s)`, 'success')
         await refreshStatus()
@@ -310,6 +319,39 @@ export const useCandidateComparisonStore = defineStore('candidateComparison', ()
     }
   }
 
+  /// AUDIT-PIPE-A8 : consigne une preuve d'effet liée à `currentCaptureId`
+  /// (la capture identifiée serveur, pas la session actuellement attachée)
+  /// -- toujours niveau "unverified", jamais de promotion automatique. Le
+  /// label/source/conditions de la preuve sont construits côté backend à
+  /// partir de la provenance figée de cette capture, pas de l'état live du
+  /// store (qui peut avoir changé si une autre capture a démarré depuis).
+  async function recordObservation(note: string): Promise<{ success: boolean, error?: string }> {
+    if (!currentCaptureId.value) {
+      return { success: false, error: 'Aucune capture identifiée -- démarre une comparaison avant de consigner.' }
+    }
+    const controller = backend.getController()
+    if (!controller.recordCandidateComparisonObservation) {
+      return { success: false, error: 'Consignation indisponible dans ce backend.' }
+    }
+    busy.value = true
+    error.value = ''
+    try {
+      const result = await controller.recordCandidateComparisonObservation(currentCaptureId.value, note.trim())
+      if (result.success === true) {
+        actionLogStore.addActionLog('investigation', 'Preuve consignée (comparaison de candidats)', note.trim(), 'success')
+        return { success: true }
+      }
+      error.value = String(result.error ?? 'Consignation refusée.')
+      actionLogStore.addActionLog('investigation', 'Consignation de preuve en échec', error.value, 'error')
+      return { success: false, error: error.value }
+    } catch (e) {
+      error.value = String(e)
+      return { success: false, error: error.value }
+    } finally {
+      busy.value = false
+    }
+  }
+
   /// Appelé depuis app.ts::init() à la réception du signal comparisonFinished.
   async function handleComparisonFinished(reason: string) {
     collecting.value = false
@@ -334,6 +376,7 @@ export const useCandidateComparisonStore = defineStore('candidateComparison', ()
     maxDurationMs,
     busy,
     error,
+    currentCaptureId,
     canStart,
     hasResults,
     stageSeriesFromSelection,
@@ -347,6 +390,7 @@ export const useCandidateComparisonStore = defineStore('candidateComparison', ()
     refreshCorrelations,
     addMarker,
     exportComparison,
+    recordObservation,
     handleComparisonFinished,
   }
 })

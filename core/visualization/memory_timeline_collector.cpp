@@ -37,6 +37,7 @@ public:
 
     ProgressCallback m_progressCallback;
     DataCallback m_dataCallback;
+    FinishedCallback m_finishedCallback;
 
     std::chrono::steady_clock::time_point m_startTime;
 
@@ -90,6 +91,13 @@ public:
         m_collecting.store(false);
         if (m_progressCallback) {
             m_progressCallback(100, "Complete");
+        }
+        // AUDIT-PIPE-A2 : notifier exactement une fois par run, quelle que
+        // soit la voie de sortie -- voir le commentaire de setFinishedCallback
+        // dans le header pour la garantie d'ordonnancement (join dans
+        // startCollection() avant tout nouveau run).
+        if (m_finishedCallback) {
+            m_finishedCallback(static_cast<TimelineStopReason>(m_stopReason.load()));
         }
     }
 
@@ -340,6 +348,10 @@ void MemoryTimelineCollector::setProgressCallback(ProgressCallback callback) {
 
 void MemoryTimelineCollector::setDataCallback(DataCallback callback) {
     m_impl->m_dataCallback = callback;
+}
+
+void MemoryTimelineCollector::setFinishedCallback(FinishedCallback callback) {
+    m_impl->m_finishedCallback = std::move(callback);
 }
 
 std::unordered_map<uint64_t, TimelineSeries> MemoryTimelineCollector::getSeries() const {

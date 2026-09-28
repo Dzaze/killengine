@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { backend } from '@/services/backend'
 import { useI18n } from 'vue-i18n'
@@ -56,10 +56,20 @@ async function runAutoDissect() {
 }
 
 onMounted(() => {
+  // AUDIT-UI-MODULES-B1 (docs/PHASE_TRACKER.md, 28/09/2026) : même défaut que
+  // ModulesView.vue, trouvé en corrigeant celui-ci -- `backend.getController()`
+  // retourne la même instance pour toute la session alors que ce composant
+  // est détruit/recréé à chaque affichage ; sans disconnect explicite,
+  // chaque visite ajoutait une nouvelle callback sans jamais retirer les
+  // précédentes.
   const controller = backend.getController()
-  controller.findStructureInstancesFinished?.connect((finished: Record<string, unknown>) => {
+  const onFindStructureInstancesFinished = (finished: Record<string, unknown>) => {
     busy.value = false
     result.value = finished
+  }
+  controller.findStructureInstancesFinished?.connect(onFindStructureInstancesFinished)
+  onUnmounted(() => {
+    controller.findStructureInstancesFinished?.disconnect?.(onFindStructureInstancesFinished)
   })
 })
 </script>

@@ -39,6 +39,15 @@ public:
     QVariantMap clearApiKey();
     bool hasApiKey() const;
 
+    /// AUDIT-PIPE-A4 : rédaction pour le rapport de diagnostic
+    /// (settings_diagnostics_manager.cpp) -- remplace toute occurrence
+    /// littérale de la clé API actuellement enregistrée par un label stable
+    /// (`<redacted_api_key>`). Ne retourne/n'expose JAMAIS la clé elle-même à
+    /// l'appelant ; no-op (retourne `text` inchangé) si aucune clé n'est
+    /// enregistrée ou si le déchiffrement échoue -- la préparation d'un
+    /// rapport ne doit jamais échouer pour cette seule raison.
+    QString redactApiKeyOccurrences(const QString& text) const;
+
     QVariantMap setActiveBackend(const QString& backend);
     QString activeBackend() const;
 

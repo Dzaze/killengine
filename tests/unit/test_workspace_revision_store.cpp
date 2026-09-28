@@ -7,8 +7,12 @@
 
 #include <gtest/gtest.h>
 
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QUuid>
@@ -23,8 +27,12 @@ protected:
         store = std::make_unique<WorkspaceRevisionStore>(tempDir->path());
     }
 
+    // AUDIT-PIPE-A7 : inclut désormais les champs élémentaires requis par
+    // isPlausibleWorkspacePayload() (version numérique + lastPresetId
+    // textuel), pour rester un payload RecoverableSnapshot plausible --
+    // sinon create() refuserait désormais ce fixture lui-même.
     QString samplePayload(const QString& marker = "x") const {
-        return QStringLiteral("{\"investigation\":{\"marker\":\"%1\"}}").arg(marker);
+        return QStringLiteral("{\"version\":1,\"lastPresetId\":\"\",\"investigation\":{\"marker\":\"%1\"}}").arg(marker);
     }
 
     std::unique_ptr<QTemporaryDir> tempDir;
@@ -219,6 +227,126 @@ TEST_F(WorkspaceRevisionStoreTest, ExplicitRemoveDeletesManualRevision) {
     EXPECT_TRUE(error.isEmpty());
     EXPECT_TRUE(store->list(0, 100).isEmpty());
     EXPECT_FALSE(store->read(created.metadata.id).success);
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT-PIPE-A7 -- validation élémentaire du payload workspace, distincte de
+// l'intégrité d'enveloppe (SHA-256) déjà testée ci-dessus.
+// ---------------------------------------------------------------------------
+
+TEST_F(WorkspaceRevisionStoreTest, CreateRejectsSyntacticallyInvalidJsonPayload) {
+    const auto created = store->create(WorkspaceRevisionReason::Manual, "", "", QStringLiteral("{"));
+    EXPECT_FALSE(created.success);
+    EXPECT_FALSE(created.error.isEmpty());
+    EXPECT_TRUE(store->list(0, 100).isEmpty());
+}
+
+TEST_F(WorkspaceRevisionStoreTest, CreateRejectsArrayRootPayload) {
+    // Régression exacte du défaut reproduit en audit : createWorkspaceRevision("[]", ...)
+    // retournait success:true avant ce correctif.
+    const auto created = store->create(WorkspaceRevisionReason::Manual, "", "", QStringLiteral("[]"));
+    EXPECT_FALSE(created.success);
+    EXPECT_FALSE(created.error.isEmpty());
+    EXPECT_TRUE(store->list(0, 100).isEmpty());
+}
+
+TEST_F(WorkspaceRevisionStoreTest, CreateRejectsMissingVersionField) {
+    const auto created = store->create(WorkspaceRevisionReason::Manual, "", "", QStringLiteral("{\"lastPresetId\":\"\"}"));
+    EXPECT_FALSE(created.success);
+}
+
+TEST_F(WorkspaceRevisionStoreTest, CreateRejectsUnsupportedVersionNumber) {
+    const auto created = store->create(
+        WorkspaceRevisionReason::Manual, "", "", QStringLiteral("{\"version\":99,\"lastPresetId\":\"\"}"));
+    EXPECT_FALSE(created.success);
+}
+
+TEST_F(WorkspaceRevisionStoreTest, CreateRejectsMissingLastPresetIdField) {
+    const auto created = store->create(WorkspaceRevisionReason::Manual, "", "", QStringLiteral("{\"version\":1}"));
+    EXPECT_FALSE(created.success);
+}
+
+TEST_F(WorkspaceRevisionStoreTest, InvalidPayloadRejectionLeavesExistingRevisionsIntactAndSkipsQuota) {
+    const auto first = store->create(WorkspaceRevisionReason::Manual, "", "", samplePayload("safe"));
+    ASSERT_TRUE(first.success);
+
+    const auto failed = store->create(WorkspaceRevisionReason::Manual, "", "", QStringLiteral("[]"));
+    EXPECT_FALSE(failed.success);
+
+    const auto entries = store->list(0, 100);
+    ASSERT_EQ(entries.size(), 1);
+    EXPECT_EQ(entries[0].metadata.id, first.metadata.id);
+    EXPECT_TRUE(store->read(first.metadata.id).success);
+}
+
+TEST_F(WorkspaceRevisionStoreTest, EnvelopeIntactButPayloadImplausibleIsListedInvalidWithoutBeingRemoved) {
+    // Enveloppe SHA-correcte (donc l'ancien contrôle d'intégrité seul la
+    // déclarait valid:true) mais dont le payload ("[]") n'est pas un
+    // workspace plausible -- distinct d'un payload tronqué/corrompu.
+    const auto good = store->create(WorkspaceRevisionReason::Manual, "", "", samplePayload("good"));
+    ASSERT_TRUE(good.success);
+
+    const QString badId = QStringLiteral("22222222-2222-2222-2222-222222222222");
+    const QString badPayload = QStringLiteral("[]");
+    const QString badSha = QString::fromLatin1(
+        QCryptographicHash::hash(badPayload.toUtf8(), QCryptographicHash::Sha256).toHex());
+    QJsonObject envelope;
+    envelope["schemaVersion"] = 1;
+    envelope["id"] = badId;
+    envelope["createdAtUtc"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    envelope["reason"] = QStringLiteral("manual");
+    envelope["projectContext"] = QString();
+    envelope["targetName"] = QString();
+    envelope["payloadSha256"] = badSha;
+    envelope["payload"] = badPayload;
+    QFile file(tempDir->filePath(badId + ".kwrev"));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
+    file.close();
+
+    const auto entries = store->list(0, 100);
+    ASSERT_EQ(entries.size(), 2);
+    int validCount = 0, invalidCount = 0;
+    for (const auto& entry : entries) {
+        if (entry.metadata.id == badId) {
+            EXPECT_FALSE(entry.valid);
+            EXPECT_FALSE(entry.error.isEmpty());
+            ++invalidCount;
+        } else {
+            EXPECT_TRUE(entry.valid);
+            EXPECT_EQ(entry.metadata.id, good.metadata.id);
+            ++validCount;
+        }
+    }
+    EXPECT_EQ(validCount, 1);
+    EXPECT_EQ(invalidCount, 1);
+
+    // Jamais purgée par une simple consultation (list()) : le fichier reste
+    // sur disque, contrairement à une éviction de quota.
+    EXPECT_TRUE(QFile::exists(tempDir->filePath(badId + ".kwrev")));
+
+    // read() refuse (comme pour toute entrée invalide -- même contrat que le
+    // cas SHA incorrect déjà testé), mais ne supprime rien non plus.
+    EXPECT_FALSE(store->read(badId).success);
+    EXPECT_TRUE(QFile::exists(tempDir->filePath(badId + ".kwrev")));
+}
+
+TEST_F(WorkspaceRevisionStoreTest, OversizedEnvelopeFileIsRejectedWithoutFullRead) {
+    const QString hugeId = QStringLiteral("33333333-3333-3333-3333-333333333333");
+    QFile file(tempDir->filePath(hugeId + ".kwrev"));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    // N'écrit pas réellement 32+ Mio de contenu JSON valide (coûteux et
+    // inutile) -- juste assez d'octets bruts pour dépasser
+    // kWorkspaceRevisionMaxEnvelopeFileBytes et vérifier que le fichier est
+    // rejeté par sa TAILLE avant toute tentative de parse JSON.
+    QByteArray filler(static_cast<int>(kWorkspaceRevisionMaxEnvelopeFileBytes + 1024), 'x');
+    file.write(filler);
+    file.close();
+
+    const auto entries = store->list(0, 100);
+    ASSERT_EQ(entries.size(), 1);
+    EXPECT_FALSE(entries[0].valid);
+    EXPECT_FALSE(entries[0].error.isEmpty());
 }
 
 TEST_F(WorkspaceRevisionStoreTest, RefusedWriteLeavesExistingRevisionsIntact) {

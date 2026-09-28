@@ -41,6 +41,50 @@ bool isProtectionReason(WorkspaceRevisionReason reason) {
     return reason == WorkspaceRevisionReason::BeforeImport || reason == WorkspaceRevisionReason::BeforeRestore;
 }
 
+/// AUDIT-PIPE-A7 : validation ÉLÉMENTAIRE du payload workspace (JSON objet,
+/// version numérique supportée, lastPresetId textuel) -- délibérément PAS la
+/// validation métier profonde par section (investigation/trainer/structures/
+/// bookmarks/audit), qui reste l'unique responsabilité de
+/// validateWorkspaceImport() côté TS (ui/src/stores/workspaceImportValidation.ts),
+/// déjà exécutée à la restauration (workspaceSession.ts::importWorkspaceJson
+/// avec source='revision_restore'). Dupliquer cette validation profonde ici
+/// créerait exactement le risque que la fiche demande d'éviter : deux
+/// validateurs métier qui peuvent diverger. Ce contrôle-ci n'attrape que ce
+/// qu'aucune restauration ne pourra jamais rendre lisible (JSON cassé, racine
+/// du mauvais type, champs racine élémentaires absents/mal typés) --
+/// suffisant pour ne plus stocker/lister comme "valid" un payload qui ne
+/// pourra jamais être restauré, sans prétendre garantir la restaurabilité
+/// complète.
+bool isPlausibleWorkspacePayload(const QString& payloadJson, QString* errorOut) {
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(payloadJson.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        if (errorOut) *errorOut = QStringLiteral("JSON invalide : %1").arg(parseError.errorString());
+        return false;
+    }
+    if (!doc.isObject()) {
+        if (errorOut) {
+            *errorOut = QStringLiteral("La racine doit être un objet JSON (racine %1 reçue).")
+                .arg(doc.isArray() ? QStringLiteral("tableau") : QStringLiteral("scalaire"));
+        }
+        return false;
+    }
+    const QJsonObject root = doc.object();
+    // Version en dur ICI, à tenir synchronisée avec
+    // WORKSPACE_IMPORT_SUPPORTED_VERSIONS (workspaceImportValidation.ts) --
+    // volontairement un simple entier plutôt qu'une structure dupliquée, pour
+    // limiter le risque de divergence à un seul point de comparaison.
+    if (!root.value(QStringLiteral("version")).isDouble() || root.value(QStringLiteral("version")).toInt(-1) != 1) {
+        if (errorOut) *errorOut = QStringLiteral("Champ 'version' manquant, non numérique, ou non supporté.");
+        return false;
+    }
+    if (!root.value(QStringLiteral("lastPresetId")).isString()) {
+        if (errorOut) *errorOut = QStringLiteral("Champ 'lastPresetId' manquant ou non textuel.");
+        return false;
+    }
+    return true;
+}
+
 /// Lit et valide une seule enveloppe .kwrev (JSON, schéma, motif, SHA-256).
 /// Utilisée à la fois pour lister (index reconstruit depuis les enveloppes,
 /// jamais depuis un manifeste séparé) et pour lire une révision précise --
@@ -53,6 +97,16 @@ WorkspaceRevisionListEntry parseEnvelopeFile(const QString& path, const QString&
     if (!file.open(QIODevice::ReadOnly)) {
         entry.valid = false;
         entry.error = QStringLiteral("Fichier illisible.");
+        return entry;
+    }
+    // AUDIT-PIPE-A7 : vérifie la taille AVANT readAll() -- une enveloppe
+    // externe/corrompue anormalement grosse ne doit jamais être chargée
+    // intégralement en mémoire juste pour être rejetée ensuite.
+    if (file.size() > kWorkspaceRevisionMaxEnvelopeFileBytes) {
+        entry.valid = false;
+        entry.error = QStringLiteral("Fichier de révision anormalement volumineux (%1 octets, max %2).")
+            .arg(file.size())
+            .arg(kWorkspaceRevisionMaxEnvelopeFileBytes);
         return entry;
     }
     const QByteArray raw = file.readAll();
@@ -89,6 +143,10 @@ WorkspaceRevisionListEntry parseEnvelopeFile(const QString& path, const QString&
         return entry;
     }
 
+    // Métadonnées peuplées AVANT le contrôle de plausibilité qui suit --
+    // AUDIT-PIPE-A7 : une révision dont l'enveloppe est intacte (SHA correct,
+    // ci-dessus) mais dont le PAYLOAD n'est pas un workspace plausible reste
+    // identifiable (id/date/motif/taille) dans la liste, jamais masquée.
     const QString contentId = root.value(QStringLiteral("id")).toString();
     entry.metadata.id = isSafeId(contentId) ? contentId : fallbackId;
     entry.metadata.createdAtUtc = root.value(QStringLiteral("createdAtUtc")).toString();
@@ -97,6 +155,19 @@ WorkspaceRevisionListEntry parseEnvelopeFile(const QString& path, const QString&
     entry.metadata.targetName = root.value(QStringLiteral("targetName")).toString();
     entry.metadata.payloadSizeBytes = static_cast<qint64>(payload.toUtf8().size());
     entry.metadata.payloadSha256 = expectedSha;
+
+    // AUDIT-PIPE-A7 : intégrité d'enveloppe confirmée (SHA ci-dessus) ne
+    // prouve pas que le PAYLOAD est un workspace lisible -- distinct et
+    // vérifié séparément ici, jamais confondu ("valid:true" pour une
+    // enveloppe intacte contenant "{"/"[]" était exactement le défaut
+    // reproduit dans cette fiche).
+    QString payloadError;
+    if (!isPlausibleWorkspacePayload(payload, &payloadError)) {
+        entry.valid = false;
+        entry.error = QStringLiteral("Enveloppe intacte, contenu du workspace invalide : %1").arg(payloadError);
+        return entry;
+    }
+
     entry.valid = true;
     return entry;
 }
@@ -163,6 +234,18 @@ WorkspaceRevisionCreateResult WorkspaceRevisionStore::create(WorkspaceRevisionRe
     const QByteArray payloadBytes = payloadJson.toUtf8();
     if (payloadBytes.size() > kWorkspaceRevisionMaxPayloadBytes) {
         result.error = QStringLiteral("Le contenu à sauvegarder dépasse la limite de 10 Mio par révision.");
+        return result;
+    }
+
+    // AUDIT-PIPE-A7 : validation élémentaire AVANT toute progression (quota,
+    // index, écriture disque) -- un payload structurellement invalide
+    // (JSON cassé, racine non-objet, champs élémentaires absents/mal typés)
+    // ne doit jamais consommer un slot de quota ni être stocké comme une
+    // révision "valid". Ne duplique pas la validation métier profonde par
+    // section, qui reste côté TS (voir isPlausibleWorkspacePayload ci-dessus).
+    QString payloadError;
+    if (!isPlausibleWorkspacePayload(payloadJson, &payloadError)) {
+        result.error = QStringLiteral("Contenu du workspace invalide : %1").arg(payloadError);
         return result;
     }
 

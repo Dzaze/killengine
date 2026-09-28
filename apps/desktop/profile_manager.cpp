@@ -159,8 +159,20 @@ QVariantMap ProfileManager::saveProfileTarget(
     // Charge le profil existant ou crée un nouveau
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (path.isEmpty()) {
+        result["error"] = KE_TXT("Nom de profil invalide.", "Invalid profile name.");
+        return result;
+    }
     if (QFile::exists(path)) {
-        killcore::ProfileStore::load(path, &profile);
+        if (!killcore::ProfileStore::load(path, &profile)) {
+            // AUDIT-PROFILS-P2 : un fichier existant mais illisible (JSON invalide,
+            // version future non reconnue) ne doit jamais être traité comme "profil
+            // inexistant, à créer" -- ça écraserait silencieusement une sauvegarde
+            // réelle avec un profil vide au save() suivant.
+            result["error"] = KE_TXT("Profil existant illisible ou d'une version non prise en charge — sauvegarde refusée pour éviter de l'écraser.",
+                "Existing profile is unreadable or from an unsupported version — refusing to save to avoid overwriting it.");
+            return result;
+        }
     } else {
         profile.gameName = profileName;
         profile.executableName = m_controller.m_processName;
@@ -265,8 +277,16 @@ QVariantMap ProfileManager::saveClrFieldProfileTarget(
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
+    if (path.isEmpty()) {
+        result["error"] = KE_TXT("Nom de profil invalide.", "Invalid profile name.");
+        return result;
+    }
     if (QFile::exists(path)) {
-        killcore::ProfileStore::load(path, &profile);
+        if (!killcore::ProfileStore::load(path, &profile)) {
+            result["error"] = KE_TXT("Profil existant illisible ou d'une version non prise en charge — sauvegarde refusée pour éviter de l'écraser.",
+                "Existing profile is unreadable or from an unsupported version — refusing to save to avoid overwriting it.");
+            return result;
+        }
     } else {
         profile.gameName = cleanProfileName;
         profile.executableName = m_controller.m_processName;
@@ -664,8 +684,20 @@ QVariantMap ProfileManager::importPointerMap(
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
-    const bool profileExists = killcore::ProfileStore::load(path, &profile);
-    if (!profileExists) {
+    if (path.isEmpty()) {
+        result["error"] = KE_TXT("Nom de profil invalide.", "Invalid profile name.");
+        return result;
+    }
+    const bool fileExists = QFile::exists(path);
+    const bool loaded = killcore::ProfileStore::load(path, &profile);
+    if (fileExists && !loaded) {
+        // AUDIT-PROFILS-P2 : un fichier présent mais illisible n'est jamais
+        // "un profil qui n'existe pas encore" -- refuser plutôt que d'écraser.
+        result["error"] = KE_TXT("Profil existant illisible ou d'une version non prise en charge — import refusé pour éviter de l'écraser.",
+            "Existing profile is unreadable or from an unsupported version — refusing the import to avoid overwriting it.");
+        return result;
+    }
+    if (!loaded) {
         const QJsonObject root = doc.object();
         profile.gameName = cleanProfileName;
         profile.executableName = root.value("sourceExecutableName").toString(m_controller.m_processName);
@@ -685,7 +717,7 @@ QVariantMap ProfileManager::importPointerMap(
     }
     result["success"] = true;
     result["profileName"] = cleanProfileName;
-    result["isNewProfile"] = !profileExists;
+    result["isNewProfile"] = !loaded;
     result["imported"] = importResult.imported;
     result["replaced"] = importResult.replaced;
     result["skipped"] = importResult.skipped;
@@ -1069,7 +1101,17 @@ QVariantMap ProfileManager::saveProfileCodePatch(
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
-    if (!killcore::ProfileStore::load(path, &profile)) {
+    if (path.isEmpty()) {
+        result["error"] = KE_TXT("Nom de profil invalide.", "Invalid profile name.");
+        return result;
+    }
+    if (QFile::exists(path)) {
+        if (!killcore::ProfileStore::load(path, &profile)) {
+            result["error"] = KE_TXT("Profil existant illisible ou d'une version non prise en charge — sauvegarde refusée pour éviter de l'écraser.",
+                "Existing profile is unreadable or from an unsupported version — refusing to save to avoid overwriting it.");
+            return result;
+        }
+    } else {
         profile.gameName = cleanProfileName;
         profile.executableName = m_controller.m_processName;
     }
@@ -1588,7 +1630,17 @@ QVariantMap ProfileManager::saveProfileAutoAsmScript(
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
-    if (!killcore::ProfileStore::load(path, &profile)) {
+    if (path.isEmpty()) {
+        result["error"] = KE_TXT("Nom de profil invalide.", "Invalid profile name.");
+        return result;
+    }
+    if (QFile::exists(path)) {
+        if (!killcore::ProfileStore::load(path, &profile)) {
+            result["error"] = KE_TXT("Profil existant illisible ou d'une version non prise en charge — sauvegarde refusée pour éviter de l'écraser.",
+                "Existing profile is unreadable or from an unsupported version — refusing to save to avoid overwriting it.");
+            return result;
+        }
+    } else {
         profile.gameName = cleanProfileName;
         profile.executableName = m_controller.m_processName;
     }
@@ -1971,8 +2023,17 @@ QVariantMap ProfileManager::savePointerChainProfileTarget(
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(profileName);
+    if (path.isEmpty()) {
+        result["error"] = KE_TXT("Nom de profil invalide.", "Invalid profile name.");
+        return result;
+    }
     bool isNewProfile = true;
-    if (killcore::ProfileStore::load(path, &profile)) {
+    if (QFile::exists(path)) {
+        if (!killcore::ProfileStore::load(path, &profile)) {
+            result["error"] = KE_TXT("Profil existant illisible ou d'une version non prise en charge — sauvegarde refusée pour éviter de l'écraser.",
+                "Existing profile is unreadable or from an unsupported version — refusing to save to avoid overwriting it.");
+            return result;
+        }
         isNewProfile = false;
     } else {
         profile.gameName = profileName;
@@ -2050,7 +2111,17 @@ QVariantMap ProfileManager::saveProfileLuaScript(
 
     killcore::Profile profile;
     const QString path = killcore::ProfileStore::profilePath(cleanProfileName);
-    if (!killcore::ProfileStore::load(path, &profile)) {
+    if (path.isEmpty()) {
+        result["error"] = KE_TXT("Nom de profil invalide.", "Invalid profile name.");
+        return result;
+    }
+    if (QFile::exists(path)) {
+        if (!killcore::ProfileStore::load(path, &profile)) {
+            result["error"] = KE_TXT("Profil existant illisible ou d'une version non prise en charge — sauvegarde refusée pour éviter de l'écraser.",
+                "Existing profile is unreadable or from an unsupported version — refusing to save to avoid overwriting it.");
+            return result;
+        }
+    } else {
         profile.gameName = cleanProfileName;
         profile.executableName = m_controller.m_processName;
     }

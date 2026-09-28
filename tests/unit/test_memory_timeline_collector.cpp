@@ -15,6 +15,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <thread>
 
@@ -233,6 +234,47 @@ TEST_F(MemoryTimelineCollectorTest, RestartAfterNaturalCompletionDoesNotCrash) {
     // gagné -- pas besoin d'assertion supplémentaire sur le résultat.
     EXPECT_TRUE(collector->startCollection(GetCurrentProcess()));
     collector->stopCollection();
+}
+
+TEST_F(MemoryTimelineCollectorTest, FinishedCallbackFiresExactlyOnceOnNaturalCompletion) {
+    // AUDIT-PIPE-A2 : avant ce correctif, rien ne notifiait la fin naturelle
+    // d'une collecte (durée max atteinte sans stopCollection() explicite) --
+    // repro live confirmée (getStatus() restait "running" pour toujours).
+    std::atomic<int> callCount{0};
+    std::atomic<int> lastReason{-1};
+    collector->setFinishedCallback([&](TimelineStopReason reason) {
+        ++callCount;
+        lastReason.store(static_cast<int>(reason));
+    });
+
+    TimelineCollectorConfig shortConfig = makeConfig();
+    shortConfig.maxDurationMs = 30;
+    collector->setConfig(shortConfig);
+    collector->addAddress(addrA, 4);
+    ASSERT_TRUE(collector->startCollection(GetCurrentProcess()));
+
+    std::this_thread::sleep_for(150ms);
+    ASSERT_FALSE(collector->isCollecting());
+
+    EXPECT_EQ(callCount.load(), 1);
+    EXPECT_EQ(static_cast<TimelineStopReason>(lastReason.load()), TimelineStopReason::DurationReached);
+}
+
+TEST_F(MemoryTimelineCollectorTest, FinishedCallbackFiresExactlyOnceOnExplicitStop) {
+    std::atomic<int> callCount{0};
+    std::atomic<int> lastReason{-1};
+    collector->setFinishedCallback([&](TimelineStopReason reason) {
+        ++callCount;
+        lastReason.store(static_cast<int>(reason));
+    });
+
+    collector->addAddress(addrA, 4);
+    ASSERT_TRUE(collector->startCollection(GetCurrentProcess()));
+    std::this_thread::sleep_for(60ms);
+    collector->stopCollection();
+
+    EXPECT_EQ(callCount.load(), 1);
+    EXPECT_EQ(static_cast<TimelineStopReason>(lastReason.load()), TimelineStopReason::UserStop);
 }
 
 TEST_F(MemoryTimelineCollectorTest, StartCollectionFailsWithoutWatchedAddresses) {

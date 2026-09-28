@@ -26,7 +26,7 @@ If the application doesn't start, run the diagnostic from the repo:
 .\scripts\diagnose-launch.ps1
 ```
 
-The script briefly opens KillEngine, collects recent Windows events, copies local logs, and writes a bundle under `diagnostics\`. After a successful launch, `Modules > Diagnostics > Runtime and logs` can also export logs, Smart Search debug data, and recent crash reports.
+The script briefly opens KillEngine, collects recent Windows events, copies local logs, and writes a bundle under `diagnostics\`. After a successful launch, `Module Installation > Diagnostics > Runtime and logs` can also export logs, Smart Search debug data, and recent crash reports.
 
 ## Try the tutorial — practice risk-free
 
@@ -251,9 +251,9 @@ In `Project > History and recovery`:
 
 Restoring the Trainer section is refused while a Trainer feature is active or running ("uncheck Trainer to continue, or stop it first") — this avoids reimporting a state while a freeze or a patch is genuinely running against the target.
 
-## Modules — optional dependencies
+## Module Installation — optional dependencies
 
-The `Modules` tab lists KillEngine's optional components and their status, with installation available directly from the UI. A `Refresh all` button at the top re-runs detection for every module.
+The `Module Installation` entry lists KillEngine's optional components and their status, with installation available directly from the UI. A `Refresh all` button at the top re-runs detection for every module.
 
 ### Dependencies
 
@@ -345,9 +345,9 @@ When a normal write explicitly fails, or sticks for a moment then always reverts
 
 Recommended path to learn this without guessing:
 
-1. **Process > Memory access mode > Kernel** — check right at attach time whether the driver is ready. If needed, `Modules > Diagnostics > Kernel > Test the driver` lets you reprobe `KillEngineKernel.sys` and confirm `Kernel memory access = yes`. Without this driver, Kernel mode cleanly refuses advanced reads/writes.
+1. **Process > Memory access mode > Kernel** — check right at attach time whether the driver is ready. If needed, `Module Installation > Diagnostics > Kernel > Test the driver` lets you reprobe `KillEngineKernel.sys` and confirm `Kernel memory access = yes`. Without this driver, Kernel mode cleanly refuses advanced reads/writes.
 2. **Narrow the candidates first** with a normal scan (`175`, then next scan `185`, etc.). The kernel isn't a replacement for scanning: it steps in once few plausible addresses remain.
-3. **Reread the address(es)** via `Modules > Diagnostics > Kernel > Memory read (kernel)` or from the Expert flow. Solid proof starts with "this address really does contain the expected value."
+3. **Reread the address(es)** via `Module Installation > Diagnostics > Kernel > Memory read (kernel)` or from the Expert flow. Solid proof starts with "this address really does contain the expected value."
 4. Once `Kernel` mode is active, simple writes from the `Candidates and writes` panel go through the driver. Multi-address atomic write remains a separate tool, since it suspends threads and solves a different problem.
 5. **Reread immediately after writing**, then check the display in the target. If memory and the on-screen value move together, you likely have the right address.
 6. **In the Assistant**, ask for it directly in natural language: *"write 9999 to 0x... via the kernel."* The Assistant recognizes the explicit request and offers a dedicated confirmation button — one click is enough, but nothing runs without that confirmation.
@@ -432,7 +432,7 @@ Some applications (Electron, WebView2, some UWP apps) display their real state i
 6. `Evaluate` runs a free-form JavaScript expression (also subject to confirmation, since it can write).
 7. `Disconnect` / `Reset` to finish.
 
-**If the target is a Store/UWP app**, the direct CDP port is blocked by default (AppContainer). First go to `Modules > Diagnostics > WebView2`, section `Prepare WebView2 inspection (Store/UWP apps)`, and run the diagnostic: it checks and, if needed, installs the Windows Developer Mode capability required for the Device Portal chain. For a regular Electron/WebView2/CEF app (not UWP), use the `WebView2 CDP debugging (advanced)` panel in `Modules > Diagnostics > WebView2` instead, which forces the debug port for the current Windows user.
+**If the target is a Store/UWP app**, the direct CDP port is blocked by default (AppContainer). First go to `Module Installation > Diagnostics > WebView2`, section `Prepare WebView2 inspection (Store/UWP apps)`, and run the diagnostic: it checks and, if needed, installs the Windows Developer Mode capability required for the Device Portal chain. For a regular Electron/WebView2/CEF app (not UWP), use the `WebView2 CDP debugging (advanced)` panel in `Module Installation > Diagnostics > WebView2` instead, which forces the debug port for the current Windows user.
 
 ## Memory over time: Heatmap, Timeline, Pattern Learning
 
@@ -588,15 +588,15 @@ Optional, never enabled by default. Switches the Assistant chat to the Claude AP
 
 As soon as this backend is active, the context of tool calls (memory addresses, process name, sometimes disassembled code) is sent to Anthropic on every request. Every sensitive tool (memory write, kernel, network, stealth...) still requires its own confirmation before running — enabling this backend doesn't execute anything on its own.
 
-This Claude backend is just one option among others: you can just as well drive KillEngine with the online model of your choice via `Automation Mode` (see `Modules > Diagnostics > Automation` below) — the local pipe exposes the entire command surface without restriction to any external tool/agent on this machine (for example, an AI extension plugged into it).
+This Claude backend is just one option among others: you can just as well drive KillEngine with the online model of your choice via `Automation Mode` (see `Module Installation > Diagnostics > Automation` below) — the local pipe exposes the entire command surface without restriction to any external tool/agent on this machine (for example, an AI extension plugged into it).
 
-## Modules diagnostics
+## Module Installation diagnostics
 
-`Modules` has two tabs: `Components` (default, installable dependencies) and `Diagnostics`, with its own local summary linking to four families.
+`Module Installation` has two tabs: `Components` (default, installable dependencies) and `Diagnostics`, with its own local summary linking to four families.
 
 ### Runtime and logs
 
-In `Modules > Diagnostics > Runtime and logs` (or the `Open diagnostics` link from `Settings > Diagnostic`), you can:
+In `Module Installation > Diagnostics > Runtime and logs` (or the `Open diagnostics` link from `Settings > Diagnostic`), you can:
 
 - see backend/process/version/workflow state and send a ping;
 - read the latest lines of the main log;
@@ -626,7 +626,7 @@ Test/restart the `KillEngineKernel.sys` driver and, once memory access is confir
 
 Lets an external AI agent (Claude Code, Cursor, a VS Code extension...) drive KillEngine live over a local named pipe, reusing the same engine as the `Lua` tab.
 
-1. In `Modules > Diagnostics > Automation`, click `Enable Automation Mode`.
+1. In `Module Installation > Diagnostics > Automation`, click `Enable Automation Mode`.
 2. Confirm once — the pipe starts immediately, no KillEngine restart needed. The status shows the pipe name, the number of calls received, and the last call made.
 3. `Refresh status` to update; `Disable Automation Mode` to turn it off (no confirmation needed).
 

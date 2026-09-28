@@ -95,9 +95,9 @@ struct BuildResult {
     PreparedDiagnosticReport report;
 };
 
-struct BoundedTextResult {
+struct BoundedNarrativeResult {
     bool ok{true};
-    QString text;
+    DiagnosticNarrative narrative;
     QString error;
 };
 
@@ -113,20 +113,50 @@ struct SectionPage {
 /// label stable partout où elle apparaît dans `input`. Les racines les plus
 /// longues sont substituées en premier pour éviter qu'une racine courte
 /// masque une racine plus longue qui la contient (ex. dossier temp sous le
-/// profil utilisateur).
+/// profil utilisateur). Réutilisée aussi pour rédiger des SECRETS CONNUS du
+/// runtime (ex. la clé API externe actuellement enregistrée) : `rootsToLabels`
+/// n'est pas limité aux chemins malgré son nom, c'est une substitution
+/// littérale générique -- voir settings_diagnostics_manager.cpp (AUDIT-PIPE-A4).
 QString redactKnownRoots(const QString& input, const QHash<QString, QString>& rootsToLabels);
 
-/// Borne `text` à DiagnosticReportLimits::kMaxNarrativeBytes en UTF-8.
-/// `ok=false` (jamais de troncature silencieuse) si le texte encodé dépasse
-/// la borne -- l'appelant doit proposer un texte plus court.
-BoundedTextResult boundNarrativeField(const QString& text);
+/// AUDIT-PIPE-A4 : rédaction de motifs de credentials clairement identifiables
+/// dans du texte libre -- PAS une détection générale de secrets arbitraires
+/// (voir la mise en garde du formatNotice généré par buildDiagnosticReport).
+/// Couvre : jetons "Bearer <token>" et assignations "mot_clé[:=]valeur" pour
+/// les mots-clés usuels (api_key, apikey, secret, access_key, client_secret,
+/// password, passwd, pwd, token). Seule la VALEUR est rédigée (le mot-clé
+/// reste visible, il fait partie du contexte utile au diagnostic). Insensible
+/// à la casse pour le mot-clé, sensible pour la valeur (jamais pertinent de
+/// varier la casse d'un secret).
+QString redactSecretPatterns(const QString& input);
+
+/// AUDIT-PIPE-A5 : borne le récit TOTAL (steps+expected+observed combinés,
+/// PAS champ par champ) à DiagnosticReportLimits::kMaxNarrativeBytes en UTF-8.
+/// Remplace l'ancienne boundNarrativeField(), qui bornait chaque champ
+/// séparément et acceptait donc jusqu'à 3x la borne nominale (3 champs à
+/// 64 Kio chacun = 192 Kio de récit réel pour un budget annoncé de 64 Kio).
+/// `ok=false` (jamais de troncature silencieuse) si la somme dépasse la
+/// borne ; `narrative` contient les 3 champs inchangés si `ok`.
+BoundedNarrativeResult boundNarrativeTotal(const DiagnosticNarrative& narrative);
 
 /// Assemble le rapport complet : rédaction (narrative + sections + valeurs
 /// texte des événements), troncature explicite section par section au-delà
 /// de kMaxSectionBytes (honnête : `truncated`/`omittedBytes`, jamais un refus
 /// pour ce cas précis), arrêt à kMaxSections sections et kMaxTotalBytes au
 /// total, calcul du SHA-256 du payload concaténé (manifeste + sections, dans
-/// l'ordre). Les narrations doivent déjà avoir passé boundNarrativeField.
+/// l'ordre). Les narrations doivent déjà avoir passé boundNarrativeTotal.
+///
+/// AUDIT-PIPE-A5 : le manifeste JSON (première section) est désormais borné
+/// en CONTENU avant sérialisation (résumés d'événements individuellement
+/// capés, puis événements les plus anciens retirés un par un si le JSON
+/// dépasse encore kMaxSectionBytes) -- jamais tronqué en octets bruts après
+/// coup comme les autres sections, ce qui produirait un JSON invalide
+/// (reproduit en audit : "Unterminated string" en plein milieu d'un résumé
+/// d'événement coupé). `payloadSha256` est désormais calculé sur les mêmes
+/// octets EXACTS que ceux assemblés par assembleExportPayload() ci-dessous
+/// (avant compression) -- avant ce correctif, le hash portait sur une
+/// concaténation id+content différente de ce que l'export écrivait
+/// réellement sur disque.
 BuildResult buildDiagnosticReport(
     const QString& reportId,
     qint64 preparedAtMs,
@@ -135,6 +165,17 @@ BuildResult buildDiagnosticReport(
     const QList<DiagnosticRawSection>& rawSections,
     const QList<DiagnosticEvent>& events,
     const QHash<QString, QString>& rootsToLabels);
+
+/// AUDIT-PIPE-A5 : assemble les octets NON compressés qu'un export réel écrit
+/// sur disque (avant qCompress) à partir des sections déjà bornées d'un
+/// rapport préparé -- source UNIQUE réutilisée à la fois pour calculer
+/// `payloadSha256` dans buildDiagnosticReport() ci-dessus et pour l'export
+/// réel (apps/desktop/settings_diagnostics_manager.cpp::buildExportPayload),
+/// pour que l'empreinte affichée dans l'aperçu corresponde TOUJOURS
+/// exactement au fichier obtenu. Format : pour chaque section, "\n===== "
+/// + (title si non vide, sinon id) + " =====\n" + content, avec un saut de
+/// ligne final garanti.
+QByteArray assembleExportPayload(const QList<DiagnosticSection>& sections);
 
 /// Lecture paginée d'une section déjà assemblée, bornée à
 /// DiagnosticReportLimits::kMaxPageBytes. `offset` est ajusté à la frontière

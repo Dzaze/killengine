@@ -237,7 +237,22 @@ public:
     /// Liste tous les profils disponibles (.keprofile dans le dossier).
     static QStringList listProfiles();
 
-    /// Retourne le chemin complet d'un profil par son nom.
+    /// Valide un nom de profil fourni par un appelant (formulaire UI, pipe
+    /// d'automatisation, script Lua) avant toute construction de chemin --
+    /// AUDIT-PROFILS-P1 (docs/PHASE_TRACKER.md, 28/09/2026) : `profilePath()`
+    /// concaténait le nom sans validation, permettant une traversée de
+    /// répertoire ("../../../windows/win.ini") à travers chacun des points
+    /// d'appel par nom du dépôt. Rejette un nom vide, un séparateur de chemin
+    /// (`/`, `\`), `.`/`..`, un caractère interdit par Windows, ou un nom de
+    /// périphérique réservé (CON, COM1...). *errorOut (optionnel) reçoit un
+    /// message expliquant le rejet.
+    static bool isValidProfileName(const QString& profileName, QString* errorOut = nullptr);
+
+    /// Retourne le chemin complet d'un profil par son nom, ou une chaîne vide
+    /// si `profileName` échoue isValidProfileName() -- un chemin vide ne
+    /// résout jamais vers un fichier réel, donc chaque appelant existant
+    /// (qui traite déjà "profil introuvable"/"échec de sauvegarde") reste
+    /// protégé sans avoir besoin d'être modifié.
     static QString profilePath(const QString& profileName);
 
     /// Supprime un profil.

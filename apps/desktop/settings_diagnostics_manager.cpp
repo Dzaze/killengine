@@ -1,6 +1,7 @@
 #include "settings_diagnostics_manager.h"
 
 #include "application_controller.h"
+#include "claude_chat_manager.h"
 #include "crash_handler.h"
 #include "localization/localization.h"
 #include "logging/logger.h"
@@ -61,6 +62,40 @@ int unknownSnapshotMaxMbFromSettings() {
     QSettings settings;
     const int mb = boundedSettingInt(settings, "scan/unknownSnapshotMaxMb", kDefaultUnknownSnapshotMaxMb, -1, 32768);
     return mb == -1 ? -1 : std::max(mb, kDefaultUnknownSnapshotMaxMb);
+}
+
+// AUDIT-PIPE-A4 : sélection positive des champs de getSettings() autorisés
+// dans un rapport de diagnostic -- voir prepareDiagnosticReport(). Un futur
+// champ sensible ajouté à getSettings() (ex. un jeton d'un futur service
+// externe) reste exclu tant qu'il n'est pas explicitement ajouté ici ; ne
+// jamais remplacer par un dump complet "tout sauf ce qu'on a pensé à exclure".
+QVariantMap diagnosticSafeSettingsSubset(const QVariantMap& settings) {
+    static const QStringList kAllowedKeys = {
+        QStringLiteral("language"),
+        QStringLiteral("defaultValueType"),
+        QStringLiteral("scanMaxResults"),
+        QStringLiteral("scanChunkSizeMb"),
+        QStringLiteral("performanceMode"),
+        QStringLiteral("scanMaxWorkerThreads"),
+        QStringLiteral("scanMaxInFlightMb"),
+        QStringLiteral("candidateFileBackedThreshold"),
+        QStringLiteral("unknownSnapshotMaxMb"),
+        QStringLiteral("fastScan"),
+        QStringLiteral("smartSearchDebugEnabled"),
+        QStringLiteral("smartSearchDebugMaxEvents"),
+        QStringLiteral("modelPath"),
+        QStringLiteral("modelEnabled"),
+        QStringLiteral("modelThreads"),
+        QStringLiteral("stealthAutoEnable"),
+        QStringLiteral("stealthDefaultProfile"),
+    };
+    QVariantMap subset;
+    for (const auto& key : kAllowedKeys) {
+        if (settings.contains(key)) {
+            subset.insert(key, settings.value(key));
+        }
+    }
+    return subset;
 }
 
 // UX-PRODUIT-17 -- même motif borné/tail-safe que getLogTail() (2 Mio, garde
@@ -837,9 +872,17 @@ QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
     // additionnelles désactivées) et écrit via QSaveFile avec vérification du
     // nombre d'octets réellement écrits -- l'ancien code ne le faisait pas
     // (voir docs/PHASE_TRACKER.md #ux-produit-17, diagnostic de départ).
-    const QVariantMap prepareResult = prepareDiagnosticReport(QVariantMap());
-    if (prepareResult.value("success").toBool() != true) {
-        return prepareResult;
+    // AUDIT-PIPE-A6 : construit désormais un rapport INDÉPENDANT via
+    // buildFreshDiagnosticReport(), sans jamais passer par
+    // prepareDiagnosticReport() -- avant ce correctif, cet appel remplaçait
+    // silencieusement m_preparedReport, effaçant un aperçu qu'un autre
+    // appelant pouvait être en train de consulter (reportId différent).
+    const auto buildResult = buildFreshDiagnosticReport(QVariantMap());
+    if (!buildResult.ok) {
+        QVariantMap result;
+        result["success"] = false;
+        result["error"] = buildResult.error;
+        return result;
     }
 
     const QString exportDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation).isEmpty()
@@ -848,7 +891,7 @@ QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
     const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
     const QString exportPath = QDir(exportDir).filePath("KillEngine-diagnostics-" + timestamp + ".kezdiag");
 
-    QVariantMap result = writeReportToPath(*m_preparedReport, exportPath);
+    QVariantMap result = writeReportToPath(buildResult.report, exportPath);
     if (result.value("success").toBool() != true) {
         return result;
     }
@@ -870,32 +913,32 @@ QVariantMap SettingsDiagnosticsManager::exportDiagnostics() {
     return result;
 }
 
-QVariantMap SettingsDiagnosticsManager::prepareDiagnosticReport(const QVariantMap& options) {
-    QVariantMap result;
-
-    const auto stepsBounded = killcore::boundNarrativeField(options.value("steps").toString());
-    if (!stepsBounded.ok) {
-        result["success"] = false;
-        result["error"] = stepsBounded.error;
-        return result;
-    }
-    const auto expectedBounded = killcore::boundNarrativeField(options.value("expected").toString());
-    if (!expectedBounded.ok) {
-        result["success"] = false;
-        result["error"] = expectedBounded.error;
-        return result;
-    }
-    const auto observedBounded = killcore::boundNarrativeField(options.value("observed").toString());
-    if (!observedBounded.ok) {
-        result["success"] = false;
-        result["error"] = observedBounded.error;
-        return result;
+killcore::BuildResult SettingsDiagnosticsManager::buildFreshDiagnosticReport(const QVariantMap& options) const {
+    // AUDIT-PIPE-A5 : borne désormais le récit TOTAL (steps+expected+observed
+    // combinés), pas champ par champ -- 3 champs à 64 Kio chacun (192 Kio
+    // réels) étaient acceptés avant ce correctif pour un budget annoncé de
+    // 64 Kio au total.
+    killcore::DiagnosticNarrative rawNarrative;
+    rawNarrative.steps = options.value("steps").toString();
+    rawNarrative.expected = options.value("expected").toString();
+    rawNarrative.observed = options.value("observed").toString();
+    const auto narrativeBounded = killcore::boundNarrativeTotal(rawNarrative);
+    if (!narrativeBounded.ok) {
+        killcore::BuildResult failure;
+        failure.ok = false;
+        failure.error = narrativeBounded.error;
+        return failure;
     }
 
     killcore::DiagnosticNarrative narrative;
-    narrative.steps = stepsBounded.text;
-    narrative.expected = expectedBounded.text;
-    narrative.observed = observedBounded.text;
+    // AUDIT-PIPE-A4 : rédaction de la clé API externe AVANT toute autre
+    // rédaction/troncature -- voir ClaudeChatManager::redactApiKeyOccurrences
+    // (jamais la clé elle-même, seulement le texte déjà rédigé). Le récit
+    // libre est l'endroit le plus probable où une clé collée par erreur pour
+    // décrire un bug de connexion IA se retrouverait sinon en clair.
+    narrative.steps = m_controller.m_claudeChatManager->redactApiKeyOccurrences(narrativeBounded.narrative.steps);
+    narrative.expected = m_controller.m_claudeChatManager->redactApiKeyOccurrences(narrativeBounded.narrative.expected);
+    narrative.observed = m_controller.m_claudeChatManager->redactApiKeyOccurrences(narrativeBounded.narrative.observed);
 
     // Provenance -- accès direct aux champs privés de m_controller autorisé
     // par l'amitié déjà en place (application_controller.h).
@@ -943,7 +986,14 @@ QVariantMap SettingsDiagnosticsManager::prepareDiagnosticReport(const QVariantMa
         session["smartSearchDebugFilePath"] = this->smartSearchDebugFilePath();
         session["scanTelemetryFilePath"] = this->scanTelemetryFilePath();
         session["crashDirectory"] = CrashHandler::crashDirectory();
-        session["settings"] = this->getSettings();
+        // AUDIT-PIPE-A4 : sélection positive plutôt qu'un dump complet de
+        // getSettings() -- un futur réglage sensible ajouté à getSettings()
+        // (ex. un jeton d'un futur service externe) ne doit jamais se
+        // retrouver dans un rapport de diagnostic sans décision explicite
+        // d'ajout à cette liste. Aucun des champs actuels n'est sensible,
+        // mais la politique doit être "j'inclus ce que je choisis", pas
+        // "j'inclus tout sauf ce que j'ai pensé à exclure".
+        session["settings"] = diagnosticSafeSettingsSubset(this->getSettings());
 
         killcore::DiagnosticRawSection section;
         section.id = QStringLiteral("session");
@@ -952,8 +1002,12 @@ QVariantMap SettingsDiagnosticsManager::prepareDiagnosticReport(const QVariantMa
         rawSections.append(section);
     }
 
-    {
-        // Toujours inclus -- signal principal d'un rapport de problème.
+    // AUDIT-PIPE-A4 : optionnel désormais (par défaut toujours inclus --
+    // signal principal d'un rapport de problème, aucun changement de
+    // comportement pour un appelant existant qui ne passe pas cette option ;
+    // UX-17 demandait explicitement que ce soit une politique choisie, pas
+    // un comportement câblé en dur sans échappatoire).
+    if (options.value("includeLog", true).toBool()) {
         constexpr int kLogTailLines = 500;
         const QVariantMap tail = this->getLogTail(kLogTailLines);
         const QVariantList lines = tail.value("lines").toList();
@@ -1078,20 +1132,43 @@ QVariantMap SettingsDiagnosticsManager::prepareDiagnosticReport(const QVariantMa
     addRedactionRoot(QDir::tempPath(), QStringLiteral("<temp_dir>"));
     addRedactionRoot(killcore::PortablePaths::root(), QStringLiteral("<app_root>"));
 
-    const QString reportId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const auto buildResult = killcore::buildDiagnosticReport(
-        reportId, nowMs, narrative, provenance, rawSections, events, rootsToLabels);
+    // AUDIT-PIPE-A4 : rédaction de la clé API dans les sections de données
+    // (log/smartSearchDebug/scanTelemetry/crashes/session.json) et les
+    // événements structurés -- le narrative l'a déjà reçue plus haut. Ces
+    // textes viennent de fichiers/état internes, pas d'une saisie utilisateur
+    // directe comme le récit, mais une clé qui aurait fui dans un log
+    // applicatif (ex. via une trace réseau de débogage) ne doit pas non plus
+    // ressortir intacte ici.
+    for (auto& section : rawSections) {
+        section.content = m_controller.m_claudeChatManager->redactApiKeyOccurrences(section.content);
+    }
+    for (auto& event : events) {
+        event.summary = m_controller.m_claudeChatManager->redactApiKeyOccurrences(event.summary);
+    }
 
+    const QString reportId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    return killcore::buildDiagnosticReport(
+        reportId, nowMs, narrative, provenance, rawSections, events, rootsToLabels);
+}
+
+QVariantMap SettingsDiagnosticsManager::prepareDiagnosticReport(const QVariantMap& options) {
+    QVariantMap result;
+    const auto buildResult = buildFreshDiagnosticReport(options);
     if (!buildResult.ok) {
         result["success"] = false;
         result["error"] = buildResult.error;
         return result;
     }
 
+    // AUDIT-PIPE-A6 : c'est ICI, et seulement ici, que le cache partagé est
+    // remplacé -- buildFreshDiagnosticReport() elle-même ne touche jamais
+    // m_preparedReport, pour qu'exportDiagnostics() (legacy) puisse
+    // construire un rapport indépendant sans écraser un aperçu en cours de
+    // consultation.
     m_preparedReport = buildResult.report;
 
     result["success"] = true;
-    result["reportId"] = reportId;
+    result["reportId"] = buildResult.report.reportId;
     return result;
 }
 
@@ -1103,12 +1180,35 @@ bool SettingsDiagnosticsManager::isPreparedReportValid() const {
     return (nowMs - m_preparedReport->preparedAtMs) < killcore::DiagnosticReportLimits::kTtlMs;
 }
 
-QVariantMap SettingsDiagnosticsManager::getPreparedDiagnosticReportPreview() const {
-    QVariantMap result;
+bool SettingsDiagnosticsManager::checkPreparedReportAccess(const QString& reportId, QVariantMap* errorResult) const {
     if (!isPreparedReportValid()) {
-        result["success"] = false;
-        result["error"] = KE_TXT("Aucun aperçu préparé, ou aperçu expiré (10 minutes). Prépare un nouvel aperçu.",
-                                  "No prepared preview, or the preview expired (10 minutes). Prepare a new one.");
+        if (errorResult) {
+            (*errorResult)["success"] = false;
+            (*errorResult)["error"] = KE_TXT("Aucun aperçu préparé, ou aperçu expiré (10 minutes). Prépare un nouvel aperçu.",
+                                              "No prepared preview, or the preview expired (10 minutes). Prepare a new one.");
+        }
+        return false;
+    }
+    // AUDIT-PIPE-A6 : reportId vide = ancien appelant, aucune vérification
+    // (compatibilité) -- sinon, refuse explicitement si l'aperçu en cache a
+    // été remplacé par une préparation plus récente depuis que l'appelant a
+    // vu ce reportId, plutôt que de servir silencieusement l'AUTRE rapport.
+    if (!reportId.isEmpty() && m_preparedReport->reportId != reportId) {
+        if (errorResult) {
+            (*errorResult)["success"] = false;
+            (*errorResult)["error"] = KE_TXT(
+                "Cet aperçu a été remplacé par une préparation plus récente. Relis l'aperçu courant avant de continuer.",
+                "This preview was replaced by a more recent preparation. Re-read the current preview before continuing.");
+            (*errorResult)["currentReportId"] = m_preparedReport->reportId;
+        }
+        return false;
+    }
+    return true;
+}
+
+QVariantMap SettingsDiagnosticsManager::getPreparedDiagnosticReportPreview(const QString& reportId) const {
+    QVariantMap result;
+    if (!checkPreparedReportAccess(reportId, &result)) {
         return result;
     }
     const auto& report = *m_preparedReport;
@@ -1165,11 +1265,10 @@ QVariantMap SettingsDiagnosticsManager::getPreparedDiagnosticReportPreview() con
     return result;
 }
 
-QVariantMap SettingsDiagnosticsManager::getPreparedDiagnosticReportSection(const QString& sectionId, qint64 offset, qint64 limit) const {
+QVariantMap SettingsDiagnosticsManager::getPreparedDiagnosticReportSection(
+    const QString& sectionId, qint64 offset, qint64 limit, const QString& reportId) const {
     QVariantMap result;
-    if (!isPreparedReportValid()) {
-        result["success"] = false;
-        result["error"] = KE_TXT("Aucun aperçu préparé, ou aperçu expiré.", "No prepared preview, or it expired.");
+    if (!checkPreparedReportAccess(reportId, &result)) {
         return result;
     }
 
@@ -1200,17 +1299,12 @@ QVariantMap SettingsDiagnosticsManager::getPreparedDiagnosticReportSection(const
 }
 
 QByteArray SettingsDiagnosticsManager::buildExportPayload(const killcore::PreparedDiagnosticReport& report) const {
-    QByteArray payload;
-    for (const auto& section : report.sections) {
-        payload.append("\n===== ");
-        payload.append((section.title.isEmpty() ? section.id : section.title).toUtf8());
-        payload.append(" =====\n");
-        payload.append(section.content);
-        if (!payload.endsWith('\n')) {
-            payload.append('\n');
-        }
-    }
-    return qCompress(payload, 9);
+    // AUDIT-PIPE-A5 : assemblage délégué à killcore::assembleExportPayload,
+    // la MÊME fonction utilisée par buildDiagnosticReport() pour calculer
+    // payloadSha256 -- une seule implémentation, plus de divergence possible
+    // entre l'empreinte affichée dans l'aperçu et les octets réellement
+    // exportés (avant ce correctif, deux assemblages différents existaient).
+    return qCompress(killcore::assembleExportPayload(report.sections), 9);
 }
 
 QVariantMap SettingsDiagnosticsManager::writeReportToPath(const killcore::PreparedDiagnosticReport& report, const QString& path) const {
@@ -1241,14 +1335,24 @@ QVariantMap SettingsDiagnosticsManager::writeReportToPath(const killcore::Prepar
     return result;
 }
 
-QVariantMap SettingsDiagnosticsManager::exportPreparedDiagnosticReport() {
+QVariantMap SettingsDiagnosticsManager::exportPreparedDiagnosticReport(const QString& reportId) {
     QVariantMap result;
-    if (!isPreparedReportValid()) {
-        result["success"] = false;
-        result["error"] = KE_TXT("Aperçu absent ou expiré. Prépare un nouvel aperçu avant d'exporter.",
-                                  "Missing or expired preview. Prepare a new one before exporting.");
+    if (!checkPreparedReportAccess(reportId, &result)) {
         return result;
     }
+
+    // AUDIT-PIPE-A6 : capture une COPIE immuable du rapport à exporter avant
+    // d'ouvrir le dialogue -- QFileDialog::getSaveFileName traite une boucle
+    // d'événements imbriquée pendant laquelle une AUTRE préparation peut
+    // arriver (confirmé en direct : le pipe d'automatisation reste servi
+    // pendant qu'un QFileDialog est ouvert) et remplacer m_preparedReport.
+    // Avant ce correctif, le code relisait `*m_preparedReport` APRÈS le
+    // dialogue : l'export aurait alors silencieusement écrit le contenu du
+    // rapport B choisi par l'appelant, jamais reproduit au niveau du
+    // dialogue mais un risque réel identifié en audit. Cette copie garantit
+    // que le fichier écrit correspond exactement à l'aperçu validé
+    // ci-dessus, quoi qu'il arrive à m_preparedReport pendant le dialogue.
+    const killcore::PreparedDiagnosticReport reportSnapshot = *m_preparedReport;
 
     const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
     const QString suggestedName = QStringLiteral("KillEngine-diagnostics-%1.kezdiag").arg(timestamp);
@@ -1270,7 +1374,7 @@ QVariantMap SettingsDiagnosticsManager::exportPreparedDiagnosticReport() {
         return result;
     }
 
-    return writeReportToPath(*m_preparedReport, path);
+    return writeReportToPath(reportSnapshot, path);
 }
 
 QString SettingsDiagnosticsManager::smartSearchDebugFilePath() const {

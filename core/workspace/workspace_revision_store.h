@@ -54,6 +54,13 @@ constexpr int kWorkspaceRevisionProtectionCap = 20;   // BeforeImport + BeforeRe
 constexpr int kWorkspaceRevisionManualCap = 10;
 constexpr qint64 kWorkspaceRevisionMaxPayloadBytes = 10LL * 1024 * 1024;
 constexpr qint64 kWorkspaceRevisionMaxTotalBytes = 100LL * 1024 * 1024;
+/// AUDIT-PIPE-A7 : borne défensive sur la taille du FICHIER .kwrev lu (pas
+/// seulement le payload) -- une enveloppe externe/corrompue anormalement
+/// grosse ne doit jamais être chargée intégralement en mémoire avant d'être
+/// rejetée. Généreux au-delà de kWorkspaceRevisionMaxPayloadBytes pour
+/// couvrir l'échappement JSON du payload (jusqu'à ~2x dans le pire cas) plus
+/// l'enveloppe (métadonnées, toujours petites).
+constexpr qint64 kWorkspaceRevisionMaxEnvelopeFileBytes = 32LL * 1024 * 1024;
 
 /// Registre de révisions immuables du workspace, persistées sur disque
 /// portable (un fichier JSON par révision, écriture atomique QSaveFile --

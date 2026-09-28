@@ -210,8 +210,16 @@ export const useAppStore = defineStore('app', () => {
   const preparedReportCancelled = ref(false)
   // Invalide localement l'aperçu dès qu'une option change après la dernière
   // préparation -- le bouton Exporter reste désactivé tant qu'un nouvel
-  // aperçu n'a pas été demandé, cohérent avec l'exigence de la fiche.
+  // aperçu n'a pas été demandé, cohérent avec l'exigence de la fiche. Devenu
+  // aussi vrai (AUDIT-PIPE-A6) quand le backend signale que l'aperçu en
+  // cache a été remplacé par une AUTRE préparation (pas seulement un champ
+  // édité localement) -- distinct de ce cas mais même conséquence UX.
   const preparedReportStale = ref(false)
+  // AUDIT-PIPE-A6 : reportId de l'aperçu que CE store a réellement préparé/
+  // consulté en dernier -- repassé à toute lecture/export suivante pour
+  // détecter (au lieu de silencieusement lire/exporter) un remplacement par
+  // une autre préparation (autre onglet, script Lua, appel pipe direct...).
+  const preparedReportId = ref('')
   const temporaryStorageStatus = ref<TemporaryStorageStatus | null>(null)
   const temporaryStorageCleanupResult = ref<Record<string, unknown> | null>(null)
   const temporaryStorageError = ref('')
@@ -4363,6 +4371,11 @@ export const useAppStore = defineStore('app', () => {
       })
       if (result.success === true) {
         preparedReportStale.value = false
+        // AUDIT-PIPE-A6 : retient le reportId de CETTE préparation avant de
+        // rafraîchir l'aperçu, pour que refreshPreparedDiagnosticReportPreview()
+        // ci-dessous vérifie déjà qu'elle lit bien celui-ci (utile si une
+        // autre préparation concurrente s'est glissée entre les deux appels).
+        preparedReportId.value = String(result.reportId ?? '')
         await refreshPreparedDiagnosticReportPreview()
       } else {
         preparedReportError.value = String(result.error ?? 'Préparation impossible.')
@@ -4381,12 +4394,22 @@ export const useAppStore = defineStore('app', () => {
     try {
       const controller = backend.getController()
       if (!controller.getPreparedDiagnosticReportPreview) return null
-      const result = await controller.getPreparedDiagnosticReportPreview()
+      // AUDIT-PIPE-A6 : ne vérifie l'identité que si ce store a déjà un
+      // reportId connu (première consultation depuis un rechargement page =
+      // pas encore de reportId local, comportement historique conservé).
+      const result = await controller.getPreparedDiagnosticReportPreview(preparedReportId.value || undefined)
       if (result.success === true) {
         preparedReportPreview.value = result
+        preparedReportId.value = String(result.reportId ?? preparedReportId.value)
       } else {
         preparedReportPreview.value = null
         preparedReportError.value = String(result.error ?? '')
+        // AUDIT-PIPE-A6 : le backend a explicitement refusé parce que
+        // l'aperçu qu'on croyait consulter a été remplacé -- même
+        // conséquence UX que "champ édité sans re-préparer".
+        if (result.currentReportId) {
+          preparedReportStale.value = true
+        }
       }
       return result
     } catch (e) {
@@ -4402,7 +4425,13 @@ export const useAppStore = defineStore('app', () => {
       if (!controller.getPreparedDiagnosticReportSection) {
         return { success: false, error: 'Backend indisponible.' }
       }
-      return await controller.getPreparedDiagnosticReportSection(sectionId, offset, limit)
+      // AUDIT-PIPE-A6 : même vérification d'identité que le preview.
+      const result = await controller.getPreparedDiagnosticReportSection(
+        sectionId, offset, limit, preparedReportId.value || undefined)
+      if (result.success !== true && result.currentReportId) {
+        preparedReportStale.value = true
+      }
+      return result
     } catch (e) {
       return { success: false, error: String(e) }
     }
@@ -4418,7 +4447,10 @@ export const useAppStore = defineStore('app', () => {
         preparedReportError.value = 'Backend indisponible.'
         return { success: false, error: preparedReportError.value }
       }
-      const result = await controller.exportPreparedDiagnosticReport()
+      // AUDIT-PIPE-A6 : vérifié côté backend avant l'ouverture du dialogue de
+      // sauvegarde -- exporte l'aperçu réellement consulté ici, jamais un
+      // autre qui l'aurait remplacé depuis.
+      const result = await controller.exportPreparedDiagnosticReport(preparedReportId.value || undefined)
       if (result.cancelled === true) {
         preparedReportCancelled.value = true
       } else if (result.success === true) {
@@ -4426,6 +4458,9 @@ export const useAppStore = defineStore('app', () => {
         actionLogStore.addActionLog('diagnostics', 'Rapport de problème exporté', preparedReportExportPath.value, 'success')
       } else {
         preparedReportError.value = String(result.error ?? 'Export impossible.')
+        if (result.currentReportId) {
+          preparedReportStale.value = true
+        }
       }
       return result
     } catch (e) {
@@ -5307,6 +5342,7 @@ export const useAppStore = defineStore('app', () => {
     preparedReportExportPath,
     preparedReportCancelled,
     preparedReportStale,
+    preparedReportId,
     temporaryStorageStatus,
     temporaryStorageCleanupResult,
     temporaryStorageError,

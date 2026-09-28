@@ -103,6 +103,25 @@ public:
     /// DurationReached uniquement quand la boucle sort d'elle-même).
     TimelineStopReason lastStopReason() const;
 
+    using FinishedCallback = std::function<void(TimelineStopReason)>;
+    /// AUDIT-PIPE-A2 : source unique de vérité pour "cette collecte est
+    /// terminée", appelée EXACTEMENT une fois par run réussi de
+    /// startCollection(), depuis le thread de collecte lui-même, juste après
+    /// la sortie de collectionLoop() -- durée max atteinte ou m_shouldStop
+    /// posé par stopCollection()/stopCollectionAsync(). Avant ce correctif,
+    /// seuls les appelants manuels de stopCollection() émettaient une
+    /// notification côté manager -- une sortie naturelle (durée max atteinte
+    /// sans stop explicite) ne notifiait jamais personne, laissant
+    /// l'activité "running" pour toujours côté UI/registre. startCollection()
+    /// joint toujours le thread précédent avant d'en lancer un nouveau : ce
+    /// join garantit que le callback d'un run précédent s'est déjà exécuté
+    /// avant qu'un nouveau run ne puisse démarrer -- jamais de notification
+    /// tardive d'un ancien run après le début d'un nouveau. Même contrat que
+    /// CandidateComparisonCollector::setFinishedCallback (core/visualization/
+    /// candidate_comparison_collector.h) : l'appelant marshale lui-même vers
+    /// le thread Qt.
+    void setFinishedCallback(FinishedCallback callback);
+
     /// Nombre total de points actuellement stockés, toutes séries confondues
     /// -- maintenu incrémentalement (pas de copie de getSeries() juste pour
     /// compter, UX-PRODUIT-12 point 4).

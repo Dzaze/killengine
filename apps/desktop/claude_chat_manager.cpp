@@ -141,6 +141,20 @@ bool ClaudeChatManager::hasApiKey() const {
     return !settings.value("ai/externalApiKeyBlob").toByteArray().isEmpty();
 }
 
+QString ClaudeChatManager::redactApiKeyOccurrences(const QString& text) const {
+    if (text.isEmpty()) {
+        return text;
+    }
+    bool ok = false;
+    const QString key = decryptedApiKey(&ok, nullptr);
+    if (!ok || key.isEmpty()) {
+        return text;
+    }
+    QString redacted = text;
+    redacted.replace(key, QStringLiteral("<redacted_api_key>"));
+    return redacted;
+}
+
 QString ClaudeChatManager::decryptedApiKey(bool* ok, QString* errorMessage) const {
     QSettings settings;
     const QByteArray encrypted = settings.value("ai/externalApiKeyBlob").toByteArray();

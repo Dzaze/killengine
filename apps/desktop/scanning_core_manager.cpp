@@ -78,6 +78,12 @@ void finishScanActivity(ApplicationController* self, const QString& activityOpId
     if (self->activityManager().registry().finish(activityOpId, state, QString(), errorMessage)) {
         self->activityManager().notifyUpdated(activityOpId);
     }
+    // AUDIT-PIPE-A3 : ne vide le slot que s'il pointe encore vers CE scan --
+    // une notification de fin tardive pour un scan déjà remplacé par un plus
+    // récent ne doit jamais effacer l'id du scan courant (accesseur dédié,
+    // finishScanActivity est une fonction libre sans accès friend -- voir le
+    // commentaire de clearActiveScanActivityOpIdIfCurrent dans le header).
+    self->clearActiveScanActivityOpIdIfCurrent(activityOpId);
 }
 
 double ratePerSecond(size_t count, qint64 elapsedMs) {
@@ -1447,6 +1453,7 @@ QVariantMap ScanningCoreManager::startExactScanAsync(
     const QString activityOpId = m_controller.activityManager().registry().beginActivity(
         killcore::ActivityKind::ScanExact, KE_TXT("Scan exact", "Exact scan"),
         /*canCancel=*/true, activityTarget(), QString::number(requestId));
+    m_controller.m_activeScanActivityOpId = activityOpId; // AUDIT-PIPE-A3
     m_controller.activityManager().notifyUpdated(activityOpId);
     emit scanStarted();
     emit scanProgress(0);
@@ -1693,6 +1700,7 @@ QVariantMap ScanningCoreManager::nextScanAsync(const QString& mode, const QStrin
     const QString activityOpId = m_controller.activityManager().registry().beginActivity(
         killcore::ActivityKind::ScanNext, KE_TXT("Next scan", "Next scan"),
         /*canCancel=*/true, activityTarget(), QString::number(requestId));
+    m_controller.m_activeScanActivityOpId = activityOpId; // AUDIT-PIPE-A3
     m_controller.activityManager().notifyUpdated(activityOpId);
     emit scanStarted();
     emit scanProgress(0);
@@ -2392,6 +2400,7 @@ QVariantMap ScanningCoreManager::captureUnknownSnapshotAsyncWithOptions(const QV
     const QString activityOpId = m_controller.activityManager().registry().beginActivity(
         killcore::ActivityKind::ScanCaptureUnknown, KE_TXT("Capture unknown", "Unknown capture"),
         /*canCancel=*/true, activityTarget(), QString::number(requestId));
+    m_controller.m_activeScanActivityOpId = activityOpId; // AUDIT-PIPE-A3
     m_controller.activityManager().notifyUpdated(activityOpId);
     emit scanStarted();
     emit scanProgress(0);
@@ -2805,6 +2814,7 @@ QVariantMap ScanningCoreManager::unknownNextScanAsync(const QString& mode, const
     const QString activityOpId = m_controller.activityManager().registry().beginActivity(
         killcore::ActivityKind::ScanUnknownNext, KE_TXT("Next scan (unknown)", "Next scan (unknown)"),
         /*canCancel=*/true, activityTarget(), QString::number(requestId));
+    m_controller.m_activeScanActivityOpId = activityOpId; // AUDIT-PIPE-A3
     m_controller.activityManager().notifyUpdated(activityOpId);
     emit scanStarted();
     emit scanProgress(0);

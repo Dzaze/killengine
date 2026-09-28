@@ -86,6 +86,26 @@ public:
 
 CandidateComparisonManager::CandidateComparisonManager(QObject* parent)
     : QObject(parent), m_impl(std::make_unique<Impl>()) {
+    // AUDIT-PIPE-A2 : source unique de la notification de fin, câblée une
+    // seule fois ici plutôt que dupliquée dans stopCollection()/
+    // stopCollectionAsync() -- voir CandidateComparisonCollector::
+    // setFinishedCallback pour la garantie "exactement une fois, toute voie
+    // de sortie confondue". Appelé depuis le thread de capture : jamais
+    // toucher Qt directement, toujours marshaler via QueuedConnection, et ne
+    // capturer `this` qu'au travers d'un QPointer (le manager peut être
+    // détruit pendant qu'une capture encore active tourne en arrière-plan).
+    QPointer<CandidateComparisonManager> self(this);
+    m_impl->collector->setFinishedCallback([self](killcore::ComparisonStopReason reason) {
+        if (!self) {
+            return;
+        }
+        QMetaObject::invokeMethod(self.data(), [self, reason]() {
+            if (!self) {
+                return;
+            }
+            emit self->comparisonFinished(stopReasonToString(reason));
+        }, Qt::QueuedConnection);
+    });
 }
 
 CandidateComparisonManager::~CandidateComparisonManager() = default;
@@ -161,23 +181,16 @@ void CandidateComparisonManager::stopCollectionAsync() {
     // Même motif que MemoryTimelineManager::stopCollectionAsync : ne jamais
     // bloquer le thread Qt sur le join() du thread de capture -- utilisé par
     // la garde attach/detach qui tourne directement sur le thread Qt.
+    // AUDIT-PIPE-A2 : plus besoin d'émettre ici -- le callback de fin câblé
+    // dans le constructeur (setFinishedCallback) s'en charge déjà, depuis le
+    // thread de capture lui-même, pour cette voie comme pour toutes les
+    // autres (stop synchrone, sortie naturelle).
     if (!m_impl->collector->isCollecting()) {
         return;
     }
     auto* collector = m_impl->collector.get();
-    QPointer<CandidateComparisonManager> self(this);
-    std::thread([self, collector]() {
+    std::thread([collector]() {
         collector->stopCollection();
-        const auto reason = collector->lastStopReason();
-        if (!self) {
-            return;
-        }
-        QMetaObject::invokeMethod(self.data(), [self, reason]() {
-            if (!self) {
-                return;
-            }
-            emit self->comparisonFinished(stopReasonToString(reason));
-        }, Qt::QueuedConnection);
     }).detach();
 }
 

@@ -2,13 +2,11 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCandidateComparisonStore, type ComparisonPoint } from '@/stores/candidateComparison'
-import { useEffectProofStore, type EffectProofLevel } from '@/stores/effectProof'
 import InfoDot from '@/components/expert/InfoDot.vue'
 import RiskBadge from '@/components/expert/RiskBadge.vue'
 
 const { t } = useI18n()
 const store = useCandidateComparisonStore()
-const effectProofStore = useEffectProofStore()
 
 const seriesColors = ['#4CAF50', '#2196F3', '#FF9800', '#E91E63', '#9C27B0', '#00BCD4']
 function colorForIndex(index: number) {
@@ -234,47 +232,34 @@ async function handleExport() {
 }
 
 // -- Consigner cette comparaison (16C partiel) --------------------------------
-
+// AUDIT-PIPE-A8 : consigne désormais via store.recordObservation(), qui
+// passe le captureId de la capture réellement démarrée (identité serveur
+// figée) plutôt que le formulaire générique effectProofStore.recordProof()
+// (identité recalculée depuis la session ACTUELLEMENT attachée -- pouvait
+// attribuer une preuve sur la capture A à la cible B après un changement
+// d'attache). Label/source/conditions sont désormais construits côté
+// backend à partir de la provenance figée, plus depuis store.activeSeries
+// (état live qui peut avoir changé). Niveau toujours "unverified" côté
+// backend pour cette voie -- plus de sélecteur de niveau ici (il n'aurait
+// plus d'effet réel).
 const consignOpen = ref(false)
 const consignNote = ref('')
-const consignLevel = ref<EffectProofLevel>('unverified')
+const consignError = ref('')
 
 function openConsignPanel() {
-  const labels = store.activeSeries.map((s) => s.label).join(', ')
-  effectProofStore.targetLabelDraft = `${t('candidateComparison.consignTargetPrefix')} ${labels}`
-  effectProofStore.addressDraft = ''
-  effectProofStore.sourceDraft = t('candidateComparison.consignSource', { count: store.activeSeries.length })
-  effectProofStore.conditionsDraft = t('candidateComparison.consignConditions', {
-    interval: store.intervalMs,
-    duration: Math.round(store.maxDurationMs / 1000),
-  })
-  // UX-PRODUIT-16 : jamais 'effect_confirmed' par défaut -- contrairement au
-  // bug de défaut déjà connu dans effectProof.ts (formulaire Investigation),
-  // une comparaison seule n'est jamais une preuve d'effet suffisante.
-  effectProofStore.levelDraft = 'unverified'
-  consignLevel.value = 'unverified'
   consignNote.value = ''
+  consignError.value = ''
   consignOpen.value = true
 }
 
 async function submitConsign() {
-  effectProofStore.levelDraft = consignLevel.value
-  effectProofStore.noteDraft = consignNote.value.trim()
-  const result = await effectProofStore.recordProof()
-  if (result?.success === true) {
+  consignError.value = ''
+  const result = await store.recordObservation(consignNote.value)
+  if (result.success === true) {
     consignOpen.value = false
+  } else {
+    consignError.value = result.error ?? ''
   }
-}
-
-const consignLevels: EffectProofLevel[] = ['unverified', 'inconclusive', 'write_confirmed', 'effect_confirmed', 'durable_solution']
-// Mêmes clés i18n que InvestigationView.vue (effectProofLevelOptions) -- pas
-// de second vocabulaire de libellés pour les mêmes 5 niveaux.
-const consignLevelI18nKeys: Record<EffectProofLevel, string> = {
-  write_confirmed: 'investigation.effectProofLevelWriteConfirmed',
-  effect_confirmed: 'investigation.effectProofLevelEffectConfirmed',
-  durable_solution: 'investigation.effectProofLevelDurableSolution',
-  inconclusive: 'investigation.effectProofLevelInconclusive',
-  unverified: 'investigation.effectProofLevelUnverified',
 }
 </script>
 
@@ -418,22 +403,21 @@ const consignLevelI18nKeys: Record<EffectProofLevel, string> = {
         </button>
         <div v-else class="consign-form">
           <h3>{{ $t('candidateComparison.consignTitle') }}</h3>
-          <label>
-            {{ $t('candidateComparison.consignLevel') }}
-            <select v-model="consignLevel" class="input select compact-input">
-              <option v-for="level in consignLevels" :key="level" :value="level">{{ $t(consignLevelI18nKeys[level]) }}</option>
-            </select>
-          </label>
+          <!-- AUDIT-PIPE-A8 : plus de sélecteur de niveau -- cette voie
+               enregistre toujours "unverified" côté backend (aucune
+               promotion automatique n'est jamais souhaitable pour une simple
+               comparaison de valeurs, cf. UX-PRODUIT-16). -->
+          <p class="hint-inline">{{ $t('candidateComparison.consignLevel') }}: {{ $t('investigation.effectProofLevelUnverified') }}</p>
           <textarea v-model="consignNote" class="input" :placeholder="$t('candidateComparison.consignNotePlaceholder')" rows="3" />
           <div class="consign-actions">
-            <button class="btn btn-primary compact" type="button" :disabled="effectProofStore.busy" @click="submitConsign()">
+            <button class="btn btn-primary compact" type="button" :disabled="store.busy" @click="submitConsign()">
               {{ $t('candidateComparison.consignSubmit') }}
             </button>
             <button class="btn btn-secondary compact" type="button" @click="consignOpen = false">
               {{ $t('candidateComparison.cancel') }}
             </button>
           </div>
-          <p v-if="effectProofStore.error" class="error-text">{{ effectProofStore.error }}</p>
+          <p v-if="consignError" class="error-text">{{ consignError }}</p>
         </div>
       </div>
     </template>

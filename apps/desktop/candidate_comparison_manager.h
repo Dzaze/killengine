@@ -48,7 +48,11 @@ public:
     void* processHandle() const;
 
 signals:
-    /// reason ∈ {"user_stop", "duration_reached", "target_lost"}.
+    /// reason ∈ {"user_stop", "duration_reached", "target_lost"}. Émis
+    /// EXACTEMENT une fois par capture, quelle que soit la voie de fin
+    /// (bouton Stop, stopCollectionAsync, ou sortie naturelle -- durée max/
+    /// cible perdue) : voir CandidateComparisonCollector::setFinishedCallback
+    /// (AUDIT-PIPE-A2), source unique câblée dans le constructeur.
     void comparisonFinished(const QString& reason);
 
 private:

@@ -66,6 +66,17 @@ QVariantMap correlationToVariantMap(const killcore::TimelineCorrelation& correla
     result["isLeading"] = correlation.isLeading;
     return result;
 }
+
+// AUDIT-PIPE-A2 : remonté ici (était plus bas dans le fichier) -- désormais
+// utilisé aussi par setupCallbacks(), câblé au constructeur, donc doit être
+// visible avant.
+QString stopReasonToString(killcore::TimelineStopReason reason) {
+    switch (reason) {
+        case killcore::TimelineStopReason::DurationReached: return QStringLiteral("duration_reached");
+        case killcore::TimelineStopReason::UserStop:
+        default: return QStringLiteral("user_stop");
+    }
+}
 }
 
 class MemoryTimelineManager::Impl {
@@ -95,21 +106,43 @@ void MemoryTimelineManager::setupCallbacks() {
             emit collectionProgress(static_cast<int>(percent), QString::fromStdString(status));
         }
     );
-    
+
     // Data callback
     m_impl->collector->setDataCallback(
         [this](const killcore::TimelineDataPoint& point) {
             QVariantMap pointData;
             pointData["timestampMs"] = static_cast<qint64>(point.timestampMs);
             pointData["isValid"] = point.isValid;
-            
+
             // Convertir la valeur en hex string
             pointData["valueHex"] = bytesToHex(point.value);
-            
+
             QString addressHex = QString("0x%1").arg(point.address, 0, 16);
             emit dataPointReceived(addressHex, pointData);
         }
     );
+
+    // AUDIT-PIPE-A2 : source unique de la notification de fin, câblée une
+    // seule fois ici plutôt que dupliquée dans stopCollection()/
+    // stopCollectionAsync() -- voir MemoryTimelineCollector::
+    // setFinishedCallback pour la garantie "exactement une fois, toute voie
+    // de sortie confondue". Appelé depuis le thread de collecte : jamais
+    // toucher Qt directement, toujours marshaler via QueuedConnection, et ne
+    // capturer `this` qu'au travers d'un QPointer (le manager peut être
+    // détruit pendant qu'une collecte encore active tourne en arrière-plan).
+    QPointer<MemoryTimelineManager> self(this);
+    m_impl->collector->setFinishedCallback([self](killcore::TimelineStopReason reason) {
+        if (!self) {
+            return;
+        }
+        QMetaObject::invokeMethod(self.data(), [self, reason]() {
+            if (!self) {
+                return;
+            }
+            emit self->collectingChanged();
+            emit self->collectionFinished(stopReasonToString(reason));
+        }, Qt::QueuedConnection);
+    });
 }
 
 bool MemoryTimelineManager::isCollecting() const {
@@ -183,21 +216,12 @@ bool MemoryTimelineManager::startCollection() {
     return started;
 }
 
-namespace {
-QString stopReasonToString(killcore::TimelineStopReason reason) {
-    switch (reason) {
-        case killcore::TimelineStopReason::DurationReached: return QStringLiteral("duration_reached");
-        case killcore::TimelineStopReason::UserStop:
-        default: return QStringLiteral("user_stop");
-    }
-}
-} // namespace
-
 void MemoryTimelineManager::stopCollection() {
+    // AUDIT-PIPE-A2 : plus besoin d'émettre ici -- le callback de fin câblé
+    // dans setupCallbacks() (setFinishedCallback) s'en charge déjà, depuis le
+    // thread de collecte lui-même, pour cette voie comme pour toutes les
+    // autres (stop async, sortie naturelle par durée max).
     m_impl->collector->stopCollection();
-    const QString reason = stopReasonToString(m_impl->collector->lastStopReason());
-    emit collectingChanged();
-    emit collectionFinished(reason);
 }
 
 void MemoryTimelineManager::stopCollectionAsync() {
@@ -205,25 +229,14 @@ void MemoryTimelineManager::stopCollectionAsync() {
     // de collecte (jusqu'à un intervalle de sampling avant le fix côté
     // collecteur) -- utilisé par la garde attach/detach qui tourne, elle,
     // directement sur le thread Qt. L'arrêt réel est lancé sur un thread
-    // séparé ; le résultat est marshalé en retour comme les scans async.
+    // séparé. AUDIT-PIPE-A2 : plus besoin de marshaler le résultat ici -- le
+    // callback de fin câblé dans setupCallbacks() s'en charge déjà.
     if (!m_impl->collector->isCollecting()) {
         return;
     }
     auto* collector = m_impl->collector.get();
-    QPointer<MemoryTimelineManager> self(this);
-    std::thread([self, collector]() {
+    std::thread([collector]() {
         collector->stopCollection();
-        const auto reason = collector->lastStopReason();
-        if (!self) {
-            return;
-        }
-        QMetaObject::invokeMethod(self.data(), [self, reason]() {
-            if (!self) {
-                return;
-            }
-            emit self->collectingChanged();
-            emit self->collectionFinished(stopReasonToString(reason));
-        }, Qt::QueuedConnection);
     }).detach();
 }
 

@@ -44,6 +44,20 @@ LocatorKind stringToLocatorKind(const QString& str) {
     return LocatorKind::ModuleOffset;
 }
 
+// AUDIT-PROFILS-P1 : noms de périphériques Windows réservés -- "CON.keprofile"
+// ou "COM1" resteraient un périphérique spécial sur certaines API Win32
+// malgré l'extension ajoutée ensuite par profilePath().
+bool isReservedWindowsDeviceName(const QString& name) {
+    static const QSet<QString> kReserved = {
+        QStringLiteral("CON"), QStringLiteral("PRN"), QStringLiteral("AUX"), QStringLiteral("NUL"),
+        QStringLiteral("COM1"), QStringLiteral("COM2"), QStringLiteral("COM3"), QStringLiteral("COM4"),
+        QStringLiteral("COM5"), QStringLiteral("COM6"), QStringLiteral("COM7"), QStringLiteral("COM8"), QStringLiteral("COM9"),
+        QStringLiteral("LPT1"), QStringLiteral("LPT2"), QStringLiteral("LPT3"), QStringLiteral("LPT4"),
+        QStringLiteral("LPT5"), QStringLiteral("LPT6"), QStringLiteral("LPT7"), QStringLiteral("LPT8"), QStringLiteral("LPT9"),
+    };
+    return kReserved.contains(name.toUpper());
+}
+
 QJsonObject pointerChainToJson(const PointerChain& chain) {
     QJsonObject json;
     json["module"] = chain.module;
@@ -642,7 +656,30 @@ bool ProfileStore::load(const QString& filename, Profile* profile) {
         return false;
     }
 
+    if (!doc.isObject()) {
+        // AUDIT-PROFILS-P2 : un JSON valide mais pas un objet (`[]`, `"x"`, `42`...)
+        // se convertissait silencieusement en QJsonObject vide via doc.object() --
+        // un profil "chargé avec succès" mais entièrement vide, jamais signalé
+        // comme corrompu.
+        KE_LOG_ERROR() << "ProfileStore: Root is not a JSON object: " << filename.toStdString();
+        return false;
+    }
+
     const QJsonObject root = doc.object();
+
+    if (root.contains("formatVersion")) {
+        const QJsonValue versionValue = root.value("formatVersion");
+        if (!versionValue.isDouble() || versionValue.toInt() > Profile::FORMAT_VERSION) {
+            // Version future non reconnue par cette build (ou champ corrompu) :
+            // jamais traité comme un profil v1 vide -- un save() qui suivrait
+            // écraserait silencieusement le fichier réel de version future.
+            // Un profil légitime antérieur à l'ajout de ce champ (formatVersion
+            // absent) reste accepté ci-dessous, migrations futures à faire ici.
+            KE_LOG_ERROR() << "ProfileStore: Unsupported formatVersion in " << filename.toStdString();
+            return false;
+        }
+    }
+
     profile->gameName = root.value("gameName").toString();
     profile->executableName = root.value("executableName").toString();
     profile->executableHash = root.value("executableHash").toString();
@@ -693,12 +730,58 @@ QStringList ProfileStore::listProfiles() {
     return result;
 }
 
+bool ProfileStore::isValidProfileName(const QString& profileName, QString* errorOut) {
+    const auto fail = [errorOut](const QString& message) {
+        if (errorOut) *errorOut = message;
+        return false;
+    };
+
+    if (profileName.isEmpty()) {
+        return fail(QStringLiteral("Le nom de profil ne peut pas être vide."));
+    }
+    if (profileName.trimmed() != profileName) {
+        return fail(QStringLiteral("Le nom de profil ne doit pas commencer ou finir par un espace."));
+    }
+    if (profileName == QLatin1String(".") || profileName == QLatin1String("..")) {
+        return fail(QStringLiteral("Nom de profil invalide."));
+    }
+    // Séparateurs de chemin (traversée de répertoire), ':' (lettre de lecteur
+    // Windows / flux de données alternatif) et le reste des caractères
+    // interdits par Windows dans un nom de fichier, plus les caractères de
+    // contrôle.
+    static const QRegularExpression kForbiddenChars(QStringLiteral("[\\\\/:*?\"<>|\\x00-\\x1f]"));
+    if (profileName.contains(kForbiddenChars)) {
+        return fail(QStringLiteral("Le nom de profil contient un caractère interdit."));
+    }
+    if (profileName.endsWith(QLatin1Char('.'))) {
+        return fail(QStringLiteral("Le nom de profil ne peut pas finir par un point."));
+    }
+    // "CON.keprofile" reste le périphérique CON sur certaines API Win32 --
+    // vérifier le segment avant le premier point, pas seulement le nom entier.
+    const int dotIndex = profileName.indexOf(QLatin1Char('.'));
+    const QString deviceCandidate = dotIndex >= 0 ? profileName.left(dotIndex) : profileName;
+    if (isReservedWindowsDeviceName(deviceCandidate)) {
+        return fail(QStringLiteral("Ce nom de profil est réservé par Windows."));
+    }
+
+    if (errorOut) errorOut->clear();
+    return true;
+}
+
 QString ProfileStore::profilePath(const QString& profileName) {
+    if (!isValidProfileName(profileName)) {
+        // Nom invalide (AUDIT-PROFILS-P1) : chemin vide plutôt qu'une
+        // traversée de répertoire -- chaque appelant existant traite déjà un
+        // chemin qui ne résout à rien comme "profil introuvable"/"échec de
+        // sauvegarde", donc ce choix ne casse aucun appelant sans le modifier.
+        return QString();
+    }
     return profilesDir() + "/" + profileName + ".keprofile";
 }
 
 bool ProfileStore::remove(const QString& profileName) {
     const QString path = profilePath(profileName);
+    if (path.isEmpty()) return false;
     QFile file(path);
     return file.remove();
 }

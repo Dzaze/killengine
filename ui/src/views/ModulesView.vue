@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useRiskGateStore } from '@/stores/riskGate'
@@ -431,25 +431,44 @@ onMounted(() => {
   // addEdrExclusionAsync/setWindowsDefenderDisabledAsync/
   // setDefenderBehaviorMonitoringDisabledAsync) — le backend démarre le
   // travail sur un thread séparé et notifie ici une fois terminé.
+  // AUDIT-UI-MODULES-B1 (docs/PHASE_TRACKER.md, 28/09/2026) : `App.vue` rend
+  // la vue courante par `<component :is="currentView" />`, donc quitter puis
+  // revenir sur cette vue détruit et recrée ce composant -- mais
+  // `backend.getController()` retourne toujours la MÊME instance pour toute
+  // la session. Sans disconnect explicite ici, chaque visite ajoutait une
+  // nouvelle callback sur ces 4 signaux sans jamais retirer les précédentes :
+  // après N visites, N callbacks accumulées, chacune mettant à jour les refs
+  // d'une instance de vue déjà détruite. Callbacks nommées (pas des lambdas
+  // anonymes) pour pouvoir les repasser telles quelles à `disconnect`.
   const controller = backend.getController()
-  controller.edrExclusionAddedFinished?.connect((result: Record<string, unknown>) => {
+  const onEdrExclusionAddedFinished = (result: Record<string, unknown>) => {
     edrResult.value = result
     edrBusy.value = false
-  })
-  controller.windowsDefenderDisabledFinished?.connect((result: Record<string, unknown>) => {
+  }
+  const onWindowsDefenderDisabledFinished = (result: Record<string, unknown>) => {
     defenderDisableResult.value = result
     if (result?.success) defenderDisabled.value = Boolean(result.disabled)
     defenderDisableBusy.value = false
-  })
-  controller.defenderBehaviorMonitoringDisabledFinished?.connect((result: Record<string, unknown>) => {
+  }
+  const onDefenderBehaviorMonitoringDisabledFinished = (result: Record<string, unknown>) => {
     behaviorMonitoringResult.value = result
     if (result?.success) behaviorMonitoringDisabled.value = Boolean(result.disabled)
     behaviorMonitoringBusy.value = false
-  })
-  controller.testSigningEnabledFinished?.connect((result: Record<string, unknown>) => {
+  }
+  const onTestSigningEnabledFinished = (result: Record<string, unknown>) => {
     testSigningResult.value = result
     if (result?.success) testSigningEnabled.value = Boolean(result.enabled)
     testSigningBusy.value = false
+  }
+  controller.edrExclusionAddedFinished?.connect(onEdrExclusionAddedFinished)
+  controller.windowsDefenderDisabledFinished?.connect(onWindowsDefenderDisabledFinished)
+  controller.defenderBehaviorMonitoringDisabledFinished?.connect(onDefenderBehaviorMonitoringDisabledFinished)
+  controller.testSigningEnabledFinished?.connect(onTestSigningEnabledFinished)
+  onUnmounted(() => {
+    controller.edrExclusionAddedFinished?.disconnect?.(onEdrExclusionAddedFinished)
+    controller.windowsDefenderDisabledFinished?.disconnect?.(onWindowsDefenderDisabledFinished)
+    controller.defenderBehaviorMonitoringDisabledFinished?.disconnect?.(onDefenderBehaviorMonitoringDisabledFinished)
+    controller.testSigningEnabledFinished?.disconnect?.(onTestSigningEnabledFinished)
   })
   void refreshTestSigningStatus()
 

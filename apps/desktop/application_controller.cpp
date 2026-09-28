@@ -116,6 +116,7 @@
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QTimer>
+#include <QUuid>
 
 #include <algorithm>
 #include <chrono>
@@ -1945,18 +1946,29 @@ bool ApplicationController::attachProcess(int pid) {
         return false;
     }
 
-    m_debugFeatureManager->stopBreakpointFreeze();
-    m_debugFeatureManager->resetHardwareBreakpointStateForPreviousTarget(m_pid);
-
-    // Close any existing handle
-    m_handle.close();
-
-    if (!m_handle.open(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly)) {
+    // AUDIT-PIPE-A1 : ouvrir le nouveau handle dans une variable temporaire
+    // et ne toucher à AUCUN état de la session courante (m_handle, m_pid,
+    // m_attached, m_processName, debug/freeze/CLR) avant d'être sûr que
+    // l'ouverture réussit. Avant ce correctif, m_handle.close() puis
+    // m_handle.open() fermaient déjà l'ancien handle (open() appelle close()
+    // en interne) avant même de savoir si le nouveau PID s'ouvrirait -- un
+    // attachProcess(pid_invalide) sur une session déjà attachée laissait donc
+    // m_attached/m_pid/m_processName décrire encore l'ancienne cible A alors
+    // que son handle était déjà fermé (session fantôme, cf. AUDIT-PIPE-A1).
+    killcore::ProcessHandle candidateHandle;
+    if (!candidateHandle.open(static_cast<uint32_t>(pid), killcore::ProcessAccess::ReadOnly)) {
         KE_LOG_ERROR() << "Failed to open process PID " << pid;
         emit errorOccurred(KE_TXT("Accès insuffisant au processus.", "Insufficient access to the process."));
         return false;
     }
 
+    // Le nouveau handle est valide : on peut maintenant démonter la session
+    // précédente (debug/freeze/CLR liés à l'ancien m_pid) sans risque de la
+    // perdre sur un échec, puis basculer réellement la session.
+    m_debugFeatureManager->stopBreakpointFreeze();
+    m_debugFeatureManager->resetHardwareBreakpointStateForPreviousTarget(m_pid);
+
+    m_handle = std::move(candidateHandle);
     m_pid = pid;
     m_attached = true;
     // UX-PRODUIT-12 : uniquement sur une vraie transition réussie (jamais sur
@@ -6679,6 +6691,7 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
     const QString activityOpId = m_activityManager->registry().beginActivity(
         killcore::ActivityKind::ModuleInstall, KE_TXT("Installation de module : %1", "Module install: %1").arg(requestedModule),
         /*canCancel=*/true, std::nullopt, QString::number(requestId));
+    m_activeModuleInstallActivityOpId = activityOpId; // AUDIT-PIPE-A3
     m_activityManager->notifyUpdated(activityOpId);
 
     KE_LOG_INFO() << "installModule(" << moduleId.toStdString() << ", requestId=" << requestId << ")";
@@ -6856,6 +6869,13 @@ QVariantMap ApplicationController::installModule(const QString& moduleId, const 
                 : (finished.value("success").toBool() ? killcore::ActivityState::Completed : killcore::ActivityState::Failed);
             if (self->m_activityManager->registry().finish(activityOpId, activityState, QString(), finished.value("error").toString())) {
                 self->m_activityManager->notifyUpdated(activityOpId);
+            }
+            // AUDIT-PIPE-A3 : ne vide le slot que s'il pointe encore vers
+            // CETTE installation -- une notification de fin tardive pour une
+            // installation déjà remplacée ne doit jamais effacer le suivi de
+            // l'installation courante.
+            if (self->m_activeModuleInstallActivityOpId == activityOpId) {
+                self->m_activeModuleInstallActivityOpId.clear();
             }
             emit self->moduleInstallFinished(finished);
         }, Qt::QueuedConnection);
@@ -7531,16 +7551,17 @@ QVariantMap ApplicationController::prepareDiagnosticReport(const QVariantMap& op
     return m_settingsDiagnosticsManager->prepareDiagnosticReport(options);
 }
 
-QVariantMap ApplicationController::getPreparedDiagnosticReportPreview() const {
-    return m_settingsDiagnosticsManager->getPreparedDiagnosticReportPreview();
+QVariantMap ApplicationController::getPreparedDiagnosticReportPreview(const QString& reportId) const {
+    return m_settingsDiagnosticsManager->getPreparedDiagnosticReportPreview(reportId);
 }
 
-QVariantMap ApplicationController::getPreparedDiagnosticReportSection(const QString& sectionId, qint64 offset, qint64 limit) const {
-    return m_settingsDiagnosticsManager->getPreparedDiagnosticReportSection(sectionId, offset, limit);
+QVariantMap ApplicationController::getPreparedDiagnosticReportSection(
+    const QString& sectionId, qint64 offset, qint64 limit, const QString& reportId) const {
+    return m_settingsDiagnosticsManager->getPreparedDiagnosticReportSection(sectionId, offset, limit, reportId);
 }
 
-QVariantMap ApplicationController::exportPreparedDiagnosticReport() {
-    return m_settingsDiagnosticsManager->exportPreparedDiagnosticReport();
+QVariantMap ApplicationController::exportPreparedDiagnosticReport(const QString& reportId) {
+    return m_settingsDiagnosticsManager->exportPreparedDiagnosticReport(reportId);
 }
 
 void ApplicationController::setUiBundleOrigin(const QString& origin, const QString& indexHtmlPath) {
@@ -7861,6 +7882,7 @@ QVariantMap ApplicationController::executeLuaScriptAsync(const QString& scriptTe
     const QString activityOpId = m_activityManager->registry().beginActivity(
         killcore::ActivityKind::LuaScript, KE_TXT("Script Lua", "Lua script"),
         /*canCancel=*/true, luaTarget, QString::number(requestId));
+    m_activeLuaScriptActivityOpId = activityOpId; // AUDIT-PIPE-A3
     m_activityManager->notifyUpdated(activityOpId);
 
     KE_LOG_INFO() << "executeLuaScriptAsync(requestId=" << requestId
@@ -7899,6 +7921,13 @@ QVariantMap ApplicationController::executeLuaScriptAsync(const QString& scriptTe
             const QString activityError = outcome.success ? QString() : outcome.stderrText;
             if (self->m_activityManager->registry().finish(activityOpId, activityState, QString(), activityError)) {
                 self->m_activityManager->notifyUpdated(activityOpId);
+            }
+            // AUDIT-PIPE-A3 : ne vide le slot que s'il pointe encore vers CE
+            // script -- une notification de fin tardive pour un script déjà
+            // remplacé par un plus récent ne doit jamais effacer le suivi du
+            // script courant.
+            if (self->m_activeLuaScriptActivityOpId == activityOpId) {
+                self->m_activeLuaScriptActivityOpId.clear();
             }
             emit self->luaScriptExecutionFinished(finished);
         }, Qt::QueuedConnection);
@@ -8124,6 +8153,28 @@ QVariantMap ApplicationController::startCandidateComparison(const QVariantList& 
         killcore::ActivityKind::CandidateComparison, KE_TXT("Comparaison de candidats", "Candidate comparison"),
         /*canCancel=*/true, target);
     m_activityManager->notifyUpdated(m_activeComparisonActivityOpId);
+
+    // AUDIT-PIPE-A8 : provenance immuable de CETTE capture, enregistrée
+    // maintenant (identité réellement attachée à cet instant précis) -- ne
+    // sera plus jamais recalculée depuis l'état courant, contrairement à
+    // recordEffectProof générique. Consommée uniquement par
+    // recordCandidateComparisonObservation().
+    CandidateComparisonCaptureProvenance provenance;
+    provenance.captureId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto identity = killcore::currentProcessIdentity(m_handle);
+    provenance.sessionId = identity.sessionId;
+    provenance.executableHash = identity.executableHash;
+    provenance.pid = QString::number(m_pid);
+    provenance.processName = m_processName;
+    provenance.startedAtMs = QDateTime::currentMSecsSinceEpoch();
+    provenance.seriesSnapshot = series;
+    provenance.intervalMs = options.value("intervalMs", 100).toUInt();
+    provenance.maxDurationMs = options.value("maxDurationMs", 30000).toUInt();
+    m_comparisonCaptureHistory.append(provenance);
+    while (m_comparisonCaptureHistory.size() > kMaxComparisonCaptureProvenanceHistory) {
+        m_comparisonCaptureHistory.removeFirst();
+    }
+    result["captureId"] = provenance.captureId;
     return result;
 }
 
@@ -8148,6 +8199,55 @@ QVariantMap ApplicationController::stopCandidateComparison() {
     QVariantMap result;
     result["success"] = true;
     return result;
+}
+
+QVariantMap ApplicationController::recordCandidateComparisonObservation(const QString& captureId, const QString& note) {
+    QVariantMap result;
+
+    // AUDIT-PIPE-A8 : recherche dans l'historique borné plutôt que de faire
+    // confiance à une identité fournie par l'appelant ou recalculée depuis
+    // l'état courant -- une capture inconnue/évincée est refusée
+    // explicitement, jamais silencieusement attribuée à la capture actuelle.
+    const CandidateComparisonCaptureProvenance* found = nullptr;
+    for (const auto& entry : m_comparisonCaptureHistory) {
+        if (entry.captureId == captureId) {
+            found = &entry;
+            break;
+        }
+    }
+    if (!found) {
+        result["success"] = false;
+        result["error"] = KE_TXT(
+            "Capture inconnue ou trop ancienne (évincée de l'historique) -- impossible de consigner une preuve pour elle.",
+            "Unknown or too-old capture (evicted from history) -- cannot record a proof for it.");
+        return result;
+    }
+
+    QStringList labels;
+    for (const auto& seriesVariant : found->seriesSnapshot) {
+        const QVariantMap seriesMap = seriesVariant.toMap();
+        const QString label = seriesMap.value("label").toString();
+        labels.append(label.isEmpty() ? seriesMap.value("id").toString() : label);
+    }
+    const QString targetLabel = KE_TXT("Comparaison de candidats : %1", "Candidate comparison: %1").arg(labels.join(", "));
+    const QString source = KE_TXT(
+        "Comparaison de candidats (%1 séries, capturée le %2 sur %3, pid %4)",
+        "Candidate comparison (%1 series, captured %2 on %3, pid %4)")
+        .arg(static_cast<int>(found->seriesSnapshot.size()))
+        .arg(QDateTime::fromMSecsSinceEpoch(found->startedAtMs).toString(Qt::ISODate))
+        .arg(found->processName.isEmpty() ? KE_TXT("processus inconnu", "unknown process") : found->processName)
+        .arg(found->pid);
+    const QString conditions = KE_TXT("Intervalle %1 ms, durée max %2 ms.", "Interval %1 ms, max duration %2 ms.")
+        .arg(found->intervalMs)
+        .arg(found->maxDurationMs);
+
+    // Identité de session/version FIGÉE au moment de la capture -- jamais
+    // recalculée depuis m_handle courant (contrairement à recordEffectProof
+    // générique ci-dessus). Niveau toujours "unverified" : pas de paramètre
+    // `level`, aucune promotion automatique possible par cette voie.
+    return m_effectProofManager->recordProof(
+        targetLabel, QString(), QStringLiteral("unverified"), source, conditions,
+        found->sessionId, note, found->executableHash);
 }
 
 QVariantMap ApplicationController::addCandidateComparisonMarker(const QString& text) {
@@ -8200,6 +8300,52 @@ QVariantMap ApplicationController::cancelActivity(const QString& operationId) {
         return result;
     }
 
+    // AUDIT-PIPE-A3 : chaque manager n'a qu'UN seul emplacement d'exécution
+    // en vol par famille (scan, Lua, installation, Timeline, comparateur,
+    // watch de sauvegarde) -- son mécanisme d'annulation réel (ex.
+    // requestCancelActiveScan()) agit donc TOUJOURS sur "ce qui tourne
+    // actuellement", sans savoir quel operationId l'appelant visait. Avant
+    // d'y router, vérifier que `operationId` est bien celui suivi comme
+    // actif pour ce type -- sinon (notification de fin encore en file pour
+    // une opération déjà remplacée, ou requête historique) refuser sans
+    // toucher à l'opération réellement en cours. Voir les membres
+    // m_active*ActivityOpId dans le header pour le détail par famille.
+    QString currentOpId;
+    switch (entry->kind) {
+        case killcore::ActivityKind::ScanExact:
+        case killcore::ActivityKind::ScanAuto:
+        case killcore::ActivityKind::ScanNext:
+        case killcore::ActivityKind::ScanCaptureUnknown:
+        case killcore::ActivityKind::ScanUnknownNext:
+            currentOpId = m_activeScanActivityOpId;
+            break;
+        case killcore::ActivityKind::TimelineCollection:
+            currentOpId = m_activeTimelineActivityOpId;
+            break;
+        case killcore::ActivityKind::LuaScript:
+            currentOpId = m_activeLuaScriptActivityOpId;
+            break;
+        case killcore::ActivityKind::ModuleInstall:
+            currentOpId = m_activeModuleInstallActivityOpId;
+            break;
+        case killcore::ActivityKind::SaveFileWatch:
+            currentOpId = m_activeSaveFileWatchActivityOpId;
+            break;
+        case killcore::ActivityKind::CandidateComparison:
+            currentOpId = m_activeComparisonActivityOpId;
+            break;
+    }
+    if (currentOpId != operationId) {
+        // Ne jamais falsifier un état terminal ici : l'entrée reste telle
+        // qu'elle est dans le registre (elle se corrigera d'elle-même via sa
+        // propre notification de fin si elle est simplement en retard).
+        result["accepted"] = false;
+        result["error"] = KE_TXT(
+            "Cette opération n'est plus l'activité en cours pour ce type (déjà remplacée par une plus récente).",
+            "This operation is no longer the current activity for this kind (already superseded by a newer one).");
+        return result;
+    }
+
     // Le registre ne devient jamais un ordonnanceur : chaque manager reste
     // autorité de ses propres transitions, on route juste vers son mécanisme
     // d'annulation réel existant selon le type d'activité.
@@ -8234,6 +8380,12 @@ QVariantMap ApplicationController::cancelActivity(const QString& operationId) {
     m_activityManager->notifyUpdated(operationId);
     result["accepted"] = true;
     return result;
+}
+
+void ApplicationController::clearActiveScanActivityOpIdIfCurrent(const QString& operationId) {
+    if (m_activeScanActivityOpId == operationId) {
+        m_activeScanActivityOpId.clear();
+    }
 }
 
 namespace {

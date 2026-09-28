@@ -1264,19 +1264,33 @@ public:
 
     /// UX-PRODUIT-17 -- flux Préparer/Aperçu/Exporter d'un rapport de
     /// problème borné, rédigé et prévisualisable. `options` : steps/expected/
-    /// observed (bornés à 64 Kio UTF-8 chacun), includeSmartSearchDebug/
+    /// observed (bornés à 64 Kio UTF-8 AU TOTAL, pas par champ --
+    /// AUDIT-PIPE-A5), includeLog (bool, défaut true), includeSmartSearchDebug/
     /// includeScanTelemetry/includeCrashReports (bool, défaut false), et
     /// actionLogEvents (liste des dernières entrées actionLog.ts, le backend
     /// n'a pas accès au store Pinia). Une seule préparation active à la fois,
-    /// TTL 10 minutes.
+    /// TTL 10 minutes. Le `reportId` retourné doit être retenu par l'appelant
+    /// et repassé aux 3 méthodes ci-dessous (AUDIT-PIPE-A6) pour garantir
+    /// qu'il lit/exporte bien CET aperçu, jamais un autre qui l'aurait
+    /// silencieusement remplacé entre-temps.
     Q_INVOKABLE QVariantMap prepareDiagnosticReport(const QVariantMap& options);
     /// Métadonnées/tailles/omissions/provenance -- jamais le contenu complet.
-    Q_INVOKABLE QVariantMap getPreparedDiagnosticReportPreview() const;
+    /// `reportId` optionnel (AUDIT-PIPE-A6) : vide = ancien comportement
+    /// (sert l'aperçu en cache quel qu'il soit) ; fourni = refuse
+    /// explicitement si l'aperçu en cache n'est plus celui-là (`success:false`,
+    /// `currentReportId` renseigné pour permettre un rafraîchissement).
+    Q_INVOKABLE QVariantMap getPreparedDiagnosticReportPreview(const QString& reportId = QString()) const;
     /// Lecture paginée (16 Kio max/page) d'une section de l'aperçu préparé.
-    Q_INVOKABLE QVariantMap getPreparedDiagnosticReportSection(const QString& sectionId, qint64 offset, qint64 limit) const;
+    /// `reportId` optionnel, même contrat que ci-dessus (AUDIT-PIPE-A6).
+    Q_INVOKABLE QVariantMap getPreparedDiagnosticReportSection(
+        const QString& sectionId, qint64 offset, qint64 limit, const QString& reportId = QString()) const;
     /// Ouvre un dialogue de sauvegarde natif puis écrit le rapport préparé
     /// via QSaveFile avec vérification du nombre d'octets réellement écrits.
-    Q_INVOKABLE QVariantMap exportPreparedDiagnosticReport();
+    /// `reportId` optionnel, même contrat que ci-dessus (AUDIT-PIPE-A6) --
+    /// vérifié AVANT d'ouvrir le dialogue, et le contenu exporté est figé à
+    /// cet instant (immunisé contre un remplacement de l'aperçu pendant la
+    /// boucle d'événements imbriquée du dialogue).
+    Q_INVOKABLE QVariantMap exportPreparedDiagnosticReport(const QString& reportId = QString());
 
     /// Liste les adresses mémoire actives dans l'Assistant.
     Q_INVOKABLE QVariantMap getActiveChatMemoryTargets() const;
@@ -1528,11 +1542,31 @@ public:
     /// (min 50, défaut 100), maxDurationMs (défaut 30000, max 120000, bornés
     /// côté collecteur). Une seule comparaison active à la fois — un nouvel
     /// appel remplace la précédente uniquement après un appel explicite.
+    /// AUDIT-PIPE-A8 : le résultat porte désormais `captureId` (identité
+    /// serveur immuable de CETTE capture précise), à retenir côté appelant
+    /// et à repasser à recordCandidateComparisonObservation() ci-dessous pour
+    /// consigner une preuve liée à CETTE capture, même après un changement
+    /// de cible attachée.
     Q_INVOKABLE QVariantMap startCandidateComparison(const QVariantList& series, const QVariantMap& options);
     Q_INVOKABLE QVariantMap getCandidateComparisonStatus() const;
     Q_INVOKABLE QVariantMap getCandidateComparisonSamples(const QString& seriesId, int offset, int limit) const;
     Q_INVOKABLE QVariantMap getCandidateComparisonCorrelations() const;
     Q_INVOKABLE QVariantMap stopCandidateComparison();
+    /// AUDIT-PIPE-A8 : consigne une preuve d'effet (registre PRODUIT-R,
+    /// recordEffectProof ci-dessus) liée à une capture PRÉCISE du
+    /// comparateur, identifiée par `captureId` (retourné par
+    /// startCandidateComparison ci-dessus) -- jamais par la session/le
+    /// process actuellement attaché, qui peut avoir changé depuis. Recherche
+    /// la provenance immuable enregistrée au moment même où cette capture a
+    /// démarré (identité de session/process, séries/paramètres réellement
+    /// appliqués) dans un historique borné des dernières captures ; refuse
+    /// explicitement (`success:false`) si `captureId` est inconnu ou a été
+    /// évincé de cet historique, sans jamais attribuer la preuve à une autre
+    /// capture. Le niveau enregistré est TOUJOURS "unverified" -- pas de
+    /// paramètre `level`, aucune promotion automatique possible par cette
+    /// voie (contrairement à recordEffectProof, qui reste le formulaire
+    /// générique pour les niveaux supérieurs sur une écriture confirmée).
+    Q_INVOKABLE QVariantMap recordCandidateComparisonObservation(const QString& captureId, const QString& note);
     /// UX-PRODUIT-16 (16C) — repère horodaté (même horloge que les points/
     /// tours) pendant une capture active uniquement. Au plus 100 repères de
     /// 500 caractères ; refusé après l'arrêt de la capture.
@@ -1778,6 +1812,14 @@ public:
     /// aussi aux futurs adaptateurs 12C).
     ActivityManager& activityManager();
 
+    /// AUDIT-PIPE-A3 : même contrainte d'accès que activityManager()
+    /// ci-dessus (finishScanActivity, dans scanning_core_manager.cpp, est une
+    /// fonction libre sans accès friend). Ne vide m_activeScanActivityOpId
+    /// que si `operationId` correspond encore au scan suivi -- une
+    /// notification de fin tardive pour un scan déjà remplacé par un plus
+    /// récent ne doit jamais effacer le suivi du scan courant.
+    void clearActiveScanActivityOpIdIfCurrent(const QString& operationId);
+
     /// UX-PRODUIT-13 -- Historique automatique et récupération du workspace :
     /// CRUD synchrone sur le registre de révisions immuables (voir
     /// core/workspace/workspace_revision_store.h). metadata attend
@@ -1984,6 +2026,30 @@ private:
     // que m_activeTimelineActivityOpId ci-dessous).
     std::unique_ptr<CandidateComparisonManager> m_candidateComparisonManager;
     QString m_activeComparisonActivityOpId;
+
+    /// AUDIT-PIPE-A8 : provenance immuable d'une capture du comparateur de
+    /// candidats, enregistrée au moment même où startCandidateComparison()
+    /// démarre réellement la capture -- jamais recalculée plus tard depuis
+    /// l'état courant (m_handle peut pointer sur un tout autre process par
+    /// la suite). Consommée uniquement par recordCandidateComparisonObservation().
+    struct CandidateComparisonCaptureProvenance {
+        QString captureId;
+        QString sessionId;        // killcore::ProcessIdentity::sessionId au démarrage de CETTE capture.
+        QString executableHash;
+        QString pid;
+        QString processName;
+        qint64 startedAtMs{0};    // horloge murale (QDateTime), pour affichage seulement.
+        QVariantList seriesSnapshot;   // {id, address, type, factor, label} réellement acceptés.
+        quint32 intervalMs{0};         // valeur réellement appliquée (post-bornage collecteur).
+        quint32 maxDurationMs{0};
+    };
+    // Bornée (les plus anciennes évincées) -- une capture "inconnue/évincée"
+    // au sens de la fiche est une capture dont la provenance n'est plus dans
+    // cette liste. Plus récente en dernier (append), recherche linéaire (une
+    // consignation est une action utilisateur explicite peu fréquente, pas
+    // un chemin chaud).
+    static constexpr int kMaxComparisonCaptureProvenanceHistory = 20;
+    QList<CandidateComparisonCaptureProvenance> m_comparisonCaptureHistory;
     std::unique_ptr<ActivityManager> m_activityManager;
     // UX-PRODUIT-15 -- rôle NORMAL : possède le cycle de vie d'une session
     // tutoriel (second KillEngine.exe). N'existe/n'est utilisé que si
@@ -2063,6 +2129,16 @@ private:
     std::unique_ptr<AutomationPipeManager> m_automationPipeManager;
     std::unique_ptr<ClaudeChatManager> m_claudeChatManager;
     std::shared_ptr<killcore::CancellationToken> m_activeScanCancellation;
+    // AUDIT-PIPE-A3 : même motif single-slot que m_activeTimelineActivityOpId/
+    // m_activeComparisonActivityOpId -- id de l'activité du scan actuellement
+    // en vol (tous les ActivityKind::Scan* partagent m_activeScanCancellation
+    // ci-dessus, donc un seul slot ici aussi). Utilisé par cancelActivity()
+    // pour vérifier que l'operationId demandé est bien celui du scan courant
+    // avant d'appeler requestCancelActiveScan() -- sinon un cancel(A) sur un
+    // scan déjà remplacé par B annulerait B à sa place. Vidé par
+    // finishScanActivity() (scanning_core_manager.cpp) quand l'opId qui se
+    // termine est bien celui suivi ici.
+    QString m_activeScanActivityOpId;
     // Stealth mode state
     killcore::AntiDebugSession m_antiDebugSession;
     QString m_stealthProfile;
@@ -2081,6 +2157,9 @@ private:
     // manipulation cross-thread du QProcess lui-meme.
     bool                     m_luaScriptInProgress{false};
     std::shared_ptr<killcore::CancellationToken> m_activeLuaScriptCancellation;
+    // AUDIT-PIPE-A3 : même rôle que m_activeScanActivityOpId ci-dessus, pour
+    // le script Lua actuellement en vol.
+    QString m_activeLuaScriptActivityOpId;
     // Vue "Modules" (installation de module complémentaire) : état dédié de
     // l'installation en cours — un seul module à la fois, annulable via
     // cancelModuleInstall() (thread worker uniquement, pas le cas élevé UAC).
@@ -2088,6 +2167,9 @@ private:
     QString                  m_moduleInstallId;
     int                      m_moduleInstallRequestId{0};
     std::shared_ptr<killcore::CancellationToken> m_activeModuleInstallCancellation;
+    // AUDIT-PIPE-A3 : même rôle que m_activeScanActivityOpId ci-dessus, pour
+    // l'installation de module actuellement en vol.
+    QString m_activeModuleInstallActivityOpId;
     killai::AIEngine         m_ai;
     bool                     m_smartSearchActive{false};
     QString                  m_smartSearchInitialValue;

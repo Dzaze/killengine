@@ -164,19 +164,94 @@ TEST_F(CandidateComparisonCollectorTest, InvalidAddressIsMarkedInvalidNeverCrash
     }
 }
 
-TEST_F(CandidateComparisonCollectorTest, TargetLostStopsCollectionAfterConsecutiveInvalidTours) {
+TEST_F(CandidateComparisonCollectorTest, InvalidAddressesOnLiveProcessNeverFalselyReportTargetLost) {
+    // AUDIT-PIPE-A2 (nuance observée en audit live) : 5 tours entièrement
+    // invalides ne prouvent PAS que le processus est mort -- seulement que
+    // les adresses sélectionnées ne sont plus lisibles (constat live : lire
+    // g_health restait possible sur la même cible pendant que 0x1/0x2
+    // échouaient en boucle). GetCurrentProcess() est un process bien vivant :
+    // la capture ne doit jamais annoncer TargetLost ici, seulement s'arrêter
+    // par durée max (bornée courte pour un test rapide).
     std::vector<ComparisonSeriesConfig> series{makeSeries("bad1", 0x1), makeSeries("bad2", 0x2)};
-    ASSERT_TRUE(collector->configure(series, 50, 30000));
+    ASSERT_TRUE(collector->configure(series, 50, 300));
     ASSERT_TRUE(collector->startCollection(GetCurrentProcess()));
 
-    // 5 tours invalides consécutifs à 50ms -> devrait s'arrêter tout seul
-    // bien avant la durée max (30s). Laisse une marge large.
+    for (int i = 0; i < 40 && collector->isCollecting(); ++i) {
+        std::this_thread::sleep_for(50ms);
+    }
+    EXPECT_FALSE(collector->isCollecting());
+    EXPECT_EQ(collector->lastStopReason(), ComparisonStopReason::DurationReached);
+    collector->stopCollection();
+}
+
+TEST_F(CandidateComparisonCollectorTest, TargetLostFiresOnlyWhenProcessHasActuallyExited) {
+    // Contrepartie honnête du test ci-dessus : ici le processus cible a
+    // réellement quitté avant même le démarrage de la capture -- TargetLost
+    // doit être rapporté, puisqu'il est cette fois prouvé (GetExitCodeProcess
+    // != STILL_ACTIVE), pas seulement supposé depuis des lectures échouées.
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    wchar_t cmdLine[] = L"cmd.exe /c exit 0";
+    ASSERT_TRUE(CreateProcessW(nullptr, cmdLine, nullptr, nullptr, FALSE,
+                                CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi));
+    CloseHandle(pi.hThread);
+    ASSERT_EQ(WaitForSingleObject(pi.hProcess, 5000), WAIT_OBJECT_0);
+
+    std::vector<ComparisonSeriesConfig> series{makeSeries("bad1", 0x1), makeSeries("bad2", 0x2)};
+    ASSERT_TRUE(collector->configure(series, 50, 30000));
+    ASSERT_TRUE(collector->startCollection(pi.hProcess));
+
     for (int i = 0; i < 40 && collector->isCollecting(); ++i) {
         std::this_thread::sleep_for(50ms);
     }
     EXPECT_FALSE(collector->isCollecting());
     EXPECT_EQ(collector->lastStopReason(), ComparisonStopReason::TargetLost);
     collector->stopCollection();
+    CloseHandle(pi.hProcess);
+}
+
+TEST_F(CandidateComparisonCollectorTest, FinishedCallbackFiresExactlyOnceOnNaturalCompletion) {
+    // AUDIT-PIPE-A2 : avant ce correctif, rien ne notifiait la fin naturelle
+    // d'une capture (durée max atteinte sans stopCollection() explicite) --
+    // repro live confirmée (getCandidateComparisonStatus() restait
+    // "collecting" pour toujours côté activité).
+    std::atomic<int> callCount{0};
+    std::atomic<int> lastReason{-1};
+    collector->setFinishedCallback([&](ComparisonStopReason reason) {
+        ++callCount;
+        lastReason.store(static_cast<int>(reason));
+    });
+
+    std::vector<ComparisonSeriesConfig> series{makeSeries("a", addrA), makeSeries("b", addrB)};
+    ASSERT_TRUE(collector->configure(series, 50, 100));
+    ASSERT_TRUE(collector->startCollection(GetCurrentProcess()));
+
+    for (int i = 0; i < 40 && collector->isCollecting(); ++i) {
+        std::this_thread::sleep_for(50ms);
+    }
+    ASSERT_FALSE(collector->isCollecting());
+
+    EXPECT_EQ(callCount.load(), 1);
+    EXPECT_EQ(static_cast<ComparisonStopReason>(lastReason.load()), ComparisonStopReason::DurationReached);
+}
+
+TEST_F(CandidateComparisonCollectorTest, FinishedCallbackFiresExactlyOnceOnExplicitStop) {
+    std::atomic<int> callCount{0};
+    std::atomic<int> lastReason{-1};
+    collector->setFinishedCallback([&](ComparisonStopReason reason) {
+        ++callCount;
+        lastReason.store(static_cast<int>(reason));
+    });
+
+    std::vector<ComparisonSeriesConfig> series{makeSeries("a", addrA), makeSeries("b", addrB)};
+    ASSERT_TRUE(collector->configure(series, 50, 30000));
+    ASSERT_TRUE(collector->startCollection(GetCurrentProcess()));
+    std::this_thread::sleep_for(60ms);
+    collector->stopCollection();
+
+    EXPECT_EQ(callCount.load(), 1);
+    EXPECT_EQ(static_cast<ComparisonStopReason>(lastReason.load()), ComparisonStopReason::UserStop);
 }
 
 TEST_F(CandidateComparisonCollectorTest, PointsForSeriesPaginationRespectsOffsetAndLimit) {

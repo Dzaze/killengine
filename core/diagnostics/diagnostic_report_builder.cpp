@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -28,6 +29,32 @@ qint64 truncateUtf8ToBoundary(QByteArray& bytes, qint64 maxLen) {
     const qint64 omitted = bytes.size() - cut;
     bytes = bytes.left(cut);
     return omitted;
+}
+
+/// AUDIT-PIPE-A4 : composition des deux passes de rédaction (racines/secrets
+/// connus par substitution littérale, puis motifs de credentials génériques)
+/// -- point d'entrée unique utilisé par buildDiagnosticReport() ci-dessous
+/// pour ne jamais oublier l'une des deux passes à un des points d'appel.
+QString redactAll(const QString& input, const QHash<QString, QString>& rootsToLabels) {
+    return redactSecretPatterns(redactKnownRoots(input, rootsToLabels));
+}
+
+/// AUDIT-PIPE-A5 : coupe `text` à `maxChars` caractères UTF-16 sans jamais
+/// laisser un substitut haut orphelin en fin de chaîne (une paire substitut
+/// coupée en deux produirait un caractère invalide/de remplacement selon
+/// l'encodeur JSON en aval) -- même esprit que truncateUtf8ToBoundary
+/// ci-dessus, mais pour une coupure en caractères plutôt qu'en octets bruts,
+/// utilisée pour borner un résumé d'événement AVANT sérialisation JSON (une
+/// troncature après coup casserait le JSON, voir buildDiagnosticReport).
+QString truncateUtf16ToBoundary(const QString& text, int maxChars) {
+    if (text.size() <= maxChars) {
+        return text;
+    }
+    int cut = maxChars;
+    if (cut > 0 && text.at(cut - 1).isHighSurrogate()) {
+        --cut;
+    }
+    return text.left(cut);
 }
 
 } // namespace
@@ -53,17 +80,49 @@ QString redactKnownRoots(const QString& input, const QHash<QString, QString>& ro
     return output;
 }
 
-BoundedTextResult boundNarrativeField(const QString& text) {
-    BoundedTextResult result;
-    const QByteArray encoded = text.toUtf8();
-    if (encoded.size() > DiagnosticReportLimits::kMaxNarrativeBytes) {
+QString redactSecretPatterns(const QString& input) {
+    if (input.isEmpty()) {
+        return input;
+    }
+    QString output = input;
+
+    // "Authorization: Bearer <token>" ou "Bearer <token>" isolé -- ne rédige
+    // que le token, "Bearer" reste un signal utile au diagnostic. Jeu de
+    // caractères couvrant base64/base64url + JWT (points de séparation).
+    static const QRegularExpression bearerPattern(
+        QStringLiteral("\\bBearer\\s+([-A-Za-z0-9_.~+/=]{6,})"),
+        QRegularExpression::CaseInsensitiveOption);
+    output.replace(bearerPattern, QStringLiteral("Bearer <redacted>"));
+
+    // "api_key=...", "apiKey: ...", "password=...", "token=...", etc. -- la
+    // valeur va jusqu'au prochain espace/virgule/point-virgule, ou est entre
+    // guillemets. Le mot-clé est conservé (groupe 1), seule la valeur
+    // (groupe 2) est rédigée.
+    static const QRegularExpression assignmentPattern(
+        QStringLiteral(
+            "\\b(api[_-]?key|secret|access[_-]?key|client[_-]?secret|password|passwd|pwd|token)"
+            "\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|[^\\s,;]+)"),
+        QRegularExpression::CaseInsensitiveOption);
+    output.replace(assignmentPattern, QStringLiteral("\\1=<redacted>"));
+
+    return output;
+}
+
+BoundedNarrativeResult boundNarrativeTotal(const DiagnosticNarrative& narrative) {
+    BoundedNarrativeResult result;
+    const qint64 totalBytes = static_cast<qint64>(narrative.steps.toUtf8().size())
+        + static_cast<qint64>(narrative.expected.toUtf8().size())
+        + static_cast<qint64>(narrative.observed.toUtf8().size());
+    if (totalBytes > DiagnosticReportLimits::kMaxNarrativeBytes) {
         result.ok = false;
-        result.error = QStringLiteral("Texte trop long (%1 octets, max %2 octets). Raccourcis-le avant de préparer l'aperçu.")
-            .arg(encoded.size())
+        result.error = QStringLiteral(
+            "Récit trop long (%1 octets au total pour steps+expected+observed, max %2 octets). "
+            "Raccourcis-le avant de préparer l'aperçu.")
+            .arg(totalBytes)
             .arg(DiagnosticReportLimits::kMaxNarrativeBytes);
         return result;
     }
-    result.text = text;
+    result.narrative = narrative;
     return result;
 }
 
@@ -80,13 +139,16 @@ BuildResult buildDiagnosticReport(
     report.reportId = reportId;
     report.preparedAtMs = preparedAtMs;
 
-    report.narrative.steps = redactKnownRoots(narrative.steps, rootsToLabels);
-    report.narrative.expected = redactKnownRoots(narrative.expected, rootsToLabels);
-    report.narrative.observed = redactKnownRoots(narrative.observed, rootsToLabels);
+    report.narrative.steps = redactAll(narrative.steps, rootsToLabels);
+    report.narrative.expected = redactAll(narrative.expected, rootsToLabels);
+    report.narrative.observed = redactAll(narrative.observed, rootsToLabels);
 
     report.provenance = provenance;
     report.provenance.uiAssetFiles.clear();
     for (const auto& file : provenance.uiAssetFiles) {
+        // Noms de fichiers d'assets UI seulement -- pas de texte libre,
+        // redactKnownRoots (chemins) suffit, redactSecretPatterns n'y a rien
+        // à faire et ajouterait un coût de regex inutile ici.
         report.provenance.uiAssetFiles.append(redactKnownRoots(file, rootsToLabels));
     }
 
@@ -98,7 +160,7 @@ BuildResult buildDiagnosticReport(
         return a.timestampMs < b.timestampMs;
     });
     for (auto& event : sortedEvents) {
-        event.summary = redactKnownRoots(event.summary, rootsToLabels);
+        event.summary = redactAll(event.summary, rootsToLabels);
     }
     constexpr int kMaxEvents = 400;
     if (sortedEvents.size() > kMaxEvents) {
@@ -118,7 +180,7 @@ BuildResult buildDiagnosticReport(
             sectionsOmittedForCap = true;
             break;
         }
-        const QString redactedText = redactKnownRoots(raw.content, rootsToLabels);
+        const QString redactedText = redactAll(raw.content, rootsToLabels);
         QByteArray bytes = redactedText.toUtf8();
 
         DiagnosticSection section;
@@ -158,16 +220,23 @@ BuildResult buildDiagnosticReport(
         sectionIdsList.append(section.id);
     }
 
-    QVariantList eventsList;
+    // AUDIT-PIPE-A5 : chaque résumé est d'abord capé en LONGUEUR (avant
+    // sérialisation), pour qu'un seul événement pathologiquement long ne
+    // puisse pas à lui seul faire déborder le manifeste. Le compte
+    // d'événements est ensuite réduit si besoin juste en dessous (jamais une
+    // troncature d'octets JSON après coup).
+    constexpr int kMaxEventSummaryChars = 500;
+    QList<QVariantMap> eventMapsOldestFirst;
+    eventMapsOldestFirst.reserve(report.events.size());
     for (const auto& event : report.events) {
         QVariantMap eventMap;
         eventMap["source"] = event.source;
         eventMap["operationId"] = event.operationId;
         eventMap["kind"] = event.kind;
         eventMap["state"] = event.state;
-        eventMap["summary"] = event.summary;
+        eventMap["summary"] = truncateUtf16ToBoundary(event.summary, kMaxEventSummaryChars);
         eventMap["timestampMs"] = event.timestampMs;
-        eventsList.append(eventMap);
+        eventMapsOldestFirst.append(eventMap);
     }
 
     QVariantMap manifestMap;
@@ -178,22 +247,59 @@ BuildResult buildDiagnosticReport(
         "Fichier .kezdiag KillEngine : payload compresse (qCompress, format Qt) contenant des sections "
         "texte separees par des lignes '===== <nom> ====='. La premiere section (manifest.json) decrit "
         "la provenance (version/empreintes), le scenario Etapes/Attendu/Observe rapporte par la personne "
-        "qui a prepare ce rapport, et la liste des sections/evenements inclus. Aucune donnee sensible "
-        "(mot de passe, jeton API, contenu de sauvegarde, memoire brute) n'est incluse par defaut ; les "
-        "chemins personnels (dossier utilisateur/temp/installation) sont remplaces par des etiquettes "
-        "stables entre crochets, ex. <user_home>.");
+        "qui a prepare ce rapport, et la liste des sections/evenements inclus. Les reglages inclus sont "
+        "une selection positive de champs non sensibles (pas un export complet des parametres), et le "
+        "journal texte n'est inclus que si explicitement demande. La cle API externe actuellement "
+        "enregistree (si presente) et les motifs de credentials clairement identifiables dans le texte "
+        "libre (jeton 'Bearer ...', assignations 'mot_de_passe=...'/'jeton=...'/'cle_api=...') sont "
+        "rediges automatiquement -- AUDIT-PIPE-A4 : cette redaction ne peut pas garantir la detection "
+        "d'un secret arbitraire ecrit sous une forme non reconnue dans un texte libre. Les chemins "
+        "personnels (dossier utilisateur/temp/installation) sont remplaces par des etiquettes stables "
+        "entre crochets, ex. <user_home>. Les evenements les plus anciens et/ou leurs resumes peuvent "
+        "etre coupes pour tenir sous la limite de taille d'une section (voir eventsOmittedForSizeCap et "
+        "eventsIncludedCount ci-dessous) -- jamais le JSON de ce manifeste lui-meme.");
     manifestMap["narrative"] = narrativeMap;
     manifestMap["provenance"] = provenanceMap;
     manifestMap["sectionsIncluded"] = sectionIdsList;
     manifestMap["sectionsOmittedForSizeCap"] = sectionsOmittedForCap;
-    manifestMap["events"] = eventsList;
+
+    // AUDIT-PIPE-A5 : borner le CONTENU avant sérialisation JSON, jamais
+    // tronquer les octets JSON après coup (produit un JSON invalide --
+    // reproduit en audit : "Unterminated string" en plein milieu d'un
+    // résumé d'événement coupé sur un manifeste de 200 événements longs).
+    // Retire les événements les plus anciens un par un tant que le JSON
+    // sérialisé dépasse kMaxSectionBytes ; le manifeste lui-même (hors
+    // événements) reste petit et fixe (narration déjà bornée par l'appelant,
+    // provenance de taille constante), donc cette boucle converge toujours
+    // sans avoir besoin de secours par troncature d'octets.
+    bool eventsOmittedForSizeCap = false;
+    QByteArray manifestBytes;
+    while (true) {
+        QVariantList eventsList;
+        eventsList.reserve(eventMapsOldestFirst.size());
+        for (const auto& eventMap : eventMapsOldestFirst) {
+            eventsList.append(eventMap);
+        }
+        manifestMap["events"] = eventsList;
+        manifestMap["eventsIncludedCount"] = eventMapsOldestFirst.size();
+        manifestMap["eventsOmittedForSizeCap"] = eventsOmittedForSizeCap;
+        manifestBytes = QJsonDocument(QJsonObject::fromVariantMap(manifestMap)).toJson(QJsonDocument::Indented);
+        if (manifestBytes.size() <= DiagnosticReportLimits::kMaxSectionBytes || eventMapsOldestFirst.isEmpty()) {
+            break;
+        }
+        eventMapsOldestFirst.removeFirst();
+        eventsOmittedForSizeCap = true;
+    }
 
     DiagnosticSection manifestSection;
     manifestSection.id = QStringLiteral("manifest");
     manifestSection.title = QStringLiteral("manifest.json");
-    manifestSection.content = QJsonDocument(QJsonObject::fromVariantMap(manifestMap)).toJson(QJsonDocument::Indented);
-    manifestSection.omittedBytes = truncateUtf8ToBoundary(manifestSection.content, DiagnosticReportLimits::kMaxSectionBytes);
-    manifestSection.truncated = manifestSection.omittedBytes > 0;
+    manifestSection.content = manifestBytes;
+    // Jamais de troncature d'octets bruts pour le manifeste (voir ci-dessus) :
+    // `truncated`/`omittedBytes` ne reflètent donc que les événements omis
+    // pour tenir dans la borne, pas une coupure JSON.
+    manifestSection.truncated = eventsOmittedForSizeCap;
+    manifestSection.omittedBytes = 0;
 
     // Budget TOTAL, manifeste inclus (toujours en premier donc presque
     // toujours entièrement conservé) : accumule dans l'ordre, tronque la
@@ -225,17 +331,34 @@ BuildResult buildDiagnosticReport(
     }
 
     qint64 totalBytes = 0;
-    QCryptographicHash hasher(QCryptographicHash::Sha256);
     for (const auto& section : finalSections) {
         totalBytes += section.content.size();
-        hasher.addData(section.id.toUtf8());
-        hasher.addData(section.content);
     }
 
     report.sections = finalSections;
     report.totalBytes = totalBytes;
-    report.payloadSha256 = QString::fromLatin1(hasher.result().toHex());
+    // AUDIT-PIPE-A5 : hash des octets EXACTS qu'un export réel écrirait sur
+    // disque (avant compression) -- assembleExportPayload() est la même
+    // fonction utilisée par apps/desktop/settings_diagnostics_manager.cpp
+    // pour l'export réel. Avant ce correctif, le hash portait sur une
+    // concaténation id+content qui ne correspondait à aucun fichier réel.
+    report.payloadSha256 = QString::fromLatin1(
+        QCryptographicHash::hash(assembleExportPayload(finalSections), QCryptographicHash::Sha256).toHex());
     return result;
+}
+
+QByteArray assembleExportPayload(const QList<DiagnosticSection>& sections) {
+    QByteArray payload;
+    for (const auto& section : sections) {
+        payload.append("\n===== ");
+        payload.append((section.title.isEmpty() ? section.id : section.title).toUtf8());
+        payload.append(" =====\n");
+        payload.append(section.content);
+        if (!payload.endsWith('\n')) {
+            payload.append('\n');
+        }
+    }
+    return payload;
 }
 
 SectionPage readSectionPage(const DiagnosticSection& section, qint64 offset, qint64 limit) {

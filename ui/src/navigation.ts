@@ -15,8 +15,8 @@ export interface NavGroup {
 
 // UX-PRODUIT-7 (docs/PHASE_TRACKER.md, 23/09/2026) : source unique pour le
 // menu et l'état actif -- IDs stables inchangés (sauf ajout `project` par
-// UX-PRODUIT-8), seul le libellé "Modules" change dans le rendu, pas son ID
-// ni les API getProcessModules/getModuleCatalog qu'il ne touche pas.
+// UX-PRODUIT-8). L'entrée modules est désormais dans le parcours initial ;
+// son ID et les API getProcessModules/getModuleCatalog restent inchangés.
 // Fichier indépendant (pas dans app.ts) pour éviter tout import circulaire
 // entre App.vue et le store.
 export const navGroups: NavGroup[] = [
@@ -26,6 +26,7 @@ export const navGroups: NavGroup[] = [
     defaultOpen: true,
     destinations: [
       { id: 'process', labelKey: 'nav.process' },
+      { id: 'modules', labelKey: 'nav.modules' },
       { id: 'assistant', labelKey: 'nav.assistant' },
       { id: 'investigation', labelKey: 'nav.investigation' },
       { id: 'expert', labelKey: 'nav.expert' },
@@ -69,7 +70,6 @@ export const navGroups: NavGroup[] = [
     labelKey: 'nav.groups.configHelp',
     defaultOpen: false,
     destinations: [
-      { id: 'modules', labelKey: 'nav.modules' },
       { id: 'settings', labelKey: 'nav.settings' },
       { id: 'lexicon', labelKey: 'nav.lexicon' },
     ],

@@ -17,6 +17,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -633,6 +634,76 @@ TEST(ProfileStore, LoadsOldProfileMissingNewerFieldsAsEmptyNotCrash) {
     EXPECT_TRUE(loaded.targets[0].dependsOn.isEmpty());
 }
 
+// AUDIT-PROFILS-P2 (docs/PHASE_TRACKER.md, 28/09/2026) : un JSON valide mais
+// dont la racine n'est pas un objet se convertissait silencieusement en
+// QJsonObject vide (QJsonDocument::object() sur un tableau retourne {}) --
+// load() rapportait "success" avec un profil entierement vide plutot que de
+// signaler un fichier corrompu.
+TEST(ProfileStore, LoadRejectsNonObjectJsonRoot) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = dir.filePath("array_root.keprofile");
+
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    {
+        QTextStream stream(&file);
+        stream << "[1, 2, 3]";
+    }
+    file.close();
+
+    Profile loaded;
+    EXPECT_FALSE(ProfileStore::load(path, &loaded));
+}
+
+// Un formatVersion superieur a Profile::FORMAT_VERSION signifie que cette
+// build ne comprend pas encore ce format -- ne jamais le traiter comme un
+// profil v1 vide (un save() qui suivrait ecraserait silencieusement le
+// fichier reel de version future avec un profil vide).
+TEST(ProfileStore, LoadRejectsFutureFormatVersion) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = dir.filePath("future.keprofile");
+
+    const QString futureJson = QStringLiteral(
+        "{\"formatVersion\":999,\"gameName\":\"Future Game\",\"executableName\":\"future.exe\",\"targets\":[]}");
+
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    {
+        QTextStream stream(&file);
+        stream << futureJson;
+    }
+    file.close();
+
+    Profile loaded;
+    EXPECT_FALSE(ProfileStore::load(path, &loaded));
+}
+
+// Un profil legitime anterieur a l'ajout du champ formatVersion (jamais
+// ecrit par cette build) doit continuer a se charger normalement -- absent
+// n'est pas synonyme de futur/corrompu.
+TEST(ProfileStore, LoadAcceptsMissingFormatVersionAsLegitimateOldProfile) {
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString path = dir.filePath("no_version.keprofile");
+
+    const QString noVersionJson = QStringLiteral(
+        "{\"gameName\":\"Pre-Version Game\",\"executableName\":\"pre.exe\",\"targets\":[]}");
+
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    {
+        QTextStream stream(&file);
+        stream << noVersionJson;
+    }
+    file.close();
+
+    Profile loaded;
+    ASSERT_TRUE(ProfileStore::load(path, &loaded));
+    EXPECT_EQ(loaded.gameName, QStringLiteral("Pre-Version Game"));
+}
+
 TEST(ProfileStore, ExportPointerMapIncludesOnlyPointerChainsWithMetadata) {
     const Profile profile = buildFullProfile();
 
@@ -741,6 +812,81 @@ TEST(ProfileStore, ListRemoveRoundTripUsesRealProfilesDirWithUniqueName) {
 
     EXPECT_TRUE(ProfileStore::remove(uniqueName));
     EXPECT_FALSE(ProfileStore::listProfiles().contains(uniqueName));
+}
+
+// AUDIT-PROFILS-P1 (docs/PHASE_TRACKER.md, 28/09/2026) : profilePath()
+// concatenait le nom sans validation -- "../../../windows/win.ini" resolvait
+// hors de profilesDir(). isValidProfileName() est le point de validation
+// centralise dont profilePath()/remove() dependent maintenant.
+TEST(ProfileStore, IsValidProfileNameRejectsTraversalSeparatorsAndReservedNames) {
+    QString error;
+    EXPECT_FALSE(ProfileStore::isValidProfileName("", &error));
+    EXPECT_FALSE(error.isEmpty());
+
+    EXPECT_FALSE(ProfileStore::isValidProfileName("../evil"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("../../windows/win.ini"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("..\\..\\windows\\win.ini"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("."));
+    EXPECT_FALSE(ProfileStore::isValidProfileName(".."));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("a/b"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("a\\b"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("C:\\Windows\\System32"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("name:stream"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("bad*name"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("bad?name"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("trailing."));
+    EXPECT_FALSE(ProfileStore::isValidProfileName(" leading space"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("trailing space "));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("CON"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("con"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("COM1"));
+    EXPECT_FALSE(ProfileStore::isValidProfileName("CON.keprofile"));
+
+    EXPECT_TRUE(ProfileStore::isValidProfileName("My Profile - v2 (SC2)"));
+    EXPECT_TRUE(ProfileStore::isValidProfileName("Diablo 2.0"));
+    EXPECT_TRUE(ProfileStore::isValidProfileName("Résumé été"));
+    EXPECT_TRUE(ProfileStore::isValidProfileName("CONtest"));
+}
+
+TEST(ProfileStore, ProfilePathReturnsEmptyForInvalidNameAndValidPathForSafeName) {
+    EXPECT_TRUE(ProfileStore::profilePath("../../windows/win.ini").isEmpty());
+    EXPECT_TRUE(ProfileStore::profilePath("..\\..\\evil").isEmpty());
+    EXPECT_TRUE(ProfileStore::profilePath("").isEmpty());
+
+    const QString safePath = ProfileStore::profilePath("killengine_test_profile_store_safe_name");
+    EXPECT_FALSE(safePath.isEmpty());
+    EXPECT_TRUE(safePath.endsWith(".keprofile"));
+    EXPECT_TRUE(safePath.startsWith(ProfileStore::profilesDir()));
+}
+
+// remove() doit refuser une traversee plutot que de tenter de supprimer un
+// chemin qui resoudrait hors de profilesDir() -- reproduction directe du
+// repro Codex (`deleteProfile("../audit_delete_20260928")`).
+TEST(ProfileStore, RemoveRefusesTraversalName) {
+    ASSERT_TRUE(ProfileStore::ensureProfilesDir());
+
+    // Un fichier reel place a cote de profilesDir() (donc atteignable via
+    // "../<dossier>/canary" si remove() ne validait pas le nom) doit survivre
+    // -- reproduction directe du repro Codex (`deleteProfile("../audit_delete_20260928")`).
+    QTemporaryDir outsideDir;
+    ASSERT_TRUE(outsideDir.isValid());
+    const QString canary = outsideDir.filePath("canary.txt");
+    QFile canaryFile(canary);
+    ASSERT_TRUE(canaryFile.open(QIODevice::WriteOnly | QIODevice::Text));
+    canaryFile.write("do not delete me");
+    canaryFile.close();
+
+    EXPECT_FALSE(ProfileStore::remove(QStringLiteral("../")
+        + QFileInfo(outsideDir.path()).fileName() + "/canary"));
+    EXPECT_TRUE(QFile::exists(canary));
+
+    // Un nom sans separateur continue de fonctionner normalement (non-regression).
+    const QString uniqueName = QStringLiteral("killengine_test_profile_store_remove_%1")
+        .arg(QDateTime::currentMSecsSinceEpoch());
+    Profile profile;
+    profile.gameName = "Removable";
+    ASSERT_TRUE(ProfileStore::save(profile, ProfileStore::profilePath(uniqueName)));
+    EXPECT_TRUE(ProfileStore::remove(uniqueName));
 }
 
 // PORT-2c (docs/PORTABILITY_ROADMAP.md, 17/09/2026) : reprise explicite et non

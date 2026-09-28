@@ -100,6 +100,27 @@ public:
     uint32_t m_nextMarkerId{1};
 
     std::chrono::steady_clock::time_point m_startTime;
+    FinishedCallback m_finishedCallback;
+
+    /// AUDIT-PIPE-A2 (nuance observée) : 5 tours entièrement invalides ne
+    /// prouvent PAS que le processus est mort -- seulement que les adresses
+    /// sélectionnées ne sont plus lisibles (sélection devenue invalide,
+    /// démappage local...), constat live confirmé (`g_health` restait lisible
+    /// sur la même cible pendant que des adresses `0x1`/`0x2` échouaient en
+    /// boucle). Avant de déclarer TargetLost, vérifier que le processus a
+    /// réellement quitté (GetExitCodeProcess != STILL_ACTIVE) ; sinon,
+    /// continuer la capture (bornée par maxDurationMs de toute façon) plutôt
+    /// que d'annoncer une cible morte sur un signal qui ne le prouve pas.
+    static bool processHasExited(void* handle) {
+        if (!handle) {
+            return true;
+        }
+        DWORD exitCode = 0;
+        if (!GetExitCodeProcess(handle, &exitCode)) {
+            return false; // Etat non concluant -- ne jamais affirmer "mort" sans preuve.
+        }
+        return exitCode != STILL_ACTIVE;
+    }
 
     void collectionLoop() {
         auto nextTickDeadline = m_startTime;
@@ -117,8 +138,8 @@ public:
                 consecutiveInvalidTours = 0;
             } else {
                 ++consecutiveInvalidTours;
-                if (consecutiveInvalidTours >= kMaxConsecutiveInvalidTours) {
-                    KE_LOG_WARN() << "Candidate comparison: target lost (no valid read for "
+                if (consecutiveInvalidTours >= kMaxConsecutiveInvalidTours && processHasExited(m_processHandle)) {
+                    KE_LOG_WARN() << "Candidate comparison: target lost (process exited, no valid read for "
                                   << kMaxConsecutiveInvalidTours << " consecutive tours)";
                     m_stopReason.store(static_cast<int>(ComparisonStopReason::TargetLost));
                     break;
@@ -146,6 +167,14 @@ public:
         }
 
         m_collecting.store(false);
+
+        // AUDIT-PIPE-A2 : notifier exactement une fois par run, quelle que
+        // soit la voie de sortie -- voir le commentaire de setFinishedCallback
+        // dans le header pour la garantie d'ordonnancement (join dans
+        // startCollection() avant tout nouveau run).
+        if (m_finishedCallback) {
+            m_finishedCallback(static_cast<ComparisonStopReason>(m_stopReason.load()));
+        }
     }
 
     /// Retourne true si au moins une série a été lue avec succès ce tour.
@@ -293,6 +322,10 @@ ComparisonStopReason CandidateComparisonCollector::lastStopReason() const {
 
 uint32_t CandidateComparisonCollector::skippedTickCount() const {
     return m_impl->m_skippedTicks.load();
+}
+
+void CandidateComparisonCollector::setFinishedCallback(FinishedCallback callback) {
+    m_impl->m_finishedCallback = std::move(callback);
 }
 
 std::vector<ComparisonSeriesConfig> CandidateComparisonCollector::seriesConfigs() const {
